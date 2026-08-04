@@ -1,0 +1,136 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+model User {
+  id            String      @id @default(uuid())
+  email         String      @unique
+  passwordHash  String
+  firstName     String
+  lastName      String
+  entityType    String      @default("toiminimi") // "kevytyrittaja" | "toiminimi"
+  vatRegistered Boolean     @default(false)
+  vatPeriod     String      @default("month") // "month" | "quarter" | "year"
+  createdAt     DateTime    @default(now())
+  receipts      Receipt[]
+  statements    Statement[]
+  uploads       Upload[]
+}
+
+model Receipt {
+  id               String    @id @default(uuid())
+  userId           String
+  user             User      @relation(fields: [userId], references: [id])
+  vendor           String?
+  date             DateTime?
+  totalAmountCents Int?
+  vatDetails       String?
+  category         String?
+  notes            String?
+  type             String    @default("meno")
+  reference        String? // viitenumero
+  invoiceNumber    String? // laskun numero
+  filePath         String
+  fileName         String
+  source           String    @default("manual")
+  confidence       Float?
+  rawText          String?
+  uploadId         String?   @unique
+  upload           Upload?   @relation("ReceiptUpload", fields: [uploadId], references: [id], onDelete: SetNull)
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  linkedTransaction     Transaction?     @relation("ConfirmedMatch")
+  suggestedTransactions Transaction[]    @relation("SuggestedMatch")
+  rejections            MatchRejection[]
+
+  @@index([userId, date])
+  @@index([userId, createdAt])
+}
+
+model Statement {
+  id           String        @id @default(uuid())
+  userId       String
+  user         User          @relation(fields: [userId], references: [id])
+  fileName     String
+  fileType     String
+  filePath     String
+  checksum     String?
+  periodMonth  String? // "YYYY-MM"
+  periodSource String        @default("auto") // "auto" | "manual"
+  uploadedAt   DateTime      @default(now())
+  transactions Transaction[]
+
+  @@unique([userId, checksum])
+  @@index([userId, periodMonth])
+  @@index([userId, uploadedAt])
+}
+
+model Transaction {
+  id           String    @id @default(uuid())
+  statementId  String
+  statement    Statement @relation(fields: [statementId], references: [id], onDelete: Cascade)
+  date         DateTime?
+  counterparty String?
+  amountCents  Int
+  reference    String?
+  message      String?
+  type         String    @default("meno")
+  createdAt    DateTime  @default(now())
+
+  // Confirmed link only — a suggestion never occupies this FK
+  receiptId          String?  @unique
+  receipt            Receipt? @relation("ConfirmedMatch", fields: [receiptId], references: [id], onDelete: SetNull)
+  suggestedReceiptId String?  @unique
+  suggestedReceipt   Receipt? @relation("SuggestedMatch", fields: [suggestedReceiptId], references: [id], onDelete: SetNull)
+  matchStatus        String   @default("unmatched") // "unmatched" | "suggested" | "confirmed" | "ignored"
+  matchScore         Float?
+  matchReasons       String? // JSON array, e.g. ["viite","amount"]
+
+  rejections MatchRejection[]
+
+  @@index([statementId, date])
+  @@index([statementId, matchStatus])
+}
+
+model Upload {
+  id               String    @id @default(uuid())
+  userId           String
+  user             User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  purpose          String
+  storageKey       String    @unique
+  originalName     String
+  mimeType         String
+  sizeBytes        Int
+  sha256           String
+  extractedJson    String?
+  extractionSource String?
+  confidence       Float?
+  rawText          String?
+  createdAt        DateTime  @default(now())
+  expiresAt        DateTime
+  claimedAt        DateTime?
+  receipt          Receipt?  @relation("ReceiptUpload")
+
+  @@unique([userId, sha256, purpose])
+  @@index([userId, purpose, claimedAt])
+  @@index([expiresAt])
+}
+
+// Rejection is per pair: rejecting one candidate must not block the
+// transaction from matching a different receipt.
+model MatchRejection {
+  id            String      @id @default(uuid())
+  transactionId String
+  transaction   Transaction @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+  receiptId     String
+  receipt       Receipt     @relation(fields: [receiptId], references: [id], onDelete: Cascade)
+  createdAt     DateTime    @default(now())
+
+  @@unique([transactionId, receiptId])
+}

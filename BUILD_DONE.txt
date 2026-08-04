@@ -1,0 +1,1 @@
+LashKirja v1 built: Next.js + Prisma/SQLite app with Finnish UI, login, dashboard, receipt upload (AI+OCR), bank statement parsing (camt052/XLSX/CSV/PDF), ALV report (OmaVero 301-308); npm run build passes; 8/8 parser tests pass.
