@@ -417,11 +417,13 @@ export default function AsetuksetPage() {
         </div>
 
         <div className="bg-white rounded-2xl p-6 shadow-sm space-y-6">
-          <div className="flex justify-between items-start">
-            <div>
+          {/* Stacks on phones — shrink-0 next to the description overflowed the
+              viewport at 320px. Side by side from sm up. */}
+          <div className="flex flex-col gap-3 sm:flex-row sm:justify-between sm:items-start">
+            <div className="min-w-0">
               <h3 className="text-lg font-medium text-charcoal">Sähköpostiautomaatio</h3>
               <p className="text-sm text-warm-gray mt-1">
-                Yhdistä sähköpostiosoitteesi, niin sovellus hakee ja analysoi automaattisesti siihen saapuneet kuitit. 
+                Yhdistä sähköpostiosoitteesi, niin sovellus hakee ja analysoi automaattisesti siihen saapuneet kuitit.
               </p>
             </div>
             {profile.imapAccounts.length > 0 && (
@@ -429,7 +431,7 @@ export default function AsetuksetPage() {
                 type="button"
                 onClick={handleEmergencySync}
                 disabled={syncing}
-                className="shrink-0 px-4 py-2 rounded-xl bg-charcoal text-white text-xs font-medium hover:bg-black transition-colors shadow-sm disabled:opacity-50"
+                className="shrink-0 self-start px-4 py-2 rounded-xl bg-charcoal text-white text-xs font-medium hover:bg-black transition-colors shadow-sm disabled:opacity-50"
               >
                 {syncing ? "Synkronoidaan..." : "Synkronoi kuitit nyt"}
               </button>

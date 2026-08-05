@@ -164,22 +164,24 @@ export default function DashboardClient({
           </Link>
         )}
 
-        <div className="flex items-center justify-between animate-in">
-          <div>
-            <h2 className="text-3xl font-light text-charcoal tracking-tight">
+        {/* Stacks on phones: the greeting and the month picker fought for room
+            and wrapped to three lines at 320px. Side by side from sm up. */}
+        <div className="flex flex-col gap-3 animate-in sm:flex-row sm:items-center sm:justify-between">
+          <div className="min-w-0">
+            <h2 className="text-2xl sm:text-3xl font-light text-charcoal tracking-tight">
               {displayName ? getGreeting(displayName) : "\u00a0"}
             </h2>
             <p className="text-sm text-warm-gray mt-1">Tervetuloa Lashkirjaan</p>
           </div>
-          
-          <div className="flex items-center gap-1 bg-white p-1 rounded-xl shadow-sm border border-warm-gray-light/20">
+
+          <div className="flex items-center gap-1 self-start shrink-0 sm:self-auto bg-white p-1 rounded-xl shadow-sm border border-warm-gray-light/20">
             <button
               onClick={() => { setLoadError(""); setMonth(shiftMonth(month, -1)); }}
               className="w-8 h-8 flex items-center justify-center rounded-lg text-charcoal hover:bg-blush/40 transition-colors"
             >
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7"/></svg>
             </button>
-            <p className="text-sm font-medium text-charcoal min-w-[100px] text-center capitalize">
+            <p className="text-sm font-medium text-charcoal min-w-[100px] text-center capitalize whitespace-nowrap">
               {monthName} {month.split("-")[0]}
             </p>
             <button
