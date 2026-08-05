@@ -125,7 +125,11 @@ export async function GET(req: NextRequest) {
     }),
     prisma.user.findUnique({
       where: { id: session.userId },
-      select: { entityType: true, vatRegistered: true, imapAccount: { select: { id: true } } },
+      select: {
+        entityType: true,
+        vatRegistered: true,
+        imapAccounts: { select: { id: true }, take: 1 },
+      },
     }),
   ]);
   const bankYtd = yearTx.reduce((a, t) => a + centsToEuros(t.amountCents), 0);
@@ -154,7 +158,7 @@ export async function GET(req: NextRequest) {
       ytdRevenue: round2(ytdRevenue),
       threshold: VAT_REGISTRATION_THRESHOLD_EUR,
     },
-    hasImap: !!user?.imapAccount,
+    hasImap: (user?.imapAccounts?.length ?? 0) > 0,
     pendingReceiptsCount,
   });
 }

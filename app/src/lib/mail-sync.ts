@@ -207,7 +207,7 @@ export async function syncImapAccount(accountId: string) {
             const mimeType = attachment.contentType || "application/octet-stream";
             await processFile(attachment.content, filename, mimeType, parsed.date || null);
           }
-        } else if (isBodyOnlyReceipt(msg.envelope)) {
+        } else if (msg.envelope && isBodyOnlyReceipt(msg.envelope)) {
           const rawHtml = parsed.html || parsed.textAsHtml || parsed.text || "";
           if (rawHtml.trim().length > 50) {
             const contentBuffer = Buffer.from(rawHtml, "utf8");
