@@ -44,8 +44,17 @@ yarn-error.log*
 next-env.d.ts
 
 src/generated/prisma
-data/
 app/build/ios/
+
+# databases and backups — never commit (public repo).
+# Runtime uploads live in data/uploads/, already covered by data/.
+# Do NOT add a bare `uploads/` — it would also match src/app/api/uploads/.
+*.db
+*.db-wal
+*.db-shm
+data/
+/backups/
+
 skills-lock.json
 .claude/
 .windsurf/
