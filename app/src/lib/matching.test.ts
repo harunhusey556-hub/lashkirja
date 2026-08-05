@@ -113,14 +113,32 @@ describe("scorePair", () => {
 });
 
 describe("shouldAutoConfirm", () => {
-  it("auto-confirms viite matches at threshold", () => {
+  it("auto-confirms an exact reference plus an exact amount", () => {
     expect(shouldAutoConfirm(0.9, ["viite", "amount"])).toBe(true);
   });
-  it("auto-confirms amount+vendor strong matches", () => {
-    expect(shouldAutoConfirm(0.88, ["amount", "vendor", "date"])).toBe(true);
+
+  // Regression guard. This combination used to auto-post, but `date` is pushed
+  // for any proximity inside a 35-day window, so it amounted to "same amount,
+  // same month" — two identical MobilePay rows would link to whichever receipt
+  // sorted first and silently enter the ALV report.
+  it("does not auto-confirm amount + vendor + date without a reference", () => {
+    expect(shouldAutoConfirm(0.88, ["amount", "vendor", "date"])).toBe(false);
   });
+
+  it("does not auto-confirm a reference without a matching amount", () => {
+    expect(shouldAutoConfirm(0.9, ["viite", "date"])).toBe(false);
+  });
+
   it("does not auto-confirm weak vendor-only picks", () => {
     expect(shouldAutoConfirm(0.6, ["vendor"])).toBe(false);
+  });
+
+  it("refuses to auto-confirm when a rival candidate existed", () => {
+    expect(shouldAutoConfirm(0.95, ["viite", "amount", "competing"])).toBe(false);
+  });
+
+  it("still respects the score floor", () => {
+    expect(shouldAutoConfirm(0.5, ["viite", "amount"])).toBe(false);
   });
 });
 
@@ -140,6 +158,27 @@ describe("computeSuggestions", () => {
     const result = computeSuggestions([weaker, strong], [receipt()], new Set());
     expect(result).toHaveLength(1);
     expect(result[0].transactionId).toBe("txA");
+  });
+
+  it("flags the winner as competing when a rival scored plausibly", () => {
+    const strong = tx({ id: "txA" });
+    const weaker = tx({ id: "txB", date: new Date("2026-08-13") });
+    const [winner] = computeSuggestions([weaker, strong], [receipt()], new Set());
+    // The rival exists, so however good the winner looks it must not auto-post.
+    expect(winner.reasons).toContain("competing");
+    expect(shouldAutoConfirm(winner.score, winner.reasons)).toBe(false);
+  });
+
+  it("leaves an unambiguous pair unflagged so it can still auto-post", () => {
+    const only = tx({ id: "txA", reference: "123456", amount: -49.9 });
+    const [winner] = computeSuggestions(
+      [only],
+      [receipt({ reference: "123456" })],
+      new Set()
+    );
+    expect(winner.reasons).not.toContain("competing");
+    expect(winner.reasons).toContain("viite");
+    expect(shouldAutoConfirm(winner.score, winner.reasons)).toBe(true);
   });
 
   it("two receipts, two txs: both get their own match", () => {

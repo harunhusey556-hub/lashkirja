@@ -1,12 +1,35 @@
 import { prisma } from "./db";
-import { confirmMatch } from "./matching";
 
 /**
- * Automates the creation and linking of Sales Receipts (Myyntitositteet)
- * for incoming bank transfers (tulo) that don't have a matching receipt.
- * This solves the issue of payment processors like MobilePay/Holvi
- * sending lump sums with empty messages.
+ * Drafts sales receipts (myyntitositteet) for incoming bank transfers that
+ * look like payment-processor settlements, for the user to review.
+ *
+ * Every draft is created as `pending` and is never linked to the transaction
+ * automatically. Nothing here reaches the ALV report until a human approves it.
+ *
+ * Why this is deliberately timid: an incoming transfer is not evidence of a
+ * sale. It could equally be an owner contribution, a loan, a tax refund, an
+ * insurance payout, a supplier refund, or a transfer between the user's own
+ * accounts. This function previously created `approved` receipts asserting a
+ * flat 25.5 % VAT on *every* unmatched incoming transfer and linked them
+ * immediately, so moving your own money into the business produced a VAT
+ * liability on it.
+ *
+ * VAT is deliberately left unset. Processors settle NET of their fee, so the
+ * deposit is not the gross sale and 25.5 % of it is not the VAT — gross sales,
+ * the fee, and VAT on the fee all have to be recorded separately. Guessing here
+ * would understate both revenue and VAT. Proper settlement handling and
+ * evidence-based recognition (trusted counterparties, reference matches) belong
+ * to the automation-rules work, not to a blanket rule.
  */
+const SETTLEMENT_PROVIDERS: { needle: string; vendor: string; note: string }[] = [
+  { needle: "mobilepay", vendor: "MobilePay Myyntitilitys", note: "MobilePay tilitys" },
+  { needle: "holvi", vendor: "Holvi Myyntitilitys", note: "Holvi tilitys" },
+  { needle: "zettle", vendor: "Zettle Myyntitilitys", note: "Zettle tilitys" },
+  { needle: "stripe", vendor: "Stripe Myyntitilitys", note: "Stripe tilitys" },
+  { needle: "sumup", vendor: "SumUp Myyntitilitys", note: "SumUp tilitys" },
+];
+
 export async function autoGenerateIncomeReceipts(userId: string, statementId: string): Promise<number> {
   const unmatchedIncomes = await prisma.transaction.findMany({
     where: {
@@ -24,69 +47,45 @@ export async function autoGenerateIncomeReceipts(userId: string, statementId: st
 
   for (const tx of unmatchedIncomes) {
     try {
-      // 1. Smart Fallback Logic for the vendor/description
-      const cp = tx.counterparty || "Tuntematon maksaja";
-      let generatedVendor = cp;
-      let notes = tx.message || tx.reference || "Automaattisesti luotu myyntitosite pankkitapahtumasta.";
+      const cp = tx.counterparty || "";
+      const provider = SETTLEMENT_PROVIDERS.find((p) =>
+        cp.toLowerCase().includes(p.needle)
+      );
 
-      const lowerCp = cp.toLowerCase();
-      if (lowerCp.includes("mobilepay")) {
-        generatedVendor = "MobilePay Myyntitilitys";
-        notes = "MobilePay tilitys";
-      } else if (lowerCp.includes("holvi")) {
-        generatedVendor = "Holvi Myyntitilitys";
-        notes = "Holvi tilitys";
-      } else if (lowerCp.includes("zettle")) {
-        generatedVendor = "Zettle Myyntitilitys";
-        notes = "Zettle tilitys";
-      } else if (lowerCp.includes("stripe")) {
-        generatedVendor = "Stripe Myyntitilitys";
-        notes = "Stripe tilitys";
-      } else if (lowerCp.includes("sumup")) {
-        generatedVendor = "SumUp Myyntitilitys";
-        notes = "SumUp tilitys";
-      }
+      // Only recognised settlement providers get a draft. A plain incoming
+      // transfer from an unknown payer carries no evidence that it is a sale,
+      // so it is left unmatched for the user to classify rather than being
+      // guessed at.
+      if (!provider) continue;
 
-      // 2. Standard 25.5% VAT calculation
-      const amountEuros = Math.abs(tx.amountCents) / 100;
-      // Formula to extract VAT from gross: Gross - (Gross / 1.255)
-      const vatAmountEuros = amountEuros - (amountEuros / 1.255);
-      
-      const vatDetailsJson = JSON.stringify([
-        {
-          rate: 25.5,
-          amount: Math.round(vatAmountEuros * 100) / 100
-        }
-      ]);
-
-      // 3. Create the Receipt
-      const receipt = await prisma.receipt.create({
+      await prisma.receipt.create({
         data: {
           userId,
           type: "tulo",
-          vendor: generatedVendor,
+          vendor: provider.vendor,
           date: tx.date || new Date(),
           totalAmountCents: Math.abs(tx.amountCents),
-          vatDetails: vatDetailsJson,
+          // Unset on purpose — see the note above on net settlements.
+          vatDetails: null,
           category: "myynti",
-          notes,
+          notes: `${provider.note} — LUONNOS. Tarkista summa ja ALV ennen hyväksyntää. Tilitys voi olla nettosumma, josta palvelumaksu on jo vähennetty.`,
           reference: tx.reference,
           invoiceNumber: null,
           filePath: "auto-generated",
-          fileName: "Automaattinen_Myyntitosite.txt",
+          fileName: "Myyntitosite_luonnos.txt",
           source: "auto_income",
-          confidence: 1.0,
-          rawText: "Automaattisesti generoitu myyntitosite tiliotteen rivistä.",
-          reviewStatus: "approved",
-        }
+          // Not 1.0: this is an unverified inference from a bank row.
+          confidence: 0.3,
+          rawText: "Luonnos tiliotteen rivistä. Ei vahvistettu tosite.",
+          reviewStatus: "pending",
+        },
       });
 
-      // 4. Instantly Link it to the transaction
-      await confirmMatch(userId, tx.id, receipt.id, false);
+      // Deliberately not linked to the transaction here. The draft goes to the
+      // review queue; matching happens after a human approves it.
       generatedCount++;
-
     } catch (error) {
-      console.error(`Failed to auto-generate income receipt for transaction ${tx.id}:`, error);
+      console.error(`Failed to draft income receipt for transaction ${tx.id}:`, error);
     }
   }
 
