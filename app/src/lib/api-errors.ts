@@ -30,13 +30,13 @@ export class ValidationError extends AppError {
 }
 
 export class UnauthorizedError extends AppError {
-  constructor(message: string = "Unauthorized") {
+  constructor(message: string = "Kirjautuminen vaaditaan") {
     super(message, "UNAUTHORIZED", 401);
   }
 }
 
 export class NotFoundError extends AppError {
-  constructor(message: string = "Resource not found") {
+  constructor(message: string = "Resurssia ei löytynyt") {
     super(message, "NOT_FOUND", 404);
   }
 }
@@ -78,13 +78,13 @@ export function withErrorHandler(
         // P2025: Record not found
         if (code === "P2002" || code === "P2003") {
           return noStoreJson(
-            { error: { code: "DATABASE_CONSTRAINT", message: "A database constraint was violated." } },
+            { error: { code: "DATABASE_CONSTRAINT", message: "Tietokantarajoitus rikkoutui." } },
             { status: 409 }
           );
         }
         if (code === "P2025") {
           return noStoreJson(
-            { error: { code: "NOT_FOUND", message: "Resource not found in database." } },
+            { error: { code: "NOT_FOUND", message: "Resurssia ei löytynyt tietokannasta." } },
             { status: 404 }
           );
         }
@@ -93,7 +93,7 @@ export function withErrorHandler(
       if (error && typeof error === "object" && error.name === "PrismaClientValidationError") {
         console.error("[PrismaClientValidationError]", error.message);
         return noStoreJson(
-          { error: { code: "DATABASE_VALIDATION", message: "Database structural validation failed." } },
+          { error: { code: "DATABASE_VALIDATION", message: "Tietokannan rakenteen validointi epäonnistui." } },
           { status: 400 }
         );
       }
@@ -105,7 +105,7 @@ export function withErrorHandler(
         {
           error: {
             code: "INTERNAL_ERROR",
-            message: "An unexpected error occurred. Please try again later.",
+            message: "Odottamaton virhe. Yritä myöhemmin uudelleen.",
           },
         },
         { status: 500 }

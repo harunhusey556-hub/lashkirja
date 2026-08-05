@@ -83,6 +83,23 @@ export async function ensureReceiptPreviewImage(
     return outPath;
   }
 
+  if (mimeType === "text/html" || /\.html?$/i.test(absolutePath)) {
+    // Generate a simple SVG placeholder for HTML receipts
+    const svg = `
+      <svg width="600" height="800" xmlns="http://www.w3.org/2000/svg">
+        <rect width="100%" height="100%" fill="#f8fafc"/>
+        <g transform="translate(300, 400)" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif">
+          <path d="M-40,-30 L40,-30 C45.5,-30 50,-25.5 50,-20 L50,20 C50,25.5 45.5,30 40,30 L-40,30 C-45.5,30 -50,25.5 -50,20 L-50,-20 C-50,-25.5 -45.5,-30 -40,-30 Z" fill="none" stroke="#94a3b8" stroke-width="4"/>
+          <path d="M-50,-20 L0,10 L50,-20" fill="none" stroke="#94a3b8" stroke-width="4"/>
+          <text y="70" fill="#64748b" font-size="24" font-weight="500">Sähköpostikuitti</text>
+        </g>
+      </svg>
+    `;
+    const svgPath = `${absolutePath}.preview.svg`;
+    fs.writeFileSync(svgPath, Buffer.from(svg.trim()), { mode: 0o600 });
+    return svgPath;
+  }
+
   return null;
 }
 
@@ -94,10 +111,12 @@ export async function readReceiptPreviewBuffer(
   if (!previewPath) return null;
   const buffer = fs.readFileSync(previewPath);
   const contentType =
-    previewPath === absolutePath
+    previewPath.endsWith(".svg")
+      ? "image/svg+xml"
+      : previewPath === absolutePath
       ? mimeType.startsWith("image/") ? mimeType : "image/jpeg"
       : "image/jpeg";
-  return { buffer, contentType: contentType === "image/png" ? "image/png" : "image/jpeg" };
+  return { buffer, contentType: contentType === "image/png" ? "image/png" : contentType };
 }
 
 export function needsGeneratedPreview(mimeType: string, fileName: string): boolean {
@@ -105,7 +124,8 @@ export function needsGeneratedPreview(mimeType: string, fileName: string): boole
   return (
     isPdf(mimeType, lower) ||
     isHeic(mimeType, lower) ||
+    mimeType === "text/html" ||
     /\.pdf$/i.test(lower) ||
-    /\.(heic|heif)$/i.test(lower)
+    /\.(heic|heif|html?)$/i.test(lower)
   );
 }

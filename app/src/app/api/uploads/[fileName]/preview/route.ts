@@ -33,7 +33,7 @@ export async function GET(
       return noStoreJson({ error: "Esikatselua ei voitu luoda" }, { status: 422 });
     }
     const baseName = upload.originalName.replace(/\.[^.]+$/, "") || "kuitti";
-    return new NextResponse(preview.buffer, {
+    return new NextResponse(preview.buffer as unknown as BodyInit, {
       headers: {
         "Content-Type": preview.contentType,
         "Content-Length": String(preview.buffer.length),

@@ -1,6 +1,6 @@
 "use client";
 
-import { use } from "react";
+import { use, Suspense } from "react";
 import AppShell from "@/components/AppShell";
 import ReceiptEditor from "@/components/ReceiptEditor";
 
@@ -13,7 +13,9 @@ export default function MuokkaaKuittiaPage({
 
   return (
     <AppShell>
-      <ReceiptEditor receiptId={id} />
+      <Suspense fallback={null}>
+        <ReceiptEditor receiptId={id} />
+      </Suspense>
     </AppShell>
   );
 }

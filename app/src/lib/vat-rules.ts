@@ -3,6 +3,8 @@
  * Default: 25.5% unless category/treatment positively establishes otherwise.
  */
 
+import { amountsOnLine } from "./finnish-numbers";
+
 export type VatTreatment =
   | "STANDARD_25_5"
   | "REDUCED_13_5"
@@ -62,19 +64,7 @@ const TREATMENT_RATE: Partial<Record<VatTreatment, number>> = {
   ZERO_WITH_DEDUCTION: 0,
 };
 
-const AMOUNT_RE =
-  /\d{1,3}(?:[ .\u00a0]\d{3})*,\d{2}(?!\d)|(?<![\d.])(\d+\.\d{2})(?![.\d])/g;
 
-function parseAmount(s: string): number {
-  if (s.includes(",")) {
-    return parseFloat(s.replace(/[ .\u00a0]/g, "").replace(",", "."));
-  }
-  return parseFloat(s);
-}
-
-function amountsOnLine(line: string): number[] {
-  return [...line.matchAll(AMOUNT_RE)].map((m) => parseAmount(m[0]));
-}
 
 function round2(n: number): number {
   return Math.round(n * 100) / 100;

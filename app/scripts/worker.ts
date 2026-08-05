@@ -1,0 +1,48 @@
+import { prisma } from "../src/lib/db";
+import { syncImapAccount } from "../src/lib/mail-sync";
+
+const SYNC_INTERVAL_MS = 10 * 60 * 1000; // 10 minutes
+
+async function runSyncCycle() {
+  console.log(`[${new Date().toISOString()}] Starting background email sync cycle...`);
+  try {
+    const accounts = await prisma.imapAccount.findMany();
+    if (accounts.length === 0) {
+      console.log(`[${new Date().toISOString()}] No IMAP accounts connected. Skipping sync.`);
+      return;
+    }
+
+    for (const account of accounts) {
+      console.log(`[${new Date().toISOString()}] Syncing account: ${account.email}...`);
+      try {
+        const count = await syncImapAccount(account.id);
+        console.log(`[${new Date().toISOString()}] Successfully synced ${count} new receipts for ${account.email}.`);
+      } catch (error) {
+        console.error(`[${new Date().toISOString()}] Failed to sync account ${account.email}:`, error);
+      }
+    }
+  } catch (error) {
+    console.error(`[${new Date().toISOString()}] Error fetching IMAP accounts:`, error);
+  }
+}
+
+async function main() {
+  console.log(`[${new Date().toISOString()}] Lashkirja Background Worker Started.`);
+  console.log(`[${new Date().toISOString()}] Next sync in ${SYNC_INTERVAL_MS / 1000 / 60} minutes.`);
+  
+  // Run immediately on start
+  await runSyncCycle();
+
+  // Schedule loop
+  setInterval(async () => {
+    await runSyncCycle();
+  }, SYNC_INTERVAL_MS);
+}
+
+// Keep the process alive
+main().catch(console.error);
+
+process.on("SIGINT", () => {
+  console.log("Shutting down worker...");
+  process.exit(0);
+});

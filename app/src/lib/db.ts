@@ -15,7 +15,6 @@ function createPrismaClient() {
   hardenLocalDatabasePermissions(dbUrl);
   const adapter = new HardenedPrismaLibSql({
     url: dbUrl,
-    busyTimeout: 5_000,
   });
   return new PrismaClient({ adapter });
 }

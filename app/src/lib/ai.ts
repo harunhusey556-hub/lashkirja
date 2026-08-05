@@ -11,6 +11,7 @@ import {
   categoriesVatHintsForAiPrompt,
   guessVatForReceipt,
 } from "./vat-rules";
+import { amountsOnLine, isoFromDateMatch, DATE_RE, parseAmount } from "./finnish-numbers";
 
 export interface ExtractedReceipt {
   vendor: string | null;
@@ -160,9 +161,15 @@ function detectReceiptMime(filePath: string, claimedMime: string): string {
   if (/ftyp(?:heic|heix|hevc|hevx|heim|heis|mif1|msf1)/i.test(brand)) {
     return "image/heic";
   }
+  
+  const textHead = header.toString("utf8").trimStart().toLowerCase();
+  if (textHead.startsWith("<html") || textHead.startsWith("<!doc") || claimedMime === "text/html") {
+    return "text/html";
+  }
+
   throw new ReceiptExtractionError(
     "UNSUPPORTED_FILE",
-    `Tiedoston sisältö ei vastaa tuettua PDF-, JPG-, PNG- tai HEIC-muotoa (${claimedMime || "tuntematon"})`
+    `Tiedoston sisältö ei vastaa tuettua PDF-, JPG-, PNG-, HEIC- tai HTML-muotoa (${claimedMime || "tuntematon"})`
   );
 }
 
@@ -475,6 +482,14 @@ async function extractDocumentText(
         }
       }
     }
+  } else if (mimeType === "text/html") {
+    const rawHtml = fs.readFileSync(filePath, "utf8");
+    rawText = rawHtml
+      .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, "")
+      .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, "")
+      .replace(/<[^>]+>/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
   } else {
     try {
       rawText = execFileSync(
@@ -703,28 +718,7 @@ function extractInvoiceNumber(lines: string[], text: string): string | null {
   return invoiceNumber;
 }
 
-// Finnish amount: "1 234,56", "1.234,56", "243,06"; fallback dot-decimal "243.06"
-// (dot-decimal guarded so date fragments like "20.05" in "20.05.2026" never match).
-const AMOUNT_RE =
-  /\d{1,3}(?:[ . ]\d{3})*,\d{2}(?!\d)|(?<![\d.])\d+\.\d{2}(?![.\d])/g;
-
-function parseAmount(s: string): number {
-  if (s.includes(",")) {
-    return parseFloat(s.replace(/[ . ]/g, "").replace(",", "."));
-  }
-  return parseFloat(s);
-}
-
-function amountsOnLine(line: string): number[] {
-  return [...line.matchAll(AMOUNT_RE)].map((m) => parseAmount(m[0]));
-}
-
 const KNOWN_VAT_RATES = [25.5, 24, 14, 13.5, 10, 0];
-const DATE_RE = /(\d{1,2})\.(\d{1,2})\.(20\d{2})/;
-
-function isoFromDateMatch(m: RegExpMatchArray): string {
-  return `${m[3]}-${m[2].padStart(2, "0")}-${m[1].padStart(2, "0")}`;
-}
 
 function extractSummaryTableTotals(lines: string[]): {
   total: number | null;

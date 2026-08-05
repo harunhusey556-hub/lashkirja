@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import ReceiptPreview from "@/components/ReceiptPreview";
 import ReceiptMatchPanel, {
   type ReceiptMatchData,
@@ -77,8 +77,11 @@ interface ReceiptResponse {
 export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
   const isEdit = Boolean(receiptId);
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const isNewStep2 = searchParams.get("new") === "true";
   const fileInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
+  const matchPanelRef = useRef<HTMLDivElement>(null);
 
   const [loading, setLoading] = useState(isEdit);
   const [uploading, setUploading] = useState(false);
@@ -176,9 +179,14 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
       })
       .finally(() => {
         if (!controller.signal.aborted) setLoading(false);
+        if (isNewStep2 && matchPanelRef.current) {
+          setTimeout(() => {
+            matchPanelRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+          }, 500);
+        }
       });
     return () => controller.abort();
-  }, [receiptId, loadAttempt]);
+  }, [receiptId, loadAttempt, isNewStep2]);
 
   function validateUploadFile(file: File): string | null {
     if (file.size === 0) return "Tiedosto on tyhjä";
@@ -435,7 +443,7 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
           matchStatus === "linked" ||
           (candidates && candidates.length > 0)
         ) {
-          router.push(`/kuitit/${data.receipt.id as string}`);
+          router.push(`/kuitit/${data.receipt.id as string}?new=true`);
           return;
         }
       }
@@ -491,7 +499,23 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center gap-3">
+      {isNewStep2 && (
+        <div className="bg-success/10 border border-success/20 rounded-2xl p-4 shadow-sm animate-in">
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 rounded-full bg-success/20 flex items-center justify-center text-success">
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5">
+                <path fillRule="evenodd" d="M19.916 4.626a.75.75 0 0 1 .208 1.04l-9 13.5a.75.75 0 0 1-1.154.114l-6-6a.75.75 0 0 1 1.06-1.06l5.353 5.353 8.493-12.74a.75.75 0 0 1 1.04-.207Z" clipRule="evenodd" />
+              </svg>
+            </div>
+            <div>
+              <h3 className="text-sm font-semibold text-success">Kuitti tallennettu onnistuneesti!</h3>
+              <p className="text-xs text-success/80 mt-0.5">Vaihe 2: Yhdistä kuitti oikeaan pankkitapahtumaan tiliotteelta.</p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <div className="flex items-center gap-3 animate-in">
         <Link
           href="/kuitit"
           className="w-11 h-11 flex items-center justify-center rounded-xl bg-white shadow-sm text-charcoal hover:bg-blush/40 transition-colors"
@@ -502,7 +526,7 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
           </svg>
         </Link>
         <h2 className="text-xl font-light text-charcoal">
-          {isEdit ? "Muokkaa kuittia" : "Lisää kuitti"}
+          {isNewStep2 ? "Vaihe 2: Linkitys" : isEdit ? "Muokkaa kuittia" : "Lisää kuitti"}
         </h2>
       </div>
 
@@ -627,15 +651,17 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
           )}
 
           {isEdit && (
-            <ErrorBoundary>
-              <ReceiptMatchPanel
-                match={matchData}
-                linkedTransaction={linkedTx}
-                busy={matchBusy}
-                onConfirm={handleMatchConfirm}
-                onUnlink={linkedTx ? handleMatchUnlink : undefined}
-              />
-            </ErrorBoundary>
+            <div ref={matchPanelRef} className={isNewStep2 ? "ring-2 ring-accent ring-offset-2 rounded-2xl transition-all duration-500" : ""}>
+              <ErrorBoundary>
+                <ReceiptMatchPanel
+                  match={matchData}
+                  linkedTransaction={linkedTx}
+                  busy={matchBusy}
+                  onConfirm={handleMatchConfirm}
+                  onUnlink={linkedTx ? handleMatchUnlink : undefined}
+                />
+              </ErrorBoundary>
+            </div>
           )}
 
           {formPreviewSrc && (
@@ -656,7 +682,8 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
             </div>
           )}
 
-          <div className="space-y-3">
+          {!isNewStep2 && (
+            <div className="space-y-3">
             <div>
               <label htmlFor="receipt-vendor" className="block text-xs text-warm-gray mb-1">Myyjä</label>
               <input
@@ -725,16 +752,28 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
                       <select
                         id={`receipt-vat-rate-${index}`}
                         value={detail.rate}
-                        onChange={(event) =>
-                          setFormData({
-                            ...formData,
-                            vatDetails: formData.vatDetails.map((row, rowIndex) =>
-                              rowIndex === index
-                                ? { ...row, rate: event.target.value }
-                                : row
-                            ),
-                          })
-                        }
+                        onChange={(event) => {
+                          const newRate = event.target.value;
+                          setFormData((prev) => {
+                            let newAmount = detail.amount;
+                            if (prev.vatDetails.length === 1 && prev.totalAmount) {
+                              const total = parseFloat(prev.totalAmount.replace(',', '.'));
+                              const rateNum = parseFloat(newRate);
+                              if (!isNaN(total) && !isNaN(rateNum)) {
+                                const calculatedVat = total * (rateNum / (100 + rateNum));
+                                newAmount = calculatedVat.toFixed(2);
+                              }
+                            }
+                            return {
+                              ...prev,
+                              vatDetails: prev.vatDetails.map((row, rowIndex) =>
+                                rowIndex === index
+                                  ? { ...row, rate: newRate, amount: newAmount }
+                                  : row
+                              ),
+                            };
+                          });
+                        }}
                         className="w-full px-3 py-2.5 rounded-xl border border-warm-gray-light bg-cream/50 text-sm"
                       >
                         {isLegacyRate && (
@@ -974,25 +1013,37 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
               </div>
             </fieldset>
           </div>
+          )}
 
           <div className="flex gap-3 pt-2">
-            <Link
-              href="/kuitit"
-              className="flex-1 py-3 rounded-xl border border-warm-gray-light text-sm text-warm-gray hover:bg-cream transition-colors text-center"
-            >
-              Peruuta
-            </Link>
-            <button
-              type="submit"
-              disabled={saving || (!isEdit && !uploadId)}
-              className="flex-1 py-3 rounded-xl bg-accent text-white text-sm font-medium hover:bg-accent-dark transition-colors disabled:opacity-50"
-            >
-              {saving
-                ? "Tallennetaan..."
-                : isEdit
-                  ? "Tallenna muutokset"
-                  : "Tallenna"}
-            </button>
+            {isNewStep2 ? (
+              <Link
+                href="/kuitit"
+                className="w-full py-3.5 rounded-xl bg-success text-white text-sm font-medium hover:bg-success/90 transition-all text-center shadow-md hover:shadow-lg hover:-translate-y-0.5"
+              >
+                Kaikki valmista, palaa kuitteihin
+              </Link>
+            ) : (
+              <>
+                <Link
+                  href="/kuitit"
+                  className="flex-1 py-3 rounded-xl border border-warm-gray-light text-sm text-warm-gray hover:bg-cream transition-colors text-center"
+                >
+                  Peruuta
+                </Link>
+                <button
+                  type="submit"
+                  disabled={saving || (!isEdit && !uploadId)}
+                  className="flex-1 py-3 rounded-xl bg-accent text-white text-sm font-medium hover:bg-accent-dark transition-colors disabled:opacity-50"
+                >
+                  {saving
+                    ? "Tallennetaan..."
+                    : isEdit
+                      ? "Tallenna muutokset"
+                      : "Tallenna"}
+                </button>
+              </>
+            )}
           </div>
         </form>
       )}

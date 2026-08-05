@@ -5,8 +5,15 @@ import "./globals.css";
 const inter = Inter({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: "Tilikirja — Kirjanpito",
-  description: "Yksinkertainen kirjanpito yrittäjille",
+  title: "LashKirja",
+  description: "Yksinkertainen kirjanpito",
+  manifest: "/manifest.json",
+  themeColor: "#F9E4E4",
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "default",
+    title: "LashKirja",
+  },
 };
 
 export default function RootLayout({

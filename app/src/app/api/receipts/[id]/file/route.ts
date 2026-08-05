@@ -14,6 +14,8 @@ const MIME: Record<string, string> = {
   ".webp": "image/webp",
   ".heic": "image/heic",
   ".heif": "image/heif",
+  ".html": "text/html",
+  ".htm": "text/html",
 };
 
 export async function GET(
@@ -36,7 +38,7 @@ export async function GET(
   try {
     const buffer = await readUserUpload(session.userId!, receipt.filePath, true);
     const contentType = receipt.upload?.mimeType || MIME[path.extname(receipt.filePath).toLowerCase()] || "application/octet-stream";
-    return new NextResponse(buffer, {
+    return new NextResponse(buffer as unknown as BodyInit, {
       headers: {
         "Content-Type": contentType,
         "Content-Length": String(buffer.length),

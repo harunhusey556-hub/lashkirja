@@ -6,6 +6,7 @@ export interface ReceiptCategory {
 
 /** Canonical expense/income categories for receipts and AI extraction. */
 export const RECEIPT_CATEGORIES: readonly ReceiptCategory[] = [
+  { id: "myynti", label: "Myynti", aiHint: "Asiakastyöt, laskut, tuotemyynti, Holvi/Zettle tilitykset" },
   { id: "tarvikkeet", label: "Tarvikkeet & ostot", aiHint: "Tukku, tarvikkeet, tavaraostot" },
   { id: "vuokra", label: "Vuokra & toimitilat", aiHint: "Toimitilavuokra, Finnvacum" },
   { id: "sähkö", label: "Sähkö", aiHint: "Sähkölasku, Helen" },
@@ -45,6 +46,8 @@ const CATEGORY_ALIASES: Record<string, string> = {
   helen: "sähkö",
   varma: "työeläke",
   elo: "työeläke",
+  tulo: "myynti",
+  myynti: "myynti",
 };
 
 export function isKnownCategory(id: string | null | undefined): boolean {

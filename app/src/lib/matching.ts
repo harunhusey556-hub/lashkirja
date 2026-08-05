@@ -46,7 +46,8 @@ export function shouldAutoConfirm(score: number, reasons: string[]): boolean {
   if (score < AUTO_CONFIRM_THRESHOLD) return false;
   if (reasons.includes("viite")) return true;
   if (reasons.includes("amount") && reasons.includes("vendor")) return true;
-  return score >= 0.92;
+  if (reasons.includes("amount") && reasons.includes("date")) return true;
+  return score >= 0.90; // Loosened from 0.92
 }
 
 const WEIGHT_VIITE = 0.45;
@@ -536,6 +537,10 @@ export async function confirmMatch(
           ? {}
           : { matchScore: null, matchReasons: JSON.stringify(["manual"]) }),
       },
+    }),
+    prisma.receipt.update({
+      where: { id: receiptId },
+      data: { reviewStatus: "approved" },
     }),
   ]);
 }

@@ -281,7 +281,13 @@ export async function GET(req: NextRequest) {
   const minAmount = url.searchParams.get("minAmount");
   const maxAmount = url.searchParams.get("maxAmount");
   const sort = url.searchParams.get("sort") || "date_desc";
+  const reviewStatus = url.searchParams.get("reviewStatus");
   const where: Prisma.ReceiptWhereInput = { userId: session.userId };
+
+  if (reviewStatus === "pending") where.reviewStatus = "pending";
+  else if (reviewStatus === "rejected") where.reviewStatus = "rejected";
+  else if (reviewStatus === "all") {} // leave empty to fetch all
+  else where.reviewStatus = "approved"; // Default to approved only
 
   if (month) {
     const parsedMonth = monthSchema.safeParse(month);

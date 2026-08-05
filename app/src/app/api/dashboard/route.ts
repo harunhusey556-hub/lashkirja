@@ -60,6 +60,7 @@ export async function GET(req: NextRequest) {
     where: {
       userId: session.userId,
       date: { gte: startOfMonth, lt: endOfMonth },
+      reviewStatus: "approved",
     },
     select: {
       totalAmountCents: true,
@@ -118,17 +119,22 @@ export async function GET(req: NextRequest) {
         userId: session.userId,
         type: "tulo",
         date: { gte: startOfYear, lt: endOfYear },
+        reviewStatus: "approved",
       },
       select: { totalAmountCents: true },
     }),
     prisma.user.findUnique({
       where: { id: session.userId },
-      select: { entityType: true, vatRegistered: true },
+      select: { entityType: true, vatRegistered: true, imapAccount: { select: { id: true } } },
     }),
   ]);
   const bankYtd = yearTx.reduce((a, t) => a + centsToEuros(t.amountCents), 0);
-  const receiptYtd = yearReceipts.reduce((a, r) => a + centsToEuros(r.totalAmountCents), 0);
+  const receiptYtd = yearReceipts.reduce((a, r) => a + centsToEuros(r.totalAmountCents || 0), 0);
   const ytdRevenue = yearTx.length > 0 ? bankYtd : receiptYtd;
+
+  const pendingReceiptsCount = await prisma.receipt.count({
+    where: { userId: session.userId, reviewStatus: "pending" },
+  });
 
   return NextResponse.json({
     firstName: session.firstName,
@@ -148,5 +154,7 @@ export async function GET(req: NextRequest) {
       ytdRevenue: round2(ytdRevenue),
       threshold: VAT_REGISTRATION_THRESHOLD_EUR,
     },
+    hasImap: !!user?.imapAccount,
+    pendingReceiptsCount,
   });
 }

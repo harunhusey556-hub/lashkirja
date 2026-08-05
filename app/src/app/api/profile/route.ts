@@ -4,6 +4,9 @@ import { prisma } from "@/lib/db";
 import { requireSession } from "@/lib/session";
 
 const patchSchema = z.object({
+  firstName: z.string().min(1).optional(),
+  lastName: z.string().min(1).optional(),
+  email: z.string().email().optional(),
   entityType: z.enum(["kevytyrittaja", "toiminimi"]).optional(),
   vatRegistered: z.boolean().optional(),
   vatPeriod: z.enum(["month", "quarter", "year"]).optional(),
@@ -24,6 +27,9 @@ export async function GET() {
       entityType: true,
       vatRegistered: true,
       vatPeriod: true,
+      imapAccounts: {
+        select: { id: true, email: true }
+      }
     },
   });
   if (!user) {
@@ -48,6 +54,9 @@ export async function PATCH(req: NextRequest) {
     where: { id: session.userId },
     data: parsed.data,
     select: {
+      firstName: true,
+      lastName: true,
+      email: true,
       entityType: true,
       vatRegistered: true,
       vatPeriod: true,

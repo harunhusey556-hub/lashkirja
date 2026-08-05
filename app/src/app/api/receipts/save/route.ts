@@ -11,6 +11,7 @@ import {
   rejectOversizedContentLength,
 } from "@/lib/http-security";
 import { withErrorHandler, UnauthorizedError, AppError } from "@/lib/api-errors";
+import { sanitizeText } from "@/lib/sanitizer";
 
 const vatLineSchema = z.object({
   rate: z.number().finite().min(0).max(100),
@@ -71,15 +72,15 @@ export const POST = withErrorHandler(async (req: NextRequest) => {
         data: {
           userId: session.userId!,
           uploadId: upload.id,
-          vendor: body.vendor || null,
+          vendor: sanitizeText(body.vendor),
           date: body.date ? isoDateToUtc(body.date) : null,
           totalAmountCents: body.totalAmount == null ? null : eurosToCents(body.totalAmount),
           vatDetails: body.vatDetails?.length ? JSON.stringify(body.vatDetails) : null,
-          category: body.category || null,
-          notes: body.notes || null,
+          category: sanitizeText(body.category),
+          notes: sanitizeText(body.notes),
           type: body.type,
-          reference: body.reference || null,
-          invoiceNumber: body.invoiceNumber || null,
+          reference: sanitizeText(body.reference),
+          invoiceNumber: sanitizeText(body.invoiceNumber),
           filePath: upload.storageKey,
           fileName: upload.originalName,
           source: upload.extractionSource || "manual",

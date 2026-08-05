@@ -13,6 +13,8 @@ const MIME: Record<string, string> = {
   ".png": "image/png",
   ".heic": "image/heic",
   ".heif": "image/heif",
+  ".html": "text/html",
+  ".htm": "text/html",
 };
 
 /** JPEG preview for saved receipt files (PDF page 1, HEIC→JPEG). */
@@ -48,7 +50,7 @@ export async function GET(
       return noStoreJson({ error: "Esikatselua ei voitu luoda" }, { status: 422 });
     }
     const baseName = receipt.fileName.replace(/\.[^.]+$/, "") || "kuitti";
-    return new NextResponse(preview.buffer, {
+    return new NextResponse(preview.buffer as unknown as BodyInit, {
       headers: {
         "Content-Type": preview.contentType,
         "Content-Length": String(preview.buffer.length),

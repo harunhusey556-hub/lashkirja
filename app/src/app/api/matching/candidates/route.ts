@@ -71,7 +71,7 @@ export async function GET(req: NextRequest) {
             totalAmount:
               byId.get(c.receiptId)!.totalAmountCents == null
                 ? null
-                : centsToEuros(byId.get(c.receiptId)!.totalAmountCents),
+                : centsToEuros(byId.get(c.receiptId)!.totalAmountCents || 0),
           }
         : null,
     })),

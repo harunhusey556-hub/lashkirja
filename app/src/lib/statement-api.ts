@@ -44,8 +44,13 @@ async function enrichStatements(
         totalAmountCents: number | null;
         date: Date | null;
       } | null;
+      date: Date | null;
+      counterparty: string | null;
+      reference: string | null;
+      message: string | null;
+      type: string;
+      matchStatus: string;
       amountCents: number;
-      [key: string]: unknown;
     }>;
     [key: string]: unknown;
   }>

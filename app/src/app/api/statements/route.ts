@@ -15,6 +15,7 @@ import { eurosToCents } from "@/lib/money";
 import { inferTransactionType } from "@/lib/statements";
 import { listStatementsForUser } from "@/lib/statement-api";
 import { centsToEuros } from "@/lib/money";
+import { autoGenerateIncomeReceipts } from "@/lib/income-automation";
 
 function publicTransaction<T extends { amountCents: number }>(tx: T) {
   const { amountCents, ...rest } = tx;
@@ -113,6 +114,11 @@ export async function POST(req: NextRequest) {
 
     await runMatching(session.userId!).catch((e) =>
       console.error("Matching after statement upload failed:", e)
+    );
+
+    // Auto-generate receipts for new income rows
+    await autoGenerateIncomeReceipts(session.userId!, statement.id).catch((e) => 
+      console.error("Income auto-generation failed:", e)
     );
 
     const transactions = await prisma.transaction.findMany({

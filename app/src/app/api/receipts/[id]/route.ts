@@ -12,6 +12,7 @@ import {
   rejectOversizedContentLength,
 } from "@/lib/http-security";
 import { withErrorHandler, UnauthorizedError, AppError, NotFoundError } from "@/lib/api-errors";
+import { sanitizeText } from "@/lib/sanitizer";
 
 const patchSchema = z.object({
   vendor: z.string().trim().max(300).nullish(),
@@ -146,7 +147,7 @@ export const PATCH = withErrorHandler(async (
   const receipt = await prisma.receipt.update({
     where: { id },
     data: {
-      ...(body.vendor !== undefined ? { vendor: body.vendor || null } : {}),
+      ...(body.vendor !== undefined ? { vendor: sanitizeText(body.vendor) } : {}),
       ...(body.date !== undefined ? { date: body.date ? isoDateToUtc(body.date) : null } : {}),
       ...(body.totalAmount !== undefined
         ? { totalAmountCents: body.totalAmount == null ? null : eurosToCents(body.totalAmount) }
@@ -154,11 +155,11 @@ export const PATCH = withErrorHandler(async (
       ...(body.vatDetails !== undefined
         ? { vatDetails: body.vatDetails?.length ? JSON.stringify(body.vatDetails) : null }
         : {}),
-      ...(body.category !== undefined ? { category: body.category || null } : {}),
-      ...(body.notes !== undefined ? { notes: body.notes || null } : {}),
+      ...(body.category !== undefined ? { category: sanitizeText(body.category) } : {}),
+      ...(body.notes !== undefined ? { notes: sanitizeText(body.notes) } : {}),
       ...(body.type !== undefined ? { type: body.type } : {}),
-      ...(body.reference !== undefined ? { reference: body.reference || null } : {}),
-      ...(body.invoiceNumber !== undefined ? { invoiceNumber: body.invoiceNumber || null } : {}),
+      ...(body.reference !== undefined ? { reference: sanitizeText(body.reference) } : {}),
+      ...(body.invoiceNumber !== undefined ? { invoiceNumber: sanitizeText(body.invoiceNumber) } : {}),
     },
     select: {
       id: true,

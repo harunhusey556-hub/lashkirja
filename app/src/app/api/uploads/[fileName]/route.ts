@@ -26,7 +26,7 @@ export async function GET(
 
   try {
     const buffer = await readUserUpload(session.userId!, upload.storageKey);
-    return new NextResponse(buffer, {
+    return new NextResponse(buffer as unknown as BodyInit, {
       headers: {
         "Content-Type": upload.mimeType,
         "Content-Length": String(buffer.length),

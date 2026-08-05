@@ -20,6 +20,7 @@ model User {
   receipts      Receipt[]
   statements    Statement[]
   uploads       Upload[]
+  imapAccounts  ImapAccount[]
 }
 
 model Receipt {
@@ -40,6 +41,7 @@ model Receipt {
   source           String    @default("manual")
   confidence       Float?
   rawText          String?
+  reviewStatus     String    @default("approved")
   uploadId         String?   @unique
   upload           Upload?   @relation("ReceiptUpload", fields: [uploadId], references: [id], onDelete: SetNull)
   createdAt        DateTime  @default(now())
@@ -86,7 +88,7 @@ model Transaction {
   // Confirmed link only — a suggestion never occupies this FK
   receiptId          String?  @unique
   receipt            Receipt? @relation("ConfirmedMatch", fields: [receiptId], references: [id], onDelete: SetNull)
-  suggestedReceiptId String?  @unique
+  suggestedReceiptId String?
   suggestedReceipt   Receipt? @relation("SuggestedMatch", fields: [suggestedReceiptId], references: [id], onDelete: SetNull)
   matchStatus        String   @default("unmatched") // "unmatched" | "suggested" | "confirmed" | "ignored"
   matchScore         Float?
@@ -96,6 +98,7 @@ model Transaction {
 
   @@index([statementId, date])
   @@index([statementId, matchStatus])
+  @@index([suggestedReceiptId])
 }
 
 model Upload {
@@ -133,4 +136,18 @@ model MatchRejection {
   createdAt     DateTime    @default(now())
 
   @@unique([transactionId, receiptId])
+}
+
+model ImapAccount {
+  id             String    @id @default(uuid())
+  userId         String
+  user           User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  email          String
+  host           String    @default("imap.gmail.com")
+  port           Int       @default(993)
+  tls            Boolean   @default(true)
+  encryptedPass  String
+  lastSyncAt     DateTime? 
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
 }

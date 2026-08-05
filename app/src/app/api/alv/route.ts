@@ -3,6 +3,7 @@ import { prisma } from "@/lib/db";
 import { requireSession } from "@/lib/session";
 import { computeAlvReport } from "@/lib/alv";
 import { OMAVERO_FIELDS } from "@/lib/vero/omavero-fields";
+import { centsToEuros } from "@/lib/money";
 
 export async function GET(req: NextRequest) {
   const session = await requireSession();
@@ -35,11 +36,17 @@ export async function GET(req: NextRequest) {
       where: {
         userId: session.userId,
         date: { gte: startDate, lt: endDate },
+        reviewStatus: "approved",
       },
     }),
   ]);
 
-  const report = computeAlvReport(receipts);
+  const mappedReceipts = receipts.map((r) => ({
+    ...r,
+    totalAmount: r.totalAmountCents == null ? null : centsToEuros(r.totalAmountCents),
+  }));
+
+  const report = computeAlvReport(mappedReceipts);
 
   return NextResponse.json({
     period: { start: startDate.toISOString(), end: endDate.toISOString() },
