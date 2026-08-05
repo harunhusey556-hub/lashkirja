@@ -3,7 +3,7 @@ import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { requireSession } from "@/lib/session";
 import { getStatementForUser } from "@/lib/statement-api";
-import * as fs from "fs";
+import { removeUserUpload } from "@/lib/storage";
 import * as path from "path";
 
 const patchSchema = z.object({
@@ -90,16 +90,12 @@ export async function DELETE(
   // Transactions are removed via onDelete: Cascade
   await prisma.statement.delete({ where: { id } });
 
-  const filePath = path.join(
-    process.cwd(),
-    "data",
-    "uploads",
-    path.basename(statement.filePath)
-  );
+  // allowLegacy: statements uploaded before per-user storage landed still carry
+  // a flat data/uploads/<uuid>.<ext> path.
   try {
-    fs.unlinkSync(filePath);
+    await removeUserUpload(session.userId, path.basename(statement.filePath), true);
   } catch {
-    // file already gone — DB row removal is what matters
+    // file already gone or unreadable — DB row removal is what matters
   }
 
   return NextResponse.json({ ok: true });
