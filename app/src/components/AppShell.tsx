@@ -449,6 +449,23 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     return () => controller.abort();
   }, [authAttempt]);
 
+  // Foreground resume: the JS context normally survives backgrounding, so
+  // this is a quiet best-effort check, not a full re-render of the auth
+  // state — only an explicit 401 (cookie expired/wiped while backgrounded)
+  // does anything.
+  useEffect(() => {
+    const onVisibility = () => {
+      if (document.visibilityState !== "visible") return;
+      fetch("/api/auth/me", { credentials: "include" })
+        .then((res) => {
+          if (res.status === 401) redirectToLogin();
+        })
+        .catch(() => {});
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => document.removeEventListener("visibilitychange", onVisibility);
+  }, []);
+
   function retryAuth() {
     setAuthState({ status: "checking" });
     setAuthAttempt((attempt) => attempt + 1);

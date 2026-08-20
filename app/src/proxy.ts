@@ -90,7 +90,15 @@ export async function proxy(request: NextRequest) {
     return redirectForRequest(request, "/dashboard");
   }
 
-  return NextResponse.next();
+  const response = NextResponse.next();
+  if (isProtected) {
+    // Belt-and-suspenders alongside signOut()'s location.replace() +
+    // clearPageCache(): without this, a bfcache/back-forward restore of a
+    // fully-loaded protected page's *document* response is theoretically
+    // possible even after logout. API/file routes already set this.
+    response.headers.set("Cache-Control", "private, no-store, max-age=0");
+  }
+  return response;
 }
 
 export const config = {
