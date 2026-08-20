@@ -97,6 +97,8 @@ const NAV_ITEMS = [
 ] as const;
 
 const MORE_ITEMS = [
+  { href: "/laskut", label: "Myyntilaskut", hint: "Laskutus, viitenumerot, saatavat" },
+  { href: "/asiakkaat", label: "Asiakkaat", hint: "Asiakasrekisteri ja avoimet saatavat" },
   { href: "/alv-raportti", label: "ALV-raportti", hint: "Arvonlisäveron yhteenveto" },
   { href: "/asetukset", label: "Asetukset", hint: "Profiili, sähköposti, kirjautuminen" },
 ] as const;
@@ -109,6 +111,9 @@ function navActive(pathname: string, href: string): boolean {
 function pageTitle(pathname: string): string {
   if (pathname.startsWith("/kuitit")) return "Kuitit & laskut";
   if (pathname.startsWith("/pankkitilit")) return "Pankkitilit";
+  if (/^\/laskut\/[^/]+$/.test(pathname)) return "Lasku";
+  if (pathname.startsWith("/laskut")) return "Myyntilaskut";
+  if (pathname.startsWith("/asiakkaat")) return "Asiakkaat";
   if (/^\/tiliotteet\/[^/]+$/.test(pathname)) return "Tiliote";
   if (pathname.startsWith("/tiliotteet")) return "Tiliotteet";
   if (pathname.startsWith("/alv-raportti")) return "ALV-raportti";

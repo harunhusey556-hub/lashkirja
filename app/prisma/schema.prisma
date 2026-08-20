@@ -25,6 +25,8 @@ model User {
   imapAccounts  ImapAccount[]
   chatMessages  ChatMessage[]
   bankAccounts  BankAccount[]
+  customers     Customer[]
+  salesInvoices SalesInvoice[]
 }
 
 model Receipt {
@@ -109,6 +111,8 @@ model Transaction {
   matchReasons       String? // JSON array, e.g. ["viite","amount"]
 
   rejections MatchRejection[]
+  // Set when this bank row settles a sales invoice.
+  invoicePayment InvoicePayment?
 
   @@index([statementId, date])
   @@index([statementId, matchStatus])
@@ -226,4 +230,97 @@ model MonthlyBalance {
 
   @@unique([bankAccountId, month])
   @@index([bankAccountId, month])
+}
+
+// A person or company the user invoices. Kept per user; two users may hold the
+// same customer without seeing each other's rows.
+model Customer {
+  id                     String    @id @default(uuid())
+  userId                 String
+  user                   User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name                   String
+  businessId             String? // Y-tunnus, validated before it is stored
+  contactPerson          String?
+  email                  String?
+  phone                  String?
+  addressStreet          String?
+  addressPostalCode      String?
+  addressCity            String?
+  country                String    @default("FI")
+  defaultPaymentTermDays Int       @default(14)
+  notes                  String?
+  archivedAt             DateTime?
+  createdAt              DateTime  @default(now())
+  updatedAt              DateTime  @updatedAt
+
+  invoices SalesInvoice[]
+
+  @@index([userId, archivedAt])
+  @@index([userId, name])
+}
+
+// Sales invoice. Totals are stored alongside the lines: the lines are the
+// source of truth while the invoice is a draft, and the stored totals are what
+// was actually sent to the customer once it leaves draft.
+model SalesInvoice {
+  id         String    @id @default(uuid())
+  userId     String
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  customerId String
+  customer   Customer  @relation(fields: [customerId], references: [id])
+  number     Int
+  reference  String // viitenumero with its check digit
+  issueDate  DateTime
+  dueDate    DateTime
+  status     String    @default("draft") // draft | sent | paid | credited
+  sentAt     DateTime?
+  paidAt     DateTime?
+  notes      String?
+  currency   String    @default("EUR")
+  netCents   Int       @default(0)
+  vatCents   Int       @default(0)
+  grossCents Int       @default(0)
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  lines    InvoiceLine[]
+  payments InvoicePayment[]
+
+  @@unique([userId, number])
+  @@unique([userId, reference])
+  @@index([userId, status, dueDate])
+  @@index([customerId, issueDate])
+}
+
+model InvoiceLine {
+  id              String       @id @default(uuid())
+  invoiceId       String
+  invoice         SalesInvoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  sortOrder       Int          @default(0)
+  description     String
+  quantityMilli   Int // thousandths of a unit
+  unit            String       @default("kpl")
+  unitPriceCents  Int
+  vatRatePermille Int          @default(255)
+  netCents        Int
+
+  @@index([invoiceId, sortOrder])
+}
+
+// A payment against an invoice. transactionId is unique so the same bank row
+// can never be counted towards two invoices.
+model InvoicePayment {
+  id            String       @id @default(uuid())
+  invoiceId     String
+  invoice       SalesInvoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  transactionId String?      @unique
+  // Losing the bank row must not erase the fact that the customer paid.
+  transaction   Transaction? @relation(fields: [transactionId], references: [id], onDelete: SetNull)
+  paidDate      DateTime
+  amountCents   Int
+  source        String       @default("manual") // "manual" | "bank"
+  note          String?
+  createdAt     DateTime     @default(now())
+
+  @@index([invoiceId])
 }
