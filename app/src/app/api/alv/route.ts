@@ -1,55 +1,36 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest } from "next/server";
 import { prisma } from "@/lib/db";
 import { requireSession } from "@/lib/session";
 import { computeAlvReport } from "@/lib/alv";
+import { loadAlvPeriodSources } from "@/lib/alv-period";
 import { OMAVERO_FIELDS } from "@/lib/vero/omavero-fields";
-import { centsToEuros } from "@/lib/money";
+import { noStoreJson } from "@/lib/http-security";
+import { UnauthorizedError, withErrorHandler } from "@/lib/api-errors";
+import { alvPeriodBoundsUtc, alvPeriodSchema } from "@/lib/validation";
 
-export async function GET(req: NextRequest) {
-  const session = await requireSession();
-  if (!session) {
-    return NextResponse.json({ error: "Ei kirjautunut" }, { status: 401 });
-  }
+export const GET = withErrorHandler(async (req: NextRequest) => {
+  const session = await requireSession(req);
+  if (!session) throw new UnauthorizedError();
+  const userId = session.userId;
 
-  const period = new URL(req.url).searchParams.get("period") || "";
+  const now = new Date();
+  const raw = req.nextUrl.searchParams.get("period");
+  const period = raw
+    ? alvPeriodSchema.parse(raw)
+    : `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, "0")}`;
+  // UTC bounds: receipt dates are stored as UTC midnight, so building the
+  // window in server-local time would move rows across period boundaries.
+  const { start, end } = alvPeriodBoundsUtc(period);
 
-  let startDate: Date;
-  let endDate: Date;
-
-  if (period.includes("Q")) {
-    const [yearStr, qStr] = period.split("-Q");
-    const year = parseInt(yearStr);
-    const quarter = parseInt(qStr);
-    startDate = new Date(year, (quarter - 1) * 3, 1);
-    endDate = new Date(year, quarter * 3, 1);
-  } else {
-    const [yearStr, monthStr] = period.split("-");
-    const year = parseInt(yearStr) || new Date().getFullYear();
-    const month = parseInt(monthStr) || new Date().getMonth() + 1;
-    startDate = new Date(year, month - 1, 1);
-    endDate = new Date(year, month, 1);
-  }
-
-  const [user, receipts] = await Promise.all([
-    prisma.user.findUnique({ where: { id: session.userId } }),
-    prisma.receipt.findMany({
-      where: {
-        userId: session.userId,
-        date: { gte: startDate, lt: endDate },
-        reviewStatus: "approved",
-      },
-    }),
+  const [user, sources] = await Promise.all([
+    prisma.user.findUnique({ where: { id: userId }, select: { vatRegistered: true } }),
+    loadAlvPeriodSources(userId, start, end),
   ]);
 
-  const mappedReceipts = receipts.map((r) => ({
-    ...r,
-    totalAmount: r.totalAmountCents == null ? null : centsToEuros(r.totalAmountCents),
-  }));
+  const report = computeAlvReport(sources.receipts, sources.invoices);
 
-  const report = computeAlvReport(mappedReceipts);
-
-  return NextResponse.json({
-    period: { start: startDate.toISOString(), end: endDate.toISOString() },
+  return noStoreJson({
+    period: { key: period, start: start.toISOString(), end: end.toISOString() },
     vatRegistered: user?.vatRegistered ?? false,
     field301: { label: OMAVERO_FIELDS[301], ...report.field301 },
     field302: { label: OMAVERO_FIELDS[302], ...report.field302 },
@@ -58,6 +39,9 @@ export async function GET(req: NextRequest) {
     field307: { label: OMAVERO_FIELDS[307], ...report.field307 },
     field308: { label: OMAVERO_FIELDS[308], ...report.field308 },
     review: report.review,
-    receiptCount: receipts.length,
+    receiptCount: sources.receiptCount,
+    sources: report.sources,
+    excludedReceiptCount: sources.excludedReceiptCount,
+    creditedInvoiceCount: sources.creditedInvoiceCount,
   });
-}
+});

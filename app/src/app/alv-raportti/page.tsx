@@ -27,6 +27,9 @@ interface ALVData {
   field308: { label: string; amount: number; isRefund: boolean };
   review: { salesGross: number; purchasesGross: number; count: number };
   receiptCount: number;
+  sources?: { receiptSalesVat: number; invoiceSalesVat: number; invoiceCount: number };
+  excludedReceiptCount?: number;
+  creditedInvoiceCount?: number;
 }
 
 
@@ -212,7 +215,31 @@ export default function ALVRaporttiPage() {
             <p className="text-xs text-warm-gray text-center">
               OmaVero-ilmoituksen kentät · {data.receiptCount} kuittia
               kaudella
+              {data.sources && data.sources.invoiceCount > 0 && (
+                <> · {data.sources.invoiceCount} myyntilaskua</>
+              )}
             </p>
+
+            {data.sources && data.sources.invoiceCount > 0 && (
+              <div className="bg-blush/40 rounded-2xl p-4 text-sm text-charcoal">
+                <p className="font-medium">Myynnin ALV kahdesta lähteestä</p>
+                <p className="mt-1 text-xs text-warm-gray">
+                  Kuiteista {formatEur(data.sources.receiptSalesVat)} · myyntilaskuista{" "}
+                  {formatEur(data.sources.invoiceSalesVat)}. Laskut lasketaan laskun päivän
+                  mukaan (suoriteperuste).
+                  {data.excludedReceiptCount ? (
+                    <>
+                      {" "}
+                      {data.excludedReceiptCount} kuittia jätettiin pois, koska sama
+                      tilitapahtuma on jo kohdistettu laskulle.
+                    </>
+                  ) : null}
+                  {data.creditedInvoiceCount ? (
+                    <> {data.creditedInvoiceCount} hyvitettyä laskua ei ole mukana.</>
+                  ) : null}
+                </p>
+              </div>
+            )}
 
             {data.review.count > 0 && (
               <div className="bg-warning/10 rounded-2xl p-4 text-sm text-charcoal">

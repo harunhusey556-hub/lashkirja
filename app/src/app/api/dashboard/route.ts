@@ -6,6 +6,8 @@ import { centsToEuros } from "@/lib/money";
 import { parseBusinessDetails, deriveVatProfile } from "@/lib/onboarding";
 import { getBankOverview } from "@/lib/bank-accounts";
 import { buildAgingReport, type InvoiceStatus } from "@/lib/invoices";
+import { computeAlvReport } from "@/lib/alv";
+import { loadAlvPeriodSources } from "@/lib/alv-period";
 
 function round2(n: number): number {
   return Math.round(n * 100) / 100;
@@ -74,32 +76,22 @@ export async function GET(req: NextRequest) {
 
   let receiptIncome = 0;
   let receiptExpenses = 0;
-  let salesVat = 0;
-  let deductibleVat = 0;
 
   for (const r of receipts) {
     if (r.totalAmountCents == null) continue;
-    let details: { rate: number; amount: number }[] = [];
-    if (r.vatDetails) {
-      try {
-        details = JSON.parse(r.vatDetails);
-      } catch {
-        details = [];
-      }
-    }
-    const vatSum = details.reduce((a, d) => a + (Number(d.amount) || 0), 0);
     const totalAmount = centsToEuros(r.totalAmountCents);
-
-    if (r.type === "tulo") {
-      receiptIncome += totalAmount;
-      salesVat += vatSum;
-    } else if (r.type === "meno") {
-      receiptExpenses += totalAmount;
-      deductibleVat += vatSum;
-    }
+    if (r.type === "tulo") receiptIncome += totalAmount;
+    else if (r.type === "meno") receiptExpenses += totalAmount;
   }
 
-  const estimatedVat = salesVat - deductibleVat;
+  // The estimate is computed from exactly the same sources as the VAT return,
+  // including sales invoices and the double-counting exclusion. Computing it
+  // separately here is how the front page and /alv-raportti drifted apart.
+  const vatSources = await loadAlvPeriodSources(session.userId, startOfMonth, endOfMonth);
+  const alvReport = computeAlvReport(vatSources.receipts, vatSources.invoices);
+  const estimatedVat = alvReport.field308.isRefund
+    ? -alvReport.field308.amount
+    : alvReport.field308.amount;
   const hasBankData = transactions.length > 0;
 
   // Calendar-year liikevaihto vs the 20 000 € ALV registration threshold
