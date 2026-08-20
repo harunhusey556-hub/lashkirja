@@ -298,7 +298,7 @@ export default function DashboardClient({
         <div className="grid grid-cols-2 gap-3 mt-4 animate-in-delay-2">
           <Link
             href="/kuitit/uusi"
-            className="flex flex-col items-center justify-center gap-2 bg-charcoal text-white rounded-3xl p-5 hover:bg-black transition-all hover:-translate-y-1 hover:shadow-lg"
+            className="flex flex-col items-center justify-center gap-2 bg-charcoal text-white rounded-3xl p-5 hover:bg-black transition-all hover:-translate-y-1 hover:shadow-lg active-press"
           >
             <div className="w-10 h-10 rounded-full bg-white/10 flex items-center justify-center">
               <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-5 h-5"><path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" /></svg>
@@ -308,7 +308,7 @@ export default function DashboardClient({
           
           <Link
             href="/tiliotteet"
-            className="flex flex-col items-center justify-center gap-2 bg-white border-2 border-charcoal/5 text-charcoal rounded-3xl p-5 hover:bg-slate-50 transition-all hover:-translate-y-1 hover:shadow-lg"
+            className="flex flex-col items-center justify-center gap-2 bg-white border-2 border-charcoal/5 text-charcoal rounded-3xl p-5 hover:bg-slate-50 transition-all hover:-translate-y-1 hover:shadow-lg active-press"
           >
             <div className="w-10 h-10 rounded-full bg-charcoal/5 flex items-center justify-center">
               <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-5 h-5"><path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5M16.5 12 12 16.5m0 0L7.5 12m4.5 4.5V3" /></svg>

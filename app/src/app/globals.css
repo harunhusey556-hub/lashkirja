@@ -300,22 +300,59 @@ button:disabled {
  */
 @keyframes sheetUp {
   from {
-    transform: translateY(12%);
-    opacity: 0.6;
+    transform: translateY(100%);
   }
   to {
     transform: translateY(0);
-    opacity: 1;
   }
 }
 
+@keyframes sheetDown {
+  from {
+    transform: translateY(0);
+  }
+  to {
+    transform: translateY(100%);
+  }
+}
+
+/* iOS sheet spring: fast start, soft settle, no bounce. */
 .animate-sheet {
-  animation: sheetUp 0.22s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  animation: sheetUp 0.32s cubic-bezier(0.32, 0.72, 0, 1);
+  will-change: transform;
+}
+
+.animate-sheet-out {
+  animation: sheetDown 0.22s cubic-bezier(0.4, 0, 1, 1) forwards;
   will-change: transform;
 }
 
 .animate-backdrop {
-  animation: fadeIn 0.18s ease-out forwards;
+  animation: fadeIn 0.25s ease-out forwards;
+}
+
+@keyframes fadeOut {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+
+.animate-backdrop-out {
+  animation: fadeOut 0.2s ease-in forwards;
+}
+
+@keyframes scaleOut {
+  from {
+    opacity: 1;
+    transform: scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+}
+
+.animate-scale-out {
+  animation: scaleOut 0.15s ease-in forwards;
 }
 
 /* Sheets own the bottom inset themselves; the tab bar is hidden behind them. */
@@ -405,7 +442,10 @@ body.signing-out {
  */
 @media (prefers-reduced-motion: reduce) {
   .animate-sheet,
+  .animate-sheet-out,
   .animate-backdrop,
+  .animate-backdrop-out,
+  .animate-scale-out,
   .animate-page,
   .animate-page-fwd,
   .animate-page-back,

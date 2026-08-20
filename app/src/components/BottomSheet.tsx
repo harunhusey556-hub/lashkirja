@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 
 interface BottomSheetProps {
   isOpen: boolean;
@@ -36,6 +36,23 @@ export default function BottomSheet({
 }: BottomSheetProps) {
   const panelRef = useRef<HTMLDivElement>(null);
 
+  // Exit animation: closing keeps the sheet mounted for one short slide-down,
+  // then unmounts. Derived-state-from-props pattern (render-phase setState)
+  // instead of an effect, so opening never renders a stale frame.
+  const [prevOpen, setPrevOpen] = useState(isOpen);
+  const [closing, setClosing] = useState(false);
+  if (isOpen !== prevOpen) {
+    setPrevOpen(isOpen);
+    if (!isOpen) setClosing(true);
+    else setClosing(false);
+  }
+
+  useEffect(() => {
+    if (!closing) return;
+    const timer = window.setTimeout(() => setClosing(false), 220);
+    return () => window.clearTimeout(timer);
+  }, [closing]);
+
   useEffect(() => {
     if (!isOpen) return;
 
@@ -55,15 +72,17 @@ export default function BottomSheet({
     };
   }, [isOpen, onClose]);
 
-  if (!isOpen) return null;
+  if (!isOpen && !closing) return null;
 
   // Above the tab bar (z-50): a sheet that the navigation paints over hides
   // its own bottom row - which is exactly where a composer or a save button
   // lives.
   return (
-    <div className="fixed inset-0 z-[60]">
+    <div className={`fixed inset-0 z-[60] ${closing ? "pointer-events-none" : ""}`}>
       <div
-        className="absolute inset-0 bg-charcoal/40 backdrop-blur-[2px] animate-backdrop"
+        className={`absolute inset-0 bg-charcoal/40 backdrop-blur-[2px] ${
+          closing ? "animate-backdrop-out" : "animate-backdrop"
+        }`}
         onClick={onClose}
         aria-hidden
       />
@@ -73,7 +92,9 @@ export default function BottomSheet({
         role="dialog"
         aria-modal="true"
         aria-labelledby={labelledBy}
-        className={`absolute inset-x-0 bottom-0 mx-auto w-full max-w-lg bg-white rounded-t-3xl shadow-2xl flex flex-col overflow-hidden animate-sheet ${heightClass}`}
+        className={`absolute inset-x-0 bottom-0 mx-auto w-full max-w-lg bg-white rounded-t-3xl shadow-2xl flex flex-col overflow-hidden ${
+          closing ? "animate-sheet-out" : "animate-sheet"
+        } ${heightClass}`}
       >
         <div className="sheet-handle shrink-0" aria-hidden />
 

@@ -4,7 +4,7 @@ import { Suspense, useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import AppShell from "@/components/AppShell";
-import { ErrorState, LoadingState } from "@/components/AsyncState";
+import { ErrorState, LoadingState, SkeletonList } from "@/components/AsyncState";
 import { InvoiceForm, type InvoicePayload } from "@/components/invoices/InvoiceForm";
 import {
   apiFetch,
@@ -274,13 +274,13 @@ function InvoicesPageContent() {
           ))}
         </div>
 
-        {status === "loading" && <LoadingState label="Haetaan laskuja…" />}
+        {status === "loading" && <SkeletonList rows={4} />}
         {status === "error" && (
           <ErrorState message={message || "Haku epäonnistui"} onRetry={() => void load()} />
         )}
 
         {status === "ready" && (
-          <ul className="space-y-3">
+          <ul className="space-y-3 list-stagger">
             {invoices.map((invoice) => (
               <li key={invoice.id}>
                 <Link

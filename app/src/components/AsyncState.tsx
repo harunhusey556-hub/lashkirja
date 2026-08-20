@@ -22,6 +22,30 @@ export function LoadingState({
   );
 }
 
+/**
+ * Content-shaped loading placeholder for list pages: shimmering rows that
+ * arrive with the same stagger the real list uses, so the swap reads as the
+ * data filling in rather than a spinner being replaced by a page.
+ */
+export function SkeletonList({ rows = 5 }: { rows?: number }) {
+  return (
+    <div className="space-y-3 list-stagger" role="status" aria-label="Ladataan…">
+      {Array.from({ length: rows }).map((_, index) => (
+        <div key={index} className="bg-white rounded-2xl p-4 shadow-sm">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-full bg-warm-gray-light/30 skeleton shrink-0" />
+            <div className="flex-1 space-y-2 min-w-0">
+              <div className="h-3.5 w-2/5 bg-warm-gray-light/30 rounded skeleton" />
+              <div className="h-3 w-3/5 bg-warm-gray-light/20 rounded skeleton" />
+            </div>
+            <div className="h-4 w-14 bg-warm-gray-light/30 rounded skeleton shrink-0" />
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export function ErrorState({
   message,
   onRetry,

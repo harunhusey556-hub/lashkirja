@@ -9,7 +9,7 @@ import ReceiptMatchPanel, {
   type ReceiptMatchData,
   type BankTxMatch,
 } from "@/components/ReceiptMatchPanel";
-import { ErrorState, LoadingState } from "@/components/AsyncState";
+import { ErrorState, SkeletonList } from "@/components/AsyncState";
 import {
   errorMessage,
   isUnauthorized,
@@ -800,7 +800,7 @@ export default function KuititPage() {
               compact
             />
           ) : loadingList ? (
-            <LoadingState label="Ladataan kuitteja..." compact />
+            <SkeletonList rows={5} />
           ) : receipts.length === 0 ? (
             <div className="text-center py-8 space-y-3">
               <p className="text-sm text-warm-gray">

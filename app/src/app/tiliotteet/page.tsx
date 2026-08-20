@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import AppShell from "@/components/AppShell";
-import { ErrorState, LoadingState } from "@/components/AsyncState";
+import { ErrorState, SkeletonList } from "@/components/AsyncState";
 import StatementSummaryCards from "@/components/StatementSummaryCards";
 import {
   errorMessage,
@@ -254,13 +254,13 @@ export default function TiliotteetPage() {
             compact
           />
         ) : loading ? (
-          <LoadingState label="Ladataan tiliotteita..." compact />
+          <SkeletonList rows={4} />
         ) : visibleStatements.length === 0 ? (
           <div className="text-center py-16 text-sm text-warm-gray leading-relaxed">
             Ei tiliotteita vielä
           </div>
         ) : (
-          <div className="space-y-4">
+          <div className="space-y-4 list-stagger">
             {visibleStatements.map((s) => {
               const relevant = s.transactions.filter(
                 (t) => t.type !== "oma_siirto" && t.type !== "palkka"

@@ -482,7 +482,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                   <Link
                     key={item.href}
                     href={item.href}
-                    className={`flex flex-1 flex-col items-center justify-center gap-0.5 touch-target active:bg-blush/30 transition-colors ${
+                    className={`flex flex-1 flex-col items-center justify-center gap-0.5 touch-target active:bg-blush/30 transition-colors active-press ${
                       active ? "text-accent-dark" : "text-warm-gray"
                     }`}
                     aria-current={active ? "page" : undefined}
@@ -502,7 +502,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                 onClick={() => setMoreOpenOn((open) => (open === pathname ? null : pathname))}
                 aria-expanded={showMore}
                 aria-haspopup="menu"
-                className={`flex flex-1 flex-col items-center justify-center gap-0.5 touch-target active:bg-blush/30 transition-colors ${
+                className={`flex flex-1 flex-col items-center justify-center gap-0.5 touch-target active:bg-blush/30 transition-colors active-press ${
                   moreActive || showMore ? "text-accent-dark" : "text-warm-gray"
                 }`}
               >
