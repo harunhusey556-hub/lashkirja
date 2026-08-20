@@ -200,7 +200,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const showMore = moreOpenOn === pathname;
 
   return (
-    <div className="min-h-dvh flex flex-col bg-cream">
+    <div className="h-dvh overflow-hidden flex flex-col bg-cream">
       <header className="app-header sticky top-0 z-40 bg-white/90 backdrop-blur-md border-b border-warm-gray-light/30">
         <div className="max-w-lg mx-auto flex items-center justify-center px-4 h-12">
           <p className="text-base font-medium text-charcoal truncate">{title}</p>

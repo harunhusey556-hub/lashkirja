@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 
 const ERROR_MESSAGES: Record<string, string> = {
@@ -9,6 +10,16 @@ const ERROR_MESSAGES: Record<string, string> = {
 };
 
 export default function LoginForm() {
+  const [submitting, setSubmitting] = useState(false);
+
+  // iOS bfcache: swiping back to the login page restores the old React state,
+  // which would leave the button stuck on the spinner — reset it on pageshow.
+  useEffect(() => {
+    const reset = () => setSubmitting(false);
+    window.addEventListener("pageshow", reset);
+    return () => window.removeEventListener("pageshow", reset);
+  }, []);
+
   const searchParams = useSearchParams();
   const errorCode = searchParams.get("error");
   const error =
@@ -34,7 +45,12 @@ export default function LoginForm() {
         <form
           action="/api/auth/login"
           method="POST"
-          className="bg-white rounded-2xl shadow-sm p-8 space-y-5"
+          // Native submit still runs; the state change only drives the
+          // "Kirjaudutaan…" feedback while the browser navigates.
+          onSubmit={() => setSubmitting(true)}
+          className={`bg-white rounded-2xl shadow-sm p-8 space-y-5 transition-all duration-300 ${
+            submitting ? "opacity-60 scale-[0.98] pointer-events-none" : ""
+          }`}
         >
           <div>
             <label
@@ -78,9 +94,12 @@ export default function LoginForm() {
 
           <button
             type="submit"
-            className="w-full py-3 rounded-xl bg-accent text-white font-medium text-sm hover:bg-accent-dark transition-colors"
+            className="w-full py-3 rounded-xl bg-accent text-white font-medium text-sm hover:bg-accent-dark transition-colors flex items-center justify-center gap-2"
           >
-            Kirjaudu sisään
+            {submitting && (
+              <span className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" />
+            )}
+            {submitting ? "Kirjaudutaan…" : "Kirjaudu sisään"}
           </button>
         </form>
 

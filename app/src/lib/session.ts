@@ -22,14 +22,14 @@ export interface SessionData {
 
 export const sessionOptions: SessionOptions = {
   password: configuredSecret || developmentSecret,
-  ttl: 8 * 60 * 60,
+  ttl: 30 * 24 * 60 * 60,
   cookieName: cookieSecure ? "__Host-lashkirja-session" : "lashkirja-session",
   cookieOptions: {
     secure: cookieSecure,
     httpOnly: true,
     sameSite: "lax" as const,
     path: "/",
-    maxAge: 8 * 60 * 60,
+    maxAge: 30 * 24 * 60 * 60,
   },
 };
 

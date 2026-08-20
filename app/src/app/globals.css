@@ -18,6 +18,14 @@
   --app-tab-height: 3.75rem;
 }
 
+/* Lock the document: the page itself never scrolls or rubber-bands on iOS.
+   Scrolling happens only inside .app-main (app) or .login-scroll (login). */
+html,
+body {
+  height: 100%;
+  overscroll-behavior: none;
+}
+
 body {
   color: var(--color-charcoal);
   -webkit-tap-highlight-color: transparent;
@@ -72,6 +80,9 @@ button:disabled {
 
 .app-main {
   padding-bottom: calc(var(--app-tab-height) + env(safe-area-inset-bottom, 0px) + 1rem);
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+  -webkit-overflow-scrolling: touch;
 }
 
 .app-header {
