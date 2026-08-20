@@ -340,6 +340,42 @@ button:disabled {
   animation: pageEnter 0.18s ease-out;
 }
 
+/*
+ * Directional route transitions (iOS push/pop). Drilling deeper slides the new
+ * page in from the right; going back slides it in from the left. Same rule as
+ * .animate-page: never a fill mode, the transform must not survive the
+ * animation or fixed descendants re-anchor to <main>.
+ */
+@keyframes pageForward {
+  from {
+    opacity: 0.35;
+    transform: translateX(28px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes pageBack {
+  from {
+    opacity: 0.35;
+    transform: translateX(-28px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+.animate-page-fwd {
+  animation: pageForward 0.26s cubic-bezier(0.32, 0.72, 0, 1);
+}
+
+.animate-page-back {
+  animation: pageBack 0.26s cubic-bezier(0.32, 0.72, 0, 1);
+}
+
 /* Sign-out: the whole app fades before the hard navigation to /login.
    Opacity only — a transform here would re-anchor fixed bars mid-fade. */
 body.signing-out {
@@ -356,6 +392,8 @@ body.signing-out {
   .animate-sheet,
   .animate-backdrop,
   .animate-page,
+  .animate-page-fwd,
+  .animate-page-back,
   .animate-fade-in,
   .animate-scale-in,
   .animate-popover,

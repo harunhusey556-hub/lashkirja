@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { ErrorState, LoadingState } from "@/components/AsyncState";
 import { OnboardingModal } from "@/components/OnboardingModal";
@@ -109,6 +109,49 @@ const MORE_ITEMS = [
   { href: "/asetukset", label: "Asetukset", hint: "Profiili, sähköposti, kirjautuminen" },
 ] as const;
 
+/* ------------------------------------------------------------------------- */
+/* Navigation direction.                                                     */
+/*                                                                           */
+/* AppShell remounts on every route change (each page renders its own shell) */
+/* so anything that has to survive a navigation lives at module scope.       */
+/* ------------------------------------------------------------------------- */
+
+let lastPathname: string | null = null;
+/** Set by the back button / edge swipe just before they navigate. */
+let forcedDirection: "forward" | "back" | null = null;
+/** Set when the navigation came from history (browser/OS back). */
+let poppedNavigation = false;
+
+function routeDepth(pathname: string): number {
+  return pathname.split("/").filter(Boolean).length;
+}
+
+type NavDirection = "forward" | "back" | "tab" | "none";
+
+function consumeDirection(pathname: string): NavDirection {
+  const previous = lastPathname;
+  lastPathname = pathname;
+  const forced = forcedDirection;
+  forcedDirection = null;
+  const popped = poppedNavigation;
+  poppedNavigation = false;
+
+  if (previous === null || previous === pathname) return "none";
+  if (forced) return forced;
+  const from = routeDepth(previous);
+  const to = routeDepth(pathname);
+  if (to > from) return "forward";
+  if (to < from) return "back";
+  return popped ? "back" : "tab";
+}
+
+/** Where the header back button lands when there is no history to pop. */
+function parentPath(pathname: string): string {
+  const segments = pathname.split("/").filter(Boolean);
+  segments.pop();
+  return segments.length > 0 ? `/${segments.join("/")}` : "/dashboard";
+}
+
 function navActive(pathname: string, href: string): boolean {
   if (href === "/dashboard") return pathname === "/dashboard";
   return pathname === href || pathname.startsWith(`${href}/`);
@@ -147,6 +190,137 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
   const title = pageTitle(pathname);
+  const mainRef = useRef<HTMLElement>(null);
+
+  // Computed once per mount: the shell remounts on every route, and the enter
+  // animation must not change class mid-flight on re-renders.
+  const [direction] = useState<NavDirection>(() => consumeDirection(pathname));
+  const canGoBack = routeDepth(pathname) > 1;
+
+  function goBack() {
+    forcedDirection = "back";
+    if (window.history.length > 1) {
+      router.back();
+    } else {
+      // Deep link with no history behind it: fall through to the parent page.
+      router.push(parentPath(pathname));
+    }
+  }
+
+  // Browser/OS back (popstate) plays the pop transition even when the route
+  // depth does not change.
+  useEffect(() => {
+    const markPop = () => {
+      poppedNavigation = true;
+    };
+    window.addEventListener("popstate", markPop);
+    return () => window.removeEventListener("popstate", markPop);
+  }, []);
+
+  // iOS-style edge swipe back on drill-in pages. Starts only within 24px of
+  // the left edge so horizontally scrollable content keeps working, tracks the
+  // finger interruptibly, and never leaves a resting transform on <main>
+  // (a retained transform re-anchors position:fixed descendants).
+  useEffect(() => {
+    if (!canGoBack) return;
+    const main = mainRef.current;
+    if (!main) return;
+
+    const EDGE = 24;
+    let startX = 0;
+    let startY = 0;
+    let startTime = 0;
+    let dx = 0;
+    let tracking = false;
+    let decided = false;
+
+    const clearInline = () => {
+      main.style.transform = "";
+      main.style.transition = "";
+      main.style.opacity = "";
+    };
+
+    const onTouchStart = (event: TouchEvent) => {
+      if (event.touches.length !== 1) return;
+      const touch = event.touches[0];
+      if (touch.clientX > EDGE) return;
+      tracking = true;
+      decided = false;
+      dx = 0;
+      startX = touch.clientX;
+      startY = touch.clientY;
+      startTime = performance.now();
+    };
+
+    const onTouchMove = (event: TouchEvent) => {
+      if (!tracking) return;
+      const touch = event.touches[0];
+      const moveX = touch.clientX - startX;
+      const moveY = touch.clientY - startY;
+      if (!decided) {
+        if (Math.abs(moveX) < 8 && Math.abs(moveY) < 8) return;
+        if (Math.abs(moveY) > Math.abs(moveX) || moveX <= 0) {
+          tracking = false;
+          return;
+        }
+        decided = true;
+        main.style.transition = "none";
+      }
+      event.preventDefault();
+      dx = Math.max(0, moveX);
+      main.style.transform = `translateX(${dx}px)`;
+    };
+
+    const onTouchEnd = () => {
+      if (!tracking) return;
+      tracking = false;
+      if (!decided) return;
+      const elapsed = Math.max(performance.now() - startTime, 1);
+      const velocity = dx / elapsed;
+      const commit =
+        dx > window.innerWidth * 0.32 || (dx > 56 && velocity > 0.45);
+      const reduceMotion = window.matchMedia(
+        "(prefers-reduced-motion: reduce)"
+      ).matches;
+
+      if (commit) {
+        forcedDirection = "back";
+        const navigate = () => {
+          if (window.history.length > 1) {
+            router.back();
+          } else {
+            router.push(parentPath(pathname));
+          }
+        };
+        if (reduceMotion) {
+          clearInline();
+          navigate();
+          return;
+        }
+        main.style.transition = "transform 0.18s ease-out, opacity 0.18s ease-out";
+        main.style.transform = "translateX(100%)";
+        main.style.opacity = "0.4";
+        window.setTimeout(navigate, 170);
+      } else {
+        main.style.transition =
+          "transform 0.2s cubic-bezier(0.32, 0.72, 0, 1)";
+        main.style.transform = "translateX(0)";
+        window.setTimeout(clearInline, 220);
+      }
+    };
+
+    main.addEventListener("touchstart", onTouchStart, { passive: true });
+    main.addEventListener("touchmove", onTouchMove, { passive: false });
+    main.addEventListener("touchend", onTouchEnd);
+    main.addEventListener("touchcancel", onTouchEnd);
+    return () => {
+      main.removeEventListener("touchstart", onTouchStart);
+      main.removeEventListener("touchmove", onTouchMove);
+      main.removeEventListener("touchend", onTouchEnd);
+      main.removeEventListener("touchcancel", onTouchEnd);
+      clearInline();
+    };
+  }, [canGoBack, pathname, router]);
 
   useEffect(() => {
     // The tab-bar links prefetch themselves; these live behind the sheet and
@@ -216,6 +390,25 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     <div className="h-dvh overflow-hidden flex flex-col bg-cream">
       <header className="app-header sticky top-0 z-40 bg-white/90 backdrop-blur-md border-b border-warm-gray-light/30">
         <div className="max-w-lg mx-auto relative flex items-center justify-center px-4 h-12">
+          {canGoBack && (
+            <button
+              type="button"
+              onClick={goBack}
+              aria-label="Takaisin"
+              className="absolute left-1 inset-y-0 my-auto w-11 h-11 flex items-center justify-center text-accent-dark active-press"
+            >
+              <svg
+                className="w-6 h-6"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth={2}
+                aria-hidden
+              >
+                <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
+              </svg>
+            </button>
+          )}
           <p className="text-base font-medium text-charcoal truncate max-w-[60%]">{title}</p>
 
           {authState.status === "ready" && (
@@ -241,7 +434,14 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       <main
         // Keyed on the path so the enter animation replays on every navigation.
         key={pathname}
-        className="app-main flex-1 max-w-lg mx-auto w-full px-4 pt-4 animate-page"
+        ref={mainRef}
+        className={`app-main flex-1 max-w-lg mx-auto w-full px-4 pt-4 ${
+          direction === "forward"
+            ? "animate-page-fwd"
+            : direction === "back"
+              ? "animate-page-back"
+              : "animate-page"
+        }`}
       >
         {authState.status === "checking" ? (
           <LoadingState label="Tarkistetaan istuntoa..." />
