@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { useFocusTrap } from "@/components/useFocusTrap";
 
 type PreviewKind = "rendered" | "raster" | "other";
 
@@ -48,36 +49,17 @@ export default function ReceiptPreview({
     setLoading(true);
   }, [imageSrc]);
 
+  useFocusTrap(dialogRef, fullscreen, {
+    onEscape: () => setFullscreen(false),
+    initialFocusRef: closeButtonRef,
+  });
+
   useEffect(() => {
     if (!fullscreen) return;
-    const previouslyFocused = document.activeElement as HTMLElement | null;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setFullscreen(false);
-      if (e.key !== "Tab" || !dialogRef.current) return;
-      const focusable = Array.from(
-        dialogRef.current.querySelectorAll<HTMLElement>(
-          'button:not([disabled]), a[href], img, [tabindex]:not([tabindex="-1"])'
-        )
-      );
-      if (focusable.length === 0) return;
-      const first = focusable[0];
-      const last = focusable[focusable.length - 1];
-      if (e.shiftKey && document.activeElement === first) {
-        e.preventDefault();
-        last.focus();
-      } else if (!e.shiftKey && document.activeElement === last) {
-        e.preventDefault();
-        first.focus();
-      }
-    };
-    window.addEventListener("keydown", onKey);
     const prev = document.body.style.overflow;
     document.body.style.overflow = "hidden";
-    closeButtonRef.current?.focus();
     return () => {
-      window.removeEventListener("keydown", onKey);
       document.body.style.overflow = prev;
-      (previouslyFocused || openButtonRef.current)?.focus();
     };
   }, [fullscreen]);
 

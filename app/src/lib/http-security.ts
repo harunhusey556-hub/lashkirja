@@ -71,6 +71,28 @@ export function rejectOversizedContentLength(
   return null;
 }
 
+/**
+ * Validates a user-supplied "continue to this page after login" target.
+ *
+ * Only a same-app, single-leading-slash path is accepted — this is the one
+ * guard standing between a `?next=` query param and an open-redirect
+ * vulnerability, so it must reject anything that a browser could interpret
+ * as pointing off-origin (protocol-relative `//`, backslash tricks, an
+ * embedded scheme, or literal whitespace/control characters).
+ */
+export function safeInternalPath(
+  path: string | null | undefined,
+  fallback = "/dashboard"
+): string {
+  if (!path || path.length > 2048) return fallback;
+  if (!path.startsWith("/") || path.startsWith("//") || path.startsWith("/\\")) {
+    return fallback;
+  }
+  // eslint-disable-next-line no-control-regex -- deliberately screening out control chars
+  if (/[\x00-\x1f\x7f]/.test(path)) return fallback;
+  return path;
+}
+
 export function noStoreJson(
   body: unknown,
   init?: { status?: number; headers?: HeadersInit }

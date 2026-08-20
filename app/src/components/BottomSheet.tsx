@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { useFocusTrap } from "@/components/useFocusTrap";
 
 interface BottomSheetProps {
   isOpen: boolean;
@@ -53,13 +54,10 @@ export default function BottomSheet({
     return () => window.clearTimeout(timer);
   }, [closing]);
 
+  useFocusTrap(panelRef, isOpen, { onEscape: onClose });
+
   useEffect(() => {
     if (!isOpen) return;
-
-    const handleKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onClose();
-    };
-    document.addEventListener("keydown", handleKey);
 
     // Freeze the page behind the sheet; otherwise a scroll gesture that starts
     // on the sheet keeps scrolling the list underneath it.
@@ -67,10 +65,9 @@ export default function BottomSheet({
     document.body.style.overflow = "hidden";
 
     return () => {
-      document.removeEventListener("keydown", handleKey);
       document.body.style.overflow = previousOverflow;
     };
-  }, [isOpen, onClose]);
+  }, [isOpen]);
 
   if (!isOpen && !closing) return null;
 

@@ -27,6 +27,10 @@ export default function LoginForm() {
   const error =
     (errorCode && ERROR_MESSAGES[errorCode]) ||
     (errorCode ? "Kirjautuminen epäonnistui" : "");
+  // Deep-link continue-after-login: the server already validated this is an
+  // internal path when it built the /login?next= redirect; carried through
+  // as a hidden field so the login POST can send it straight back.
+  const next = searchParams.get("next") || "";
 
   return (
     // fixed + overflow-hidden + touch-none: login never scrolls or rubber-bands;
@@ -54,6 +58,8 @@ export default function LoginForm() {
             submitting ? "opacity-60 scale-[0.98] pointer-events-none" : ""
           }`}
         >
+          {next && <input type="hidden" name="next" value={next} />}
+
           <div>
             <label
               htmlFor="email"

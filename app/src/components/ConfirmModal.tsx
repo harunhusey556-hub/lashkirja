@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { useFocusTrap } from "@/components/useFocusTrap";
 
 interface ConfirmModalProps {
   isOpen: boolean;
@@ -24,6 +25,7 @@ export default function ConfirmModal({
   isDestructive = true,
 }: ConfirmModalProps) {
   const overlayRef = useRef<HTMLDivElement>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
 
   // Exit animation: stay mounted for one short fade/scale-down after close.
   const [prevOpen, setPrevOpen] = useState(isOpen);
@@ -39,15 +41,7 @@ export default function ConfirmModal({
     return () => window.clearTimeout(timer);
   }, [closing]);
 
-  useEffect(() => {
-    const handleEscape = (e: KeyboardEvent) => {
-      if (isOpen && e.key === "Escape") {
-        onCancel();
-      }
-    };
-    document.addEventListener("keydown", handleEscape);
-    return () => document.removeEventListener("keydown", handleEscape);
-  }, [isOpen, onCancel]);
+  useFocusTrap(dialogRef, isOpen, { onEscape: onCancel });
 
   useEffect(() => {
     if (isOpen) {
@@ -81,6 +75,7 @@ export default function ConfirmModal({
       />
 
       <div
+        ref={dialogRef}
         className={`relative bg-white rounded-3xl p-6 w-full max-w-sm shadow-2xl ${
           closing ? "animate-scale-out" : "animate-scale-in"
         }`}

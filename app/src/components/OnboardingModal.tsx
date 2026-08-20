@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
   ONBOARDING_STEPS,
   BusinessProfile,
@@ -8,6 +8,7 @@ import {
   type ChipValue,
 } from "@/lib/onboarding";
 import { errorMessage, readJson } from "@/components/clientFetch";
+import { useFocusTrap } from "@/components/useFocusTrap";
 
 interface OnboardingModalProps {
   isOpen: boolean;
@@ -30,6 +31,11 @@ export function OnboardingModal({
   });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const dialogRef = useRef<HTMLDivElement>(null);
+
+  // No `onEscape`: this is a mandatory, non-dismissable onboarding gate —
+  // only completing it is allowed to close the modal.
+  useFocusTrap(dialogRef, isOpen);
 
   // Freeze the dashboard behind the modal; otherwise it stays scrollable
   // while onboarding is blocking the rest of the app.
@@ -100,7 +106,10 @@ export function OnboardingModal({
       aria-modal="true"
       aria-labelledby="onboarding-modal-title"
     >
-      <div className="w-full max-w-lg bg-white rounded-3xl shadow-2xl border border-white/50 overflow-hidden animate-scale-in flex flex-col max-h-[90dvh]">
+      <div
+        ref={dialogRef}
+        className="w-full max-w-lg bg-white rounded-3xl shadow-2xl border border-white/50 overflow-hidden animate-scale-in flex flex-col max-h-[90dvh]"
+      >
         {/* Header */}
         <div className="px-6 py-4 bg-cream/60 border-b border-warm-gray-light/30 flex items-center justify-between">
           <div className="flex items-center gap-2.5">

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { NextRequest } from "next/server";
-import { rejectCrossSite, rejectOversizedContentLength } from "./http-security";
+import { rejectCrossSite, rejectOversizedContentLength, safeInternalPath } from "./http-security";
 
 function request(headers: Record<string, string>, url = "http://127.0.0.1:3791/api/x") {
   return new NextRequest(new URL(url), { method: "POST", headers });
@@ -95,5 +95,36 @@ describe("rejectOversizedContentLength", () => {
 
   it("honours a custom maximum", () => {
     expect(rejectOversizedContentLength(request({ "content-length": "2048" }), 1024)?.status).toBe(413);
+  });
+});
+
+describe("safeInternalPath", () => {
+  it("accepts a plain internal path with a query string", () => {
+    expect(safeInternalPath("/laskut?filter=avoin")).toBe("/laskut?filter=avoin");
+  });
+
+  it("falls back for a missing or empty value", () => {
+    expect(safeInternalPath(null)).toBe("/dashboard");
+    expect(safeInternalPath(undefined)).toBe("/dashboard");
+    expect(safeInternalPath("")).toBe("/dashboard");
+  });
+
+  it("honours a custom fallback", () => {
+    expect(safeInternalPath(null, "/login")).toBe("/login");
+  });
+
+  it("rejects protocol-relative and backslash open-redirect tricks", () => {
+    expect(safeInternalPath("//evil.test")).toBe("/dashboard");
+    expect(safeInternalPath("/\\evil.test")).toBe("/dashboard");
+  });
+
+  it("rejects an absolute URL or a value with no leading slash", () => {
+    expect(safeInternalPath("https://evil.test")).toBe("/dashboard");
+    expect(safeInternalPath("evil.test")).toBe("/dashboard");
+  });
+
+  it("rejects control characters and oversized values", () => {
+    expect(safeInternalPath("/laskut\n/evil")).toBe("/dashboard");
+    expect(safeInternalPath(`/${"a".repeat(3000)}`)).toBe("/dashboard");
   });
 });

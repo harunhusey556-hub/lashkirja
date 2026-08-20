@@ -29,12 +29,12 @@ function isPublicApi(pathname: string): boolean {
   return PUBLIC_API_PREFIXES.some((prefix) => pathname.startsWith(prefix));
 }
 
-function redirectForRequest(request: NextRequest, path: string) {
+function redirectForRequest(request: NextRequest, path: string, search = "") {
   // NextResponse.redirect requires an absolute URL in proxy. Keep the
   // request's current origin so LAN/Tailscale access continues to work.
   const url = request.nextUrl.clone();
   url.pathname = path;
-  url.search = "";
+  url.search = search;
   return NextResponse.redirect(url, 307);
 }
 
@@ -79,7 +79,12 @@ export async function proxy(request: NextRequest) {
 
   const isAuthenticated = await authenticated(request);
   if (isProtected && !isAuthenticated) {
-    return redirectForRequest(request, "/login");
+    // Deep-link continue-after-login: remember where the user was headed so
+    // LoginForm/the login route can send them back there instead of always
+    // dumping them on /dashboard.
+    const target = `${pathname}${request.nextUrl.search}`;
+    const search = target === "/" ? "" : `?next=${encodeURIComponent(target)}`;
+    return redirectForRequest(request, "/login", search);
   }
   if (pathname === "/login" && isAuthenticated) {
     return redirectForRequest(request, "/dashboard");
