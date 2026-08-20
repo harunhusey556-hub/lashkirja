@@ -124,7 +124,7 @@ export default function ALVRaporttiPage() {
   return (
     <AppShell>
       <div className="space-y-6">
-        <h2 className="text-xl font-light text-charcoal">ALV-raportti</h2>
+        <h2 className="text-2xl font-semibold text-charcoal tracking-tight">ALV-raportti</h2>
 
         {data && !data.vatRegistered && (
           <div className="bg-warning/10 rounded-2xl p-4 text-sm text-charcoal">

@@ -85,7 +85,7 @@ export function SelectMenu({
         disabled={disabled}
         onClick={() => setIsOpen(!isOpen)}
         onKeyDown={handleKeyDown}
-        className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl border text-left text-sm transition-all duration-200 active-press ${
+        className={`w-full min-h-11 flex items-center justify-between px-3.5 py-2.5 rounded-xl border text-left text-sm transition-all duration-200 active-press ${
           isOpen
             ? "border-accent ring-2 ring-accent/20 bg-white shadow-sm"
             : "border-warm-gray-light/60 bg-white/80 hover:bg-white hover:border-warm-gray"

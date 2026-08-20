@@ -118,7 +118,7 @@ export default function ReportsPage() {
           <button
             type="button"
             onClick={() => setYear((value) => value - 1)}
-            className="px-4 py-2 rounded-xl border border-warm-gray-light/60 text-sm"
+            className="min-h-11 px-4 py-2 rounded-xl border border-warm-gray-light/60 text-sm"
             aria-label="Edellinen vuosi"
           >
             ←
@@ -128,7 +128,7 @@ export default function ReportsPage() {
             type="button"
             onClick={() => setYear((value) => value + 1)}
             disabled={year >= currentYear}
-            className="px-4 py-2 rounded-xl border border-warm-gray-light/60 text-sm disabled:opacity-40"
+            className="min-h-11 px-4 py-2 rounded-xl border border-warm-gray-light/60 text-sm disabled:opacity-40"
             aria-label="Seuraava vuosi"
           >
             →

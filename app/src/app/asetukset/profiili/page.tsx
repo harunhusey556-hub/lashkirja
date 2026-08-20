@@ -83,7 +83,7 @@ function ProfileForm({
             <div>
               <label
                 htmlFor="firstName"
-                className="block text-xs font-medium text-charcoal-light mb-1"
+                className="block text-sm font-medium text-charcoal mb-1.5"
               >
                 Etunimi
               </label>
@@ -93,13 +93,13 @@ function ProfileForm({
                 required
                 value={firstName}
                 onChange={(e) => setFirstName(e.target.value)}
-                className="w-full px-3 py-2.5 rounded-xl border border-warm-gray-light bg-cream/50 text-sm"
+                className="w-full px-3 py-2.5 rounded-xl border border-warm-gray-light bg-white text-sm"
               />
             </div>
             <div>
               <label
                 htmlFor="lastName"
-                className="block text-xs font-medium text-charcoal-light mb-1"
+                className="block text-sm font-medium text-charcoal mb-1.5"
               >
                 Sukunimi
               </label>
@@ -109,14 +109,14 @@ function ProfileForm({
                 required
                 value={lastName}
                 onChange={(e) => setLastName(e.target.value)}
-                className="w-full px-3 py-2.5 rounded-xl border border-warm-gray-light bg-cream/50 text-sm"
+                className="w-full px-3 py-2.5 rounded-xl border border-warm-gray-light bg-white text-sm"
               />
             </div>
           </div>
           <div>
             <label
               htmlFor="email"
-              className="block text-xs font-medium text-charcoal-light mb-1"
+              className="block text-sm font-medium text-charcoal mb-1.5"
             >
               Sähköposti
             </label>
@@ -126,7 +126,7 @@ function ProfileForm({
               required
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              className="w-full px-3 py-2.5 rounded-xl border border-warm-gray-light bg-cream/50 text-sm"
+              className="w-full px-3 py-2.5 rounded-xl border border-warm-gray-light bg-white text-sm"
             />
           </div>
 

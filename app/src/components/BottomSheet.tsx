@@ -114,7 +114,7 @@ export default function BottomSheet({
                 type="button"
                 onClick={onClose}
                 aria-label="Sulje"
-                className="w-9 h-9 rounded-full flex items-center justify-center text-warm-gray hover:bg-warm-gray-light/30 transition-colors"
+                className="w-11 h-11 rounded-full flex items-center justify-center text-warm-gray hover:bg-warm-gray-light/30 transition-colors"
               >
                 <svg
                   className="w-5 h-5"

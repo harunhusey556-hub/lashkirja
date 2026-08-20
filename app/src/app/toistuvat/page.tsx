@@ -562,7 +562,7 @@ export default function RecurringInvoicesPage() {
                       type="button"
                       onClick={() => void runDue(entry.id)}
                       disabled={busy}
-                      className="text-xs font-medium px-3 py-2 rounded-xl border border-warm-gray-light/60 disabled:opacity-50"
+                      className="min-h-11 text-xs font-medium px-3 py-2 rounded-xl border border-warm-gray-light/60 disabled:opacity-50"
                     >
                       Luo nyt
                     </button>
@@ -571,14 +571,14 @@ export default function RecurringInvoicesPage() {
                     type="button"
                     onClick={() => void toggleActive(entry)}
                     disabled={busy}
-                    className="text-xs font-medium px-3 py-2 rounded-xl border border-warm-gray-light/60 disabled:opacity-50"
+                    className="min-h-11 text-xs font-medium px-3 py-2 rounded-xl border border-warm-gray-light/60 disabled:opacity-50"
                   >
                     {entry.active ? "Pysäytä" : "Jatka"}
                   </button>
                   <button
                     type="button"
                     onClick={() => setConfirmRemove(entry)}
-                    className="text-xs font-medium px-3 py-2 rounded-xl border border-danger/40 text-danger"
+                    className="min-h-11 text-xs font-medium px-3 py-2 rounded-xl border border-danger/40 text-danger"
                   >
                     Poista
                   </button>

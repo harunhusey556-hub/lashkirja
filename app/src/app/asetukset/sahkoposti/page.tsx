@@ -272,7 +272,7 @@ export default function SahkopostiPage() {
                       {selectedProvider === "other" && (
                         <div className="grid grid-cols-[1fr_100px] gap-3">
                           <div>
-                            <label className="block text-xs font-medium text-charcoal-light mb-1">
+                            <label className="block text-sm font-medium text-charcoal mb-1.5">
                               IMAP Palvelin
                             </label>
                             <input
@@ -280,19 +280,19 @@ export default function SahkopostiPage() {
                               placeholder="esim. imap.omaverkko.fi"
                               value={imapHost}
                               onChange={(e) => setImapHost(e.target.value)}
-                              className="w-full px-3 py-2 rounded-xl border border-warm-gray-light bg-cream/50 text-sm"
+                              className="w-full px-3 py-2 rounded-xl border border-warm-gray-light bg-white text-sm"
                               required
                             />
                           </div>
                           <div>
-                            <label className="block text-xs font-medium text-charcoal-light mb-1">
+                            <label className="block text-sm font-medium text-charcoal mb-1.5">
                               Portti
                             </label>
                             <input
                               type="number"
                               value={imapPort}
                               onChange={(e) => setImapPort(e.target.value)}
-                              className="w-full px-3 py-2 rounded-xl border border-warm-gray-light bg-cream/50 text-sm"
+                              className="w-full px-3 py-2 rounded-xl border border-warm-gray-light bg-white text-sm"
                               required
                             />
                           </div>
@@ -300,26 +300,26 @@ export default function SahkopostiPage() {
                       )}
 
                       <div>
-                        <label className="block text-xs font-medium text-charcoal-light mb-1">
+                        <label className="block text-sm font-medium text-charcoal mb-1.5">
                           Sähköpostiosoite
                         </label>
                         <input
                           type="email"
                           value={imapEmail}
                           onChange={(e) => setImapEmail(e.target.value)}
-                          className="w-full px-3 py-2 rounded-xl border border-warm-gray-light bg-cream/50 text-sm"
+                          className="w-full px-3 py-2 rounded-xl border border-warm-gray-light bg-white text-sm"
                           required
                         />
                       </div>
                       <div>
-                        <label className="block text-xs font-medium text-charcoal-light mb-1">
+                        <label className="block text-sm font-medium text-charcoal mb-1.5">
                           Sovellussalasana
                         </label>
                         <input
                           type="password"
                           value={imapPass}
                           onChange={(e) => setImapPass(e.target.value)}
-                          className="w-full px-3 py-2 rounded-xl border border-warm-gray-light bg-cream/50 text-sm"
+                          className="w-full px-3 py-2 rounded-xl border border-warm-gray-light bg-white text-sm"
                           required
                         />
                       </div>

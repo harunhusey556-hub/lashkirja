@@ -78,7 +78,7 @@ export default function YritysPage() {
               role="switch"
               aria-checked={profile.vatRegistered}
               aria-label="ALV-rekisterissä"
-              className={`w-12 h-7 rounded-full transition-colors relative ${
+              className={`w-12 h-7 rounded-full transition-colors relative after:content-[''] after:absolute after:-inset-2 ${
                 profile.vatRegistered ? "bg-accent" : "bg-warm-gray-light"
               }`}
             >

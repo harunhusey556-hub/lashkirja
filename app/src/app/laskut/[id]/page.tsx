@@ -80,6 +80,7 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
   const [paymentAmount, setPaymentAmount] = useState("");
   const [paymentDate, setPaymentDate] = useState(new Date().toISOString().slice(0, 10));
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [confirmRemovePayment, setConfirmRemovePayment] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
   const [reminder, setReminder] = useState<ReminderPreview | null>(null);
   const [remindingBusy, setRemindingBusy] = useState(false);
@@ -178,6 +179,7 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
       setMessage(errorMessage(error, "Maksun poisto epäonnistui"));
     } finally {
       setBusy(false);
+      setConfirmRemovePayment(null);
     }
   }
 
@@ -350,7 +352,7 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
                   href={`/api/invoices/${invoice.id}/pdf`}
                   target="_blank"
                   rel="noreferrer"
-                  className="px-4 py-2.5 rounded-xl border border-warm-gray-light/60 text-sm font-medium text-charcoal"
+                  className="min-h-11 px-4 py-2.5 rounded-xl border border-warm-gray-light/60 text-sm font-medium text-charcoal"
                 >
                   Avaa PDF
                 </a>
@@ -359,7 +361,7 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
                     type="button"
                     onClick={() => void sendByEmail()}
                     disabled={sending || busy}
-                    className="px-4 py-2.5 rounded-xl border border-warm-gray-light/60 text-sm font-medium disabled:opacity-50"
+                    className="min-h-11 px-4 py-2.5 rounded-xl border border-warm-gray-light/60 text-sm font-medium disabled:opacity-50"
                   >
                     {sending ? "Lähetetään…" : "Lähetä sähköpostilla"}
                   </button>
@@ -369,7 +371,7 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
                     type="button"
                     onClick={() => void changeStatus("sent")}
                     disabled={busy}
-                    className="px-4 py-2.5 rounded-xl bg-accent text-white text-sm font-medium disabled:opacity-50"
+                    className="min-h-11 px-4 py-2.5 rounded-xl bg-accent text-white text-sm font-medium disabled:opacity-50"
                   >
                     Merkitse lähetetyksi
                   </button>
@@ -379,7 +381,7 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
                     type="button"
                     onClick={() => void changeStatus("paid")}
                     disabled={busy}
-                    className="px-4 py-2.5 rounded-xl bg-accent text-white text-sm font-medium disabled:opacity-50"
+                    className="min-h-11 px-4 py-2.5 rounded-xl bg-accent text-white text-sm font-medium disabled:opacity-50"
                   >
                     Merkitse maksetuksi
                   </button>
@@ -389,7 +391,7 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
                     type="button"
                     onClick={() => void changeStatus("credited")}
                     disabled={busy}
-                    className="px-4 py-2.5 rounded-xl border border-warm-gray-light/60 text-sm font-medium disabled:opacity-50"
+                    className="min-h-11 px-4 py-2.5 rounded-xl border border-warm-gray-light/60 text-sm font-medium disabled:opacity-50"
                   >
                     Hyvitä
                   </button>
@@ -399,7 +401,7 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
                     type="button"
                     onClick={() => setConfirmDelete(true)}
                     disabled={busy}
-                    className="px-4 py-2.5 rounded-xl border border-danger/40 text-danger text-sm font-medium disabled:opacity-50"
+                    className="min-h-11 px-4 py-2.5 rounded-xl border border-danger/40 text-danger text-sm font-medium disabled:opacity-50"
                   >
                     Poista luonnos
                   </button>
@@ -429,7 +431,7 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
                       type="button"
                       onClick={() => void addPayment()}
                       disabled={busy}
-                      className="px-4 py-2.5 rounded-xl bg-accent text-white text-sm font-medium disabled:opacity-50"
+                      className="min-h-11 px-4 py-2.5 rounded-xl bg-accent text-white text-sm font-medium disabled:opacity-50"
                     >
                       Lisää
                     </button>
@@ -474,7 +476,7 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
                       href={`/api/invoices/${invoice.id}/reminders/pdf`}
                       target="_blank"
                       rel="noreferrer"
-                      className="px-4 py-2.5 rounded-xl border border-warm-gray-light/60 text-sm font-medium text-charcoal"
+                      className="min-h-11 px-4 py-2.5 rounded-xl border border-warm-gray-light/60 text-sm font-medium text-charcoal"
                     >
                       Avaa muistutus
                     </a>
@@ -482,7 +484,7 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
                       type="button"
                       onClick={() => void sendReminder()}
                       disabled={remindingBusy || busy}
-                      className="px-4 py-2.5 rounded-xl bg-accent text-white text-sm font-medium disabled:opacity-50"
+                      className="min-h-11 px-4 py-2.5 rounded-xl bg-accent text-white text-sm font-medium disabled:opacity-50"
                     >
                       {remindingBusy ? "Lähetetään…" : "Lähetä maksumuistutus"}
                     </button>
@@ -515,9 +517,9 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
                       </div>
                       <button
                         type="button"
-                        onClick={() => void removePayment(payment.id)}
+                        onClick={() => setConfirmRemovePayment(payment.id)}
                         disabled={busy}
-                        className="text-xs text-warm-gray disabled:opacity-50"
+                        className="min-h-11 inline-flex items-center px-3 py-2 rounded-xl text-danger disabled:opacity-50"
                       >
                         Poista
                       </button>
@@ -537,6 +539,17 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
         confirmLabel="Poista"
         onConfirm={() => void deleteInvoice()}
         onCancel={() => setConfirmDelete(false)}
+      />
+
+      <ConfirmModal
+        isOpen={confirmRemovePayment !== null}
+        title="Poistetaanko maksu?"
+        description="Maksu poistetaan pysyvästi laskulta."
+        confirmLabel="Poista"
+        onConfirm={() => {
+          if (confirmRemovePayment) void removePayment(confirmRemovePayment);
+        }}
+        onCancel={() => setConfirmRemovePayment(null)}
       />
     </AppShell>
   );

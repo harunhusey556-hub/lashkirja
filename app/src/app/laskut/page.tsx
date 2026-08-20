@@ -267,7 +267,7 @@ function InvoicesPageContent() {
               key={entry.id}
               type="button"
               onClick={() => setFilter(entry.id)}
-              className={`shrink-0 px-4 py-2 rounded-full text-xs font-medium border ${
+              className={`shrink-0 min-h-11 px-4 py-2 rounded-full text-xs font-medium border ${
                 filter === entry.id
                   ? "bg-accent text-white border-accent"
                   : "border-warm-gray-light/60 text-warm-gray"

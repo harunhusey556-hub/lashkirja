@@ -261,21 +261,21 @@ export default function CustomersPage() {
                 <div className="flex flex-wrap gap-2 pt-1">
                   <Link
                     href={`/laskut?customerId=${customer.id}`}
-                    className="text-xs font-medium px-3 py-2 rounded-xl border border-warm-gray-light/60"
+                    className="min-h-11 text-xs font-medium px-3 py-2 rounded-xl border border-warm-gray-light/60"
                   >
                     Laskut
                   </Link>
                   <button
                     type="button"
                     onClick={() => setFormMode({ edit: customer })}
-                    className="text-xs font-medium px-3 py-2 rounded-xl border border-warm-gray-light/60"
+                    className="min-h-11 text-xs font-medium px-3 py-2 rounded-xl border border-warm-gray-light/60"
                   >
                     Muokkaa
                   </button>
                   <button
                     type="button"
                     onClick={() => setConfirmRemove(customer)}
-                    className="text-xs font-medium px-3 py-2 rounded-xl border border-danger/40 text-danger"
+                    className="min-h-11 text-xs font-medium px-3 py-2 rounded-xl border border-danger/40 text-danger"
                   >
                     Poista
                   </button>
