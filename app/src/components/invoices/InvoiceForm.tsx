@@ -251,6 +251,7 @@ export function InvoiceForm({ customers, initial, submitLabel, busy, onSubmit, o
               value={line.description}
               onChange={(e) => setLine(index, { description: e.target.value })}
               placeholder="Ripsienpidennys"
+              maxLength={200}
             />
             <div className="grid grid-cols-3 gap-2">
               <input
@@ -266,6 +267,7 @@ export function InvoiceForm({ customers, initial, submitLabel, busy, onSubmit, o
                 className={field}
                 value={line.unit}
                 onChange={(e) => setLine(index, { unit: e.target.value })}
+                maxLength={16}
               />
               <input
                 aria-label={`Rivin ${index + 1} hinta (pakollinen)`}
@@ -351,6 +353,7 @@ export function InvoiceForm({ customers, initial, submitLabel, busy, onSubmit, o
           className={`${field} min-h-[64px]`}
           value={values.notes}
           onChange={(e) => setValues((current) => ({ ...current, notes: e.target.value }))}
+          maxLength={2000}
         />
       </div>
 

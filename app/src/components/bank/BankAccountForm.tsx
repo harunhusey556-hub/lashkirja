@@ -131,6 +131,7 @@ export function BankAccountForm({ initial, submitLabel, busy, onSubmit, onCancel
           aria-invalid={Boolean(errors.name)}
           aria-describedby={errors.name ? "ba-name-error" : undefined}
           aria-required="true"
+          maxLength={80}
         />
         {errors.name && <p id="ba-name-error" className={errorText}>{errors.name}</p>}
       </div>
@@ -148,6 +149,7 @@ export function BankAccountForm({ initial, submitLabel, busy, onSubmit, onCancel
           autoCapitalize="characters"
           aria-invalid={Boolean(errors.iban)}
           aria-describedby={errors.iban ? "ba-iban-error" : undefined}
+          maxLength={42}
         />
         {errors.iban ? (
           <p id="ba-iban-error" className={errorText}>{errors.iban}</p>
@@ -165,6 +167,7 @@ export function BankAccountForm({ initial, submitLabel, busy, onSubmit, onCancel
             value={values.bankName}
             onChange={(e) => set("bankName", e.target.value)}
             placeholder="Nordea"
+            maxLength={80}
           />
         </div>
         <div className="space-y-1.5">

@@ -114,6 +114,7 @@ export function CustomerForm({ initial, submitLabel, busy, onSubmit, onCancel }:
           onChange={(e) => set("name", e.target.value)}
           aria-invalid={Boolean(errors.name)}
           aria-required="true"
+          maxLength={120}
         />
         {errors.name && <p className="text-xs text-danger">{errors.name}</p>}
       </div>
@@ -128,6 +129,7 @@ export function CustomerForm({ initial, submitLabel, busy, onSubmit, onCancel }:
             onChange={(e) => set("businessId", e.target.value)}
             placeholder="0201256-6"
             aria-invalid={Boolean(errors.businessId)}
+            maxLength={20}
           />
           {errors.businessId && <p className="text-xs text-danger">{errors.businessId}</p>}
         </div>
@@ -160,6 +162,7 @@ export function CustomerForm({ initial, submitLabel, busy, onSubmit, onCancel }:
             autoCorrect="off"
             spellCheck={false}
             aria-invalid={Boolean(errors.email)}
+            maxLength={160}
           />
           {errors.email && <p className="text-xs text-danger">{errors.email}</p>}
         </div>
@@ -171,6 +174,7 @@ export function CustomerForm({ initial, submitLabel, busy, onSubmit, onCancel }:
             value={values.phone}
             onChange={(e) => set("phone", e.target.value)}
             inputMode="tel"
+            maxLength={40}
           />
         </div>
       </div>
@@ -182,6 +186,7 @@ export function CustomerForm({ initial, submitLabel, busy, onSubmit, onCancel }:
           className={field}
           value={values.addressStreet}
           onChange={(e) => set("addressStreet", e.target.value)}
+          maxLength={120}
         />
         <div className="grid grid-cols-3 gap-3 pt-1">
           <input
@@ -190,6 +195,7 @@ export function CustomerForm({ initial, submitLabel, busy, onSubmit, onCancel }:
             value={values.addressPostalCode}
             onChange={(e) => set("addressPostalCode", e.target.value)}
             placeholder="00100"
+            maxLength={20}
           />
           <input
             aria-label="Postitoimipaikka"
@@ -197,6 +203,7 @@ export function CustomerForm({ initial, submitLabel, busy, onSubmit, onCancel }:
             value={values.addressCity}
             onChange={(e) => set("addressCity", e.target.value)}
             placeholder="Helsinki"
+            maxLength={80}
           />
         </div>
       </div>
@@ -208,6 +215,7 @@ export function CustomerForm({ initial, submitLabel, busy, onSubmit, onCancel }:
           className={`${field} min-h-[72px]`}
           value={values.notes}
           onChange={(e) => set("notes", e.target.value)}
+          maxLength={2000}
         />
       </div>
 

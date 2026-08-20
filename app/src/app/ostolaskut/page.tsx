@@ -322,6 +322,7 @@ export default function PurchaseInvoicesPage() {
                   value={form.supplierName}
                   onChange={(e) => setForm({ ...form, supplierName: e.target.value })}
                   placeholder="Tukku Oy"
+                  maxLength={120}
                 />
                 {formErrors.supplierName && (
                   <p className="text-xs text-danger">{formErrors.supplierName}</p>
@@ -387,6 +388,7 @@ export default function PurchaseInvoicesPage() {
                     value={form.reference}
                     onChange={(e) => setForm({ ...form, reference: e.target.value })}
                     inputMode="numeric"
+                    maxLength={30}
                   />
                   {formErrors.reference ? (
                     <p className="text-xs text-danger">{formErrors.reference}</p>
@@ -401,6 +403,7 @@ export default function PurchaseInvoicesPage() {
                     className={field}
                     value={form.invoiceNumber}
                     onChange={(e) => setForm({ ...form, invoiceNumber: e.target.value })}
+                    maxLength={40}
                   />
                 </div>
               </div>
