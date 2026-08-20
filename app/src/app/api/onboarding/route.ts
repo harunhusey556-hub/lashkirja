@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { requireSession } from "@/lib/session";
-import { parseBusinessDetails, BusinessProfile } from "@/lib/onboarding";
+import { parseBusinessDetails, type BusinessProfile } from "@/lib/onboarding";
+import { errorText } from "@/lib/api-errors";
 
 export async function GET() {
   const session = await requireSession();
@@ -29,9 +30,9 @@ export async function GET() {
     onboarded: user.onboarded,
     profile: {
       ...profile,
-      entityType: (user.entityType as any) || profile.entityType,
+      entityType: (user.entityType as BusinessProfile["entityType"]) || profile.entityType,
       vatRegistered: user.vatRegistered ?? profile.vatRegistered,
-      vatPeriod: (user.vatPeriod as any) || profile.vatPeriod,
+      vatPeriod: (user.vatPeriod as BusinessProfile["vatPeriod"]) || profile.vatPeriod,
     },
   });
 }
@@ -70,9 +71,9 @@ export async function POST(req: NextRequest) {
     });
 
     return NextResponse.json({ success: true, profile });
-  } catch (error: any) {
+  } catch (error: unknown) {
     return NextResponse.json(
-      { error: error?.message || "Virhe tallennettaessa asetuksia" },
+      { error: errorText(error, "Virhe tallennettaessa asetuksia") },
       { status: 500 }
     );
   }

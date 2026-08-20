@@ -47,7 +47,7 @@ interface ExtractedMeta {
   rawText?: string | null;
 }
 
-interface LinkedBankTx extends BankTxMatch {}
+type LinkedBankTx = BankTxMatch;
 
 interface ReceiptEditorProps {
   /** When set, loads and edits an existing receipt */
@@ -435,7 +435,14 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
         try {
           await readJson(res, "Tallennus epäonnistui");
         } catch (e: unknown) {
-          if (e instanceof ApiError && e.status === 409 && e.details?.isDuplicate) {
+          // details is untyped by nature; read the one flag this path needs.
+          const duplicate =
+            e instanceof ApiError &&
+            e.status === 409 &&
+            typeof e.details === "object" &&
+            e.details !== null &&
+            (e.details as { isDuplicate?: boolean }).isDuplicate === true;
+          if (duplicate) {
             setForceDuplicate(true);
             setError(e.message);
             setSaving(false);

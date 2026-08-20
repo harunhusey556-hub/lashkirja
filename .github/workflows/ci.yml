@@ -63,12 +63,12 @@ jobs:
         run: npm run build
 
   lint:
-    name: Lint (non-blocking)
+    name: Lint
     runs-on: ubuntu-latest
-    # ESLint currently reports ~35 pre-existing errors, mostly no-explicit-any in
-    # the OCR/parser code. Reported so the count is visible and can be burned
-    # down; flip continue-on-error to false once it reaches zero.
-    continue-on-error: true
+    # The error count reached zero on 2026-08-20, so lint is a real gate now.
+    # ESLint exits non-zero on errors only; the remaining warnings do not fail
+    # the build but are visible in the log.
+    continue-on-error: false
     steps:
       - uses: actions/checkout@v4
 

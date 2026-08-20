@@ -127,8 +127,8 @@ export default function AsetuksetPage() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Synkronointi epäonnistui");
       setSyncMsg(`Synkronoitu onnistuneesti! Löydettiin ${data.count} uutta kuittia.`);
-    } catch (err: any) {
-      setSyncMsg(err.message);
+    } catch (err: unknown) {
+      setSyncMsg(errorMessage(err, "Synkronointi epäonnistui"));
     } finally {
       setSyncing(false);
       setTimeout(() => setSyncMsg(""), 6000);
@@ -157,7 +157,7 @@ export default function AsetuksetPage() {
               <li>Mene <b>Microsoft-tilin turva-asetuksiin</b>.</li>
               <li>Valitse <b>Lisäsuojausasetukset</b> (Advanced security options).</li>
               <li>Varmista, että kaksivaiheinen todennus on käytössä.</li>
-              <li>Valitse "Luo uusi sovellussalasana" (Create a new app password).</li>
+              <li>Valitse &quot;Luo uusi sovellussalasana&quot; (Create a new app password).</li>
             </ol>
           </div>
         );
@@ -555,8 +555,8 @@ export default function AsetuksetPage() {
                             imapAccounts: [...profile.imapAccounts, { id: Math.random().toString(), email: json.email }]
                           });
                           cancelAdding();
-                        } catch (err: any) {
-                          setImapMsg(err.message);
+                        } catch (err: unknown) {
+                          setImapMsg(errorMessage(err, "Tallennus epäonnistui"));
                         } finally {
                           setImapSaving(false);
                         }

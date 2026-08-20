@@ -11,7 +11,9 @@ import { currentMonthKey, formatMonth } from "@/lib/format";
  */
 export default function BooksLockCard() {
   const [lockedThrough, setLockedThrough] = useState<string | null>(null);
-  const [choice, setChoice] = useState("");
+  // null means "whatever the server says". A pending load must never overwrite
+  // a choice the user has already made.
+  const [choice, setChoice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
 
@@ -23,7 +25,6 @@ export default function BooksLockCard() {
         "Lukituksen haku epäonnistui"
       );
       setLockedThrough(data.lockedThrough);
-      setChoice(data.lockedThrough ?? "");
     } catch (error) {
       setMessage(errorMessage(error, "Lukituksen haku epäonnistui"));
     }
@@ -49,7 +50,7 @@ export default function BooksLockCard() {
         "Tallennus epäonnistui"
       );
       setLockedThrough(data.lockedThrough);
-      setChoice(data.lockedThrough ?? "");
+      setChoice(null);
       setMessage(
         data.lockedThrough
           ? `Kirjanpito lukittu ${formatMonth(data.lockedThrough)} asti.`
@@ -97,7 +98,7 @@ export default function BooksLockCard() {
         <select
           aria-label="Lukitse kaudet tähän kuukauteen asti"
           className="flex-1 px-3 py-2.5 rounded-xl border border-warm-gray-light/60 bg-white text-sm"
-          value={choice}
+          value={choice ?? lockedThrough ?? ""}
           onChange={(e) => setChoice(e.target.value)}
         >
           <option value="">Ei lukitusta</option>
@@ -109,7 +110,7 @@ export default function BooksLockCard() {
         </select>
         <button
           type="button"
-          onClick={() => void save(choice || null)}
+          onClick={() => void save((choice ?? lockedThrough) || null)}
           disabled={busy}
           className="px-4 py-2.5 rounded-xl bg-accent text-white text-sm font-medium disabled:opacity-50"
         >

@@ -13,6 +13,7 @@ import {
   redirectToLogin,
 } from "@/components/clientFetch";
 
+import type { BusinessProfile } from "@/lib/onboarding";
 const NAV_ITEMS = [
   {
     href: "/dashboard",
@@ -134,7 +135,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   // Stored with the path it was opened on, so a route change closes it without
   // an effect that would re-render twice.
   const [moreOpenOn, setMoreOpenOn] = useState<string | null>(null);
-  const [onboardingProfile, setOnboardingProfile] = useState<any>(null);
+  const [onboardingProfile, setOnboardingProfile] = useState<BusinessProfile | null>(null);
 
   const pathname = usePathname();
   const title = pageTitle(pathname);
@@ -156,7 +157,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         setAuthState({ status: "ready" });
         // Check onboarding state
         return fetch("/api/onboarding", { signal: controller.signal })
-          .then((res) => readJson<{ onboarded: boolean; profile: any }>(res, ""))
+          .then((res) => readJson<{ onboarded: boolean; profile: BusinessProfile | null }>(res, ""))
           .then((data) => {
             if (data && !data.onboarded) {
               setOnboardingProfile(data.profile || null);
@@ -214,7 +215,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
           <AiChatDrawer />
           <OnboardingModal
             isOpen={showOnboarding}
-            initialProfile={onboardingProfile}
+            initialProfile={onboardingProfile ?? undefined}
             onComplete={() => setShowOnboarding(false)}
           />
 

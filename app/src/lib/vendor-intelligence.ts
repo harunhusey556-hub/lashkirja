@@ -48,7 +48,7 @@ export async function getVendorIntelligence(
 
   // Calculate category consistency
   const categoryCounts = new Map<string, number>();
-  let lastApprovedCategory = receipts[0]?.category || null;
+  const lastApprovedCategory = receipts[0]?.category || null;
 
   for (const r of receipts) {
     if (r.category) {

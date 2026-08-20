@@ -2,7 +2,9 @@
 
 import React, { useState, useEffect, useRef } from "react";
 import { ChatMatchProposal } from "@/lib/ai-assistant";
-import { readJson } from "@/components/clientFetch";
+import { readJson,
+  errorMessage,
+} from "@/components/clientFetch";
 
 interface ChatMessageItem {
   id: string;
@@ -10,6 +12,13 @@ interface ChatMessageItem {
   content: string;
   proposal?: ChatMatchProposal | null;
   createdAt: string;
+}
+
+interface ChatResponse {
+  id?: string;
+  content: string;
+  proposal?: ChatMatchProposal | null;
+  createdAt?: string;
 }
 
 export function AiChatDrawer() {
@@ -60,7 +69,7 @@ export function AiChatDrawer() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ message: userMsg.content }),
       });
-      const data = await readJson<any>(res, "Virhe viestin lähetyksessä");
+      const data = await readJson<ChatResponse>(res, "Virhe viestin lähetyksessä");
 
       setMessages((prev) => [
         ...prev,
@@ -72,13 +81,16 @@ export function AiChatDrawer() {
           createdAt: data.createdAt || new Date().toISOString(),
         },
       ]);
-    } catch (err: any) {
+    } catch (err: unknown) {
       setMessages((prev) => [
         ...prev,
         {
           id: String(Date.now() + 2),
           role: "assistant",
-          content: `Pahoittelut, viestin käsittely epäonnistui: ${err.message}. Yritä uudelleen!`,
+          content: `Pahoittelut, viestin käsittely epäonnistui: ${errorMessage(
+            err,
+            "tuntematon virhe"
+          )}. Yritä uudelleen!`,
           createdAt: new Date().toISOString(),
         },
       ]);
@@ -116,8 +128,8 @@ export function AiChatDrawer() {
             : msg
         )
       );
-    } catch (err: any) {
-      alert(err.message || "Täsmäytys epäonnistui");
+    } catch (err: unknown) {
+      alert(errorMessage(err, "Täsmäytys epäonnistui"));
     } finally {
       setMatchBusyId(null);
     }

@@ -6,6 +6,7 @@ import { encrypt } from "@/lib/encryption";
 import { z } from "zod";
 import { withErrorHandler, AppError } from "@/lib/api-errors";
 
+import { errorText } from "@/lib/api-errors";
 const connectSchema = z.object({
   email: z.string().email(),
   password: z.string().min(1),
@@ -37,9 +38,9 @@ export const POST = withErrorHandler(async (req: NextRequest) => {
   try {
     await client.connect();
     await client.logout();
-  } catch (error: any) {
+  } catch (error: unknown) {
     throw new AppError(
-      `Yhdistäminen epäonnistui: ${error?.message || "Tarkista sähköposti ja sovellussalasana"}`,
+      `Yhdistäminen epäonnistui: ${errorText(error, "Tarkista sähköposti ja sovellussalasana")}`,
       "IMAP_CONNECTION_FAILED",
       400
     );

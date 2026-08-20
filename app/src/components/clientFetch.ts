@@ -1,8 +1,8 @@
 export class ApiError extends Error {
   status: number;
-  details?: any;
+  details?: unknown;
 
-  constructor(message: string, status: number, details?: any) {
+  constructor(message: string, status: number, details?: unknown) {
     super(message);
     this.name = "ApiError";
     this.status = status;
@@ -10,7 +10,7 @@ export class ApiError extends Error {
   }
 }
 
-type ErrorPayload = { error?: { message?: string; details?: any } | string } | null;
+type ErrorPayload = { error?: { message?: string; details?: unknown } | string } | null;
 
 export async function readJson<T>(
   response: Response,
@@ -20,7 +20,7 @@ export async function readJson<T>(
 
   if (!response.ok) {
     let message = fallbackMessage;
-    let details: any = undefined;
+    let details: unknown = undefined;
     
     if (payload && typeof payload === "object" && "error" in payload) {
       if (typeof payload.error === "string") {
@@ -77,7 +77,13 @@ export function errorMessage(error: unknown, fallback: string): string {
   if (error instanceof ApiError && error.details) {
     // If we have detailed Zod/Validation issues, format them cleanly
     if (Array.isArray(error.details)) {
-      return `${error.message}: ${error.details.map((d: any) => d.message || d).join(', ')}`;
+      return `${error.message}: ${error.details
+        .map((issue) =>
+          issue && typeof issue === "object" && "message" in issue
+            ? String((issue as { message?: unknown }).message ?? issue)
+            : String(issue)
+        )
+        .join(", ")}`;
     }
   }
   return error instanceof Error && error.message ? error.message : fallback;

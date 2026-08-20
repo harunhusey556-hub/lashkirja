@@ -5,8 +5,9 @@ import {
   ONBOARDING_STEPS,
   BusinessProfile,
   generateProfileSummary,
+  type ChipValue,
 } from "@/lib/onboarding";
-import { readJson } from "@/components/clientFetch";
+import { errorMessage, readJson } from "@/components/clientFetch";
 
 interface OnboardingModalProps {
   isOpen: boolean;
@@ -35,14 +36,16 @@ export function OnboardingModal({
   const step = ONBOARDING_STEPS[currentStepIndex];
   const isFinalReview = currentStepIndex >= ONBOARDING_STEPS.length;
 
-  function handleSelectChip(value: any) {
+  function handleSelectChip(value: ChipValue) {
     if (!step) return;
 
     if (step.multiSelect) {
+      // Multi-select steps collect tags, which are always strings.
+      const selected = String(value);
       const fieldArr = (profile[step.field] as string[]) || [];
-      const updated = fieldArr.includes(value)
-        ? fieldArr.filter((v) => v !== value)
-        : [...fieldArr, value];
+      const updated = fieldArr.includes(selected)
+        ? fieldArr.filter((v) => v !== selected)
+        : [...fieldArr, selected];
 
       setProfile({ ...profile, [step.field]: updated });
     } else {
@@ -72,8 +75,8 @@ export function OnboardingModal({
 
       await readJson(res, "Asetusten tallennus epäonnistui");
       onComplete(profile);
-    } catch (err: any) {
-      setError(err.message || "Tallennus epäonnistui");
+    } catch (err: unknown) {
+      setError(errorMessage(err, "Tallennus epäonnistui"));
     } finally {
       setSaving(false);
     }
@@ -140,7 +143,7 @@ export function OnboardingModal({
                   {step.chips.map((chip) => {
                     const isSelected = step.multiSelect
                       ? ((profile[step.field] as string[]) || []).includes(
-                          chip.value
+                          String(chip.value)
                         )
                       : profile[step.field] === chip.value;
 

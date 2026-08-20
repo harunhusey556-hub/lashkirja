@@ -186,16 +186,16 @@ export async function POST(req: NextRequest) {
       const imapAccounts = await prisma.imapAccount.findMany({ where: { userId } });
       await Promise.all(
         imapAccounts.map(account =>
-          syncImapAccount(account.id).catch((e: any) =>
+          syncImapAccount(account.id).catch((e: unknown) =>
             console.error(`Statement upload: email sync failed for ${account.email}:`, e)
           )
         )
       );
-    } catch (e: any) {
+    } catch (e: unknown) {
       console.error("Failed to sync emails during statement upload:", e);
     }
 
-    await runMatching(userId).catch((e: any) =>
+    await runMatching(userId).catch((e: unknown) =>
       console.error("Matching after statement upload failed:", e)
     );
 

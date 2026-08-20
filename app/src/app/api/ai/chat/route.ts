@@ -3,6 +3,7 @@ import { prisma } from "@/lib/db";
 import { requireSession } from "@/lib/session";
 import { processAiChatMessage } from "@/lib/ai-assistant";
 
+import { errorText } from "@/lib/api-errors";
 export async function GET() {
   const session = await requireSession();
   if (!session) {
@@ -73,10 +74,10 @@ export async function POST(req: NextRequest) {
       proposal: proposal || null,
       createdAt: assistantMsg.createdAt,
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error("🔥 AI Chat API Error:", error);
     return NextResponse.json(
-      { error: error?.message || "AI-apurin virhe" },
+      { error: errorText(error, "AI-apurin virhe") },
       { status: 500 }
     );
   }

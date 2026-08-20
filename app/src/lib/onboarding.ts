@@ -1,3 +1,6 @@
+/** A chip answers one onboarding question: a flag, a choice or a tag. */
+export type ChipValue = string | boolean;
+
 export interface BusinessProfile {
   entityType: "toiminimi" | "kevytyrittaja" | "oy";
   vatRegistered: boolean;
@@ -11,7 +14,7 @@ export interface OnboardingChatStep {
   id: string;
   question: string;
   field: keyof BusinessProfile;
-  chips: { label: string; value: any }[];
+  chips: { label: string; value: ChipValue }[];
   multiSelect?: boolean;
 }
 
