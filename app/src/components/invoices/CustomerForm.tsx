@@ -104,13 +104,16 @@ export function CustomerForm({ initial, submitLabel, busy, onSubmit, onCancel }:
       }}
     >
       <div className="space-y-1.5">
-        <label className={label} htmlFor="cf-name">Nimi</label>
+        <label className={label} htmlFor="cf-name">
+          Nimi <span className="text-danger" aria-hidden="true">*</span>
+        </label>
         <input
           id="cf-name"
           className={field}
           value={values.name}
           onChange={(e) => set("name", e.target.value)}
           aria-invalid={Boolean(errors.name)}
+          aria-required="true"
         />
         {errors.name && <p className="text-xs text-danger">{errors.name}</p>}
       </div>

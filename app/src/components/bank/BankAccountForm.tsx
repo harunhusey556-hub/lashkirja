@@ -119,7 +119,9 @@ export function BankAccountForm({ initial, submitLabel, busy, onSubmit, onCancel
   return (
     <form onSubmit={handleSubmit} className="space-y-4" noValidate>
       <div className="space-y-1.5">
-        <label className={label} htmlFor="ba-name">Tilin nimi</label>
+        <label className={label} htmlFor="ba-name">
+          Tilin nimi <span className="text-danger" aria-hidden="true">*</span>
+        </label>
         <input
           id="ba-name"
           className={field}
@@ -128,6 +130,7 @@ export function BankAccountForm({ initial, submitLabel, busy, onSubmit, onCancel
           placeholder="Käyttötili"
           aria-invalid={Boolean(errors.name)}
           aria-describedby={errors.name ? "ba-name-error" : undefined}
+          aria-required="true"
         />
         {errors.name && <p id="ba-name-error" className={errorText}>{errors.name}</p>}
       </div>
@@ -165,7 +168,9 @@ export function BankAccountForm({ initial, submitLabel, busy, onSubmit, onCancel
           />
         </div>
         <div className="space-y-1.5">
-          <label className={label} htmlFor="ba-currency">Valuutta</label>
+          <label className={label} htmlFor="ba-currency">
+            Valuutta <span className="text-danger" aria-hidden="true">*</span>
+          </label>
           <input
             id="ba-currency"
             className={field}
@@ -173,6 +178,7 @@ export function BankAccountForm({ initial, submitLabel, busy, onSubmit, onCancel
             onChange={(e) => set("currency", e.target.value.toUpperCase())}
             maxLength={3}
             aria-invalid={Boolean(errors.currency)}
+            aria-required="true"
           />
           {errors.currency && <p className={errorText}>{errors.currency}</p>}
         </div>
@@ -180,7 +186,9 @@ export function BankAccountForm({ initial, submitLabel, busy, onSubmit, onCancel
 
       <div className="grid grid-cols-2 gap-3">
         <div className="space-y-1.5">
-          <label className={label} htmlFor="ba-opening">Alkusaldo (€)</label>
+          <label className={label} htmlFor="ba-opening">
+            Alkusaldo (€) <span className="text-danger" aria-hidden="true">*</span>
+          </label>
           <input
             id="ba-opening"
             className={field}
@@ -189,13 +197,16 @@ export function BankAccountForm({ initial, submitLabel, busy, onSubmit, onCancel
             inputMode="decimal"
             aria-invalid={Boolean(errors.openingBalance)}
             aria-describedby={errors.openingBalance ? "ba-opening-error" : undefined}
+            aria-required="true"
           />
           {errors.openingBalance && (
             <p id="ba-opening-error" className={errorText}>{errors.openingBalance}</p>
           )}
         </div>
         <div className="space-y-1.5">
-          <label className={label} htmlFor="ba-date">Avauspäivä</label>
+          <label className={label} htmlFor="ba-date">
+            Avauspäivä <span className="text-danger" aria-hidden="true">*</span>
+          </label>
           <input
             id="ba-date"
             type="date"
@@ -203,6 +214,7 @@ export function BankAccountForm({ initial, submitLabel, busy, onSubmit, onCancel
             value={values.openingDate}
             onChange={(e) => set("openingDate", e.target.value)}
             aria-invalid={Boolean(errors.openingDate)}
+            aria-required="true"
           />
           {errors.openingDate && <p className={errorText}>{errors.openingDate}</p>}
         </div>

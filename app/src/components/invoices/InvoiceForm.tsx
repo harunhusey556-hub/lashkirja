@@ -183,13 +183,16 @@ export function InvoiceForm({ customers, initial, submitLabel, busy, onSubmit, o
       }}
     >
       <div className="space-y-1.5">
-        <label className={label} htmlFor="if-customer">Asiakas</label>
+        <label className={label} htmlFor="if-customer">
+          Asiakas <span className="text-danger" aria-hidden="true">*</span>
+        </label>
         <select
           id="if-customer"
           className={field}
           value={values.customerId}
           onChange={(e) => pickCustomer(e.target.value)}
           aria-invalid={Boolean(errors.customerId)}
+          aria-required="true"
         >
           <option value="">Valitse asiakas</option>
           {customers.map((customer) => (
@@ -203,7 +206,9 @@ export function InvoiceForm({ customers, initial, submitLabel, busy, onSubmit, o
 
       <div className="grid grid-cols-2 gap-3">
         <div className="space-y-1.5">
-          <label className={label} htmlFor="if-issue">Laskun päivä</label>
+          <label className={label} htmlFor="if-issue">
+            Laskun päivä <span className="text-danger" aria-hidden="true">*</span>
+          </label>
           <input
             id="if-issue"
             type="date"
@@ -212,17 +217,21 @@ export function InvoiceForm({ customers, initial, submitLabel, busy, onSubmit, o
             onChange={(e) =>
               setValues((current) => ({ ...current, issueDate: e.target.value }))
             }
+            aria-required="true"
           />
           {errors.issueDate && <p className="text-xs text-danger">{errors.issueDate}</p>}
         </div>
         <div className="space-y-1.5">
-          <label className={label} htmlFor="if-due">Eräpäivä</label>
+          <label className={label} htmlFor="if-due">
+            Eräpäivä <span className="text-danger" aria-hidden="true">*</span>
+          </label>
           <input
             id="if-due"
             type="date"
             className={field}
             value={values.dueDate}
             onChange={(e) => setValues((current) => ({ ...current, dueDate: e.target.value }))}
+            aria-required="true"
           />
           {errors.dueDate && <p className="text-xs text-danger">{errors.dueDate}</p>}
         </div>
@@ -236,7 +245,8 @@ export function InvoiceForm({ customers, initial, submitLabel, busy, onSubmit, o
             className="rounded-2xl border border-warm-gray-light/40 p-3 space-y-2 bg-cream/40"
           >
             <input
-              aria-label={`Rivin ${index + 1} kuvaus`}
+              aria-label={`Rivin ${index + 1} kuvaus (pakollinen)`}
+              aria-required="true"
               className={field}
               value={line.description}
               onChange={(e) => setLine(index, { description: e.target.value })}
@@ -244,7 +254,8 @@ export function InvoiceForm({ customers, initial, submitLabel, busy, onSubmit, o
             />
             <div className="grid grid-cols-3 gap-2">
               <input
-                aria-label={`Rivin ${index + 1} määrä`}
+                aria-label={`Rivin ${index + 1} määrä (pakollinen)`}
+                aria-required="true"
                 className={field}
                 value={line.quantity}
                 onChange={(e) => setLine(index, { quantity: e.target.value })}
@@ -257,7 +268,8 @@ export function InvoiceForm({ customers, initial, submitLabel, busy, onSubmit, o
                 onChange={(e) => setLine(index, { unit: e.target.value })}
               />
               <input
-                aria-label={`Rivin ${index + 1} hinta`}
+                aria-label={`Rivin ${index + 1} hinta (pakollinen)`}
+                aria-required="true"
                 className={field}
                 value={line.unitPrice}
                 onChange={(e) => setLine(index, { unitPrice: e.target.value })}
