@@ -106,23 +106,29 @@ function InvoicesPageContent() {
   const [creating, setCreating] = useState(false);
   const [busy, setBusy] = useState(false);
 
-  const load = useCallback(async () => {
+  // `signal` is only ever passed by the mount/filter-change effect below —
+  // manual call sites (retry button, post-mutation refresh) call load() with
+  // no signal so they are never cancelled out from under themselves.
+  const load = useCallback(async (signal?: AbortSignal) => {
     try {
       const params = new URLSearchParams();
       if (filter !== "all") params.set("status", filter);
       if (customerFilter) params.set("customerId", customerFilter);
       const response = await apiFetch(`/api/invoices?${params.toString()}`, {
         credentials: "include",
+        signal,
       });
       const data = await readJson<{ invoices: InvoiceSummary[]; aging: Aging }>(
         response,
         "Laskujen haku epäonnistui"
       );
+      if (signal?.aborted) return;
       if (filter === "all" && !customerFilter) writePageCache("invoices", data);
       setInvoices(data.invoices);
       setAging(data.aging);
       setStatus("ready");
     } catch (error) {
+      if (signal?.aborted) return;
       if (isUnauthorized(error)) {
         redirectToLogin();
         return;
@@ -133,8 +139,10 @@ function InvoicesPageContent() {
   }, [filter, customerFilter]);
 
   useEffect(() => {
+    const controller = new AbortController();
     // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional fetch-on-mount: flipping to a loading state and storing the response is exactly the external-system sync this effect exists for
-    void load();
+    void load(controller.signal);
+    return () => controller.abort();
   }, [load]);
 
   useScrollRestoration("laskut", status === "ready");
