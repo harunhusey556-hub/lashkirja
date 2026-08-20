@@ -72,8 +72,9 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ success: true, profile });
   } catch (error: unknown) {
+    console.error("[onboarding]", errorText(error));
     return NextResponse.json(
-      { error: errorText(error, "Virhe tallennettaessa asetuksia") },
+      { error: "Asetusten tallennus epäonnistui. Yritä myöhemmin uudelleen." },
       { status: 500 }
     );
   }

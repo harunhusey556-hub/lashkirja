@@ -75,9 +75,9 @@ export async function POST(req: NextRequest) {
       createdAt: assistantMsg.createdAt,
     });
   } catch (error: unknown) {
-    console.error("🔥 AI Chat API Error:", error);
+    console.error("🔥 AI Chat API Error:", errorText(error));
     return NextResponse.json(
-      { error: errorText(error, "AI-apurin virhe") },
+      { error: "Tekoälyapurin käsittely epäonnistui. Yritä hetken kuluttua uudelleen." },
       { status: 500 }
     );
   }

@@ -43,31 +43,88 @@ export async function readJson<T>(
   return payload as T;
 }
 
+const REQUEST_TIMEOUT_MS = 25_000;
+const IDEMPOTENT_METHODS = new Set(["GET", "HEAD"]);
+
+/** A request that never got a response — hung connection, not a transient 5xx. */
+export class ApiTimeoutError extends Error {
+  constructor() {
+    super("Pyyntö aikakatkaistiin. Tarkista verkkoyhteytesi ja yritä uudelleen.");
+    this.name = "ApiTimeoutError";
+  }
+}
+
+/** A 502/503/504 from the gateway/proxy, not from the app's own logic. */
+export class ApiGatewayError extends Error {
+  status: number;
+  constructor(status: number) {
+    super(
+      `Palvelin ei vastannut tilapäisesti (virhe ${status}). Tarkista onnistuiko toiminto ennen kuin yrität uudelleen.`
+    );
+    this.name = "ApiGatewayError";
+    this.status = status;
+  }
+}
+
+/** Aborts when either the caller's own signal or our timeout fires, whichever comes first. */
+function withTimeout(externalSignal: AbortSignal | null | undefined) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  const onExternalAbort = () => controller.abort();
+  externalSignal?.addEventListener("abort", onExternalAbort);
+  return {
+    signal: controller.signal,
+    cleanup: () => {
+      clearTimeout(timer);
+      externalSignal?.removeEventListener("abort", onExternalAbort);
+    },
+  };
+}
+
 /**
- * Resilient fetch wrapper with extreme exponential backoff for network drops & transient 5xx faults.
+ * Resilient fetch wrapper with extreme exponential backoff for network drops
+ * & transient 5xx faults, plus an absolute timeout so a hung connection
+ * doesn't spin forever with no feedback.
+ *
+ * Retries are limited to safe (GET/HEAD) requests: a lost response to a
+ * non-idempotent POST/PUT/PATCH/DELETE on a gateway timeout could otherwise
+ * mean the request actually succeeded server-side and this would silently
+ * resubmit it, risking a duplicate record. Those methods get one attempt —
+ * the caller's existing retry/error UI handles the rest.
  */
 export async function apiFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
-  const MAX_RETRIES = 3;
+  const method = (init?.method || "GET").toUpperCase();
+  const maxRetries = IDEMPOTENT_METHODS.has(method) ? 3 : 1;
   let attempt = 0;
-  
-  while (attempt < MAX_RETRIES) {
+
+  while (attempt < maxRetries) {
+    const { signal, cleanup } = withTimeout(init?.signal);
     try {
-      const response = await fetch(input, init);
+      const response = await fetch(input, { ...init, signal });
       // If it's a 502/503/504 gateway/timeout error, we should retry!
       if (response.status === 502 || response.status === 503 || response.status === 504) {
-        throw new Error(`Transient Server Error: ${response.status}`);
+        throw new ApiGatewayError(response.status);
       }
       return response; // 2xx, 4xx, and 500 (logic errors) are returned normally
     } catch (error) {
+      if (init?.signal?.aborted) throw error; // caller cancelled — not a timeout, not retryable
+      if (
+        error instanceof DOMException &&
+        error.name === "AbortError"
+      ) {
+        throw new ApiTimeoutError();
+      }
       attempt++;
-      if (attempt >= MAX_RETRIES) {
+      if (attempt >= maxRetries) {
         throw error; // Bubble up if maximum retries reached
       }
       // Wait exponentially: 500ms, 1000ms, 2000ms...
       await new Promise(resolve => setTimeout(resolve, 500 * Math.pow(2, attempt - 1)));
+    } finally {
+      cleanup();
     }
   }
-  
+
   throw new Error("apiFetch failed unexpectedly");
 }
 

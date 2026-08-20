@@ -4,9 +4,8 @@ import { ImapFlow } from "imapflow";
 import { prisma } from "@/lib/db";
 import { encrypt } from "@/lib/encryption";
 import { z } from "zod";
-import { withErrorHandler, AppError } from "@/lib/api-errors";
+import { withErrorHandler, AppError, errorText } from "@/lib/api-errors";
 
-import { errorText } from "@/lib/api-errors";
 const connectSchema = z.object({
   email: z.string().email(),
   password: z.string().min(1),
@@ -39,8 +38,11 @@ export const POST = withErrorHandler(async (req: NextRequest) => {
     await client.connect();
     await client.logout();
   } catch (error: unknown) {
+    // The raw IMAP client error (server banners, TLS details, auth internals)
+    // must stay server-side only — never forward it to the client response.
+    console.error("[imap connect]", errorText(error));
     throw new AppError(
-      `Yhdistäminen epäonnistui: ${errorText(error, "Tarkista sähköposti ja sovellussalasana")}`,
+      "Sähköpostiin yhdistäminen epäonnistui. Tarkista sähköpostiosoite, sovellussalasana ja palvelinasetukset.",
       "IMAP_CONNECTION_FAILED",
       400
     );
