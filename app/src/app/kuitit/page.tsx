@@ -21,6 +21,7 @@ import {
   RECEIPT_CATEGORIES,
 } from "@/lib/receipt-categories";
 import { readPageCache, writePageCache } from "@/lib/page-cache";
+import { usePersistedState, useScrollRestoration } from "@/lib/list-ui-state";
 
 import { formatEur, formatMonth, parseFinnishNumber } from "@/lib/format";
 interface SavedReceipt {
@@ -67,17 +68,25 @@ export default function KuititPage() {
     query: string;
     receipts: SavedReceipt[];
   } | null>(null);
-  const [monthFilter, setMonthFilter] = useState("");
-  const [searchInput, setSearchInput] = useState("");
+  // Persisted so back-navigation restores the active month/search/advanced
+  // filters instead of resetting the list to its defaults.
+  const [monthFilter, setMonthFilter] = usePersistedState("kuitit.monthFilter", "");
+  const [searchInput, setSearchInput] = usePersistedState("kuitit.searchInput", "");
   const [searchQuery, setSearchQuery] = useState("");
   const [advancedOpen, setAdvancedOpen] = useState(false);
-  const [advanced, setAdvanced] = useState(emptyAdvanced);
-  const [appliedAdvanced, setAppliedAdvanced] = useState(emptyAdvanced);
+  const [advanced, setAdvanced] = usePersistedState("kuitit.advanced", emptyAdvanced);
+  const [appliedAdvanced, setAppliedAdvanced] = usePersistedState(
+    "kuitit.appliedAdvanced",
+    emptyAdvanced
+  );
   const [receiptToDelete, setReceiptToDelete] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [matchBusyId, setMatchBusyId] = useState<string | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
-  const [showAllReceipts, setShowAllReceipts] = useState(false);
+  const [showAllReceipts, setShowAllReceipts] = usePersistedState(
+    "kuitit.showAllReceipts",
+    false
+  );
   const [loadError, setLoadError] = useState<{ query: string; message: string } | null>(null);
   const [actionError, setActionError] = useState("");
   const [loadAttempt, setLoadAttempt] = useState(0);
@@ -185,6 +194,8 @@ export default function KuititPage() {
   const currentLoadError = loadError?.query === query ? loadError.message : "";
   const loadingList =
     listResult?.query !== query && cachedReceipts === null && !currentLoadError;
+
+  useScrollRestoration("kuitit", !loadingList);
 
   const activeChips = useMemo(() => {
     const chips: { key: string; label: string; clear: () => void }[] = [];

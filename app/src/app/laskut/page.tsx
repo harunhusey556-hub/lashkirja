@@ -16,6 +16,7 @@ import {
 import { formatDate, formatEur } from "@/lib/format";
 
 import { readPageCache, writePageCache } from "@/lib/page-cache";
+import { usePersistedState, useScrollRestoration } from "@/lib/list-ui-state";
 interface InvoiceSummary {
   id: string;
   number: number;
@@ -95,7 +96,12 @@ function InvoicesPageContent() {
   const [status, setStatus] = useState<"loading" | "ready" | "error">(
     cached ? "ready" : "loading"
   );
-  const [filter, setFilter] = useState<(typeof FILTERS)[number]["id"]>("all");
+  // Persisted (not just in-memory) so back-navigation restores the active
+  // tab instead of resetting the list to "Kaikki".
+  const [filter, setFilter] = usePersistedState<(typeof FILTERS)[number]["id"]>(
+    "laskut.filter",
+    "all"
+  );
   const [message, setMessage] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -130,6 +136,8 @@ function InvoicesPageContent() {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional fetch-on-mount: flipping to a loading state and storing the response is exactly the external-system sync this effect exists for
     void load();
   }, [load]);
+
+  useScrollRestoration("laskut", status === "ready");
 
   useEffect(() => {
     apiFetch("/api/customers", { credentials: "include" })

@@ -15,6 +15,7 @@ import { formatDate, formatEur, parseFinnishNumber } from "@/lib/format";
 import { isValidReferenceNumber, normalizeReference } from "@/lib/finnish-reference";
 
 import { readPageCache, writePageCache } from "@/lib/page-cache";
+import { usePersistedState, useScrollRestoration } from "@/lib/list-ui-state";
 interface PurchaseInvoice {
   id: string;
   supplierName: string;
@@ -71,7 +72,12 @@ export default function PurchaseInvoicesPage() {
   const [status, setStatus] = useState<"loading" | "ready" | "error">(
     cached ? "ready" : "loading"
   );
-  const [filter, setFilter] = useState<(typeof FILTERS)[number]["id"]>("open");
+  // Persisted so back-navigation restores the active tab instead of resetting
+  // the list to "Avoimet".
+  const [filter, setFilter] = usePersistedState<(typeof FILTERS)[number]["id"]>(
+    "ostolaskut.filter",
+    "open"
+  );
   const [message, setMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [creating, setCreating] = useState(false);
@@ -120,6 +126,8 @@ export default function PurchaseInvoicesPage() {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional fetch-on-mount: flipping to a loading state and storing the response is exactly the external-system sync this effect exists for
     void load();
   }, [load]);
+
+  useScrollRestoration("ostolaskut", status === "ready");
 
   function validate() {
     const errors: Record<string, string> = {};

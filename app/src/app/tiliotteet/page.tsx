@@ -17,6 +17,7 @@ import {
   type StatementData,
 } from "@/lib/statement-client";
 import { readPageCache, writePageCache } from "@/lib/page-cache";
+import { usePersistedState, useScrollRestoration } from "@/lib/list-ui-state";
 
 const RECENT_LIMIT = 5;
 
@@ -37,8 +38,13 @@ export default function TiliotteetPage() {
   const [loading, setLoading] = useState(
     () => readPageCache<StatementData[]>("statements") === null
   );
-  const [monthFilter, setMonthFilter] = useState("");
-  const [showAllStatements, setShowAllStatements] = useState(false);
+  // Persisted so back-navigation restores the active filter/tab instead of
+  // resetting to the defaults.
+  const [monthFilter, setMonthFilter] = usePersistedState("tiliotteet.monthFilter", "");
+  const [showAllStatements, setShowAllStatements] = usePersistedState(
+    "tiliotteet.showAllStatements",
+    false
+  );
   const [loadError, setLoadError] = useState("");
   const [accounts, setAccounts] = useState<BankAccountOption[]>(
     () => readPageCache<{ accounts?: BankAccountOption[] }>("bank-overview")?.accounts ?? []
@@ -76,6 +82,8 @@ export default function TiliotteetPage() {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional fetch-on-mount: flipping to a loading state and storing the response is exactly the external-system sync this effect exists for
     void loadStatements();
   }, [loadStatements]);
+
+  useScrollRestoration("tiliotteet", !loading);
 
   useEffect(() => {
     let cancelled = false;

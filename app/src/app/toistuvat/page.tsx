@@ -17,6 +17,7 @@ import { VAT_RATES_PERMILLE } from "@/lib/invoices";
 import { RECURRENCE_INTERVALS, type RecurrenceInterval } from "@/lib/recurrence";
 
 import { readPageCache, writePageCache } from "@/lib/page-cache";
+import { usePersistedState, useScrollRestoration } from "@/lib/list-ui-state";
 interface RecurringInvoice {
   id: string;
   name: string | null;
@@ -70,7 +71,8 @@ export default function RecurringInvoicesPage() {
   const [message, setMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [creating, setCreating] = useState(false);
-  const [showInactive, setShowInactive] = useState(false);
+  // Persisted so back-navigation restores whether inactive entries were shown.
+  const [showInactive, setShowInactive] = usePersistedState("toistuvat.showInactive", false);
   const [confirmRemove, setConfirmRemove] = useState<RecurringInvoice | null>(null);
 
   const [form, setForm] = useState({
@@ -114,6 +116,8 @@ export default function RecurringInvoicesPage() {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional fetch-on-mount: flipping to a loading state and storing the response is exactly the external-system sync this effect exists for
     void load();
   }, [load]);
+
+  useScrollRestoration("toistuvat", status === "ready");
 
   useEffect(() => {
     apiFetch("/api/customers", { credentials: "include" })
