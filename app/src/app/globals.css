@@ -266,6 +266,21 @@ button:disabled {
   overflow: hidden;
 }
 
+/* Staggered list entrance: direct children arrive one after another.
+   `backwards` fill only — never `forwards`, so no transform survives the
+   animation (retained transforms re-anchor fixed descendants). */
+.list-stagger > * {
+  animation: slideUpFade 0.3s cubic-bezier(0.16, 1, 0.3, 1) backwards;
+}
+.list-stagger > *:nth-child(1) { animation-delay: 0ms; }
+.list-stagger > *:nth-child(2) { animation-delay: 40ms; }
+.list-stagger > *:nth-child(3) { animation-delay: 80ms; }
+.list-stagger > *:nth-child(4) { animation-delay: 120ms; }
+.list-stagger > *:nth-child(5) { animation-delay: 160ms; }
+.list-stagger > *:nth-child(6) { animation-delay: 200ms; }
+.list-stagger > *:nth-child(7) { animation-delay: 240ms; }
+.list-stagger > *:nth-child(n+8) { animation-delay: 280ms; }
+
 /* Stagger delay classes for lists */
 .stagger-1 { animation-delay: 50ms; }
 .stagger-2 { animation-delay: 100ms; }
@@ -399,7 +414,8 @@ body.signing-out {
   .animate-popover,
   .animate-in,
   .animate-in-delay-1,
-  .animate-in-delay-2 {
+  .animate-in-delay-2,
+  .list-stagger > * {
     animation: none !important;
     opacity: 1 !important;
     transform: none !important;

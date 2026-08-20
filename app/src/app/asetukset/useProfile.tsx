@@ -1,0 +1,122 @@
+"use client";
+
+import { useCallback, useEffect, useState } from "react";
+import {
+  errorMessage,
+  isUnauthorized,
+  readJson,
+  redirectToLogin,
+} from "@/components/clientFetch";
+
+export interface Profile {
+  firstName: string;
+  lastName: string;
+  email: string;
+  entityType: string;
+  vatRegistered: boolean;
+  vatPeriod: string;
+  imapAccounts: { id: string; email: string }[];
+}
+
+/**
+ * The one profile load/save used by every settings page. Saves are
+ * optimistic: the UI flips immediately and rolls back on failure.
+ */
+export function useProfile() {
+  const [profile, setProfile] = useState<Profile | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [savedMsg, setSavedMsg] = useState("");
+  const [loadError, setLoadError] = useState("");
+  const [loadAttempt, setLoadAttempt] = useState(0);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    fetch("/api/profile", { signal: controller.signal })
+      .then((response) =>
+        readJson<{ profile: Profile }>(response, "Asetusten lataus epäonnistui")
+      )
+      .then((data) => {
+        if (controller.signal.aborted) return;
+        if (!data.profile) {
+          throw new Error("Palvelin palautti virheelliset asetukset");
+        }
+        setLoadError("");
+        setProfile(data.profile);
+      })
+      .catch((error: unknown) => {
+        if (controller.signal.aborted) return;
+        if (isUnauthorized(error)) {
+          redirectToLogin();
+          return;
+        }
+        setLoadError(errorMessage(error, "Asetusten lataus epäonnistui"));
+      });
+    return () => controller.abort();
+  }, [loadAttempt]);
+
+  const retry = useCallback(() => {
+    setLoadError("");
+    setLoadAttempt((attempt) => attempt + 1);
+  }, []);
+
+  const save = useCallback(
+    async (update: Partial<Profile>): Promise<boolean> => {
+      if (!profile || saving) return false;
+      const previous = profile;
+      setProfile({ ...profile, ...update });
+      setSaving(true);
+      setSavedMsg("");
+      try {
+        const res = await fetch("/api/profile", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(update),
+        });
+        const data = await readJson<{ profile: Partial<Profile> }>(
+          res,
+          "Tallennus epäonnistui"
+        );
+        setProfile((current) =>
+          current ? { ...current, ...data.profile } : current
+        );
+        setSavedMsg("Tallennettu");
+        return true;
+      } catch (error: unknown) {
+        if (isUnauthorized(error)) {
+          redirectToLogin();
+          return false;
+        }
+        setProfile(previous);
+        setSavedMsg(errorMessage(error, "Tallennus epäonnistui"));
+        return false;
+      } finally {
+        setSaving(false);
+        setTimeout(() => setSavedMsg(""), 3000);
+      }
+    },
+    [profile, saving]
+  );
+
+  return { profile, setProfile, saving, savedMsg, loadError, retry, save };
+}
+
+/** Shared save/error status line under settings forms. */
+export function SaveStatus({
+  saving,
+  savedMsg,
+}: {
+  saving: boolean;
+  savedMsg: string;
+}) {
+  if (!saving && !savedMsg) return null;
+  const isError = Boolean(savedMsg) && savedMsg !== "Tallennettu";
+  return (
+    <p
+      className={`text-xs ${isError ? "text-danger" : "text-success"}`}
+      role={isError ? "alert" : "status"}
+      aria-live="polite"
+    >
+      {saving ? "Tallennetaan..." : savedMsg}
+    </p>
+  );
+}

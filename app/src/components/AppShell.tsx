@@ -158,6 +158,8 @@ function navActive(pathname: string, href: string): boolean {
 }
 
 function pageTitle(pathname: string): string {
+  if (pathname === "/kuitit/uusi") return "Uusi kuitti";
+  if (/^\/kuitit\/[^/]+$/.test(pathname)) return "Kuitti";
   if (pathname.startsWith("/kuitit")) return "Kuitit & laskut";
   if (pathname.startsWith("/pankkitilit")) return "Pankkitilit";
   if (/^\/laskut\/[^/]+$/.test(pathname)) return "Lasku";
@@ -169,6 +171,11 @@ function pageTitle(pathname: string): string {
   if (/^\/tiliotteet\/[^/]+$/.test(pathname)) return "Tiliote";
   if (pathname.startsWith("/tiliotteet")) return "Tiliotteet";
   if (pathname.startsWith("/alv-raportti")) return "ALV-raportti";
+  if (pathname.startsWith("/asetukset/profiili")) return "Profiili";
+  if (pathname.startsWith("/asetukset/yritys")) return "Yritysmuoto & ALV";
+  if (pathname.startsWith("/asetukset/laskutus")) return "Laskuttajan tiedot";
+  if (pathname.startsWith("/asetukset/kirjanpito")) return "Kirjanpidon lukitus";
+  if (pathname.startsWith("/asetukset/sahkoposti")) return "Sähköpostien tuonti";
   if (pathname.startsWith("/asetukset")) return "Asetukset";
   return "Etusivu";
 }
