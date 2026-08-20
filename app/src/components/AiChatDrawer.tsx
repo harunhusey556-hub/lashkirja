@@ -199,7 +199,7 @@ export function AiChatDrawer() {
 
             {/* Messages Body */}
             <div
-              className={`flex-1 min-h-0 p-4 overflow-y-auto space-y-4 ${
+              className={`flex-1 min-h-0 p-4 overflow-y-auto overscroll-contain space-y-4 ${
                 messages.length === 0 && !loading ? "flex flex-col justify-center" : ""
               }`}
             >
