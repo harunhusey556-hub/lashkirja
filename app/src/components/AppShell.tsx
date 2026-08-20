@@ -75,8 +75,8 @@ const NAV_ITEMS = [
     ),
   },
   {
-    href: "/alv-raportti",
-    label: "ALV",
+    href: "/pankkitilit",
+    label: "Pankki",
     icon: (active: boolean) => (
       <svg
         className={`w-6 h-6 ${active ? "text-accent" : "text-warm-gray"}`}
@@ -89,37 +89,16 @@ const NAV_ITEMS = [
           strokeLinecap="round"
           strokeLinejoin="round"
           strokeWidth={1.75}
-          d="M4 19V5m4 14V9m4 10V7m4 12v-4m4 4V11"
+          d="M3 10h18M5 10V8.5L12 4l7 4.5V10M6 10v7m4-7v7m4-7v7m4-7v7M4 20h16"
         />
       </svg>
     ),
   },
-  {
-    href: "/asetukset",
-    label: "Asetukset",
-    icon: (active: boolean) => (
-      <svg
-        className={`w-6 h-6 ${active ? "text-accent" : "text-warm-gray"}`}
-        fill="none"
-        stroke="currentColor"
-        viewBox="0 0 24 24"
-        aria-hidden
-      >
-        <path
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          strokeWidth={1.75}
-          d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z"
-        />
-        <path
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          strokeWidth={1.75}
-          d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1.08-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1.08 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9c.26.604.852.997 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z"
-        />
-      </svg>
-    ),
-  },
+] as const;
+
+const MORE_ITEMS = [
+  { href: "/alv-raportti", label: "ALV-raportti", hint: "Arvonlisäveron yhteenveto" },
+  { href: "/asetukset", label: "Asetukset", hint: "Profiili, sähköposti, kirjautuminen" },
 ] as const;
 
 function navActive(pathname: string, href: string): boolean {
@@ -129,6 +108,7 @@ function navActive(pathname: string, href: string): boolean {
 
 function pageTitle(pathname: string): string {
   if (pathname.startsWith("/kuitit")) return "Kuitit & laskut";
+  if (pathname.startsWith("/pankkitilit")) return "Pankkitilit";
   if (/^\/tiliotteet\/[^/]+$/.test(pathname)) return "Tiliote";
   if (pathname.startsWith("/tiliotteet")) return "Tiliotteet";
   if (pathname.startsWith("/alv-raportti")) return "ALV-raportti";
@@ -142,6 +122,9 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     { status: "checking" | "ready" | "error"; message?: string }
   >({ status: "checking" });
   const [showOnboarding, setShowOnboarding] = useState(false);
+  // Stored with the path it was opened on, so a route change closes it without
+  // an effect that would re-render twice.
+  const [moreOpenOn, setMoreOpenOn] = useState<string | null>(null);
   const [onboardingProfile, setOnboardingProfile] = useState<any>(null);
 
   const pathname = usePathname();
@@ -192,6 +175,9 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     setAuthState({ status: "checking" });
     setAuthAttempt((attempt) => attempt + 1);
   }
+
+  const moreActive = MORE_ITEMS.some((item) => navActive(pathname, item.href));
+  const showMore = moreOpenOn === pathname;
 
   return (
     <div className="min-h-dvh flex flex-col bg-cream">
@@ -248,8 +234,69 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                   </Link>
                 );
               })}
+
+              <button
+                type="button"
+                onClick={() => setMoreOpenOn((open) => (open === pathname ? null : pathname))}
+                aria-expanded={showMore}
+                aria-haspopup="menu"
+                className={`flex flex-1 flex-col items-center justify-center gap-0.5 touch-target active:bg-blush/30 transition-colors ${
+                  moreActive || showMore ? "text-accent-dark" : "text-warm-gray"
+                }`}
+              >
+                <svg
+                  className={`w-6 h-6 ${moreActive || showMore ? "text-accent" : "text-warm-gray"}`}
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                  aria-hidden
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={1.75}
+                    d="M5 12h.01M12 12h.01M19 12h.01"
+                  />
+                </svg>
+                <span className={`text-[10px] leading-none ${moreActive || showMore ? "font-semibold" : "font-medium"}`}>
+                  Lisää
+                </span>
+              </button>
             </div>
           </nav>
+
+          {showMore && (
+            <>
+              <div
+                className="fixed inset-0 z-40 bg-charcoal/20"
+                onClick={() => setMoreOpenOn(null)}
+                aria-hidden
+              />
+              <div
+                role="menu"
+                aria-label="Lisää-valikko"
+                className="fixed inset-x-0 z-50 bottom-[var(--app-tab-height)] max-w-lg mx-auto bg-white border-t border-warm-gray-light/40 rounded-t-3xl p-4 space-y-1 shadow-lg"
+              >
+                {MORE_ITEMS.map((item) => {
+                  const active = navActive(pathname, item.href);
+                  return (
+                    <Link
+                      key={item.href}
+                      href={item.href}
+                      role="menuitem"
+                      onClick={() => setMoreOpenOn(null)}
+                      className={`block px-4 py-3 rounded-2xl active:bg-blush/40 ${
+                        active ? "bg-blush/50" : ""
+                      }`}
+                    >
+                      <span className="block text-sm font-medium text-charcoal">{item.label}</span>
+                      <span className="block text-xs text-warm-gray">{item.hint}</span>
+                    </Link>
+                  );
+                })}
+              </div>
+            </>
+          )}
         </>
       )}
     </div>

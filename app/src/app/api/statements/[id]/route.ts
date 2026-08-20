@@ -6,15 +6,22 @@ import { getStatementForUser } from "@/lib/statement-api";
 import { removeUserUpload } from "@/lib/storage";
 import * as path from "path";
 
-const patchSchema = z.object({
-  periodMonth: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/, "Muoto: YYYY-MM"),
-});
+const patchSchema = z
+  .object({
+    periodMonth: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/, "Muoto: YYYY-MM").optional(),
+    // null detaches the statement from every account.
+    bankAccountId: z.string().uuid().nullable().optional(),
+  })
+  .refine(
+    (value) => value.periodMonth !== undefined || value.bankAccountId !== undefined,
+    "Ei muutettavia kenttiä"
+  );
 
 export async function GET(
-  _req: NextRequest,
+  req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const session = await requireSession();
+  const session = await requireSession(req);
   if (!session) {
     return NextResponse.json({ error: "Ei kirjautunut" }, { status: 401 });
   }
@@ -35,7 +42,7 @@ export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const session = await requireSession();
+  const session = await requireSession(req);
   if (!session) {
     return NextResponse.json({ error: "Ei kirjautunut" }, { status: 401 });
   }
@@ -44,7 +51,7 @@ export async function PATCH(
   const parsed = patchSchema.safeParse(await req.json().catch(() => null));
   if (!parsed.success) {
     return NextResponse.json(
-      { error: "Virheellinen kuukausi (YYYY-MM)" },
+      { error: "Virheellinen pyyntö (kuukausi YYYY-MM tai pankkitilin tunnus)" },
       { status: 400 }
     );
   }
@@ -59,19 +66,38 @@ export async function PATCH(
     );
   }
 
-  const updated = await prisma.statement.update({
-    where: { id },
-    data: { periodMonth: parsed.data.periodMonth, periodSource: "manual" },
-  });
+  if (parsed.data.bankAccountId) {
+    const account = await prisma.bankAccount.findFirst({
+      where: { id: parsed.data.bankAccountId, userId: session.userId },
+      select: { id: true },
+    });
+    if (!account) {
+      return NextResponse.json(
+        { error: "Pankkitiliä ei löytynyt" },
+        { status: 404 }
+      );
+    }
+  }
+
+  const data: { periodMonth?: string; periodSource?: string; bankAccountId?: string | null } = {};
+  if (parsed.data.periodMonth !== undefined) {
+    data.periodMonth = parsed.data.periodMonth;
+    data.periodSource = "manual";
+  }
+  if (parsed.data.bankAccountId !== undefined) {
+    data.bankAccountId = parsed.data.bankAccountId;
+  }
+
+  const updated = await prisma.statement.update({ where: { id }, data });
 
   return NextResponse.json({ ok: true, statement: updated });
 }
 
 export async function DELETE(
-  _req: NextRequest,
+  req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const session = await requireSession();
+  const session = await requireSession(req);
   if (!session) {
     return NextResponse.json({ error: "Ei kirjautunut" }, { status: 401 });
   }

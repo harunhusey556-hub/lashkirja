@@ -19,6 +19,13 @@ import {
 
 const RECENT_LIMIT = 5;
 
+interface BankAccountOption {
+  id: string;
+  name: string;
+  bankName: string | null;
+  isDefault: boolean;
+}
+
 export default function TiliotteetPage() {
   const router = useRouter();
   const [statements, setStatements] = useState<StatementData[]>([]);
@@ -28,6 +35,8 @@ export default function TiliotteetPage() {
   const [monthFilter, setMonthFilter] = useState("");
   const [showAllStatements, setShowAllStatements] = useState(false);
   const [loadError, setLoadError] = useState("");
+  const [accounts, setAccounts] = useState<BankAccountOption[]>([]);
+  const [targetAccountId, setTargetAccountId] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const loadStatements = useCallback(async () => {
@@ -54,12 +63,30 @@ export default function TiliotteetPage() {
     void loadStatements();
   }, [loadStatements]);
 
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/bank-accounts", { credentials: "include" })
+      .then((res) => readJson<{ accounts?: BankAccountOption[] }>(res, ""))
+      .then((data) => {
+        if (cancelled) return;
+        const list = data.accounts || [];
+        setAccounts(list);
+        setTargetAccountId(list.find((a) => a.isDefault)?.id || "");
+      })
+      // The picker is a convenience; the upload still works without it.
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   async function handleUpload(file: File) {
     setUploading(true);
     setUploadMsg("Käsitellään tiliotetta...");
     try {
       const fd = new FormData();
       fd.append("file", file);
+      if (targetAccountId) fd.append("bankAccountId", targetAccountId);
 
       const res = await fetch("/api/statements", { method: "POST", body: fd });
       const data = await readJson<{
@@ -117,6 +144,31 @@ export default function TiliotteetPage() {
               PDF, XML, XLSX tai CSV
             </p>
           </div>
+
+          {accounts.length > 0 && (
+            <div className="space-y-1.5">
+              <label
+                htmlFor="statement-target-account"
+                className="text-sm font-medium text-charcoal"
+              >
+                Pankkitili
+              </label>
+              <select
+                id="statement-target-account"
+                value={targetAccountId}
+                onChange={(e) => setTargetAccountId(e.target.value)}
+                className="w-full text-sm px-4 py-3 rounded-xl border border-warm-gray-light/60 bg-white"
+              >
+                <option value="">Tunnista automaattisesti</option>
+                {accounts.map((account) => (
+                  <option key={account.id} value={account.id}>
+                    {account.name}
+                    {account.bankName ? ` · ${account.bankName}` : ""}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
 
           <button
             type="button"
@@ -237,6 +289,13 @@ export default function TiliotteetPage() {
                         </p>
                         <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-warm-gray">
                           <span>{formatMonth(s.periodMonth)}</span>
+                          <span aria-hidden>·</span>
+                          <span
+                            className={s.bankAccount ? "" : "text-warning"}
+                            title={s.bankAccount ? undefined : "Tiliotetta ei ole kohdistettu pankkitilille"}
+                          >
+                            {s.bankAccount ? s.bankAccount.name : "Ei pankkitiliä"}
+                          </span>
                           <span aria-hidden>·</span>
                           <span>{s.totals.txCount} tapahtumaa</span>
                           {relevant > 0 && (

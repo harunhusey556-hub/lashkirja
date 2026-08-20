@@ -24,6 +24,7 @@ model User {
   uploads       Upload[]
   imapAccounts  ImapAccount[]
   chatMessages  ChatMessage[]
+  bankAccounts  BankAccount[]
 }
 
 model Receipt {
@@ -66,6 +67,11 @@ model Statement {
   id           String        @id @default(uuid())
   userId       String
   user         User          @relation(fields: [userId], references: [id])
+  // Which of the user's bank accounts this statement belongs to. Optional so
+  // statements imported before multi-account support keep working; the UI
+  // asks the user to assign them.
+  bankAccountId String?
+  bankAccount   BankAccount? @relation(fields: [bankAccountId], references: [id], onDelete: SetNull)
   fileName     String
   fileType     String
   filePath     String
@@ -78,6 +84,7 @@ model Statement {
   @@unique([userId, checksum])
   @@index([userId, periodMonth])
   @@index([userId, uploadedAt])
+  @@index([bankAccountId, periodMonth])
 }
 
 model Transaction {
@@ -171,3 +178,52 @@ model ChatMessage {
   @@index([userId, createdAt])
 }
 
+
+// A bank account the user owns. Balances are tracked per account so a user
+// with several banks sees each account's own month-end position instead of
+// one merged number.
+model BankAccount {
+  id                  String   @id @default(uuid())
+  userId              String
+  user                User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name                String
+  bankName            String?
+  // Normalised (uppercase, no spaces). Nullable because a user may track a
+  // cash account. SQLite treats NULLs as distinct, so several accounts may
+  // have no IBAN while real IBANs stay unique per user.
+  iban                String?
+  bic                 String?
+  currency            String   @default("EUR")
+  // The known balance at the start of openingDate. Every later month rolls
+  // forward from here.
+  openingBalanceCents Int      @default(0)
+  openingDate         DateTime
+  isDefault           Boolean  @default(false)
+  archivedAt          DateTime?
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  statements      Statement[]
+  monthlyBalances MonthlyBalance[]
+
+  @@unique([userId, iban])
+  @@index([userId, archivedAt])
+}
+
+// The balance the bank itself reports at the end of a month. Kept separate
+// from the computed rollforward so a mismatch is visible instead of silently
+// overwritten - that difference is the whole point of reconciliation.
+model MonthlyBalance {
+  id                  String      @id @default(uuid())
+  bankAccountId       String
+  bankAccount         BankAccount @relation(fields: [bankAccountId], references: [id], onDelete: Cascade)
+  month               String // "YYYY-MM"
+  closingBalanceCents Int
+  source              String      @default("manual") // "manual" | "statement"
+  note                String?
+  createdAt           DateTime    @default(now())
+  updatedAt           DateTime    @updatedAt
+
+  @@unique([bankAccountId, month])
+  @@index([bankAccountId, month])
+}

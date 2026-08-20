@@ -22,6 +22,8 @@ import { inferTransactionType } from "@/lib/statements";
 import { listStatementsForUser } from "@/lib/statement-api";
 import { centsToEuros } from "@/lib/money";
 import { autoGenerateIncomeReceipts } from "@/lib/income-automation";
+import { resolveAccountForImport } from "@/lib/bank-accounts";
+import { extractIbans } from "@/lib/iban";
 
 function publicTransaction<T extends { amountCents: number }>(tx: T) {
   const { amountCents, ...rest } = tx;
@@ -118,10 +120,36 @@ export async function POST(req: NextRequest) {
       [...monthCounts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ||
       new Date().toISOString().slice(0, 7);
 
+    // File the upload under a bank account: an explicit choice from the form
+    // wins, then an IBAN found inside the file, then the default account.
+    const requestedAccountId = formData.get("bankAccountId");
+    let bankAccountId: string | null = null;
+    if (typeof requestedAccountId === "string" && requestedAccountId.trim()) {
+      const owned = await prisma.bankAccount.findFirst({
+        where: { id: requestedAccountId.trim(), userId },
+        select: { id: true },
+      });
+      if (!owned) {
+        return NextResponse.json(
+          { error: "Pankkitiliä ei löytynyt" },
+          { status: 404 }
+        );
+      }
+      bankAccountId = owned.id;
+    } else {
+      // Only text formats are cheap to scan; xlsx/pdf fall back to the default.
+      const scannable = detected.kind === "xml" || detected.kind === "csv";
+      const ibanHint = scannable
+        ? extractIbans(buffer.toString("utf8").slice(0, 200_000))[0] ?? null
+        : null;
+      bankAccountId = await resolveAccountForImport(userId, { iban: ibanHint });
+    }
+
     const statement = await prisma.$transaction(async (db) => {
       const created = await db.statement.create({
         data: {
           userId,
+          bankAccountId,
           fileName: file.name,
           fileType,
           filePath: storageKey!,

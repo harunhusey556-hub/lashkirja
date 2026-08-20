@@ -12,10 +12,12 @@
     "test": "vitest run",
     "test:parsers": "tsx scripts/test-parsers.ts",
     "test:e2e": "npm run build && playwright test",
-    "check": "npm run lint && npm run typecheck && npm test && npm run build",
+    "check": "npm run lint && npm run typecheck && npm run test:all && npm run build",
     "ios:sync": "npx cap sync ios",
     "ios:open": "npx cap open ios",
-    "ios:ipa": "bash scripts/build-ios-ipa.sh"
+    "ios:ipa": "bash scripts/build-ios-ipa.sh",
+    "test:integration": "vitest run --config vitest.integration.config.ts",
+    "test:all": "npm run test && npm run test:integration"
   },
   "dependencies": {
     "@capacitor/cli": "^8.5.0",

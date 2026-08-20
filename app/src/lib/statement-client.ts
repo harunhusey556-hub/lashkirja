@@ -36,12 +36,22 @@ export interface StatementTotals {
   txCount: number;
 }
 
+export interface StatementBankAccount {
+  id: string;
+  name: string;
+  bankName: string | null;
+  iban: string | null;
+  currency: string;
+}
+
 export interface StatementData {
   id: string;
   fileName: string;
   fileType: string;
   uploadedAt: string;
   periodMonth: string | null;
+  bankAccountId: string | null;
+  bankAccount: StatementBankAccount | null;
   transactions: StatementTransaction[];
   totals: StatementTotals;
 }
