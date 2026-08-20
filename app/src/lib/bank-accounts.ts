@@ -15,6 +15,7 @@ import {
   type RollforwardResult,
 } from "./bank-balances";
 import { AppError, NotFoundError, ValidationError } from "./api-errors";
+import { assertMonthOpen } from "./period-lock";
 
 export interface BankAccountInput {
   name: string;
@@ -369,6 +370,8 @@ export async function upsertMonthlyBalance(
   });
   if (!account) throw new NotFoundError("Pankkitiliä ei löytynyt.");
 
+  await assertMonthOpen(userId, input.month);
+
   if (input.month < monthKey(account.openingDate)) {
     throw new ValidationError(
       "Kuukausi on ennen tilin avauspäivää, joten saldoa ei voi kirjata."
@@ -410,6 +413,8 @@ export async function deleteMonthlyBalance(
     select: { id: true },
   });
   if (!account) throw new NotFoundError("Pankkitiliä ei löytynyt.");
+
+  await assertMonthOpen(userId, month);
 
   const deleted = await prisma.monthlyBalance.deleteMany({
     where: { bankAccountId, month },

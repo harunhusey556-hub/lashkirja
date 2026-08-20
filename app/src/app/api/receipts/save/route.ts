@@ -12,6 +12,7 @@ import {
 } from "@/lib/http-security";
 import { withErrorHandler, UnauthorizedError, AppError } from "@/lib/api-errors";
 import { sanitizeText } from "@/lib/sanitizer";
+import { assertPeriodOpen } from "@/lib/period-lock";
 
 const vatLineSchema = z.object({
   rate: z.number().finite().min(0).max(100),
@@ -44,6 +45,9 @@ export const POST = withErrorHandler(async (req: NextRequest) => {
   // Let ZodError bubble up to the global error handler
   const parsed = saveSchema.parse(await req.json());
   const body = parsed;
+
+  // A receipt dated inside a closed period would change a filed VAT return.
+  await assertPeriodOpen(session.userId, [body.date ? isoDateToUtc(body.date) : null]);
 
   if (!body.forceDuplicate && body.vendor && body.date && body.totalAmount != null) {
     const totalAmountCents = eurosToCents(body.totalAmount);

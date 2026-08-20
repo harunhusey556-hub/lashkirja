@@ -13,6 +13,7 @@ import {
 } from "@/components/clientFetch";
 
 import SellerProfileCard from "@/components/SellerProfileCard";
+import BooksLockCard from "@/components/BooksLockCard";
 interface Profile {
   firstName: string;
   lastName: string;
@@ -414,6 +415,8 @@ export default function AsetuksetPage() {
         </div>
 
         <SellerProfileCard />
+
+        <BooksLockCard />
 
         <div className="bg-white rounded-2xl p-6 shadow-sm space-y-6">
           {/* Stacks on phones — shrink-0 next to the description overflowed the

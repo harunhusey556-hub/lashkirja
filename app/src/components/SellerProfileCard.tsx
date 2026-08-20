@@ -4,8 +4,11 @@ import { useCallback, useEffect, useState } from "react";
 import { apiFetch, errorMessage, readJson } from "@/components/clientFetch";
 import { isValidBusinessId, normalizeBusinessId } from "@/lib/finnish-reference";
 import { formatIban, isValidIban, normalizeIban } from "@/lib/iban";
+import { parseFinnishNumber } from "@/lib/format";
 
 interface SellerProfile {
+  lateInterestPercent: number | null;
+  reminderFeeCents: number;
   businessName: string | null;
   businessId: string | null;
   addressStreet: string | null;
@@ -20,6 +23,8 @@ interface SellerProfile {
 type Values = Record<keyof SellerProfile, string>;
 
 const EMPTY: Values = {
+  lateInterestPercent: "",
+  reminderFeeCents: "5,00",
   businessName: "",
   businessId: "",
   addressStreet: "",
@@ -51,6 +56,14 @@ export default function SellerProfileCard() {
         "Profiilin haku epäonnistui"
       );
       setValues({
+        lateInterestPercent:
+          data.profile.lateInterestPercent === null ||
+          data.profile.lateInterestPercent === undefined
+            ? ""
+            : String(data.profile.lateInterestPercent).replace(".", ","),
+        reminderFeeCents: ((data.profile.reminderFeeCents ?? 500) / 100)
+          .toFixed(2)
+          .replace(".", ","),
         businessName: data.profile.businessName ?? "",
         businessId: data.profile.businessId ?? "",
         addressStreet: data.profile.addressStreet ?? "",
@@ -86,6 +99,16 @@ export default function SellerProfileCard() {
     if (values.invoiceIban.trim() && !isValidIban(values.invoiceIban)) {
       nextErrors.invoiceIban = "IBAN ei ole kelvollinen.";
     }
+    const interest = values.lateInterestPercent.trim()
+      ? parseFinnishNumber(values.lateInterestPercent)
+      : null;
+    if (values.lateInterestPercent.trim() && (interest === null || interest < 0 || interest > 100)) {
+      nextErrors.lateInterestPercent = "Anna korko välillä 0-100, esim. 11,5.";
+    }
+    const fee = parseFinnishNumber(values.reminderFeeCents);
+    if (fee === null || fee < 0) {
+      nextErrors.reminderFeeCents = "Anna muistutusmaksu, esim. 5,00.";
+    }
     if (Object.keys(nextErrors).length > 0) {
       setErrors(nextErrors);
       return;
@@ -109,6 +132,8 @@ export default function SellerProfileCard() {
           invoiceIban: values.invoiceIban.trim() ? normalizeIban(values.invoiceIban) : null,
           invoiceBic: values.invoiceBic.trim().toUpperCase() || null,
           invoiceTerms: values.invoiceTerms.trim() || null,
+          lateInterestPercent: interest,
+          reminderFee: fee,
         }),
       });
       await readJson(response, "Tallennus epäonnistui");
@@ -219,6 +244,41 @@ export default function SellerProfileCard() {
                 onChange={(e) => set("invoiceBic", e.target.value.toUpperCase())}
                 placeholder="NDEAFIHH"
               />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <label className={label} htmlFor="sp-interest">Viivästyskorko (% / v)</label>
+              <input
+                id="sp-interest"
+                className={field}
+                value={values.lateInterestPercent}
+                onChange={(e) => set("lateInterestPercent", e.target.value)}
+                inputMode="decimal"
+                placeholder="11,5"
+              />
+              {errors.lateInterestPercent ? (
+                <p className="text-xs text-danger">{errors.lateInterestPercent}</p>
+              ) : (
+                <p className="text-xs text-warm-gray">
+                  Suomen Pankin viitekorko + 7 (kuluttaja) tai + 8 (yritys) prosenttiyksikköä.
+                  Tyhjä = korkoa ei peritä.
+                </p>
+              )}
+            </div>
+            <div className="space-y-1.5">
+              <label className={label} htmlFor="sp-fee">Muistutusmaksu (€)</label>
+              <input
+                id="sp-fee"
+                className={field}
+                value={values.reminderFeeCents}
+                onChange={(e) => set("reminderFeeCents", e.target.value)}
+                inputMode="decimal"
+              />
+              {errors.reminderFeeCents && (
+                <p className="text-xs text-danger">{errors.reminderFeeCents}</p>
+              )}
             </div>
           </div>
 

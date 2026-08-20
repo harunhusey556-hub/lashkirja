@@ -88,6 +88,27 @@ Tuetut muodot:
   varten. Lasku merkitään lähetetyksi vasta kun postipalvelin on hyväksynyt viestin.
 - Laskuttajan tiedot (nimi, Y-tunnus, osoite, IBAN, BIC, ehdot) syötetään Asetukset-sivulla.
 
+## Maksumuistutukset ja viivästyskorko
+
+- Myöhässä olevalle laskulle voi luoda maksumuistutuksen: avoin pääoma + viivästyskorko +
+  muistutusmaksu, omana PDF:nään ja sähköpostina.
+- **Korkoa ei arvata.** Viivästyskorko on Suomen Pankin viitekorko + 7 (kuluttaja) tai + 8
+  (yritys) prosenttiyksikköä, ja viitekorko vaihtuu puolivuosittain. Sovellus ei kovakoodaa
+  sitä: syötä korko Asetuksissa, muuten korkoa ei peritä lainkaan.
+- Korko lasketaan eräpäivää seuraavasta päivästä, todellisilta päiviltä, 365 päivän vuodella.
+- Muistutus toistaa alkuperäisen viitenumeron, joten maksu kohdistuu edelleen oikealle laskulle.
+- Muistutuksesta tallennetaan mitä sinä päivänä vaadittiin, joten summa on jälkikäteen
+  todennettavissa. `/api/invoices/overdue` listaa työjonon: myöhässä olevat, pahin ensin.
+
+## Kirjanpidon lukitus
+
+- Asetuksissa voi sulkea kaudet valittuun kuukauteen asti. Sen jälkeen kyseisille kausille ei voi
+  lisätä, muuttaa **eikä poistaa** kuitteja, tiliotteita, myynti- tai ostolaskuja, maksuja eikä
+  kuukausisaldoja — poistaminen muuttaa jo annettua ALV-ilmoitusta yhtä paljon kuin muokkaus.
+- Pankkikohdistus ei kaadu lukkoon: lukitulle kaudelle osuva viitenumero-osuma ohitetaan ja
+  raportoidaan (`skippedLocked`), muut kohdistuvat normaalisti.
+- Lukituksen voi avata uudelleen — korjaus on joskus pakko tehdä — mutta se on tietoinen teko.
+
 ## Raportit ja viennit
 
 - `/raportit`: tuloslaskelma kuukausittain, menot ja tulot kategorioittain, netto ja brutto.

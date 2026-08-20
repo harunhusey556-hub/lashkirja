@@ -16,6 +16,18 @@ import {
 import { formatDate, formatEur, parseFinnishNumber } from "@/lib/format";
 import { formatReference } from "@/lib/finnish-reference";
 
+interface ReminderPreview {
+  level: number;
+  daysLate: number;
+  open: number;
+  interest: number;
+  fee: number;
+  total: number;
+  dueDate: string;
+  recipient: string | null;
+  previousReminders: Array<{ level: number; sentAt: string; total: number }>;
+}
+
 interface Invoice {
   id: string;
   number: number;
@@ -69,6 +81,8 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
   const [paymentDate, setPaymentDate] = useState(new Date().toISOString().slice(0, 10));
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [sending, setSending] = useState(false);
+  const [reminder, setReminder] = useState<ReminderPreview | null>(null);
+  const [remindingBusy, setRemindingBusy] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -77,6 +91,22 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
       setInvoice(data.invoice);
       setPaymentAmount(String(data.invoice.open > 0 ? data.invoice.open : "").replace(".", ","));
       setState("ready");
+
+      // The reminder preview only exists for an invoice that is genuinely
+      // overdue; a 409 here is the expected answer, not an error to show.
+      if (data.invoice.displayStatus === "overdue") {
+        try {
+          const preview = await apiFetch(`/api/invoices/${id}/reminders`, {
+            credentials: "include",
+          });
+          const previewData = await readJson<{ reminder: ReminderPreview }>(preview, "");
+          setReminder(previewData.reminder);
+        } catch {
+          setReminder(null);
+        }
+      } else {
+        setReminder(null);
+      }
     } catch (error) {
       if (isUnauthorized(error)) {
         redirectToLogin();
@@ -168,6 +198,31 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
       setMessage(errorMessage(error, "Lähetys epäonnistui"));
     } finally {
       setSending(false);
+    }
+  }
+
+  async function sendReminder() {
+    setRemindingBusy(true);
+    setMessage(null);
+    try {
+      const response = await apiFetch(`/api/invoices/${id}/reminders`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      const result = await readJson<{ sentTo: string; reminder: { level: number } }>(
+        response,
+        "Muistutuksen lähetys epäonnistui"
+      );
+      setMessage(
+        `Maksumuistutus ${result.reminder.level} lähetettiin osoitteeseen ${result.sentTo}.`
+      );
+      await load();
+    } catch (error) {
+      setMessage(errorMessage(error, "Muistutuksen lähetys epäonnistui"));
+    } finally {
+      setRemindingBusy(false);
     }
   }
 
@@ -379,6 +434,70 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
                       Lisää
                     </button>
                   </div>
+                </div>
+              )}
+
+              {reminder && (
+                <div className="space-y-3 border-t border-warm-gray-light/30 pt-4">
+                  <div>
+                    <p className="text-sm font-medium text-charcoal">Maksumuistutus</p>
+                    <p className="text-xs text-warm-gray">
+                      Myöhässä {reminder.daysLate} päivää · muistutus {reminder.level}
+                    </p>
+                  </div>
+
+                  <div className="space-y-1 text-sm">
+                    <div className="flex justify-between text-warm-gray">
+                      <span>Avoin pääoma</span>
+                      <span>{formatEur(reminder.open)}</span>
+                    </div>
+                    {reminder.interest > 0 && (
+                      <div className="flex justify-between text-warm-gray">
+                        <span>Viivästyskorko</span>
+                        <span>{formatEur(reminder.interest)}</span>
+                      </div>
+                    )}
+                    {reminder.fee > 0 && (
+                      <div className="flex justify-between text-warm-gray">
+                        <span>Muistutusmaksu</span>
+                        <span>{formatEur(reminder.fee)}</span>
+                      </div>
+                    )}
+                    <div className="flex justify-between font-semibold text-charcoal">
+                      <span>Maksettava yhteensä</span>
+                      <span>{formatEur(reminder.total)}</span>
+                    </div>
+                  </div>
+
+                  <div className="flex flex-wrap gap-2">
+                    <a
+                      href={`/api/invoices/${invoice.id}/reminders/pdf`}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="px-4 py-2.5 rounded-xl border border-warm-gray-light/60 text-sm font-medium text-charcoal"
+                    >
+                      Avaa muistutus
+                    </a>
+                    <button
+                      type="button"
+                      onClick={() => void sendReminder()}
+                      disabled={remindingBusy || busy}
+                      className="px-4 py-2.5 rounded-xl bg-accent text-white text-sm font-medium disabled:opacity-50"
+                    >
+                      {remindingBusy ? "Lähetetään…" : "Lähetä maksumuistutus"}
+                    </button>
+                  </div>
+
+                  {reminder.previousReminders.length > 0 && (
+                    <ul className="space-y-1 text-xs text-warm-gray">
+                      {reminder.previousReminders.map((previous) => (
+                        <li key={`${previous.level}-${previous.sentAt}`}>
+                          Muistutus {previous.level} · {formatDate(previous.sentAt.slice(0, 10))} ·{" "}
+                          {formatEur(previous.total)}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
                 </div>
               )}
 

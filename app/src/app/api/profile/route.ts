@@ -4,6 +4,7 @@ import { prisma } from "@/lib/db";
 import { requireSession } from "@/lib/session";
 import { isValidIban, normalizeIban } from "@/lib/iban";
 import { isValidBusinessId, normalizeBusinessId } from "@/lib/finnish-reference";
+import { updateReminderSettings } from "@/lib/invoice-reminders";
 
 const patchSchema = z.object({
   firstName: z.string().min(1).optional(),
@@ -22,9 +23,15 @@ const patchSchema = z.object({
   invoiceIban: z.string().trim().max(42).nullish(),
   invoiceBic: z.string().trim().max(11).nullish(),
   invoiceTerms: z.string().trim().max(1000).nullish(),
+  // Collection settings; validated by updateReminderSettings so the rules live
+  // in one place rather than being restated here.
+  lateInterestPercent: z.number().finite().nullable().optional(),
+  reminderFee: z.number().finite().optional(),
 });
 
 const SELLER_SELECT = {
+  lateInterestPercent: true,
+  reminderFeeCents: true,
   businessName: true,
   businessId: true,
   addressStreet: true,
@@ -75,7 +82,12 @@ export async function PATCH(req: NextRequest) {
     return NextResponse.json({ error: "Virheellinen pyyntö" }, { status: 400 });
   }
 
-  const data = { ...parsed.data };
+  const { lateInterestPercent, reminderFee, ...data } = parsed.data;
+
+  if (lateInterestPercent !== undefined || reminderFee !== undefined) {
+    await updateReminderSettings(session.userId, { lateInterestPercent, reminderFee });
+  }
+
   // An IBAN or Y-tunnus that fails its check digit must never reach an invoice.
   if (data.invoiceIban) {
     const iban = normalizeIban(data.invoiceIban);

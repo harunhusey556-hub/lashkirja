@@ -6,6 +6,8 @@ import { getStatementForUser } from "@/lib/statement-api";
 import { removeUserUpload } from "@/lib/storage";
 import * as path from "path";
 
+import { assertMonthOpen } from "@/lib/period-lock";
+import { withErrorHandler } from "@/lib/api-errors";
 const patchSchema = z
   .object({
     periodMonth: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/, "Muoto: YYYY-MM").optional(),
@@ -38,10 +40,10 @@ export async function GET(
   return NextResponse.json({ statement });
 }
 
-export async function PATCH(
+export const PATCH = withErrorHandler(async (
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
-) {
+) => {
   const session = await requireSession(req);
   if (!session) {
     return NextResponse.json({ error: "Ei kirjautunut" }, { status: 401 });
@@ -64,6 +66,13 @@ export async function PATCH(
       { error: "Tiliotetta ei löytynyt" },
       { status: 404 }
     );
+  }
+
+  if (statement.periodMonth) {
+    await assertMonthOpen(session.userId, statement.periodMonth);
+  }
+  if (parsed.data.periodMonth) {
+    await assertMonthOpen(session.userId, parsed.data.periodMonth);
   }
 
   if (parsed.data.bankAccountId) {
@@ -91,12 +100,12 @@ export async function PATCH(
   const updated = await prisma.statement.update({ where: { id }, data });
 
   return NextResponse.json({ ok: true, statement: updated });
-}
+});
 
-export async function DELETE(
+export const DELETE = withErrorHandler(async (
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
-) {
+) => {
   const session = await requireSession(req);
   if (!session) {
     return NextResponse.json({ error: "Ei kirjautunut" }, { status: 401 });
@@ -113,6 +122,10 @@ export async function DELETE(
     );
   }
 
+  if (statement.periodMonth) {
+    await assertMonthOpen(session.userId, statement.periodMonth);
+  }
+
   // Transactions are removed via onDelete: Cascade
   await prisma.statement.delete({ where: { id } });
 
@@ -125,4 +138,4 @@ export async function DELETE(
   }
 
   return NextResponse.json({ ok: true });
-}
+});

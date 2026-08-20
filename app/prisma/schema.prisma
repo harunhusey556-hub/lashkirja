@@ -29,6 +29,14 @@ model User {
   invoiceIban       String?
   invoiceBic        String?
   invoiceTerms      String?
+  // Late payment interest the user is entitled to charge (annual %). Null
+  // means "do not charge": the Bank of Finland reference rate changes twice a
+  // year, so a default baked into the app would be wrong half the time.
+  lateInterestPercent Float?
+  reminderFeeCents    Int     @default(500)
+  /// Months up to and including this one are closed; nothing dated inside
+  /// them may be created, edited or deleted. Format "YYYY-MM".
+  booksLockedThrough  String?
   createdAt     DateTime    @default(now())
   receipts      Receipt[]
   statements    Statement[]
@@ -303,8 +311,9 @@ model SalesInvoice {
   createdAt  DateTime  @default(now())
   updatedAt  DateTime  @updatedAt
 
-  lines    InvoiceLine[]
-  payments InvoicePayment[]
+  lines     InvoiceLine[]
+  payments  InvoicePayment[]
+  reminders InvoiceReminder[]
 
   @@unique([userId, number])
   @@unique([userId, reference])
@@ -392,4 +401,25 @@ model PurchasePayment {
   createdAt         DateTime        @default(now())
 
   @@index([purchaseInvoiceId])
+}
+
+// A payment reminder that was actually sent. Stored because what was demanded
+// - principal, interest and fee on that day - has to stay reconstructible.
+model InvoiceReminder {
+  id                String       @id @default(uuid())
+  invoiceId         String
+  invoice           SalesInvoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  level             Int          @default(1)
+  sentAt            DateTime     @default(now())
+  sentTo            String?
+  /// Due date printed on the reminder itself, not the invoice's own.
+  dueDate           DateTime
+  openCents         Int
+  interestCents     Int
+  feeCents          Int
+  totalCents        Int
+  annualRatePercent Float?
+  daysLate          Int
+
+  @@index([invoiceId, sentAt])
 }

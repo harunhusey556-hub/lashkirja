@@ -25,6 +25,8 @@ import { autoGenerateIncomeReceipts } from "@/lib/income-automation";
 import { resolveAccountForImport } from "@/lib/bank-accounts";
 import { extractIbans } from "@/lib/iban";
 
+import { assertMonthOpen } from "@/lib/period-lock";
+import { AppError } from "@/lib/api-errors";
 function publicTransaction<T extends { amountCents: number }>(tx: T) {
   const { amountCents, ...rest } = tx;
   return { ...rest, amount: centsToEuros(amountCents) };
@@ -119,6 +121,8 @@ export async function POST(req: NextRequest) {
     const periodMonth =
       [...monthCounts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ||
       new Date().toISOString().slice(0, 7);
+
+    await assertMonthOpen(userId, periodMonth);
 
     // File the upload under a bank account: an explicit choice from the form
     // wins, then an IBAN found inside the file, then the default account.
@@ -219,6 +223,13 @@ export async function POST(req: NextRequest) {
     }
     if (e instanceof UploadValidationError) {
       return NextResponse.json({ error: e.message }, { status: e.status });
+    }
+    // A closed period is a deliberate refusal, not a server fault.
+    if (e instanceof AppError) {
+      return NextResponse.json(
+        { error: { code: e.code, message: e.message } },
+        { status: e.statusCode }
+      );
     }
     console.error("Statement upload error:", e);
     return NextResponse.json(

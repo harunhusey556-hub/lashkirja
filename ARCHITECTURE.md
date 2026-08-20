@@ -232,3 +232,43 @@ its .afm metric files from node_modules at runtime, and bundling it made every
 PDF request answer 500 in a production build while passing in tests. The
 Playwright suite is what caught it — a reminder that unbundled integration
 tests cannot see build-time packaging faults.
+
+## 11. Reminders and closed books (added 2026-08-20)
+
+### Late interest is configuration, not a constant
+
+`lib/late-interest.ts` computes interest from a rate the user stores, never
+from a rate baked into the app: Finnish late interest is the Bank of Finland
+reference rate plus a statutory margin, and that reference rate changes every
+six months. With no rate configured, no interest is charged at all — a
+deliberately visible gap rather than a plausible wrong number. Interest runs
+from the day after the due date, actual days over 365.
+
+`lib/invoice-reminders.ts` refuses to produce a reminder unless the invoice is
+sent, unpaid and actually overdue, and stores what was demanded on the day it
+was sent (`InvoiceReminder`), so the figure stays reconstructible. The row is
+written only after the mail server accepts the message.
+
+### Closed books
+
+`User.booksLockedThrough` is the last closed month. `lib/period-lock.ts`
+exposes `assertPeriodOpen` / `assertMonthOpen`, called from the service layer
+so every route inherits the rule:
+
+| Domain | Guarded operations |
+|---|---|
+| Sales invoices | create, edit, status change, delete, payment add/remove |
+| Purchase invoices | create, edit, delete, payment add/remove |
+| Receipts | save, edit, delete, batch delete |
+| Statements | upload, period change, delete |
+| Bank balances | month-end balance set/clear |
+
+Deletion is guarded as strictly as editing: removing a receipt changes a filed
+return exactly as much as changing one. Bank reconciliation is the one place
+that degrades instead of failing — a reference hit inside a closed period is
+skipped and reported in `skippedLocked`, so one locked month cannot stop the
+rest of a matching run.
+
+Wrapping `statements/[id]` in `withErrorHandler` was part of this: those
+handlers returned raw responses, so a thrown domain error would have surfaced
+as a 500 instead of the 409 it is.

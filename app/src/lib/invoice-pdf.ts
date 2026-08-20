@@ -250,3 +250,152 @@ export function renderInvoicePdf(data: InvoicePdfData): Promise<Buffer> {
     doc.end();
   });
 }
+
+/* ------------------------------------------------------------------ */
+/* Payment reminder                                                    */
+/* ------------------------------------------------------------------ */
+
+export interface ReminderPdfData {
+  level: number;
+  invoiceNumber: number;
+  reference: string;
+  originalIssueDate: string;
+  originalDueDate: string;
+  /** New due date printed on the reminder. */
+  dueDate: string;
+  daysLate: number;
+  openCents: number;
+  interestCents: number;
+  feeCents: number;
+  totalCents: number;
+  annualRatePercent: number | null;
+  seller: InvoicePdfSeller;
+  customer: InvoicePdfCustomer;
+  notes?: string | null;
+}
+
+/**
+ * The reminder repeats the original invoice's reference on purpose: the
+ * customer pays the same reference, so an incoming payment still reconciles
+ * automatically against the invoice it belongs to.
+ */
+export function renderReminderPdf(data: ReminderPdfData): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    const doc = new PDFDocument({ size: "A4", margin: 48 });
+    const chunks: Buffer[] = [];
+    doc.on("data", (chunk: Buffer) => chunks.push(chunk));
+    doc.on("end", () => resolve(Buffer.concat(chunks)));
+    doc.on("error", reject);
+
+    const left = doc.page.margins.left;
+    const right = doc.page.width - doc.page.margins.right;
+    const width = right - left;
+
+    doc.font("Helvetica-Bold").fontSize(16).text(data.seller.name, left, 48);
+    doc.font("Helvetica").fontSize(9);
+    for (const line of addressLines(data.seller)) doc.text(line);
+    if (data.seller.businessId) doc.text(`Y-tunnus ${data.seller.businessId}`);
+    if (data.seller.email) doc.text(data.seller.email);
+    if (data.seller.phone) doc.text(data.seller.phone);
+
+    const title = data.level > 1 ? `MAKSUMUISTUTUS ${data.level}` : "MAKSUMUISTUTUS";
+    doc.font("Helvetica-Bold").fontSize(20).text(title, left, 48, { width, align: "right" });
+    doc.font("Helvetica").fontSize(9);
+    let headerY = 74;
+    for (const [label, value] of [
+      ["Koskee laskua", String(data.invoiceNumber)],
+      ["Laskun päivä", fiDate(data.originalIssueDate)],
+      ["Alkuperäinen eräpäivä", fiDate(data.originalDueDate)],
+      ["Maksettava viimeistään", fiDate(data.dueDate)],
+      ["Viitenumero", formatReference(data.reference)],
+    ] as Array<[string, string]>) {
+      doc.text(`${label}: ${value}`, left, headerY, { width, align: "right" });
+      headerY += 13;
+    }
+
+    let y = Math.max(doc.y, headerY) + 24;
+    doc.font("Helvetica-Bold").fontSize(10).text("Vastaanottaja", left, y);
+    doc.font("Helvetica").fontSize(10).text(data.customer.name);
+    doc.fontSize(9);
+    for (const line of addressLines(data.customer)) doc.text(line);
+    if (data.customer.businessId) doc.text(`Y-tunnus ${data.customer.businessId}`);
+
+    y = doc.y + 20;
+    doc
+      .fontSize(10)
+      .text(
+        `Laskun ${data.invoiceNumber} eräpäivä on ylittynyt ${data.daysLate} päivällä. ` +
+          "Ellei maksu ole jo matkalla, pyydämme suorittamaan sen alla olevilla tiedoilla.",
+        left,
+        y,
+        { width }
+      );
+
+    y = doc.y + 18;
+    const totalsLeft = left + width * 0.45;
+    const totalsWidth = width * 0.55;
+    const row = (label: string, value: string, bold = false) => {
+      doc.font(bold ? "Helvetica-Bold" : "Helvetica").fontSize(bold ? 11 : 9);
+      doc.text(label, totalsLeft, y, { width: totalsWidth * 0.6 });
+      doc.text(value, totalsLeft + totalsWidth * 0.6, y, {
+        width: totalsWidth * 0.4,
+        align: "right",
+      });
+      y += bold ? 18 : 13;
+    };
+
+    row("Avoin pääoma", eur(data.openCents));
+    if (data.interestCents > 0) {
+      const rate = data.annualRatePercent
+        ? ` (${String(data.annualRatePercent).replace(".", ",")} % / v, ${data.daysLate} pv)`
+        : "";
+      row(`Viivästyskorko${rate}`, eur(data.interestCents));
+    }
+    if (data.feeCents > 0) row("Muistutusmaksu", eur(data.feeCents));
+    row("Maksettava yhteensä", eur(data.totalCents), true);
+
+    y += 16;
+    doc.font("Helvetica-Bold").fontSize(10).text("Maksutiedot", left, y);
+    y = doc.y + 4;
+    doc.font("Helvetica").fontSize(9);
+    if (data.seller.iban) {
+      doc.text(`Tilinumero (IBAN): ${formatIban(data.seller.iban)}`, left, y);
+      y = doc.y;
+    }
+    if (data.seller.bic) {
+      doc.text(`BIC: ${data.seller.bic}`, left, y);
+      y = doc.y;
+    }
+    doc.text(`Viitenumero: ${formatReference(data.reference)}`, left, y);
+    y = doc.y;
+    doc.text(`Eräpäivä: ${fiDate(data.dueDate)}`, left, y);
+    y = doc.y;
+    doc.text(`Summa: ${eur(data.totalCents)}`, left, y);
+    y = doc.y + 8;
+
+    const barcode = data.seller.iban
+      ? buildBankBarcode({
+          iban: data.seller.iban,
+          reference: data.reference,
+          amountCents: data.totalCents,
+          dueDate: `${data.dueDate}T00:00:00.000Z`,
+        })
+      : null;
+    if (barcode) {
+      doc.fontSize(8).fillColor("#666666").text("Virtuaaliviivakoodi", left, y);
+      doc
+        .font("Courier")
+        .fontSize(9)
+        .fillColor("#000000")
+        .text(formatBankBarcode(barcode), left, doc.y);
+      doc.font("Helvetica");
+      y = doc.y + 8;
+    }
+
+    if (data.notes) {
+      doc.fontSize(9).fillColor("#000000").text(data.notes, left, y + 6, { width });
+    }
+
+    doc.end();
+  });
+}

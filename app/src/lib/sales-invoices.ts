@@ -24,6 +24,7 @@ import {
   type InvoiceStatus,
 } from "./invoices";
 import { requireActiveCustomer } from "./customers";
+import { assertPeriodOpen, PeriodLockedError } from "./period-lock";
 import type { InvoicePdfData } from "./invoice-pdf";
 
 export interface InvoiceLinePayload {
@@ -250,6 +251,7 @@ export async function createInvoice(
   const totals = computeInvoiceTotals(lineInputs);
 
   const issueDate = isoDateToUtc(input.issueDate);
+  await assertPeriodOpen(userId, [issueDate]);
   let dueDate: Date;
   try {
     dueDate = input.dueDate
@@ -336,6 +338,11 @@ export async function updateInvoice(
   });
   if (!existing) throw new NotFoundError("Laskua ei löytynyt.");
 
+  await assertPeriodOpen(userId, [
+    existing.issueDate,
+    input.issueDate ? isoDateToUtc(input.issueDate) : null,
+  ]);
+
   const isDraft = existing.status === "draft";
   if (!isDraft && (input.lines || input.customerId || input.issueDate)) {
     throw new AppError(
@@ -394,9 +401,10 @@ export async function updateInvoice(
 export async function deleteInvoice(userId: string, id: string): Promise<void> {
   const existing = await prisma.salesInvoice.findFirst({
     where: { id, userId },
-    select: { id: true, status: true },
+    select: { id: true, status: true, issueDate: true },
   });
   if (!existing) throw new NotFoundError("Laskua ei löytynyt.");
+  await assertPeriodOpen(userId, [existing.issueDate]);
   if (existing.status !== "draft") {
     throw new AppError(
       "Vain luonnoksen voi poistaa. Lähetetty lasku hyvitetään.",
@@ -417,6 +425,8 @@ export async function setInvoiceStatus(
     include: { payments: { select: { amountCents: true } }, lines: { select: { id: true } } },
   });
   if (!existing) throw new NotFoundError("Laskua ei löytynyt.");
+
+  await assertPeriodOpen(userId, [existing.issueDate]);
 
   const current = existing.status as InvoiceStatus;
   if (!canTransition(current, target)) {
@@ -478,6 +488,8 @@ export async function recordPayment(
     throw new AppError("Hyvitetylle laskulle ei voi kirjata maksua.", "INVOICE_CREDITED", 409);
   }
 
+  await assertPeriodOpen(userId, [isoDateToUtc(input.paidDate)]);
+
   const amountCents = eurosToCents(input.amount);
   if (amountCents === 0) throw new ValidationError("Maksun summa ei voi olla nolla.");
 
@@ -533,6 +545,13 @@ export async function removePayment(
     select: { id: true, status: true },
   });
   if (!invoice) throw new NotFoundError("Laskua ei löytynyt.");
+
+  const payment = await prisma.invoicePayment.findFirst({
+    where: { id: paymentId, invoiceId },
+    select: { paidDate: true },
+  });
+  if (!payment) throw new NotFoundError("Maksua ei löytynyt.");
+  await assertPeriodOpen(userId, [payment.paidDate]);
 
   const deleted = await prisma.invoicePayment.deleteMany({
     where: { id: paymentId, invoiceId },
@@ -624,6 +643,8 @@ export async function listInvoices(
 
 export interface BankMatchResult {
   applied: Array<{ invoiceId: string; invoiceNumber: number; transactionId: string; amount: number }>;
+  /** Reference hits that fall inside a closed period and were left alone. */
+  skippedLocked: Array<{ invoiceId: string; invoiceNumber: number; transactionId: string }>;
   suggestions: Array<{
     invoiceId: string;
     invoiceNumber: number;
@@ -648,7 +669,7 @@ export async function matchInvoicePaymentsFromBank(
     where: { userId, status: "sent" },
     include: { payments: { select: { amountCents: true } } },
   });
-  if (openInvoices.length === 0) return { applied: [], suggestions: [] };
+  if (openInvoices.length === 0) return { applied: [], suggestions: [], skippedLocked: [] };
 
   const incoming = await prisma.transaction.findMany({
     where: {
@@ -662,6 +683,7 @@ export async function matchInvoicePaymentsFromBank(
   const byReference = new Map(openInvoices.map((invoice) => [invoice.reference, invoice]));
   const applied: BankMatchResult["applied"] = [];
   const suggestions: BankMatchResult["suggestions"] = [];
+  const skippedLocked: BankMatchResult["skippedLocked"] = [];
   const consumed = new Set<string>();
 
   for (const transaction of incoming) {
@@ -672,13 +694,27 @@ export async function matchInvoicePaymentsFromBank(
     const invoice = candidates.map((value) => byReference.get(value)).find(Boolean);
     if (!invoice) continue;
 
-    await recordPayment(userId, invoice.id, {
-      amount: centsToEuros(transaction.amountCents),
-      paidDate: (transaction.date ?? now).toISOString().slice(0, 10),
-      transactionId: transaction.id,
-      source: "bank",
-      note: "Kohdistettu viitenumerolla",
-    });
+    try {
+      await recordPayment(userId, invoice.id, {
+        amount: centsToEuros(transaction.amountCents),
+        paidDate: (transaction.date ?? now).toISOString().slice(0, 10),
+        transactionId: transaction.id,
+        source: "bank",
+        note: "Kohdistettu viitenumerolla",
+      });
+    } catch (error) {
+      // A closed period stops this one payment, not the whole run.
+      if (error instanceof PeriodLockedError) {
+        skippedLocked.push({
+          invoiceId: invoice.id,
+          invoiceNumber: invoice.number,
+          transactionId: transaction.id,
+        });
+        consumed.add(transaction.id);
+        continue;
+      }
+      throw error;
+    }
     applied.push({
       invoiceId: invoice.id,
       invoiceNumber: invoice.number,
@@ -709,7 +745,7 @@ export async function matchInvoicePaymentsFromBank(
     }
   }
 
-  return { applied, suggestions };
+  return { applied, suggestions, skippedLocked };
 }
 
 /* ------------------------------------------------------------------ */

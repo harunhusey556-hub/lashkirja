@@ -13,6 +13,7 @@ import { isoDateToUtc } from "./validation";
 import { isValidBusinessId, isValidReferenceNumber, normalizeBusinessId, normalizeReference } from "./finnish-reference";
 import { isValidIban, normalizeIban } from "./iban";
 import { buildAging, displayStatus, type AgingReport } from "./invoices";
+import { assertPeriodOpen, PeriodLockedError } from "./period-lock";
 
 export type PurchaseStatus = "open" | "paid" | "cancelled";
 
@@ -208,6 +209,8 @@ export async function createPurchaseInvoice(
     throw new ValidationError("Eräpäivä ei voi olla ennen laskun päivää.");
   }
 
+  await assertPeriodOpen(userId, [issueDate]);
+
   const { businessId, iban } = prepareSupplier(input);
   const { grossCents, vatCents, netCents } = amounts(input.gross, input.vat);
   if (input.receiptId) await assertReceiptAvailable(userId, input.receiptId);
@@ -244,6 +247,10 @@ export async function updatePurchaseInvoice(
     include: purchaseInclude,
   });
   if (!existing) throw new NotFoundError("Ostolaskua ei löytynyt.");
+  await assertPeriodOpen(userId, [
+    existing.issueDate,
+    input.issueDate ? isoDateToUtc(input.issueDate) : null,
+  ]);
 
   const data: Record<string, unknown> = {};
   if (input.supplierName !== undefined) {
@@ -329,6 +336,7 @@ export async function deletePurchaseInvoice(userId: string, id: string): Promise
     include: { payments: { select: { id: true } } },
   });
   if (!existing) throw new NotFoundError("Ostolaskua ei löytynyt.");
+  await assertPeriodOpen(userId, [existing.issueDate]);
   if (existing.payments.length > 0) {
     throw new AppError(
       "Laskulla on maksuja. Poista maksut ensin tai mitätöi lasku.",
@@ -372,6 +380,8 @@ export async function recordPurchasePayment(
   if (invoice.status === "cancelled") {
     throw new AppError("Mitätöidylle laskulle ei voi kirjata maksua.", "INVOICE_CANCELLED", 409);
   }
+
+  await assertPeriodOpen(userId, [isoDateToUtc(input.paidDate)]);
 
   const amountCents = eurosToCents(input.amount);
   if (amountCents <= 0) throw new ValidationError("Maksun summan on oltava positiivinen.");
@@ -428,6 +438,13 @@ export async function removePurchasePayment(
     select: { id: true, status: true, grossCents: true },
   });
   if (!invoice) throw new NotFoundError("Ostolaskua ei löytynyt.");
+
+  const payment = await prisma.purchasePayment.findFirst({
+    where: { id: paymentId, purchaseInvoiceId: invoiceId },
+    select: { paidDate: true },
+  });
+  if (!payment) throw new NotFoundError("Maksua ei löytynyt.");
+  await assertPeriodOpen(userId, [payment.paidDate]);
 
   const deleted = await prisma.purchasePayment.deleteMany({
     where: { id: paymentId, purchaseInvoiceId: invoiceId },
@@ -516,6 +533,8 @@ export async function listPurchaseInvoices(
 
 export interface PurchaseMatchResult {
   applied: Array<{ invoiceId: string; supplierName: string; transactionId: string; amount: number }>;
+  /** Reference hits that fall inside a closed period and were left alone. */
+  skippedLocked: Array<{ invoiceId: string; supplierName: string; transactionId: string }>;
   suggestions: Array<{
     invoiceId: string;
     supplierName: string;
@@ -538,7 +557,7 @@ export async function matchPurchasePaymentsFromBank(
     where: { userId, status: "open" },
     include: { payments: { select: { amountCents: true } } },
   });
-  if (openInvoices.length === 0) return { applied: [], suggestions: [] };
+  if (openInvoices.length === 0) return { applied: [], suggestions: [], skippedLocked: [] };
 
   const outgoing = await prisma.transaction.findMany({
     where: { statement: { userId }, amountCents: { lt: 0 }, purchasePayment: null },
@@ -552,6 +571,7 @@ export async function matchPurchasePaymentsFromBank(
   );
   const applied: PurchaseMatchResult["applied"] = [];
   const suggestions: PurchaseMatchResult["suggestions"] = [];
+  const skippedLocked: PurchaseMatchResult["skippedLocked"] = [];
   const consumed = new Set<string>();
 
   for (const transaction of outgoing) {
@@ -562,13 +582,27 @@ export async function matchPurchasePaymentsFromBank(
     if (!invoice) continue;
 
     const amount = centsToEuros(Math.abs(transaction.amountCents));
-    await recordPurchasePayment(userId, invoice.id, {
-      amount,
-      paidDate: (transaction.date ?? now).toISOString().slice(0, 10),
-      transactionId: transaction.id,
-      source: "bank",
-      note: "Kohdistettu viitenumerolla",
-    });
+    try {
+      await recordPurchasePayment(userId, invoice.id, {
+        amount,
+        paidDate: (transaction.date ?? now).toISOString().slice(0, 10),
+        transactionId: transaction.id,
+        source: "bank",
+        note: "Kohdistettu viitenumerolla",
+      });
+    } catch (error) {
+      // A closed period stops this one payment, not the whole run.
+      if (error instanceof PeriodLockedError) {
+        skippedLocked.push({
+          invoiceId: invoice.id,
+          supplierName: invoice.supplierName,
+          transactionId: transaction.id,
+        });
+        consumed.add(transaction.id);
+        continue;
+      }
+      throw error;
+    }
     applied.push({
       invoiceId: invoice.id,
       supplierName: invoice.supplierName,
@@ -599,5 +633,5 @@ export async function matchPurchasePaymentsFromBank(
     }
   }
 
-  return { applied, suggestions };
+  return { applied, suggestions, skippedLocked };
 }

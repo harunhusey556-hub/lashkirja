@@ -171,3 +171,36 @@ test("responses include the launch security baseline", async ({ request }) => {
   expect(response.headers()["x-content-type-options"]).toBe("nosniff");
   expect(response.headers()["x-frame-options"]).toBe("DENY");
 });
+
+// Runs last: it closes the books and reopens them, and a lock left behind
+// would break every earlier test's assumptions.
+test("closing the books makes an earlier period read-only", async ({ page }) => {
+  await login(page);
+  await page.goto("/asetukset");
+
+  const lockSelect = page.getByLabel("Lukitse kaudet tähän kuukauteen asti");
+  const currentMonth = await lockSelect.locator("option").nth(1).getAttribute("value");
+  await lockSelect.selectOption(currentMonth!);
+  await page.getByRole("button", { name: "Tallenna", exact: true }).click();
+  await expect(page.getByText(/Kirjanpito lukittu/)).toBeVisible();
+
+  await page.goto("/asiakkaat");
+  await page.getByRole("main").getByRole("button", { name: "Lisää", exact: true }).click();
+  await page.getByLabel("Nimi").fill("Lukko Asiakas");
+  await page.getByRole("button", { name: "Lisää asiakas" }).click();
+
+  await page.goto("/laskut");
+  await page.getByRole("button", { name: "Uusi lasku" }).click();
+  await page.getByLabel("Asiakas").selectOption({ label: "Lukko Asiakas" });
+  await page.getByLabel("Rivin 1 kuvaus").fill("Lukittu kausi");
+  await page.getByLabel("Rivin 1 hinta").fill("50");
+  // Date the invoice inside the closed month.
+  await page.getByLabel("Laskun päivä").fill(`${currentMonth}-01`);
+  await page.getByRole("button", { name: "Luo lasku" }).click();
+
+  await expect(page.getByText(/lukittu/i)).toBeVisible();
+
+  await page.goto("/asetukset");
+  await page.getByRole("button", { name: "Avaa kirjanpito uudelleen" }).click();
+  await expect(page.getByText("Lukitus poistettu.")).toBeVisible();
+});

@@ -9,6 +9,7 @@ import {
 } from "@/lib/http-security";
 import { withErrorHandler, UnauthorizedError } from "@/lib/api-errors";
 
+import { assertPeriodOpen } from "@/lib/period-lock";
 const batchDeleteSchema = z.object({
   receiptIds: z.array(z.string()).min(1).max(50),
 });
@@ -35,8 +36,14 @@ export const POST = withErrorHandler(async (req: NextRequest) => {
       id: true,
       filePath: true,
       uploadId: true,
+      date: true,
     },
   });
+
+  await assertPeriodOpen(
+    session.userId!,
+    existingReceipts.map((receipt) => receipt.date)
+  );
 
   if (existingReceipts.length === 0) {
     return noStoreJson({ ok: true }); // None found that belong to user, just return OK

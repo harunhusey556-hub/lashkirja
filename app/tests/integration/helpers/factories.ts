@@ -129,3 +129,22 @@ export async function createReceipt(
     },
   });
 }
+
+export async function createUpload(
+  userId: string,
+  overrides: Partial<{ purpose: string; originalName: string }> = {}
+) {
+  const key = `${randomUUID()}.pdf`;
+  return prisma.upload.create({
+    data: {
+      userId,
+      purpose: overrides.purpose ?? "receipt",
+      storageKey: key,
+      originalName: overrides.originalName ?? "kuitti.pdf",
+      mimeType: "application/pdf",
+      sizeBytes: 1024,
+      sha256: randomUUID().replace(/-/g, ""),
+      expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
+    },
+  });
+}
