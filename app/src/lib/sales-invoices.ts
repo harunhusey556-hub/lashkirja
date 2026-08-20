@@ -24,6 +24,7 @@ import {
   type InvoiceStatus,
 } from "./invoices";
 import { requireActiveCustomer } from "./customers";
+import type { InvoicePdfData } from "./invoice-pdf";
 
 export interface InvoiceLinePayload {
   description: string;
@@ -709,4 +710,84 @@ export async function matchInvoicePaymentsFromBank(
   }
 
   return { applied, suggestions };
+}
+
+/* ------------------------------------------------------------------ */
+/* PDF                                                                 */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Assembles everything the PDF needs. The seller block comes from the user's
+ * own profile, so an incomplete profile produces a visibly incomplete invoice
+ * rather than a plausible-looking one with invented details.
+ */
+export async function buildInvoicePdfData(
+  userId: string,
+  invoiceId: string
+): Promise<InvoicePdfData> {
+  const invoice = await prisma.salesInvoice.findFirst({
+    where: { id: invoiceId, userId },
+    include: {
+      customer: true,
+      lines: { orderBy: { sortOrder: "asc" } },
+    },
+  });
+  if (!invoice) throw new NotFoundError("Laskua ei löytynyt.");
+
+  const user = await prisma.user.findUnique({ where: { id: userId } });
+  if (!user) throw new NotFoundError("Käyttäjää ei löytynyt.");
+
+  const totals = computeInvoiceTotals(
+    invoice.lines.map((line) => ({
+      quantityMilli: line.quantityMilli,
+      unitPriceCents: line.unitPriceCents,
+      vatRatePermille: line.vatRatePermille,
+    }))
+  );
+
+  return {
+    number: invoice.number,
+    reference: invoice.reference,
+    issueDate: invoice.issueDate.toISOString().slice(0, 10),
+    dueDate: invoice.dueDate.toISOString().slice(0, 10),
+    notes: invoice.notes,
+    netCents: invoice.netCents,
+    vatCents: invoice.vatCents,
+    grossCents: invoice.grossCents,
+    breakdown: totals.breakdown,
+    seller: {
+      name: user.businessName?.trim() || `${user.firstName} ${user.lastName}`.trim(),
+      businessId: user.businessId,
+      addressStreet: user.addressStreet,
+      addressPostalCode: user.addressPostalCode,
+      addressCity: user.addressCity,
+      email: user.email,
+      phone: user.phone,
+      iban: user.invoiceIban,
+      bic: user.invoiceBic,
+      terms: user.invoiceTerms,
+      vatRegistered: user.vatRegistered,
+    },
+    customer: {
+      name: invoice.customer.name,
+      businessId: invoice.customer.businessId,
+      email: invoice.customer.email,
+      addressStreet: invoice.customer.addressStreet,
+      addressPostalCode: invoice.customer.addressPostalCode,
+      addressCity: invoice.customer.addressCity,
+    },
+    lines: invoice.lines.map((line) => ({
+      description: line.description,
+      quantityMilli: line.quantityMilli,
+      unit: line.unit,
+      unitPriceCents: line.unitPriceCents,
+      vatRatePermille: line.vatRatePermille,
+      netCents: line.netCents,
+    })),
+  };
+}
+
+/** Filename used for downloads and email attachments. */
+export function invoicePdfFileName(number: number): string {
+  return `lasku-${String(number).padStart(4, "0")}.pdf`;
 }

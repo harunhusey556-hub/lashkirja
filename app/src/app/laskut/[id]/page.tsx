@@ -68,6 +68,7 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
   const [paymentAmount, setPaymentAmount] = useState("");
   const [paymentDate, setPaymentDate] = useState(new Date().toISOString().slice(0, 10));
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [sending, setSending] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -147,6 +148,26 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
       setMessage(errorMessage(error, "Maksun poisto epäonnistui"));
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function sendByEmail() {
+    setSending(true);
+    setMessage(null);
+    try {
+      const response = await apiFetch(`/api/invoices/${id}/send`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      const result = await readJson<{ sentTo: string }>(response, "Lähetys epäonnistui");
+      setMessage(`Lasku lähetettiin osoitteeseen ${result.sentTo}.`);
+      await load();
+    } catch (error) {
+      setMessage(errorMessage(error, "Lähetys epäonnistui"));
+    } finally {
+      setSending(false);
     }
   }
 
@@ -270,6 +291,24 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
             <section className="bg-white rounded-3xl border border-warm-gray-light/20 shadow-sm p-6 space-y-4">
               <p className="text-base font-medium text-charcoal">Toiminnot</p>
               <div className="flex flex-wrap gap-2">
+                <a
+                  href={`/api/invoices/${invoice.id}/pdf`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="px-4 py-2.5 rounded-xl border border-warm-gray-light/60 text-sm font-medium text-charcoal"
+                >
+                  Avaa PDF
+                </a>
+                {invoice.status !== "credited" && (
+                  <button
+                    type="button"
+                    onClick={() => void sendByEmail()}
+                    disabled={sending || busy}
+                    className="px-4 py-2.5 rounded-xl border border-warm-gray-light/60 text-sm font-medium disabled:opacity-50"
+                  >
+                    {sending ? "Lähetetään…" : "Lähetä sähköpostilla"}
+                  </button>
+                )}
                 {invoice.status === "draft" && (
                   <button
                     type="button"

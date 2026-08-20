@@ -58,7 +58,10 @@ const nextConfig: NextConfig = {
   turbopack: {
     root: path.resolve(__dirname),
   },
-  serverExternalPackages: ["pdf-parse", "read-excel-file"],
+  // pdfkit reads its .afm metric files from node_modules at runtime and
+  // nodemailer resolves transports dynamically; bundling either one turns
+  // every PDF request into a 500. Keep them external.
+  serverExternalPackages: ["pdf-parse", "read-excel-file", "pdfkit", "nodemailer"],
   async headers() {
     return [
       {

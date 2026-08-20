@@ -190,3 +190,45 @@ turned invoice validation into HTTP 500; `chmod` on a database directory the pro
 (for example `/tmp`) crashed every database-backed request; and the CSRF check compared the Origin
 header against `req.nextUrl.origin`, which under `next start` does not carry the real host and so
 rejected every same-origin form POST, login included.
+
+## 10. VAT sources, payables, invoice documents (added 2026-08-20)
+
+### One loader for the VAT period
+
+`lib/alv-period.ts` is the single place that decides what a VAT period is made
+of. Both `/api/alv` and the dashboard estimate call it, which is what stops the
+front page and the return from drifting apart.
+
+It also owns the double-counting rule: a receipt is excluded when the bank row
+it was drafted from (`sourceTransactionId`), or the bank row it is
+confirm-matched to, already settled a sales invoice. The exclusion is on
+identity, never on resemblance of amount or date.
+
+Sales invoices enter the return by issue date, `sent` and `paid` only. Drafts
+and credit notes stay out, and the credited count is reported so a missing
+figure is visible rather than mysterious.
+
+### Payables are deliberately outside the books
+
+`PurchaseInvoice` tracks what is owed. It does **not** feed the VAT return:
+receipts remain the only purchase-VAT source, so recording a supplier invoice
+and photographing its receipt cannot double-count. `receiptId` links the two.
+Two integration tests pin this boundary so a later change cannot quietly cross
+it.
+
+Receivables and payables age through the same `buildAging`; only the definition
+of "open" differs.
+
+### Invoice documents
+
+| Module | Responsibility |
+|---|---|
+| `lib/invoice-pdf.ts` | A4 invoice rendered with pdfkit: parties, lines, VAT breakdown per rate, payment block. |
+| `lib/bank-barcode.ts` | Finnish virtuaaliviivakoodi v4 (54 digits) plus a decoder used to verify what was encoded. Returns null for a foreign IBAN, an RF reference or an amount the format cannot carry. |
+| `lib/mailer.ts` | Sends through the IMAP account the user already connected. `MAIL_TRANSPORT=json` swaps in nodemailer's test transport so delivery is asserted without a mail server. |
+
+`pdfkit` and `nodemailer` are listed in `serverExternalPackages`: pdfkit reads
+its .afm metric files from node_modules at runtime, and bundling it made every
+PDF request answer 500 in a production build while passing in tests. The
+Playwright suite is what caught it — a reminder that unbundled integration
+tests cannot see build-time packaging faults.

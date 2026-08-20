@@ -29,6 +29,7 @@ npm run dev                  # käynnistä http://localhost:3000
 | `LLM_BASE_URL` | OpenAI-yhteensopiva API endpoint | `https://api.openai.com/v1` |
 | `LLM_API_KEY` | API-avain (tyhjä = OCR-varapolku) | – |
 | `LLM_MODEL` | Malli | `gpt-4o-mini` |
+| `MAIL_TRANSPORT` | `json` = testilähetys (ei avaa yhteyttä), muuten SMTP | – |
 
 ## Kuittien analyysi
 
@@ -67,6 +68,25 @@ Tuetut muodot:
 - **Maksujen kohdistus:** `Kohdista maksut` lukee tuodut tilitapahtumat ja merkitsee maksun
   automaattisesti vain, jos tapahtuma kantaa laskun viitenumeron. Pelkkä summaosuma jää
   ehdotukseksi eikä kirjaudu kirjanpitoon.
+
+## Ostolaskut
+
+- `/ostolaskut` seuraa mitä olet velkaa ja milloin: toimittaja, eräpäivä, osamaksut, ikäjakauma.
+- **Tarkoituksella pelkkä velkaseuranta.** ALV-raportti lasketaan edelleen kuiteista, joten sama
+  osto ei kirjaudu kahdesti. Kun kuitti saapuu, liitä se ostolaskuun (`receiptId`).
+- Maksujen kohdistus toimii kuten myynnissä: viitenumero-osuma kirjautuu automaattisesti,
+  pelkkä summaosuma jää ehdotukseksi.
+
+## Laskun PDF ja lähetys
+
+- `Avaa PDF` tuottaa laskun palvelimella (pdfkit), joten asiakkaan kappale, sähköpostin liite ja
+  arkistoitu tiedosto ovat samat tavut.
+- PDF:llä on myös **virtuaaliviivakoodi** (versio 4), jonka asiakas voi skannata pankkiin.
+  Koodi rakennetaan vain kelvollisesta suomalaisesta IBANista ja viitenumerosta — muuten se
+  jätetään pois eikä arvata.
+- `Lähetä sähköpostilla` käyttää samaa sähköpostitiliä, joka on jo yhdistetty kuittien hakua
+  varten. Lasku merkitään lähetetyksi vasta kun postipalvelin on hyväksynyt viestin.
+- Laskuttajan tiedot (nimi, Y-tunnus, osoite, IBAN, BIC, ehdot) syötetään Asetukset-sivulla.
 
 ## Raportit ja viennit
 

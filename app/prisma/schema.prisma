@@ -18,6 +18,17 @@ model User {
   vatPeriod     String      @default("month") // "month" | "quarter" | "year"
   onboarded     Boolean     @default(false)
   businessDetails String?
+  // Seller details printed on an invoice. Explicit columns rather than JSON:
+  // an invoice is a legal document, so these are validated and queryable.
+  businessName      String?
+  businessId        String? // Y-tunnus
+  addressStreet     String?
+  addressPostalCode String?
+  addressCity       String?
+  phone             String?
+  invoiceIban       String?
+  invoiceBic        String?
+  invoiceTerms      String?
   createdAt     DateTime    @default(now())
   receipts      Receipt[]
   statements    Statement[]
@@ -162,6 +173,11 @@ model MatchRejection {
 
 model ImapAccount {
   id             String    @id @default(uuid())
+  // Outgoing settings live with the account that already holds the password.
+  // Null means "derive from the IMAP host", which is right for the common
+  // providers (imap.gmail.com -> smtp.gmail.com).
+  smtpHost       String?
+  smtpPort       Int?
   userId         String
   user           User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   email          String

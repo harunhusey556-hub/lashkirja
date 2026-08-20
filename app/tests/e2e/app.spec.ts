@@ -103,6 +103,56 @@ test("invoice goes from draft to paid", async ({ page }) => {
   await expect(page.getByText("Avoinna")).toHaveCount(0);
 });
 
+test("a purchase invoice can be added and marked paid", async ({ page }) => {
+  await login(page);
+  await page.goto("/ostolaskut");
+
+  await page.getByRole("button", { name: "Uusi ostolasku" }).click();
+  await page.getByLabel("Toimittaja").fill("E2E Tukku");
+  await page.getByLabel("Summa (€)").fill("124,00");
+  await page.getByLabel("ALV (€)").fill("24,00");
+  await page.getByRole("button", { name: "Lisää ostolasku" }).click();
+
+  const card = page.getByRole("button", { name: /E2E Tukku/ });
+  await expect(card).toBeVisible();
+  await card.click();
+
+  await page.getByRole("button", { name: "Merkitse maksetuksi" }).click();
+  await page.getByRole("button", { name: "Maksetut" }).click();
+  await expect(page.getByText("E2E Tukku")).toBeVisible();
+  await expect(page.getByText("Maksettu").first()).toBeVisible();
+});
+
+test("an invoice can be downloaded as a PDF", async ({ page, context }) => {
+  await login(page);
+
+  await page.goto("/asiakkaat");
+  await page.getByRole("main").getByRole("button", { name: "Lisää", exact: true }).click();
+  await page.getByLabel("Nimi").fill("PDF Asiakas");
+  await page.getByRole("button", { name: "Lisää asiakas" }).click();
+
+  await page.goto("/laskut");
+  await page.getByRole("button", { name: "Uusi lasku" }).click();
+  await page.getByLabel("Asiakas").selectOption({ label: "PDF Asiakas" });
+  await page.getByLabel("Rivin 1 kuvaus").fill("Ripsienpidennys");
+  await page.getByLabel("Rivin 1 hinta").fill("100");
+  await page.getByRole("button", { name: "Luo lasku" }).click();
+
+  await page.getByRole("link", { name: /PDF Asiakas/ }).first().click();
+  await expect(page.getByRole("link", { name: "Avaa PDF" })).toBeVisible();
+
+  const url = new URL(page.url());
+  const id = url.pathname.split("/").pop();
+  const cookies = await context.cookies();
+  const response = await page.request.get(`/api/invoices/${id}/pdf`, {
+    headers: { cookie: cookies.map((c) => `${c.name}=${c.value}`).join("; ") },
+  });
+  expect(response.status()).toBe(200);
+  expect(response.headers()["content-type"]).toBe("application/pdf");
+  const body = await response.body();
+  expect(body.subarray(0, 5).toString("ascii")).toBe("%PDF-");
+});
+
 test("CSV export is served as a downloadable file", async ({ page, context }) => {
   await login(page);
   const cookies = await context.cookies();

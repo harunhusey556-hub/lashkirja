@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { requireSession } from "@/lib/session";
+import { isValidIban, normalizeIban } from "@/lib/iban";
+import { isValidBusinessId, normalizeBusinessId } from "@/lib/finnish-reference";
 
 const patchSchema = z.object({
   firstName: z.string().min(1).optional(),
@@ -10,10 +12,32 @@ const patchSchema = z.object({
   entityType: z.enum(["kevytyrittaja", "toiminimi"]).optional(),
   vatRegistered: z.boolean().optional(),
   vatPeriod: z.enum(["month", "quarter", "year"]).optional(),
+  // Seller details printed on sales invoices.
+  businessName: z.string().trim().max(120).nullish(),
+  businessId: z.string().trim().max(20).nullish(),
+  addressStreet: z.string().trim().max(120).nullish(),
+  addressPostalCode: z.string().trim().max(20).nullish(),
+  addressCity: z.string().trim().max(80).nullish(),
+  phone: z.string().trim().max(40).nullish(),
+  invoiceIban: z.string().trim().max(42).nullish(),
+  invoiceBic: z.string().trim().max(11).nullish(),
+  invoiceTerms: z.string().trim().max(1000).nullish(),
 });
 
-export async function GET() {
-  const session = await requireSession();
+const SELLER_SELECT = {
+  businessName: true,
+  businessId: true,
+  addressStreet: true,
+  addressPostalCode: true,
+  addressCity: true,
+  phone: true,
+  invoiceIban: true,
+  invoiceBic: true,
+  invoiceTerms: true,
+} as const;
+
+export async function GET(req: NextRequest) {
+  const session = await requireSession(req);
   if (!session) {
     return NextResponse.json({ error: "Ei kirjautunut" }, { status: 401 });
   }
@@ -27,6 +51,7 @@ export async function GET() {
       entityType: true,
       vatRegistered: true,
       vatPeriod: true,
+      ...SELLER_SELECT,
       imapAccounts: {
         select: { id: true, email: true }
       }
@@ -40,7 +65,7 @@ export async function GET() {
 }
 
 export async function PATCH(req: NextRequest) {
-  const session = await requireSession();
+  const session = await requireSession(req);
   if (!session) {
     return NextResponse.json({ error: "Ei kirjautunut" }, { status: 401 });
   }
@@ -50,9 +75,25 @@ export async function PATCH(req: NextRequest) {
     return NextResponse.json({ error: "Virheellinen pyyntö" }, { status: 400 });
   }
 
+  const data = { ...parsed.data };
+  // An IBAN or Y-tunnus that fails its check digit must never reach an invoice.
+  if (data.invoiceIban) {
+    const iban = normalizeIban(data.invoiceIban);
+    if (!isValidIban(iban)) {
+      return NextResponse.json({ error: "IBAN ei ole kelvollinen" }, { status: 400 });
+    }
+    data.invoiceIban = iban;
+  }
+  if (data.businessId) {
+    if (!isValidBusinessId(data.businessId)) {
+      return NextResponse.json({ error: "Y-tunnus ei ole kelvollinen" }, { status: 400 });
+    }
+    data.businessId = normalizeBusinessId(data.businessId);
+  }
+
   const user = await prisma.user.update({
     where: { id: session.userId },
-    data: parsed.data,
+    data,
     select: {
       firstName: true,
       lastName: true,
@@ -60,6 +101,7 @@ export async function PATCH(req: NextRequest) {
       entityType: true,
       vatRegistered: true,
       vatPeriod: true,
+      ...SELLER_SELECT,
     },
   });
 
