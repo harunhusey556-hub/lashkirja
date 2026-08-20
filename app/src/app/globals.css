@@ -334,7 +334,10 @@ button:disabled {
 }
 
 .animate-page {
-  animation: pageEnter 0.18s ease-out forwards;
+  /* No `forwards`: a retained transform (even translateY(0)) turns <main> into
+     the containing block for position:fixed descendants, un-pinning bars like
+     the bulk-select toolbar from the viewport. */
+  animation: pageEnter 0.18s ease-out;
 }
 
 /*

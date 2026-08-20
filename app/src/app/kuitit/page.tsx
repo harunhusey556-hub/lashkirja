@@ -993,7 +993,7 @@ export default function KuititPage() {
       />
 
       {selectedIds.size > 0 && (
-        <div className="fixed bottom-24 left-1/2 -translate-x-1/2 z-[60] animate-in slide-in-from-bottom-8 fade-in duration-300">
+        <div className="fixed bottom-[calc(var(--app-tab-height)+env(safe-area-inset-bottom,0px)+0.75rem)] left-1/2 -translate-x-1/2 z-[60] animate-in slide-in-from-bottom-8 fade-in duration-300">
           <div className="bg-charcoal text-white rounded-full px-4 py-3 flex items-center gap-4 shadow-xl border border-white/10">
             <span className="text-sm font-medium pl-2">{selectedIds.size} valittu</span>
             <div className="w-px h-4 bg-white/20" />
