@@ -312,6 +312,16 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       if (event.touches.length !== 1) return;
       const touch = event.touches[0];
       if (touch.clientX > EDGE) return;
+      // Filter chip rows (laskut/ostolaskut/kuitit) sit close enough to the
+      // left edge that a touch starting on them can land inside the 24px
+      // zone; letting the edge-swipe win there would break their horizontal
+      // scroll. Anything the page marks as horizontally scrollable is exempt.
+      if (
+        event.target instanceof Element &&
+        event.target.closest(".overflow-x-auto")
+      ) {
+        return;
+      }
       tracking = true;
       decided = false;
       dx = 0;
@@ -395,6 +405,41 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     // would otherwise be fetched only after the user has already tapped.
     for (const item of MORE_ITEMS) router.prefetch(item.href);
   }, [router]);
+
+  // Keyboard-aware scrolling: the on-screen keyboard shrinks the visual
+  // viewport without moving the layout viewport, so a focused field near the
+  // bottom of a long form (invoice/customer/bank-account forms, settings)
+  // ends up hidden behind the keyboard until the user scrolls manually. Nudge
+  // whatever is currently focused back into view whenever that happens.
+  useEffect(() => {
+    const vv = window.visualViewport;
+    if (!vv) return;
+
+    let frame = 0;
+    const reveal = () => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        const active = document.activeElement;
+        if (!(active instanceof HTMLElement)) return;
+        if (!["INPUT", "TEXTAREA", "SELECT"].includes(active.tagName)) return;
+        const reduceMotion = window.matchMedia(
+          "(prefers-reduced-motion: reduce)"
+        ).matches;
+        active.scrollIntoView({
+          block: "center",
+          behavior: reduceMotion ? "auto" : "smooth",
+        });
+      });
+    };
+
+    vv.addEventListener("resize", reveal);
+    vv.addEventListener("scroll", reveal);
+    return () => {
+      cancelAnimationFrame(frame);
+      vv.removeEventListener("resize", reveal);
+      vv.removeEventListener("scroll", reveal);
+    };
+  }, []);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -629,7 +674,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
           >
             <nav
               aria-label="Lisää-valikko"
-              className="overflow-y-auto px-3 py-2 sheet-safe-bottom"
+              className="overflow-y-auto overscroll-contain px-3 py-2 sheet-safe-bottom"
             >
               {MORE_ITEMS.map((item) => {
                 const active = navActive(pathname, item.href);
