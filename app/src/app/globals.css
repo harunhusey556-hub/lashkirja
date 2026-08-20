@@ -340,6 +340,14 @@ button:disabled {
   animation: pageEnter 0.18s ease-out;
 }
 
+/* Sign-out: the whole app fades before the hard navigation to /login.
+   Opacity only — a transform here would re-anchor fixed bars mid-fade. */
+body.signing-out {
+  opacity: 0;
+  transition: opacity 0.22s ease-out;
+  pointer-events: none;
+}
+
 /*
  * Motion is decoration here: every animation above is optional, and a user who
  * asked the system to stop moving things gets the final state immediately.

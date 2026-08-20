@@ -11,6 +11,7 @@ import {
   isUnauthorized,
   readJson,
   redirectToLogin,
+  signOut,
 } from "@/components/clientFetch";
 
 import type { BusinessProfile } from "@/lib/onboarding";
@@ -138,6 +139,9 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   // Stored with the path it was opened on, so a route change closes it without
   // an effect that would re-render twice.
   const [moreOpenOn, setMoreOpenOn] = useState<string | null>(null);
+  const [profileOpenOn, setProfileOpenOn] = useState<string | null>(null);
+  const [signingOut, setSigningOut] = useState(false);
+  const [user, setUser] = useState<{ email?: string; firstName?: string } | null>(null);
   const [onboardingProfile, setOnboardingProfile] = useState<BusinessProfile | null>(null);
 
   const pathname = usePathname();
@@ -158,12 +162,13 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       signal: controller.signal,
     })
       .then((response) =>
-        readJson<{ user: { userId: string } }>(
+        readJson<{ user: { userId: string; email?: string; firstName?: string } }>(
           response,
           "Istunnon tarkistus epäonnistui"
         )
       )
-      .then(() => {
+      .then((me) => {
+        setUser(me.user ?? null);
         setAuthState({ status: "ready" });
         // Check onboarding state
         return fetch("/api/onboarding", { signal: controller.signal })
@@ -198,12 +203,38 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
   const moreActive = MORE_ITEMS.some((item) => navActive(pathname, item.href));
   const showMore = moreOpenOn === pathname;
+  const showProfile = profileOpenOn === pathname;
+  const initials = (user?.firstName?.trim()?.[0] || user?.email?.trim()?.[0] || "").toUpperCase();
+
+  async function handleSignOut() {
+    if (signingOut) return;
+    setSigningOut(true);
+    await signOut();
+  }
 
   return (
     <div className="h-dvh overflow-hidden flex flex-col bg-cream">
       <header className="app-header sticky top-0 z-40 bg-white/90 backdrop-blur-md border-b border-warm-gray-light/30">
-        <div className="max-w-lg mx-auto flex items-center justify-center px-4 h-12">
-          <p className="text-base font-medium text-charcoal truncate">{title}</p>
+        <div className="max-w-lg mx-auto relative flex items-center justify-center px-4 h-12">
+          <p className="text-base font-medium text-charcoal truncate max-w-[60%]">{title}</p>
+
+          {authState.status === "ready" && (
+            <button
+              type="button"
+              onClick={() => setProfileOpenOn((open) => (open === pathname ? null : pathname))}
+              aria-label="Profiili ja uloskirjautuminen"
+              aria-haspopup="dialog"
+              className="absolute right-1 inset-y-0 my-auto w-11 h-11 flex items-center justify-center active-press"
+            >
+              <span className="w-8 h-8 rounded-full bg-blush text-accent-dark text-xs font-semibold flex items-center justify-center border border-blush-dark/40">
+                {initials || (
+                  <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.75} aria-hidden>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8Zm-7 8a7 7 0 0 1 14 0" />
+                  </svg>
+                )}
+              </span>
+            </button>
+          )}
         </div>
       </header>
 
@@ -333,6 +364,70 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                 );
               })}
             </nav>
+          </BottomSheet>
+
+          <BottomSheet
+            isOpen={showProfile}
+            onClose={() => setProfileOpenOn(null)}
+            title={user?.firstName || "Profiili"}
+            subtitle={user?.email}
+            labelledBy="profile-sheet-title"
+            heightClass="max-h-[60dvh]"
+          >
+            <div className="px-3 py-2 sheet-safe-bottom space-y-1">
+              <Link
+                href="/asetukset"
+                onClick={() => setProfileOpenOn(null)}
+                className="flex items-center gap-3 px-4 py-3.5 rounded-2xl transition-colors active:bg-blush/40"
+              >
+                <span className="flex-1 min-w-0">
+                  <span className="block text-sm font-medium text-charcoal">Asetukset</span>
+                  <span className="block text-xs text-warm-gray">Profiili, yritys, sähköpostit</span>
+                </span>
+                <svg
+                  className="w-4 h-4 text-warm-gray-light shrink-0"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth={2}
+                  aria-hidden
+                >
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                </svg>
+              </Link>
+
+              <button
+                type="button"
+                onClick={handleSignOut}
+                disabled={signingOut}
+                className="w-full flex items-center gap-3 px-4 py-3.5 rounded-2xl text-left transition-colors active:bg-danger/10 disabled:opacity-60 touch-target"
+              >
+                {signingOut ? (
+                  <span
+                    className="w-4 h-4 border-2 border-danger/40 border-t-danger rounded-full animate-spin motion-reduce:animate-none"
+                    aria-hidden
+                  />
+                ) : (
+                  <svg
+                    className="w-4 h-4 text-danger shrink-0"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth={1.75}
+                    aria-hidden
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      d="M15.75 9V5.25A2.25 2.25 0 0 0 13.5 3h-6a2.25 2.25 0 0 0-2.25 2.25v13.5A2.25 2.25 0 0 0 7.5 21h6a2.25 2.25 0 0 0 2.25-2.25V15m3 0 3-3m0 0-3-3m3 3H9"
+                    />
+                  </svg>
+                )}
+                <span className="text-sm font-medium text-danger">
+                  {signingOut ? "Kirjaudutaan ulos…" : "Kirjaudu ulos"}
+                </span>
+              </button>
+            </div>
           </BottomSheet>
         </>
       )}

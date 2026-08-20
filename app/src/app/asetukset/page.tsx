@@ -10,6 +10,7 @@ import {
   isUnauthorized,
   readJson,
   redirectToLogin,
+  signOut,
 } from "@/components/clientFetch";
 
 import SellerProfileCard from "@/components/SellerProfileCard";
@@ -53,6 +54,14 @@ export default function AsetuksetPage() {
   // Sync State
   const [syncing, setSyncing] = useState(false);
   const [syncMsg, setSyncMsg] = useState("");
+
+  const [signingOut, setSigningOut] = useState(false);
+
+  async function handleSignOut() {
+    if (signingOut) return;
+    setSigningOut(true);
+    await signOut();
+  }
 
   useEffect(() => {
     const controller = new AbortController();
@@ -645,8 +654,23 @@ export default function AsetuksetPage() {
             )}
           </div>
         </div>
+
+        <button
+          type="button"
+          onClick={handleSignOut}
+          disabled={signingOut}
+          className="w-full flex items-center justify-center gap-2 py-3.5 rounded-2xl bg-white shadow-sm text-sm font-medium text-danger transition-colors active:bg-danger/10 disabled:opacity-60 touch-target active-press"
+        >
+          {signingOut && (
+            <span
+              className="w-4 h-4 border-2 border-danger/40 border-t-danger rounded-full animate-spin motion-reduce:animate-none"
+              aria-hidden
+            />
+          )}
+          {signingOut ? "Kirjaudutaan ulos…" : "Kirjaudu ulos"}
+        </button>
       </div>
-      
+
       <ConfirmModal
         isOpen={accountToDisconnect !== null}
         title="Katkaise yhteys?"

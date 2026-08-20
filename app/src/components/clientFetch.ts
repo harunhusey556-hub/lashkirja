@@ -92,3 +92,20 @@ export function errorMessage(error: unknown, fallback: string): string {
 export function redirectToLogin(): void {
   window.location.replace("/login");
 }
+
+/**
+ * Ends the session server-side, fades the whole app out and lands on the
+ * login screen. The fade lives on <body> (opacity only — a transform here
+ * would re-anchor position:fixed bars mid-fade) so it works from any page.
+ */
+export async function signOut(): Promise<void> {
+  document.body.classList.add("signing-out");
+  try {
+    await fetch("/api/auth/logout", { method: "POST", credentials: "include" });
+  } catch {
+    // Network hiccup: the cookie may survive, but landing on /login is still
+    // right — the next authenticated fetch redirects back here anyway.
+  }
+  await new Promise((resolve) => setTimeout(resolve, 240));
+  window.location.replace("/login");
+}
