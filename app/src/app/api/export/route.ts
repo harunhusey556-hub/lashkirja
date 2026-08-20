@@ -8,7 +8,13 @@ import { centsToEuros } from "@/lib/money";
 import { monthSchema } from "@/lib/validation";
 import { displayStatus, type InvoiceStatus } from "@/lib/invoices";
 
-const typeSchema = z.enum(["receipts", "transactions", "invoices", "customers"]);
+const typeSchema = z.enum([
+  "receipts",
+  "transactions",
+  "invoices",
+  "purchase-invoices",
+  "customers",
+]);
 
 function monthWindow(month: string | null) {
   if (!month) return undefined;
@@ -131,6 +137,34 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
       ];
     });
     fileName = `myyntilaskut${suffix}.csv`;
+  } else if (type === "purchase-invoices") {
+    const invoices = await prisma.purchaseInvoice.findMany({
+      where: { userId, ...(window ? { issueDate: window } : {}) },
+      orderBy: [{ dueDate: "asc" }],
+      include: { payments: { select: { amountCents: true } } },
+    });
+    headers = [
+      "Päivä", "Eräpäivä", "Toimittaja", "Laskun numero", "Viitenumero",
+      "Veroton", "ALV", "Yhteensä", "Maksettu", "Avoinna", "Tila", "Kategoria",
+    ];
+    rows = invoices.map((invoice) => {
+      const paidCents = invoice.payments.reduce((sum, payment) => sum + payment.amountCents, 0);
+      return [
+        isoDate(invoice.issueDate),
+        isoDate(invoice.dueDate),
+        invoice.supplierName,
+        invoice.invoiceNumber,
+        invoice.reference,
+        csvMoney(centsToEuros(invoice.netCents)),
+        csvMoney(centsToEuros(invoice.vatCents)),
+        csvMoney(centsToEuros(invoice.grossCents)),
+        csvMoney(centsToEuros(paidCents)),
+        csvMoney(centsToEuros(invoice.grossCents - paidCents)),
+        invoice.status,
+        invoice.category,
+      ];
+    });
+    fileName = `ostolaskut${suffix}.csv`;
   } else {
     const customers = await prisma.customer.findMany({
       where: { userId },

@@ -194,11 +194,17 @@ export interface AgingReport {
   overdueCount: number;
 }
 
-/** Accounts receivable aging over the invoices that are actually outstanding. */
-export function buildAgingReport(
-  invoices: ReceivableLike[],
-  now: Date = new Date()
-): AgingReport {
+export interface AgingItem {
+  dueDate: Date | string;
+  openCents: number;
+}
+
+/**
+ * Aging over anything with a due date and an open amount. Receivables and
+ * payables age identically; only what counts as "open" differs, and that
+ * decision belongs to the caller.
+ */
+export function buildAging(items: AgingItem[], now: Date = new Date()): AgingReport {
   const buckets = Object.fromEntries(
     AGING_BUCKETS.map((bucket) => [bucket, { count: 0, openCents: 0 }])
   ) as AgingReport["buckets"];
@@ -207,21 +213,34 @@ export function buildAgingReport(
   let overdueCents = 0;
   let overdueCount = 0;
 
-  for (const invoice of invoices) {
-    // Drafts are not receivables and credited/paid invoices are settled.
-    if (invoice.status !== "sent") continue;
-    const open = invoice.grossCents - (invoice.paidCents ?? 0);
-    if (open <= 0) continue;
-
-    const bucket = agingBucket(invoice.dueDate, now);
+  for (const item of items) {
+    if (item.openCents <= 0) continue;
+    const bucket = agingBucket(item.dueDate, now);
     buckets[bucket].count += 1;
-    buckets[bucket].openCents += open;
-    totalOpenCents += open;
+    buckets[bucket].openCents += item.openCents;
+    totalOpenCents += item.openCents;
     if (bucket !== "not_due") {
-      overdueCents += open;
+      overdueCents += item.openCents;
       overdueCount += 1;
     }
   }
 
   return { buckets, totalOpenCents, overdueCents, overdueCount };
+}
+
+/** Accounts receivable aging over the invoices that are actually outstanding. */
+export function buildAgingReport(
+  invoices: ReceivableLike[],
+  now: Date = new Date()
+): AgingReport {
+  return buildAging(
+    invoices
+      // Drafts are not receivables and credited/paid invoices are settled.
+      .filter((invoice) => invoice.status === "sent")
+      .map((invoice) => ({
+        dueDate: invoice.dueDate,
+        openCents: invoice.grossCents - (invoice.paidCents ?? 0),
+      })),
+    now
+  );
 }

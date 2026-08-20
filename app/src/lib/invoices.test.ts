@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   agingBucket,
   addDaysUtc,
+  buildAging,
   buildAgingReport,
   canTransition,
   computeInvoiceTotals,
@@ -286,5 +287,47 @@ describe("canTransition", () => {
     expect(canTransition("credited", "sent")).toBe(false);
     expect(canTransition("credited", "draft")).toBe(false);
     expect(canTransition("credited", "paid")).toBe(false);
+  });
+});
+
+describe("buildAging", () => {
+  const now = new Date("2026-06-01T00:00:00Z");
+
+  it("ages any due-dated open amount, receivable or payable", () => {
+    const report = buildAging(
+      [
+        { dueDate: "2026-07-01", openCents: 10_000 },
+        { dueDate: "2026-05-20", openCents: 20_000 },
+        { dueDate: "2026-01-01", openCents: 30_000 },
+      ],
+      now
+    );
+    expect(report.buckets.not_due.openCents).toBe(10_000);
+    expect(report.buckets["1-30"].openCents).toBe(20_000);
+    expect(report.buckets["90+"].openCents).toBe(30_000);
+    expect(report.totalOpenCents).toBe(60_000);
+    expect(report.overdueCount).toBe(2);
+  });
+
+  it("ignores settled and negative balances", () => {
+    const report = buildAging(
+      [
+        { dueDate: "2026-05-01", openCents: 0 },
+        { dueDate: "2026-05-01", openCents: -500 },
+      ],
+      now
+    );
+    expect(report.totalOpenCents).toBe(0);
+    expect(report.buckets["31-60"].count).toBe(0);
+  });
+
+  it("agrees with buildAgingReport for the receivable case", () => {
+    const invoices = [
+      { status: "sent" as const, dueDate: "2026-05-01", grossCents: 10_000, paidCents: 4_000 },
+      { status: "draft" as const, dueDate: "2026-05-01", grossCents: 99_000 },
+    ];
+    const viaReport = buildAgingReport(invoices, now);
+    const viaGeneric = buildAging([{ dueDate: "2026-05-01", openCents: 6_000 }], now);
+    expect(viaReport).toEqual(viaGeneric);
   });
 });

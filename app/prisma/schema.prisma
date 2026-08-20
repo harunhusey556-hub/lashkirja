@@ -27,6 +27,7 @@ model User {
   bankAccounts  BankAccount[]
   customers     Customer[]
   salesInvoices SalesInvoice[]
+  purchaseInvoices PurchaseInvoice[]
 }
 
 model Receipt {
@@ -60,6 +61,7 @@ model Receipt {
   linkedTransaction     Transaction?     @relation("ConfirmedMatch")
   suggestedTransactions Transaction[]    @relation("SuggestedMatch")
   rejections            MatchRejection[]
+  purchaseInvoice       PurchaseInvoice?
 
   @@index([userId, date])
   @@index([userId, createdAt])
@@ -113,6 +115,8 @@ model Transaction {
   rejections MatchRejection[]
   // Set when this bank row settles a sales invoice.
   invoicePayment InvoicePayment?
+  // Set when this bank row settles a purchase invoice.
+  purchasePayment PurchasePayment?
 
   @@index([statementId, date])
   @@index([statementId, matchStatus])
@@ -323,4 +327,53 @@ model InvoicePayment {
   createdAt     DateTime     @default(now())
 
   @@index([invoiceId])
+}
+
+// A supplier invoice the user owes. Deliberately a payables tracker only: the
+// VAT return keeps taking its numbers from receipts, so an invoice recorded
+// here and a receipt for the same purchase cannot double-count each other.
+// Attach the receipt with receiptId once it arrives.
+model PurchaseInvoice {
+  id                 String    @id @default(uuid())
+  userId             String
+  user               User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  supplierName       String
+  supplierBusinessId String?
+  supplierIban       String?
+  invoiceNumber      String?
+  reference          String? // viitenumero, used for bank matching
+  issueDate          DateTime
+  dueDate            DateTime
+  status             String    @default("open") // open | paid | cancelled
+  grossCents         Int
+  vatCents           Int       @default(0)
+  netCents           Int       @default(0)
+  category           String?
+  notes              String?
+  paidAt             DateTime?
+  // The receipt that documents this purchase, once it exists.
+  receiptId          String?   @unique
+  receipt            Receipt?  @relation(fields: [receiptId], references: [id], onDelete: SetNull)
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  payments PurchasePayment[]
+
+  @@index([userId, status, dueDate])
+  @@index([userId, issueDate])
+}
+
+model PurchasePayment {
+  id                String          @id @default(uuid())
+  purchaseInvoiceId String
+  purchaseInvoice   PurchaseInvoice @relation(fields: [purchaseInvoiceId], references: [id], onDelete: Cascade)
+  transactionId     String?         @unique
+  transaction       Transaction?    @relation(fields: [transactionId], references: [id], onDelete: SetNull)
+  paidDate          DateTime
+  amountCents       Int
+  source            String          @default("manual") // "manual" | "bank"
+  note              String?
+  createdAt         DateTime        @default(now())
+
+  @@index([purchaseInvoiceId])
 }

@@ -47,6 +47,7 @@ const EXPORTS = [
   { type: "receipts", label: "Kuitit" },
   { type: "transactions", label: "Tilitapahtumat" },
   { type: "invoices", label: "Myyntilaskut" },
+  { type: "purchase-invoices", label: "Ostolaskut" },
   { type: "customers", label: "Asiakkaat" },
 ] as const;
 

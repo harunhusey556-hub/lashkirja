@@ -5,7 +5,7 @@ import { VAT_REGISTRATION_THRESHOLD_EUR } from "@/lib/vero/omavero-fields";
 import { centsToEuros } from "@/lib/money";
 import { parseBusinessDetails, deriveVatProfile } from "@/lib/onboarding";
 import { getBankOverview } from "@/lib/bank-accounts";
-import { buildAgingReport, type InvoiceStatus } from "@/lib/invoices";
+import { buildAging, buildAgingReport, type InvoiceStatus } from "@/lib/invoices";
 import { computeAlvReport } from "@/lib/alv";
 import { loadAlvPeriodSources } from "@/lib/alv-period";
 
@@ -153,6 +153,19 @@ export async function GET(req: NextRequest) {
       payments: { select: { amountCents: true } },
     },
   });
+  const openPayables = await prisma.purchaseInvoice.findMany({
+    where: { userId: session.userId, status: "open" },
+    select: { dueDate: true, grossCents: true, payments: { select: { amountCents: true } } },
+  });
+  const payablesAging = buildAging(
+    openPayables.map((invoice) => ({
+      dueDate: invoice.dueDate,
+      openCents:
+        invoice.grossCents - invoice.payments.reduce((sum, p) => sum + p.amountCents, 0),
+    })),
+    now
+  );
+
   const aging = buildAgingReport(
     openInvoices.map((invoice) => ({
       status: invoice.status as InvoiceStatus,
@@ -192,6 +205,11 @@ export async function GET(req: NextRequest) {
       totalOpen: centsToEuros(aging.totalOpenCents),
       overdue: centsToEuros(aging.overdueCents),
       overdueCount: aging.overdueCount,
+    },
+    payables: {
+      totalOpen: centsToEuros(payablesAging.totalOpenCents),
+      overdue: centsToEuros(payablesAging.overdueCents),
+      overdueCount: payablesAging.overdueCount,
     },
     isSingleVatProfile: vatProfile.isSingleRate && vatProfile.isVatRegistered,
     singleVatRate: vatProfile.defaultSalesRate,
