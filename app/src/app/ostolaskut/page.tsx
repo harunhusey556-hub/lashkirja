@@ -14,6 +14,7 @@ import {
 import { formatDate, formatEur, parseFinnishNumber } from "@/lib/format";
 import { isValidReferenceNumber, normalizeReference } from "@/lib/finnish-reference";
 
+import { readPageCache, writePageCache } from "@/lib/page-cache";
 interface PurchaseInvoice {
   id: string;
   supplierName: string;
@@ -64,9 +65,12 @@ const FILTERS = [
 const today = () => new Date().toISOString().slice(0, 10);
 
 export default function PurchaseInvoicesPage() {
-  const [invoices, setInvoices] = useState<PurchaseInvoice[]>([]);
-  const [aging, setAging] = useState<Aging | null>(null);
-  const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
+  const cached = readPageCache<{ invoices: PurchaseInvoice[]; aging: Aging }>("purchases");
+  const [invoices, setInvoices] = useState<PurchaseInvoice[]>(cached?.invoices ?? []);
+  const [aging, setAging] = useState<Aging | null>(cached?.aging ?? null);
+  const [status, setStatus] = useState<"loading" | "ready" | "error">(
+    cached ? "ready" : "loading"
+  );
   const [filter, setFilter] = useState<(typeof FILTERS)[number]["id"]>("open");
   const [message, setMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -98,6 +102,7 @@ export default function PurchaseInvoicesPage() {
         response,
         "Ostolaskujen haku epäonnistui"
       );
+      writePageCache("purchases", data);
       setInvoices(data.invoices);
       setAging(data.aging);
       setStatus("ready");

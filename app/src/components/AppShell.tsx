@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { ErrorState, LoadingState } from "@/components/AsyncState";
 import { OnboardingModal } from "@/components/OnboardingModal";
 import { AiChatDrawer } from "@/components/AiChatDrawer";
@@ -14,6 +14,7 @@ import {
 } from "@/components/clientFetch";
 
 import type { BusinessProfile } from "@/lib/onboarding";
+import BottomSheet from "@/components/BottomSheet";
 const NAV_ITEMS = [
   {
     href: "/dashboard",
@@ -140,7 +141,14 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const [onboardingProfile, setOnboardingProfile] = useState<BusinessProfile | null>(null);
 
   const pathname = usePathname();
+  const router = useRouter();
   const title = pageTitle(pathname);
+
+  useEffect(() => {
+    // The tab-bar links prefetch themselves; these live behind the sheet and
+    // would otherwise be fetched only after the user has already tapped.
+    for (const item of MORE_ITEMS) router.prefetch(item.href);
+  }, [router]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -199,7 +207,11 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         </div>
       </header>
 
-      <main className="app-main flex-1 max-w-lg mx-auto w-full px-4 pt-4">
+      <main
+        // Keyed on the path so the enter animation replays on every navigation.
+        key={pathname}
+        className="app-main flex-1 max-w-lg mx-auto w-full px-4 pt-4 animate-page"
+      >
         {authState.status === "checking" ? (
           <LoadingState label="Tarkistetaan istuntoa..." />
         ) : authState.status === "error" ? (
@@ -277,38 +289,51 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
             </div>
           </nav>
 
-          {showMore && (
-            <>
-              <div
-                className="fixed inset-0 z-40 bg-charcoal/20"
-                onClick={() => setMoreOpenOn(null)}
-                aria-hidden
-              />
-              <div
-                role="menu"
-                aria-label="Lisää-valikko"
-                className="fixed inset-x-0 z-50 bottom-[var(--app-tab-height)] max-w-lg mx-auto bg-white border-t border-warm-gray-light/40 rounded-t-3xl p-4 space-y-1 shadow-lg"
-              >
-                {MORE_ITEMS.map((item) => {
-                  const active = navActive(pathname, item.href);
-                  return (
-                    <Link
-                      key={item.href}
-                      href={item.href}
-                      role="menuitem"
-                      onClick={() => setMoreOpenOn(null)}
-                      className={`block px-4 py-3 rounded-2xl active:bg-blush/40 ${
-                        active ? "bg-blush/50" : ""
-                      }`}
+          <BottomSheet
+            isOpen={showMore}
+            onClose={() => setMoreOpenOn(null)}
+            title="Lisää"
+            subtitle="Laskutus, raportit ja asetukset"
+            labelledBy="more-sheet-title"
+            heightClass="max-h-[70dvh]"
+          >
+            <nav
+              aria-label="Lisää-valikko"
+              className="overflow-y-auto px-3 py-2 sheet-safe-bottom"
+            >
+              {MORE_ITEMS.map((item) => {
+                const active = navActive(pathname, item.href);
+                return (
+                  <Link
+                    key={item.href}
+                    href={item.href}
+                    onClick={() => setMoreOpenOn(null)}
+                    aria-current={active ? "page" : undefined}
+                    className={`flex items-center gap-3 px-4 py-3.5 rounded-2xl transition-colors active:bg-blush/40 ${
+                      active ? "bg-blush/50" : ""
+                    }`}
+                  >
+                    <span className="flex-1 min-w-0">
+                      <span className="block text-sm font-medium text-charcoal">
+                        {item.label}
+                      </span>
+                      <span className="block text-xs text-warm-gray truncate">{item.hint}</span>
+                    </span>
+                    <svg
+                      className="w-4 h-4 text-warm-gray-light shrink-0"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth={2}
+                      aria-hidden
                     >
-                      <span className="block text-sm font-medium text-charcoal">{item.label}</span>
-                      <span className="block text-xs text-warm-gray">{item.hint}</span>
-                    </Link>
-                  );
-                })}
-              </div>
-            </>
-          )}
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                    </svg>
+                  </Link>
+                );
+              })}
+            </nav>
+          </BottomSheet>
         </>
       )}
     </div>

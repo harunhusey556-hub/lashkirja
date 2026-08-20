@@ -250,3 +250,85 @@ button:disabled {
 .stagger-5 { animation-delay: 250ms; }
 
 
+
+/* ------------------------------------------------------------------ */
+/* Bottom sheets, page transitions                                     */
+/* ------------------------------------------------------------------ */
+
+/*
+ * A sheet slides up from the edge it is attached to, and the backdrop fades.
+ * Both are short: a transition that has to be waited for reads as lag.
+ */
+@keyframes sheetUp {
+  from {
+    transform: translateY(12%);
+    opacity: 0.6;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+.animate-sheet {
+  animation: sheetUp 0.22s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  will-change: transform;
+}
+
+.animate-backdrop {
+  animation: fadeIn 0.18s ease-out forwards;
+}
+
+/* Sheets own the bottom inset themselves; the tab bar is hidden behind them. */
+.sheet-safe-bottom {
+  padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 0.75rem);
+}
+
+/* Grab handle at the top of a sheet. */
+.sheet-handle {
+  width: 2.25rem;
+  height: 0.25rem;
+  border-radius: 9999px;
+  background: var(--color-warm-gray-light);
+  margin: 0.5rem auto 0.25rem;
+}
+
+/*
+ * Route transition. Keyed on the pathname so it replays per navigation; the
+ * movement is small on purpose, enough to signal "new page" without delaying
+ * the content that is already rendered.
+ */
+@keyframes pageEnter {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-page {
+  animation: pageEnter 0.18s ease-out forwards;
+}
+
+/*
+ * Motion is decoration here: every animation above is optional, and a user who
+ * asked the system to stop moving things gets the final state immediately.
+ */
+@media (prefers-reduced-motion: reduce) {
+  .animate-sheet,
+  .animate-backdrop,
+  .animate-page,
+  .animate-fade-in,
+  .animate-scale-in,
+  .animate-popover,
+  .animate-in,
+  .animate-in-delay-1,
+  .animate-in-delay-2 {
+    animation: none !important;
+    opacity: 1 !important;
+    transform: none !important;
+  }
+}

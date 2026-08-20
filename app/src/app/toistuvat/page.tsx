@@ -16,6 +16,7 @@ import { formatDate, formatEur, parseFinnishNumber } from "@/lib/format";
 import { VAT_RATES_PERMILLE } from "@/lib/invoices";
 import { RECURRENCE_INTERVALS, type RecurrenceInterval } from "@/lib/recurrence";
 
+import { readPageCache, writePageCache } from "@/lib/page-cache";
 interface RecurringInvoice {
   id: string;
   name: string | null;
@@ -59,10 +60,13 @@ const EMPTY_LINE: FormLine = {
 const today = () => new Date().toISOString().slice(0, 10);
 
 export default function RecurringInvoicesPage() {
-  const [recurring, setRecurring] = useState<RecurringInvoice[]>([]);
-  const [dueNow, setDueNow] = useState(0);
+  const cached = readPageCache<{ recurring: RecurringInvoice[]; dueNow: number }>("recurring");
+  const [recurring, setRecurring] = useState<RecurringInvoice[]>(cached?.recurring ?? []);
+  const [dueNow, setDueNow] = useState(cached?.dueNow ?? 0);
   const [customers, setCustomers] = useState<Array<{ id: string; name: string }>>([]);
-  const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
+  const [status, setStatus] = useState<"loading" | "ready" | "error">(
+    cached ? "ready" : "loading"
+  );
   const [message, setMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [creating, setCreating] = useState(false);
@@ -92,6 +96,7 @@ export default function RecurringInvoicesPage() {
         response,
         "Toistuvien laskujen haku epäonnistui"
       );
+      writePageCache("recurring", data);
       setRecurring(data.recurring);
       setDueNow(data.dueNow);
       setStatus("ready");

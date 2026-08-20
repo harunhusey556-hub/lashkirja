@@ -13,6 +13,7 @@ import { apiFetch, errorMessage, isUnauthorized, readJson, redirectToLogin } fro
 import { formatEur, formatMonth } from "@/lib/format";
 import { maskIban } from "@/lib/iban";
 
+import { readPageCache, writePageCache } from "@/lib/page-cache";
 interface AccountSummary {
   id: string;
   name: string;
@@ -51,8 +52,11 @@ interface Rollforward {
 }
 
 export default function BankAccountsPage() {
-  const [overview, setOverview] = useState<Overview | null>(null);
-  const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
+  const cached = readPageCache<Overview>("bank-overview");
+  const [overview, setOverview] = useState<Overview | null>(cached);
+  const [status, setStatus] = useState<"loading" | "ready" | "error">(
+    cached ? "ready" : "loading"
+  );
   const [message, setMessage] = useState<string | null>(null);
   const [formMode, setFormMode] = useState<"hidden" | "create" | { edit: AccountSummary }>("hidden");
   const [busy, setBusy] = useState(false);
@@ -69,6 +73,7 @@ export default function BankAccountsPage() {
         { credentials: "include" }
       );
       const data = await readJson<Overview>(response, "Pankkitilien haku epäonnistui");
+      writePageCache("bank-overview", data);
       setOverview(data);
       setStatus("ready");
     } catch (error) {
@@ -212,11 +217,25 @@ export default function BankAccountsPage() {
   return (
     <AppShell>
       <div className="space-y-6 pb-6">
-        <header className="space-y-2">
-          <h2 className="text-2xl font-semibold text-charcoal tracking-tight">Pankkitilit</h2>
-          <p className="text-sm text-warm-gray leading-relaxed">
-            Lisää jokainen pankkitili ja seuraa kuukausien loppusaldoja.
-          </p>
+        <header className="flex items-start justify-between gap-3">
+          <div className="space-y-2 min-w-0">
+            <h2 className="text-2xl font-semibold text-charcoal tracking-tight">Pankkitilit</h2>
+            <p className="text-sm text-warm-gray leading-relaxed">
+              Lisää jokainen pankkitili ja seuraa kuukausien loppusaldoja.
+            </p>
+          </div>
+          {formMode === "hidden" && (
+            // Adding an account is a once-a-year action; it does not deserve a
+            // full-width button competing with the balances.
+            <button
+              type="button"
+              onClick={() => setFormMode("create")}
+              aria-label="Lisää pankkitili"
+              className="shrink-0 mt-1 px-3.5 py-2 rounded-xl border border-accent/40 text-accent-dark text-sm font-medium active-press hover:bg-blush/40 transition-colors"
+            >
+              + Lisää
+            </button>
+          )}
         </header>
 
         {status === "loading" && <LoadingState label="Haetaan pankkitilejä…" />}
@@ -250,15 +269,7 @@ export default function BankAccountsPage() {
               </p>
             )}
 
-            {formMode === "hidden" ? (
-              <button
-                type="button"
-                onClick={() => setFormMode("create")}
-                className="w-full py-3.5 rounded-2xl bg-accent text-white text-sm font-medium hover:bg-accent-dark transition-colors"
-              >
-                Lisää pankkitili
-              </button>
-            ) : (
+            {formMode !== "hidden" && (
               <section className="bg-white rounded-3xl border border-warm-gray-light/20 shadow-sm p-6 space-y-4">
                 <p className="text-base font-medium text-charcoal">
                   {formMode === "create" ? "Uusi pankkitili" : "Muokkaa tiliä"}

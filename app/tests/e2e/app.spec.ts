@@ -30,8 +30,12 @@ test("login lands on the dashboard and the tab bar navigates", async ({ page }) 
 
   // Secondary destinations live behind the "Lisää" sheet.
   await nav.getByRole("button", { name: "Lisää" }).click();
-  await page.getByRole("menuitem", { name: /Myyntilaskut/ }).click();
+  const sheet = page.getByRole("dialog");
+  await expect(sheet).toBeVisible();
+  await sheet.getByRole("link", { name: /Myyntilaskut/ }).click();
   await expect(page).toHaveURL(/\/laskut$/);
+  // The sheet closes on navigation and unfreezes the page behind it.
+  await expect(page.getByRole("dialog")).toHaveCount(0);
 });
 
 test("a bank account can be added and a month reconciled", async ({ page }) => {

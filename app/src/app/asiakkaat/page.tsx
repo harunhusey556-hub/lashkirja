@@ -18,6 +18,7 @@ import {
 } from "@/components/clientFetch";
 import { formatDate, formatEur } from "@/lib/format";
 
+import { readPageCache, writePageCache } from "@/lib/page-cache";
 interface Customer {
   id: string;
   name: string;
@@ -38,8 +39,11 @@ interface Customer {
 }
 
 export default function CustomersPage() {
-  const [customers, setCustomers] = useState<Customer[]>([]);
-  const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
+  const cached = readPageCache<Customer[]>("customers");
+  const [customers, setCustomers] = useState<Customer[]>(cached ?? []);
+  const [status, setStatus] = useState<"loading" | "ready" | "error">(
+    cached ? "ready" : "loading"
+  );
   const [message, setMessage] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [showArchived, setShowArchived] = useState(false);
@@ -59,6 +63,7 @@ export default function CustomersPage() {
         response,
         "Asiakkaiden haku epäonnistui"
       );
+      writePageCache("customers", data.customers);
       setCustomers(data.customers);
       setStatus("ready");
     } catch (error) {

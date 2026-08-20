@@ -15,6 +15,7 @@ import {
 } from "@/components/clientFetch";
 import { formatDate, formatEur } from "@/lib/format";
 
+import { readPageCache, writePageCache } from "@/lib/page-cache";
 interface InvoiceSummary {
   id: string;
   number: number;
@@ -81,12 +82,15 @@ function InvoicesPageContent() {
   const searchParams = useSearchParams();
   const customerFilter = searchParams.get("customerId") ?? "";
 
-  const [invoices, setInvoices] = useState<InvoiceSummary[]>([]);
-  const [aging, setAging] = useState<Aging | null>(null);
+  const cached = readPageCache<{ invoices: InvoiceSummary[]; aging: Aging }>("invoices");
+  const [invoices, setInvoices] = useState<InvoiceSummary[]>(cached?.invoices ?? []);
+  const [aging, setAging] = useState<Aging | null>(cached?.aging ?? null);
   const [customers, setCustomers] = useState<
     Array<{ id: string; name: string; defaultPaymentTermDays: number }>
   >([]);
-  const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
+  const [status, setStatus] = useState<"loading" | "ready" | "error">(
+    cached ? "ready" : "loading"
+  );
   const [filter, setFilter] = useState<(typeof FILTERS)[number]["id"]>("all");
   const [message, setMessage] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
@@ -104,6 +108,7 @@ function InvoicesPageContent() {
         response,
         "Laskujen haku epäonnistui"
       );
+      writePageCache("invoices", data);
       setInvoices(data.invoices);
       setAging(data.aging);
       setStatus("ready");

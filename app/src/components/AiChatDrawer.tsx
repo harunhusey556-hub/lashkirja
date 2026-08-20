@@ -6,6 +6,7 @@ import { readJson,
   errorMessage,
 } from "@/components/clientFetch";
 
+import BottomSheet from "@/components/BottomSheet";
 interface ChatMessageItem {
   id: string;
   role: "user" | "assistant";
@@ -155,44 +156,23 @@ export function AiChatDrawer() {
       <button
         type="button"
         onClick={() => setIsOpen(true)}
-        className="fixed bottom-20 right-4 z-40 px-4 py-2.5 rounded-full bg-accent text-white font-medium text-xs shadow-xl hover:bg-accent-dark transition-all duration-300 hover-lift active-press flex items-center gap-2 border border-white/40 glass"
+        className="fixed right-4 z-40 bottom-[calc(var(--app-tab-height)+env(safe-area-inset-bottom,0px)+0.75rem)] px-4 py-2.5 rounded-full bg-accent text-white font-medium text-xs shadow-xl hover:bg-accent-dark transition-all duration-300 hover-lift active-press flex items-center gap-2 border border-white/40 glass"
         aria-label="Avaa tekoälyapuri"
       >
         <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
         <span>LashKirja AI</span>
       </button>
 
-      {/* Slide-over Drawer Backdrop */}
-      {isOpen && (
-        <div className="fixed inset-0 z-50 bg-charcoal/40 backdrop-blur-xs animate-fade-in flex justify-end">
-          <div className="w-full max-w-md bg-white h-full shadow-2xl flex flex-col animate-scale-in border-l border-warm-gray-light/30">
-            {/* Drawer Header */}
-            <div className="p-4 bg-cream/70 border-b border-warm-gray-light/40 flex items-center justify-between">
-              <div className="flex items-center gap-2.5">
-                <div className="w-8 h-8 rounded-2xl bg-accent text-white flex items-center justify-center font-bold text-xs shadow-sm">
-                  AI
-                </div>
-                <div>
-                  <h3 className="text-sm font-semibold text-charcoal">
-                    LashKirja AI Kirjanpitoapuri
-                  </h3>
-                  <p className="text-[10px] text-warm-gray">
-                    Kysy ALV-ohjeita tai anna tekoälyn etsiä kuitteja
-                  </p>
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={() => setIsOpen(false)}
-                className="w-8 h-8 rounded-full flex items-center justify-center text-warm-gray hover:bg-warm-gray-light/30 transition-colors"
-                aria-label="Sulje"
-              >
-                ✕
-              </button>
-            </div>
-
+      <BottomSheet
+        isOpen={isOpen}
+        onClose={() => setIsOpen(false)}
+        title="LashKirja AI"
+        subtitle="Kysy ALV-ohjeita tai anna tekoälyn etsiä kuitteja"
+        labelledBy="ai-chat-title"
+        heightClass="h-[85dvh]"
+      >
             {/* Quick Action Chips */}
-            <div className="px-4 py-2 bg-cream/30 border-b border-warm-gray-light/20 flex items-center gap-2 overflow-x-auto scrollbar-none">
+            <div className="shrink-0 px-4 py-2 bg-cream/30 border-b border-warm-gray-light/20 flex items-center gap-2 overflow-x-auto scrollbar-none">
               <button
                 type="button"
                 onClick={() => handleSendMessage("Etsi täsmäytettäviä kuitteja ja laskuja")}
@@ -210,9 +190,15 @@ export function AiChatDrawer() {
             </div>
 
             {/* Messages Body */}
-            <div className="flex-1 p-4 overflow-y-auto space-y-4">
+            <div
+              className={`flex-1 min-h-0 p-4 overflow-y-auto space-y-4 ${
+                messages.length === 0 && !loading ? "flex flex-col justify-center" : ""
+              }`}
+            >
               {messages.length === 0 && !loading && (
-                <div className="text-center py-10 space-y-3">
+                // Centred rather than stuck to the top: an empty chat with a
+                // wall of white above the composer reads as broken.
+                <div className="text-center space-y-2.5">
                   <div className="w-12 h-12 rounded-3xl bg-accent/10 text-accent mx-auto flex items-center justify-center text-xl font-bold">
                     💬
                   </div>
@@ -300,7 +286,7 @@ export function AiChatDrawer() {
                 e.preventDefault();
                 handleSendMessage();
               }}
-              className="p-3 bg-white border-t border-warm-gray-light/40 flex items-center gap-2"
+              className="shrink-0 p-3 bg-white border-t border-warm-gray-light/40 flex items-center gap-2 sheet-safe-bottom"
             >
               <input
                 type="text"
@@ -317,9 +303,7 @@ export function AiChatDrawer() {
                 ➔
               </button>
             </form>
-          </div>
-        </div>
-      )}
+      </BottomSheet>
     </>
   );
 }
