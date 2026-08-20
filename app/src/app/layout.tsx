@@ -8,6 +8,16 @@ export const metadata: Metadata = {
   title: "LashKirja",
   description: "Yksinkertainen kirjanpito",
   manifest: "/manifest.json",
+  // iOS ignores the manifest icons and only reads apple-touch-icon, so the
+  // home-screen icon has to be declared here as well or Safari falls back to a
+  // screenshot of the page.
+  icons: {
+    icon: [
+      { url: "/icons/icon-192.png", sizes: "192x192", type: "image/png" },
+      { url: "/icons/icon-512.png", sizes: "512x512", type: "image/png" },
+    ],
+    apple: [{ url: "/apple-touch-icon.png", sizes: "180x180", type: "image/png" }],
+  },
   appleWebApp: {
     capable: true,
     statusBarStyle: "default",
@@ -23,7 +33,7 @@ export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
   viewportFit: "cover",
-  themeColor: "#F9E4E4",
+  themeColor: "#f5e6e0",
 };
 
 export default function RootLayout({

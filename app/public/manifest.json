@@ -1,16 +1,17 @@
 {
   "name": "LashKirja",
   "short_name": "LashKirja",
-  "description": "Lash tech bookkeeper",
+  "description": "Kirjanpito ripsiteknikoille",
+  "lang": "fi",
   "start_url": "/",
+  "scope": "/",
   "display": "standalone",
-  "background_color": "#FCFAFA",
-  "theme_color": "#F9E4E4",
+  "orientation": "portrait",
+  "background_color": "#faf8f5",
+  "theme_color": "#f5e6e0",
   "icons": [
-    {
-      "src": "/favicon.ico",
-      "sizes": "64x64",
-      "type": "image/x-icon"
-    }
+    { "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
   ]
 }
