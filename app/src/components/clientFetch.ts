@@ -91,8 +91,13 @@ export function errorMessage(error: unknown, fallback: string): string {
   return error instanceof Error && error.message ? error.message : fallback;
 }
 
+/**
+ * Used whenever an API call comes back 401 mid-session (cookie expired or was
+ * cleared server-side). Carries a reason so the login screen can explain why
+ * the user landed there instead of silently dropping them on a blank form.
+ */
 export function redirectToLogin(): void {
-  window.location.replace("/login");
+  window.location.replace("/login?error=expired");
 }
 
 /**

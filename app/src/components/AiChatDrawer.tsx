@@ -167,7 +167,7 @@ export function AiChatDrawer() {
         className="fixed right-4 z-40 bottom-[calc(var(--app-tab-height)+var(--safe-bottom)+0.75rem)] min-h-11 px-4 py-2.5 rounded-full bg-accent text-white font-medium text-xs shadow-xl hover:bg-accent-dark transition-all duration-300 hover-lift active-press flex items-center gap-2 border border-white/40 glass"
         aria-label="Avaa tekoälyapuri"
       >
-        <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
+        <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping motion-reduce:animate-none" />
         <span>LashKirja AI</span>
       </button>
 
@@ -285,7 +285,7 @@ export function AiChatDrawer() {
 
               {loading && (
                 <div className="flex items-center gap-2 text-xs text-warm-gray bg-cream/50 p-3 rounded-2xl max-w-[70%]">
-                  <div className="w-4 h-4 border-2 border-accent border-t-transparent rounded-full animate-spin" />
+                  <div className="w-4 h-4 border-2 border-accent border-t-transparent rounded-full animate-spin motion-reduce:animate-none" />
                   <span>Tehdään hakuja...</span>
                 </div>
               )}
@@ -305,6 +305,7 @@ export function AiChatDrawer() {
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 placeholder="Kirjoita viesti tekoälyapurille..."
+                aria-label="Viesti tekoälyapurille"
                 className="flex-1 px-3.5 py-2.5 rounded-xl border border-warm-gray-light/60 bg-cream/30 text-sm focus:bg-white transition-colors"
               />
               <button

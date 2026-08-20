@@ -7,6 +7,8 @@ const ERROR_MESSAGES: Record<string, string> = {
   auth: "Väärä sähköposti tai salasana",
   missing: "Sähköposti ja salasana vaaditaan",
   server: "Kirjautuminen epäonnistui",
+  rate: "Liian monta kirjautumisyritystä. Yritä muutaman minuutin kuluttua uudelleen.",
+  expired: "Istuntosi vanhentui. Kirjaudu sisään uudelleen.",
 };
 
 export default function LoginForm() {
@@ -64,6 +66,9 @@ export default function LoginForm() {
               name="email"
               type="email"
               autoComplete="username"
+              autoCapitalize="none"
+              autoCorrect="off"
+              spellCheck={false}
               className="w-full px-4 py-3 rounded-xl border border-warm-gray-light bg-cream/50 text-charcoal placeholder:text-warm-gray text-sm"
               placeholder="demo@lashkirja.fi"
               required
@@ -97,7 +102,7 @@ export default function LoginForm() {
             className="w-full py-3 rounded-xl bg-accent text-white font-medium text-sm hover:bg-accent-dark transition-colors flex items-center justify-center gap-2"
           >
             {submitting && (
-              <span className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" />
+              <span className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin motion-reduce:animate-none" />
             )}
             {submitting ? "Kirjaudutaan…" : "Kirjaudu sisään"}
           </button>

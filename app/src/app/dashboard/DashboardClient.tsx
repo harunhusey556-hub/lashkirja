@@ -145,7 +145,7 @@ export default function DashboardClient({
         {/* Dynamic Action Banner for Pending Receipts */}
         {data && data.pendingReceiptsCount !== undefined && data.pendingReceiptsCount > 0 && (
           <Link href="/kuitit" className="block relative overflow-hidden group animate-in">
-            <div className="absolute inset-0 bg-gradient-to-r from-warning/20 to-warning-dark/20 animate-pulse rounded-2xl" />
+            <div className="absolute inset-0 bg-gradient-to-r from-warning/20 to-warning-dark/20 animate-pulse motion-reduce:animate-none rounded-2xl" />
             <div className="relative bg-white/80 backdrop-blur-md border border-warning/40 rounded-2xl p-4 shadow-[0_4px_20px_-4px_rgba(138,105,30,0.3)] flex items-center justify-between transition-all group-hover:shadow-[0_4px_25px_-4px_rgba(138,105,30,0.5)] group-hover:bg-white">
               <div className="flex items-center gap-4">
                 <div className="w-10 h-10 rounded-full bg-warning/20 flex items-center justify-center text-warning-dark">
@@ -206,10 +206,10 @@ export default function DashboardClient({
         ) : !data ? (
           <div className="space-y-4">
             <div className="grid grid-cols-2 gap-4">
-              <div className="h-28 bg-warm-gray-light/20 rounded-3xl animate-pulse" />
-              <div className="h-28 bg-warm-gray-light/20 rounded-3xl animate-pulse" />
+              <div className="h-28 bg-warm-gray-light/20 rounded-3xl animate-pulse motion-reduce:animate-none" />
+              <div className="h-28 bg-warm-gray-light/20 rounded-3xl animate-pulse motion-reduce:animate-none" />
             </div>
-            <div className="h-24 bg-warm-gray-light/20 rounded-3xl animate-pulse" />
+            <div className="h-24 bg-warm-gray-light/20 rounded-3xl animate-pulse motion-reduce:animate-none" />
           </div>
         ) : (
           <>
@@ -252,7 +252,7 @@ export default function DashboardClient({
 
             <div className="flex items-center justify-center gap-2 mt-2 animate-in-delay-2">
               <span className="relative flex h-2 w-2">
-                {data.hasImap && <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-success opacity-40"></span>}
+                {data.hasImap && <span className="animate-ping motion-reduce:animate-none absolute inline-flex h-full w-full rounded-full bg-success opacity-40"></span>}
                 <span className={`relative inline-flex rounded-full h-2 w-2 ${data.hasImap ? 'bg-success' : 'bg-warm-gray'}`}></span>
               </span>
               <p className="text-xs text-warm-gray text-center">

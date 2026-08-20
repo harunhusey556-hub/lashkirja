@@ -22,7 +22,7 @@ import {
 } from "@/lib/receipt-categories";
 import { readPageCache, writePageCache } from "@/lib/page-cache";
 
-import { formatEur, formatMonth } from "@/lib/format";
+import { formatEur, formatMonth, parseFinnishNumber } from "@/lib/format";
 interface SavedReceipt {
   id: string;
   vendor: string | null;
@@ -256,7 +256,16 @@ export default function KuititPage() {
   }, [monthFilter, searchQuery, appliedAdvanced]);
 
   function applyAdvanced() {
-    setAppliedAdvanced({ ...advanced });
+    // Amount fields accept the Finnish decimal comma; normalize to a
+    // period-decimal string here so the API (which parses with Number())
+    // and the "active filters" chips always see a consistent format.
+    const minAmount = parseFinnishNumber(advanced.minAmount);
+    const maxAmount = parseFinnishNumber(advanced.maxAmount);
+    setAppliedAdvanced({
+      ...advanced,
+      minAmount: minAmount !== null ? String(minAmount) : "",
+      maxAmount: maxAmount !== null ? String(maxAmount) : "",
+    });
     setAdvancedOpen(false);
   }
 
@@ -676,9 +685,8 @@ export default function KuititPage() {
                   </label>
                   <input
                     id="receipt-min-amount"
-                    type="number"
-                    step="0.01"
-                    min="0"
+                    type="text"
+                    inputMode="decimal"
                     value={advanced.minAmount}
                     onChange={(e) =>
                       setAdvanced({ ...advanced, minAmount: e.target.value })
@@ -693,9 +701,8 @@ export default function KuititPage() {
                   </label>
                   <input
                     id="receipt-max-amount"
-                    type="number"
-                    step="0.01"
-                    min="0"
+                    type="text"
+                    inputMode="decimal"
                     value={advanced.maxAmount}
                     onChange={(e) =>
                       setAdvanced({ ...advanced, maxAmount: e.target.value })

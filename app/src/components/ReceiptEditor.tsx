@@ -18,6 +18,7 @@ import {
 } from "@/components/clientFetch";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { SelectMenu, SelectOption } from "@/components/SelectMenu";
+import { parseFinnishNumber } from "@/lib/format";
 import {
   categoryLabel,
   isKnownCategory,
@@ -350,7 +351,7 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
   }
 
   async function handleSave() {
-    const totalAmount = Number(formData.totalAmount);
+    const totalAmount = parseFinnishNumber(formData.totalAmount) ?? NaN;
     const populatedVatRows = formData.vatDetails.filter(
       (detail) => detail.amount !== ""
     );
@@ -363,7 +364,7 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
     }
     const vatDetails = populatedVatRows.map((detail) => ({
       rate: Number(detail.rate),
-      amount: Number(detail.amount),
+      amount: parseFinnishNumber(detail.amount) ?? NaN,
     }));
     const invalidVat = vatDetails.some(
       (detail) =>
@@ -745,9 +746,9 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
                 </label>
                 <input
                   id="receipt-total"
-                  type="number"
-                  step="0.01"
-                  min="0.01"
+                  type="text"
+                  inputMode="decimal"
+                  placeholder="0,00"
                   required
                   value={formData.totalAmount}
                   onChange={(e) =>
@@ -813,9 +814,9 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
                       </label>
                       <input
                         id={`receipt-vat-amount-${index}`}
-                        type="number"
-                        step="0.01"
-                        min="0"
+                        type="text"
+                        inputMode="decimal"
+                        placeholder="0,00"
                         value={detail.amount}
                         onChange={(event) =>
                           setFormData({

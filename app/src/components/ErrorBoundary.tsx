@@ -40,7 +40,9 @@ export class ErrorBoundary extends Component<Props, State> {
           </div>
           <h3 className="text-sm font-semibold text-charcoal mb-1">Osa sisällöstä ei voitu ladata</h3>
           <p className="text-xs text-warm-gray max-w-sm">
-            {this.state.error?.message || "Tuntematon virhe komponentissa. Yritä päivittää sivu."}
+            {/* Never show the raw JS error message to the user (may contain
+                stack details); it is already logged via componentDidCatch. */}
+            Tapahtui odottamaton virhe. Yritä päivittää sivu.
           </p>
           <button
             onClick={() => this.setState({ hasError: false })}

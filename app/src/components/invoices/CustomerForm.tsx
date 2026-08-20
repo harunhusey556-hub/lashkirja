@@ -153,6 +153,9 @@ export function CustomerForm({ initial, submitLabel, busy, onSubmit, onCancel }:
             value={values.email}
             onChange={(e) => set("email", e.target.value)}
             inputMode="email"
+            autoCapitalize="none"
+            autoCorrect="off"
+            spellCheck={false}
             aria-invalid={Boolean(errors.email)}
           />
           {errors.email && <p className="text-xs text-danger">{errors.email}</p>}

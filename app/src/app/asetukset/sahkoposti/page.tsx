@@ -308,6 +308,9 @@ export default function SahkopostiPage() {
                           value={imapEmail}
                           onChange={(e) => setImapEmail(e.target.value)}
                           className="w-full px-3 py-2 rounded-xl border border-warm-gray-light bg-white text-sm"
+                          autoCapitalize="none"
+                          autoCorrect="off"
+                          spellCheck={false}
                           required
                         />
                       </div>
@@ -360,11 +363,19 @@ export default function SahkopostiPage() {
           if (!accountToDisconnect) return;
           const id = accountToDisconnect;
           setAccountToDisconnect(null);
-          await fetch(`/api/integrations/imap?id=${id}`, { method: "DELETE" });
-          setProfile({
-            ...profile,
-            imapAccounts: profile.imapAccounts.filter((a) => a.id !== id),
-          });
+          try {
+            const res = await fetch(`/api/integrations/imap?id=${id}`, { method: "DELETE" });
+            if (!res.ok) {
+              setSyncMsg("Yhteyden katkaisu epäonnistui. Yritä uudelleen.");
+              return;
+            }
+            setProfile({
+              ...profile,
+              imapAccounts: profile.imapAccounts.filter((a) => a.id !== id),
+            });
+          } catch {
+            setSyncMsg("Yhteyden katkaisu epäonnistui. Tarkista verkkoyhteys ja yritä uudelleen.");
+          }
         }}
         onCancel={() => setAccountToDisconnect(null)}
       />

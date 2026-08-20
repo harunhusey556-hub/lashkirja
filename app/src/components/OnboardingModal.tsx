@@ -94,7 +94,12 @@ export function OnboardingModal({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-charcoal/60 backdrop-blur-md animate-fade-in">
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-charcoal/60 backdrop-blur-md animate-fade-in"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="onboarding-modal-title"
+    >
       <div className="w-full max-w-lg bg-white rounded-3xl shadow-2xl border border-white/50 overflow-hidden animate-scale-in flex flex-col max-h-[90dvh]">
         {/* Header */}
         <div className="px-6 py-4 bg-cream/60 border-b border-warm-gray-light/30 flex items-center justify-between">
@@ -103,7 +108,7 @@ export function OnboardingModal({
               ✨
             </div>
             <div>
-              <h2 className="text-sm font-semibold text-charcoal">
+              <h2 id="onboarding-modal-title" className="text-sm font-semibold text-charcoal">
                 LashKirja AI — Perehdytys
               </h2>
               <p className="text-[11px] text-warm-gray">
