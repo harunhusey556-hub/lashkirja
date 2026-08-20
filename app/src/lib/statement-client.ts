@@ -3,6 +3,7 @@ export interface LinkedReceipt {
   vendor: string | null;
   totalAmount: number | null;
   date: string | null;
+  source?: string;
 }
 
 export interface StatementTransaction {

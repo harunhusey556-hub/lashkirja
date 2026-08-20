@@ -1,0 +1,2343 @@
+
+> app@0.1.0 dev
+> next dev -H 0.0.0.0
+
+⚠ Port 3000 is in use by an unknown process, using available port 3002 instead.
+▲ Next.js 16.2.12 (Turbopack)
+- Local:         http://localhost:3002
+- Network:       http://0.0.0.0:3002
+- Environments: .env
+✓ Ready in 436ms
+
+ GET /kuitit 200 in 476ms (next.js: 66ms, proxy.ts: 205ms, application-code: 205ms)
+ GET /api/auth/me 200 in 106ms (next.js: 54ms, proxy.ts: 13ms, application-code: 38ms)
+ GET /api/receipts?sort=date_desc 200 in 509ms (next.js: 251ms, proxy.ts: 97ms, application-code: 161ms)
+ GET /api/receipts?reviewStatus=pending 200 in 529ms (next.js: 256ms, proxy.ts: 95ms, application-code: 178ms)
+ GET /api/onboarding 200 in 208ms (next.js: 28ms, proxy.ts: 170ms, application-code: 11ms)
+ GET /api/onboarding 200 in 28ms (next.js: 4ms, proxy.ts: 12ms, application-code: 13ms)
+ GET / 307 in 259ms (next.js: 34ms, application-code: 225ms)
+ GET /dashboard 200 in 142ms (next.js: 43ms, proxy.ts: 12ms, application-code: 87ms)
+ GET /api/auth/me 200 in 20ms (next.js: 5ms, proxy.ts: 7ms, application-code: 8ms)
+ GET /api/dashboard?month=2026-08 200 in 69ms (next.js: 33ms, proxy.ts: 12ms, application-code: 24ms)
+ GET /api/onboarding 200 in 32ms (next.js: 5ms, proxy.ts: 18ms, application-code: 9ms)
+ POST /api/onboarding 200 in 31ms (next.js: 3ms, proxy.ts: 9ms, application-code: 19ms)
+ GET /kuitit 200 in 40ms (next.js: 3ms, proxy.ts: 7ms, application-code: 30ms)
+ GET /api/auth/me 200 in 67ms (next.js: 11ms, proxy.ts: 31ms, application-code: 24ms)
+ GET /api/receipts?reviewStatus=pending 200 in 114ms (next.js: 11ms, proxy.ts: 55ms, application-code: 47ms)
+ GET /api/receipts?sort=date_desc 200 in 98ms (next.js: 12ms, proxy.ts: 31ms, application-code: 54ms)
+ GET /api/onboarding 200 in 17ms (next.js: 3ms, proxy.ts: 6ms, application-code: 8ms)
+ PATCH /api/receipts/5af80eb0-b185-45ba-a2df-daa3a7738ed8/review 200 in 775ms (next.js: 712ms, proxy.ts: 22ms, application-code: 41ms)
+ PATCH /api/receipts/a635e4e5-0291-49ab-a7b8-b4f06d23a5b3/review 200 in 790ms (next.js: 714ms, proxy.ts: 25ms, application-code: 51ms)
+ PATCH /api/receipts/289fa049-333d-4dd5-8d32-972040f25992/review 200 in 796ms (next.js: 713ms, proxy.ts: 24ms, application-code: 59ms)
+ PATCH /api/receipts/7b913a83-b125-42ea-ad80-5bdafc1c8b5f/review 200 in 795ms (next.js: 709ms, proxy.ts: 20ms, application-code: 66ms)
+ PATCH /api/receipts/6491f13d-7d87-4fb4-acd7-95dd1fcf74ce/review 200 in 802ms (next.js: 709ms, proxy.ts: 19ms, application-code: 74ms)
+ PATCH /api/receipts/471b3bbc-81d3-4ae3-8e04-9d03c87f0fc4/review 200 in 814ms (next.js: 704ms, proxy.ts: 18ms, application-code: 92ms)
+ PATCH /api/receipts/d2e54863-db00-42e1-9608-b3af98a61db1/review 200 in 146ms (next.js: 86ms, proxy.ts: 22ms, application-code: 37ms)
+ PATCH /api/receipts/1990b9ee-e34b-4fe4-ad3d-a03f60a8e2c1/review 200 in 154ms (next.js: 92ms, proxy.ts: 22ms, application-code: 40ms)
+ PATCH /api/receipts/932bc966-6e29-4b35-a030-f4ec36a1ea36/review 200 in 161ms (next.js: 96ms, proxy.ts: 22ms, application-code: 43ms)
+ PATCH /api/receipts/6c93e92c-3097-4344-81ba-ad9550d317ea/review 200 in 167ms (next.js: 100ms, proxy.ts: 21ms, application-code: 46ms)
+ PATCH /api/receipts/eb7bd46f-7745-40d8-8f02-fd6e38462139/review 200 in 173ms (next.js: 102ms, proxy.ts: 22ms, application-code: 48ms)
+ PATCH /api/receipts/6d254061-0c77-4f19-aa16-16a77b973ce8/review 200 in 179ms (next.js: 104ms, proxy.ts: 23ms, application-code: 52ms)
+ PATCH /api/receipts/b4f1aee1-20d1-4e2c-a87e-abd92cbe3d54/review 200 in 71ms (next.js: 17ms, proxy.ts: 30ms, application-code: 24ms)
+ PATCH /api/receipts/4394239f-fa35-431d-a066-82d92041780b/review 200 in 77ms (next.js: 20ms, proxy.ts: 29ms, application-code: 27ms)
+ PATCH /api/receipts/e2afe536-8eb8-4bdd-9e07-0fd3b0a6c4c1/review 200 in 81ms (next.js: 22ms, proxy.ts: 29ms, application-code: 30ms)
+ PATCH /api/receipts/d922f4a3-5f33-47c6-be07-4feb249ca54d/review 200 in 87ms (next.js: 25ms, proxy.ts: 26ms, application-code: 36ms)
+ PATCH /api/receipts/5a6d05b9-0fe8-4d25-802e-43889515a983/review 200 in 92ms (next.js: 27ms, proxy.ts: 25ms, application-code: 40ms)
+ GET /api/receipts?sort=date_desc 200 in 42ms (next.js: 4ms, proxy.ts: 8ms, application-code: 30ms)
+ GET /api/receipts?reviewStatus=pending 200 in 59ms (next.js: 7ms, proxy.ts: 8ms, application-code: 45ms)
+ GET /kuitit/80b4356c-852f-4e13-afb7-7992a5246b96 200 in 433ms (next.js: 403ms, proxy.ts: 4ms, application-code: 26ms)
+ GET /api/auth/me 200 in 15ms (next.js: 5ms, proxy.ts: 4ms, application-code: 6ms)
+ GET /api/onboarding 200 in 32ms (next.js: 6ms, proxy.ts: 16ms, application-code: 11ms)
+ GET /api/receipts/80b4356c-852f-4e13-afb7-7992a5246b96 200 in 761ms (next.js: 729ms, proxy.ts: 18ms, application-code: 15ms)
+ PATCH /api/receipts/80b4356c-852f-4e13-afb7-7992a5246b96 200 in 111ms (next.js: 66ms, proxy.ts: 9ms, application-code: 36ms)
+ GET /kuitit 200 in 26ms (next.js: 3ms, proxy.ts: 5ms, application-code: 18ms)
+ GET /api/auth/me 200 in 42ms (next.js: 9ms, proxy.ts: 12ms, application-code: 21ms)
+ GET /api/receipts?sort=date_desc 200 in 75ms (next.js: 10ms, proxy.ts: 28ms, application-code: 37ms)
+ GET /api/receipts?reviewStatus=pending 200 in 85ms (next.js: 12ms, proxy.ts: 20ms, application-code: 53ms)
+ GET /api/onboarding 200 in 30ms (next.js: 2ms, proxy.ts: 21ms, application-code: 7ms)
+ GET /alv-raportti 200 in 81ms (next.js: 41ms, proxy.ts: 14ms, application-code: 26ms)
+ GET /api/auth/me 200 in 55ms (next.js: 4ms, proxy.ts: 7ms, application-code: 43ms)
+ GET /api/alv?period=2026-08 200 in 66ms (next.js: 38ms, proxy.ts: 14ms, application-code: 14ms)
+ GET /api/onboarding 200 in 25ms (next.js: 4ms, proxy.ts: 11ms, application-code: 9ms)
+ GET /api/alv?period=2026-07 200 in 14ms (next.js: 2ms, proxy.ts: 5ms, application-code: 7ms)
+ GET /tiliotteet 200 in 45ms (next.js: 21ms, proxy.ts: 4ms, application-code: 20ms)
+ GET /api/auth/me 200 in 121ms (next.js: 4ms, proxy.ts: 12ms, application-code: 106ms)
+ GET /api/statements 200 in 167ms (next.js: 98ms, proxy.ts: 20ms, application-code: 50ms)
+ GET /api/onboarding 200 in 25ms (next.js: 4ms, proxy.ts: 12ms, application-code: 9ms)
+ GET /api/statements 200 in 50ms (next.js: 7ms, proxy.ts: 11ms, application-code: 32ms)
+ GET /kuitit 200 in 25ms (next.js: 5ms, proxy.ts: 5ms, application-code: 15ms)
+ GET /api/auth/me 200 in 26ms (next.js: 7ms, proxy.ts: 10ms, application-code: 9ms)
+ GET /api/receipts?sort=date_desc 200 in 45ms (next.js: 5ms, proxy.ts: 18ms, application-code: 22ms)
+ GET /api/receipts?reviewStatus=pending 200 in 63ms (next.js: 10ms, proxy.ts: 16ms, application-code: 37ms)
+ GET /api/onboarding 200 in 50ms (next.js: 2ms, proxy.ts: 42ms, application-code: 6ms)
+ GET /tiliotteet 200 in 21ms (next.js: 3ms, proxy.ts: 4ms, application-code: 14ms)
+ GET /api/auth/me 200 in 19ms (next.js: 3ms, proxy.ts: 7ms, application-code: 9ms)
+ GET /api/statements 200 in 47ms (next.js: 2ms, proxy.ts: 14ms, application-code: 31ms)
+ GET /api/statements 200 in 37ms (next.js: 7ms, proxy.ts: 7ms, application-code: 23ms)
+ GET /api/onboarding 200 in 41ms (next.js: 3ms, proxy.ts: 7ms, application-code: 30ms)
+ GET /tiliotteet/8c549118-5b39-4ff9-935d-72cb23ed696b 200 in 398ms (next.js: 371ms, proxy.ts: 5ms, application-code: 22ms)
+ GET /api/auth/me 200 in 33ms (next.js: 6ms, proxy.ts: 19ms, application-code: 8ms)
+ GET /api/onboarding 200 in 16ms (next.js: 3ms, proxy.ts: 5ms, application-code: 8ms)
+ GET /api/statements/8c549118-5b39-4ff9-935d-72cb23ed696b 200 in 820ms (next.js: 757ms, proxy.ts: 29ms, application-code: 34ms)
+ GET /api/statements/8c549118-5b39-4ff9-935d-72cb23ed696b 200 in 128ms (next.js: 94ms, proxy.ts: 5ms, application-code: 30ms)
+ DELETE /api/statements/8c549118-5b39-4ff9-935d-72cb23ed696b 200 in 98ms (next.js: 74ms, proxy.ts: 8ms, application-code: 17ms)
+ GET /tiliotteet 200 in 23ms (next.js: 3ms, proxy.ts: 4ms, application-code: 16ms)
+ GET /api/auth/me 200 in 32ms (next.js: 3ms, proxy.ts: 7ms, application-code: 22ms)
+ GET /api/statements 200 in 41ms (next.js: 6ms, proxy.ts: 13ms, application-code: 21ms)
+ GET /api/onboarding 200 in 23ms (next.js: 3ms, proxy.ts: 8ms, application-code: 12ms)
+ GET /api/statements 200 in 25ms (next.js: 7ms, proxy.ts: 7ms, application-code: 11ms)
+ POST /api/statements 200 in 339ms (next.js: 4ms, proxy.ts: 5ms, application-code: 331ms)
+ GET /tiliotteet/2e399cdd-1de5-4a00-9591-3cdaadf915f0 200 in 105ms (next.js: 76ms, proxy.ts: 5ms, application-code: 24ms)
+ GET /api/auth/me 200 in 21ms (next.js: 3ms, proxy.ts: 9ms, application-code: 9ms)
+ GET /api/statements/2e399cdd-1de5-4a00-9591-3cdaadf915f0 200 in 141ms (next.js: 84ms, proxy.ts: 15ms, application-code: 41ms)
+ GET /api/onboarding 200 in 57ms (next.js: 4ms, proxy.ts: 45ms, application-code: 8ms)
+ GET /api/statements/2e399cdd-1de5-4a00-9591-3cdaadf915f0 200 in 66ms (next.js: 9ms, proxy.ts: 12ms, application-code: 46ms)
+ GET /tiliotteet 200 in 45ms (next.js: 5ms, proxy.ts: 7ms, application-code: 34ms)
+ GET /api/auth/me 200 in 23ms (next.js: 4ms, proxy.ts: 7ms, application-code: 11ms)
+ GET /api/statements 200 in 72ms (next.js: 9ms, proxy.ts: 17ms, application-code: 46ms)
+ GET /api/onboarding 200 in 28ms (next.js: 8ms, proxy.ts: 10ms, application-code: 10ms)
+ GET /api/statements 200 in 58ms (next.js: 10ms, proxy.ts: 9ms, application-code: 39ms)
+ GET /kuitit 200 in 22ms (next.js: 3ms, proxy.ts: 5ms, application-code: 14ms)
+ GET /api/auth/me 200 in 25ms (next.js: 5ms, proxy.ts: 9ms, application-code: 12ms)
+ GET /api/receipts?reviewStatus=pending 200 in 56ms (next.js: 7ms, proxy.ts: 16ms, application-code: 33ms)
+ GET /api/receipts?sort=date_desc 200 in 67ms (next.js: 10ms, proxy.ts: 13ms, application-code: 44ms)
+ GET /api/onboarding 200 in 30ms (next.js: 2ms, proxy.ts: 22ms, application-code: 6ms)
+ PATCH /api/receipts/aacb0ba9-62f5-47b4-badf-f5f759c76c09/review 200 in 162ms (next.js: 95ms, proxy.ts: 24ms, application-code: 43ms)
+ PATCH /api/receipts/a37b92ff-908d-4605-9221-e07be934994d/review 200 in 166ms (next.js: 108ms, proxy.ts: 23ms, application-code: 36ms)
+ PATCH /api/receipts/69ec345c-9ae2-4d89-8781-bff65dbdedb3/review 200 in 170ms (next.js: 108ms, proxy.ts: 26ms, application-code: 36ms)
+ PATCH /api/receipts/18b14f2b-d2a0-4aa0-a75d-f255187305cd/review 200 in 175ms (next.js: 108ms, proxy.ts: 26ms, application-code: 41ms)
+ PATCH /api/receipts/f14b7e0e-4852-40ee-8760-b5a1742f2454/review 200 in 179ms (next.js: 111ms, proxy.ts: 25ms, application-code: 43ms)
+ PATCH /api/receipts/93a944da-c4ce-462f-a05e-198b837bd127/review 200 in 185ms (next.js: 113ms, proxy.ts: 22ms, application-code: 51ms)
+ PATCH /api/receipts/34dae7d6-ae32-450f-b21a-8d103df2b2a9/review 200 in 97ms (next.js: 20ms, proxy.ts: 38ms, application-code: 39ms)
+ PATCH /api/receipts/2a32597e-9807-4988-a9a2-320e650ffc67/review 200 in 102ms (next.js: 23ms, proxy.ts: 37ms, application-code: 41ms)
+ PATCH /api/receipts/2467ab19-48ce-435a-8f28-18f43594098e/review 200 in 97ms (next.js: 28ms, proxy.ts: 28ms, application-code: 42ms)
+ PATCH /api/receipts/9b986681-afde-46aa-b9c3-e2c2cb9c150a/review 200 in 102ms (next.js: 31ms, proxy.ts: 25ms, application-code: 45ms)
+ PATCH /api/receipts/8d30df12-7215-4772-8ad9-a7dd090864f0/review 200 in 106ms (next.js: 34ms, proxy.ts: 25ms, application-code: 47ms)
+ PATCH /api/receipts/4899c019-7a96-46b4-b893-9aa530efa27d/review 200 in 110ms (next.js: 38ms, proxy.ts: 21ms, application-code: 51ms)
+ PATCH /api/receipts/c5713248-afcd-4765-a443-3581c5ce8a2f/review 200 in 73ms (next.js: 22ms, proxy.ts: 28ms, application-code: 24ms)
+ PATCH /api/receipts/13d8798f-f0db-4eee-8f45-07f2049b1125/review 200 in 77ms (next.js: 25ms, proxy.ts: 27ms, application-code: 25ms)
+ PATCH /api/receipts/c1c663db-f231-4507-8197-65df1d1253f2/review 200 in 73ms (next.js: 24ms, proxy.ts: 23ms, application-code: 25ms)
+ PATCH /api/receipts/4ae9e2c6-4c7a-47da-92f9-241a5f5215a8/review 200 in 75ms (next.js: 26ms, proxy.ts: 21ms, application-code: 28ms)
+ PATCH /api/receipts/c5a70978-109c-479f-9a55-670d46a70d8c/review 200 in 81ms (next.js: 28ms, proxy.ts: 21ms, application-code: 32ms)
+ PATCH /api/receipts/943be81e-332c-4457-88a1-7202170acea0/review 200 in 85ms (next.js: 29ms, proxy.ts: 18ms, application-code: 37ms)
+ GET /api/receipts?sort=date_desc 200 in 38ms (next.js: 3ms, proxy.ts: 7ms, application-code: 28ms)
+ GET /api/receipts?reviewStatus=pending 200 in 48ms (next.js: 5ms, proxy.ts: 6ms, application-code: 37ms)
+ GET /alv-raportti 200 in 29ms (next.js: 3ms, proxy.ts: 5ms, application-code: 21ms)
+ GET /api/auth/me 200 in 35ms (next.js: 6ms, proxy.ts: 19ms, application-code: 11ms)
+ GET /api/alv?period=2026-08 200 in 32ms (next.js: 3ms, proxy.ts: 20ms, application-code: 9ms)
+ GET /api/onboarding 200 in 16ms (next.js: 2ms, proxy.ts: 5ms, application-code: 9ms)
+ GET /kuitit 200 in 30ms (next.js: 3ms, proxy.ts: 5ms, application-code: 23ms)
+ GET /api/auth/me 200 in 33ms (next.js: 7ms, proxy.ts: 17ms, application-code: 9ms)
+ GET /api/receipts?sort=date_desc 200 in 58ms (next.js: 4ms, proxy.ts: 18ms, application-code: 37ms)
+ GET /api/receipts?reviewStatus=pending 200 in 65ms (next.js: 7ms, proxy.ts: 13ms, application-code: 45ms)
+ GET /api/onboarding 200 in 53ms (next.js: 3ms, proxy.ts: 45ms, application-code: 5ms)
+✓ Compiled in 441ms
+ GET /kuitit 200 in 192ms (next.js: 63ms, proxy.ts: 72ms, application-code: 56ms)
+ GET /kuitit 200 in 62ms (next.js: 5ms, proxy.ts: 9ms, application-code: 49ms)
+ GET /kuitit 200 in 37ms (next.js: 2ms, proxy.ts: 6ms, application-code: 29ms)
+ GET /kuitit 200 in 64ms (next.js: 3ms, proxy.ts: 5ms, application-code: 55ms)
+ GET /kuitit 200 in 52ms (next.js: 5ms, proxy.ts: 6ms, application-code: 40ms)
+ GET /kuitit 200 in 48ms (next.js: 6ms, proxy.ts: 9ms, application-code: 33ms)
+ GET /kuitit 200 in 163ms (next.js: 51ms, proxy.ts: 68ms, application-code: 44ms)
+ GET /kuitit 200 in 37ms (next.js: 5ms, proxy.ts: 8ms, application-code: 24ms)
+ GET /kuitit 200 in 31ms (next.js: 4ms, proxy.ts: 5ms, application-code: 22ms)
+ GET /kuitit 200 in 150ms (next.js: 58ms, proxy.ts: 43ms, application-code: 48ms)
+ GET /kuitit 200 in 62ms (next.js: 8ms, proxy.ts: 9ms, application-code: 45ms)
+ GET /kuitit 200 in 33ms (next.js: 5ms, proxy.ts: 9ms, application-code: 19ms)
+ GET /kuitit 200 in 138ms (next.js: 48ms, proxy.ts: 54ms, application-code: 37ms)
+ GET /kuitit 200 in 41ms (next.js: 2ms, proxy.ts: 6ms, application-code: 33ms)
+ GET /kuitit 200 in 30ms (next.js: 3ms, proxy.ts: 5ms, application-code: 22ms)
+ GET /kuitit 200 in 220ms (next.js: 67ms, proxy.ts: 83ms, application-code: 70ms)
+ GET /kuitit 200 in 46ms (next.js: 7ms, proxy.ts: 7ms, application-code: 32ms)
+ GET /kuitit 200 in 51ms (next.js: 4ms, proxy.ts: 7ms, application-code: 40ms)
+ GET /kuitit 200 in 54ms (next.js: 7ms, proxy.ts: 11ms, application-code: 36ms)
+ GET /kuitit 200 in 56ms (next.js: 7ms, proxy.ts: 8ms, application-code: 42ms)
+ GET /kuitit 200 in 46ms (next.js: 8ms, proxy.ts: 9ms, application-code: 30ms)
+ GET /kuitit 200 in 49ms (next.js: 4ms, proxy.ts: 5ms, application-code: 39ms)
+ GET /kuitit 200 in 39ms (next.js: 4ms, proxy.ts: 6ms, application-code: 29ms)
+ GET /kuitit 200 in 62ms (next.js: 4ms, proxy.ts: 6ms, application-code: 52ms)
+ GET /kuitit 200 in 44ms (next.js: 3ms, proxy.ts: 6ms, application-code: 34ms)
+ GET /kuitit 200 in 55ms (next.js: 5ms, proxy.ts: 9ms, application-code: 42ms)
+ GET /kuitit 200 in 55ms (next.js: 5ms, proxy.ts: 14ms, application-code: 36ms)
+ GET /kuitit 200 in 79ms (next.js: 5ms, proxy.ts: 9ms, application-code: 65ms)
+ GET /kuitit 200 in 61ms (next.js: 7ms, proxy.ts: 8ms, application-code: 46ms)
+ GET /kuitit 200 in 67ms (next.js: 6ms, proxy.ts: 13ms, application-code: 49ms)
+ GET /kuitit 200 in 52ms (next.js: 5ms, proxy.ts: 9ms, application-code: 38ms)
+ GET /kuitit 200 in 51ms (next.js: 5ms, proxy.ts: 8ms, application-code: 38ms)
+ GET /kuitit 200 in 117ms (next.js: 6ms, proxy.ts: 9ms, application-code: 102ms)
+ GET /kuitit 200 in 78ms (next.js: 6ms, proxy.ts: 13ms, application-code: 59ms)
+ GET /kuitit 200 in 66ms (next.js: 5ms, proxy.ts: 9ms, application-code: 51ms)
+ GET /kuitit 200 in 49ms (next.js: 5ms, proxy.ts: 10ms, application-code: 33ms)
+ GET /kuitit 200 in 46ms (next.js: 4ms, proxy.ts: 7ms, application-code: 35ms)
+ GET /kuitit 200 in 56ms (next.js: 5ms, proxy.ts: 8ms, application-code: 42ms)
+ GET /kuitit 200 in 37ms (next.js: 4ms, proxy.ts: 7ms, application-code: 26ms)
+ GET /kuitit 200 in 72ms (next.js: 4ms, proxy.ts: 7ms, application-code: 61ms)
+ GET /kuitit 200 in 61ms (next.js: 4ms, proxy.ts: 7ms, application-code: 50ms)
+ GET /kuitit 200 in 53ms (next.js: 5ms, proxy.ts: 11ms, application-code: 37ms)
+ GET /kuitit 200 in 41ms (next.js: 5ms, proxy.ts: 8ms, application-code: 28ms)
+ GET /kuitit 200 in 37ms (next.js: 4ms, proxy.ts: 6ms, application-code: 27ms)
+ GET /kuitit 200 in 62ms (next.js: 4ms, proxy.ts: 4ms, application-code: 54ms)
+ GET /kuitit 200 in 54ms (next.js: 3ms, proxy.ts: 6ms, application-code: 46ms)
+ GET /kuitit 200 in 71ms (next.js: 4ms, proxy.ts: 17ms, application-code: 50ms)
+ GET /kuitit 200 in 38ms (next.js: 3ms, proxy.ts: 8ms, application-code: 27ms)
+ GET /kuitit 200 in 35ms (next.js: 3ms, proxy.ts: 6ms, application-code: 26ms)
+ GET /kuitit 200 in 43ms (next.js: 4ms, proxy.ts: 4ms, application-code: 35ms)
+ GET /kuitit 200 in 38ms (next.js: 3ms, proxy.ts: 6ms, application-code: 29ms)
+ GET /kuitit 200 in 36ms (next.js: 4ms, proxy.ts: 6ms, application-code: 26ms)
+ GET /kuitit 200 in 66ms (next.js: 3ms, proxy.ts: 6ms, application-code: 57ms)
+ GET /kuitit 200 in 45ms (next.js: 3ms, proxy.ts: 6ms, application-code: 36ms)
+ GET /kuitit 200 in 38ms (next.js: 3ms, proxy.ts: 6ms, application-code: 29ms)
+ GET /kuitit 200 in 39ms (next.js: 4ms, proxy.ts: 6ms, application-code: 29ms)
+ GET /kuitit 200 in 41ms (next.js: 8ms, proxy.ts: 5ms, application-code: 29ms)
+ GET /kuitit 200 in 42ms (next.js: 5ms, proxy.ts: 5ms, application-code: 32ms)
+ GET /kuitit 200 in 96ms (next.js: 6ms, proxy.ts: 7ms, application-code: 84ms)
+ GET /kuitit 200 in 67ms (next.js: 25ms, proxy.ts: 8ms, application-code: 33ms)
+ GET /kuitit 200 in 61ms (next.js: 4ms, proxy.ts: 6ms, application-code: 52ms)
+ GET /kuitit 200 in 38ms (next.js: 3ms, proxy.ts: 6ms, application-code: 30ms)
+ GET /kuitit 200 in 36ms (next.js: 4ms, proxy.ts: 5ms, application-code: 27ms)
+ GET /kuitit 200 in 37ms (next.js: 4ms, proxy.ts: 7ms, application-code: 27ms)
+ GET /kuitit 200 in 40ms (next.js: 3ms, proxy.ts: 5ms, application-code: 32ms)
+ GET /kuitit 200 in 45ms (next.js: 5ms, proxy.ts: 5ms, application-code: 34ms)
+ GET /kuitit 200 in 43ms (next.js: 4ms, proxy.ts: 7ms, application-code: 33ms)
+ GET /kuitit 200 in 74ms (next.js: 4ms, proxy.ts: 6ms, application-code: 64ms)
+ GET /kuitit 200 in 51ms (next.js: 5ms, proxy.ts: 8ms, application-code: 39ms)
+ GET /kuitit 200 in 51ms (next.js: 5ms, proxy.ts: 10ms, application-code: 35ms)
+ GET /kuitit 200 in 51ms (next.js: 5ms, proxy.ts: 11ms, application-code: 34ms)
+ GET /kuitit 200 in 43ms (next.js: 6ms, proxy.ts: 9ms, application-code: 28ms)
+ GET /kuitit 200 in 61ms (next.js: 4ms, proxy.ts: 7ms, application-code: 51ms)
+ GET /kuitit 200 in 37ms (next.js: 3ms, proxy.ts: 5ms, application-code: 29ms)
+ GET /kuitit 200 in 36ms (next.js: 3ms, proxy.ts: 5ms, application-code: 28ms)
+ GET /kuitit 200 in 45ms (next.js: 6ms, proxy.ts: 6ms, application-code: 33ms)
+ GET /kuitit 200 in 34ms (next.js: 6ms, proxy.ts: 4ms, application-code: 24ms)
+ GET /kuitit 200 in 33ms (next.js: 4ms, proxy.ts: 4ms, application-code: 24ms)
+ GET /kuitit 200 in 30ms (next.js: 3ms, proxy.ts: 4ms, application-code: 22ms)
+ GET /kuitit 200 in 33ms (next.js: 3ms, proxy.ts: 4ms, application-code: 25ms)
+ GET /kuitit 200 in 32ms (next.js: 3ms, proxy.ts: 5ms, application-code: 25ms)
+ GET /kuitit 200 in 33ms (next.js: 4ms, proxy.ts: 7ms, application-code: 23ms)
+ GET /kuitit 200 in 32ms (next.js: 3ms, proxy.ts: 5ms, application-code: 24ms)
+ GET /kuitit 200 in 41ms (next.js: 3ms, proxy.ts: 5ms, application-code: 33ms)
+ GET /kuitit 200 in 32ms (next.js: 3ms, proxy.ts: 5ms, application-code: 23ms)
+ GET /kuitit 200 in 36ms (next.js: 3ms, proxy.ts: 5ms, application-code: 28ms)
+ GET /kuitit 200 in 44ms (next.js: 4ms, proxy.ts: 5ms, application-code: 35ms)
+ GET /kuitit 200 in 56ms (next.js: 4ms, proxy.ts: 10ms, application-code: 42ms)
+ GET /kuitit 200 in 34ms (next.js: 4ms, proxy.ts: 5ms, application-code: 24ms)
+ GET /kuitit 200 in 32ms (next.js: 3ms, proxy.ts: 5ms, application-code: 24ms)
+ GET /kuitit 200 in 32ms (next.js: 4ms, proxy.ts: 5ms, application-code: 23ms)
+ GET /kuitit 200 in 44ms (next.js: 4ms, proxy.ts: 5ms, application-code: 35ms)
+ GET /kuitit 200 in 37ms (next.js: 3ms, proxy.ts: 5ms, application-code: 28ms)
+ GET /kuitit 200 in 34ms (next.js: 3ms, proxy.ts: 5ms, application-code: 26ms)
+ GET /kuitit 200 in 35ms (next.js: 3ms, proxy.ts: 7ms, application-code: 25ms)
+ GET /kuitit 200 in 35ms (next.js: 3ms, proxy.ts: 5ms, application-code: 27ms)
+ GET /kuitit 200 in 37ms (next.js: 3ms, proxy.ts: 5ms, application-code: 29ms)
+ GET /kuitit 200 in 36ms (next.js: 4ms, proxy.ts: 7ms, application-code: 25ms)
+ GET /kuitit 200 in 36ms (next.js: 4ms, proxy.ts: 5ms, application-code: 27ms)
+ GET /kuitit 200 in 48ms (next.js: 4ms, proxy.ts: 5ms, application-code: 39ms)
+ GET /kuitit 200 in 36ms (next.js: 3ms, proxy.ts: 5ms, application-code: 28ms)
+ GET /kuitit 200 in 59ms (next.js: 4ms, proxy.ts: 4ms, application-code: 50ms)
+ GET /kuitit 200 in 61ms (next.js: 4ms, proxy.ts: 5ms, application-code: 51ms)
+ GET /kuitit 200 in 38ms (next.js: 3ms, proxy.ts: 7ms, application-code: 28ms)
+ GET /kuitit 200 in 28ms (next.js: 3ms, proxy.ts: 5ms, application-code: 20ms)
+✓ Compiled in 42ms
+ GET /kuitit 200 in 180ms (next.js: 55ms, proxy.ts: 68ms, application-code: 57ms)
+ GET /kuitit 200 in 63ms (next.js: 6ms, proxy.ts: 10ms, application-code: 46ms)
+ GET /kuitit 200 in 33ms (next.js: 4ms, proxy.ts: 6ms, application-code: 23ms)
+ GET /kuitit 200 in 30ms (next.js: 5ms, proxy.ts: 4ms, application-code: 20ms)
+ GET /kuitit 200 in 196ms (next.js: 65ms, proxy.ts: 44ms, application-code: 88ms)
+ GET /kuitit 200 in 162ms (next.js: 8ms, proxy.ts: 20ms, application-code: 133ms)
+ GET /kuitit 200 in 99ms (next.js: 5ms, proxy.ts: 11ms, application-code: 83ms)
+ GET /kuitit 200 in 45ms (next.js: 3ms, proxy.ts: 9ms, application-code: 33ms)
+ GET /kuitit 200 in 37ms (next.js: 5ms, proxy.ts: 8ms, application-code: 25ms)
+ GET /kuitit 200 in 147ms (next.js: 52ms, proxy.ts: 47ms, application-code: 48ms)
+ GET /kuitit 200 in 44ms (next.js: 5ms, proxy.ts: 7ms, application-code: 32ms)
+ GET /kuitit 200 in 35ms (next.js: 5ms, proxy.ts: 9ms, application-code: 20ms)
+✓ Compiled in 49ms
+✓ Compiled in 78ms
+ GET /kuitit 200 in 201ms (next.js: 64ms, proxy.ts: 49ms, application-code: 88ms)
+ GET /kuitit 200 in 67ms (next.js: 6ms, proxy.ts: 28ms, application-code: 34ms)
+ GET /kuitit 200 in 46ms (next.js: 3ms, proxy.ts: 6ms, application-code: 37ms)
+ GET /kuitit 200 in 56ms (next.js: 5ms, proxy.ts: 7ms, application-code: 44ms)
+ GET /kuitit 200 in 68ms (next.js: 5ms, proxy.ts: 9ms, application-code: 54ms)
+ GET /kuitit 200 in 76ms (next.js: 8ms, proxy.ts: 14ms, application-code: 53ms)
+ GET /kuitit 200 in 172ms (next.js: 54ms, proxy.ts: 53ms, application-code: 64ms)
+ GET /kuitit 200 in 61ms (next.js: 6ms, proxy.ts: 12ms, application-code: 43ms)
+ GET /kuitit 200 in 182ms (next.js: 66ms, proxy.ts: 55ms, application-code: 61ms)
+ GET /kuitit 200 in 71ms (next.js: 8ms, proxy.ts: 10ms, application-code: 53ms)
+ GET /dashboard 200 in 55ms (next.js: 21ms, proxy.ts: 5ms, application-code: 29ms)
+ GET /api/auth/me 200 in 56ms (next.js: 29ms, proxy.ts: 11ms, application-code: 16ms)
+ GET /api/dashboard?month=2026-08 200 in 106ms (next.js: 35ms, proxy.ts: 48ms, application-code: 23ms)
+ GET /api/onboarding 200 in 46ms (next.js: 26ms, proxy.ts: 12ms, application-code: 8ms)
+ GET /kuitit 200 in 27ms (next.js: 3ms, proxy.ts: 6ms, application-code: 19ms)
+ GET /api/auth/me 200 in 84ms (next.js: 7ms, proxy.ts: 10ms, application-code: 67ms)
+ GET /api/receipts?sort=date_desc 200 in 127ms (next.js: 58ms, proxy.ts: 16ms, application-code: 53ms)
+ GET /api/receipts?reviewStatus=pending 200 in 139ms (next.js: 64ms, proxy.ts: 13ms, application-code: 61ms)
+ GET /api/onboarding 200 in 25ms (next.js: 2ms, proxy.ts: 18ms, application-code: 5ms)
+ GET /tiliotteet 200 in 32ms (next.js: 12ms, proxy.ts: 5ms, application-code: 15ms)
+ GET /api/auth/me 200 in 58ms (next.js: 2ms, proxy.ts: 6ms, application-code: 49ms)
+ GET /api/statements 200 in 92ms (next.js: 40ms, proxy.ts: 12ms, application-code: 40ms)
+ GET /api/statements 200 in 40ms (next.js: 6ms, proxy.ts: 6ms, application-code: 28ms)
+ GET /api/onboarding 200 in 44ms (next.js: 3ms, proxy.ts: 6ms, application-code: 35ms)
+ GET /alv-raportti 200 in 38ms (next.js: 16ms, proxy.ts: 5ms, application-code: 17ms)
+ GET /api/auth/me 200 in 55ms (next.js: 5ms, proxy.ts: 13ms, application-code: 38ms)
+ GET /api/alv?period=2026-08 200 in 57ms (next.js: 31ms, proxy.ts: 16ms, application-code: 11ms)
+ GET /api/onboarding 200 in 14ms (next.js: 2ms, proxy.ts: 4ms, application-code: 7ms)
+ GET /asetukset 200 in 142ms (next.js: 121ms, proxy.ts: 5ms, application-code: 16ms)
+ GET /api/auth/me 200 in 20ms (next.js: 5ms, proxy.ts: 9ms, application-code: 6ms)
+ GET /api/profile 200 in 59ms (next.js: 36ms, proxy.ts: 13ms, application-code: 10ms)
+ GET /api/onboarding 200 in 50ms (next.js: 2ms, proxy.ts: 41ms, application-code: 6ms)
+ GET /alv-raportti 200 in 22ms (next.js: 3ms, proxy.ts: 5ms, application-code: 15ms)
+ GET /api/auth/me 200 in 20ms (next.js: 5ms, proxy.ts: 9ms, application-code: 5ms)
+ GET /api/alv?period=2026-08 200 in 21ms (next.js: 3ms, proxy.ts: 9ms, application-code: 9ms)
+ GET /api/onboarding 200 in 15ms (next.js: 1845µs, proxy.ts: 8ms, application-code: 6ms)
+ GET /tiliotteet 200 in 31ms (next.js: 3ms, proxy.ts: 5ms, application-code: 23ms)
+ GET /api/auth/me 200 in 18ms (next.js: 2ms, proxy.ts: 7ms, application-code: 9ms)
+ GET /api/statements 200 in 42ms (next.js: 3ms, proxy.ts: 13ms, application-code: 26ms)
+ GET /api/statements 200 in 44ms (next.js: 6ms, proxy.ts: 6ms, application-code: 33ms)
+ GET /api/onboarding 200 in 49ms (next.js: 4ms, proxy.ts: 8ms, application-code: 38ms)
+ GET /api/ai/chat 200 in 49ms (next.js: 32ms, proxy.ts: 4ms, application-code: 12ms)
+ POST /api/ai/chat 200 in 3.2s (next.js: 3ms, proxy.ts: 5ms, application-code: 3.2s)
+ POST /api/ai/chat 200 in 56ms (next.js: 3ms, proxy.ts: 8ms, application-code: 45ms)
+ POST /api/matching/confirm 200 in 74ms (next.js: 44ms, proxy.ts: 6ms, application-code: 25ms)
+ GET /tiliotteet/2e399cdd-1de5-4a00-9591-3cdaadf915f0 200 in 132ms (next.js: 101ms, proxy.ts: 7ms, application-code: 25ms)
+ GET /api/auth/me 200 in 22ms (next.js: 4ms, proxy.ts: 8ms, application-code: 10ms)
+ GET /api/statements/2e399cdd-1de5-4a00-9591-3cdaadf915f0 200 in 253ms (next.js: 143ms, proxy.ts: 14ms, application-code: 96ms)
+ GET /api/onboarding 200 in 109ms (next.js: 5ms, proxy.ts: 95ms, application-code: 9ms)
+ GET /api/statements/2e399cdd-1de5-4a00-9591-3cdaadf915f0 200 in 54ms (next.js: 8ms, proxy.ts: 12ms, application-code: 33ms)
+ GET /kuitit 200 in 30ms (next.js: 3ms, proxy.ts: 6ms, application-code: 22ms)
+ GET /api/auth/me 200 in 27ms (next.js: 7ms, proxy.ts: 11ms, application-code: 10ms)
+ GET /api/receipts?sort=date_desc 200 in 58ms (next.js: 7ms, proxy.ts: 18ms, application-code: 32ms)
+ GET /api/receipts?reviewStatus=pending 200 in 69ms (next.js: 7ms, proxy.ts: 18ms, application-code: 44ms)
+ GET /api/onboarding 200 in 27ms (next.js: 2ms, proxy.ts: 18ms, application-code: 6ms)
+ GET /tiliotteet 200 in 22ms (next.js: 3ms, proxy.ts: 5ms, application-code: 14ms)
+ GET /api/auth/me 200 in 17ms (next.js: 3ms, proxy.ts: 6ms, application-code: 8ms)
+ GET /api/statements 200 in 48ms (next.js: 1755µs, proxy.ts: 12ms, application-code: 34ms)
+ GET /api/statements 200 in 39ms (next.js: 6ms, proxy.ts: 6ms, application-code: 27ms)
+ GET /api/onboarding 200 in 43ms (next.js: 3ms, proxy.ts: 6ms, application-code: 34ms)
+ GET /tiliotteet/2e399cdd-1de5-4a00-9591-3cdaadf915f0 200 in 101ms (next.js: 75ms, proxy.ts: 8ms, application-code: 17ms)
+ GET /api/auth/me 200 in 14ms (next.js: 3ms, proxy.ts: 6ms, application-code: 6ms)
+ GET /api/statements/2e399cdd-1de5-4a00-9591-3cdaadf915f0 200 in 128ms (next.js: 83ms, proxy.ts: 12ms, application-code: 33ms)
+ GET /api/onboarding 200 in 45ms (next.js: 3ms, proxy.ts: 35ms, application-code: 7ms)
+ GET /api/statements/2e399cdd-1de5-4a00-9591-3cdaadf915f0 200 in 49ms (next.js: 8ms, proxy.ts: 10ms, application-code: 32ms)
+ GET /tiliotteet 200 in 19ms (next.js: 2ms, proxy.ts: 4ms, application-code: 13ms)
+ GET /api/auth/me 200 in 16ms (next.js: 2ms, proxy.ts: 6ms, application-code: 8ms)
+ GET /api/statements 200 in 43ms (next.js: 3ms, proxy.ts: 12ms, application-code: 28ms)
+ GET /api/onboarding 200 in 19ms (next.js: 3ms, proxy.ts: 7ms, application-code: 9ms)
+ GET /api/statements 200 in 40ms (next.js: 6ms, proxy.ts: 5ms, application-code: 29ms)
+ GET /asetukset 200 in 22ms (next.js: 3ms, proxy.ts: 6ms, application-code: 13ms)
+ GET /api/auth/me 200 in 18ms (next.js: 4ms, proxy.ts: 9ms, application-code: 6ms)
+ GET /api/profile 200 in 22ms (next.js: 3ms, proxy.ts: 10ms, application-code: 8ms)
+ GET /api/onboarding 200 in 14ms (next.js: 1741µs, proxy.ts: 7ms, application-code: 6ms)
+ PATCH /api/profile 200 in 17ms (next.js: 1929µs, proxy.ts: 4ms, application-code: 11ms)
+ GET /alv-raportti 200 in 26ms (next.js: 2ms, proxy.ts: 10ms, application-code: 14ms)
+ GET /api/auth/me 200 in 19ms (next.js: 4ms, proxy.ts: 7ms, application-code: 8ms)
+ GET /api/alv?period=2026-08 200 in 21ms (next.js: 2ms, proxy.ts: 12ms, application-code: 7ms)
+ GET /api/onboarding 200 in 11ms (next.js: 2ms, proxy.ts: 3ms, application-code: 6ms)
+ GET /tiliotteet 200 in 20ms (next.js: 2ms, proxy.ts: 4ms, application-code: 13ms)
+ GET /api/auth/me 200 in 27ms (next.js: 2ms, proxy.ts: 6ms, application-code: 18ms)
+ GET /api/statements 200 in 53ms (next.js: 3ms, proxy.ts: 13ms, application-code: 37ms)
+ GET /api/statements 200 in 57ms (next.js: 7ms, proxy.ts: 8ms, application-code: 41ms)
+ GET /api/onboarding 200 in 72ms (next.js: 4ms, proxy.ts: 8ms, application-code: 59ms)
+ GET /kuitit 200 in 22ms (next.js: 3ms, proxy.ts: 5ms, application-code: 14ms)
+ GET /api/auth/me 200 in 25ms (next.js: 6ms, proxy.ts: 10ms, application-code: 9ms)
+ GET /api/receipts?sort=date_desc 200 in 44ms (next.js: 3ms, proxy.ts: 15ms, application-code: 26ms)
+ GET /api/receipts?reviewStatus=pending 200 in 54ms (next.js: 7ms, proxy.ts: 12ms, application-code: 35ms)
+ GET /api/onboarding 200 in 44ms (next.js: 2ms, proxy.ts: 35ms, application-code: 6ms)
+ PATCH /api/receipts/fa27670a-a425-4dd0-894d-bdfe3821d036/review 200 in 112ms (next.js: 90ms, proxy.ts: 6ms, application-code: 17ms)
+ GET /api/receipts?sort=date_desc 200 in 35ms (next.js: 3ms, proxy.ts: 6ms, application-code: 26ms)
+ GET /api/receipts?reviewStatus=pending 200 in 47ms (next.js: 5ms, proxy.ts: 6ms, application-code: 36ms)
+ PATCH /api/receipts/0a295920-5712-4128-9edc-8ba6d6027f02/review 200 in 94ms (next.js: 76ms, proxy.ts: 6ms, application-code: 11ms)
+ GET /api/receipts?sort=date_desc 200 in 45ms (next.js: 3ms, proxy.ts: 7ms, application-code: 35ms)
+ GET /api/receipts?reviewStatus=pending 200 in 58ms (next.js: 6ms, proxy.ts: 7ms, application-code: 45ms)
+ PATCH /api/receipts/a22c6126-983d-4be5-8c02-e6a57480d6c5/review 200 in 92ms (next.js: 75ms, proxy.ts: 5ms, application-code: 12ms)
+ GET /api/receipts?sort=date_desc 200 in 35ms (next.js: 3ms, proxy.ts: 7ms, application-code: 26ms)
+ GET /api/receipts?reviewStatus=pending 200 in 45ms (next.js: 5ms, proxy.ts: 7ms, application-code: 33ms)
+ PATCH /api/receipts/dac33ca7-80a6-43d2-90e6-fe6e5581f747/review 200 in 96ms (next.js: 76ms, proxy.ts: 6ms, application-code: 13ms)
+ GET /api/receipts?sort=date_desc 200 in 46ms (next.js: 4ms, proxy.ts: 9ms, application-code: 34ms)
+ GET /api/receipts?reviewStatus=pending 200 in 55ms (next.js: 8ms, proxy.ts: 7ms, application-code: 40ms)
+ PATCH /api/receipts/fb5805c7-4fac-4464-856d-e88fea15202e/review 200 in 20ms (next.js: 4ms, proxy.ts: 5ms, application-code: 11ms)
+ GET /api/receipts?sort=date_desc 200 in 40ms (next.js: 3ms, proxy.ts: 8ms, application-code: 29ms)
+ GET /api/receipts?reviewStatus=pending 200 in 46ms (next.js: 8ms, proxy.ts: 6ms, application-code: 32ms)
+ PATCH /api/receipts/d0127a0c-96a8-44fb-9ecd-b9b73d8b5404/review 200 in 93ms (next.js: 76ms, proxy.ts: 6ms, application-code: 12ms)
+ GET /api/receipts?sort=date_desc 200 in 39ms (next.js: 3ms, proxy.ts: 7ms, application-code: 29ms)
+ GET /api/receipts?reviewStatus=pending 200 in 47ms (next.js: 6ms, proxy.ts: 6ms, application-code: 35ms)
+ PATCH /api/receipts/6cb80857-37f4-412d-b950-4cfd5dab0ff3/review 200 in 19ms (next.js: 4ms, proxy.ts: 4ms, application-code: 12ms)
+ GET /api/receipts?sort=date_desc 200 in 39ms (next.js: 4ms, proxy.ts: 7ms, application-code: 28ms)
+ GET /api/receipts?reviewStatus=pending 200 in 46ms (next.js: 6ms, proxy.ts: 6ms, application-code: 33ms)
+ PATCH /api/receipts/fa30fb48-3ffb-4df4-b56a-3fdd403ef583/review 200 in 93ms (next.js: 75ms, proxy.ts: 6ms, application-code: 13ms)
+ GET /api/receipts?sort=date_desc 200 in 34ms (next.js: 3ms, proxy.ts: 8ms, application-code: 23ms)
+ GET /api/receipts?reviewStatus=pending 200 in 40ms (next.js: 5ms, proxy.ts: 8ms, application-code: 27ms)
+ PATCH /api/receipts/758038c0-dcae-4fef-9cf0-aa9d11a09923/review 200 in 90ms (next.js: 74ms, proxy.ts: 5ms, application-code: 11ms)
+ GET /api/receipts?sort=date_desc 200 in 38ms (next.js: 3ms, proxy.ts: 7ms, application-code: 28ms)
+ GET /api/receipts?reviewStatus=pending 200 in 47ms (next.js: 6ms, proxy.ts: 6ms, application-code: 35ms)
+ PATCH /api/receipts/eea02310-f441-4421-b4d6-1bfd230d9b47/review 200 in 18ms (next.js: 3ms, proxy.ts: 5ms, application-code: 9ms)
+ GET /api/receipts?sort=date_desc 200 in 56ms (next.js: 4ms, proxy.ts: 8ms, application-code: 43ms)
+ GET /api/receipts?reviewStatus=pending 200 in 73ms (next.js: 7ms, proxy.ts: 8ms, application-code: 59ms)
+ PATCH /api/receipts/c2c7c8c1-35cb-411e-b589-654a36875592/review 200 in 88ms (next.js: 71ms, proxy.ts: 5ms, application-code: 11ms)
+ GET /api/receipts?sort=date_desc 200 in 39ms (next.js: 1892µs, proxy.ts: 8ms, application-code: 29ms)
+ GET /api/receipts?reviewStatus=pending 200 in 45ms (next.js: 6ms, proxy.ts: 7ms, application-code: 33ms)
+ GET /kuitit/a22c6126-983d-4be5-8c02-e6a57480d6c5 200 in 122ms (next.js: 94ms, proxy.ts: 4ms, application-code: 24ms)
+ GET /api/auth/me 200 in 22ms (next.js: 5ms, proxy.ts: 8ms, application-code: 8ms)
+ GET /api/onboarding 200 in 24ms (next.js: 6ms, proxy.ts: 8ms, application-code: 10ms)
+ GET /api/receipts/a22c6126-983d-4be5-8c02-e6a57480d6c5 200 in 187ms (next.js: 148ms, proxy.ts: 11ms, application-code: 28ms)
+ GET /api/receipts/a22c6126-983d-4be5-8c02-e6a57480d6c5/file/preview 200 in 932ms (next.js: 908ms, proxy.ts: 5ms, application-code: 19ms)
+ GET /kuitit 200 in 22ms (next.js: 3ms, proxy.ts: 5ms, application-code: 14ms)
+ GET /api/auth/me 200 in 33ms (next.js: 5ms, proxy.ts: 7ms, application-code: 21ms)
+ GET /api/receipts?sort=date_desc 200 in 77ms (next.js: 7ms, proxy.ts: 14ms, application-code: 56ms)
+ GET /api/receipts?reviewStatus=pending 200 in 87ms (next.js: 13ms, proxy.ts: 12ms, application-code: 61ms)
+ GET /api/onboarding 200 in 18ms (next.js: 2ms, proxy.ts: 10ms, application-code: 6ms)
+ DELETE /api/receipts/a22c6126-983d-4be5-8c02-e6a57480d6c5 200 in 112ms (next.js: 86ms, proxy.ts: 4ms, application-code: 22ms)
+ GET /kuitit/943be81e-332c-4457-88a1-7202170acea0 200 in 91ms (next.js: 70ms, proxy.ts: 5ms, application-code: 17ms)
+ GET /api/auth/me 200 in 13ms (next.js: 2ms, proxy.ts: 5ms, application-code: 6ms)
+ GET /api/onboarding 200 in 17ms (next.js: 3ms, proxy.ts: 7ms, application-code: 7ms)
+ GET /api/receipts/943be81e-332c-4457-88a1-7202170acea0 200 in 103ms (next.js: 84ms, proxy.ts: 9ms, application-code: 10ms)
+ GET /kuitit 200 in 27ms (next.js: 3ms, proxy.ts: 6ms, application-code: 18ms)
+ GET /api/auth/me 200 in 24ms (next.js: 5ms, proxy.ts: 9ms, application-code: 10ms)
+ GET /api/receipts?sort=date_desc 200 in 55ms (next.js: 6ms, proxy.ts: 15ms, application-code: 35ms)
+ GET /api/receipts?reviewStatus=pending 200 in 56ms (next.js: 8ms, proxy.ts: 14ms, application-code: 34ms)
+ GET /api/onboarding 200 in 15ms (next.js: 2ms, proxy.ts: 8ms, application-code: 5ms)
+✓ Compiled in 464ms
+✓ Compiled in 72ms
+✓ Compiled in 65ms
+✓ Compiled in 64ms
+✓ Compiled in 183ms
+✓ Compiled in 40ms
+✓ Compiled in 80ms
+✓ Compiled in 59ms
+ GET /kuitit 200 in 37ms (next.js: 5ms, proxy.ts: 4ms, application-code: 28ms)
+[browser] ./src/app/kuitit/page.tsx:889:1
+Unexpected token. Did you mean `{'}'}` or `&rbrace;`?
+  887 |     </AppShell>
+  888 |   );
+> 889 | }
+      | ^
+  890 |
+
+Parsing ecmascript source code failed
+
+Import traces:
+  Client Component Browser:
+    ./src/app/kuitit/page.tsx [Client Component Browser]
+    ./src/app/kuitit/page.tsx [Server Component]
+
+  Client Component SSR:
+    ./src/app/kuitit/page.tsx [Client Component SSR]
+    ./src/app/kuitit/page.tsx [Server Component] 
+[browser] ./src/app/kuitit/page.tsx:662:14
+Unterminated regexp literal
+  660 |               </div>
+  661 |               </div>
+> 662 |             </div>
+      |              ^^^^^
+  663 |           </div>
+  664 |
+  665 |           {hasFilters && (
+
+Parsing ecmascript source code failed
+
+Import traces:
+  Client Component Browser:
+    ./src/app/kuitit/page.tsx [Client Component Browser]
+    ./src/app/kuitit/page.tsx [Server Component]
+
+  Client Component SSR:
+    ./src/app/kuitit/page.tsx [Client Component SSR]
+    ./src/app/kuitit/page.tsx [Server Component] 
+[browser] ./src/app/kuitit/page.tsx:662:14
+Unterminated regexp literal
+  660 |               </div>
+  661 |               </div>
+> 662 |             </div>
+      |              ^^^^^
+  663 |           </div>
+  664 |
+  665 |           {hasFilters && (
+
+Parsing ecmascript source code failed
+
+Import traces:
+  Client Component Browser:
+    ./src/app/kuitit/page.tsx [Client Component Browser]
+    ./src/app/kuitit/page.tsx [Server Component]
+
+  Client Component SSR:
+    ./src/app/kuitit/page.tsx [Client Component SSR]
+    ./src/app/kuitit/page.tsx [Server Component] 
+[browser] ./src/app/kuitit/page.tsx:882:1
+Unexpected token. Did you mean `{'}'}` or `&rbrace;`?
+  880 |     </AppShell>
+  881 |   );
+> 882 | }
+      | ^
+  883 |
+
+Parsing ecmascript source code failed
+
+Import traces:
+  Client Component Browser:
+    ./src/app/kuitit/page.tsx [Client Component Browser]
+    ./src/app/kuitit/page.tsx [Server Component]
+
+  Client Component SSR:
+    ./src/app/kuitit/page.tsx [Client Component SSR]
+    ./src/app/kuitit/page.tsx [Server Component] 
+ GET /kuitit 200 in 144ms (next.js: 3ms, proxy.ts: 6ms, application-code: 134ms)
+ GET /api/auth/me 200 in 30ms (next.js: 7ms, proxy.ts: 11ms, application-code: 12ms)
+ GET /api/receipts?sort=date_desc 200 in 70ms (next.js: 5ms, proxy.ts: 21ms, application-code: 43ms)
+ GET /api/receipts?reviewStatus=pending 200 in 76ms (next.js: 10ms, proxy.ts: 21ms, application-code: 44ms)
+ GET /api/onboarding 200 in 56ms (next.js: 2ms, proxy.ts: 44ms, application-code: 10ms)
+ GET /api/receipts?type=tulo&sort=date_desc 200 in 52ms (next.js: 4ms, proxy.ts: 9ms, application-code: 40ms)
+ GET /api/receipts?reviewStatus=pending 200 in 56ms (next.js: 8ms, proxy.ts: 9ms, application-code: 39ms)
+ GET /api/receipts?type=meno&sort=date_desc 200 in 22ms (next.js: 3ms, proxy.ts: 7ms, application-code: 12ms)
+ GET /api/receipts?reviewStatus=pending 200 in 25ms (next.js: 7ms, proxy.ts: 6ms, application-code: 12ms)
+ GET /api/receipts?type=tulo&sort=date_desc 200 in 38ms (next.js: 3ms, proxy.ts: 9ms, application-code: 26ms)
+ GET /api/receipts?reviewStatus=pending 200 in 42ms (next.js: 5ms, proxy.ts: 8ms, application-code: 29ms)
+ GET /api/receipts?sort=date_desc 200 in 39ms (next.js: 5ms, proxy.ts: 7ms, application-code: 27ms)
+ GET /api/receipts?reviewStatus=pending 200 in 41ms (next.js: 11ms, proxy.ts: 6ms, application-code: 25ms)
+ GET /api/receipts?type=tulo&sort=date_desc 200 in 32ms (next.js: 3ms, proxy.ts: 7ms, application-code: 23ms)
+ GET /api/receipts?reviewStatus=pending 200 in 35ms (next.js: 5ms, proxy.ts: 7ms, application-code: 23ms)
+ GET /api/receipts?sort=date_desc 200 in 36ms (next.js: 3ms, proxy.ts: 10ms, application-code: 23ms)
+ GET /api/receipts?reviewStatus=pending 200 in 36ms (next.js: 5ms, proxy.ts: 6ms, application-code: 24ms)
+ GET /api/receipts?type=tulo&sort=date_desc 200 in 44ms (next.js: 3ms, proxy.ts: 12ms, application-code: 29ms)
+ GET /api/receipts?reviewStatus=pending 200 in 46ms (next.js: 6ms, proxy.ts: 11ms, application-code: 29ms)
+ GET /api/receipts?type=meno&sort=date_desc 200 in 24ms (next.js: 3ms, proxy.ts: 11ms, application-code: 9ms)
+ GET /api/receipts?reviewStatus=pending 200 in 27ms (next.js: 6ms, proxy.ts: 11ms, application-code: 9ms)
+ GET /api/receipts?type=tulo&sort=date_desc 200 in 38ms (next.js: 3ms, proxy.ts: 11ms, application-code: 24ms)
+ GET /api/receipts?reviewStatus=pending 200 in 44ms (next.js: 7ms, proxy.ts: 10ms, application-code: 27ms)
+ GET /tiliotteet 200 in 25ms (next.js: 3ms, proxy.ts: 7ms, application-code: 15ms)
+ GET /api/auth/me 200 in 17ms (next.js: 3ms, proxy.ts: 6ms, application-code: 8ms)
+ GET /api/statements 200 in 54ms (next.js: 7ms, proxy.ts: 15ms, application-code: 32ms)
+ GET /api/statements 200 in 42ms (next.js: 5ms, proxy.ts: 9ms, application-code: 27ms)
+ GET /api/onboarding 200 in 48ms (next.js: 3ms, proxy.ts: 9ms, application-code: 36ms)
+ GET /dashboard 200 in 27ms (next.js: 3ms, proxy.ts: 5ms, application-code: 18ms)
+ GET /api/auth/me 200 in 25ms (next.js: 6ms, proxy.ts: 13ms, application-code: 5ms)
+ GET /api/dashboard?month=2026-08 200 in 32ms (next.js: 3ms, proxy.ts: 16ms, application-code: 12ms)
+ GET /api/onboarding 200 in 20ms (next.js: 2ms, proxy.ts: 11ms, application-code: 6ms)
+ GET /kuitit 200 in 24ms (next.js: 1988µs, proxy.ts: 8ms, application-code: 14ms)
+ GET /api/auth/me 200 in 27ms (next.js: 7ms, proxy.ts: 10ms, application-code: 10ms)
+ GET /api/receipts?sort=date_desc 200 in 54ms (next.js: 9ms, proxy.ts: 16ms, application-code: 29ms)
+ GET /api/receipts?reviewStatus=pending 200 in 59ms (next.js: 10ms, proxy.ts: 14ms, application-code: 34ms)
+ GET /api/onboarding 200 in 47ms (next.js: 2ms, proxy.ts: 38ms, application-code: 7ms)
+ GET /dashboard 200 in 33ms (next.js: 2ms, proxy.ts: 4ms, application-code: 27ms)
+ GET /api/auth/me 200 in 46ms (next.js: 23ms, proxy.ts: 15ms, application-code: 9ms)
+ GET /api/dashboard?month=2026-08 200 in 53ms (next.js: 8ms, proxy.ts: 31ms, application-code: 13ms)
+ GET /api/onboarding 200 in 19ms (next.js: 2ms, proxy.ts: 11ms, application-code: 6ms)
+ GET /kuitit 200 in 27ms (next.js: 2ms, proxy.ts: 10ms, application-code: 15ms)
+ GET /api/auth/me 200 in 29ms (next.js: 7ms, proxy.ts: 11ms, application-code: 11ms)
+ GET /api/receipts?sort=date_desc 200 in 66ms (next.js: 5ms, proxy.ts: 17ms, application-code: 44ms)
+ GET /api/receipts?reviewStatus=pending 200 in 67ms (next.js: 9ms, proxy.ts: 13ms, application-code: 45ms)
+ GET /api/onboarding 200 in 53ms (next.js: 2ms, proxy.ts: 42ms, application-code: 8ms)
+ GET /dashboard 200 in 29ms (next.js: 5ms, proxy.ts: 4ms, application-code: 19ms)
+ GET /api/auth/me 200 in 30ms (next.js: 5ms, proxy.ts: 18ms, application-code: 8ms)
+ GET /api/dashboard?month=2026-08 200 in 23ms (next.js: 2ms, proxy.ts: 11ms, application-code: 9ms)
+ GET /api/onboarding 200 in 13ms (next.js: 2ms, proxy.ts: 4ms, application-code: 6ms)
+ GET /kuitit 200 in 25ms (next.js: 3ms, proxy.ts: 4ms, application-code: 19ms)
+ GET /api/auth/me 200 in 28ms (next.js: 7ms, proxy.ts: 9ms, application-code: 11ms)
+ GET /api/receipts?reviewStatus=pending 200 in 41ms (next.js: 9ms, proxy.ts: 19ms, application-code: 14ms)
+ GET /api/receipts?sort=date_desc 200 in 76ms (next.js: 9ms, proxy.ts: 18ms, application-code: 49ms)
+ GET /api/onboarding 200 in 61ms (next.js: 6ms, proxy.ts: 46ms, application-code: 10ms)
+ GET /tiliotteet 200 in 35ms (next.js: 3ms, proxy.ts: 6ms, application-code: 26ms)
+ GET /api/auth/me 200 in 21ms (next.js: 6ms, proxy.ts: 6ms, application-code: 9ms)
+ GET /api/statements 200 in 60ms (next.js: 7ms, proxy.ts: 15ms, application-code: 37ms)
+ GET /api/onboarding 200 in 22ms (next.js: 3ms, proxy.ts: 8ms, application-code: 11ms)
+ GET /api/statements 200 in 47ms (next.js: 6ms, proxy.ts: 6ms, application-code: 36ms)
+ GET /alv-raportti 200 in 20ms (next.js: 2ms, proxy.ts: 5ms, application-code: 13ms)
+ GET /api/auth/me 200 in 26ms (next.js: 4ms, proxy.ts: 11ms, application-code: 11ms)
+ GET /api/alv?period=2026-08 200 in 30ms (next.js: 5ms, proxy.ts: 17ms, application-code: 8ms)
+ GET /api/onboarding 200 in 14ms (next.js: 1821µs, proxy.ts: 6ms, application-code: 6ms)
+ GET /tiliotteet 200 in 24ms (next.js: 3ms, proxy.ts: 4ms, application-code: 18ms)
+ GET /api/auth/me 200 in 20ms (next.js: 3ms, proxy.ts: 7ms, application-code: 10ms)
+ GET /api/statements 200 in 56ms (next.js: 6ms, proxy.ts: 13ms, application-code: 37ms)
+ GET /api/onboarding 200 in 22ms (next.js: 3ms, proxy.ts: 10ms, application-code: 10ms)
+ GET /api/statements 200 in 52ms (next.js: 7ms, proxy.ts: 8ms, application-code: 37ms)
+ GET /tiliotteet/2e399cdd-1de5-4a00-9591-3cdaadf915f0 200 in 112ms (next.js: 89ms, proxy.ts: 4ms, application-code: 20ms)
+ GET /api/auth/me 200 in 27ms (next.js: 4ms, proxy.ts: 12ms, application-code: 11ms)
+ GET /api/statements/2e399cdd-1de5-4a00-9591-3cdaadf915f0 200 in 168ms (next.js: 109ms, proxy.ts: 17ms, application-code: 42ms)
+ GET /api/onboarding 200 in 77ms (next.js: 10ms, proxy.ts: 56ms, application-code: 12ms)
+ GET /api/statements/2e399cdd-1de5-4a00-9591-3cdaadf915f0 200 in 84ms (next.js: 10ms, proxy.ts: 23ms, application-code: 51ms)
+✓ Compiled in 111ms
+✓ Compiled in 126ms
+[browser] ./src/app/kuitit/page.tsx:743:15
+Expected '</', got '{'
+  741 |                 ? receipts
+  742 |                 : receipts.slice(0, RECENT_LIMIT)
+> 743 |               {(showAllReceipts
+      |               ^
+  744 |                 ? receipts
+  745 |                 : receipts.slice(0, RECENT_LIMIT)
+  746 |               ).map((r, i) => (
+
+Parsing ecmascript source code failed
+
+Import traces:
+  Client Component Browser:
+    ./src/app/kuitit/page.tsx [Client Component Browser]
+    ./src/app/kuitit/page.tsx [Server Component]
+
+  Client Component SSR:
+    ./src/app/kuitit/page.tsx [Client Component SSR]
+    ./src/app/kuitit/page.tsx [Server Component] 
+✓ Compiled in 40ms
+ GET /tiliotteet/2e399cdd-1de5-4a00-9591-3cdaadf915f0 200 in 116ms (next.js: 86ms, proxy.ts: 5ms, application-code: 24ms)
+ GET /kuitit 200 in 27ms (next.js: 5ms, proxy.ts: 6ms, application-code: 16ms)
+ GET /api/auth/me 200 in 29ms (next.js: 10ms, proxy.ts: 12ms, application-code: 8ms)
+ GET /api/receipts?sort=date_desc 200 in 65ms (next.js: 5ms, proxy.ts: 18ms, application-code: 42ms)
+ GET /api/receipts?reviewStatus=pending 200 in 74ms (next.js: 16ms, proxy.ts: 15ms, application-code: 43ms)
+ GET /api/onboarding 200 in 57ms (next.js: 3ms, proxy.ts: 47ms, application-code: 8ms)
+Receipt file cleanup failed: Error: Unsafe storage key
+    at safeStorageKey (src/lib/storage.ts:109:60)
+    at removeUserUpload (src/lib/storage.ts:177:19)
+    at <unknown> (src/app/api/receipts/[id]/route.ts:224:25)
+    at async (src/lib/api-errors.ts:52:14)
+  107 |
+  108 | function safeStorageKey(value: string): string {
+> 109 |   if (!/^[a-f0-9-]{36}\.[a-z0-9]{2,5}$/.test(value)) throw new Error("Unsafe storage key");
+      |                                                            ^
+  110 |   return value;
+  111 | }
+  112 |
+ DELETE /api/receipts/80b4356c-852f-4e13-afb7-7992a5246b96 200 in 260ms (next.js: 78ms, proxy.ts: 4ms, application-code: 178ms)
+ GET /api/receipts?type=tulo&sort=date_desc 200 in 39ms (next.js: 4ms, proxy.ts: 7ms, application-code: 28ms)
+ GET /api/receipts?reviewStatus=pending 200 in 42ms (next.js: 7ms, proxy.ts: 7ms, application-code: 29ms)
+ GET /api/receipts?type=meno&sort=date_desc 200 in 20ms (next.js: 3ms, proxy.ts: 7ms, application-code: 11ms)
+ GET /api/receipts?reviewStatus=pending 200 in 25ms (next.js: 6ms, proxy.ts: 7ms, application-code: 12ms)
+ GET /api/receipts?sort=date_desc 200 in 39ms (next.js: 5ms, proxy.ts: 8ms, application-code: 27ms)
+ GET /api/receipts?reviewStatus=pending 200 in 45ms (next.js: 7ms, proxy.ts: 8ms, application-code: 31ms)
+ GET /api/receipts?type=tulo&sort=date_desc 200 in 36ms (next.js: 3ms, proxy.ts: 8ms, application-code: 26ms)
+ GET /api/receipts?reviewStatus=pending 200 in 42ms (next.js: 5ms, proxy.ts: 7ms, application-code: 30ms)
+ GET /api/receipts?sort=date_desc 200 in 38ms (next.js: 5ms, proxy.ts: 7ms, application-code: 27ms)
+ GET /api/receipts?reviewStatus=pending 200 in 43ms (next.js: 8ms, proxy.ts: 6ms, application-code: 28ms)
+✓ Compiled in 101ms
+ GET /kuitit 200 in 46ms (next.js: 3ms, proxy.ts: 4ms, application-code: 38ms)
+ GET /api/auth/me 200 in 35ms (next.js: 5ms, proxy.ts: 17ms, application-code: 13ms)
+ GET /api/receipts?sort=date_desc 200 in 56ms (next.js: 4ms, proxy.ts: 25ms, application-code: 28ms)
+ GET /api/receipts?reviewStatus=pending 200 in 55ms (next.js: 6ms, proxy.ts: 17ms, application-code: 32ms)
+ GET /api/onboarding 200 in 14ms (next.js: 2ms, proxy.ts: 5ms, application-code: 7ms)
+ GET /api/receipts?type=tulo&sort=date_desc 200 in 38ms (next.js: 4ms, proxy.ts: 7ms, application-code: 27ms)
+ GET /api/receipts?reviewStatus=pending 200 in 44ms (next.js: 6ms, proxy.ts: 7ms, application-code: 31ms)
+ GET /api/receipts?type=meno&sort=date_desc 200 in 24ms (next.js: 3ms, proxy.ts: 12ms, application-code: 9ms)
+ GET /api/receipts?reviewStatus=pending 200 in 26ms (next.js: 6ms, proxy.ts: 11ms, application-code: 9ms)
+ GET /api/receipts?sort=date_desc 200 in 41ms (next.js: 3ms, proxy.ts: 8ms, application-code: 30ms)
+ GET /api/receipts?reviewStatus=pending 200 in 43ms (next.js: 5ms, proxy.ts: 7ms, application-code: 30ms)
+ GET /kuitit 200 in 17ms (next.js: 3ms, proxy.ts: 8ms, application-code: 6ms)
+ GET /kuitit 200 in 19ms (next.js: 2ms, proxy.ts: 4ms, application-code: 13ms)
+ GET /tiliotteet 200 in 19ms (next.js: 2ms, proxy.ts: 4ms, application-code: 13ms)
+ GET /api/auth/me 200 in 17ms (next.js: 3ms, proxy.ts: 6ms, application-code: 8ms)
+ GET /api/statements 200 in 48ms (next.js: 5ms, proxy.ts: 13ms, application-code: 29ms)
+ GET /api/statements 200 in 40ms (next.js: 8ms, proxy.ts: 6ms, application-code: 27ms)
+ GET /api/onboarding 200 in 45ms (next.js: 4ms, proxy.ts: 6ms, application-code: 35ms)
+ GET /alv-raportti 200 in 23ms (next.js: 3ms, proxy.ts: 4ms, application-code: 16ms)
+ GET /api/auth/me 200 in 25ms (next.js: 5ms, proxy.ts: 12ms, application-code: 8ms)
+ GET /api/alv?period=2026-08 200 in 28ms (next.js: 4ms, proxy.ts: 14ms, application-code: 10ms)
+ GET /api/onboarding 200 in 16ms (next.js: 1915µs, proxy.ts: 7ms, application-code: 7ms)
+ GET /asetukset 200 in 21ms (next.js: 3ms, proxy.ts: 5ms, application-code: 13ms)
+ GET /api/auth/me 200 in 23ms (next.js: 6ms, proxy.ts: 11ms, application-code: 5ms)
+ GET /api/profile 200 in 35ms (next.js: 4ms, proxy.ts: 13ms, application-code: 17ms)
+ GET /api/onboarding 200 in 30ms (next.js: 1857µs, proxy.ts: 22ms, application-code: 6ms)
+ GET /dashboard 200 in 25ms (next.js: 3ms, proxy.ts: 4ms, application-code: 18ms)
+ GET /api/auth/me 200 in 26ms (next.js: 4ms, proxy.ts: 7ms, application-code: 15ms)
+ GET /api/dashboard?month=2026-08 200 in 32ms (next.js: 8ms, proxy.ts: 10ms, application-code: 14ms)
+ GET /api/onboarding 200 in 16ms (next.js: 3ms, proxy.ts: 6ms, application-code: 8ms)
+ GET /kuitit 200 in 28ms (next.js: 3ms, proxy.ts: 6ms, application-code: 19ms)
+ GET /api/auth/me 200 in 46ms (next.js: 13ms, proxy.ts: 17ms, application-code: 16ms)
+ GET /api/receipts?sort=date_desc 200 in 82ms (next.js: 6ms, proxy.ts: 30ms, application-code: 46ms)
+ GET /api/receipts?reviewStatus=pending 200 in 84ms (next.js: 9ms, proxy.ts: 25ms, application-code: 50ms)
+ GET /api/onboarding 200 in 62ms (next.js: 3ms, proxy.ts: 50ms, application-code: 9ms)
+Receipt file cleanup failed: Error: Unsafe storage key
+    at safeStorageKey (src/lib/storage.ts:109:60)
+    at removeUserUpload (src/lib/storage.ts:177:19)
+    at <unknown> (src/app/api/receipts/[id]/route.ts:224:25)
+    at async (src/lib/api-errors.ts:52:14)
+  107 |
+  108 | function safeStorageKey(value: string): string {
+> 109 |   if (!/^[a-f0-9-]{36}\.[a-z0-9]{2,5}$/.test(value)) throw new Error("Unsafe storage key");
+      |                                                            ^
+  110 |   return value;
+  111 | }
+  112 |
+ DELETE /api/receipts/aacb0ba9-62f5-47b4-badf-f5f759c76c09 200 in 211ms (next.js: 90ms, proxy.ts: 4ms, application-code: 116ms)
+Receipt file cleanup failed: Error: Unsafe storage key
+    at safeStorageKey (src/lib/storage.ts:109:60)
+    at removeUserUpload (src/lib/storage.ts:177:19)
+    at <unknown> (src/app/api/receipts/[id]/route.ts:224:25)
+    at async (src/lib/api-errors.ts:52:14)
+  107 |
+  108 | function safeStorageKey(value: string): string {
+> 109 |   if (!/^[a-f0-9-]{36}\.[a-z0-9]{2,5}$/.test(value)) throw new Error("Unsafe storage key");
+      |                                                            ^
+  110 |   return value;
+  111 | }
+  112 |
+ DELETE /api/receipts/69ec345c-9ae2-4d89-8781-bff65dbdedb3 200 in 209ms (next.js: 80ms, proxy.ts: 6ms, application-code: 123ms)
+Receipt file cleanup failed: Error: Unsafe storage key
+    at safeStorageKey (src/lib/storage.ts:109:60)
+    at removeUserUpload (src/lib/storage.ts:177:19)
+    at <unknown> (src/app/api/receipts/[id]/route.ts:224:25)
+    at async (src/lib/api-errors.ts:52:14)
+  107 |
+  108 | function safeStorageKey(value: string): string {
+> 109 |   if (!/^[a-f0-9-]{36}\.[a-z0-9]{2,5}$/.test(value)) throw new Error("Unsafe storage key");
+      |                                                            ^
+  110 |   return value;
+  111 | }
+  112 |
+ DELETE /api/receipts/a635e4e5-0291-49ab-a7b8-b4f06d23a5b3 200 in 168ms (next.js: 75ms, proxy.ts: 6ms, application-code: 87ms)
+Receipt file cleanup failed: Error: Unsafe storage key
+    at safeStorageKey (src/lib/storage.ts:109:60)
+    at removeUserUpload (src/lib/storage.ts:177:19)
+    at <unknown> (src/app/api/receipts/[id]/route.ts:224:25)
+    at async (src/lib/api-errors.ts:52:14)
+  107 |
+  108 | function safeStorageKey(value: string): string {
+> 109 |   if (!/^[a-f0-9-]{36}\.[a-z0-9]{2,5}$/.test(value)) throw new Error("Unsafe storage key");
+      |                                                            ^
+  110 |   return value;
+  111 | }
+  112 |
+ DELETE /api/receipts/289fa049-333d-4dd5-8d32-972040f25992 200 in 194ms (next.js: 84ms, proxy.ts: 5ms, application-code: 105ms)
+Receipt file cleanup failed: Error: Unsafe storage key
+    at safeStorageKey (src/lib/storage.ts:109:60)
+    at removeUserUpload (src/lib/storage.ts:177:19)
+    at <unknown> (src/app/api/receipts/[id]/route.ts:224:25)
+    at async (src/lib/api-errors.ts:52:14)
+  107 |
+  108 | function safeStorageKey(value: string): string {
+> 109 |   if (!/^[a-f0-9-]{36}\.[a-z0-9]{2,5}$/.test(value)) throw new Error("Unsafe storage key");
+      |                                                            ^
+  110 |   return value;
+  111 | }
+  112 |
+ DELETE /api/receipts/18b14f2b-d2a0-4aa0-a75d-f255187305cd 200 in 190ms (next.js: 83ms, proxy.ts: 7ms, application-code: 99ms)
+Receipt file cleanup failed: Error: Unsafe storage key
+    at safeStorageKey (src/lib/storage.ts:109:60)
+    at removeUserUpload (src/lib/storage.ts:177:19)
+    at <unknown> (src/app/api/receipts/[id]/route.ts:224:25)
+    at async (src/lib/api-errors.ts:52:14)
+  107 |
+  108 | function safeStorageKey(value: string): string {
+> 109 |   if (!/^[a-f0-9-]{36}\.[a-z0-9]{2,5}$/.test(value)) throw new Error("Unsafe storage key");
+      |                                                            ^
+  110 |   return value;
+  111 | }
+  112 |
+ DELETE /api/receipts/f14b7e0e-4852-40ee-8760-b5a1742f2454 200 in 157ms (next.js: 81ms, proxy.ts: 6ms, application-code: 70ms)
+Receipt file cleanup failed: Error: Unsafe storage key
+    at safeStorageKey (src/lib/storage.ts:109:60)
+    at removeUserUpload (src/lib/storage.ts:177:19)
+    at <unknown> (src/app/api/receipts/[id]/route.ts:224:25)
+    at async (src/lib/api-errors.ts:52:14)
+  107 |
+  108 | function safeStorageKey(value: string): string {
+> 109 |   if (!/^[a-f0-9-]{36}\.[a-z0-9]{2,5}$/.test(value)) throw new Error("Unsafe storage key");
+      |                                                            ^
+  110 |   return value;
+  111 | }
+  112 |
+ DELETE /api/receipts/a37b92ff-908d-4605-9221-e07be934994d 200 in 179ms (next.js: 90ms, proxy.ts: 5ms, application-code: 84ms)
+Receipt file cleanup failed: Error: Unsafe storage key
+    at safeStorageKey (src/lib/storage.ts:109:60)
+    at removeUserUpload (src/lib/storage.ts:177:19)
+    at <unknown> (src/app/api/receipts/[id]/route.ts:224:25)
+    at async (src/lib/api-errors.ts:52:14)
+  107 |
+  108 | function safeStorageKey(value: string): string {
+> 109 |   if (!/^[a-f0-9-]{36}\.[a-z0-9]{2,5}$/.test(value)) throw new Error("Unsafe storage key");
+      |                                                            ^
+  110 |   return value;
+  111 | }
+  112 |
+ DELETE /api/receipts/93a944da-c4ce-462f-a05e-198b837bd127 200 in 185ms (next.js: 97ms, proxy.ts: 5ms, application-code: 83ms)
+Receipt file cleanup failed: Error: Unsafe storage key
+    at safeStorageKey (src/lib/storage.ts:109:60)
+    at removeUserUpload (src/lib/storage.ts:177:19)
+    at <unknown> (src/app/api/receipts/[id]/route.ts:224:25)
+    at async (src/lib/api-errors.ts:52:14)
+  107 |
+  108 | function safeStorageKey(value: string): string {
+> 109 |   if (!/^[a-f0-9-]{36}\.[a-z0-9]{2,5}$/.test(value)) throw new Error("Unsafe storage key");
+      |                                                            ^
+  110 |   return value;
+  111 | }
+  112 |
+ DELETE /api/receipts/7b913a83-b125-42ea-ad80-5bdafc1c8b5f 200 in 208ms (next.js: 95ms, proxy.ts: 5ms, application-code: 108ms)
+Receipt file cleanup failed: Error: Unsafe storage key
+    at safeStorageKey (src/lib/storage.ts:109:60)
+    at removeUserUpload (src/lib/storage.ts:177:19)
+    at <unknown> (src/app/api/receipts/[id]/route.ts:224:25)
+    at async (src/lib/api-errors.ts:52:14)
+  107 |
+  108 | function safeStorageKey(value: string): string {
+> 109 |   if (!/^[a-f0-9-]{36}\.[a-z0-9]{2,5}$/.test(value)) throw new Error("Unsafe storage key");
+      |                                                            ^
+  110 |   return value;
+  111 | }
+  112 |
+ DELETE /api/receipts/6491f13d-7d87-4fb4-acd7-95dd1fcf74ce 200 in 219ms (next.js: 116ms, proxy.ts: 5ms, application-code: 98ms)
+Receipt file cleanup failed: Error: Unsafe storage key
+    at safeStorageKey (src/lib/storage.ts:109:60)
+    at removeUserUpload (src/lib/storage.ts:177:19)
+    at <unknown> (src/app/api/receipts/[id]/route.ts:224:25)
+    at async (src/lib/api-errors.ts:52:14)
+  107 |
+  108 | function safeStorageKey(value: string): string {
+> 109 |   if (!/^[a-f0-9-]{36}\.[a-z0-9]{2,5}$/.test(value)) throw new Error("Unsafe storage key");
+      |                                                            ^
+  110 |   return value;
+  111 | }
+  112 |
+ DELETE /api/receipts/34dae7d6-ae32-450f-b21a-8d103df2b2a9 200 in 329ms (next.js: 164ms, proxy.ts: 5ms, application-code: 160ms)
+Receipt file cleanup failed: Error: Unsafe storage key
+    at safeStorageKey (src/lib/storage.ts:109:60)
+    at removeUserUpload (src/lib/storage.ts:177:19)
+    at <unknown> (src/app/api/receipts/[id]/route.ts:224:25)
+    at async (src/lib/api-errors.ts:52:14)
+  107 |
+  108 | function safeStorageKey(value: string): string {
+> 109 |   if (!/^[a-f0-9-]{36}\.[a-z0-9]{2,5}$/.test(value)) throw new Error("Unsafe storage key");
+      |                                                            ^
+  110 |   return value;
+  111 | }
+  112 |
+ DELETE /api/receipts/471b3bbc-81d3-4ae3-8e04-9d03c87f0fc4 200 in 351ms (next.js: 162ms, proxy.ts: 11ms, application-code: 177ms)
+Receipt file cleanup failed: Error: Unsafe storage key
+    at safeStorageKey (src/lib/storage.ts:109:60)
+    at removeUserUpload (src/lib/storage.ts:177:19)
+    at <unknown> (src/app/api/receipts/[id]/route.ts:224:25)
+    at async (src/lib/api-errors.ts:52:14)
+  107 |
+  108 | function safeStorageKey(value: string): string {
+> 109 |   if (!/^[a-f0-9-]{36}\.[a-z0-9]{2,5}$/.test(value)) throw new Error("Unsafe storage key");
+      |                                                            ^
+  110 |   return value;
+  111 | }
+  112 |
+ DELETE /api/receipts/2a32597e-9807-4988-a9a2-320e650ffc67 200 in 215ms (next.js: 102ms, proxy.ts: 10ms, application-code: 104ms)
+Receipt file cleanup failed: Error: Unsafe storage key
+    at safeStorageKey (src/lib/storage.ts:109:60)
+    at removeUserUpload (src/lib/storage.ts:177:19)
+    at <unknown> (src/app/api/receipts/[id]/route.ts:224:25)
+    at async (src/lib/api-errors.ts:52:14)
+  107 |
+  108 | function safeStorageKey(value: string): string {
+> 109 |   if (!/^[a-f0-9-]{36}\.[a-z0-9]{2,5}$/.test(value)) throw new Error("Unsafe storage key");
+      |                                                            ^
+  110 |   return value;
+  111 | }
+  112 |
+ DELETE /api/receipts/d2e54863-db00-42e1-9608-b3af98a61db1 200 in 186ms (next.js: 93ms, proxy.ts: 5ms, application-code: 88ms)
+Receipt file cleanup failed: Error: Unsafe storage key
+    at safeStorageKey (src/lib/storage.ts:109:60)
+    at removeUserUpload (src/lib/storage.ts:177:19)
+    at <unknown> (src/app/api/receipts/[id]/route.ts:224:25)
+    at async (src/lib/api-errors.ts:52:14)
+  107 |
+  108 | function safeStorageKey(value: string): string {
+> 109 |   if (!/^[a-f0-9-]{36}\.[a-z0-9]{2,5}$/.test(value)) throw new Error("Unsafe storage key");
+      |                                                            ^
+  110 |   return value;
+  111 | }
+  112 |
+ DELETE /api/receipts/2467ab19-48ce-435a-8f28-18f43594098e 200 in 154ms (next.js: 78ms, proxy.ts: 3ms, application-code: 72ms)
+Receipt file cleanup failed: Error: Unsafe storage key
+    at safeStorageKey (src/lib/storage.ts:109:60)
+    at removeUserUpload (src/lib/storage.ts:177:19)
+    at <unknown> (src/app/api/receipts/[id]/route.ts:224:25)
+    at async (src/lib/api-errors.ts:52:14)
+  107 |
+  108 | function safeStorageKey(value: string): string {
+> 109 |   if (!/^[a-f0-9-]{36}\.[a-z0-9]{2,5}$/.test(value)) throw new Error("Unsafe storage key");
+      |                                                            ^
+  110 |   return value;
+  111 | }
+  112 |
+ DELETE /api/receipts/9b986681-afde-46aa-b9c3-e2c2cb9c150a 200 in 185ms (next.js: 91ms, proxy.ts: 4ms, application-code: 90ms)
+Receipt file cleanup failed: Error: Unsafe storage key
+    at safeStorageKey (src/lib/storage.ts:109:60)
+    at removeUserUpload (src/lib/storage.ts:177:19)
+    at <unknown> (src/app/api/receipts/[id]/route.ts:224:25)
+    at async (src/lib/api-errors.ts:52:14)
+  107 |
+  108 | function safeStorageKey(value: string): string {
+> 109 |   if (!/^[a-f0-9-]{36}\.[a-z0-9]{2,5}$/.test(value)) throw new Error("Unsafe storage key");
+      |                                                            ^
+  110 |   return value;
+  111 | }
+  112 |
+ DELETE /api/receipts/1990b9ee-e34b-4fe4-ad3d-a03f60a8e2c1 200 in 206ms (next.js: 114ms, proxy.ts: 4ms, application-code: 87ms)
+Receipt file cleanup failed: Error: Unsafe storage key
+    at safeStorageKey (src/lib/storage.ts:109:60)
+    at removeUserUpload (src/lib/storage.ts:177:19)
+    at <unknown> (src/app/api/receipts/[id]/route.ts:224:25)
+    at async (src/lib/api-errors.ts:52:14)
+  107 |
+  108 | function safeStorageKey(value: string): string {
+> 109 |   if (!/^[a-f0-9-]{36}\.[a-z0-9]{2,5}$/.test(value)) throw new Error("Unsafe storage key");
+      |                                                            ^
+  110 |   return value;
+  111 | }
+  112 |
+ DELETE /api/receipts/932bc966-6e29-4b35-a030-f4ec36a1ea36 200 in 198ms (next.js: 86ms, proxy.ts: 5ms, application-code: 107ms)
+Receipt file cleanup failed: Error: Unsafe storage key
+    at safeStorageKey (src/lib/storage.ts:109:60)
+    at removeUserUpload (src/lib/storage.ts:177:19)
+    at <unknown> (src/app/api/receipts/[id]/route.ts:224:25)
+    at async (src/lib/api-errors.ts:52:14)
+  107 |
+  108 | function safeStorageKey(value: string): string {
+> 109 |   if (!/^[a-f0-9-]{36}\.[a-z0-9]{2,5}$/.test(value)) throw new Error("Unsafe storage key");
+      |                                                            ^
+  110 |   return value;
+  111 | }
+  112 |
+ DELETE /api/receipts/8d30df12-7215-4772-8ad9-a7dd090864f0 200 in 187ms (next.js: 93ms, proxy.ts: 5ms, application-code: 90ms)
+Receipt file cleanup failed: Error: Unsafe storage key
+    at safeStorageKey (src/lib/storage.ts:109:60)
+    at removeUserUpload (src/lib/storage.ts:177:19)
+    at <unknown> (src/app/api/receipts/[id]/route.ts:224:25)
+    at async (src/lib/api-errors.ts:52:14)
+  107 |
+  108 | function safeStorageKey(value: string): string {
+> 109 |   if (!/^[a-f0-9-]{36}\.[a-z0-9]{2,5}$/.test(value)) throw new Error("Unsafe storage key");
+      |                                                            ^
+  110 |   return value;
+  111 | }
+  112 |
+ DELETE /api/receipts/6c93e92c-3097-4344-81ba-ad9550d317ea 200 in 218ms (next.js: 96ms, proxy.ts: 4ms, application-code: 118ms)
+Receipt file cleanup failed: Error: Unsafe storage key
+    at safeStorageKey (src/lib/storage.ts:109:60)
+    at removeUserUpload (src/lib/storage.ts:177:19)
+    at <unknown> (src/app/api/receipts/[id]/route.ts:224:25)
+    at async (src/lib/api-errors.ts:52:14)
+  107 |
+  108 | function safeStorageKey(value: string): string {
+> 109 |   if (!/^[a-f0-9-]{36}\.[a-z0-9]{2,5}$/.test(value)) throw new Error("Unsafe storage key");
+      |                                                            ^
+  110 |   return value;
+  111 | }
+  112 |
+ DELETE /api/receipts/4899c019-7a96-46b4-b893-9aa530efa27d 200 in 158ms (next.js: 81ms, proxy.ts: 5ms, application-code: 71ms)
+Receipt file cleanup failed: Error: Unsafe storage key
+    at safeStorageKey (src/lib/storage.ts:109:60)
+    at removeUserUpload (src/lib/storage.ts:177:19)
+    at <unknown> (src/app/api/receipts/[id]/route.ts:224:25)
+    at async (src/lib/api-errors.ts:52:14)
+  107 |
+  108 | function safeStorageKey(value: string): string {
+> 109 |   if (!/^[a-f0-9-]{36}\.[a-z0-9]{2,5}$/.test(value)) throw new Error("Unsafe storage key");
+      |                                                            ^
+  110 |   return value;
+  111 | }
+  112 |
+ DELETE /api/receipts/c5713248-afcd-4765-a443-3581c5ce8a2f 200 in 164ms (next.js: 83ms, proxy.ts: 4ms, application-code: 77ms)
+Receipt file cleanup failed: Error: Unsafe storage key
+    at safeStorageKey (src/lib/storage.ts:109:60)
+    at removeUserUpload (src/lib/storage.ts:177:19)
+    at <unknown> (src/app/api/receipts/[id]/route.ts:224:25)
+    at async (src/lib/api-errors.ts:52:14)
+  107 |
+  108 | function safeStorageKey(value: string): string {
+> 109 |   if (!/^[a-f0-9-]{36}\.[a-z0-9]{2,5}$/.test(value)) throw new Error("Unsafe storage key");
+      |                                                            ^
+  110 |   return value;
+  111 | }
+  112 |
+ DELETE /api/receipts/13d8798f-f0db-4eee-8f45-07f2049b1125 200 in 164ms (next.js: 82ms, proxy.ts: 5ms, application-code: 77ms)
+Receipt file cleanup failed: Error: Unsafe storage key
+    at safeStorageKey (src/lib/storage.ts:109:60)
+    at removeUserUpload (src/lib/storage.ts:177:19)
+    at <unknown> (src/app/api/receipts/[id]/route.ts:224:25)
+    at async (src/lib/api-errors.ts:52:14)
+  107 |
+  108 | function safeStorageKey(value: string): string {
+> 109 |   if (!/^[a-f0-9-]{36}\.[a-z0-9]{2,5}$/.test(value)) throw new Error("Unsafe storage key");
+      |                                                            ^
+  110 |   return value;
+  111 | }
+  112 |
+ DELETE /api/receipts/eb7bd46f-7745-40d8-8f02-fd6e38462139 200 in 156ms (next.js: 85ms, proxy.ts: 5ms, application-code: 66ms)
+Receipt file cleanup failed: Error: Unsafe storage key
+    at safeStorageKey (src/lib/storage.ts:109:60)
+    at removeUserUpload (src/lib/storage.ts:177:19)
+    at <unknown> (src/app/api/receipts/[id]/route.ts:224:25)
+    at async (src/lib/api-errors.ts:52:14)
+  107 |
+  108 | function safeStorageKey(value: string): string {
+> 109 |   if (!/^[a-f0-9-]{36}\.[a-z0-9]{2,5}$/.test(value)) throw new Error("Unsafe storage key");
+      |                                                            ^
+  110 |   return value;
+  111 | }
+  112 |
+ DELETE /api/receipts/6d254061-0c77-4f19-aa16-16a77b973ce8 200 in 167ms (next.js: 83ms, proxy.ts: 4ms, application-code: 81ms)
+Receipt file cleanup failed: Error: Unsafe storage key
+    at safeStorageKey (src/lib/storage.ts:109:60)
+    at removeUserUpload (src/lib/storage.ts:177:19)
+    at <unknown> (src/app/api/receipts/[id]/route.ts:224:25)
+    at async (src/lib/api-errors.ts:52:14)
+  107 |
+  108 | function safeStorageKey(value: string): string {
+> 109 |   if (!/^[a-f0-9-]{36}\.[a-z0-9]{2,5}$/.test(value)) throw new Error("Unsafe storage key");
+      |                                                            ^
+  110 |   return value;
+  111 | }
+  112 |
+ DELETE /api/receipts/b4f1aee1-20d1-4e2c-a87e-abd92cbe3d54 200 in 186ms (next.js: 101ms, proxy.ts: 4ms, application-code: 81ms)
+Receipt file cleanup failed: Error: Unsafe storage key
+    at safeStorageKey (src/lib/storage.ts:109:60)
+    at removeUserUpload (src/lib/storage.ts:177:19)
+    at <unknown> (src/app/api/receipts/[id]/route.ts:224:25)
+    at async (src/lib/api-errors.ts:52:14)
+  107 |
+  108 | function safeStorageKey(value: string): string {
+> 109 |   if (!/^[a-f0-9-]{36}\.[a-z0-9]{2,5}$/.test(value)) throw new Error("Unsafe storage key");
+      |                                                            ^
+  110 |   return value;
+  111 | }
+  112 |
+ DELETE /api/receipts/c1c663db-f231-4507-8197-65df1d1253f2 200 in 149ms (next.js: 81ms, proxy.ts: 5ms, application-code: 63ms)
+Receipt file cleanup failed: Error: Unsafe storage key
+    at safeStorageKey (src/lib/storage.ts:109:60)
+    at removeUserUpload (src/lib/storage.ts:177:19)
+    at <unknown> (src/app/api/receipts/[id]/route.ts:224:25)
+    at async (src/lib/api-errors.ts:52:14)
+  107 |
+  108 | function safeStorageKey(value: string): string {
+> 109 |   if (!/^[a-f0-9-]{36}\.[a-z0-9]{2,5}$/.test(value)) throw new Error("Unsafe storage key");
+      |                                                            ^
+  110 |   return value;
+  111 | }
+  112 |
+ DELETE /api/receipts/4ae9e2c6-4c7a-47da-92f9-241a5f5215a8 200 in 167ms (next.js: 83ms, proxy.ts: 6ms, application-code: 78ms)
+Receipt file cleanup failed: Error: Unsafe storage key
+    at safeStorageKey (src/lib/storage.ts:109:60)
+    at removeUserUpload (src/lib/storage.ts:177:19)
+    at <unknown> (src/app/api/receipts/[id]/route.ts:224:25)
+    at async (src/lib/api-errors.ts:52:14)
+  107 |
+  108 | function safeStorageKey(value: string): string {
+> 109 |   if (!/^[a-f0-9-]{36}\.[a-z0-9]{2,5}$/.test(value)) throw new Error("Unsafe storage key");
+      |                                                            ^
+  110 |   return value;
+  111 | }
+  112 |
+ DELETE /api/receipts/c5a70978-109c-479f-9a55-670d46a70d8c 200 in 159ms (next.js: 82ms, proxy.ts: 4ms, application-code: 73ms)
+Receipt file cleanup failed: Error: Unsafe storage key
+    at safeStorageKey (src/lib/storage.ts:109:60)
+    at removeUserUpload (src/lib/storage.ts:177:19)
+    at <unknown> (src/app/api/receipts/[id]/route.ts:224:25)
+    at async (src/lib/api-errors.ts:52:14)
+  107 |
+  108 | function safeStorageKey(value: string): string {
+> 109 |   if (!/^[a-f0-9-]{36}\.[a-z0-9]{2,5}$/.test(value)) throw new Error("Unsafe storage key");
+      |                                                            ^
+  110 |   return value;
+  111 | }
+  112 |
+ DELETE /api/receipts/4394239f-fa35-431d-a066-82d92041780b 200 in 184ms (next.js: 93ms, proxy.ts: 5ms, application-code: 86ms)
+Receipt file cleanup failed: Error: Unsafe storage key
+    at safeStorageKey (src/lib/storage.ts:109:60)
+    at removeUserUpload (src/lib/storage.ts:177:19)
+    at <unknown> (src/app/api/receipts/[id]/route.ts:224:25)
+    at async (src/lib/api-errors.ts:52:14)
+  107 |
+  108 | function safeStorageKey(value: string): string {
+> 109 |   if (!/^[a-f0-9-]{36}\.[a-z0-9]{2,5}$/.test(value)) throw new Error("Unsafe storage key");
+      |                                                            ^
+  110 |   return value;
+  111 | }
+  112 |
+ DELETE /api/receipts/e2afe536-8eb8-4bdd-9e07-0fd3b0a6c4c1 200 in 172ms (next.js: 87ms, proxy.ts: 4ms, application-code: 81ms)
+Receipt file cleanup failed: Error: Unsafe storage key
+    at safeStorageKey (src/lib/storage.ts:109:60)
+    at removeUserUpload (src/lib/storage.ts:177:19)
+    at <unknown> (src/app/api/receipts/[id]/route.ts:224:25)
+    at async (src/lib/api-errors.ts:52:14)
+  107 |
+  108 | function safeStorageKey(value: string): string {
+> 109 |   if (!/^[a-f0-9-]{36}\.[a-z0-9]{2,5}$/.test(value)) throw new Error("Unsafe storage key");
+      |                                                            ^
+  110 |   return value;
+  111 | }
+  112 |
+ DELETE /api/receipts/d922f4a3-5f33-47c6-be07-4feb249ca54d 200 in 169ms (next.js: 84ms, proxy.ts: 5ms, application-code: 80ms)
+Receipt file cleanup failed: Error: Unsafe storage key
+    at safeStorageKey (src/lib/storage.ts:109:60)
+    at removeUserUpload (src/lib/storage.ts:177:19)
+    at <unknown> (src/app/api/receipts/[id]/route.ts:224:25)
+    at async (src/lib/api-errors.ts:52:14)
+  107 |
+  108 | function safeStorageKey(value: string): string {
+> 109 |   if (!/^[a-f0-9-]{36}\.[a-z0-9]{2,5}$/.test(value)) throw new Error("Unsafe storage key");
+      |                                                            ^
+  110 |   return value;
+  111 | }
+  112 |
+ DELETE /api/receipts/943be81e-332c-4457-88a1-7202170acea0 200 in 152ms (next.js: 81ms, proxy.ts: 5ms, application-code: 66ms)
+Receipt file cleanup failed: Error: Unsafe storage key
+    at safeStorageKey (src/lib/storage.ts:109:60)
+    at removeUserUpload (src/lib/storage.ts:177:19)
+    at <unknown> (src/app/api/receipts/[id]/route.ts:224:25)
+    at async (src/lib/api-errors.ts:52:14)
+  107 |
+  108 | function safeStorageKey(value: string): string {
+> 109 |   if (!/^[a-f0-9-]{36}\.[a-z0-9]{2,5}$/.test(value)) throw new Error("Unsafe storage key");
+      |                                                            ^
+  110 |   return value;
+  111 | }
+  112 |
+ DELETE /api/receipts/5a6d05b9-0fe8-4d25-802e-43889515a983 200 in 157ms (next.js: 82ms, proxy.ts: 5ms, application-code: 71ms)
+Receipt file cleanup failed: Error: Unsafe storage key
+    at safeStorageKey (src/lib/storage.ts:109:60)
+    at removeUserUpload (src/lib/storage.ts:177:19)
+    at <unknown> (src/app/api/receipts/[id]/route.ts:224:25)
+    at async (src/lib/api-errors.ts:52:14)
+  107 |
+  108 | function safeStorageKey(value: string): string {
+> 109 |   if (!/^[a-f0-9-]{36}\.[a-z0-9]{2,5}$/.test(value)) throw new Error("Unsafe storage key");
+      |                                                            ^
+  110 |   return value;
+  111 | }
+  112 |
+ DELETE /api/receipts/5af80eb0-b185-45ba-a2df-daa3a7738ed8 200 in 164ms (next.js: 85ms, proxy.ts: 4ms, application-code: 76ms)
+ GET /tiliotteet 200 in 25ms (next.js: 3ms, proxy.ts: 5ms, application-code: 17ms)
+ GET /api/auth/me 200 in 23ms (next.js: 4ms, proxy.ts: 10ms, application-code: 9ms)
+ GET /api/statements 200 in 41ms (next.js: 7ms, proxy.ts: 17ms, application-code: 16ms)
+ GET /api/statements 200 in 37ms (next.js: 8ms, proxy.ts: 14ms, application-code: 15ms)
+ GET /api/onboarding 200 in 41ms (next.js: 4ms, proxy.ts: 14ms, application-code: 23ms)
+ GET /tiliotteet/2e399cdd-1de5-4a00-9591-3cdaadf915f0 200 in 100ms (next.js: 79ms, proxy.ts: 5ms, application-code: 16ms)
+ GET /api/auth/me 200 in 19ms (next.js: 4ms, proxy.ts: 10ms, application-code: 6ms)
+ GET /api/statements/2e399cdd-1de5-4a00-9591-3cdaadf915f0 200 in 138ms (next.js: 99ms, proxy.ts: 18ms, application-code: 20ms)
+ GET /api/onboarding 200 in 32ms (next.js: 5ms, proxy.ts: 18ms, application-code: 9ms)
+ GET /api/statements/2e399cdd-1de5-4a00-9591-3cdaadf915f0 200 in 37ms (next.js: 4ms, proxy.ts: 13ms, application-code: 19ms)
+ DELETE /api/statements/2e399cdd-1de5-4a00-9591-3cdaadf915f0 200 in 131ms (next.js: 114ms, proxy.ts: 5ms, application-code: 12ms)
+ GET /tiliotteet 200 in 25ms (next.js: 4ms, proxy.ts: 5ms, application-code: 16ms)
+ GET /api/auth/me 200 in 27ms (next.js: 4ms, proxy.ts: 11ms, application-code: 13ms)
+ GET /api/statements 200 in 38ms (next.js: 6ms, proxy.ts: 19ms, application-code: 13ms)
+ GET /api/statements 200 in 26ms (next.js: 6ms, proxy.ts: 9ms, application-code: 12ms)
+ GET /api/onboarding 200 in 41ms (next.js: 4ms, proxy.ts: 9ms, application-code: 28ms)
+ POST /api/statements 200 in 409ms (next.js: 3ms, proxy.ts: 19ms, application-code: 388ms)
+ GET /tiliotteet/aa053fc2-2bc3-4c0a-98ac-196fb21662a7 200 in 117ms (next.js: 90ms, proxy.ts: 5ms, application-code: 23ms)
+ GET /api/auth/me 200 in 23ms (next.js: 5ms, proxy.ts: 12ms, application-code: 7ms)
+ GET /api/statements/aa053fc2-2bc3-4c0a-98ac-196fb21662a7 200 in 156ms (next.js: 102ms, proxy.ts: 22ms, application-code: 31ms)
+ GET /api/onboarding 200 in 61ms (next.js: 4ms, proxy.ts: 42ms, application-code: 15ms)
+ GET /api/statements/aa053fc2-2bc3-4c0a-98ac-196fb21662a7 200 in 63ms (next.js: 12ms, proxy.ts: 16ms, application-code: 35ms)
+ GET /kuitit 200 in 21ms (next.js: 2ms, proxy.ts: 5ms, application-code: 13ms)
+ GET /api/auth/me 200 in 25ms (next.js: 4ms, proxy.ts: 7ms, application-code: 14ms)
+ GET /api/receipts?sort=date_desc 200 in 36ms (next.js: 10ms, proxy.ts: 15ms, application-code: 10ms)
+ GET /api/receipts?reviewStatus=pending 200 in 47ms (next.js: 12ms, proxy.ts: 13ms, application-code: 22ms)
+ GET /api/onboarding 200 in 15ms (next.js: 3ms, proxy.ts: 7ms, application-code: 6ms)
+ POST /api/receipts/batch-approve 200 in 625ms (next.js: 585ms, proxy.ts: 5ms, application-code: 35ms)
+ GET /api/receipts?sort=date_desc 200 in 37ms (next.js: 3ms, proxy.ts: 8ms, application-code: 25ms)
+ GET /api/receipts?reviewStatus=pending 200 in 39ms (next.js: 6ms, proxy.ts: 8ms, application-code: 26ms)
+ POST /api/matching/confirm 200 in 24ms (next.js: 4ms, proxy.ts: 5ms, application-code: 15ms)
+ GET /api/receipts?sort=date_desc 200 in 41ms (next.js: 3ms, proxy.ts: 10ms, application-code: 27ms)
+ GET /api/receipts?reviewStatus=pending 200 in 44ms (next.js: 8ms, proxy.ts: 10ms, application-code: 26ms)
+ POST /api/matching/confirm 200 in 28ms (next.js: 2ms, proxy.ts: 5ms, application-code: 20ms)
+ GET /api/receipts?sort=date_desc 200 in 39ms (next.js: 3ms, proxy.ts: 16ms, application-code: 21ms)
+ GET /api/receipts?reviewStatus=pending 200 in 38ms (next.js: 6ms, proxy.ts: 12ms, application-code: 21ms)
+ POST /api/matching/confirm 200 in 22ms (next.js: 3ms, proxy.ts: 4ms, application-code: 15ms)
+ GET /api/receipts?sort=date_desc 200 in 28ms (next.js: 3ms, proxy.ts: 7ms, application-code: 18ms)
+ GET /api/receipts?reviewStatus=pending 200 in 30ms (next.js: 6ms, proxy.ts: 6ms, application-code: 19ms)
+ GET /kuitit/3d13d371-dd63-4f7b-a172-8a7d780f54e8 200 in 142ms (next.js: 113ms, proxy.ts: 4ms, application-code: 24ms)
+ GET /api/auth/me 200 in 23ms (next.js: 4ms, proxy.ts: 11ms, application-code: 8ms)
+ GET /api/onboarding 200 in 53ms (next.js: 19ms, proxy.ts: 20ms, application-code: 14ms)
+ GET /api/receipts/3d13d371-dd63-4f7b-a172-8a7d780f54e8 200 in 153ms (next.js: 104ms, proxy.ts: 35ms, application-code: 15ms)
+✓ Compiled in 96ms
+✓ Compiled in 45ms
+✓ Compiled in 192ms
+ GET /kuitit/3d13d371-dd63-4f7b-a172-8a7d780f54e8 200 in 178ms (next.js: 100ms, proxy.ts: 8ms, application-code: 71ms)
+ GET /api/auth/me 200 in 26ms (next.js: 5ms, proxy.ts: 9ms, application-code: 12ms)
+ GET /api/onboarding 200 in 74ms (next.js: 7ms, proxy.ts: 15ms, application-code: 52ms)
+ GET /api/receipts/3d13d371-dd63-4f7b-a172-8a7d780f54e8 200 in 161ms (next.js: 125ms, proxy.ts: 22ms, application-code: 14ms)
+ GET /kuitit/3d13d371-dd63-4f7b-a172-8a7d780f54e8 200 in 140ms (next.js: 90ms, proxy.ts: 5ms, application-code: 44ms)
+ GET /api/auth/me 200 in 16ms (next.js: 3ms, proxy.ts: 6ms, application-code: 8ms)
+ GET /api/onboarding 200 in 22ms (next.js: 7ms, proxy.ts: 8ms, application-code: 7ms)
+ GET /api/receipts/3d13d371-dd63-4f7b-a172-8a7d780f54e8 200 in 113ms (next.js: 89ms, proxy.ts: 11ms, application-code: 12ms)
+ GET /kuitit 200 in 25ms (next.js: 5ms, proxy.ts: 5ms, application-code: 14ms)
+ GET /api/auth/me 200 in 35ms (next.js: 7ms, proxy.ts: 13ms, application-code: 15ms)
+ GET /api/receipts?sort=date_desc 200 in 51ms (next.js: 7ms, proxy.ts: 21ms, application-code: 23ms)
+ GET /api/receipts?reviewStatus=pending 200 in 50ms (next.js: 9ms, proxy.ts: 17ms, application-code: 24ms)
+ GET /api/onboarding 200 in 17ms (next.js: 2ms, proxy.ts: 5ms, application-code: 10ms)
+ GET /kuitit/189eb104-f7a1-426a-8450-0ad7c48e0fa0 200 in 114ms (next.js: 83ms, proxy.ts: 4ms, application-code: 27ms)
+ GET /api/auth/me 200 in 15ms (next.js: 3ms, proxy.ts: 6ms, application-code: 6ms)
+ GET /api/onboarding 200 in 26ms (next.js: 5ms, proxy.ts: 13ms, application-code: 8ms)
+ GET /api/receipts/189eb104-f7a1-426a-8450-0ad7c48e0fa0 200 in 116ms (next.js: 92ms, proxy.ts: 14ms, application-code: 10ms)
+✓ Compiled in 78ms
+ GET /kuitit/189eb104-f7a1-426a-8450-0ad7c48e0fa0 200 in 149ms (next.js: 85ms, proxy.ts: 4ms, application-code: 60ms)
+ GET /api/auth/me 200 in 15ms (next.js: 3ms, proxy.ts: 6ms, application-code: 6ms)
+ GET /api/onboarding 200 in 22ms (next.js: 8ms, proxy.ts: 6ms, application-code: 8ms)
+ GET /api/receipts/189eb104-f7a1-426a-8450-0ad7c48e0fa0 200 in 102ms (next.js: 82ms, proxy.ts: 12ms, application-code: 8ms)
+✓ Compiled in 62ms
+ GET /kuitit/189eb104-f7a1-426a-8450-0ad7c48e0fa0 200 in 136ms (next.js: 89ms, proxy.ts: 6ms, application-code: 41ms)
+ GET /api/auth/me 200 in 22ms (next.js: 10ms, proxy.ts: 4ms, application-code: 8ms)
+ GET /api/onboarding 200 in 29ms (next.js: 3ms, proxy.ts: 5ms, application-code: 21ms)
+ GET /api/receipts/189eb104-f7a1-426a-8450-0ad7c48e0fa0 200 in 109ms (next.js: 84ms, proxy.ts: 16ms, application-code: 8ms)
+ PATCH /api/receipts/189eb104-f7a1-426a-8450-0ad7c48e0fa0 200 in 134ms (next.js: 88ms, proxy.ts: 7ms, application-code: 39ms)
+ GET /kuitit 200 in 26ms (next.js: 3ms, proxy.ts: 6ms, application-code: 16ms)
+ GET /api/auth/me 200 in 41ms (next.js: 8ms, proxy.ts: 18ms, application-code: 15ms)
+ GET /api/receipts?reviewStatus=pending 200 in 48ms (next.js: 4ms, proxy.ts: 30ms, application-code: 14ms)
+ GET /api/receipts?sort=date_desc 200 in 59ms (next.js: 7ms, proxy.ts: 20ms, application-code: 32ms)
+ GET /api/onboarding 200 in 14ms (next.js: 2ms, proxy.ts: 5ms, application-code: 7ms)
+ GET /kuitit/189eb104-f7a1-426a-8450-0ad7c48e0fa0 200 in 193ms (next.js: 148ms, proxy.ts: 8ms, application-code: 38ms)
+ GET /api/auth/me 200 in 36ms (next.js: 6ms, proxy.ts: 15ms, application-code: 16ms)
+ GET /api/onboarding 200 in 55ms (next.js: 8ms, proxy.ts: 24ms, application-code: 23ms)
+ GET /api/receipts/189eb104-f7a1-426a-8450-0ad7c48e0fa0 200 in 194ms (next.js: 158ms, proxy.ts: 22ms, application-code: 14ms)
+ GET /kuitit 200 in 23ms (next.js: 3ms, proxy.ts: 4ms, application-code: 16ms)
+ GET /api/auth/me 200 in 37ms (next.js: 9ms, proxy.ts: 13ms, application-code: 15ms)
+ GET /api/receipts?sort=date_desc 200 in 58ms (next.js: 9ms, proxy.ts: 22ms, application-code: 26ms)
+ GET /api/receipts?reviewStatus=pending 200 in 57ms (next.js: 7ms, proxy.ts: 19ms, application-code: 32ms)
+ GET /api/onboarding 200 in 32ms (next.js: 3ms, proxy.ts: 19ms, application-code: 10ms)
+ GET /alv-raportti 200 in 28ms (next.js: 3ms, proxy.ts: 7ms, application-code: 18ms)
+ GET /api/auth/me 200 in 31ms (next.js: 10ms, proxy.ts: 12ms, application-code: 9ms)
+ GET /api/alv?period=2026-08 200 in 35ms (next.js: 2ms, proxy.ts: 25ms, application-code: 8ms)
+ GET /api/onboarding 200 in 15ms (next.js: 2ms, proxy.ts: 6ms, application-code: 7ms)
+ GET /tiliotteet 200 in 26ms (next.js: 3ms, proxy.ts: 6ms, application-code: 17ms)
+ GET /api/auth/me 200 in 27ms (next.js: 3ms, proxy.ts: 15ms, application-code: 9ms)
+ GET /api/statements 200 in 52ms (next.js: 3ms, proxy.ts: 21ms, application-code: 28ms)
+ GET /api/statements 200 in 39ms (next.js: 6ms, proxy.ts: 8ms, application-code: 24ms)
+ GET /api/onboarding 200 in 45ms (next.js: 3ms, proxy.ts: 12ms, application-code: 30ms)
+ GET /tiliotteet/aa053fc2-2bc3-4c0a-98ac-196fb21662a7 200 in 146ms (next.js: 117ms, proxy.ts: 6ms, application-code: 23ms)
+ GET /api/auth/me 200 in 27ms (next.js: 4ms, proxy.ts: 15ms, application-code: 8ms)
+ GET /api/statements/aa053fc2-2bc3-4c0a-98ac-196fb21662a7 200 in 162ms (next.js: 97ms, proxy.ts: 24ms, application-code: 41ms)
+ GET /api/onboarding 200 in 72ms (next.js: 10ms, proxy.ts: 49ms, application-code: 14ms)
+ GET /api/statements/aa053fc2-2bc3-4c0a-98ac-196fb21662a7 200 in 98ms (next.js: 14ms, proxy.ts: 22ms, application-code: 62ms)
+ GET /tiliotteet 200 in 22ms (next.js: 2ms, proxy.ts: 5ms, application-code: 15ms)
+ GET /api/auth/me 200 in 21ms (next.js: 4ms, proxy.ts: 7ms, application-code: 10ms)
+ GET /api/statements 200 in 42ms (next.js: 6ms, proxy.ts: 13ms, application-code: 23ms)
+ GET /api/statements 200 in 37ms (next.js: 6ms, proxy.ts: 10ms, application-code: 21ms)
+ GET /api/onboarding 200 in 39ms (next.js: 3ms, proxy.ts: 10ms, application-code: 26ms)
+✓ Compiled in 78ms
+ GET /kuitit 200 in 23ms (next.js: 2ms, proxy.ts: 5ms, application-code: 16ms)
+ GET /api/auth/me 200 in 31ms (next.js: 11ms, proxy.ts: 11ms, application-code: 10ms)
+ GET /api/receipts?sort=date_desc 200 in 49ms (next.js: 4ms, proxy.ts: 18ms, application-code: 26ms)
+ GET /api/receipts?reviewStatus=pending 200 in 57ms (next.js: 7ms, proxy.ts: 15ms, application-code: 35ms)
+ GET /api/onboarding 200 in 46ms (next.js: 3ms, proxy.ts: 35ms, application-code: 8ms)
+ GET /kuitit/189eb104-f7a1-426a-8450-0ad7c48e0fa0 200 in 103ms (next.js: 83ms, proxy.ts: 4ms, application-code: 15ms)
+ GET /api/auth/me 200 in 19ms (next.js: 6ms, proxy.ts: 8ms, application-code: 5ms)
+ GET /api/onboarding 200 in 21ms (next.js: 9ms, proxy.ts: 5ms, application-code: 8ms)
+ GET /api/receipts/189eb104-f7a1-426a-8450-0ad7c48e0fa0 200 in 111ms (next.js: 89ms, proxy.ts: 13ms, application-code: 9ms)
+ PATCH /api/receipts/189eb104-f7a1-426a-8450-0ad7c48e0fa0 200 in 117ms (next.js: 81ms, proxy.ts: 4ms, application-code: 32ms)
+ GET /kuitit 200 in 24ms (next.js: 3ms, proxy.ts: 5ms, application-code: 16ms)
+ GET /api/auth/me 200 in 35ms (next.js: 11ms, proxy.ts: 11ms, application-code: 13ms)
+ GET /api/receipts?sort=date_desc 200 in 51ms (next.js: 3ms, proxy.ts: 21ms, application-code: 27ms)
+ GET /api/receipts?reviewStatus=pending 200 in 56ms (next.js: 11ms, proxy.ts: 18ms, application-code: 27ms)
+ GET /api/onboarding 200 in 22ms (next.js: 2ms, proxy.ts: 12ms, application-code: 8ms)
+ GET /dashboard 200 in 37ms (next.js: 3ms, proxy.ts: 5ms, application-code: 29ms)
+ GET /api/auth/me 200 in 28ms (next.js: 6ms, proxy.ts: 13ms, application-code: 9ms)
+ GET /api/dashboard?month=2026-08 200 in 28ms (next.js: 3ms, proxy.ts: 14ms, application-code: 10ms)
+ GET /api/onboarding 200 in 15ms (next.js: 3ms, proxy.ts: 5ms, application-code: 7ms)
+ GET /kuitit 200 in 22ms (next.js: 3ms, proxy.ts: 4ms, application-code: 15ms)
+ GET /api/auth/me 200 in 53ms (next.js: 10ms, proxy.ts: 16ms, application-code: 28ms)
+ GET /api/receipts?sort=date_desc 200 in 71ms (next.js: 14ms, proxy.ts: 35ms, application-code: 22ms)
+ GET /api/receipts?reviewStatus=pending 200 in 69ms (next.js: 15ms, proxy.ts: 32ms, application-code: 23ms)
+ GET /api/onboarding 200 in 33ms (next.js: 2ms, proxy.ts: 24ms, application-code: 6ms)
+ GET /kuitit/e0d2233b-9d23-475d-96da-f9cdf93d5acb 200 in 113ms (next.js: 87ms, proxy.ts: 5ms, application-code: 21ms)
+ GET /api/auth/me 200 in 15ms (next.js: 3ms, proxy.ts: 5ms, application-code: 6ms)
+ GET /api/onboarding 200 in 25ms (next.js: 6ms, proxy.ts: 9ms, application-code: 9ms)
+ GET /api/receipts/e0d2233b-9d23-475d-96da-f9cdf93d5acb 200 in 117ms (next.js: 93ms, proxy.ts: 13ms, application-code: 11ms)
+ PATCH /api/receipts/e0d2233b-9d23-475d-96da-f9cdf93d5acb 200 in 110ms (next.js: 79ms, proxy.ts: 6ms, application-code: 25ms)
+ GET /kuitit 200 in 22ms (next.js: 3ms, proxy.ts: 5ms, application-code: 14ms)
+ GET /api/auth/me 200 in 33ms (next.js: 10ms, proxy.ts: 11ms, application-code: 13ms)
+ GET /api/receipts?reviewStatus=pending 200 in 43ms (next.js: 4ms, proxy.ts: 25ms, application-code: 14ms)
+ GET /api/receipts?sort=date_desc 200 in 48ms (next.js: 7ms, proxy.ts: 19ms, application-code: 23ms)
+ GET /api/onboarding 200 in 12ms (next.js: 2ms, proxy.ts: 4ms, application-code: 6ms)
+ POST /api/matching/confirm 200 in 31ms (next.js: 2ms, proxy.ts: 5ms, application-code: 23ms)
+ GET /api/receipts?sort=date_desc 200 in 30ms (next.js: 3ms, proxy.ts: 8ms, application-code: 20ms)
+ GET /api/receipts?reviewStatus=pending 200 in 34ms (next.js: 8ms, proxy.ts: 7ms, application-code: 18ms)
+ POST /api/matching/confirm 200 in 24ms (next.js: 2ms, proxy.ts: 4ms, application-code: 18ms)
+ GET /api/receipts?sort=date_desc 200 in 30ms (next.js: 3ms, proxy.ts: 7ms, application-code: 20ms)
+ GET /api/receipts?reviewStatus=pending 200 in 33ms (next.js: 5ms, proxy.ts: 7ms, application-code: 22ms)
+✓ Compiled in 40ms
+ GET /api/receipts?type=tulo&sort=date_desc 200 in 84ms (next.js: 15ms, proxy.ts: 21ms, application-code: 47ms)
+ GET /api/receipts?reviewStatus=pending 200 in 93ms (next.js: 24ms, proxy.ts: 22ms, application-code: 47ms)
+ GET /api/receipts?type=meno&sort=date_desc 200 in 55ms (next.js: 12ms, proxy.ts: 27ms, application-code: 15ms)
+ GET /api/receipts?reviewStatus=pending 200 in 60ms (next.js: 14ms, proxy.ts: 29ms, application-code: 18ms)
+ GET /api/receipts?sort=date_desc&linkedStatus=linked 200 in 40ms (next.js: 4ms, proxy.ts: 13ms, application-code: 24ms)
+ GET /api/receipts?reviewStatus=pending 200 in 43ms (next.js: 10ms, proxy.ts: 12ms, application-code: 21ms)
+ GET /api/receipts?sort=date_desc&linkedStatus=unlinked 200 in 33ms (next.js: 4ms, proxy.ts: 8ms, application-code: 21ms)
+ GET /api/receipts?reviewStatus=pending 200 in 36ms (next.js: 6ms, proxy.ts: 8ms, application-code: 22ms)
+ GET /kuitit/4ad5faaa-37e2-4d6c-8b42-e7601596a6d9 200 in 118ms (next.js: 90ms, proxy.ts: 4ms, application-code: 24ms)
+ GET /api/auth/me 200 in 22ms (next.js: 4ms, proxy.ts: 7ms, application-code: 11ms)
+ GET /api/onboarding 200 in 25ms (next.js: 8ms, proxy.ts: 9ms, application-code: 9ms)
+ GET /api/receipts/4ad5faaa-37e2-4d6c-8b42-e7601596a6d9 200 in 136ms (next.js: 109ms, proxy.ts: 14ms, application-code: 13ms)
+ GET /kuitit 200 in 29ms (next.js: 5ms, proxy.ts: 4ms, application-code: 20ms)
+ GET /api/auth/me 200 in 60ms (next.js: 12ms, proxy.ts: 26ms, application-code: 22ms)
+ GET /api/receipts?sort=date_desc 200 in 91ms (next.js: 12ms, proxy.ts: 34ms, application-code: 44ms)
+ GET /api/receipts?reviewStatus=pending 200 in 87ms (next.js: 17ms, proxy.ts: 27ms, application-code: 43ms)
+ GET /api/onboarding 200 in 37ms (next.js: 3ms, proxy.ts: 27ms, application-code: 8ms)
+ GET /api/receipts?sort=date_desc&linkedStatus=unlinked 200 in 29ms (next.js: 6ms, proxy.ts: 7ms, application-code: 15ms)
+ GET /api/receipts?reviewStatus=pending 200 in 32ms (next.js: 8ms, proxy.ts: 7ms, application-code: 17ms)
+ POST /api/matching/confirm 200 in 25ms (next.js: 3ms, proxy.ts: 5ms, application-code: 17ms)
+ GET /api/receipts?sort=date_desc&linkedStatus=unlinked 200 in 31ms (next.js: 3ms, proxy.ts: 8ms, application-code: 19ms)
+ GET /api/receipts?reviewStatus=pending 200 in 37ms (next.js: 5ms, proxy.ts: 7ms, application-code: 24ms)
+ POST /api/matching/confirm 200 in 22ms (next.js: 3ms, proxy.ts: 8ms, application-code: 11ms)
+ GET /api/receipts?sort=date_desc&linkedStatus=unlinked 200 in 23ms (next.js: 3ms, proxy.ts: 7ms, application-code: 13ms)
+ GET /api/receipts?reviewStatus=pending 200 in 30ms (next.js: 5ms, proxy.ts: 7ms, application-code: 18ms)
+ POST /api/matching/confirm 200 in 26ms (next.js: 2ms, proxy.ts: 5ms, application-code: 19ms)
+ GET /api/receipts?sort=date_desc&linkedStatus=unlinked 200 in 25ms (next.js: 3ms, proxy.ts: 7ms, application-code: 15ms)
+ GET /api/receipts?reviewStatus=pending 200 in 30ms (next.js: 5ms, proxy.ts: 6ms, application-code: 19ms)
+ POST /api/matching/confirm 200 in 25ms (next.js: 1945µs, proxy.ts: 5ms, application-code: 19ms)
+ GET /api/receipts?sort=date_desc&linkedStatus=unlinked 200 in 34ms (next.js: 3ms, proxy.ts: 8ms, application-code: 24ms)
+ GET /api/receipts?reviewStatus=pending 200 in 42ms (next.js: 7ms, proxy.ts: 8ms, application-code: 27ms)
+ POST /api/matching/confirm 200 in 22ms (next.js: 2ms, proxy.ts: 5ms, application-code: 15ms)
+ GET /api/receipts?sort=date_desc&linkedStatus=unlinked 200 in 22ms (next.js: 3ms, proxy.ts: 7ms, application-code: 12ms)
+ GET /api/receipts?reviewStatus=pending 200 in 23ms (next.js: 5ms, proxy.ts: 7ms, application-code: 12ms)
+ POST /api/matching/confirm 200 in 22ms (next.js: 2ms, proxy.ts: 5ms, application-code: 15ms)
+ GET /api/receipts?sort=date_desc&linkedStatus=unlinked 200 in 23ms (next.js: 3ms, proxy.ts: 8ms, application-code: 13ms)
+ GET /api/receipts?reviewStatus=pending 200 in 28ms (next.js: 5ms, proxy.ts: 7ms, application-code: 16ms)
+ POST /api/matching/confirm 200 in 27ms (next.js: 2ms, proxy.ts: 9ms, application-code: 16ms)
+ GET /api/receipts?sort=date_desc&linkedStatus=unlinked 200 in 21ms (next.js: 3ms, proxy.ts: 7ms, application-code: 12ms)
+ GET /api/receipts?reviewStatus=pending 200 in 24ms (next.js: 5ms, proxy.ts: 6ms, application-code: 12ms)
+ POST /api/matching/confirm 200 in 24ms (next.js: 2ms, proxy.ts: 6ms, application-code: 16ms)
+ GET /api/receipts?sort=date_desc&linkedStatus=unlinked 200 in 24ms (next.js: 3ms, proxy.ts: 8ms, application-code: 13ms)
+ GET /api/receipts?reviewStatus=pending 200 in 26ms (next.js: 6ms, proxy.ts: 7ms, application-code: 13ms)
+ POST /api/matching/confirm 200 in 31ms (next.js: 2ms, proxy.ts: 5ms, application-code: 23ms)
+ GET /api/receipts?sort=date_desc&linkedStatus=unlinked 200 in 24ms (next.js: 4ms, proxy.ts: 7ms, application-code: 13ms)
+ GET /api/receipts?reviewStatus=pending 200 in 26ms (next.js: 8ms, proxy.ts: 6ms, application-code: 12ms)
+ POST /api/matching/confirm 200 in 26ms (next.js: 3ms, proxy.ts: 6ms, application-code: 17ms)
+ GET /api/receipts?sort=date_desc&linkedStatus=unlinked 200 in 20ms (next.js: 3ms, proxy.ts: 6ms, application-code: 11ms)
+ GET /api/receipts?reviewStatus=pending 200 in 26ms (next.js: 5ms, proxy.ts: 6ms, application-code: 15ms)
+ POST /api/matching/confirm 200 in 21ms (next.js: 3ms, proxy.ts: 5ms, application-code: 13ms)
+ GET /api/receipts?sort=date_desc&linkedStatus=unlinked 200 in 30ms (next.js: 3ms, proxy.ts: 16ms, application-code: 11ms)
+ GET /api/receipts?reviewStatus=pending 200 in 34ms (next.js: 6ms, proxy.ts: 15ms, application-code: 13ms)
+ POST /api/matching/confirm 200 in 25ms (next.js: 2ms, proxy.ts: 6ms, application-code: 17ms)
+ GET /api/receipts?sort=date_desc&linkedStatus=unlinked 200 in 27ms (next.js: 3ms, proxy.ts: 8ms, application-code: 16ms)
+ GET /api/receipts?reviewStatus=pending 200 in 31ms (next.js: 6ms, proxy.ts: 7ms, application-code: 17ms)
+ POST /api/matching/confirm 200 in 20ms (next.js: 3ms, proxy.ts: 4ms, application-code: 13ms)
+ GET /api/receipts?sort=date_desc&linkedStatus=unlinked 200 in 41ms (next.js: 4ms, proxy.ts: 23ms, application-code: 15ms)
+ GET /api/receipts?reviewStatus=pending 200 in 46ms (next.js: 6ms, proxy.ts: 20ms, application-code: 20ms)
+ GET /kuitit 200 in 178ms (next.js: 63ms, proxy.ts: 57ms, application-code: 58ms)
+ GET /kuitit 200 in 53ms (next.js: 5ms, proxy.ts: 9ms, application-code: 39ms)
+ GET /kuitit 200 in 70ms (next.js: 6ms, proxy.ts: 7ms, application-code: 56ms)
+ GET /kuitit 200 in 44ms (next.js: 5ms, proxy.ts: 11ms, application-code: 27ms)
+ GET /kuitit 200 in 40ms (next.js: 3ms, proxy.ts: 5ms, application-code: 31ms)
+ GET /kuitit 200 in 44ms (next.js: 3ms, proxy.ts: 6ms, application-code: 35ms)
+ GET /kuitit 200 in 47ms (next.js: 5ms, proxy.ts: 7ms, application-code: 35ms)
+ GET /kuitit 200 in 42ms (next.js: 3ms, proxy.ts: 6ms, application-code: 33ms)
+ GET /kuitit 200 in 46ms (next.js: 4ms, proxy.ts: 7ms, application-code: 35ms)
+ GET /kuitit 200 in 71ms (next.js: 6ms, proxy.ts: 11ms, application-code: 54ms)
+ GET /kuitit 200 in 46ms (next.js: 6ms, proxy.ts: 8ms, application-code: 32ms)
+ GET /kuitit 200 in 52ms (next.js: 6ms, proxy.ts: 5ms, application-code: 41ms)
+ GET /kuitit 200 in 60ms (next.js: 7ms, proxy.ts: 7ms, application-code: 47ms)
+ GET /kuitit 200 in 48ms (next.js: 3ms, proxy.ts: 6ms, application-code: 38ms)
+ GET /kuitit 200 in 47ms (next.js: 5ms, proxy.ts: 6ms, application-code: 35ms)
+ GET /kuitit 200 in 50ms (next.js: 5ms, proxy.ts: 9ms, application-code: 37ms)
+ GET /kuitit 200 in 52ms (next.js: 9ms, proxy.ts: 9ms, application-code: 34ms)
+ GET /kuitit 200 in 41ms (next.js: 4ms, proxy.ts: 4ms, application-code: 32ms)
+ GET /kuitit 200 in 38ms (next.js: 4ms, proxy.ts: 9ms, application-code: 25ms)
+ GET /kuitit 200 in 42ms (next.js: 3ms, proxy.ts: 5ms, application-code: 34ms)
+ GET /kuitit 200 in 37ms (next.js: 3ms, proxy.ts: 6ms, application-code: 28ms)
+ GET /kuitit 200 in 55ms (next.js: 4ms, proxy.ts: 5ms, application-code: 46ms)
+ GET /kuitit 200 in 38ms (next.js: 7ms, proxy.ts: 5ms, application-code: 26ms)
+ GET /kuitit 200 in 60ms (next.js: 4ms, proxy.ts: 4ms, application-code: 51ms)
+ GET /kuitit 200 in 38ms (next.js: 3ms, proxy.ts: 5ms, application-code: 29ms)
+ GET /kuitit 200 in 47ms (next.js: 3ms, proxy.ts: 6ms, application-code: 38ms)
+ GET /kuitit 200 in 35ms (next.js: 3ms, proxy.ts: 8ms, application-code: 24ms)
+ GET /kuitit 200 in 33ms (next.js: 3ms, proxy.ts: 5ms, application-code: 25ms)
+ GET /kuitit 200 in 35ms (next.js: 3ms, proxy.ts: 5ms, application-code: 28ms)
+ GET /kuitit 200 in 39ms (next.js: 4ms, proxy.ts: 8ms, application-code: 28ms)
+ GET /kuitit 200 in 33ms (next.js: 5ms, proxy.ts: 5ms, application-code: 24ms)
+ GET /kuitit 200 in 43ms (next.js: 4ms, proxy.ts: 4ms, application-code: 35ms)
+ GET /kuitit 200 in 58ms (next.js: 3ms, proxy.ts: 6ms, application-code: 49ms)
+ GET /kuitit 200 in 39ms (next.js: 4ms, proxy.ts: 12ms, application-code: 24ms)
+ GET /kuitit 200 in 36ms (next.js: 3ms, proxy.ts: 5ms, application-code: 29ms)
+ GET /kuitit 200 in 43ms (next.js: 9ms, proxy.ts: 4ms, application-code: 30ms)
+ GET /kuitit 200 in 56ms (next.js: 3ms, proxy.ts: 5ms, application-code: 47ms)
+ GET /kuitit 200 in 47ms (next.js: 3ms, proxy.ts: 7ms, application-code: 37ms)
+ GET /kuitit 200 in 48ms (next.js: 4ms, proxy.ts: 17ms, application-code: 27ms)
+ GET /kuitit 200 in 50ms (next.js: 8ms, proxy.ts: 5ms, application-code: 36ms)
+ GET /kuitit 200 in 52ms (next.js: 4ms, proxy.ts: 4ms, application-code: 43ms)
+ GET /kuitit 200 in 62ms (next.js: 4ms, proxy.ts: 6ms, application-code: 52ms)
+ GET /kuitit 200 in 57ms (next.js: 3ms, proxy.ts: 5ms, application-code: 49ms)
+ GET /kuitit 200 in 45ms (next.js: 3ms, proxy.ts: 4ms, application-code: 38ms)
+ GET /kuitit 200 in 57ms (next.js: 8ms, proxy.ts: 16ms, application-code: 33ms)
+ GET /kuitit 200 in 35ms (next.js: 4ms, proxy.ts: 6ms, application-code: 25ms)
+ GET /kuitit 200 in 35ms (next.js: 5ms, proxy.ts: 4ms, application-code: 25ms)
+ GET /kuitit 200 in 37ms (next.js: 4ms, proxy.ts: 5ms, application-code: 29ms)
+ GET /kuitit 200 in 37ms (next.js: 4ms, proxy.ts: 4ms, application-code: 28ms)
+ GET /kuitit 200 in 51ms (next.js: 4ms, proxy.ts: 8ms, application-code: 39ms)
+ GET /kuitit 200 in 50ms (next.js: 3ms, proxy.ts: 16ms, application-code: 31ms)
+ GET /kuitit 200 in 47ms (next.js: 4ms, proxy.ts: 6ms, application-code: 36ms)
+ GET /kuitit 200 in 54ms (next.js: 6ms, proxy.ts: 9ms, application-code: 39ms)
+ GET /kuitit 200 in 45ms (next.js: 5ms, proxy.ts: 6ms, application-code: 34ms)
+ GET /kuitit 200 in 43ms (next.js: 3ms, proxy.ts: 6ms, application-code: 34ms)
+ GET /kuitit 200 in 53ms (next.js: 4ms, proxy.ts: 4ms, application-code: 45ms)
+ GET /kuitit 200 in 35ms (next.js: 2ms, proxy.ts: 11ms, application-code: 21ms)
+ GET /kuitit 200 in 30ms (next.js: 3ms, proxy.ts: 4ms, application-code: 23ms)
+ GET /kuitit 200 in 51ms (next.js: 3ms, proxy.ts: 4ms, application-code: 44ms)
+ GET /kuitit 200 in 35ms (next.js: 4ms, proxy.ts: 9ms, application-code: 22ms)
+ GET /kuitit 200 in 30ms (next.js: 3ms, proxy.ts: 4ms, application-code: 23ms)
+ GET /kuitit 200 in 55ms (next.js: 3ms, proxy.ts: 4ms, application-code: 48ms)
+ GET /kuitit 200 in 39ms (next.js: 11ms, proxy.ts: 4ms, application-code: 24ms)
+ GET /kuitit 200 in 31ms (next.js: 3ms, proxy.ts: 5ms, application-code: 24ms)
+ GET /kuitit 200 in 30ms (next.js: 3ms, proxy.ts: 5ms, application-code: 22ms)
+ GET /kuitit 200 in 32ms (next.js: 3ms, proxy.ts: 4ms, application-code: 25ms)
+ GET /kuitit 200 in 31ms (next.js: 3ms, proxy.ts: 5ms, application-code: 24ms)
+ GET /kuitit 200 in 37ms (next.js: 3ms, proxy.ts: 7ms, application-code: 27ms)
+ GET /kuitit 200 in 34ms (next.js: 4ms, proxy.ts: 8ms, application-code: 23ms)
+ GET /kuitit 200 in 34ms (next.js: 3ms, proxy.ts: 5ms, application-code: 26ms)
+ GET /kuitit 200 in 42ms (next.js: 3ms, proxy.ts: 7ms, application-code: 32ms)
+ GET /kuitit 200 in 35ms (next.js: 3ms, proxy.ts: 5ms, application-code: 27ms)
+ GET /kuitit 200 in 33ms (next.js: 3ms, proxy.ts: 4ms, application-code: 26ms)
+ GET /kuitit 200 in 26ms (next.js: 3ms, proxy.ts: 4ms, application-code: 19ms)
+ GET /kuitit 200 in 28ms (next.js: 3ms, proxy.ts: 4ms, application-code: 21ms)
+ GET /kuitit 200 in 28ms (next.js: 4ms, proxy.ts: 5ms, application-code: 20ms)
+ GET /kuitit 200 in 30ms (next.js: 3ms, proxy.ts: 4ms, application-code: 23ms)
+ GET /kuitit 200 in 27ms (next.js: 3ms, proxy.ts: 4ms, application-code: 20ms)
+ GET /kuitit 200 in 37ms (next.js: 4ms, proxy.ts: 4ms, application-code: 29ms)
+ GET /kuitit 200 in 34ms (next.js: 3ms, proxy.ts: 10ms, application-code: 21ms)
+ GET /kuitit 200 in 25ms (next.js: 3ms, proxy.ts: 4ms, application-code: 18ms)
+ GET /kuitit 200 in 34ms (next.js: 3ms, proxy.ts: 4ms, application-code: 28ms)
+ GET /kuitit 200 in 35ms (next.js: 3ms, proxy.ts: 6ms, application-code: 26ms)
+ GET /kuitit 200 in 64ms (next.js: 18ms, proxy.ts: 7ms, application-code: 39ms)
+ GET /kuitit 200 in 31ms (next.js: 6ms, proxy.ts: 4ms, application-code: 21ms)
+ GET /kuitit 200 in 27ms (next.js: 3ms, proxy.ts: 4ms, application-code: 21ms)
+ GET /kuitit 200 in 33ms (next.js: 3ms, proxy.ts: 4ms, application-code: 26ms)
+ GET /kuitit 200 in 33ms (next.js: 3ms, proxy.ts: 10ms, application-code: 20ms)
+ GET /kuitit 200 in 25ms (next.js: 3ms, proxy.ts: 4ms, application-code: 19ms)
+ GET /kuitit 200 in 28ms (next.js: 3ms, proxy.ts: 4ms, application-code: 21ms)
+ GET /kuitit 200 in 26ms (next.js: 3ms, proxy.ts: 4ms, application-code: 20ms)
+ GET /kuitit 200 in 25ms (next.js: 3ms, proxy.ts: 4ms, application-code: 18ms)
+✓ Compiled in 39ms
+ GET /api/auth/me 200 in 174ms (next.js: 37ms, proxy.ts: 11ms, application-code: 125ms)
+ GET /api/receipts?sort=date_desc 200 in 190ms (next.js: 81ms, proxy.ts: 55ms, application-code: 54ms)
+ GET /api/receipts?reviewStatus=pending 200 in 199ms (next.js: 109ms, proxy.ts: 55ms, application-code: 35ms)
+ GET /api/onboarding 200 in 104ms (next.js: 49ms, proxy.ts: 22ms, application-code: 33ms)
+✓ Compiled in 49ms
+✓ Compiled in 75ms
+✓ Compiled in 80ms
+✓ Compiled in 58ms
+ GET /kuitit 200 in 118ms (next.js: 4ms, proxy.ts: 6ms, application-code: 108ms)
+ GET /api/auth/me 200 in 46ms (next.js: 12ms, proxy.ts: 11ms, application-code: 22ms)
+ GET /api/receipts?sort=date_desc 200 in 57ms (next.js: 9ms, proxy.ts: 31ms, application-code: 17ms)
+ GET /api/receipts?reviewStatus=pending 200 in 60ms (next.js: 13ms, proxy.ts: 31ms, application-code: 16ms)
+ GET /api/onboarding 200 in 24ms (next.js: 1906µs, proxy.ts: 15ms, application-code: 7ms)
+ GET /kuitit 200 in 47ms (next.js: 3ms, proxy.ts: 4ms, application-code: 40ms)
+ GET /api/auth/me 200 in 50ms (next.js: 16ms, proxy.ts: 9ms, application-code: 25ms)
+ GET /api/receipts?sort=date_desc 200 in 57ms (next.js: 7ms, proxy.ts: 30ms, application-code: 21ms)
+ GET /api/receipts?reviewStatus=pending 200 in 60ms (next.js: 9ms, proxy.ts: 31ms, application-code: 20ms)
+ GET /api/onboarding 200 in 15ms (next.js: 2ms, proxy.ts: 5ms, application-code: 8ms)
+✓ Compiled in 99ms
+ GET /kuitit 200 in 57ms (next.js: 8ms, proxy.ts: 8ms, application-code: 41ms)
+ GET /api/auth/me 200 in 28ms (next.js: 15ms, proxy.ts: 6ms, application-code: 8ms)
+ GET /api/receipts?sort=date_desc 200 in 39ms (next.js: 6ms, proxy.ts: 19ms, application-code: 14ms)
+ GET /api/receipts?reviewStatus=pending 200 in 45ms (next.js: 9ms, proxy.ts: 17ms, application-code: 19ms)
+ GET /api/onboarding 200 in 14ms (next.js: 2ms, proxy.ts: 5ms, application-code: 7ms)
+✓ Compiled in 76ms
+ GET /api/receipts?sort=date_desc&linkedStatus=unlinked 200 in 22ms (next.js: 3ms, proxy.ts: 8ms, application-code: 12ms)
+ GET /api/receipts?reviewStatus=pending 200 in 26ms (next.js: 8ms, proxy.ts: 7ms, application-code: 12ms)
+ GET /api/receipts?sort=date_desc&linkedStatus=linked 200 in 32ms (next.js: 6ms, proxy.ts: 9ms, application-code: 17ms)
+ GET /api/receipts?reviewStatus=pending 200 in 35ms (next.js: 9ms, proxy.ts: 10ms, application-code: 17ms)
+ GET /api/receipts?type=tulo&sort=date_desc 200 in 32ms (next.js: 3ms, proxy.ts: 15ms, application-code: 14ms)
+ GET /api/receipts?reviewStatus=pending 200 in 31ms (next.js: 7ms, proxy.ts: 10ms, application-code: 14ms)
+ GET /api/receipts?type=meno&sort=date_desc 200 in 33ms (next.js: 5ms, proxy.ts: 11ms, application-code: 18ms)
+ GET /api/receipts?reviewStatus=pending 200 in 40ms (next.js: 10ms, proxy.ts: 10ms, application-code: 19ms)
+ GET /asetukset 200 in 80ms (next.js: 19ms, proxy.ts: 6ms, application-code: 55ms)
+ GET /api/auth/me 200 in 115ms (next.js: 8ms, proxy.ts: 23ms, application-code: 84ms)
+ GET /api/profile 200 in 116ms (next.js: 53ms, proxy.ts: 23ms, application-code: 40ms)
+ GET /api/onboarding 200 in 25ms (next.js: 5ms, proxy.ts: 10ms, application-code: 11ms)
+ GET /alv-raportti 200 in 49ms (next.js: 14ms, proxy.ts: 6ms, application-code: 30ms)
+ GET /api/auth/me 200 in 38ms (next.js: 8ms, proxy.ts: 19ms, application-code: 11ms)
+ GET /api/alv?period=2026-08 200 in 86ms (next.js: 46ms, proxy.ts: 23ms, application-code: 17ms)
+ GET /api/onboarding 200 in 27ms (next.js: 3ms, proxy.ts: 11ms, application-code: 13ms)
+ GET /alv-raportti 200 in 177ms (next.js: 58ms, proxy.ts: 60ms, application-code: 59ms)
+ GET /alv-raportti 200 in 58ms (next.js: 4ms, proxy.ts: 10ms, application-code: 44ms)
+ GET /alv-raportti 200 in 67ms (next.js: 7ms, proxy.ts: 9ms, application-code: 52ms)
+ GET /alv-raportti 200 in 117ms (next.js: 4ms, proxy.ts: 7ms, application-code: 107ms)
+ GET /api/auth/me 200 in 55ms (next.js: 35ms, proxy.ts: 8ms, application-code: 12ms)
+ GET /api/alv?period=2026-08 200 in 87ms (next.js: 20ms, proxy.ts: 49ms, application-code: 17ms)
+ GET /api/onboarding 200 in 73ms (next.js: 39ms, proxy.ts: 14ms, application-code: 19ms)
+ GET /tiliotteet 200 in 37ms (next.js: 16ms, proxy.ts: 5ms, application-code: 16ms)
+ GET /api/statements 200 in 84ms (next.js: 46ms, proxy.ts: 15ms, application-code: 23ms)
+ GET /api/auth/me 200 in 80ms (next.js: 5ms, proxy.ts: 5ms, application-code: 70ms)
+ GET /api/statements 200 in 36ms (next.js: 7ms, proxy.ts: 8ms, application-code: 22ms)
+ GET /api/onboarding 200 in 36ms (next.js: 3ms, proxy.ts: 14ms, application-code: 19ms)
+ GET /kuitit 200 in 61ms (next.js: 23ms, proxy.ts: 7ms, application-code: 31ms)
+ GET /api/auth/me 200 in 35ms (next.js: 8ms, proxy.ts: 16ms, application-code: 11ms)
+ GET /api/receipts?reviewStatus=pending 200 in 127ms (next.js: 86ms, proxy.ts: 22ms, application-code: 19ms)
+ GET /api/receipts?sort=date_desc 200 in 133ms (next.js: 92ms, proxy.ts: 21ms, application-code: 20ms)
+ GET /api/onboarding 200 in 41ms (next.js: 10ms, proxy.ts: 18ms, application-code: 13ms)
+ GET /tiliotteet 200 in 30ms (next.js: 3ms, proxy.ts: 6ms, application-code: 21ms)
+ GET /api/auth/me 200 in 27ms (next.js: 3ms, proxy.ts: 7ms, application-code: 17ms)
+ GET /api/statements 200 in 51ms (next.js: 8ms, proxy.ts: 15ms, application-code: 28ms)
+ GET /api/onboarding 200 in 24ms (next.js: 4ms, proxy.ts: 10ms, application-code: 10ms)
+ GET /api/statements 200 in 35ms (next.js: 7ms, proxy.ts: 9ms, application-code: 19ms)
+ GET /alv-raportti 200 in 22ms (next.js: 1881µs, proxy.ts: 6ms, application-code: 14ms)
+ GET /api/auth/me 200 in 24ms (next.js: 5ms, proxy.ts: 11ms, application-code: 8ms)
+ GET /api/alv?period=2026-08 200 in 21ms (next.js: 3ms, proxy.ts: 11ms, application-code: 7ms)
+ GET /api/onboarding 200 in 16ms (next.js: 2ms, proxy.ts: 6ms, application-code: 7ms)
+ GET /tiliotteet 200 in 24ms (next.js: 3ms, proxy.ts: 6ms, application-code: 15ms)
+ GET /api/auth/me 200 in 18ms (next.js: 3ms, proxy.ts: 7ms, application-code: 9ms)
+ GET /api/statements 200 in 37ms (next.js: 2ms, proxy.ts: 14ms, application-code: 22ms)
+ GET /api/onboarding 200 in 24ms (next.js: 3ms, proxy.ts: 12ms, application-code: 9ms)
+ GET /api/statements 200 in 35ms (next.js: 7ms, proxy.ts: 9ms, application-code: 19ms)
+ GET /kuitit 200 in 33ms (next.js: 4ms, proxy.ts: 5ms, application-code: 24ms)
+ GET /api/auth/me 200 in 31ms (next.js: 8ms, proxy.ts: 14ms, application-code: 9ms)
+ GET /api/receipts?reviewStatus=pending 200 in 44ms (next.js: 4ms, proxy.ts: 27ms, application-code: 13ms)
+ GET /api/receipts?sort=date_desc 200 in 41ms (next.js: 7ms, proxy.ts: 17ms, application-code: 16ms)
+ GET /api/onboarding 200 in 29ms (next.js: 2ms, proxy.ts: 16ms, application-code: 10ms)
+ GET /api/receipts?type=meno&sort=date_desc 200 in 22ms (next.js: 5ms, proxy.ts: 8ms, application-code: 9ms)
+ GET /api/receipts?reviewStatus=pending 200 in 26ms (next.js: 8ms, proxy.ts: 8ms, application-code: 9ms)
+ GET /api/receipts?sort=date_desc 200 in 25ms (next.js: 3ms, proxy.ts: 8ms, application-code: 14ms)
+ GET /api/receipts?reviewStatus=pending 200 in 30ms (next.js: 8ms, proxy.ts: 7ms, application-code: 15ms)
+ GET /alv-raportti 200 in 19ms (next.js: 1933µs, proxy.ts: 4ms, application-code: 13ms)
+ GET /api/auth/me 200 in 19ms (next.js: 4ms, proxy.ts: 9ms, application-code: 6ms)
+ GET /api/alv?period=2026-08 200 in 31ms (next.js: 4ms, proxy.ts: 12ms, application-code: 15ms)
+ GET /api/onboarding 200 in 17ms (next.js: 1764µs, proxy.ts: 9ms, application-code: 6ms)
+ GET /tiliotteet 200 in 31ms (next.js: 2ms, proxy.ts: 5ms, application-code: 23ms)
+ GET /api/auth/me 200 in 33ms (next.js: 9ms, proxy.ts: 8ms, application-code: 16ms)
+ GET /api/statements 200 in 62ms (next.js: 15ms, proxy.ts: 19ms, application-code: 28ms)
+ GET /api/onboarding 200 in 31ms (next.js: 3ms, proxy.ts: 15ms, application-code: 12ms)
+ GET /api/statements 200 in 36ms (next.js: 8ms, proxy.ts: 10ms, application-code: 19ms)
+ GET /tiliotteet/aa053fc2-2bc3-4c0a-98ac-196fb21662a7 200 in 118ms (next.js: 97ms, proxy.ts: 4ms, application-code: 17ms)
+ GET /api/auth/me 200 in 30ms (next.js: 3ms, proxy.ts: 10ms, application-code: 16ms)
+ GET /api/statements/aa053fc2-2bc3-4c0a-98ac-196fb21662a7 200 in 208ms (next.js: 148ms, proxy.ts: 18ms, application-code: 43ms)
+ GET /api/onboarding 200 in 40ms (next.js: 5ms, proxy.ts: 26ms, application-code: 8ms)
+ GET /api/statements/aa053fc2-2bc3-4c0a-98ac-196fb21662a7 200 in 49ms (next.js: 10ms, proxy.ts: 12ms, application-code: 27ms)
+ DELETE /api/statements/aa053fc2-2bc3-4c0a-98ac-196fb21662a7 200 in 113ms (next.js: 95ms, proxy.ts: 5ms, application-code: 13ms)
+ GET /tiliotteet 200 in 24ms (next.js: 2ms, proxy.ts: 6ms, application-code: 15ms)
+ GET /api/auth/me 200 in 23ms (next.js: 3ms, proxy.ts: 6ms, application-code: 14ms)
+ GET /api/statements 200 in 32ms (next.js: 9ms, proxy.ts: 13ms, application-code: 10ms)
+ GET /api/onboarding 200 in 24ms (next.js: 3ms, proxy.ts: 11ms, application-code: 10ms)
+ GET /api/statements 200 in 32ms (next.js: 6ms, proxy.ts: 9ms, application-code: 17ms)
+Failed to process email attachment: Error [ReceiptExtractionError]: Kuitista ei saatu luettua tekstiä. Kokeile terävämpää kuvaa tai tekstipohjaista PDF:ää.
+    at extractDocumentText (src/lib/ai.ts:477:11)
+    at extractReceipt (src/lib/ai.ts:106:27)
+    at async processFile (src/lib/mail-sync.ts:154:32)
+    at async syncImapAccount (src/lib/mail-sync.ts:219:13)
+    at async POST (src/app/api/statements/route.ts:155:7)
+  475 |
+  476 |   if (rawText.trim().length < 10) {
+> 477 |     throw new ReceiptExtractionError(
+      |           ^
+  478 |       "NO_TEXT",
+  479 |       "Kuitista ei saatu luettua tekstiä. Kokeile terävämpää kuvaa tai tekstipohjaista PD...
+  480 |     ); {
+  code: 'NO_TEXT'
+}
+Failed to process email attachment: Error [ReceiptExtractionError]: Kuitista ei saatu luettua tekstiä. Kokeile terävämpää kuvaa tai tekstipohjaista PDF:ää.
+    at extractDocumentText (src/lib/ai.ts:477:11)
+    at extractReceipt (src/lib/ai.ts:106:27)
+    at async processFile (src/lib/mail-sync.ts:154:32)
+    at async syncImapAccount (src/lib/mail-sync.ts:219:13)
+    at async POST (src/app/api/statements/route.ts:155:7)
+  475 |
+  476 |   if (rawText.trim().length < 10) {
+> 477 |     throw new ReceiptExtractionError(
+      |           ^
+  478 |       "NO_TEXT",
+  479 |       "Kuitista ei saatu luettua tekstiä. Kokeile terävämpää kuvaa tai tekstipohjaista PD...
+  480 |     ); {
+  code: 'NO_TEXT'
+}
+Failed to process email attachment: Error [ReceiptExtractionError]: Kuitista ei saatu luettua tekstiä. Kokeile terävämpää kuvaa tai tekstipohjaista PDF:ää.
+    at extractDocumentText (src/lib/ai.ts:477:11)
+    at extractReceipt (src/lib/ai.ts:106:27)
+    at async processFile (src/lib/mail-sync.ts:154:32)
+    at async syncImapAccount (src/lib/mail-sync.ts:219:13)
+    at async POST (src/app/api/statements/route.ts:155:7)
+  475 |
+  476 |   if (rawText.trim().length < 10) {
+> 477 |     throw new ReceiptExtractionError(
+      |           ^
+  478 |       "NO_TEXT",
+  479 |       "Kuitista ei saatu luettua tekstiä. Kokeile terävämpää kuvaa tai tekstipohjaista PD...
+  480 |     ); {
+  code: 'NO_TEXT'
+}
+Failed to process email attachment: Error [ReceiptExtractionError]: Kuitista ei saatu luettua tekstiä. Kokeile terävämpää kuvaa tai tekstipohjaista PDF:ää.
+    at extractDocumentText (src/lib/ai.ts:477:11)
+    at extractReceipt (src/lib/ai.ts:106:27)
+    at async processFile (src/lib/mail-sync.ts:154:32)
+    at async syncImapAccount (src/lib/mail-sync.ts:219:13)
+    at async POST (src/app/api/statements/route.ts:155:7)
+  475 |
+  476 |   if (rawText.trim().length < 10) {
+> 477 |     throw new ReceiptExtractionError(
+      |           ^
+  478 |       "NO_TEXT",
+  479 |       "Kuitista ei saatu luettua tekstiä. Kokeile terävämpää kuvaa tai tekstipohjaista PD...
+  480 |     ); {
+  code: 'NO_TEXT'
+}
+Failed to process email attachment: Error [ReceiptExtractionError]: Kuitista ei saatu luettua tekstiä. Kokeile terävämpää kuvaa tai tekstipohjaista PDF:ää.
+    at extractDocumentText (src/lib/ai.ts:477:11)
+    at extractReceipt (src/lib/ai.ts:106:27)
+    at async processFile (src/lib/mail-sync.ts:154:32)
+    at async syncImapAccount (src/lib/mail-sync.ts:219:13)
+    at async POST (src/app/api/statements/route.ts:155:7)
+  475 |
+  476 |   if (rawText.trim().length < 10) {
+> 477 |     throw new ReceiptExtractionError(
+      |           ^
+  478 |       "NO_TEXT",
+  479 |       "Kuitista ei saatu luettua tekstiä. Kokeile terävämpää kuvaa tai tekstipohjaista PD...
+  480 |     ); {
+  code: 'NO_TEXT'
+}
+Failed to process email attachment: Error [ReceiptExtractionError]: Kuitista ei saatu luettua tekstiä. Kokeile terävämpää kuvaa tai tekstipohjaista PDF:ää.
+    at extractDocumentText (src/lib/ai.ts:477:11)
+    at extractReceipt (src/lib/ai.ts:106:27)
+    at async processFile (src/lib/mail-sync.ts:154:32)
+    at async syncImapAccount (src/lib/mail-sync.ts:219:13)
+    at async POST (src/app/api/statements/route.ts:155:7)
+  475 |
+  476 |   if (rawText.trim().length < 10) {
+> 477 |     throw new ReceiptExtractionError(
+      |           ^
+  478 |       "NO_TEXT",
+  479 |       "Kuitista ei saatu luettua tekstiä. Kokeile terävämpää kuvaa tai tekstipohjaista PD...
+  480 |     ); {
+  code: 'NO_TEXT'
+}
+Failed to process email attachment: Error [ReceiptExtractionError]: Kuitista ei saatu luettua tekstiä. Kokeile terävämpää kuvaa tai tekstipohjaista PDF:ää.
+    at extractDocumentText (src/lib/ai.ts:477:11)
+    at extractReceipt (src/lib/ai.ts:106:27)
+    at async processFile (src/lib/mail-sync.ts:154:32)
+    at async syncImapAccount (src/lib/mail-sync.ts:219:13)
+    at async POST (src/app/api/statements/route.ts:155:7)
+  475 |
+  476 |   if (rawText.trim().length < 10) {
+> 477 |     throw new ReceiptExtractionError(
+      |           ^
+  478 |       "NO_TEXT",
+  479 |       "Kuitista ei saatu luettua tekstiä. Kokeile terävämpää kuvaa tai tekstipohjaista PD...
+  480 |     ); {
+  code: 'NO_TEXT'
+}
+Cloud receipt extraction failed; trying the next configured path: Too little text extracted for LLM analysis
+Cloud receipt extraction failed; trying the next configured path: Too little text extracted for LLM analysis
+Failed to process email attachment: Error [ReceiptExtractionError]: Kuitista ei saatu luettua tekstiä. Kokeile terävämpää kuvaa tai tekstipohjaista PDF:ää.
+    at extractDocumentText (src/lib/ai.ts:477:11)
+    at extractReceipt (src/lib/ai.ts:106:27)
+    at async processFile (src/lib/mail-sync.ts:154:32)
+    at async syncImapAccount (src/lib/mail-sync.ts:219:13)
+    at async POST (src/app/api/statements/route.ts:155:7)
+  475 |
+  476 |   if (rawText.trim().length < 10) {
+> 477 |     throw new ReceiptExtractionError(
+      |           ^
+  478 |       "NO_TEXT",
+  479 |       "Kuitista ei saatu luettua tekstiä. Kokeile terävämpää kuvaa tai tekstipohjaista PD...
+  480 |     ); {
+  code: 'NO_TEXT'
+}
+ POST /api/statements 200 in 2.1min (next.js: 3ms, proxy.ts: 6ms, application-code: 2.1min)
+ GET /tiliotteet/d7f0ac32-1de7-444d-8f79-cb7ca1875a88 200 in 107ms (next.js: 83ms, proxy.ts: 5ms, application-code: 18ms)
+ GET /api/auth/me 200 in 19ms (next.js: 4ms, proxy.ts: 8ms, application-code: 8ms)
+ GET /api/statements/d7f0ac32-1de7-444d-8f79-cb7ca1875a88 200 in 158ms (next.js: 95ms, proxy.ts: 16ms, application-code: 47ms)
+ GET /api/onboarding 200 in 58ms (next.js: 4ms, proxy.ts: 46ms, application-code: 8ms)
+ GET /api/statements/d7f0ac32-1de7-444d-8f79-cb7ca1875a88 200 in 57ms (next.js: 7ms, proxy.ts: 11ms, application-code: 38ms)
+ POST /api/matching/confirm 200 in 46ms (next.js: 23ms, proxy.ts: 5ms, application-code: 18ms)
+ GET /api/statements/d7f0ac32-1de7-444d-8f79-cb7ca1875a88 200 in 108ms (next.js: 77ms, proxy.ts: 3ms, application-code: 28ms)
+ POST /api/matching/confirm 200 in 22ms (next.js: 3ms, proxy.ts: 6ms, application-code: 13ms)
+ GET /api/statements/d7f0ac32-1de7-444d-8f79-cb7ca1875a88 200 in 114ms (next.js: 76ms, proxy.ts: 3ms, application-code: 35ms)
+ POST /api/matching/confirm 200 in 23ms (next.js: 3ms, proxy.ts: 6ms, application-code: 14ms)
+ GET /api/statements/d7f0ac32-1de7-444d-8f79-cb7ca1875a88 200 in 109ms (next.js: 76ms, proxy.ts: 4ms, application-code: 30ms)
+✓ Compiled in 42ms
+✓ Compiled in 67ms
+✓ Compiled in 78ms
+ GET /tiliotteet/d7f0ac32-1de7-444d-8f79-cb7ca1875a88 200 in 157ms (next.js: 92ms, proxy.ts: 5ms, application-code: 60ms)
+ GET /api/auth/me 200 in 17ms (next.js: 3ms, proxy.ts: 5ms, application-code: 8ms)
+ GET /api/statements/d7f0ac32-1de7-444d-8f79-cb7ca1875a88 200 in 158ms (next.js: 100ms, proxy.ts: 13ms, application-code: 45ms)
+ GET /api/onboarding 200 in 56ms (next.js: 3ms, proxy.ts: 43ms, application-code: 10ms)
+ GET /kuitit 200 in 22ms (next.js: 4ms, proxy.ts: 4ms, application-code: 15ms)
+ GET /api/auth/me 200 in 22ms (next.js: 4ms, proxy.ts: 9ms, application-code: 10ms)
+ GET /api/receipts?sort=date_desc 200 in 47ms (next.js: 6ms, proxy.ts: 20ms, application-code: 21ms)
+ GET /api/receipts?reviewStatus=pending 200 in 59ms (next.js: 8ms, proxy.ts: 16ms, application-code: 35ms)
+ GET /api/onboarding 200 in 16ms (next.js: 3ms, proxy.ts: 4ms, application-code: 9ms)
+ PATCH /api/receipts/75b354f5-bd88-48ac-a717-79ac41ae4a34/review 200 in 117ms (next.js: 96ms, proxy.ts: 5ms, application-code: 16ms)
+ GET /api/receipts?sort=date_desc 200 in 43ms (next.js: 4ms, proxy.ts: 9ms, application-code: 30ms)
+ GET /api/receipts?reviewStatus=pending 200 in 75ms (next.js: 8ms, proxy.ts: 9ms, application-code: 59ms)
+ GET /kuitit/75b354f5-bd88-48ac-a717-79ac41ae4a34 200 in 118ms (next.js: 94ms, proxy.ts: 4ms, application-code: 20ms)
+ GET /api/auth/me 200 in 18ms (next.js: 7ms, proxy.ts: 5ms, application-code: 6ms)
+ GET /api/onboarding 200 in 23ms (next.js: 5ms, proxy.ts: 4ms, application-code: 14ms)
+ GET /api/receipts/75b354f5-bd88-48ac-a717-79ac41ae4a34 200 in 143ms (next.js: 111ms, proxy.ts: 13ms, application-code: 19ms)
+ GET /api/receipts/75b354f5-bd88-48ac-a717-79ac41ae4a34/file 200 in 682ms (next.js: 664ms, proxy.ts: 5ms, application-code: 13ms)
+ GET /kuitit 200 in 30ms (next.js: 3ms, proxy.ts: 5ms, application-code: 21ms)
+ GET /api/auth/me 200 in 28ms (next.js: 7ms, proxy.ts: 10ms, application-code: 11ms)
+ GET /api/receipts?sort=date_desc 200 in 54ms (next.js: 6ms, proxy.ts: 21ms, application-code: 27ms)
+ GET /api/receipts?reviewStatus=pending 200 in 74ms (next.js: 25ms, proxy.ts: 22ms, application-code: 27ms)
+ GET /api/onboarding 200 in 37ms (next.js: 4ms, proxy.ts: 25ms, application-code: 8ms)
+ DELETE /api/receipts/75b354f5-bd88-48ac-a717-79ac41ae4a34 200 in 104ms (next.js: 84ms, proxy.ts: 5ms, application-code: 15ms)
+ GET /tiliotteet 200 in 24ms (next.js: 3ms, proxy.ts: 6ms, application-code: 15ms)
+ GET /api/auth/me 200 in 20ms (next.js: 3ms, proxy.ts: 5ms, application-code: 12ms)
+ GET /api/statements 200 in 58ms (next.js: 8ms, proxy.ts: 14ms, application-code: 36ms)
+ GET /api/onboarding 200 in 20ms (next.js: 3ms, proxy.ts: 8ms, application-code: 9ms)
+ GET /api/statements 200 in 45ms (next.js: 6ms, proxy.ts: 6ms, application-code: 33ms)
+ GET /tiliotteet/d7f0ac32-1de7-444d-8f79-cb7ca1875a88 200 in 97ms (next.js: 77ms, proxy.ts: 5ms, application-code: 16ms)
+ GET /api/auth/me 200 in 16ms (next.js: 4ms, proxy.ts: 5ms, application-code: 7ms)
+ GET /api/statements/d7f0ac32-1de7-444d-8f79-cb7ca1875a88 200 in 146ms (next.js: 93ms, proxy.ts: 14ms, application-code: 39ms)
+ GET /api/onboarding 200 in 51ms (next.js: 4ms, proxy.ts: 40ms, application-code: 7ms)
+ GET /api/statements/d7f0ac32-1de7-444d-8f79-cb7ca1875a88 200 in 56ms (next.js: 7ms, proxy.ts: 11ms, application-code: 38ms)
+ GET /kuitit 200 in 22ms (next.js: 2ms, proxy.ts: 5ms, application-code: 14ms)
+ GET /api/auth/me 200 in 28ms (next.js: 9ms, proxy.ts: 9ms, application-code: 11ms)
+ GET /api/receipts?sort=date_desc 200 in 50ms (next.js: 4ms, proxy.ts: 18ms, application-code: 28ms)
+ GET /api/receipts?reviewStatus=pending 200 in 65ms (next.js: 9ms, proxy.ts: 16ms, application-code: 40ms)
+ GET /api/onboarding 200 in 49ms (next.js: 3ms, proxy.ts: 40ms, application-code: 6ms)
+ GET /kuitit 200 in 51ms (next.js: 2ms, proxy.ts: 4ms, application-code: 44ms)
+ GET /api/auth/me 200 in 41ms (next.js: 5ms, proxy.ts: 8ms, application-code: 28ms)
+ GET /api/receipts?sort=date_desc 200 in 63ms (next.js: 11ms, proxy.ts: 17ms, application-code: 35ms)
+ GET /api/receipts?reviewStatus=pending 200 in 79ms (next.js: 16ms, proxy.ts: 18ms, application-code: 45ms)
+ GET /api/onboarding 200 in 15ms (next.js: 3ms, proxy.ts: 5ms, application-code: 7ms)
+ GET /kuitit 200 in 45ms (next.js: 2ms, proxy.ts: 5ms, application-code: 38ms)
+ GET /api/auth/me 200 in 31ms (next.js: 8ms, proxy.ts: 7ms, application-code: 15ms)
+ GET /api/receipts?sort=date_desc 200 in 56ms (next.js: 5ms, proxy.ts: 17ms, application-code: 34ms)
+ GET /api/receipts?reviewStatus=pending 200 in 84ms (next.js: 7ms, proxy.ts: 17ms, application-code: 59ms)
+ GET /api/onboarding 200 in 24ms (next.js: 6ms, proxy.ts: 8ms, application-code: 10ms)
+ POST /api/receipts/batch-approve 200 in 100ms (next.js: 32ms, proxy.ts: 5ms, application-code: 63ms)
+ GET /api/receipts?sort=date_desc 200 in 47ms (next.js: 4ms, proxy.ts: 11ms, application-code: 32ms)
+ GET /api/receipts?reviewStatus=pending 200 in 74ms (next.js: 8ms, proxy.ts: 11ms, application-code: 56ms)
+ DELETE /api/receipts/11fccb95-ec35-4476-87b5-fba52ef21236 200 in 190ms (next.js: 150ms, proxy.ts: 6ms, application-code: 33ms)
+ DELETE /api/receipts/19890d02-98fc-411a-96e0-b445948059f6 200 in 168ms (next.js: 125ms, proxy.ts: 6ms, application-code: 38ms)
+Batch receipt file cleanup failed for auto-generated: Error: Unsafe storage key
+    at safeStorageKey (src/lib/storage.ts:109:60)
+    at removeUserUpload (src/lib/storage.ts:177:19)
+    at <unknown> (src/app/api/receipts/batch-delete/route.ts:81:23)
+    at Array.map (<anonymous>)
+    at <unknown> (src/app/api/receipts/batch-delete/route.ts:80:15)
+    at async (src/lib/api-errors.ts:52:14)
+  107 |
+  108 | function safeStorageKey(value: string): string {
+> 109 |   if (!/^[a-f0-9-]{36}\.[a-z0-9]{2,5}$/.test(value)) throw new Error("Unsafe storage key");
+      |                                                            ^
+  110 |   return value;
+  111 | }
+  112 |
+Batch receipt file cleanup failed for auto-generated: Error: Unsafe storage key
+    at safeStorageKey (src/lib/storage.ts:109:60)
+    at removeUserUpload (src/lib/storage.ts:177:19)
+    at <unknown> (src/app/api/receipts/batch-delete/route.ts:81:23)
+    at Array.map (<anonymous>)
+    at <unknown> (src/app/api/receipts/batch-delete/route.ts:80:15)
+    at async (src/lib/api-errors.ts:52:14)
+  107 |
+  108 | function safeStorageKey(value: string): string {
+> 109 |   if (!/^[a-f0-9-]{36}\.[a-z0-9]{2,5}$/.test(value)) throw new Error("Unsafe storage key");
+      |                                                            ^
+  110 |   return value;
+  111 | }
+  112 |
+Batch receipt file cleanup failed for auto-generated: Error: Unsafe storage key
+    at safeStorageKey (src/lib/storage.ts:109:60)
+    at removeUserUpload (src/lib/storage.ts:177:19)
+    at <unknown> (src/app/api/receipts/batch-delete/route.ts:81:23)
+    at Array.map (<anonymous>)
+    at <unknown> (src/app/api/receipts/batch-delete/route.ts:80:15)
+    at async (src/lib/api-errors.ts:52:14)
+  107 |
+  108 | function safeStorageKey(value: string): string {
+> 109 |   if (!/^[a-f0-9-]{36}\.[a-z0-9]{2,5}$/.test(value)) throw new Error("Unsafe storage key");
+      |                                                            ^
+  110 |   return value;
+  111 | }
+  112 |
+Batch receipt file cleanup failed for auto-generated: Error: Unsafe storage key
+    at safeStorageKey (src/lib/storage.ts:109:60)
+    at removeUserUpload (src/lib/storage.ts:177:19)
+    at <unknown> (src/app/api/receipts/batch-delete/route.ts:81:23)
+    at Array.map (<anonymous>)
+    at <unknown> (src/app/api/receipts/batch-delete/route.ts:80:15)
+    at async (src/lib/api-errors.ts:52:14)
+  107 |
+  108 | function safeStorageKey(value: string): string {
+> 109 |   if (!/^[a-f0-9-]{36}\.[a-z0-9]{2,5}$/.test(value)) throw new Error("Unsafe storage key");
+      |                                                            ^
+  110 |   return value;
+  111 | }
+  112 |
+Batch receipt file cleanup failed for auto-generated: Error: Unsafe storage key
+    at safeStorageKey (src/lib/storage.ts:109:60)
+    at removeUserUpload (src/lib/storage.ts:177:19)
+    at <unknown> (src/app/api/receipts/batch-delete/route.ts:81:23)
+    at Array.map (<anonymous>)
+    at <unknown> (src/app/api/receipts/batch-delete/route.ts:80:15)
+    at async (src/lib/api-errors.ts:52:14)
+  107 |
+  108 | function safeStorageKey(value: string): string {
+> 109 |   if (!/^[a-f0-9-]{36}\.[a-z0-9]{2,5}$/.test(value)) throw new Error("Unsafe storage key");
+      |                                                            ^
+  110 |   return value;
+  111 | }
+  112 |
+Batch receipt file cleanup failed for auto-generated: Error: Unsafe storage key
+    at safeStorageKey (src/lib/storage.ts:109:60)
+    at removeUserUpload (src/lib/storage.ts:177:19)
+    at <unknown> (src/app/api/receipts/batch-delete/route.ts:81:23)
+    at Array.map (<anonymous>)
+    at <unknown> (src/app/api/receipts/batch-delete/route.ts:80:15)
+    at async (src/lib/api-errors.ts:52:14)
+  107 |
+  108 | function safeStorageKey(value: string): string {
+> 109 |   if (!/^[a-f0-9-]{36}\.[a-z0-9]{2,5}$/.test(value)) throw new Error("Unsafe storage key");
+      |                                                            ^
+  110 |   return value;
+  111 | }
+  112 |
+Batch receipt file cleanup failed for auto-generated: Error: Unsafe storage key
+    at safeStorageKey (src/lib/storage.ts:109:60)
+    at removeUserUpload (src/lib/storage.ts:177:19)
+    at <unknown> (src/app/api/receipts/batch-delete/route.ts:81:23)
+    at Array.map (<anonymous>)
+    at <unknown> (src/app/api/receipts/batch-delete/route.ts:80:15)
+    at async (src/lib/api-errors.ts:52:14)
+  107 |
+  108 | function safeStorageKey(value: string): string {
+> 109 |   if (!/^[a-f0-9-]{36}\.[a-z0-9]{2,5}$/.test(value)) throw new Error("Unsafe storage key");
+      |                                                            ^
+  110 |   return value;
+  111 | }
+  112 |
+Batch receipt file cleanup failed for auto-generated: Error: Unsafe storage key
+    at safeStorageKey (src/lib/storage.ts:109:60)
+    at removeUserUpload (src/lib/storage.ts:177:19)
+    at <unknown> (src/app/api/receipts/batch-delete/route.ts:81:23)
+    at Array.map (<anonymous>)
+    at <unknown> (src/app/api/receipts/batch-delete/route.ts:80:15)
+    at async (src/lib/api-errors.ts:52:14)
+  107 |
+  108 | function safeStorageKey(value: string): string {
+> 109 |   if (!/^[a-f0-9-]{36}\.[a-z0-9]{2,5}$/.test(value)) throw new Error("Unsafe storage key");
+      |                                                            ^
+  110 |   return value;
+  111 | }
+  112 |
+Batch receipt file cleanup failed for auto-generated: Error: Unsafe storage key
+    at safeStorageKey (src/lib/storage.ts:109:60)
+    at removeUserUpload (src/lib/storage.ts:177:19)
+    at <unknown> (src/app/api/receipts/batch-delete/route.ts:81:23)
+    at Array.map (<anonymous>)
+    at <unknown> (src/app/api/receipts/batch-delete/route.ts:80:15)
+    at async (src/lib/api-errors.ts:52:14)
+  107 |
+  108 | function safeStorageKey(value: string): string {
+> 109 |   if (!/^[a-f0-9-]{36}\.[a-z0-9]{2,5}$/.test(value)) throw new Error("Unsafe storage key");
+      |                                                            ^
+  110 |   return value;
+  111 | }
+  112 |
+Batch receipt file cleanup failed for auto-generated: Error: Unsafe storage key
+    at safeStorageKey (src/lib/storage.ts:109:60)
+    at removeUserUpload (src/lib/storage.ts:177:19)
+    at <unknown> (src/app/api/receipts/batch-delete/route.ts:81:23)
+    at Array.map (<anonymous>)
+    at <unknown> (src/app/api/receipts/batch-delete/route.ts:80:15)
+    at async (src/lib/api-errors.ts:52:14)
+  107 |
+  108 | function safeStorageKey(value: string): string {
+> 109 |   if (!/^[a-f0-9-]{36}\.[a-z0-9]{2,5}$/.test(value)) throw new Error("Unsafe storage key");
+      |                                                            ^
+  110 |   return value;
+  111 | }
+  112 |
+Batch receipt file cleanup failed for auto-generated: Error: Unsafe storage key
+    at safeStorageKey (src/lib/storage.ts:109:60)
+    at removeUserUpload (src/lib/storage.ts:177:19)
+    at <unknown> (src/app/api/receipts/batch-delete/route.ts:81:23)
+    at Array.map (<anonymous>)
+    at <unknown> (src/app/api/receipts/batch-delete/route.ts:80:15)
+    at async (src/lib/api-errors.ts:52:14)
+  107 |
+  108 | function safeStorageKey(value: string): string {
+> 109 |   if (!/^[a-f0-9-]{36}\.[a-z0-9]{2,5}$/.test(value)) throw new Error("Unsafe storage key");
+      |                                                            ^
+  110 |   return value;
+  111 | }
+  112 |
+Batch receipt file cleanup failed for auto-generated: Error: Unsafe storage key
+    at safeStorageKey (src/lib/storage.ts:109:60)
+    at removeUserUpload (src/lib/storage.ts:177:19)
+    at <unknown> (src/app/api/receipts/batch-delete/route.ts:81:23)
+    at Array.map (<anonymous>)
+    at <unknown> (src/app/api/receipts/batch-delete/route.ts:80:15)
+    at async (src/lib/api-errors.ts:52:14)
+  107 |
+  108 | function safeStorageKey(value: string): string {
+> 109 |   if (!/^[a-f0-9-]{36}\.[a-z0-9]{2,5}$/.test(value)) throw new Error("Unsafe storage key");
+      |                                                            ^
+  110 |   return value;
+  111 | }
+  112 |
+Batch receipt file cleanup failed for auto-generated: Error: Unsafe storage key
+    at safeStorageKey (src/lib/storage.ts:109:60)
+    at removeUserUpload (src/lib/storage.ts:177:19)
+    at <unknown> (src/app/api/receipts/batch-delete/route.ts:81:23)
+    at Array.map (<anonymous>)
+    at <unknown> (src/app/api/receipts/batch-delete/route.ts:80:15)
+    at async (src/lib/api-errors.ts:52:14)
+  107 |
+  108 | function safeStorageKey(value: string): string {
+> 109 |   if (!/^[a-f0-9-]{36}\.[a-z0-9]{2,5}$/.test(value)) throw new Error("Unsafe storage key");
+      |                                                            ^
+  110 |   return value;
+  111 | }
+  112 |
+Batch receipt file cleanup failed for auto-generated: Error: Unsafe storage key
+    at safeStorageKey (src/lib/storage.ts:109:60)
+    at removeUserUpload (src/lib/storage.ts:177:19)
+    at <unknown> (src/app/api/receipts/batch-delete/route.ts:81:23)
+    at Array.map (<anonymous>)
+    at <unknown> (src/app/api/receipts/batch-delete/route.ts:80:15)
+    at async (src/lib/api-errors.ts:52:14)
+  107 |
+  108 | function safeStorageKey(value: string): string {
+> 109 |   if (!/^[a-f0-9-]{36}\.[a-z0-9]{2,5}$/.test(value)) throw new Error("Unsafe storage key");
+      |                                                            ^
+  110 |   return value;
+  111 | }
+  112 |
+Batch receipt file cleanup failed for auto-generated: Error: Unsafe storage key
+    at safeStorageKey (src/lib/storage.ts:109:60)
+    at removeUserUpload (src/lib/storage.ts:177:19)
+    at <unknown> (src/app/api/receipts/batch-delete/route.ts:81:23)
+    at Array.map (<anonymous>)
+    at <unknown> (src/app/api/receipts/batch-delete/route.ts:80:15)
+    at async (src/lib/api-errors.ts:52:14)
+  107 |
+  108 | function safeStorageKey(value: string): string {
+> 109 |   if (!/^[a-f0-9-]{36}\.[a-z0-9]{2,5}$/.test(value)) throw new Error("Unsafe storage key");
+      |                                                            ^
+  110 |   return value;
+  111 | }
+  112 |
+Batch receipt file cleanup failed for auto-generated: Error: Unsafe storage key
+    at safeStorageKey (src/lib/storage.ts:109:60)
+    at removeUserUpload (src/lib/storage.ts:177:19)
+    at <unknown> (src/app/api/receipts/batch-delete/route.ts:81:23)
+    at Array.map (<anonymous>)
+    at <unknown> (src/app/api/receipts/batch-delete/route.ts:80:15)
+    at async (src/lib/api-errors.ts:52:14)
+  107 |
+  108 | function safeStorageKey(value: string): string {
+> 109 |   if (!/^[a-f0-9-]{36}\.[a-z0-9]{2,5}$/.test(value)) throw new Error("Unsafe storage key");
+      |                                                            ^
+  110 |   return value;
+  111 | }
+  112 |
+Batch receipt file cleanup failed for auto-generated: Error: Unsafe storage key
+    at safeStorageKey (src/lib/storage.ts:109:60)
+    at removeUserUpload (src/lib/storage.ts:177:19)
+    at <unknown> (src/app/api/receipts/batch-delete/route.ts:81:23)
+    at Array.map (<anonymous>)
+    at <unknown> (src/app/api/receipts/batch-delete/route.ts:80:15)
+    at async (src/lib/api-errors.ts:52:14)
+  107 |
+  108 | function safeStorageKey(value: string): string {
+> 109 |   if (!/^[a-f0-9-]{36}\.[a-z0-9]{2,5}$/.test(value)) throw new Error("Unsafe storage key");
+      |                                                            ^
+  110 |   return value;
+  111 | }
+  112 |
+Batch receipt file cleanup failed for auto-generated: Error: Unsafe storage key
+    at safeStorageKey (src/lib/storage.ts:109:60)
+    at removeUserUpload (src/lib/storage.ts:177:19)
+    at <unknown> (src/app/api/receipts/batch-delete/route.ts:81:23)
+    at Array.map (<anonymous>)
+    at <unknown> (src/app/api/receipts/batch-delete/route.ts:80:15)
+    at async (src/lib/api-errors.ts:52:14)
+  107 |
+  108 | function safeStorageKey(value: string): string {
+> 109 |   if (!/^[a-f0-9-]{36}\.[a-z0-9]{2,5}$/.test(value)) throw new Error("Unsafe storage key");
+      |                                                            ^
+  110 |   return value;
+  111 | }
+  112 |
+ POST /api/receipts/batch-delete 200 in 1548ms (next.js: 222ms, proxy.ts: 8ms, application-code: 1318ms)
+ POST /api/receipts/batch-approve 200 in 89ms (next.js: 3ms, proxy.ts: 5ms, application-code: 81ms)
+ GET /api/receipts?sort=date_desc 200 in 24ms (next.js: 3ms, proxy.ts: 8ms, application-code: 13ms)
+ GET /api/receipts?reviewStatus=pending 200 in 25ms (next.js: 6ms, proxy.ts: 6ms, application-code: 13ms)
+Batch receipt file cleanup failed for auto-generated: Error: Unsafe storage key
+    at safeStorageKey (src/lib/storage.ts:109:60)
+    at removeUserUpload (src/lib/storage.ts:177:19)
+    at <unknown> (src/app/api/receipts/batch-delete/route.ts:81:23)
+    at Array.map (<anonymous>)
+    at <unknown> (src/app/api/receipts/batch-delete/route.ts:80:15)
+    at async (src/lib/api-errors.ts:52:14)
+  107 |
+  108 | function safeStorageKey(value: string): string {
+> 109 |   if (!/^[a-f0-9-]{36}\.[a-z0-9]{2,5}$/.test(value)) throw new Error("Unsafe storage key");
+      |                                                            ^
+  110 |   return value;
+  111 | }
+  112 |
+Batch receipt file cleanup failed for auto-generated: Error: Unsafe storage key
+    at safeStorageKey (src/lib/storage.ts:109:60)
+    at removeUserUpload (src/lib/storage.ts:177:19)
+    at <unknown> (src/app/api/receipts/batch-delete/route.ts:81:23)
+    at Array.map (<anonymous>)
+    at <unknown> (src/app/api/receipts/batch-delete/route.ts:80:15)
+    at async (src/lib/api-errors.ts:52:14)
+  107 |
+  108 | function safeStorageKey(value: string): string {
+> 109 |   if (!/^[a-f0-9-]{36}\.[a-z0-9]{2,5}$/.test(value)) throw new Error("Unsafe storage key");
+      |                                                            ^
+  110 |   return value;
+  111 | }
+  112 |
+Batch receipt file cleanup failed for auto-generated: Error: Unsafe storage key
+    at safeStorageKey (src/lib/storage.ts:109:60)
+    at removeUserUpload (src/lib/storage.ts:177:19)
+    at <unknown> (src/app/api/receipts/batch-delete/route.ts:81:23)
+    at Array.map (<anonymous>)
+    at <unknown> (src/app/api/receipts/batch-delete/route.ts:80:15)
+    at async (src/lib/api-errors.ts:52:14)
+  107 |
+  108 | function safeStorageKey(value: string): string {
+> 109 |   if (!/^[a-f0-9-]{36}\.[a-z0-9]{2,5}$/.test(value)) throw new Error("Unsafe storage key");
+      |                                                            ^
+  110 |   return value;
+  111 | }
+  112 |
+Batch receipt file cleanup failed for auto-generated: Error: Unsafe storage key
+    at safeStorageKey (src/lib/storage.ts:109:60)
+    at removeUserUpload (src/lib/storage.ts:177:19)
+    at <unknown> (src/app/api/receipts/batch-delete/route.ts:81:23)
+    at Array.map (<anonymous>)
+    at <unknown> (src/app/api/receipts/batch-delete/route.ts:80:15)
+    at async (src/lib/api-errors.ts:52:14)
+  107 |
+  108 | function safeStorageKey(value: string): string {
+> 109 |   if (!/^[a-f0-9-]{36}\.[a-z0-9]{2,5}$/.test(value)) throw new Error("Unsafe storage key");
+      |                                                            ^
+  110 |   return value;
+  111 | }
+  112 |
+Batch receipt file cleanup failed for auto-generated: Error: Unsafe storage key
+    at safeStorageKey (src/lib/storage.ts:109:60)
+    at removeUserUpload (src/lib/storage.ts:177:19)
+    at <unknown> (src/app/api/receipts/batch-delete/route.ts:81:23)
+    at Array.map (<anonymous>)
+    at <unknown> (src/app/api/receipts/batch-delete/route.ts:80:15)
+    at async (src/lib/api-errors.ts:52:14)
+  107 |
+  108 | function safeStorageKey(value: string): string {
+> 109 |   if (!/^[a-f0-9-]{36}\.[a-z0-9]{2,5}$/.test(value)) throw new Error("Unsafe storage key");
+      |                                                            ^
+  110 |   return value;
+  111 | }
+  112 |
+Batch receipt file cleanup failed for auto-generated: Error: Unsafe storage key
+    at safeStorageKey (src/lib/storage.ts:109:60)
+    at removeUserUpload (src/lib/storage.ts:177:19)
+    at <unknown> (src/app/api/receipts/batch-delete/route.ts:81:23)
+    at Array.map (<anonymous>)
+    at <unknown> (src/app/api/receipts/batch-delete/route.ts:80:15)
+    at async (src/lib/api-errors.ts:52:14)
+  107 |
+  108 | function safeStorageKey(value: string): string {
+> 109 |   if (!/^[a-f0-9-]{36}\.[a-z0-9]{2,5}$/.test(value)) throw new Error("Unsafe storage key");
+      |                                                            ^
+  110 |   return value;
+  111 | }
+  112 |
+Batch receipt file cleanup failed for auto-generated: Error: Unsafe storage key
+    at safeStorageKey (src/lib/storage.ts:109:60)
+    at removeUserUpload (src/lib/storage.ts:177:19)
+    at <unknown> (src/app/api/receipts/batch-delete/route.ts:81:23)
+    at Array.map (<anonymous>)
+    at <unknown> (src/app/api/receipts/batch-delete/route.ts:80:15)
+    at async (src/lib/api-errors.ts:52:14)
+  107 |
+  108 | function safeStorageKey(value: string): string {
+> 109 |   if (!/^[a-f0-9-]{36}\.[a-z0-9]{2,5}$/.test(value)) throw new Error("Unsafe storage key");
+      |                                                            ^
+  110 |   return value;
+  111 | }
+  112 |
+Batch receipt file cleanup failed for auto-generated: Error: Unsafe storage key
+    at safeStorageKey (src/lib/storage.ts:109:60)
+    at removeUserUpload (src/lib/storage.ts:177:19)
+    at <unknown> (src/app/api/receipts/batch-delete/route.ts:81:23)
+    at Array.map (<anonymous>)
+    at <unknown> (src/app/api/receipts/batch-delete/route.ts:80:15)
+    at async (src/lib/api-errors.ts:52:14)
+  107 |
+  108 | function safeStorageKey(value: string): string {
+> 109 |   if (!/^[a-f0-9-]{36}\.[a-z0-9]{2,5}$/.test(value)) throw new Error("Unsafe storage key");
+      |                                                            ^
+  110 |   return value;
+  111 | }
+  112 |
+Batch receipt file cleanup failed for auto-generated: Error: Unsafe storage key
+    at safeStorageKey (src/lib/storage.ts:109:60)
+    at removeUserUpload (src/lib/storage.ts:177:19)
+    at <unknown> (src/app/api/receipts/batch-delete/route.ts:81:23)
+    at Array.map (<anonymous>)
+    at <unknown> (src/app/api/receipts/batch-delete/route.ts:80:15)
+    at async (src/lib/api-errors.ts:52:14)
+  107 |
+  108 | function safeStorageKey(value: string): string {
+> 109 |   if (!/^[a-f0-9-]{36}\.[a-z0-9]{2,5}$/.test(value)) throw new Error("Unsafe storage key");
+      |                                                            ^
+  110 |   return value;
+  111 | }
+  112 |
+Batch receipt file cleanup failed for auto-generated: Error: Unsafe storage key
+    at safeStorageKey (src/lib/storage.ts:109:60)
+    at removeUserUpload (src/lib/storage.ts:177:19)
+    at <unknown> (src/app/api/receipts/batch-delete/route.ts:81:23)
+    at Array.map (<anonymous>)
+    at <unknown> (src/app/api/receipts/batch-delete/route.ts:80:15)
+    at async (src/lib/api-errors.ts:52:14)
+  107 |
+  108 | function safeStorageKey(value: string): string {
+> 109 |   if (!/^[a-f0-9-]{36}\.[a-z0-9]{2,5}$/.test(value)) throw new Error("Unsafe storage key");
+      |                                                            ^
+  110 |   return value;
+  111 | }
+  112 |
+Batch receipt file cleanup failed for auto-generated: Error: Unsafe storage key
+    at safeStorageKey (src/lib/storage.ts:109:60)
+    at removeUserUpload (src/lib/storage.ts:177:19)
+    at <unknown> (src/app/api/receipts/batch-delete/route.ts:81:23)
+    at Array.map (<anonymous>)
+    at <unknown> (src/app/api/receipts/batch-delete/route.ts:80:15)
+    at async (src/lib/api-errors.ts:52:14)
+  107 |
+  108 | function safeStorageKey(value: string): string {
+> 109 |   if (!/^[a-f0-9-]{36}\.[a-z0-9]{2,5}$/.test(value)) throw new Error("Unsafe storage key");
+      |                                                            ^
+  110 |   return value;
+  111 | }
+  112 |
+Batch receipt file cleanup failed for auto-generated: Error: Unsafe storage key
+    at safeStorageKey (src/lib/storage.ts:109:60)
+    at removeUserUpload (src/lib/storage.ts:177:19)
+    at <unknown> (src/app/api/receipts/batch-delete/route.ts:81:23)
+    at Array.map (<anonymous>)
+    at <unknown> (src/app/api/receipts/batch-delete/route.ts:80:15)
+    at async (src/lib/api-errors.ts:52:14)
+  107 |
+  108 | function safeStorageKey(value: string): string {
+> 109 |   if (!/^[a-f0-9-]{36}\.[a-z0-9]{2,5}$/.test(value)) throw new Error("Unsafe storage key");
+      |                                                            ^
+  110 |   return value;
+  111 | }
+  112 |
+Batch receipt file cleanup failed for auto-generated: Error: Unsafe storage key
+    at safeStorageKey (src/lib/storage.ts:109:60)
+    at removeUserUpload (src/lib/storage.ts:177:19)
+    at <unknown> (src/app/api/receipts/batch-delete/route.ts:81:23)
+    at Array.map (<anonymous>)
+    at <unknown> (src/app/api/receipts/batch-delete/route.ts:80:15)
+    at async (src/lib/api-errors.ts:52:14)
+  107 |
+  108 | function safeStorageKey(value: string): string {
+> 109 |   if (!/^[a-f0-9-]{36}\.[a-z0-9]{2,5}$/.test(value)) throw new Error("Unsafe storage key");
+      |                                                            ^
+  110 |   return value;
+  111 | }
+  112 |
+Batch receipt file cleanup failed for auto-generated: Error: Unsafe storage key
+    at safeStorageKey (src/lib/storage.ts:109:60)
+    at removeUserUpload (src/lib/storage.ts:177:19)
+    at <unknown> (src/app/api/receipts/batch-delete/route.ts:81:23)
+    at Array.map (<anonymous>)
+    at <unknown> (src/app/api/receipts/batch-delete/route.ts:80:15)
+    at async (src/lib/api-errors.ts:52:14)
+  107 |
+  108 | function safeStorageKey(value: string): string {
+> 109 |   if (!/^[a-f0-9-]{36}\.[a-z0-9]{2,5}$/.test(value)) throw new Error("Unsafe storage key");
+      |                                                            ^
+  110 |   return value;
+  111 | }
+  112 |
+Batch receipt file cleanup failed for auto-generated: Error: Unsafe storage key
+    at safeStorageKey (src/lib/storage.ts:109:60)
+    at removeUserUpload (src/lib/storage.ts:177:19)
+    at <unknown> (src/app/api/receipts/batch-delete/route.ts:81:23)
+    at Array.map (<anonymous>)
+    at <unknown> (src/app/api/receipts/batch-delete/route.ts:80:15)
+    at async (src/lib/api-errors.ts:52:14)
+  107 |
+  108 | function safeStorageKey(value: string): string {
+> 109 |   if (!/^[a-f0-9-]{36}\.[a-z0-9]{2,5}$/.test(value)) throw new Error("Unsafe storage key");
+      |                                                            ^
+  110 |   return value;
+  111 | }
+  112 |
+Batch receipt file cleanup failed for auto-generated: Error: Unsafe storage key
+    at safeStorageKey (src/lib/storage.ts:109:60)
+    at removeUserUpload (src/lib/storage.ts:177:19)
+    at <unknown> (src/app/api/receipts/batch-delete/route.ts:81:23)
+    at Array.map (<anonymous>)
+    at <unknown> (src/app/api/receipts/batch-delete/route.ts:80:15)
+    at async (src/lib/api-errors.ts:52:14)
+  107 |
+  108 | function safeStorageKey(value: string): string {
+> 109 |   if (!/^[a-f0-9-]{36}\.[a-z0-9]{2,5}$/.test(value)) throw new Error("Unsafe storage key");
+      |                                                            ^
+  110 |   return value;
+  111 | }
+  112 |
+Batch receipt file cleanup failed for auto-generated: Error: Unsafe storage key
+    at safeStorageKey (src/lib/storage.ts:109:60)
+    at removeUserUpload (src/lib/storage.ts:177:19)
+    at <unknown> (src/app/api/receipts/batch-delete/route.ts:81:23)
+    at Array.map (<anonymous>)
+    at <unknown> (src/app/api/receipts/batch-delete/route.ts:80:15)
+    at async (src/lib/api-errors.ts:52:14)
+  107 |
+  108 | function safeStorageKey(value: string): string {
+> 109 |   if (!/^[a-f0-9-]{36}\.[a-z0-9]{2,5}$/.test(value)) throw new Error("Unsafe storage key");
+      |                                                            ^
+  110 |   return value;
+  111 | }
+  112 |
+Batch receipt file cleanup failed for auto-generated: Error: Unsafe storage key
+    at safeStorageKey (src/lib/storage.ts:109:60)
+    at removeUserUpload (src/lib/storage.ts:177:19)
+    at <unknown> (src/app/api/receipts/batch-delete/route.ts:81:23)
+    at Array.map (<anonymous>)
+    at <unknown> (src/app/api/receipts/batch-delete/route.ts:80:15)
+    at async (src/lib/api-errors.ts:52:14)
+  107 |
+  108 | function safeStorageKey(value: string): string {
+> 109 |   if (!/^[a-f0-9-]{36}\.[a-z0-9]{2,5}$/.test(value)) throw new Error("Unsafe storage key");
+      |                                                            ^
+  110 |   return value;
+  111 | }
+  112 |
+ POST /api/receipts/batch-delete 200 in 1401ms (next.js: 2ms, proxy.ts: 5ms, application-code: 1393ms)
+ GET /tiliotteet 200 in 31ms (next.js: 3ms, proxy.ts: 5ms, application-code: 23ms)
+ GET /api/statements 200 in 51ms (next.js: 7ms, proxy.ts: 21ms, application-code: 23ms)
+ GET /api/auth/me 200 in 40ms (next.js: 3ms, proxy.ts: 8ms, application-code: 29ms)
+ GET /api/statements 200 in 30ms (next.js: 3ms, proxy.ts: 7ms, application-code: 20ms)
+ GET /api/onboarding 200 in 37ms (next.js: 19ms, proxy.ts: 8ms, application-code: 9ms)
+ GET /tiliotteet/d7f0ac32-1de7-444d-8f79-cb7ca1875a88 200 in 105ms (next.js: 84ms, proxy.ts: 4ms, application-code: 18ms)
+ GET /api/auth/me 200 in 22ms (next.js: 4ms, proxy.ts: 10ms, application-code: 8ms)
+ GET /api/statements/d7f0ac32-1de7-444d-8f79-cb7ca1875a88 200 in 153ms (next.js: 106ms, proxy.ts: 18ms, application-code: 29ms)
+ GET /api/onboarding 200 in 42ms (next.js: 8ms, proxy.ts: 26ms, application-code: 8ms)
+ GET /api/statements/d7f0ac32-1de7-444d-8f79-cb7ca1875a88 200 in 42ms (next.js: 9ms, proxy.ts: 12ms, application-code: 21ms)
+ DELETE /api/statements/d7f0ac32-1de7-444d-8f79-cb7ca1875a88 200 in 131ms (next.js: 96ms, proxy.ts: 6ms, application-code: 30ms)
+ GET /tiliotteet 200 in 45ms (next.js: 7ms, proxy.ts: 14ms, application-code: 24ms)
+ GET /api/auth/me 200 in 41ms (next.js: 14ms, proxy.ts: 15ms, application-code: 12ms)
+ GET /api/statements 200 in 53ms (next.js: 12ms, proxy.ts: 33ms, application-code: 8ms)
+ GET /api/onboarding 200 in 59ms (next.js: 10ms, proxy.ts: 24ms, application-code: 25ms)
+ GET /api/statements 200 in 64ms (next.js: 13ms, proxy.ts: 26ms, application-code: 25ms)
+Failed to process email attachment: Error [ReceiptExtractionError]: Kuitista ei saatu luettua tekstiä. Kokeile terävämpää kuvaa tai tekstipohjaista PDF:ää.
+    at extractDocumentText (src/lib/ai.ts:477:11)
+    at extractReceipt (src/lib/ai.ts:106:27)
+    at async processFile (src/lib/mail-sync.ts:154:32)
+    at async syncImapAccount (src/lib/mail-sync.ts:219:13)
+    at async POST (src/app/api/statements/route.ts:155:7)
+  475 |
+  476 |   if (rawText.trim().length < 10) {
+> 477 |     throw new ReceiptExtractionError(
+      |           ^
+  478 |       "NO_TEXT",
+  479 |       "Kuitista ei saatu luettua tekstiä. Kokeile terävämpää kuvaa tai tekstipohjaista PD...
+  480 |     ); {
+  code: 'NO_TEXT'
+}
+Failed to process email attachment: Error [ReceiptExtractionError]: Kuitista ei saatu luettua tekstiä. Kokeile terävämpää kuvaa tai tekstipohjaista PDF:ää.
+    at extractDocumentText (src/lib/ai.ts:477:11)
+    at extractReceipt (src/lib/ai.ts:106:27)
+    at async processFile (src/lib/mail-sync.ts:154:32)
+    at async syncImapAccount (src/lib/mail-sync.ts:219:13)
+    at async POST (src/app/api/statements/route.ts:155:7)
+  475 |
+  476 |   if (rawText.trim().length < 10) {
+> 477 |     throw new ReceiptExtractionError(
+      |           ^
+  478 |       "NO_TEXT",
+  479 |       "Kuitista ei saatu luettua tekstiä. Kokeile terävämpää kuvaa tai tekstipohjaista PD...
+  480 |     ); {
+  code: 'NO_TEXT'
+}
+Failed to process email attachment: Error [ReceiptExtractionError]: Kuitista ei saatu luettua tekstiä. Kokeile terävämpää kuvaa tai tekstipohjaista PDF:ää.
+    at extractDocumentText (src/lib/ai.ts:477:11)
+    at extractReceipt (src/lib/ai.ts:106:27)
+    at async processFile (src/lib/mail-sync.ts:154:32)
+    at async syncImapAccount (src/lib/mail-sync.ts:219:13)
+    at async POST (src/app/api/statements/route.ts:155:7)
+  475 |
+  476 |   if (rawText.trim().length < 10) {
+> 477 |     throw new ReceiptExtractionError(
+      |           ^
+  478 |       "NO_TEXT",
+  479 |       "Kuitista ei saatu luettua tekstiä. Kokeile terävämpää kuvaa tai tekstipohjaista PD...
+  480 |     ); {
+  code: 'NO_TEXT'
+}
+Failed to process email attachment: Error [ReceiptExtractionError]: Kuitista ei saatu luettua tekstiä. Kokeile terävämpää kuvaa tai tekstipohjaista PDF:ää.
+    at extractDocumentText (src/lib/ai.ts:477:11)
+    at extractReceipt (src/lib/ai.ts:106:27)
+    at async processFile (src/lib/mail-sync.ts:154:32)
+    at async syncImapAccount (src/lib/mail-sync.ts:219:13)
+    at async POST (src/app/api/statements/route.ts:155:7)
+  475 |
+  476 |   if (rawText.trim().length < 10) {
+> 477 |     throw new ReceiptExtractionError(
+      |           ^
+  478 |       "NO_TEXT",
+  479 |       "Kuitista ei saatu luettua tekstiä. Kokeile terävämpää kuvaa tai tekstipohjaista PD...
+  480 |     ); {
+  code: 'NO_TEXT'
+}
+Failed to process email attachment: Error [ReceiptExtractionError]: Kuitista ei saatu luettua tekstiä. Kokeile terävämpää kuvaa tai tekstipohjaista PDF:ää.
+    at extractDocumentText (src/lib/ai.ts:477:11)
+    at extractReceipt (src/lib/ai.ts:106:27)
+    at async processFile (src/lib/mail-sync.ts:154:32)
+    at async syncImapAccount (src/lib/mail-sync.ts:219:13)
+    at async POST (src/app/api/statements/route.ts:155:7)
+  475 |
+  476 |   if (rawText.trim().length < 10) {
+> 477 |     throw new ReceiptExtractionError(
+      |           ^
+  478 |       "NO_TEXT",
+  479 |       "Kuitista ei saatu luettua tekstiä. Kokeile terävämpää kuvaa tai tekstipohjaista PD...
+  480 |     ); {
+  code: 'NO_TEXT'
+}
+Failed to process email attachment: Error [ReceiptExtractionError]: Kuitista ei saatu luettua tekstiä. Kokeile terävämpää kuvaa tai tekstipohjaista PDF:ää.
+    at extractDocumentText (src/lib/ai.ts:477:11)
+    at extractReceipt (src/lib/ai.ts:106:27)
+    at async processFile (src/lib/mail-sync.ts:154:32)
+    at async syncImapAccount (src/lib/mail-sync.ts:219:13)
+    at async POST (src/app/api/statements/route.ts:155:7)
+  475 |
+  476 |   if (rawText.trim().length < 10) {
+> 477 |     throw new ReceiptExtractionError(
+      |           ^
+  478 |       "NO_TEXT",
+  479 |       "Kuitista ei saatu luettua tekstiä. Kokeile terävämpää kuvaa tai tekstipohjaista PD...
+  480 |     ); {
+  code: 'NO_TEXT'
+}
+Failed to process email attachment: Error [ReceiptExtractionError]: Kuitista ei saatu luettua tekstiä. Kokeile terävämpää kuvaa tai tekstipohjaista PDF:ää.
+    at extractDocumentText (src/lib/ai.ts:477:11)
+    at extractReceipt (src/lib/ai.ts:106:27)
+    at async processFile (src/lib/mail-sync.ts:154:32)
+    at async syncImapAccount (src/lib/mail-sync.ts:219:13)
+    at async POST (src/app/api/statements/route.ts:155:7)
+  475 |
+  476 |   if (rawText.trim().length < 10) {
+> 477 |     throw new ReceiptExtractionError(
+      |           ^
+  478 |       "NO_TEXT",
+  479 |       "Kuitista ei saatu luettua tekstiä. Kokeile terävämpää kuvaa tai tekstipohjaista PD...
+  480 |     ); {
+  code: 'NO_TEXT'
+}
+Cloud receipt extraction failed; trying the next configured path: Too little text extracted for LLM analysis
+Cloud receipt extraction failed; trying the next configured path: Too little text extracted for LLM analysis
+Failed to process email attachment: Error [ReceiptExtractionError]: Kuitista ei saatu luettua tekstiä. Kokeile terävämpää kuvaa tai tekstipohjaista PDF:ää.
+    at extractDocumentText (src/lib/ai.ts:477:11)
+    at extractReceipt (src/lib/ai.ts:106:27)
+    at async processFile (src/lib/mail-sync.ts:154:32)
+    at async syncImapAccount (src/lib/mail-sync.ts:219:13)
+    at async POST (src/app/api/statements/route.ts:155:7)
+  475 |
+  476 |   if (rawText.trim().length < 10) {
+> 477 |     throw new ReceiptExtractionError(
+      |           ^
+  478 |       "NO_TEXT",
+  479 |       "Kuitista ei saatu luettua tekstiä. Kokeile terävämpää kuvaa tai tekstipohjaista PD...
+  480 |     ); {
+  code: 'NO_TEXT'
+}
+ POST /api/statements 200 in 95s (next.js: 3ms, proxy.ts: 5ms, application-code: 95s)
+ GET /tiliotteet/d6e7c676-ec2d-4d0e-9171-5b1719ed4ff1 200 in 126ms (next.js: 98ms, proxy.ts: 7ms, application-code: 21ms)
+ GET /api/auth/me 200 in 27ms (next.js: 5ms, proxy.ts: 11ms, application-code: 12ms)
+ GET /api/statements/d6e7c676-ec2d-4d0e-9171-5b1719ed4ff1 200 in 215ms (next.js: 141ms, proxy.ts: 18ms, application-code: 56ms)
+ GET /api/onboarding 200 in 78ms (next.js: 9ms, proxy.ts: 54ms, application-code: 15ms)
+ GET /api/statements/d6e7c676-ec2d-4d0e-9171-5b1719ed4ff1 200 in 103ms (next.js: 33ms, proxy.ts: 21ms, application-code: 49ms)
+[?25h

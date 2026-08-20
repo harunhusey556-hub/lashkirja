@@ -1,0 +1,148 @@
+# LashKirja — Codebase Architecture
+
+_Generated 2026-08-05 via Explore agent sweep. App root: `app/`._
+
+Kirjanpito (bookkeeping) web app for Finnish lash-technician sole traders. Next.js 16 (App Router) + TypeScript + Tailwind v4 + Prisma 7 + SQLite. AI/OCR receipt extraction, bank statement import, receipt↔transaction matching, ALV (VAT) reporting.
+
+## 1. Top-level layout (`app/`)
+
+| Path | Purpose |
+|---|---|
+| `src/app/` | Next.js App Router — pages + API routes |
+| `src/components/` | Shared React client components |
+| `src/lib/` | Core business logic (AI/OCR, parsers, matching, auth, storage, VAT) |
+| `src/generated/prisma/` | Generated Prisma Client |
+| `src/types/` | Shared TS types |
+| `prisma/` | `schema.prisma`, `migrations/`, `seed.ts`, `dev.db` |
+| `data/` | Runtime SQLite (`lashkirja.db`) + `data/uploads/` private file storage |
+| `scripts/` | tsx/sh maintenance & background scripts (worker, backfill, cleanup, debug) |
+| `tests/e2e/` | Playwright E2E tests |
+| `ios/` | Capacitor iOS wrapper |
+| `public/` | Static assets, PWA manifest |
+
+## 2. Route map (`src/app/`)
+
+**Pages** — all client components except where noted:
+- `page.tsx` (server) — redirect `/dashboard` if session, else `/login`
+- `login/page.tsx` + `LoginForm.tsx` — public login
+- `dashboard/page.tsx` (server, `requireSession` → redirect `/login`) renders client `DashboardClient.tsx`
+- `kuitit/page.tsx` — receipts list
+- `kuitit/uusi/page.tsx` — new receipt upload/extract
+- `kuitit/[id]/page.tsx` — receipt detail (`ReceiptEditor.tsx`)
+- `tiliotteet/page.tsx` — bank statements list
+- `tiliotteet/[id]/page.tsx` — statement detail + matching (`StatementDetailView`)
+- `alv-raportti/page.tsx` — VAT report
+- `asetukset/page.tsx` — settings (profile, IMAP, entity/VAT type)
+- `not-found.tsx`, `error.tsx`, `global-error.tsx`
+
+**Auth pattern**: only `/` and `/dashboard` are server-gated (redirect). All other pages are client components that call session-protected API routes and redirect to `/login` on 401 (`clientFetch.ts` → `isUnauthorized`/`redirectToLogin`).
+
+**API routes** (`app/api/**/route.ts`) — all call `requireSession` except `auth/login`, `auth/logout`, `cron/*` (CRON_SECRET-gated):
+
+- `auth/login` — bcrypt check (dummy-hash timing-safe), Zod validation, cross-site/content-length rejection, per-IP+per-account rate limit, iron-session cookie, JSON or form POST
+- `auth/logout`, `auth/me`
+- `dashboard` — summary aggregation
+- `profile` — entityType/vatRegistered/vatPeriod
+- `receipts` — GET list + POST staged upload (validate → `lib/ai.ts extractReceipt` → preview → `Upload` row, 24h TTL)
+- `receipts/save` — confirm staged upload into real `Receipt`, sanitize, trigger `runMatching`
+- `receipts/[id]` — GET/PATCH/DELETE
+- `receipts/[id]/review` — approve/reject reviewStatus
+- `receipts/[id]/file`, `receipts/[id]/file/preview` — stream file/preview (session-scoped)
+- `statements` — list/upload (parsed via `lib/parsers.ts`)
+- `statements/[id]`, `statements/[id]/transactions`, `statements/[id]/reinfer-types`
+- `matching/{candidates,unmatched,run,confirm,confirm-all,reject,ignore,unlink}` — full match workflow (`lib/matching.ts`)
+- `integrations/imap`, `integrations/imap/sync` — IMAP account mgmt (AES-256-GCM password), manual sync trigger
+- `alv` — VAT report data (`lib/alv.ts`)
+- `cron/cleanup` — expired upload sweep
+- `cron/sync-email` — periodic IMAP sync (alt to `scripts/worker.ts`)
+
+## 3. Prisma schema (`prisma/schema.prisma`, sqlite, client → `src/generated/prisma`)
+
+- **User** — email(unique), passwordHash, name, `entityType`(kevytyrittaja|toiminimi), vatRegistered, vatPeriod(month|quarter|year). → Receipt, Statement, Upload, ImapAccount
+- **Receipt** — userId; vendor, date, totalAmountCents, vatDetails(JSON), category, notes, type(meno|tulo), reference, invoiceNumber, filePath/fileName, source(manual/ai/ocr/email_sync), confidence, rawText, reviewStatus(default approved), optional 1:1 uploadId. Relations: linkedTransaction(1:1 confirmed), suggestedTransactions(1:many), rejections. Index `[userId,date]`, `[userId,createdAt]`
+- **Statement** — userId; fileName/fileType/filePath, checksum(unique/user, dedupe), periodMonth("YYYY-MM"), periodSource. → Transaction[]
+- **Transaction** — statementId(cascade); date, counterparty, amountCents, reference, message, type. Two receipt FKs: `receiptId`(unique, confirmed only) + `suggestedReceiptId`(non-exclusive). matchStatus(unmatched/suggested/confirmed/ignored), matchScore, matchReasons(JSON). → rejections
+- **Upload** — userId(cascade); staging table. purpose(receipt/statement), storageKey(unique), originalName, mimeType, sizeBytes, sha256, extractedJson/extractionSource/confidence/rawText, expiresAt+claimedAt(TTL), optional back-ref to Receipt. Unique `[userId,sha256,purpose]`
+- **MatchRejection** — per-(transaction,receipt) rejection record, cascade both sides
+- **ImapAccount** — userId(cascade); email, host/port/tls, encryptedPass(AES-256-GCM), lastSyncAt
+
+## 4. `lib/` modules
+
+- **`ai.ts`** (1020L) — receipt extraction pipeline. MIME sniff from magic bytes, HEIC→JPEG (`heic-convert`), text extraction (`pdftotext`/`pdf-parse`, HTML strip, tesseract fin+swe+eng OCR, `ocrScannedPdfReceipt` via `pdftoppm`+tesseract). LLM routing in `extractReceipt`: if `isCloudAiEnabled()` (CLOUD_AI_ENABLED or LLM_API_KEY/COPILOT_GITHUB_TOKEN present) → tries LLM + Copilot, order flips **PDF=Copilot-first, other=LLM-first**, each falls through, final fallback = regex/heuristic `parseOCRText`. Finnish regex parsers (vendor/date/total/VAT/reference/invoice), VAT-rate validation (25.5/24/14/13.5/10/0%), `enrichExtractedReceipt` cross-checks `vat-rules.ts`.
+- **`parsers.ts`** (1088L) — bank statement parsers: `parseCamtXML`(ISO 20022), `parseXLSX`, `parseCSV`, `parseHolviTilioteLayout`/`parseFinnishBankStatementLayout`(PDF layouts), `parsePDFStatement`(text+OCR fallback), generic `parseBankStatementText`. All → `ParsedTransaction[]`.
+- **`session.ts`** — iron-session config, SESSION_SECRET ≥32 chars required in prod, cookie `__Host-lashkirja-session` when secure, `getSession`/`getSessionFromRequest`/`requireSession`/`redirectResponse`(app-relative guard, anti open-redirect)
+- **`encryption.ts`** — AES-256-GCM for IMAP passwords, key = SHA-256(SESSION_SECRET) — **shared secret with session signing**
+- **`storage.ts`** — private per-user upload storage: `detectFile`(magic bytes), `validateUploadBuffer`, `writePrivateUpload`/`readUserUpload`/`removeUserUpload`(0700/0600, O_NOFOLLOW, path-traversal-safe keys), `sha256`, `inlineContentDisposition`
+- **`matching.ts`** (794L) — fuzzy receipt↔transaction matcher: `scorePair`(Levenshtein name sim, date diff, amount, reference), thresholds SUGGEST=0.85, CANDIDATE=0.55, AUTO_CONFIRM=0.85; `computeSuggestions`, `runMatching`, `confirmMatch`/`confirmAllSuggestions`(MatchNotFoundError/MatchConflictError), `buildReceiptMatchViews`, `buildInlineCandidates`
+- **`mail-sync.ts`** — `syncImapAccount(accountId)` via ImapFlow+mailparser, filters attachment/body receipts, decrypts password
+- **`income-automation.ts`** — `autoGenerateIncomeReceipts` — auto-creates "tulo" receipts from matched incoming transactions
+- **`vat-rules.ts`** / **`alv.ts`** — Finnish VAT category hints, rate guessing, ALV report computation
+- **`receipt-categories.ts`** — canonical category ids, AI-prompt formatting, normalization
+- **`finnish-numbers.ts`** — Finnish decimal-comma amount/date regex helpers
+- **`preview.ts`** — `ensureReceiptPreviewImage` thumbnail generation
+- **`db.ts`** — Prisma client singleton
+- **`http-security.ts`** — `rejectCrossSite`, `rejectOversizedContentLength`, `noStoreJson`
+- **`rate-limit.ts`** — in-memory `consumeRateLimit`/`clearRateLimit`, `opaqueRateKey`, `requestClientKey`
+- **`api-errors.ts`** — `withErrorHandler`, `UnauthorizedError`/`AppError`
+- **`sanitizer.ts`** — user input text sanitization
+- **`validation.ts`** — shared Zod schemas
+- **`money.ts`** — cents↔euros conversion
+- **`statement-api.ts`** / **`statement-client.ts`** — server vs client statement data shaping
+- **`vero/omavero-fields.ts`** — OmaVero (Finnish tax authority) export field mapping
+
+## 5. Key `components/`
+
+- `AppShell.tsx` — authenticated layout chrome
+- `ReceiptEditor.tsx` — receipt detail/edit form
+- `ReceiptMatchPanel.tsx` — suggested/confirmed match UI (`BankTxMatch`/`ReceiptMatchData`)
+- `ReceiptPreview.tsx` — stored file/preview display
+- `StatementDetailView.tsx` — transaction table + matching UI
+- `StatementSummaryCards.tsx` — stat cards
+- `AsyncState.tsx` — `LoadingState`/`ErrorState`
+- `ConfirmModal.tsx` — generic confirm dialog
+- `ErrorBoundary.tsx` — React error boundary
+- `SkeletonCard.tsx` — loading skeleton
+- `clientFetch.ts` — `ApiError`, `apiFetch`(backoff retry 502/503/504), `readJson`, `isUnauthorized`, `errorMessage`, `redirectToLogin` — central client API/auth handling
+
+## 6. `scripts/`
+
+- `worker.ts` — long-running (10min interval) IMAP sync for all accounts, alt to cron route
+- `seed.ts` (`prisma/seed.ts`) — DB seed
+- `backfill-references.ts` — extract reference/invoiceNumber from stored rawText, no AI, re-runs matching
+- `cleanup-uploads.ts` — `cleanupExpiredUploads()`, called from cron + worker
+- `backup-db.sh`, `build-ios-ipa.sh`
+- `check_imap.ts`, `check_suomifi.ts`, `find_yth.ts` — ad-hoc IMAP debug scripts
+- `fix_receipts.ts` — one-off repair for email_sync receipts with legacy file paths
+- `test_extraction.ts`, `test-parsers.ts`, `test-receipt-extract.ts`, `test_heic.mjs` — manual debug harnesses (outside Vitest)
+- `update_categories.ts` (repo root) — category migration script
+
+## 7. Env vars
+
+| Var | Used in | Purpose |
+|---|---|---|
+| `DATABASE_URL` | prisma | SQLite connection |
+| `SESSION_SECRET` | session.ts, encryption.ts | iron-session signing key (≥32 chars, prod-required); also derives AES key for IMAP passwords |
+| `COOKIE_SECURE` | session.ts | override secure-cookie flag |
+| `NODE_ENV` | session.ts, encryption.ts, cron | prod/dev switch |
+| `CLOUD_AI_ENABLED` | ai.ts | explicit toggle for cloud LLM extraction |
+| `LLM_API_KEY` | ai.ts | OpenAI-compatible key |
+| `LLM_BASE_URL` | ai.ts | OpenAI-compatible base URL (default api.openai.com/v1) |
+| `LLM_MODEL` | ai.ts | model name (default gpt-4o-mini) |
+| `COPILOT_GITHUB_TOKEN` | ai.ts | GH token → exchanged for Copilot session token |
+| `COPILOT_MODEL` | ai.ts | Copilot model (default gpt-4o) |
+| `CRON_SECRET` | api/cron/* | bearer/query auth for cron routes; prod refuses without it |
+| `ALLOWED_DEV_ORIGINS` | next.config.ts | dev-server allowed origins |
+| `APP_ORIGIN` | http-security.ts | expected origin for CSRF-style same-origin check |
+| `TRUST_PROXY` | rate-limit.ts | trust X-Forwarded-For for client IP |
+
+## 8. Architectural patterns worth remembering
+
+- **Two-phase upload/confirm**: file → staging `Upload` row (AI/OCR cached as JSON, 24h TTL) → explicit confirm into permanent `Receipt` via `receipts/save`. Unclaimed uploads swept by `cleanup-uploads.ts`.
+- **LLM fallback chain** (`ai.ts`): order flips by file type (PDF=Copilot-first, else LLM-first), each falls through, final fallback = deterministic regex/heuristic parser — app works fully offline without any API key.
+- **API routes over Server Actions** — everything effectful is `route.ts`; pages are thin client components via `clientFetch.ts`.
+- **Auth split** — server redirect-gating only on `/` and `/dashboard`; rest rely on client-side 401→redirect.
+- **Defense-in-depth file handling** — content-sniffed MIME (not trusting client type/ext), ext-vs-content match, 0700/0600 dirs/files, O_NOFOLLOW reads, path-traversal-safe keys, per-purpose size caps.
+- **Matching engine** — scoring pipeline (Levenshtein name + date + amount + reference) with 3 tiers (candidate/suggest/auto-confirm) + explicit per-pair rejection tracking so one rejection doesn't block alternates.
+- **Secret reuse** — `SESSION_SECRET` doubles as source key (via SHA-256) for IMAP password AES-256-GCM encryption.
+- **Money as integer cents** throughout schema, `money.ts` conversion helpers — no float currency bugs.
+- **Finnish-locale parsing pervasive** — comma-decimal amounts, dd.mm.yyyy dates, Finnish VAT rates, viitenumero/laskun numero patterns, OCR lang set fin+swe+eng.

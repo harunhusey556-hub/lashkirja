@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import AppShell from "@/components/AppShell";
 import ConfirmModal from "@/components/ConfirmModal";
+import { SelectMenu } from "@/components/SelectMenu";
 import { ErrorState, LoadingState } from "@/components/AsyncState";
 import {
   errorMessage,
@@ -385,23 +386,18 @@ export default function AsetuksetPage() {
 
           {profile.vatRegistered && (
             <div>
-              <label
-                htmlFor="vat-period"
-                className="block text-sm font-medium text-charcoal-light mb-2"
-              >
-                ALV-verokausi
-              </label>
-              <select
+              <SelectMenu
                 id="vat-period"
+                label="ALV-verokausi"
                 value={profile.vatPeriod}
-                onChange={(e) => save({ vatPeriod: e.target.value })}
                 disabled={saving}
-                className="w-full px-3 py-2.5 rounded-xl border border-warm-gray-light bg-cream/50 text-sm"
-              >
-                <option value="month">Kuukausi</option>
-                <option value="quarter">Neljännesvuosi</option>
-                <option value="year">Kalenterivuosi</option>
-              </select>
+                options={[
+                  { value: "month", label: "Kuukausi", description: "OmaVero-ilmoitus kuukausittain (oletus)" },
+                  { value: "quarter", label: "Neljännesvuosi", description: "OmaVero-ilmoitus 3kk välein" },
+                  { value: "year", label: "Kalenterivuosi", description: "OmaVero-ilmoitus kerran vuodessa" },
+                ]}
+                onChange={(newVal) => save({ vatPeriod: newVal })}
+              />
             </div>
           )}
 

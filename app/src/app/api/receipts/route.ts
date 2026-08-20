@@ -23,6 +23,7 @@ import {
   rejectCrossSite,
   rejectOversizedContentLength,
 } from "@/lib/http-security";
+import { parseBusinessDetails, generateProfileSummary } from "@/lib/onboarding";
 
 const MAX_LIST_ROWS = 200;
 const STAGING_TTL_MS = 24 * 60 * 60 * 1000;
@@ -107,7 +108,9 @@ async function reuseStagedUpload(
   userId: string,
   upload: StagedUploadRow,
   originalName: string,
-  mimeType: string
+  mimeType: string,
+  profileContext: string,
+  vendorPriors: string
 ) {
   let extracted: ExtractedReceipt;
   const absolutePath = resolveUserUploadPath(userId, upload.storageKey);
@@ -119,7 +122,7 @@ async function reuseStagedUpload(
   if (upload.extractedJson && !shouldUpgradeToAi) {
     extracted = extractedFromStagedUpload(upload);
   } else {
-    extracted = await extractReceipt(absolutePath, mimeType);
+    extracted = await extractReceipt(absolutePath, mimeType, profileContext, vendorPriors);
     await persistExtraction(upload.id, extracted);
   }
   await ensureReceiptPreviewImage(absolutePath, mimeType).catch((err) =>
@@ -180,6 +183,19 @@ export async function POST(req: NextRequest) {
   let absolutePath: string | null = null;
   let uploadId: string | null = null;
   let checksum: string | null = null;
+  
+  const user = await prisma.user.findUnique({ where: { id: session.userId! }, select: { businessDetails: true } });
+  const profile = parseBusinessDetails(user?.businessDetails);
+  const profileContext = generateProfileSummary(profile);
+
+  let vendorPriors = "";
+  try {
+    const { getTopVendorsForAiPrompt } = await import("@/lib/vendor-intelligence");
+    vendorPriors = await getTopVendorsForAiPrompt(session.userId!);
+  } catch (e) {
+    console.error("Failed to fetch vendor priors", e);
+  }
+
   try {
     const formData = await req.formData();
     const candidate = formData.get("file");
@@ -196,6 +212,7 @@ export async function POST(req: NextRequest) {
     if (existing?.claimedAt) {
       return noStoreJson({ error: "Tämä kuitti on jo tallennettu" }, { status: 409 });
     }
+    
     if (existing && existing.expiresAt <= new Date()) {
       await discardStagedUpload(session.userId!, existing);
     } else if (existing) {
@@ -203,7 +220,9 @@ export async function POST(req: NextRequest) {
         session.userId!,
         existing,
         originalName,
-        detected.mimeType
+        detected.mimeType,
+        profileContext,
+        vendorPriors
       );
     }
 
@@ -226,7 +245,7 @@ export async function POST(req: NextRequest) {
     });
     uploadId = upload.id;
 
-    const extracted = await extractReceipt(absolutePath, detected.mimeType);
+    const extracted = await extractReceipt(absolutePath, detected.mimeType, profileContext, vendorPriors);
     await persistExtraction(upload.id, extracted);
     await ensureReceiptPreviewImage(absolutePath, detected.mimeType).catch((err) =>
       console.warn("Preview generation failed:", err)
@@ -259,7 +278,9 @@ export async function POST(req: NextRequest) {
           session.userId!,
           raced,
           raced.originalName,
-          raced.mimeType
+          raced.mimeType,
+          profileContext,
+          vendorPriors
         );
       }
     }
@@ -298,6 +319,10 @@ export async function GET(req: NextRequest) {
   if (type === "meno" || type === "tulo") where.type = type;
   if (category) where.category = category;
   if (source === "ai" || source === "ocr" || source === "manual") where.source = source;
+
+  const linkedStatus = url.searchParams.get("linkedStatus");
+  if (linkedStatus === "linked") where.linkedTransaction = { isNot: null };
+  if (linkedStatus === "unlinked") where.linkedTransaction = null;
 
   const amountFilter: { gte?: number; lte?: number } = {};
   try {

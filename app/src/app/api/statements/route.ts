@@ -147,7 +147,23 @@ export async function POST(req: NextRequest) {
       return created;
     });
 
-    await runMatching(userId).catch((e) =>
+    // Fetch recent emails from connected accounts before matching so that
+    // any new emailed receipts can be matched to this statement immediately.
+    try {
+      const { syncImapAccount } = await import("@/lib/mail-sync");
+      const imapAccounts = await prisma.imapAccount.findMany({ where: { userId } });
+      await Promise.all(
+        imapAccounts.map(account =>
+          syncImapAccount(account.id).catch((e: any) =>
+            console.error(`Statement upload: email sync failed for ${account.email}:`, e)
+          )
+        )
+      );
+    } catch (e: any) {
+      console.error("Failed to sync emails during statement upload:", e);
+    }
+
+    await runMatching(userId).catch((e: any) =>
       console.error("Matching after statement upload failed:", e)
     );
 

@@ -71,6 +71,7 @@ async function enrichStatements(
           vendor: true,
           totalAmountCents: true,
           date: true,
+          source: true,
         },
       })
     : [];

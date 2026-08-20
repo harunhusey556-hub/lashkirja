@@ -3,6 +3,7 @@ import { prisma } from "@/lib/db";
 import { requireSession } from "@/lib/session";
 import { VAT_REGISTRATION_THRESHOLD_EUR } from "@/lib/vero/omavero-fields";
 import { centsToEuros } from "@/lib/money";
+import { parseBusinessDetails, deriveVatProfile } from "@/lib/onboarding";
 
 function round2(n: number): number {
   return Math.round(n * 100) / 100;
@@ -103,7 +104,7 @@ export async function GET(req: NextRequest) {
   const startOfYear = new Date(Date.UTC(year, 0, 1));
   const endOfYear = new Date(Date.UTC(year + 1, 0, 1));
   const yearPrefix = `${year}-`;
-  const [yearTx, yearReceipts, user] = await Promise.all([
+  const [yearTx, yearReceipts] = await Promise.all([
     prisma.transaction.findMany({
       where: {
         type: "tulo",
@@ -123,15 +124,21 @@ export async function GET(req: NextRequest) {
       },
       select: { totalAmountCents: true },
     }),
-    prisma.user.findUnique({
-      where: { id: session.userId },
-      select: {
-        entityType: true,
-        vatRegistered: true,
-        imapAccounts: { select: { id: true }, take: 1 },
-      },
-    }),
   ]);
+
+  const user = await prisma.user.findUnique({
+    where: { id: session.userId },
+    select: {
+      entityType: true,
+      vatRegistered: true,
+      businessDetails: true,
+      imapAccounts: { select: { id: true }, take: 1 },
+    },
+  });
+
+  const businessProfile = parseBusinessDetails(user?.businessDetails);
+  const vatProfile = deriveVatProfile(businessProfile);
+
   const bankYtd = yearTx.reduce((a, t) => a + centsToEuros(t.amountCents), 0);
   const receiptYtd = yearReceipts.reduce((a, r) => a + centsToEuros(r.totalAmountCents || 0), 0);
   const ytdRevenue = yearTx.length > 0 ? bankYtd : receiptYtd;
@@ -160,5 +167,7 @@ export async function GET(req: NextRequest) {
     },
     hasImap: (user?.imapAccounts?.length ?? 0) > 0,
     pendingReceiptsCount,
+    isSingleVatProfile: vatProfile.isSingleRate && vatProfile.isVatRegistered,
+    singleVatRate: vatProfile.defaultSalesRate,
   });
 }

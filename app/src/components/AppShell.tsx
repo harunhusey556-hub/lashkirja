@@ -4,6 +4,8 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { usePathname } from "next/navigation";
 import { ErrorState, LoadingState } from "@/components/AsyncState";
+import { OnboardingModal } from "@/components/OnboardingModal";
+import { AiChatDrawer } from "@/components/AiChatDrawer";
 import {
   errorMessage,
   isUnauthorized,
@@ -139,6 +141,9 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const [authState, setAuthState] = useState<
     { status: "checking" | "ready" | "error"; message?: string }
   >({ status: "checking" });
+  const [showOnboarding, setShowOnboarding] = useState(false);
+  const [onboardingProfile, setOnboardingProfile] = useState<any>(null);
+
   const pathname = usePathname();
   const title = pageTitle(pathname);
 
@@ -155,7 +160,19 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
           "Istunnon tarkistus epäonnistui"
         )
       )
-      .then(() => setAuthState({ status: "ready" }))
+      .then(() => {
+        setAuthState({ status: "ready" });
+        // Check onboarding state
+        return fetch("/api/onboarding", { signal: controller.signal })
+          .then((res) => readJson<{ onboarded: boolean; profile: any }>(res, ""))
+          .then((data) => {
+            if (data && !data.onboarded) {
+              setOnboardingProfile(data.profile || null);
+              setShowOnboarding(true);
+            }
+          })
+          .catch(() => {});
+      })
       .catch((error: unknown) => {
         if (controller.signal.aborted) return;
         if (isUnauthorized(error)) {
@@ -198,34 +215,44 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       </main>
 
       {authState.status === "ready" && (
-        <nav
-          className="app-tab-bar fixed bottom-0 inset-x-0 z-50 bg-white/95 backdrop-blur-md border-t border-warm-gray-light/40"
-          aria-label="Päävalikko"
-        >
-          <div className="max-w-lg mx-auto h-[var(--app-tab-height)] flex items-stretch">
-            {NAV_ITEMS.map((item) => {
-              const active = navActive(pathname, item.href);
-              return (
-                <Link
-                  key={item.href}
-                  href={item.href}
-                  className={`flex flex-1 flex-col items-center justify-center gap-0.5 touch-target active:bg-blush/30 transition-colors ${
-                    active ? "text-accent-dark" : "text-warm-gray"
-                  }`}
-                  aria-current={active ? "page" : undefined}
-                >
-                  {item.icon(active)}
-                  <span
-                    className={`text-[10px] leading-none ${active ? "font-semibold" : "font-medium"}`}
+        <>
+          <AiChatDrawer />
+          <OnboardingModal
+            isOpen={showOnboarding}
+            initialProfile={onboardingProfile}
+            onComplete={() => setShowOnboarding(false)}
+          />
+
+          <nav
+            className="app-tab-bar fixed bottom-0 inset-x-0 z-50 bg-white/95 backdrop-blur-md border-t border-warm-gray-light/40"
+            aria-label="Päävalikko"
+          >
+            <div className="max-w-lg mx-auto h-[var(--app-tab-height)] flex items-stretch">
+              {NAV_ITEMS.map((item) => {
+                const active = navActive(pathname, item.href);
+                return (
+                  <Link
+                    key={item.href}
+                    href={item.href}
+                    className={`flex flex-1 flex-col items-center justify-center gap-0.5 touch-target active:bg-blush/30 transition-colors ${
+                      active ? "text-accent-dark" : "text-warm-gray"
+                    }`}
+                    aria-current={active ? "page" : undefined}
                   >
-                    {item.label}
-                  </span>
-                </Link>
-              );
-            })}
-          </div>
-        </nav>
+                    {item.icon(active)}
+                    <span
+                      className={`text-[10px] leading-none ${active ? "font-semibold" : "font-medium"}`}
+                    >
+                      {item.label}
+                    </span>
+                  </Link>
+                );
+              })}
+            </div>
+          </nav>
+        </>
       )}
     </div>
   );
 }
+

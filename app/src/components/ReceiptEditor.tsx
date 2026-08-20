@@ -17,6 +17,7 @@ import {
   redirectToLogin,
 } from "@/components/clientFetch";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
+import { SelectMenu, SelectOption } from "@/components/SelectMenu";
 import {
   categoryLabel,
   isKnownCategory,
@@ -104,6 +105,7 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
   const [error, setError] = useState("");
   const [notFound, setNotFound] = useState(false);
   const [loadAttempt, setLoadAttempt] = useState(0);
+  const [forceDuplicate, setForceDuplicate] = useState(false);
 
   useEffect(() => {
     if (!receiptId) return;
@@ -411,6 +413,7 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
         type: formData.type,
         reference: formData.reference || null,
         invoiceNumber: formData.invoiceNumber || null,
+        forceDuplicate,
       };
 
       const res = isEdit
@@ -429,7 +432,17 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
           });
 
       if (!res.ok) {
-        await readJson(res, "Tallennus epäonnistui");
+        try {
+          await readJson(res, "Tallennus epäonnistui");
+        } catch (e: unknown) {
+          if (e instanceof ApiError && e.status === 409 && e.details?.isDuplicate) {
+            setForceDuplicate(true);
+            setError(e.message);
+            setSaving(false);
+            return;
+          }
+          throw e;
+        }
         return;
       }
 
@@ -561,17 +574,22 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
       )}
 
       {!isEdit && !formReady && (
-        <div className="bg-white rounded-2xl p-6 shadow-sm space-y-4">
-          <p className="text-sm text-warm-gray">
+        <div className="bg-white rounded-[32px] p-8 border border-warm-gray-light/30 shadow-sm space-y-6 text-center animate-in fade-in slide-in-from-bottom-2">
+          <div className="mx-auto w-12 h-12 bg-cream/50 rounded-full flex items-center justify-center text-warm-gray mb-2">
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-6 h-6">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 0 0-3.375-3.375h-1.5A1.125 1.125 0 0 1 13.5 7.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H8.25m3.75 9v6m3-3H9m1.5-12H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 0 0-9-9Z" />
+            </svg>
+          </div>
+          <p className="text-sm font-medium text-charcoal tracking-tight">
             Lisää kuitti tai lasku kuvana tai PDF-tiedostona
           </p>
 
-          <div className="flex gap-3">
+          <div className="flex flex-col sm:flex-row gap-3 justify-center max-w-sm mx-auto">
             <button
               type="button"
               onClick={() => fileInputRef.current?.click()}
               disabled={uploading}
-              className="flex-1 py-3 rounded-xl bg-accent text-white text-sm font-medium hover:bg-accent-dark transition-colors disabled:opacity-50"
+              className="flex-1 py-3 px-4 rounded-full bg-charcoal text-white text-sm font-medium shadow-sm hover:bg-black transition-colors disabled:opacity-50 active:scale-95"
             >
               Valitse tiedosto
             </button>
@@ -579,14 +597,14 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
               type="button"
               onClick={() => cameraInputRef.current?.click()}
               disabled={uploading}
-              className="flex-1 py-3 rounded-xl bg-white text-charcoal text-sm font-medium border border-warm-gray-light hover:bg-blush/30 transition-colors disabled:opacity-50"
+              className="flex-1 py-3 px-4 rounded-full bg-white text-charcoal text-sm font-medium hover:bg-cream/50 shadow-sm transition-colors disabled:opacity-50 active:scale-95"
             >
               Ota kuva
             </button>
           </div>
 
           {uploading && (
-            <div className="flex items-center gap-3 text-sm text-warm-gray" role="status" aria-live="polite">
+            <div className="flex items-center justify-center gap-3 text-sm text-warm-gray pt-4" role="status" aria-live="polite">
               <div className="w-5 h-5 border-2 border-accent border-t-transparent rounded-full animate-spin motion-reduce:animate-none" aria-hidden="true" />
               {uploadProgress}
             </div>
@@ -602,14 +620,14 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
 
       {formReady && (
         <form
-          className="bg-white rounded-2xl p-6 shadow-sm space-y-4"
+          className="bg-white rounded-[32px] p-6 sm:p-8 border border-warm-gray-light/30 shadow-sm space-y-6 pb-8 animate-in fade-in slide-in-from-bottom-2"
           onSubmit={(event) => {
             event.preventDefault();
             void handleSave();
           }}
         >
-          <div className="flex items-center justify-between gap-2">
-            <h3 className="text-sm font-medium text-charcoal">
+          <div className="flex items-center justify-between gap-2 pb-2">
+            <h3 className="text-sm font-semibold uppercase tracking-wider text-charcoal">
               {isEdit ? "Kuitin tiedot" : "Tarkista tiedot"}
             </h3>
             <div className="flex items-center gap-2 shrink-0">
@@ -683,9 +701,9 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
           )}
 
           {!isNewStep2 && (
-            <div className="space-y-3">
+            <div className="space-y-4">
             <div>
-              <label htmlFor="receipt-vendor" className="block text-xs text-warm-gray mb-1">Myyjä</label>
+              <label htmlFor="receipt-vendor" className="block text-[10px] font-medium tracking-wider uppercase text-warm-gray mb-1.5">Myyjä</label>
               <input
                 id="receipt-vendor"
                 type="text"
@@ -694,13 +712,13 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
                 onChange={(e) =>
                   setFormData({ ...formData, vendor: e.target.value })
                 }
-                className="w-full px-3 py-2.5 rounded-xl border border-warm-gray-light bg-cream/50 text-sm"
+                className="w-full h-11 px-4 rounded-xl border border-warm-gray-light/50 bg-white text-sm transition-colors focus:border-accent outline-none focus:ring-1 focus:ring-accent shadow-sm"
               />
             </div>
 
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label htmlFor="receipt-date" className="block text-xs text-warm-gray mb-1">
+                <label htmlFor="receipt-date" className="block text-[10px] font-medium tracking-wider uppercase text-warm-gray mb-1.5">
                   Päivämäärä
                 </label>
                 <input
@@ -711,11 +729,11 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
                   onChange={(e) =>
                     setFormData({ ...formData, date: e.target.value })
                   }
-                  className="w-full px-3 py-2.5 rounded-xl border border-warm-gray-light bg-cream/50 text-sm"
+                  className="w-full h-11 px-4 rounded-xl border border-warm-gray-light/50 bg-white text-sm transition-colors focus:border-accent outline-none focus:ring-1 focus:ring-accent shadow-sm"
                 />
               </div>
               <div>
-                <label htmlFor="receipt-total" className="block text-xs text-warm-gray mb-1">
+                <label htmlFor="receipt-total" className="block text-[10px] font-medium tracking-wider uppercase text-warm-gray mb-1.5">
                   Summa (€)
                 </label>
                 <input
@@ -728,7 +746,7 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
                   onChange={(e) =>
                     setFormData({ ...formData, totalAmount: e.target.value })
                   }
-                  className="w-full px-3 py-2.5 rounded-xl border border-warm-gray-light bg-cream/50 text-sm"
+                  className="w-full h-11 px-4 rounded-xl border border-warm-gray-light/50 bg-white text-sm transition-colors focus:border-accent outline-none focus:ring-1 focus:ring-accent shadow-sm"
                 />
               </div>
             </div>
@@ -743,17 +761,20 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
                 return (
                   <div key={index} className="grid grid-cols-[1fr_1fr_auto] gap-2 items-end">
                     <div>
-                      <label
-                        htmlFor={`receipt-vat-rate-${index}`}
-                        className="block text-xs text-warm-gray mb-1"
-                      >
-                        ALV-%
-                      </label>
-                      <select
+                      <SelectMenu
                         id={`receipt-vat-rate-${index}`}
+                        label="ALV-%"
                         value={detail.rate}
-                        onChange={(event) => {
-                          const newRate = event.target.value;
+                        options={[
+                          ...(isLegacyRate
+                            ? [{ value: detail.rate, label: `${detail.rate.replace(".", ",")} %` }]
+                            : []),
+                          { value: "25.5", label: "25,5 %", description: "Yleinen (mm. palvelut & tuotteet)" },
+                          { value: "13.5", label: "13,5 %", description: "Ravintola, kirjat, liikunta" },
+                          { value: "10", label: "10 %", description: "Sanoma-/aikakauslehdet" },
+                          { value: "0", label: "0 %", description: "Vienti / veroton" },
+                        ]}
+                        onChange={(newRate) => {
                           setFormData((prev) => {
                             let newAmount = detail.amount;
                             if (prev.vatDetails.length === 1 && prev.totalAmount) {
@@ -774,23 +795,12 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
                             };
                           });
                         }}
-                        className="w-full px-3 py-2.5 rounded-xl border border-warm-gray-light bg-cream/50 text-sm"
-                      >
-                        {isLegacyRate && (
-                          <option value={detail.rate}>
-                            {detail.rate.replace(".", ",")} %
-                          </option>
-                        )}
-                        <option value="25.5">25,5 %</option>
-                        <option value="13.5">13,5 %</option>
-                        <option value="10">10 %</option>
-                        <option value="0">0 %</option>
-                      </select>
+                      />
                     </div>
                     <div>
                       <label
                         htmlFor={`receipt-vat-amount-${index}`}
-                        className="block text-xs text-warm-gray mb-1"
+                        className="block text-[10px] font-medium tracking-wider uppercase text-warm-gray mb-1.5"
                       >
                         ALV (€)
                       </label>
@@ -810,7 +820,7 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
                             ),
                           })
                         }
-                        className="w-full px-3 py-2.5 rounded-xl border border-warm-gray-light bg-cream/50 text-sm"
+                        className="w-full h-11 px-4 rounded-xl border border-warm-gray-light/50 bg-white text-sm transition-colors focus:border-accent outline-none focus:ring-1 focus:ring-accent shadow-sm"
                       />
                     </div>
                     <button
@@ -826,7 +836,7 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
                                 ),
                         })
                       }
-                      className="w-11 h-11 rounded-xl border border-danger/30 text-danger hover:bg-danger/10 disabled:opacity-40"
+                      className="w-11 h-11 flex items-center justify-center rounded-xl border border-danger/30 text-danger hover:bg-danger/10 disabled:opacity-40 transition-colors"
                       aria-label={`Poista ALV-rivi ${index + 1}`}
                       disabled={
                         formData.vatDetails.length === 1 &&
@@ -850,7 +860,7 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
                     ],
                   })
                 }
-                className="min-h-11 w-full rounded-xl border border-warm-gray-light text-xs font-medium text-charcoal hover:bg-cream"
+                className="h-11 w-full rounded-xl border border-warm-gray-light/50 bg-white text-xs font-medium text-charcoal hover:bg-cream/50 transition-colors shadow-sm"
               >
                 + Lisää ALV-rivi
               </button>
@@ -858,7 +868,7 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
 
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label htmlFor="receipt-reference" className="block text-xs text-warm-gray mb-1">
+                <label htmlFor="receipt-reference" className="block text-[10px] font-medium tracking-wider uppercase text-warm-gray mb-1.5">
                   Viitenumero
                 </label>
                 <input
@@ -869,11 +879,11 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
                     setFormData({ ...formData, reference: e.target.value })
                   }
                   placeholder="esim. 1009"
-                  className="w-full px-3 py-2.5 rounded-xl border border-warm-gray-light bg-cream/50 text-sm"
+                  className="w-full h-11 px-4 rounded-xl border border-warm-gray-light/50 bg-white text-sm transition-colors focus:border-accent outline-none focus:ring-1 focus:ring-accent shadow-sm"
                 />
               </div>
               <div>
-                <label htmlFor="receipt-invoice-number" className="block text-xs text-warm-gray mb-1">
+                <label htmlFor="receipt-invoice-number" className="block text-[10px] font-medium tracking-wider uppercase text-warm-gray mb-1.5">
                   Laskun numero
                 </label>
                 <input
@@ -886,88 +896,91 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
                       invoiceNumber: e.target.value,
                     })
                   }
-                  className="w-full px-3 py-2.5 rounded-xl border border-warm-gray-light bg-cream/50 text-sm"
+                  className="w-full h-11 px-4 rounded-xl border border-warm-gray-light/50 bg-white text-sm transition-colors focus:border-accent outline-none focus:ring-1 focus:ring-accent shadow-sm"
                 />
               </div>
             </div>
 
             <fieldset className="space-y-3">
-              <legend className="block text-xs text-warm-gray mb-1">
+              <legend className="block text-[10px] font-medium tracking-wider uppercase text-warm-gray mb-1.5">
                 Kategoria
               </legend>
-              <p className="text-xs text-warm-gray leading-relaxed -mt-1">
-                Valitse sopivin luokka. AI ehdottaa automaattisesti latauksen
-                jälkeen.
-              </p>
-              <div className="grid grid-cols-2 gap-2 max-h-72 overflow-y-auto pr-1">
-                {RECEIPT_CATEGORIES.map((c) => {
-                  const selected = !useCustomCategory && formData.category === c.id;
-                  return (
+              
+              {(formData.category || useCustomCategory) ? (
+                <div className="space-y-3 animate-in fade-in">
+                  <SelectMenu
+                    id="receipt-category"
+                    label="Valittu kategoria"
+                    value={useCustomCategory ? "custom" : formData.category}
+                    options={[
+                      ...RECEIPT_CATEGORIES.map(c => ({ value: c.id, label: c.label })),
+                      { value: "custom", label: "Muu kategoria…" }
+                    ]}
+                    onChange={(newCat) => {
+                      if (newCat === "custom") {
+                        setUseCustomCategory(true);
+                      } else {
+                        setUseCustomCategory(false);
+                        setFormData({ ...formData, category: newCat });
+                      }
+                    }}
+                  />
+                  {useCustomCategory && (
+                    <div className="pt-1 animate-in fade-in slide-in-from-top-1">
+                      <label
+                        htmlFor="receipt-custom-category"
+                        className="block text-[10px] font-medium tracking-wider uppercase text-warm-gray mb-1.5"
+                      >
+                        Oma kategoria
+                      </label>
+                      <input
+                        id="receipt-custom-category"
+                        type="text"
+                        value={formData.customCategory}
+                        onChange={(e) =>
+                          setFormData({
+                            ...formData,
+                            customCategory: e.target.value,
+                          })
+                        }
+                        placeholder="esim. kalusteet, siivous"
+                        className="w-full h-11 px-4 rounded-xl border border-warm-gray-light/50 bg-white text-sm transition-colors focus:border-accent outline-none focus:ring-1 focus:ring-accent shadow-sm"
+                      />
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="grid grid-cols-2 gap-2 max-h-72 overflow-y-auto pr-1 animate-in fade-in">
+                  {RECEIPT_CATEGORIES.map((c) => (
                     <button
                       key={c.id}
                       type="button"
-                      aria-pressed={selected}
+                      aria-pressed={false}
                       onClick={() => {
                         setUseCustomCategory(false);
                         setFormData({ ...formData, category: c.id });
                       }}
-                      className={`text-left px-3 py-2.5 rounded-xl text-sm leading-snug border transition-colors ${
-                        selected
-                          ? "bg-accent text-white border-accent"
-                          : "bg-cream/50 text-charcoal border-warm-gray-light hover:bg-cream"
-                      }`}
+                      className="text-left px-4 py-3 rounded-xl text-sm leading-snug border bg-white text-charcoal border-warm-gray-light/50 hover:bg-cream/50 transition-colors shadow-sm"
                     >
                       {c.label}
                     </button>
-                  );
-                })}
-                <button
-                  type="button"
-                  aria-pressed={useCustomCategory}
-                  onClick={() => setUseCustomCategory(true)}
-                  className={`text-left px-3 py-2.5 rounded-xl text-sm leading-snug border transition-colors ${
-                    useCustomCategory
-                      ? "bg-accent text-white border-accent"
-                      : "bg-cream/50 text-charcoal border-warm-gray-light hover:bg-cream"
-                  }`}
-                >
-                  Muu kategoria…
-                </button>
-              </div>
-              {useCustomCategory && (
-                <div>
-                  <label
-                    htmlFor="receipt-custom-category"
-                    className="block text-xs text-warm-gray mb-1"
+                  ))}
+                  <button
+                    type="button"
+                    aria-pressed={false}
+                    onClick={() => setUseCustomCategory(true)}
+                    className="text-left px-4 py-3 rounded-xl text-sm leading-snug border bg-white text-charcoal border-warm-gray-light/50 hover:bg-cream/50 transition-colors shadow-sm"
                   >
-                    Oma kategoria
-                  </label>
-                  <input
-                    id="receipt-custom-category"
-                    type="text"
-                    value={formData.customCategory}
-                    onChange={(e) =>
-                      setFormData({
-                        ...formData,
-                        customCategory: e.target.value,
-                      })
-                    }
-                    placeholder="esim. kalusteet, siivous"
-                    className="w-full px-3 py-2.5 rounded-xl border border-warm-gray-light bg-cream/50 text-sm"
-                  />
+                    Muu kategoria…
+                  </button>
                 </div>
-              )}
-              {!useCustomCategory && formData.category && (
-                <p className="text-xs text-warm-gray">
-                  Valittu: {categoryLabel(formData.category)}
-                </p>
               )}
             </fieldset>
 
             <div>
               <label
                 htmlFor="receipt-notes"
-                className="block text-xs text-warm-gray mb-1"
+                className="block text-[10px] font-medium tracking-wider uppercase text-warm-gray mb-1.5"
               >
                 Selite / lisätiedot
               </label>
@@ -978,22 +991,22 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
                 onChange={(e) =>
                   setFormData({ ...formData, notes: e.target.value })
                 }
-                placeholder="Valinnainen selite esim. miksi kategoria valittiin, mitä ostettiin, tai muu huomio kirjanpitoon"
-                className="w-full px-3 py-2.5 rounded-xl border border-warm-gray-light bg-cream/50 text-sm resize-y min-h-[5rem]"
+                placeholder="Valinnainen selite kirjanpitoon..."
+                className="w-full px-4 py-3 rounded-xl border border-warm-gray-light/50 bg-white text-sm resize-y min-h-[5rem] transition-colors focus:border-accent outline-none focus:ring-1 focus:ring-accent shadow-sm"
               />
             </div>
 
             <fieldset>
-              <legend className="block text-xs text-warm-gray mb-1">Tyyppi</legend>
-              <div className="flex gap-2">
+              <legend className="block text-[10px] font-medium tracking-wider uppercase text-warm-gray mb-1.5">Tyyppi</legend>
+              <div className="flex gap-2 p-1.5 bg-white border border-warm-gray-light/30 rounded-3xl shadow-sm">
                 <button
                   type="button"
                   onClick={() => setFormData({ ...formData, type: "meno" })}
                   aria-pressed={formData.type === "meno"}
-                  className={`flex-1 py-2 rounded-xl text-sm font-medium transition-colors ${
+                  className={`flex-1 py-2 px-4 rounded-full text-sm font-medium transition-colors ${
                     formData.type === "meno"
-                      ? "bg-accent text-white"
-                      : "bg-cream text-charcoal border border-warm-gray-light"
+                      ? "bg-charcoal text-white shadow-sm"
+                      : "text-charcoal hover:bg-cream/50"
                   }`}
                 >
                   Meno
@@ -1002,10 +1015,10 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
                   type="button"
                   onClick={() => setFormData({ ...formData, type: "tulo" })}
                   aria-pressed={formData.type === "tulo"}
-                  className={`flex-1 py-2 rounded-xl text-sm font-medium transition-colors ${
+                  className={`flex-1 py-2 px-4 rounded-full text-sm font-medium transition-colors ${
                     formData.type === "tulo"
-                      ? "bg-success text-white"
-                      : "bg-cream text-charcoal border border-warm-gray-light"
+                      ? "bg-charcoal text-white shadow-sm"
+                      : "text-charcoal hover:bg-cream/50"
                   }`}
                 >
                   Tulo
@@ -1015,11 +1028,11 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
           </div>
           )}
 
-          <div className="flex gap-3 pt-2">
+          <div className="flex gap-3 pt-4 border-t border-warm-gray-light/20 mt-4">
             {isNewStep2 ? (
               <Link
                 href="/kuitit"
-                className="w-full py-3.5 rounded-xl bg-success text-white text-sm font-medium hover:bg-success/90 transition-all text-center shadow-md hover:shadow-lg hover:-translate-y-0.5"
+                className="w-full py-3 px-4 rounded-full bg-success text-white text-sm font-medium hover:bg-success/90 transition-all text-center shadow-sm active:scale-95"
               >
                 Kaikki valmista, palaa kuitteihin
               </Link>
@@ -1027,20 +1040,22 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
               <>
                 <Link
                   href="/kuitit"
-                  className="flex-1 py-3 rounded-xl border border-warm-gray-light text-sm text-warm-gray hover:bg-cream transition-colors text-center"
+                  className="flex-1 py-3 px-4 rounded-full bg-white text-charcoal text-sm font-medium border border-warm-gray-light/50 hover:bg-cream/50 shadow-sm transition-colors text-center active:scale-95"
                 >
                   Peruuta
                 </Link>
                 <button
                   type="submit"
                   disabled={saving || (!isEdit && !uploadId)}
-                  className="flex-1 py-3 rounded-xl bg-accent text-white text-sm font-medium hover:bg-accent-dark transition-colors disabled:opacity-50"
+                  className={`flex-1 py-3 px-4 rounded-full text-white text-sm font-medium shadow-sm transition-colors disabled:opacity-50 active:scale-95 ${forceDuplicate ? "bg-warning-dark hover:bg-warning" : "bg-accent hover:bg-accent-dark"}`}
                 >
                   {saving
                     ? "Tallennetaan..."
-                    : isEdit
-                      ? "Tallenna muutokset"
-                      : "Tallenna"}
+                    : forceDuplicate 
+                      ? "Tallenna silti"
+                      : isEdit
+                        ? "Tallenna muutokset"
+                        : "Tallenna"}
                 </button>
               </>
             )}

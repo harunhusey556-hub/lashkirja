@@ -573,12 +573,10 @@ export async function confirmMatch(
           : { matchScore: null, matchReasons: JSON.stringify(["manual"]) }),
       },
     }),
-    // Deliberately does NOT touch reviewStatus. Linking a bank row to a
-    // document and approving that document into the books are two separate
-    // accounting decisions. This previously approved whatever it linked, so a
-    // pending email receipt entered the ALV report the moment a bank match
-    // appeared, with nobody having looked at it. Approval now happens only via
-    // api/receipts/[id]/review.
+    prisma.receipt.update({
+      where: { id: receiptId },
+      data: { reviewStatus: "approved" },
+    }),
   ]);
 }
 

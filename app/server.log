@@ -1,0 +1,19 @@
+
+> app@0.1.0 dev
+> next dev -H 0.0.0.0
+
+⚠ Port 3000 is in use by an unknown process, using available port 3003 instead.
+▲ Next.js 16.2.12 (Turbopack)
+- Local:         http://localhost:3003
+- Network:       http://0.0.0.0:3003
+- Environments: .env
+✓ Ready in 716ms
+⨯ Another next dev server is already running.
+
+- Local:        http://localhost:3002
+- PID:          3464818
+- Dir:          /home/hhusey/.openclaw/workspace/tiyouba/kirjanpitaja/projects/lashkirja/app
+- Log:          .next/dev/logs/next-development.log
+
+Run kill 3464818 to stop it.
+[?25h

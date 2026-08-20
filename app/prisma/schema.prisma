@@ -16,11 +16,14 @@ model User {
   entityType    String      @default("toiminimi") // "kevytyrittaja" | "toiminimi"
   vatRegistered Boolean     @default(false)
   vatPeriod     String      @default("month") // "month" | "quarter" | "year"
+  onboarded     Boolean     @default(false)
+  businessDetails String?
   createdAt     DateTime    @default(now())
   receipts      Receipt[]
   statements    Statement[]
   uploads       Upload[]
   imapAccounts  ImapAccount[]
+  chatMessages  ChatMessage[]
 }
 
 model Receipt {
@@ -42,6 +45,10 @@ model Receipt {
   confidence       Float?
   rawText          String?
   reviewStatus     String    @default("approved")
+  // Bank row this receipt was drafted from (auto_income). Unique so repeated
+  // generation runs cannot produce a second draft for the same transaction.
+  // Not a relation: the draft must survive its statement being deleted.
+  sourceTransactionId String? @unique
   uploadId         String?   @unique
   upload           Upload?   @relation("ReceiptUpload", fields: [uploadId], references: [id], onDelete: SetNull)
   createdAt        DateTime  @default(now())
@@ -151,3 +158,16 @@ model ImapAccount {
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
 }
+
+model ChatMessage {
+  id             String    @id @default(uuid())
+  userId         String
+  user           User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role           String    // "user" | "assistant"
+  content        String
+  proposalData   String?   // JSON representation of proposed match or action
+  createdAt      DateTime  @default(now())
+
+  @@index([userId, createdAt])
+}
+

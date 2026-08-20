@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import AppShell from "@/components/AppShell";
 import ConfirmModal from "@/components/ConfirmModal";
+import ReviewQueue from "@/components/ReviewQueue";
 import ReceiptMatchPanel, {
   type ReceiptMatchData,
   type BankTxMatch,
@@ -45,6 +46,7 @@ const emptyAdvanced = {
   minAmount: "",
   maxAmount: "",
   sort: "date_desc",
+  linkedStatus: "",
 };
 
 function formatEur(n: number): string {
@@ -85,9 +87,23 @@ export default function KuititPage() {
   const [loadAttempt, setLoadAttempt] = useState(0);
 
   const [pendingReceipts, setPendingReceipts] = useState<SavedReceipt[]>([]);
+  const [bulkReviewing, setBulkReviewing] = useState(false);
   const [loadingPending, setLoadingPending] = useState(true);
   const [isPendingOpen, setIsPendingOpen] = useState(false);
   const [isSearchOpen, setIsSearchOpen] = useState(false);
+
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [bulkDeleting, setBulkDeleting] = useState(false);
+  const [showBulkConfirm, setShowBulkConfirm] = useState(false);
+
+  function toggleSelection(id: string) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
 
   // Debounce search typing
   useEffect(() => {
@@ -108,6 +124,7 @@ export default function KuititPage() {
     if (appliedAdvanced.maxAmount)
       params.set("maxAmount", appliedAdvanced.maxAmount);
     if (appliedAdvanced.sort) params.set("sort", appliedAdvanced.sort);
+    if (appliedAdvanced.linkedStatus) params.set("linkedStatus", appliedAdvanced.linkedStatus);
 
     return params.toString();
   }, [monthFilter, searchQuery, appliedAdvanced]);
@@ -312,101 +329,133 @@ export default function KuititPage() {
     }
   }
 
+  async function handleReviewMany(ids: string[]) {
+    if (ids.length === 0) return;
+    setActionError("");
+    setBulkReviewing(true);
+    try {
+      const res = await fetch("/api/receipts/batch-approve", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ receiptIds: ids }),
+      });
+      if (!res.ok) {
+        await readJson(res, "Kaikkien kuittein hyväksyntä epäonnistui");
+      }
+      setLoadAttempt((a) => a + 1);
+    } catch (error: unknown) {
+      if (isUnauthorized(error)) {
+        redirectToLogin();
+        return;
+      }
+      setActionError(errorMessage(error, "Kaikkien kuittein hyväksyntä epäonnistui"));
+    } finally {
+      setBulkReviewing(false);
+    }
+  }
+
+  async function handleBulkDelete() {
+    if (selectedIds.size === 0) return;
+    setBulkDeleting(true);
+    setActionError("");
+    try {
+      const res = await fetch("/api/receipts/batch-delete", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ receiptIds: Array.from(selectedIds) }),
+      });
+      if (!res.ok) await readJson(res, "Poisto epäonnistui");
+      
+      setListResult((prev) => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          receipts: prev.receipts.filter((r) => !selectedIds.has(r.id)),
+        };
+      });
+      setSelectedIds(new Set());
+      setShowBulkConfirm(false);
+    } catch (error: unknown) {
+      if (isUnauthorized(error)) {
+        redirectToLogin();
+        return;
+      }
+      setActionError(errorMessage(error, "Poisto epäonnistui"));
+    } finally {
+      setBulkDeleting(false);
+    }
+  }
+
   const hasFilters = activeChips.length > 0;
+
+  // Split the review queue by where the document came from.
+  const emailPending = pendingReceipts.filter((r) => r.source === "email_sync");
+  const otherPending = pendingReceipts.filter(
+    (r) => r.source !== "email_sync" && r.source !== "auto_income"
+  );
 
   return (
     <AppShell>
       <div className="space-y-6">
-        <div className="flex items-center justify-between gap-3 animate-in">
-          <h2 className="text-xl font-light text-charcoal">Kuitit & laskut</h2>
+        <div className="flex items-center justify-between gap-3 animate-in fade-in slide-in-from-top-2">
+          <h2 className="text-xl font-medium text-charcoal tracking-tight">Kuitit & laskut</h2>
           <Link
             href="/kuitit/uusi"
-            className="min-h-11 px-4 rounded-xl bg-accent text-white text-sm font-medium hover:bg-accent-dark transition-colors inline-flex items-center"
+            className="h-10 px-4 rounded-full bg-charcoal text-white text-sm font-medium hover:bg-charcoal/90 transition-all active:scale-95 inline-flex items-center gap-1.5 shadow-sm"
           >
-            + Lisää
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4">
+              <path d="M10.75 4.75a.75.75 0 0 0-1.5 0v4.5h-4.5a.75.75 0 0 0 0 1.5h4.5v4.5a.75.75 0 0 0 1.5 0v-4.5h4.5a.75.75 0 0 0 0-1.5h-4.5v-4.5Z" />
+            </svg>
+            Lisää
           </Link>
         </div>
 
-        {pendingReceipts.length > 0 && (
-          <div className="bg-warning/10 border border-warning/20 rounded-2xl p-4 shadow-sm transition-all duration-300">
-            <button
-              type="button"
-              onClick={() => setIsPendingOpen(prev => !prev)}
-              className="w-full flex items-center justify-between text-left group"
-            >
-              <div>
-                <h3 className="text-sm font-medium text-warning-dark">
-                  Tarkastettavat sähköpostikuitit ({pendingReceipts.length})
-                </h3>
-                <p className="text-xs text-charcoal/80 mt-1">
-                  Sähköpostista tuodut kuitit odottavat hyväksyntää ennen kirjanpitoon siirtymistä.
-                </p>
-              </div>
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                viewBox="0 0 20 20"
-                fill="currentColor"
-                className={`w-5 h-5 text-warning-dark transition-transform duration-300 ${isPendingOpen ? 'rotate-180' : ''}`}
-              >
-                <path fillRule="evenodd" d="M5.22 8.22a.75.75 0 0 1 1.06 0L10 11.94l3.72-3.72a.75.75 0 1 1 1.06 1.06l-4.25 4.25a.75.75 0 0 1-1.06 0L5.22 9.28a.75.75 0 0 1 0-1.06Z" clipRule="evenodd" />
-              </svg>
-            </button>
-            
-            {isPendingOpen && (
-              <div className="space-y-2 mt-4 animate-in fade-in slide-in-from-top-4 duration-300">
-                {pendingReceipts.map(r => (
-                  <div key={r.id} className="bg-white rounded-xl p-3 shadow-sm flex items-center justify-between gap-3">
-                    <div className="min-w-0">
-                      <p className="text-sm font-medium text-charcoal truncate">{r.vendor || "Tuntematon myyjä"}</p>
-                      <p className="text-xs text-warm-gray truncate">
-                        {r.date ? new Date(r.date).toLocaleDateString("fi-FI") : "–"} · {r.totalAmount != null ? formatEur(r.totalAmount) : "–"} · {r.fileName}
-                      </p>
-                    </div>
-                    <div className="flex gap-2 shrink-0">
-                      <button
-                        type="button"
-                        onClick={() => handleReview(r.id, "rejected")}
-                        className="px-3 py-1.5 text-xs font-medium text-danger hover:bg-danger/10 rounded-lg transition-colors border border-danger/30"
-                      >
-                        Hylkää (Yksityinen)
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handleReview(r.id, "approved")}
-                        className="px-3 py-1.5 text-xs font-medium text-white bg-success hover:bg-success-dark rounded-lg transition-colors"
-                      >
-                        Hyväksy
-                      </button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
+        {emailPending.length > 0 && (
+          <ReviewQueue
+            title="Tarkastettavat sähköpostikuitit"
+            description="Sähköpostista tuodut kuitit odottavat hyväksyntää ennen kirjanpitoon siirtymistä."
+            receipts={emailPending}
+            rejectLabel="Hylkää (Yksityinen)"
+            onReview={handleReview}
+            onApproveAll={() => void handleReviewMany(emailPending.map((r) => r.id))}
+            bulkBusy={bulkReviewing}
+          />
         )}
 
-        <div className="bg-white/95 backdrop-blur-md rounded-2xl border border-warm-gray-light/25 shadow-sm p-2 animate-in-delay-1">
-          <div className="flex gap-2 overflow-x-auto pb-0.5 scrollbar-none" role="tablist">
+        {otherPending.length > 0 && (
+          <ReviewQueue
+            title="Muut tarkastettavat kuitit"
+            description="Odottavat hyväksyntää ennen kirjanpitoon siirtymistä."
+            receipts={otherPending}
+            rejectLabel="Hylkää"
+            onReview={handleReview}
+            onApproveAll={() => void handleReviewMany(otherPending.map((r) => r.id))}
+            bulkBusy={bulkReviewing}
+          />
+        )}
+
+        <div className="animate-in fade-in slide-in-from-top-3 stagger-1">
+          <div className="flex gap-2 p-1.5 bg-white border border-warm-gray-light/30 rounded-3xl overflow-x-auto scrollbar-none shadow-sm" role="tablist">
             <button
               type="button"
               onClick={() => {
-                setAdvanced((a) => ({ ...a, type: "" }));
-                setAppliedAdvanced((a) => ({ ...a, type: "" }));
+                setAdvanced((a) => ({ ...a, type: "", linkedStatus: "" }));
+                setAppliedAdvanced((a) => ({ ...a, type: "", linkedStatus: "" }));
               }}
-              className={`shrink-0 flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium transition-all ${
-                !appliedAdvanced.type ? "bg-charcoal text-white shadow-sm" : "bg-cream/80 text-charcoal hover:bg-cream"
+              className={`shrink-0 px-4 py-2 text-sm font-medium rounded-full transition-colors ${
+                !appliedAdvanced.type && !appliedAdvanced.linkedStatus ? "bg-charcoal text-white shadow-sm" : "text-charcoal hover:bg-cream/50"
               }`}
             >
-              Kaikki kuitit
+              Kaikki
             </button>
             <button
               type="button"
               onClick={() => {
-                setAdvanced((a) => ({ ...a, type: "tulo" }));
-                setAppliedAdvanced((a) => ({ ...a, type: "tulo" }));
+                setAdvanced((a) => ({ ...a, type: "tulo", linkedStatus: "" }));
+                setAppliedAdvanced((a) => ({ ...a, type: "tulo", linkedStatus: "" }));
               }}
-              className={`shrink-0 flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium transition-all ${
-                appliedAdvanced.type === "tulo" ? "bg-charcoal text-white shadow-sm" : "bg-cream/80 text-charcoal hover:bg-cream"
+              className={`shrink-0 px-4 py-2 text-sm font-medium rounded-full transition-colors ${
+                appliedAdvanced.type === "tulo" ? "bg-charcoal text-white shadow-sm" : "text-charcoal hover:bg-cream/50"
               }`}
             >
               Myynnit
@@ -414,59 +463,84 @@ export default function KuititPage() {
             <button
               type="button"
               onClick={() => {
-                setAdvanced((a) => ({ ...a, type: "meno" }));
-                setAppliedAdvanced((a) => ({ ...a, type: "meno" }));
+                setAdvanced((a) => ({ ...a, type: "meno", linkedStatus: "" }));
+                setAppliedAdvanced((a) => ({ ...a, type: "meno", linkedStatus: "" }));
               }}
-              className={`shrink-0 flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium transition-all ${
-                appliedAdvanced.type === "meno" ? "bg-charcoal text-white shadow-sm" : "bg-cream/80 text-charcoal hover:bg-cream"
+              className={`shrink-0 px-4 py-2 text-sm font-medium rounded-full transition-colors ${
+                appliedAdvanced.type === "meno" ? "bg-charcoal text-white shadow-sm" : "text-charcoal hover:bg-cream/50"
               }`}
             >
               Ostot
             </button>
+            <button
+              type="button"
+              onClick={() => {
+                setAdvanced((a) => ({ ...a, type: "", linkedStatus: "linked" }));
+                setAppliedAdvanced((a) => ({ ...a, type: "", linkedStatus: "linked" }));
+              }}
+              className={`shrink-0 px-4 py-2 text-sm font-medium rounded-full transition-colors ${
+                appliedAdvanced.linkedStatus === "linked" ? "bg-charcoal text-white shadow-sm" : "text-charcoal hover:bg-cream/50"
+              }`}
+            >
+              Linkitetty
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setAdvanced((a) => ({ ...a, type: "", linkedStatus: "unlinked" }));
+                setAppliedAdvanced((a) => ({ ...a, type: "", linkedStatus: "unlinked" }));
+              }}
+              className={`shrink-0 px-4 py-2 text-sm font-medium rounded-full transition-colors ${
+                appliedAdvanced.linkedStatus === "unlinked" ? "bg-charcoal text-white shadow-sm" : "text-charcoal hover:bg-cream/50"
+              }`}
+            >
+              Ei linkitetty
+            </button>
           </div>
         </div>
 
-        <div className="bg-white rounded-2xl p-4 shadow-sm space-y-3 animate-in-delay-1">
+        <div className="animate-in fade-in slide-in-from-top-4 stagger-2">
           <button
             type="button"
             onClick={() => setIsSearchOpen((v) => !v)}
-            className="w-full flex items-center justify-between text-left"
+            className="w-full flex items-center justify-between text-left py-2 group"
           >
             <div className="flex items-center gap-2">
-              <svg className="w-4 h-4 text-warm-gray" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <svg className="w-4 h-4 text-warm-gray group-hover:text-charcoal transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-4.35-4.35M11 18a7 7 0 100-14 7 7 0 000 14z" />
               </svg>
-              <span className="text-sm font-medium text-charcoal">Hae ja suodata kuitteja</span>
+              <span className="text-sm font-medium text-warm-gray group-hover:text-charcoal transition-colors">Hae ja suodata kuitteja</span>
             </div>
             <svg
               xmlns="http://www.w3.org/2000/svg"
               viewBox="0 0 20 20"
               fill="currentColor"
-              className={`w-5 h-5 text-warm-gray transition-transform duration-300 ${isSearchOpen ? "rotate-180" : ""}`}
+              className={`w-5 h-5 text-warm-gray group-hover:text-charcoal transition-all duration-300 ${isSearchOpen ? "rotate-180" : ""}`}
             >
               <path fillRule="evenodd" d="M5.22 8.22a.75.75 0 0 1 1.06 0L10 11.94l3.72-3.72a.75.75 0 1 1 1.06 1.06l-4.25 4.25a.75.75 0 0 1-1.06 0L5.22 9.28a.75.75 0 0 1 0-1.06Z" clipRule="evenodd" />
             </svg>
           </button>
 
-          {isSearchOpen && (
-            <div className="space-y-3 pt-2 animate-in fade-in slide-in-from-top-2 duration-300">
-              <div className="relative">
-                <input
-                  aria-label="Hae kuitteja"
-                  type="search"
-                  value={searchInput}
-                  onChange={(e) => setSearchInput(e.target.value)}
-                  placeholder="Hae myyjää, tiedostoa tai kategoriaa..."
-                  className="w-full px-3 py-2.5 rounded-xl border border-warm-gray-light bg-cream/50 text-sm"
-                />
-              </div>
+          <div className={`accordion-wrapper ${isSearchOpen ? "expanded" : ""}`}>
+            <div className="accordion-content">
+              <div className="space-y-3 pt-4 pb-2">
+                <div className="relative">
+                  <input
+                    aria-label="Hae kuitteja"
+                    type="search"
+                    value={searchInput}
+                    onChange={(e) => setSearchInput(e.target.value)}
+                    placeholder="Hae myyjää, tiedostoa tai kategoriaa..."
+                    className="w-full h-11 px-4 rounded-xl border border-warm-gray-light/50 bg-white text-sm transition-colors focus:border-accent outline-none focus:ring-1 focus:ring-accent shadow-sm"
+                  />
+                </div>
 
               <div className="flex items-center gap-2">
                 <input
                   type="month"
                   value={monthFilter}
                   onChange={(e) => setMonthFilter(e.target.value)}
-                  className="flex-1 px-3 py-2 rounded-xl border border-warm-gray-light bg-cream/50 text-sm"
+                  className="flex-1 h-11 px-4 rounded-xl border border-warm-gray-light/50 bg-white text-sm transition-colors focus:border-accent outline-none focus:ring-1 focus:ring-accent shadow-sm"
                   aria-label="Kuukausi"
                 />
                 <button
@@ -475,7 +549,7 @@ export default function KuititPage() {
                     setAdvanced({ ...appliedAdvanced });
                     setAdvancedOpen((v) => !v);
                   }}
-                  className={`px-3 py-2 rounded-xl text-xs font-medium border transition-colors whitespace-nowrap ${
+                  className={`h-11 px-4 rounded-xl text-sm font-medium border transition-colors whitespace-nowrap shadow-sm ${
                     advancedOpen ||
                     appliedAdvanced.type ||
                     appliedAdvanced.category ||
@@ -483,8 +557,8 @@ export default function KuititPage() {
                     appliedAdvanced.minAmount ||
                     appliedAdvanced.maxAmount ||
                     appliedAdvanced.sort !== "date_desc"
-                      ? "bg-blush/50 border-accent/30 text-accent-dark"
-                      : "bg-white border-warm-gray-light text-charcoal hover:bg-cream"
+                      ? "bg-blush/20 border-accent/30 text-accent-dark"
+                      : "bg-white border-warm-gray-light/50 text-charcoal hover:bg-cream/50"
                   }`}
                   aria-expanded={advancedOpen}
                   aria-controls="advanced-receipt-filters"
@@ -635,10 +709,11 @@ export default function KuititPage() {
                   Käytä suodattimia
                 </button>
               </div>
-            </div>
+              </div>
               )}
             </div>
-          )}
+          </div>
+        </div>
 
           {hasFilters && (
             <div className="flex flex-wrap items-center gap-2">
@@ -678,11 +753,46 @@ export default function KuititPage() {
 
         <div className="space-y-3 animate-in-delay-2">
           <div className="flex items-center justify-between">
-            <h3 className="text-sm font-medium text-charcoal">
-              {loadingList
-                ? "Ladataan..."
-                : `${receipts.length} kuittia${hasFilters ? " (suodatettu)" : ""}`}
-            </h3>
+            <div className="flex items-center gap-3">
+              {receipts.length > 0 && (
+                <label className="relative flex items-center justify-center w-8 h-8 -ml-2 rounded-full hover:bg-cream/50 cursor-pointer transition-colors" title="Valitse kaikki">
+                  <input
+                    type="checkbox"
+                    className="peer sr-only"
+                    checked={selectedIds.size > 0 && selectedIds.size === receipts.length}
+                    onChange={() => {
+                      if (selectedIds.size === receipts.length) {
+                        setSelectedIds(new Set());
+                      } else {
+                        setSelectedIds(new Set(receipts.map((r) => r.id)));
+                      }
+                    }}
+                  />
+                  <div className={`w-[18px] h-[18px] rounded-full border flex items-center justify-center transition-colors ${
+                    selectedIds.size > 0
+                      ? "bg-charcoal border-charcoal"
+                      : "bg-white border-warm-gray-light peer-focus-visible:ring-2 peer-focus-visible:ring-charcoal/20"
+                  }`}>
+                    {selectedIds.size > 0 && selectedIds.size === receipts.length && (
+                      <svg className="w-2.5 h-2.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+                      </svg>
+                    )}
+                    {selectedIds.size > 0 && selectedIds.size < receipts.length && (
+                      <svg className="w-2.5 h-2.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 12h-15" />
+                      </svg>
+                    )}
+                  </div>
+                  <span className="sr-only">Valitse kaikki</span>
+                </label>
+              )}
+              <h3 className="text-sm font-medium text-charcoal">
+                {loadingList
+                  ? "Ladataan..."
+                  : `${receipts.length} kuittia${hasFilters ? " (suodatettu)" : ""}`}
+              </h3>
+            </div>
           </div>
 
           {currentLoadError ? (
@@ -725,115 +835,132 @@ export default function KuititPage() {
               {(showAllReceipts
                 ? receipts
                 : receipts.slice(0, RECENT_LIMIT)
-              ).map((r) => (
-                <div key={r.id} className="bg-white rounded-xl p-4 shadow-sm space-y-3 hover-lift transition-all border border-transparent hover:border-slate-100">
+              ).map((r, i) => (
+                <div key={r.id} className={`bg-white border border-warm-gray-light/30 rounded-3xl shadow-sm overflow-hidden animate-in fade-in slide-in-from-bottom-2 stagger-${(i % 5) + 1} relative`}>
+                  <div className="absolute left-5 top-[22px] z-10 flex items-center justify-center">
+                    <label className="relative flex items-center justify-center cursor-pointer">
+                      <input
+                        type="checkbox"
+                        className="peer sr-only"
+                        checked={selectedIds.has(r.id)}
+                        onChange={() => toggleSelection(r.id)}
+                      />
+                      <div className="w-[18px] h-[18px] rounded-full border border-warm-gray-light bg-white peer-checked:bg-charcoal peer-checked:border-charcoal peer-focus-visible:ring-2 peer-focus-visible:ring-charcoal/20 transition-colors flex items-center justify-center">
+                        <svg className={`w-2.5 h-2.5 text-white transition-opacity ${selectedIds.has(r.id) ? 'opacity-100' : 'opacity-0'}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+                        </svg>
+                      </div>
+                    </label>
+                  </div>
                   <button
                     type="button"
                     onClick={() =>
                       setExpandedId((id) => (id === r.id ? null : r.id))
                     }
-                    className="w-full text-left"
+                    className="w-full text-left outline-none pl-12 pr-5 pt-5 pb-4 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent transition-colors hover:bg-cream/20"
                     aria-expanded={expandedId === r.id}
                   >
-                    <div className="flex items-center justify-between gap-3">
-                      <div className="min-w-0 flex-1">
-                        <p className="text-sm font-medium text-charcoal truncate">
+                    <div className="flex justify-between items-start gap-4">
+                      <div className="min-w-0">
+                        <p className="text-base font-medium text-charcoal truncate tracking-tight">
                           {r.vendor || "Tuntematon"}
                         </p>
-                        <p className="text-xs text-warm-gray">
+                        <p className="text-sm text-warm-gray mt-1">
                           {r.date
                             ? new Date(r.date).toLocaleDateString("fi-FI")
                             : "–"}{" "}
                           · {r.category ? categoryLabel(r.category) : "–"}
-                          {r.reference ? ` · viite ${r.reference}` : ""}
                         </p>
+                        <div className="mt-2.5 flex items-center gap-2">
+                          <span className={`inline-flex px-2 py-0.5 rounded-full text-[11px] font-medium ${
+                            r.match.status === "linked"
+                              ? "bg-[#e8f1ec] text-success"
+                              : r.match.status === "suggested" || r.match.matchCandidates?.length
+                                ? "bg-warning/10 text-warning"
+                                : "bg-warm-gray-light/30 text-warm-gray"
+                          }`}>
+                            {r.match.status === "linked"
+                              ? "Linkitetty"
+                              : r.match.status === "suggested"
+                                ? "Ehdotus"
+                                : r.match.matchCandidates?.length
+                                  ? "Ehdotuksia"
+                                  : "Ei linkitystä"}
+                          </span>
+                        </div>
                       </div>
-                      <div className="text-right shrink-0">
+                      <div className="shrink-0 pt-0.5">
                         <p
-                          className={`text-sm font-medium ${
-                            r.type === "tulo" ? "text-success" : "text-accent"
+                          className={`text-lg font-medium tracking-tight ${
+                            r.type === "tulo" ? "text-success" : "text-charcoal"
                           }`}
                         >
-                          {r.type === "tulo" ? "+" : "−"}
+                          {r.type === "tulo" ? "+" : ""}
                           {r.totalAmount != null ? formatEur(r.totalAmount) : "–"}
-                        </p>
-                        <p className="text-[10px] text-warm-gray">
-                          {r.match.status === "linked"
-                            ? "Linkitetty"
-                            : r.match.status === "suggested"
-                              ? "Ehdotus"
-                              : r.match.matchCandidates?.length
-                                ? "Ehdotuksia"
-                                : "Ei linkitystä"}
                         </p>
                       </div>
                     </div>
                   </button>
 
-                  {expandedId === r.id && (
-                    <div className="space-y-3 border-t border-warm-gray-light/20 pt-3">
-                      <dl className="grid grid-cols-2 gap-x-3 gap-y-2 text-xs">
-                        <div>
-                          <dt className="text-warm-gray">Tiedosto</dt>
-                          <dd className="text-charcoal truncate">{r.fileName}</dd>
+                  <div className={`accordion-wrapper ${expandedId === r.id ? "expanded" : ""}`}>
+                    <div className="accordion-content bg-white">
+                      <div className="px-5 pb-5 space-y-4">
+                        <div className="bg-cream/40 rounded-2xl p-4 border border-warm-gray-light/20 space-y-3">
+                          <dl className="grid grid-cols-2 gap-x-3 gap-y-3 text-xs">
+                            <div>
+                              <dt className="text-warm-gray mb-0.5 uppercase tracking-wider text-[10px] font-medium">Tiedosto</dt>
+                              <dd className="text-charcoal truncate">{r.fileName}</dd>
+                            </div>
+                            <div>
+                              <dt className="text-warm-gray mb-0.5 uppercase tracking-wider text-[10px] font-medium">Lähde</dt>
+                              <dd className="text-charcoal">
+                                {r.source === "ai"
+                                  ? "AI"
+                                  : r.source === "ocr"
+                                    ? "OCR"
+                                    : "Manuaalinen"}
+                              </dd>
+                            </div>
+                            {r.invoiceNumber && (
+                              <div>
+                                <dt className="text-warm-gray mb-0.5 uppercase tracking-wider text-[10px] font-medium">Laskun nro</dt>
+                                <dd className="text-charcoal">{r.invoiceNumber}</dd>
+                              </div>
+                            )}
+                            {r.reference && (
+                              <div>
+                                <dt className="text-warm-gray mb-0.5 uppercase tracking-wider text-[10px] font-medium">Viite</dt>
+                                <dd className="text-charcoal">{r.reference}</dd>
+                              </div>
+                            )}
+                          </dl>
                         </div>
-                        <div>
-                          <dt className="text-warm-gray">Lähde</dt>
-                          <dd className="text-charcoal">
-                            {r.source === "ai"
-                              ? "AI"
-                              : r.source === "ocr"
-                                ? "OCR"
-                                : "Manuaalinen"}
-                          </dd>
-                        </div>
-                        {r.invoiceNumber && (
-                          <div>
-                            <dt className="text-warm-gray">Laskun nro</dt>
-                            <dd className="text-charcoal">{r.invoiceNumber}</dd>
-                          </div>
-                        )}
-                        {r.reference && (
-                          <div>
-                            <dt className="text-warm-gray">Viite</dt>
-                            <dd className="text-charcoal">{r.reference}</dd>
-                          </div>
-                        )}
-                      </dl>
 
-                      <ReceiptMatchPanel
-                        match={r.match}
-                        linkedTransaction={r.linkedTransaction}
-                        compact
-                        busy={matchBusyId === r.id}
-                        onConfirm={(txId) => handleMatchConfirm(r.id, txId)}
-                      />
+                        <ReceiptMatchPanel
+                          match={r.match}
+                          linkedTransaction={r.linkedTransaction}
+                          compact
+                          busy={matchBusyId === r.id}
+                          onConfirm={(txId) => handleMatchConfirm(r.id, txId)}
+                        />
+                      </div>
                     </div>
-                  )}
+                  </div>
 
-                  <div className="flex gap-2">
+                  <div className="px-5 py-3 border-t border-warm-gray-light/20 flex gap-4 bg-white/50">
                     <Link
                       href={`/kuitit/${r.id}`}
-                      className="flex-1 min-h-11 text-xs font-medium rounded-lg border border-warm-gray-light text-charcoal hover:bg-cream transition-colors inline-flex items-center justify-center"
+                      className="text-sm font-medium text-warm-gray hover:text-charcoal transition-colors active:scale-95"
                     >
                       Muokkaa
                     </Link>
                     <button
                       type="button"
-                      onClick={() =>
-                        setExpandedId((id) => (id === r.id ? null : r.id))
-                      }
-                      className="flex-1 min-h-11 text-xs font-medium rounded-lg border border-warm-gray-light text-charcoal hover:bg-cream transition-colors"
-                    >
-                      {expandedId === r.id ? "Piilota" : "Tiedot"}
-                    </button>
-                    <button
-                      type="button"
                       onClick={() => setReceiptToDelete(r.id)}
                       disabled={deletingId === r.id}
-                      className="min-h-11 px-3 text-xs font-medium rounded-lg border border-danger/30 text-danger hover:bg-danger/10 transition-colors disabled:opacity-50"
+                      className="text-sm font-medium text-danger/80 hover:text-danger transition-colors disabled:opacity-50 active:scale-95"
                     >
-                      {deletingId === r.id ? "..." : "Poista"}
+                      {deletingId === r.id ? "Poistetaan..." : "Poista"}
                     </button>
                   </div>
                 </div>
@@ -861,6 +988,40 @@ export default function KuititPage() {
         onConfirm={executeDeleteReceipt}
         onCancel={() => setReceiptToDelete(null)}
       />
+
+      <ConfirmModal
+        isOpen={showBulkConfirm}
+        title={`Poista ${selectedIds.size} kuittia?`}
+        description="Oletko varma, että haluat poistaa valitut kuitit? Tätä toimintoa ei voi perua."
+        onConfirm={handleBulkDelete}
+        onCancel={() => setShowBulkConfirm(false)}
+      />
+
+      {selectedIds.size > 0 && (
+        <div className="fixed bottom-24 left-1/2 -translate-x-1/2 z-[60] animate-in slide-in-from-bottom-8 fade-in duration-300">
+          <div className="bg-charcoal text-white rounded-full px-4 py-3 flex items-center gap-4 shadow-xl border border-white/10">
+            <span className="text-sm font-medium pl-2">{selectedIds.size} valittu</span>
+            <div className="w-px h-4 bg-white/20" />
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => setSelectedIds(new Set())}
+                className="text-sm px-3 py-1.5 rounded-full hover:bg-white/10 transition-colors active:scale-95"
+              >
+                Peruuta
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowBulkConfirm(true)}
+                disabled={bulkDeleting}
+                className="text-sm font-medium px-4 py-1.5 rounded-full bg-danger text-white hover:bg-danger/90 transition-colors disabled:opacity-50 active:scale-95"
+              >
+                {bulkDeleting ? "Poistetaan..." : "Poista"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </AppShell>
   );
 }

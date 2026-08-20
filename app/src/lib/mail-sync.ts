@@ -67,6 +67,17 @@ export async function syncImapAccount(accountId: string) {
     logger: false,
   });
 
+  const user = await prisma.user.findUnique({
+    where: { id: account.userId },
+    select: { businessDetails: true },
+  });
+  
+  const { parseBusinessDetails, generateProfileSummary } = await import("./onboarding");
+  const profileContext = user?.businessDetails ? generateProfileSummary(parseBusinessDetails(user.businessDetails)) : undefined;
+
+  const { getTopVendorsForAiPrompt } = await import("./vendor-intelligence");
+  const vendorPriors = await getTopVendorsForAiPrompt(account.userId);
+
   await client.connect();
   let lock;
   
@@ -140,7 +151,7 @@ export async function syncImapAccount(accountId: string) {
 
           try {
             // 1) Run extraction
-            const extraction = await extractReceipt(tempPath, mimeType);
+            const extraction = await extractReceipt(tempPath, mimeType, profileContext, vendorPriors);
             
             const { storageKey, absolutePath } = await writePrivateUpload(
               account.userId,

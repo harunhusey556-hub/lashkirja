@@ -30,6 +30,8 @@ interface DashboardData {
   };
   hasImap: boolean;
   pendingReceiptsCount?: number;
+  isSingleVatProfile?: boolean;
+  singleVatRate?: number;
 }
 
 function getGreeting(firstName: string): string {
@@ -154,7 +156,12 @@ export default function DashboardClient({
                 </div>
                 <div>
                   <h3 className="text-sm font-semibold text-charcoal">Tarkastusta odottavia kuitteja</h3>
-                  <p className="text-xs text-charcoal/70">Sinulla on {data.pendingReceiptsCount} uutta sähköpostikuittia.</p>
+                  <p className="text-xs text-charcoal/70">
+                    {data.isSingleVatProfile 
+                      ? `Kaikki myyntisi ovat ALV ${data.singleVatRate}% — tarkista ja hyväksy yhdellä napautuksella.`
+                      : `Sinulla on ${data.pendingReceiptsCount} tarkastamatonta kuittia/luonnosta.`
+                    }
+                  </p>
                 </div>
               </div>
               <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-5 h-5 text-warning-dark transform group-hover:translate-x-1 transition-transform">
@@ -257,9 +264,30 @@ export default function DashboardClient({
             </div>
 
             {data.matching && data.matching.matchable > 0 && (
-              <p className="text-xs text-warm-gray text-center">
-                Kuitteja linkitetty {data.matching.matched}/{data.matching.matchable} pankkitapahtumaan.
-              </p>
+              <Link href="/tiliotteet" className="block mt-2 animate-in-delay-2">
+                <div className="bg-white rounded-2xl p-4 shadow-sm border border-slate-100 flex items-center justify-between hover:border-charcoal/20 transition-colors group">
+                  <div>
+                    <p className="text-sm font-semibold text-charcoal">Kuittien linkitys</p>
+                    <p className="text-xs text-warm-gray mt-1">
+                      {data.matching.matched} / {data.matching.matchable} tapahtumaa linkitetty
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    {data.matching.matchable > data.matching.matched + data.matching.suggested ? (
+                      <span className="bg-accent/10 text-accent text-xs font-medium px-2.5 py-1 rounded-full">
+                        {data.matching.matchable - data.matching.matched - data.matching.suggested} puuttuu
+                      </span>
+                    ) : (
+                      <span className="bg-success/10 text-success text-xs font-medium px-2.5 py-1 rounded-full">
+                        Kaikki ok
+                      </span>
+                    )}
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4 text-warm-gray group-hover:text-charcoal transition-colors">
+                      <path fillRule="evenodd" d="M8.22 5.22a.75.75 0 0 1 1.06 0l4.25 4.25a.75.75 0 0 1 0 1.06l-4.25 4.25a.75.75 0 0 1-1.06-1.06L11.94 10 8.22 6.28a.75.75 0 0 1 0-1.06Z" clipRule="evenodd" />
+                    </svg>
+                  </div>
+                </div>
+              </Link>
             )}
 
             {!data.vat.registered && data.vat.ytdRevenue >= data.vat.threshold * 0.75 && (
