@@ -94,6 +94,26 @@ export const viewport: Viewport = {
   themeColor: "#f5e6e0",
 };
 
+/**
+ * WebKit (Safari and this Capacitor WKWebView shell) only evaluates
+ * `:active`/`:hover` on tap when *some* element in the page has a touch
+ * listener attached — without one, taps go straight from touchstart to
+ * touchend without the browser ever entering the `:active` state, so every
+ * press-feedback class in globals.css (`.active-press`, `active:scale-95`,
+ * the touch-only `:active` opacity fallback) silently does nothing. A single
+ * no-op, passive listener on the document is the standard fix and has no
+ * behavioural effect of its own.
+ */
+function TouchActiveShim() {
+  return (
+    <script
+      dangerouslySetInnerHTML={{
+        __html: `document.addEventListener('touchstart', function(){}, {passive:true});`,
+      }}
+    />
+  );
+}
+
 export default function RootLayout({
   children,
 }: {
@@ -103,6 +123,7 @@ export default function RootLayout({
     <html lang="fi">
       <body className={`${inter.className} bg-cream min-h-screen`}>
         <SafeAreaShim />
+        <TouchActiveShim />
         {children}
       </body>
     </html>

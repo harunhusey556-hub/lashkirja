@@ -1,5 +1,19 @@
 @import "tailwindcss";
 
+/* Redefine the built-in `hover:` variant so it only ever matches on devices
+   that actually have a hover-capable pointer. Without this, tapping a button
+   on iOS enters `:hover` and it stays "stuck" that way (no mouseleave event
+   ever fires on touch) until the user taps something else — every one of the
+   ~100 `hover:` utility classes in this app would otherwise read as a lit-up
+   row on a phone. `:active` (below) is the correct touch feedback instead. */
+@custom-variant hover {
+  @media (hover: hover) {
+    &:hover {
+      @slot;
+    }
+  }
+}
+
 @theme {
   --color-cream: #faf8f5;
   --color-blush: #f5e6e0;
@@ -234,6 +248,21 @@ button:disabled {
 }
 .active-press:active {
   transform: scale(0.97);
+}
+
+/* Baseline press feedback for every button/link on a touch device, so a tap
+   never reads as "did that register?" even on the many controls that only
+   ever had a `hover:` state (now inert on touch, see the `hover` variant
+   above) and no `.active-press`/`active:` class of their own. Scoped to
+   `(hover: none)` so pointer devices keep their existing hover treatment
+   untouched, and to `:active` only, so it never lingers the way `:hover`
+   does. */
+@media (hover: none) {
+  button:not(:disabled):active,
+  a:active,
+  [role="button"]:not([aria-disabled="true"]):active {
+    opacity: 0.7;
+  }
 }
 
 /* Custom Dropdown & Popover Animations */
