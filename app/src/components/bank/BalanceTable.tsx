@@ -163,7 +163,7 @@ export function BalanceTable({ months, busyMonth, onSave, onClear }: Props) {
                   <button
                     type="button"
                     onClick={() => startEdit(row)}
-                    className="text-xs font-medium text-accent"
+                    className="min-h-11 inline-flex items-center px-2 -mx-2 text-xs font-medium text-accent"
                   >
                     {row.reportedClosing === null ? "Kirjaa saldo" : "Muokkaa"}
                   </button>
@@ -172,7 +172,7 @@ export function BalanceTable({ months, busyMonth, onSave, onClear }: Props) {
                       type="button"
                       onClick={() => void onClear(row.month)}
                       disabled={busyMonth === row.month}
-                      className="text-xs font-medium text-warm-gray disabled:opacity-50"
+                      className="min-h-11 inline-flex items-center px-2 -mx-2 text-xs font-medium text-warm-gray disabled:opacity-50"
                     >
                       Poista
                     </button>

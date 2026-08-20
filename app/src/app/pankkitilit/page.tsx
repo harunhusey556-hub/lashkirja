@@ -58,6 +58,15 @@ export default function BankAccountsPage() {
     cached ? "ready" : "loading"
   );
   const [message, setMessage] = useState<string | null>(null);
+  const [messageIsError, setMessageIsError] = useState(false);
+  function showError(text: string) {
+    setMessage(text);
+    setMessageIsError(true);
+  }
+  function showSuccess(text: string) {
+    setMessage(text);
+    setMessageIsError(false);
+  }
   const [formMode, setFormMode] = useState<"hidden" | "create" | { edit: AccountSummary }>("hidden");
   const [busy, setBusy] = useState(false);
   const [expanded, setExpanded] = useState<string | null>(null);
@@ -81,7 +90,7 @@ export default function BankAccountsPage() {
         redirectToLogin();
         return;
       }
-      setMessage(errorMessage(error, "Pankkitilien haku epäonnistui"));
+      showError(errorMessage(error, "Pankkitilien haku epäonnistui"));
       setStatus("error");
     }
   }, [showArchived]);
@@ -99,7 +108,7 @@ export default function BankAccountsPage() {
       });
       setRollforward(await readJson<Rollforward>(response, "Saldojen haku epäonnistui"));
     } catch (error) {
-      setMessage(errorMessage(error, "Saldojen haku epäonnistui"));
+      showError(errorMessage(error, "Saldojen haku epäonnistui"));
     }
   }, []);
 
@@ -132,7 +141,7 @@ export default function BankAccountsPage() {
       await load();
       if (editing && expanded === editing.id) await loadRollforward(editing.id);
     } catch (error) {
-      setMessage(errorMessage(error, "Tallennus epäonnistui"));
+      showError(errorMessage(error, "Tallennus epäonnistui"));
     } finally {
       setBusy(false);
     }
@@ -151,7 +160,7 @@ export default function BankAccountsPage() {
       await readJson(response, "Saldon tallennus epäonnistui");
       await Promise.all([loadRollforward(accountId), load()]);
     } catch (error) {
-      setMessage(errorMessage(error, "Saldon tallennus epäonnistui"));
+      showError(errorMessage(error, "Saldon tallennus epäonnistui"));
     } finally {
       setBusyMonth(null);
     }
@@ -167,7 +176,7 @@ export default function BankAccountsPage() {
       await readJson(response, "Saldon poisto epäonnistui");
       await Promise.all([loadRollforward(accountId), load()]);
     } catch (error) {
-      setMessage(errorMessage(error, "Saldon poisto epäonnistui"));
+      showError(errorMessage(error, "Saldon poisto epäonnistui"));
     } finally {
       setBusyMonth(null);
     }
@@ -184,7 +193,7 @@ export default function BankAccountsPage() {
         response,
         "Poisto epäonnistui"
       );
-      setMessage(
+      showSuccess(
         result.archived
           ? `Tilillä on ${result.statementCount} tiliotetta, joten se arkistoitiin poiston sijaan.`
           : "Pankkitili poistettiin."
@@ -193,7 +202,7 @@ export default function BankAccountsPage() {
       setExpanded(null);
       await load();
     } catch (error) {
-      setMessage(errorMessage(error, "Poisto epäonnistui"));
+      showError(errorMessage(error, "Poisto epäonnistui"));
     } finally {
       setBusy(false);
     }
@@ -210,7 +219,7 @@ export default function BankAccountsPage() {
       await readJson(response, "Oletustilin vaihto epäonnistui");
       await load();
     } catch (error) {
-      setMessage(errorMessage(error, "Oletustilin vaihto epäonnistui"));
+      showError(errorMessage(error, "Oletustilin vaihto epäonnistui"));
     }
   }
 
@@ -264,7 +273,14 @@ export default function BankAccountsPage() {
             </section>
 
             {message && (
-              <p className="text-sm text-charcoal bg-blush/40 rounded-2xl px-4 py-3" role="status">
+              <p
+                className={
+                  messageIsError
+                    ? "text-sm text-danger bg-danger/10 rounded-2xl px-4 py-3"
+                    : "text-sm text-charcoal bg-blush/40 rounded-2xl px-4 py-3"
+                }
+                role={messageIsError ? "alert" : "status"}
+              >
                 {message}
               </p>
             )}
@@ -364,7 +380,7 @@ export default function BankAccountsPage() {
                         <button
                           type="button"
                           onClick={() => setFormMode({ edit: account })}
-                          className="text-xs font-medium px-3 py-2 rounded-xl border border-warm-gray-light/60"
+                          className="min-h-11 text-xs font-medium px-3 py-2 rounded-xl border border-warm-gray-light/60"
                         >
                           Muokkaa
                         </button>
@@ -372,7 +388,7 @@ export default function BankAccountsPage() {
                           <button
                             type="button"
                             onClick={() => void setDefault(account)}
-                            className="text-xs font-medium px-3 py-2 rounded-xl border border-warm-gray-light/60"
+                            className="min-h-11 text-xs font-medium px-3 py-2 rounded-xl border border-warm-gray-light/60"
                           >
                             Aseta oletukseksi
                           </button>
@@ -380,7 +396,7 @@ export default function BankAccountsPage() {
                         <button
                           type="button"
                           onClick={() => setConfirmRemove(account)}
-                          className="text-xs font-medium px-3 py-2 rounded-xl border border-danger/40 text-danger"
+                          className="min-h-11 text-xs font-medium px-3 py-2 rounded-xl border border-danger/40 text-danger"
                         >
                           Poista
                         </button>
@@ -430,7 +446,7 @@ export default function BankAccountsPage() {
             <button
               type="button"
               onClick={() => setShowArchived((value) => !value)}
-              className="w-full text-xs text-warm-gray py-2"
+              className="w-full min-h-11 text-xs text-warm-gray py-2"
             >
               {showArchived ? "Piilota arkistoidut" : "Näytä arkistoidut"}
             </button>

@@ -21,6 +21,7 @@ import {
   type StatementTransaction,
   type StatementTxFilter,
 } from "@/lib/statement-client";
+import { parseFinnishNumber } from "@/lib/format";
 import StatementSummaryCards from "@/components/StatementSummaryCards";
 import ConfirmModal from "@/components/ConfirmModal";
 
@@ -87,7 +88,7 @@ function ActionLink({
       type="button"
       onClick={onClick}
       disabled={disabled}
-      className={`text-sm font-medium transition-colors disabled:opacity-40 ${
+      className={`min-h-11 inline-flex items-center px-2 -mx-2 text-sm font-medium transition-colors disabled:opacity-40 ${
         tone === "danger"
           ? "text-danger hover:text-danger/80"
           : "text-warm-gray hover:text-charcoal"
@@ -185,7 +186,7 @@ export default function StatementDetailView({
     setTxForm({
       counterparty: t.counterparty || "",
       date: t.date ? t.date.slice(0, 10) : "",
-      amount: String(t.amount),
+      amount: String(t.amount).replace(".", ","),
       type: t.type,
       message: t.message || "",
     });
@@ -196,8 +197,8 @@ export default function StatementDetailView({
     setSavingTx(true);
     setActionError("");
     try {
-      const amount = parseFloat(txForm.amount.replace(",", "."));
-      if (!Number.isFinite(amount)) {
+      const amount = parseFinnishNumber(txForm.amount);
+      if (amount === null || !Number.isFinite(amount)) {
         throw new Error("Anna tapahtumalle kelvollinen summa");
       }
       const normalizedAmount =
@@ -519,21 +520,14 @@ export default function StatementDetailView({
         body: JSON.stringify({ receiptIds }),
       });
       if (!res.ok) await readJson(res, "Myyntien hyväksyntä epäonnistui");
-      
-      // We don't have the updated statement here, we have to reload
-      // But the parent will probably trigger a reload or we can rely on polling/cache invalidation
-      // Let's just do window.location.reload() or let the user do it. Wait, the page 
-      // is client-side. We should refresh the statement. 
-      // Actually, onStatementUpdated is passed as a prop, but we only have `res` which is { ok, updatedCount }.
-      // To refresh, we can call the statement endpoint again, or just let the page handle it.
-      // Easiest is to force a reload for simplicity if we can't easily patch the statement.
-      window.location.reload(); 
+      await reloadStatement();
     } catch (error: unknown) {
       if (isUnauthorized(error)) {
         redirectToLogin();
         return;
       }
       setActionError(errorMessage(error, "Myyntien hyväksyntä epäonnistui"));
+    } finally {
       setBulkBusy(false);
     }
   };
@@ -682,8 +676,8 @@ export default function StatementDetailView({
               <h3 className="text-base font-medium text-success-dark">Tunnistetut myynnit</h3>
             </div>
             <p className="text-sm text-charcoal/80 mt-2 leading-relaxed">
-              Tunnistimme tiliotteelta {incomeDraftCount} myyntitapahtumaa (esim. MobilePay-tilitystä). 
-              Hyväksymällä lisäät ne automaattisesti kirjanpitoon tuloina ALV:n kera.
+              Tunnistimme tiliotteelta {incomeDraftCount} myyntitapahtumaa (esim. MobilePay-tilitystä).
+              Hyväksymällä lisäät ne automaattisesti kirjanpitoon tuloina, alv mukaan lukien.
             </p>
           </div>
           <button
@@ -854,8 +848,8 @@ export default function StatementDetailView({
                         </label>
                         <input
                           id={`transaction-${t.id}-amount`}
-                          type="number"
-                          step="0.01"
+                          type="text"
+                          inputMode="decimal"
                           value={txForm.amount}
                           onChange={(e) =>
                             setTxForm({
@@ -964,7 +958,7 @@ export default function StatementDetailView({
                                   receiptId: t.suggestedReceiptId,
                                 })
                               }
-                              className="flex-1 py-2 px-3 text-xs font-medium text-danger border border-danger/20 rounded-xl hover:bg-danger/5 transition-colors disabled:opacity-50"
+                              className="flex-1 min-h-11 py-2 px-3 text-xs font-medium text-danger border border-danger/20 rounded-xl hover:bg-danger/5 transition-colors disabled:opacity-50"
                             >
                               Ei myyntiä
                             </button>
@@ -976,7 +970,7 @@ export default function StatementDetailView({
                                   receiptIds: [t.suggestedReceiptId],
                                 })
                               }
-                              className="flex-1 py-2 px-3 text-xs font-medium text-white bg-success hover:bg-success-dark rounded-xl transition-colors disabled:opacity-50"
+                              className="flex-1 min-h-11 py-2 px-3 text-xs font-medium text-white bg-success hover:bg-success-dark rounded-xl transition-colors disabled:opacity-50"
                             >
                               Hyväksy
                             </button>

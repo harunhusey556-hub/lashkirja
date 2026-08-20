@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { apiFetch, errorMessage, readJson } from "@/components/clientFetch";
 import { currentMonthKey, formatMonth } from "@/lib/format";
+import { ErrorState, LoadingState } from "@/components/AsyncState";
 
 /**
  * Closing the books. Everything dated on or before the chosen month becomes
@@ -16,6 +17,8 @@ export default function BooksLockCard() {
   const [choice, setChoice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -25,8 +28,10 @@ export default function BooksLockCard() {
         "Lukituksen haku epäonnistui"
       );
       setLockedThrough(data.lockedThrough);
+      setStatus("ready");
     } catch (error) {
-      setMessage(errorMessage(error, "Lukituksen haku epäonnistui"));
+      setLoadError(errorMessage(error, "Lukituksen haku epäonnistui"));
+      setStatus("error");
     }
   }, []);
 
@@ -75,64 +80,79 @@ export default function BooksLockCard() {
   }
 
   return (
-    <div className="bg-white rounded-2xl p-6 shadow-sm space-y-4">
+    <div className="bg-white rounded-3xl border border-warm-gray-light/20 shadow-sm p-6 space-y-4">
       <div>
-        <h3 className="text-lg font-medium text-charcoal">Kirjanpidon lukitus</h3>
+        <h3 className="text-base font-medium text-charcoal">Kirjanpidon lukitus</h3>
         <p className="text-sm text-warm-gray mt-1">
           Valittu kuukausi ja sitä vanhemmat lukitaan: kuitteja, tiliotteita, laskuja tai maksuja
           ei voi enää lisätä, muuttaa eikä poistaa niiltä kausilta.
         </p>
       </div>
 
-      <p className="text-sm text-charcoal">
-        {lockedThrough ? (
-          <>
-            Lukittu <span className="font-medium">{formatMonth(lockedThrough)}</span> asti.
-          </>
-        ) : (
-          "Kirjanpito on auki kaikilta kausilta."
-        )}
-      </p>
+      {status === "loading" ? (
+        <LoadingState label="Ladataan lukitustietoja…" compact />
+      ) : status === "error" ? (
+        <ErrorState
+          message={loadError || "Lukituksen haku epäonnistui"}
+          onRetry={() => {
+            setStatus("loading");
+            void load();
+          }}
+          compact
+        />
+      ) : (
+        <>
+          <p className="text-sm text-charcoal">
+            {lockedThrough ? (
+              <>
+                Lukittu <span className="font-medium">{formatMonth(lockedThrough)}</span> asti.
+              </>
+            ) : (
+              "Kirjanpito on auki kaikilta kausilta."
+            )}
+          </p>
 
-      <div className="flex gap-2">
-        <select
-          aria-label="Lukitse kaudet tähän kuukauteen asti"
-          className="flex-1 px-3 py-2.5 rounded-xl border border-warm-gray-light/60 bg-white text-sm"
-          value={choice ?? lockedThrough ?? ""}
-          onChange={(e) => setChoice(e.target.value)}
-        >
-          <option value="">Ei lukitusta</option>
-          {options.map((option) => (
-            <option key={option} value={option}>
-              {formatMonth(option)}
-            </option>
-          ))}
-        </select>
-        <button
-          type="button"
-          onClick={() => void save((choice ?? lockedThrough) || null)}
-          disabled={busy}
-          className="px-4 py-2.5 rounded-xl bg-accent text-white text-sm font-medium disabled:opacity-50"
-        >
-          {busy ? "Tallennetaan…" : "Tallenna"}
-        </button>
-      </div>
+          <div className="flex gap-2">
+            <select
+              aria-label="Lukitse kaudet tähän kuukauteen asti"
+              className="flex-1 px-3 py-2.5 rounded-xl border border-warm-gray-light/60 bg-white text-sm"
+              value={choice ?? lockedThrough ?? ""}
+              onChange={(e) => setChoice(e.target.value)}
+            >
+              <option value="">Ei lukitusta</option>
+              {options.map((option) => (
+                <option key={option} value={option}>
+                  {formatMonth(option)}
+                </option>
+              ))}
+            </select>
+            <button
+              type="button"
+              onClick={() => void save((choice ?? lockedThrough) || null)}
+              disabled={busy}
+              className="min-h-11 px-4 py-2.5 rounded-xl bg-accent text-white text-sm font-medium disabled:opacity-50"
+            >
+              {busy ? "Tallennetaan…" : "Tallenna"}
+            </button>
+          </div>
 
-      {lockedThrough && (
-        <button
-          type="button"
-          onClick={() => void save(null)}
-          disabled={busy}
-          className="w-full py-2.5 rounded-xl border border-warm-gray-light/60 text-sm font-medium disabled:opacity-50"
-        >
-          Avaa kirjanpito uudelleen
-        </button>
-      )}
+          {lockedThrough && (
+            <button
+              type="button"
+              onClick={() => void save(null)}
+              disabled={busy}
+              className="w-full min-h-11 py-2.5 rounded-xl border border-warm-gray-light/60 text-sm font-medium disabled:opacity-50"
+            >
+              Avaa kirjanpito uudelleen
+            </button>
+          )}
 
-      {message && (
-        <p className="text-sm text-warm-gray" role="status">
-          {message}
-        </p>
+          {message && (
+            <p className="text-sm text-warm-gray" role="status">
+              {message}
+            </p>
+          )}
+        </>
       )}
     </div>
   );
