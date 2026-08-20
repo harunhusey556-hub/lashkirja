@@ -16,7 +16,9 @@ export default function LoginForm() {
     (errorCode ? "Kirjautuminen epäonnistui" : "");
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-cream px-4">
+    // fixed + overflow-hidden + touch-none: login never scrolls or rubber-bands;
+    // iOS pans the visual viewport itself when the keyboard covers an input.
+    <div className="fixed inset-0 overflow-hidden touch-none flex items-center justify-center bg-cream px-4">
       <div className="w-full max-w-sm">
         <div className="text-center mb-8">
           <h1 className="text-3xl font-light text-charcoal tracking-wide">
