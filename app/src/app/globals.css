@@ -29,6 +29,19 @@ textarea {
   font-size: 16px;
 }
 
+/* Double-tap-to-zoom fires on ANY element, not only text. manipulation keeps
+   scroll and pinch but drops the 300ms double-tap zoom gesture entirely. */
+html,
+body,
+button,
+a,
+input,
+select,
+textarea,
+label {
+  touch-action: manipulation;
+}
+
 @media (min-width: 768px) {
   input,
   select,
