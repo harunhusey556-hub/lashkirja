@@ -6,6 +6,7 @@ import AppShell from "@/components/AppShell";
 import { ErrorState } from "@/components/AsyncState";
 import { signOut } from "@/components/clientFetch";
 import { useProfile } from "./useProfile";
+import { version as appVersion } from "../../../package.json";
 
 function Chevron() {
   return (
@@ -162,6 +163,10 @@ export default function AsetuksetPage() {
           )}
           {signingOut ? "Kirjaudutaan ulos…" : "Kirjaudu ulos"}
         </button>
+
+        <p className="text-center text-xs text-warm-gray-light pb-2">
+          LashKirja {appVersion}
+        </p>
       </div>
     </AppShell>
   );
