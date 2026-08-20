@@ -156,7 +156,7 @@ export function AiChatDrawer() {
       <button
         type="button"
         onClick={() => setIsOpen(true)}
-        className="fixed right-4 z-40 bottom-[calc(var(--app-tab-height)+env(safe-area-inset-bottom,0px)+0.75rem)] px-4 py-2.5 rounded-full bg-accent text-white font-medium text-xs shadow-xl hover:bg-accent-dark transition-all duration-300 hover-lift active-press flex items-center gap-2 border border-white/40 glass"
+        className="fixed right-4 z-40 bottom-[calc(var(--app-tab-height)+var(--safe-bottom)+0.75rem)] px-4 py-2.5 rounded-full bg-accent text-white font-medium text-xs shadow-xl hover:bg-accent-dark transition-all duration-300 hover-lift active-press flex items-center gap-2 border border-white/40 glass"
         aria-label="Avaa tekoälyapuri"
       >
         <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />

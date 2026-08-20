@@ -14,7 +14,11 @@ const config: CapacitorConfig = {
       }
     : undefined,
   ios: {
-    contentInset: "automatic",
+    // "never" makes WKWebView fill the screen and report REAL safe-area
+    // insets through env(safe-area-inset-*), so the web UI can pad the header
+    // (Dynamic Island) and tab bar (home indicator) correctly. "automatic"
+    // reports env() as 0 and shifts content itself, hiding the top/bottom.
+    contentInset: "never",
     allowsLinkPreview: false,
   },
   plugins: {

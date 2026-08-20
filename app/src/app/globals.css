@@ -18,6 +18,21 @@
   --app-tab-height: 3.75rem;
 }
 
+/* Safe-area insets, shim-aware.
+   env(safe-area-inset-*) needs viewport-fit=cover (layout.tsx) to resolve —
+   but the installed Capacitor shell was built with contentInset:"automatic",
+   and WKWebView reports env() as 0 whenever contentInsetAdjustmentBehavior is
+   not .never. The inline SafeAreaShim in layout.tsx detects that case and
+   sets --shell-inset-* to the device's real insets; max() picks whichever
+   source is live. Always pad with var(--safe-top)/var(--safe-bottom), never
+   raw env(), or the shell renders under the Dynamic Island / home indicator. */
+:root {
+  --shell-inset-top: 0px;
+  --shell-inset-bottom: 0px;
+  --safe-top: max(env(safe-area-inset-top, 0px), var(--shell-inset-top));
+  --safe-bottom: max(env(safe-area-inset-bottom, 0px), var(--shell-inset-bottom));
+}
+
 /* Lock the document: the page itself never scrolls or rubber-bands on iOS.
    Scrolling happens only inside .app-main (app) or .login-scroll (login). */
 html,
@@ -79,19 +94,19 @@ button:disabled {
 }
 
 .app-main {
-  padding-bottom: calc(var(--app-tab-height) + env(safe-area-inset-bottom, 0px) + 1rem);
+  padding-bottom: calc(var(--app-tab-height) + var(--safe-bottom) + 1rem);
   overflow-y: auto;
   overscroll-behavior-y: contain;
   -webkit-overflow-scrolling: touch;
 }
 
 .app-header {
-  padding-top: env(safe-area-inset-top, 0px);
+  padding-top: var(--safe-top);
 }
 
 .app-tab-bar {
-  padding-bottom: env(safe-area-inset-bottom, 0px);
-  height: calc(var(--app-tab-height) + env(safe-area-inset-bottom, 0px));
+  padding-bottom: var(--safe-bottom);
+  height: calc(var(--app-tab-height) + var(--safe-bottom));
 }
 
 .touch-target {
@@ -357,7 +372,7 @@ button:disabled {
 
 /* Sheets own the bottom inset themselves; the tab bar is hidden behind them. */
 .sheet-safe-bottom {
-  padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 0.75rem);
+  padding-bottom: calc(var(--safe-bottom) + 0.75rem);
 }
 
 /* Grab handle at the top of a sheet. */
