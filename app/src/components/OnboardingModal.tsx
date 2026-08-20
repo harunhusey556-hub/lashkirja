@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import {
   ONBOARDING_STEPS,
   BusinessProfile,
@@ -30,6 +30,17 @@ export function OnboardingModal({
   });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+
+  // Freeze the dashboard behind the modal; otherwise it stays scrollable
+  // while onboarding is blocking the rest of the app.
+  useEffect(() => {
+    if (!isOpen) return;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [isOpen]);
 
   if (!isOpen) return null;
 
@@ -84,7 +95,7 @@ export function OnboardingModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-charcoal/60 backdrop-blur-md animate-fade-in">
-      <div className="w-full max-w-lg bg-white rounded-3xl shadow-2xl border border-white/50 overflow-hidden animate-scale-in flex flex-col max-h-[90vh]">
+      <div className="w-full max-w-lg bg-white rounded-3xl shadow-2xl border border-white/50 overflow-hidden animate-scale-in flex flex-col max-h-[90dvh]">
         {/* Header */}
         <div className="px-6 py-4 bg-cream/60 border-b border-warm-gray-light/30 flex items-center justify-between">
           <div className="flex items-center gap-2.5">
@@ -136,7 +147,7 @@ export function OnboardingModal({
               <div className="space-y-2 pt-2">
                 <p className="text-xs font-semibold text-charcoal-light uppercase tracking-wider">
                   {step.multiSelect
-                    ? "Valitse vaihtoehdot (klikkaa ja jatka):"
+                    ? "Valitse vaihtoehdot (napauta ja jatka):"
                     : "Valitse sopivin vaihtoehto:"}
                 </p>
                 <div className="flex flex-col gap-2.5">
@@ -230,7 +241,7 @@ export function OnboardingModal({
                   )}
                   <div className="py-1">
                     <span className="text-warm-gray block mb-1">
-                      Pääasialliset myynnit & kulut:
+                      Pääasialliset myynnit ja kulut:
                     </span>
                     <span className="text-xs bg-white px-3 py-2 rounded-xl border border-warm-gray-light/40 block">
                       {generateProfileSummary(profile)}

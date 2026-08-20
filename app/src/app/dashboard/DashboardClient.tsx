@@ -38,7 +38,7 @@ interface DashboardData {
 
 function getGreeting(firstName: string): string {
   const hour = new Date().getHours();
-  if (hour >= 5 && hour < 10) return `Huomenta, ${firstName}!`;
+  if (hour >= 5 && hour < 10) return `Hyvää huomenta, ${firstName}!`;
   if (hour >= 10 && hour < 17) return `Hyvää päivää, ${firstName}!`;
   if (hour >= 17 && hour < 23) return `Hyvää iltaa, ${firstName}!`;
   return `Hyvää yötä, ${firstName}!`;
@@ -146,7 +146,7 @@ export default function DashboardClient({
         {data && data.pendingReceiptsCount !== undefined && data.pendingReceiptsCount > 0 && (
           <Link href="/kuitit" className="block relative overflow-hidden group animate-in">
             <div className="absolute inset-0 bg-gradient-to-r from-warning/20 to-warning-dark/20 animate-pulse rounded-2xl" />
-            <div className="relative bg-white/80 backdrop-blur-md border border-warning/40 rounded-2xl p-4 shadow-[0_4px_20px_-4px_rgba(251,191,36,0.3)] flex items-center justify-between transition-all group-hover:shadow-[0_4px_25px_-4px_rgba(251,191,36,0.5)] group-hover:bg-white">
+            <div className="relative bg-white/80 backdrop-blur-md border border-warning/40 rounded-2xl p-4 shadow-[0_4px_20px_-4px_rgba(138,105,30,0.3)] flex items-center justify-between transition-all group-hover:shadow-[0_4px_25px_-4px_rgba(138,105,30,0.5)] group-hover:bg-white">
               <div className="flex items-center gap-4">
                 <div className="w-10 h-10 rounded-full bg-warning/20 flex items-center justify-center text-warning-dark">
                   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5">
@@ -184,7 +184,7 @@ export default function DashboardClient({
           <div className="flex items-center gap-1 self-start shrink-0 sm:self-auto bg-white p-1 rounded-xl shadow-sm border border-warm-gray-light/20">
             <button
               onClick={() => { setLoadError(""); setMonth(shiftMonth(month, -1)); }}
-              className="w-8 h-8 flex items-center justify-center rounded-lg text-charcoal hover:bg-blush/40 transition-colors"
+              className="touch-target flex items-center justify-center rounded-lg text-charcoal hover:bg-blush/40 transition-colors"
             >
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7"/></svg>
             </button>
@@ -194,7 +194,7 @@ export default function DashboardClient({
             <button
               onClick={() => { setLoadError(""); setMonth(shiftMonth(month, 1)); }}
               disabled={month >= currentMonth()}
-              className="w-8 h-8 flex items-center justify-center rounded-lg text-charcoal hover:bg-blush/40 transition-colors disabled:opacity-30"
+              className="touch-target flex items-center justify-center rounded-lg text-charcoal hover:bg-blush/40 transition-colors disabled:opacity-30"
             >
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7"/></svg>
             </button>
@@ -241,7 +241,7 @@ export default function DashboardClient({
 
               <div className="bg-white rounded-3xl p-5 shadow-sm border border-slate-100 flex items-center justify-between hover-lift">
                 <div>
-                  <p className="text-xs text-warm-gray uppercase tracking-widest font-medium mb-1">ALV Arvio</p>
+                  <p className="text-xs text-warm-gray uppercase tracking-widest font-medium mb-1">ALV-arvio</p>
                   <p className={`text-xl font-semibold ${data.isRefund ? "text-success" : "text-accent"}`}>
                     {data.isRefund ? "−" : ""}{formatEur(Math.abs(data.estimatedVat))}
                   </p>

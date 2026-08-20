@@ -33,7 +33,7 @@ export default function LoginForm() {
       <div className="w-full max-w-sm">
         <div className="text-center mb-8">
           <h1 className="text-3xl font-light text-charcoal tracking-wide">
-            Tilikirja
+            LashKirja
           </h1>
           <p className="text-warm-gray mt-2 text-sm">
             Kirjanpito yksinkertaisesti

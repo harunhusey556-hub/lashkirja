@@ -7,6 +7,7 @@ import { readJson,
 } from "@/components/clientFetch";
 
 import BottomSheet from "@/components/BottomSheet";
+import { LoadingState } from "@/components/AsyncState";
 interface ChatMessageItem {
   id: string;
   role: "user" | "assistant";
@@ -27,11 +28,14 @@ export function AiChatDrawer() {
   const [messages, setMessages] = useState<ChatMessageItem[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
+  const [loadingHistory, setLoadingHistory] = useState(false);
+  const [historyLoaded, setHistoryLoaded] = useState(false);
   const [matchBusyId, setMatchBusyId] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    if (isOpen && messages.length === 0) {
+    if (isOpen && !historyLoaded) {
+      setLoadingHistory(true);
       fetch("/api/ai/chat")
         .then((res) => readJson<{ messages: ChatMessageItem[] }>(res, ""))
         .then((data) => {
@@ -39,9 +43,13 @@ export function AiChatDrawer() {
             setMessages(data.messages);
           }
         })
-        .catch(() => {});
+        .catch(() => {})
+        .finally(() => {
+          setLoadingHistory(false);
+          setHistoryLoaded(true);
+        });
     }
-  }, [isOpen, messages.length]);
+  }, [isOpen, historyLoaded]);
 
   useEffect(() => {
     if (isOpen) {
@@ -156,7 +164,7 @@ export function AiChatDrawer() {
       <button
         type="button"
         onClick={() => setIsOpen(true)}
-        className="fixed right-4 z-40 bottom-[calc(var(--app-tab-height)+var(--safe-bottom)+0.75rem)] px-4 py-2.5 rounded-full bg-accent text-white font-medium text-xs shadow-xl hover:bg-accent-dark transition-all duration-300 hover-lift active-press flex items-center gap-2 border border-white/40 glass"
+        className="fixed right-4 z-40 bottom-[calc(var(--app-tab-height)+var(--safe-bottom)+0.75rem)] min-h-11 px-4 py-2.5 rounded-full bg-accent text-white font-medium text-xs shadow-xl hover:bg-accent-dark transition-all duration-300 hover-lift active-press flex items-center gap-2 border border-white/40 glass"
         aria-label="Avaa tekoälyapuri"
       >
         <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
@@ -176,14 +184,14 @@ export function AiChatDrawer() {
               <button
                 type="button"
                 onClick={() => handleSendMessage("Etsi täsmäytettäviä kuitteja ja laskuja")}
-                className="text-[11px] px-3 py-1.5 rounded-full bg-accent/10 text-accent-dark font-medium border border-accent/20 whitespace-nowrap hover:bg-accent/20 transition-colors active-press"
+                className="min-h-11 inline-flex items-center text-[11px] px-3 py-1.5 rounded-full bg-accent/10 text-accent-dark font-medium border border-accent/20 whitespace-nowrap hover:bg-accent/20 transition-colors active-press"
               >
                 🔍 Täsmäytä kuitit
               </button>
               <button
                 type="button"
                 onClick={() => handleSendMessage("Mikä on ripsienpidennysten ALV-kanta?")}
-                className="text-[11px] px-3 py-1.5 rounded-full bg-white text-charcoal font-medium border border-warm-gray-light whitespace-nowrap hover:bg-cream transition-colors active-press"
+                className="min-h-11 inline-flex items-center text-[11px] px-3 py-1.5 rounded-full bg-white text-charcoal font-medium border border-warm-gray-light whitespace-nowrap hover:bg-cream transition-colors active-press"
               >
                 💡 ALV-ohjeet
               </button>
@@ -195,7 +203,11 @@ export function AiChatDrawer() {
                 messages.length === 0 && !loading ? "flex flex-col justify-center" : ""
               }`}
             >
-              {messages.length === 0 && !loading && (
+              {loadingHistory && messages.length === 0 && (
+                <LoadingState label="Ladataan keskustelua…" compact />
+              )}
+
+              {!loadingHistory && messages.length === 0 && !loading && (
                 // Centred rather than stuck to the top: an empty chat with a
                 // wall of white above the composer reads as broken.
                 <div className="text-center space-y-2.5">
@@ -254,14 +266,14 @@ export function AiChatDrawer() {
                           type="button"
                           disabled={matchBusyId === msg.id}
                           onClick={() => handleConfirmProposal(msg.id, msg.proposal!)}
-                          className="flex-1 py-2 rounded-xl bg-accent text-white text-xs font-semibold hover:bg-accent-dark transition-all shadow-sm active-press disabled:opacity-50"
+                          className="flex-1 min-h-11 py-2 rounded-xl bg-accent text-white text-xs font-semibold hover:bg-accent-dark transition-all shadow-sm active-press disabled:opacity-50"
                         >
-                          {matchBusyId === msg.id ? "Yhdistetään..." : "Hyväksy match ✓"}
+                          {matchBusyId === msg.id ? "Yhdistetään..." : "Hyväksy täsmäytys ✓"}
                         </button>
                         <button
                           type="button"
                           onClick={() => handleRejectProposal(msg.id)}
-                          className="px-3 py-2 rounded-xl border border-warm-gray-light text-xs font-medium text-warm-gray hover:bg-cream transition-colors"
+                          className="min-h-11 px-3 py-2 rounded-xl border border-warm-gray-light text-xs font-medium text-warm-gray hover:bg-cream transition-colors"
                         >
                           Hylkää
                         </button>

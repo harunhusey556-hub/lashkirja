@@ -219,7 +219,7 @@ function navActive(pathname: string, href: string): boolean {
 function pageTitle(pathname: string): string {
   if (pathname === "/kuitit/uusi") return "Uusi kuitti";
   if (/^\/kuitit\/[^/]+$/.test(pathname)) return "Kuitti";
-  if (pathname.startsWith("/kuitit")) return "Kuitit & laskut";
+  if (pathname.startsWith("/kuitit")) return "Kuitit ja laskut";
   if (pathname.startsWith("/pankkitilit")) return "Pankkitilit";
   if (/^\/laskut\/[^/]+$/.test(pathname)) return "Lasku";
   if (pathname.startsWith("/laskut")) return "Myyntilaskut";
