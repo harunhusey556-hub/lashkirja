@@ -344,7 +344,20 @@ function InvoicesPageContent() {
             ))}
 
             {invoices.length === 0 && (
-              <p className="text-sm text-warm-gray text-center py-8">Ei laskuja tällä suodattimella.</p>
+              <div className="text-center py-8 space-y-3">
+                <p className="text-sm text-warm-gray">
+                  {filter !== "all" ? "Ei laskuja tällä suodattimella." : "Ei laskuja vielä."}
+                </p>
+                {filter !== "all" && (
+                  <button
+                    type="button"
+                    onClick={() => setFilter("all")}
+                    className="text-sm font-medium text-accent hover:text-accent-dark"
+                  >
+                    Tyhjennä suodatin
+                  </button>
+                )}
+              </div>
             )}
           </ul>
         )}

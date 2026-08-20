@@ -583,9 +583,20 @@ export default function PurchaseInvoicesPage() {
             ))}
 
             {invoices.length === 0 && (
-              <p className="text-sm text-warm-gray text-center py-8">
-                Ei ostolaskuja tällä suodattimella.
-              </p>
+              <div className="text-center py-8 space-y-3">
+                <p className="text-sm text-warm-gray">
+                  {filter !== "all" ? "Ei ostolaskuja tällä suodattimella." : "Ei ostolaskuja vielä."}
+                </p>
+                {filter !== "all" && (
+                  <button
+                    type="button"
+                    onClick={() => setFilter("all")}
+                    className="text-sm font-medium text-accent hover:text-accent-dark"
+                  >
+                    Tyhjennä suodatin
+                  </button>
+                )}
+              </div>
             )}
           </ul>
         )}

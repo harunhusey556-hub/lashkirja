@@ -591,9 +591,20 @@ export default function RecurringInvoicesPage() {
             ))}
 
             {recurring.length === 0 && (
-              <p className="text-sm text-warm-gray text-center py-8">
-                Ei toistuvia laskuja.
-              </p>
+              <div className="text-center py-8 space-y-3">
+                <p className="text-sm text-warm-gray">
+                  {showInactive ? "Ei toistuvia laskuja." : "Ei aktiivisia toistuvia laskuja."}
+                </p>
+                {!showInactive && (
+                  <button
+                    type="button"
+                    onClick={() => setShowInactive(true)}
+                    className="text-sm font-medium text-accent hover:text-accent-dark"
+                  >
+                    Näytä myös pysäytetyt
+                  </button>
+                )}
+              </div>
             )}
           </ul>
         )}
