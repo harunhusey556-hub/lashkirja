@@ -198,7 +198,9 @@ function warmTabCaches() {
       });
   };
 
-  warm("/api/receipts", "receipts:", (d) => d.receipts ?? []);
+  // Key must match the kuitit page's default query (its default sort is
+  // part of the query string).
+  warm("/api/receipts?sort=date_desc", "receipts:sort=date_desc", (d) => d.receipts ?? []);
   warm("/api/receipts?reviewStatus=pending", "receipts-pending", (d) => d.receipts ?? []);
   warm("/api/statements", "statements", (d) => d.statements ?? []);
   warm("/api/bank-accounts", "bank-overview", (d) => (d.accounts ? d : undefined));
