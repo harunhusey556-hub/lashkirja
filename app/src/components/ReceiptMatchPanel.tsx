@@ -1,5 +1,7 @@
 "use client";
 
+import { formatEur } from "@/lib/format";
+
 export interface BankTxMatch {
   id: string;
   date: string | null;
@@ -18,14 +20,6 @@ export interface ReceiptMatchData {
   matchCandidates?: BankTxMatch[];
 }
 
-function formatEur(n: number): string {
-  return (
-    n.toLocaleString("fi-FI", {
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
-    }) + " €"
-  );
-}
 
 function txLabel(tx: BankTxMatch): string {
   const parts = [tx.counterparty || "Pankkitapahtuma"];

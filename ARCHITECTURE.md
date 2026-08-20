@@ -146,3 +146,47 @@ Kirjanpito (bookkeeping) web app for Finnish lash-technician sole traders. Next.
 - **Secret reuse** — `SESSION_SECRET` doubles as source key (via SHA-256) for IMAP password AES-256-GCM encryption.
 - **Money as integer cents** throughout schema, `money.ts` conversion helpers — no float currency bugs.
 - **Finnish-locale parsing pervasive** — comma-decimal amounts, dd.mm.yyyy dates, Finnish VAT rates, viitenumero/laskun numero patterns, OCR lang set fin+swe+eng.
+
+## 9. Banking, receivables and reporting (added 2026-08-20)
+
+### Domain modules (pure, unit-tested)
+
+| Module | Responsibility |
+|---|---|
+| `lib/bank-balances.ts` | Month-end rollforward: opening + movement = computed closing, compared with the bank's reported closing. Anchors the next month on the reported figure when one exists; excludes and counts pre-opening and undated rows. Capped at `MAX_ROLLFORWARD_MONTHS`. |
+| `lib/iban.ts` | ISO 13616 mod-97 validation (chunked, so a 34-char IBAN never loses precision), formatting, masking, Finnish bank-code hints, extraction of IBANs from statement text. |
+| `lib/invoices.ts` | Invoice arithmetic in integer cents: quantities in thousandths, VAT rates in permille. VAT is computed per rate on the summed net. Also the lifecycle transition table and AR aging buckets. |
+| `lib/finnish-reference.ts` | Viitenumero (7-3-1 mod 10) and Y-tunnus (mod 11) check digits, including the remainder-1 case that has no valid check digit. |
+| `lib/reports.ts` | Profit and loss from receipts, per month and per category. A receipt with no VAT breakdown is counted gross and reported in `missingVat` — the rate is never guessed. |
+| `lib/csv.ts` | Semicolon CSV with UTF-8 BOM, comma decimals, quoting and formula-injection guarding. |
+
+### Persistence layer
+
+`lib/bank-accounts.ts`, `lib/customers.ts`, `lib/sales-invoices.ts` hold everything that needs the
+database (ownership checks, the per-user invoice number sequence, archive-instead-of-delete rules,
+bank reconciliation). Routes stay thin: parse with zod, call the service, return `noStoreJson`.
+
+### Rules that are enforced server-side, not in the UI
+
+- A bank account or customer that owns history is archived, never deleted.
+- `Statement.bankAccountId` is `SET NULL`: deleting an account cannot destroy bookkeeping evidence.
+- `InvoicePayment.transactionId` is unique — one bank row can settle at most one invoice — and also
+  `SET NULL`, so deleting a statement does not erase the fact that a customer paid.
+- Only a draft invoice may be edited or deleted; crediting is terminal; an invoice with payments
+  cannot return to draft.
+- Automatic payment matching applies **only** on a viitenumero hit. An amount-only coincidence is
+  returned as a suggestion and never posted.
+
+### Testing layers
+
+- `npm test` — pure logic (`src/**/*.test.ts`).
+- `npm run test:integration` — `vitest.integration.config.ts`: a migrated SQLite file per test file,
+  real App Router handlers invoked directly, genuinely sealed iron-session cookies. No mocks.
+- `npm run test:e2e` — Playwright against a built server: login, tab-bar navigation, bank account
+  creation and reconciliation, invoice draft → sent → paid, CSV download, security headers.
+
+Three production defects were found by these layers rather than by review: an unmapped error type
+turned invoice validation into HTTP 500; `chmod` on a database directory the process does not own
+(for example `/tmp`) crashed every database-backed request; and the CSRF check compared the Origin
+header against `req.nextUrl.origin`, which under `next start` does not carry the real host and so
+rejected every same-origin form POST, login included.

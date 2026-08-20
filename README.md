@@ -45,6 +45,36 @@ Tuetut muodot:
 - **CSV** — puolipisteellä tai pilkulla erotettu
 - **PDF** — pdftotext + regex-parseri (Säästöpankki ym.)
 
+## Pankkitilit ja kuukausisaldot
+
+- Jokainen pankkitili lisätään erikseen (nimi, IBAN, alkusaldo ja avauspäivä). IBAN tarkistetaan
+  oikealla ISO 13616 mod-97 -laskennalla, joten yksikin väärä numero ei mene läpi.
+- Tiliote kohdistetaan tilille automaattisesti: käyttäjän valinta > tiedostosta löytyvä IBAN >
+  oletustili.
+- `/pankkitilit` näyttää kuukausittain alkusaldon, tulot, menot, lasketun loppusaldon ja pankin
+  ilmoittaman loppusaldon. Ero jää näkyviin (`Ero`-merkintä) eikä sitä sulauteta pois.
+- Seuraava kuukausi ankkuroidaan pankin ilmoittamaan saldoon, jos sellainen on kirjattu, jottei
+  yksi selvittämätön kuukausi siirrä kaikkia myöhempiä saldoja.
+
+## Asiakkaat ja myyntilaskut
+
+- Asiakasrekisteri (`/asiakkaat`): Y-tunnus tarkistetaan mod-11-laskennalla, maksuaika per asiakas,
+  avoin saldo asiakaskohtaisesti.
+- Myyntilaskut (`/laskut`): rivit, ALV-kannat, viitenumero (7-3-1 mod 10), tilat
+  luonnos → lähetetty → maksettu / hyvitetty. Vain luonnosta voi muokata tai poistaa.
+- ALV lasketaan kantakohtaisesta nettosummasta, ei riveittäin — sadan pienen rivin pyöristykset
+  eivät voi siirtää loppusummaa.
+- **Maksujen kohdistus:** `Kohdista maksut` lukee tuodut tilitapahtumat ja merkitsee maksun
+  automaattisesti vain, jos tapahtuma kantaa laskun viitenumeron. Pelkkä summaosuma jää
+  ehdotukseksi eikä kirjaudu kirjanpitoon.
+
+## Raportit ja viennit
+
+- `/raportit`: tuloslaskelma kuukausittain, menot ja tulot kategorioittain, netto ja brutto.
+  Kuitit joilta puuttuu ALV-erittely lasketaan bruttona ja merkitään erikseen — kantaa ei arvata.
+- CSV-viennit (kuitit, tilitapahtumat, myyntilaskut, asiakkaat): puolipiste-eroteltu, UTF-8 BOM,
+  desimaalipilkku — avautuu suoraan Exceliin.
+
 ## ALV-raportti
 
 Suomen 2026 ALV-kannat:
@@ -61,6 +91,19 @@ OmaVero-kentät 301/303/305/307/308.
 - Prisma 7 + SQLite (libsql-adapteri)
 - iron-session (istuntoevästeet)
 - Ei ulkoisia riippuvuuksia palveluista — kaikki pyörii paikallisesti
+
+## Testit
+
+```bash
+npm test                 # yksikkötestit (puhtaat laskennat, validoinnit)
+npm run test:integration # oikea SQLite-tiedosto + oikeat API-reitit + oikeat istuntoevästeet
+npm run test:e2e         # Playwright: kirjautuminen, pankkitili, laskun elinkaari
+npm run check            # lint + typecheck + kaikki testit + tuotantorakennus
+```
+
+Integraatiotestit ajavat jokaisen testitiedoston omaa migratoitua tietokantaa vasten
+(`tests/integration/`), eivätkä käytä mockeja: vihreä ajo tarkoittaa, että HTTP-rajapinta
+todella toimii.
 
 ## Tuotantorakennus
 

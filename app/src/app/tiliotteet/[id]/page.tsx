@@ -45,6 +45,7 @@ export default function StatementDetailPage() {
   }, [statementId]);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional fetch-on-mount: flipping to a loading state and storing the response is exactly the external-system sync this effect exists for
     void loadStatement();
   }, [loadStatement]);
 

@@ -11,6 +11,7 @@ import {
   redirectToLogin,
 } from "@/components/clientFetch";
 
+import { formatEur } from "@/lib/format";
 interface DashboardData {
   firstName: string;
   month: string;
@@ -57,14 +58,6 @@ const MONTH_NAMES = [
   "joulukuu",
 ];
 
-function formatEur(n: number): string {
-  return (
-    n.toLocaleString("fi-FI", {
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
-    }) + " €"
-  );
-}
 
 function currentMonth(): string {
   const now = new Date();

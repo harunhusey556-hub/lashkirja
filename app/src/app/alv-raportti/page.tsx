@@ -10,6 +10,7 @@ import {
   redirectToLogin,
 } from "@/components/clientFetch";
 
+import { formatEur } from "@/lib/format";
 interface SalesField {
   label: string;
   netSales: number;
@@ -28,12 +29,6 @@ interface ALVData {
   receiptCount: number;
 }
 
-function formatEur(n: number): string {
-  return n.toLocaleString("fi-FI", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  }) + " €";
-}
 
 const MONTHS = [
   "Tammikuu",

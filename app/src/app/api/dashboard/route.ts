@@ -4,6 +4,8 @@ import { requireSession } from "@/lib/session";
 import { VAT_REGISTRATION_THRESHOLD_EUR } from "@/lib/vero/omavero-fields";
 import { centsToEuros } from "@/lib/money";
 import { parseBusinessDetails, deriveVatProfile } from "@/lib/onboarding";
+import { getBankOverview } from "@/lib/bank-accounts";
+import { buildAgingReport, type InvoiceStatus } from "@/lib/invoices";
 
 function round2(n: number): number {
   return Math.round(n * 100) / 100;
@@ -147,6 +149,28 @@ export async function GET(req: NextRequest) {
     where: { userId: session.userId, reviewStatus: "pending" },
   });
 
+  // Bank position and receivables: the two numbers a business owner checks
+  // first, and neither was visible on the front page before.
+  const bankOverview = await getBankOverview(session.userId);
+  const openInvoices = await prisma.salesInvoice.findMany({
+    where: { userId: session.userId, status: "sent" },
+    select: {
+      status: true,
+      dueDate: true,
+      grossCents: true,
+      payments: { select: { amountCents: true } },
+    },
+  });
+  const aging = buildAgingReport(
+    openInvoices.map((invoice) => ({
+      status: invoice.status as InvoiceStatus,
+      dueDate: invoice.dueDate,
+      grossCents: invoice.grossCents,
+      paidCents: invoice.payments.reduce((sum, payment) => sum + payment.amountCents, 0),
+    })),
+    now
+  );
+
   return NextResponse.json({
     firstName: session.firstName,
     month,
@@ -167,6 +191,16 @@ export async function GET(req: NextRequest) {
     },
     hasImap: (user?.imapAccounts?.length ?? 0) > 0,
     pendingReceiptsCount,
+    bank: {
+      totalBalance: bankOverview.totalBalance,
+      accountCount: bankOverview.accounts.length,
+      needsAttention: bankOverview.needsAttention,
+    },
+    receivables: {
+      totalOpen: centsToEuros(aging.totalOpenCents),
+      overdue: centsToEuros(aging.overdueCents),
+      overdueCount: aging.overdueCount,
+    },
     isSingleVatProfile: vatProfile.isSingleRate && vatProfile.isVatRegistered,
     singleVatRate: vatProfile.defaultSalesRate,
   });

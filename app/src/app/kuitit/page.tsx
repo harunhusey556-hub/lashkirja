@@ -21,6 +21,7 @@ import {
   RECEIPT_CATEGORIES,
 } from "@/lib/receipt-categories";
 
+import { formatEur, formatMonth } from "@/lib/format";
 interface SavedReceipt {
   id: string;
   vendor: string | null;
@@ -49,12 +50,6 @@ const emptyAdvanced = {
   linkedStatus: "",
 };
 
-function formatEur(n: number): string {
-  return n.toLocaleString("fi-FI", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  }) + " €";
-}
 
 function formatMonthLabel(month: string): string {
   if (!month) return "";

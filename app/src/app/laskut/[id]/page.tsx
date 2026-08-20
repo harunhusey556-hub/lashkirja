@@ -87,6 +87,7 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
   }, [id]);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional fetch-on-mount: flipping to a loading state and storing the response is exactly the external-system sync this effect exists for
     void load();
   }, [load]);
 

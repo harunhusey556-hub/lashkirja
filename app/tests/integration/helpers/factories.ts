@@ -94,3 +94,38 @@ export async function createStatementWithTransactions(
   });
   return statement;
 }
+
+export async function createReceipt(
+  userId: string,
+  overrides: Partial<{
+    type: string;
+    date: string | null;
+    totalAmountCents: number | null;
+    category: string | null;
+    vendor: string;
+    vatDetails: string | null;
+    reviewStatus: string;
+  }> = {}
+) {
+  return prisma.receipt.create({
+    data: {
+      userId,
+      type: overrides.type ?? "meno",
+      date:
+        overrides.date === null
+          ? null
+          : new Date(`${overrides.date ?? "2026-01-15"}T00:00:00.000Z`),
+      totalAmountCents:
+        overrides.totalAmountCents === undefined ? 12_550 : overrides.totalAmountCents,
+      category: overrides.category === undefined ? "tarvikkeet" : overrides.category,
+      vendor: overrides.vendor ?? "Tukku Oy",
+      vatDetails:
+        overrides.vatDetails === undefined
+          ? JSON.stringify([{ rate: 25.5, amount: 25.5 }])
+          : overrides.vatDetails,
+      reviewStatus: overrides.reviewStatus ?? "approved",
+      filePath: `/tmp/${randomUUID()}.pdf`,
+      fileName: "kuitti.pdf",
+    },
+  });
+}

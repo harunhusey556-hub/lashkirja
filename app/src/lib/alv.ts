@@ -23,12 +23,13 @@ export interface AlvReport {
   review: { salesGross: number; purchasesGross: number; count: number };
 }
 
-interface VatLine {
+export interface VatLine {
   rate: number;
   amountCents: number;
 }
 
-function parseVatDetails(raw: string | null): VatLine[] | null {
+/** Exported so reporting can reuse the exact same parsing the ALV return uses. */
+export function parseVatDetails(raw: string | null): VatLine[] | null {
   if (!raw) return null;
   try {
     const parsed = JSON.parse(raw);

@@ -19,6 +19,9 @@ async function main() {
       passwordHash: hash1,
       firstName: "Liisa",
       lastName: "Demo",
+      // The demo account is meant to be usable straight away; the onboarding
+      // wizard has its own entry point for real sign-ups.
+      onboarded: true,
     },
   });
 
@@ -30,6 +33,7 @@ async function main() {
       passwordHash: hash2,
       firstName: "Anna",
       lastName: "Yrittäjä",
+      onboarded: true,
     },
   });
 

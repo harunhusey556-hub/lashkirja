@@ -36,15 +36,35 @@ class HardenedPrismaLibSql extends PrismaLibSql {
   }
 }
 
-function hardenLocalDatabasePermissions(dbUrl: string): void {
+/**
+ * Tightening permissions is a precaution, not a precondition for running.
+ * A database placed in a directory this process does not own (/tmp in test
+ * environments, a shared mount in production) cannot be chmodded, and letting
+ * that throw took the whole process down: every database-backed request
+ * answered 500 because the Prisma client could not even be constructed.
+ */
+function tightenPermissions(target: string, mode: number): void {
+  try {
+    fs.chmodSync(target, mode);
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code !== "EPERM" && code !== "EACCES" && code !== "ENOENT") throw error;
+    console.warn(
+      `SQLite permission hardening skipped for ${target} (${code}). ` +
+        "Verify the file is not world-readable."
+    );
+  }
+}
+
+export function hardenLocalDatabasePermissions(dbUrl: string): void {
   if (!dbUrl.startsWith("file:")) return;
   const withoutScheme = decodeURIComponent(dbUrl.slice("file:".length).split("?")[0]);
   if (!withoutScheme || withoutScheme === ":memory:") return;
   const databasePath = path.resolve(process.cwd(), withoutScheme);
   const directory = path.dirname(databasePath);
   fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
-  fs.chmodSync(directory, 0o700);
-  if (fs.existsSync(databasePath)) fs.chmodSync(databasePath, 0o600);
+  tightenPermissions(directory, 0o700);
+  if (fs.existsSync(databasePath)) tightenPermissions(databasePath, 0o600);
 }
 
 export const prisma = globalForPrisma.prisma || createPrismaClient();

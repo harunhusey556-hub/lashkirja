@@ -55,6 +55,10 @@ jobs:
       - name: Unit tests
         run: npm test
 
+      # Real SQLite file, real route handlers, real signed session cookies.
+      - name: Integration tests
+        run: npm run test:integration
+
       - name: Production build
         run: npm run build
 
