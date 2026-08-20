@@ -351,7 +351,7 @@ export default function KuititPage() {
         body: JSON.stringify({ receiptIds: ids }),
       });
       if (!res.ok) {
-        await readJson(res, "Kaikkien kuittein hyväksyntä epäonnistui");
+        await readJson(res, "Kaikkien kuittien hyväksyntä epäonnistui");
       }
       setLoadAttempt((a) => a + 1);
     } catch (error: unknown) {
@@ -359,7 +359,7 @@ export default function KuititPage() {
         redirectToLogin();
         return;
       }
-      setActionError(errorMessage(error, "Kaikkien kuittein hyväksyntä epäonnistui"));
+      setActionError(errorMessage(error, "Kaikkien kuittien hyväksyntä epäonnistui"));
     } finally {
       setBulkReviewing(false);
     }
@@ -411,7 +411,7 @@ export default function KuititPage() {
     <AppShell>
       <div className="space-y-6">
         <div className="flex items-center justify-between gap-3 animate-in fade-in slide-in-from-top-2">
-          <h2 className="text-xl font-medium text-charcoal tracking-tight">Kuitit & laskut</h2>
+          <h2 className="text-xl font-medium text-charcoal tracking-tight">Kuitit ja laskut</h2>
           <Link
             href="/kuitit/uusi"
             className="h-10 px-4 rounded-full bg-charcoal text-white text-sm font-medium hover:bg-charcoal/90 transition-all active:scale-95 inline-flex items-center gap-1.5 shadow-sm"
@@ -422,6 +422,10 @@ export default function KuititPage() {
             Lisää
           </Link>
         </div>
+
+        {loadingPending && pendingReceipts.length === 0 && (
+          <div className="skeleton bg-white border border-warm-gray-light/30 rounded-3xl shadow-sm h-24" />
+        )}
 
         {emailPending.length > 0 && (
           <ReviewQueue
@@ -455,7 +459,7 @@ export default function KuititPage() {
                 setAdvanced((a) => ({ ...a, type: "", linkedStatus: "" }));
                 setAppliedAdvanced((a) => ({ ...a, type: "", linkedStatus: "" }));
               }}
-              className={`shrink-0 px-4 py-2 text-sm font-medium rounded-full transition-colors ${
+              className={`shrink-0 min-h-11 px-4 py-2 text-sm font-medium rounded-full transition-colors ${
                 !appliedAdvanced.type && !appliedAdvanced.linkedStatus ? "bg-charcoal text-white shadow-sm" : "text-charcoal hover:bg-cream/50"
               }`}
             >
@@ -467,7 +471,7 @@ export default function KuititPage() {
                 setAdvanced((a) => ({ ...a, type: "tulo", linkedStatus: "" }));
                 setAppliedAdvanced((a) => ({ ...a, type: "tulo", linkedStatus: "" }));
               }}
-              className={`shrink-0 px-4 py-2 text-sm font-medium rounded-full transition-colors ${
+              className={`shrink-0 min-h-11 px-4 py-2 text-sm font-medium rounded-full transition-colors ${
                 appliedAdvanced.type === "tulo" ? "bg-charcoal text-white shadow-sm" : "text-charcoal hover:bg-cream/50"
               }`}
             >
@@ -479,7 +483,7 @@ export default function KuititPage() {
                 setAdvanced((a) => ({ ...a, type: "meno", linkedStatus: "" }));
                 setAppliedAdvanced((a) => ({ ...a, type: "meno", linkedStatus: "" }));
               }}
-              className={`shrink-0 px-4 py-2 text-sm font-medium rounded-full transition-colors ${
+              className={`shrink-0 min-h-11 px-4 py-2 text-sm font-medium rounded-full transition-colors ${
                 appliedAdvanced.type === "meno" ? "bg-charcoal text-white shadow-sm" : "text-charcoal hover:bg-cream/50"
               }`}
             >
@@ -491,7 +495,7 @@ export default function KuititPage() {
                 setAdvanced((a) => ({ ...a, type: "", linkedStatus: "linked" }));
                 setAppliedAdvanced((a) => ({ ...a, type: "", linkedStatus: "linked" }));
               }}
-              className={`shrink-0 px-4 py-2 text-sm font-medium rounded-full transition-colors ${
+              className={`shrink-0 min-h-11 px-4 py-2 text-sm font-medium rounded-full transition-colors ${
                 appliedAdvanced.linkedStatus === "linked" ? "bg-charcoal text-white shadow-sm" : "text-charcoal hover:bg-cream/50"
               }`}
             >
@@ -503,7 +507,7 @@ export default function KuititPage() {
                 setAdvanced((a) => ({ ...a, type: "", linkedStatus: "unlinked" }));
                 setAppliedAdvanced((a) => ({ ...a, type: "", linkedStatus: "unlinked" }));
               }}
-              className={`shrink-0 px-4 py-2 text-sm font-medium rounded-full transition-colors ${
+              className={`shrink-0 min-h-11 px-4 py-2 text-sm font-medium rounded-full transition-colors ${
                 appliedAdvanced.linkedStatus === "unlinked" ? "bg-charcoal text-white shadow-sm" : "text-charcoal hover:bg-cream/50"
               }`}
             >
@@ -768,7 +772,7 @@ export default function KuititPage() {
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
               {receipts.length > 0 && (
-                <label className="relative flex items-center justify-center w-8 h-8 -ml-2 rounded-full hover:bg-cream/50 cursor-pointer transition-colors" title="Valitse kaikki">
+                <label className="relative flex items-center justify-center w-11 h-11 -ml-2.5 rounded-full hover:bg-cream/50 cursor-pointer transition-colors" title="Valitse kaikki">
                   <input
                     type="checkbox"
                     className="peer sr-only"
@@ -850,8 +854,8 @@ export default function KuititPage() {
                 : receipts.slice(0, RECENT_LIMIT)
               ).map((r, i) => (
                 <div key={r.id} className={`bg-white border border-warm-gray-light/30 rounded-3xl shadow-sm overflow-hidden animate-in fade-in slide-in-from-bottom-2 stagger-${(i % 5) + 1} relative`}>
-                  <div className="absolute left-5 top-[22px] z-10 flex items-center justify-center">
-                    <label className="relative flex items-center justify-center cursor-pointer">
+                  <div className="absolute left-[7px] top-[9px] z-10 flex items-center justify-center">
+                    <label className="relative flex items-center justify-center w-11 h-11 cursor-pointer">
                       <input
                         type="checkbox"
                         className="peer sr-only"
@@ -887,7 +891,7 @@ export default function KuititPage() {
                         <div className="mt-2.5 flex items-center gap-2">
                           <span className={`inline-flex px-2 py-0.5 rounded-full text-[11px] font-medium ${
                             r.match.status === "linked"
-                              ? "bg-[#e8f1ec] text-success"
+                              ? "bg-success/10 text-success"
                               : r.match.status === "suggested" || r.match.matchCandidates?.length
                                 ? "bg-warning/10 text-warning"
                                 : "bg-warm-gray-light/30 text-warm-gray"
@@ -960,10 +964,10 @@ export default function KuititPage() {
                     </div>
                   </div>
 
-                  <div className="px-5 py-3 border-t border-warm-gray-light/20 flex gap-4 bg-white/50">
+                  <div className="px-3 py-1 border-t border-warm-gray-light/20 flex gap-2 bg-white/50">
                     <Link
                       href={`/kuitit/${r.id}`}
-                      className="text-sm font-medium text-warm-gray hover:text-charcoal transition-colors active:scale-95"
+                      className="min-h-11 inline-flex items-center px-2 text-sm font-medium text-warm-gray hover:text-charcoal transition-colors active:scale-95"
                     >
                       Muokkaa
                     </Link>
@@ -971,7 +975,7 @@ export default function KuititPage() {
                       type="button"
                       onClick={() => setReceiptToDelete(r.id)}
                       disabled={deletingId === r.id}
-                      className="text-sm font-medium text-danger/80 hover:text-danger transition-colors disabled:opacity-50 active:scale-95"
+                      className="min-h-11 inline-flex items-center px-2 text-sm font-medium text-danger/80 hover:text-danger transition-colors disabled:opacity-50 active:scale-95"
                     >
                       {deletingId === r.id ? "Poistetaan..." : "Poista"}
                     </button>

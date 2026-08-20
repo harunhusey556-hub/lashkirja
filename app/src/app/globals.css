@@ -12,7 +12,9 @@
   --color-accent: #9a5650;
   --color-accent-dark: #7f413c;
   --color-success: #477455;
+  --color-success-dark: #395d44;
   --color-warning: #8a691e;
+  --color-warning-dark: #6e5418;
   --color-danger: #a83232;
 
   --app-tab-height: 3.75rem;
@@ -46,10 +48,16 @@ body {
   -webkit-tap-highlight-color: transparent;
 }
 
+/* !important is load-bearing here: Tailwind v4 compiles this rule into the
+   same `@layer utilities` bucket as class utilities like `.text-sm`/`.text-xs`,
+   so without it a plain element selector loses to any class selector on the
+   same element regardless of source order. Dozens of inputs across the app
+   carry `text-sm`/`text-xs` for visual sizing; without !important those
+   inputs silently drop to <16px and iOS zooms the viewport on focus. */
 input,
 select,
 textarea {
-  font-size: 16px;
+  font-size: 16px !important;
 }
 
 /* Double-tap-to-zoom fires on ANY element, not only text. manipulation keeps
@@ -69,7 +77,7 @@ label {
   input,
   select,
   textarea {
-    font-size: 0.875rem;
+    font-size: 0.875rem !important;
   }
 }
 

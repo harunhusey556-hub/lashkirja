@@ -128,7 +128,10 @@ export default function ReceiptPreview({
           aria-modal="true"
           aria-labelledby="receipt-preview-title"
         >
-          <div className="flex items-center justify-between px-4 py-3 shrink-0">
+          <div
+            className="flex items-center justify-between px-4 py-3 shrink-0"
+            style={{ paddingTop: "max(0.75rem, var(--safe-top))" }}
+          >
             <p id="receipt-preview-title" className="text-sm text-white truncate pr-4">
               {fileName}
             </p>
@@ -141,7 +144,12 @@ export default function ReceiptPreview({
               Sulje
             </button>
           </div>
-          <div className="flex-1 min-h-0 px-2 pb-4">{viewer}</div>
+          <div
+            className="flex-1 min-h-0 px-2"
+            style={{ paddingBottom: "max(1rem, var(--safe-bottom))" }}
+          >
+            {viewer}
+          </div>
         </div>
       )}
     </>
@@ -190,7 +198,10 @@ function PreviewBody({
     <div className={`relative w-full h-full bg-white ${fill ? "rounded-xl" : ""}`}>
       {loading && (
         <div className="absolute inset-0 flex items-center justify-center bg-cream/80 z-10">
-          <div className="w-6 h-6 border-2 border-accent border-t-transparent rounded-full animate-spin" />
+          <div
+            className="w-6 h-6 border-2 border-accent border-t-transparent rounded-full animate-spin motion-reduce:animate-none"
+            aria-hidden="true"
+          />
         </div>
       )}
       {/* eslint-disable-next-line @next/next/no-img-element */}

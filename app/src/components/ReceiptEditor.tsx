@@ -545,7 +545,7 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
           </svg>
         </Link>
-        <h2 className="text-xl font-light text-charcoal">
+        <h2 className="text-xl font-medium text-charcoal tracking-tight">
           {isNewStep2 ? "Vaihe 2: Linkitys" : isEdit ? "Muokkaa kuittia" : "Lisää kuitti"}
         </h2>
       </div>
@@ -643,7 +643,7 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
                   type="button"
                   onClick={() => fileInputRef.current?.click()}
                   disabled={uploading}
-                  className="text-xs text-accent hover:underline disabled:opacity-50"
+                  className="min-h-11 inline-flex items-center px-2 -mx-2 text-xs text-accent hover:underline disabled:opacity-50"
                 >
                   Vaihda tiedosto
                 </button>
@@ -957,7 +957,7 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
                   )}
                 </div>
               ) : (
-                <div className="grid grid-cols-2 gap-2 max-h-72 overflow-y-auto pr-1 animate-in fade-in">
+                <div className="grid grid-cols-2 gap-2 max-h-72 overflow-y-auto overscroll-contain pr-1 animate-in fade-in">
                   {RECEIPT_CATEGORIES.map((c) => (
                     <button
                       key={c.id}

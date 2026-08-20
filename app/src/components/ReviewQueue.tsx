@@ -117,14 +117,14 @@ export default function ReviewQueue({
                 <button
                   type="button"
                   onClick={() => onReview(r.id, "rejected")}
-                  className="flex-1 sm:flex-none px-3 py-2 text-xs font-medium text-danger hover:bg-danger/10 rounded-lg transition-colors border border-danger/30"
+                  className="flex-1 sm:flex-none min-h-11 px-3 py-2 text-xs font-medium text-danger hover:bg-danger/10 rounded-xl transition-colors border border-danger/30"
                 >
                   {rejectLabel}
                 </button>
                 <button
                   type="button"
                   onClick={() => onReview(r.id, "approved")}
-                  className="flex-1 sm:flex-none px-3 py-2 text-xs font-medium text-white bg-success hover:bg-success-dark rounded-lg transition-colors"
+                  className="flex-1 sm:flex-none min-h-11 px-3 py-2 text-xs font-medium text-white bg-success hover:bg-success-dark rounded-xl transition-colors"
                 >
                   Hyväksy
                 </button>
