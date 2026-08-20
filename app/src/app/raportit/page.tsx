@@ -11,6 +11,7 @@ import {
   redirectToLogin,
 } from "@/components/clientFetch";
 import { formatEur, formatMonthShort } from "@/lib/format";
+import { readPageCache, writePageCache } from "@/lib/page-cache";
 
 interface CategoryRow {
   category: string;
@@ -54,18 +55,32 @@ const EXPORTS = [
 export default function ReportsPage() {
   const currentYear = new Date().getUTCFullYear();
   const [year, setYear] = useState(currentYear);
-  const [report, setReport] = useState<Report | null>(null);
-  const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
+  const [report, setReport] = useState<Report | null>(
+    () => readPageCache<Report>(`report:${currentYear}`)
+  );
+  const [status, setStatus] = useState<"loading" | "ready" | "error">(
+    () => (readPageCache<Report>(`report:${currentYear}`) ? "ready" : "loading")
+  );
   const [message, setMessage] = useState<string | null>(null);
 
   const load = useCallback(async () => {
-    setStatus("loading");
+    // Show the cached year immediately and refresh it silently; a year that
+    // has never been computed still gets the loading state.
+    const cached = readPageCache<Report>(`report:${year}`);
+    if (cached) {
+      setReport(cached);
+      setStatus("ready");
+    } else {
+      setStatus("loading");
+    }
     try {
       const response = await apiFetch(
         `/api/reports/profit-loss?from=${year}-01&to=${year}-12`,
         { credentials: "include" }
       );
-      setReport(await readJson<Report>(response, "Raportin haku epäonnistui"));
+      const data = await readJson<Report>(response, "Raportin haku epäonnistui");
+      writePageCache(`report:${year}`, data);
+      setReport(data);
       setStatus("ready");
     } catch (error) {
       if (isUnauthorized(error)) {

@@ -16,6 +16,7 @@ import {
   formatMonth,
   type StatementData,
 } from "@/lib/statement-client";
+import { readPageCache, writePageCache } from "@/lib/page-cache";
 
 const RECENT_LIMIT = 5;
 
@@ -28,15 +29,26 @@ interface BankAccountOption {
 
 export default function TiliotteetPage() {
   const router = useRouter();
-  const [statements, setStatements] = useState<StatementData[]>([]);
+  const [statements, setStatements] = useState<StatementData[]>(
+    () => readPageCache<StatementData[]>("statements") ?? []
+  );
   const [uploading, setUploading] = useState(false);
   const [uploadMsg, setUploadMsg] = useState("");
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(
+    () => readPageCache<StatementData[]>("statements") === null
+  );
   const [monthFilter, setMonthFilter] = useState("");
   const [showAllStatements, setShowAllStatements] = useState(false);
   const [loadError, setLoadError] = useState("");
-  const [accounts, setAccounts] = useState<BankAccountOption[]>([]);
-  const [targetAccountId, setTargetAccountId] = useState("");
+  const [accounts, setAccounts] = useState<BankAccountOption[]>(
+    () => readPageCache<{ accounts?: BankAccountOption[] }>("bank-overview")?.accounts ?? []
+  );
+  const [targetAccountId, setTargetAccountId] = useState(
+    () =>
+      (readPageCache<{ accounts?: BankAccountOption[] }>("bank-overview")?.accounts ?? []).find(
+        (a) => a.isDefault
+      )?.id || ""
+  );
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const loadStatements = useCallback(async () => {
@@ -46,6 +58,7 @@ export default function TiliotteetPage() {
         res,
         "Tiliotteiden lataus epäonnistui"
       );
+      writePageCache("statements", data.statements || []);
       setStatements(data.statements || []);
       setLoadError("");
     } catch (error: unknown) {
@@ -72,7 +85,13 @@ export default function TiliotteetPage() {
         if (cancelled) return;
         const list = data.accounts || [];
         setAccounts(list);
-        setTargetAccountId(list.find((a) => a.isDefault)?.id || "");
+        // Keep whatever the user (or the cached default) already picked; only
+        // fill the default in when nothing is selected yet.
+        setTargetAccountId((current) =>
+          current && list.some((a) => a.id === current)
+            ? current
+            : list.find((a) => a.isDefault)?.id || ""
+        );
       })
       // The picker is a convenience; the upload still works without it.
       .catch(() => {});

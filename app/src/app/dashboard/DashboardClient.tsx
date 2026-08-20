@@ -12,6 +12,7 @@ import {
 } from "@/components/clientFetch";
 
 import { formatEur } from "@/lib/format";
+import { readPageCache, writePageCache } from "@/lib/page-cache";
 interface DashboardData {
   firstName: string;
   month: string;
@@ -110,6 +111,7 @@ export default function DashboardClient({
           throw new Error("Palvelin palautti virheelliset etusivun tiedot");
         }
         setLoadError("");
+        writePageCache(`dashboard:${month}`, data);
         setResult({ month, data });
       })
       .catch((error: unknown) => {
@@ -125,7 +127,12 @@ export default function DashboardClient({
     return () => controller.abort();
   }, [month, loadAttempt]);
 
-  const data = result?.month === month ? result.data : null;
+  // Cached copy (warmed post-login or left by an earlier visit) paints in the
+  // first frame; the fetch above replaces it silently when it lands.
+  const data =
+    result?.month === month
+      ? result.data
+      : readPageCache<DashboardData>(`dashboard:${month}`);
   const displayName = data?.firstName || firstName;
 
   const monthIdx = parseInt(month.split("-")[1]) - 1;

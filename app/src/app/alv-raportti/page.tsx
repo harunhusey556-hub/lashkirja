@@ -11,6 +11,7 @@ import {
 } from "@/components/clientFetch";
 
 import { formatEur } from "@/lib/format";
+import { readPageCache, writePageCache } from "@/lib/page-cache";
 interface SalesField {
   label: string;
   netSales: number;
@@ -78,6 +79,7 @@ export default function ALVRaporttiPage() {
           throw new Error("Palvelin palautti virheellisen ALV-raportin");
         }
         setLoadError("");
+        writePageCache(`alv:${period}`, data);
         setResult({ period, data });
       })
       .catch((error: unknown) => {
@@ -93,7 +95,12 @@ export default function ALVRaporttiPage() {
     return () => controller.abort();
   }, [period, loadAttempt]);
 
-  const data = result?.period === period ? result.data : null;
+  // A previously computed period paints instantly from the cache while the
+  // fetch above recomputes it in the background.
+  const data =
+    result?.period === period
+      ? result.data
+      : readPageCache<ALVData>(`alv:${period}`);
   const loading = !data && !loadError;
 
   function buildMonthOptions() {

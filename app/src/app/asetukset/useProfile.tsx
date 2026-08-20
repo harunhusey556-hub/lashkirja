@@ -7,6 +7,7 @@ import {
   readJson,
   redirectToLogin,
 } from "@/components/clientFetch";
+import { readPageCache, writePageCache } from "@/lib/page-cache";
 
 export interface Profile {
   firstName: string;
@@ -23,7 +24,9 @@ export interface Profile {
  * optimistic: the UI flips immediately and rolls back on failure.
  */
 export function useProfile() {
-  const [profile, setProfile] = useState<Profile | null>(null);
+  const [profile, setProfile] = useState<Profile | null>(
+    () => readPageCache<Profile>("profile")
+  );
   const [saving, setSaving] = useState(false);
   const [savedMsg, setSavedMsg] = useState("");
   const [loadError, setLoadError] = useState("");
@@ -41,6 +44,7 @@ export function useProfile() {
           throw new Error("Palvelin palautti virheelliset asetukset");
         }
         setLoadError("");
+        writePageCache("profile", data.profile);
         setProfile(data.profile);
       })
       .catch((error: unknown) => {
@@ -76,9 +80,11 @@ export function useProfile() {
           res,
           "Tallennus epäonnistui"
         );
-        setProfile((current) =>
-          current ? { ...current, ...data.profile } : current
-        );
+        setProfile((current) => {
+          const next = current ? { ...current, ...data.profile } : current;
+          if (next) writePageCache("profile", next);
+          return next;
+        });
         setSavedMsg("Tallennettu");
         return true;
       } catch (error: unknown) {

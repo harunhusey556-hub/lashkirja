@@ -82,7 +82,11 @@ function InvoicesPageContent() {
   const searchParams = useSearchParams();
   const customerFilter = searchParams.get("customerId") ?? "";
 
-  const cached = readPageCache<{ invoices: InvoiceSummary[]; aging: Aging }>("invoices");
+  // The cache only ever holds the unfiltered list, so a customer-scoped link
+  // must not paint it as if it were the filtered result.
+  const cached = customerFilter
+    ? null
+    : readPageCache<{ invoices: InvoiceSummary[]; aging: Aging }>("invoices");
   const [invoices, setInvoices] = useState<InvoiceSummary[]>(cached?.invoices ?? []);
   const [aging, setAging] = useState<Aging | null>(cached?.aging ?? null);
   const [customers, setCustomers] = useState<
@@ -108,7 +112,7 @@ function InvoicesPageContent() {
         response,
         "Laskujen haku epäonnistui"
       );
-      writePageCache("invoices", data);
+      if (filter === "all" && !customerFilter) writePageCache("invoices", data);
       setInvoices(data.invoices);
       setAging(data.aging);
       setStatus("ready");

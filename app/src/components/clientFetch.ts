@@ -1,3 +1,5 @@
+import { clearPageCache } from "@/lib/page-cache";
+
 export class ApiError extends Error {
   status: number;
   details?: unknown;
@@ -100,6 +102,9 @@ export function redirectToLogin(): void {
  */
 export async function signOut(): Promise<void> {
   document.body.classList.add("signing-out");
+  // Nothing cached may survive the account: the next sign-in must not paint
+  // the previous user's lists while its own fetches are still in flight.
+  clearPageCache();
   try {
     await fetch("/api/auth/logout", { method: "POST", credentials: "include" });
   } catch {

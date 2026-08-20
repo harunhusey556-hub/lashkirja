@@ -20,6 +20,7 @@ import {
   categoryLabel,
   RECEIPT_CATEGORIES,
 } from "@/lib/receipt-categories";
+import { readPageCache, writePageCache } from "@/lib/page-cache";
 
 import { formatEur, formatMonth } from "@/lib/format";
 interface SavedReceipt {
@@ -81,9 +82,13 @@ export default function KuititPage() {
   const [actionError, setActionError] = useState("");
   const [loadAttempt, setLoadAttempt] = useState(0);
 
-  const [pendingReceipts, setPendingReceipts] = useState<SavedReceipt[]>([]);
+  const [pendingReceipts, setPendingReceipts] = useState<SavedReceipt[]>(
+    () => readPageCache<SavedReceipt[]>("receipts-pending") ?? []
+  );
   const [bulkReviewing, setBulkReviewing] = useState(false);
-  const [loadingPending, setLoadingPending] = useState(true);
+  const [loadingPending, setLoadingPending] = useState(
+    () => readPageCache<SavedReceipt[]>("receipts-pending") === null
+  );
   const [isPendingOpen, setIsPendingOpen] = useState(false);
   const [isSearchOpen, setIsSearchOpen] = useState(false);
 
@@ -138,6 +143,7 @@ export default function KuititPage() {
       .then((data) => {
         if (controller.signal.aborted) return;
         setLoadError(null);
+        writePageCache(`receipts:${query}`, data.receipts || []);
         setListResult({ query, receipts: data.receipts || [] });
       })
       .catch((error: unknown) => {
@@ -156,6 +162,7 @@ export default function KuititPage() {
       .then((res) => readJson<{ receipts?: SavedReceipt[] }>(res, "Virhe"))
       .then((data) => {
         if (!controller.signal.aborted) {
+          writePageCache("receipts-pending", data.receipts || []);
           setPendingReceipts(data.receipts || []);
           setLoadingPending(false);
         }
@@ -167,9 +174,17 @@ export default function KuititPage() {
     return () => controller.abort();
   }, [query, loadAttempt]);
 
-  const receipts = listResult?.query === query ? listResult.receipts : [];
+  // A stale-but-cached copy paints immediately while the fetch above
+  // revalidates; the skeleton is reserved for a genuinely never-seen query.
+  const cachedReceipts =
+    listResult?.query === query
+      ? null
+      : readPageCache<SavedReceipt[]>(`receipts:${query}`);
+  const receipts =
+    listResult?.query === query ? listResult.receipts : cachedReceipts ?? [];
   const currentLoadError = loadError?.query === query ? loadError.message : "";
-  const loadingList = listResult?.query !== query && !currentLoadError;
+  const loadingList =
+    listResult?.query !== query && cachedReceipts === null && !currentLoadError;
 
   const activeChips = useMemo(() => {
     const chips: { key: string; label: string; clear: () => void }[] = [];
@@ -286,14 +301,15 @@ export default function KuititPage() {
       if (!res.ok) {
         await readJson(res, "Kuitin poistaminen epäonnistui");
       }
-      setListResult((previous) =>
-        previous
-          ? {
-              ...previous,
-              receipts: previous.receipts.filter((receipt) => receipt.id !== id),
-            }
-          : previous
-      );
+      setListResult((previous) => {
+        const base =
+          previous?.query === query
+            ? previous.receipts
+            : readPageCache<SavedReceipt[]>(`receipts:${query}`) ?? [];
+        const next = base.filter((receipt) => receipt.id !== id);
+        writePageCache(`receipts:${query}`, next);
+        return { query, receipts: next };
+      });
     } catch (error: unknown) {
       if (isUnauthorized(error)) {
         redirectToLogin();
@@ -362,11 +378,13 @@ export default function KuititPage() {
       if (!res.ok) await readJson(res, "Poisto epäonnistui");
       
       setListResult((prev) => {
-        if (!prev) return prev;
-        return {
-          ...prev,
-          receipts: prev.receipts.filter((r) => !selectedIds.has(r.id)),
-        };
+        const base =
+          prev?.query === query
+            ? prev.receipts
+            : readPageCache<SavedReceipt[]>(`receipts:${query}`) ?? [];
+        const next = base.filter((r) => !selectedIds.has(r.id));
+        writePageCache(`receipts:${query}`, next);
+        return { query, receipts: next };
       });
       setSelectedIds(new Set());
       setShowBulkConfirm(false);

@@ -16,6 +16,7 @@ import {
 
 import type { BusinessProfile } from "@/lib/onboarding";
 import BottomSheet from "@/components/BottomSheet";
+import { readPageCache, writePageCache } from "@/lib/page-cache";
 const NAV_ITEMS = [
   {
     href: "/dashboard",
@@ -152,6 +153,62 @@ function parentPath(pathname: string): string {
   return segments.length > 0 ? `/${segments.join("/")}` : "/dashboard";
 }
 
+type ShellUser = { email?: string; firstName?: string };
+
+/**
+ * The session check lives in the page cache so a navigation (which remounts
+ * the whole shell) renders the page content in the very first frame and the
+ * /api/auth/me revalidation runs silently behind it. Only the first mount
+ * after a full page load ever shows the "checking session" state.
+ */
+const AUTH_CACHE_KEY = "shell-auth";
+/** Set once the onboarding endpoint has confirmed the user is onboarded. */
+const ONBOARDED_CACHE_KEY = "shell-onboarded";
+
+let warmedTabs = false;
+
+function currentMonthKey(): string {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+}
+
+/**
+ * Fire-and-forget warm-up of the main tab payloads right after the first
+ * successful session check, so even the first tap on each tab paints with
+ * data instead of a skeleton. Keys and shapes mirror what each page caches
+ * for itself; existing entries are never overwritten.
+ */
+function warmTabCaches() {
+  if (warmedTabs) return;
+  warmedTabs = true;
+
+  const warm = (url: string, key: string, pick: (data: Record<string, unknown>) => unknown) => {
+    if (readPageCache(key) !== null) return;
+    fetch(url, { credentials: "include" })
+      .then((res) => (res.ok ? (res.json() as Promise<Record<string, unknown>>) : null))
+      .then((data) => {
+        if (!data) return;
+        const value = pick(data);
+        if (value !== undefined && readPageCache(key) === null) {
+          writePageCache(key, value);
+        }
+      })
+      .catch(() => {
+        // Warm-up only; the page's own fetch will surface real errors.
+      });
+  };
+
+  warm("/api/receipts", "receipts:", (d) => d.receipts ?? []);
+  warm("/api/receipts?reviewStatus=pending", "receipts-pending", (d) => d.receipts ?? []);
+  warm("/api/statements", "statements", (d) => d.statements ?? []);
+  warm("/api/bank-accounts", "bank-overview", (d) => (d.accounts ? d : undefined));
+  warm("/api/invoices?", "invoices", (d) => (d.invoices && d.aging ? d : undefined));
+  const month = currentMonthKey();
+  warm(`/api/dashboard?month=${month}`, `dashboard:${month}`, (d) =>
+    Number.isFinite(d.income) && Number.isFinite(d.expenses) && d.vat ? d : undefined
+  );
+}
+
 function navActive(pathname: string, href: string): boolean {
   if (href === "/dashboard") return pathname === "/dashboard";
   return pathname === href || pathname.startsWith(`${href}/`);
@@ -184,14 +241,16 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const [authAttempt, setAuthAttempt] = useState(0);
   const [authState, setAuthState] = useState<
     { status: "checking" | "ready" | "error"; message?: string }
-  >({ status: "checking" });
+  >(() =>
+    readPageCache<ShellUser>(AUTH_CACHE_KEY) ? { status: "ready" } : { status: "checking" }
+  );
   const [showOnboarding, setShowOnboarding] = useState(false);
   // Stored with the path it was opened on, so a route change closes it without
   // an effect that would re-render twice.
   const [moreOpenOn, setMoreOpenOn] = useState<string | null>(null);
   const [profileOpenOn, setProfileOpenOn] = useState<string | null>(null);
   const [signingOut, setSigningOut] = useState(false);
-  const [user, setUser] = useState<{ email?: string; firstName?: string } | null>(null);
+  const [user, setUser] = useState<ShellUser | null>(() => readPageCache<ShellUser>(AUTH_CACHE_KEY));
   const [onboardingProfile, setOnboardingProfile] = useState<BusinessProfile | null>(null);
 
   const pathname = usePathname();
@@ -349,13 +408,20 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         )
       )
       .then((me) => {
-        setUser(me.user ?? null);
+        const nextUser: ShellUser = me.user ?? {};
+        writePageCache(AUTH_CACHE_KEY, nextUser);
+        setUser(nextUser);
         setAuthState({ status: "ready" });
-        // Check onboarding state
+        warmTabCaches();
+        // Check onboarding state; skip once it has been confirmed done.
+        if (readPageCache<boolean>(ONBOARDED_CACHE_KEY)) return;
         return fetch("/api/onboarding", { signal: controller.signal })
           .then((res) => readJson<{ onboarded: boolean; profile: BusinessProfile | null }>(res, ""))
           .then((data) => {
-            if (data && !data.onboarded) {
+            if (!data) return;
+            if (data.onboarded) {
+              writePageCache(ONBOARDED_CACHE_KEY, true);
+            } else {
               setOnboardingProfile(data.profile || null);
               setShowOnboarding(true);
             }
@@ -368,6 +434,10 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
           redirectToLogin();
           return;
         }
+        // With a cached session the revalidation failing (flaky network) must
+        // not blank an already-rendered page; the page's own fetches will
+        // surface anything real.
+        if (readPageCache<ShellUser>(AUTH_CACHE_KEY)) return;
         setAuthState({
           status: "error",
           message: errorMessage(error, "Istunnon tarkistus epäonnistui"),
@@ -468,7 +538,10 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
           <OnboardingModal
             isOpen={showOnboarding}
             initialProfile={onboardingProfile ?? undefined}
-            onComplete={() => setShowOnboarding(false)}
+            onComplete={() => {
+              writePageCache(ONBOARDED_CACHE_KEY, true);
+              setShowOnboarding(false);
+            }}
           />
 
           <nav
