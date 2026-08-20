@@ -272,3 +272,43 @@ rest of a matching run.
 Wrapping `statements/[id]` in `withErrorHandler` was part of this: those
 handlers returned raw responses, so a thrown domain error would have surfaced
 as a 500 instead of the 409 it is.
+
+## 12. Recurring invoices (added 2026-08-20)
+
+### Schedule arithmetic
+
+`lib/recurrence.ts` is pure and answers two questions: what date comes next,
+and what is owed right now. Two rules drive it:
+
+- The anchor day is remembered, not lost. A schedule on the 31st bills
+  28 February and then 31 March again; clamping must not walk the schedule
+  permanently back to the 28th.
+- Missed occurrences are generated, not skipped, each with its own issue date.
+  `MAX_CATCH_UP_RUNS` caps a single pass and the result says `truncated: true`
+  rather than silently dropping the rest.
+
+### Generation is idempotent by construction
+
+Every occurrence is a `RecurringInvoiceRun` row keyed by
+`(recurringInvoiceId, issueDate)` with a unique index. The runner claims that
+row **before** creating the invoice, so a retried cron, a double click or two
+tabs lose the race at the database rather than invoicing a customer twice. A
+claim that then fails is updated with the reason (`skipped_locked`, `failed`)
+instead of being deleted, which is also what stops a locked period from being
+retried forever.
+
+Editing a schedule never re-bills history: the next run is one full interval
+after the last generated occurrence, on the new anchor day.
+
+Sending is best-effort and cannot lose an invoice: the invoice is created and
+recorded first, and a failed send is reported against that run. `lib/invoice-
+mail.ts` holds the send logic so the manual action and the automatic one
+compose the same message.
+
+### Scheduled routes
+
+`lib/cron-auth.ts` now guards every `/api/cron/*` route. Previously `cleanup`
+refused to run in production without `CRON_SECRET` while `sync-email` ran wide
+open — and sync-email acts on every connected mail account, for all users. Both
+now share one rule: with a secret it must match; without one the route runs
+only outside production.

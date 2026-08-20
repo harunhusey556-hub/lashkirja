@@ -100,6 +100,7 @@ const NAV_ITEMS = [
 const MORE_ITEMS = [
   { href: "/laskut", label: "Myyntilaskut", hint: "Laskutus, viitenumerot, saatavat" },
   { href: "/asiakkaat", label: "Asiakkaat", hint: "Asiakasrekisteri ja avoimet saatavat" },
+  { href: "/toistuvat", label: "Toistuvat laskut", hint: "Automaattinen laskutus aikataulun mukaan" },
   { href: "/ostolaskut", label: "Ostolaskut", hint: "Mitä olet velkaa ja milloin" },
   { href: "/raportit", label: "Raportit", hint: "Tuloslaskelma ja CSV-viennit" },
   { href: "/alv-raportti", label: "ALV-raportti", hint: "Arvonlisäveron yhteenveto" },
@@ -119,6 +120,7 @@ function pageTitle(pathname: string): string {
   if (pathname.startsWith("/asiakkaat")) return "Asiakkaat";
   if (pathname.startsWith("/raportit")) return "Raportit";
   if (pathname.startsWith("/ostolaskut")) return "Ostolaskut";
+  if (pathname.startsWith("/toistuvat")) return "Toistuvat laskut";
   if (/^\/tiliotteet\/[^/]+$/.test(pathname)) return "Tiliote";
   if (pathname.startsWith("/tiliotteet")) return "Tiliotteet";
   if (pathname.startsWith("/alv-raportti")) return "ALV-raportti";

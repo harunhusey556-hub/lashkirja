@@ -88,6 +88,20 @@ Tuetut muodot:
   varten. Lasku merkitään lähetetyksi vasta kun postipalvelin on hyväksynyt viestin.
 - Laskuttajan tiedot (nimi, Y-tunnus, osoite, IBAN, BIC, ehdot) syötetään Asetukset-sivulla.
 
+## Toistuvat laskut
+
+- `/toistuvat`: sama lasku samalle asiakkaalle kuukausittain, neljännesvuosittain tai vuosittain.
+- Rivit ovat **pohja**: jokainen luotu lasku saa omat rivinsä, joten pohjan muokkaus ei muuta
+  laskua, joka on jo asiakkaalla.
+- Laskutuspäivä muistetaan: 31. päivä laskuttaa helmikuussa 28./29. ja maaliskuussa taas 31.
+- Väliin jääneet kerrat luodaan, ei ohiteta — jos sovellus on ollut kiinni kolme kuukautta,
+  syntyy kolme laskua omilla päivämäärillään (katto 24 kerralla).
+- Luonti on **idempotenttia**: yksi kerta = yksi rivi `(aikataulu, laskun päivä)` -uniikilla
+  avaimella, joten uusintayritys tai kaksi välilehteä ei laskuta kahdesti.
+- Lukittu kausi ei kaada ajoa: se kerta merkitään ohitetuksi ja loput syntyvät normaalisti.
+- Automaattilähetys on best-effort: lasku on aina tallessa, epäonnistunut lähetys raportoidaan.
+- Ajastus: `GET /api/cron/recurring-invoices` (vaatii `CRON_SECRET`-bearerin tai `?secret=`).
+
 ## Maksumuistutukset ja viivästyskorko
 
 - Myöhässä olevalle laskulle voi luoda maksumuistutuksen: avoin pääoma + viivästyskorko +

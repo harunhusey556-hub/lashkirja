@@ -47,6 +47,7 @@ model User {
   customers     Customer[]
   salesInvoices SalesInvoice[]
   purchaseInvoices PurchaseInvoice[]
+  recurringInvoices RecurringInvoice[]
 }
 
 model Receipt {
@@ -281,7 +282,8 @@ model Customer {
   createdAt              DateTime  @default(now())
   updatedAt              DateTime  @updatedAt
 
-  invoices SalesInvoice[]
+  invoices          SalesInvoice[]
+  recurringInvoices RecurringInvoice[]
 
   @@index([userId, archivedAt])
   @@index([userId, name])
@@ -311,9 +313,10 @@ model SalesInvoice {
   createdAt  DateTime  @default(now())
   updatedAt  DateTime  @updatedAt
 
-  lines     InvoiceLine[]
-  payments  InvoicePayment[]
-  reminders InvoiceReminder[]
+  lines        InvoiceLine[]
+  payments     InvoicePayment[]
+  reminders    InvoiceReminder[]
+  recurringRun RecurringInvoiceRun?
 
   @@unique([userId, number])
   @@unique([userId, reference])
@@ -422,4 +425,66 @@ model InvoiceReminder {
   daysLate          Int
 
   @@index([invoiceId, sentAt])
+}
+
+// A standing order to invoice the same customer on a schedule. The lines are a
+// template: each generated invoice gets its own copy, so editing the template
+// never rewrites an invoice the customer already holds.
+model RecurringInvoice {
+  id              String    @id @default(uuid())
+  userId          String
+  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  customerId      String
+  customer        Customer  @relation(fields: [customerId], references: [id])
+  name            String?
+  interval        String // "monthly" | "quarterly" | "yearly"
+  anchorDay       Int // day of month the invoice is issued on
+  startDate       DateTime
+  endDate         DateTime?
+  /// Next issue date owed. Null once the schedule has finished.
+  nextRunAt       DateTime?
+  paymentTermDays Int       @default(14)
+  notes           String?
+  /// Email the invoice to the customer as soon as it is generated.
+  autoSend        Boolean   @default(false)
+  active          Boolean   @default(true)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  lines RecurringInvoiceLine[]
+  runs  RecurringInvoiceRun[]
+
+  @@index([userId, active, nextRunAt])
+  @@index([customerId])
+}
+
+model RecurringInvoiceLine {
+  id                 String           @id @default(uuid())
+  recurringInvoiceId String
+  recurringInvoice   RecurringInvoice @relation(fields: [recurringInvoiceId], references: [id], onDelete: Cascade)
+  sortOrder          Int              @default(0)
+  description        String
+  quantityMilli      Int
+  unit               String           @default("kpl")
+  unitPriceCents     Int
+  vatRatePermille    Int              @default(255)
+
+  @@index([recurringInvoiceId, sortOrder])
+}
+
+// One occurrence. The unique (schedule, issueDate) pair is what makes
+// generation idempotent: a second run on the same day cannot invoice twice.
+model RecurringInvoiceRun {
+  id                 String           @id @default(uuid())
+  recurringInvoiceId String
+  recurringInvoice   RecurringInvoice @relation(fields: [recurringInvoiceId], references: [id], onDelete: Cascade)
+  issueDate          DateTime
+  invoiceId          String?          @unique
+  invoice            SalesInvoice?    @relation(fields: [invoiceId], references: [id], onDelete: SetNull)
+  status             String           @default("created") // created | skipped_locked | failed
+  note               String?
+  createdAt          DateTime         @default(now())
+
+  @@unique([recurringInvoiceId, issueDate])
+  @@index([recurringInvoiceId, createdAt])
 }

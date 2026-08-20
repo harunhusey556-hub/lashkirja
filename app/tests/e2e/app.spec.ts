@@ -204,3 +204,28 @@ test("closing the books makes an earlier period read-only", async ({ page }) => 
   await page.getByRole("button", { name: "Avaa kirjanpito uudelleen" }).click();
   await expect(page.getByText("Lukitus poistettu.")).toBeVisible();
 });
+
+test("a recurring invoice generates a real invoice", async ({ page }) => {
+  await login(page);
+
+  await page.goto("/asiakkaat");
+  await page.getByRole("main").getByRole("button", { name: "Lisää", exact: true }).click();
+  await page.getByLabel("Nimi").fill("Toisto Asiakas");
+  await page.getByRole("button", { name: "Lisää asiakas" }).click();
+
+  await page.goto("/toistuvat");
+  await page.getByRole("button", { name: "Uusi toistuva lasku" }).click();
+  await page.getByLabel("Asiakas").selectOption({ label: "Toisto Asiakas" });
+  await page.getByLabel("Rivin 1 kuvaus").fill("Kuukausiylläpito");
+  await page.getByLabel("Rivin 1 hinta").fill("50");
+  // Start in the past so the first occurrence is immediately due.
+  await page.getByLabel("Alkaa").fill("2026-01-01");
+  await page.getByRole("button", { name: "Luo toistuva lasku" }).click();
+
+  await expect(page.getByText("Toisto Asiakas").first()).toBeVisible();
+  await page.getByRole("button", { name: "Luo erääntyneet laskut" }).click();
+  await expect(page.getByText(/Luotiin \d+ laskua/)).toBeVisible();
+
+  await page.goto("/laskut");
+  await expect(page.getByText("Toisto Asiakas").first()).toBeVisible();
+});
