@@ -1,139 +1,219 @@
 "use client";
 
-import React, { useState, useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ChatMatchProposal } from "@/lib/ai-assistant";
-import { readJson,
-  errorMessage,
-} from "@/components/clientFetch";
-
-import BottomSheet from "@/components/BottomSheet";
-import { LoadingState } from "@/components/AsyncState";
+import { errorMessage, readJson } from "@/components/clientFetch";
 import { ChatMarkdown } from "@/components/ChatMarkdown";
-import { Button } from "@/components/ui";
+import { Button, FormError } from "@/components/ui";
+import { hapticNotify } from "@/lib/haptics";
+
 interface ChatMessageItem {
   id: string;
   role: "user" | "assistant";
   content: string;
-  proposal?: ChatMatchProposal | null;
+  clientId?: string | null;
+  proposal?: (ChatMatchProposal & { status?: "accepted" | "rejected" }) | null;
+  limited?: boolean;
   createdAt: string;
+  incomplete?: boolean;
 }
 
-interface ChatResponse {
+interface DoneEvent {
+  done?: boolean;
+  incomplete?: boolean;
+  delta?: string;
+  error?: string;
   id?: string;
-  content: string;
-  proposal?: ChatMatchProposal | null;
+  content?: string;
+  proposal?: ChatMessageItem["proposal"];
   createdAt?: string;
+  limited?: boolean;
 }
 
-export function AiChatDrawer() {
-  const [isOpen, setIsOpen] = useState(false);
+export function AiChatDrawer({
+  open,
+  onClose,
+}: {
+  open: boolean;
+  onClose: () => void;
+}) {
   const [messages, setMessages] = useState<ChatMessageItem[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [loadingHistory, setLoadingHistory] = useState(false);
+  const [historyError, setHistoryError] = useState("");
+  const [hasMore, setHasMore] = useState(false);
   const [historyLoaded, setHistoryLoaded] = useState(false);
   const [matchBusyId, setMatchBusyId] = useState<string | null>(null);
-  const [failedQuery, setFailedQuery] = useState<string | null>(null);
-  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const [actionError, setActionError] = useState("");
+  const [failed, setFailed] = useState<{ text: string; clientId: string } | null>(null);
+  const [showJump, setShowJump] = useState(false);
+  const [cutoff, setCutoff] = useState<string | null>(null);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+  const scrollerRef = useRef<HTMLDivElement>(null);
+  const stickRef = useRef(true);
+  const abortRef = useRef<AbortController | null>(null);
+  const loadingRef = useRef(false);
+
+  const visible = messages.filter((message) => !cutoff || message.createdAt >= cutoff);
+
+  function mergeHistory(incoming: ChatMessageItem[]) {
+    setMessages((current) => {
+      const serverClientIds = new Set(
+        incoming.map((message) => message.clientId).filter((id): id is string => Boolean(id))
+      );
+      const byId = new Map<string, ChatMessageItem>();
+      for (const message of incoming) byId.set(message.id, message);
+      for (const message of current) {
+        if (byId.has(message.id)) continue;
+        const localClient = message.id.startsWith("user-") ? message.id.slice(5) : message.clientId;
+        if (localClient && serverClientIds.has(localClient)) continue;
+        byId.set(message.id, message);
+      }
+      return [...byId.values()].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+    });
+  }
+
+  async function loadHistory(before?: string) {
+    if (loadingRef.current && !before) return;
+    setLoadingHistory(true);
+    setHistoryError("");
+    try {
+      const url = before ? `/api/ai/chat?before=${encodeURIComponent(before)}` : "/api/ai/chat";
+      const response = await fetch(url);
+      const data = await readJson<{ messages: ChatMessageItem[]; hasMore?: boolean }>(
+        response,
+        "Keskusteluhistorian lataus epäonnistui"
+      );
+      mergeHistory(data.messages ?? []);
+      setHasMore(Boolean(data.hasMore));
+      setHistoryLoaded(true);
+    } catch (error) {
+      setHistoryError(errorMessage(error, "Keskusteluhistorian lataus epäonnistui"));
+    } finally {
+      setLoadingHistory(false);
+    }
+  }
 
   useEffect(() => {
-    if (isOpen && !historyLoaded) {
-      setLoadingHistory(true);
-      fetch("/api/ai/chat")
-        .then((res) => readJson<{ messages: ChatMessageItem[] }>(res, ""))
-        .then((data) => {
-          if (data && data.messages && Array.isArray(data.messages)) {
-            setMessages(data.messages);
-          }
-        })
-        .catch(() => {})
-        .finally(() => {
-          setLoadingHistory(false);
-          setHistoryLoaded(true);
-        });
-    }
-  }, [isOpen, historyLoaded]);
+    if (open && !historyLoaded && !historyError) void loadHistory();
+    // loadHistory is stable enough for the open transition; historyLoaded gates repeats.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, historyLoaded, historyError]);
 
   useEffect(() => {
-    if (isOpen) {
-      messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    const el = scrollerRef.current;
+    if (!el || !open) return;
+    if (stickRef.current) {
+      el.scrollTop = el.scrollHeight;
+      setShowJump(false);
+    } else if (loading) {
+      setShowJump(true);
     }
-  }, [messages, isOpen]);
+  }, [messages, loading, open]);
 
-  async function handleSendMessage(textToSend?: string, retrying = false) {
+  function onScroll() {
+    const el = scrollerRef.current;
+    if (!el) return;
+    const distance = el.scrollHeight - el.scrollTop - el.clientHeight;
+    stickRef.current = distance < 72;
+    if (stickRef.current) setShowJump(false);
+  }
+
+  function jumpToLatest() {
+    const el = scrollerRef.current;
+    if (!el) return;
+    stickRef.current = true;
+    el.scrollTop = el.scrollHeight;
+    setShowJump(false);
+  }
+
+  async function handleSendMessage(textToSend?: string, retry?: { clientId: string }) {
     const query = (textToSend || input).trim();
     if (!query || loading) return;
-
-    if (retrying) {
-      setMessages((prev) => prev.filter((msg) => !msg.id.startsWith("error-") && !msg.id.startsWith("stream-")));
-    } else {
+    const clientId = retry?.clientId || crypto.randomUUID();
+    if (!retry) {
       setMessages((prev) => [
         ...prev,
         {
-          id: `user-${Date.now()}`,
+          id: `user-${clientId}`,
           role: "user",
           content: query,
           createdAt: new Date().toISOString(),
         },
       ]);
-      if (!textToSend) setInput("");
+      setInput("");
+    } else {
+      setMessages((prev) =>
+        prev.filter((message) => !message.id.startsWith("error-") && !message.incomplete)
+      );
     }
-    setFailedQuery(null);
+    setFailed(null);
+    setActionError("");
     setLoading(true);
-
-    const placeholderId = `stream-${Date.now()}`;
+    loadingRef.current = true;
+    stickRef.current = true;
+    const controller = new AbortController();
+    abortRef.current = controller;
+    const placeholderId = `stream-${clientId}`;
     let placeholderAdded = false;
+    let sawDone = false;
 
-    try {
-      const res = await fetch("/api/ai/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: query, stream: true }),
-      });
-      const type = res.headers.get("content-type") || "";
-      if (!res.ok || !type.includes("text/event-stream")) {
-        const data = await readJson<ChatResponse>(res, "Virhe viestin lähetyksessä");
+    const paint = (next: string) => {
+      if (!placeholderAdded) {
+        placeholderAdded = true;
         setMessages((prev) => [
           ...prev,
           {
-            id: data.id || String(Date.now() + 1),
+            id: placeholderId,
             role: "assistant",
-            content: data.content,
-            proposal: data.proposal,
-            createdAt: data.createdAt || new Date().toISOString(),
+            content: next,
+            createdAt: new Date().toISOString(),
           },
         ]);
         return;
       }
+      setMessages((prev) =>
+        prev.map((message) => (message.id === placeholderId ? { ...message, content: next } : message))
+      );
+    };
 
-      const reader = res.body?.getReader();
+    try {
+      const response = await fetch("/api/ai/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message: query, stream: true, clientId }),
+        signal: controller.signal,
+      });
+      const type = response.headers.get("content-type") || "";
+      if (!response.ok || !type.includes("text/event-stream")) {
+        const data = await readJson<{
+          id?: string;
+          content: string;
+          proposal?: ChatMessageItem["proposal"];
+          createdAt?: string;
+          limited?: boolean;
+        }>(response, "Virhe viestin lähetyksessä");
+        setMessages((prev) => [
+          ...prev.filter((message) => message.id !== placeholderId),
+          {
+            id: data.id || `assistant-${clientId}`,
+            role: "assistant",
+            content: data.content,
+            proposal: data.proposal,
+            limited: data.limited,
+            createdAt: data.createdAt || new Date().toISOString(),
+          },
+        ]);
+        sawDone = true;
+        return;
+      }
+      const reader = response.body?.getReader();
       if (!reader) throw new Error("Vastausta ei voitu lukea");
       const decoder = new TextDecoder();
       let buffer = "";
       let content = "";
-      let finalId = placeholderId;
-      let proposal: ChatMessageItem["proposal"] = null;
-      let createdAt = new Date().toISOString();
-
-      const paint = (next: string) => {
-        if (!placeholderAdded) {
-          placeholderAdded = true;
-          setMessages((prev) => [
-            ...prev,
-            {
-              id: placeholderId,
-              role: "assistant",
-              content: next,
-              createdAt,
-            },
-          ]);
-          return;
-        }
-        setMessages((prev) =>
-          prev.map((msg) => (msg.id === placeholderId ? { ...msg, content: next } : msg))
-        );
-      };
-
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
@@ -143,62 +223,121 @@ export function AiChatDrawer() {
         for (const part of parts) {
           const line = part.split("\n").find((entry) => entry.startsWith("data: "));
           if (!line) continue;
-          const event = JSON.parse(line.slice(6)) as {
-            delta?: string;
-            done?: boolean;
-            error?: string;
-            id?: string;
-            proposal?: ChatMessageItem["proposal"];
-            createdAt?: string;
-          };
-          if (event.error) throw new Error(event.error);
+          const event = JSON.parse(line.slice(6)) as DoneEvent;
           if (event.delta) {
             content += event.delta;
             paint(content);
           }
+          if (event.incomplete) {
+            sawDone = false;
+            setFailed({ text: query, clientId });
+            setMessages((prev) => {
+              const rest = prev.filter((message) => message.id !== placeholderId);
+              return [
+                ...rest,
+                {
+                  id: `error-${clientId}`,
+                  role: "assistant",
+                  content: event.error || "Vastaus jäi kesken.",
+                  createdAt: new Date().toISOString(),
+                  incomplete: true,
+                  limited: true,
+                },
+              ];
+            });
+            void hapticNotify("error");
+            return;
+          }
           if (event.done) {
-            if (event.id) finalId = event.id;
-            proposal = event.proposal ?? null;
-            if (event.createdAt) createdAt = event.createdAt;
+            sawDone = true;
+            const finalContent = event.content || content;
+            setMessages((prev) =>
+              prev.map((message) =>
+                message.id === placeholderId
+                  ? {
+                      ...message,
+                      id: event.id || placeholderId,
+                      content: finalContent,
+                      proposal: event.proposal ?? null,
+                      limited: event.limited,
+                      createdAt: event.createdAt || message.createdAt,
+                      incomplete: false,
+                    }
+                  : message
+              )
+            );
+            if (!placeholderAdded) paint(finalContent);
           }
         }
       }
-
-      if (!placeholderAdded) paint(content);
-      setMessages((prev) =>
-        prev.map((msg) =>
-          msg.id === placeholderId ? { ...msg, id: finalId, content, proposal, createdAt } : msg
-        )
-      );
-    } catch (err: unknown) {
-      setFailedQuery(query);
-      setMessages((prev) => {
-        const withoutStream = prev.filter((msg) => msg.id !== placeholderId);
-        return [
-          ...withoutStream,
-          {
-            id: `error-${Date.now()}`,
-            role: "assistant",
-            content: `Pahoittelut, viestin käsittely epäonnistui: ${errorMessage(
-              err,
-              "tuntematon virhe"
-            )}.`,
-            createdAt: new Date().toISOString(),
-          },
-        ];
-      });
+      if (!sawDone) {
+        setFailed({ text: query, clientId });
+        setMessages((prev) =>
+          prev.map((message) =>
+            message.id === placeholderId ? { ...message, incomplete: true } : message
+          )
+        );
+        void hapticNotify("error");
+      }
+    } catch (error) {
+      if (controller.signal.aborted) {
+        setMessages((prev) =>
+          prev.map((message) =>
+            message.id === placeholderId
+              ? { ...message, incomplete: true, content: message.content || "Vastaus keskeytettiin." }
+              : message
+          )
+        );
+        setFailed({ text: query, clientId });
+        return;
+      }
+      setFailed({ text: query, clientId });
+      setMessages((prev) => [
+        ...prev.filter((message) => message.id !== placeholderId),
+        {
+          id: `error-${clientId}`,
+          role: "assistant",
+          content: `Viestin käsittely epäonnistui: ${errorMessage(error, "tuntematon virhe")}.`,
+          createdAt: new Date().toISOString(),
+          incomplete: true,
+        },
+      ]);
+      void hapticNotify("error");
     } finally {
       setLoading(false);
+      loadingRef.current = false;
+      abortRef.current = null;
     }
   }
 
-  async function handleConfirmProposal(
-    msgId: string,
-    proposal: ChatMatchProposal
-  ) {
-    setMatchBusyId(msgId);
+  function stop() {
+    abortRef.current?.abort();
+  }
+
+  async function copyMessage(message: ChatMessageItem) {
     try {
-      const res = await fetch("/api/matching/confirm", {
+      await navigator.clipboard.writeText(message.content);
+      setCopiedId(message.id);
+      window.setTimeout(() => setCopiedId((current) => (current === message.id ? null : current)), 1500);
+    } catch {
+      setActionError("Kopiointi epäonnistui");
+    }
+  }
+
+  async function persistDecision(id: string, decision: "accepted" | "rejected") {
+    const response = await fetch("/api/ai/chat", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id, decision }),
+    });
+    await readJson(response, "Päätöksen tallennus epäonnistui");
+  }
+
+  async function handleConfirmProposal(msgId: string, proposal: ChatMatchProposal) {
+    setMatchBusyId(msgId);
+    setActionError("");
+    try {
+      const response = await fetch("/api/matching/confirm", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -206,220 +345,245 @@ export function AiChatDrawer() {
           receiptId: proposal.receiptId,
         }),
       });
-
-      await readJson(res, "Yhdistäminen epäonnistui");
-
-      // Update message state to show match confirmed
+      await readJson(response, "Yhdistäminen epäonnistui");
+      if (!msgId.startsWith("stream-") && !msgId.startsWith("error-")) {
+        await persistDecision(msgId, "accepted");
+      }
       setMessages((prev) =>
-        prev.map((msg) =>
-          msg.id === msgId
+        prev.map((message) =>
+          message.id === msgId
             ? {
-                ...msg,
-                content: "✅ Täsmäytys hyväksytty ja kuitti yhdistetty tiliotteeseen!",
-                proposal: null,
+                ...message,
+                content: "Täsmäytys hyväksytty ja kuitti yhdistetty tiliotteeseen.",
+                proposal: message.proposal ? { ...message.proposal, status: "accepted" } : null,
               }
-            : msg
+            : message
         )
       );
-    } catch (err: unknown) {
-      alert(errorMessage(err, "Täsmäytys epäonnistui"));
+      void hapticNotify("success");
+    } catch (error) {
+      setActionError(errorMessage(error, "Täsmäytys epäonnistui"));
+      void hapticNotify("error");
     } finally {
       setMatchBusyId(null);
     }
   }
 
-  function handleRejectProposal(msgId: string) {
-    setMessages((prev) =>
-      prev.map((msg) =>
-        msg.id === msgId
-          ? {
-              ...msg,
-              content: "Ehdotus hylätty.",
-              proposal: null,
-            }
-          : msg
-      )
-    );
+  async function handleRejectProposal(msgId: string) {
+    setActionError("");
+    try {
+      if (!msgId.startsWith("stream-") && !msgId.startsWith("error-")) {
+        await persistDecision(msgId, "rejected");
+      }
+      setMessages((prev) =>
+        prev.map((message) =>
+          message.id === msgId
+            ? {
+                ...message,
+                proposal: message.proposal ? { ...message.proposal, status: "rejected" } : null,
+              }
+            : message
+        )
+      );
+    } catch (error) {
+      setActionError(errorMessage(error, "Hylkäyksen tallennus epäonnistui"));
+    }
   }
 
+  if (!open) return null;
+
   return (
-    <>
-      {/* Floating Trigger Badge Button */}
-      <button
-        type="button"
-        onClick={() => setIsOpen(true)}
-        className="fixed right-4 z-40 bottom-[calc(var(--app-tab-height)+var(--safe-bottom)+0.75rem)] min-h-11 px-4 py-2.5 rounded-full bg-accent text-white font-medium text-xs shadow-xl hover:bg-accent-dark transition-all duration-300 hover-lift active-press flex items-center gap-2 border border-white/40 glass"
-        aria-label="Avaa tekoälyapuri"
-      >
-        <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping motion-reduce:animate-none" />
-        <span>LashKirja AI</span>
-      </button>
+    <div className="absolute inset-0 z-[70] flex flex-col bg-white" role="dialog" aria-labelledby="ai-chat-title">
+      <header className="app-header flex items-center gap-2 border-b border-warm-gray-light/40 px-3 pb-2">
+        <button type="button" onClick={onClose} className="active-press min-h-11 px-2 text-sm font-medium text-accent-dark">
+          Sulje
+        </button>
+        <h2 id="ai-chat-title" className="flex-1 text-center text-base font-medium text-charcoal">
+          Avustaja
+        </h2>
+        <button
+          type="button"
+          aria-expanded={menuOpen}
+          onClick={() => setMenuOpen((value) => !value)}
+          className="active-press min-h-11 px-2 text-sm font-medium text-charcoal"
+        >
+          Valikko
+        </button>
+      </header>
+      {menuOpen && (
+        <div className="border-b border-warm-gray-light/30 bg-cream/40 px-3 py-2">
+          <button
+            type="button"
+            className="block min-h-11 w-full rounded-xl px-3 text-left text-sm"
+            onClick={() => {
+              setCutoff(new Date().toISOString());
+              setMenuOpen(false);
+              stickRef.current = true;
+            }}
+          >
+            Uusi keskustelu
+          </button>
+          <button
+            type="button"
+            className="block min-h-11 w-full rounded-xl px-3 text-left text-sm"
+            onClick={() => {
+              setCutoff(null);
+              setMenuOpen(false);
+              if (!historyLoaded) void loadHistory();
+            }}
+          >
+            Näytä historia
+          </button>
+        </div>
+      )}
 
-      <BottomSheet
-        isOpen={isOpen}
-        onClose={() => setIsOpen(false)}
-        title="LashKirja AI"
-        subtitle="Kysy ALV-ohjeita tai anna tekoälyn etsiä kuitteja"
-        labelledBy="ai-chat-title"
-        heightClass="h-[85dvh]"
-      >
-            {/* Quick Action Chips */}
-            <div className="shrink-0 px-4 py-2 bg-cream/30 border-b border-warm-gray-light/20 flex items-center gap-2 overflow-x-auto scrollbar-none">
-              <button
-                type="button"
-                onClick={() => handleSendMessage("Etsi täsmäytettäviä kuitteja ja laskuja")}
-                className="min-h-11 inline-flex items-center text-[11px] px-3 py-1.5 rounded-full bg-accent/10 text-accent-dark font-medium border border-accent/20 whitespace-nowrap hover:bg-accent/20 transition-colors active-press"
-              >
-                🔍 Täsmäytä kuitit
-              </button>
-              <button
-                type="button"
-                onClick={() => handleSendMessage("Mikä on ripsienpidennysten ALV-kanta?")}
-                className="min-h-11 inline-flex items-center text-[11px] px-3 py-1.5 rounded-full bg-white text-charcoal font-medium border border-warm-gray-light whitespace-nowrap hover:bg-cream transition-colors active-press"
-              >
-                💡 ALV-ohjeet
-              </button>
+      <div ref={scrollerRef} onScroll={onScroll} className="relative min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain px-4 py-3">
+        {hasMore && (
+          <button
+            type="button"
+            className="mx-auto block min-h-11 text-sm text-accent-dark"
+            disabled={loadingHistory}
+            onClick={() => {
+              const oldest = messages[0]?.createdAt;
+              if (oldest) void loadHistory(oldest);
+            }}
+          >
+            {loadingHistory ? "Ladataan…" : "Vanhemmat viestit"}
+          </button>
+        )}
+        {historyError && (
+          <div className="space-y-2">
+            <FormError message={historyError} />
+            <Button variant="secondary" onClick={() => void loadHistory()}>
+              Yritä ladata historia uudelleen
+            </Button>
+          </div>
+        )}
+        {loadingHistory && messages.length === 0 && (
+          <p className="text-sm text-warm-gray">Ladataan keskustelua…</p>
+        )}
+        {!loadingHistory && visible.length === 0 && (
+          <div className="space-y-3 pt-6">
+            <p className="text-sm text-charcoal">Miten voin auttaa?</p>
+            <div className="flex flex-wrap gap-2">
+              <Button variant="secondary" onClick={() => void handleSendMessage("Täsmäytä kuitit")}>
+                Täsmäytä kuitit
+              </Button>
+              <Button variant="secondary" onClick={() => void handleSendMessage("Mikä on tämän kuun ALV?")}>
+                Tämän kuun ALV
+              </Button>
             </div>
-
-            {/* Messages Body */}
+          </div>
+        )}
+        {visible.map((message) => (
+          <div key={message.id} className={`flex flex-col ${message.role === "user" ? "items-end" : "items-start"}`}>
             <div
-              className={`flex-1 min-h-0 p-4 overflow-y-auto overscroll-contain space-y-4 ${
-                messages.length === 0 && !loading ? "flex flex-col justify-center" : ""
+              className={`max-w-[85%] rounded-2xl px-3.5 py-3 text-sm leading-relaxed ${
+                message.role === "user" ? "bg-accent text-white" : "bg-cream text-charcoal"
               }`}
             >
-              {loadingHistory && messages.length === 0 && (
-                <LoadingState label="Ladataan keskustelua…" compact />
-              )}
-
-              {!loadingHistory && messages.length === 0 && !loading && (
-                // Centred rather than stuck to the top: an empty chat with a
-                // wall of white above the composer reads as broken.
-                <div className="text-center space-y-2.5">
-                  <div className="w-12 h-12 rounded-3xl bg-accent/10 text-accent mx-auto flex items-center justify-center text-xl font-bold">
-                    💬
-                  </div>
-                  <p className="text-sm font-medium text-charcoal">
-                    Miten voin auttaa kirjanpidossasi tänään?
-                  </p>
-                  <p className="text-xs text-warm-gray max-w-xs mx-auto">
-                    Voit kysyä Suomen ALV-säännöistä tai pyytää minua etsimään tiliotteen tapahtumiin sopivia kuitteja.
-                  </p>
-                </div>
-              )}
-
-              {messages.map((msg) => (
-                <div
-                  key={msg.id}
-                  className={`flex flex-col ${
-                    msg.role === "user" ? "items-end" : "items-start"
-                  }`}
-                >
-                  <div
-                    className={`max-w-[85%] rounded-2xl p-3.5 text-sm leading-relaxed ${
-                      msg.role === "user"
-                        ? "bg-accent text-white rounded-tr-xs shadow-sm"
-                        : "bg-cream/80 text-charcoal border border-warm-gray-light/40 rounded-tl-xs shadow-xs"
-                    }`}
-                  >
-                    {msg.role === "assistant" ? (
-                      <ChatMarkdown text={msg.content} />
-                    ) : (
-                      msg.content
-                    )}
-                  </div>
-
-                  {/* Match Proposal Card (Human Approval Required) */}
-                  {msg.proposal && (
-                    <div className="mt-2.5 max-w-[90%] bg-white border border-accent/30 rounded-2xl p-4 shadow-md space-y-3 animate-in">
-                      <div className="flex items-center justify-between border-b border-warm-gray-light/30 pb-2">
-                        <span className="text-[11px] font-bold text-accent-dark uppercase tracking-wider">
-                          Ehdotus täsmäytykseksi ({Math.round(msg.proposal.confidenceScore * 100)}% varmuus)
-                        </span>
-                      </div>
-
-                      <div className="space-y-2 text-xs">
-                        <div className="bg-cream/50 p-2.5 rounded-xl border border-warm-gray-light/30">
-                          <span className="text-warm-gray block text-[10px]">Pankkitapahtuma:</span>
-                          <span className="font-semibold text-charcoal">{msg.proposal.txSummary}</span>
-                        </div>
-                        <div className="bg-cream/50 p-2.5 rounded-xl border border-warm-gray-light/30">
-                          <span className="text-warm-gray block text-[10px]">Vastaava kuitti:</span>
-                          <span className="font-semibold text-charcoal">{msg.proposal.receiptSummary}</span>
-                        </div>
-                      </div>
-
-                      {/* Explicit Human Approval Action Buttons */}
-                      <div className="flex gap-2 pt-1">
-                        <Button
-                          busy={matchBusyId === msg.id}
-                          busyLabel="Yhdistetään…"
-                          onClick={() => handleConfirmProposal(msg.id, msg.proposal!)}
-                          className="flex-1 text-xs"
-                        >
-                          Hyväksy täsmäytys ✓
-                        </Button>
-                        <button
-                          type="button"
-                          onClick={() => handleRejectProposal(msg.id)}
-                          className="min-h-11 px-3 py-2 rounded-xl border border-warm-gray-light text-xs font-medium text-warm-gray hover:bg-cream transition-colors"
-                        >
-                          Hylkää
-                        </button>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              ))}
-
-              {failedQuery && !loading && (
-                <Button
-                  variant="secondary"
-                  onClick={() => void handleSendMessage(failedQuery, true)}
-                  className="text-xs"
-                >
-                  Yritä uudelleen
-                </Button>
-              )}
-
-              {loading && (
-                <div className="flex items-center gap-2 text-xs text-warm-gray bg-cream/50 p-3 rounded-2xl max-w-[70%]">
-                  <div className="w-4 h-4 border-2 border-accent border-t-transparent rounded-full animate-spin motion-reduce:animate-none" />
-                  <span>Tehdään hakuja...</span>
-                </div>
-              )}
-              <div ref={messagesEndRef} />
+              {message.role === "assistant" ? <ChatMarkdown text={message.content} /> : message.content}
             </div>
-
-            {/* Input Form */}
-            <form
-              onSubmit={(e) => {
-                e.preventDefault();
-                handleSendMessage();
-              }}
-              className="shrink-0 p-3 bg-white border-t border-warm-gray-light/40 flex items-center gap-2 sheet-safe-bottom"
-            >
-              <input
-                type="text"
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                placeholder="Kirjoita viesti tekoälyapurille..."
-                aria-label="Viesti tekoälyapurille"
-                className="flex-1 px-3.5 py-2.5 rounded-xl border border-warm-gray-light/60 bg-cream/30 text-sm focus:bg-white transition-colors"
-              />
-              <button
-                type="submit"
-                disabled={!input.trim() || loading}
-                aria-busy={loading || undefined}
-                className="w-10 h-10 rounded-xl bg-accent text-white flex items-center justify-center hover:bg-accent-dark transition-colors disabled:opacity-40 shrink-0 shadow-sm active-press"
-              >
-                {loading ? (
-                  <span className="h-4 w-4 rounded-full border-2 border-white/40 border-t-white animate-spin motion-reduce:animate-none" />
-                ) : (
-                  "➔"
+            {message.limited && message.role === "assistant" && (
+              <p className="mt-1 text-xs text-warm-gray">Rajattu tila</p>
+            )}
+            {message.role === "assistant" && message.content && (
+              <div className="mt-1 flex gap-2">
+                <button type="button" className="min-h-11 text-xs text-warm-gray" onClick={() => void copyMessage(message)}>
+                  {copiedId === message.id ? "Kopioitu" : "Kopioi"}
+                </button>
+                {message.incomplete && failed && (
+                  <button
+                    type="button"
+                    className="min-h-11 text-xs text-accent-dark"
+                    onClick={() => void handleSendMessage(failed.text, { clientId: failed.clientId })}
+                  >
+                    Yritä uudelleen
+                  </button>
                 )}
-              </button>
-            </form>
-      </BottomSheet>
-    </>
+              </div>
+            )}
+            {message.proposal?.transactionId && message.proposal.status !== "accepted" && message.proposal.status !== "rejected" && (
+              <div className="mt-2 max-w-[90%] space-y-2 rounded-2xl border border-accent/30 bg-white p-3">
+                <p className="text-xs font-medium text-accent-dark">Ehdotus täsmäytykseksi</p>
+                <p className="text-xs text-charcoal">{message.proposal.txSummary}</p>
+                <p className="text-xs text-charcoal">{message.proposal.receiptSummary}</p>
+                <div className="flex gap-2">
+                  <Button
+                    busy={matchBusyId === message.id}
+                    busyLabel="Yhdistetään…"
+                    className="flex-1 text-xs"
+                    onClick={() => void handleConfirmProposal(message.id, message.proposal!)}
+                  >
+                    Hyväksy
+                  </Button>
+                  <Button variant="secondary" className="text-xs" onClick={() => void handleRejectProposal(message.id)}>
+                    Hylkää
+                  </Button>
+                </div>
+              </div>
+            )}
+            {message.proposal?.status === "accepted" && (
+              <p className="mt-1 text-xs text-success">Täsmäytys hyväksytty</p>
+            )}
+            {message.proposal?.status === "rejected" && (
+              <p className="mt-1 text-xs text-warm-gray">Ehdotus hylätty</p>
+            )}
+          </div>
+        ))}
+        {showJump && (
+          <button
+            type="button"
+            onClick={jumpToLatest}
+            className="sticky bottom-2 ml-auto block rounded-full bg-charcoal px-3 py-2 text-xs text-white"
+          >
+            Uusi viesti ↓
+          </button>
+        )}
+      </div>
+
+      <form
+        className="sheet-safe-bottom border-t border-warm-gray-light/40 bg-white px-3 py-2"
+        onSubmit={(event) => {
+          event.preventDefault();
+          void handleSendMessage();
+        }}
+      >
+        <FormError message={actionError} />
+        {failed && !loading && (
+          <Button
+            variant="secondary"
+            className="mb-2 text-xs"
+            onClick={() => void handleSendMessage(failed.text, { clientId: failed.clientId })}
+          >
+            Yritä uudelleen
+          </Button>
+        )}
+        <div className="flex items-end gap-2">
+          <textarea
+            value={input}
+            rows={1}
+            aria-label="Viesti avustajalle"
+            placeholder="Kirjoita viesti…"
+            onChange={(event) => {
+              setInput(event.target.value);
+              const field = event.target;
+              field.style.height = "auto";
+              field.style.height = `${Math.min(field.scrollHeight, 120)}px`;
+            }}
+            className="max-h-[120px] min-h-12 flex-1 resize-none rounded-xl border border-warm-gray-light/60 bg-cream/40 px-3 py-2.5 text-sm"
+          />
+          {loading ? (
+            <Button type="button" variant="secondary" onClick={stop}>
+              Pysäytä
+            </Button>
+          ) : (
+            <Button type="submit" disabled={!input.trim()}>
+              Lähetä
+            </Button>
+          )}
+        </div>
+      </form>
+    </div>
   );
 }

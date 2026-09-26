@@ -9,6 +9,7 @@ import {
   redirectToLogin,
 } from "@/components/clientFetch";
 
+import { REPORT_LINKS, WorkspaceLinks, linksWithActive } from "@/components/WorkspaceLinks";
 import { formatEur } from "@/lib/format";
 import { readPageCache, writePageCache } from "@/lib/page-cache";
 interface SalesField {
@@ -123,7 +124,10 @@ export default function ALVRaporttiPage() {
   return (
     <>
       <div className="space-y-6">
-        <h2 className="text-2xl font-semibold text-charcoal tracking-tight">ALV-raportti</h2>
+        <header className="space-y-2">
+          <h2 className="text-2xl font-semibold text-charcoal tracking-tight">ALV-raportti</h2>
+          <WorkspaceLinks items={linksWithActive(REPORT_LINKS, "/alv-raportti")} />
+        </header>
 
         {data && !data.vatRegistered && (
           <div className="bg-warning/10 rounded-2xl p-4 text-sm text-charcoal">

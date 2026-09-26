@@ -215,6 +215,8 @@ model ChatMessage {
   role           String    // "user" | "assistant"
   content        String
   proposalData   String?   // JSON representation of proposed match or action
+  // Client retry key. A repeated send with the same id returns the saved turn.
+  clientId       String?   @unique
   createdAt      DateTime  @default(now())
 
   @@index([userId, createdAt])

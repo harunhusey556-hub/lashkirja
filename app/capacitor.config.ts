@@ -20,6 +20,10 @@ const config: CapacitorConfig = {
     // reports env() as 0 and shifts content itself, hiding the top/bottom.
     contentInset: "never",
     allowsLinkPreview: false,
+    // The web document is locked. This stops WKWebView's own UIScrollView
+    // from rubber-banding the header and tab. A new IPA is required before
+    // an installed app picks this up.
+    scrollEnabled: false,
   },
   plugins: {
     SplashScreen: {

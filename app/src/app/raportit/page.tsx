@@ -9,6 +9,7 @@ import {
   readJson,
   redirectToLogin,
 } from "@/components/clientFetch";
+import { REPORT_LINKS, WorkspaceLinks, linksWithActive } from "@/components/WorkspaceLinks";
 import { formatEur, formatMonthShort } from "@/lib/format";
 import { readPageCache, writePageCache } from "@/lib/page-cache";
 
@@ -111,6 +112,7 @@ export default function ReportsPage() {
           <p className="text-sm text-warm-gray leading-relaxed">
             Tuloslaskelma kuukausittain ja tiedot ulos kirjanpitäjälle.
           </p>
+          <WorkspaceLinks items={linksWithActive(REPORT_LINKS, "/raportit")} />
         </header>
 
         <div className="flex items-center gap-3">

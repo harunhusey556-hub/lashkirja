@@ -11,6 +11,7 @@ import {
   readJson,
   redirectToLogin,
 } from "@/components/clientFetch";
+import { INVOICE_LINKS, WorkspaceLinks, linksWithActive } from "@/components/WorkspaceLinks";
 import { formatDate, formatEur, parseFinnishNumber } from "@/lib/format";
 import { VAT_RATES_PERMILLE } from "@/lib/invoices";
 import { RECURRENCE_INTERVALS, type RecurrenceInterval } from "@/lib/recurrence";
@@ -274,6 +275,7 @@ export default function RecurringInvoicesPage() {
             Sama lasku samalle asiakkaalle aikataulun mukaan. Rivit ovat pohja: jo luotu lasku ei
             muutu, vaikka pohjaa muokkaisi.
           </p>
+          <WorkspaceLinks items={linksWithActive(INVOICE_LINKS, "/toistuvat")} />
         </header>
 
         {dueNow > 0 && (

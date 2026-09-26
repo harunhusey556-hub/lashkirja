@@ -1,6 +1,20 @@
 import type { NextConfig } from "next";
+import { execSync } from "node:child_process";
 import os from "node:os";
 import path from "node:path";
+
+function gitCommit(): string {
+  const fromEnv = process.env.GIT_COMMIT?.trim();
+  if (fromEnv) return fromEnv.slice(0, 12);
+  try {
+    return execSync("git rev-parse --short HEAD", {
+      cwd: path.resolve(__dirname, ".."),
+      encoding: "utf8",
+    }).trim();
+  } catch {
+    return "unknown";
+  }
+}
 
 const configuredDevOrigins = (process.env.ALLOWED_DEV_ORIGINS || "")
   .split(",")
@@ -51,6 +65,10 @@ const securityHeaders = [
 ];
 
 const nextConfig: NextConfig = {
+  env: {
+    NEXT_PUBLIC_GIT_COMMIT: gitCommit(),
+    NEXT_PUBLIC_APP_ENV: process.env.NODE_ENV === "production" ? "production" : "development",
+  },
   allowedDevOrigins: Array.from(
     new Set(["127.0.0.1", ...localInterfaceOrigins, ...configuredDevOrigins])
   ),

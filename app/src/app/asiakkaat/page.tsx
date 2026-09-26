@@ -17,6 +17,7 @@ import {
 } from "@/components/clientFetch";
 import { formatDate, formatEur } from "@/lib/format";
 
+import { INVOICE_LINKS, WorkspaceLinks, linksWithActive } from "@/components/WorkspaceLinks";
 import { readPageCache, writePageCache } from "@/lib/page-cache";
 interface Customer {
   id: string;
@@ -139,6 +140,7 @@ export default function CustomersPage() {
           <p className="text-sm text-warm-gray leading-relaxed">
             Asiakasrekisteri ja avoimet saatavat.
           </p>
+          <WorkspaceLinks items={linksWithActive(INVOICE_LINKS, "/asiakkaat")} />
         </header>
 
         {status === "ready" && customers.length > 0 && (

@@ -3,6 +3,16 @@ import { parseBusinessDetails, generateProfileSummary } from "./onboarding";
 import { centsToEuros } from "./money";
 import { candidatesFor, MatchTx, MatchReceipt } from "./matching";
 import { askCopilot } from "./copilot";
+import { computeAlvReport } from "./alv";
+import { loadAlvPeriodSources } from "./alv-period";
+import {
+  greetingReply,
+  isGreeting,
+  isMatchRequest,
+  limitedModeNotice,
+  matchStatusReply,
+  prefersEnglish,
+} from "./chat-policy";
 
 export interface ChatMatchProposal {
   type: "match_proposal";
@@ -17,12 +27,45 @@ export interface ChatMatchProposal {
 export interface ChatAssistantResult {
   reply: string;
   proposal?: ChatMatchProposal;
+  limited?: boolean;
 }
 
-export async function processAiChatMessage(
-  userId: string,
-  userMessage: string
-): Promise<ChatAssistantResult> {
+export type PreparedChat =
+  | { kind: "local"; reply: string; proposal?: ChatMatchProposal; limited?: boolean }
+  | { kind: "provider"; systemPrompt: string; userMessage: string; english: boolean };
+
+async function currentMonthVatLine(userId: string, english: boolean): Promise<string | null> {
+  try {
+    const now = new Date();
+    const start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+    const end = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1));
+    const sources = await loadAlvPeriodSources(userId, start, end);
+    const report = computeAlvReport(sources.receipts, sources.invoices);
+    const month = `${start.getUTCFullYear()}-${String(start.getUTCMonth() + 1).padStart(2, "0")}`;
+    const amount = report.field308.amount.toFixed(2);
+    const kind = report.field308.isRefund
+      ? english
+        ? "refund"
+        : "palautusta"
+      : english
+        ? "to pay"
+        : "maksettavaa";
+    return english
+      ? `From your books for ${month}: VAT ${kind} ${amount} € (field 308). Source: /alv-raportti.`
+      : `Kirjanpidostasi kaudelta ${month}: ALV ${kind} ${amount} € (kohta 308). Lähde: /alv-raportti.`;
+  } catch (error) {
+    console.error("Chat VAT lookup failed:", error);
+    return null;
+  }
+}
+
+function entityPhrase(entityType: string | null | undefined, english: boolean): string {
+  if (entityType === "oy") return english ? "As a limited company" : "Osakeyhtiönä";
+  if (entityType === "kevytyrittaja") return english ? "As a light entrepreneur" : "Kevytyrittäjänä";
+  return english ? "As a sole trader" : "Toiminimiyrittäjänä";
+}
+
+export async function prepareChat(userId: string, userMessage: string): Promise<PreparedChat> {
   const user = await prisma.user.findUnique({
     where: { id: userId },
     select: {
@@ -37,13 +80,13 @@ export async function processAiChatMessage(
   const profileSummary = generateProfileSummary(profile);
 
   const normalizedQuery = userMessage.toLowerCase().trim();
-  const isMatchIntent =
-    normalizedQuery.includes("täsmäytä") ||
-    normalizedQuery.includes("match") ||
-    normalizedQuery.includes("kuitti") ||
-    normalizedQuery.includes("yhdistä") ||
-    normalizedQuery.includes("lasku") ||
-    normalizedQuery.includes("ehdotus");
+  const english = prefersEnglish(userMessage);
+
+  if (isGreeting(userMessage)) {
+    return { kind: "local", reply: greetingReply(english) };
+  }
+
+  const isMatchIntent = isMatchRequest(userMessage);
 
   if (isMatchIntent) {
     const unmatchedTxs = await prisma.transaction.findMany({
@@ -146,76 +189,117 @@ export async function processAiChatMessage(
 
       if (bestProposal) {
         return {
-          reply: `Tarkistin pankkitapahtumasi ja kuitit! Löysin yhteensopivan ehdotuksen. Tarkista ja hyväksy yhdistäminen alta:`,
+          kind: "local",
+          reply: english
+            ? "I checked your bank rows and receipts and found one suggestion. Confirm it below."
+            : "Tarkistin pankkitapahtumasi ja kuitit. Löysin yhden ehdotuksen. Vahvista se alta.",
           proposal: bestProposal,
         };
-      } else {
-        return {
-          reply: `Ajoin täsmäytystarkistuksen. Juuri nyt avoimille pankkitapahtumillesi (${unmatchedTxs.length} kpl) ja kuiteillesi (${openReceipts.length} kpl) ei löytynyt varmoja ehdotuksia. Voit lisätä uusia kuitteja Kuitit-sivulta!`,
-        };
       }
-    } else if (unmatchedTxs.length === 0) {
       return {
-        reply: `Kaikki tiliotteesi tapahtumat on jo täsmäytetty kuitteihin! Hienoa työtä! 🎉`,
-      };
-    } else {
-      return {
-        reply: `Sinulla on ${unmatchedTxs.length} täsmäyttämätöntä pankkitapahtumaa, mutta ei vielä liitettyjä kuitteja. Lataa kuitti Kuitit-sivulta niin voin auttaa yhdistämisessä!`,
+        kind: "local",
+        reply: english
+          ? `No confident match among ${unmatchedTxs.length} open bank rows and ${openReceipts.length} receipts.`
+          : `Avoimista pankkitapahtumista (${unmatchedTxs.length}) ja kuiteista (${openReceipts.length}) ei löytynyt varmaa ehdotusta.`,
       };
     }
-  }
 
-  // General bookkeeping assistant replies based on Finnish sole trader & lash business domain
-  const ghToken = process.env.COPILOT_GITHUB_TOKEN;
-  if (ghToken) {
-    try {
-      const systemPrompt = `Olet ystävällinen ja asiantunteva kirjanpidon apulainen (LashKirja AI).
-Käyttäjän profiili: ${profileSummary}
-Autat suomalaista yrittäjää kirjanpidon, ALV-vähennysten ja kuitteihin liittyvissä kysymyksissä.
-Vastaa lyhyesti, selkeästi ja kannustavasti suomeksi. Käytä tarvittaessa luetteloita.`;
-      
-      const reply = await askCopilot(systemPrompt, userMessage, ghToken);
-      return { reply };
-    } catch (error) {
-      console.error("Copilot chat failed:", error);
-      // Fallback to static rules below
-    }
-  }
-
-  if (normalizedQuery.includes("alv") || normalizedQuery.includes("vero")) {
+    const totalTransactions =
+      unmatchedTxs.length === 0
+        ? await prisma.transaction.count({ where: { statement: { userId } } })
+        : unmatchedTxs.length;
     return {
-      reply: `Suomen ALV-järjestelmässä (2026):
-• Ripsienpidennykset ja kulmapalvelut: **25,5 %** (yleinen ALV-kanta)
-• Kauneus- ja ihonhoitotuotteiden jälleenmyynti: **25,5 %**
-• Koulutus: yleensä **25,5 %** (ellei kyseessä ole virallinen tutkintokoulutus)
-• ALV-raportin näet LashKirjan **ALV-sivulta**, mistä voit siirtää summat suoraan OmaVeroon.`,
+      kind: "local",
+      reply:
+        matchStatusReply({
+          totalTransactions,
+          unmatched: unmatchedTxs.length,
+          openReceipts: openReceipts.length,
+          english,
+        }) ?? greetingReply(english),
     };
   }
 
-  if (
+  const asksVat = normalizedQuery.includes("alv") || normalizedQuery.includes("vero") || normalizedQuery.includes("vat");
+  const asksDeduction =
     normalizedQuery.includes("kulut") ||
     normalizedQuery.includes("vähennys") ||
-    normalizedQuery.includes("mitä voin")
-  ) {
-    return {
-      reply: `Toiminimiyrittäjänä voit vähentää verotuksessa kaikki yritystoimintaan liittyvät kulut:
-1. **Ripsiliimat, kuidut, nesteet ja suojatarvikkeet** (ALV 25,5%)
-2. **Liiketilan vuokra tai hoitolapaikkavuokra**
-3. **Ajanvarausohjelmat, kirjanpito-ohjelmat ja markkinointikulut**
-4. **Työvaatteet** (jos yksinomaan työkäyttöön tarkoitetut)
-5. **Koulutus- ja kurssimaksut** alan ammattitaidon ylläpitämiseen.
+    normalizedQuery.includes("mitä voin") ||
+    normalizedQuery.includes("deduct");
+  const asksProfile = normalizedQuery.includes("profiili") || normalizedQuery.includes("yritysmuoto");
+  const vatLine = asksVat ? await currentMonthVatLine(userId, english) : null;
+  const who = entityPhrase(user?.entityType, english);
 
-Muista aina ottaa kuitti talteen LashKirjaan!`,
-    };
+  if (!process.env.COPILOT_GITHUB_TOKEN) {
+    if (asksVat) {
+      return {
+        kind: "local",
+        limited: true,
+        reply: `${limitedModeNotice(english)}\n\n${vatLine ?? ""}\n\n${
+          english
+            ? "Standard rate for lash services in 2026 is **25.5%**. See /alv-raportti."
+            : "Ripsipalveluiden yleinen ALV-kanta 2026 on **25,5 %**. Katso /alv-raportti."
+        }`.trim(),
+      };
+    }
+    if (asksDeduction) {
+      return {
+        kind: "local",
+        limited: true,
+        reply: `${limitedModeNotice(english)}\n\n${who} ${
+          english
+            ? "you can deduct costs that belong to the business: materials, workspace, software, and training. Keep the receipt in Kuitit."
+            : "voit vähentää yritystoimintaan kuuluvat kulut: tarvikkeet, työtila, ohjelmistot ja koulutus. Tallenna kuitti Kuitteihin."
+        }`,
+      };
+    }
+    if (asksProfile) {
+      return {
+        kind: "local",
+        limited: true,
+        reply: `${limitedModeNotice(english)}\n\n${profileSummary}`,
+      };
+    }
+    return { kind: "local", limited: true, reply: limitedModeNotice(english) };
   }
 
-  return {
-    reply: `Hei! Olen tekoälyapurisi. Suorittamiesi asetusten pohjalta (${profileSummary}):
-Voin auttaa sinua täsmäyttämään tiliotteen tapahtumia kuiteiksi, laskemaan ALV:t tai vastaamaan kirjanpitokysymyksiin.
+  const systemPrompt = [
+    english
+      ? "You are LashKirja's bookkeeping assistant. Reply in the user's language, briefly."
+      : "Olet LashKirjan kirjanpitoavustaja. Vastaa käyttäjän kielellä, lyhyesti.",
+    "Do not dump the company profile unless the user asks about it.",
+    "Separate information from actions. Do not claim you changed the books.",
+    asksProfile ? `Profile: ${profileSummary}` : `Business form: ${who}.`,
+    vatLine ? `Use this calculated figure, do not invent another: ${vatLine}` : "",
+    "When you cite an amount from the books, name the screen (/alv-raportti, /raportit, /kuitit, /laskut).",
+  ]
+    .filter(Boolean)
+    .join("\n");
 
-Kokeile kysyä esimerkiksi:
-• *"Täsmäytä tiliotteen kuitit"*
-• *"Mikä on ripsipalveluiden ALV-prosentti?"*
-• *"Mitä kuluja toiminimiyrittäjä voi vähentää?"*`,
-  };
+  return { kind: "provider", systemPrompt, userMessage, english };
+}
+
+export async function processAiChatMessage(
+  userId: string,
+  userMessage: string
+): Promise<ChatAssistantResult> {
+  const prepared = await prepareChat(userId, userMessage);
+  if (prepared.kind === "local") {
+    return { reply: prepared.reply, proposal: prepared.proposal, limited: prepared.limited };
+  }
+  const token = process.env.COPILOT_GITHUB_TOKEN;
+  if (!token) {
+    return { reply: limitedModeNotice(prepared.english), limited: true };
+  }
+  try {
+    const reply = await askCopilot(prepared.systemPrompt, prepared.userMessage, token);
+    if (!reply.trim()) {
+      console.error("Copilot chat returned an empty reply");
+      return { reply: limitedModeNotice(prepared.english), limited: true };
+    }
+    return { reply };
+  } catch (error) {
+    console.error("Copilot chat failed:", error);
+    return { reply: limitedModeNotice(prepared.english), limited: true };
+  }
 }

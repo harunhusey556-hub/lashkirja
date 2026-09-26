@@ -24,6 +24,7 @@ import {
   markHistoryBack,
   type NavDirection,
 } from "@/lib/nav-direction";
+import { hapticSelection } from "@/lib/haptics";
 const NAV_ITEMS = [
   {
     href: "/dashboard",
@@ -66,8 +67,8 @@ const NAV_ITEMS = [
     ),
   },
   {
-    href: "/tiliotteet",
-    label: "Tiliote",
+    href: "/laskut",
+    label: "Laskut",
     icon: (active: boolean) => (
       <svg
         className={`w-6 h-6 ${active ? "text-accent" : "text-warm-gray"}`}
@@ -105,16 +106,26 @@ const NAV_ITEMS = [
       </svg>
     ),
   },
-] as const;
-
-const MORE_ITEMS = [
-  { href: "/laskut", label: "Myyntilaskut", hint: "Laskutus, viitenumerot, saatavat" },
-  { href: "/asiakkaat", label: "Asiakkaat", hint: "Asiakasrekisteri ja avoimet saatavat" },
-  { href: "/toistuvat", label: "Toistuvat laskut", hint: "Automaattinen laskutus aikataulun mukaan" },
-  { href: "/ostolaskut", label: "Ostolaskut", hint: "Mitä olet velkaa ja milloin" },
-  { href: "/raportit", label: "Raportit", hint: "Tuloslaskelma ja CSV-viennit" },
-  { href: "/alv-raportti", label: "ALV-raportti", hint: "Arvonlisäveron yhteenveto" },
-  { href: "/asetukset", label: "Asetukset", hint: "Profiili, sähköposti, kirjautuminen" },
+  {
+    href: "/raportit",
+    label: "Raportit",
+    icon: (active: boolean) => (
+      <svg
+        className={`w-6 h-6 ${active ? "text-accent" : "text-warm-gray"}`}
+        fill="none"
+        stroke="currentColor"
+        viewBox="0 0 24 24"
+        aria-hidden
+      >
+        <path
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          strokeWidth={1.75}
+          d="M4 19V5m0 14h16M8 16v-5m4 5V8m4 8v-3"
+        />
+      </svg>
+    ),
+  },
 ] as const;
 
 function routeDepth(pathname: string): number {
@@ -188,6 +199,20 @@ function warmTabCaches() {
 
 function navActive(pathname: string, href: string): boolean {
   if (href === "/dashboard") return pathname === "/dashboard";
+  if (href === "/laskut") {
+    return (
+      pathname.startsWith("/laskut") ||
+      pathname.startsWith("/ostolaskut") ||
+      pathname.startsWith("/asiakkaat") ||
+      pathname.startsWith("/toistuvat")
+    );
+  }
+  if (href === "/pankkitilit") {
+    return pathname.startsWith("/pankkitilit") || pathname.startsWith("/tiliotteet");
+  }
+  if (href === "/raportit") {
+    return pathname.startsWith("/raportit") || pathname.startsWith("/alv-raportti");
+  }
   return pathname === href || pathname.startsWith(`${href}/`);
 }
 
@@ -224,8 +249,8 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const [showOnboarding, setShowOnboarding] = useState(false);
   // Stored with the path it was opened on, so a route change closes it without
   // an effect that would re-render twice.
-  const [moreOpenOn, setMoreOpenOn] = useState<string | null>(null);
   const [profileOpenOn, setProfileOpenOn] = useState<string | null>(null);
+  const [chatOpen, setChatOpen] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
   const [user, setUser] = useState<ShellUser | null>(() => readPageCache<ShellUser>(AUTH_CACHE_KEY));
   const [onboardingProfile, setOnboardingProfile] = useState<BusinessProfile | null>(null);
@@ -233,6 +258,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
   const title = pageTitle(pathname);
+  const frameRef = useRef<HTMLDivElement>(null);
   const mainRef = useRef<HTMLElement>(null);
   const swipeLock = useRef(false);
   // Adjusting state during render is how a new pathname picks its enter
@@ -389,61 +415,39 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     };
   }, [canGoBack, pathname, router]);
 
+  // The frame tracks the visual viewport. The keyboard shrinks that viewport,
+  // so the header and tab stay inside it instead of being padded a second
+  // time with --keyboard-inset on top of the safe area.
   useEffect(() => {
-    // The tab-bar links prefetch themselves; these live behind the sheet and
-    // would otherwise be fetched only after the user has already tapped.
-    for (const item of MORE_ITEMS) router.prefetch(item.href);
-  }, [router]);
-
-  // Keyboard-aware scrolling: the on-screen keyboard shrinks the visual
-  // viewport without moving the layout viewport, so a focused field near the
-  // bottom of a long form (invoice/customer/bank-account forms, settings)
-  // ends up hidden behind the keyboard until the user scrolls manually. Nudge
-  // whatever is currently focused back into view whenever that happens.
-  useEffect(() => {
+    const frame = frameRef.current;
     const vv = window.visualViewport;
-    if (!vv) return;
+    if (!frame || !vv) return;
 
-    let frame = 0;
-    const publishKeyboardInset = () => {
-      const covered = Math.max(0, window.innerHeight - vv.offsetTop - vv.height);
-      // The home indicator is already --safe-bottom. A real keyboard is taller.
-      const pixels = covered < 120 ? 0 : Math.round(covered);
-      const css = `:root{--keyboard-inset:${pixels}px !important}`;
-      let tag = document.getElementById("lashkirja-keyboard");
-      if (!tag) {
-        tag = document.createElement("style");
-        tag.id = "lashkirja-keyboard";
-        document.head.appendChild(tag);
-      }
-      if (tag.textContent !== css) tag.textContent = css;
-    };
-    const reveal = () => {
-      cancelAnimationFrame(frame);
-      frame = requestAnimationFrame(() => {
-        publishKeyboardInset();
+    let raf = 0;
+    const place = () => {
+      cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(() => {
+        const covered = Math.max(0, window.innerHeight - vv.offsetTop - vv.height);
+        frame.style.top = `${vv.offsetTop}px`;
+        frame.style.height = `${vv.height}px`;
+        frame.dataset.keyboard = covered >= 120 ? "open" : "closed";
         const active = document.activeElement;
         if (!(active instanceof HTMLElement)) return;
         if (!["INPUT", "TEXTAREA", "SELECT"].includes(active.tagName)) return;
-        const reduceMotion = window.matchMedia(
-          "(prefers-reduced-motion: reduce)"
-        ).matches;
-        active.scrollIntoView({
-          block: "center",
-          behavior: reduceMotion ? "auto" : "smooth",
-        });
+        active.scrollIntoView({ block: "nearest", behavior: "auto" });
       });
     };
 
-    publishKeyboardInset();
-    vv.addEventListener("resize", reveal);
-    vv.addEventListener("scroll", reveal);
+    place();
+    vv.addEventListener("resize", place);
+    vv.addEventListener("scroll", place);
     return () => {
-      cancelAnimationFrame(frame);
-      vv.removeEventListener("resize", reveal);
-      vv.removeEventListener("scroll", reveal);
-      const tag = document.getElementById("lashkirja-keyboard");
-      if (tag) tag.textContent = ":root{--keyboard-inset:0px !important}";
+      cancelAnimationFrame(raf);
+      vv.removeEventListener("resize", place);
+      vv.removeEventListener("scroll", place);
+      frame.style.top = "";
+      frame.style.height = "";
+      delete frame.dataset.keyboard;
     };
   }, []);
 
@@ -522,8 +526,6 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     setAuthAttempt((attempt) => attempt + 1);
   }
 
-  const moreActive = MORE_ITEMS.some((item) => navActive(pathname, item.href));
-  const showMore = moreOpenOn === pathname;
   const showProfile = profileOpenOn === pathname;
   const initials = (user?.firstName?.trim()?.[0] || user?.email?.trim()?.[0] || "").toUpperCase();
 
@@ -534,8 +536,8 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   }
 
   return (
-    <div className="h-dvh overflow-hidden flex flex-col bg-cream">
-      <header className="app-header sticky top-0 z-40 bg-white/90 backdrop-blur-md border-b border-warm-gray-light/30">
+    <div ref={frameRef} className="app-frame">
+      <header className="app-header z-40 bg-white/90 backdrop-blur-md border-b border-warm-gray-light/30">
         <div className="max-w-lg mx-auto relative flex items-center justify-center px-4 h-14">
           {canGoBack && (
             <button
@@ -556,15 +558,26 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
               </svg>
             </button>
           )}
-          <p className="text-base font-medium text-charcoal truncate max-w-[60%]">{title}</p>
+          <p className="text-base font-medium text-charcoal truncate max-w-[40%]">{title}</p>
 
           {authState.status === "ready" && (
+            <div className="absolute right-1 inset-y-0 my-auto flex items-center gap-0.5">
+            <button
+              type="button"
+              onClick={() => {
+                void hapticSelection();
+                setChatOpen(true);
+              }}
+              className="active-press h-9 rounded-full bg-accent px-3 text-sm font-medium text-white"
+            >
+              Avustaja
+            </button>
             <button
               type="button"
               onClick={() => setProfileOpenOn((open) => (open === pathname ? null : pathname))}
               aria-label="Profiili ja uloskirjautuminen"
               aria-haspopup="dialog"
-              className="absolute right-1 inset-y-0 my-auto w-11 h-11 flex items-center justify-center active-press"
+              className="w-11 h-11 flex items-center justify-center active-press"
             >
               <span className="w-8 h-8 rounded-full bg-blush text-accent-dark text-xs font-semibold flex items-center justify-center border border-blush-dark/40">
                 {initials || (
@@ -574,6 +587,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                 )}
               </span>
             </button>
+            </div>
           )}
         </div>
       </header>
@@ -604,7 +618,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
       {authState.status === "ready" && (
         <>
-          <AiChatDrawer />
+          <AiChatDrawer open={chatOpen} onClose={() => setChatOpen(false)} />
           <OnboardingModal
             isOpen={showOnboarding}
             initialProfile={onboardingProfile ?? undefined}
@@ -615,7 +629,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
           />
 
           <nav
-            className="app-tab-bar fixed bottom-0 inset-x-0 z-50 bg-white/95 backdrop-blur-md border-t border-warm-gray-light/40"
+            className="app-tab-bar z-50 bg-white/95 backdrop-blur-md border-t border-warm-gray-light/40"
             aria-label="Päävalikko"
           >
             <div className="max-w-lg mx-auto h-[var(--app-tab-height)] flex items-stretch">
@@ -626,6 +640,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                     key={item.href}
                     href={item.href}
                     onClick={() => {
+                      void hapticSelection();
                       if (item.href !== pathname) armNavigation(item.href, "tab");
                     }}
                     className={`flex flex-1 flex-col items-center justify-center gap-0.5 touch-target active:bg-blush/30 transition-colors active-press ${
@@ -635,92 +650,15 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                   >
                     {item.icon(active)}
                     <span
-                      className={`text-[13px] leading-tight ${active ? "font-semibold" : "font-medium"}`}
+                      className={`text-[11px] leading-tight ${active ? "font-semibold" : "font-medium"}`}
                     >
                       {item.label}
                     </span>
                   </Link>
                 );
               })}
-
-              <button
-                type="button"
-                onClick={() => setMoreOpenOn((open) => (open === pathname ? null : pathname))}
-                aria-expanded={showMore}
-                aria-haspopup="menu"
-                className={`flex flex-1 flex-col items-center justify-center gap-0.5 touch-target active:bg-blush/30 transition-colors active-press ${
-                  moreActive || showMore ? "text-accent-dark" : "text-warm-gray"
-                }`}
-              >
-                <svg
-                  className={`w-6 h-6 ${moreActive || showMore ? "text-accent" : "text-warm-gray"}`}
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                  aria-hidden
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={1.75}
-                    d="M5 12h.01M12 12h.01M19 12h.01"
-                  />
-                </svg>
-                <span className={`text-[13px] leading-tight ${moreActive || showMore ? "font-semibold" : "font-medium"}`}>
-                  Lisää
-                </span>
-              </button>
             </div>
           </nav>
-
-          <BottomSheet
-            isOpen={showMore}
-            onClose={() => setMoreOpenOn(null)}
-            title="Lisää"
-            subtitle="Laskutus, raportit ja asetukset"
-            labelledBy="more-sheet-title"
-            heightClass="max-h-[70dvh]"
-          >
-            <nav
-              aria-label="Lisää-valikko"
-              className="overflow-y-auto overscroll-contain px-3 py-2 sheet-safe-bottom"
-            >
-              {MORE_ITEMS.map((item) => {
-                const active = navActive(pathname, item.href);
-                return (
-                  <Link
-                    key={item.href}
-                    href={item.href}
-                    onClick={() => {
-                      setMoreOpenOn(null);
-                      if (item.href !== pathname) armNavigation(item.href, "tab");
-                    }}
-                    aria-current={active ? "page" : undefined}
-                    className={`flex items-center gap-3 px-4 py-3.5 rounded-2xl transition-colors active:bg-blush/40 ${
-                      active ? "bg-blush/50" : ""
-                    }`}
-                  >
-                    <span className="flex-1 min-w-0">
-                      <span className="block text-sm font-medium text-charcoal">
-                        {item.label}
-                      </span>
-                      <span className="block text-xs text-warm-gray truncate">{item.hint}</span>
-                    </span>
-                    <svg
-                      className="w-4 h-4 text-warm-gray-light shrink-0"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth={2}
-                      aria-hidden
-                    >
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-                    </svg>
-                  </Link>
-                );
-              })}
-            </nav>
-          </BottomSheet>
 
           <BottomSheet
             isOpen={showProfile}

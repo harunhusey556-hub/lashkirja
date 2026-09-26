@@ -42,14 +42,27 @@ function SafeAreaShim() {
     probe.remove();
     return v;
   }
-  function shimInset(side){
-    // WKWebView with contentInset:.automatic reports env()==0 but still shifts
-    // content, so the real insets are the difference between the full viewport
-    // and the visualViewport (the notch / home-indicator zone).
+  var restingTop = 0;
+  var restingBottom = 0;
+  function keyboardCovered(){
     var vv = window.visualViewport;
     if (!vv) return 0;
-    return side==='top' ? (vv.offsetTop||0)
+    return Math.max(0, window.innerHeight - vv.offsetTop - vv.height);
+  }
+  function shimInset(side){
+    // Only the resting notch / home indicator. A keyboard shrinks
+    // visualViewport and must not be stored as a safe-area inset.
+    if (keyboardCovered() >= 120) {
+      return side === 'top' ? restingTop : restingBottom;
+    }
+    var vv = window.visualViewport;
+    if (!vv) return 0;
+    var value = side==='top' ? (vv.offsetTop||0)
                         : (window.innerHeight - vv.height - vv.offsetTop);
+    value = Math.max(0, Math.round(value));
+    if (side === 'top') restingTop = value;
+    else restingBottom = value;
+    return value;
   }
   function px(side){
     var real = realInset(side);
@@ -69,6 +82,9 @@ function SafeAreaShim() {
   apply();
   window.addEventListener('resize', apply);
   window.addEventListener('orientationchange', apply);
+  if (window.visualViewport) {
+    window.visualViewport.addEventListener('resize', apply);
+  }
 })();` }}
     />
   );
@@ -125,10 +141,35 @@ function TouchActiveShim() {
         __html: `document.addEventListener('touchstart', function(){}, {passive:true});
 (function(){
   var pressed = null;
-  function clear(){
+  var timer = 0;
+  var started = 0;
+  var startX = 0;
+  var startY = 0;
+  var MIN = 140;
+  function clearNow(){
+    if (timer) { clearTimeout(timer); timer = 0; }
     if (!pressed) return;
     pressed.removeAttribute('data-pressed');
     pressed = null;
+  }
+  function release(){
+    if (!pressed) return;
+    var wait = Math.max(0, MIN - (Date.now() - started));
+    var node = pressed;
+    if (timer) clearTimeout(timer);
+    timer = setTimeout(function(){
+      if (pressed === node) {
+        node.removeAttribute('data-pressed');
+        pressed = null;
+      }
+      timer = 0;
+    }, wait);
+  }
+  function arm(el){
+    clearNow();
+    el.setAttribute('data-pressed', 'true');
+    pressed = el;
+    started = Date.now();
   }
   function targetOf(event){
     var node = event.target;
@@ -139,20 +180,31 @@ function TouchActiveShim() {
   }
   document.addEventListener('pointerdown', function(event){
     if (event.pointerType === 'mouse' && event.button !== 0) return;
-    clear();
     var el = targetOf(event);
     if (!el) return;
     if (el.matches(':disabled') || el.getAttribute('aria-disabled') === 'true') return;
-    el.setAttribute('data-pressed', 'true');
-    pressed = el;
+    startX = event.clientX;
+    startY = event.clientY;
+    arm(el);
   }, {passive:true});
-  document.addEventListener('pointerup', clear, {passive:true});
-  document.addEventListener('pointercancel', clear, {passive:true});
+  document.addEventListener('pointerup', release, {passive:true});
+  document.addEventListener('pointercancel', clearNow, {passive:true});
   document.addEventListener('pointermove', function(event){
     if (!pressed) return;
-    if (targetOf(event) !== pressed) clear();
+    if (Math.abs(event.clientX - startX) > 10 || Math.abs(event.clientY - startY) > 10) clearNow();
   }, {passive:true});
-  window.addEventListener('blur', clear);
+  document.addEventListener('scroll', clearNow, true);
+  document.addEventListener('keydown', function(event){
+    if (event.key !== 'Enter' && event.key !== ' ') return;
+    var el = event.target;
+    if (!el || !el.matches || !el.matches('button, a, [role="button"]')) return;
+    if (el.matches(':disabled') || el.getAttribute('aria-disabled') === 'true') return;
+    arm(el);
+  }, true);
+  document.addEventListener('keyup', function(event){
+    if (event.key === 'Enter' || event.key === ' ') release();
+  }, true);
+  window.addEventListener('blur', clearNow);
 })();`,
       }}
     />
@@ -166,7 +218,7 @@ export default function RootLayout({
 }) {
   return (
     <html lang="fi">
-      <body className={`${inter.className} bg-cream min-h-screen`}>
+      <body className={`${inter.className} bg-cream`}>
         <SafeAreaShim />
         <TouchActiveShim />
         <ShellGate>{children}</ShellGate>

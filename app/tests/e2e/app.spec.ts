@@ -22,27 +22,22 @@ test("login lands on the dashboard and the tab bar navigates", async ({ page }) 
   await expect(page.getByText("Tulot", { exact: true })).toBeVisible();
 
   const nav = page.getByRole("navigation", { name: "Päävalikko" });
-  await nav.getByRole("link", { name: "Tiliote" }).click();
-  await expect(page).toHaveURL(/\/tiliotteet$/);
+  await nav.getByRole("link", { name: "Laskut" }).click();
+  await expect(page).toHaveURL(/\/laskut$/);
 
   await nav.getByRole("link", { name: "Pankki" }).click();
   await expect(page).toHaveURL(/\/pankkitilit$/);
 
-  // Secondary destinations live behind the "Lisää" sheet.
-  await nav.getByRole("button", { name: "Lisää" }).click();
-  const sheet = page.getByRole("dialog");
-  await expect(sheet).toBeVisible();
-  await sheet.getByRole("link", { name: /Myyntilaskut/ }).click();
-  await expect(page).toHaveURL(/\/laskut$/);
-  // The sheet closes on navigation and unfreezes the page behind it.
-  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await nav.getByRole("link", { name: "Raportit" }).click();
+  await expect(page).toHaveURL(/\/raportit$/);
+  await expect(nav.getByRole("button", { name: "Lisää", exact: true })).toHaveCount(0);
 });
 
 test("a bank account can be added and a month reconciled", async ({ page }) => {
   await login(page);
   await page.goto("/pankkitilit");
 
-  await page.getByRole("button", { name: "Lisää pankkitili" }).click();
+  await page.getByRole("button", { name: /Lisää (ensimmäinen )?pankkitili/ }).click();
   await page.getByLabel("Tilin nimi").fill("E2E Käyttötili");
   await page.getByLabel("IBAN").fill("FI21 1234 5600 0007 85");
   await page.getByLabel("Alkusaldo (€)").fill("1000");
@@ -66,7 +61,7 @@ test("a rejected IBAN never reaches the server", async ({ page }) => {
   await login(page);
   await page.goto("/pankkitilit");
 
-  await page.getByRole("button", { name: "Lisää pankkitili" }).click();
+  await page.getByRole("button", { name: /Lisää (ensimmäinen )?pankkitili/ }).click();
   await page.getByLabel("Tilin nimi").fill("Virheellinen");
   await page.getByLabel("IBAN").fill("FI2112345600000786");
   await page.getByRole("button", { name: "Lisää tili" }).click();

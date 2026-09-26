@@ -14,6 +14,7 @@ import {
 } from "@/components/clientFetch";
 import { formatDate, formatEur } from "@/lib/format";
 
+import { INVOICE_LINKS, WorkspaceLinks, linksWithActive } from "@/components/WorkspaceLinks";
 import { readPageCache, writePageCache } from "@/lib/page-cache";
 import { usePersistedState, useScrollRestoration } from "@/lib/list-ui-state";
 interface InvoiceSummary {
@@ -206,6 +207,7 @@ function InvoicesPageContent() {
           <p className="text-sm text-warm-gray leading-relaxed">
             Laskuta asiakkaita ja seuraa maksuja viitenumerolla.
           </p>
+          <WorkspaceLinks items={linksWithActive(INVOICE_LINKS, "/laskut")} />
         </header>
 
         {aging && (

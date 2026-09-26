@@ -192,9 +192,12 @@ export default function BottomSheet({
     // on the sheet keeps scrolling the list underneath it.
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
+    const main = document.querySelector(".app-main");
+    if (main instanceof HTMLElement) main.dataset.scrollLock = "true";
 
     return () => {
       document.body.style.overflow = previousOverflow;
+      if (main instanceof HTMLElement) delete main.dataset.scrollLock;
     };
   }, [isOpen]);
 

@@ -48,6 +48,13 @@ the Organizer window produces the same IPA.
 - `CAPACITOR_SERVER_URL` must be HTTPS. A plain-HTTP address is only allowed for
   local testing and App Transport Security will block it on a device.
 - Changing the URL means running `npm run ios:sync` again — it is written into
-  the native project, not read at runtime.
+  the native project, not read at runtime. The installed IPA does not switch
+  itself to production.
+- Point `CAPACITOR_SERVER_URL` at a host running `next build && next start`.
+  `next dev` shows Next's red Issue badge; that badge is not hidden. A web
+  commit does not update an already installed IPA.
+- Native changes (Capacitor plugins, `scrollEnabled`) need a new IPA. The
+  web build's git commit is shown in Asetukset so you can see which server
+  the installed app is talking to.
 - Capacitor 8 uses Swift Package Manager, so there is no `.xcworkspace`; the
   build script targets `ios/App/App.xcodeproj` directly.

@@ -9,6 +9,7 @@ import {
 } from "@/components/clientFetch";
 import { readPageCache, writePageCache } from "@/lib/page-cache";
 import { FormError, SavedNote } from "@/components/ui";
+import { hapticNotify } from "@/lib/haptics";
 
 export interface Profile {
   firstName: string;
@@ -87,6 +88,7 @@ export function useProfile() {
           return next;
         });
         setSavedMsg("Tallennettu");
+        void hapticNotify("success");
         return true;
       } catch (error: unknown) {
         if (isUnauthorized(error)) {
@@ -95,6 +97,7 @@ export function useProfile() {
         }
         setProfile(previous);
         setSavedMsg(errorMessage(error, "Tallennus epäonnistui"));
+        void hapticNotify("error");
         return false;
       } finally {
         setSaving(false);

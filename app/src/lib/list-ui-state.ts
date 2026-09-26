@@ -58,6 +58,12 @@ export function usePersistedState<T>(
   return [state, setState];
 }
 
+/** The document is locked. Lists scroll inside the shell's content pane. */
+function appScroller(): HTMLElement | null {
+  const node = document.querySelector(".app-main");
+  return node instanceof HTMLElement ? node : null;
+}
+
 /**
  * Restores scroll position once the list has finished its first load
  * (`ready`), and keeps saving it as the user scrolls so back-navigation
@@ -70,24 +76,29 @@ export function useScrollRestoration(key: string, ready: boolean): void {
     if (!ready || restored.current) return;
     restored.current = true;
     const saved = readRaw<number>(key);
-    if (saved && saved > 0) {
+    const scroller = appScroller();
+    if (saved && saved > 0 && scroller) {
       // Wait one frame so the restored list has actually painted before we
       // scroll to a position that only exists once it has.
-      requestAnimationFrame(() => window.scrollTo(0, saved));
+      requestAnimationFrame(() => {
+        scroller.scrollTop = saved;
+      });
     }
   }, [ready, key]);
 
   useEffect(() => {
+    const scroller = appScroller();
+    if (!scroller) return;
     let frame = 0;
     const onScroll = () => {
       cancelAnimationFrame(frame);
-      frame = requestAnimationFrame(() => writeRaw(key, window.scrollY));
+      frame = requestAnimationFrame(() => writeRaw(key, scroller.scrollTop));
     };
-    window.addEventListener("scroll", onScroll, { passive: true });
+    scroller.addEventListener("scroll", onScroll, { passive: true });
     return () => {
       cancelAnimationFrame(frame);
-      window.removeEventListener("scroll", onScroll);
-      writeRaw(key, window.scrollY);
+      scroller.removeEventListener("scroll", onScroll);
+      writeRaw(key, scroller.scrollTop);
     };
   }, [key]);
 }

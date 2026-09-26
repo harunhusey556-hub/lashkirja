@@ -5,8 +5,8 @@ import { useState } from "react";
 import BankConnectCard from "@/components/BankConnectCard";
 import { ErrorState } from "@/components/AsyncState";
 import { signOut } from "@/components/clientFetch";
+import { BuildInfo } from "@/components/BuildInfo";
 import { useProfile } from "./useProfile";
-import { version as appVersion } from "../../../package.json";
 
 function Chevron() {
   return (
@@ -177,9 +177,7 @@ export default function AsetuksetPage() {
           {signingOut ? "Kirjaudutaan ulos…" : "Kirjaudu ulos"}
         </button>
 
-        <p className="text-center text-xs text-warm-gray-light pb-2">
-          LashKirja {appVersion}
-        </p>
+        <BuildInfo />
       </div>
     </>
   );

@@ -22,6 +22,9 @@ ARCHIVE_PATH="${ARCHIVE_PATH:-$ROOT/build/ios/App.xcarchive}"
 EXPORT_PATH="${EXPORT_PATH:-$ROOT/build/ios/export}"
 EXPORT_OPTIONS="${EXPORT_OPTIONS:-$ROOT/ios/ExportOptions.plist}"
 
+echo "The URL is baked into the IPA. Point it at a host running next build && next start."
+echo "next dev shows a red Issue badge and is not a production target."
+echo "Native plugin or scroll changes need a new IPA. A web commit alone does not update an installed app."
 echo "Syncing Capacitor iOS project..."
 npx cap sync ios
 

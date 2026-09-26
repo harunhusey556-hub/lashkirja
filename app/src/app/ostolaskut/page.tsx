@@ -13,6 +13,7 @@ import {
 import { formatDate, formatEur, parseFinnishNumber } from "@/lib/format";
 import { isValidReferenceNumber, normalizeReference } from "@/lib/finnish-reference";
 
+import { INVOICE_LINKS, WorkspaceLinks, linksWithActive } from "@/components/WorkspaceLinks";
 import { readPageCache, writePageCache } from "@/lib/page-cache";
 import { usePersistedState, useScrollRestoration } from "@/lib/list-ui-state";
 interface PurchaseInvoice {
@@ -277,6 +278,7 @@ export default function PurchaseInvoicesPage() {
             Mitä olet velkaa ja milloin. ALV-raportti lasketaan edelleen kuiteista, joten sama
             osto ei kirjaudu kahdesti.
           </p>
+          <WorkspaceLinks items={linksWithActive(INVOICE_LINKS, "/ostolaskut")} />
         </header>
 
         {aging && (

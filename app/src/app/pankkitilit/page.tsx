@@ -10,6 +10,7 @@ import {
 import { BalanceTable, type MonthRow } from "@/components/bank/BalanceTable";
 import { apiFetch, errorMessage, isUnauthorized, readJson, redirectToLogin } from "@/components/clientFetch";
 import { formatEur, formatMonth } from "@/lib/format";
+import { BANK_LINKS, WorkspaceLinks, linksWithActive } from "@/components/WorkspaceLinks";
 import { maskIban } from "@/lib/iban";
 
 import { readPageCache, writePageCache } from "@/lib/page-cache";
@@ -36,6 +37,7 @@ interface Overview {
   accounts: AccountSummary[];
   totalBalance: number;
   totalAccounts: number;
+  archivedCount?: number;
   excludedCurrencies: string[];
   needsAttention: number;
 }
@@ -227,12 +229,12 @@ export default function BankAccountsPage() {
       <div className="space-y-6 pb-6">
         <header className="flex items-start justify-between gap-3">
           <div className="space-y-2 min-w-0">
-            <h2 className="text-2xl font-semibold text-charcoal tracking-tight">Pankkitilit</h2>
             <p className="text-sm text-warm-gray leading-relaxed">
               Lisää jokainen pankkitili ja seuraa kuukausien loppusaldoja.
             </p>
+            <WorkspaceLinks items={linksWithActive(BANK_LINKS, "/pankkitilit")} />
           </div>
-          {formMode === "hidden" && (
+          {formMode === "hidden" && status === "ready" && (overview?.accounts.length ?? 0) > 0 && (
             // Adding an account is a once-a-year action; it does not deserve a
             // full-width button competing with the balances.
             <button
@@ -253,23 +255,39 @@ export default function BankAccountsPage() {
 
         {status === "ready" && overview && (
           <>
-            <section className="bg-white rounded-3xl border border-warm-gray-light/20 shadow-sm p-6 space-y-3">
-              <p className="text-sm text-warm-gray">Yhteenlaskettu saldo</p>
-              <p className="text-3xl font-semibold text-charcoal tracking-tight">
-                {formatEur(overview.totalBalance)}
-              </p>
-              <p className="text-xs text-warm-gray">
-                {overview.totalAccounts} tiliä
-                {overview.needsAttention > 0 && (
-                  <span className="text-danger"> · {overview.needsAttention} vaatii täsmäytystä</span>
-                )}
-              </p>
-              {overview.excludedCurrencies.length > 0 && (
-                <p className="text-xs text-warning">
-                  Summasta puuttuvat muut valuutat: {overview.excludedCurrencies.join(", ")}
+            {overview.accounts.length > 0 ? (
+              <section className="bg-white rounded-3xl border border-warm-gray-light/20 shadow-sm p-6 space-y-3">
+                <p className="text-sm text-warm-gray">Yhteenlaskettu saldo</p>
+                <p className="text-3xl font-semibold text-charcoal tracking-tight">
+                  {formatEur(overview.totalBalance)}
                 </p>
-              )}
-            </section>
+                <p className="text-xs text-warm-gray">
+                  {overview.totalAccounts} tiliä
+                  {overview.needsAttention > 0 && (
+                    <span className="text-danger"> · {overview.needsAttention} vaatii täsmäytystä</span>
+                  )}
+                </p>
+                {overview.excludedCurrencies.length > 0 && (
+                  <p className="text-xs text-warning">
+                    Summasta puuttuvat muut valuutat: {overview.excludedCurrencies.join(", ")}
+                  </p>
+                )}
+              </section>
+            ) : formMode === "hidden" ? (
+              <section className="bg-white rounded-3xl border border-warm-gray-light/20 shadow-sm p-8 text-center space-y-3">
+                <p className="text-base font-medium text-charcoal">Ei vielä pankkitilejä</p>
+                <p className="text-sm text-warm-gray leading-relaxed">
+                  Saldo ja täsmäytys näkyvät tässä, kun ensimmäinen tili on lisätty.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => setFormMode("create")}
+                  className="active-press inline-flex min-h-11 items-center justify-center rounded-xl bg-accent px-4 text-sm font-medium text-white"
+                >
+                  Lisää ensimmäinen pankkitili
+                </button>
+              </section>
+            ) : null}
 
             {message && (
               <p
@@ -436,19 +454,15 @@ export default function BankAccountsPage() {
               ))}
             </ul>
 
-            {overview.accounts.length === 0 && (
-              <p className="text-sm text-warm-gray text-center py-6">
-                Ei vielä pankkitilejä. Lisää ensimmäinen yllä.
-              </p>
+            {(showArchived || (overview.archivedCount ?? 0) > 0) && (
+              <button
+                type="button"
+                onClick={() => setShowArchived((value) => !value)}
+                className="w-full min-h-11 text-xs text-warm-gray py-2"
+              >
+                {showArchived ? "Piilota arkistoidut" : "Näytä arkistoidut"}
+              </button>
             )}
-
-            <button
-              type="button"
-              onClick={() => setShowArchived((value) => !value)}
-              className="w-full min-h-11 text-xs text-warm-gray py-2"
-            >
-              {showArchived ? "Piilota arkistoidut" : "Näytä arkistoidut"}
-            </button>
           </>
         )}
       </div>

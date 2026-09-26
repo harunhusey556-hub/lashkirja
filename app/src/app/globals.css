@@ -55,8 +55,25 @@
    Scrolling happens only inside .app-main (app) or .login-scroll (login). */
 html,
 body {
+  position: fixed;
+  inset: 0;
+  width: 100%;
   height: 100%;
+  overflow: hidden;
   overscroll-behavior: none;
+}
+
+.app-frame {
+  position: fixed;
+  left: 0;
+  right: 0;
+  top: 0;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: var(--color-cream);
 }
 
 body {
@@ -118,26 +135,41 @@ button:disabled {
 }
 
 .app-main {
+  flex: 1 1 auto;
+  min-height: 0;
   padding-right: max(1rem, env(safe-area-inset-right, 0px));
-  padding-bottom: calc(var(--app-tab-height) + var(--safe-bottom) + var(--keyboard-inset) + 1.25rem);
-  scroll-padding-bottom: calc(var(--keyboard-inset) + 1.5rem);
+  padding-bottom: 1.25rem;
+  scroll-padding-bottom: 1.5rem;
   padding-left: max(1rem, env(safe-area-inset-left, 0px));
   overflow-y: auto;
-  overscroll-behavior-y: contain;
+  overscroll-behavior: none;
   -webkit-overflow-scrolling: touch;
 }
 
+.app-main[data-scroll-lock="true"] {
+  overflow: hidden;
+  touch-action: none;
+}
+
 .app-header {
+  flex: none;
   padding-top: var(--safe-top);
   padding-right: env(safe-area-inset-right, 0px);
   padding-left: env(safe-area-inset-left, 0px);
 }
 
 .app-tab-bar {
+  position: relative;
+  flex: none;
   padding-right: env(safe-area-inset-right, 0px);
   padding-bottom: var(--safe-bottom);
   padding-left: env(safe-area-inset-left, 0px);
   height: calc(var(--app-tab-height) + var(--safe-bottom));
+}
+
+.app-frame[data-keyboard="open"] .app-tab-bar {
+  height: var(--app-tab-height);
+  padding-bottom: 0;
 }
 
 .touch-target {
@@ -253,20 +285,19 @@ button:disabled {
 }
 
 .active-press {
-  transition: transform 0.15s cubic-bezier(0.16, 1, 0.3, 1);
+  transition: filter 0.12s ease;
 }
 .active-press:active {
-  transform: scale(0.97);
+  filter: brightness(0.88);
 }
 
-/* Painted on pointerdown, before click or any network request. transition:none
-   so the scale does not wait out the .active-press easing. */
+/* Painted on pointerdown, before click or any network request. filter rather
+   than transform so page-enter animations do not cancel the press. */
 button[data-pressed="true"],
 a[data-pressed="true"],
 [role="button"][data-pressed="true"],
 .active-press[data-pressed="true"] {
-  transform: scale(0.97);
-  opacity: 0.72;
+  filter: brightness(0.82);
   transition: none;
 }
 
@@ -429,7 +460,7 @@ a[data-pressed="true"],
 
 /* Sheets own the bottom inset themselves; the tab bar is hidden behind them. */
 .sheet-safe-bottom {
-  padding-bottom: calc(var(--safe-bottom) + var(--keyboard-inset) + 0.75rem);
+  padding-bottom: calc(var(--safe-bottom) + 0.75rem);
 }
 
 /* Grab handle at the top of a sheet. */

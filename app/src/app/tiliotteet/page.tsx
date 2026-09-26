@@ -16,6 +16,7 @@ import {
   formatMonth,
   type StatementData,
 } from "@/lib/statement-client";
+import { BANK_LINKS, WorkspaceLinks, linksWithActive } from "@/components/WorkspaceLinks";
 import { readPageCache, writePageCache } from "@/lib/page-cache";
 import { usePersistedState, useScrollRestoration } from "@/lib/list-ui-state";
 
@@ -216,6 +217,7 @@ export default function TiliotteetPage() {
           <p className="text-sm text-warm-gray leading-relaxed">
             Tuo tiliote tiedostona tai hae tapahtumat yhdistetystä pankista.
           </p>
+          <WorkspaceLinks items={linksWithActive(BANK_LINKS, "/tiliotteet")} />
         </header>
 
         <section className="bg-white rounded-3xl border border-warm-gray-light/20 shadow-sm p-6 space-y-5">

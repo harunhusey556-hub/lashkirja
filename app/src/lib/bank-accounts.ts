@@ -299,6 +299,7 @@ export interface BankOverview {
   accounts: BankAccountWithPosition[];
   totalBalance: number;
   totalAccounts: number;
+  archivedCount: number;
   excludedCurrencies: string[];
   needsAttention: number;
 }
@@ -307,10 +308,13 @@ export async function getBankOverview(
   userId: string,
   options: { includeArchived?: boolean } = {}
 ): Promise<BankOverview> {
-  const accounts = await prisma.bankAccount.findMany({
-    where: { userId, ...(options.includeArchived ? {} : { archivedAt: null }) },
-    orderBy: [{ isDefault: "desc" }, { createdAt: "asc" }],
-  });
+  const [accounts, archivedCount] = await Promise.all([
+    prisma.bankAccount.findMany({
+      where: { userId, ...(options.includeArchived ? {} : { archivedAt: null }) },
+      orderBy: [{ isDefault: "desc" }, { createdAt: "asc" }],
+    }),
+    prisma.bankAccount.count({ where: { userId, archivedAt: { not: null } } }),
+  ]);
 
   const through = monthKey(new Date());
   const positions: BankAccountWithPosition[] = [];
@@ -354,6 +358,7 @@ export async function getBankOverview(
     accounts: positions,
     totalBalance: centsToEuros(total.totalCents),
     totalAccounts: total.includedAccounts,
+    archivedCount,
     excludedCurrencies: total.excludedCurrencies,
     needsAttention: positions.filter((p) => !p.archivedAt && p.mismatchCount > 0).length,
   };

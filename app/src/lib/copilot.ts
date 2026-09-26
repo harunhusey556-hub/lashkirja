@@ -96,3 +96,64 @@ export async function askCopilot(
   const data = await response.json();
   return data.choices?.[0]?.message?.content || "";
 }
+
+/**
+ * Token stream from the provider. Yields content deltas as they arrive.
+ * Throws if the HTTP call fails before any token. The caller decides what
+ * an incomplete stream means; this function does not invent a finished reply.
+ */
+export async function* askCopilotStream(
+  systemPrompt: string,
+  userPrompt: string,
+  ghToken: string,
+  signal?: AbortSignal
+): AsyncGenerator<string> {
+  const model = process.env.COPILOT_MODEL || "gpt-4o";
+  const session = await getCopilotSessionToken(ghToken);
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    Authorization: `Bearer ${session.token}`,
+    "Copilot-Integration-Id": "vscode-chat",
+    "Openai-Organization": "github-copilot",
+    ...COPILOT_HEADERS,
+  };
+  const response = await fetch(`${session.baseUrl}/chat/completions`, {
+    method: "POST",
+    headers,
+    signal,
+    body: JSON.stringify({
+      model,
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: userPrompt },
+      ],
+      max_tokens: 1500,
+      temperature: 0.4,
+      stream: true,
+    }),
+  });
+  if (!response.ok || !response.body) {
+    throw new Error(`Copilot stream failed: ${response.status}`);
+  }
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split("\n");
+    buffer = lines.pop() ?? "";
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed.startsWith("data:")) continue;
+      const payload = trimmed.slice(5).trim();
+      if (!payload || payload === "[DONE]") continue;
+      const event = JSON.parse(payload) as {
+        choices?: Array<{ delta?: { content?: string }; finish_reason?: string | null }>;
+      };
+      const delta = event.choices?.[0]?.delta?.content;
+      if (delta) yield delta;
+    }
+  }
+}
