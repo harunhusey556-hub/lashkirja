@@ -14,7 +14,10 @@ const config: CapacitorConfig = {
       }
     : undefined,
   ios: {
-    contentInset: "automatic",
+    // Edge-to-edge webview. Safe areas come from viewport-fit=cover and CSS env().
+    // "automatic" only insets the scroll view, so a position:fixed tab bar still
+    // sits on the home indicator.
+    contentInset: "never",
     allowsLinkPreview: false,
   },
   plugins: {
@@ -25,7 +28,7 @@ const config: CapacitorConfig = {
     },
     StatusBar: {
       style: "DARK",
-      backgroundColor: "#faf7f2",
+      backgroundColor: "#ffffff",
     },
   },
 };

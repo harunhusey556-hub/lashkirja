@@ -518,7 +518,7 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
       <div className="flex items-center gap-3 animate-in">
         <Link
           href="/kuitit"
-          className="w-11 h-11 flex items-center justify-center rounded-xl bg-white shadow-sm text-charcoal hover:bg-blush/40 transition-colors"
+          className="pressable flex h-12 w-12 items-center justify-center rounded-xl bg-white text-charcoal shadow-sm"
           aria-label="Takaisin"
         >
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -669,7 +669,7 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
               <button
                 type="button"
                 onClick={() => setShowPreview((v) => !v)}
-                className="w-full py-2 rounded-xl border border-warm-gray-light text-xs font-medium text-charcoal hover:bg-cream transition-colors"
+                className="pressable min-h-12 w-full rounded-xl border border-warm-gray-light text-sm font-medium text-charcoal"
               >
                 {showPreview ? "Piilota esikatselu" : "Näytä kuitti / lasku"}
               </button>

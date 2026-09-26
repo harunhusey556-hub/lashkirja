@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import AppShell from "@/components/AppShell";
 import { ErrorState, LoadingState } from "@/components/AsyncState";
 import StatementSummaryCards from "@/components/StatementSummaryCards";
 import {
@@ -152,13 +151,9 @@ export default function TiliotteetPage() {
     : filteredStatements.slice(0, RECENT_LIMIT);
 
   return (
-    <AppShell>
-      <div className="space-y-8 pb-6">
-        <header className="space-y-2">
-          <h2 className="text-2xl font-semibold text-charcoal tracking-tight">
-            Tiliotteet
-          </h2>
-          <p className="text-sm text-warm-gray leading-relaxed">
+    <div className="space-y-8">
+        <header>
+          <p className="text-sm leading-relaxed text-warm-gray">
             Tuo tiliote tiedostona tai hae tapahtumat yhdistetystä pankista.
           </p>
         </header>
@@ -178,7 +173,7 @@ export default function TiliotteetPage() {
               type="button"
               onClick={() => fileInputRef.current?.click()}
               disabled={uploading || bankSyncing}
-              className="w-full py-3.5 rounded-2xl bg-accent text-white text-sm font-medium hover:bg-accent-dark transition-colors disabled:opacity-50"
+              className="pressable min-h-12 w-full rounded-2xl bg-accent text-sm font-medium text-white disabled:opacity-50"
             >
               {uploading ? "Käsitellään..." : "Tuo tiedosto"}
             </button>
@@ -186,7 +181,7 @@ export default function TiliotteetPage() {
               type="button"
               onClick={() => void handleBankSync()}
               disabled={uploading || bankSyncing}
-              className="w-full py-3.5 rounded-2xl border border-warm-gray-light text-charcoal text-sm font-medium hover:bg-cream transition-colors disabled:opacity-50"
+              className="pressable min-h-12 w-full rounded-2xl border border-warm-gray-light text-sm font-medium text-charcoal disabled:opacity-50"
             >
               {bankSyncing ? "Haetaan pankista..." : "Hae pankista"}
             </button>
@@ -351,7 +346,7 @@ export default function TiliotteetPage() {
               <button
                 type="button"
                 onClick={() => setShowAllStatements((v) => !v)}
-                className="w-full py-3 text-sm font-medium text-accent hover:text-accent-dark transition-colors"
+                className="pressable min-h-12 w-full text-sm font-medium text-accent"
               >
                 {showAllStatements
                   ? "Näytä vähemmän"
@@ -361,6 +356,5 @@ export default function TiliotteetPage() {
           </div>
         )}
       </div>
-    </AppShell>
   );
 }

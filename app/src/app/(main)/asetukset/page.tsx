@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import AppShell from "@/components/AppShell";
 import BankConnectCard from "@/components/BankConnectCard";
 import ConfirmModal from "@/components/ConfirmModal";
 import { ErrorState, LoadingState } from "@/components/AsyncState";
@@ -208,31 +207,23 @@ export default function AsetuksetPage() {
 
   if (loadError) {
     return (
-      <AppShell>
-        <ErrorState
-          message={loadError}
-          onRetry={() => {
-            setLoadError("");
-            setLoadAttempt((attempt) => attempt + 1);
-          }}
-        />
-      </AppShell>
+      <ErrorState
+        message={loadError}
+        onRetry={() => {
+          setLoadError("");
+          setLoadAttempt((attempt) => attempt + 1);
+        }}
+      />
     );
   }
 
   if (!profile) {
-    return (
-      <AppShell>
-        <LoadingState label="Ladataan asetuksia..." />
-      </AppShell>
-    );
+    return <LoadingState label="Ladataan asetuksia..." />;
   }
 
   return (
-    <AppShell>
+    <>
       <div className="space-y-6">
-        <h2 className="text-xl font-light text-charcoal">Asetukset</h2>
-
         <div className="bg-white rounded-2xl p-6 shadow-sm">
           <div className="flex justify-between items-start">
             {isEditingProfile ? (
@@ -663,6 +654,6 @@ export default function AsetuksetPage() {
         }}
         onCancel={() => setAccountToDisconnect(null)}
       />
-    </AppShell>
+    </>
   );
 }

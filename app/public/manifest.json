@@ -4,8 +4,8 @@
   "description": "Lash tech bookkeeper",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#FCFAFA",
-  "theme_color": "#F9E4E4",
+  "background_color": "#faf8f5",
+  "theme_color": "#ffffff",
   "icons": [
     {
       "src": "/favicon.ico",

@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import AppShell from "@/components/AppShell";
 import { ErrorState, LoadingState } from "@/components/AsyncState";
 import {
   errorMessage,
@@ -117,10 +116,7 @@ export default function ALVRaporttiPage() {
   }
 
   return (
-    <AppShell>
-      <div className="space-y-6">
-        <h2 className="text-xl font-light text-charcoal">ALV-raportti</h2>
-
+    <div className="space-y-6">
         {data && !data.vatRegistered && (
           <div className="bg-warning/10 rounded-2xl p-4 text-sm text-charcoal">
             <p className="font-medium">OmaVero-luonnos</p>
@@ -141,10 +137,10 @@ export default function ALVRaporttiPage() {
                 setPeriodType("month");
               }}
               aria-pressed={periodType === "month"}
-              className={`flex-1 py-2 rounded-xl text-sm font-medium transition-colors ${
+              className={`pressable min-h-12 flex-1 rounded-xl text-sm font-medium ${
                 periodType === "month"
                   ? "bg-accent text-white"
-                  : "bg-cream text-charcoal border border-warm-gray-light"
+                  : "border border-warm-gray-light bg-cream text-charcoal"
               }`}
             >
               Kuukausi
@@ -156,10 +152,10 @@ export default function ALVRaporttiPage() {
                 setPeriodType("quarter");
               }}
               aria-pressed={periodType === "quarter"}
-              className={`flex-1 py-2 rounded-xl text-sm font-medium transition-colors ${
+              className={`pressable min-h-12 flex-1 rounded-xl text-sm font-medium ${
                 periodType === "quarter"
                   ? "bg-accent text-white"
-                  : "bg-cream text-charcoal border border-warm-gray-light"
+                  : "border border-warm-gray-light bg-cream text-charcoal"
               }`}
             >
               Neljännes
@@ -317,7 +313,6 @@ export default function ALVRaporttiPage() {
           </div>
         ) : null}
       </div>
-    </AppShell>
   );
 }
 

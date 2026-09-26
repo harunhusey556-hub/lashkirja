@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Inter } from "next/font/google";
 import "./globals.css";
 
@@ -8,12 +8,18 @@ export const metadata: Metadata = {
   title: "LashKirja",
   description: "Yksinkertainen kirjanpito",
   manifest: "/manifest.json",
-  themeColor: "#F9E4E4",
   appleWebApp: {
     capable: true,
     statusBarStyle: "default",
     title: "LashKirja",
   },
+};
+
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "cover",
+  themeColor: "#ffffff",
 };
 
 export default function RootLayout({

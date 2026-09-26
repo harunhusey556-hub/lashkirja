@@ -2,7 +2,6 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-import AppShell from "@/components/AppShell";
 import ConfirmModal from "@/components/ConfirmModal";
 import ReceiptMatchPanel, {
   type ReceiptMatchData,
@@ -315,13 +314,12 @@ export default function KuititPage() {
   const hasFilters = activeChips.length > 0;
 
   return (
-    <AppShell>
-      <div className="space-y-6">
-        <div className="flex items-center justify-between gap-3 animate-in">
-          <h2 className="text-xl font-light text-charcoal">Kuitit & laskut</h2>
+    <>
+    <div className="space-y-6">
+        <div className="flex items-center justify-end animate-in">
           <Link
             href="/kuitit/uusi"
-            className="min-h-11 px-4 rounded-xl bg-accent text-white text-sm font-medium hover:bg-accent-dark transition-colors inline-flex items-center"
+            className="pressable inline-flex min-h-12 items-center rounded-2xl bg-charcoal px-5 text-sm font-medium text-white"
           >
             + Lisää
           </Link>
@@ -332,7 +330,7 @@ export default function KuititPage() {
             <button
               type="button"
               onClick={() => setIsPendingOpen(prev => !prev)}
-              className="w-full flex items-center justify-between text-left group"
+              className="pressable flex min-h-12 w-full items-center justify-between text-left"
             >
               <div>
                 <h3 className="text-sm font-medium text-warning-dark">
@@ -366,14 +364,14 @@ export default function KuititPage() {
                       <button
                         type="button"
                         onClick={() => handleReview(r.id, "rejected")}
-                        className="px-3 py-1.5 text-xs font-medium text-danger hover:bg-danger/10 rounded-lg transition-colors border border-danger/30"
+                        className="pressable min-h-11 rounded-xl border border-danger/30 px-3 text-sm font-medium text-danger"
                       >
                         Hylkää (Yksityinen)
                       </button>
                       <button
                         type="button"
                         onClick={() => handleReview(r.id, "approved")}
-                        className="px-3 py-1.5 text-xs font-medium text-white bg-success hover:bg-success-dark rounded-lg transition-colors"
+                        className="pressable min-h-11 rounded-xl bg-success px-3 text-sm font-medium text-white"
                       >
                         Hyväksy
                       </button>
@@ -393,8 +391,8 @@ export default function KuititPage() {
                 setAdvanced((a) => ({ ...a, type: "" }));
                 setAppliedAdvanced((a) => ({ ...a, type: "" }));
               }}
-              className={`shrink-0 flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium transition-all ${
-                !appliedAdvanced.type ? "bg-charcoal text-white shadow-sm" : "bg-cream/80 text-charcoal hover:bg-cream"
+              className={`pressable flex min-h-12 shrink-0 items-center gap-2 rounded-xl px-4 text-sm font-medium transition-colors ${
+                !appliedAdvanced.type ? "bg-charcoal text-white shadow-sm" : "bg-cream/80 text-charcoal"
               }`}
             >
               Kaikki kuitit
@@ -405,8 +403,8 @@ export default function KuititPage() {
                 setAdvanced((a) => ({ ...a, type: "tulo" }));
                 setAppliedAdvanced((a) => ({ ...a, type: "tulo" }));
               }}
-              className={`shrink-0 flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium transition-all ${
-                appliedAdvanced.type === "tulo" ? "bg-charcoal text-white shadow-sm" : "bg-cream/80 text-charcoal hover:bg-cream"
+              className={`pressable flex min-h-12 shrink-0 items-center gap-2 rounded-xl px-4 text-sm font-medium transition-colors ${
+                appliedAdvanced.type === "tulo" ? "bg-charcoal text-white shadow-sm" : "bg-cream/80 text-charcoal"
               }`}
             >
               Myynnit
@@ -417,8 +415,8 @@ export default function KuititPage() {
                 setAdvanced((a) => ({ ...a, type: "meno" }));
                 setAppliedAdvanced((a) => ({ ...a, type: "meno" }));
               }}
-              className={`shrink-0 flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium transition-all ${
-                appliedAdvanced.type === "meno" ? "bg-charcoal text-white shadow-sm" : "bg-cream/80 text-charcoal hover:bg-cream"
+              className={`pressable flex min-h-12 shrink-0 items-center gap-2 rounded-xl px-4 text-sm font-medium transition-colors ${
+                appliedAdvanced.type === "meno" ? "bg-charcoal text-white shadow-sm" : "bg-cream/80 text-charcoal"
               }`}
             >
               Ostot
@@ -430,7 +428,7 @@ export default function KuititPage() {
           <button
             type="button"
             onClick={() => setIsSearchOpen((v) => !v)}
-            className="w-full flex items-center justify-between text-left"
+            className="pressable flex min-h-12 w-full items-center justify-between text-left"
           >
             <div className="flex items-center gap-2">
               <svg className="w-4 h-4 text-warm-gray" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -842,7 +840,7 @@ export default function KuititPage() {
                 <button
                   type="button"
                   onClick={() => setShowAllReceipts((v) => !v)}
-                  className="w-full py-2 text-xs font-medium text-accent hover:text-accent-dark transition-colors"
+                  className="pressable min-h-12 w-full text-sm font-medium text-accent"
                 >
                   {showAllReceipts
                     ? "Näytä vähemmän"
@@ -861,6 +859,6 @@ export default function KuititPage() {
         onConfirm={executeDeleteReceipt}
         onCancel={() => setReceiptToDelete(null)}
       />
-    </AppShell>
+    </>
   );
 }

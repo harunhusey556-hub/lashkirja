@@ -49,7 +49,7 @@ export default function ConfirmModal({
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
+    <div className="fixed inset-0 z-[70] flex items-center justify-center px-4">
       {/* Backdrop */}
       <div
         ref={overlayRef}
