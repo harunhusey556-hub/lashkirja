@@ -118,6 +118,40 @@ body {
   -webkit-tap-highlight-color: transparent;
 }
 
+/* Installed app, not a website: long-press must not reveal the tunnel URL,
+   and chrome must not start a text selection. user-select inherits, so the
+   opt-in class and form fields turn it back on. Focus rings stay below. */
+html,
+body {
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+a,
+button,
+.app-header,
+.app-tab-bar,
+img,
+svg {
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-user-drag: none;
+}
+
+.select-text {
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+input,
+textarea,
+select,
+[contenteditable="true"] {
+  -webkit-user-select: text;
+  user-select: text;
+}
+
 /* !important is load-bearing here: Tailwind v4 compiles this rule into the
    same `@layer utilities` bucket as class utilities like `.text-sm`/`.text-xs`,
    so without it a plain element selector loses to any class selector on the

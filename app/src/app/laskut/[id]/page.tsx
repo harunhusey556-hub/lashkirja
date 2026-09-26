@@ -286,7 +286,7 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
 
         {state === "ready" && invoice && (
           <>
-            <header className="space-y-2">
+            <header className="select-text space-y-2">
               <h2 className="text-2xl font-semibold text-charcoal tracking-tight">
                 Lasku {invoice.number}
               </h2>
@@ -302,7 +302,7 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
               </p>
             )}
 
-            <section className="bg-white rounded-3xl border border-warm-gray-light/20 shadow-sm p-6 space-y-3">
+            <section className="select-text bg-white rounded-3xl border border-warm-gray-light/20 shadow-sm p-6 space-y-3">
               <div className="flex items-center justify-between">
                 <span className="text-sm text-warm-gray">Tila</span>
                 <span className="text-sm font-medium text-charcoal">
@@ -325,7 +325,7 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
               </div>
             </section>
 
-            <section className="bg-white rounded-3xl border border-warm-gray-light/20 shadow-sm p-6 space-y-3">
+            <section className="select-text bg-white rounded-3xl border border-warm-gray-light/20 shadow-sm p-6 space-y-3">
               <p className="text-base font-medium text-charcoal">Rivit</p>
               <ul className="space-y-2">
                 {invoice.lines.map((line) => (

@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { ErrorState, LoadingState } from "@/components/AsyncState";
@@ -510,7 +509,10 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="app-frame">
-      <header className="app-header z-40 bg-white/90 backdrop-blur-md border-b border-warm-gray-light/30">
+      <header
+        className="app-header z-40 bg-white/90 backdrop-blur-md border-b border-warm-gray-light/30"
+        onContextMenu={(event) => event.preventDefault()}
+      >
         <div className="app-header-row max-w-lg mx-auto min-h-14 px-1">
           <div className="flex h-11 w-11 items-center justify-center">
             {canGoBack && (
@@ -612,17 +614,20 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
           <nav
             className="app-tab-bar z-50 bg-white/95 backdrop-blur-md border-t border-warm-gray-light/40"
             aria-label="Päävalikko"
+            onContextMenu={(event) => event.preventDefault()}
           >
             <div className="max-w-lg mx-auto h-[var(--app-tab-height)] flex items-stretch">
               {NAV_ITEMS.map((item) => {
                 const active = navActive(pathname, item.href);
                 return (
-                  <Link
+                  <button
                     key={item.href}
-                    href={item.href}
+                    type="button"
                     onClick={() => {
                       void hapticSelection();
-                      if (item.href !== pathname) armNavigation(item.href, "tab");
+                      if (item.href === pathname) return;
+                      armNavigation(item.href, "tab");
+                      router.push(item.href);
                     }}
                     className={`flex min-w-0 flex-1 flex-col items-center justify-center gap-0.5 touch-target active:bg-blush/30 transition-colors active-press ${
                       active ? "text-accent-dark" : "text-warm-gray"
@@ -635,7 +640,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                     >
                       {item.label}
                     </span>
-                  </Link>
+                  </button>
                 );
               })}
             </div>
@@ -650,13 +655,15 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
             heightClass="max-h-[60dvh]"
           >
             <div className="px-3 py-2 sheet-safe-bottom space-y-1">
-              <Link
-                href="/asetukset"
+              <button
+                type="button"
                 onClick={() => {
                   setProfileOpenOn(null);
-                  if (pathname !== "/asetukset") armNavigation("/asetukset", "tab");
+                  if (pathname === "/asetukset") return;
+                  armNavigation("/asetukset", "tab");
+                  router.push("/asetukset");
                 }}
-                className="flex items-center gap-3 px-4 py-3.5 rounded-2xl transition-colors active:bg-blush/40"
+                className="flex w-full items-center gap-3 px-4 py-3.5 rounded-2xl text-left transition-colors active:bg-blush/40"
               >
                 <span className="flex-1 min-w-0">
                   <span className="block text-sm font-medium text-charcoal">Asetukset</span>
@@ -672,7 +679,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                 >
                   <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
                 </svg>
-              </Link>
+              </button>
 
               <button
                 type="button"

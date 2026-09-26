@@ -480,7 +480,7 @@ export function AiChatDrawer({
         {visible.map((message) => (
           <div key={message.id} className={`flex flex-col ${message.role === "user" ? "items-end" : "items-start"}`}>
             <div
-              className={`max-w-[85%] rounded-2xl px-3.5 py-3 text-sm leading-relaxed ${
+              className={`select-text max-w-[85%] rounded-2xl px-3.5 py-3 text-sm leading-relaxed ${
                 message.role === "user" ? "bg-accent text-white" : "bg-cream text-charcoal"
               }`}
             >

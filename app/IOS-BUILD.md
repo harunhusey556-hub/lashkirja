@@ -60,5 +60,13 @@ the Organizer window produces the same IPA.
   home indicator are padding inside the header and tab bar. An IPA that
   already loads this server with `contentInset: "never"` picks that up on
   refresh. It does not need a new IPA.
+- Long-press URL balloons and text selection on chrome are web CSS and the
+  tab bar is a button, not a link. A tunnel refresh is enough. No new IPA.
+- `ios.allowsLinkPreview: false` is in `capacitor.config.ts`. `npm run ios:sync`
+  (which `scripts/build-ios-ipa.sh` runs) copies it to
+  `ios/App/App/capacitor.config.json`, and Capacitor sets
+  `WKWebView.allowsLinkPreview`. The native default is on if that key is
+  absent. Harun's current IPA was synced from this config, so the flag is
+  already in that binary. It does not suppress the URL balloon on its own.
 - Capacitor 8 uses Swift Package Manager, so there is no `.xcworkspace`; the
   build script targets `ios/App/App.xcodeproj` directly.

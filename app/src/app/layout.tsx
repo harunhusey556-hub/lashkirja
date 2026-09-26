@@ -113,6 +113,12 @@ function TouchActiveShim() {
     if (!pressed) return;
     if (Math.abs(event.clientX - startX) > 10 || Math.abs(event.clientY - startY) > 10) clearNow();
   }, {passive:true});
+  document.addEventListener('contextmenu', function(event){
+    var node = event.target;
+    if (!node || !node.closest) return;
+    if (node.closest('input, textarea, select')) return;
+    if (node.closest('a, button, img, svg, .app-header, .app-tab-bar')) event.preventDefault();
+  }, true);
   document.addEventListener('scroll', clearNow, true);
   document.addEventListener('lashkirja-dismiss-press', clearNow);
   window.addEventListener('popstate', clearNow);

@@ -19,6 +19,11 @@ const config: CapacitorConfig = {
     // (Dynamic Island) and tab bar (home indicator) correctly. "automatic"
     // reports env() as 0 and shifts content itself, hiding the top/bottom.
     contentInset: "never",
+    // WKWebView.allowsLinkPreview. cap sync writes this into
+    // ios/App/App/capacitor.config.json (gitignored). The native default is
+    // YES when the key is missing. This flag does not by itself remove the
+    // long-press URL balloon on an <a href>; the shell also sets
+    // -webkit-touch-callout: none and the tab bar is not a link.
     allowsLinkPreview: false,
     // The web document is locked. This stops WKWebView's own UIScrollView
     // from rubber-banding the header and tab. A new IPA is required before
