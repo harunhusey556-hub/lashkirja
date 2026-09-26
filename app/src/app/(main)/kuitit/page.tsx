@@ -316,14 +316,12 @@ export default function KuititPage() {
   return (
     <>
     <div className="space-y-6">
-        <div className="flex items-center justify-end animate-in">
-          <Link
-            href="/kuitit/uusi"
-            className="pressable inline-flex min-h-12 items-center rounded-2xl bg-charcoal px-5 text-sm font-medium text-white"
-          >
-            + Lisää
-          </Link>
-        </div>
+        <Link
+          href="/kuitit/uusi"
+          className="pressable flex min-h-12 w-full items-center justify-center rounded-2xl bg-charcoal text-sm font-medium text-white animate-in"
+        >
+          + Lisää
+        </Link>
 
         {pendingReceipts.length > 0 && (
           <div className="bg-warning/10 border border-warning/20 rounded-2xl p-4 shadow-sm transition-all duration-300">
