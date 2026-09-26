@@ -53,8 +53,8 @@ the Organizer window produces the same IPA.
 - Point `CAPACITOR_SERVER_URL` at a host running `next build && next start`.
   `next dev` shows Next's red Issue badge; that badge is not hidden. A web
   commit does not update an already installed IPA.
-- Native changes (Capacitor plugins, `scrollEnabled`) need a new IPA. The
-  web build's git commit is shown in Asetukset so you can see which server
-  the installed app is talking to.
+- `ios.scrollEnabled: false` is already in `capacitor.config.ts`, but an
+  installed IPA keeps the WebView bounce until you rebuild and reinstall.
+  Shipping this web commit does not apply that native flag.
 - Capacitor 8 uses Swift Package Manager, so there is no `.xcworkspace`; the
   build script targets `ios/App/App.xcodeproj` directly.

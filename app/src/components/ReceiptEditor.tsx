@@ -537,16 +537,7 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
         </div>
       )}
 
-      <div className="flex items-center gap-3 animate-in">
-        <Link
-          href="/kuitit"
-          className="w-11 h-11 flex items-center justify-center rounded-xl bg-white shadow-sm text-charcoal hover:bg-blush/40 transition-colors"
-          aria-label="Takaisin"
-        >
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-          </svg>
-        </Link>
+      <div className="animate-in">
         <h2 className="text-xl font-medium text-charcoal tracking-tight">
           {isNewStep2 ? "Vaihe 2: Linkitys" : isEdit ? "Muokkaa kuittia" : "Lisää kuitti"}
         </h2>

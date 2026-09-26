@@ -22,6 +22,8 @@ import {
   armNavigation,
   consumeDirection,
   markHistoryBack,
+  performInAppBack,
+  recordRoute,
   type NavDirection,
 } from "@/lib/nav-direction";
 import { hapticSelection } from "@/lib/haptics";
@@ -130,13 +132,6 @@ const NAV_ITEMS = [
 
 function routeDepth(pathname: string): number {
   return pathname.split("/").filter(Boolean).length;
-}
-
-/** Where the header back button lands when there is no history to pop. */
-function parentPath(pathname: string): string {
-  const segments = pathname.split("/").filter(Boolean);
-  segments.pop();
-  return segments.length > 0 ? `/${segments.join("/")}` : "/dashboard";
 }
 
 type ShellUser = { email?: string; firstName?: string };
@@ -258,7 +253,6 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
   const title = pageTitle(pathname);
-  const frameRef = useRef<HTMLDivElement>(null);
   const mainRef = useRef<HTMLElement>(null);
   const swipeLock = useRef(false);
   // Adjusting state during render is how a new pathname picks its enter
@@ -274,15 +268,13 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const direction = navFrame.path === pathname ? navFrame.direction : "none";
   const canGoBack = routeDepth(pathname) > 1;
 
+  useEffect(() => {
+    recordRoute(pathname, direction);
+    document.dispatchEvent(new Event("lashkirja-dismiss-press"));
+  }, [pathname, direction]);
+
   function goBack() {
-    if (window.history.length > 1) {
-      markHistoryBack();
-      router.back();
-    } else {
-      const target = parentPath(pathname);
-      armNavigation(target, "back");
-      router.push(target);
-    }
+    performInAppBack(pathname, router);
   }
 
   // Browser/OS back (popstate) plays the pop transition even when the route
@@ -375,14 +367,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       if (commit) {
         swipeLock.current = true;
         const navigate = () => {
-          if (window.history.length > 1) {
-            markHistoryBack();
-            router.back();
-          } else {
-            const target = parentPath(pathname);
-            armNavigation(target, "back");
-            router.push(target);
-          }
+          performInAppBack(pathname, router);
         };
         if (reduceMotion) {
           clearInline();
@@ -415,39 +400,27 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     };
   }, [canGoBack, pathname, router]);
 
-  // The frame tracks the visual viewport. The keyboard shrinks that viewport,
-  // so the header and tab stay inside it instead of being padded a second
-  // time with --keyboard-inset on top of the safe area.
+  // UsableArea owns frame size. This only keeps a focused field inside the
+  // content scroller when the keyboard changes the visual viewport.
   useEffect(() => {
-    const frame = frameRef.current;
     const vv = window.visualViewport;
-    if (!frame || !vv) return;
-
+    if (!vv) return;
     let raf = 0;
-    const place = () => {
+    const reveal = () => {
       cancelAnimationFrame(raf);
       raf = requestAnimationFrame(() => {
-        const covered = Math.max(0, window.innerHeight - vv.offsetTop - vv.height);
-        frame.style.top = `${vv.offsetTop}px`;
-        frame.style.height = `${vv.height}px`;
-        frame.dataset.keyboard = covered >= 120 ? "open" : "closed";
         const active = document.activeElement;
         if (!(active instanceof HTMLElement)) return;
         if (!["INPUT", "TEXTAREA", "SELECT"].includes(active.tagName)) return;
         active.scrollIntoView({ block: "nearest", behavior: "auto" });
       });
     };
-
-    place();
-    vv.addEventListener("resize", place);
-    vv.addEventListener("scroll", place);
+    vv.addEventListener("resize", reveal);
+    vv.addEventListener("scroll", reveal);
     return () => {
       cancelAnimationFrame(raf);
-      vv.removeEventListener("resize", place);
-      vv.removeEventListener("scroll", place);
-      frame.style.top = "";
-      frame.style.height = "";
-      delete frame.dataset.keyboard;
+      vv.removeEventListener("resize", reveal);
+      vv.removeEventListener("scroll", reveal);
     };
   }, []);
 
@@ -536,48 +509,54 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   }
 
   return (
-    <div ref={frameRef} className="app-frame">
+    <div className="app-frame">
       <header className="app-header z-40 bg-white/90 backdrop-blur-md border-b border-warm-gray-light/30">
-        <div className="max-w-lg mx-auto relative flex items-center justify-center px-4 h-14">
-          {canGoBack && (
-            <button
-              type="button"
-              onClick={goBack}
-              aria-label="Takaisin"
-              className="absolute left-1 inset-y-0 my-auto w-11 h-11 flex items-center justify-center text-accent-dark active-press"
-            >
-              <svg
-                className="w-6 h-6"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth={2}
-                aria-hidden
+        <div className="app-header-row max-w-lg mx-auto h-14 px-1">
+          <div className="flex h-11 w-11 items-center justify-center">
+            {canGoBack && (
+              <button
+                type="button"
+                onClick={goBack}
+                aria-label="Takaisin"
+                className="flex h-11 w-11 items-center justify-center text-accent-dark active-press"
               >
-                <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
-              </svg>
-            </button>
-          )}
-          <p className="text-base font-medium text-charcoal truncate max-w-[40%]">{title}</p>
+                <svg
+                  className="w-6 h-6"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth={2}
+                  aria-hidden
+                >
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
+                </svg>
+              </button>
+            )}
+          </div>
+          <p className="min-w-0 truncate text-center text-base font-medium text-charcoal">{title}</p>
 
-          {authState.status === "ready" && (
-            <div className="absolute right-1 inset-y-0 my-auto flex items-center gap-0.5">
+          {authState.status === "ready" ? (
+            <div className="flex items-center justify-end">
             <button
               type="button"
               onClick={() => {
                 void hapticSelection();
                 setChatOpen(true);
               }}
-              className="active-press h-9 rounded-full bg-accent px-3 text-sm font-medium text-white"
+              aria-label="Avustaja"
+              className="assistant-button active-press flex h-11 items-center justify-center gap-1 rounded-full bg-accent px-2.5 text-sm font-medium text-white"
             >
-              Avustaja
+              <svg className="h-5 w-5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.75} aria-hidden>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M8 10h8M8 14h5M6 5h12a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H11l-4 3v-3H6a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Z" />
+              </svg>
+              <span className="assistant-word">Avustaja</span>
             </button>
             <button
               type="button"
               onClick={() => setProfileOpenOn((open) => (open === pathname ? null : pathname))}
               aria-label="Profiili ja uloskirjautuminen"
               aria-haspopup="dialog"
-              className="w-11 h-11 flex items-center justify-center active-press"
+              className="flex h-11 w-11 items-center justify-center active-press"
             >
               <span className="w-8 h-8 rounded-full bg-blush text-accent-dark text-xs font-semibold flex items-center justify-center border border-blush-dark/40">
                 {initials || (
@@ -588,6 +567,8 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
               </span>
             </button>
             </div>
+          ) : (
+            <div className="w-11" aria-hidden />
           )}
         </div>
       </header>
@@ -650,7 +631,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                   >
                     {item.icon(active)}
                     <span
-                      className={`text-[11px] leading-tight ${active ? "font-semibold" : "font-medium"}`}
+                      className={`max-w-full truncate text-[11px] leading-tight ${active ? "font-semibold" : "font-medium"}`}
                     >
                       {item.label}
                     </span>

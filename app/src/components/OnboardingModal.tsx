@@ -9,6 +9,7 @@ import {
 } from "@/lib/onboarding";
 import { errorMessage, readJson } from "@/components/clientFetch";
 import { useFocusTrap } from "@/components/useFocusTrap";
+import { useOverlayLock } from "@/lib/overlay-lock";
 
 interface OnboardingModalProps {
   isOpen: boolean;
@@ -36,6 +37,7 @@ export function OnboardingModal({
   // No `onEscape`: this is a mandatory, non-dismissable onboarding gate —
   // only completing it is allowed to close the modal.
   useFocusTrap(dialogRef, isOpen);
+  useOverlayLock(isOpen);
 
   // Freeze the dashboard behind the modal; otherwise it stays scrollable
   // while onboarding is blocking the rest of the app.

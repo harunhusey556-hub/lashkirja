@@ -1,7 +1,6 @@
 "use client";
 
 import { use, useCallback, useEffect, useState } from "react";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ErrorState, LoadingState } from "@/components/AsyncState";
 import ConfirmModal from "@/components/ConfirmModal";
@@ -288,9 +287,6 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
         {state === "ready" && invoice && (
           <>
             <header className="space-y-2">
-              <Link href="/laskut" className="text-xs text-warm-gray">
-                ← Myyntilaskut
-              </Link>
               <h2 className="text-2xl font-semibold text-charcoal tracking-tight">
                 Lasku {invoice.number}
               </h2>

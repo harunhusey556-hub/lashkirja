@@ -34,21 +34,16 @@
   --app-tab-height: 4.5rem;
 }
 
-/* Safe-area insets, shim-aware.
-   env(safe-area-inset-*) needs viewport-fit=cover (layout.tsx) to resolve —
-   but the installed Capacitor shell was built with contentInset:"automatic",
-   and WKWebView reports env() as 0 whenever contentInsetAdjustmentBehavior is
-   not .never. The inline SafeAreaShim in layout.tsx detects that case and
-   publishes --shell-inset-* from a <head> stylesheet (not the <html> style
-   attribute, which would break hydration). max() picks whichever source is
-   live. Always pad with var(--safe-top)/var(--safe-bottom), never raw env(),
-   or the shell renders under the Dynamic Island / home indicator. */
+/* Usable area is ONE calculation (UsableArea): the frame is the visual
+   viewport, and --safe-top / --safe-bottom are only the notch and home
+   indicator still inside that frame. Defaults match a closed keyboard so the
+   first paint does not wait on script. The publisher overwrites these from
+   a <head> stylesheet and never from the <html> style attribute. */
 :root {
-  --shell-inset-top: 0px;
-  --shell-inset-bottom: 0px;
-  --keyboard-inset: 0px;
-  --safe-top: max(env(safe-area-inset-top, 0px), var(--shell-inset-top));
-  --safe-bottom: max(env(safe-area-inset-bottom, 0px), var(--shell-inset-bottom));
+  --usable-top: 0px;
+  --usable-height: 100%;
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
 }
 
 /* Lock the document: the page itself never scrolls or rubber-bands on iOS.
@@ -67,13 +62,42 @@ body {
   position: fixed;
   left: 0;
   right: 0;
-  top: 0;
+  top: var(--usable-top);
   display: flex;
   flex-direction: column;
   width: 100%;
-  height: 100%;
+  height: var(--usable-height);
   overflow: hidden;
   background: var(--color-cream);
+}
+
+/* Three non-overlapping slots: back, title, assistant + profile.
+   The word "Avustaja" only fits once the row is wide enough. */
+.app-header-row {
+  display: grid;
+  grid-template-columns: 2.75rem minmax(0, 1fr) auto;
+  align-items: center;
+  container-type: inline-size;
+}
+
+.assistant-word {
+  display: none;
+}
+
+@container (min-width: 28rem) {
+  .assistant-word {
+    display: inline;
+  }
+}
+
+.app-frame[data-overlay="open"] > .app-header,
+.app-frame[data-overlay="open"] > .app-main,
+.app-frame[data-overlay="open"] > .app-tab-bar {
+  pointer-events: none;
+}
+
+.app-frame[data-overlay="open"] > .app-main .overlay-root {
+  pointer-events: auto;
 }
 
 body {
@@ -167,7 +191,7 @@ button:disabled {
   height: calc(var(--app-tab-height) + var(--safe-bottom));
 }
 
-.app-frame[data-keyboard="open"] .app-tab-bar {
+html[data-keyboard="open"] .app-tab-bar {
   height: var(--app-tab-height);
   padding-bottom: 0;
 }
@@ -284,36 +308,22 @@ button:disabled {
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.08);
 }
 
-.active-press {
-  transition: filter 0.12s ease;
-}
-.active-press:active {
-  filter: brightness(0.88);
+/* One press paint: data-pressed. :active is not a second darken, so a
+   lingering :active and a held data-pressed cannot light two controls. */
+button:not(:disabled):active,
+a:active,
+[role="button"]:not([aria-disabled="true"]):active {
+  filter: none;
+  opacity: 1;
+  transform: none;
 }
 
-/* Painted on pointerdown, before click or any network request. filter rather
-   than transform so page-enter animations do not cancel the press. */
 button[data-pressed="true"],
 a[data-pressed="true"],
-[role="button"][data-pressed="true"],
-.active-press[data-pressed="true"] {
+[role="button"][data-pressed="true"] {
   filter: brightness(0.82);
+  opacity: 1;
   transition: none;
-}
-
-/* Baseline press feedback for every button/link on a touch device, so a tap
-   never reads as "did that register?" even on the many controls that only
-   ever had a `hover:` state (now inert on touch, see the `hover` variant
-   above) and no `.active-press`/`active:` class of their own. Scoped to
-   `(hover: none)` so pointer devices keep their existing hover treatment
-   untouched, and to `:active` only, so it never lingers the way `:hover`
-   does. */
-@media (hover: none) {
-  button:not(:disabled):active,
-  a:active,
-  [role="button"]:not([aria-disabled="true"]):active {
-    opacity: 0.7;
-  }
 }
 
 /* Custom Dropdown & Popover Animations */

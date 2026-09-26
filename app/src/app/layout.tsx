@@ -1,94 +1,10 @@
 import type { Metadata, Viewport } from "next";
 import { Inter } from "next/font/google";
 import ShellGate from "@/components/ShellGate";
+import { UsableArea } from "@/components/UsableArea";
 import "./globals.css";
 
 const inter = Inter({ subsets: ["latin"] });
-
-/**
- * SafeAreaShim
- *
- * The installed Capacitor shell is built with `contentInset: "automatic"`,
- * and under that setting WKWebView reports env(safe-area-inset-*) as 0 even
- * though content is shifted under the Dynamic Island / home indicator. So the
- * pure-CSS padding in globals.css (which relies on env()) collapses to 0 and
- * the header slides under the notch while the tab bar collides with the home
- * indicator (black strip at the bottom).
- *
- * This shim detects that case and exposes the REAL device insets on CSS
- * custom properties (--shell-inset-top / --shell-inset-bottom). globals.css
- * then resolves every safe-area usage through
- *   --safe-top:  max(env(safe-area-inset-top, 0px), var(--shell-inset-top))
- * so whichever source is live wins. Fixing contentInset to "never" in the
- * shell makes env() resolve natively and the shim becomes a no-op (env() > 0).
- *
- * The measured values must NOT be written onto documentElement.style. That
- * attribute is not in the server HTML, so the first client render mismatches
- * <html> and React reports a hydration error. A stylesheet in <head> carries
- * the same variables without touching the hydrated <html> attributes.
- * !important keeps the measurement ahead of the 0px defaults in globals.css
- * even if that file is injected again after this script runs.
- */
-function SafeAreaShim() {
-  return (
-    <script
-      dangerouslySetInnerHTML={{ __html: `(()=>{
-  var STYLE_ID = 'lashkirja-shell-insets';
-  function realInset(side){
-    var probe = document.createElement('div');
-    probe.style.cssText = 'position:fixed;top:0;left:0;visibility:hidden;pointer-events:none;padding-'+side+':env(safe-area-inset-'+side+', 0px)';
-    document.body.appendChild(probe);
-    var v = parseFloat(getComputedStyle(probe)['padding-'+side])||0;
-    probe.remove();
-    return v;
-  }
-  var restingTop = 0;
-  var restingBottom = 0;
-  function keyboardCovered(){
-    var vv = window.visualViewport;
-    if (!vv) return 0;
-    return Math.max(0, window.innerHeight - vv.offsetTop - vv.height);
-  }
-  function shimInset(side){
-    // Only the resting notch / home indicator. A keyboard shrinks
-    // visualViewport and must not be stored as a safe-area inset.
-    if (keyboardCovered() >= 120) {
-      return side === 'top' ? restingTop : restingBottom;
-    }
-    var vv = window.visualViewport;
-    if (!vv) return 0;
-    var value = side==='top' ? (vv.offsetTop||0)
-                        : (window.innerHeight - vv.height - vv.offsetTop);
-    value = Math.max(0, Math.round(value));
-    if (side === 'top') restingTop = value;
-    else restingBottom = value;
-    return value;
-  }
-  function px(side){
-    var real = realInset(side);
-    var value = real > 0 ? real : shimInset(side);
-    return Math.max(0, Math.round(value));
-  }
-  function apply(){
-    var css = ':root{--shell-inset-top:'+px('top')+'px !important;--shell-inset-bottom:'+px('bottom')+'px !important}';
-    var tag = document.getElementById(STYLE_ID);
-    if (!tag) {
-      tag = document.createElement('style');
-      tag.id = STYLE_ID;
-      document.head.appendChild(tag);
-    }
-    if (tag.textContent !== css) tag.textContent = css;
-  }
-  apply();
-  window.addEventListener('resize', apply);
-  window.addEventListener('orientationchange', apply);
-  if (window.visualViewport) {
-    window.visualViewport.addEventListener('resize', apply);
-  }
-})();` }}
-    />
-  );
-}
 
 export const metadata: Metadata = {
   title: "LashKirja",
@@ -129,17 +45,20 @@ export const viewport: Viewport = {
 };
 
 /**
- * WebKit only evaluates `:active` when some element has a touch listener.
- * That alone is still late: `:active` can wait until the click, which on a
- * slow network feels like the tap did nothing. pointerdown paints
- * data-pressed immediately, before the click handler or any request.
+ * Single press feedback. pointerdown sets data-pressed on the hit control
+ * only (the nearest button, link, or role=button — not a wrapper). Scroll,
+ * a route change, or an opening panel clears it immediately so a short hold
+ * cannot stay painted on the previous control.
+ *
+ * To verify a tap: in the element picker, the node with data-pressed must be
+ * event.target.closest('button, a, [role="button"]') and the control whose
+ * click handler ran. A second control must not darken.
  */
 function TouchActiveShim() {
   return (
     <script
       dangerouslySetInnerHTML={{
-        __html: `document.addEventListener('touchstart', function(){}, {passive:true});
-(function(){
+        __html: `(function(){
   var pressed = null;
   var timer = 0;
   var started = 0;
@@ -176,13 +95,14 @@ function TouchActiveShim() {
     if (!node) return null;
     if (node.nodeType !== 1) node = node.parentElement;
     if (!node || !node.closest) return null;
-    return node.closest('button, a, [role="button"], .active-press');
+    return node.closest('button, a, [role="button"]');
   }
   document.addEventListener('pointerdown', function(event){
     if (event.pointerType === 'mouse' && event.button !== 0) return;
     var el = targetOf(event);
     if (!el) return;
     if (el.matches(':disabled') || el.getAttribute('aria-disabled') === 'true') return;
+    if (el.closest('.app-frame[data-overlay="open"] .app-header, .app-frame[data-overlay="open"] .app-tab-bar')) return;
     startX = event.clientX;
     startY = event.clientY;
     arm(el);
@@ -194,6 +114,8 @@ function TouchActiveShim() {
     if (Math.abs(event.clientX - startX) > 10 || Math.abs(event.clientY - startY) > 10) clearNow();
   }, {passive:true});
   document.addEventListener('scroll', clearNow, true);
+  document.addEventListener('lashkirja-dismiss-press', clearNow);
+  window.addEventListener('popstate', clearNow);
   document.addEventListener('keydown', function(event){
     if (event.key !== 'Enter' && event.key !== ' ') return;
     var el = event.target;
@@ -219,7 +141,7 @@ export default function RootLayout({
   return (
     <html lang="fi">
       <body className={`${inter.className} bg-cream`}>
-        <SafeAreaShim />
+        <UsableArea />
         <TouchActiveShim />
         <ShellGate>{children}</ShellGate>
       </body>

@@ -6,6 +6,7 @@ import { errorMessage, readJson } from "@/components/clientFetch";
 import { ChatMarkdown } from "@/components/ChatMarkdown";
 import { Button, FormError } from "@/components/ui";
 import { hapticNotify } from "@/lib/haptics";
+import { useOverlayLock } from "@/lib/overlay-lock";
 
 interface ChatMessageItem {
   id: string;
@@ -55,6 +56,7 @@ export function AiChatDrawer({
   const stickRef = useRef(true);
   const abortRef = useRef<AbortController | null>(null);
   const loadingRef = useRef(false);
+  useOverlayLock(open);
 
   const visible = messages.filter((message) => !cutoff || message.createdAt >= cutoff);
 

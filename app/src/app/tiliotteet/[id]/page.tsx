@@ -1,7 +1,6 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import StatementDetailView from "@/components/StatementDetailView";
 import { ErrorState, LoadingState } from "@/components/AsyncState";
@@ -51,27 +50,6 @@ export default function StatementDetailPage() {
   return (
     <>
       <div className="space-y-6 pb-6">
-        <Link
-          href="/tiliotteet"
-          className="inline-flex items-center gap-2 text-sm font-medium text-accent hover:text-accent-dark transition-colors px-1"
-        >
-          <svg
-            className="w-4 h-4"
-            fill="none"
-            stroke="currentColor"
-            viewBox="0 0 24 24"
-            aria-hidden
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={2}
-              d="M15 19l-7-7 7-7"
-            />
-          </svg>
-          Takaisin tiliotteisiin
-        </Link>
-
         {loadError ? (
           <ErrorState
             message={loadError}

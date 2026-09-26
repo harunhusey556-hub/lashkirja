@@ -17,11 +17,67 @@ let intents: Intent[] = [];
 /** Same landing rendered twice (Strict Mode) must not consume the queue twice. */
 let shownFor: { pathname: string; direction: NavDirection } | null = null;
 
+let memoryStack: string[] = [];
+
+function readStack(): string[] {
+  return memoryStack;
+}
+
+function writeStack(stack: string[]): void {
+  memoryStack = stack.slice(-30);
+}
+
 export function resetNavigationForTests(): void {
   lastPathname = null;
   poppedNavigation = false;
   intents = [];
   shownFor = null;
+  memoryStack = [];
+}
+
+/** Where the shell back button goes when this document has no in-app history. */
+export function fallbackBackPath(pathname: string): string {
+  const segments = pathname.split("/").filter(Boolean);
+  segments.pop();
+  return segments.length > 0 ? `/${segments.join("/")}` : "/dashboard";
+}
+
+/**
+ * Remember landings so back can tell an in-app previous screen from a deep
+ * link. A deep link or refresh has no predecessor and uses fallbackBackPath.
+ */
+export function recordRoute(pathname: string, direction: NavDirection): void {
+  const stack = readStack();
+  if (stack[stack.length - 1] === pathname) return;
+  if (direction === "back") {
+    const at = stack.lastIndexOf(pathname);
+    writeStack(at >= 0 ? stack.slice(0, at + 1) : [pathname]);
+    return;
+  }
+  writeStack([...stack, pathname]);
+}
+
+/** Previous in-app screen, or null when this entry was opened directly. */
+export function inAppPrevious(pathname: string): string | null {
+  const stack = readStack();
+  if (stack.length >= 2 && stack[stack.length - 1] === pathname) {
+    return stack[stack.length - 2];
+  }
+  return null;
+}
+
+export function performInAppBack(
+  pathname: string,
+  router: { back: () => void; replace: (href: string) => void }
+): void {
+  if (inAppPrevious(pathname)) {
+    markHistoryBack();
+    router.back();
+    return;
+  }
+  const target = fallbackBackPath(pathname);
+  armNavigation(target, "back");
+  router.replace(target);
 }
 
 /** Remember which way the next landing on `pathname` should animate. */

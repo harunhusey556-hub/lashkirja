@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useFocusTrap } from "@/components/useFocusTrap";
+import { useOverlayLock } from "@/lib/overlay-lock";
 
 interface BottomSheetProps {
   isOpen: boolean;
@@ -185,21 +186,7 @@ export default function BottomSheet({
     };
   }, [isOpen]);
 
-  useEffect(() => {
-    if (!isOpen) return;
-
-    // Freeze the page behind the sheet; otherwise a scroll gesture that starts
-    // on the sheet keeps scrolling the list underneath it.
-    const previousOverflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    const main = document.querySelector(".app-main");
-    if (main instanceof HTMLElement) main.dataset.scrollLock = "true";
-
-    return () => {
-      document.body.style.overflow = previousOverflow;
-      if (main instanceof HTMLElement) delete main.dataset.scrollLock;
-    };
-  }, [isOpen]);
+  useOverlayLock(isOpen);
 
   if (!isOpen && !closing) return null;
 

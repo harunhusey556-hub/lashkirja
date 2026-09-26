@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useFocusTrap } from "@/components/useFocusTrap";
+import { useOverlayLock } from "@/lib/overlay-lock";
 
 interface ConfirmModalProps {
   isOpen: boolean;
@@ -42,6 +43,7 @@ export default function ConfirmModal({
   }, [closing]);
 
   useFocusTrap(dialogRef, isOpen, { onEscape: onCancel });
+  useOverlayLock(isOpen);
 
   useEffect(() => {
     if (isOpen) {
@@ -58,8 +60,8 @@ export default function ConfirmModal({
 
   return (
     <div
-      className={`fixed inset-0 z-50 flex items-center justify-center px-4 ${
-        closing ? "pointer-events-none" : ""
+      className={`overlay-root fixed inset-0 z-[80] flex items-center justify-center px-4 ${
+        closing ? "pointer-events-none" : "pointer-events-auto"
       }`}
     >
       {/* Backdrop */}

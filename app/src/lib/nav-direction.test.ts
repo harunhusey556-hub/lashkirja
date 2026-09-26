@@ -2,7 +2,10 @@ import { describe, expect, it, beforeEach } from "vitest";
 import {
   armNavigation,
   consumeDirection,
+  fallbackBackPath,
+  inAppPrevious,
   markHistoryBack,
+  recordRoute,
   resetNavigationForTests,
 } from "./nav-direction";
 
@@ -39,5 +42,27 @@ describe("consumeDirection", () => {
     armNavigation("/kuitit", "tab");
     expect(consumeDirection("/kuitit")).toBe("tab");
     expect(consumeDirection("/kuitit")).toBe("tab");
+  });
+});
+
+describe("in-app back", () => {
+  beforeEach(() => {
+    resetNavigationForTests();
+  });
+
+  it("sends a deep link to the parent list", () => {
+    recordRoute("/laskut/1", "none");
+    expect(inAppPrevious("/laskut/1")).toBeNull();
+    expect(fallbackBackPath("/laskut/1")).toBe("/laskut");
+    expect(fallbackBackPath("/kuitit/abc")).toBe("/kuitit");
+    expect(fallbackBackPath("/asetukset/profiili")).toBe("/asetukset");
+  });
+
+  it("returns to the previous in-app screen and pops on back", () => {
+    recordRoute("/laskut", "none");
+    recordRoute("/laskut/1", "forward");
+    expect(inAppPrevious("/laskut/1")).toBe("/laskut");
+    recordRoute("/laskut", "back");
+    expect(inAppPrevious("/laskut")).toBeNull();
   });
 });
