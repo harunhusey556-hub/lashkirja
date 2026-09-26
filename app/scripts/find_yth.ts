@@ -9,7 +9,7 @@ async function main() {
     const password = decrypt(account.encryptedPass);
     const client = new ImapFlow({ host: account.host, port: account.port, secure: account.tls, auth: { user: account.email, pass: password }, logger: false });
     await client.connect();
-    let lock = await client.getMailboxLock("INBOX");
+    const lock = await client.getMailboxLock("INBOX");
     try {
       // Just check the entire July for ANY email with attachments named yth or kuitti
       const messages = client.fetch({ since: new Date("2026-07-01") }, { uid: true, envelope: true, source: true });

@@ -111,3 +111,107 @@ describe("computeAlvReport", () => {
     expect(r.field308.amount).toBe(0);
   });
 });
+
+describe("computeAlvReport with sales invoices", () => {
+  const invoice = (lines: Array<[number, number, number]>) => ({
+    breakdown: lines.map(([ratePermille, netCents, vatCents]) => ({
+      ratePermille,
+      netCents,
+      vatCents,
+    })),
+  });
+
+  it("adds invoice VAT to the matching OmaVero field", () => {
+    const report = computeAlvReport([], [invoice([[255, 10_000, 2_550]])]);
+    expect(report.field301).toEqual({ netSales: 100, vat: 25.5 });
+    expect(report.field308).toEqual({ amount: 25.5, isRefund: false });
+    expect(report.sources).toEqual({
+      receiptSalesVat: 0,
+      invoiceSalesVat: 25.5,
+      invoiceCount: 1,
+    });
+  });
+
+  it("splits several rates across fields 301, 302 and 303", () => {
+    const report = computeAlvReport(
+      [],
+      [invoice([[255, 10_000, 2_550], [135, 10_000, 1_350], [100, 10_000, 1_000]])]
+    );
+    expect(report.field301.vat).toBe(25.5);
+    expect(report.field302.vat).toBe(13.5);
+    expect(report.field303.vat).toBe(10);
+    expect(report.field308.amount).toBe(49);
+  });
+
+  it("counts a zero-rated invoice line as turnover, not as VAT", () => {
+    const report = computeAlvReport([], [invoice([[0, 50_000, 0]])]);
+    expect(report.field309.turnover).toBe(500);
+    expect(report.field301.vat).toBe(0);
+    expect(report.field308.amount).toBe(0);
+  });
+
+  it("still maps the legacy 24 % rate to field 301", () => {
+    const report = computeAlvReport([], [invoice([[240, 10_000, 2_400]])]);
+    expect(report.field301).toEqual({ netSales: 100, vat: 24 });
+    expect(report.review.count).toBe(0);
+  });
+
+  it("sends an unmappable rate to review instead of a total", () => {
+    const report = computeAlvReport([], [invoice([[175, 10_000, 1_750]])]);
+    expect(report.review.count).toBe(1);
+    expect(report.review.salesGross).toBe(117.5);
+    expect(report.field301.vat).toBe(0);
+  });
+
+  it("sums receipts and invoices into one return and keeps the origin visible", () => {
+    const report = computeAlvReport(
+      [
+        {
+          type: "tulo",
+          totalAmount: 125.5,
+          vatDetails: JSON.stringify([{ rate: 25.5, amount: 25.5 }]),
+        },
+        {
+          type: "meno",
+          totalAmount: 62.75,
+          vatDetails: JSON.stringify([{ rate: 25.5, amount: 12.75 }]),
+        },
+      ],
+      [invoice([[255, 20_000, 5_100]])]
+    );
+
+    expect(report.sources.receiptSalesVat).toBe(25.5);
+    expect(report.sources.invoiceSalesVat).toBe(51);
+    expect(report.field301.vat).toBe(76.5);
+    expect(report.field307.amount).toBe(12.75);
+    expect(report.field308.amount).toBe(63.75);
+  });
+
+  it("turns a VAT-heavy purchase month into a refund", () => {
+    const report = computeAlvReport(
+      [
+        {
+          type: "meno",
+          totalAmount: 1_000,
+          vatDetails: JSON.stringify([{ rate: 25.5, amount: 200 }]),
+        },
+      ],
+      [invoice([[255, 10_000, 2_550]])]
+    );
+    expect(report.field308).toEqual({ amount: 174.5, isRefund: true });
+  });
+
+  it("behaves exactly as before when no invoices are passed", () => {
+    const receipts = [
+      {
+        type: "tulo",
+        totalAmount: 125.5,
+        vatDetails: JSON.stringify([{ rate: 25.5, amount: 25.5 }]),
+      },
+    ];
+    const withoutArgument = computeAlvReport(receipts);
+    const withEmptyArray = computeAlvReport(receipts, []);
+    expect(withoutArgument).toEqual(withEmptyArray);
+    expect(withoutArgument.sources.invoiceCount).toBe(0);
+  });
+});

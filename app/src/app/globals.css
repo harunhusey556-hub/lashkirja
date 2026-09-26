@@ -1,5 +1,19 @@
 @import "tailwindcss";
 
+/* Redefine the built-in `hover:` variant so it only ever matches on devices
+   that actually have a hover-capable pointer. Without this, tapping a button
+   on iOS enters `:hover` and it stays "stuck" that way (no mouseleave event
+   ever fires on touch) until the user taps something else — every one of the
+   ~100 `hover:` utility classes in this app would otherwise read as a lit-up
+   row on a phone. `:active` (below) is the correct touch feedback instead. */
+@custom-variant hover {
+  @media (hover: hover) {
+    &:hover {
+      @slot;
+    }
+  }
+}
+
 @theme {
   --color-cream: #faf8f5;
   --color-blush: #f5e6e0;
@@ -12,35 +26,72 @@
   --color-accent: #9a5650;
   --color-accent-dark: #7f413c;
   --color-success: #477455;
+  --color-success-dark: #395d44;
   --color-warning: #8a691e;
+  --color-warning-dark: #6e5418;
   --color-danger: #a83232;
 
-  --app-header-bar: 3.5rem;
   --app-tab-height: 4.5rem;
 }
 
-html {
-  background: var(--color-cream);
+/* Safe-area insets, shim-aware.
+   env(safe-area-inset-*) needs viewport-fit=cover (layout.tsx) to resolve —
+   but the installed Capacitor shell was built with contentInset:"automatic",
+   and WKWebView reports env() as 0 whenever contentInsetAdjustmentBehavior is
+   not .never. The inline SafeAreaShim in layout.tsx detects that case and
+   sets --shell-inset-* to the device's real insets; max() picks whichever
+   source is live. Always pad with var(--safe-top)/var(--safe-bottom), never
+   raw env(), or the shell renders under the Dynamic Island / home indicator. */
+:root {
+  --shell-inset-top: 0px;
+  --shell-inset-bottom: 0px;
+  --safe-top: max(env(safe-area-inset-top, 0px), var(--shell-inset-top));
+  --safe-bottom: max(env(safe-area-inset-bottom, 0px), var(--shell-inset-bottom));
+}
+
+/* Lock the document: the page itself never scrolls or rubber-bands on iOS.
+   Scrolling happens only inside .app-main (app) or .login-scroll (login). */
+html,
+body {
+  height: 100%;
+  overscroll-behavior: none;
 }
 
 body {
   color: var(--color-charcoal);
   -webkit-tap-highlight-color: transparent;
-  overscroll-behavior-y: none;
-  touch-action: manipulation;
 }
 
+/* !important is load-bearing here: Tailwind v4 compiles this rule into the
+   same `@layer utilities` bucket as class utilities like `.text-sm`/`.text-xs`,
+   so without it a plain element selector loses to any class selector on the
+   same element regardless of source order. Dozens of inputs across the app
+   carry `text-sm`/`text-xs` for visual sizing; without !important those
+   inputs silently drop to <16px and iOS zooms the viewport on focus. */
 input,
 select,
 textarea {
-  font-size: 16px;
+  font-size: 16px !important;
+}
+
+/* Double-tap-to-zoom fires on ANY element, not only text. manipulation keeps
+   scroll and pinch but drops the 300ms double-tap zoom gesture entirely. */
+html,
+body,
+button,
+a,
+input,
+select,
+textarea,
+label {
+  touch-action: manipulation;
 }
 
 @media (min-width: 768px) {
   input,
   select,
   textarea {
-    font-size: 0.875rem;
+    font-size: 0.875rem !important;
   }
 }
 
@@ -66,77 +117,29 @@ button:disabled {
 
 .app-main {
   padding-right: max(1rem, env(safe-area-inset-right, 0px));
-  padding-bottom: calc(var(--app-tab-height) + env(safe-area-inset-bottom, 0px) + 1.25rem);
+  padding-bottom: calc(var(--app-tab-height) + var(--safe-bottom) + 1.25rem);
   padding-left: max(1rem, env(safe-area-inset-left, 0px));
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+  -webkit-overflow-scrolling: touch;
 }
 
 .app-header {
-  padding-top: env(safe-area-inset-top, 0px);
+  padding-top: var(--safe-top);
   padding-right: env(safe-area-inset-right, 0px);
   padding-left: env(safe-area-inset-left, 0px);
 }
 
 .app-tab-bar {
   padding-right: env(safe-area-inset-right, 0px);
-  padding-bottom: env(safe-area-inset-bottom, 0px);
+  padding-bottom: var(--safe-bottom);
   padding-left: env(safe-area-inset-left, 0px);
+  height: calc(var(--app-tab-height) + var(--safe-bottom));
 }
 
 .touch-target {
   min-height: 48px;
   min-width: 48px;
-}
-
-.app-tab-label {
-  max-width: 100%;
-  font-size: 13px;
-  line-height: 1.15;
-  letter-spacing: -0.01em;
-  white-space: nowrap;
-}
-
-@media (max-width: 360px) {
-  .app-tab-label {
-    font-size: 12px;
-  }
-}
-
-.tab-link {
-  border-radius: 1rem;
-  -webkit-tap-highlight-color: transparent;
-  transition: color 200ms ease-out, background-color 200ms ease-out;
-}
-
-.tab-link:active {
-  background-color: var(--color-blush);
-}
-
-.tab-icon-plate {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 2.75rem;
-  height: 2rem;
-  border-radius: 999px;
-  transition: background-color 200ms ease-out, transform 200ms ease-out;
-}
-
-.tab-link[aria-current="page"] .tab-icon-plate {
-  background-color: var(--color-blush);
-  animation: tabPlateIn 200ms ease-out;
-}
-
-.pressable {
-  transition: transform 200ms ease-out, background-color 200ms ease-out, box-shadow 200ms ease-out;
-}
-
-.pressable:active {
-  transform: scale(0.97);
-}
-
-.pressable:disabled,
-.pressable:disabled:active {
-  transform: none;
 }
 
 @keyframes shimmer {
@@ -188,44 +191,28 @@ button:disabled {
 @keyframes slideUpFade {
   0% {
     opacity: 0;
-    transform: translateY(8px);
+    transform: translateY(16px);
   }
   100% {
     opacity: 1;
-    transform: none;
+    transform: translateY(0);
   }
-}
-
-@keyframes pageFade {
-  from { opacity: 0; }
-  to { opacity: 1; }
-}
-
-.page-enter {
-  animation: pageFade 220ms ease-out both;
 }
 
 .animate-in {
-  animation: slideUpFade 220ms ease-out both;
+  animation: slideUpFade 0.6s cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }
 
 .animate-in-delay-1 {
-  animation: slideUpFade 220ms ease-out 70ms both;
+  animation: slideUpFade 0.6s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  animation-delay: 0.1s;
+  opacity: 0;
 }
 
 .animate-in-delay-2 {
-  animation: slideUpFade 220ms ease-out 140ms both;
-}
-
-@keyframes tabPlateIn {
-  from {
-    opacity: 0.4;
-    transform: scale(0.86);
-  }
-  to {
-    opacity: 1;
-    transform: scale(1);
-  }
+  animation: slideUpFade 0.6s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  animation-delay: 0.2s;
+  opacity: 0;
 }
 
 /* Modal Animations */
@@ -253,42 +240,64 @@ button:disabled {
   animation: scaleIn 0.2s cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }
 
-/* Hover effects */
+/* Hover and Press effects */
 .hover-lift {
-  transition: transform 200ms ease-out, box-shadow 200ms ease-out;
+  transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.25s cubic-bezier(0.16, 1, 0.3, 1);
 }
-@media (hover: hover) and (pointer: fine) {
-  .hover-lift:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 10px 40px rgba(45, 45, 45, 0.06);
-  }
-}
-.hover-lift:active {
-  transform: scale(0.985);
+.hover-lift:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.08);
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .page-enter,
-  .animate-in,
-  .animate-in-delay-1,
-  .animate-in-delay-2,
-  .tab-link,
-  .tab-icon-plate,
-  .tab-link[aria-current="page"] .tab-icon-plate,
-  .pressable,
-  .pressable:active,
-  .hover-lift,
-  .hover-lift:hover,
-  .hover-lift:active {
-    animation: none !important;
-    transition: none !important;
-    transform: none !important;
-    opacity: 1 !important;
-  }
+.active-press {
+  transition: transform 0.15s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.active-press:active {
+  transform: scale(0.97);
+}
 
-  .skeleton::after {
-    animation: none;
+/* Baseline press feedback for every button/link on a touch device, so a tap
+   never reads as "did that register?" even on the many controls that only
+   ever had a `hover:` state (now inert on touch, see the `hover` variant
+   above) and no `.active-press`/`active:` class of their own. Scoped to
+   `(hover: none)` so pointer devices keep their existing hover treatment
+   untouched, and to `:active` only, so it never lingers the way `:hover`
+   does. */
+@media (hover: none) {
+  button:not(:disabled):active,
+  a:active,
+  [role="button"]:not([aria-disabled="true"]):active {
+    opacity: 0.7;
   }
+}
+
+/* Custom Dropdown & Popover Animations */
+@keyframes popoverIn {
+  from {
+    opacity: 0;
+    transform: translateY(-8px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.animate-popover {
+  animation: popoverIn 0.2s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+@keyframes pulseGlow {
+  0%, 100% {
+    box-shadow: 0 0 0 0 rgba(201, 144, 138, 0.4);
+  }
+  50% {
+    box-shadow: 0 0 0 8px rgba(201, 144, 138, 0);
+  }
+}
+
+.pulse-glow {
+  animation: pulseGlow 2.5s infinite;
 }
 
 .scrollbar-none {
@@ -298,4 +307,215 @@ button:disabled {
 
 .scrollbar-none::-webkit-scrollbar {
   display: none;
+}
+
+/* Smooth Accordion using CSS Grid */
+.accordion-wrapper {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 300ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.accordion-wrapper.expanded {
+  grid-template-rows: 1fr;
+}
+
+.accordion-content {
+  overflow: hidden;
+}
+
+/* Staggered list entrance: direct children arrive one after another.
+   `backwards` fill only — never `forwards`, so no transform survives the
+   animation (retained transforms re-anchor fixed descendants). */
+.list-stagger > * {
+  animation: slideUpFade 0.3s cubic-bezier(0.16, 1, 0.3, 1) backwards;
+}
+.list-stagger > *:nth-child(1) { animation-delay: 0ms; }
+.list-stagger > *:nth-child(2) { animation-delay: 40ms; }
+.list-stagger > *:nth-child(3) { animation-delay: 80ms; }
+.list-stagger > *:nth-child(4) { animation-delay: 120ms; }
+.list-stagger > *:nth-child(5) { animation-delay: 160ms; }
+.list-stagger > *:nth-child(6) { animation-delay: 200ms; }
+.list-stagger > *:nth-child(7) { animation-delay: 240ms; }
+.list-stagger > *:nth-child(n+8) { animation-delay: 280ms; }
+
+/* Stagger delay classes for lists */
+.stagger-1 { animation-delay: 50ms; }
+.stagger-2 { animation-delay: 100ms; }
+.stagger-3 { animation-delay: 150ms; }
+.stagger-4 { animation-delay: 200ms; }
+.stagger-5 { animation-delay: 250ms; }
+
+
+
+/* ------------------------------------------------------------------ */
+/* Bottom sheets, page transitions                                     */
+/* ------------------------------------------------------------------ */
+
+/*
+ * A sheet slides up from the edge it is attached to, and the backdrop fades.
+ * Both are short: a transition that has to be waited for reads as lag.
+ */
+@keyframes sheetUp {
+  from {
+    transform: translateY(100%);
+  }
+  to {
+    transform: translateY(0);
+  }
+}
+
+@keyframes sheetDown {
+  from {
+    transform: translateY(0);
+  }
+  to {
+    transform: translateY(100%);
+  }
+}
+
+/* iOS sheet spring: fast start, soft settle, no bounce. */
+.animate-sheet {
+  animation: sheetUp 0.32s cubic-bezier(0.32, 0.72, 0, 1);
+  will-change: transform;
+}
+
+.animate-sheet-out {
+  animation: sheetDown 0.22s cubic-bezier(0.4, 0, 1, 1) forwards;
+  will-change: transform;
+}
+
+.animate-backdrop {
+  animation: fadeIn 0.25s ease-out forwards;
+}
+
+@keyframes fadeOut {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+
+.animate-backdrop-out {
+  animation: fadeOut 0.2s ease-in forwards;
+}
+
+@keyframes scaleOut {
+  from {
+    opacity: 1;
+    transform: scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+}
+
+.animate-scale-out {
+  animation: scaleOut 0.15s ease-in forwards;
+}
+
+/* Sheets own the bottom inset themselves; the tab bar is hidden behind them. */
+.sheet-safe-bottom {
+  padding-bottom: calc(var(--safe-bottom) + 0.75rem);
+}
+
+/* Grab handle at the top of a sheet. */
+.sheet-handle {
+  width: 2.25rem;
+  height: 0.25rem;
+  border-radius: 9999px;
+  background: var(--color-warm-gray-light);
+  margin: 0.5rem auto 0.25rem;
+}
+
+/*
+ * Route transition. Keyed on the pathname so it replays per navigation; the
+ * movement is small on purpose, enough to signal "new page" without delaying
+ * the content that is already rendered.
+ */
+@keyframes pageEnter {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-page {
+  /* No `forwards`: a retained transform (even translateY(0)) turns <main> into
+     the containing block for position:fixed descendants, un-pinning bars like
+     the bulk-select toolbar from the viewport. */
+  animation: pageEnter 0.18s ease-out;
+}
+
+/*
+ * Directional route transitions (iOS push/pop). Drilling deeper slides the new
+ * page in from the right; going back slides it in from the left. Same rule as
+ * .animate-page: never a fill mode, the transform must not survive the
+ * animation or fixed descendants re-anchor to <main>.
+ */
+@keyframes pageForward {
+  from {
+    opacity: 0.35;
+    transform: translateX(28px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes pageBack {
+  from {
+    opacity: 0.35;
+    transform: translateX(-28px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+.animate-page-fwd {
+  animation: pageForward 0.26s cubic-bezier(0.32, 0.72, 0, 1);
+}
+
+.animate-page-back {
+  animation: pageBack 0.26s cubic-bezier(0.32, 0.72, 0, 1);
+}
+
+/* Sign-out: the whole app fades before the hard navigation to /login.
+   Opacity only — a transform here would re-anchor fixed bars mid-fade. */
+body.signing-out {
+  opacity: 0;
+  transition: opacity 0.22s ease-out;
+  pointer-events: none;
+}
+
+/*
+ * Motion is decoration here: every animation above is optional, and a user who
+ * asked the system to stop moving things gets the final state immediately.
+ */
+@media (prefers-reduced-motion: reduce) {
+  .animate-sheet,
+  .animate-sheet-out,
+  .animate-backdrop,
+  .animate-backdrop-out,
+  .animate-scale-out,
+  .animate-page,
+  .animate-page-fwd,
+  .animate-page-back,
+  .animate-fade-in,
+  .animate-scale-in,
+  .animate-popover,
+  .animate-in,
+  .animate-in-delay-1,
+  .animate-in-delay-2,
+  .list-stagger > * {
+    animation: none !important;
+    opacity: 1 !important;
+    transform: none !important;
+  }
 }

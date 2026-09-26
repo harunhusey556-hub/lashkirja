@@ -1,20 +1,26 @@
 import { ZodError } from "zod";
+import type { NextRequest } from "next/server";
 import { noStoreJson } from "./http-security";
 
 export interface ApiErrorResponse {
   error: {
     code: string;
     message: string;
-    details?: any;
+    details?: unknown;
   };
 }
 
 export class AppError extends Error {
   public code: string;
   public statusCode: number;
-  public details?: any;
+  public details?: unknown;
 
-  constructor(message: string, code: string = "INTERNAL_ERROR", statusCode: number = 500, details?: any) {
+  constructor(
+    message: string,
+    code: string = "INTERNAL_ERROR",
+    statusCode: number = 500,
+    details?: unknown
+  ) {
     super(message);
     this.name = "AppError";
     this.code = code;
@@ -24,7 +30,7 @@ export class AppError extends Error {
 }
 
 export class ValidationError extends AppError {
-  constructor(message: string, details?: any) {
+  constructor(message: string, details?: unknown) {
     super(message, "VALIDATION_FAILED", 400, details);
   }
 }
@@ -44,13 +50,24 @@ export class NotFoundError extends AppError {
 /**
  * Wraps an API route handler to uniformly capture and format errors.
  */
-export function withErrorHandler(
-  handler: (req: any, ...args: any[]) => Promise<Response>
+/** Prisma surfaces its errors by name and code rather than by exported class. */
+interface PrismaLikeError {
+  name?: string;
+  code?: string;
+  message?: string;
+}
+
+function asPrismaError(error: unknown): PrismaLikeError | null {
+  return error && typeof error === "object" ? (error as PrismaLikeError) : null;
+}
+
+export function withErrorHandler<Args extends unknown[]>(
+  handler: (req: NextRequest, ...args: Args) => Promise<Response>
 ) {
-  return async (req: any, ...args: any[]): Promise<Response> => {
+  return async (req: NextRequest, ...args: Args): Promise<Response> => {
     try {
       return await handler(req, ...args);
-    } catch (error: any) {
+    } catch (error: unknown) {
       if (error instanceof AppError) {
         return noStoreJson(
           { error: { code: error.code, message: error.message, details: error.details } },
@@ -71,8 +88,9 @@ export function withErrorHandler(
         );
       }
 
-      if (error && typeof error === "object" && error.name === "PrismaClientKnownRequestError") {
-        const code = (error as any).code;
+      const prismaError = asPrismaError(error);
+      if (prismaError?.name === "PrismaClientKnownRequestError") {
+        const code = prismaError.code;
         // P2002: Unique constraint failed
         // P2003: Foreign key constraint failed
         // P2025: Record not found
@@ -90,8 +108,8 @@ export function withErrorHandler(
         }
       }
 
-      if (error && typeof error === "object" && error.name === "PrismaClientValidationError") {
-        console.error("[PrismaClientValidationError]", error.message);
+      if (prismaError?.name === "PrismaClientValidationError") {
+        console.error("[PrismaClientValidationError]", prismaError.message);
         return noStoreJson(
           { error: { code: "DATABASE_VALIDATION", message: "Tietokannan rakenteen validointi epäonnistui." } },
           { status: 400 }
@@ -112,4 +130,11 @@ export function withErrorHandler(
       );
     }
   };
+}
+
+/** Message of an unknown throw, for logging and for user-facing fallbacks. */
+export function errorText(error: unknown, fallback = "Tuntematon virhe"): string {
+  if (error instanceof Error && error.message) return error.message;
+  if (typeof error === "string" && error) return error;
+  return fallback;
 }

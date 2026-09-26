@@ -2,29 +2,26 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { syncImapAccount } from "@/lib/mail-sync";
 
-// This route must be protected by a cron secret to prevent abuse
+import { errorText } from "@/lib/api-errors";
+import { checkCronAuth } from "@/lib/cron-auth";
+// Runs for every connected account, so it is never left unauthenticated in
+// production: checkCronAuth refuses when CRON_SECRET is not configured.
 export async function GET(req: NextRequest) {
-  const authHeader = req.headers.get("authorization");
-  const expectedToken = process.env.CRON_SECRET
-    ? `Bearer ${process.env.CRON_SECRET}`
-    : null;
-
-  if (expectedToken && authHeader !== expectedToken) {
-    return new NextResponse("Unauthorized", { status: 401 });
-  }
+  const auth = checkCronAuth(req);
+  if (!auth.ok) return auth.response;
 
   try {
     const accounts = await prisma.imapAccount.findMany();
     let totalSynced = 0;
-    const errors: any[] = [];
+    const errors: Array<{ accountId?: string; email?: string; error: string }> = [];
 
     for (const account of accounts) {
       try {
         const count = await syncImapAccount(account.id);
         totalSynced += count;
-      } catch (err: any) {
+      } catch (err: unknown) {
         console.error(`Failed to sync account ${account.email}:`, err);
-        errors.push({ email: account.email, error: err.message });
+        errors.push({ email: account.email, error: errorText(err) });
       }
     }
 
@@ -34,7 +31,7 @@ export async function GET(req: NextRequest) {
       totalSynced,
       errors: errors.length ? errors : undefined,
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error("Global IMAP sync error:", error);
     return NextResponse.json(
       { success: false, error: "Internal error" },

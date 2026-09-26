@@ -14,6 +14,7 @@ import {
 import { withErrorHandler, UnauthorizedError, AppError, NotFoundError } from "@/lib/api-errors";
 import { sanitizeText } from "@/lib/sanitizer";
 
+import { assertPeriodOpen } from "@/lib/period-lock";
 const patchSchema = z.object({
   vendor: z.string().trim().max(300).nullish(),
   date: isoDateSchema.nullish(),
@@ -134,7 +135,8 @@ export const PATCH = withErrorHandler(async (
   if (oversized) return oversized;
 
   const { id } = await params;
-  if (!(await findOwnedReceipt(id, session.userId!))) {
+  const owned = await findOwnedReceipt(id, session.userId!);
+  if (!owned) {
     return noStoreJson({ error: "Kuittia ei löytynyt" }, { status: 404 });
   }
   const parsed = patchSchema.safeParse(await req.json().catch(() => null));
@@ -143,6 +145,12 @@ export const PATCH = withErrorHandler(async (
     return noStoreJson({ error: "Ei päivitettäviä kenttiä" }, { status: 400 });
   }
   const body = parsed.data;
+
+  // Both where the receipt is now and where it would move to must be open.
+  await assertPeriodOpen(session.userId!, [
+    owned.date,
+    body.date ? isoDateToUtc(body.date) : null,
+  ]);
 
   const receipt = await prisma.receipt.update({
     where: { id },
@@ -202,6 +210,8 @@ export const DELETE = withErrorHandler(async (
   const { id } = await params;
   const existing = await findOwnedReceipt(id, session.userId!);
   if (!existing) return noStoreJson({ error: "Kuittia ei löytynyt" }, { status: 404 });
+  // Deleting a receipt changes a filed return exactly as much as editing one.
+  await assertPeriodOpen(session.userId!, [existing.date]);
 
   await prisma.$transaction(async (db) => {
     await db.transaction.updateMany({

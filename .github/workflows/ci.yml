@@ -1,0 +1,88 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Cancel superseded runs on the same ref.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    working-directory: app
+
+env:
+  # Throwaway values. src/lib/session.ts refuses to load in production without a
+  # >=32 char SESSION_SECRET, and next build runs with NODE_ENV=production.
+  DATABASE_URL: "file:./ci-check.db"
+  SESSION_SECRET: "ci-only-secret-not-used-anywhere-real-32plus"
+  # Never call an external AI provider from CI.
+  CLOUD_AI_ENABLED: "false"
+
+jobs:
+  check:
+    name: Typecheck, test, build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      # The generated client is gitignored (src/generated/prisma), so nothing
+      # below this step can compile without it.
+      - name: Generate Prisma client
+        run: npx prisma generate
+
+      - name: Validate schema
+        run: npx prisma validate
+
+      - name: Verify migrations apply to an empty database
+        run: npx prisma migrate deploy
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Unit tests
+        run: npm test
+
+      # Real SQLite file, real route handlers, real signed session cookies.
+      - name: Integration tests
+        run: npm run test:integration
+
+      - name: Production build
+        run: npm run build
+
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    # The error count reached zero on 2026-08-20, so lint is a real gate now.
+    # ESLint exits non-zero on errors only; the remaining warnings do not fail
+    # the build but are visible in the log.
+    continue-on-error: false
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate Prisma client
+        run: npx prisma generate
+
+      - name: ESLint
+        run: npm run lint

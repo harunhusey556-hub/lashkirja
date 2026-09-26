@@ -142,7 +142,7 @@ export async function syncBankConnection(
         const balances = await client.getAccountBalances(account.providerAccountUid, psuHeaders);
         const picked = pickBookedBalance(balances);
         if (picked) {
-          await prisma.bankAccount.update({
+          await prisma.connectedAccount.update({
             where: { id: account.id },
             data: { balanceCents: picked.amountCents, balanceAt: new Date() },
           });
@@ -234,7 +234,7 @@ export async function syncDueBankConnections(now = new Date()): Promise<{
       skipped += 1;
       continue;
     }
-    const scoped = await prisma.bankAccount.count({
+    const scoped = await prisma.connectedAccount.count({
       where: { connectionId: connection.id, inScope: true },
     });
     if (scoped === 0) {

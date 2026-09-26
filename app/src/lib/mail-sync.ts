@@ -10,16 +10,28 @@ import * as path from "path";
 import * as fs from "fs";
 import * as os from "os";
 
+import { createHash } from "crypto";
 // We only process attachments that are likely to be receipts.
 const VALID_EXTENSIONS = [".pdf", ".jpg", ".jpeg", ".png", ".heic"];
 
 // To prevent overwhelming the AI or downloading gigabytes of emails, we do a two-pass fetch:
 // 1. Fetch bodyStructure to detect which emails have attachments.
 // 2. Fetch the full source only for the matching UIDs.
-function hasLikelyAttachment(part: any): boolean {
+/** The shape imapflow returns for a bodyStructure node; only what is read here. */
+interface BodyStructureNode {
+  disposition?: string | { value?: string };
+  type?: string;
+  parameters?: { name?: string };
+  childNodes?: BodyStructureNode[];
+}
+
+function hasLikelyAttachment(part: BodyStructureNode | null | undefined): boolean {
   if (!part) return false;
   
-  const disposition = typeof part.disposition === 'string' ? part.disposition.toLowerCase() : (part.disposition?.value || '').toLowerCase();
+  const disposition =
+    typeof part.disposition === "string"
+      ? part.disposition.toLowerCase()
+      : (part.disposition?.value || "").toLowerCase();
   if (disposition === 'attachment') return true;
   
   const type = part.type ? part.type.toLowerCase() : '';
@@ -39,7 +51,7 @@ function hasLikelyAttachment(part: any): boolean {
   return false;
 }
 
-function isBodyOnlyReceipt(envelope: any): boolean {
+function isBodyOnlyReceipt(envelope: { subject?: string } | null | undefined): boolean {
   if (!envelope || !envelope.subject) return false;
   const subject = envelope.subject.toLowerCase();
   const keywords = [
@@ -66,6 +78,17 @@ export async function syncImapAccount(accountId: string) {
     },
     logger: false,
   });
+
+  const user = await prisma.user.findUnique({
+    where: { id: account.userId },
+    select: { businessDetails: true },
+  });
+  
+  const { parseBusinessDetails, generateProfileSummary } = await import("./onboarding");
+  const profileContext = user?.businessDetails ? generateProfileSummary(parseBusinessDetails(user.businessDetails)) : undefined;
+
+  const { getTopVendorsForAiPrompt } = await import("./vendor-intelligence");
+  const vendorPriors = await getTopVendorsForAiPrompt(account.userId);
 
   await client.connect();
   let lock;
@@ -123,10 +146,7 @@ export async function syncImapAccount(accountId: string) {
           if (!VALID_EXTENSIONS.includes(ext) && ext !== ".html") return;
 
           // Skip if we already processed this exact attachment (based on checksum/content)
-          const checksum = require("crypto")
-            .createHash("sha256")
-            .update(contentBuffer)
-            .digest("hex");
+          const checksum = createHash("sha256").update(contentBuffer).digest("hex");
 
           const existing = await prisma.upload.findFirst({
             where: { userId: account.userId, sha256: checksum },
@@ -140,7 +160,7 @@ export async function syncImapAccount(accountId: string) {
 
           try {
             // 1) Run extraction
-            const extraction = await extractReceipt(tempPath, mimeType);
+            const extraction = await extractReceipt(tempPath, mimeType, profileContext, vendorPriors);
             
             const { storageKey, absolutePath } = await writePrivateUpload(
               account.userId,

@@ -6,7 +6,7 @@ import { prisma } from "@/lib/db";
 
 export async function POST(req: NextRequest) {
   const session = await requireSession(req);
-  if (!session?.userId) {
+  if (!session) {
     return NextResponse.json({ error: "Ei kirjautunut" }, { status: 401 });
   }
 
@@ -22,11 +22,14 @@ export async function POST(req: NextRequest) {
       autoIncomeCount += await autoGenerateIncomeReceipts(session.userId, stmt.id);
     }
 
-    if (autoIncomeCount > 0) {
-      (result as any).autoConfirmed += autoIncomeCount;
-    }
+    // Drafts generated from bank rows count towards the same total the
+    // matcher reports, so the caller sees one number.
+    const totals = {
+      ...result,
+      autoConfirmed: result.autoConfirmed + autoIncomeCount,
+    };
 
-    return NextResponse.json({ ok: true, ...result });
+    return NextResponse.json({ ok: true, ...totals });
   } catch (error) {
     return NextResponse.json({ error: "Matching failed" }, { status: 500 });
   }

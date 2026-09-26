@@ -17,6 +17,11 @@ function publicReceipt<T extends { totalAmountCents?: number | null }>(receipt: 
 }
 
 const statementInclude = {
+  // The owning account travels with every statement so the UI can show and
+  // change it without a second round trip.
+  bankAccount: {
+    select: { id: true, name: true, bankName: true, iban: true, currency: true },
+  },
   transactions: {
     orderBy: { date: "asc" as const },
     include: {
@@ -71,6 +76,7 @@ async function enrichStatements(
           vendor: true,
           totalAmountCents: true,
           date: true,
+          source: true,
         },
       })
     : [];

@@ -1,8 +1,11 @@
+import { formatEur, formatMonth as formatMonthName } from "./format";
+
 export interface LinkedReceipt {
   id: string;
   vendor: string | null;
   totalAmount: number | null;
   date: string | null;
+  source?: string;
 }
 
 export interface StatementTransaction {
@@ -35,12 +38,22 @@ export interface StatementTotals {
   txCount: number;
 }
 
+export interface StatementBankAccount {
+  id: string;
+  name: string;
+  bankName: string | null;
+  iban: string | null;
+  currency: string;
+}
+
 export interface StatementData {
   id: string;
   fileName: string;
   fileType: string;
   uploadedAt: string;
   periodMonth: string | null;
+  bankAccountId: string | null;
+  bankAccount: StatementBankAccount | null;
   transactions: StatementTransaction[];
   totals: StatementTotals;
 }
@@ -68,33 +81,11 @@ export const STATEMENT_TX_FILTERS: {
   { id: "transfers", label: "Omat siirrot", shortLabel: "Siirrot" },
 ];
 
-export function formatEur(n: number): string {
-  return (
-    n.toLocaleString("fi-FI", {
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
-    }) + " €"
-  );
-}
+// Re-exported so existing statement views keep their import path.
+export { formatEur };
 
 export function formatMonth(month: string | null): string {
-  if (!month) return "Ei kuukautta";
-  const [y, m] = month.split("-");
-  const names = [
-    "tammikuu",
-    "helmikuu",
-    "maaliskuu",
-    "huhtikuu",
-    "toukokuu",
-    "kesäkuu",
-    "heinäkuu",
-    "elokuu",
-    "syyskuu",
-    "lokakuu",
-    "marraskuu",
-    "joulukuu",
-  ];
-  return `${names[parseInt(m, 10) - 1]} ${y}`;
+  return month ? formatMonthName(month) : "Ei kuukautta";
 }
 
 export function receiptLabel(r: LinkedReceipt): string {

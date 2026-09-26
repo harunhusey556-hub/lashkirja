@@ -21,7 +21,9 @@ import {
   type StatementTransaction,
   type StatementTxFilter,
 } from "@/lib/statement-client";
+import { parseFinnishNumber } from "@/lib/format";
 import StatementSummaryCards from "@/components/StatementSummaryCards";
+import ConfirmModal from "@/components/ConfirmModal";
 
 interface Props {
   statement: StatementData;
@@ -86,7 +88,7 @@ function ActionLink({
       type="button"
       onClick={onClick}
       disabled={disabled}
-      className={`text-sm font-medium transition-colors disabled:opacity-40 ${
+      className={`min-h-11 inline-flex items-center px-2 -mx-2 text-sm font-medium transition-colors disabled:opacity-40 ${
         tone === "danger"
           ? "text-danger hover:text-danger/80"
           : "text-warm-gray hover:text-charcoal"
@@ -125,6 +127,12 @@ export default function StatementDetailView({
   const [loadingCandidates, setLoadingCandidates] = useState(false);
   const [actionError, setActionError] = useState("");
   const [statusMsg, setStatusMsg] = useState("");
+  // Native window.confirm() is suppressed in Capacitor's WKWebView and in many
+  // in-app browsers, where it returns false immediately — which silently killed
+  // both delete actions. Everything else in the app already uses ConfirmModal.
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [confirmingTxDelete, setConfirmingTxDelete] = useState<string | null>(null);
+  const [toolsOpen, setToolsOpen] = useState(false);
 
   const reloadStatement = useCallback(async () => {
     try {
@@ -178,7 +186,7 @@ export default function StatementDetailView({
     setTxForm({
       counterparty: t.counterparty || "",
       date: t.date ? t.date.slice(0, 10) : "",
-      amount: String(t.amount),
+      amount: String(t.amount).replace(".", ","),
       type: t.type,
       message: t.message || "",
     });
@@ -189,8 +197,8 @@ export default function StatementDetailView({
     setSavingTx(true);
     setActionError("");
     try {
-      const amount = parseFloat(txForm.amount.replace(",", "."));
-      if (!Number.isFinite(amount)) {
+      const amount = parseFinnishNumber(txForm.amount);
+      if (amount === null || !Number.isFinite(amount)) {
         throw new Error("Anna tapahtumalle kelvollinen summa");
       }
       const normalizedAmount =
@@ -270,7 +278,7 @@ export default function StatementDetailView({
   }
 
   async function handleDelete() {
-    if (!confirm("Poistetaanko tiliote ja kaikki sen tapahtumat?")) return;
+    setConfirmingDelete(false);
     setDeleting(true);
     setActionError("");
     try {
@@ -448,7 +456,7 @@ export default function StatementDetailView({
   }
 
   async function deleteTransaction(transactionId: string) {
-    if (!confirm("Poistetaanko tämä tapahtuma?")) return;
+    setConfirmingTxDelete(null);
     setDeletingTxId(transactionId);
     setActionError("");
     try {
@@ -493,6 +501,37 @@ export default function StatementDetailView({
     (t) => t.matchStatus === "confirmed"
   ).length;
 
+  // Only the genuinely actionable bulk step stays on screen.
+  
+  const incomeDrafts = statement.transactions.filter(
+    (t) => t.matchStatus === "suggested" && t.suggestedReceipt?.source === "auto_income"
+  );
+  const incomeDraftCount = incomeDrafts.length;
+  const regularSuggestedCount = suggestedCount - incomeDraftCount;
+
+  const handleApproveAllIncomes = async () => {
+    setBulkBusy(true);
+    setActionError("");
+    try {
+      const receiptIds = incomeDrafts.map((t) => t.suggestedReceiptId!);
+      const res = await fetch("/api/receipts/batch-approve", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ receiptIds }),
+      });
+      if (!res.ok) await readJson(res, "Myyntien hyväksyntä epäonnistui");
+      await reloadStatement();
+    } catch (error: unknown) {
+      if (isUnauthorized(error)) {
+        redirectToLogin();
+        return;
+      }
+      setActionError(errorMessage(error, "Myyntien hyväksyntä epäonnistui"));
+    } finally {
+      setBulkBusy(false);
+    }
+  };
+
   return (
     <div className="space-y-6 pb-4">
       {/* Header */}
@@ -517,6 +556,57 @@ export default function StatementDetailView({
             nettoon
           </p>
         )}
+
+        <div className="pt-4 border-t border-warm-gray-light/25 space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-end gap-4">
+            <div className="flex-1 min-w-0">
+              <label
+                htmlFor={`statement-${statement.id}-period`}
+                className="block text-sm text-charcoal mb-2"
+              >
+                Kohdekuukausi
+              </label>
+              <input
+                id={`statement-${statement.id}-period`}
+                type="month"
+                value={periodValue()}
+                onChange={(e) => setDraftPeriod(e.target.value)}
+                className="w-full sm:max-w-xs px-3 py-2.5 rounded-xl border border-warm-gray-light/60 bg-white text-sm"
+              />
+              <p className="text-xs text-warm-gray mt-2 leading-relaxed">
+                Määrittää millä kuukaudella etusivu näyttää tämän tiliotteen.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setConfirmingDelete(true)}
+              disabled={deleting}
+              className="shrink-0 self-start sm:self-auto px-4 py-2.5 rounded-xl text-sm font-medium text-danger border border-danger/20 hover:bg-danger/5 transition-colors disabled:opacity-50"
+            >
+              {deleting ? "Poistetaan..." : "Poista tiliote"}
+            </button>
+          </div>
+
+          {periodDirty() && (
+            <div className="flex gap-3">
+              <button
+                type="button"
+                onClick={cancelPeriodMonth}
+                className="flex-1 py-2.5 text-sm rounded-xl border border-warm-gray-light text-warm-gray hover:bg-cream transition-colors"
+              >
+                Peruuta
+              </button>
+              <button
+                type="button"
+                onClick={() => void savePeriodMonth()}
+                disabled={savingPeriod || !periodValue()}
+                className="flex-1 py-2.5 text-sm rounded-xl bg-accent text-white hover:bg-accent-dark disabled:opacity-50"
+              >
+                {savingPeriod ? "Tallennetaan..." : "Tallenna kuukausi"}
+              </button>
+            </div>
+          )}
+        </div>
       </section>
 
       {actionError && (
@@ -576,59 +666,108 @@ export default function StatementDetailView({
         </div>
       </section>
 
-      {/* Bulk actions */}
-      {(suggestedCount > 0 || missingCount > 0) && (
+      {incomeDraftCount > 0 && (
+        <section className="rounded-3xl p-5 space-y-4 border border-success/30 bg-success/5 shadow-sm">
+          <div>
+            <div className="flex items-center gap-2">
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-5 h-5 text-success">
+                <path fillRule="evenodd" d="M10 18a8 8 0 1 0 0-16 8 8 0 0 0 0 16Zm3.857-9.809a.75.75 0 0 0-1.214-.882l-3.483 4.79-1.88-1.88a.75.75 0 1 0-1.06 1.061l2.5 2.5a.75.75 0 0 0 1.137-.089l4-5.5Z" clipRule="evenodd" />
+              </svg>
+              <h3 className="text-base font-medium text-success-dark">Tunnistetut myynnit</h3>
+            </div>
+            <p className="text-sm text-charcoal/80 mt-2 leading-relaxed">
+              Tunnistimme tiliotteelta {incomeDraftCount} myyntitapahtumaa (esim. MobilePay-tilitystä).
+              Hyväksymällä lisäät ne automaattisesti kirjanpitoon tuloina, alv mukaan lukien.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={handleApproveAllIncomes}
+            disabled={bulkBusy}
+            className="w-full py-3 px-4 rounded-2xl bg-success text-white text-sm font-medium hover:bg-success-dark disabled:opacity-50 transition-colors"
+          >
+            {bulkBusy ? "Hyväksytään..." : `Hyväksy kaikki ${incomeDraftCount} kpl`}
+          </button>
+        </section>
+      )}
+
+      {regularSuggestedCount > 0 && (
         <section className="rounded-3xl p-5 space-y-4 border border-accent/10 bg-white shadow-sm">
           <div>
             <p className="text-base font-medium text-charcoal">Kuittien linkitys</p>
             <p className="text-sm text-warm-gray mt-1 leading-relaxed">
-              {missingCount > 0
-                ? `${missingCount} tapahtumaa odottaa kuittia`
-                : "Kaikki tapahtumat on käsitelty"}
-              {suggestedCount > 0 && ` · ${suggestedCount} valmista ehdotusta`}
+              {regularSuggestedCount} valmista ehdotusta
+              {missingCount > 0 && ` · ${missingCount} tapahtumaa odottaa kuittia`}
             </p>
           </div>
-          <div className="flex flex-col sm:flex-row gap-3">
-            {suggestedCount > 0 && (
-              <button
-                type="button"
-                onClick={() => void confirmAllSuggested()}
-                disabled={bulkBusy}
-                className="flex-1 py-3 px-4 rounded-2xl bg-success text-white text-sm font-medium hover:bg-success/90 disabled:opacity-50 transition-colors"
-              >
-                {bulkBusy
-                  ? "Linkitetään..."
-                  : `Linkitä kaikki (${suggestedCount})`}
-              </button>
-            )}
-            <button
-              type="button"
-              onClick={() => void rerunMatching()}
-              disabled={bulkBusy}
-              className="flex-1 py-3 px-4 rounded-2xl border border-warm-gray-light/60 bg-cream/50 text-charcoal text-sm font-medium hover:bg-cream disabled:opacity-50 transition-colors"
-            >
-              {bulkBusy ? "Haetaan..." : "Etsi kuitteja uudelleen"}
-            </button>
-          </div>
+          <button
+            type="button"
+            onClick={() => void confirmAllSuggested()}
+            disabled={bulkBusy}
+            className="w-full py-3 px-4 rounded-2xl bg-accent text-white text-sm font-medium hover:bg-accent-dark disabled:opacity-50 transition-colors"
+          >
+            {bulkBusy ? "Linkitetään..." : `Linkitä kaikki (${regularSuggestedCount})`}
+          </button>
         </section>
       )}
 
-      <section className="rounded-3xl p-5 space-y-3 border border-warm-gray-light/20 bg-white/60">
-        <div>
-          <p className="text-sm font-medium text-charcoal">Palkka & tyypit</p>
-          <p className="text-sm text-warm-gray mt-1 leading-relaxed">
-            Tunnistaa uudelleen &quot;Palkka&quot;-viestillä maksetut siirrot
-            (näytetään Palkka-kategoriana, ei vaadi kuittia).
-          </p>
-        </div>
+      <section className="rounded-3xl border border-warm-gray-light/20 bg-white/60">
         <button
           type="button"
-          onClick={() => void reinferTransferTypes()}
-          disabled={bulkBusy}
-          className="w-full sm:w-auto py-2.5 px-4 rounded-2xl border border-warm-gray-light/60 bg-cream/50 text-charcoal text-sm font-medium hover:bg-cream disabled:opacity-50 transition-colors"
+          onClick={() => setToolsOpen((prev) => !prev)}
+          className="w-full flex items-center justify-between gap-3 p-4 text-left"
+          aria-expanded={toolsOpen}
         >
-          {bulkBusy ? "Päivitetään..." : "Tunnista palkat uudelleen"}
+          <span className="text-sm font-medium text-charcoal">Työkalut</span>
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            viewBox="0 0 20 20"
+            fill="currentColor"
+            aria-hidden
+            className={`w-5 h-5 shrink-0 text-warm-gray transition-transform duration-300 ${
+              toolsOpen ? "rotate-180" : ""
+            }`}
+          >
+            <path
+              fillRule="evenodd"
+              d="M5.22 8.22a.75.75 0 0 1 1.06 0L10 11.94l3.72-3.72a.75.75 0 1 1 1.06 1.06l-4.25 4.25a.75.75 0 0 1-1.06 0L5.22 9.28a.75.75 0 0 1 0-1.06Z"
+              clipRule="evenodd"
+            />
+          </svg>
         </button>
+
+        {toolsOpen && (
+          <div className="px-4 pb-4 space-y-3">
+            <div>
+              <button
+                type="button"
+                onClick={() => void rerunMatching()}
+                disabled={bulkBusy}
+                className="w-full py-2.5 px-4 rounded-2xl border border-warm-gray-light/60 bg-cream/50 text-charcoal text-sm font-medium hover:bg-cream disabled:opacity-50 transition-colors"
+              >
+                {bulkBusy ? "Haetaan..." : "Etsi kuitteja uudelleen"}
+              </button>
+              <p className="text-xs text-warm-gray mt-2 leading-relaxed">
+                Etsii kuiteille vastaavat tapahtumat uudelleen.
+              </p>
+            </div>
+
+            <div>
+              <button
+                type="button"
+                onClick={() => void reinferTransferTypes()}
+                disabled={bulkBusy}
+                className="w-full py-2.5 px-4 rounded-2xl border border-warm-gray-light/60 bg-cream/50 text-charcoal text-sm font-medium hover:bg-cream disabled:opacity-50 transition-colors"
+              >
+                {bulkBusy ? "Päivitetään..." : "Tunnista palkat uudelleen"}
+              </button>
+              <p className="text-xs text-warm-gray mt-2 leading-relaxed">
+                Tunnistaa uudelleen &quot;Palkka&quot;-viestillä maksetut siirrot
+                (näytetään Palkka-kategoriana, ei vaadi kuittia).
+              </p>
+            </div>
+          </div>
+        )}
       </section>
 
       {/* Transactions */}
@@ -709,8 +848,8 @@ export default function StatementDetailView({
                         </label>
                         <input
                           id={`transaction-${t.id}-amount`}
-                          type="number"
-                          step="0.01"
+                          type="text"
+                          inputMode="decimal"
                           value={txForm.amount}
                           onChange={(e) =>
                             setTxForm({
@@ -799,24 +938,64 @@ export default function StatementDetailView({
                     </div>
 
                     {t.matchStatus === "suggested" && t.suggestedReceipt && (
-                      <button
-                        type="button"
-                        onClick={() =>
-                          matchAction(t.id, "/api/matching/confirm", {
-                            transactionId: t.id,
-                            receiptId: t.suggestedReceiptId,
-                          })
-                        }
-                        disabled={matchBusyTxId === t.id}
-                        className="w-full text-left bg-success/8 border border-success/20 rounded-2xl p-4 hover:bg-success/12 transition-colors disabled:opacity-50"
-                      >
-                        <p className="text-sm font-medium text-success">
-                          Linkitä ehdotettu kuitti
-                        </p>
-                        <p className="text-sm text-charcoal mt-1.5 leading-relaxed">
-                          {receiptLabel(t.suggestedReceipt)}
-                        </p>
-                      </button>
+                      t.suggestedReceipt.source === "auto_income" ? (
+                        <div className="bg-success/5 border border-success/20 rounded-2xl p-4 space-y-3">
+                          <div>
+                            <p className="text-sm font-medium text-success-dark">
+                              Tunnistettu myyntitilitys
+                            </p>
+                            <p className="text-sm text-charcoal/80 mt-1 leading-relaxed">
+                              {t.suggestedReceipt.vendor || "Myyjä"} · {t.suggestedReceipt.totalAmount != null ? formatEur(t.suggestedReceipt.totalAmount) : ""}
+                            </p>
+                          </div>
+                          <div className="flex gap-2">
+                            <button
+                              type="button"
+                              disabled={matchBusyTxId === t.id}
+                              onClick={() =>
+                                matchAction(t.id, "/api/matching/reject", {
+                                  transactionId: t.id,
+                                  receiptId: t.suggestedReceiptId,
+                                })
+                              }
+                              className="flex-1 min-h-11 py-2 px-3 text-xs font-medium text-danger border border-danger/20 rounded-xl hover:bg-danger/5 transition-colors disabled:opacity-50"
+                            >
+                              Ei myyntiä
+                            </button>
+                            <button
+                              type="button"
+                              disabled={matchBusyTxId === t.id}
+                              onClick={() =>
+                                matchAction(t.id, "/api/receipts/batch-approve", {
+                                  receiptIds: [t.suggestedReceiptId],
+                                })
+                              }
+                              className="flex-1 min-h-11 py-2 px-3 text-xs font-medium text-white bg-success hover:bg-success-dark rounded-xl transition-colors disabled:opacity-50"
+                            >
+                              Hyväksy
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            matchAction(t.id, "/api/matching/confirm", {
+                              transactionId: t.id,
+                              receiptId: t.suggestedReceiptId,
+                            })
+                          }
+                          disabled={matchBusyTxId === t.id}
+                          className="w-full text-left bg-success/8 border border-success/20 rounded-2xl p-4 hover:bg-success/12 transition-colors disabled:opacity-50"
+                        >
+                          <p className="text-sm font-medium text-success">
+                            Linkitä ehdotettu kuitti
+                          </p>
+                          <p className="text-sm text-charcoal mt-1.5 leading-relaxed">
+                            {receiptLabel(t.suggestedReceipt)}
+                          </p>
+                        </button>
+                      )
                     )}
 
                     {t.matchStatus === "confirmed" && t.receipt && (
@@ -879,7 +1058,7 @@ export default function StatementDetailView({
                       <ActionLink
                         tone="danger"
                         disabled={deletingTxId === t.id}
-                        onClick={() => void deleteTransaction(t.id)}
+                        onClick={() => setConfirmingTxDelete(t.id)}
                       >
                         {deletingTxId === t.id ? "Poistetaan..." : "Poista"}
                       </ActionLink>
@@ -977,59 +1156,25 @@ export default function StatementDetailView({
         )}
       </section>
 
-      {/* Settings */}
-      <section className="rounded-3xl border border-warm-gray-light/20 bg-white/60 p-6 space-y-4">
-        <h3 className="text-sm font-medium text-warm-gray uppercase tracking-wide">
-          Tiliotteen asetukset
-        </h3>
-        <div className="flex flex-col sm:flex-row sm:items-end gap-4">
-          <div className="flex-1">
-            <label
-              htmlFor={`statement-${statement.id}-period`}
-              className="block text-sm text-charcoal mb-2"
-            >
-              Kohdekuukausi
-            </label>
-            <input
-              id={`statement-${statement.id}-period`}
-              type="month"
-              value={periodValue()}
-              onChange={(e) => setDraftPeriod(e.target.value)}
-              className="w-full sm:max-w-xs px-3 py-2.5 rounded-xl border border-warm-gray-light/60 bg-white text-sm"
-            />
-            <p className="text-xs text-warm-gray mt-2 leading-relaxed">
-              Määrittää millä kuukaudella etusivu näyttää tämän tiliotteen.
-            </p>
-          </div>
-          <button
-            type="button"
-            onClick={() => void handleDelete()}
-            disabled={deleting}
-            className="shrink-0 px-4 py-2.5 rounded-xl text-sm font-medium text-danger border border-danger/20 hover:bg-danger/5 transition-colors disabled:opacity-50"
-          >
-            {deleting ? "Poistetaan..." : "Poista tiliote"}
-          </button>
-        </div>
-        {periodDirty() && (
-          <div className="flex gap-3">
-            <button
-              type="button"
-              onClick={cancelPeriodMonth}
-              className="flex-1 py-2.5 text-sm rounded-xl border border-warm-gray-light text-warm-gray hover:bg-cream transition-colors"
-            >
-              Peruuta
-            </button>
-            <button
-              type="button"
-              onClick={() => void savePeriodMonth()}
-              disabled={savingPeriod || !periodValue()}
-              className="flex-1 py-2.5 text-sm rounded-xl bg-accent text-white hover:bg-accent-dark disabled:opacity-50"
-            >
-              {savingPeriod ? "Tallennetaan..." : "Tallenna kuukausi"}
-            </button>
-          </div>
-        )}
-      </section>
+      <ConfirmModal
+        isOpen={confirmingDelete}
+        title="Poistetaanko tiliote?"
+        description={`"${statement.fileName}" ja kaikki sen tapahtumat poistetaan pysyvästi. Tätä ei voi perua.`}
+        confirmLabel="Poista tiliote"
+        onConfirm={() => void handleDelete()}
+        onCancel={() => setConfirmingDelete(false)}
+      />
+
+      <ConfirmModal
+        isOpen={confirmingTxDelete !== null}
+        title="Poistetaanko tapahtuma?"
+        description="Tapahtuma poistetaan tästä tiliotteesta pysyvästi."
+        confirmLabel="Poista"
+        onConfirm={() => {
+          if (confirmingTxDelete) void deleteTransaction(confirmingTxDelete);
+        }}
+        onCancel={() => setConfirmingTxDelete(null)}
+      />
     </div>
   );
 }

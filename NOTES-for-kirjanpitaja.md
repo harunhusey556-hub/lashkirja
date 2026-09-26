@@ -1,0 +1,27 @@
+# Notes for kirjanpitaja
+
+## 2026-08-20 — Mobile UX overhaul round 1 (hardening-r1, commits 5d88a0d..abad798)
+
+Done by a devteam agent on Harun's complaint ("no sign-out, no back-swipe, everything crammed into settings, doesn't feel like an app").
+
+- **Sign out**: header avatar (every page) opens a profile sheet with Asetukset link + "Kirjaudu ulos"; also a sign-out button at the bottom of /asetukset. `signOut()` in `src/components/clientFetch.ts` destroys the iron-session cookie via POST /api/auth/logout, fades <body> out (opacity only) and lands on /login. Verified: cookie cleared, /api/auth/me → 401.
+- **Back-swipe + directional transitions**: `AppShell.tsx` now tracks navigation direction at module scope (route depth + popstate + forced direction). Drill-in slides from right, back from left, tab switch keeps fade-up. Subpages (depth > 1) get a header back chevron and a 24px left-edge swipe-back gesture on <main> (interruptible, velocity/distance commit, inline transform always cleared — never leave a transform on <main>, fixed bars re-anchor).
+- **Settings restructure**: /asetukset is a grouped menu; subpages: /asetukset/profiili, /yritys, /laskutus (SellerProfileCard), /kirjanpito (BooksLockCard), /sahkoposti (IMAP + sync). Shared hook `src/app/asetukset/useProfile.tsx`.
+- **Motion pass**: BottomSheet + ConfirmModal exit animations (mounted-while-closing pattern, 220/180ms timeout unmount — do NOT rely on animationend, reduced-motion never fires it). Sheet enter is full-height spring (0.32s cubic-bezier(0.32,0.72,0,1)). `SkeletonList` (AsyncState.tsx) replaces spinners on kuitit/tiliotteet/laskut; `.list-stagger` CSS staggers list entrances with `backwards` fill only. Press states (`active-press`) on tab bar, dashboard quick actions, settings forms.
+- **Hard constraints re-verified**: login hard-lock (fixed/overflow-hidden/touch-none) intact, login spinner intact, computed transform on <main> is "none" on dashboard/subpage/after back-nav/kuitit, tab-height var + bulk bar untouched, viewport zoom-lock untouched.
+- Live service `lashkirja-live` (port 3920) restarted on the new build (CSS hash 1jymxmnge → 1qbdvycsie3sa). Screenshots in /tmp/lk-r1-*.png.
+
+Deferred to round 2: drag-to-dismiss on BottomSheet, per-detail-page skeletons (kuitit/[id], tiliotteet/[id]), haptics via Capacitor, kuitit-page inline "synkronoi" shortcut, converting kuitit's legacy `animate-in ... stagger-N` items (they still use forwards-fill; harmless — not ancestors of fixed elements).
+
+## 2026-08-20 — Round 2: instant page revisits (stale-while-revalidate)
+
+Harun's complaint: every tab switch reloaded the page from scratch — round 1's skeletons showed on EVERY visit. Fixed by extending the existing `src/lib/page-cache.ts` (module-scope Map, deliberately NOT persisted to storage) to everything that still fetched blind. Commits 72ad13f + the follow-up warm-key fix on `fix/dashboard-500-ci-mobile`.
+
+- **AppShell auth gate was the biggest offender**: the shell remounts on every route and blocked children behind `/api/auth/me` ("Tarkistetaan istuntoa…" on every nav). Now the session result is cached under `shell-auth`; revisits render page content in the first frame and the auth check revalidates silently (network failure with a cached session stays silent; 401 still redirects). Onboarding probe stops re-running once confirmed onboarded (`shell-onboarded`).
+- **Warm prefetch**: after the first successful session check, `warmTabCaches()` in AppShell fires background GETs for kuitit (NOTE: key is `receipts:sort=date_desc` — the page's default query includes the sort param!), pending review, statements, bank-overview, invoices and current-month dashboard. In practice even the FIRST tap on each tab paints with data.
+- **Pages wired to the cache** (paint cached copy instantly, refetch silently, skeleton only for never-seen keys): kuitit (`receipts:<query>` + `receipts-pending`, delete/bulk-delete update the cached list in place), tiliotteet (`statements`, account picker seeds from `bank-overview` and no longer clobbers the user's selection when the background fetch lands), dashboard (`dashboard:<month>`), raportit (`report:<year>`), alv-raportti (`alv:<period>`), asetukset via useProfile (`profile`). laskut/pankkitilit/asiakkaat/ostolaskut/toistuvat already did this; laskut fixed to not cache filtered/customer-scoped results as the full list.
+- **Sign-out clears the whole cache** (`clearPageCache()` at the top of `signOut()` in clientFetch.ts) so the next login can't paint the previous user's data.
+- **Transitions**: tab fade (`pageEnter` 0.18s, no fill mode) renders cached content in the first animation frame — untouched, constraint (no persistent transform on <main>) still holds.
+- **Verified**: typecheck + build green, 299 unit tests pass, service restarted on new build (BUILD_ID TeJP3iTeK1wLvdwo5EgnP). Headless 390x844: return visits to kuitit/tiliotteet/dashboard assert NO skeleton + content text present immediately after URL change (ALL PASS, script /tmp/lk-r2-assert.mjs); sign-out → /login → protected page bounces back (session dead). Demo video /tmp/lk-r2-nav.mp4 (BEFORE/AFTER halves).
+
+Deferred: detail pages (kuitit/[id], tiliotteet/[id], laskut/[id]) and BooksLockCard still fetch on mount (drill-ins, less felt); sessionStorage persistence intentionally skipped (page-cache.ts's own privacy note: bookkeeping data shouldn't outlive the tab — WKWebView keeps the process alive anyway); destructive-mutation e2e not run against the live real-db service.

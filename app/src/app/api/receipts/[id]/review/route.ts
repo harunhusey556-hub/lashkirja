@@ -9,17 +9,22 @@ const reviewSchema = z.object({
 });
 
 export const PATCH = withErrorHandler(
-  async (req: NextRequest, { params }: { params: { id: string } }) => {
+  async (req: NextRequest, { params }: { params: Promise<{ id: string }> }) => {
     const session = await requireSession(req);
     if (!session) {
       return NextResponse.json({ error: "Ei kirjautunut" }, { status: 401 });
+    }
+
+    const { id } = await params;
+    if (!id) {
+      throw new AppError("Kuittia ei löydy", "NOT_FOUND", 404);
     }
 
     const json = await req.json();
     const parsed = reviewSchema.parse(json);
 
     const receipt = await prisma.receipt.findFirst({
-      where: { id: params.id, userId: session.userId },
+      where: { id, userId: session.userId },
     });
 
     if (!receipt) {
@@ -46,6 +51,37 @@ export const PATCH = withErrorHandler(
       data: { reviewStatus: parsed.reviewStatus },
     });
 
-    return NextResponse.json({ success: true, reviewStatus: updated.reviewStatus });
+    // Auto-link: if this was an auto-generated income draft that just got
+    // approved, link it to the bank transaction it was created from.
+    let autoLinked = false;
+    if (parsed.reviewStatus === "approved" && receipt.sourceTransactionId) {
+      try {
+        const tx = await prisma.transaction.findFirst({
+          where: {
+            id: receipt.sourceTransactionId,
+            statement: { userId: session.userId },
+            receiptId: null, // not already linked to something else
+          },
+        });
+        if (tx) {
+          await prisma.transaction.update({
+            where: { id: tx.id },
+            data: {
+              receiptId: receipt.id,
+              matchStatus: "confirmed",
+              matchScore: 1.0,
+              matchReasons: JSON.stringify(["auto_income", "approved"]),
+              // Clear any stale suggestion
+              suggestedReceiptId: tx.suggestedReceiptId === receipt.id ? null : tx.suggestedReceiptId,
+            },
+          });
+          autoLinked = true;
+        }
+      } catch (e) {
+        console.error("Auto-link after approval failed:", e);
+      }
+    }
+
+    return NextResponse.json({ success: true, reviewStatus: updated.reviewStatus, autoLinked });
   }
 );

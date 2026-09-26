@@ -20,7 +20,7 @@ CREATE TABLE "BankConnection" (
 );
 
 -- CreateTable
-CREATE TABLE "BankAccount" (
+CREATE TABLE "ConnectedAccount" (
     "id" TEXT NOT NULL PRIMARY KEY,
     "userId" TEXT NOT NULL,
     "connectionId" TEXT NOT NULL,
@@ -33,7 +33,7 @@ CREATE TABLE "BankAccount" (
     "balanceAt" DATETIME,
     "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" DATETIME NOT NULL,
-    CONSTRAINT "BankAccount_connectionId_fkey" FOREIGN KEY ("connectionId") REFERENCES "BankConnection" ("id") ON DELETE CASCADE ON UPDATE CASCADE
+    CONSTRAINT "ConnectedAccount_connectionId_fkey" FOREIGN KEY ("connectionId") REFERENCES "BankConnection" ("id") ON DELETE CASCADE ON UPDATE CASCADE
 );
 
 -- RedefineTables
@@ -87,7 +87,7 @@ CREATE INDEX "BankConnection_status_lastSyncAt_idx" ON "BankConnection"("status"
 CREATE INDEX "BankConnection_authStateHash_idx" ON "BankConnection"("authStateHash");
 
 -- CreateIndex
-CREATE INDEX "BankAccount_userId_iban_idx" ON "BankAccount"("userId", "iban");
+CREATE INDEX "ConnectedAccount_userId_iban_idx" ON "ConnectedAccount"("userId", "iban");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "BankAccount_connectionId_providerAccountUid_key" ON "BankAccount"("connectionId", "providerAccountUid");
+CREATE UNIQUE INDEX "ConnectedAccount_connectionId_providerAccountUid_key" ON "ConnectedAccount"("connectionId", "providerAccountUid");

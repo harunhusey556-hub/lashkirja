@@ -9,7 +9,7 @@ async function main() {
     const password = decrypt(account.encryptedPass);
     const client = new ImapFlow({ host: account.host, port: account.port, secure: account.tls, auth: { user: account.email, pass: password }, logger: false });
     await client.connect();
-    let lock = await client.getMailboxLock("INBOX");
+    const lock = await client.getMailboxLock("INBOX");
     try {
       // Find messages from July 9 to July 11
       const messages = client.fetch({ since: new Date("2026-07-09"), before: new Date("2026-07-12") }, { uid: true, envelope: true });

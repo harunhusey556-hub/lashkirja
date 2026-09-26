@@ -4,7 +4,7 @@ import { prisma } from "@/lib/db";
 import { redirectResponse, sessionOptions, type SessionData } from "@/lib/session";
 import { getIronSession } from "iron-session";
 import { z } from "zod";
-import { rejectCrossSite, rejectOversizedContentLength } from "@/lib/http-security";
+import { rejectCrossSite, rejectOversizedContentLength, safeInternalPath } from "@/lib/http-security";
 import {
   clearRateLimit,
   consumeRateLimit,
@@ -50,16 +50,29 @@ export async function POST(req: NextRequest) {
     const contentType = req.headers.get("content-type") || "";
     let email = "";
     let password = "";
+    let next = "";
 
     if (wantsJson) {
       const body = await req.json().catch(() => ({}));
       email = String(body.email || "").trim();
       password = String(body.password || "");
+      next = String(body.next || "");
     } else {
       const form = await req.formData();
       email = String(form.get("email") || "").trim();
       password = String(form.get("password") || "");
+      next = String(form.get("next") || "");
     }
+
+    // Deep-link continue-after-login: re-validate here too, since this field
+    // arrives as ordinary request input regardless of what proxy.ts sent.
+    const nextPath = next ? safeInternalPath(next, "") : "";
+    const loginRedirect = (errorCode: string) =>
+      redirectResponse(
+        nextPath
+          ? `/login?error=${errorCode}&next=${encodeURIComponent(nextPath)}`
+          : `/login?error=${errorCode}`
+      );
 
     const credentials = credentialsSchema.safeParse({ email, password });
     if (!credentials.success) {
@@ -69,7 +82,7 @@ export async function POST(req: NextRequest) {
           { status: 400 }
         );
       }
-      return redirectResponse("/login?error=missing");
+      return loginRedirect("missing");
     }
 
     email = credentials.data.email;
@@ -85,7 +98,7 @@ export async function POST(req: NextRequest) {
           { status: 429, headers: { "Retry-After": String(retryAfter) } }
         );
       }
-      const response = redirectResponse("/login?error=rate");
+      const response = loginRedirect("rate");
       response.headers.set("Retry-After", String(retryAfter));
       return response;
     }
@@ -98,7 +111,7 @@ export async function POST(req: NextRequest) {
           { status: 401 }
         );
       }
-      return redirectResponse("/login?error=auth");
+      return loginRedirect("auth");
     }
 
     clearRateLimit(accountRateKey);
@@ -112,8 +125,9 @@ export async function POST(req: NextRequest) {
       return res;
     }
 
-    // 303 redirect after form POST — browser stores cookie before /dashboard
-    const res = redirectResponse("/dashboard");
+    // 303 redirect after form POST — browser stores cookie before /dashboard,
+    // or back to the originally requested deep link when there is one.
+    const res = redirectResponse(nextPath || "/dashboard");
     await writeSession(req, res, user);
     return res;
   } catch (error) {

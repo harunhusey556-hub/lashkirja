@@ -16,8 +16,8 @@ export default function Error({
   return (
     <main className="min-h-screen bg-blush px-4 flex items-center justify-center relative overflow-hidden">
       {/* Decorative background shapes */}
-      <div className="absolute top-[-10%] left-[-10%] w-96 h-96 bg-cream rounded-full mix-blend-multiply filter blur-3xl opacity-70 animate-pulse"></div>
-      <div className="absolute bottom-[-10%] right-[-10%] w-96 h-96 bg-rose rounded-full mix-blend-multiply filter blur-3xl opacity-50 animate-pulse" style={{ animationDelay: '2s' }}></div>
+      <div className="absolute top-[-10%] left-[-10%] w-96 h-96 bg-cream rounded-full mix-blend-multiply filter blur-3xl opacity-70 animate-pulse motion-reduce:animate-none"></div>
+      <div className="absolute bottom-[-10%] right-[-10%] w-96 h-96 bg-rose rounded-full mix-blend-multiply filter blur-3xl opacity-50 animate-pulse motion-reduce:animate-none" style={{ animationDelay: '2s' }}></div>
       
       <div className="w-full max-w-sm glass rounded-2xl p-8 text-center animate-in relative z-10">
         <div className="w-16 h-16 mx-auto bg-charcoal/5 rounded-full flex items-center justify-center mb-6">

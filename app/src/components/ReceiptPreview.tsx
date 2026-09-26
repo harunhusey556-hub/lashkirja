@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { useFocusTrap } from "@/components/useFocusTrap";
 
 type PreviewKind = "rendered" | "raster" | "other";
 
@@ -43,40 +44,22 @@ export default function ReceiptPreview({
   const imageSrc = previewSrc(src, kind);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional fetch-on-mount: flipping to a loading state and storing the response is exactly the external-system sync this effect exists for
     setPreviewFailed(false);
     setLoading(true);
   }, [imageSrc]);
 
+  useFocusTrap(dialogRef, fullscreen, {
+    onEscape: () => setFullscreen(false),
+    initialFocusRef: closeButtonRef,
+  });
+
   useEffect(() => {
     if (!fullscreen) return;
-    const previouslyFocused = document.activeElement as HTMLElement | null;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setFullscreen(false);
-      if (e.key !== "Tab" || !dialogRef.current) return;
-      const focusable = Array.from(
-        dialogRef.current.querySelectorAll<HTMLElement>(
-          'button:not([disabled]), a[href], img, [tabindex]:not([tabindex="-1"])'
-        )
-      );
-      if (focusable.length === 0) return;
-      const first = focusable[0];
-      const last = focusable[focusable.length - 1];
-      if (e.shiftKey && document.activeElement === first) {
-        e.preventDefault();
-        last.focus();
-      } else if (!e.shiftKey && document.activeElement === last) {
-        e.preventDefault();
-        first.focus();
-      }
-    };
-    window.addEventListener("keydown", onKey);
     const prev = document.body.style.overflow;
     document.body.style.overflow = "hidden";
-    closeButtonRef.current?.focus();
     return () => {
-      window.removeEventListener("keydown", onKey);
       document.body.style.overflow = prev;
-      (previouslyFocused || openButtonRef.current)?.focus();
     };
   }, [fullscreen]);
 
@@ -127,7 +110,10 @@ export default function ReceiptPreview({
           aria-modal="true"
           aria-labelledby="receipt-preview-title"
         >
-          <div className="flex items-center justify-between px-4 py-3 shrink-0">
+          <div
+            className="flex items-center justify-between px-4 py-3 shrink-0"
+            style={{ paddingTop: "max(0.75rem, var(--safe-top))" }}
+          >
             <p id="receipt-preview-title" className="text-sm text-white truncate pr-4">
               {fileName}
             </p>
@@ -140,7 +126,12 @@ export default function ReceiptPreview({
               Sulje
             </button>
           </div>
-          <div className="flex-1 min-h-0 px-2 pb-4">{viewer}</div>
+          <div
+            className="flex-1 min-h-0 px-2"
+            style={{ paddingBottom: "max(1rem, var(--safe-bottom))" }}
+          >
+            {viewer}
+          </div>
         </div>
       )}
     </>
@@ -189,7 +180,10 @@ function PreviewBody({
     <div className={`relative w-full h-full bg-white ${fill ? "rounded-xl" : ""}`}>
       {loading && (
         <div className="absolute inset-0 flex items-center justify-center bg-cream/80 z-10">
-          <div className="w-6 h-6 border-2 border-accent border-t-transparent rounded-full animate-spin" />
+          <div
+            className="w-6 h-6 border-2 border-accent border-t-transparent rounded-full animate-spin motion-reduce:animate-none"
+            aria-hidden="true"
+          />
         </div>
       )}
       {/* eslint-disable-next-line @next/next/no-img-element */}

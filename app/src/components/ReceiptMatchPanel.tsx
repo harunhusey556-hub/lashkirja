@@ -1,5 +1,7 @@
 "use client";
 
+import { formatEur } from "@/lib/format";
+
 export interface BankTxMatch {
   id: string;
   date: string | null;
@@ -18,14 +20,6 @@ export interface ReceiptMatchData {
   matchCandidates?: BankTxMatch[];
 }
 
-function formatEur(n: number): string {
-  return (
-    n.toLocaleString("fi-FI", {
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
-    }) + " €"
-  );
-}
 
 function txLabel(tx: BankTxMatch): string {
   const parts = [tx.counterparty || "Pankkitapahtuma"];
@@ -93,7 +87,7 @@ export default function ReceiptMatchPanel({
             type="button"
             onClick={onUnlink}
             disabled={busy}
-            className="text-[11px] text-warm-gray hover:text-danger disabled:opacity-50"
+            className="min-h-11 inline-flex items-center px-2 -mx-2 text-[11px] text-warm-gray hover:text-danger disabled:opacity-50"
           >
             Poista linkitys
           </button>

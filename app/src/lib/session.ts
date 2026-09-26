@@ -1,4 +1,4 @@
-import { getIronSession, SessionOptions } from "iron-session";
+import { getIronSession, IronSession, SessionOptions } from "iron-session";
 import { cookies } from "next/headers";
 import { NextRequest, NextResponse } from "next/server";
 
@@ -22,14 +22,14 @@ export interface SessionData {
 
 export const sessionOptions: SessionOptions = {
   password: configuredSecret || developmentSecret,
-  ttl: 8 * 60 * 60,
+  ttl: 30 * 24 * 60 * 60,
   cookieName: cookieSecure ? "__Host-lashkirja-session" : "lashkirja-session",
   cookieOptions: {
     secure: cookieSecure,
     httpOnly: true,
     sameSite: "lax" as const,
     path: "/",
-    maxAge: 8 * 60 * 60,
+    maxAge: 30 * 24 * 60 * 60,
   },
 };
 
@@ -52,8 +52,11 @@ export async function getSessionFromRequest(req: NextRequest) {
   return getIronSession<SessionData>(req, res, sessionOptions);
 }
 
+/** A session that has passed the requireSession check — userId is guaranteed. */
+export type AuthenticatedSession = IronSession<SessionData> & { userId: string };
+
 /** Returns the session if logged in, otherwise null. */
-export async function requireSession(req?: NextRequest) {
+export async function requireSession(req?: NextRequest): Promise<AuthenticatedSession | null> {
   const session = req ? await getSessionFromRequest(req) : await getSession();
-  return session.userId ? session : null;
+  return session.userId ? (session as AuthenticatedSession) : null;
 }

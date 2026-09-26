@@ -1,26 +1,45 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 
 const ERROR_MESSAGES: Record<string, string> = {
   auth: "Väärä sähköposti tai salasana",
   missing: "Sähköposti ja salasana vaaditaan",
   server: "Kirjautuminen epäonnistui",
+  rate: "Liian monta kirjautumisyritystä. Yritä muutaman minuutin kuluttua uudelleen.",
+  expired: "Istuntosi vanhentui. Kirjaudu sisään uudelleen.",
 };
 
 export default function LoginForm() {
+  const [submitting, setSubmitting] = useState(false);
+
+  // iOS bfcache: swiping back to the login page restores the old React state,
+  // which would leave the button stuck on the spinner — reset it on pageshow.
+  useEffect(() => {
+    const reset = () => setSubmitting(false);
+    window.addEventListener("pageshow", reset);
+    return () => window.removeEventListener("pageshow", reset);
+  }, []);
+
   const searchParams = useSearchParams();
   const errorCode = searchParams.get("error");
   const error =
     (errorCode && ERROR_MESSAGES[errorCode]) ||
     (errorCode ? "Kirjautuminen epäonnistui" : "");
+  // Deep-link continue-after-login: the server already validated this is an
+  // internal path when it built the /login?next= redirect; carried through
+  // as a hidden field so the login POST can send it straight back.
+  const next = searchParams.get("next") || "";
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-cream px-4">
+    // fixed + overflow-hidden + touch-none: login never scrolls or rubber-bands;
+    // iOS pans the visual viewport itself when the keyboard covers an input.
+    <div className="fixed inset-0 overflow-hidden touch-none flex items-center justify-center bg-cream px-4">
       <div className="w-full max-w-sm">
         <div className="text-center mb-8">
           <h1 className="text-3xl font-light text-charcoal tracking-wide">
-            Tilikirja
+            LashKirja
           </h1>
           <p className="text-warm-gray mt-2 text-sm">
             Kirjanpito yksinkertaisesti
@@ -32,8 +51,15 @@ export default function LoginForm() {
         <form
           action="/api/auth/login"
           method="POST"
-          className="bg-white rounded-2xl shadow-sm p-8 space-y-5"
+          // Native submit still runs; the state change only drives the
+          // "Kirjaudutaan…" feedback while the browser navigates.
+          onSubmit={() => setSubmitting(true)}
+          className={`bg-white rounded-2xl shadow-sm p-8 space-y-5 transition-all duration-300 ${
+            submitting ? "opacity-60 scale-[0.98] pointer-events-none" : ""
+          }`}
         >
+          {next && <input type="hidden" name="next" value={next} />}
+
           <div>
             <label
               htmlFor="email"
@@ -46,6 +72,9 @@ export default function LoginForm() {
               name="email"
               type="email"
               autoComplete="username"
+              autoCapitalize="none"
+              autoCorrect="off"
+              spellCheck={false}
               className="w-full px-4 py-3 rounded-xl border border-warm-gray-light bg-cream/50 text-charcoal placeholder:text-warm-gray text-sm"
               placeholder="demo@lashkirja.fi"
               required
@@ -76,9 +105,12 @@ export default function LoginForm() {
 
           <button
             type="submit"
-            className="w-full py-3 rounded-xl bg-accent text-white font-medium text-sm hover:bg-accent-dark transition-colors"
+            className="w-full py-3 rounded-xl bg-accent text-white font-medium text-sm hover:bg-accent-dark transition-colors flex items-center justify-center gap-2"
           >
-            Kirjaudu sisään
+            {submitting && (
+              <span className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin motion-reduce:animate-none" />
+            )}
+            {submitting ? "Kirjaudutaan…" : "Kirjaudu sisään"}
           </button>
         </form>
 

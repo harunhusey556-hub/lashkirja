@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireSession } from "@/lib/session";
 import { prisma } from "@/lib/db";
 import { syncImapAccount } from "@/lib/mail-sync";
-import { withErrorHandler } from "@/lib/api-errors";
+import { withErrorHandler, errorText } from "@/lib/api-errors";
 
 export const POST = withErrorHandler(async (req: NextRequest) => {
   const session = await requireSession(req);
@@ -24,7 +24,11 @@ export const POST = withErrorHandler(async (req: NextRequest) => {
       totalCount += await syncImapAccount(account.id);
     }
     return NextResponse.json({ success: true, count: totalCount });
-  } catch (err: any) {
-    return NextResponse.json({ error: `Synkronointi epäonnistui: ${err.message}` }, { status: 500 });
+  } catch (err: unknown) {
+    console.error("[imap sync]", errorText(err));
+    return NextResponse.json(
+      { error: "Sähköpostien synkronointi epäonnistui. Yritä myöhemmin uudelleen." },
+      { status: 500 }
+    );
   }
 });

@@ -14,9 +14,10 @@ const config: CapacitorConfig = {
       }
     : undefined,
   ios: {
-    // Edge-to-edge webview. Safe areas come from viewport-fit=cover and CSS env().
-    // "automatic" only insets the scroll view, so a position:fixed tab bar still
-    // sits on the home indicator.
+    // "never" makes WKWebView fill the screen and report REAL safe-area
+    // insets through env(safe-area-inset-*), so the web UI can pad the header
+    // (Dynamic Island) and tab bar (home indicator) correctly. "automatic"
+    // reports env() as 0 and shifts content itself, hiding the top/bottom.
     contentInset: "never",
     allowsLinkPreview: false,
   },
@@ -28,7 +29,7 @@ const config: CapacitorConfig = {
     },
     StatusBar: {
       style: "DARK",
-      backgroundColor: "#ffffff",
+      backgroundColor: "#faf7f2",
     },
   },
 };

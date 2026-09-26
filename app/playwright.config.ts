@@ -5,12 +5,13 @@ const port = 3791;
 const managedBaseUrl = `http://127.0.0.1:${port}`;
 const externalBaseUrl = process.env.PLAYWRIGHT_BASE_URL;
 const testDatabase = `file:/tmp/lashkirja-e2e-${process.pid}.db`;
-const chromiumPath = [
-  process.env.PLAYWRIGHT_CHROMIUM_PATH,
-  "/snap/bin/chromium",
-  "/usr/bin/chromium",
-  "/usr/bin/google-chrome",
-].find((candidate): candidate is string => Boolean(candidate && existsSync(candidate)));
+// Playwright's own browser download is the default: a snap-confined Chromium
+// exits immediately when launched this way, which failed the whole suite for
+// environment reasons rather than product reasons. A system browser is used
+// only when explicitly pointed at one.
+const chromiumPath = [process.env.PLAYWRIGHT_CHROMIUM_PATH].find(
+  (candidate): candidate is string => Boolean(candidate && existsSync(candidate))
+);
 
 export default defineConfig({
   testDir: "./tests/e2e",

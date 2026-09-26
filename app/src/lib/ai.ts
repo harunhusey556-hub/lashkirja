@@ -13,6 +13,8 @@ import {
 } from "./vat-rules";
 import { amountsOnLine, isoFromDateMatch, DATE_RE, parseAmount } from "./finnish-numbers";
 
+import { getTopVendorsForAiPrompt } from "./vendor-intelligence";
+
 export interface ExtractedReceipt {
   vendor: string | null;
   date: string | null;
@@ -46,8 +48,12 @@ const MAX_LLM_TEXT_CHARS = 80_000;
 
 const CATEGORIES = [...RECEIPT_CATEGORY_IDS];
 
-const EXTRACTION_PROMPT = `Olet kirjanpidon avustaja. Analysoi tämä kuitti/lasku ja palauta tiedot JSON-muodossa.
-
+function buildExtractionPrompt(profileContext: string | null, vendorPriors: string): string {
+  const profileHint = profileContext ? `\nKäyttäjän yritysprofiili:\n${profileContext}\n` : "";
+  const priorsHint = vendorPriors ? `\n${vendorPriors}\n` : "";
+  
+  return `Olet kirjanpidon avustaja. Analysoi tämä kuitti/lasku ja palauta tiedot JSON-muodossa.
+${profileHint}
 Palauta VAIN validi JSON seuraavalla rakenteella (ei muuta tekstiä):
 {
   "vendor": "myyjän nimi",
@@ -62,7 +68,7 @@ Palauta VAIN validi JSON seuraavalla rakenteella (ei muuta tekstiä):
 }
 
 Kategoriat (käytä TARKALLEEN näitä id-arvoja category-kentässä):
-${categoriesForAiPrompt()}
+${categoriesForAiPrompt()}${priorsHint}
 Jos mikään kategoria ei sovi, käytä "muut" ja selitä lyhyesti notes-kentässä.
 ALV-säännöt (2026):
 - Jos laskussa/kuitissa on ALV-erittely, käytä sitä vatDetails-kentässä.
@@ -76,6 +82,7 @@ ALV-kannat Suomessa 2026: 25.5%, 13.5%, 10%, 0%
 Päivämäärä muodossa YYYY-MM-DD.
 Summat desimaalilukuina (piste erottimena).
 Jos tietoa ei löydy, käytä null. ÄLÄ KOSKAAN arvaa tai keksi arvoja — erityisesti päivämäärää: jos sitä ei näy dokumentissa, palauta null.`;
+}
 
 function isCloudAiEnabled(): boolean {
   const flag = (process.env.CLOUD_AI_ENABLED || "").toLocaleLowerCase("en-US");
@@ -86,7 +93,9 @@ function isCloudAiEnabled(): boolean {
 
 export async function extractReceipt(
   filePath: string,
-  mimeType: string
+  mimeType: string,
+  profileContext?: string,
+  vendorPriors?: string
 ): Promise<ExtractedReceipt> {
   mimeType = detectReceiptMime(filePath, mimeType);
   const converted = await convertHeicIfNeeded(filePath, mimeType);
@@ -102,10 +111,10 @@ export async function extractReceipt(
       const isPdf = mimeType === "application/pdf";
 
       const tryLLM = apiKey
-        ? () => extractWithAIFromText(rawText, apiKey)
+        ? () => extractWithAIFromText(rawText, apiKey, profileContext, vendorPriors)
         : null;
       const tryCopilot = copilotToken
-        ? () => extractWithCopilotFromText(rawText, copilotToken)
+        ? () => extractWithCopilotFromText(rawText, copilotToken, profileContext, vendorPriors)
         : null;
       const attempts = (isPdf ? [tryCopilot, tryLLM] : [tryLLM, tryCopilot]).filter(
         (fn): fn is () => Promise<ExtractedReceipt> => fn !== null
@@ -173,19 +182,11 @@ function detectReceiptMime(filePath: string, claimedMime: string): string {
   );
 }
 
-async function fetchWithTimeout(
-  input: string,
-  init: RequestInit,
-  timeoutMs = CLOUD_TIMEOUT_MS
-): Promise<Response> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    return await fetch(input, { ...init, signal: controller.signal });
-  } finally {
-    clearTimeout(timer);
-  }
-}
+import {
+  getCopilotSessionToken,
+  COPILOT_HEADERS,
+  fetchWithTimeout,
+} from "./copilot";
 
 function boundedLLMText(text: string): string {
   const cleaned = text.replace(/\0/g, "");
@@ -194,54 +195,11 @@ function boundedLLMText(text: string): string {
   return `${cleaned.slice(0, half)}\n\n[... dokumentin keskiosa rajattu ...]\n\n${cleaned.slice(-half)}`;
 }
 
-// --- GitHub Copilot backend: the long-lived ghu_ GitHub token must be
-// exchanged for a short-lived Copilot session token before each chat call.
-// Auth flow mirrors OpenClaw's verified implementation.
-let copilotSession: { token: string; expiresAt: number; baseUrl: string } | null = null;
-
-const COPILOT_HEADERS = {
-  "Accept-Encoding": "identity",
-  "Editor-Version": "vscode/1.107.0",
-  "Editor-Plugin-Version": "copilot-chat/0.35.0",
-  "User-Agent": "GitHubCopilotChat/0.35.0",
-};
-
-function deriveCopilotBaseUrl(token: string): string {
-  const proxyEp = token.match(/(?:^|;)\s*proxy-ep=([^;\s]+)/i)?.[1]?.trim();
-  if (proxyEp) {
-    const host = proxyEp.replace(/^proxy\./i, "api.");
-    return `https://${host}`;
-  }
-  return "https://api.individual.githubcopilot.com";
-}
-
-async function getCopilotSessionToken(ghToken: string): Promise<{ token: string; baseUrl: string }> {
-  if (copilotSession && Date.now() < copilotSession.expiresAt - 60_000) {
-    return { token: copilotSession.token, baseUrl: copilotSession.baseUrl };
-  }
-  const res = await fetchWithTimeout("https://api.github.com/copilot_internal/v2/token", {
-    headers: {
-      Authorization: `Bearer ${ghToken}`,
-      "Copilot-Integration-Id": "vscode-chat",
-      "X-Github-Api-Version": "2025-04-01",
-      Accept: "application/json",
-      ...COPILOT_HEADERS,
-    },
-  });
-  if (!res.ok) {
-    throw new Error(`Copilot token exchange failed: ${res.status}`);
-  }
-  const data = await res.json();
-  const sessionToken = data.token as string;
-  const expiresAt = (data.expires_at ?? Math.floor(Date.now() / 1000) + 600) * 1000;
-  const baseUrl = deriveCopilotBaseUrl(sessionToken);
-  copilotSession = { token: sessionToken, expiresAt, baseUrl };
-  return { token: sessionToken, baseUrl };
-}
-
 async function extractWithCopilotFromText(
   docText: string,
-  ghToken: string
+  ghToken: string,
+  profileContext?: string,
+  vendorPriors?: string
 ): Promise<ExtractedReceipt> {
   if (docText.trim().length < 20) {
     throw new Error("Too little text extracted for LLM analysis");
@@ -250,8 +208,11 @@ async function extractWithCopilotFromText(
   const model = process.env.COPILOT_MODEL || "gpt-4o";
   const session = await getCopilotSessionToken(ghToken);
   const bounded = boundedLLMText(docText);
+  
+  const promptText = buildExtractionPrompt(profileContext || null, vendorPriors || "");
+
   const content = [
-    { type: "text", text: EXTRACTION_PROMPT },
+    { type: "text", text: promptText },
     { type: "text", text: `Kuitin/laskun teksti:\n${bounded}` },
   ];
 
@@ -320,7 +281,9 @@ async function convertHeicIfNeeded(
 
 async function extractWithAIFromText(
   docText: string,
-  apiKey: string
+  apiKey: string,
+  profileContext?: string,
+  vendorPriors?: string
 ): Promise<ExtractedReceipt> {
   if (docText.trim().length < 20) {
     throw new Error("Too little text extracted for LLM analysis");
@@ -328,7 +291,10 @@ async function extractWithAIFromText(
 
   const baseUrl = process.env.LLM_BASE_URL || "https://api.openai.com/v1";
   const model = process.env.LLM_MODEL || "gpt-4o-mini";
-  const content = `${EXTRACTION_PROMPT}\n\nKuitin/laskun teksti:\n${boundedLLMText(docText)}`;
+  
+  const promptText = buildExtractionPrompt(profileContext || null, vendorPriors || "");
+    
+  const content = `${promptText}\n\nKuitin/laskun teksti:\n${boundedLLMText(docText)}`;
 
   const response = await fetchWithTimeout(`${baseUrl}/chat/completions`, {
     method: "POST",

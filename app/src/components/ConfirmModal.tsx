@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
+import { useFocusTrap } from "@/components/useFocusTrap";
 
 interface ConfirmModalProps {
   isOpen: boolean;
@@ -24,16 +25,23 @@ export default function ConfirmModal({
   isDestructive = true,
 }: ConfirmModalProps) {
   const overlayRef = useRef<HTMLDivElement>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
+
+  // Exit animation: stay mounted for one short fade/scale-down after close.
+  const [prevOpen, setPrevOpen] = useState(isOpen);
+  const [closing, setClosing] = useState(false);
+  if (isOpen !== prevOpen) {
+    setPrevOpen(isOpen);
+    setClosing(!isOpen);
+  }
 
   useEffect(() => {
-    const handleEscape = (e: KeyboardEvent) => {
-      if (isOpen && e.key === "Escape") {
-        onCancel();
-      }
-    };
-    document.addEventListener("keydown", handleEscape);
-    return () => document.removeEventListener("keydown", handleEscape);
-  }, [isOpen, onCancel]);
+    if (!closing) return;
+    const timer = window.setTimeout(() => setClosing(false), 180);
+    return () => window.clearTimeout(timer);
+  }, [closing]);
+
+  useFocusTrap(dialogRef, isOpen, { onEscape: onCancel });
 
   useEffect(() => {
     if (isOpen) {
@@ -46,22 +54,31 @@ export default function ConfirmModal({
     };
   }, [isOpen]);
 
-  if (!isOpen) return null;
+  if (!isOpen && !closing) return null;
 
   return (
-    <div className="fixed inset-0 z-[70] flex items-center justify-center px-4">
+    <div
+      className={`fixed inset-0 z-50 flex items-center justify-center px-4 ${
+        closing ? "pointer-events-none" : ""
+      }`}
+    >
       {/* Backdrop */}
       <div
         ref={overlayRef}
-        className="absolute inset-0 bg-charcoal/60 transition-opacity duration-200 animate-fade-in"
+        className={`absolute inset-0 bg-charcoal/60 ${
+          closing ? "animate-backdrop-out" : "animate-fade-in"
+        }`}
         onClick={(e) => {
           if (e.target === overlayRef.current) onCancel();
         }}
         aria-hidden="true"
       />
-      
-      <div 
-        className="relative bg-white rounded-3xl p-6 w-full max-w-sm shadow-2xl animate-scale-in"
+
+      <div
+        ref={dialogRef}
+        className={`relative bg-white rounded-3xl p-6 w-full max-w-sm shadow-2xl ${
+          closing ? "animate-scale-out" : "animate-scale-in"
+        }`}
         role="dialog"
         aria-modal="true"
       >

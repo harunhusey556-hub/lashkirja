@@ -28,6 +28,9 @@ export interface MatchReceipt {
   type: string;
   reference: string | null;
   invoiceNumber: string | null;
+  /** Only "approved" documents may post automatically. Pending ones can still
+   *  be scored and suggested, they just never auto-confirm. */
+  reviewStatus?: string;
 }
 
 export interface ScoredPair {
@@ -42,12 +45,23 @@ export const CANDIDATE_THRESHOLD = 0.55;
 /** Strong matches link immediately without manual approval. */
 export const AUTO_CONFIRM_THRESHOLD = 0.85;
 
+/**
+ * Evidence-based, not score-based. Posting to the books without a human needs
+ * proof the pair belongs together, and only two signals are proof:
+ *
+ *   viite  — the bank reference equals the receipt reference or invoice number
+ *   amount — the amounts agree to the cent
+ *
+ * vendor and date are weak. `date` is pushed for *any* proximity inside a
+ * 35-day window, so the old `amount + date` rule auto-posted on little more
+ * than "same amount, same month" — two identical MobilePay payments would link
+ * to whichever receipt sorted first. `competing` marks a pair that had a
+ * plausible rival, which means the evidence is not decisive.
+ */
 export function shouldAutoConfirm(score: number, reasons: string[]): boolean {
   if (score < AUTO_CONFIRM_THRESHOLD) return false;
-  if (reasons.includes("viite")) return true;
-  if (reasons.includes("amount") && reasons.includes("vendor")) return true;
-  if (reasons.includes("amount") && reasons.includes("date")) return true;
-  return score >= 0.90; // Loosened from 0.92
+  if (reasons.includes("competing")) return false;
+  return reasons.includes("viite") && reasons.includes("amount");
 }
 
 const WEIGHT_VIITE = 0.45;
@@ -201,13 +215,16 @@ export function computeSuggestions(
   receipts: MatchReceipt[],
   rejectedPairs: Set<string>
 ): ScoredPair[] {
-  const scored: ScoredPair[] = [];
+  // Kept down to CANDIDATE_THRESHOLD rather than SUGGEST_THRESHOLD: a rival
+  // scoring 0.6 is still a reason not to post automatically, and filtering at
+  // 0.85 here would hide exactly the ambiguity the competing check looks for.
+  const plausible: ScoredPair[] = [];
   for (const tx of txs) {
     for (const receipt of receipts) {
       if (rejectedPairs.has(pairKey(tx.id, receipt.id))) continue;
       const result = scorePair(tx, receipt);
-      if (result && result.score >= SUGGEST_THRESHOLD) {
-        scored.push({
+      if (result && result.score >= CANDIDATE_THRESHOLD) {
+        plausible.push({
           transactionId: tx.id,
           receiptId: receipt.id,
           score: result.score,
@@ -217,6 +234,7 @@ export function computeSuggestions(
     }
   }
 
+  const scored = plausible.filter((p) => p.score >= SUGGEST_THRESHOLD);
   scored.sort((a, b) => b.score - a.score);
   const usedTx = new Set<string>();
   const usedReceipt = new Set<string>();
@@ -229,6 +247,23 @@ export function computeSuggestions(
     usedReceipt.add(pair.receiptId);
     assignments.push(pair);
   }
+
+  // Greedy assignment always produces a single winner, which hides ambiguity:
+  // with two plausible receipts the highest score wins silently. Flag any
+  // winner that had a real rival on either side so it cannot auto-post.
+  // The pair stays a suggestion for the user to resolve.
+  for (const pair of assignments) {
+    const hasRival = plausible.some(
+      (other) =>
+        other !== pair &&
+        (other.transactionId === pair.transactionId ||
+          other.receiptId === pair.receiptId)
+    );
+    if (hasRival && !pair.reasons.includes("competing")) {
+      pair.reasons = [...pair.reasons, "competing"];
+    }
+  }
+
   return assignments;
 }
 
@@ -627,6 +662,7 @@ export async function runMatching(userId: string): Promise<RunMatchingResult> {
         type: true,
         reference: true,
         invoiceNumber: true,
+        reviewStatus: true,
       },
     }),
     prisma.matchRejection.findMany({
@@ -647,10 +683,17 @@ export async function runMatching(userId: string): Promise<RunMatchingResult> {
     totalAmount: totalAmountCents == null ? null : centsToEuros(totalAmountCents),
   }));
   const assignments = computeSuggestions(txs, receipts, rejectedPairs);
-  const autoPairs = assignments.filter((a) => shouldAutoConfirm(a.score, a.reasons));
-  const suggestPairs = assignments.filter(
-    (a) => !shouldAutoConfirm(a.score, a.reasons)
+
+  // A pending document must never post automatically, however strong the match.
+  // It can still be suggested — the user approves it in the review queue.
+  const approvedReceiptIds = new Set(
+    receipts.filter((r) => r.reviewStatus === "approved").map((r) => r.id)
   );
+  const canAutoPost = (a: ScoredPair) =>
+    shouldAutoConfirm(a.score, a.reasons) && approvedReceiptIds.has(a.receiptId);
+
+  const autoPairs = assignments.filter(canAutoPost);
+  const suggestPairs = assignments.filter((a) => !canAutoPost(a));
 
   const usedReceiptForAuto = new Set(autoPairs.map((a) => a.receiptId));
   const filteredSuggest = suggestPairs.filter(

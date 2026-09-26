@@ -165,7 +165,7 @@ export async function completeBankConsent(
     }
     const validUntil = session.access?.valid_until ? new Date(session.access.valid_until) : null;
     await prisma.$transaction(async (db) => {
-      await db.bankAccount.createMany({ data: accounts });
+      await db.connectedAccount.createMany({ data: accounts });
       await db.bankConnection.update({
         where: { id: pending.id },
         data: {
@@ -214,7 +214,7 @@ export async function setAccountScope(
   }
   await prisma.$transaction(
     accounts.map((account) =>
-      prisma.bankAccount.update({
+      prisma.connectedAccount.update({
         where: { id: account.id },
         data: { inScope: account.inScope },
       })

@@ -15,6 +15,12 @@ const protectedPrefixes = [
   "/tiliotteet",
   "/alv-raportti",
   "/asetukset",
+  "/laskut",
+  "/asiakkaat",
+  "/ostolaskut",
+  "/toistuvat",
+  "/pankkitilit",
+  "/raportit",
   "/bank",
 ];
 
@@ -24,12 +30,12 @@ function isPublicApi(pathname: string): boolean {
   return PUBLIC_API_PREFIXES.some((prefix) => pathname.startsWith(prefix));
 }
 
-function redirectForRequest(request: NextRequest, path: string) {
+function redirectForRequest(request: NextRequest, path: string, search = "") {
   // NextResponse.redirect requires an absolute URL in proxy. Keep the
   // request's current origin so LAN/Tailscale access continues to work.
   const url = request.nextUrl.clone();
   url.pathname = path;
-  url.search = "";
+  url.search = search;
   return NextResponse.redirect(url, 307);
 }
 
@@ -74,13 +80,26 @@ export async function proxy(request: NextRequest) {
 
   const isAuthenticated = await authenticated(request);
   if (isProtected && !isAuthenticated) {
-    return redirectForRequest(request, "/login");
+    // Deep-link continue-after-login: remember where the user was headed so
+    // LoginForm/the login route can send them back there instead of always
+    // dumping them on /dashboard.
+    const target = `${pathname}${request.nextUrl.search}`;
+    const search = target === "/" ? "" : `?next=${encodeURIComponent(target)}`;
+    return redirectForRequest(request, "/login", search);
   }
   if (pathname === "/login" && isAuthenticated) {
     return redirectForRequest(request, "/dashboard");
   }
 
-  return NextResponse.next();
+  const response = NextResponse.next();
+  if (isProtected) {
+    // Belt-and-suspenders alongside signOut()'s location.replace() +
+    // clearPageCache(): without this, a bfcache/back-forward restore of a
+    // fully-loaded protected page's *document* response is theoretically
+    // possible even after logout. API/file routes already set this.
+    response.headers.set("Cache-Control", "private, no-store, max-age=0");
+  }
+  return response;
 }
 
 export const config = {
@@ -90,6 +109,12 @@ export const config = {
     "/tiliotteet/:path*",
     "/alv-raportti/:path*",
     "/asetukset/:path*",
+    "/laskut/:path*",
+    "/asiakkaat/:path*",
+    "/ostolaskut/:path*",
+    "/toistuvat/:path*",
+    "/pankkitilit/:path*",
+    "/raportit/:path*",
     "/bank/:path*",
     "/login",
     "/api/:path*",

@@ -3,6 +3,11 @@ import { prisma } from "@/lib/db";
 import { requireSession } from "@/lib/session";
 import { VAT_REGISTRATION_THRESHOLD_EUR } from "@/lib/vero/omavero-fields";
 import { centsToEuros } from "@/lib/money";
+import { parseBusinessDetails, deriveVatProfile } from "@/lib/onboarding";
+import { getBankOverview } from "@/lib/bank-accounts";
+import { buildAging, buildAgingReport, type InvoiceStatus } from "@/lib/invoices";
+import { computeAlvReport } from "@/lib/alv";
+import { loadAlvPeriodSources } from "@/lib/alv-period";
 
 function round2(n: number): number {
   return Math.round(n * 100) / 100;
@@ -71,39 +76,29 @@ export async function GET(req: NextRequest) {
 
   let receiptIncome = 0;
   let receiptExpenses = 0;
-  let salesVat = 0;
-  let deductibleVat = 0;
 
   for (const r of receipts) {
     if (r.totalAmountCents == null) continue;
-    let details: { rate: number; amount: number }[] = [];
-    if (r.vatDetails) {
-      try {
-        details = JSON.parse(r.vatDetails);
-      } catch {
-        details = [];
-      }
-    }
-    const vatSum = details.reduce((a, d) => a + (Number(d.amount) || 0), 0);
     const totalAmount = centsToEuros(r.totalAmountCents);
-
-    if (r.type === "tulo") {
-      receiptIncome += totalAmount;
-      salesVat += vatSum;
-    } else if (r.type === "meno") {
-      receiptExpenses += totalAmount;
-      deductibleVat += vatSum;
-    }
+    if (r.type === "tulo") receiptIncome += totalAmount;
+    else if (r.type === "meno") receiptExpenses += totalAmount;
   }
 
-  const estimatedVat = salesVat - deductibleVat;
+  // The estimate is computed from exactly the same sources as the VAT return,
+  // including sales invoices and the double-counting exclusion. Computing it
+  // separately here is how the front page and /alv-raportti drifted apart.
+  const vatSources = await loadAlvPeriodSources(session.userId, startOfMonth, endOfMonth);
+  const alvReport = computeAlvReport(vatSources.receipts, vatSources.invoices);
+  const estimatedVat = alvReport.field308.isRefund
+    ? -alvReport.field308.amount
+    : alvReport.field308.amount;
   const hasBankData = transactions.length > 0;
 
   // Calendar-year liikevaihto vs the 20 000 € ALV registration threshold
   const startOfYear = new Date(Date.UTC(year, 0, 1));
   const endOfYear = new Date(Date.UTC(year + 1, 0, 1));
   const yearPrefix = `${year}-`;
-  const [yearTx, yearReceipts, user] = await Promise.all([
+  const [yearTx, yearReceipts] = await Promise.all([
     prisma.transaction.findMany({
       where: {
         type: "tulo",
@@ -123,11 +118,21 @@ export async function GET(req: NextRequest) {
       },
       select: { totalAmountCents: true },
     }),
-    prisma.user.findUnique({
-      where: { id: session.userId },
-      select: { entityType: true, vatRegistered: true, imapAccounts: { select: { id: true } } },
-    }),
   ]);
+
+  const user = await prisma.user.findUnique({
+    where: { id: session.userId },
+    select: {
+      entityType: true,
+      vatRegistered: true,
+      businessDetails: true,
+      imapAccounts: { select: { id: true }, take: 1 },
+    },
+  });
+
+  const businessProfile = parseBusinessDetails(user?.businessDetails);
+  const vatProfile = deriveVatProfile(businessProfile);
+
   const bankYtd = yearTx.reduce((a, t) => a + centsToEuros(t.amountCents), 0);
   const receiptYtd = yearReceipts.reduce((a, r) => a + centsToEuros(r.totalAmountCents || 0), 0);
   const ytdRevenue = yearTx.length > 0 ? bankYtd : receiptYtd;
@@ -135,6 +140,41 @@ export async function GET(req: NextRequest) {
   const pendingReceiptsCount = await prisma.receipt.count({
     where: { userId: session.userId, reviewStatus: "pending" },
   });
+
+  // Bank position and receivables: the two numbers a business owner checks
+  // first, and neither was visible on the front page before.
+  const bankOverview = await getBankOverview(session.userId);
+  const openInvoices = await prisma.salesInvoice.findMany({
+    where: { userId: session.userId, status: "sent" },
+    select: {
+      status: true,
+      dueDate: true,
+      grossCents: true,
+      payments: { select: { amountCents: true } },
+    },
+  });
+  const openPayables = await prisma.purchaseInvoice.findMany({
+    where: { userId: session.userId, status: "open" },
+    select: { dueDate: true, grossCents: true, payments: { select: { amountCents: true } } },
+  });
+  const payablesAging = buildAging(
+    openPayables.map((invoice) => ({
+      dueDate: invoice.dueDate,
+      openCents:
+        invoice.grossCents - invoice.payments.reduce((sum, p) => sum + p.amountCents, 0),
+    })),
+    now
+  );
+
+  const aging = buildAgingReport(
+    openInvoices.map((invoice) => ({
+      status: invoice.status as InvoiceStatus,
+      dueDate: invoice.dueDate,
+      grossCents: invoice.grossCents,
+      paidCents: invoice.payments.reduce((sum, payment) => sum + payment.amountCents, 0),
+    })),
+    now
+  );
 
   return NextResponse.json({
     firstName: session.firstName,
@@ -154,7 +194,24 @@ export async function GET(req: NextRequest) {
       ytdRevenue: round2(ytdRevenue),
       threshold: VAT_REGISTRATION_THRESHOLD_EUR,
     },
-    hasImap: (user?.imapAccounts.length ?? 0) > 0,
+    hasImap: (user?.imapAccounts?.length ?? 0) > 0,
     pendingReceiptsCount,
+    bank: {
+      totalBalance: bankOverview.totalBalance,
+      accountCount: bankOverview.accounts.length,
+      needsAttention: bankOverview.needsAttention,
+    },
+    receivables: {
+      totalOpen: centsToEuros(aging.totalOpenCents),
+      overdue: centsToEuros(aging.overdueCents),
+      overdueCount: aging.overdueCount,
+    },
+    payables: {
+      totalOpen: centsToEuros(payablesAging.totalOpenCents),
+      overdue: centsToEuros(payablesAging.overdueCents),
+      overdueCount: payablesAging.overdueCount,
+    },
+    isSingleVatProfile: vatProfile.isSingleRate && vatProfile.isVatRegistered,
+    singleVatRate: vatProfile.defaultSalesRate,
   });
 }

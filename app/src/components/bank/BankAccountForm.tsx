@@ -1,0 +1,249 @@
+"use client";
+
+import { useState } from "react";
+import { bankNameFromIban, formatIban, isValidIban, normalizeIban } from "@/lib/iban";
+import { parseFinnishNumber } from "@/lib/format";
+
+export interface BankAccountFormValues {
+  name: string;
+  bankName: string;
+  iban: string;
+  bic: string;
+  currency: string;
+  openingBalance: string;
+  openingDate: string;
+}
+
+export interface BankAccountFormPayload {
+  name: string;
+  bankName: string | null;
+  iban: string | null;
+  bic: string | null;
+  currency: string;
+  openingBalance: number;
+  openingDate: string;
+}
+
+const EMPTY: BankAccountFormValues = {
+  name: "",
+  bankName: "",
+  iban: "",
+  bic: "",
+  currency: "EUR",
+  openingBalance: "0",
+  openingDate: new Date().toISOString().slice(0, 10),
+};
+
+/** Client-side mirror of the server rules, so mistakes surface before saving. */
+export function validateBankAccountForm(
+  values: BankAccountFormValues
+): { ok: true; payload: BankAccountFormPayload } | { ok: false; errors: Record<string, string> } {
+  const errors: Record<string, string> = {};
+
+  const name = values.name.trim();
+  if (!name) errors.name = "Anna tilille nimi.";
+  else if (name.length > 80) errors.name = "Nimi on liian pitkä (max 80 merkkiä).";
+
+  const iban = normalizeIban(values.iban);
+  if (iban && !isValidIban(iban)) errors.iban = "IBAN ei ole kelvollinen.";
+
+  const openingBalance = parseFinnishNumber(values.openingBalance);
+  if (openingBalance === null) errors.openingBalance = "Anna summa, esim. 1250,50.";
+  else if (Math.round(openingBalance * 100) !== openingBalance * 100) {
+    errors.openingBalance = "Enintään kaksi desimaalia.";
+  }
+
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(values.openingDate)) {
+    errors.openingDate = "Valitse avauspäivä.";
+  }
+
+  const currency = values.currency.trim().toUpperCase();
+  if (currency.length !== 3) errors.currency = "Valuutta on kolme kirjainta (esim. EUR).";
+
+  if (Object.keys(errors).length > 0) return { ok: false, errors };
+
+  return {
+    ok: true,
+    payload: {
+      name,
+      bankName: values.bankName.trim() || null,
+      iban: iban || null,
+      bic: values.bic.trim().toUpperCase() || null,
+      currency,
+      openingBalance: openingBalance as number,
+      openingDate: values.openingDate,
+    },
+  };
+}
+
+interface Props {
+  initial?: Partial<BankAccountFormValues>;
+  submitLabel: string;
+  busy?: boolean;
+  onSubmit: (payload: BankAccountFormPayload) => void | Promise<void>;
+  onCancel: () => void;
+}
+
+export function BankAccountForm({ initial, submitLabel, busy, onSubmit, onCancel }: Props) {
+  const [values, setValues] = useState<BankAccountFormValues>({ ...EMPTY, ...initial });
+  const [errors, setErrors] = useState<Record<string, string>>({});
+
+  function set<K extends keyof BankAccountFormValues>(key: K, value: string) {
+    setValues((current) => {
+      const next = { ...current, [key]: value } as BankAccountFormValues;
+      // Filling the bank in from the IBAN saves a step; an entry the user
+      // typed themselves is never overwritten.
+      if (key === "iban" && !current.bankName.trim()) {
+        const guess = bankNameFromIban(value);
+        if (guess) next.bankName = guess;
+      }
+      return next;
+    });
+  }
+
+  function handleSubmit(event: React.FormEvent) {
+    event.preventDefault();
+    const result = validateBankAccountForm(values);
+    if (!result.ok) {
+      setErrors(result.errors);
+      return;
+    }
+    setErrors({});
+    void onSubmit(result.payload);
+  }
+
+  const field = "w-full px-4 py-3 rounded-xl border border-warm-gray-light/60 bg-white text-sm";
+  const label = "text-sm font-medium text-charcoal";
+  const errorText = "text-xs text-danger";
+
+  return (
+    <form onSubmit={handleSubmit} className="space-y-4" noValidate>
+      <div className="space-y-1.5">
+        <label className={label} htmlFor="ba-name">
+          Tilin nimi <span className="text-danger" aria-hidden="true">*</span>
+        </label>
+        <input
+          id="ba-name"
+          className={field}
+          value={values.name}
+          onChange={(e) => set("name", e.target.value)}
+          placeholder="Käyttötili"
+          aria-invalid={Boolean(errors.name)}
+          aria-describedby={errors.name ? "ba-name-error" : undefined}
+          aria-required="true"
+          maxLength={80}
+        />
+        {errors.name && <p id="ba-name-error" className={errorText}>{errors.name}</p>}
+      </div>
+
+      <div className="space-y-1.5">
+        <label className={label} htmlFor="ba-iban">IBAN</label>
+        <input
+          id="ba-iban"
+          className={field}
+          value={values.iban}
+          onChange={(e) => set("iban", e.target.value)}
+          onBlur={(e) => set("iban", formatIban(e.target.value))}
+          placeholder="FI21 1234 5600 0007 85"
+          inputMode="text"
+          autoCapitalize="characters"
+          aria-invalid={Boolean(errors.iban)}
+          aria-describedby={errors.iban ? "ba-iban-error" : undefined}
+          maxLength={42}
+        />
+        {errors.iban ? (
+          <p id="ba-iban-error" className={errorText}>{errors.iban}</p>
+        ) : (
+          <p className="text-xs text-warm-gray">Vapaaehtoinen – käteiskassalla ei ole IBANia.</p>
+        )}
+      </div>
+
+      <div className="grid grid-cols-2 gap-3">
+        <div className="space-y-1.5">
+          <label className={label} htmlFor="ba-bank">Pankki</label>
+          <input
+            id="ba-bank"
+            className={field}
+            value={values.bankName}
+            onChange={(e) => set("bankName", e.target.value)}
+            placeholder="Nordea"
+            maxLength={80}
+          />
+        </div>
+        <div className="space-y-1.5">
+          <label className={label} htmlFor="ba-currency">
+            Valuutta <span className="text-danger" aria-hidden="true">*</span>
+          </label>
+          <input
+            id="ba-currency"
+            className={field}
+            value={values.currency}
+            onChange={(e) => set("currency", e.target.value.toUpperCase())}
+            maxLength={3}
+            aria-invalid={Boolean(errors.currency)}
+            aria-required="true"
+          />
+          {errors.currency && <p className={errorText}>{errors.currency}</p>}
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 gap-3">
+        <div className="space-y-1.5">
+          <label className={label} htmlFor="ba-opening">
+            Alkusaldo (€) <span className="text-danger" aria-hidden="true">*</span>
+          </label>
+          <input
+            id="ba-opening"
+            className={field}
+            value={values.openingBalance}
+            onChange={(e) => set("openingBalance", e.target.value)}
+            inputMode="decimal"
+            aria-invalid={Boolean(errors.openingBalance)}
+            aria-describedby={errors.openingBalance ? "ba-opening-error" : undefined}
+            aria-required="true"
+          />
+          {errors.openingBalance && (
+            <p id="ba-opening-error" className={errorText}>{errors.openingBalance}</p>
+          )}
+        </div>
+        <div className="space-y-1.5">
+          <label className={label} htmlFor="ba-date">
+            Avauspäivä <span className="text-danger" aria-hidden="true">*</span>
+          </label>
+          <input
+            id="ba-date"
+            type="date"
+            className={field}
+            value={values.openingDate}
+            onChange={(e) => set("openingDate", e.target.value)}
+            aria-invalid={Boolean(errors.openingDate)}
+            aria-required="true"
+          />
+          {errors.openingDate && <p className={errorText}>{errors.openingDate}</p>}
+        </div>
+      </div>
+
+      <p className="text-xs text-warm-gray leading-relaxed">
+        Alkusaldo on tilin saldo avauspäivän aamuna. Sitä aiemmat tapahtumat jäävät laskennan
+        ulkopuolelle.
+      </p>
+
+      <div className="flex gap-3 pt-1">
+        <button
+          type="button"
+          onClick={onCancel}
+          className="flex-1 py-3 rounded-2xl border border-warm-gray-light/60 text-sm font-medium text-charcoal"
+        >
+          Peruuta
+        </button>
+        <button
+          type="submit"
+          disabled={busy}
+          className="flex-1 py-3 rounded-2xl bg-accent text-white text-sm font-medium hover:bg-accent-dark transition-colors disabled:opacity-50"
+        >
+          {busy ? "Tallennetaan…" : submitLabel}
+        </button>
+      </div>
+    </form>
+  );
+}

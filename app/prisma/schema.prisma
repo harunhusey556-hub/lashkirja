@@ -16,12 +16,39 @@ model User {
   entityType    String      @default("toiminimi") // "kevytyrittaja" | "toiminimi"
   vatRegistered Boolean     @default(false)
   vatPeriod     String      @default("month") // "month" | "quarter" | "year"
+  onboarded     Boolean     @default(false)
+  businessDetails String?
+  // Seller details printed on an invoice. Explicit columns rather than JSON:
+  // an invoice is a legal document, so these are validated and queryable.
+  businessName      String?
+  businessId        String? // Y-tunnus
+  addressStreet     String?
+  addressPostalCode String?
+  addressCity       String?
+  phone             String?
+  invoiceIban       String?
+  invoiceBic        String?
+  invoiceTerms      String?
+  // Late payment interest the user is entitled to charge (annual %). Null
+  // means "do not charge": the Bank of Finland reference rate changes twice a
+  // year, so a default baked into the app would be wrong half the time.
+  lateInterestPercent Float?
+  reminderFeeCents    Int     @default(500)
+  /// Months up to and including this one are closed; nothing dated inside
+  /// them may be created, edited or deleted. Format "YYYY-MM".
+  booksLockedThrough  String?
   createdAt     DateTime    @default(now())
-  receipts        Receipt[]
-  statements      Statement[]
-  uploads         Upload[]
-  imapAccounts    ImapAccount[]
+  receipts      Receipt[]
+  statements    Statement[]
+  uploads       Upload[]
+  imapAccounts  ImapAccount[]
+  chatMessages  ChatMessage[]
+  bankAccounts  BankAccount[]
   bankConnections BankConnection[]
+  customers     Customer[]
+  salesInvoices SalesInvoice[]
+  purchaseInvoices PurchaseInvoice[]
+  recurringInvoices RecurringInvoice[]
 }
 
 model Receipt {
@@ -43,6 +70,10 @@ model Receipt {
   confidence       Float?
   rawText          String?
   reviewStatus     String    @default("approved")
+  // Bank row this receipt was drafted from (auto_income). Unique so repeated
+  // generation runs cannot produce a second draft for the same transaction.
+  // Not a relation: the draft must survive its statement being deleted.
+  sourceTransactionId String? @unique
   uploadId         String?   @unique
   upload           Upload?   @relation("ReceiptUpload", fields: [uploadId], references: [id], onDelete: SetNull)
   createdAt        DateTime  @default(now())
@@ -51,6 +82,7 @@ model Receipt {
   linkedTransaction     Transaction?     @relation("ConfirmedMatch")
   suggestedTransactions Transaction[]    @relation("SuggestedMatch")
   rejections            MatchRejection[]
+  purchaseInvoice       PurchaseInvoice?
 
   @@index([userId, date])
   @@index([userId, createdAt])
@@ -60,6 +92,11 @@ model Statement {
   id           String        @id @default(uuid())
   userId       String
   user         User          @relation(fields: [userId], references: [id])
+  // Which of the user's bank accounts this statement belongs to. Optional so
+  // statements imported before multi-account support keep working; the UI
+  // asks the user to assign them.
+  bankAccountId String?
+  bankAccount   BankAccount? @relation(fields: [bankAccountId], references: [id], onDelete: SetNull)
   fileName     String
   fileType     String
   filePath     String
@@ -72,6 +109,7 @@ model Statement {
   @@unique([userId, checksum])
   @@index([userId, periodMonth])
   @@index([userId, uploadedAt])
+  @@index([bankAccountId, periodMonth])
 }
 
 model Transaction {
@@ -96,66 +134,22 @@ model Transaction {
   matchReasons       String? // JSON array, e.g. ["viite","amount"]
 
   rejections MatchRejection[]
+  // Set when this bank row settles a sales invoice.
+  invoicePayment InvoicePayment?
+  // Set when this bank row settles a purchase invoice.
+  purchasePayment PurchasePayment?
 
-  // Denormalized for dedupe. File imports may leave bankRef null.
+  // Denormalized for Enable Banking dedupe. File imports may leave bankRef null.
   userId  String?
   bankRef String?
   source  String  @default("file") // "file" | "enablebanking"
   iban    String?
 
-  @@unique([userId, bankRef])
   @@index([statementId, date])
   @@index([statementId, matchStatus])
   @@index([suggestedReceiptId])
+  @@unique([userId, bankRef])
   @@index([userId, source])
-}
-
-// PSD2 AIS consent. sessionIdEnc is the Enable Banking session id at rest.
-// It is never returned to the browser.
-model BankConnection {
-  id                 String        @id @default(uuid())
-  userId             String
-  user               User          @relation(fields: [userId], references: [id], onDelete: Cascade)
-  aspspName          String
-  aspspCountry       String
-  aspspLogo          String?
-  psuType            String // "personal" | "business"
-  status             String        @default("pending") // pending|authorizing|active|expired|revoked|error
-  authStateHash      String?
-  sessionIdEnc       String?
-  validUntil         DateTime?
-  requiredPsuHeaders String?
-  lastSyncAt         DateTime?
-  lastSuccessAt      DateTime?
-  lastError          String?
-  createdAt          DateTime      @default(now())
-  updatedAt          DateTime      @updatedAt
-  accounts           BankAccount[]
-
-  @@index([userId, status])
-  @@index([status, lastSyncAt])
-  @@index([authStateHash])
-}
-
-// New accounts stay out of bookkeeping until the user opts in.
-// A business consent can return IBANs that belong to other companies.
-model BankAccount {
-  id                 String         @id @default(uuid())
-  userId             String
-  connectionId       String
-  connection         BankConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
-  iban               String
-  label              String?
-  currency           String         @default("EUR")
-  providerAccountUid String
-  inScope            Boolean        @default(false)
-  balanceCents       Int?
-  balanceAt          DateTime?
-  createdAt          DateTime       @default(now())
-  updatedAt          DateTime       @updatedAt
-
-  @@unique([connectionId, providerAccountUid])
-  @@index([userId, iban])
 }
 
 model Upload {
@@ -197,6 +191,11 @@ model MatchRejection {
 
 model ImapAccount {
   id             String    @id @default(uuid())
+  // Outgoing settings live with the account that already holds the password.
+  // Null means "derive from the IMAP host", which is right for the common
+  // providers (imap.gmail.com -> smtp.gmail.com).
+  smtpHost       String?
+  smtpPort       Int?
   userId         String
   user           User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   email          String
@@ -207,4 +206,345 @@ model ImapAccount {
   lastSyncAt     DateTime? 
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
+}
+
+model ChatMessage {
+  id             String    @id @default(uuid())
+  userId         String
+  user           User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role           String    // "user" | "assistant"
+  content        String
+  proposalData   String?   // JSON representation of proposed match or action
+  createdAt      DateTime  @default(now())
+
+  @@index([userId, createdAt])
+}
+
+// PSD2 AIS consent. sessionIdEnc is the Enable Banking session id at rest.
+// It is never returned to the browser. This is not a ledger BankAccount:
+// month-end balances stay on BankAccount, synced ASPSP accounts stay here.
+model BankConnection {
+  id                 String             @id @default(uuid())
+  userId             String
+  user               User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  aspspName          String
+  aspspCountry       String
+  aspspLogo          String?
+  psuType            String // "personal" | "business"
+  status             String             @default("pending") // pending|authorizing|active|expired|revoked|error
+  authStateHash      String?
+  sessionIdEnc       String?
+  validUntil         DateTime?
+  requiredPsuHeaders String?
+  lastSyncAt         DateTime?
+  lastSuccessAt      DateTime?
+  lastError          String?
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+  accounts           ConnectedAccount[]
+
+  @@index([userId, status])
+  @@index([status, lastSyncAt])
+  @@index([authStateHash])
+}
+
+// Accounts returned by a PSD2 consent. New rows stay out of bookkeeping
+// until the user opts in. A business consent can return IBANs that belong
+// to other companies.
+model ConnectedAccount {
+  id                 String         @id @default(uuid())
+  userId             String
+  connectionId       String
+  connection         BankConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+  iban               String
+  label              String?
+  currency           String         @default("EUR")
+  providerAccountUid String
+  inScope            Boolean        @default(false)
+  balanceCents       Int?
+  balanceAt          DateTime?
+  createdAt          DateTime       @default(now())
+  updatedAt          DateTime       @updatedAt
+
+  @@unique([connectionId, providerAccountUid])
+  @@index([userId, iban])
+  @@map("ConnectedAccount")
+}
+
+
+// A bank account the user owns. Balances are tracked per account so a user
+// with several banks sees each account's own month-end position instead of
+// one merged number.
+model BankAccount {
+  id                  String   @id @default(uuid())
+  userId              String
+  user                User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name                String
+  bankName            String?
+  // Normalised (uppercase, no spaces). Nullable because a user may track a
+  // cash account. SQLite treats NULLs as distinct, so several accounts may
+  // have no IBAN while real IBANs stay unique per user.
+  iban                String?
+  bic                 String?
+  currency            String   @default("EUR")
+  // The known balance at the start of openingDate. Every later month rolls
+  // forward from here.
+  openingBalanceCents Int      @default(0)
+  openingDate         DateTime
+  isDefault           Boolean  @default(false)
+  archivedAt          DateTime?
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  statements      Statement[]
+  monthlyBalances MonthlyBalance[]
+
+  @@unique([userId, iban])
+  @@index([userId, archivedAt])
+}
+
+// The balance the bank itself reports at the end of a month. Kept separate
+// from the computed rollforward so a mismatch is visible instead of silently
+// overwritten - that difference is the whole point of reconciliation.
+model MonthlyBalance {
+  id                  String      @id @default(uuid())
+  bankAccountId       String
+  bankAccount         BankAccount @relation(fields: [bankAccountId], references: [id], onDelete: Cascade)
+  month               String // "YYYY-MM"
+  closingBalanceCents Int
+  source              String      @default("manual") // "manual" | "statement"
+  note                String?
+  createdAt           DateTime    @default(now())
+  updatedAt           DateTime    @updatedAt
+
+  @@unique([bankAccountId, month])
+  @@index([bankAccountId, month])
+}
+
+// A person or company the user invoices. Kept per user; two users may hold the
+// same customer without seeing each other's rows.
+model Customer {
+  id                     String    @id @default(uuid())
+  userId                 String
+  user                   User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name                   String
+  businessId             String? // Y-tunnus, validated before it is stored
+  contactPerson          String?
+  email                  String?
+  phone                  String?
+  addressStreet          String?
+  addressPostalCode      String?
+  addressCity            String?
+  country                String    @default("FI")
+  defaultPaymentTermDays Int       @default(14)
+  notes                  String?
+  archivedAt             DateTime?
+  createdAt              DateTime  @default(now())
+  updatedAt              DateTime  @updatedAt
+
+  invoices          SalesInvoice[]
+  recurringInvoices RecurringInvoice[]
+
+  @@index([userId, archivedAt])
+  @@index([userId, name])
+}
+
+// Sales invoice. Totals are stored alongside the lines: the lines are the
+// source of truth while the invoice is a draft, and the stored totals are what
+// was actually sent to the customer once it leaves draft.
+model SalesInvoice {
+  id         String    @id @default(uuid())
+  userId     String
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  customerId String
+  customer   Customer  @relation(fields: [customerId], references: [id])
+  number     Int
+  reference  String // viitenumero with its check digit
+  issueDate  DateTime
+  dueDate    DateTime
+  status     String    @default("draft") // draft | sent | paid | credited
+  sentAt     DateTime?
+  paidAt     DateTime?
+  notes      String?
+  currency   String    @default("EUR")
+  netCents   Int       @default(0)
+  vatCents   Int       @default(0)
+  grossCents Int       @default(0)
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  lines        InvoiceLine[]
+  payments     InvoicePayment[]
+  reminders    InvoiceReminder[]
+  recurringRun RecurringInvoiceRun?
+
+  @@unique([userId, number])
+  @@unique([userId, reference])
+  @@index([userId, status, dueDate])
+  @@index([customerId, issueDate])
+}
+
+model InvoiceLine {
+  id              String       @id @default(uuid())
+  invoiceId       String
+  invoice         SalesInvoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  sortOrder       Int          @default(0)
+  description     String
+  quantityMilli   Int // thousandths of a unit
+  unit            String       @default("kpl")
+  unitPriceCents  Int
+  vatRatePermille Int          @default(255)
+  netCents        Int
+
+  @@index([invoiceId, sortOrder])
+}
+
+// A payment against an invoice. transactionId is unique so the same bank row
+// can never be counted towards two invoices.
+model InvoicePayment {
+  id            String       @id @default(uuid())
+  invoiceId     String
+  invoice       SalesInvoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  transactionId String?      @unique
+  // Losing the bank row must not erase the fact that the customer paid.
+  transaction   Transaction? @relation(fields: [transactionId], references: [id], onDelete: SetNull)
+  paidDate      DateTime
+  amountCents   Int
+  source        String       @default("manual") // "manual" | "bank"
+  note          String?
+  createdAt     DateTime     @default(now())
+
+  @@index([invoiceId])
+}
+
+// A supplier invoice the user owes. Deliberately a payables tracker only: the
+// VAT return keeps taking its numbers from receipts, so an invoice recorded
+// here and a receipt for the same purchase cannot double-count each other.
+// Attach the receipt with receiptId once it arrives.
+model PurchaseInvoice {
+  id                 String    @id @default(uuid())
+  userId             String
+  user               User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  supplierName       String
+  supplierBusinessId String?
+  supplierIban       String?
+  invoiceNumber      String?
+  reference          String? // viitenumero, used for bank matching
+  issueDate          DateTime
+  dueDate            DateTime
+  status             String    @default("open") // open | paid | cancelled
+  grossCents         Int
+  vatCents           Int       @default(0)
+  netCents           Int       @default(0)
+  category           String?
+  notes              String?
+  paidAt             DateTime?
+  // The receipt that documents this purchase, once it exists.
+  receiptId          String?   @unique
+  receipt            Receipt?  @relation(fields: [receiptId], references: [id], onDelete: SetNull)
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  payments PurchasePayment[]
+
+  @@index([userId, status, dueDate])
+  @@index([userId, issueDate])
+}
+
+model PurchasePayment {
+  id                String          @id @default(uuid())
+  purchaseInvoiceId String
+  purchaseInvoice   PurchaseInvoice @relation(fields: [purchaseInvoiceId], references: [id], onDelete: Cascade)
+  transactionId     String?         @unique
+  transaction       Transaction?    @relation(fields: [transactionId], references: [id], onDelete: SetNull)
+  paidDate          DateTime
+  amountCents       Int
+  source            String          @default("manual") // "manual" | "bank"
+  note              String?
+  createdAt         DateTime        @default(now())
+
+  @@index([purchaseInvoiceId])
+}
+
+// A payment reminder that was actually sent. Stored because what was demanded
+// - principal, interest and fee on that day - has to stay reconstructible.
+model InvoiceReminder {
+  id                String       @id @default(uuid())
+  invoiceId         String
+  invoice           SalesInvoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  level             Int          @default(1)
+  sentAt            DateTime     @default(now())
+  sentTo            String?
+  /// Due date printed on the reminder itself, not the invoice's own.
+  dueDate           DateTime
+  openCents         Int
+  interestCents     Int
+  feeCents          Int
+  totalCents        Int
+  annualRatePercent Float?
+  daysLate          Int
+
+  @@index([invoiceId, sentAt])
+}
+
+// A standing order to invoice the same customer on a schedule. The lines are a
+// template: each generated invoice gets its own copy, so editing the template
+// never rewrites an invoice the customer already holds.
+model RecurringInvoice {
+  id              String    @id @default(uuid())
+  userId          String
+  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  customerId      String
+  customer        Customer  @relation(fields: [customerId], references: [id])
+  name            String?
+  interval        String // "monthly" | "quarterly" | "yearly"
+  anchorDay       Int // day of month the invoice is issued on
+  startDate       DateTime
+  endDate         DateTime?
+  /// Next issue date owed. Null once the schedule has finished.
+  nextRunAt       DateTime?
+  paymentTermDays Int       @default(14)
+  notes           String?
+  /// Email the invoice to the customer as soon as it is generated.
+  autoSend        Boolean   @default(false)
+  active          Boolean   @default(true)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  lines RecurringInvoiceLine[]
+  runs  RecurringInvoiceRun[]
+
+  @@index([userId, active, nextRunAt])
+  @@index([customerId])
+}
+
+model RecurringInvoiceLine {
+  id                 String           @id @default(uuid())
+  recurringInvoiceId String
+  recurringInvoice   RecurringInvoice @relation(fields: [recurringInvoiceId], references: [id], onDelete: Cascade)
+  sortOrder          Int              @default(0)
+  description        String
+  quantityMilli      Int
+  unit               String           @default("kpl")
+  unitPriceCents     Int
+  vatRatePermille    Int              @default(255)
+
+  @@index([recurringInvoiceId, sortOrder])
+}
+
+// One occurrence. The unique (schedule, issueDate) pair is what makes
+// generation idempotent: a second run on the same day cannot invoice twice.
+model RecurringInvoiceRun {
+  id                 String           @id @default(uuid())
+  recurringInvoiceId String
+  recurringInvoice   RecurringInvoice @relation(fields: [recurringInvoiceId], references: [id], onDelete: Cascade)
+  issueDate          DateTime
+  invoiceId          String?          @unique
+  invoice            SalesInvoice?    @relation(fields: [invoiceId], references: [id], onDelete: SetNull)
+  status             String           @default("created") // created | skipped_locked | failed
+  note               String?
+  createdAt          DateTime         @default(now())
+
+  @@unique([recurringInvoiceId, issueDate])
+  @@index([recurringInvoiceId, createdAt])
 }
