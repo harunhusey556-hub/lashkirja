@@ -679,7 +679,7 @@ export default function StatementDetailView({
                       }
                       className="w-full px-3 py-2.5 rounded-xl border border-warm-gray-light/60 bg-white text-sm"
                     />
-                    <div className="grid grid-cols-2 gap-3">
+                    <div className="form-split">
                       <div>
                         <label
                           htmlFor={`transaction-${t.id}-date`}
@@ -983,7 +983,7 @@ export default function StatementDetailView({
           Tiliotteen asetukset
         </h3>
         <div className="flex flex-col sm:flex-row sm:items-end gap-4">
-          <div className="flex-1">
+          <div className="min-w-0 flex-1">
             <label
               htmlFor={`statement-${statement.id}-period`}
               className="block text-sm text-charcoal mb-2"
@@ -995,7 +995,7 @@ export default function StatementDetailView({
               type="month"
               value={periodValue()}
               onChange={(e) => setDraftPeriod(e.target.value)}
-              className="w-full sm:max-w-xs px-3 py-2.5 rounded-xl border border-warm-gray-light/60 bg-white text-sm"
+              className="w-full min-w-0 sm:max-w-xs px-3 py-2.5 rounded-xl border border-warm-gray-light/60 bg-white text-sm"
             />
             <p className="text-xs text-warm-gray mt-2 leading-relaxed">
               Määrittää millä kuukaudella etusivu näyttää tämän tiliotteen.

@@ -698,7 +698,7 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
               />
             </div>
 
-            <div className="grid grid-cols-2 gap-3">
+            <div className="form-split">
               <div>
                 <label htmlFor="receipt-date" className="block text-xs text-warm-gray mb-1">
                   Päivämäärä
@@ -741,8 +741,8 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
                 const standardRates = ["25.5", "13.5", "10", "0"];
                 const isLegacyRate = !standardRates.includes(detail.rate);
                 return (
-                  <div key={index} className="grid grid-cols-[1fr_1fr_auto] gap-2 items-end">
-                    <div>
+                  <div key={index} className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] gap-2 items-end">
+                    <div className="min-w-0">
                       <label
                         htmlFor={`receipt-vat-rate-${index}`}
                         className="block text-xs text-warm-gray mb-1"
@@ -787,7 +787,7 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
                         <option value="0">0 %</option>
                       </select>
                     </div>
-                    <div>
+                    <div className="min-w-0">
                       <label
                         htmlFor={`receipt-vat-amount-${index}`}
                         className="block text-xs text-warm-gray mb-1"
@@ -856,7 +856,7 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
               </button>
             </fieldset>
 
-            <div className="grid grid-cols-2 gap-3">
+            <div className="form-split">
               <div>
                 <label htmlFor="receipt-reference" className="block text-xs text-warm-gray mb-1">
                   Viitenumero

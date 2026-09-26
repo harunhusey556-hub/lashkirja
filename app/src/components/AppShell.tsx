@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { usePathname } from "next/navigation";
 import { ErrorState, LoadingState } from "@/components/AsyncState";
 import {
@@ -142,9 +142,49 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const title = pageTitle(pathname);
   const titleRef = useRef<HTMLHeadingElement>(null);
+  const mainRef = useRef<HTMLElement>(null);
+
+  useLayoutEffect(() => {
+    const root = document.documentElement;
+    root.classList.add("app-scroll-lock");
+
+    const syncViewport = () => {
+      const viewport = window.visualViewport;
+      const height = viewport?.height ?? window.innerHeight;
+      const offset = viewport?.offsetTop ?? 0;
+      root.style.setProperty("--app-height", `${Math.round(height)}px`);
+      root.style.setProperty("--app-vv-offset", `${Math.round(offset)}px`);
+    };
+
+    const scrollFocusedField = () => {
+      const el = document.activeElement;
+      if (!(el instanceof HTMLElement)) return;
+      if (!el.matches("input, textarea, select")) return;
+      if (!mainRef.current?.contains(el)) return;
+      el.scrollIntoView({ block: "center", inline: "nearest", behavior: "auto" });
+    };
+
+    syncViewport();
+    const viewport = window.visualViewport;
+    viewport?.addEventListener("resize", syncViewport);
+    viewport?.addEventListener("scroll", syncViewport);
+    viewport?.addEventListener("resize", scrollFocusedField);
+    window.addEventListener("orientationchange", syncViewport);
+
+    return () => {
+      root.classList.remove("app-scroll-lock");
+      root.style.removeProperty("--app-height");
+      root.style.removeProperty("--app-vv-offset");
+      viewport?.removeEventListener("resize", syncViewport);
+      viewport?.removeEventListener("scroll", syncViewport);
+      viewport?.removeEventListener("resize", scrollFocusedField);
+      window.removeEventListener("orientationchange", syncViewport);
+    };
+  }, []);
 
   useEffect(() => {
     titleRef.current?.focus({ preventScroll: true });
+    mainRef.current?.scrollTo({ top: 0, behavior: "auto" });
   }, [pathname]);
 
   useEffect(() => {
@@ -182,8 +222,8 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   }
 
   return (
-    <div className="min-h-dvh flex flex-col bg-cream">
-      <header className="app-header sticky top-0 z-40 border-b border-warm-gray-light/40 bg-white/95 backdrop-blur-md">
+    <div className="app-shell">
+      <header className="app-header border-b border-warm-gray-light/40 bg-white/95 backdrop-blur-md">
         <div className="mx-auto flex h-[var(--app-header-bar)] max-w-lg items-center justify-center px-5">
           <h1
             ref={titleRef}
@@ -195,7 +235,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         </div>
       </header>
 
-      <main className="app-main mx-auto w-full max-w-lg flex-1 pt-5">
+      <main ref={mainRef} className="app-main mx-auto w-full max-w-lg pt-5">
         <div key={pathname} className="page-enter">
           {authState.status === "checking" ? (
             <LoadingState label="Tarkistetaan istuntoa..." />
@@ -211,7 +251,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       </main>
 
       <nav
-        className="app-tab-bar fixed inset-x-0 bottom-0 z-50 border-t border-warm-gray-light/50 bg-white/95 shadow-[0_-8px_24px_rgba(45,45,45,0.04)] backdrop-blur-md"
+        className="app-tab-bar border-t border-warm-gray-light/50 bg-white/95 shadow-[0_-8px_24px_rgba(45,45,45,0.04)] backdrop-blur-md"
         aria-label="Päävalikko"
       >
         <div className="mx-auto flex h-[var(--app-tab-height)] max-w-lg items-stretch px-1">

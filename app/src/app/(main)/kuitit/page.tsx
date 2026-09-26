@@ -462,7 +462,7 @@ export default function KuititPage() {
                   type="month"
                   value={monthFilter}
                   onChange={(e) => setMonthFilter(e.target.value)}
-                  className="flex-1 px-3 py-2 rounded-xl border border-warm-gray-light bg-cream/50 text-sm"
+                  className="min-w-0 flex-1 px-3 py-2 rounded-xl border border-warm-gray-light bg-cream/50 text-sm"
                   aria-label="Kuukausi"
                 />
                 <button
@@ -494,7 +494,7 @@ export default function KuititPage() {
                   id="advanced-receipt-filters"
                   className="border-t border-warm-gray-light/30 pt-3 space-y-3"
                 >
-              <div className="grid grid-cols-2 gap-3">
+              <div className="form-split">
                 <div>
                   <label htmlFor="receipt-type-filter" className="block text-xs text-warm-gray mb-1">
                     Tyyppi
@@ -534,7 +534,7 @@ export default function KuititPage() {
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
+              <div className="form-split">
                 <div>
                   <label htmlFor="receipt-source-filter" className="block text-xs text-warm-gray mb-1">
                     Lähde
@@ -574,7 +574,7 @@ export default function KuititPage() {
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
+              <div className="form-split">
                 <div>
                   <label htmlFor="receipt-min-amount" className="block text-xs text-warm-gray mb-1">
                     Summa alkaen (€)

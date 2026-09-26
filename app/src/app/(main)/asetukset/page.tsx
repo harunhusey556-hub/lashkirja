@@ -238,7 +238,7 @@ export default function AsetuksetPage() {
                   });
                 }}
               >
-                <div className="grid grid-cols-2 gap-4">
+                <div className="form-split">
                   <div>
                     <label className="block text-xs font-medium text-charcoal-light mb-1">Etunimi</label>
                     <input 

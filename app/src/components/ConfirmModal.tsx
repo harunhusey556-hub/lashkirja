@@ -36,13 +36,13 @@ export default function ConfirmModal({
   }, [isOpen, onCancel]);
 
   useEffect(() => {
-    if (isOpen) {
-      document.body.style.overflow = "hidden";
-    } else {
-      document.body.style.overflow = "unset";
-    }
+    if (!isOpen) return;
+    const main = document.querySelector(".app-main");
+    const target = main instanceof HTMLElement ? main : document.body;
+    const previous = target.style.overflow;
+    target.style.overflow = "hidden";
     return () => {
-      document.body.style.overflow = "unset";
+      target.style.overflow = previous;
     };
   }, [isOpen]);
 
