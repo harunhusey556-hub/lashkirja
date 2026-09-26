@@ -20,12 +20,19 @@ const inter = Inter({ subsets: ["latin"] });
  *   --safe-top:  max(env(safe-area-inset-top, 0px), var(--shell-inset-top))
  * so whichever source is live wins. Fixing contentInset to "never" in the
  * shell makes env() resolve natively and the shim becomes a no-op (env() > 0).
+ *
+ * The measured values must NOT be written onto documentElement.style. That
+ * attribute is not in the server HTML, so the first client render mismatches
+ * <html> and React reports a hydration error. A stylesheet in <head> carries
+ * the same variables without touching the hydrated <html> attributes.
+ * !important keeps the measurement ahead of the 0px defaults in globals.css
+ * even if that file is injected again after this script runs.
  */
 function SafeAreaShim() {
   return (
     <script
       dangerouslySetInnerHTML={{ __html: `(()=>{
-  var el = document.documentElement;
+  var STYLE_ID = 'lashkirja-shell-insets';
   function realInset(side){
     var probe = document.createElement('div');
     probe.style.cssText = 'position:fixed;top:0;left:0;visibility:hidden;pointer-events:none;padding-'+side+':env(safe-area-inset-'+side+', 0px)';
@@ -43,14 +50,24 @@ function SafeAreaShim() {
     return side==='top' ? (vv.offsetTop||0)
                         : (window.innerHeight - vv.height - vv.offsetTop);
   }
-  function set(side){
+  function px(side){
     var real = realInset(side);
     var value = real > 0 ? real : shimInset(side);
-    el.style.setProperty('--shell-inset-'+side, Math.max(0, Math.round(value))+'px');
+    return Math.max(0, Math.round(value));
   }
-  set('top'); set('bottom');
-  window.addEventListener('resize', function(){ set('top'); set('bottom'); });
-  window.addEventListener('orientationchange', function(){ set('top'); set('bottom'); });
+  function apply(){
+    var css = ':root{--shell-inset-top:'+px('top')+'px !important;--shell-inset-bottom:'+px('bottom')+'px !important}';
+    var tag = document.getElementById(STYLE_ID);
+    if (!tag) {
+      tag = document.createElement('style');
+      tag.id = STYLE_ID;
+      document.head.appendChild(tag);
+    }
+    if (tag.textContent !== css) tag.textContent = css;
+  }
+  apply();
+  window.addEventListener('resize', apply);
+  window.addEventListener('orientationchange', apply);
 })();` }}
     />
   );

@@ -39,9 +39,10 @@
    but the installed Capacitor shell was built with contentInset:"automatic",
    and WKWebView reports env() as 0 whenever contentInsetAdjustmentBehavior is
    not .never. The inline SafeAreaShim in layout.tsx detects that case and
-   sets --shell-inset-* to the device's real insets; max() picks whichever
-   source is live. Always pad with var(--safe-top)/var(--safe-bottom), never
-   raw env(), or the shell renders under the Dynamic Island / home indicator. */
+   publishes --shell-inset-* from a <head> stylesheet (not the <html> style
+   attribute, which would break hydration). max() picks whichever source is
+   live. Always pad with var(--safe-top)/var(--safe-bottom), never raw env(),
+   or the shell renders under the Dynamic Island / home indicator. */
 :root {
   --shell-inset-top: 0px;
   --shell-inset-bottom: 0px;
