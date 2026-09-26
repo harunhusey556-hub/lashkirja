@@ -25,9 +25,10 @@ EXPORT_OPTIONS="${EXPORT_OPTIONS:-$ROOT/ios/ExportOptions.plist}"
 echo "Syncing Capacitor iOS project..."
 npx cap sync ios
 
+# Capacitor SPM ships ios/App/App.xcodeproj. App.xcworkspace exists only after CocoaPods.
 echo "Archiving $SCHEME ($CONFIGURATION)..."
 xcodebuild \
-  -workspace ios/App/App.xcworkspace \
+  -project ios/App/App.xcodeproj \
   -scheme "$SCHEME" \
   -configuration "$CONFIGURATION" \
   -archivePath "$ARCHIVE_PATH" \

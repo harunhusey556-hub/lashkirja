@@ -1,0 +1,88 @@
+name: Build unsigned IPA
+
+on:
+  workflow_dispatch:
+    inputs:
+      capacitor_server_url:
+        description: HTTPS URL the Capacitor WebView loads
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Unsigned iOS IPA
+    runs-on: macos-15
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+
+      - name: Install dependencies
+        working-directory: app
+        run: npm ci
+
+      - name: Sync Capacitor iOS project
+        working-directory: app
+        env:
+          CAPACITOR_SERVER_URL: ${{ inputs.capacitor_server_url }}
+        run: |
+          case "$CAPACITOR_SERVER_URL" in
+            https://*) ;;
+            *)
+              echo "capacitor_server_url must be an https:// URL"
+              exit 1
+              ;;
+          esac
+          npx cap sync ios
+          grep -F -q "$CAPACITOR_SERVER_URL" ios/App/App/capacitor.config.json
+
+      - name: Build unsigned app
+        working-directory: app
+        run: |
+          # Capacitor SPM has ios/App/App.xcodeproj only. App.xcworkspace is a CocoaPods artifact and is not in this repo.
+          xcodebuild \
+            -project ios/App/App.xcodeproj \
+            -scheme App \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath build/ios-unsigned \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGN_ENTITLEMENTS="" \
+            build
+
+      - name: Package unsigned IPA
+        working-directory: app
+        run: |
+          APP="build/ios-unsigned/Build/Products/Release-iphoneos/App.app"
+          if [[ ! -d "$APP" ]]; then
+            echo "Build product not found at $APP"
+            find build/ios-unsigned/Build/Products -name '*.app' -type d || true
+            exit 1
+          fi
+          rm -rf Payload
+          mkdir -p Payload
+          cp -R "$APP" Payload/
+          zip -qry Tilikirja-unsigned.ipa Payload
+          rm -rf Payload
+          echo "Size: $(du -h Tilikirja-unsigned.ipa | cut -f1)"
+
+      - name: Upload unsigned IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: Tilikirja-unsigned-ipa
+          path: app/Tilikirja-unsigned.ipa
+          retention-days: 30
+          if-no-files-found: error

@@ -91,3 +91,21 @@ OmaVero-kentät 301/303/305/307/308.
 npm run build   # optimoitu tuotantorakennus
 npm start       # käynnistä tuotantopalvelin
 ```
+
+## iOS-kuori (unsigned IPA)
+
+Puhelintestaukseen GitHub Actions rakentaa allekirjoittamattoman Capacitor-IPA:n (`macos-15`). WebView lataa annetun HTTPS-osoitteen: se kirjoitetaan projektiin `CAPACITOR_SERVER_URL`-ympäristömuuttujana ennen `npx cap sync ios`. Paketti on `Tilikirja-unsigned.ipa` (Capacitorin `appName`), artefakti `Tilikirja-unsigned-ipa`, säilytys 30 päivää. Sideload-työkalu allekirjoittaa sen asennuksen yhteydessä.
+
+```bash
+gh workflow run build-ipa.yml \
+  -f capacitor_server_url=https://oma-osoite.example
+```
+
+Jos työnkulkutiedosto ei ole vielä `main`-haarassa, lisää haara:
+
+```bash
+gh workflow run build-ipa.yml --ref cursor/enable-banking-connect-14f2 \
+  -f capacitor_server_url=https://oma-osoite.example
+```
+
+Lataa artefakti ajon sivulta tai komennolla `gh run download`. Paikallinen allekirjoitettu vienti Macilla ja Xcodella: `cd app && CAPACITOR_SERVER_URL=https://oma-osoite.example npm run ios:ipa`.
