@@ -15,6 +15,7 @@ const protectedPrefixes = [
   "/tiliotteet",
   "/alv-raportti",
   "/asetukset",
+  "/bank",
 ];
 
 const PUBLIC_API_PREFIXES = ["/api/auth/", "/api/cron/"];
@@ -89,6 +90,7 @@ export const config = {
     "/tiliotteet/:path*",
     "/alv-raportti/:path*",
     "/asetukset/:path*",
+    "/bank/:path*",
     "/login",
     "/api/:path*",
   ],

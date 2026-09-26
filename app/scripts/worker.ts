@@ -1,7 +1,22 @@
 import { prisma } from "../src/lib/db";
+import { enableBankingStatus } from "../src/lib/enablebanking/signing";
+import { syncDueBankConnections } from "../src/lib/enablebanking/sync";
 import { syncImapAccount } from "../src/lib/mail-sync";
 
 const SYNC_INTERVAL_MS = 10 * 60 * 1000; // 10 minutes
+
+async function runBankSyncCycle() {
+  if (!enableBankingStatus().ready) return;
+  console.log(`[${new Date().toISOString()}] Checking bank connections due for sync...`);
+  try {
+    const result = await syncDueBankConnections();
+    console.log(
+      `[${new Date().toISOString()}] Bank sync processed=${result.processed} imported=${result.imported} skipped=${result.skipped} errors=${result.errors.length}`
+    );
+  } catch (error) {
+    console.error(`[${new Date().toISOString()}] Bank sync cycle failed`, error);
+  }
+}
 
 async function runSyncCycle() {
   console.log(`[${new Date().toISOString()}] Starting background email sync cycle...`);
@@ -32,10 +47,12 @@ async function main() {
   
   // Run immediately on start
   await runSyncCycle();
+  await runBankSyncCycle();
 
-  // Schedule loop
+  // Schedule loop. Bank sync itself stays on a 6h gate inside syncDueBankConnections.
   setInterval(async () => {
     await runSyncCycle();
+    await runBankSyncCycle();
   }, SYNC_INTERVAL_MS);
 }
 

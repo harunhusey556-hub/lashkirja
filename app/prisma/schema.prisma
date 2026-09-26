@@ -17,10 +17,11 @@ model User {
   vatRegistered Boolean     @default(false)
   vatPeriod     String      @default("month") // "month" | "quarter" | "year"
   createdAt     DateTime    @default(now())
-  receipts      Receipt[]
-  statements    Statement[]
-  uploads       Upload[]
-  imapAccounts  ImapAccount[]
+  receipts        Receipt[]
+  statements      Statement[]
+  uploads         Upload[]
+  imapAccounts    ImapAccount[]
+  bankConnections BankConnection[]
 }
 
 model Receipt {
@@ -96,9 +97,65 @@ model Transaction {
 
   rejections MatchRejection[]
 
+  // Denormalized for dedupe. File imports may leave bankRef null.
+  userId  String?
+  bankRef String?
+  source  String  @default("file") // "file" | "enablebanking"
+  iban    String?
+
+  @@unique([userId, bankRef])
   @@index([statementId, date])
   @@index([statementId, matchStatus])
   @@index([suggestedReceiptId])
+  @@index([userId, source])
+}
+
+// PSD2 AIS consent. sessionIdEnc is the Enable Banking session id at rest.
+// It is never returned to the browser.
+model BankConnection {
+  id                 String        @id @default(uuid())
+  userId             String
+  user               User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  aspspName          String
+  aspspCountry       String
+  aspspLogo          String?
+  psuType            String // "personal" | "business"
+  status             String        @default("pending") // pending|authorizing|active|expired|revoked|error
+  authStateHash      String?
+  sessionIdEnc       String?
+  validUntil         DateTime?
+  requiredPsuHeaders String?
+  lastSyncAt         DateTime?
+  lastSuccessAt      DateTime?
+  lastError          String?
+  createdAt          DateTime      @default(now())
+  updatedAt          DateTime      @updatedAt
+  accounts           BankAccount[]
+
+  @@index([userId, status])
+  @@index([status, lastSyncAt])
+  @@index([authStateHash])
+}
+
+// New accounts stay out of bookkeeping until the user opts in.
+// A business consent can return IBANs that belong to other companies.
+model BankAccount {
+  id                 String         @id @default(uuid())
+  userId             String
+  connectionId       String
+  connection         BankConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+  iban               String
+  label              String?
+  currency           String         @default("EUR")
+  providerAccountUid String
+  inScope            Boolean        @default(false)
+  balanceCents       Int?
+  balanceAt          DateTime?
+  createdAt          DateTime       @default(now())
+  updatedAt          DateTime       @updatedAt
+
+  @@unique([connectionId, providerAccountUid])
+  @@index([userId, iban])
 }
 
 model Upload {

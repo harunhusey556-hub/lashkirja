@@ -28,6 +28,7 @@ export default function TiliotteetPage() {
   const [monthFilter, setMonthFilter] = useState("");
   const [showAllStatements, setShowAllStatements] = useState(false);
   const [loadError, setLoadError] = useState("");
+  const [bankSyncing, setBankSyncing] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const loadStatements = useCallback(async () => {
@@ -53,6 +54,60 @@ export default function TiliotteetPage() {
   useEffect(() => {
     void loadStatements();
   }, [loadStatements]);
+
+  async function handleBankSync() {
+    if (bankSyncing || uploading) return;
+    setBankSyncing(true);
+    setUploadMsg("Haetaan tapahtumia pankista...");
+    try {
+      const listResponse = await fetch("/api/bank/connections");
+      const list = await readJson<{
+        ready?: boolean;
+        connections?: Array<{
+          id: string;
+          status: string;
+          accounts: Array<{ inScope: boolean }>;
+        }>;
+      }>(listResponse, "Pankkiyhteyksien lataus epäonnistui");
+      const targets = (list.connections || []).filter(
+        (connection) =>
+          connection.status === "active" &&
+          connection.accounts.some((account) => account.inScope)
+      );
+      if (!list.ready || targets.length === 0) {
+        setUploadMsg("");
+        router.push("/asetukset#pankkiyhteys");
+        return;
+      }
+      let imported = 0;
+      let statementId: string | null = null;
+      for (const connection of targets) {
+        const response = await fetch(`/api/bank/connections/${connection.id}/sync`, {
+          method: "POST",
+        });
+        const data = await readJson<{ imported: number; statementId: string | null }>(
+          response,
+          "Pankin haku epäonnistui"
+        );
+        imported += data.imported;
+        if (data.statementId) statementId = data.statementId;
+      }
+      if (statementId && imported > 0) {
+        router.push(`/tiliotteet/${statementId}`);
+        return;
+      }
+      setUploadMsg(imported > 0 ? `${imported} uutta tapahtumaa` : "Ei uusia tapahtumia");
+      await loadStatements();
+    } catch (error: unknown) {
+      if (isUnauthorized(error)) {
+        redirectToLogin();
+        return;
+      }
+      setUploadMsg(`Virhe: ${errorMessage(error, "Pankin haku epäonnistui")}`);
+    } finally {
+      setBankSyncing(false);
+    }
+  }
 
   async function handleUpload(file: File) {
     setUploading(true);
@@ -104,7 +159,7 @@ export default function TiliotteetPage() {
             Tiliotteet
           </h2>
           <p className="text-sm text-warm-gray leading-relaxed">
-            Lataa pankkitiliote ja linkitä tapahtumat kuitteihin.
+            Tuo tiliote tiedostona tai hae tapahtumat yhdistetystä pankista.
           </p>
         </header>
 
@@ -118,14 +173,24 @@ export default function TiliotteetPage() {
             </p>
           </div>
 
-          <button
-            type="button"
-            onClick={() => fileInputRef.current?.click()}
-            disabled={uploading}
-            className="w-full py-3.5 rounded-2xl bg-accent text-white text-sm font-medium hover:bg-accent-dark transition-colors disabled:opacity-50"
-          >
-            {uploading ? "Käsitellään..." : "Valitse tiedosto"}
-          </button>
+          <div className="grid grid-cols-1 gap-3">
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={uploading || bankSyncing}
+              className="w-full py-3.5 rounded-2xl bg-accent text-white text-sm font-medium hover:bg-accent-dark transition-colors disabled:opacity-50"
+            >
+              {uploading ? "Käsitellään..." : "Tuo tiedosto"}
+            </button>
+            <button
+              type="button"
+              onClick={() => void handleBankSync()}
+              disabled={uploading || bankSyncing}
+              className="w-full py-3.5 rounded-2xl border border-warm-gray-light text-charcoal text-sm font-medium hover:bg-cream transition-colors disabled:opacity-50"
+            >
+              {bankSyncing ? "Haetaan pankista..." : "Hae pankista"}
+            </button>
+          </div>
 
           <input
             ref={fileInputRef}
@@ -152,7 +217,7 @@ export default function TiliotteetPage() {
               role={uploadMsg.startsWith("Virhe") ? "alert" : "status"}
               aria-live="polite"
             >
-              {uploading && (
+              {(uploading || bankSyncing) && (
                 <span
                   className="inline-block w-4 h-4 border-2 border-accent border-t-transparent rounded-full animate-spin motion-reduce:animate-none mr-2 align-middle"
                   aria-hidden="true"
@@ -235,6 +300,9 @@ export default function TiliotteetPage() {
                         <p className="text-base font-semibold text-charcoal leading-snug break-words">
                           {s.fileName}
                         </p>
+                        {s.fileType === "enablebanking" && (
+                          <p className="text-xs font-medium text-accent">Pankkiyhteys</p>
+                        )}
                         <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-warm-gray">
                           <span>{formatMonth(s.periodMonth)}</span>
                           <span aria-hidden>·</span>

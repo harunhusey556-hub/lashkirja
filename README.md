@@ -29,6 +29,29 @@ npm run dev                  # käynnistä http://localhost:3000
 | `LLM_BASE_URL` | OpenAI-yhteensopiva API endpoint | `https://api.openai.com/v1` |
 | `LLM_API_KEY` | API-avain (tyhjä = OCR-varapolku) | – |
 | `LLM_MODEL` | Malli | `gpt-4o-mini` |
+| `CRON_SECRET` | Suojaa cron-reitit (`/api/cron/sync-bank` vaatii aina Bearer-avaimen) | – |
+| `ENABLEBANKING_ENABLED` | `true` kytkee oikean PSD2-pankkiyhteyden | `false` |
+| `ENABLEBANKING_APP_ID` | Enable Banking -sovelluksen id (`kid`) | – |
+| `ENABLEBANKING_KEY_FILE` | RSA-yksityisen avaimen polku, ei repossa | – |
+| `ENABLEBANKING_KEY_PEM` | Vaihtoehto tiedostolle: PEM tai sen base64 (vain deploy-secret) | – |
+| `ENABLEBANKING_REDIRECT_URL` | Paluuosoite, täsmälleen sama kuin Control Panelin whitelistissä | – |
+| `ENABLEBANKING_API_BASE` | API-juuri | `https://api.enablebanking.com` |
+
+## Pankkiyhteys (Enable Banking)
+
+Asetukset → Pankkiyhteys yhdistää oikean suomalaisen pankin (esim. Holvi tai Säästöpankki) PSD2-tilitietorajapintaan. Käyttäjä valitsee pankin, kirjautuu pankin sivulla ja palaa sovellukseen. Tapahtumat kirjoitetaan samoihin tiliotteisiin kuin tiedostotuonti. Tiedoston lataus säilyy.
+
+Mock-pankki ei ole tuotantopolku. Sandbox- ja production-sovellukset ovat Enable Bankingissa erillisiä, ja sama koodi käy molempiin kun ympäristömuuttujat osoittavat oikeaan sovellukseen.
+
+1. Luo sovellus [Enable Banking Control Panelissa](https://enablebanking.com/sign-in/) (sandbox kokeiluun, production oikeaan pankkiin).
+2. Luo RSA-avain ja sertifikaatti. Lataa sertifikaatti paneeliin ja ota talteen Application ID.
+3. Lisää whitelist-ohjausosoite täsmälleen samaan muotoon kuin `ENABLEBANKING_REDIRECT_URL`, esim. `https://oma-osoite.example/bank/callback`. Localhost kelpaa vain jos paneeli hyväksyy sen; muuten tarvitaan HTTPS-tunneli.
+4. Pidä yksityinen avain repon ulkopuolella (`ENABLEBANKING_KEY_FILE`). Ilman tiedostojärjestelmää (esim. Vercel) laita PEM tai sen base64 `ENABLEBANKING_KEY_PEM`-secretiin. Avainta ei logiteta eikä palauteta selaimeen.
+5. Aseta `ENABLEBANKING_ENABLED=true`, `ENABLEBANKING_APP_ID` ja paluuosoite. Käynnistä sovellus uudelleen.
+6. Asetuksissa valitse yritystili tai henkilötili, sitten pankki. Uudet IBAN-tilit ovat oletuksena kirjanpidon ulkopuolella — valitse oma tili ennen hakua.
+7. Ajasta `GET /api/cron/sync-bank` noin kuuden tunnin välein otsikolla `Authorization: Bearer $CRON_SECRET`. Ilman avainta reitti vastaa 401. Paikallinen `npm run worker` käyttää samaa 6 tunnin rajaa. Käyttäjän “Synkronoi nyt” lähettää selaimen PSU-otsikot, cron ei.
+
+Istunnon eväste on `SameSite=Lax`, joten pankin paluu selaimessa toimii. iOS-sovelluksen sisäinen selain ja syvälinkki eivät ole vielä mukana: pankkiyhteys on ensin verkkoselaimessa.
 
 ## Kuittien analyysi
 

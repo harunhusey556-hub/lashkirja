@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import AppShell from "@/components/AppShell";
+import BankConnectCard from "@/components/BankConnectCard";
 import ConfirmModal from "@/components/ConfirmModal";
 import { ErrorState, LoadingState } from "@/components/AsyncState";
 import {
@@ -415,6 +416,8 @@ export default function AsetuksetPage() {
             </p>
           )}
         </div>
+
+        <BankConnectCard entityType={profile.entityType} />
 
         <div className="bg-white rounded-2xl p-6 shadow-sm space-y-6">
           <div className="flex justify-between items-start">

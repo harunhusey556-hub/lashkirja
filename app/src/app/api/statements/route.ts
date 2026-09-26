@@ -98,11 +98,13 @@ export async function POST(req: NextRequest) {
       await db.transaction.createMany({
         data: parsedTransactions.map((tx) => ({
           statementId: created.id,
+          userId: session.userId!,
           date: tx.date ? new Date(tx.date) : null,
           counterparty: tx.counterparty,
           amountCents: eurosToCents(tx.amount),
           reference: tx.reference,
           message: tx.message,
+          source: "file",
           type: inferTransactionType(tx.amount, {
             counterparty: tx.counterparty,
             message: tx.message,

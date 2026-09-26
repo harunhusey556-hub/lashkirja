@@ -6,7 +6,7 @@ import { prisma } from "@/lib/db";
 
 export async function POST(req: NextRequest) {
   const session = await requireSession(req);
-  if (!session) {
+  if (!session?.userId) {
     return NextResponse.json({ error: "Ei kirjautunut" }, { status: 401 });
   }
 
