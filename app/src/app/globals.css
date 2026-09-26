@@ -34,16 +34,29 @@
   --app-tab-height: 4.5rem;
 }
 
-/* Usable area is ONE calculation (UsableArea): the frame is the visual
-   viewport, and --safe-top / --safe-bottom are only the notch and home
-   indicator still inside that frame. Defaults match a closed keyboard so the
-   first paint does not wait on script. The publisher overwrites these from
-   a <head> stylesheet and never from the <html> style attribute. */
+/* The frame fills the WKWebView. Notch and home indicator are padding inside
+   the header and tab bar, once: the larger of env() and a small visual-viewport
+   fallback. A keyboard lifts --usable-bottom; it is not stored as a safe area.
+   Defaults are correct before UsableArea runs. That script publishes anchors
+   from a <head> stylesheet and never from the <html> style attribute. */
 :root {
   --usable-top: 0px;
-  --usable-height: 100%;
-  --safe-top: env(safe-area-inset-top, 0px);
-  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --usable-bottom: 0px;
+  --safe-top-fallback: 0px;
+  --safe-bottom-fallback: 0px;
+  --safe-top: max(env(safe-area-inset-top, 0px), var(--safe-top-fallback));
+  --safe-bottom: max(env(safe-area-inset-bottom, 0px), var(--safe-bottom-fallback));
+}
+
+/* While the keyboard is open the frame already starts at --usable-top, so the
+   notch still inside that frame is env minus that offset. The home indicator
+   is covered by the keyboard and must not leave a band above it. */
+html[data-keyboard="open"] {
+  --safe-bottom: 0px;
+  --safe-top: max(
+    0px,
+    calc(max(env(safe-area-inset-top, 0px), var(--safe-top-fallback)) - var(--usable-top))
+  );
 }
 
 /* Lock the document: the page itself never scrolls or rubber-bands on iOS.
@@ -63,10 +76,10 @@ body {
   left: 0;
   right: 0;
   top: var(--usable-top);
+  bottom: var(--usable-bottom);
   display: flex;
   flex-direction: column;
   width: 100%;
-  height: var(--usable-height);
   overflow: hidden;
   background: var(--color-cream);
 }

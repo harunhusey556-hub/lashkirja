@@ -2,56 +2,98 @@ import { describe, expect, it } from "vitest";
 import { usableArea } from "./usable-area";
 
 describe("usableArea", () => {
-  it("pads the notch once when the frame starts at the top of the screen", () => {
+  it("fills the webview when the visual viewport already matches it", () => {
     const area = usableArea({
-      innerHeight: 844,
+      innerHeight: 956,
       offsetTop: 0,
-      viewportHeight: 844,
-      envTop: 59,
-      envBottom: 34,
+      viewportHeight: 956,
+      editableFocused: false,
     });
     expect(area.frameTop).toBe(0);
-    expect(area.safeTop).toBe(59);
-    expect(area.safeBottom).toBe(34);
-    expect(area.safeTop + area.frameTop).toBe(59);
+    expect(area.frameBottom).toBe(0);
+    expect(area.safeTopFallback).toBe(0);
+    expect(area.safeBottomFallback).toBe(0);
+    expect(area.keyboardOpen).toBe(false);
   });
 
-  it("does not pad the header again when offsetTop already cleared the notch", () => {
+  it("keeps a full frame when the visual viewport stops above the home indicator", () => {
     const area = usableArea({
-      innerHeight: 844,
-      offsetTop: 59,
-      viewportHeight: 785,
-      envTop: 59,
-      envBottom: 34,
+      innerHeight: 956,
+      offsetTop: 0,
+      viewportHeight: 922,
+      editableFocused: false,
     });
-    expect(area.frameTop).toBe(59);
-    expect(area.safeTop).toBe(0);
-    expect(area.safeTop + area.frameTop).toBe(59);
+    expect(area.frameTop).toBe(0);
+    expect(area.frameBottom).toBe(0);
+    expect(area.keyboardOpen).toBe(false);
+    expect(area.safeBottomFallback).toBe(34);
+    expect(area.safeTopFallback).toBe(0);
   });
 
-  it("treats a keyboard as a shorter frame, not as a safe-area inset", () => {
+  it("does not shift the frame when offsetTop already equals the notch", () => {
     const area = usableArea({
-      innerHeight: 844,
+      innerHeight: 956,
+      offsetTop: 62,
+      viewportHeight: 860,
+      editableFocused: false,
+    });
+    expect(area.frameTop).toBe(0);
+    expect(area.frameBottom).toBe(0);
+    expect(area.keyboardOpen).toBe(false);
+    expect(area.safeTopFallback).toBe(62);
+    expect(area.safeBottomFallback).toBe(34);
+  });
+
+  it("lifts the frame above a keyboard and clears the home-indicator pad", () => {
+    const area = usableArea({
+      innerHeight: 956,
       offsetTop: 0,
       viewportHeight: 520,
-      envTop: 59,
-      envBottom: 34,
+      editableFocused: true,
     });
     expect(area.keyboardOpen).toBe(true);
-    expect(area.frameHeight).toBe(520);
-    expect(area.safeTop).toBe(59);
-    expect(area.safeBottom).toBe(0);
+    expect(area.frameTop).toBe(0);
+    expect(area.frameBottom).toBe(436);
+    expect(area.safeTopFallback).toBe(0);
+    expect(area.safeBottomFallback).toBe(0);
   });
 
-  it("does not add the home indicator when the frame already ends above it", () => {
+  it("does not treat a keyboard-sized gap as a keyboard when nothing is focused", () => {
+    const area = usableArea({
+      innerHeight: 956,
+      offsetTop: 0,
+      viewportHeight: 520,
+      editableFocused: false,
+    });
+    expect(area.keyboardOpen).toBe(false);
+    expect(area.frameTop).toBe(0);
+    expect(area.frameBottom).toBe(0);
+    expect(area.safeBottomFallback).toBe(0);
+  });
+
+  it("does not pad the notch twice when the keyboard also shifts offsetTop", () => {
+    const area = usableArea({
+      innerHeight: 956,
+      offsetTop: 62,
+      viewportHeight: 480,
+      editableFocused: true,
+    });
+    expect(area.keyboardOpen).toBe(true);
+    expect(area.frameTop).toBe(62);
+    expect(area.frameBottom).toBe(956 - 62 - 480);
+    expect(area.safeTopFallback).toBe(0);
+    expect(area.safeBottomFallback).toBe(0);
+  });
+
+  it("ignores a focused gap that is still shorter than a keyboard", () => {
     const area = usableArea({
       innerHeight: 844,
       offsetTop: 0,
-      viewportHeight: 810,
-      envTop: 0,
-      envBottom: 34,
+      viewportHeight: 844 - 119,
+      editableFocused: true,
     });
     expect(area.keyboardOpen).toBe(false);
-    expect(area.safeBottom).toBe(0);
+    expect(area.frameBottom).toBe(0);
+    expect(area.safeBottomFallback).toBe(0);
   });
 });

@@ -511,7 +511,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   return (
     <div className="app-frame">
       <header className="app-header z-40 bg-white/90 backdrop-blur-md border-b border-warm-gray-light/30">
-        <div className="app-header-row max-w-lg mx-auto h-14 px-1">
+        <div className="app-header-row max-w-lg mx-auto min-h-14 px-1">
           <div className="flex h-11 w-11 items-center justify-center">
             {canGoBack && (
               <button
@@ -624,7 +624,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                       void hapticSelection();
                       if (item.href !== pathname) armNavigation(item.href, "tab");
                     }}
-                    className={`flex flex-1 flex-col items-center justify-center gap-0.5 touch-target active:bg-blush/30 transition-colors active-press ${
+                    className={`flex min-w-0 flex-1 flex-col items-center justify-center gap-0.5 touch-target active:bg-blush/30 transition-colors active-press ${
                       active ? "text-accent-dark" : "text-warm-gray"
                     }`}
                     aria-current={active ? "page" : undefined}

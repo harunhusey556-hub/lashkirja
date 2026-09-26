@@ -5,18 +5,17 @@ import { usableArea } from "@/lib/usable-area";
 
 const STYLE_ID = "lashkirja-usable";
 
-function readEnv(side: "top" | "bottom"): number {
-  const probe = document.createElement("div");
-  probe.style.cssText = `position:fixed;visibility:hidden;pointer-events:none;padding-${side}:env(safe-area-inset-${side}, 0px)`;
-  document.body.appendChild(probe);
-  const value = parseFloat(getComputedStyle(probe).getPropertyValue(`padding-${side}`)) || 0;
-  probe.remove();
-  return value;
+function editableFocused(): boolean {
+  const el = document.activeElement;
+  if (!(el instanceof HTMLElement)) return false;
+  if (el.isContentEditable) return true;
+  return el.matches("input, textarea, select");
 }
 
 /**
- * Publishes the one usable-area result as a head stylesheet. It does not
- * write style attributes onto <html>, so hydration stays stable.
+ * Publishes frame anchors and safe-area fallbacks from a head stylesheet.
+ * It does not write style attributes onto <html>, so hydration stays stable,
+ * and it does not replace env(safe-area-inset-*) with a pixel guess.
  */
 export function UsableArea() {
   useLayoutEffect(() => {
@@ -26,14 +25,13 @@ export function UsableArea() {
         innerHeight: window.innerHeight,
         offsetTop: vv?.offsetTop ?? 0,
         viewportHeight: vv?.height ?? window.innerHeight,
-        envTop: readEnv("top"),
-        envBottom: readEnv("bottom"),
+        editableFocused: editableFocused(),
       });
       const css =
         `:root{--usable-top:${area.frameTop}px !important;` +
-        `--usable-height:${area.frameHeight}px !important;` +
-        `--safe-top:${area.safeTop}px !important;` +
-        `--safe-bottom:${area.safeBottom}px !important}`;
+        `--usable-bottom:${area.frameBottom}px !important;` +
+        `--safe-top-fallback:${area.safeTopFallback}px !important;` +
+        `--safe-bottom-fallback:${area.safeBottomFallback}px !important}`;
       let tag = document.getElementById(STYLE_ID);
       if (!tag) {
         tag = document.createElement("style");
@@ -45,16 +43,23 @@ export function UsableArea() {
     };
 
     apply();
+    const later = window.setTimeout(apply, 300);
     const vv = window.visualViewport;
     vv?.addEventListener("resize", apply);
     vv?.addEventListener("scroll", apply);
     window.addEventListener("resize", apply);
     window.addEventListener("orientationchange", apply);
+    document.addEventListener("focusin", apply);
+    document.addEventListener("focusout", apply);
     return () => {
+      window.clearTimeout(later);
       vv?.removeEventListener("resize", apply);
       vv?.removeEventListener("scroll", apply);
       window.removeEventListener("resize", apply);
       window.removeEventListener("orientationchange", apply);
+      document.removeEventListener("focusin", apply);
+      document.removeEventListener("focusout", apply);
+      document.getElementById(STYLE_ID)?.remove();
       delete document.documentElement.dataset.keyboard;
     };
   }, []);
