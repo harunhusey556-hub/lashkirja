@@ -1,7 +1,6 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import AppShell from "@/components/AppShell";
 import { ErrorState, LoadingState } from "@/components/AsyncState";
 import {
   apiFetch,
@@ -105,7 +104,7 @@ export default function ReportsPage() {
     : 1;
 
   return (
-    <AppShell>
+    <>
       <div className="space-y-6 pb-6">
         <header className="space-y-2">
           <h2 className="text-2xl font-semibold text-charcoal tracking-tight">Raportit</h2>
@@ -265,6 +264,6 @@ export default function ReportsPage() {
           </>
         )}
       </div>
-    </AppShell>
+    </>
   );
 }

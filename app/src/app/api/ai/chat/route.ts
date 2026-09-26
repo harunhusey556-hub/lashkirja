@@ -4,6 +4,23 @@ import { requireSession } from "@/lib/session";
 import { processAiChatMessage } from "@/lib/ai-assistant";
 
 import { errorText } from "@/lib/api-errors";
+
+function chunkReply(reply: string): string[] {
+  if (!reply) return [""];
+  const parts = reply.split(/(\s+)/);
+  const chunks: string[] = [];
+  let current = "";
+  for (const part of parts) {
+    current += part;
+    if (current.length >= 48) {
+      chunks.push(current);
+      current = "";
+    }
+  }
+  if (current) chunks.push(current);
+  return chunks.length > 0 ? chunks : [reply];
+}
+
 export async function GET() {
   const session = await requireSession();
   if (!session) {
@@ -34,7 +51,7 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const { message } = await req.json();
+    const { message, stream } = await req.json();
     if (!message || typeof message !== "string" || message.trim().length === 0) {
       return NextResponse.json(
         { error: "Viesti on pakollinen" },
@@ -67,13 +84,47 @@ export async function POST(req: NextRequest) {
       },
     });
 
-    return NextResponse.json({
+    const payload = {
       id: assistantMsg.id,
-      role: "assistant",
+      role: "assistant" as const,
       content: reply,
       proposal: proposal || null,
       createdAt: assistantMsg.createdAt,
-    });
+    };
+
+    // The model call finishes before this response. Streaming chunks the
+    // finished reply so the drawer can paint it as it arrives, then a done
+    // event carries the saved id and any match proposal.
+    if (stream === true) {
+      const encoder = new TextEncoder();
+      const streamBody = new ReadableStream({
+        async start(controller) {
+          for (const delta of chunkReply(reply)) {
+            controller.enqueue(encoder.encode(`data: ${JSON.stringify({ delta })}\n\n`));
+            await new Promise((resolve) => setTimeout(resolve, 12));
+          }
+          controller.enqueue(
+            encoder.encode(
+              `data: ${JSON.stringify({
+                done: true,
+                id: payload.id,
+                proposal: payload.proposal,
+                createdAt: payload.createdAt,
+              })}\n\n`
+            )
+          );
+          controller.close();
+        },
+      });
+      return new Response(streamBody, {
+        headers: {
+          "Content-Type": "text/event-stream; charset=utf-8",
+          "Cache-Control": "no-cache, no-transform",
+        },
+      });
+    }
+
+    return NextResponse.json(payload);
   } catch (error: unknown) {
     console.error("🔥 AI Chat API Error:", errorText(error));
     return NextResponse.json(

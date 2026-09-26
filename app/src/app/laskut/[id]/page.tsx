@@ -3,7 +3,6 @@
 import { use, useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import AppShell from "@/components/AppShell";
 import { ErrorState, LoadingState } from "@/components/AsyncState";
 import ConfirmModal from "@/components/ConfirmModal";
 import {
@@ -15,6 +14,8 @@ import {
 } from "@/components/clientFetch";
 import { formatDate, formatEur, parseFinnishNumber } from "@/lib/format";
 import { formatReference } from "@/lib/finnish-reference";
+import { shareContent } from "@/lib/share";
+import { Button } from "@/components/ui";
 
 interface ReminderPreview {
   level: number;
@@ -82,6 +83,7 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [confirmRemovePayment, setConfirmRemovePayment] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
+  const [sharing, setSharing] = useState(false);
   const [reminder, setReminder] = useState<ReminderPreview | null>(null);
   const [remindingBusy, setRemindingBusy] = useState(false);
 
@@ -183,6 +185,36 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
     }
   }
 
+  async function shareInvoice() {
+    if (!invoice || sharing) return;
+    setSharing(true);
+    setMessage(null);
+    try {
+      const response = await apiFetch(`/api/invoices/${invoice.id}/pdf`, {
+        credentials: "include",
+      });
+      if (!response.ok) throw new Error("PDF:n haku epäonnistui");
+      const blob = await response.blob();
+      const file = new File([blob], `lasku-${invoice.number}.pdf`, {
+        type: blob.type || "application/pdf",
+      });
+      const result = await shareContent({
+        title: `Lasku ${invoice.number}`,
+        text: `Lasku ${invoice.number}`,
+        url: window.location.href,
+        file,
+      });
+      if (result === "downloaded") setMessage("PDF ladattiin laitteelle.");
+      if (result === "unavailable") {
+        setMessage("Jakaminen ei ole käytettävissä tällä laitteella.");
+      }
+    } catch (error) {
+      setMessage(errorMessage(error, "Jakaminen epäonnistui"));
+    } finally {
+      setSharing(false);
+    }
+  }
+
   async function sendByEmail() {
     setSending(true);
     setMessage(null);
@@ -246,7 +278,7 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
   }
 
   return (
-    <AppShell>
+    <>
       <div className="space-y-6 pb-6">
         {state === "loading" && <LoadingState label="Haetaan laskua…" />}
         {state === "error" && (
@@ -352,59 +384,49 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
                   href={`/api/invoices/${invoice.id}/pdf`}
                   target="_blank"
                   rel="noreferrer"
-                  className="min-h-11 px-4 py-2.5 rounded-xl border border-warm-gray-light/60 text-sm font-medium text-charcoal"
+                  className="active-press inline-flex min-h-12 items-center px-4 rounded-xl border border-warm-gray-light/60 text-sm font-medium text-charcoal"
                 >
                   Avaa PDF
                 </a>
+                <Button
+                  variant="secondary"
+                  busy={sharing}
+                  busyLabel="Jaetaan…"
+                  disabled={busy}
+                  onClick={() => void shareInvoice()}
+                >
+                  Jaa
+                </Button>
                 {invoice.status !== "credited" && (
-                  <button
-                    type="button"
+                  <Button
+                    variant="secondary"
+                    busy={sending}
+                    busyLabel="Lähetetään…"
+                    disabled={busy}
                     onClick={() => void sendByEmail()}
-                    disabled={sending || busy}
-                    className="min-h-11 px-4 py-2.5 rounded-xl border border-warm-gray-light/60 text-sm font-medium disabled:opacity-50"
                   >
-                    {sending ? "Lähetetään…" : "Lähetä sähköpostilla"}
-                  </button>
+                    Lähetä sähköpostilla
+                  </Button>
                 )}
                 {invoice.status === "draft" && (
-                  <button
-                    type="button"
-                    onClick={() => void changeStatus("sent")}
-                    disabled={busy}
-                    className="min-h-11 px-4 py-2.5 rounded-xl bg-accent text-white text-sm font-medium disabled:opacity-50"
-                  >
+                  <Button disabled={busy} onClick={() => void changeStatus("sent")}>
                     Merkitse lähetetyksi
-                  </button>
+                  </Button>
                 )}
                 {invoice.status === "sent" && (
-                  <button
-                    type="button"
-                    onClick={() => void changeStatus("paid")}
-                    disabled={busy}
-                    className="min-h-11 px-4 py-2.5 rounded-xl bg-accent text-white text-sm font-medium disabled:opacity-50"
-                  >
+                  <Button disabled={busy} onClick={() => void changeStatus("paid")}>
                     Merkitse maksetuksi
-                  </button>
+                  </Button>
                 )}
                 {invoice.status !== "credited" && invoice.status !== "draft" && (
-                  <button
-                    type="button"
-                    onClick={() => void changeStatus("credited")}
-                    disabled={busy}
-                    className="min-h-11 px-4 py-2.5 rounded-xl border border-warm-gray-light/60 text-sm font-medium disabled:opacity-50"
-                  >
+                  <Button variant="secondary" disabled={busy} onClick={() => void changeStatus("credited")}>
                     Hyvitä
-                  </button>
+                  </Button>
                 )}
                 {invoice.status === "draft" && (
-                  <button
-                    type="button"
-                    onClick={() => setConfirmDelete(true)}
-                    disabled={busy}
-                    className="min-h-11 px-4 py-2.5 rounded-xl border border-danger/40 text-danger text-sm font-medium disabled:opacity-50"
-                  >
+                  <Button variant="danger" disabled={busy} onClick={() => setConfirmDelete(true)}>
                     Poista luonnos
-                  </button>
+                  </Button>
                 )}
               </div>
 
@@ -551,6 +573,6 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
         }}
         onCancel={() => setConfirmRemovePayment(null)}
       />
-    </AppShell>
+    </>
   );
 }

@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
+import { Button, Field, FormError } from "@/components/ui";
 
 const ERROR_MESSAGES: Record<string, string> = {
   auth: "Väärä sähköposti tai salasana",
@@ -60,13 +61,7 @@ export default function LoginForm() {
         >
           {next && <input type="hidden" name="next" value={next} />}
 
-          <div>
-            <label
-              htmlFor="email"
-              className="block text-sm font-medium text-charcoal-light mb-1.5"
-            >
-              Sähköposti
-            </label>
+          <Field label="Sähköposti" htmlFor="email">
             <input
               id="email"
               name="email"
@@ -79,15 +74,9 @@ export default function LoginForm() {
               placeholder="demo@lashkirja.fi"
               required
             />
-          </div>
+          </Field>
 
-          <div>
-            <label
-              htmlFor="password"
-              className="block text-sm font-medium text-charcoal-light mb-1.5"
-            >
-              Salasana
-            </label>
+          <Field label="Salasana" htmlFor="password">
             <input
               id="password"
               name="password"
@@ -97,21 +86,19 @@ export default function LoginForm() {
               placeholder="••••••"
               required
             />
-          </div>
+          </Field>
 
-          {error && (
-            <p className="text-danger text-sm text-center">{error}</p>
-          )}
+          <FormError message={error} className="text-center" />
 
-          <button
+          <Button
             type="submit"
-            className="w-full py-3 rounded-xl bg-accent text-white font-medium text-sm hover:bg-accent-dark transition-colors flex items-center justify-center gap-2"
+            busy={submitting}
+            busyLabel="Kirjaudutaan…"
+            allowBusySubmit
+            className="w-full"
           >
-            {submitting && (
-              <span className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin motion-reduce:animate-none" />
-            )}
-            {submitting ? "Kirjaudutaan…" : "Kirjaudu sisään"}
-          </button>
+            Kirjaudu sisään
+          </Button>
         </form>
 
         <p className="text-center text-xs text-warm-gray mt-6">

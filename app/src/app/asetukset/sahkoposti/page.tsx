@@ -1,7 +1,6 @@
 "use client";
 
 import { useState } from "react";
-import AppShell from "@/components/AppShell";
 import ConfirmModal from "@/components/ConfirmModal";
 import { ErrorState, LoadingState } from "@/components/AsyncState";
 import { errorMessage } from "@/components/clientFetch";
@@ -117,22 +116,22 @@ export default function SahkopostiPage() {
 
   if (loadError) {
     return (
-      <AppShell>
+      <>
         <ErrorState message={loadError} onRetry={retry} />
-      </AppShell>
+      </>
     );
   }
 
   if (!profile) {
     return (
-      <AppShell>
+      <>
         <LoadingState label="Ladataan asetuksia..." />
-      </AppShell>
+      </>
     );
   }
 
   return (
-    <AppShell>
+    <>
       <div className="space-y-6">
         <div className="bg-white rounded-2xl p-6 shadow-sm space-y-6 animate-in">
           <div className="flex flex-col gap-3 sm:flex-row sm:justify-between sm:items-start">
@@ -379,6 +378,6 @@ export default function SahkopostiPage() {
         }}
         onCancel={() => setAccountToDisconnect(null)}
       />
-    </AppShell>
+    </>
   );
 }

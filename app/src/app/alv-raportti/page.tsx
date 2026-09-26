@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import AppShell from "@/components/AppShell";
 import { ErrorState, LoadingState } from "@/components/AsyncState";
 import {
   errorMessage,
@@ -122,7 +121,7 @@ export default function ALVRaporttiPage() {
   }
 
   return (
-    <AppShell>
+    <>
       <div className="space-y-6">
         <h2 className="text-2xl font-semibold text-charcoal tracking-tight">ALV-raportti</h2>
 
@@ -346,7 +345,7 @@ export default function ALVRaporttiPage() {
           </div>
         ) : null}
       </div>
-    </AppShell>
+    </>
   );
 }
 

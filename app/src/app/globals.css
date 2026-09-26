@@ -46,6 +46,7 @@
 :root {
   --shell-inset-top: 0px;
   --shell-inset-bottom: 0px;
+  --keyboard-inset: 0px;
   --safe-top: max(env(safe-area-inset-top, 0px), var(--shell-inset-top));
   --safe-bottom: max(env(safe-area-inset-bottom, 0px), var(--shell-inset-bottom));
 }
@@ -118,7 +119,8 @@ button:disabled {
 
 .app-main {
   padding-right: max(1rem, env(safe-area-inset-right, 0px));
-  padding-bottom: calc(var(--app-tab-height) + var(--safe-bottom) + 1.25rem);
+  padding-bottom: calc(var(--app-tab-height) + var(--safe-bottom) + var(--keyboard-inset) + 1.25rem);
+  scroll-padding-bottom: calc(var(--keyboard-inset) + 1.5rem);
   padding-left: max(1rem, env(safe-area-inset-left, 0px));
   overflow-y: auto;
   overscroll-behavior-y: contain;
@@ -255,6 +257,17 @@ button:disabled {
 }
 .active-press:active {
   transform: scale(0.97);
+}
+
+/* Painted on pointerdown, before click or any network request. transition:none
+   so the scale does not wait out the .active-press easing. */
+button[data-pressed="true"],
+a[data-pressed="true"],
+[role="button"][data-pressed="true"],
+.active-press[data-pressed="true"] {
+  transform: scale(0.97);
+  opacity: 0.72;
+  transition: none;
 }
 
 /* Baseline press feedback for every button/link on a touch device, so a tap
@@ -416,7 +429,7 @@ button:disabled {
 
 /* Sheets own the bottom inset themselves; the tab bar is hidden behind them. */
 .sheet-safe-bottom {
-  padding-bottom: calc(var(--safe-bottom) + 0.75rem);
+  padding-bottom: calc(var(--safe-bottom) + var(--keyboard-inset) + 0.75rem);
 }
 
 /* Grab handle at the top of a sheet. */

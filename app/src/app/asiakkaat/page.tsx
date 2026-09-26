@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import AppShell from "@/components/AppShell";
 import { ErrorState, LoadingState } from "@/components/AsyncState";
 import ConfirmModal from "@/components/ConfirmModal";
 import {
@@ -133,7 +132,7 @@ export default function CustomersPage() {
   const totalOpen = customers.reduce((sum, customer) => sum + customer.openBalance, 0);
 
   return (
-    <AppShell>
+    <>
       <div className="space-y-6 pb-6">
         <header className="space-y-2">
           <h2 className="text-2xl font-semibold text-charcoal tracking-tight">Asiakkaat</h2>
@@ -316,6 +315,6 @@ export default function CustomersPage() {
         onConfirm={() => confirmRemove && void remove(confirmRemove)}
         onCancel={() => setConfirmRemove(null)}
       />
-    </AppShell>
+    </>
   );
 }

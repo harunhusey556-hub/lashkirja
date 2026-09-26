@@ -1,38 +1,38 @@
 "use client";
 
 import { useState } from "react";
-import AppShell from "@/components/AppShell";
 import { ErrorState, LoadingState } from "@/components/AsyncState";
 import { type Profile, SaveStatus, useProfile } from "../useProfile";
+import { Button } from "@/components/ui";
 
 export default function ProfiiliPage() {
   const { profile, saving, savedMsg, loadError, retry, save } = useProfile();
 
   if (loadError) {
     return (
-      <AppShell>
+      <>
         <ErrorState message={loadError} onRetry={retry} />
-      </AppShell>
+      </>
     );
   }
 
   if (!profile) {
     return (
-      <AppShell>
+      <>
         <LoadingState label="Ladataan profiilia..." />
-      </AppShell>
+      </>
     );
   }
 
   return (
-    <AppShell>
+    <>
       <ProfileForm
         profile={profile}
         saving={saving}
         savedMsg={savedMsg}
         save={save}
       />
-    </AppShell>
+    </>
   );
 }
 
@@ -135,13 +135,9 @@ function ProfileForm({
 
           <div className="flex items-center justify-between gap-3 pt-1">
             <SaveStatus saving={saving} savedMsg={savedMsg} />
-            <button
-              type="submit"
-              disabled={saving || !dirty}
-              className="ml-auto px-5 py-2.5 rounded-xl bg-accent text-white text-sm font-medium hover:bg-accent-dark disabled:opacity-50 transition-colors active-press touch-target"
-            >
+            <Button type="submit" busy={saving} busyLabel="Tallennetaan…" disabled={!dirty} className="ml-auto">
               Tallenna
-            </button>
+            </Button>
           </div>
         </form>
     </div>

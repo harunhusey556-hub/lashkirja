@@ -17,6 +17,7 @@ import {
   redirectToLogin,
 } from "@/components/clientFetch";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
+import { Button, FormError } from "@/components/ui";
 import { SelectMenu, SelectOption } from "@/components/SelectMenu";
 import { parseFinnishNumber } from "@/lib/format";
 import {
@@ -620,11 +621,7 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
         </div>
       )}
 
-      {error && (
-        <p className="text-sm text-danger bg-danger/10 rounded-xl px-4 py-3" role="alert">
-          {error}
-        </p>
-      )}
+      <FormError message={error} className="bg-danger/10 rounded-xl px-4 py-3" />
 
       {formReady && (
         <form
@@ -1052,19 +1049,15 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
                 >
                   Peruuta
                 </Link>
-                <button
+                <Button
                   type="submit"
-                  disabled={saving || (!isEdit && !uploadId)}
-                  className={`flex-1 py-3 px-4 rounded-full text-white text-sm font-medium shadow-sm transition-colors disabled:opacity-50 active:scale-95 ${forceDuplicate ? "bg-warning-dark hover:bg-warning" : "bg-accent hover:bg-accent-dark"}`}
+                  busy={saving}
+                  busyLabel="Tallennetaan…"
+                  disabled={!isEdit && !uploadId}
+                  className={`flex-1 ${forceDuplicate ? "bg-warning-dark! hover:bg-warning!" : ""}`}
                 >
-                  {saving
-                    ? "Tallennetaan..."
-                    : forceDuplicate 
-                      ? "Tallenna silti"
-                      : isEdit
-                        ? "Tallenna muutokset"
-                        : "Tallenna"}
-                </button>
+                  {forceDuplicate ? "Tallenna silti" : isEdit ? "Tallenna muutokset" : "Tallenna"}
+                </Button>
               </>
             )}
           </div>

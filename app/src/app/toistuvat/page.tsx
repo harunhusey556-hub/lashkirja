@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import AppShell from "@/components/AppShell";
 import { ErrorState, LoadingState } from "@/components/AsyncState";
 import ConfirmModal from "@/components/ConfirmModal";
 import {
@@ -267,7 +266,7 @@ export default function RecurringInvoicesPage() {
   const label = "text-sm font-medium text-charcoal";
 
   return (
-    <AppShell>
+    <>
       <div className="space-y-6 pb-6">
         <header className="space-y-2">
           <h2 className="text-2xl font-semibold text-charcoal tracking-tight">Toistuvat laskut</h2>
@@ -630,6 +629,6 @@ export default function RecurringInvoicesPage() {
         onConfirm={() => confirmRemove && void remove(confirmRemove)}
         onCancel={() => setConfirmRemove(null)}
       />
-    </AppShell>
+    </>
   );
 }

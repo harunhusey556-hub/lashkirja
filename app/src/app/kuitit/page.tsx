@@ -2,7 +2,6 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-import AppShell from "@/components/AppShell";
 import ConfirmModal from "@/components/ConfirmModal";
 import ReviewQueue from "@/components/ReviewQueue";
 import ReceiptMatchPanel, {
@@ -11,6 +10,7 @@ import ReceiptMatchPanel, {
 } from "@/components/ReceiptMatchPanel";
 import { ErrorState, SkeletonList } from "@/components/AsyncState";
 import {
+  apiFetch,
   errorMessage,
   isUnauthorized,
   readJson,
@@ -139,10 +139,8 @@ export default function KuititPage() {
   }, [monthFilter, searchQuery, appliedAdvanced]);
 
   useEffect(() => {
-    const controller = new AbortController();
-    fetch(`/api/receipts${query ? `?${query}` : ""}`, {
-      signal: controller.signal,
-    })
+    let cancelled = false;
+    apiFetch(`/api/receipts${query ? `?${query}` : ""}`)
       .then((response) =>
         readJson<{ receipts?: SavedReceipt[] }>(
           response,
@@ -150,13 +148,13 @@ export default function KuititPage() {
         )
       )
       .then((data) => {
-        if (controller.signal.aborted) return;
+        if (cancelled) return;
         setLoadError(null);
         writePageCache(`receipts:${query}`, data.receipts || []);
         setListResult({ query, receipts: data.receipts || [] });
       })
       .catch((error: unknown) => {
-        if (controller.signal.aborted) return;
+        if (cancelled) return;
         if (isUnauthorized(error)) {
           redirectToLogin();
           return;
@@ -167,20 +165,21 @@ export default function KuititPage() {
         });
       });
 
-    fetch(`/api/receipts?reviewStatus=pending`, { signal: controller.signal })
+    apiFetch("/api/receipts?reviewStatus=pending")
       .then((res) => readJson<{ receipts?: SavedReceipt[] }>(res, "Virhe"))
       .then((data) => {
-        if (!controller.signal.aborted) {
-          writePageCache("receipts-pending", data.receipts || []);
-          setPendingReceipts(data.receipts || []);
-          setLoadingPending(false);
-        }
+        if (cancelled) return;
+        writePageCache("receipts-pending", data.receipts || []);
+        setPendingReceipts(data.receipts || []);
+        setLoadingPending(false);
       })
       .catch(() => {
-        if (!controller.signal.aborted) setLoadingPending(false);
+        if (!cancelled) setLoadingPending(false);
       });
 
-    return () => controller.abort();
+    return () => {
+      cancelled = true;
+    };
   }, [query, loadAttempt]);
 
   // A stale-but-cached copy paints immediately while the fetch above
@@ -428,7 +427,7 @@ export default function KuititPage() {
   );
 
   return (
-    <AppShell>
+    <>
       <div className="space-y-6">
         <div className="space-y-3 animate-in fade-in slide-in-from-top-2">
           <h2 className="text-xl font-medium text-charcoal tracking-tight">Kuitit ja laskut</h2>
@@ -1057,6 +1056,6 @@ export default function KuititPage() {
           </div>
         </div>
       )}
-    </AppShell>
+    </>
   );
 }

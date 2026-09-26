@@ -98,4 +98,15 @@ describe("apiFetch", () => {
     controller.abort();
     await expect(promise).rejects.not.toBeInstanceOf(ApiTimeoutError);
   });
+
+  it("dedupes identical in-flight GETs and gives each caller its own body", async () => {
+    const fetchMock = vi.fn(fetchThatRespectsAbort(jsonResponse(200, { ok: true })));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const [first, second] = await Promise.all([apiFetch("/api/same"), apiFetch("/api/same")]);
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(await first.json()).toEqual({ ok: true });
+    expect(await second.json()).toEqual({ ok: true });
+  });
 });

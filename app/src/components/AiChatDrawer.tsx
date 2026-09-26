@@ -8,6 +8,8 @@ import { readJson,
 
 import BottomSheet from "@/components/BottomSheet";
 import { LoadingState } from "@/components/AsyncState";
+import { ChatMarkdown } from "@/components/ChatMarkdown";
+import { Button } from "@/components/ui";
 interface ChatMessageItem {
   id: string;
   role: "user" | "assistant";
@@ -31,6 +33,7 @@ export function AiChatDrawer() {
   const [loadingHistory, setLoadingHistory] = useState(false);
   const [historyLoaded, setHistoryLoaded] = useState(false);
   const [matchBusyId, setMatchBusyId] = useState<string | null>(null);
+  const [failedQuery, setFailedQuery] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -57,52 +60,133 @@ export function AiChatDrawer() {
     }
   }, [messages, isOpen]);
 
-  async function handleSendMessage(textToSend?: string) {
-    const query = textToSend || input;
-    if (!query.trim() || loading) return;
+  async function handleSendMessage(textToSend?: string, retrying = false) {
+    const query = (textToSend || input).trim();
+    if (!query || loading) return;
 
-    const userMsg: ChatMessageItem = {
-      id: String(Date.now()),
-      role: "user",
-      content: query.trim(),
-      createdAt: new Date().toISOString(),
-    };
-
-    setMessages((prev) => [...prev, userMsg]);
-    if (!textToSend) setInput("");
+    if (retrying) {
+      setMessages((prev) => prev.filter((msg) => !msg.id.startsWith("error-") && !msg.id.startsWith("stream-")));
+    } else {
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: `user-${Date.now()}`,
+          role: "user",
+          content: query,
+          createdAt: new Date().toISOString(),
+        },
+      ]);
+      if (!textToSend) setInput("");
+    }
+    setFailedQuery(null);
     setLoading(true);
+
+    const placeholderId = `stream-${Date.now()}`;
+    let placeholderAdded = false;
 
     try {
       const res = await fetch("/api/ai/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: userMsg.content }),
+        body: JSON.stringify({ message: query, stream: true }),
       });
-      const data = await readJson<ChatResponse>(res, "Virhe viestin lähetyksessä");
+      const type = res.headers.get("content-type") || "";
+      if (!res.ok || !type.includes("text/event-stream")) {
+        const data = await readJson<ChatResponse>(res, "Virhe viestin lähetyksessä");
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: data.id || String(Date.now() + 1),
+            role: "assistant",
+            content: data.content,
+            proposal: data.proposal,
+            createdAt: data.createdAt || new Date().toISOString(),
+          },
+        ]);
+        return;
+      }
 
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: data.id || String(Date.now() + 1),
-          role: "assistant",
-          content: data.content,
-          proposal: data.proposal,
-          createdAt: data.createdAt || new Date().toISOString(),
-        },
-      ]);
+      const reader = res.body?.getReader();
+      if (!reader) throw new Error("Vastausta ei voitu lukea");
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let content = "";
+      let finalId = placeholderId;
+      let proposal: ChatMessageItem["proposal"] = null;
+      let createdAt = new Date().toISOString();
+
+      const paint = (next: string) => {
+        if (!placeholderAdded) {
+          placeholderAdded = true;
+          setMessages((prev) => [
+            ...prev,
+            {
+              id: placeholderId,
+              role: "assistant",
+              content: next,
+              createdAt,
+            },
+          ]);
+          return;
+        }
+        setMessages((prev) =>
+          prev.map((msg) => (msg.id === placeholderId ? { ...msg, content: next } : msg))
+        );
+      };
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const parts = buffer.split("\n\n");
+        buffer = parts.pop() ?? "";
+        for (const part of parts) {
+          const line = part.split("\n").find((entry) => entry.startsWith("data: "));
+          if (!line) continue;
+          const event = JSON.parse(line.slice(6)) as {
+            delta?: string;
+            done?: boolean;
+            error?: string;
+            id?: string;
+            proposal?: ChatMessageItem["proposal"];
+            createdAt?: string;
+          };
+          if (event.error) throw new Error(event.error);
+          if (event.delta) {
+            content += event.delta;
+            paint(content);
+          }
+          if (event.done) {
+            if (event.id) finalId = event.id;
+            proposal = event.proposal ?? null;
+            if (event.createdAt) createdAt = event.createdAt;
+          }
+        }
+      }
+
+      if (!placeholderAdded) paint(content);
+      setMessages((prev) =>
+        prev.map((msg) =>
+          msg.id === placeholderId ? { ...msg, id: finalId, content, proposal, createdAt } : msg
+        )
+      );
     } catch (err: unknown) {
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: String(Date.now() + 2),
-          role: "assistant",
-          content: `Pahoittelut, viestin käsittely epäonnistui: ${errorMessage(
-            err,
-            "tuntematon virhe"
-          )}. Yritä uudelleen!`,
-          createdAt: new Date().toISOString(),
-        },
-      ]);
+      setFailedQuery(query);
+      setMessages((prev) => {
+        const withoutStream = prev.filter((msg) => msg.id !== placeholderId);
+        return [
+          ...withoutStream,
+          {
+            id: `error-${Date.now()}`,
+            role: "assistant",
+            content: `Pahoittelut, viestin käsittely epäonnistui: ${errorMessage(
+              err,
+              "tuntematon virhe"
+            )}.`,
+            createdAt: new Date().toISOString(),
+          },
+        ];
+      });
     } finally {
       setLoading(false);
     }
@@ -237,7 +321,11 @@ export function AiChatDrawer() {
                         : "bg-cream/80 text-charcoal border border-warm-gray-light/40 rounded-tl-xs shadow-xs"
                     }`}
                   >
-                    {msg.content}
+                    {msg.role === "assistant" ? (
+                      <ChatMarkdown text={msg.content} />
+                    ) : (
+                      msg.content
+                    )}
                   </div>
 
                   {/* Match Proposal Card (Human Approval Required) */}
@@ -262,14 +350,14 @@ export function AiChatDrawer() {
 
                       {/* Explicit Human Approval Action Buttons */}
                       <div className="flex gap-2 pt-1">
-                        <button
-                          type="button"
-                          disabled={matchBusyId === msg.id}
+                        <Button
+                          busy={matchBusyId === msg.id}
+                          busyLabel="Yhdistetään…"
                           onClick={() => handleConfirmProposal(msg.id, msg.proposal!)}
-                          className="flex-1 min-h-11 py-2 rounded-xl bg-accent text-white text-xs font-semibold hover:bg-accent-dark transition-all shadow-sm active-press disabled:opacity-50"
+                          className="flex-1 text-xs"
                         >
-                          {matchBusyId === msg.id ? "Yhdistetään..." : "Hyväksy täsmäytys ✓"}
-                        </button>
+                          Hyväksy täsmäytys ✓
+                        </Button>
                         <button
                           type="button"
                           onClick={() => handleRejectProposal(msg.id)}
@@ -282,6 +370,16 @@ export function AiChatDrawer() {
                   )}
                 </div>
               ))}
+
+              {failedQuery && !loading && (
+                <Button
+                  variant="secondary"
+                  onClick={() => void handleSendMessage(failedQuery, true)}
+                  className="text-xs"
+                >
+                  Yritä uudelleen
+                </Button>
+              )}
 
               {loading && (
                 <div className="flex items-center gap-2 text-xs text-warm-gray bg-cream/50 p-3 rounded-2xl max-w-[70%]">
@@ -311,9 +409,14 @@ export function AiChatDrawer() {
               <button
                 type="submit"
                 disabled={!input.trim() || loading}
-                className="w-10 h-10 rounded-xl bg-accent text-white flex items-center justify-center hover:bg-accent-dark transition-colors disabled:opacity-40 shrink-0 shadow-sm"
+                aria-busy={loading || undefined}
+                className="w-10 h-10 rounded-xl bg-accent text-white flex items-center justify-center hover:bg-accent-dark transition-colors disabled:opacity-40 shrink-0 shadow-sm active-press"
               >
-                ➔
+                {loading ? (
+                  <span className="h-4 w-4 rounded-full border-2 border-white/40 border-t-white animate-spin motion-reduce:animate-none" />
+                ) : (
+                  "➔"
+                )}
               </button>
             </form>
       </BottomSheet>

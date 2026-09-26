@@ -2,7 +2,6 @@
 
 import Link from "next/link";
 import { useState } from "react";
-import AppShell from "@/components/AppShell";
 import BankConnectCard from "@/components/BankConnectCard";
 import { ErrorState } from "@/components/AsyncState";
 import { signOut } from "@/components/clientFetch";
@@ -80,9 +79,9 @@ export default function AsetuksetPage() {
 
   if (loadError) {
     return (
-      <AppShell>
+      <>
         <ErrorState message={loadError} onRetry={retry} />
-      </AppShell>
+      </>
     );
   }
 
@@ -93,7 +92,7 @@ export default function AsetuksetPage() {
     : undefined;
 
   return (
-    <AppShell>
+    <>
       <div className="space-y-6 list-stagger">
         {/* Profile header: tap through to the editable profile page. */}
         {profile ? (
@@ -182,6 +181,6 @@ export default function AsetuksetPage() {
           LashKirja {appVersion}
         </p>
       </div>
-    </AppShell>
+    </>
   );
 }

@@ -3,10 +3,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import AppShell from "@/components/AppShell";
 import { ErrorState, SkeletonList } from "@/components/AsyncState";
 import StatementSummaryCards from "@/components/StatementSummaryCards";
 import {
+  apiFetch,
   errorMessage,
   isUnauthorized,
   readJson,
@@ -60,7 +60,7 @@ export default function TiliotteetPage() {
 
   const loadStatements = useCallback(async () => {
     try {
-      const res = await fetch("/api/statements");
+      const res = await apiFetch("/api/statements");
       const data = await readJson<{ statements?: StatementData[] }>(
         res,
         "Tiliotteiden lataus epäonnistui"
@@ -88,7 +88,7 @@ export default function TiliotteetPage() {
 
   useEffect(() => {
     let cancelled = false;
-    fetch("/api/bank-accounts", { credentials: "include" })
+    apiFetch("/api/bank-accounts", { credentials: "include" })
       .then((res) => readJson<{ accounts?: BankAccountOption[] }>(res, ""))
       .then((data) => {
         if (cancelled) return;
@@ -207,7 +207,7 @@ export default function TiliotteetPage() {
     : filteredStatements.slice(0, RECENT_LIMIT);
 
   return (
-    <AppShell>
+    <>
       <div className="space-y-8 pb-6">
         <header className="space-y-2">
           <h2 className="text-2xl font-semibold text-charcoal tracking-tight">
@@ -448,6 +448,6 @@ export default function TiliotteetPage() {
           </div>
         )}
       </div>
-    </AppShell>
+    </>
   );
 }

@@ -8,6 +8,7 @@ import {
   redirectToLogin,
 } from "@/components/clientFetch";
 import { readPageCache, writePageCache } from "@/lib/page-cache";
+import { FormError, SavedNote } from "@/components/ui";
 
 export interface Profile {
   firstName: string;
@@ -114,15 +115,14 @@ export function SaveStatus({
   saving: boolean;
   savedMsg: string;
 }) {
-  if (!saving && !savedMsg) return null;
+  if (saving) {
+    return (
+      <p className="text-xs text-success" role="status" aria-live="polite">
+        Tallennetaan...
+      </p>
+    );
+  }
   const isError = Boolean(savedMsg) && savedMsg !== "Tallennettu";
-  return (
-    <p
-      className={`text-xs ${isError ? "text-danger" : "text-success"}`}
-      role={isError ? "alert" : "status"}
-      aria-live="polite"
-    >
-      {saving ? "Tallennetaan..." : savedMsg}
-    </p>
-  );
+  if (isError) return <FormError message={savedMsg} className="text-xs" />;
+  return <SavedNote message={savedMsg} className="text-xs" />;
 }

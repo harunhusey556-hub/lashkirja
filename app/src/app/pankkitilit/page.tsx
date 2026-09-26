@@ -1,7 +1,6 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import AppShell from "@/components/AppShell";
 import { ErrorState, LoadingState } from "@/components/AsyncState";
 import ConfirmModal from "@/components/ConfirmModal";
 import {
@@ -224,7 +223,7 @@ export default function BankAccountsPage() {
   }
 
   return (
-    <AppShell>
+    <>
       <div className="space-y-6 pb-6">
         <header className="flex items-start justify-between gap-3">
           <div className="space-y-2 min-w-0">
@@ -470,6 +469,6 @@ export default function BankAccountsPage() {
         onConfirm={() => confirmRemove && void removeAccount(confirmRemove)}
         onCancel={() => setConfirmRemove(null)}
       />
-    </AppShell>
+    </>
   );
 }

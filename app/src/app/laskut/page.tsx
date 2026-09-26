@@ -3,7 +3,6 @@
 import { Suspense, useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import AppShell from "@/components/AppShell";
 import { ErrorState, LoadingState, SkeletonList } from "@/components/AsyncState";
 import { InvoiceForm, type InvoicePayload } from "@/components/invoices/InvoiceForm";
 import {
@@ -69,9 +68,9 @@ export default function InvoicesPage() {
   return (
     <Suspense
       fallback={
-        <AppShell>
+        <>
           <LoadingState label="Haetaan laskuja…" />
-        </AppShell>
+        </>
       }
     >
       <InvoicesPageContent />
@@ -200,7 +199,7 @@ function InvoicesPageContent() {
   }
 
   return (
-    <AppShell>
+    <>
       <div className="space-y-6 pb-6">
         <header className="space-y-2">
           <h2 className="text-2xl font-semibold text-charcoal tracking-tight">Myyntilaskut</h2>
@@ -362,6 +361,6 @@ function InvoicesPageContent() {
           </ul>
         )}
       </div>
-    </AppShell>
+    </>
   );
 }

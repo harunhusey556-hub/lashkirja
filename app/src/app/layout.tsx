@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import { Inter } from "next/font/google";
+import ShellGate from "@/components/ShellGate";
 import "./globals.css";
 
 const inter = Inter({ subsets: ["latin"] });
@@ -112,20 +113,47 @@ export const viewport: Viewport = {
 };
 
 /**
- * WebKit (Safari and this Capacitor WKWebView shell) only evaluates
- * `:active`/`:hover` on tap when *some* element in the page has a touch
- * listener attached — without one, taps go straight from touchstart to
- * touchend without the browser ever entering the `:active` state, so every
- * press-feedback class in globals.css (`.active-press`, `active:scale-95`,
- * the touch-only `:active` opacity fallback) silently does nothing. A single
- * no-op, passive listener on the document is the standard fix and has no
- * behavioural effect of its own.
+ * WebKit only evaluates `:active` when some element has a touch listener.
+ * That alone is still late: `:active` can wait until the click, which on a
+ * slow network feels like the tap did nothing. pointerdown paints
+ * data-pressed immediately, before the click handler or any request.
  */
 function TouchActiveShim() {
   return (
     <script
       dangerouslySetInnerHTML={{
-        __html: `document.addEventListener('touchstart', function(){}, {passive:true});`,
+        __html: `document.addEventListener('touchstart', function(){}, {passive:true});
+(function(){
+  var pressed = null;
+  function clear(){
+    if (!pressed) return;
+    pressed.removeAttribute('data-pressed');
+    pressed = null;
+  }
+  function targetOf(event){
+    var node = event.target;
+    if (!node) return null;
+    if (node.nodeType !== 1) node = node.parentElement;
+    if (!node || !node.closest) return null;
+    return node.closest('button, a, [role="button"], .active-press');
+  }
+  document.addEventListener('pointerdown', function(event){
+    if (event.pointerType === 'mouse' && event.button !== 0) return;
+    clear();
+    var el = targetOf(event);
+    if (!el) return;
+    if (el.matches(':disabled') || el.getAttribute('aria-disabled') === 'true') return;
+    el.setAttribute('data-pressed', 'true');
+    pressed = el;
+  }, {passive:true});
+  document.addEventListener('pointerup', clear, {passive:true});
+  document.addEventListener('pointercancel', clear, {passive:true});
+  document.addEventListener('pointermove', function(event){
+    if (!pressed) return;
+    if (targetOf(event) !== pressed) clear();
+  }, {passive:true});
+  window.addEventListener('blur', clear);
+})();`,
       }}
     />
   );
@@ -141,7 +169,7 @@ export default function RootLayout({
       <body className={`${inter.className} bg-cream min-h-screen`}>
         <SafeAreaShim />
         <TouchActiveShim />
-        {children}
+        <ShellGate>{children}</ShellGate>
       </body>
     </html>
   );

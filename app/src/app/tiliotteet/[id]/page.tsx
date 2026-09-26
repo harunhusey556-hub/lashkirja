@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
-import AppShell from "@/components/AppShell";
 import StatementDetailView from "@/components/StatementDetailView";
 import { ErrorState, LoadingState } from "@/components/AsyncState";
 import {
@@ -50,7 +49,7 @@ export default function StatementDetailPage() {
   }, [loadStatement]);
 
   return (
-    <AppShell>
+    <>
       <div className="space-y-6 pb-6">
         <Link
           href="/tiliotteet"
@@ -97,6 +96,6 @@ export default function StatementDetailPage() {
           />
         )}
       </div>
-    </AppShell>
+    </>
   );
 }

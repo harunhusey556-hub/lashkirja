@@ -2,9 +2,9 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import AppShell from "@/components/AppShell";
 import { ErrorState, LoadingState } from "@/components/AsyncState";
 import {
+  apiFetch,
   errorMessage,
   isUnauthorized,
   readJson,
@@ -93,16 +93,13 @@ export default function DashboardClient({
   }, []);
 
   useEffect(() => {
-    const controller = new AbortController();
-    fetch(`/api/dashboard?month=${month}`, {
-      credentials: "include",
-      signal: controller.signal,
-    })
+    let cancelled = false;
+    apiFetch(`/api/dashboard?month=${month}`, { credentials: "include" })
       .then((response) =>
         readJson<DashboardData>(response, "Etusivun tietojen lataus epäonnistui")
       )
       .then((data) => {
-        if (controller.signal.aborted) return;
+        if (cancelled) return;
         if (
           !Number.isFinite(data.income) ||
           !Number.isFinite(data.expenses) ||
@@ -115,7 +112,7 @@ export default function DashboardClient({
         setResult({ month, data });
       })
       .catch((error: unknown) => {
-        if (controller.signal.aborted) return;
+        if (cancelled) return;
         if (isUnauthorized(error)) {
           redirectToLogin();
           return;
@@ -124,7 +121,9 @@ export default function DashboardClient({
           errorMessage(error, "Etusivun tietojen lataus epäonnistui")
         );
       });
-    return () => controller.abort();
+    return () => {
+      cancelled = true;
+    };
   }, [month, loadAttempt]);
 
   // Cached copy (warmed post-login or left by an earlier visit) paints in the
@@ -139,7 +138,7 @@ export default function DashboardClient({
   const monthName = MONTH_NAMES[monthIdx] || "";
 
   return (
-    <AppShell>
+    <>
       <div className="space-y-6 pb-20">
         
         {/* Dynamic Action Banner for Pending Receipts */}
@@ -325,6 +324,6 @@ export default function DashboardClient({
         </div>
         
       </div>
-    </AppShell>
+    </>
   );
 }

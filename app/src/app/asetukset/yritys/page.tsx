@@ -1,6 +1,5 @@
 "use client";
 
-import AppShell from "@/components/AppShell";
 import { ErrorState, LoadingState } from "@/components/AsyncState";
 import { SelectMenu } from "@/components/SelectMenu";
 import { SaveStatus, useProfile } from "../useProfile";
@@ -10,22 +9,22 @@ export default function YritysPage() {
 
   if (loadError) {
     return (
-      <AppShell>
+      <>
         <ErrorState message={loadError} onRetry={retry} />
-      </AppShell>
+      </>
     );
   }
 
   if (!profile) {
     return (
-      <AppShell>
+      <>
         <LoadingState label="Ladataan asetuksia..." />
-      </AppShell>
+      </>
     );
   }
 
   return (
-    <AppShell>
+    <>
       <div className="space-y-6">
         <div className="bg-white rounded-2xl p-6 shadow-sm space-y-5 animate-in">
           <div>
@@ -110,6 +109,6 @@ export default function YritysPage() {
           <SaveStatus saving={saving} savedMsg={savedMsg} />
         </div>
       </div>
-    </AppShell>
+    </>
   );
 }

@@ -16,7 +16,14 @@ import {
 
 import type { BusinessProfile } from "@/lib/onboarding";
 import BottomSheet from "@/components/BottomSheet";
+import { apiFetch } from "@/components/clientFetch";
 import { readPageCache, writePageCache } from "@/lib/page-cache";
+import {
+  armNavigation,
+  consumeDirection,
+  markHistoryBack,
+  type NavDirection,
+} from "@/lib/nav-direction";
 const NAV_ITEMS = [
   {
     href: "/dashboard",
@@ -110,40 +117,8 @@ const MORE_ITEMS = [
   { href: "/asetukset", label: "Asetukset", hint: "Profiili, sähköposti, kirjautuminen" },
 ] as const;
 
-/* ------------------------------------------------------------------------- */
-/* Navigation direction.                                                     */
-/*                                                                           */
-/* AppShell remounts on every route change (each page renders its own shell) */
-/* so anything that has to survive a navigation lives at module scope.       */
-/* ------------------------------------------------------------------------- */
-
-let lastPathname: string | null = null;
-/** Set by the back button / edge swipe just before they navigate. */
-let forcedDirection: "forward" | "back" | null = null;
-/** Set when the navigation came from history (browser/OS back). */
-let poppedNavigation = false;
-
 function routeDepth(pathname: string): number {
   return pathname.split("/").filter(Boolean).length;
-}
-
-type NavDirection = "forward" | "back" | "tab" | "none";
-
-function consumeDirection(pathname: string): NavDirection {
-  const previous = lastPathname;
-  lastPathname = pathname;
-  const forced = forcedDirection;
-  forcedDirection = null;
-  const popped = poppedNavigation;
-  poppedNavigation = false;
-
-  if (previous === null || previous === pathname) return "none";
-  if (forced) return forced;
-  const from = routeDepth(previous);
-  const to = routeDepth(pathname);
-  if (to > from) return "forward";
-  if (to < from) return "back";
-  return popped ? "back" : "tab";
 }
 
 /** Where the header back button lands when there is no history to pop. */
@@ -156,10 +131,10 @@ function parentPath(pathname: string): string {
 type ShellUser = { email?: string; firstName?: string };
 
 /**
- * The session check lives in the page cache so a navigation (which remounts
- * the whole shell) renders the page content in the very first frame and the
- * /api/auth/me revalidation runs silently behind it. Only the first mount
- * after a full page load ever shows the "checking session" state.
+ * The session check lives in the page cache so the first paint after a full
+ * load can skip the "checking session" state. The shell itself stays mounted
+ * across navigations (see ShellGate), so this revalidation does not remount
+ * the header, tab bar, or chat.
  */
 const AUTH_CACHE_KEY = "shell-auth";
 /** Set once the onboarding endpoint has confirmed the user is onboarded. */
@@ -184,7 +159,7 @@ function warmTabCaches() {
 
   const warm = (url: string, key: string, pick: (data: Record<string, unknown>) => unknown) => {
     if (readPageCache(key) !== null) return;
-    fetch(url, { credentials: "include" })
+    apiFetch(url, { credentials: "include" })
       .then((res) => (res.ok ? (res.json() as Promise<Record<string, unknown>>) : null))
       .then((data) => {
         if (!data) return;
@@ -259,19 +234,28 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const title = pageTitle(pathname);
   const mainRef = useRef<HTMLElement>(null);
-
-  // Computed once per mount: the shell remounts on every route, and the enter
-  // animation must not change class mid-flight on re-renders.
-  const [direction] = useState<NavDirection>(() => consumeDirection(pathname));
+  const swipeLock = useRef(false);
+  // Adjusting state during render is how a new pathname picks its enter
+  // direction before paint. The server skips this so the first HTML matches
+  // the client's first visit (direction "none" until a real navigation).
+  const [navFrame, setNavFrame] = useState<{ path: string; direction: NavDirection }>({
+    path: "",
+    direction: "none",
+  });
+  if (typeof window !== "undefined" && navFrame.path !== pathname) {
+    setNavFrame({ path: pathname, direction: consumeDirection(pathname) });
+  }
+  const direction = navFrame.path === pathname ? navFrame.direction : "none";
   const canGoBack = routeDepth(pathname) > 1;
 
   function goBack() {
-    forcedDirection = "back";
     if (window.history.length > 1) {
+      markHistoryBack();
       router.back();
     } else {
-      // Deep link with no history behind it: fall through to the parent page.
-      router.push(parentPath(pathname));
+      const target = parentPath(pathname);
+      armNavigation(target, "back");
+      router.push(target);
     }
   }
 
@@ -279,7 +263,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   // depth does not change.
   useEffect(() => {
     const markPop = () => {
-      poppedNavigation = true;
+      markHistoryBack();
     };
     window.addEventListener("popstate", markPop);
     return () => window.removeEventListener("popstate", markPop);
@@ -309,6 +293,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     };
 
     const onTouchStart = (event: TouchEvent) => {
+      if (swipeLock.current) return;
       if (event.touches.length !== 1) return;
       const touch = event.touches[0];
       if (touch.clientX > EDGE) return;
@@ -362,12 +347,15 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       ).matches;
 
       if (commit) {
-        forcedDirection = "back";
+        swipeLock.current = true;
         const navigate = () => {
           if (window.history.length > 1) {
+            markHistoryBack();
             router.back();
           } else {
-            router.push(parentPath(pathname));
+            const target = parentPath(pathname);
+            armNavigation(target, "back");
+            router.push(target);
           }
         };
         if (reduceMotion) {
@@ -397,6 +385,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       main.removeEventListener("touchend", onTouchEnd);
       main.removeEventListener("touchcancel", onTouchEnd);
       clearInline();
+      swipeLock.current = false;
     };
   }, [canGoBack, pathname, router]);
 
@@ -416,9 +405,23 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     if (!vv) return;
 
     let frame = 0;
+    const publishKeyboardInset = () => {
+      const covered = Math.max(0, window.innerHeight - vv.offsetTop - vv.height);
+      // The home indicator is already --safe-bottom. A real keyboard is taller.
+      const pixels = covered < 120 ? 0 : Math.round(covered);
+      const css = `:root{--keyboard-inset:${pixels}px !important}`;
+      let tag = document.getElementById("lashkirja-keyboard");
+      if (!tag) {
+        tag = document.createElement("style");
+        tag.id = "lashkirja-keyboard";
+        document.head.appendChild(tag);
+      }
+      if (tag.textContent !== css) tag.textContent = css;
+    };
     const reveal = () => {
       cancelAnimationFrame(frame);
       frame = requestAnimationFrame(() => {
+        publishKeyboardInset();
         const active = document.activeElement;
         if (!(active instanceof HTMLElement)) return;
         if (!["INPUT", "TEXTAREA", "SELECT"].includes(active.tagName)) return;
@@ -432,12 +435,15 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       });
     };
 
+    publishKeyboardInset();
     vv.addEventListener("resize", reveal);
     vv.addEventListener("scroll", reveal);
     return () => {
       cancelAnimationFrame(frame);
       vv.removeEventListener("resize", reveal);
       vv.removeEventListener("scroll", reveal);
+      const tag = document.getElementById("lashkirja-keyboard");
+      if (tag) tag.textContent = ":root{--keyboard-inset:0px !important}";
     };
   }, []);
 
@@ -619,6 +625,9 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                   <Link
                     key={item.href}
                     href={item.href}
+                    onClick={() => {
+                      if (item.href !== pathname) armNavigation(item.href, "tab");
+                    }}
                     className={`flex flex-1 flex-col items-center justify-center gap-0.5 touch-target active:bg-blush/30 transition-colors active-press ${
                       active ? "text-accent-dark" : "text-warm-gray"
                     }`}
@@ -682,7 +691,10 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                   <Link
                     key={item.href}
                     href={item.href}
-                    onClick={() => setMoreOpenOn(null)}
+                    onClick={() => {
+                      setMoreOpenOn(null);
+                      if (item.href !== pathname) armNavigation(item.href, "tab");
+                    }}
                     aria-current={active ? "page" : undefined}
                     className={`flex items-center gap-3 px-4 py-3.5 rounded-2xl transition-colors active:bg-blush/40 ${
                       active ? "bg-blush/50" : ""
@@ -721,7 +733,10 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
             <div className="px-3 py-2 sheet-safe-bottom space-y-1">
               <Link
                 href="/asetukset"
-                onClick={() => setProfileOpenOn(null)}
+                onClick={() => {
+                  setProfileOpenOn(null);
+                  if (pathname !== "/asetukset") armNavigation("/asetukset", "tab");
+                }}
                 className="flex items-center gap-3 px-4 py-3.5 rounded-2xl transition-colors active:bg-blush/40"
               >
                 <span className="flex-1 min-w-0">

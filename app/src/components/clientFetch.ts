@@ -92,7 +92,42 @@ function withTimeout(externalSignal: AbortSignal | null | undefined) {
  * resubmit it, risking a duplicate record. Those methods get one attempt —
  * the caller's existing retry/error UI handles the rest.
  */
+const inflightGets = new Map<string, Promise<Response>>();
+
+function requestUrl(input: RequestInfo | URL): string {
+  if (typeof input === "string") return input;
+  if (input instanceof URL) return input.href;
+  return input.url;
+}
+
+/**
+ * Collapse identical in-flight GETs (tab warm-up plus the page that just
+ * opened, or two screens asking for the same list) into one network call.
+ * Each caller receives its own clone so the body can be read twice.
+ * A caller-supplied abort signal opts out: that request has its own lifetime.
+ */
 export async function apiFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+  const method = (init?.method || "GET").toUpperCase();
+  const shareable = IDEMPOTENT_METHODS.has(method) && !init?.signal;
+  const key = shareable ? `${method} ${requestUrl(input)}` : null;
+  if (key) {
+    const existing = inflightGets.get(key);
+    if (existing) return existing.then((response) => response.clone());
+  }
+
+  const promise = apiFetchAttempt(input, init);
+  if (key) {
+    inflightGets.set(key, promise);
+    // `.finally` creates a second rejection the caller does not await.
+    void promise.finally(() => {
+      if (inflightGets.get(key) === promise) inflightGets.delete(key);
+    }).catch(() => undefined);
+    return promise.then((response) => response.clone());
+  }
+  return promise;
+}
+
+async function apiFetchAttempt(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
   const method = (init?.method || "GET").toUpperCase();
   const maxRetries = IDEMPOTENT_METHODS.has(method) ? 3 : 1;
   let attempt = 0;
