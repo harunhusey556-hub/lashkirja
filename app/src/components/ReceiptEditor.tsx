@@ -708,11 +708,11 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
                 onChange={(e) =>
                   setFormData({ ...formData, vendor: e.target.value })
                 }
-                className="w-full h-11 px-4 rounded-xl border border-warm-gray-light/50 bg-white text-sm transition-colors focus:border-accent outline-none focus:ring-1 focus:ring-accent shadow-sm"
+                className="w-full min-h-12 min-w-0 px-3 rounded-xl border border-warm-gray-light/50 bg-white text-sm transition-colors focus:border-accent outline-none focus:ring-1 focus:ring-accent shadow-sm"
               />
             </div>
 
-            <div className="grid grid-cols-2 gap-3">
+            <div className="field-dates">
               <div>
                 <label htmlFor="receipt-date" className="block text-[10px] font-medium tracking-wider uppercase text-warm-gray mb-1.5">
                   Päivämäärä
@@ -725,7 +725,7 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
                   onChange={(e) =>
                     setFormData({ ...formData, date: e.target.value })
                   }
-                  className="w-full h-11 px-4 rounded-xl border border-warm-gray-light/50 bg-white text-sm transition-colors focus:border-accent outline-none focus:ring-1 focus:ring-accent shadow-sm"
+                  className="w-full min-h-12 min-w-0 px-3 rounded-xl border border-warm-gray-light/50 bg-white text-sm transition-colors focus:border-accent outline-none focus:ring-1 focus:ring-accent shadow-sm"
                 />
               </div>
               <div>
@@ -742,7 +742,7 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
                   onChange={(e) =>
                     setFormData({ ...formData, totalAmount: e.target.value })
                   }
-                  className="w-full h-11 px-4 rounded-xl border border-warm-gray-light/50 bg-white text-sm transition-colors focus:border-accent outline-none focus:ring-1 focus:ring-accent shadow-sm"
+                  className="w-full min-h-12 min-w-0 px-3 rounded-xl border border-warm-gray-light/50 bg-white text-sm transition-colors focus:border-accent outline-none focus:ring-1 focus:ring-accent shadow-sm"
                 />
               </div>
             </div>
@@ -816,7 +816,7 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
                             ),
                           })
                         }
-                        className="w-full h-11 px-4 rounded-xl border border-warm-gray-light/50 bg-white text-sm transition-colors focus:border-accent outline-none focus:ring-1 focus:ring-accent shadow-sm"
+                        className="w-full min-h-12 min-w-0 px-3 rounded-xl border border-warm-gray-light/50 bg-white text-sm transition-colors focus:border-accent outline-none focus:ring-1 focus:ring-accent shadow-sm"
                       />
                     </div>
                     <button
@@ -856,13 +856,13 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
                     ],
                   })
                 }
-                className="h-11 w-full rounded-xl border border-warm-gray-light/50 bg-white text-xs font-medium text-charcoal hover:bg-cream/50 transition-colors shadow-sm"
+                className="active-press min-h-12 w-full rounded-xl border border-warm-gray-light/70 bg-white text-sm font-medium text-charcoal hover:bg-cream transition-colors shadow-sm"
               >
                 + Lisää ALV-rivi
               </button>
             </fieldset>
 
-            <div className="grid grid-cols-2 gap-3">
+            <div className="field-grid">
               <div>
                 <label htmlFor="receipt-reference" className="block text-[10px] font-medium tracking-wider uppercase text-warm-gray mb-1.5">
                   Viitenumero
@@ -875,7 +875,7 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
                     setFormData({ ...formData, reference: e.target.value })
                   }
                   placeholder="esim. 1009"
-                  className="w-full h-11 px-4 rounded-xl border border-warm-gray-light/50 bg-white text-sm transition-colors focus:border-accent outline-none focus:ring-1 focus:ring-accent shadow-sm"
+                  className="w-full min-h-12 min-w-0 px-3 rounded-xl border border-warm-gray-light/50 bg-white text-sm transition-colors focus:border-accent outline-none focus:ring-1 focus:ring-accent shadow-sm"
                 />
               </div>
               <div>
@@ -892,7 +892,7 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
                       invoiceNumber: e.target.value,
                     })
                   }
-                  className="w-full h-11 px-4 rounded-xl border border-warm-gray-light/50 bg-white text-sm transition-colors focus:border-accent outline-none focus:ring-1 focus:ring-accent shadow-sm"
+                  className="w-full min-h-12 min-w-0 px-3 rounded-xl border border-warm-gray-light/50 bg-white text-sm transition-colors focus:border-accent outline-none focus:ring-1 focus:ring-accent shadow-sm"
                 />
               </div>
             </div>
@@ -940,7 +940,7 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
                           })
                         }
                         placeholder="esim. kalusteet, siivous"
-                        className="w-full h-11 px-4 rounded-xl border border-warm-gray-light/50 bg-white text-sm transition-colors focus:border-accent outline-none focus:ring-1 focus:ring-accent shadow-sm"
+                        className="w-full min-h-12 min-w-0 px-3 rounded-xl border border-warm-gray-light/50 bg-white text-sm transition-colors focus:border-accent outline-none focus:ring-1 focus:ring-accent shadow-sm"
                       />
                     </div>
                   )}

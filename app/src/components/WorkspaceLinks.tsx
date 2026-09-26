@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { chipClass } from "@/components/control-styles";
 
 export function WorkspaceLinks({
   items,
@@ -12,9 +13,7 @@ export function WorkspaceLinks({
           key={item.href}
           href={item.href}
           aria-current={item.active ? "page" : undefined}
-          className={`active-press inline-flex min-h-11 shrink-0 items-center rounded-full px-3 text-sm font-medium ${
-            item.active ? "bg-charcoal text-white" : "bg-white text-charcoal"
-          }`}
+          className={chipClass(Boolean(item.active))}
         >
           {item.label}
         </Link>

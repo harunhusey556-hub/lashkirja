@@ -14,7 +14,7 @@ import {
 import { formatDate, formatEur, parseFinnishNumber } from "@/lib/format";
 import { formatReference } from "@/lib/finnish-reference";
 import { shareContent } from "@/lib/share";
-import { Button } from "@/components/ui";
+import { Button, buttonClass, controlClass } from "@/components/ui";
 
 interface ReminderPreview {
   level: number;
@@ -429,10 +429,10 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
               {(invoice.status === "sent" || invoice.status === "paid") && (
                 <div className="space-y-2 border-t border-warm-gray-light/30 pt-4">
                   <p className="text-sm font-medium text-charcoal">Kirjaa maksu</p>
-                  <div className="flex gap-2">
+                  <div className="field-dates">
                     <input
                       aria-label="Maksun summa"
-                      className="flex-1 px-3 py-2.5 rounded-xl border border-warm-gray-light/60 text-sm"
+                      className={`${controlClass} min-h-12`}
                       value={paymentAmount}
                       onChange={(e) => setPaymentAmount(e.target.value)}
                       inputMode="decimal"
@@ -441,19 +441,14 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
                     <input
                       aria-label="Maksun päivä"
                       type="date"
-                      className="px-3 py-2.5 rounded-xl border border-warm-gray-light/60 text-sm"
+                      className={`${controlClass} min-h-12`}
                       value={paymentDate}
                       onChange={(e) => setPaymentDate(e.target.value)}
                     />
-                    <button
-                      type="button"
-                      onClick={() => void addPayment()}
-                      disabled={busy}
-                      className="min-h-11 px-4 py-2.5 rounded-xl bg-accent text-white text-sm font-medium disabled:opacity-50"
-                    >
-                      Lisää
-                    </button>
                   </div>
+                  <Button type="button" className="w-full" disabled={busy} onClick={() => void addPayment()}>
+                    Lisää
+                  </Button>
                 </div>
               )}
 
@@ -494,18 +489,19 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
                       href={`/api/invoices/${invoice.id}/reminders/pdf`}
                       target="_blank"
                       rel="noreferrer"
-                      className="min-h-11 px-4 py-2.5 rounded-xl border border-warm-gray-light/60 text-sm font-medium text-charcoal"
+                      className={buttonClass("secondary")}
                     >
                       Avaa muistutus
                     </a>
-                    <button
+                    <Button
                       type="button"
                       onClick={() => void sendReminder()}
-                      disabled={remindingBusy || busy}
-                      className="min-h-11 px-4 py-2.5 rounded-xl bg-accent text-white text-sm font-medium disabled:opacity-50"
+                      disabled={busy}
+                      busy={remindingBusy}
+                      busyLabel="Lähetetään…"
                     >
-                      {remindingBusy ? "Lähetetään…" : "Lähetä maksumuistutus"}
-                    </button>
+                      Lähetä maksumuistutus
+                    </Button>
                   </div>
 
                   {reminder.previousReminders.length > 0 && (
@@ -533,14 +529,14 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
                           {payment.note ? ` · ${payment.note}` : ""}
                         </p>
                       </div>
-                      <button
+                      <Button
                         type="button"
+                        variant="danger"
                         onClick={() => setConfirmRemovePayment(payment.id)}
                         disabled={busy}
-                        className="min-h-11 inline-flex items-center px-3 py-2 rounded-xl text-danger disabled:opacity-50"
                       >
                         Poista
-                      </button>
+                      </Button>
                     </li>
                   ))}
                 </ul>

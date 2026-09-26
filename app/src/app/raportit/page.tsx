@@ -10,6 +10,7 @@ import {
   redirectToLogin,
 } from "@/components/clientFetch";
 import { REPORT_LINKS, WorkspaceLinks, linksWithActive } from "@/components/WorkspaceLinks";
+import { buttonClass } from "@/components/control-styles";
 import { formatEur, formatMonthShort } from "@/lib/format";
 import { readPageCache, writePageCache } from "@/lib/page-cache";
 
@@ -108,7 +109,6 @@ export default function ReportsPage() {
     <>
       <div className="space-y-6 pb-6">
         <header className="space-y-2">
-          <h2 className="text-2xl font-semibold text-charcoal tracking-tight">Raportit</h2>
           <p className="text-sm text-warm-gray leading-relaxed">
             Tuloslaskelma kuukausittain ja tiedot ulos kirjanpitäjälle.
           </p>
@@ -119,7 +119,7 @@ export default function ReportsPage() {
           <button
             type="button"
             onClick={() => setYear((value) => value - 1)}
-            className="min-h-11 px-4 py-2 rounded-xl border border-warm-gray-light/60 text-sm"
+            className="min-h-12 min-w-12 px-4 rounded-xl border border-warm-gray-light/60 bg-white text-sm font-medium text-charcoal"
             aria-label="Edellinen vuosi"
           >
             ←
@@ -129,7 +129,7 @@ export default function ReportsPage() {
             type="button"
             onClick={() => setYear((value) => value + 1)}
             disabled={year >= currentYear}
-            className="min-h-11 px-4 py-2 rounded-xl border border-warm-gray-light/60 text-sm disabled:opacity-40"
+            className="min-h-12 min-w-12 px-4 rounded-xl border border-warm-gray-light/60 bg-white text-sm font-medium text-charcoal disabled:opacity-40"
             aria-label="Seuraava vuosi"
           >
             →
@@ -251,12 +251,12 @@ export default function ReportsPage() {
               <p className="text-xs text-warm-gray">
                 Puolipiste-eroteltu, avautuu suoraan Exceliin.
               </p>
-              <div className="grid grid-cols-2 gap-2">
+              <div className="field-grid">
                 {EXPORTS.map((entry) => (
                   <a
                     key={entry.type}
                     href={`/api/export?type=${entry.type}`}
-                    className="text-center text-sm font-medium px-3 py-2.5 rounded-xl border border-warm-gray-light/60 text-charcoal"
+                    className={buttonClass("secondary", "w-full text-center")}
                   >
                     {entry.label}
                   </a>

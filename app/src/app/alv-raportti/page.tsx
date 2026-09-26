@@ -125,7 +125,9 @@ export default function ALVRaporttiPage() {
     <>
       <div className="space-y-6">
         <header className="space-y-2">
-          <h2 className="text-2xl font-semibold text-charcoal tracking-tight">ALV-raportti</h2>
+          <p className="text-sm text-warm-gray leading-relaxed">
+            Kuukauden tai neljänneksen arvonlisävero.
+          </p>
           <WorkspaceLinks items={linksWithActive(REPORT_LINKS, "/alv-raportti")} />
         </header>
 
@@ -149,10 +151,10 @@ export default function ALVRaporttiPage() {
                 setPeriodType("month");
               }}
               aria-pressed={periodType === "month"}
-              className={`flex-1 py-2 rounded-xl text-sm font-medium transition-colors ${
+              className={`active-press min-h-12 flex-1 rounded-xl text-sm font-medium transition-colors ${
                 periodType === "month"
                   ? "bg-accent text-white"
-                  : "bg-cream text-charcoal border border-warm-gray-light"
+                  : "bg-white text-charcoal border border-warm-gray-light"
               }`}
             >
               Kuukausi
@@ -164,10 +166,10 @@ export default function ALVRaporttiPage() {
                 setPeriodType("quarter");
               }}
               aria-pressed={periodType === "quarter"}
-              className={`flex-1 py-2 rounded-xl text-sm font-medium transition-colors ${
+              className={`active-press min-h-12 flex-1 rounded-xl text-sm font-medium transition-colors ${
                 periodType === "quarter"
                   ? "bg-accent text-white"
-                  : "bg-cream text-charcoal border border-warm-gray-light"
+                  : "bg-white text-charcoal border border-warm-gray-light"
               }`}
             >
               Neljännes
@@ -182,7 +184,7 @@ export default function ALVRaporttiPage() {
                 setLoadError("");
                 setSelectedMonth(e.target.value);
               }}
-              className="w-full px-3 py-2.5 rounded-xl border border-warm-gray-light bg-cream/50 text-sm"
+              className="w-full min-h-12 min-w-0 px-3 rounded-xl border border-warm-gray-light bg-white text-sm"
             >
               {buildMonthOptions().map((o) => (
                 <option key={o.value} value={o.value}>
@@ -198,7 +200,7 @@ export default function ALVRaporttiPage() {
                 setLoadError("");
                 setSelectedQuarter(e.target.value);
               }}
-              className="w-full px-3 py-2.5 rounded-xl border border-warm-gray-light bg-cream/50 text-sm"
+              className="w-full min-h-12 min-w-0 px-3 rounded-xl border border-warm-gray-light bg-white text-sm"
             >
               {buildQuarterOptions().map((o) => (
                 <option key={o.value} value={o.value}>

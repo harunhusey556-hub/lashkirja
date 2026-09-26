@@ -1,20 +1,16 @@
 "use client";
 
 import type { ButtonHTMLAttributes, ReactNode } from "react";
+import { buttonClass, type ButtonVariant } from "@/components/control-styles";
+
+export { buttonClass, chipClass, controlClass } from "@/components/control-styles";
 
 type ButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & {
   busy?: boolean;
   busyLabel?: string;
   /** Native form posts must stay enabled or the browser drops the submit. */
   allowBusySubmit?: boolean;
-  variant?: "primary" | "secondary" | "danger" | "ghost";
-};
-
-const VARIANTS: Record<NonNullable<ButtonProps["variant"]>, string> = {
-  primary: "bg-accent text-white hover:bg-accent-dark",
-  secondary: "bg-white text-charcoal border border-warm-gray-light/70 hover:bg-cream",
-  danger: "bg-white text-danger border border-danger/30 hover:bg-danger/5",
-  ghost: "bg-transparent text-charcoal hover:bg-cream",
+  variant?: ButtonVariant;
 };
 
 /**
@@ -40,7 +36,7 @@ export function Button({
       {...props}
       disabled={disabled || (isBusy && !allowBusySubmit)}
       aria-busy={isBusy || undefined}
-      className={`active-press inline-flex min-h-12 items-center justify-center gap-2 rounded-xl px-4 text-sm font-medium transition-colors disabled:opacity-60 ${VARIANTS[variant]} ${className}`}
+      className={buttonClass(variant, className)}
     >
       {isBusy && (
         <span

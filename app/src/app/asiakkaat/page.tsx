@@ -18,6 +18,7 @@ import {
 import { formatDate, formatEur } from "@/lib/format";
 
 import { INVOICE_LINKS, WorkspaceLinks, linksWithActive } from "@/components/WorkspaceLinks";
+import { Button } from "@/components/ui";
 import { readPageCache, writePageCache } from "@/lib/page-cache";
 interface Customer {
   id: string;
@@ -136,7 +137,6 @@ export default function CustomersPage() {
     <>
       <div className="space-y-6 pb-6">
         <header className="space-y-2">
-          <h2 className="text-2xl font-semibold text-charcoal tracking-tight">Asiakkaat</h2>
           <p className="text-sm text-warm-gray leading-relaxed">
             Asiakasrekisteri ja avoimet saatavat.
           </p>
@@ -166,15 +166,11 @@ export default function CustomersPage() {
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="Hae nimellä"
-              className="flex-1 px-4 py-3 rounded-2xl border border-warm-gray-light/60 bg-white text-sm"
+              className="min-w-0 flex-1 min-h-12 px-4 rounded-2xl border border-warm-gray-light/60 bg-white text-sm"
             />
-            <button
-              type="button"
-              onClick={() => setFormMode("create")}
-              className="px-5 py-3 rounded-2xl bg-accent text-white text-sm font-medium hover:bg-accent-dark"
-            >
+            <Button type="button" onClick={() => setFormMode("create")}>
               Lisää
-            </button>
+            </Button>
           </div>
         ) : (
           <section className="bg-white rounded-3xl border border-warm-gray-light/20 shadow-sm p-6 space-y-4">
@@ -285,20 +281,28 @@ export default function CustomersPage() {
             ))}
 
             {customers.length === 0 && (
-              <p className="text-sm text-warm-gray text-center py-8">
-                {search ? "Ei osumia." : "Ei vielä asiakkaita."}
-              </p>
+              <div className="text-center py-8 space-y-3">
+                <p className="text-sm text-warm-gray">
+                  {search ? "Ei osumia." : "Ei vielä asiakkaita."}
+                </p>
+                {!search && formMode === "hidden" && (
+                  <Button type="button" onClick={() => setFormMode("create")}>
+                    Lisää asiakas
+                  </Button>
+                )}
+              </div>
             )}
           </ul>
         )}
 
-        <button
+        <Button
           type="button"
+          variant="ghost"
+          className="w-full"
           onClick={() => setShowArchived((value) => !value)}
-          className="w-full text-xs text-warm-gray py-2"
         >
           {showArchived ? "Piilota arkistoidut" : "Näytä arkistoidut"}
-        </button>
+        </Button>
       </div>
 
       <ConfirmModal

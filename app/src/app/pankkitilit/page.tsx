@@ -282,7 +282,7 @@ export default function BankAccountsPage() {
                 <button
                   type="button"
                   onClick={() => setFormMode("create")}
-                  className="active-press inline-flex min-h-11 items-center justify-center rounded-xl bg-accent px-4 text-sm font-medium text-white"
+                  className="active-press inline-flex min-h-12 items-center justify-center rounded-xl bg-accent px-4 text-sm font-medium text-white"
                 >
                   Lisää ensimmäinen pankkitili
                 </button>

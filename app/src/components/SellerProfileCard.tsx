@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { apiFetch, errorMessage, readJson } from "@/components/clientFetch";
+import { Button, controlClass } from "@/components/ui";
 import { isValidBusinessId, normalizeBusinessId } from "@/lib/finnish-reference";
 import { formatIban, isValidIban, normalizeIban } from "@/lib/iban";
 import { parseFinnishNumber } from "@/lib/format";
@@ -145,7 +146,7 @@ export default function SellerProfileCard() {
     }
   }
 
-  const field = "w-full px-3 py-2.5 rounded-xl border border-warm-gray-light/60 bg-white text-sm";
+  const field = `${controlClass} min-h-12`;
   const label = "text-sm font-medium text-charcoal";
 
   return (
@@ -172,7 +173,7 @@ export default function SellerProfileCard() {
             />
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
+          <div className="field-grid">
             <div className="space-y-1.5">
               <label className={label} htmlFor="sp-business-id">Y-tunnus</label>
               <input
@@ -204,7 +205,7 @@ export default function SellerProfileCard() {
               value={values.addressStreet}
               onChange={(e) => set("addressStreet", e.target.value)}
             />
-            <div className="grid grid-cols-3 gap-3 pt-1">
+            <div className="field-grid field-grid-3 pt-1">
               <input
                 aria-label="Postinumero"
                 className={field}
@@ -222,7 +223,7 @@ export default function SellerProfileCard() {
             </div>
           </div>
 
-          <div className="grid grid-cols-3 gap-3">
+          <div className="field-grid field-grid-3">
             <div className="space-y-1.5 col-span-2">
               <label className={label} htmlFor="sp-iban">Tilinumero (IBAN)</label>
               <input
@@ -247,7 +248,7 @@ export default function SellerProfileCard() {
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
+          <div className="field-grid">
             <div className="space-y-1.5">
               <label className={label} htmlFor="sp-interest">Viivästyskorko (% / v)</label>
               <input
@@ -286,20 +287,16 @@ export default function SellerProfileCard() {
             <label className={label} htmlFor="sp-terms">Laskun ehdot</label>
             <textarea
               id="sp-terms"
-              className={`${field} min-h-[64px]`}
+              className={`${controlClass} min-h-24`}
               value={values.invoiceTerms}
               onChange={(e) => set("invoiceTerms", e.target.value)}
               placeholder="Viivästyskorko 8 %. Huomautusaika 8 päivää."
             />
           </div>
 
-          <button
-            type="submit"
-            disabled={saving}
-            className="w-full py-3 rounded-2xl bg-accent text-white text-sm font-medium disabled:opacity-50"
-          >
-            {saving ? "Tallennetaan…" : "Tallenna laskuttajan tiedot"}
-          </button>
+          <Button type="submit" className="w-full" busy={saving} busyLabel="Tallennetaan…">
+            Tallenna laskuttajan tiedot
+          </Button>
 
           {message && (
             <p className="text-sm text-warm-gray" role="status">

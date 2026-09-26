@@ -15,6 +15,7 @@ import {
 import { formatDate, formatEur } from "@/lib/format";
 
 import { INVOICE_LINKS, WorkspaceLinks, linksWithActive } from "@/components/WorkspaceLinks";
+import { Button, chipClass } from "@/components/ui";
 import { readPageCache, writePageCache } from "@/lib/page-cache";
 import { usePersistedState, useScrollRestoration } from "@/lib/list-ui-state";
 interface InvoiceSummary {
@@ -203,7 +204,6 @@ function InvoicesPageContent() {
     <>
       <div className="space-y-6 pb-6">
         <header className="space-y-2">
-          <h2 className="text-2xl font-semibold text-charcoal tracking-tight">Myyntilaskut</h2>
           <p className="text-sm text-warm-gray leading-relaxed">
             Laskuta asiakkaita ja seuraa maksuja viitenumerolla.
           </p>
@@ -260,21 +260,18 @@ function InvoicesPageContent() {
           </section>
         ) : (
           <div className="flex gap-3">
-            <button
-              type="button"
-              onClick={() => setCreating(true)}
-              className="flex-1 py-3.5 rounded-2xl bg-accent text-white text-sm font-medium hover:bg-accent-dark"
-            >
+            <Button type="button" className="flex-1" onClick={() => setCreating(true)}>
               Uusi lasku
-            </button>
-            <button
+            </Button>
+            <Button
               type="button"
+              variant="secondary"
               onClick={() => void runBankMatch()}
-              disabled={busy}
-              className="px-5 py-3.5 rounded-2xl border border-warm-gray-light/60 text-sm font-medium disabled:opacity-50"
+              busy={busy}
+              busyLabel="Kohdistetaan…"
             >
               Kohdista maksut
-            </button>
+            </Button>
           </div>
         )}
 
@@ -284,11 +281,8 @@ function InvoicesPageContent() {
               key={entry.id}
               type="button"
               onClick={() => setFilter(entry.id)}
-              className={`shrink-0 min-h-11 px-4 py-2 rounded-full text-xs font-medium border ${
-                filter === entry.id
-                  ? "bg-accent text-white border-accent"
-                  : "border-warm-gray-light/60 text-warm-gray"
-              }`}
+              aria-pressed={filter === entry.id}
+              className={chipClass(filter === entry.id)}
             >
               {entry.label}
             </button>
@@ -350,13 +344,9 @@ function InvoicesPageContent() {
                   {filter !== "all" ? "Ei laskuja tällä suodattimella." : "Ei laskuja vielä."}
                 </p>
                 {filter !== "all" && (
-                  <button
-                    type="button"
-                    onClick={() => setFilter("all")}
-                    className="text-sm font-medium text-accent hover:text-accent-dark"
-                  >
+                  <Button type="button" variant="secondary" onClick={() => setFilter("all")}>
                     Tyhjennä suodatin
-                  </button>
+                  </Button>
                 )}
               </div>
             )}

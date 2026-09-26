@@ -211,9 +211,6 @@ export default function TiliotteetPage() {
     <>
       <div className="space-y-8 pb-6">
         <header className="space-y-2">
-          <h2 className="text-2xl font-semibold text-charcoal tracking-tight">
-            Tiliotteet
-          </h2>
           <p className="text-sm text-warm-gray leading-relaxed">
             Tuo tiliote tiedostona tai hae tapahtumat yhdistetystä pankista.
           </p>
@@ -242,7 +239,7 @@ export default function TiliotteetPage() {
                 id="statement-target-account"
                 value={targetAccountId}
                 onChange={(e) => setTargetAccountId(e.target.value)}
-                className="w-full text-sm px-4 py-3 rounded-xl border border-warm-gray-light/60 bg-white"
+                className="w-full min-h-12 min-w-0 text-sm px-4 rounded-xl border border-warm-gray-light/60 bg-white"
               >
                 <option value="">Tunnista automaattisesti</option>
                 {accounts.map((account) => (
@@ -350,8 +347,11 @@ export default function TiliotteetPage() {
         ) : loading ? (
           <SkeletonList rows={4} />
         ) : visibleStatements.length === 0 ? (
-          <div className="text-center py-16 text-sm text-warm-gray leading-relaxed">
-            Ei tiliotteita vielä
+          <div className="text-center py-10 space-y-2">
+            <p className="text-sm font-medium text-charcoal">Ei tiliotteita vielä</p>
+            <p className="text-sm text-warm-gray leading-relaxed">
+              Tuo tiedosto tai hae tapahtumat pankista yllä.
+            </p>
           </div>
         ) : (
           <div className="space-y-4 list-stagger">

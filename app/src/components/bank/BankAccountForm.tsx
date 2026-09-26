@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { Button, controlClass } from "@/components/ui";
 import { bankNameFromIban, formatIban, isValidIban, normalizeIban } from "@/lib/iban";
 import { parseFinnishNumber } from "@/lib/format";
 
@@ -112,7 +113,7 @@ export function BankAccountForm({ initial, submitLabel, busy, onSubmit, onCancel
     void onSubmit(result.payload);
   }
 
-  const field = "w-full px-4 py-3 rounded-xl border border-warm-gray-light/60 bg-white text-sm";
+  const field = `${controlClass} min-h-12`;
   const label = "text-sm font-medium text-charcoal";
   const errorText = "text-xs text-danger";
 
@@ -158,7 +159,7 @@ export function BankAccountForm({ initial, submitLabel, busy, onSubmit, onCancel
         )}
       </div>
 
-      <div className="grid grid-cols-2 gap-3">
+      <div className="field-grid">
         <div className="space-y-1.5">
           <label className={label} htmlFor="ba-bank">Pankki</label>
           <input
@@ -187,7 +188,7 @@ export function BankAccountForm({ initial, submitLabel, busy, onSubmit, onCancel
         </div>
       </div>
 
-      <div className="grid grid-cols-2 gap-3">
+      <div className="field-dates">
         <div className="space-y-1.5">
           <label className={label} htmlFor="ba-opening">
             Alkusaldo (€) <span className="text-danger" aria-hidden="true">*</span>
@@ -229,20 +230,12 @@ export function BankAccountForm({ initial, submitLabel, busy, onSubmit, onCancel
       </p>
 
       <div className="flex gap-3 pt-1">
-        <button
-          type="button"
-          onClick={onCancel}
-          className="flex-1 py-3 rounded-2xl border border-warm-gray-light/60 text-sm font-medium text-charcoal"
-        >
+        <Button type="button" variant="secondary" className="flex-1" onClick={onCancel}>
           Peruuta
-        </button>
-        <button
-          type="submit"
-          disabled={busy}
-          className="flex-1 py-3 rounded-2xl bg-accent text-white text-sm font-medium hover:bg-accent-dark transition-colors disabled:opacity-50"
-        >
-          {busy ? "Tallennetaan…" : submitLabel}
-        </button>
+        </Button>
+        <Button type="submit" className="flex-1" busy={busy} busyLabel="Tallennetaan…">
+          {submitLabel}
+        </Button>
       </div>
     </form>
   );

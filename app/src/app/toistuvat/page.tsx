@@ -12,6 +12,7 @@ import {
   redirectToLogin,
 } from "@/components/clientFetch";
 import { INVOICE_LINKS, WorkspaceLinks, linksWithActive } from "@/components/WorkspaceLinks";
+import { Button, controlClass } from "@/components/ui";
 import { formatDate, formatEur, parseFinnishNumber } from "@/lib/format";
 import { VAT_RATES_PERMILLE } from "@/lib/invoices";
 import { RECURRENCE_INTERVALS, type RecurrenceInterval } from "@/lib/recurrence";
@@ -263,14 +264,14 @@ export default function RecurringInvoicesPage() {
     }
   }
 
-  const field = "w-full px-3 py-2.5 rounded-xl border border-warm-gray-light/60 bg-white text-sm";
+  const field = `${controlClass} min-h-12`;
   const label = "text-sm font-medium text-charcoal";
+  const lineLabel = "block text-xs font-medium text-warm-gray mb-1";
 
   return (
     <>
       <div className="space-y-6 pb-6">
         <header className="space-y-2">
-          <h2 className="text-2xl font-semibold text-charcoal tracking-tight">Toistuvat laskut</h2>
           <p className="text-sm text-warm-gray leading-relaxed">
             Sama lasku samalle asiakkaalle aikataulun mukaan. Rivit ovat pohja: jo luotu lasku ei
             muutu, vaikka pohjaa muokkaisi.
@@ -283,14 +284,9 @@ export default function RecurringInvoicesPage() {
             <p className="text-sm text-charcoal">
               {dueNow} toistuvaa laskua on erääntynyt luotavaksi.
             </p>
-            <button
-              type="button"
-              onClick={() => void runDue()}
-              disabled={busy}
-              className="w-full py-3 rounded-2xl bg-accent text-white text-sm font-medium disabled:opacity-50"
-            >
-              {busy ? "Luodaan…" : "Luo erääntyneet laskut"}
-            </button>
+            <Button type="button" className="w-full" busy={busy} busyLabel="Luodaan…" onClick={() => void runDue()}>
+              Luo erääntyneet laskut
+            </Button>
           </section>
         )}
 
@@ -327,7 +323,7 @@ export default function RecurringInvoicesPage() {
                   {errors.customerId && <p className="text-xs text-danger">{errors.customerId}</p>}
                 </div>
 
-                <div className="grid grid-cols-2 gap-3">
+                <div className="field-grid">
                   <div className="space-y-1.5">
                     <label className={label} htmlFor="ri-interval">Toistoväli</label>
                     <select
@@ -364,7 +360,7 @@ export default function RecurringInvoicesPage() {
                   </div>
                 </div>
 
-                <div className="grid grid-cols-2 gap-3">
+                <div className="field-dates">
                   <div className="space-y-1.5">
                     <label className={label} htmlFor="ri-start">Alkaa</label>
                     <input
@@ -395,73 +391,88 @@ export default function RecurringInvoicesPage() {
                       key={index}
                       className="rounded-2xl border border-warm-gray-light/40 p-3 space-y-2 bg-cream/40"
                     >
+                      <label className={lineLabel} htmlFor={`ri-line-${index}-desc`}>Kuvaus</label>
                       <input
-                        aria-label={`Rivin ${index + 1} kuvaus`}
+                        id={`ri-line-${index}-desc`}
                         className={field}
                         value={line.description}
                         onChange={(e) => setLine(index, { description: e.target.value })}
-                        placeholder="Kuukausiylläpito"
+                        placeholder="Kuvaus"
                       />
-                      <div className="grid grid-cols-3 gap-2">
-                        <input
-                          aria-label={`Rivin ${index + 1} määrä`}
-                          className={field}
-                          value={line.quantity}
-                          onChange={(e) => setLine(index, { quantity: e.target.value })}
-                          inputMode="decimal"
-                        />
-                        <input
-                          aria-label={`Rivin ${index + 1} yksikkö`}
-                          className={field}
-                          value={line.unit}
-                          onChange={(e) => setLine(index, { unit: e.target.value })}
-                        />
-                        <input
-                          aria-label={`Rivin ${index + 1} hinta`}
-                          className={field}
-                          value={line.unitPrice}
-                          onChange={(e) => setLine(index, { unitPrice: e.target.value })}
-                          inputMode="decimal"
-                          placeholder="€"
-                        />
+                      <div className="field-grid field-grid-3">
+                        <div>
+                          <label className={lineLabel} htmlFor={`ri-line-${index}-qty`}>Määrä</label>
+                          <input
+                            id={`ri-line-${index}-qty`}
+                            className={field}
+                            value={line.quantity}
+                            onChange={(e) => setLine(index, { quantity: e.target.value })}
+                            inputMode="decimal"
+                          />
+                        </div>
+                        <div>
+                          <label className={lineLabel} htmlFor={`ri-line-${index}-unit`}>Yksikkö</label>
+                          <input
+                            id={`ri-line-${index}-unit`}
+                            className={field}
+                            value={line.unit}
+                            onChange={(e) => setLine(index, { unit: e.target.value })}
+                          />
+                        </div>
+                        <div>
+                          <label className={lineLabel} htmlFor={`ri-line-${index}-price`}>Hinta €</label>
+                          <input
+                            id={`ri-line-${index}-price`}
+                            className={field}
+                            value={line.unitPrice}
+                            onChange={(e) => setLine(index, { unitPrice: e.target.value })}
+                            inputMode="decimal"
+                            placeholder="0,00"
+                          />
+                        </div>
                       </div>
-                      <div className="flex items-center gap-2">
-                        <select
-                          aria-label={`Rivin ${index + 1} ALV`}
-                          className={`${field} flex-1`}
-                          value={line.vatRate}
-                          onChange={(e) => setLine(index, { vatRate: Number(e.target.value) })}
-                        >
-                          {VAT_RATES_PERMILLE.map((permille) => (
-                            <option key={permille} value={permille / 10}>
-                              ALV {permille / 10} %
-                            </option>
-                          ))}
-                        </select>
+                      <div className="flex items-end gap-2">
+                        <div className="min-w-0 flex-1">
+                          <label className={lineLabel} htmlFor={`ri-line-${index}-vat`}>ALV</label>
+                          <select
+                            id={`ri-line-${index}-vat`}
+                            className={field}
+                            value={line.vatRate}
+                            onChange={(e) => setLine(index, { vatRate: Number(e.target.value) })}
+                          >
+                            {VAT_RATES_PERMILLE.map((permille) => (
+                              <option key={permille} value={permille / 10}>
+                                ALV {permille / 10} %
+                              </option>
+                            ))}
+                          </select>
+                        </div>
                         {form.lines.length > 1 && (
-                          <button
+                          <Button
                             type="button"
+                            variant="danger"
+                            className="shrink-0"
                             onClick={() =>
                               setForm({
                                 ...form,
                                 lines: form.lines.filter((_, i) => i !== index),
                               })
                             }
-                            className="px-3 py-2 rounded-xl border border-danger/40 text-danger text-xs"
                           >
                             Poista
-                          </button>
+                          </Button>
                         )}
                       </div>
                     </div>
                   ))}
-                  <button
+                  <Button
                     type="button"
+                    variant="secondary"
+                    className="w-full"
                     onClick={() => setForm({ ...form, lines: [...form.lines, { ...EMPTY_LINE }] })}
-                    className="w-full py-2.5 rounded-2xl border border-warm-gray-light/60 text-sm font-medium"
                   >
                     Lisää rivi
-                  </button>
+                  </Button>
                   {errors.lines && <p className="text-xs text-danger">{errors.lines}</p>}
                 </div>
 
@@ -476,32 +487,20 @@ export default function RecurringInvoicesPage() {
                 </label>
 
                 <div className="flex gap-3">
-                  <button
-                    type="button"
-                    onClick={() => setCreating(false)}
-                    className="flex-1 py-3 rounded-2xl border border-warm-gray-light/60 text-sm font-medium"
-                  >
+                  <Button type="button" variant="secondary" className="flex-1" onClick={() => setCreating(false)}>
                     Peruuta
-                  </button>
-                  <button
-                    type="submit"
-                    disabled={busy}
-                    className="flex-1 py-3 rounded-2xl bg-accent text-white text-sm font-medium disabled:opacity-50"
-                  >
-                    {busy ? "Tallennetaan…" : "Luo toistuva lasku"}
-                  </button>
+                  </Button>
+                  <Button type="submit" className="flex-1" busy={busy} busyLabel="Tallennetaan…">
+                    Luo toistuva lasku
+                  </Button>
                 </div>
               </form>
             )}
           </section>
         ) : (
-          <button
-            type="button"
-            onClick={() => setCreating(true)}
-            className="w-full py-3.5 rounded-2xl bg-accent text-white text-sm font-medium hover:bg-accent-dark"
-          >
+          <Button type="button" className="w-full" onClick={() => setCreating(true)}>
             Uusi toistuva lasku
-          </button>
+          </Button>
         )}
 
         {status === "loading" && <LoadingState label="Haetaan toistuvia laskuja…" />}
@@ -597,26 +596,23 @@ export default function RecurringInvoicesPage() {
                   {showInactive ? "Ei toistuvia laskuja." : "Ei aktiivisia toistuvia laskuja."}
                 </p>
                 {!showInactive && (
-                  <button
-                    type="button"
-                    onClick={() => setShowInactive(true)}
-                    className="text-sm font-medium text-accent hover:text-accent-dark"
-                  >
+                  <Button type="button" variant="secondary" onClick={() => setShowInactive(true)}>
                     Näytä myös pysäytetyt
-                  </button>
+                  </Button>
                 )}
               </div>
             )}
           </ul>
         )}
 
-        <button
+        <Button
           type="button"
+          variant="ghost"
+          className="w-full"
           onClick={() => setShowInactive((value) => !value)}
-          className="w-full text-xs text-warm-gray py-2"
         >
           {showInactive ? "Piilota pysäytetyt" : "Näytä pysäytetyt"}
-        </button>
+        </Button>
       </div>
 
       <ConfirmModal

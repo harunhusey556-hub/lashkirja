@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { Button, controlClass } from "@/components/ui";
 import { formatEur, parseFinnishNumber } from "@/lib/format";
 import {
   computeInvoiceTotals,
@@ -164,8 +165,9 @@ export function InvoiceForm({ customers, initial, submitLabel, busy, onSubmit, o
     }));
   }
 
-  const field = "w-full px-3 py-2.5 rounded-xl border border-warm-gray-light/60 bg-white text-sm";
+  const field = `${controlClass} min-h-12`;
   const label = "text-sm font-medium text-charcoal";
+  const lineLabel = "block text-xs font-medium text-warm-gray mb-1";
 
   return (
     <form
@@ -204,7 +206,7 @@ export function InvoiceForm({ customers, initial, submitLabel, busy, onSubmit, o
         {errors.customerId && <p className="text-xs text-danger">{errors.customerId}</p>}
       </div>
 
-      <div className="grid grid-cols-2 gap-3">
+      <div className="field-dates">
         <div className="space-y-1.5">
           <label className={label} htmlFor="if-issue">
             Laskun päivä <span className="text-danger" aria-hidden="true">*</span>
@@ -244,67 +246,87 @@ export function InvoiceForm({ customers, initial, submitLabel, busy, onSubmit, o
             key={index}
             className="rounded-2xl border border-warm-gray-light/40 p-3 space-y-2 bg-cream/40"
           >
+            <label className={lineLabel} htmlFor={`if-line-${index}-desc`}>
+              Kuvaus <span className="text-danger" aria-hidden="true">*</span>
+            </label>
             <input
-              aria-label={`Rivin ${index + 1} kuvaus (pakollinen)`}
+              id={`if-line-${index}-desc`}
               aria-required="true"
               className={field}
               value={line.description}
               onChange={(e) => setLine(index, { description: e.target.value })}
-              placeholder="Ripsienpidennys"
+              placeholder="Kuvaus"
               maxLength={200}
             />
-            <div className="grid grid-cols-3 gap-2">
-              <input
-                aria-label={`Rivin ${index + 1} määrä (pakollinen)`}
-                aria-required="true"
-                className={field}
-                value={line.quantity}
-                onChange={(e) => setLine(index, { quantity: e.target.value })}
-                inputMode="decimal"
-              />
-              <input
-                aria-label={`Rivin ${index + 1} yksikkö`}
-                className={field}
-                value={line.unit}
-                onChange={(e) => setLine(index, { unit: e.target.value })}
-                maxLength={16}
-              />
-              <input
-                aria-label={`Rivin ${index + 1} hinta (pakollinen)`}
-                aria-required="true"
-                className={field}
-                value={line.unitPrice}
-                onChange={(e) => setLine(index, { unitPrice: e.target.value })}
-                inputMode="decimal"
-                placeholder="€"
-              />
+            <div className="field-grid field-grid-3">
+              <div>
+                <label className={lineLabel} htmlFor={`if-line-${index}-qty`}>
+                  Määrä <span className="text-danger" aria-hidden="true">*</span>
+                </label>
+                <input
+                  id={`if-line-${index}-qty`}
+                  aria-required="true"
+                  className={field}
+                  value={line.quantity}
+                  onChange={(e) => setLine(index, { quantity: e.target.value })}
+                  inputMode="decimal"
+                />
+              </div>
+              <div>
+                <label className={lineLabel} htmlFor={`if-line-${index}-unit`}>Yksikkö</label>
+                <input
+                  id={`if-line-${index}-unit`}
+                  className={field}
+                  value={line.unit}
+                  onChange={(e) => setLine(index, { unit: e.target.value })}
+                  maxLength={16}
+                />
+              </div>
+              <div>
+                <label className={lineLabel} htmlFor={`if-line-${index}-price`}>
+                  Hinta € <span className="text-danger" aria-hidden="true">*</span>
+                </label>
+                <input
+                  id={`if-line-${index}-price`}
+                  aria-required="true"
+                  className={field}
+                  value={line.unitPrice}
+                  onChange={(e) => setLine(index, { unitPrice: e.target.value })}
+                  inputMode="decimal"
+                  placeholder="0,00"
+                />
+              </div>
             </div>
-            <div className="flex items-center gap-2">
-              <select
-                aria-label={`Rivin ${index + 1} ALV`}
-                className={`${field} flex-1`}
-                value={line.vatRate}
-                onChange={(e) => setLine(index, { vatRate: Number(e.target.value) })}
-              >
-                {VAT_RATES_PERMILLE.map((permille) => (
-                  <option key={permille} value={permille / 10}>
-                    ALV {permille / 10} %
-                  </option>
-                ))}
-              </select>
+            <div className="flex items-end gap-2">
+              <div className="min-w-0 flex-1">
+                <label className={lineLabel} htmlFor={`if-line-${index}-vat`}>ALV</label>
+                <select
+                  id={`if-line-${index}-vat`}
+                  className={field}
+                  value={line.vatRate}
+                  onChange={(e) => setLine(index, { vatRate: Number(e.target.value) })}
+                >
+                  {VAT_RATES_PERMILLE.map((permille) => (
+                    <option key={permille} value={permille / 10}>
+                      ALV {permille / 10} %
+                    </option>
+                  ))}
+                </select>
+              </div>
               {values.lines.length > 1 && (
-                <button
+                <Button
                   type="button"
+                  variant="danger"
+                  className="shrink-0"
                   onClick={() =>
                     setValues((current) => ({
                       ...current,
                       lines: current.lines.filter((_, i) => i !== index),
                     }))
                   }
-                  className="px-3 py-2 rounded-xl border border-danger/40 text-danger text-xs"
                 >
                   Poista
-                </button>
+                </Button>
               )}
             </div>
             {(errors[`line-${index}-description`] ||
@@ -319,15 +341,16 @@ export function InvoiceForm({ customers, initial, submitLabel, busy, onSubmit, o
           </div>
         ))}
 
-        <button
+        <Button
           type="button"
+          variant="secondary"
+          className="w-full"
           onClick={() =>
             setValues((current) => ({ ...current, lines: [...current.lines, { ...EMPTY_LINE }] }))
           }
-          className="w-full py-2.5 rounded-2xl border border-warm-gray-light/60 text-sm font-medium"
         >
           Lisää rivi
-        </button>
+        </Button>
         {errors.lines && <p className="text-xs text-danger">{errors.lines}</p>}
       </div>
 
@@ -344,13 +367,18 @@ export function InvoiceForm({ customers, initial, submitLabel, busy, onSubmit, o
           <span>Yhteensä</span>
           <span>{formatEur(totals.grossCents / 100)}</span>
         </div>
+        {totals.grossCents === 0 && values.lines.some((line) => line.unitPrice.trim() === "") && (
+          <p className="text-xs text-warm-gray pt-2">
+            Summa päivittyy, kun rivillä on hinta. Tyhjä kenttä ei ole nolla euroa.
+          </p>
+        )}
       </div>
 
       <div className="space-y-1.5">
         <label className={label} htmlFor="if-notes">Viesti laskulla</label>
         <textarea
           id="if-notes"
-          className={`${field} min-h-[64px]`}
+          className={`${controlClass} min-h-24`}
           value={values.notes}
           onChange={(e) => setValues((current) => ({ ...current, notes: e.target.value }))}
           maxLength={2000}
@@ -358,20 +386,12 @@ export function InvoiceForm({ customers, initial, submitLabel, busy, onSubmit, o
       </div>
 
       <div className="flex gap-3">
-        <button
-          type="button"
-          onClick={onCancel}
-          className="flex-1 py-3 rounded-2xl border border-warm-gray-light/60 text-sm font-medium"
-        >
+        <Button type="button" variant="secondary" className="flex-1" onClick={onCancel}>
           Peruuta
-        </button>
-        <button
-          type="submit"
-          disabled={busy}
-          className="flex-1 py-3 rounded-2xl bg-accent text-white text-sm font-medium hover:bg-accent-dark disabled:opacity-50"
-        >
-          {busy ? "Tallennetaan…" : submitLabel}
-        </button>
+        </Button>
+        <Button type="submit" className="flex-1" busy={busy} busyLabel="Tallennetaan…">
+          {submitLabel}
+        </Button>
       </div>
     </form>
   );

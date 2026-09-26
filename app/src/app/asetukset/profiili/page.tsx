@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { ErrorState, LoadingState } from "@/components/AsyncState";
 import { type Profile, SaveStatus, useProfile } from "../useProfile";
-import { Button } from "@/components/ui";
+import { Button, controlClass } from "@/components/ui";
 
 export default function ProfiiliPage() {
   const { profile, saving, savedMsg, loadError, retry, save } = useProfile();
@@ -79,7 +79,7 @@ function ProfileForm({
             save({ firstName, lastName, email });
           }}
         >
-          <div className="grid grid-cols-2 gap-4">
+          <div className="field-grid">
             <div>
               <label
                 htmlFor="firstName"
@@ -93,7 +93,7 @@ function ProfileForm({
                 required
                 value={firstName}
                 onChange={(e) => setFirstName(e.target.value)}
-                className="w-full px-3 py-2.5 rounded-xl border border-warm-gray-light bg-white text-sm"
+                className={`${controlClass} min-h-12`}
               />
             </div>
             <div>
@@ -109,7 +109,7 @@ function ProfileForm({
                 required
                 value={lastName}
                 onChange={(e) => setLastName(e.target.value)}
-                className="w-full px-3 py-2.5 rounded-xl border border-warm-gray-light bg-white text-sm"
+                className={`${controlClass} min-h-12`}
               />
             </div>
           </div>
@@ -129,7 +129,7 @@ function ProfileForm({
               required
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              className="w-full px-3 py-2.5 rounded-xl border border-warm-gray-light bg-white text-sm"
+              className={`${controlClass} min-h-12`}
             />
           </div>
 

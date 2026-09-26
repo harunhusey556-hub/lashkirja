@@ -14,6 +14,7 @@ import { formatDate, formatEur, parseFinnishNumber } from "@/lib/format";
 import { isValidReferenceNumber, normalizeReference } from "@/lib/finnish-reference";
 
 import { INVOICE_LINKS, WorkspaceLinks, linksWithActive } from "@/components/WorkspaceLinks";
+import { Button, chipClass, controlClass } from "@/components/ui";
 import { readPageCache, writePageCache } from "@/lib/page-cache";
 import { usePersistedState, useScrollRestoration } from "@/lib/list-ui-state";
 interface PurchaseInvoice {
@@ -266,14 +267,13 @@ export default function PurchaseInvoicesPage() {
     }
   }
 
-  const field = "w-full px-3 py-2.5 rounded-xl border border-warm-gray-light/60 bg-white text-sm";
+  const field = `${controlClass} min-h-12`;
   const label = "text-sm font-medium text-charcoal";
 
   return (
     <>
       <div className="space-y-6 pb-6">
         <header className="space-y-2">
-          <h2 className="text-2xl font-semibold text-charcoal tracking-tight">Ostolaskut</h2>
           <p className="text-sm text-warm-gray leading-relaxed">
             Mitä olet velkaa ja milloin. ALV-raportti lasketaan edelleen kuiteista, joten sama
             osto ei kirjaudu kahdesti.
@@ -330,7 +330,7 @@ export default function PurchaseInvoicesPage() {
                 )}
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
+              <div className="field-grid">
                 <div className="space-y-1.5">
                   <label className={label} htmlFor="pi-gross">Summa (€)</label>
                   <input
@@ -356,7 +356,7 @@ export default function PurchaseInvoicesPage() {
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
+              <div className="field-dates">
                 <div className="space-y-1.5">
                   <label className={label} htmlFor="pi-issue">Laskun päivä</label>
                   <input
@@ -380,7 +380,7 @@ export default function PurchaseInvoicesPage() {
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
+              <div className="field-grid">
                 <div className="space-y-1.5">
                   <label className={label} htmlFor="pi-reference">Viitenumero</label>
                   <input
@@ -410,40 +410,29 @@ export default function PurchaseInvoicesPage() {
               </div>
 
               <div className="flex gap-3">
-                <button
-                  type="button"
-                  onClick={() => setCreating(false)}
-                  className="flex-1 py-3 rounded-2xl border border-warm-gray-light/60 text-sm font-medium"
-                >
+                <Button type="button" variant="secondary" className="flex-1" onClick={() => setCreating(false)}>
                   Peruuta
-                </button>
-                <button
-                  type="submit"
-                  disabled={busy}
-                  className="flex-1 py-3 rounded-2xl bg-accent text-white text-sm font-medium disabled:opacity-50"
-                >
-                  {busy ? "Tallennetaan…" : "Lisää ostolasku"}
-                </button>
+                </Button>
+                <Button type="submit" className="flex-1" busy={busy} busyLabel="Tallennetaan…">
+                  Lisää ostolasku
+                </Button>
               </div>
             </form>
           </section>
         ) : (
           <div className="flex gap-3">
-            <button
-              type="button"
-              onClick={() => setCreating(true)}
-              className="flex-1 py-3.5 rounded-2xl bg-accent text-white text-sm font-medium hover:bg-accent-dark"
-            >
+            <Button type="button" className="flex-1" onClick={() => setCreating(true)}>
               Uusi ostolasku
-            </button>
-            <button
+            </Button>
+            <Button
               type="button"
+              variant="secondary"
               onClick={() => void runBankMatch()}
-              disabled={busy}
-              className="px-5 py-3.5 rounded-2xl border border-warm-gray-light/60 text-sm font-medium disabled:opacity-50"
+              busy={busy}
+              busyLabel="Kohdistetaan…"
             >
               Kohdista maksut
-            </button>
+            </Button>
           </div>
         )}
 
@@ -453,11 +442,8 @@ export default function PurchaseInvoicesPage() {
               key={entry.id}
               type="button"
               onClick={() => setFilter(entry.id)}
-              className={`shrink-0 min-h-11 px-4 py-2 rounded-full text-xs font-medium border ${
-                filter === entry.id
-                  ? "bg-accent text-white border-accent"
-                  : "border-warm-gray-light/60 text-warm-gray"
-              }`}
+              aria-pressed={filter === entry.id}
+              className={chipClass(filter === entry.id)}
             >
               {entry.label}
             </button>
@@ -592,13 +578,9 @@ export default function PurchaseInvoicesPage() {
                   {filter !== "all" ? "Ei ostolaskuja tällä suodattimella." : "Ei ostolaskuja vielä."}
                 </p>
                 {filter !== "all" && (
-                  <button
-                    type="button"
-                    onClick={() => setFilter("all")}
-                    className="text-sm font-medium text-accent hover:text-accent-dark"
-                  >
+                  <Button type="button" variant="secondary" onClick={() => setFilter("all")}>
                     Tyhjennä suodatin
-                  </button>
+                  </Button>
                 )}
               </div>
             )}

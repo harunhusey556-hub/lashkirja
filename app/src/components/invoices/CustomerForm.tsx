@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { Button, controlClass } from "@/components/ui";
 import { isValidBusinessId, normalizeBusinessId } from "@/lib/finnish-reference";
 
 export interface CustomerFormValues {
@@ -85,7 +86,7 @@ export function CustomerForm({ initial, submitLabel, busy, onSubmit, onCancel }:
     setValues((current) => ({ ...current, [key]: value }));
   }
 
-  const field = "w-full px-4 py-3 rounded-xl border border-warm-gray-light/60 bg-white text-sm";
+  const field = `${controlClass} min-h-12`;
   const label = "text-sm font-medium text-charcoal";
 
   return (
@@ -119,7 +120,7 @@ export function CustomerForm({ initial, submitLabel, busy, onSubmit, onCancel }:
         {errors.name && <p className="text-xs text-danger">{errors.name}</p>}
       </div>
 
-      <div className="grid grid-cols-2 gap-3">
+      <div className="field-grid">
         <div className="space-y-1.5">
           <label className={label} htmlFor="cf-business">Y-tunnus</label>
           <input
@@ -149,7 +150,7 @@ export function CustomerForm({ initial, submitLabel, busy, onSubmit, onCancel }:
         </div>
       </div>
 
-      <div className="grid grid-cols-2 gap-3">
+      <div className="field-grid">
         <div className="space-y-1.5">
           <label className={label} htmlFor="cf-email">Sähköposti</label>
           <input
@@ -188,7 +189,7 @@ export function CustomerForm({ initial, submitLabel, busy, onSubmit, onCancel }:
           onChange={(e) => set("addressStreet", e.target.value)}
           maxLength={120}
         />
-        <div className="grid grid-cols-3 gap-3 pt-1">
+        <div className="field-grid field-grid-3 pt-1">
           <input
             aria-label="Postinumero"
             className={field}
@@ -212,7 +213,7 @@ export function CustomerForm({ initial, submitLabel, busy, onSubmit, onCancel }:
         <label className={label} htmlFor="cf-notes">Muistiinpanot</label>
         <textarea
           id="cf-notes"
-          className={`${field} min-h-[72px]`}
+          className={`${controlClass} min-h-24`}
           value={values.notes}
           onChange={(e) => set("notes", e.target.value)}
           maxLength={2000}
@@ -220,20 +221,12 @@ export function CustomerForm({ initial, submitLabel, busy, onSubmit, onCancel }:
       </div>
 
       <div className="flex gap-3 pt-1">
-        <button
-          type="button"
-          onClick={onCancel}
-          className="flex-1 py-3 rounded-2xl border border-warm-gray-light/60 text-sm font-medium text-charcoal"
-        >
+        <Button type="button" variant="secondary" className="flex-1" onClick={onCancel}>
           Peruuta
-        </button>
-        <button
-          type="submit"
-          disabled={busy}
-          className="flex-1 py-3 rounded-2xl bg-accent text-white text-sm font-medium hover:bg-accent-dark disabled:opacity-50"
-        >
-          {busy ? "Tallennetaan…" : submitLabel}
-        </button>
+        </Button>
+        <Button type="submit" className="flex-1" busy={busy} busyLabel="Tallennetaan…">
+          {submitLabel}
+        </Button>
       </div>
     </form>
   );

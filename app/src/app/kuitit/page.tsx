@@ -24,6 +24,7 @@ import { readPageCache, writePageCache } from "@/lib/page-cache";
 import { usePersistedState, useScrollRestoration } from "@/lib/list-ui-state";
 
 import { formatEur, formatMonth, parseFinnishNumber } from "@/lib/format";
+import { Button, buttonClass, chipClass } from "@/components/ui";
 interface SavedReceipt {
   id: string;
   vendor: string | null;
@@ -429,8 +430,7 @@ export default function KuititPage() {
   return (
     <>
       <div className="space-y-6">
-        <div className="space-y-3 animate-in fade-in slide-in-from-top-2">
-          <h2 className="text-xl font-medium text-charcoal tracking-tight">Kuitit ja laskut</h2>
+        <div className="animate-in fade-in slide-in-from-top-2">
           <Link
             href="/kuitit/uusi"
             className="touch-target active-press flex min-h-12 w-full items-center justify-center gap-1.5 rounded-2xl bg-charcoal text-sm font-medium text-white"
@@ -478,9 +478,8 @@ export default function KuititPage() {
                 setAdvanced((a) => ({ ...a, type: "", linkedStatus: "" }));
                 setAppliedAdvanced((a) => ({ ...a, type: "", linkedStatus: "" }));
               }}
-              className={`shrink-0 min-h-11 px-4 py-2 text-sm font-medium rounded-full transition-colors ${
-                !appliedAdvanced.type && !appliedAdvanced.linkedStatus ? "bg-charcoal text-white shadow-sm" : "text-charcoal hover:bg-cream/50"
-              }`}
+              aria-pressed={!appliedAdvanced.type && !appliedAdvanced.linkedStatus}
+              className={chipClass(!appliedAdvanced.type && !appliedAdvanced.linkedStatus)}
             >
               Kaikki
             </button>
@@ -490,9 +489,8 @@ export default function KuititPage() {
                 setAdvanced((a) => ({ ...a, type: "tulo", linkedStatus: "" }));
                 setAppliedAdvanced((a) => ({ ...a, type: "tulo", linkedStatus: "" }));
               }}
-              className={`shrink-0 min-h-11 px-4 py-2 text-sm font-medium rounded-full transition-colors ${
-                appliedAdvanced.type === "tulo" ? "bg-charcoal text-white shadow-sm" : "text-charcoal hover:bg-cream/50"
-              }`}
+              aria-pressed={appliedAdvanced.type === "tulo"}
+              className={chipClass(appliedAdvanced.type === "tulo")}
             >
               Myynnit
             </button>
@@ -502,9 +500,8 @@ export default function KuititPage() {
                 setAdvanced((a) => ({ ...a, type: "meno", linkedStatus: "" }));
                 setAppliedAdvanced((a) => ({ ...a, type: "meno", linkedStatus: "" }));
               }}
-              className={`shrink-0 min-h-11 px-4 py-2 text-sm font-medium rounded-full transition-colors ${
-                appliedAdvanced.type === "meno" ? "bg-charcoal text-white shadow-sm" : "text-charcoal hover:bg-cream/50"
-              }`}
+              aria-pressed={appliedAdvanced.type === "meno"}
+              className={chipClass(appliedAdvanced.type === "meno")}
             >
               Ostot
             </button>
@@ -514,9 +511,8 @@ export default function KuititPage() {
                 setAdvanced((a) => ({ ...a, type: "", linkedStatus: "linked" }));
                 setAppliedAdvanced((a) => ({ ...a, type: "", linkedStatus: "linked" }));
               }}
-              className={`shrink-0 min-h-11 px-4 py-2 text-sm font-medium rounded-full transition-colors ${
-                appliedAdvanced.linkedStatus === "linked" ? "bg-charcoal text-white shadow-sm" : "text-charcoal hover:bg-cream/50"
-              }`}
+              aria-pressed={appliedAdvanced.linkedStatus === "linked"}
+              className={chipClass(appliedAdvanced.linkedStatus === "linked")}
             >
               Linkitetty
             </button>
@@ -526,9 +522,8 @@ export default function KuititPage() {
                 setAdvanced((a) => ({ ...a, type: "", linkedStatus: "unlinked" }));
                 setAppliedAdvanced((a) => ({ ...a, type: "", linkedStatus: "unlinked" }));
               }}
-              className={`shrink-0 min-h-11 px-4 py-2 text-sm font-medium rounded-full transition-colors ${
-                appliedAdvanced.linkedStatus === "unlinked" ? "bg-charcoal text-white shadow-sm" : "text-charcoal hover:bg-cream/50"
-              }`}
+              aria-pressed={appliedAdvanced.linkedStatus === "unlinked"}
+              className={chipClass(appliedAdvanced.linkedStatus === "unlinked")}
             >
               Ei linkitetty
             </button>
@@ -567,7 +562,7 @@ export default function KuititPage() {
                     value={searchInput}
                     onChange={(e) => setSearchInput(e.target.value)}
                     placeholder="Hae myyjää, tiedostoa tai kategoriaa..."
-                    className="w-full h-11 px-4 rounded-xl border border-warm-gray-light/50 bg-white text-sm transition-colors focus:border-accent outline-none focus:ring-1 focus:ring-accent shadow-sm"
+                    className="w-full min-h-12 min-w-0 px-4 rounded-xl border border-warm-gray-light/50 bg-white text-sm transition-colors focus:border-accent outline-none focus:ring-1 focus:ring-accent shadow-sm"
                   />
                 </div>
 
@@ -576,7 +571,7 @@ export default function KuititPage() {
                   type="month"
                   value={monthFilter}
                   onChange={(e) => setMonthFilter(e.target.value)}
-                  className="flex-1 h-11 px-4 rounded-xl border border-warm-gray-light/50 bg-white text-sm transition-colors focus:border-accent outline-none focus:ring-1 focus:ring-accent shadow-sm"
+                  className="min-w-0 flex-1 min-h-12 px-4 rounded-xl border border-warm-gray-light/50 bg-white text-sm transition-colors focus:border-accent outline-none focus:ring-1 focus:ring-accent shadow-sm"
                   aria-label="Kuukausi"
                 />
                 <button
@@ -585,7 +580,7 @@ export default function KuititPage() {
                     setAdvanced({ ...appliedAdvanced });
                     setAdvancedOpen((v) => !v);
                   }}
-                  className={`h-11 px-4 rounded-xl text-sm font-medium border transition-colors whitespace-nowrap shadow-sm ${
+                  className={`min-h-12 px-4 rounded-xl text-sm font-medium border transition-colors whitespace-nowrap shadow-sm ${
                     advancedOpen ||
                     appliedAdvanced.type ||
                     appliedAdvanced.category ||
@@ -608,7 +603,7 @@ export default function KuititPage() {
                   id="advanced-receipt-filters"
                   className="border-t border-warm-gray-light/30 pt-3 space-y-3"
                 >
-              <div className="grid grid-cols-2 gap-3">
+              <div className="field-grid">
                 <div>
                   <label htmlFor="receipt-type-filter" className="block text-xs text-warm-gray mb-1">
                     Tyyppi
@@ -619,7 +614,7 @@ export default function KuititPage() {
                     onChange={(e) =>
                       setAdvanced({ ...advanced, type: e.target.value })
                     }
-                    className="w-full px-3 py-2 rounded-xl border border-warm-gray-light bg-cream/50 text-sm"
+                    className="w-full min-h-12 min-w-0 px-3 rounded-xl border border-warm-gray-light bg-cream/50 text-sm"
                   >
                     <option value="">Kaikki</option>
                     <option value="meno">Meno</option>
@@ -636,7 +631,7 @@ export default function KuititPage() {
                     onChange={(e) =>
                       setAdvanced({ ...advanced, category: e.target.value })
                     }
-                    className="w-full px-3 py-2 rounded-xl border border-warm-gray-light bg-cream/50 text-sm"
+                    className="w-full min-h-12 min-w-0 px-3 rounded-xl border border-warm-gray-light bg-cream/50 text-sm"
                   >
                     <option value="">Kaikki</option>
                     {RECEIPT_CATEGORIES.map((c) => (
@@ -648,7 +643,7 @@ export default function KuititPage() {
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
+              <div className="field-grid">
                 <div>
                   <label htmlFor="receipt-source-filter" className="block text-xs text-warm-gray mb-1">
                     Lähde
@@ -659,7 +654,7 @@ export default function KuititPage() {
                     onChange={(e) =>
                       setAdvanced({ ...advanced, source: e.target.value })
                     }
-                    className="w-full px-3 py-2 rounded-xl border border-warm-gray-light bg-cream/50 text-sm"
+                    className="w-full min-h-12 min-w-0 px-3 rounded-xl border border-warm-gray-light bg-cream/50 text-sm"
                   >
                     <option value="">Kaikki</option>
                     <option value="ai">AI</option>
@@ -677,7 +672,7 @@ export default function KuititPage() {
                     onChange={(e) =>
                       setAdvanced({ ...advanced, sort: e.target.value })
                     }
-                    className="w-full px-3 py-2 rounded-xl border border-warm-gray-light bg-cream/50 text-sm"
+                    className="w-full min-h-12 min-w-0 px-3 rounded-xl border border-warm-gray-light bg-cream/50 text-sm"
                   >
                     <option value="date_desc">Päivä (uusin)</option>
                     <option value="date_asc">Päivä (vanhin)</option>
@@ -688,7 +683,7 @@ export default function KuititPage() {
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
+              <div className="field-grid">
                 <div>
                   <label htmlFor="receipt-min-amount" className="block text-xs text-warm-gray mb-1">
                     Summa alkaen (€)
@@ -702,7 +697,7 @@ export default function KuititPage() {
                       setAdvanced({ ...advanced, minAmount: e.target.value })
                     }
                     placeholder="0"
-                    className="w-full px-3 py-2 rounded-xl border border-warm-gray-light bg-cream/50 text-sm"
+                    className="w-full min-h-12 min-w-0 px-3 rounded-xl border border-warm-gray-light bg-cream/50 text-sm"
                   />
                 </div>
                 <div>
@@ -718,30 +713,27 @@ export default function KuititPage() {
                       setAdvanced({ ...advanced, maxAmount: e.target.value })
                     }
                     placeholder="—"
-                    className="w-full px-3 py-2 rounded-xl border border-warm-gray-light bg-cream/50 text-sm"
+                    className="w-full min-h-12 min-w-0 px-3 rounded-xl border border-warm-gray-light bg-cream/50 text-sm"
                   />
                 </div>
               </div>
 
               <div className="flex gap-2">
-                <button
+                <Button
                   type="button"
+                  variant="secondary"
+                  className="flex-1"
                   onClick={() => {
                     setAdvanced(emptyAdvanced);
                     setAppliedAdvanced(emptyAdvanced);
                     setAdvancedOpen(false);
                   }}
-                  className="flex-1 py-2 rounded-xl border border-warm-gray-light text-xs text-warm-gray hover:bg-cream"
                 >
                   Tyhjennä
-                </button>
-                <button
-                  type="button"
-                  onClick={applyAdvanced}
-                  className="flex-1 py-2 rounded-xl bg-accent text-white text-xs font-medium hover:bg-accent-dark"
-                >
+                </Button>
+                <Button type="button" className="flex-1" onClick={applyAdvanced}>
                   Käytä suodattimia
-                </button>
+                </Button>
               </div>
               </div>
               )}
@@ -848,18 +840,11 @@ export default function KuititPage() {
                   : "Ei kuitteja vielä"}
               </p>
               {hasFilters ? (
-                <button
-                  type="button"
-                  onClick={clearAllFilters}
-                  className="text-sm font-medium text-accent hover:text-accent-dark"
-                >
+                <Button type="button" variant="secondary" onClick={clearAllFilters}>
                   Tyhjennä suodattimet
-                </button>
+                </Button>
               ) : (
-                <Link
-                  href="/kuitit/uusi"
-                  className="min-h-11 text-sm font-medium text-accent hover:text-accent-dark inline-flex items-center"
-                >
+                <Link href="/kuitit/uusi" className={buttonClass("primary")}>
                   Lisää ensimmäinen kuitti
                 </Link>
               )}
@@ -1000,15 +985,16 @@ export default function KuititPage() {
                 </div>
               ))}
               {receipts.length > RECENT_LIMIT && (
-                <button
+                <Button
                   type="button"
+                  variant="ghost"
+                  className="w-full"
                   onClick={() => setShowAllReceipts((v) => !v)}
-                  className="w-full py-2 text-xs font-medium text-accent hover:text-accent-dark transition-colors"
                 >
                   {showAllReceipts
                     ? "Näytä vähemmän"
                     : `Katso kaikki (${receipts.length})`}
-                </button>
+                </Button>
               )}
             </div>
           )}

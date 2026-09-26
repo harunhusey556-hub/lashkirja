@@ -164,6 +164,57 @@ textarea {
   font-size: 16px !important;
 }
 
+/* Text and date controls must shrink inside a phone-width grid. iOS date
+   inputs otherwise keep a min-content width and paint over the next cell. */
+input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]):not([type="hidden"]):not([type="button"]):not([type="submit"]):not([type="reset"]),
+select,
+textarea {
+  min-width: 0;
+  max-width: 100%;
+}
+
+input[type="date"],
+input[type="time"],
+input[type="datetime-local"],
+input[type="month"],
+input[type="week"] {
+  display: block;
+  width: 100%;
+  min-width: 0 !important;
+  max-width: 100%;
+}
+
+input[type="date"]::-webkit-datetime-edit,
+input[type="month"]::-webkit-datetime-edit,
+input[type="time"]::-webkit-datetime-edit {
+  min-width: 0;
+  padding: 0;
+}
+
+/* Two equal fields. Children may shrink; date rows stack on a phone. */
+.field-grid,
+.field-dates {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.field-grid > *,
+.field-dates > * {
+  min-width: 0;
+}
+
+.field-grid-3 {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.5rem;
+}
+
+@media (max-width: 480px) {
+  .field-dates {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
 /* Double-tap-to-zoom fires on ANY element, not only text. manipulation keeps
    scroll and pinch but drops the 300ms double-tap zoom gesture entirely. */
 html,

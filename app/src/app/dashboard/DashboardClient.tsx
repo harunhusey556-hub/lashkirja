@@ -182,6 +182,8 @@ export default function DashboardClient({
 
           <div className="flex items-center gap-1 self-start shrink-0 sm:self-auto bg-white p-1 rounded-xl shadow-sm border border-warm-gray-light/20">
             <button
+              type="button"
+              aria-label="Edellinen kuukausi"
               onClick={() => { setLoadError(""); setMonth(shiftMonth(month, -1)); }}
               className="touch-target flex items-center justify-center rounded-lg text-charcoal hover:bg-blush/40 transition-colors"
             >
@@ -191,6 +193,8 @@ export default function DashboardClient({
               {monthName} {month.split("-")[0]}
             </p>
             <button
+              type="button"
+              aria-label="Seuraava kuukausi"
               onClick={() => { setLoadError(""); setMonth(shiftMonth(month, 1)); }}
               disabled={month >= currentMonth()}
               className="touch-target flex items-center justify-center rounded-lg text-charcoal hover:bg-blush/40 transition-colors disabled:opacity-30"
