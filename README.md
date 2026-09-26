@@ -96,12 +96,14 @@ npm start       # käynnistä tuotantopalvelin
 
 Puhelintestaukseen GitHub Actions rakentaa allekirjoittamattoman Capacitor-IPA:n (`macos-15`). WebView lataa annetun HTTPS-osoitteen: se kirjoitetaan projektiin `CAPACITOR_SERVER_URL`-ympäristömuuttujana ennen `npx cap sync ios`. Paketti on `Tilikirja-unsigned.ipa` (Capacitorin `appName`), artefakti `Tilikirja-unsigned-ipa`, säilytys 30 päivää. Sideload-työkalu allekirjoittaa sen asennuksen yhteydessä.
 
+Kun `.github/workflows/build-ipa.yml` on oletushaarassa `main`, käynnistä ajo näin:
+
 ```bash
 gh workflow run build-ipa.yml \
   -f capacitor_server_url=https://oma-osoite.example
 ```
 
-Jos työnkulkutiedosto ei ole vielä `main`-haarassa, lisää haara:
+Rakennus tästä haarasta (sama komento, kun työnkulku on jo `main`issa):
 
 ```bash
 gh workflow run build-ipa.yml --ref cursor/enable-banking-connect-14f2 \
