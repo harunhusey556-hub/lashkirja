@@ -45,6 +45,8 @@ jobs:
           esac
           npx cap sync ios
           grep -F -q "$CAPACITOR_SERVER_URL" ios/App/App/capacitor.config.json
+          npx tsx scripts/patch-ios-url-scheme.ts
+          grep -F -q "<string>lashkirja</string>" ios/App/App/Info.plist
 
       - name: Build unsigned app
         working-directory: app
