@@ -55,6 +55,7 @@ model User {
   backgroundJobs  BackgroundJob[]
   automationEvents AutomationEvent[]
   vendorCategoryRules VendorCategoryRule[]
+  conversations Conversation[]
 }
 
 model Receipt {
@@ -269,18 +270,49 @@ model ImapAccount {
   updatedAt      DateTime  @updatedAt
 }
 
+// A persisted chat thread. "Uusi keskustelu" creates one of these; it is not
+// a client-side date cutoff.
+model Conversation {
+  id         String    @id @default(uuid())
+  userId     String
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title      String    @default("Uusi keskustelu")
+  archivedAt DateTime?
+  deletedAt  DateTime?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+  messages   ChatMessage[]
+
+  @@index([userId, updatedAt])
+}
+
 model ChatMessage {
   id             String    @id @default(uuid())
   userId         String
   user           User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
   role           String    // "user" | "assistant"
   content        String
   proposalData   String?   // JSON representation of proposed match or action
   // Client retry key. A repeated send with the same id returns the saved turn.
   clientId       String?   @unique
+  // The user message this assistant reply answers. One reply row per question;
+  // a retry updates that row instead of inserting another.
+  replyToId      String?   @unique
+  replyTo        ChatMessage?  @relation("ChatReply", fields: [replyToId], references: [id], onDelete: SetNull)
+  replies        ChatMessage[] @relation("ChatReply")
+  // streaming | complete | cancelled | failed | incomplete
+  status         String    @default("complete")
+  // In-flight owner. A second retry cannot take a fresh streaming row.
+  replyOwner     String?
+  ownerHeartbeat DateTime?
+  // JSON [{ label, href }] for figures taken from the user's books.
+  sources        String?
   createdAt      DateTime  @default(now())
 
   @@index([userId, createdAt])
+  @@index([conversationId, createdAt, id])
 }
 
 // PSD2 AIS consent. sessionIdEnc is the Enable Banking session id at rest.

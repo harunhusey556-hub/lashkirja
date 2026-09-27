@@ -7,7 +7,7 @@ import { Fragment, type ReactNode } from "react";
 export function ChatMarkdown({ text }: { text: string }) {
   const blocks = parseBlocks(text);
   return (
-    <div className="space-y-2">
+    <div className="max-w-full space-y-2 break-words [overflow-wrap:anywhere]">
       {blocks.map((block, index) => (
         <Fragment key={index}>{renderBlock(block)}</Fragment>
       ))}
@@ -20,7 +20,35 @@ type Block =
   | { type: "p"; text: string }
   | { type: "h"; level: number; text: string }
   | { type: "ul" | "ol"; items: ListItem[] }
-  | { type: "pre"; text: string };
+  | { type: "pre"; text: string }
+  | { type: "table"; headers: string[]; rows: string[][] };
+
+function pipeCells(line: string): string[] {
+  return line
+    .trim()
+    .replace(/^\|/, "")
+    .replace(/\|$/, "")
+    .split("|")
+    .map((cell) => cell.trim());
+}
+
+function isDividerRow(line: string): boolean {
+  return /^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$/.test(line.trim());
+}
+
+function isPipeRow(line: string): boolean {
+  const trimmed = line.trim();
+  return trimmed.startsWith("|") && trimmed.endsWith("|") && trimmed.length > 1;
+}
+
+function tableFromPipeLines(lines: string[]): Block | null {
+  const dividerAt = lines.findIndex((line) => isDividerRow(line));
+  if (dividerAt <= 0) return null;
+  const headers = pipeCells(lines[dividerAt - 1]);
+  const rows = lines.slice(dividerAt + 1).filter((line) => !isDividerRow(line)).map(pipeCells);
+  if (headers.length === 0) return null;
+  return { type: "table", headers, rows };
+}
 
 export function parseBlocks(text: string): Block[] {
   const lines = text.replace(/\r\n/g, "\n").split("\n");
@@ -28,6 +56,7 @@ export function parseBlocks(text: string): Block[] {
   let paragraph: string[] = [];
   let list: { type: "ul" | "ol"; items: ListItem[] } | null = null;
   let fence: string[] | null = null;
+  let pipes: string[] = [];
 
   const flushParagraph = () => {
     if (paragraph.length === 0) return;
@@ -38,6 +67,15 @@ export function parseBlocks(text: string): Block[] {
     if (!list) return;
     blocks.push(list);
     list = null;
+  };
+  const flushPipes = () => {
+    if (pipes.length === 0) return;
+    const table = tableFromPipeLines(pipes);
+    if (table) blocks.push(table);
+    else {
+      for (const line of pipes) blocks.push({ type: "p", text: line.trim() });
+    }
+    pipes = [];
   };
 
   for (const line of lines) {
@@ -53,13 +91,22 @@ export function parseBlocks(text: string): Block[] {
     if (line.trim().startsWith("```")) {
       flushParagraph();
       flushList();
+      flushPipes();
       fence = [];
       continue;
     }
+    if (isPipeRow(line) || (pipes.length > 0 && isDividerRow(line))) {
+      flushParagraph();
+      flushList();
+      pipes.push(line);
+      continue;
+    }
+    flushPipes();
     const heading = /^(#{1,3})\s+(.+)$/.exec(line.trim());
     if (heading) {
       flushParagraph();
       flushList();
+      flushPipes();
       blocks.push({ type: "h", level: heading[1].length, text: heading[2] });
       continue;
     }
@@ -68,8 +115,9 @@ export function parseBlocks(text: string): Block[] {
     const item = bullet ?? numbered;
     if (item && line.trim() !== "") {
       flushParagraph();
+      flushPipes();
       const type = bullet ? "ul" : "ol";
-      const depth = item[1].replace(/\t/g, "  ").length >= 2 ? 1 : 0;
+      const depth = Math.min(3, Math.floor(item[1].replace(/\t/g, "  ").length / 2));
       if (!list || list.type !== type) {
         flushList();
         list = { type, items: [] };
@@ -86,6 +134,7 @@ export function parseBlocks(text: string): Block[] {
     paragraph.push(line.trim());
   }
   if (fence) blocks.push({ type: "pre", text: fence.join("\n") });
+  flushPipes();
   flushParagraph();
   flushList();
   return blocks;
@@ -94,9 +143,37 @@ export function parseBlocks(text: string): Block[] {
 function renderBlock(block: Block): ReactNode {
   if (block.type === "pre") {
     return (
-      <pre className="overflow-x-auto rounded-xl bg-black/5 p-3 text-xs">
-        <code>{block.text}</code>
+      <pre className="max-w-full overflow-x-auto rounded-xl bg-black/5 p-3 text-xs">
+        <code className="break-all">{block.text}</code>
       </pre>
+    );
+  }
+  if (block.type === "table") {
+    return (
+      <div className="max-w-full overflow-x-auto">
+        <table className="w-full border-collapse text-left text-xs">
+          <thead>
+            <tr>
+              {block.headers.map((cell, index) => (
+                <th key={index} className="border-b border-black/10 px-2 py-1 font-medium">
+                  {renderInline(cell)}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {block.rows.map((row, rowIndex) => (
+              <tr key={rowIndex}>
+                {row.map((cell, index) => (
+                  <td key={index} className="border-b border-black/5 px-2 py-1 align-top">
+                    {renderInline(cell)}
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     );
   }
   if (block.type === "h") {
@@ -145,7 +222,7 @@ function renderInline(text: string): ReactNode[] {
       const href = link ? safeUrl(link[2]) : null;
       nodes.push(
         href ? (
-          <a key={key++} href={href} className="underline">
+          <a key={key++} href={href} className="underline break-all">
             {link?.[1]}
           </a>
         ) : (

@@ -1,4 +1,5 @@
 // Relative import so standalone scripts (tsx) can load this module too
+import type { Prisma } from "@/generated/prisma/client";
 import { prisma } from "./db";
 import { centsToEuros } from "./money";
 
@@ -527,18 +528,21 @@ export async function buildReceiptMatchViews(
   return result;
 }
 
+type MatchWriter = Prisma.TransactionClient | typeof prisma;
+
 /** Confirm a bank row ↔ receipt link (shared by API routes and auto-match). */
 export async function confirmMatch(
   userId: string,
   transactionId: string,
   receiptId: string,
-  fromSuggestion = false
+  fromSuggestion = false,
+  db: MatchWriter = prisma
 ): Promise<void> {
   const [tx, receipt] = await Promise.all([
-    prisma.transaction.findFirst({
+    db.transaction.findFirst({
       where: { id: transactionId, statement: { userId } },
     }),
-    prisma.receipt.findFirst({
+    db.receipt.findFirst({
       where: { id: receiptId, userId },
       include: { linkedTransaction: { select: { id: true } } },
     }),
@@ -548,8 +552,8 @@ export async function confirmMatch(
     throw new MatchConflictError("Kuitti on jo linkitetty toiseen tapahtumaan");
   }
 
-  await prisma.$transaction([
-    prisma.automationEvent.create({
+  const write = async (client: MatchWriter) => {
+    await client.automationEvent.create({
       data: {
         userId,
         kind: "match",
@@ -559,8 +563,8 @@ export async function confirmMatch(
         newValue: "confirmed",
         reason: fromSuggestion ? "automaattinen täsmäytys" : "käyttäjän vahvistus",
       },
-    }),
-    prisma.transaction.updateMany({
+    });
+    await client.transaction.updateMany({
       where: {
         suggestedReceiptId: receiptId,
         id: { not: transactionId },
@@ -572,8 +576,8 @@ export async function confirmMatch(
         matchScore: null,
         matchReasons: null,
       },
-    }),
-    prisma.transaction.update({
+    });
+    await client.transaction.update({
       where: { id: transactionId },
       data: {
         receiptId,
@@ -583,12 +587,20 @@ export async function confirmMatch(
           ? {}
           : { matchScore: null, matchReasons: JSON.stringify(["manual"]) }),
       },
-    }),
-    prisma.receipt.update({
+    });
+    await client.receipt.update({
       where: { id: receiptId },
       data: { reviewStatus: "approved" },
-    }),
-  ]);
+    });
+  };
+
+  if (db === prisma) {
+    await prisma.$transaction(async (txClient) => {
+      await write(txClient);
+    });
+    return;
+  }
+  await write(db);
 }
 
 export class MatchNotFoundError extends Error {

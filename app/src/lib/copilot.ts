@@ -1,4 +1,9 @@
+import { copilotRequestMessages, type ContextTurn } from "./chat-turn";
+
 const CLOUD_TIMEOUT_MS = 30_000;
+
+export type CopilotTurn = ContextTurn;
+export { copilotRequestMessages };
 
 export const COPILOT_HEADERS = {
   "Accept-Encoding": "identity",
@@ -59,7 +64,8 @@ export async function getCopilotSessionToken(ghToken: string): Promise<{ token: 
 export async function askCopilot(
   systemPrompt: string,
   userPrompt: string,
-  ghToken: string
+  ghToken: string,
+  prior: CopilotTurn[] = []
 ): Promise<string> {
   const model = process.env.COPILOT_MODEL || "gpt-4o";
   const session = await getCopilotSessionToken(ghToken);
@@ -79,10 +85,7 @@ export async function askCopilot(
       headers,
       body: JSON.stringify({
         model,
-        messages: [
-          { role: "system", content: systemPrompt },
-          { role: "user", content: userPrompt }
-        ],
+        messages: copilotRequestMessages(systemPrompt, userPrompt, prior),
         max_tokens: 1500,
         temperature: 0.7,
       }),
@@ -106,7 +109,8 @@ export async function* askCopilotStream(
   systemPrompt: string,
   userPrompt: string,
   ghToken: string,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  prior: CopilotTurn[] = []
 ): AsyncGenerator<string> {
   const model = process.env.COPILOT_MODEL || "gpt-4o";
   const session = await getCopilotSessionToken(ghToken);
@@ -123,10 +127,7 @@ export async function* askCopilotStream(
     signal,
     body: JSON.stringify({
       model,
-      messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: userPrompt },
-      ],
+      messages: copilotRequestMessages(systemPrompt, userPrompt, prior),
       max_tokens: 1500,
       temperature: 0.4,
       stream: true,

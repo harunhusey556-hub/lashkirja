@@ -9,6 +9,17 @@ import { Button, FormError } from "@/components/ui";
 import { hapticNotify } from "@/lib/haptics";
 import { useOverlayLock } from "@/lib/overlay-lock";
 
+interface ChatSourceLink {
+  label: string;
+  href: string;
+}
+
+interface ConversationItem {
+  id: string;
+  title: string;
+  archivedAt?: string | null;
+}
+
 interface ChatMessageItem {
   id: string;
   role: "user" | "assistant";
@@ -16,6 +27,9 @@ interface ChatMessageItem {
   clientId?: string | null;
   proposal?: (ChatMatchProposal & { status?: "accepted" | "rejected" }) | null;
   limited?: boolean;
+  sources?: ChatSourceLink[];
+  status?: string;
+  replyToId?: string | null;
   createdAt: string;
   incomplete?: boolean;
 }
@@ -28,6 +42,10 @@ interface DoneEvent {
   id?: string;
   content?: string;
   proposal?: ChatMessageItem["proposal"];
+  sources?: ChatSourceLink[];
+  status?: string;
+  replyToId?: string | null;
+  conversationId?: string;
   createdAt?: string;
   limited?: boolean;
 }
@@ -50,9 +68,16 @@ export function AiChatDrawer({
   const [actionError, setActionError] = useState("");
   const [failed, setFailed] = useState<{ text: string; clientId: string } | null>(null);
   const [showJump, setShowJump] = useState(false);
-  const [cutoff, setCutoff] = useState<string | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [conversationId, setConversationId] = useState<string | null>(null);
+  const [conversationTitle, setConversationTitle] = useState("Avustaja");
+  const [conversations, setConversations] = useState<ConversationItem[]>([]);
+  const [conversationQuery, setConversationQuery] = useState("");
+  const [showArchived, setShowArchived] = useState(false);
+  const [renamingId, setRenamingId] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState("");
+  const [removedConversation, setRemovedConversation] = useState<ConversationItem | null>(null);
   const scrollerRef = useRef<HTMLDivElement>(null);
   const stickRef = useRef(true);
   const abortRef = useRef<AbortController | null>(null);
@@ -64,8 +89,6 @@ export function AiChatDrawer({
     if (!open) return;
     return subscribeOverlayClose(() => closeRef.current());
   }, [open]);
-
-  const visible = messages.filter((message) => !cutoff || message.createdAt >= cutoff);
 
   function mergeHistory(incoming: ChatMessageItem[]) {
     setMessages((current) => {
@@ -80,22 +103,41 @@ export function AiChatDrawer({
         if (localClient && serverClientIds.has(localClient)) continue;
         byId.set(message.id, message);
       }
-      return [...byId.values()].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+      return [...byId.values()].sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id));
     });
   }
 
-  async function loadHistory(before?: string) {
+  async function loadHistory(before?: { createdAt: string; id: string }, replace = false) {
     if (loadingRef.current && !before) return;
     setLoadingHistory(true);
     setHistoryError("");
     try {
-      const url = before ? `/api/ai/chat?before=${encodeURIComponent(before)}` : "/api/ai/chat";
-      const response = await apiFetch(url);
-      const data = await readJson<{ messages: ChatMessageItem[]; hasMore?: boolean }>(
-        response,
-        "Keskusteluhistorian lataus epäonnistui"
-      );
-      mergeHistory(data.messages ?? []);
+      const params = new URLSearchParams();
+      if (conversationId) params.set("conversationId", conversationId);
+      if (before) {
+        params.set("before", before.createdAt);
+        params.set("beforeId", before.id);
+      }
+      const query = params.toString();
+      const response = await apiFetch(query ? `/api/ai/chat?${query}` : "/api/ai/chat");
+      const data = await readJson<{
+        messages: ChatMessageItem[];
+        hasMore?: boolean;
+        conversation?: { id: string; title: string } | null;
+      }>(response, "Keskusteluhistorian lataus epäonnistui");
+      if (data.conversation?.id) {
+        setConversationId(data.conversation.id);
+        setConversationTitle(data.conversation.title);
+      }
+      if (replace) {
+        setMessages(
+          [...(data.messages ?? [])].sort(
+            (a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id)
+          )
+        );
+      } else {
+        mergeHistory(data.messages ?? []);
+      }
       setHasMore(Boolean(data.hasMore));
       setHistoryLoaded(true);
     } catch (error) {
@@ -105,11 +147,29 @@ export function AiChatDrawer({
     }
   }
 
+  async function loadConversations(query = conversationQuery, archived = showArchived) {
+    const params = new URLSearchParams();
+    if (query.trim()) params.set("q", query.trim());
+    if (archived) params.set("archived", "1");
+    const response = await apiFetch(`/api/ai/conversations?${params.toString()}`);
+    const data = await readJson<{ conversations: ConversationItem[] }>(response, "Keskustelulistan lataus epäonnistui");
+    setConversations(data.conversations ?? []);
+  }
+
   useEffect(() => {
     if (open && !historyLoaded && !historyError) void loadHistory();
     // loadHistory is stable enough for the open transition; historyLoaded gates repeats.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, historyLoaded, historyError]);
+  }, [open, historyLoaded, historyError, conversationId]);
+
+  useEffect(() => {
+    if (!open) return;
+    const onHide = () => {
+      if (document.visibilityState === "hidden") abortRef.current?.abort();
+    };
+    document.addEventListener("visibilitychange", onHide);
+    return () => document.removeEventListener("visibilitychange", onHide);
+  }, [open]);
 
   useEffect(() => {
     const el = scrollerRef.current;
@@ -138,9 +198,33 @@ export function AiChatDrawer({
     setShowJump(false);
   }
 
+  async function ensureConversation(): Promise<string | null> {
+    if (conversationId) return conversationId;
+    const response = await apiFetch("/api/ai/conversations", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: "{}",
+    });
+    const data = await readJson<{ id: string; title: string }>(response, "Keskustelun luonti epäonnistui");
+    setConversationId(data.id);
+    setConversationTitle(data.title);
+    return data.id;
+  }
+
   async function handleSendMessage(textToSend?: string, retry?: { clientId: string }) {
     const query = (textToSend || input).trim();
     if (!query || loading) return;
+    if (query.length > 4000) {
+      setActionError("Viesti on liian pitkä (enintään 4000 merkkiä).");
+      return;
+    }
+    let activeConversation = conversationId;
+    try {
+      activeConversation = await ensureConversation();
+    } catch (error) {
+      setActionError(errorMessage(error, "Keskustelun luonti epäonnistui"));
+      return;
+    }
     const clientId = retry?.clientId || crypto.randomUUID();
     if (!retry) {
       setMessages((prev) => [
@@ -197,7 +281,12 @@ export function AiChatDrawer({
       const response = await fetch("/api/ai/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: query, stream: true, clientId }),
+        body: JSON.stringify({
+          message: query,
+          stream: true,
+          clientId,
+          conversationId: activeConversation,
+        }),
         signal: controller.signal,
       });
       const type = response.headers.get("content-type") || "";
@@ -263,7 +352,8 @@ export function AiChatDrawer({
             void hapticNotify("error");
             return;
           }
-          if (event.done) {
+          if (event.conversationId) setConversationId(event.conversationId);
+          if (event.done || event.status === "complete") {
             sawDone = true;
             const finalContent = event.content || content;
             setMessages((prev) =>
@@ -274,6 +364,9 @@ export function AiChatDrawer({
                       id: event.id || placeholderId,
                       content: finalContent,
                       proposal: event.proposal ?? null,
+                      sources: event.sources,
+                      status: event.status || "complete",
+                      replyToId: event.replyToId,
                       limited: event.limited,
                       createdAt: event.createdAt || message.createdAt,
                       incomplete: false,
@@ -364,22 +457,11 @@ export function AiChatDrawer({
     await readJson(response, "Päätöksen tallennus epäonnistui");
   }
 
-  async function handleConfirmProposal(msgId: string, proposal: ChatMatchProposal) {
+  async function handleConfirmProposal(msgId: string) {
     setMatchBusyId(msgId);
     setActionError("");
     try {
-      const response = await apiFetch("/api/matching/confirm", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          transactionId: proposal.transactionId,
-          receiptId: proposal.receiptId,
-        }),
-      });
-      await readJson(response, "Yhdistäminen epäonnistui");
-      if (!msgId.startsWith("stream-") && !msgId.startsWith("error-")) {
-        await persistDecision(msgId, "accepted");
-      }
+      await persistDecision(msgId, "accepted");
       setMessages((prev) =>
         prev.map((message) =>
           message.id === msgId
@@ -403,9 +485,7 @@ export function AiChatDrawer({
   async function handleRejectProposal(msgId: string) {
     setActionError("");
     try {
-      if (!msgId.startsWith("stream-") && !msgId.startsWith("error-")) {
-        await persistDecision(msgId, "rejected");
-      }
+      await persistDecision(msgId, "rejected");
       setMessages((prev) =>
         prev.map((message) =>
           message.id === msgId
@@ -429,27 +509,62 @@ export function AiChatDrawer({
         <button type="button" onClick={onClose} className="active-press min-h-11 px-2 text-sm font-medium text-accent-dark">
           Sulje
         </button>
-        <h2 id="ai-chat-title" className="flex-1 text-center text-base font-medium text-charcoal">
-          Avustaja
+        <h2 id="ai-chat-title" className="flex-1 truncate text-center text-base font-medium text-charcoal">
+          {conversationTitle || "Avustaja"}
         </h2>
         <button
           type="button"
           aria-expanded={menuOpen}
-          onClick={() => setMenuOpen((value) => !value)}
+          onClick={() => {
+            setMenuOpen((value) => !value);
+            if (!menuOpen) void loadConversations();
+          }}
           className="active-press min-h-11 px-2 text-sm font-medium text-charcoal"
         >
           Valikko
         </button>
       </header>
       {menuOpen && (
-        <div className="border-b border-warm-gray-light/30 bg-cream/40 px-3 py-2">
+        <div className="max-h-72 space-y-2 overflow-y-auto border-b border-warm-gray-light/30 bg-cream/40 px-3 py-2">
+          <form
+            className="flex gap-2"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void loadConversations(conversationQuery, showArchived);
+            }}
+          >
+            <input
+              value={conversationQuery}
+              onChange={(event) => setConversationQuery(event.target.value)}
+              aria-label="Hae keskusteluja"
+              placeholder="Hae keskusteluja"
+              className="min-h-11 flex-1 rounded-xl border border-warm-gray-light/60 bg-white px-3 text-sm"
+            />
+            <Button type="submit" variant="secondary">
+              Hae
+            </Button>
+          </form>
           <button
             type="button"
             className="block min-h-11 w-full rounded-xl px-3 text-left text-sm"
             onClick={() => {
-              setCutoff(new Date().toISOString());
-              setMenuOpen(false);
-              stickRef.current = true;
+              void (async () => {
+                const response = await apiFetch("/api/ai/conversations", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: "{}",
+                });
+                const data = await readJson<{ id: string; title: string }>(response, "Keskustelun luonti epäonnistui");
+                setConversationId(data.id);
+                setConversationTitle(data.title);
+                setMessages([]);
+                setHasMore(false);
+                setHistoryLoaded(true);
+                setFailed(null);
+                setMenuOpen(false);
+                stickRef.current = true;
+                void loadConversations();
+              })();
             }}
           >
             Uusi keskustelu
@@ -458,13 +573,146 @@ export function AiChatDrawer({
             type="button"
             className="block min-h-11 w-full rounded-xl px-3 text-left text-sm"
             onClick={() => {
-              setCutoff(null);
-              setMenuOpen(false);
-              if (!historyLoaded) void loadHistory();
+              const next = !showArchived;
+              setShowArchived(next);
+              void loadConversations(conversationQuery, next);
             }}
           >
-            Näytä historia
+            {showArchived ? "Näytä aktiiviset" : "Näytä arkisto"}
           </button>
+          {conversations.length === 0 && <p className="px-3 text-sm text-warm-gray">Ei keskusteluja</p>}
+          {conversations.map((conversation) => (
+            <div key={conversation.id} className="rounded-xl bg-white px-3 py-2">
+              {renamingId === conversation.id ? (
+                <form
+                  className="flex gap-2"
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    void (async () => {
+                      const response = await apiFetch("/api/ai/conversations", {
+                        method: "PATCH",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ id: conversation.id, title: renameValue }),
+                      });
+                      const data = await readJson<{ title: string }>(response, "Nimen tallennus epäonnistui");
+                      if (conversation.id === conversationId) setConversationTitle(data.title);
+                      setRenamingId(null);
+                      void loadConversations();
+                    })();
+                  }}
+                >
+                  <input
+                    value={renameValue}
+                    onChange={(event) => setRenameValue(event.target.value)}
+                    aria-label="Keskustelun nimi"
+                    className="min-h-11 flex-1 rounded-xl border border-warm-gray-light/60 px-3 text-sm"
+                  />
+                  <Button type="submit" variant="secondary">
+                    Tallenna
+                  </Button>
+                </form>
+              ) : (
+                <button
+                  type="button"
+                  className="block min-h-11 w-full text-left text-sm"
+                  onClick={() => {
+                    setConversationId(conversation.id);
+                    setConversationTitle(conversation.title);
+                    setMessages([]);
+                    setHasMore(false);
+                    setHistoryLoaded(false);
+                    setHistoryError("");
+                    setMenuOpen(false);
+                  }}
+                >
+                  {conversation.title}
+                </button>
+              )}
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  className="min-h-11 text-xs text-accent-dark"
+                  onClick={() => {
+                    setRenamingId(conversation.id);
+                    setRenameValue(conversation.title);
+                  }}
+                >
+                  Nimeä
+                </button>
+                <button
+                  type="button"
+                  className="min-h-11 text-xs text-charcoal"
+                  onClick={() => {
+                    void (async () => {
+                      const response = await apiFetch("/api/ai/conversations", {
+                        method: "PATCH",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ id: conversation.id, archived: !conversation.archivedAt }),
+                      });
+                      await readJson(response, "Arkistointi epäonnistui");
+                      if (conversation.id === conversationId) {
+                        setConversationId(null);
+                        setConversationTitle("Avustaja");
+                        setMessages([]);
+                        setHistoryLoaded(false);
+                      }
+                      void loadConversations();
+                    })();
+                  }}
+                >
+                  {conversation.archivedAt ? "Palauta" : "Arkistoi"}
+                </button>
+                <button
+                  type="button"
+                  className="min-h-11 text-xs text-warm-gray"
+                  onClick={() => {
+                    void (async () => {
+                      const response = await apiFetch("/api/ai/conversations", {
+                        method: "PATCH",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ id: conversation.id, deleted: true }),
+                      });
+                      await readJson(response, "Poisto epäonnistui");
+                      setRemovedConversation(conversation);
+                      if (conversation.id === conversationId) {
+                        setConversationId(null);
+                        setConversationTitle("Avustaja");
+                        setMessages([]);
+                        setHistoryLoaded(true);
+                      }
+                      void loadConversations();
+                    })();
+                  }}
+                >
+                  Poista
+                </button>
+              </div>
+            </div>
+          ))}
+          {removedConversation && (
+            <div className="flex items-center justify-between gap-2 rounded-xl bg-white px-3 py-2 text-sm">
+              <span>Keskustelu poistettu</span>
+              <button
+                type="button"
+                className="min-h-11 text-accent-dark"
+                onClick={() => {
+                  const removed = removedConversation;
+                  void (async () => {
+                    const response = await apiFetch("/api/ai/conversations", {
+                      method: "PATCH",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({ id: removed.id, deleted: false }),
+                    });
+                    await readJson(response, "Palautus epäonnistui");
+                    setRemovedConversation(null);
+                    void loadConversations();
+                  })();
+                }}
+              >
+                Kumoa
+              </button>
+            </div>
+          )}
         </div>
       )}
 
@@ -475,8 +723,8 @@ export function AiChatDrawer({
             className="mx-auto block min-h-11 text-sm text-accent-dark"
             disabled={loadingHistory}
             onClick={() => {
-              const oldest = messages[0]?.createdAt;
-              if (oldest) void loadHistory(oldest);
+              const oldest = messages[0];
+              if (oldest) void loadHistory({ createdAt: oldest.createdAt, id: oldest.id });
             }}
           >
             {loadingHistory ? "Ladataan…" : "Vanhemmat viestit"}
@@ -493,7 +741,7 @@ export function AiChatDrawer({
         {loadingHistory && messages.length === 0 && (
           <p className="text-sm text-warm-gray">Ladataan keskustelua…</p>
         )}
-        {!loadingHistory && visible.length === 0 && (
+        {!loadingHistory && messages.length === 0 && (
           <div className="space-y-3 pt-6">
             <p className="text-sm text-charcoal">Miten voin auttaa?</p>
             <div className="flex flex-wrap gap-2">
@@ -506,7 +754,7 @@ export function AiChatDrawer({
             </div>
           </div>
         )}
-        {visible.map((message) => (
+        {messages.map((message) => (
           <div key={message.id} className={`flex flex-col ${message.role === "user" ? "items-end" : "items-start"}`}>
             <div
               className={`select-text max-w-[85%] rounded-2xl px-3.5 py-3 text-sm leading-relaxed ${
@@ -517,6 +765,18 @@ export function AiChatDrawer({
             </div>
             {message.limited && message.role === "assistant" && (
               <p className="mt-1 text-xs text-warm-gray">Rajattu tila</p>
+            )}
+            {message.sources && message.sources.length > 0 && (
+              <div className="mt-1 flex max-w-[85%] flex-wrap gap-2">
+                {message.sources.map((source) => (
+                  <a key={source.href} href={source.href} className="text-xs text-accent-dark underline">
+                    {source.label}
+                  </a>
+                ))}
+              </div>
+            )}
+            {message.status === "cancelled" && (
+              <p className="mt-1 text-xs text-warm-gray">Keskeytetty</p>
             )}
             {message.role === "assistant" && message.content && (
               <div className="mt-1 flex gap-2">
@@ -544,7 +804,7 @@ export function AiChatDrawer({
                     busy={matchBusyId === message.id}
                     busyLabel="Yhdistetään…"
                     className="flex-1 text-xs"
-                    onClick={() => void handleConfirmProposal(message.id, message.proposal!)}
+                    onClick={() => void handleConfirmProposal(message.id)}
                   >
                     Hyväksy
                   </Button>
@@ -602,6 +862,7 @@ export function AiChatDrawer({
               field.style.height = "auto";
               field.style.height = `${Math.min(field.scrollHeight, 120)}px`;
             }}
+            maxLength={4000}
             className="max-h-[120px] min-h-12 flex-1 resize-none rounded-xl border border-warm-gray-light/60 bg-cream/40 px-3 py-2.5 text-sm"
           />
           {loading ? (

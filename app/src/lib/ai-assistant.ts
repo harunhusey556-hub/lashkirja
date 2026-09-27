@@ -2,9 +2,12 @@ import { prisma } from "./db";
 import { parseBusinessDetails, generateProfileSummary } from "./onboarding";
 import { centsToEuros } from "./money";
 import { candidatesFor, MatchTx, MatchReceipt } from "./matching";
-import { askCopilot } from "./copilot";
+import { askCopilot, type CopilotTurn } from "./copilot";
 import { computeAlvReport } from "./alv";
 import { loadAlvPeriodSources } from "./alv-period";
+import { formatBookedVatAnswer, mergeSources } from "./chat-honesty";
+import { receiptDrillHref, statementDrillHref } from "./report-drill";
+import type { ChatSource, ContextTurn } from "./chat-turn";
 import {
   greetingReply,
   isGreeting,
@@ -28,13 +31,20 @@ export interface ChatAssistantResult {
   reply: string;
   proposal?: ChatMatchProposal;
   limited?: boolean;
+  sources?: ChatSource[];
 }
 
 export type PreparedChat =
-  | { kind: "local"; reply: string; proposal?: ChatMatchProposal; limited?: boolean }
-  | { kind: "provider"; systemPrompt: string; userMessage: string; english: boolean };
+  | { kind: "local"; reply: string; proposal?: ChatMatchProposal; limited?: boolean; sources?: ChatSource[] }
+  | { kind: "provider"; systemPrompt: string; userMessage: string; english: boolean; sources?: ChatSource[] };
 
-async function currentMonthVatLine(userId: string, english: boolean): Promise<string | null> {
+function monthKey(date: Date | null | undefined): string | null {
+  if (!date) return null;
+  const month = `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}`;
+  return /^\d{4}-\d{2}$/.test(month) ? month : null;
+}
+
+async function currentMonthVat(userId: string, english: boolean): Promise<{ text: string; sources: ChatSource[] } | null> {
   try {
     const now = new Date();
     const start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
@@ -42,17 +52,12 @@ async function currentMonthVatLine(userId: string, english: boolean): Promise<st
     const sources = await loadAlvPeriodSources(userId, start, end);
     const report = computeAlvReport(sources.receipts, sources.invoices);
     const month = `${start.getUTCFullYear()}-${String(start.getUTCMonth() + 1).padStart(2, "0")}`;
-    const amount = report.field308.amount.toFixed(2);
-    const kind = report.field308.isRefund
-      ? english
-        ? "refund"
-        : "palautusta"
-      : english
-        ? "to pay"
-        : "maksettavaa";
-    return english
-      ? `From your books for ${month}: VAT ${kind} ${amount} € (field 308). Source: /alv-raportti.`
-      : `Kirjanpidostasi kaudelta ${month}: ALV ${kind} ${amount} € (kohta 308). Lähde: /alv-raportti.`;
+    return formatBookedVatAnswer({
+      month,
+      amount: report.field308.amount.toFixed(2),
+      isRefund: report.field308.isRefund,
+      english,
+    });
   } catch (error) {
     console.error("Chat VAT lookup failed:", error);
     return null;
@@ -65,7 +70,11 @@ function entityPhrase(entityType: string | null | undefined, english: boolean): 
   return english ? "As a sole trader" : "Toiminimiyrittäjänä";
 }
 
-export async function prepareChat(userId: string, userMessage: string): Promise<PreparedChat> {
+export async function prepareChat(
+  userId: string,
+  userMessage: string,
+  prior: ContextTurn[] = []
+): Promise<PreparedChat> {
   const user = await prisma.user.findUnique({
     where: { id: userId },
     select: {
@@ -154,6 +163,7 @@ export async function prepareChat(userId: string, userMessage: string): Promise<
       }));
 
       let bestProposal: ChatMatchProposal | undefined;
+      let matchSources: ChatSource[] | undefined;
       let highestScore = 0;
 
       for (const tx of txModels) {
@@ -174,6 +184,8 @@ export async function prepareChat(userId: string, userMessage: string): Promise<
               ? centsToEuros(rawReceipt.totalAmountCents).toFixed(2)
               : "?";
 
+            const txMonth = monthKey(rawTx.date);
+            const receiptMonth = monthKey(rawReceipt.date);
             bestProposal = {
               type: "match_proposal",
               transactionId: rawTx.id,
@@ -183,6 +195,15 @@ export async function prepareChat(userId: string, userMessage: string): Promise<
               confidenceScore: candidate.score,
               reasons: candidate.reasons,
             };
+            const proposalSources: ChatSource[] = [];
+            if (txMonth) proposalSources.push({ label: "Tiliotteet", href: statementDrillHref(txMonth) });
+            if (receiptMonth) {
+              proposalSources.push({
+                label: "Kuitit",
+                href: receiptDrillHref({ month: receiptMonth, type: rawReceipt.type === "tulo" ? "tulo" : "meno" }),
+              });
+            }
+            matchSources = proposalSources;
           }
         }
       }
@@ -191,9 +212,10 @@ export async function prepareChat(userId: string, userMessage: string): Promise<
         return {
           kind: "local",
           reply: english
-            ? "I checked your bank rows and receipts and found one suggestion. Confirm it below."
-            : "Tarkistin pankkitapahtumasi ja kuitit. Löysin yhden ehdotuksen. Vahvista se alta.",
+            ? "I checked your bank rows and receipts and found one suggestion. Confirm it below. I have not linked them."
+            : "Tarkistin pankkitapahtumasi ja kuitit. Löysin yhden ehdotuksen. Vahvista se alta. En ole vielä yhdistänyt niitä.",
           proposal: bestProposal,
+          sources: matchSources,
         };
       }
       return {
@@ -227,19 +249,22 @@ export async function prepareChat(userId: string, userMessage: string): Promise<
     normalizedQuery.includes("mitä voin") ||
     normalizedQuery.includes("deduct");
   const asksProfile = normalizedQuery.includes("profiili") || normalizedQuery.includes("yritysmuoto");
-  const vatLine = asksVat ? await currentMonthVatLine(userId, english) : null;
+  const vatAnswer = asksVat ? await currentMonthVat(userId, english) : null;
+  const vatLine = vatAnswer?.text ?? null;
   const who = entityPhrase(user?.entityType, english);
 
   if (!process.env.COPILOT_GITHUB_TOKEN) {
     if (asksVat) {
+      const reply = `${limitedModeNotice(english)}\n\n${vatLine ?? ""}\n\n${
+        english
+          ? "Standard rate for lash services in 2026 is **25.5%**. See /alv-raportti."
+          : "Ripsipalveluiden yleinen ALV-kanta 2026 on **25,5 %**. Katso /alv-raportti."
+      }`.trim();
       return {
         kind: "local",
         limited: true,
-        reply: `${limitedModeNotice(english)}\n\n${vatLine ?? ""}\n\n${
-          english
-            ? "Standard rate for lash services in 2026 is **25.5%**. See /alv-raportti."
-            : "Ripsipalveluiden yleinen ALV-kanta 2026 on **25,5 %**. Katso /alv-raportti."
-        }`.trim(),
+        reply,
+        sources: mergeSources(vatAnswer?.sources, reply),
       };
     }
     if (asksDeduction) {
@@ -272,34 +297,41 @@ export async function prepareChat(userId: string, userMessage: string): Promise<
     asksProfile ? `Profile: ${profileSummary}` : `Business form: ${who}.`,
     vatLine ? `Use this calculated figure, do not invent another: ${vatLine}` : "",
     "When you cite an amount from the books, name the screen (/alv-raportti, /raportit, /kuitit, /laskut).",
+    prior.length > 0 ? "Use the earlier turns. Answer the latest question." : "",
   ]
     .filter(Boolean)
     .join("\n");
 
-  return { kind: "provider", systemPrompt, userMessage, english };
+  return { kind: "provider", systemPrompt, userMessage, english, sources: vatAnswer?.sources };
 }
 
 export async function processAiChatMessage(
   userId: string,
-  userMessage: string
+  userMessage: string,
+  prior: CopilotTurn[] = []
 ): Promise<ChatAssistantResult> {
-  const prepared = await prepareChat(userId, userMessage);
+  const prepared = await prepareChat(userId, userMessage, prior);
   if (prepared.kind === "local") {
-    return { reply: prepared.reply, proposal: prepared.proposal, limited: prepared.limited };
+    return {
+      reply: prepared.reply,
+      proposal: prepared.proposal,
+      limited: prepared.limited,
+      sources: prepared.sources,
+    };
   }
   const token = process.env.COPILOT_GITHUB_TOKEN;
   if (!token) {
-    return { reply: limitedModeNotice(prepared.english), limited: true };
+    return { reply: limitedModeNotice(prepared.english), limited: true, sources: prepared.sources };
   }
   try {
-    const reply = await askCopilot(prepared.systemPrompt, prepared.userMessage, token);
+    const reply = await askCopilot(prepared.systemPrompt, prepared.userMessage, token, prior);
     if (!reply.trim()) {
       console.error("Copilot chat returned an empty reply");
-      return { reply: limitedModeNotice(prepared.english), limited: true };
+      return { reply: limitedModeNotice(prepared.english), limited: true, sources: prepared.sources };
     }
-    return { reply };
+    return { reply, sources: mergeSources(prepared.sources, reply) };
   } catch (error) {
     console.error("Copilot chat failed:", error);
-    return { reply: limitedModeNotice(prepared.english), limited: true };
+    return { reply: limitedModeNotice(prepared.english), limited: true, sources: prepared.sources };
   }
 }
