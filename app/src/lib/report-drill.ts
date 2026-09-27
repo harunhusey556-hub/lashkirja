@@ -18,7 +18,7 @@ export function receiptDrillHref(filter: {
 }
 
 export function statementDrillHref(month: string): string {
-  return MONTH.test(month) ? `/tiliotteet?month=${month}` : "/tiliotteet";
+  return MONTH.test(month) ? `/pankki/tapahtumat?month=${month}` : "/pankki/tapahtumat";
 }
 
 export function invoiceDrillHref(filter: { month?: string | null; status?: string | null }): string {

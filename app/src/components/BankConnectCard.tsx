@@ -279,7 +279,7 @@ export default function BankConnectCard({ entityType }: { entityType: string }) 
       const accounts = data.accounts || [];
       const outcome = syncOutcomeMessage(accounts, data.imported);
       setSyncAccounts(accounts);
-      setStatementHref(data.statementId ? `/tiliotteet/${data.statementId}` : null);
+      setStatementHref(data.statementId ? `/pankki/tapahtumat/${data.statementId}` : null);
       setMessageTone(outcome.tone);
       setMessage(outcome.text);
     } catch (error: unknown) {

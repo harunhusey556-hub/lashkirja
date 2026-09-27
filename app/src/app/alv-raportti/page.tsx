@@ -11,7 +11,6 @@ import {
   redirectToLogin,
 } from "@/components/clientFetch";
 
-import { REPORT_LINKS, WorkspaceLinks, linksWithActive } from "@/components/WorkspaceLinks";
 import { formatEur } from "@/lib/format";
 import { receiptDrillHref } from "@/lib/report-drill";
 import { helsinkiMonthKey, helsinkiQuarterKey } from "@/lib/validation";
@@ -147,7 +146,6 @@ export default function ALVRaporttiPage() {
           <p className="text-sm text-warm-gray leading-relaxed">
             Kuukauden tai neljänneksen arvonlisävero.
           </p>
-          <WorkspaceLinks items={linksWithActive(REPORT_LINKS, "/alv-raportti")} />
         </header>
 
         {data && !data.vatRegistered && (

@@ -2,8 +2,10 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { ErrorState, SkeletonList } from "@/components/AsyncState";
+import { PageHeader } from "@/components/PageHeader";
+import { SectionTabs } from "@/components/SectionTabs";
 import StatementSummaryCards from "@/components/StatementSummaryCards";
 import {
   apiFetch,
@@ -16,11 +18,10 @@ import {
   formatMonth,
   type StatementData,
 } from "@/lib/statement-client";
-import { BANK_LINKS, WorkspaceLinks, linksWithActive } from "@/components/WorkspaceLinks";
 import { readPageCache, writePageCache } from "@/lib/page-cache";
 import { usePersistedState, useScrollRestoration } from "@/lib/list-ui-state";
-import { drillFromSearch } from "@/lib/report-drill";
 import { chooseDocuments, isNativeShell } from "@/lib/native-pick";
+import { activeBankTab, bankTabs } from "@/lib/navigation";
 
 const RECENT_LIMIT = 5;
 
@@ -31,8 +32,12 @@ interface BankAccountOption {
   isDefault: boolean;
 }
 
-export default function TiliotteetPage() {
+export default function TapahtumatClient() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const monthFilter = searchParams.get("month") ?? "";
+  const accountFilter = searchParams.get("account") ?? "";
+  const query = searchParams.get("q") ?? "";
   const [statements, setStatements] = useState<StatementData[]>(
     () => readPageCache<StatementData[]>("statements") ?? []
   );
@@ -41,14 +46,6 @@ export default function TiliotteetPage() {
   const [loading, setLoading] = useState(
     () => readPageCache<StatementData[]>("statements") === null
   );
-  // Persisted so back-navigation restores the active filter/tab instead of
-  // resetting to the defaults.
-  const [monthFilter, setMonthFilter] = usePersistedState("tiliotteet.monthFilter", "");
-  useEffect(() => {
-    const drill = drillFromSearch(window.location.search);
-    if (drill.month) setMonthFilter(drill.month);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
   const [showAllStatements, setShowAllStatements] = usePersistedState(
     "tiliotteet.showAllStatements",
     false
@@ -64,6 +61,16 @@ export default function TiliotteetPage() {
       )?.id || ""
   );
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  function replaceQuery(patch: Record<string, string>) {
+    const next = new URLSearchParams(searchParams.toString());
+    for (const [key, value] of Object.entries(patch)) {
+      if (value) next.set(key, value);
+      else next.delete(key);
+    }
+    const queryString = next.toString();
+    router.replace(queryString ? `/pankki/tapahtumat?${queryString}` : "/pankki/tapahtumat");
+  }
 
   const loadStatements = useCallback(async () => {
     try {
@@ -135,7 +142,7 @@ export default function TiliotteetPage() {
       }>(res, "Tiliotteen käsittely epäonnistui");
       setUploadMsg(`${data.count} tapahtumaa löydetty`);
       if (data.statement?.id) {
-        router.push(`/tiliotteet/${data.statement.id}`);
+        router.push(`${`/pankki/tapahtumat/${data.statement.id}`}${searchParams.toString() ? `?${searchParams.toString()}` : ""}`);
       } else {
         await loadStatements();
       }
@@ -177,13 +184,22 @@ export default function TiliotteetPage() {
 
   const months = [
     ...new Set(
-      statements.map((s) => s.periodMonth).filter((m): m is string => !!m)
+      [
+        ...statements.map((s) => s.periodMonth).filter((m): m is string => !!m),
+        ...(monthFilter ? [monthFilter] : []),
+      ]
     ),
   ].sort().reverse();
 
-  const filteredStatements = monthFilter
-    ? statements.filter((s) => s.periodMonth === monthFilter)
-    : statements;
+  const filteredStatements = statements.filter((s) => {
+    if (monthFilter && s.periodMonth !== monthFilter) return false;
+    if (accountFilter && s.bankAccountId !== accountFilter) return false;
+    if (query) {
+      const haystack = `${s.fileName} ${s.bankAccount?.name ?? ""}`.toLowerCase();
+      if (!haystack.includes(query.trim().toLowerCase())) return false;
+    }
+    return true;
+  });
   const visibleStatements = showAllStatements
     ? filteredStatements
     : filteredStatements.slice(0, RECENT_LIMIT);
@@ -191,23 +207,72 @@ export default function TiliotteetPage() {
   return (
     <>
       <div className="space-y-8 pb-6">
-        <header className="space-y-2">
-          <p className="text-sm text-warm-gray leading-relaxed">
-            Tapahtumat tulevat yhdistetystä pankista. Tiedoston tuonti on alla, jos tarvitset sen.
-          </p>
-          <WorkspaceLinks items={linksWithActive(BANK_LINKS, "/tiliotteet")} />
-        </header>
+        <PageHeader
+          crumbs={[{ href: "/pankki", label: "Pankki" }, { label: "Tapahtumat" }]}
+          backHref="/pankki"
+        />
+        <SectionTabs items={bankTabs()} activeHref={activeBankTab("/pankki/tapahtumat")} />
+        <p className="text-sm text-warm-gray leading-relaxed">
+          Tapahtumat tulevat yhdistetystä pankista. Tiedoston tuonti on alla, jos tarvitset sen.
+        </p>
 
-        <Link
-          href="/pankki"
-          className="flex items-center justify-between gap-3 bg-charcoal text-white rounded-3xl px-5 py-4 active-press"
-        >
-          <span>
-            <span className="block text-sm font-medium">Hae tapahtumat</span>
-            <span className="block text-xs text-white/70 mt-0.5">Tilit ja synkronointi</span>
-          </span>
-          <span aria-hidden>→</span>
-        </Link>
+        <div className="flex flex-col gap-2">
+          <label htmlFor="statement-search" className="text-sm font-medium text-charcoal">
+            Haku
+          </label>
+          <input
+            id="statement-search"
+            value={query}
+            onChange={(event) => {
+              replaceQuery({ q: event.target.value });
+              setShowAllStatements(false);
+            }}
+            placeholder="Tiedosto tai tili"
+            className="min-h-12 rounded-xl border border-warm-gray-light/60 bg-white px-4 text-sm"
+          />
+          <div className="flex flex-col gap-2 sm:flex-row">
+            <label className="flex min-w-0 flex-1 flex-col gap-1 text-sm font-medium text-charcoal">
+              Kuukausi
+              <select
+                id="statement-month-filter"
+                value={monthFilter}
+                onChange={(event) => {
+                  replaceQuery({ month: event.target.value });
+                  setShowAllStatements(false);
+                }}
+                className="min-h-12 rounded-xl border border-warm-gray-light/60 bg-white px-4 text-sm font-normal"
+              >
+                <option value="">Kaikki</option>
+                {months.map((month) => (
+                  <option key={month} value={month}>
+                    {formatMonth(month)}
+                  </option>
+                ))}
+              </select>
+            </label>
+            {accounts.length > 0 && (
+              <label className="flex min-w-0 flex-1 flex-col gap-1 text-sm font-medium text-charcoal">
+                Tili
+                <select
+                  id="statement-account-filter"
+                  value={accountFilter}
+                  onChange={(event) => {
+                    replaceQuery({ account: event.target.value });
+                    setShowAllStatements(false);
+                  }}
+                  className="min-h-12 rounded-xl border border-warm-gray-light/60 bg-white px-4 text-sm font-normal"
+                >
+                  <option value="">Kaikki</option>
+                  {accounts.map((account) => (
+                    <option key={account.id} value={account.id}>
+                      {account.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
+          </div>
+        </div>
 
         <details className="bg-white rounded-3xl border border-warm-gray-light/20 shadow-sm p-6 space-y-5">
           <summary className="text-sm font-medium text-charcoal cursor-pointer min-h-11">
@@ -285,33 +350,6 @@ export default function TiliotteetPage() {
           )}
         </details>
 
-        {months.length > 1 && (
-          <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3 px-1">
-            <label
-              htmlFor="statement-month-filter"
-              className="text-sm font-medium text-charcoal"
-            >
-              Kuukausi
-            </label>
-            <select
-              id="statement-month-filter"
-              value={monthFilter}
-              onChange={(e) => {
-                setMonthFilter(e.target.value);
-                setShowAllStatements(false);
-              }}
-              className="text-sm px-4 py-2.5 rounded-xl border border-warm-gray-light/60 bg-white min-w-[10rem]"
-            >
-              <option value="">Kaikki</option>
-              {months.map((m) => (
-                <option key={m} value={m}>
-                  {formatMonth(m)}
-                </option>
-              ))}
-            </select>
-          </div>
-        )}
-
         {loadError ? (
           <ErrorState
             message={loadError}
@@ -351,7 +389,7 @@ export default function TiliotteetPage() {
               return (
                 <Link
                   key={s.id}
-                  href={`/tiliotteet/${s.id}`}
+                  href={searchParams.toString() ? `/pankki/tapahtumat/${s.id}?${searchParams.toString()}` : `/pankki/tapahtumat/${s.id}`}
                   className="block bg-white rounded-3xl border border-warm-gray-light/20 shadow-sm overflow-hidden hover:border-accent/20 hover:shadow-md transition-all"
                 >
                   <div className="p-6 space-y-5">

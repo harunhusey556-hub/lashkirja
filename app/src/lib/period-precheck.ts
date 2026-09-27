@@ -98,7 +98,7 @@ export async function listPeriodPrecheck(userId: string, month: string): Promise
         id: tx.id,
         title: tx.counterparty || tx.message || "Pankkitapahtuma",
         detail: `${money(tx.amountCents)} · ei tositetta`,
-        href: `/tiliotteet/${tx.statementId}`,
+        href: `/pankki/tapahtumat/${tx.statementId}`,
       })),
       ...pending.map((receipt) => ({
         id: receipt.id,
@@ -114,7 +114,7 @@ export async function listPeriodPrecheck(userId: string, month: string): Promise
       id: tx.id,
       title: tx.counterparty || tx.message || "Pankkitapahtuma",
       detail: `${money(tx.amountCents)} · ehdotettu täsmäytys`,
-      href: `/tiliotteet/${tx.statementId}`,
+      href: `/pankki/tapahtumat/${tx.statementId}`,
     })),
     draftInvoices: drafts.map((invoice) => ({
       id: invoice.id,

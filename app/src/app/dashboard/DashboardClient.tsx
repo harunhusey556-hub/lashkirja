@@ -339,7 +339,7 @@ export default function DashboardClient({
                 onRetry={() => setLoadAttempt((a) => a + 1)}
               />
             ) : data.matching && data.matching.matchable > 0 && (
-              <Link href="/tiliotteet" className="block mt-2 animate-in-delay-2">
+              <Link href="/pankki/taydennys" className="block mt-2 animate-in-delay-2">
                 <div className="bg-white rounded-2xl p-4 shadow-sm border border-slate-100 flex items-center justify-between hover:border-charcoal/20 transition-colors group">
                   <div>
                     <p className="text-sm font-semibold text-charcoal">Kuittien linkitys</p>

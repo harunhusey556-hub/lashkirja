@@ -107,7 +107,7 @@ export async function listWorkQueue(userId: string): Promise<WorkQueueItem[]> {
       kind: "missing_document",
       title: tx.counterparty || tx.message || "Pankkitapahtuma",
       detail: "Tapahtumalla ei ole tositetta.",
-      href: `/tiliotteet/${tx.statementId}`,
+      href: `/pankki/tapahtumat/${tx.statementId}`,
     });
   }
 
@@ -120,7 +120,7 @@ export async function listWorkQueue(userId: string): Promise<WorkQueueItem[]> {
       kind: "amount_mismatch",
       title: tx.receipt?.vendor || tx.counterparty || "Täsmäytys",
       detail: "Linkitetyn kuitin summa eroaa pankkitapahtumasta.",
-      href: tx.receipt ? `/kuitit/${tx.receipt.id}` : `/tiliotteet/${tx.statementId}`,
+      href: tx.receipt ? `/kuitit/${tx.receipt.id}` : `/pankki/tapahtumat/${tx.statementId}`,
     });
     if (items.filter((item) => item.kind === "amount_mismatch").length >= TAKE) break;
   }
@@ -154,7 +154,7 @@ export async function listWorkQueue(userId: string): Promise<WorkQueueItem[]> {
         tx.matchScore == null
           ? "Useita tai epävarmoja osumia."
           : "Osuma on epävarma.",
-      href: `/tiliotteet/${tx.statementId}`,
+      href: `/pankki/tapahtumat/${tx.statementId}`,
     });
   }
 

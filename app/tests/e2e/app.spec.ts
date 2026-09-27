@@ -34,13 +34,15 @@ test("login lands on the dashboard and the tab bar navigates", async ({ page }) 
   await expect(page.getByText("Tulot", { exact: true })).toBeVisible();
 
   const nav = page.getByRole("navigation", { name: "Päävalikko" });
-  await nav.getByRole("button", { name: "Laskut" }).click();
+  await nav.getByRole("button", { name: "Myynti" }).click();
   await expect(page).toHaveURL(/\/laskut$/);
 
   await nav.getByRole("button", { name: "Pankki" }).click();
   await expect(page).toHaveURL(/\/pankki$/);
+  await expect(page.getByRole("navigation", { name: "Osio" }).getByRole("button", { name: "Täsmäytys" })).toBeVisible();
 
-  await nav.getByRole("button", { name: "Raportit" }).click();
+  await nav.getByRole("button", { name: "Muut" }).click();
+  await page.getByRole("button", { name: "Raportit" }).click();
   await expect(page).toHaveURL(/\/raportit$/);
   await expect(nav.getByRole("button", { name: "Lisää", exact: true })).toHaveCount(0);
 });

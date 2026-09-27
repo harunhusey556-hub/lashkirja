@@ -18,7 +18,14 @@ export const EMPTY_HONESTY: HonestyContext = {
 export const HONESTY_REFUSAL =
   "En vahvistanut väitettä kirjanpidosta. Summat ja toimenpiteet tulevat vain palvelimen laskennasta ja tehdyistä toimista.";
 
-const KNOWN_SCREENS = new Set(["/alv-raportti", "/raportit", "/kuitit", "/laskut", "/tiliotteet"]);
+const KNOWN_SCREENS = new Set([
+  "/alv-raportti",
+  "/raportit",
+  "/kuitit",
+  "/laskut",
+  "/pankki/tapahtumat",
+  "/tiliotteet",
+]);
 const RECORD_ID_SOURCE = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
 
 const UNPERFORMED_ACTION =
@@ -50,6 +57,7 @@ const SOURCE_RULES: Array<{ prefix: string; label: string }> = [
   { prefix: "/raportit", label: "Raportit" },
   { prefix: "/kuitit", label: "Kuitit" },
   { prefix: "/laskut", label: "Laskut" },
+  { prefix: "/pankki/tapahtumat", label: "Tapahtumat" },
   { prefix: "/tiliotteet", label: "Tiliotteet" },
 ];
 
@@ -71,7 +79,7 @@ export function sourcesFromText(text: string): ChatSource[] {
   };
   for (const match of text.matchAll(/\[[^\]]+\]\((\/[^)\s]+)\)/g)) add(match[1]);
   for (const match of text.matchAll(
-    /(?:^|\s)(\/(?:alv-raportti|raportit|kuitit|laskut|tiliotteet)(?:\?[^\s).,;]*)?)/g
+    /(?:^|\s)(\/(?:alv-raportti|raportit|kuitit|laskut|pankki\/tapahtumat|tiliotteet)(?:\?[^\s).,;]*)?)/g
   )) {
     add(match[1]);
   }

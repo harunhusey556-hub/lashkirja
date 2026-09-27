@@ -12,7 +12,9 @@ import {
 import { BalanceTable, type MonthRow } from "@/components/bank/BalanceTable";
 import { apiFetch, errorMessage, isUnauthorized, readJson, redirectToLogin } from "@/components/clientFetch";
 import { formatEur, formatMonth } from "@/lib/format";
-import { BANK_LINKS, WorkspaceLinks, linksWithActive } from "@/components/WorkspaceLinks";
+import { PageHeader } from "@/components/PageHeader";
+import { SectionTabs } from "@/components/SectionTabs";
+import { activeBankTab, bankTabs } from "@/lib/navigation";
 import { maskIban } from "@/lib/iban";
 
 import { pageCacheFetchedAt, readPageCache, writePageCache } from "@/lib/page-cache";
@@ -236,14 +238,26 @@ export default function BankAccountsPage() {
   return (
     <>
       <div className="space-y-6 pb-6">
+        <PageHeader
+          crumbs={[{ href: "/pankki", label: "Pankki" }, { label: "Tilit" }]}
+          backHref="/pankki"
+        />
+        <SectionTabs items={bankTabs()} activeHref={activeBankTab("/pankki/tilit")} />
         <header className="flex items-start justify-between gap-3">
           <div className="space-y-2 min-w-0">
             <p className="text-sm text-warm-gray leading-relaxed">
-              Kirjanpidon tilit ja kuukausien loppusaldot. Yhdistetty pankki on Pankki-välilehdellä.
+              Kirjanpidon tilit ja kuukausien loppusaldot. Pankkiyhteyden asetukset ovat Asetuksissa.
             </p>
-            <WorkspaceLinks items={linksWithActive(BANK_LINKS, "/pankkitilit")} />
           </div>
-          {formMode === "hidden" && status === "ready" && (overview?.accounts.length ?? 0) > 0 && (
+          {formMode === "hidden" && status === "ready" && (
+            <div className="flex shrink-0 gap-2">
+              <Link
+                href="/asetukset/pankkiyhteys"
+                className="mt-1 inline-flex min-h-11 items-center rounded-xl bg-charcoal px-3.5 py-2 text-sm font-medium text-white active-press"
+              >
+                + Yhdistä
+              </Link>
+              {(overview?.accounts.length ?? 0) > 0 && (
             // Adding an account is a once-a-year action; it does not deserve a
             // full-width button competing with the balances.
             <button
@@ -254,6 +268,8 @@ export default function BankAccountsPage() {
             >
               + Lisää
             </button>
+              )}
+            </div>
           )}
         </header>
 
@@ -293,14 +309,8 @@ export default function BankAccountsPage() {
               <section className="bg-white rounded-3xl border border-warm-gray-light/20 shadow-sm p-8 text-center space-y-3">
                 <p className="text-base font-medium text-charcoal">Ei vielä kirjanpidon tilejä</p>
                 <p className="text-sm text-warm-gray leading-relaxed">
-                  Yhdistetty pankki näkyy Pankki-välilehdellä. Tänne lisätään tili vain, jos seuraat saldoa käsin.
+                  Yhdistä pankki, jos tapahtumat haetaan suoraan. Käsin seurattava tili lisätään tähän.
                 </p>
-                <Link
-                  href="/pankki"
-                  className="active-press inline-flex min-h-12 items-center justify-center rounded-xl bg-charcoal px-4 text-sm font-medium text-white"
-                >
-                  Avaa pankkiyhteys
-                </Link>
                 <button
                   type="button"
                   onClick={() => setFormMode("create")}

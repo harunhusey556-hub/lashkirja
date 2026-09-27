@@ -88,6 +88,13 @@ const nextConfig: NextConfig = {
       },
     ];
   },
+  async redirects() {
+    return [
+      { source: "/tiliotteet", destination: "/pankki/tapahtumat", permanent: false },
+      { source: "/tiliotteet/:id", destination: "/pankki/tapahtumat/:id", permanent: false },
+      { source: "/pankkitilit", destination: "/pankki/tilit", permanent: false },
+    ];
+  },
 };
 
 export default nextConfig;

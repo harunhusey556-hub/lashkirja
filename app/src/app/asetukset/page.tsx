@@ -105,11 +105,11 @@ export default function AsetuksetPage() {
           />
         </SettingsGroup>
 
-        <SettingsGroup label="Pankki ja sähköposti">
+        <SettingsGroup label="Integraatiot">
           <SettingsRow
             href="/asetukset/pankkiyhteys"
             label="Pankkiyhteys"
-            hint="Yhdistä pankki ja hae tapahtumat"
+            hint="Pankin tekninen yhteys ja haettavat tilit"
           />
           <SettingsRow
             href="/asetukset/sahkoposti"

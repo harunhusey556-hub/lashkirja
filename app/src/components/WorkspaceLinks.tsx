@@ -36,13 +36,3 @@ export const INVOICE_LINKS = [
   { href: "/toistuvat", label: "Toistuvat" },
 ] as const;
 
-export const BANK_LINKS = [
-  { href: "/pankkitilit", label: "Tilit" },
-  { href: "/tiliotteet", label: "Tapahtumat" },
-  { href: "/pankki", label: "Pankki" },
-] as const;
-
-export const REPORT_LINKS = [
-  { href: "/raportit", label: "Tulos" },
-  { href: "/alv-raportti", label: "ALV" },
-] as const;

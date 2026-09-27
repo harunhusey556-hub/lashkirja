@@ -14,7 +14,7 @@ describe("report drill links", () => {
 
   it("skips an uncategorised label that is not a stored category", () => {
     expect(receiptDrillHref({ month: "2026-03", category: "Luokittelematon" })).toBe("/kuitit?month=2026-03");
-    expect(statementDrillHref("2026-03")).toBe("/tiliotteet?month=2026-03");
+    expect(statementDrillHref("2026-03")).toBe("/pankki/tapahtumat?month=2026-03");
     expect(invoiceDrillHref({ month: "2026-03", status: "draft" })).toBe("/laskut?month=2026-03&status=draft");
   });
 });

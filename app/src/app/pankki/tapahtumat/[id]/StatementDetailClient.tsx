@@ -1,8 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import StatementDetailView from "@/components/StatementDetailView";
+import { PageHeader } from "@/components/PageHeader";
 import { ErrorState, LoadingState } from "@/components/AsyncState";
 import {
   apiFetch,
@@ -12,11 +13,14 @@ import {
   redirectToLogin,
 } from "@/components/clientFetch";
 import type { StatementData } from "@/lib/statement-client";
+import { statementListHref } from "@/lib/navigation";
 
 export default function StatementDetailPage() {
   const params = useParams<{ id: string }>();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const statementId = params.id;
+  const listHref = statementListHref(searchParams.toString());
 
   const [statement, setStatement] = useState<StatementData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -51,6 +55,14 @@ export default function StatementDetailPage() {
   return (
     <>
       <div className="space-y-6 pb-6">
+        <PageHeader
+          crumbs={[
+            { href: "/pankki", label: "Pankki" },
+            { href: listHref, label: "Tapahtumat" },
+            { label: "Tiliote" },
+          ]}
+          backHref={listHref}
+        />
         {loadError ? (
           <ErrorState
             message={loadError}
@@ -71,7 +83,7 @@ export default function StatementDetailPage() {
           <StatementDetailView
             statement={statement}
             onStatementUpdated={setStatement}
-            onDeleted={() => router.push("/tiliotteet")}
+            onDeleted={() => router.push(listHref)}
           />
         )}
       </div>

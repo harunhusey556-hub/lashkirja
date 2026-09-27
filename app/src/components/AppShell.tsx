@@ -34,111 +34,66 @@ import {
 import { hapticSelection } from "@/lib/haptics";
 import { anyFormDirty, requestLeave } from "@/lib/form-guard";
 import { UnsavedChangesHost } from "@/components/UnsavedChangesHost";
-const NAV_ITEMS = [
-  {
-    href: "/dashboard",
-    label: "Etusivu",
-    icon: (active: boolean) => (
-      <svg
-        className={`w-6 h-6 ${active ? "text-accent" : "text-warm-gray"}`}
-        fill="none"
-        stroke="currentColor"
-        viewBox="0 0 24 24"
-        aria-hidden
-      >
-        <path
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          strokeWidth={1.75}
-          d="M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1v-9.5Z"
-        />
-      </svg>
-    ),
-  },
-  {
-    href: "/kuitit",
-    label: "Kuitit",
-    icon: (active: boolean) => (
-      <svg
-        className={`w-6 h-6 ${active ? "text-accent" : "text-warm-gray"}`}
-        fill="none"
-        stroke="currentColor"
-        viewBox="0 0 24 24"
-        aria-hidden
-      >
-        <path
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          strokeWidth={1.75}
-          d="M9 12h6m-6 4h6m2 5H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5.586a1 1 0 0 1 .707.293l5.414 5.414a1 1 0 0 1 .293.707V19a2 2 0 0 1-2 2Z"
-        />
-      </svg>
-    ),
-  },
-  {
-    href: "/laskut",
-    label: "Laskut",
-    icon: (active: boolean) => (
-      <svg
-        className={`w-6 h-6 ${active ? "text-accent" : "text-warm-gray"}`}
-        fill="none"
-        stroke="currentColor"
-        viewBox="0 0 24 24"
-        aria-hidden
-      >
-        <path
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          strokeWidth={1.75}
-          d="M3 6h18M3 12h18M3 18h10"
-        />
-      </svg>
-    ),
-  },
-  {
-    href: "/pankki",
-    label: "Pankki",
-    icon: (active: boolean) => (
-      <svg
-        className={`w-6 h-6 ${active ? "text-accent" : "text-warm-gray"}`}
-        fill="none"
-        stroke="currentColor"
-        viewBox="0 0 24 24"
-        aria-hidden
-      >
-        <path
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          strokeWidth={1.75}
-          d="M3 10h18M5 10V8.5L12 4l7 4.5V10M6 10v7m4-7v7m4-7v7m4-7v7M4 20h16"
-        />
-      </svg>
-    ),
-  },
-  {
-    href: "/raportit",
-    label: "Raportit",
-    icon: (active: boolean) => (
-      <svg
-        className={`w-6 h-6 ${active ? "text-accent" : "text-warm-gray"}`}
-        fill="none"
-        stroke="currentColor"
-        viewBox="0 0 24 24"
-        aria-hidden
-      >
-        <path
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          strokeWidth={1.75}
-          d="M4 19V5m0 14h16M8 16v-5m4 5V8m4 8v-3"
-        />
-      </svg>
-    ),
-  },
-] as const;
+import {
+  matchNav,
+  moreRoots,
+  primaryRoots,
+  rootIsActive,
+  rootNav,
+  shellShowsBack,
+} from "@/lib/navigation";
 
-function routeDepth(pathname: string): number {
-  return pathname.split("/").filter(Boolean).length;
+function RootIcon({ id, active, className }: { id: string; active: boolean; className?: string }) {
+  const tone = className ?? `h-6 w-6 ${active ? "text-accent" : "text-warm-gray"}`;
+  if (id === "etusivu") {
+    return (
+      <svg className={tone} fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.75} d="M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1v-9.5Z" />
+      </svg>
+    );
+  }
+  if (id === "kuitit") {
+    return (
+      <svg className={tone} fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.75} d="M9 12h6m-6 4h6m2 5H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5.586a1 1 0 0 1 .707.293l5.414 5.414a1 1 0 0 1 .293.707V19a2 2 0 0 1-2 2Z" />
+      </svg>
+    );
+  }
+  if (id === "myynti") {
+    return (
+      <svg className={tone} fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.75} d="M3 6h18M3 12h18M3 18h10" />
+      </svg>
+    );
+  }
+  if (id === "pankki") {
+    return (
+      <svg className={tone} fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.75} d="M3 10h18M5 10V8.5L12 4l7 4.5V10M6 10v7m4-7v7m4-7v7m4-7v7M4 20h16" />
+      </svg>
+    );
+  }
+  if (id === "kirjanpito") {
+    return (
+      <svg className={tone} fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.75} d="M7 3.5h8.5L19 7v13.5H7A2.5 2.5 0 0 1 4.5 18V6A2.5 2.5 0 0 1 7 3.5Z" />
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.75} d="M9 12h6M9 16h4" />
+      </svg>
+    );
+  }
+  if (id === "raportit") {
+    return (
+      <svg className={tone} fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.75} d="M4 19V5m0 14h16M8 16v-5m4 5V8m4 8v-3" />
+      </svg>
+    );
+  }
+  return (
+    <svg className={tone} fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.75} d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z" />
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.75} d="M19.4 15a7.8 7.8 0 0 0 .1-2l2-1.2-2-3.4-2.2.6a8 8 0 0 0-1.7-1L15.2 6h-4.4L10.4 8a8 8 0 0 0-1.7 1L6.5 8.4 4.5 11.8 6.5 13a7.8 7.8 0 0 0 .1 2l-2 1.2 2 3.4 2.2-.6a8 8 0 0 0 1.7 1l.4 2h4.4l.4-2a8 8 0 0 0 1.7-1l2.2.6 2-3.4-2-1.2Z" />
+    </svg>
+  );
 }
 
 type ShellUser = { userId?: string; email?: string; firstName?: string };
@@ -198,61 +153,16 @@ function warmTabCaches() {
   );
 }
 
-function navActive(pathname: string, href: string): boolean {
-  if (href === "/dashboard") return pathname === "/dashboard";
-  if (href === "/laskut") {
-    return (
-      pathname.startsWith("/laskut") ||
-      pathname.startsWith("/ostolaskut") ||
-      pathname.startsWith("/asiakkaat") ||
-      pathname.startsWith("/toistuvat")
-    );
-  }
-  if (href === "/pankki") {
-    return (
-      pathname.startsWith("/pankki") ||
-      pathname.startsWith("/pankkitilit") ||
-      pathname.startsWith("/tiliotteet")
-    );
-  }
-  if (href === "/raportit") {
-    return pathname.startsWith("/raportit") || pathname.startsWith("/alv-raportti");
-  }
-  return pathname === href || pathname.startsWith(`${href}/`);
-}
-
-function pageTitle(pathname: string): string {
-  if (pathname === "/kuitit/uusi") return "Uusi kuitti";
-  if (/^\/kuitit\/[^/]+$/.test(pathname)) return "Kuitti";
-  if (pathname.startsWith("/kuitit")) return "Kuitit ja laskut";
-  if (pathname === "/pankki") return "Pankki";
-  if (pathname.startsWith("/pankkitilit")) return "Pankkitilit";
-  if (pathname === "/laskut/uusi") return "Uusi lasku";
-  if (/^\/laskut\/[^/]+$/.test(pathname)) return "Lasku";
-  if (pathname.startsWith("/laskut")) return "Myyntilaskut";
-  if (pathname.startsWith("/asiakkaat")) return "Asiakkaat";
-  if (pathname.startsWith("/raportit")) return "Raportit";
-  if (pathname.startsWith("/ostolaskut")) return "Ostolaskut";
-  if (pathname.startsWith("/toistuvat")) return "Toistuvat laskut";
-  if (/^\/tiliotteet\/[^/]+$/.test(pathname)) return "Tiliote";
-  if (pathname.startsWith("/tiliotteet")) return "Tapahtumat";
-  if (pathname.startsWith("/alv-raportti")) return "ALV-raportti";
-  if (pathname.startsWith("/asetukset/profiili")) return "Profiili";
-  if (pathname.startsWith("/asetukset/yritys")) return "Yritysmuoto & ALV";
-  if (pathname.startsWith("/asetukset/laskutus")) return "Laskuttajan tiedot";
-  if (pathname.startsWith("/asetukset/kirjanpito")) return "Kirjanpidon lukitus";
-  if (pathname.startsWith("/asetukset/sahkoposti")) return "Sähköpostien tuonti";
-  if (pathname.startsWith("/asetukset/tili/salasana")) return "Vaihda salasana";
-  if (pathname.startsWith("/asetukset/tili/laitteet")) return "Laitteet";
-  if (pathname.startsWith("/asetukset/tili")) return "Tili";
-  if (pathname.startsWith("/asetukset/turvallisuus/lukitus")) return "Näytön lukitus";
-  if (pathname.startsWith("/asetukset/turvallisuus/biometria")) return "Face ID";
-  if (pathname.startsWith("/asetukset/turvallisuus")) return "Turvallisuus";
-  if (pathname.startsWith("/asetukset/pankkiyhteys")) return "Pankkiyhteys";
-  if (pathname.startsWith("/asetukset/ohje")) return "Ohje ja tuki";
-  if (pathname.startsWith("/asetukset/tietosuoja")) return "Tietosuoja";
-  if (pathname.startsWith("/asetukset")) return "Asetukset";
-  return "Etusivu";
+function openRoot(
+  href: string,
+  pathname: string,
+  router: { push: (href: string) => void }
+) {
+  if (href === pathname) return;
+  requestLeave(() => {
+    armNavigation(href, "tab");
+    router.push(href);
+  });
 }
 
 export default function AppShell({ children }: { children: React.ReactNode }) {
@@ -266,6 +176,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   // Stored with the path it was opened on, so a route change closes it without
   // an effect that would re-render twice.
   const [profileOpenOn, setProfileOpenOn] = useState<string | null>(null);
+  const [moreOpenOn, setMoreOpenOn] = useState<string | null>(null);
   const [chatOpenOn, setChatOpenOn] = useState<string | null>(null);
   const [signingOut, setSigningOut] = useState(false);
   const [signOutError, setSignOutError] = useState("");
@@ -278,7 +189,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
   const pathname = usePathname();
   const router = useRouter();
-  const title = pageTitle(pathname);
+  const title = matchNav(pathname)?.label ?? "Etusivu";
   const mainRef = useRef<HTMLElement>(null);
   const swipeLock = useRef(false);
   // Adjusting state during render is how a new pathname picks its enter
@@ -292,7 +203,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     setNavFrame({ path: pathname, direction: consumeDirection(pathname) });
   }
   const direction = navFrame.path === pathname ? navFrame.direction : "none";
-  const canGoBack = routeDepth(pathname) > 1;
+  const canGoBack = shellShowsBack(pathname);
 
   useEffect(() => {
     recordRoute(pathname, direction);
@@ -553,15 +464,52 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     }
   }
 
+  const moreOpen = moreOpenOn === pathname;
+  const moreActive = moreRoots().some((item) => rootIsActive(pathname, item.id));
+
+  function goToRoot(href: string) {
+    void hapticSelection();
+    setMoreOpenOn(null);
+    openRoot(href, pathname, router);
+  }
+
   return (
     <AppLock>
+    {authState.status === "ready" && (
+      <aside className="app-sidebar" aria-hidden={false}>
+        <p className="px-4 pb-2 pt-4 text-xs font-semibold uppercase tracking-wide text-warm-gray">LashKirja</p>
+        <nav aria-label="Päävalikko" className="flex flex-1 flex-col gap-1 px-2">
+          {rootNav().map((item) => {
+            const active = rootIsActive(pathname, item.id);
+            return (
+              <button
+                key={item.id}
+                type="button"
+                onClick={() => goToRoot(item.path)}
+                aria-current={active ? "page" : undefined}
+                className={`flex min-h-12 items-center gap-3 rounded-xl px-3 text-left text-sm active-press ${
+                  active ? "bg-blush font-semibold text-accent-dark" : "font-medium text-charcoal"
+                }`}
+              >
+                <RootIcon
+                  id={item.id}
+                  active={active}
+                  className={`h-5 w-5 ${active ? "text-accent" : "text-warm-gray"}`}
+                />
+                <span className="truncate">{item.label}</span>
+              </button>
+            );
+          })}
+        </nav>
+      </aside>
+    )}
     <div className="app-frame">
       <UnsavedChangesHost />
       <header
         className="app-header z-40 bg-white/90 backdrop-blur-md border-b border-warm-gray-light/30"
         onContextMenu={(event) => event.preventDefault()}
       >
-        <div className="app-header-row max-w-lg mx-auto min-h-14 px-1">
+        <div className="app-header-row mx-auto min-h-14 max-w-lg px-1 md:max-w-3xl">
           <div className="flex h-11 w-11 items-center justify-center">
             {canGoBack && (
               <button
@@ -627,7 +575,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         // Keyed on the path so the enter animation replays on every navigation.
         key={pathname}
         ref={mainRef}
-        className={`app-main flex-1 max-w-lg mx-auto w-full pt-5 ${
+        className={`app-main mx-auto w-full max-w-lg flex-1 pt-5 md:max-w-3xl ${
           direction === "forward"
             ? "animate-page-fwd"
             : direction === "back"
@@ -665,27 +613,20 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
             aria-label="Päävalikko"
             onContextMenu={(event) => event.preventDefault()}
           >
-            <div className="max-w-lg mx-auto h-[var(--app-tab-height)] flex items-stretch">
-              {NAV_ITEMS.map((item) => {
-                const active = navActive(pathname, item.href);
+            <div className="mx-auto flex h-[var(--app-tab-height)] max-w-lg items-stretch">
+              {primaryRoots().map((item) => {
+                const active = rootIsActive(pathname, item.id);
                 return (
                   <button
-                    key={item.href}
+                    key={item.id}
                     type="button"
-                    onClick={() => {
-                      void hapticSelection();
-                      if (item.href === pathname) return;
-                      requestLeave(() => {
-                        armNavigation(item.href, "tab");
-                        router.push(item.href);
-                      });
-                    }}
+                    onClick={() => goToRoot(item.path)}
                     className={`flex min-w-0 flex-1 flex-col items-center justify-center gap-0.5 touch-target active:bg-blush/30 transition-colors active-press ${
                       active ? "text-accent-dark" : "text-warm-gray"
                     }`}
                     aria-current={active ? "page" : undefined}
                   >
-                    {item.icon(active)}
+                    <RootIcon id={item.id} active={active} />
                     <span
                       className={`max-w-full truncate text-[11px] leading-tight ${active ? "font-semibold" : "font-medium"}`}
                     >
@@ -694,8 +635,62 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                   </button>
                 );
               })}
+              <button
+                type="button"
+                onClick={() => {
+                  void hapticSelection();
+                  setMoreOpenOn(pathname);
+                }}
+                className={`flex min-w-0 flex-1 flex-col items-center justify-center gap-0.5 touch-target active:bg-blush/30 transition-colors active-press ${
+                  moreActive ? "text-accent-dark" : "text-warm-gray"
+                }`}
+                aria-current={moreActive ? "page" : undefined}
+                aria-haspopup="dialog"
+                aria-expanded={moreOpen}
+              >
+                <svg className={`h-6 w-6 ${moreActive ? "text-accent" : "text-warm-gray"}`} viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+                  <circle cx="6" cy="12" r="1.6" />
+                  <circle cx="12" cy="12" r="1.6" />
+                  <circle cx="18" cy="12" r="1.6" />
+                </svg>
+                <span className={`max-w-full truncate text-[11px] leading-tight ${moreActive ? "font-semibold" : "font-medium"}`}>
+                  Muut
+                </span>
+              </button>
             </div>
           </nav>
+
+          <BottomSheet
+            isOpen={moreOpen}
+            onClose={() => setMoreOpenOn(null)}
+            title="Muut"
+            labelledBy="more-sheet-title"
+            heightClass="max-h-[60dvh]"
+          >
+            <div className="space-y-1 px-3 py-2 sheet-safe-bottom">
+              {moreRoots().map((item) => {
+                const active = rootIsActive(pathname, item.id);
+                return (
+                  <button
+                    key={item.id}
+                    type="button"
+                    onClick={() => goToRoot(item.path)}
+                    aria-current={active ? "page" : undefined}
+                    className={`flex w-full items-center gap-3 rounded-2xl px-4 py-3.5 text-left active-press ${
+                      active ? "bg-blush" : "active:bg-blush/40"
+                    }`}
+                  >
+                    <RootIcon
+                      id={item.id}
+                      active={active}
+                      className={`h-5 w-5 ${active ? "text-accent" : "text-warm-gray"}`}
+                    />
+                    <span className="text-sm font-medium text-charcoal">{item.label}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </BottomSheet>
 
           <BottomSheet
             isOpen={showProfile}
@@ -706,34 +701,6 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
             heightClass="max-h-[60dvh]"
           >
             <div className="px-3 py-2 sheet-safe-bottom space-y-1">
-              <button
-                type="button"
-                onClick={() => {
-                  requestLeave(() => {
-                    setProfileOpenOn(null);
-                    if (pathname === "/asetukset") return;
-                    armNavigation("/asetukset", "tab");
-                    router.push("/asetukset");
-                  });
-                }}
-                className="flex w-full items-center gap-3 px-4 py-3.5 rounded-2xl text-left transition-colors active:bg-blush/40"
-              >
-                <span className="flex-1 min-w-0">
-                  <span className="block text-sm font-medium text-charcoal">Asetukset</span>
-                  <span className="block text-xs text-warm-gray">Profiili, yritys, sähköpostit</span>
-                </span>
-                <svg
-                  className="w-4 h-4 text-warm-gray-light shrink-0"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth={2}
-                  aria-hidden
-                >
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-                </svg>
-              </button>
-
               {signOutError && (
                 <p className="px-4 text-sm text-danger" role="alert">
                   {signOutError}
