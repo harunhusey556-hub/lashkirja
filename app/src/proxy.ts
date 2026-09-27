@@ -9,21 +9,17 @@ import { SessionData, sessionOptions } from "@/lib/session-options";
  * unless explicitly listed in PUBLIC_API_PREFIXES.
  */
 
-const protectedPrefixes = [
-  "/dashboard",
-  "/kuitit",
-  "/tiliotteet",
-  "/alv-raportti",
-  "/asetukset",
-  "/laskut",
-  "/asiakkaat",
-  "/ostolaskut",
-  "/toistuvat",
-  "/pankkitilit",
-  "/pankki",
-  "/raportit",
-  "/bank",
+/** Signed-out screens. Every other page requires a session. */
+export const PUBLIC_PAGES: readonly string[] = [
+  "/login",
+  "/unohtunut-salasana",
+  "/palauta-salasana",
+  "/vahvista-sahkoposti",
 ];
+
+export function isPublicPage(pathname: string): boolean {
+  return PUBLIC_PAGES.includes(pathname);
+}
 
 const PUBLIC_API_PREFIXES = ["/api/auth/", "/api/cron/", "/api/health"];
 
@@ -70,20 +66,11 @@ export async function proxy(request: NextRequest) {
     return NextResponse.next();
   }
 
-  // --- Protected page routes ---
-  const isProtected = protectedPrefixes.some(
-    (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`),
-  );
-
-  if (!isProtected && pathname !== "/login") {
-    return NextResponse.next();
-  }
-
+  // --- Page routes: protected unless explicitly public ---
+  const isProtected = !isPublicPage(pathname);
   const isAuthenticated = await authenticated(request);
   if (isProtected && !isAuthenticated) {
-    // Deep-link continue-after-login: remember where the user was headed so
-    // LoginForm/the login route can send them back there instead of always
-    // dumping them on /dashboard.
+    // Deep-link continue-after-login: remember where the user was headed.
     const target = `${pathname}${request.nextUrl.search}`;
     const search = target === "/" ? "" : `?next=${encodeURIComponent(target)}`;
     return redirectForRequest(request, "/login", search);
@@ -105,21 +92,7 @@ export async function proxy(request: NextRequest) {
 
 export const config = {
   matcher: [
-    "/dashboard/:path*",
-    "/kuitit/:path*",
-    "/tiliotteet/:path*",
-    "/alv-raportti/:path*",
-    "/asetukset/:path*",
-    "/laskut/:path*",
-    "/asiakkaat/:path*",
-    "/ostolaskut/:path*",
-    "/toistuvat/:path*",
-    "/pankkitilit/:path*",
-    "/pankki",
-    "/pankki/:path*",
-    "/raportit/:path*",
-    "/bank/:path*",
-    "/login",
-    "/api/:path*",
+    // Everything except Next internals and files served from public/.
+    "/((?!_next/|favicon\\.ico|manifest\\.json|offline\\.html|index\\.html|icons/|.*\\.(?:png|svg|jpg|jpeg|webp|ico|txt|webmanifest)$).*)",
   ],
 };
