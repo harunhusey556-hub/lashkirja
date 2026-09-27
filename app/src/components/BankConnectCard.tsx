@@ -280,7 +280,6 @@ export default function BankConnectCard({ entityType }: { entityType: string }) 
   }
 
   async function disconnect(connectionId: string) {
-    setDisconnectId(null);
     setBusyId(connectionId);
     try {
       const response = await fetch(`/api/bank/connections/${connectionId}`, {
@@ -291,13 +290,16 @@ export default function BankConnectCard({ entityType }: { entityType: string }) 
       setShowPicker(true);
       setMessageTone("ok");
       setMessage("Pankkiyhteys katkaistu.");
+      setDisconnectId(null);
     } catch (error: unknown) {
       if (isUnauthorized(error)) {
         redirectToLogin();
         return;
       }
+      const message = errorMessage(error, "Yhteyden katkaisu epäonnistui");
       setMessageTone("err");
-      setMessage(errorMessage(error, "Yhteyden katkaisu epäonnistui"));
+      setMessage(message);
+      throw new Error(message);
     } finally {
       setBusyId(null);
     }
@@ -569,9 +571,7 @@ export default function BankConnectCard({ entityType }: { entityType: string }) 
         title="Katkaise pankkiyhteys?"
         description="Suostumus pankissa suljetaan. Jo haetut tiliotteet säilyvät."
         confirmLabel="Katkaise yhteys"
-        onConfirm={() => {
-          if (disconnectId) void disconnect(disconnectId);
-        }}
+        onConfirm={() => (disconnectId ? disconnect(disconnectId) : Promise.resolve())}
         onCancel={() => setDisconnectId(null)}
       />
     </section>

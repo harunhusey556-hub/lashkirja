@@ -189,10 +189,11 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
       await readJson(response, "Maksun poisto epäonnistui");
       await load();
     } catch (error) {
-      setMessage(errorMessage(error, "Maksun poisto epäonnistui"));
+      const message = errorMessage(error, "Maksun poisto epäonnistui");
+      setMessage(message);
+      throw new Error(message);
     } finally {
       setBusy(false);
-      setConfirmRemovePayment(null);
     }
   }
 
@@ -291,8 +292,9 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
       await readJson(response, "Poisto epäonnistui");
       router.push("/laskut");
     } catch (error) {
-      setMessage(errorMessage(error, "Poisto epäonnistui"));
-      setConfirmDelete(false);
+      const message = errorMessage(error, "Poisto epäonnistui");
+      setMessage(message);
+      throw new Error(message);
     } finally {
       setBusy(false);
     }
@@ -590,7 +592,7 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
         title="Poistetaanko luonnos?"
         description="Luonnos poistetaan pysyvästi."
         confirmLabel="Poista"
-        onConfirm={() => void deleteInvoice()}
+        onConfirm={() => deleteInvoice()}
         onCancel={() => setConfirmDelete(false)}
       />
 
@@ -599,9 +601,9 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
         title="Poistetaanko maksu?"
         description="Maksu poistetaan pysyvästi laskulta."
         confirmLabel="Poista"
-        onConfirm={() => {
-          if (confirmRemovePayment) void removePayment(confirmRemovePayment);
-        }}
+        onConfirm={() =>
+          confirmRemovePayment ? removePayment(confirmRemovePayment) : Promise.resolve()
+        }
         onCancel={() => setConfirmRemovePayment(null)}
       />
     </>

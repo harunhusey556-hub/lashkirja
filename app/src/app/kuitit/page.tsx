@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import ConfirmModal from "@/components/ConfirmModal";
 import ReviewQueue from "@/components/ReviewQueue";
 import ReceiptMatchPanel, {
@@ -24,6 +24,14 @@ import { readPageCache, writePageCache } from "@/lib/page-cache";
 import { usePersistedState, useScrollRestoration } from "@/lib/list-ui-state";
 
 import { formatEur, formatMonth, parseFinnishNumber } from "@/lib/format";
+import {
+  coerceReceiptListCache,
+  dropReceipt,
+  dropReceipts,
+  mergeReceiptPage,
+  receiptCountLabel,
+  type ReceiptListPayload,
+} from "@/lib/receipt-list";
 import { Button, buttonClass, chipClass } from "@/components/ui";
 interface SavedReceipt {
   id: string;
@@ -68,7 +76,10 @@ export default function KuititPage() {
   const [listResult, setListResult] = useState<{
     query: string;
     receipts: SavedReceipt[];
+    count: number;
+    truncated: boolean;
   } | null>(null);
+  const [loadingMore, setLoadingMore] = useState(false);
   // Persisted so back-navigation restores the active month/search/advanced
   // filters instead of resetting the list to its defaults.
   const [monthFilter, setMonthFilter] = usePersistedState("kuitit.monthFilter", "");
@@ -95,6 +106,8 @@ export default function KuititPage() {
   const [pendingReceipts, setPendingReceipts] = useState<SavedReceipt[]>(
     () => readPageCache<SavedReceipt[]>("receipts-pending") ?? []
   );
+  const [pendingTruncated, setPendingTruncated] = useState(false);
+  const [loadingMorePending, setLoadingMorePending] = useState(false);
   const [bulkReviewing, setBulkReviewing] = useState(false);
   const [loadingPending, setLoadingPending] = useState(
     () => readPageCache<SavedReceipt[]>("receipts-pending") === null
@@ -139,11 +152,14 @@ export default function KuititPage() {
     return params.toString();
   }, [monthFilter, searchQuery, appliedAdvanced]);
 
+  const queryRef = useRef(query);
+  queryRef.current = query;
+
   useEffect(() => {
     let cancelled = false;
     apiFetch(`/api/receipts${query ? `?${query}` : ""}`)
       .then((response) =>
-        readJson<{ receipts?: SavedReceipt[] }>(
+        readJson<{ receipts?: SavedReceipt[]; count?: number; truncated?: boolean }>(
           response,
           "Kuittien lataus epäonnistui"
         )
@@ -151,8 +167,17 @@ export default function KuititPage() {
       .then((data) => {
         if (cancelled) return;
         setLoadError(null);
-        writePageCache(`receipts:${query}`, data.receipts || []);
-        setListResult({ query, receipts: data.receipts || [] });
+        const page = mergeReceiptPage<SavedReceipt>(
+          [],
+          {
+            receipts: data.receipts || [],
+            count: typeof data.count === "number" ? data.count : (data.receipts || []).length,
+            truncated: Boolean(data.truncated),
+          },
+          0
+        );
+        writePageCache(`receipts:${query}`, page);
+        setListResult({ query, ...page });
       })
       .catch((error: unknown) => {
         if (cancelled) return;
@@ -167,11 +192,14 @@ export default function KuititPage() {
       });
 
     apiFetch("/api/receipts?reviewStatus=pending")
-      .then((res) => readJson<{ receipts?: SavedReceipt[] }>(res, "Virhe"))
+      .then((res) =>
+        readJson<{ receipts?: SavedReceipt[]; truncated?: boolean }>(res, "Virhe")
+      )
       .then((data) => {
         if (cancelled) return;
         writePageCache("receipts-pending", data.receipts || []);
         setPendingReceipts(data.receipts || []);
+        setPendingTruncated(Boolean(data.truncated));
         setLoadingPending(false);
       })
       .catch(() => {
@@ -185,15 +213,19 @@ export default function KuititPage() {
 
   // A stale-but-cached copy paints immediately while the fetch above
   // revalidates; the skeleton is reserved for a genuinely never-seen query.
-  const cachedReceipts =
+  const cachedList =
     listResult?.query === query
       ? null
-      : readPageCache<SavedReceipt[]>(`receipts:${query}`);
+      : coerceReceiptListCache<SavedReceipt>(readPageCache(`receipts:${query}`));
   const receipts =
-    listResult?.query === query ? listResult.receipts : cachedReceipts ?? [];
+    listResult?.query === query ? listResult.receipts : cachedList?.receipts ?? [];
+  const receiptCount =
+    listResult?.query === query ? listResult.count : cachedList?.count ?? receipts.length;
+  const truncated =
+    listResult?.query === query ? listResult.truncated : cachedList?.truncated ?? false;
   const currentLoadError = loadError?.query === query ? loadError.message : "";
   const loadingList =
-    listResult?.query !== query && cachedReceipts === null && !currentLoadError;
+    listResult?.query !== query && cachedList === null && !currentLoadError;
 
   useScrollRestoration("kuitit", !loadingList);
 
@@ -313,7 +345,6 @@ export default function KuititPage() {
   async function executeDeleteReceipt() {
     if (!receiptToDelete) return;
     const id = receiptToDelete;
-    setReceiptToDelete(null);
     setDeletingId(id);
     setActionError("");
     try {
@@ -322,20 +353,24 @@ export default function KuititPage() {
         await readJson(res, "Kuitin poistaminen epäonnistui");
       }
       setListResult((previous) => {
-        const base =
+        const cached = coerceReceiptListCache<SavedReceipt>(readPageCache(`receipts:${query}`));
+        const base: ReceiptListPayload<SavedReceipt> | null =
           previous?.query === query
-            ? previous.receipts
-            : readPageCache<SavedReceipt[]>(`receipts:${query}`) ?? [];
-        const next = base.filter((receipt) => receipt.id !== id);
+            ? { receipts: previous.receipts, count: previous.count, truncated: previous.truncated }
+            : cached;
+        if (!base) return previous;
+        const next = dropReceipt(base, id);
         writePageCache(`receipts:${query}`, next);
-        return { query, receipts: next };
+        return { query, ...next };
       });
     } catch (error: unknown) {
       if (isUnauthorized(error)) {
         redirectToLogin();
         return;
       }
-      setActionError(errorMessage(error, "Kuitin poistaminen epäonnistui"));
+      const message = errorMessage(error, "Kuitin poistaminen epäonnistui");
+      setActionError(message);
+      throw new Error(message);
     } finally {
       setDeletingId(null);
     }
@@ -398,13 +433,15 @@ export default function KuititPage() {
       if (!res.ok) await readJson(res, "Poisto epäonnistui");
       
       setListResult((prev) => {
-        const base =
+        const cached = coerceReceiptListCache<SavedReceipt>(readPageCache(`receipts:${query}`));
+        const base: ReceiptListPayload<SavedReceipt> | null =
           prev?.query === query
-            ? prev.receipts
-            : readPageCache<SavedReceipt[]>(`receipts:${query}`) ?? [];
-        const next = base.filter((r) => !selectedIds.has(r.id));
+            ? { receipts: prev.receipts, count: prev.count, truncated: prev.truncated }
+            : cached;
+        if (!base) return prev;
+        const next = dropReceipts(base, selectedIds);
         writePageCache(`receipts:${query}`, next);
-        return { query, receipts: next };
+        return { query, ...next };
       });
       setSelectedIds(new Set());
       setShowBulkConfirm(false);
@@ -413,9 +450,79 @@ export default function KuititPage() {
         redirectToLogin();
         return;
       }
-      setActionError(errorMessage(error, "Poisto epäonnistui"));
+      const message = errorMessage(error, "Poisto epäonnistui");
+      setActionError(message);
+      throw new Error(message);
     } finally {
       setBulkDeleting(false);
+    }
+  }
+
+  async function loadMoreReceipts() {
+    if (loadingMore || !truncated) return;
+    const requested = query;
+    const offset = receipts.length;
+    setLoadingMore(true);
+    setActionError("");
+    try {
+      const params = new URLSearchParams(requested);
+      params.set("offset", String(offset));
+      const response = await apiFetch(`/api/receipts?${params.toString()}`);
+      const data = await readJson<{ receipts?: SavedReceipt[]; count?: number; truncated?: boolean }>(
+        response,
+        "Kuittien lataus epäonnistui"
+      );
+      if (queryRef.current !== requested) return;
+      setListResult((previous) => {
+        const current =
+          previous?.query === requested ? previous.receipts : receipts;
+        const page = mergeReceiptPage(
+          current,
+          {
+            receipts: data.receipts || [],
+            count: typeof data.count === "number" ? data.count : offset + (data.receipts || []).length,
+            truncated: Boolean(data.truncated),
+          },
+          offset
+        );
+        writePageCache(`receipts:${requested}`, page);
+        return { query: requested, ...page };
+      });
+    } catch (error: unknown) {
+      if (isUnauthorized(error)) {
+        redirectToLogin();
+        return;
+      }
+      setActionError(errorMessage(error, "Kuittien lataus epäonnistui"));
+    } finally {
+      setLoadingMore(false);
+    }
+  }
+
+  async function loadMorePending() {
+    if (loadingMorePending || !pendingTruncated) return;
+    const offset = pendingReceipts.length;
+    setLoadingMorePending(true);
+    try {
+      const response = await apiFetch(`/api/receipts?reviewStatus=pending&offset=${offset}`);
+      const data = await readJson<{ receipts?: SavedReceipt[]; truncated?: boolean }>(
+        response,
+        "Kuittien lataus epäonnistui"
+      );
+      setPendingReceipts((current) => {
+        const next = [...current, ...(data.receipts || [])];
+        writePageCache("receipts-pending", next);
+        return next;
+      });
+      setPendingTruncated(Boolean(data.truncated));
+    } catch (error: unknown) {
+      if (isUnauthorized(error)) {
+        redirectToLogin();
+        return;
+      }
+      setActionError(errorMessage(error, "Kuittien lataus epäonnistui"));
+    } finally {
+      setLoadingMorePending(false);
     }
   }
 
@@ -468,6 +575,18 @@ export default function KuititPage() {
             onApproveAll={() => void handleReviewMany(otherPending.map((r) => r.id))}
             bulkBusy={bulkReviewing}
           />
+        )}
+
+        {pendingTruncated && (
+          <Button
+            type="button"
+            variant="secondary"
+            className="w-full"
+            disabled={loadingMorePending}
+            onClick={() => void loadMorePending()}
+          >
+            {loadingMorePending ? "Ladataan..." : "Lataa lisää tarkastettavia"}
+          </Button>
         )}
 
         <div className="animate-in fade-in slide-in-from-top-3 stagger-1">
@@ -814,9 +933,7 @@ export default function KuititPage() {
                 </label>
               )}
               <h3 className="text-sm font-medium text-charcoal">
-                {loadingList
-                  ? "Ladataan..."
-                  : `${receipts.length} kuittia${hasFilters ? " (suodatettu)" : ""}`}
+                {loadingList ? "Ladataan..." : receiptCountLabel(receiptCount, hasFilters)}
               </h3>
             </div>
           </div>
@@ -994,6 +1111,19 @@ export default function KuititPage() {
                   {showAllReceipts
                     ? "Näytä vähemmän"
                     : `Katso kaikki (${receipts.length})`}
+                </Button>
+              )}
+              {truncated && (
+                <Button
+                  type="button"
+                  variant="secondary"
+                  className="w-full"
+                  disabled={loadingMore}
+                  onClick={() => void loadMoreReceipts()}
+                >
+                  {loadingMore
+                    ? "Ladataan..."
+                    : `Lataa lisää (${receipts.length} / ${receiptCount})`}
                 </Button>
               )}
             </div>

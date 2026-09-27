@@ -18,6 +18,7 @@ import {
   DEFAULT_PAYMENT_TERM_DAYS,
   displayStatus,
   dueDateFor,
+  overdueBefore,
   openPosition,
   type AgingReport,
   type InvoiceDisplayStatus,
@@ -643,7 +644,12 @@ export async function listInvoices(
       lt: new Date(Date.UTC(year, month, 1)),
     };
   }
-  if (options.status && options.status !== "all" && options.status !== "overdue") {
+  if (options.status === "overdue") {
+    // Filter in the database before `take`. A post-query filter would hide an
+    // old overdue invoice behind 200 newer ones that are not overdue.
+    where.status = "sent";
+    where.dueDate = { lt: overdueBefore(now) };
+  } else if (options.status && options.status !== "all") {
     where.status = options.status;
   }
 
@@ -654,11 +660,7 @@ export async function listInvoices(
     take: options.limit ?? 200,
   });
 
-  let invoices = rows.map((row) => toPublicInvoice(row, now));
-  // "overdue" is derived, so it is filtered after mapping rather than in SQL.
-  if (options.status === "overdue") {
-    invoices = invoices.filter((invoice) => invoice.displayStatus === "overdue");
-  }
+  const invoices = rows.map((row) => toPublicInvoice(row, now));
 
   const allOpen = await prisma.salesInvoice.findMany({
     where: { userId, status: { in: ["sent", "paid"] } },

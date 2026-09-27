@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useFocusTrap } from "@/components/useFocusTrap";
+import { settleConfirm } from "@/lib/confirm-action";
 import { useOverlayLock } from "@/lib/overlay-lock";
 
 interface ConfirmModalProps {
@@ -10,7 +11,7 @@ interface ConfirmModalProps {
   description?: string;
   confirmLabel?: string;
   cancelLabel?: string;
-  onConfirm: () => void;
+  onConfirm: () => void | Promise<void>;
   onCancel: () => void;
   isDestructive?: boolean;
 }
@@ -27,6 +28,9 @@ export default function ConfirmModal({
 }: ConfirmModalProps) {
   const overlayRef = useRef<HTMLDivElement>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
+  const attemptRef = useRef(0);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
 
   // Exit animation: stay mounted for one short fade/scale-down after close.
   const [prevOpen, setPrevOpen] = useState(isOpen);
@@ -34,6 +38,30 @@ export default function ConfirmModal({
   if (isOpen !== prevOpen) {
     setPrevOpen(isOpen);
     setClosing(!isOpen);
+    if (isOpen) {
+      setBusy(false);
+      setError("");
+    }
+  }
+
+  function dismiss() {
+    attemptRef.current += 1;
+    setBusy(false);
+    onCancel();
+  }
+
+  function confirm() {
+    if (busy) return;
+    const attempt = attemptRef.current + 1;
+    attemptRef.current = attempt;
+    setBusy(true);
+    setError("");
+    void settleConfirm(onConfirm).then((outcome) => {
+      if (attemptRef.current !== attempt) return;
+      setBusy(false);
+      if (outcome.close) onCancel();
+      else setError(outcome.message);
+    });
   }
 
   useEffect(() => {
@@ -42,7 +70,7 @@ export default function ConfirmModal({
     return () => window.clearTimeout(timer);
   }, [closing]);
 
-  useFocusTrap(dialogRef, isOpen, { onEscape: onCancel });
+  useFocusTrap(dialogRef, isOpen, { onEscape: dismiss });
   useOverlayLock(isOpen);
 
   useEffect(() => {
@@ -71,7 +99,7 @@ export default function ConfirmModal({
           closing ? "animate-backdrop-out" : "animate-fade-in"
         }`}
         onClick={(e) => {
-          if (e.target === overlayRef.current) onCancel();
+          if (e.target === overlayRef.current) dismiss();
         }}
         aria-hidden="true"
       />
@@ -104,26 +132,31 @@ export default function ConfirmModal({
           {description && (
             <p className="mt-2 text-sm text-warm-gray">{description}</p>
           )}
+
+          {error && (
+            <p className="mt-3 text-sm text-danger" role="alert">
+              {error}
+            </p>
+          )}
           
           <div className="mt-6 flex w-full gap-3">
             <button
               type="button"
-              onClick={onCancel}
+              onClick={dismiss}
               className="flex-1 py-3 rounded-xl border border-warm-gray-light text-sm font-medium text-charcoal hover:bg-cream transition-colors"
             >
               {cancelLabel}
             </button>
             <button
               type="button"
-              onClick={() => {
-                onConfirm();
-                onCancel();
-              }}
-              className={`flex-1 py-3 rounded-xl text-sm font-medium text-white transition-colors ${
+              onClick={confirm}
+              disabled={busy}
+              aria-busy={busy}
+              className={`flex-1 py-3 rounded-xl text-sm font-medium text-white transition-colors disabled:opacity-60 ${
                 isDestructive ? "bg-danger hover:bg-danger/90" : "bg-charcoal hover:bg-black"
               }`}
             >
-              {confirmLabel}
+              {busy ? "Odota..." : confirmLabel}
             </button>
           </div>
         </div>

@@ -13,7 +13,7 @@ model User {
   passwordHash  String
   firstName     String
   lastName      String
-  entityType    String      @default("toiminimi") // "kevytyrittaja" | "toiminimi"
+  entityType    String      @default("toiminimi") // "toiminimi" | "kevytyrittaja" | "oy"
   vatRegistered Boolean     @default(false)
   vatPeriod     String      @default("month") // "month" | "quarter" | "year"
   onboarded     Boolean     @default(false)

@@ -9,6 +9,7 @@ import {
   computeInvoiceTotals,
   daysOverdue,
   displayStatus,
+  overdueBefore,
   dueDateFor,
   InvoiceValidationError,
   isSupportedVatRate,
@@ -190,6 +191,16 @@ describe("displayStatus", () => {
     expect(displayStatus({ status: "sent", dueDate: due }, new Date("2026-03-11T00:00:01Z"))).toBe(
       "overdue"
     );
+  });
+
+  it("uses the same overdue boundary in SQL as the display label", () => {
+    const due = new Date("2026-03-10T00:00:00.000Z");
+    const onDueDay = new Date("2026-03-10T23:59:59.000Z");
+    const nextDay = new Date("2026-03-11T00:00:01.000Z");
+    expect(due.getTime() < overdueBefore(onDueDay).getTime()).toBe(false);
+    expect(displayStatus({ status: "sent", dueDate: due }, onDueDay)).toBe("sent");
+    expect(due.getTime() < overdueBefore(nextDay).getTime()).toBe(true);
+    expect(displayStatus({ status: "sent", dueDate: due }, nextDay)).toBe("overdue");
   });
 
   it("never marks a draft, paid or credited invoice overdue", () => {

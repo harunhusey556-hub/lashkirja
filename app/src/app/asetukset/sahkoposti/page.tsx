@@ -361,19 +361,23 @@ export default function SahkopostiPage() {
         onConfirm={async () => {
           if (!accountToDisconnect) return;
           const id = accountToDisconnect;
-          setAccountToDisconnect(null);
           try {
             const res = await fetch(`/api/integrations/imap?id=${id}`, { method: "DELETE" });
             if (!res.ok) {
-              setSyncMsg("Yhteyden katkaisu epäonnistui. Yritä uudelleen.");
-              return;
+              const message = "Yhteyden katkaisu epäonnistui. Yritä uudelleen.";
+              setSyncMsg(message);
+              throw new Error(message);
             }
             setProfile({
               ...profile,
               imapAccounts: profile.imapAccounts.filter((a) => a.id !== id),
             });
-          } catch {
-            setSyncMsg("Yhteyden katkaisu epäonnistui. Tarkista verkkoyhteys ja yritä uudelleen.");
+            setAccountToDisconnect(null);
+          } catch (error) {
+            if (error instanceof Error && error.message) throw error;
+            const message = "Yhteyden katkaisu epäonnistui. Tarkista verkkoyhteys ja yritä uudelleen.";
+            setSyncMsg(message);
+            throw new Error(message);
           }
         }}
         onCancel={() => setAccountToDisconnect(null)}

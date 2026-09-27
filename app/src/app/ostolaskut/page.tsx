@@ -236,8 +236,9 @@ export default function PurchaseInvoicesPage() {
       setConfirmRemove(null);
       await load();
     } catch (error) {
-      setMessage(errorMessage(error, "Poisto epäonnistui"));
-      setConfirmRemove(null);
+      const message = errorMessage(error, "Poisto epäonnistui");
+      setMessage(message);
+      throw new Error(message);
     } finally {
       setBusy(false);
     }
@@ -593,7 +594,7 @@ export default function PurchaseInvoicesPage() {
         title="Poistetaanko ostolasku?"
         description={confirmRemove ? `${confirmRemove.supplierName} · ${formatEur(confirmRemove.gross)}` : ""}
         confirmLabel="Poista"
-        onConfirm={() => confirmRemove && void remove(confirmRemove)}
+        onConfirm={() => (confirmRemove ? remove(confirmRemove) : Promise.resolve())}
         onCancel={() => setConfirmRemove(null)}
       />
     </>

@@ -26,6 +26,15 @@ import {
 import { parseBusinessDetails, generateProfileSummary } from "@/lib/onboarding";
 
 const MAX_LIST_ROWS = 200;
+const MAX_LIST_OFFSET = 100_000;
+
+function parseListOffset(raw: string | null): number | null {
+  if (raw == null || raw === "") return 0;
+  if (!/^\d{1,6}$/.test(raw)) return null;
+  const offset = Number(raw);
+  if (!Number.isSafeInteger(offset) || offset < 0 || offset > MAX_LIST_OFFSET) return null;
+  return offset;
+}
 const STAGING_TTL_MS = 24 * 60 * 60 * 1000;
 
 type StagedUploadRow = {
@@ -294,6 +303,8 @@ export async function GET(req: NextRequest) {
   if (!session) return noStoreJson({ error: "Ei kirjautunut" }, { status: 401 });
 
   const url = new URL(req.url);
+  const offset = parseListOffset(url.searchParams.get("offset"));
+  if (offset === null) return noStoreJson({ error: "Virheellinen sivutus" }, { status: 400 });
   const month = url.searchParams.get("month");
   const q = (url.searchParams.get("q") || "").trim().slice(0, 100);
   const type = url.searchParams.get("type");
@@ -353,6 +364,7 @@ export async function GET(req: NextRequest) {
     prisma.receipt.findMany({
       where,
       orderBy,
+      skip: offset,
       take: MAX_LIST_ROWS,
       select: {
         id: true,
@@ -427,6 +439,6 @@ export async function GET(req: NextRequest) {
       };
     }),
     count,
-    truncated: count > receipts.length,
+    truncated: count > offset + receipts.length,
   });
 }

@@ -4,13 +4,15 @@ import { prisma } from "@/lib/db";
 import { requireSession } from "@/lib/session";
 import { isValidIban, normalizeIban } from "@/lib/iban";
 import { isValidBusinessId, normalizeBusinessId } from "@/lib/finnish-reference";
-import { updateReminderSettings } from "@/lib/invoice-reminders";
+import { reminderSettingsData } from "@/lib/invoice-reminders";
+import { ValidationError } from "@/lib/api-errors";
+import { ENTITY_TYPES } from "@/lib/onboarding";
 
 const patchSchema = z.object({
   firstName: z.string().min(1).optional(),
   lastName: z.string().min(1).optional(),
   email: z.string().email().optional(),
-  entityType: z.enum(["kevytyrittaja", "toiminimi"]).optional(),
+  entityType: z.enum(ENTITY_TYPES).optional(),
   vatRegistered: z.boolean().optional(),
   vatPeriod: z.enum(["month", "quarter", "year"]).optional(),
   // Seller details printed on sales invoices.
@@ -23,7 +25,7 @@ const patchSchema = z.object({
   invoiceIban: z.string().trim().max(42).nullish(),
   invoiceBic: z.string().trim().max(11).nullish(),
   invoiceTerms: z.string().trim().max(1000).nullish(),
-  // Collection settings; validated by updateReminderSettings so the rules live
+  // Collection settings; validated by reminderSettingsData so the rules live
   // in one place rather than being restated here.
   lateInterestPercent: z.number().finite().nullable().optional(),
   reminderFee: z.number().finite().optional(),
@@ -84,8 +86,16 @@ export async function PATCH(req: NextRequest) {
 
   const { lateInterestPercent, reminderFee, ...data } = parsed.data;
 
-  if (lateInterestPercent !== undefined || reminderFee !== undefined) {
-    await updateReminderSettings(session.userId, { lateInterestPercent, reminderFee });
+  // Validate every field before any write. A failed IBAN must not leave a
+  // reminder-fee change behind.
+  let reminderData: ReturnType<typeof reminderSettingsData>;
+  try {
+    reminderData = reminderSettingsData({ lateInterestPercent, reminderFee });
+  } catch (error) {
+    if (error instanceof ValidationError) {
+      return NextResponse.json({ error: error.message }, { status: 400 });
+    }
+    throw error;
   }
 
   // An IBAN or Y-tunnus that fails its check digit must never reach an invoice.
@@ -105,7 +115,7 @@ export async function PATCH(req: NextRequest) {
 
   const user = await prisma.user.update({
     where: { id: session.userId },
-    data,
+    data: { ...data, ...reminderData },
     select: {
       firstName: true,
       lastName: true,

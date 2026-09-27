@@ -143,6 +143,17 @@ export interface InvoiceLike {
   dueDate: Date | string;
 }
 
+/**
+ * UTC midnight of `now`'s calendar day.
+ *
+ * Due dates are stored as UTC midnights. An invoice is overdue once this
+ * instant is strictly after the due day — the same boundary as displayStatus,
+ * so a SQL `dueDate < overdueBefore(now)` matches the label the UI shows.
+ */
+export function overdueBefore(now: Date = new Date()): Date {
+  return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+}
+
 /** An unpaid sent invoice becomes overdue the day AFTER its due date. */
 export function displayStatus(invoice: InvoiceLike, now: Date = new Date()): InvoiceDisplayStatus {
   if (invoice.status !== "sent") return invoice.status;

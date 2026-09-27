@@ -1,8 +1,18 @@
 /** A chip answers one onboarding question: a flag, a choice or a tag. */
 export type ChipValue = string | boolean;
 
+/** Company types shared by onboarding, settings and the profile PATCH schema. */
+export const ENTITY_TYPES = ["toiminimi", "kevytyrittaja", "oy"] as const;
+export type EntityType = (typeof ENTITY_TYPES)[number];
+
+export const ENTITY_TYPE_OPTIONS: { value: EntityType; label: string }[] = [
+  { value: "toiminimi", label: "Toiminimi" },
+  { value: "kevytyrittaja", label: "Kevytyrittäjä" },
+  { value: "oy", label: "Osakeyhtiö (Oy)" },
+];
+
 export interface BusinessProfile {
-  entityType: "toiminimi" | "kevytyrittaja" | "oy";
+  entityType: EntityType;
   vatRegistered: boolean;
   vatPeriod: "month" | "quarter" | "year";
   salesTypes: string[];

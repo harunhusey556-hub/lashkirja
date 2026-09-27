@@ -2,6 +2,7 @@
 
 import { ErrorState, LoadingState } from "@/components/AsyncState";
 import { SelectMenu } from "@/components/SelectMenu";
+import { ENTITY_TYPE_OPTIONS } from "@/lib/onboarding";
 import { SaveStatus, useProfile } from "../useProfile";
 
 export default function YritysPage() {
@@ -31,33 +32,23 @@ export default function YritysPage() {
             <label className="block text-sm font-medium text-charcoal-light mb-2">
               Yritysmuoto
             </label>
-            <div className="flex gap-2">
-              <button
-                type="button"
-                onClick={() => save({ entityType: "kevytyrittaja" })}
-                disabled={saving}
-                aria-pressed={profile.entityType === "kevytyrittaja"}
-                className={`flex-1 py-2.5 rounded-xl text-sm font-medium transition-colors active-press touch-target ${
-                  profile.entityType === "kevytyrittaja"
-                    ? "bg-accent text-white"
-                    : "bg-cream text-charcoal border border-warm-gray-light"
-                }`}
-              >
-                Kevytyrittäjä
-              </button>
-              <button
-                type="button"
-                onClick={() => save({ entityType: "toiminimi" })}
-                disabled={saving}
-                aria-pressed={profile.entityType === "toiminimi"}
-                className={`flex-1 py-2.5 rounded-xl text-sm font-medium transition-colors active-press touch-target ${
-                  profile.entityType === "toiminimi"
-                    ? "bg-accent text-white"
-                    : "bg-cream text-charcoal border border-warm-gray-light"
-                }`}
-              >
-                Toiminimi
-              </button>
+            <div className="grid grid-cols-1 gap-2">
+              {ENTITY_TYPE_OPTIONS.map((option) => (
+                <button
+                  key={option.value}
+                  type="button"
+                  onClick={() => save({ entityType: option.value })}
+                  disabled={saving}
+                  aria-pressed={profile.entityType === option.value}
+                  className={`py-2.5 rounded-xl text-sm font-medium transition-colors active-press touch-target ${
+                    profile.entityType === option.value
+                      ? "bg-accent text-white"
+                      : "bg-cream text-charcoal border border-warm-gray-light"
+                  }`}
+                >
+                  {option.label}
+                </button>
+              ))}
             </div>
           </div>
 

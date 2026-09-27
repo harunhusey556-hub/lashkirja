@@ -2,6 +2,9 @@ import { describe, it, expect } from "vitest";
 import {
   parseBusinessDetails,
   generateProfileSummary,
+  ENTITY_TYPES,
+  ENTITY_TYPE_OPTIONS,
+  ONBOARDING_STEPS,
   BusinessProfile,
 } from "./onboarding";
 
@@ -41,5 +44,15 @@ describe("onboarding lib", () => {
     const summary = generateProfileSummary(profile);
     expect(summary).toContain("Yritysmuoto: Toiminimi");
     expect(summary).toContain("ALV: ALV-rekisterissä (kausi: kuukausi)");
+  });
+
+  it("uses one company-type list, including Oy, for onboarding and settings", () => {
+    const step = ONBOARDING_STEPS.find((item) => item.field === "entityType");
+    expect(step?.chips.map((chip) => chip.value)).toEqual([...ENTITY_TYPES]);
+    expect(ENTITY_TYPE_OPTIONS.map((option) => option.value)).toEqual([...ENTITY_TYPES]);
+    expect(ENTITY_TYPES).toContain("oy");
+    expect(ENTITY_TYPE_OPTIONS.find((option) => option.value === "oy")?.label).toBe(
+      "Osakeyhtiö (Oy)"
+    );
   });
 });

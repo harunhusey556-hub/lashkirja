@@ -257,8 +257,9 @@ export default function RecurringInvoicesPage() {
       setConfirmRemove(null);
       await load();
     } catch (error) {
-      setMessage(errorMessage(error, "Poisto epäonnistui"));
-      setConfirmRemove(null);
+      const message = errorMessage(error, "Poisto epäonnistui");
+      setMessage(message);
+      throw new Error(message);
     } finally {
       setBusy(false);
     }
@@ -624,7 +625,7 @@ export default function RecurringInvoicesPage() {
             : ""
         }
         confirmLabel="Poista"
-        onConfirm={() => confirmRemove && void remove(confirmRemove)}
+        onConfirm={() => (confirmRemove ? remove(confirmRemove) : Promise.resolve())}
         onCancel={() => setConfirmRemove(null)}
       />
     </>

@@ -203,7 +203,9 @@ export default function BankAccountsPage() {
       setExpanded(null);
       await load();
     } catch (error) {
-      showError(errorMessage(error, "Poisto epäonnistui"));
+      const message = errorMessage(error, "Poisto epäonnistui");
+      showError(message);
+      throw new Error(message);
     } finally {
       setBusy(false);
     }
@@ -480,7 +482,7 @@ export default function BankAccountsPage() {
             : ""
         }
         confirmLabel="Poista"
-        onConfirm={() => confirmRemove && void removeAccount(confirmRemove)}
+        onConfirm={() => (confirmRemove ? removeAccount(confirmRemove) : Promise.resolve())}
         onCancel={() => setConfirmRemove(null)}
       />
     </>

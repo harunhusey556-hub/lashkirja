@@ -229,8 +229,12 @@ export interface ReminderSettingsInput {
   reminderFee?: number;
 }
 
-export async function updateReminderSettings(userId: string, input: ReminderSettingsInput) {
-  const data: Record<string, unknown> = {};
+/** Validated reminder columns. Does not write; the caller persists them. */
+export function reminderSettingsData(input: ReminderSettingsInput): {
+  lateInterestPercent?: number | null;
+  reminderFeeCents?: number;
+} {
+  const data: { lateInterestPercent?: number | null; reminderFeeCents?: number } = {};
   if (input.lateInterestPercent !== undefined) {
     if (input.lateInterestPercent !== null) {
       if (!Number.isFinite(input.lateInterestPercent) || input.lateInterestPercent < 0) {
@@ -249,6 +253,11 @@ export async function updateReminderSettings(userId: string, input: ReminderSett
     }
     data.reminderFeeCents = cents;
   }
+  return data;
+}
+
+export async function updateReminderSettings(userId: string, input: ReminderSettingsInput) {
+  const data = reminderSettingsData(input);
   if (Object.keys(data).length === 0) return loadSettings(userId);
 
   const user = await prisma.user.update({

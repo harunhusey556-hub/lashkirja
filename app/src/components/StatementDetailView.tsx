@@ -278,7 +278,6 @@ export default function StatementDetailView({
   }
 
   async function handleDelete() {
-    setConfirmingDelete(false);
     setDeleting(true);
     setActionError("");
     try {
@@ -288,15 +287,16 @@ export default function StatementDetailView({
       if (!res.ok) {
         await readJson(res, "Tiliotteen poistaminen epäonnistui");
       }
+      setConfirmingDelete(false);
       onDeleted();
     } catch (error: unknown) {
       if (isUnauthorized(error)) {
         redirectToLogin();
         return;
       }
-      setActionError(
-        errorMessage(error, "Tiliotteen poistaminen epäonnistui")
-      );
+      const message = errorMessage(error, "Tiliotteen poistaminen epäonnistui");
+      setActionError(message);
+      throw new Error(message);
     } finally {
       setDeleting(false);
     }
@@ -456,7 +456,6 @@ export default function StatementDetailView({
   }
 
   async function deleteTransaction(transactionId: string) {
-    setConfirmingTxDelete(null);
     setDeletingTxId(transactionId);
     setActionError("");
     try {
@@ -473,14 +472,15 @@ export default function StatementDetailView({
       }
       applyTxUpdate(transactionId, null);
       if (editingTx?.id === transactionId) setEditingTx(null);
+      setConfirmingTxDelete(null);
     } catch (error: unknown) {
       if (isUnauthorized(error)) {
         redirectToLogin();
         return;
       }
-      setActionError(
-        errorMessage(error, "Tapahtuman poistaminen epäonnistui")
-      );
+      const message = errorMessage(error, "Tapahtuman poistaminen epäonnistui");
+      setActionError(message);
+      throw new Error(message);
     } finally {
       setDeletingTxId(null);
     }
@@ -1161,7 +1161,7 @@ export default function StatementDetailView({
         title="Poistetaanko tiliote?"
         description={`"${statement.fileName}" ja kaikki sen tapahtumat poistetaan pysyvästi. Tätä ei voi perua.`}
         confirmLabel="Poista tiliote"
-        onConfirm={() => void handleDelete()}
+        onConfirm={() => handleDelete()}
         onCancel={() => setConfirmingDelete(false)}
       />
 
@@ -1170,9 +1170,9 @@ export default function StatementDetailView({
         title="Poistetaanko tapahtuma?"
         description="Tapahtuma poistetaan tästä tiliotteesta pysyvästi."
         confirmLabel="Poista"
-        onConfirm={() => {
-          if (confirmingTxDelete) void deleteTransaction(confirmingTxDelete);
-        }}
+        onConfirm={() =>
+          confirmingTxDelete ? deleteTransaction(confirmingTxDelete) : Promise.resolve()
+        }
         onCancel={() => setConfirmingTxDelete(null)}
       />
     </div>

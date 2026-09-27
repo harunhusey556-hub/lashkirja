@@ -12,7 +12,7 @@ import { centsToEuros, eurosToCents } from "./money";
 import { isoDateToUtc } from "./validation";
 import { isValidBusinessId, isValidReferenceNumber, normalizeBusinessId, normalizeReference } from "./finnish-reference";
 import { isValidIban, normalizeIban } from "./iban";
-import { buildAging, displayStatus, openPosition, type AgingReport } from "./invoices";
+import { buildAging, displayStatus, openPosition, overdueBefore, type AgingReport } from "./invoices";
 import { assertPeriodOpen, PeriodLockedError } from "./period-lock";
 
 export type PurchaseStatus = "open" | "paid" | "cancelled";
@@ -513,7 +513,12 @@ export async function listPurchaseInvoices(
   now: Date = new Date()
 ): Promise<PurchaseListResult> {
   const where: Record<string, unknown> = { userId };
-  if (options.status && options.status !== "all" && options.status !== "overdue") {
+  if (options.status === "overdue") {
+    // Open payables age like unpaid sales invoices. Apply that before `take`,
+    // or 200 earlier non-open rows can crowd the overdue one out of the page.
+    where.status = "open";
+    where.dueDate = { lt: overdueBefore(now) };
+  } else if (options.status && options.status !== "all") {
     where.status = options.status;
   }
   if (options.month) {
@@ -531,11 +536,7 @@ export async function listPurchaseInvoices(
     take: options.limit ?? 200,
   });
 
-  let invoices = rows.map((row) => toPublicPurchaseInvoice(row, now));
-  // "overdue" is derived from the due date, so it is filtered after mapping.
-  if (options.status === "overdue") {
-    invoices = invoices.filter((invoice) => invoice.displayStatus === "overdue");
-  }
+  const invoices = rows.map((row) => toPublicPurchaseInvoice(row, now));
 
   const open = await prisma.purchaseInvoice.findMany({
     where: { userId, status: { in: ["open", "paid"] } },
