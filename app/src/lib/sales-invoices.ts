@@ -37,6 +37,7 @@ import {
 } from "./invoice-snapshot";
 import { requireActiveCustomer } from "./customers";
 import { assertPeriodOpen, PeriodLockedError } from "./period-lock";
+import { INVOICE_LIST_LIMIT } from "./invoice-groups";
 import type { InvoicePdfData } from "./invoice-pdf";
 
 export interface InvoiceLinePayload {
@@ -1005,11 +1006,11 @@ export interface ListInvoicesOptions {
   limit?: number;
 }
 
-export async function listInvoices(
+/** Shared customerId/month scoping for the list, count, and aging queries. */
+function invoiceScopeWhere(
   userId: string,
-  options: ListInvoicesOptions = {},
-  now: Date = new Date()
-): Promise<{ invoices: PublicInvoice[]; aging: AgingReport & { totalOpen: number; overdue: number } }> {
+  options: { customerId?: string; month?: string }
+): Record<string, unknown> {
   const where: Record<string, unknown> = { userId };
   if (options.customerId) where.customerId = options.customerId;
   if (options.month) {
@@ -1019,12 +1020,30 @@ export async function listInvoices(
       lt: new Date(Date.UTC(year, month, 1)),
     };
   }
+  return where;
+}
+
+/**
+ * The exact rows that count as "overdue": a sent invoice that is not a
+ * credit note (see `displayStatus` in ./invoices - a credit note always
+ * reports its own raw status and is never reclassified as overdue) whose due
+ * date has fully passed. Shared by `listInvoices` and
+ * `countInvoicesByDisplayStatus` so the two definitions cannot drift apart.
+ */
+function overdueStatusWhere(now: Date): Record<string, unknown> {
+  return { status: "sent", documentKind: "invoice", dueDate: { lt: overdueBefore(now) } };
+}
+
+export async function listInvoices(
+  userId: string,
+  options: ListInvoicesOptions = {},
+  now: Date = new Date()
+): Promise<{ invoices: PublicInvoice[]; aging: AgingReport & { totalOpen: number; overdue: number } }> {
+  const where = invoiceScopeWhere(userId, options);
   if (options.status === "overdue") {
     // Filter in the database before `take`. A post-query filter would hide an
-    // old overdue invoice behind 200 newer ones that are not overdue.
-    where.status = "sent";
-    where.documentKind = "invoice";
-    where.dueDate = { lt: overdueBefore(now) };
+    // old overdue invoice behind INVOICE_LIST_LIMIT newer ones that are not overdue.
+    Object.assign(where, overdueStatusWhere(now));
   } else if (options.status && options.status !== "all") {
     where.status = options.status;
   }
@@ -1033,7 +1052,7 @@ export async function listInvoices(
     where,
     include: invoiceInclude,
     orderBy: [{ issueDate: "desc" }, { number: "desc" }],
-    take: options.limit ?? 200,
+    take: options.limit ?? INVOICE_LIST_LIMIT,
   });
 
   const invoices = rows.map((row) => toPublicInvoice(row, now));
@@ -1067,6 +1086,52 @@ export async function listInvoices(
       overdue: centsToEuros(aging.overdueCents),
     },
   };
+}
+
+export interface InvoiceStatusCounts {
+  draft: number;
+  sent: number;
+  overdue: number;
+  paid: number;
+  credited: number;
+}
+
+/**
+ * DB-side counts per display status, for the sales list's filter chips.
+ * `listInvoices` caps its rows at `INVOICE_LIST_LIMIT`, so counting the
+ * fetched rows themselves would silently undercount past that cap - this
+ * counts the whole table instead, with the same customerId/month scoping
+ * `listInvoices` uses and the same displayStatus semantics as
+ * `displayStatus` in ./invoices: a credit note reports its own raw status
+ * and is never overdue; a sent invoice is overdue only once its due date has
+ * fully passed (see `overdueStatusWhere`, shared with `listInvoices`).
+ */
+export async function countInvoicesByDisplayStatus(
+  userId: string,
+  options: { customerId?: string; month?: string } = {},
+  now: Date = new Date()
+): Promise<InvoiceStatusCounts> {
+  const where = invoiceScopeWhere(userId, options);
+  const overdueWhere = overdueStatusWhere(now);
+
+  const [draft, sent, overdue, paid, credited] = await Promise.all([
+    prisma.salesInvoice.count({ where: { ...where, status: "draft" } }),
+    prisma.salesInvoice.count({
+      where: {
+        ...where,
+        status: "sent",
+        // Not overdue: a credit note is exempt regardless of its due date;
+        // an ordinary invoice counts here only while its due date has not
+        // yet fully passed (the mirror image of overdueStatusWhere below).
+        OR: [{ documentKind: "credit_note" }, { dueDate: { gte: overdueBefore(now) } }],
+      },
+    }),
+    prisma.salesInvoice.count({ where: { ...where, ...overdueWhere } }),
+    prisma.salesInvoice.count({ where: { ...where, status: "paid" } }),
+    prisma.salesInvoice.count({ where: { ...where, status: "credited" } }),
+  ]);
+
+  return { draft, sent, overdue, paid, credited };
 }
 
 export interface BankMatchResult {

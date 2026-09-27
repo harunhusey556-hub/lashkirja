@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
-  countInvoicesByStatus,
+  INVOICE_LIST_LIMIT,
   salesFilterChips,
   salesInvoiceGroups,
+  type SalesStatusCounts,
   type StatusedInvoice,
 } from "./invoice-groups";
 
@@ -18,31 +19,17 @@ const MIXED: StatusedInvoice[] = [
   invoice("paid"),
 ];
 
-describe("countInvoicesByStatus", () => {
-  it("counts each display status and reports zero for statuses with no invoices", () => {
-    expect(countInvoicesByStatus(MIXED)).toEqual({
-      overdue: 1,
-      draft: 1,
-      sent: 2,
-      paid: 1,
-      credited: 0,
-    });
-  });
+const COUNTS: SalesStatusCounts = { overdue: 1, draft: 1, sent: 2, paid: 1, credited: 0 };
 
-  it("returns all zeros for an empty list", () => {
-    expect(countInvoicesByStatus([])).toEqual({
-      overdue: 0,
-      draft: 0,
-      sent: 0,
-      paid: 0,
-      credited: 0,
-    });
+describe("INVOICE_LIST_LIMIT", () => {
+  it("is the same cap the server applies to a single fetch", () => {
+    expect(INVOICE_LIST_LIMIT).toBe(200);
   });
 });
 
 describe("salesFilterChips", () => {
   it("always shows Kaikki, Myöhässä, Luonnokset, Avoimet, Maksetut with live counts, in that order", () => {
-    expect(salesFilterChips(MIXED)).toEqual([
+    expect(salesFilterChips(COUNTS)).toEqual([
       { id: "all", label: "Kaikki", count: 5 },
       { id: "overdue", label: "Myöhässä", count: 1 },
       { id: "draft", label: "Luonnokset", count: 1 },
@@ -52,24 +39,30 @@ describe("salesFilterChips", () => {
   });
 
   it("hides Hyvitetyt when no invoice has been credited", () => {
-    const chips = salesFilterChips(MIXED);
+    const chips = salesFilterChips(COUNTS);
     expect(chips.some((chip) => chip.id === "credited")).toBe(false);
   });
 
   it("shows Hyvitetyt last, with its count, once at least one invoice is credited", () => {
-    const withCredit = [...MIXED, invoice("credited")];
+    const withCredit: SalesStatusCounts = { ...COUNTS, credited: 1 };
     const chips = salesFilterChips(withCredit);
     expect(chips.at(-1)).toEqual({ id: "credited", label: "Hyvitetyt", count: 1 });
   });
 
-  it("still shows the always-on chips at zero when the list is empty", () => {
-    expect(salesFilterChips([])).toEqual([
+  it("still shows the always-on chips at zero when there are no invoices", () => {
+    const zero: SalesStatusCounts = { overdue: 0, draft: 0, sent: 0, paid: 0, credited: 0 };
+    expect(salesFilterChips(zero)).toEqual([
       { id: "all", label: "Kaikki", count: 0 },
       { id: "overdue", label: "Myöhässä", count: 0 },
       { id: "draft", label: "Luonnokset", count: 0 },
       { id: "sent", label: "Avoimet", count: 0 },
       { id: "paid", label: "Maksetut", count: 0 },
     ]);
+  });
+
+  it("sums 'Kaikki' from the counts rather than trusting a separate total", () => {
+    const withCredit: SalesStatusCounts = { overdue: 3, draft: 2, sent: 4, paid: 5, credited: 6 };
+    expect(salesFilterChips(withCredit)[0]).toEqual({ id: "all", label: "Kaikki", count: 20 });
   });
 });
 

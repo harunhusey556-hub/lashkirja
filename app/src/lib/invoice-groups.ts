@@ -16,6 +16,13 @@ export type SalesFilterId = (typeof SALES_FILTER_IDS)[number];
 type StatusFilterId = Exclude<SalesFilterId, "all">;
 
 /**
+ * The server's per-fetch row cap (see `listInvoices` in ./sales-invoices,
+ * which caps `take` at this value). Shared so the page's "showing the newest
+ * N" note always names the actual limit rather than a copy of the number.
+ */
+export const INVOICE_LIST_LIMIT = 200;
+
+/**
  * Fixed display order for both the "Kaikki" section groups and the filter
  * chips: overdue first (most urgent), credited last (and hidden entirely
  * from the chips when there are none - see `salesFilterChips`).
@@ -53,29 +60,23 @@ export interface SalesInvoiceGroup<T> {
   items: T[];
 }
 
-/** Count of invoices per display status, keyed the same as the filter/group ids. */
-export function countInvoicesByStatus<T extends StatusedInvoice>(
-  invoices: readonly T[]
-): Record<StatusFilterId, number> {
-  const counts: Record<StatusFilterId, number> = {
-    overdue: 0,
-    draft: 0,
-    sent: 0,
-    paid: 0,
-    credited: 0,
-  };
-  for (const invoice of invoices) counts[invoice.displayStatus] += 1;
-  return counts;
-}
+/**
+ * Counts per display status, keyed the same as the filter/group ids. These
+ * now come from the database (`countInvoicesByDisplayStatus` in
+ * ./sales-invoices) rather than from the fetched rows: the row list is
+ * capped at `INVOICE_LIST_LIMIT`, so counting the rows themselves would
+ * silently undercount past that cap.
+ */
+export type SalesStatusCounts = Record<StatusFilterId, number>;
 
 /**
  * Chips for `FilterChips`: "Kaikki" plus one per status, in a fixed order,
  * with live counts. "Hyvitetyt" only appears once at least one invoice has
  * actually been credited - an always-zero credit-note filter is dead weight.
  */
-export function salesFilterChips<T extends StatusedInvoice>(invoices: readonly T[]): SalesFilterChip[] {
-  const counts = countInvoicesByStatus(invoices);
-  const chips: SalesFilterChip[] = [{ id: "all", label: FILTER_LABEL.all, count: invoices.length }];
+export function salesFilterChips(counts: SalesStatusCounts): SalesFilterChip[] {
+  const total = STATUS_ORDER.reduce((sum, id) => sum + counts[id], 0);
+  const chips: SalesFilterChip[] = [{ id: "all", label: FILTER_LABEL.all, count: total }];
   for (const id of STATUS_ORDER) {
     if (id === "credited" && counts.credited === 0) continue;
     chips.push({ id, label: FILTER_LABEL[id], count: counts[id] });

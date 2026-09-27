@@ -24,10 +24,12 @@ import {
 } from "@/components/ds";
 import { SALES_STATUS } from "@/lib/status-labels";
 import {
+  INVOICE_LIST_LIMIT,
   SALES_FILTER_IDS,
   salesFilterChips,
   salesInvoiceGroups,
   type SalesFilterId,
+  type SalesStatusCounts,
 } from "@/lib/invoice-groups";
 
 import { Button } from "@/components/ui";
@@ -56,6 +58,8 @@ interface Aging {
 }
 
 const AGING_BUCKETS = ["1-30", "31-60", "61-90", "90+"] as const;
+
+const ZERO_COUNTS: SalesStatusCounts = { draft: 0, sent: 0, overdue: 0, paid: 0, credited: 0 };
 
 /** Leading icon for the "Asiakkaat" registry row. */
 function CustomersIcon() {
@@ -152,13 +156,17 @@ function InvoicesPageContent() {
   const [loadFailure, setLoadFailure] = useState<unknown>(null);
   const [busy, setBusy] = useState(false);
   const [registryCounts, setRegistryCounts] = useState<{ customers?: number; recurring?: number }>({});
+  const [statusCounts, setStatusCounts] = useState<SalesStatusCounts>(ZERO_COUNTS);
 
-  // The list is always fetched unfiltered: filtering/grouping by status
-  // happens locally (see salesInvoiceGroups) so every filter chip's count
-  // stays correct no matter which tab is currently selected.
+  // The active filter's status is sent to the server (as before): a fetch
+  // capped at INVOICE_LIST_LIMIT rows and then filtered in JS would hide an
+  // old invoice behind newer ones in its own tab. Chip counts do NOT come
+  // from this list - see the /api/invoices/counts fetch below - because that
+  // same cap would silently undercount past INVOICE_LIST_LIMIT invoices.
   const load = useCallback(async (signal?: AbortSignal) => {
     try {
       const params = new URLSearchParams();
+      if (filter !== "all") params.set("status", filter);
       if (customerFilter) params.set("customerId", customerFilter);
       if (monthFilter) params.set("month", monthFilter);
       const response = await apiFetch(`/api/invoices?${params.toString()}`, {
@@ -170,7 +178,7 @@ function InvoicesPageContent() {
         "Laskujen haku epäonnistui"
       );
       if (signal?.aborted) return;
-      if (!customerFilter && !monthFilter) writePageCache("invoices", data);
+      if (filter === "all" && !customerFilter && !monthFilter) writePageCache("invoices", data);
       setInvoices(data.invoices);
       setAging(data.aging);
       setLoadFailure(null);
@@ -185,7 +193,7 @@ function InvoicesPageContent() {
       setMessage(errorMessage(error, "Laskujen haku epäonnistui"));
       setStatus((current) => (current === "ready" ? "ready" : "error"));
     }
-  }, [customerFilter, monthFilter]);
+  }, [filter, customerFilter, monthFilter]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -193,6 +201,29 @@ function InvoicesPageContent() {
     void load(controller.signal);
     return () => controller.abort();
   }, [load]);
+
+  // Filter-chip counts: fetched separately from the (capped) list above, so
+  // every chip stays correct regardless of which tab is active. Scoped the
+  // same way as the list (customerId/month), but never by status/filter.
+  useEffect(() => {
+    const controller = new AbortController();
+    const params = new URLSearchParams();
+    if (customerFilter) params.set("customerId", customerFilter);
+    if (monthFilter) params.set("month", monthFilter);
+    apiFetch(`/api/invoices/counts?${params.toString()}`, {
+      credentials: "include",
+      signal: controller.signal,
+    })
+      .then((res) => readJson<{ counts: SalesStatusCounts }>(res, "Määrien haku epäonnistui"))
+      .then((data) => setStatusCounts(data.counts))
+      .catch((error) => {
+        if (controller.signal.aborted) return;
+        if (isUnauthorized(error)) redirectToLogin();
+        // Otherwise leave the last-known (or zero) counts - the invoice list
+        // itself still loads independently of this fetch.
+      });
+    return () => controller.abort();
+  }, [customerFilter, monthFilter]);
 
   // Best-effort counts for the registry rows at the bottom of the page; a
   // failure here must not block the invoice list itself, so errors are
@@ -236,10 +267,11 @@ function InvoicesPageContent() {
     }
   }
 
-  const filterChips = salesFilterChips(invoices);
+  const filterChips = salesFilterChips(statusCounts);
   const groups = salesInvoiceGroups(invoices, filter);
   const visibleCount = groups.reduce((sum, group) => sum + group.items.length, 0);
   const filtered = filter !== "all" || Boolean(customerFilter);
+  const reachedListLimit = invoices.length === INVOICE_LIST_LIMIT;
 
   return (
     <div className="space-y-6 pb-6">
@@ -337,6 +369,12 @@ function InvoicesPageContent() {
               onClear={filtered ? () => setFilter("all") : undefined}
               clearLabel="Tyhjennä suodatin"
             />
+          )}
+
+          {reachedListLimit && (
+            <p className="text-[13px] text-ink-2">
+              Näytetään {INVOICE_LIST_LIMIT} uusinta laskua. Valitse suodatin nähdäksesi kaikki.
+            </p>
           )}
         </>
       )}
