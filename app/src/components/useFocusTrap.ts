@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef } from "react";
+import { nextFocusable, pickRestoreElement, pushTrap, topTrapId } from "@/lib/focus-trap";
 
 const FOCUSABLE_SELECTOR =
   'button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), img, [tabindex]:not([tabindex="-1"])';
@@ -53,10 +54,15 @@ export function useFocusTrap<T extends HTMLElement>(
 
     const toFocus = initialFocusRefRef.current?.current || focusables()[0] || container;
     toFocus?.focus();
+    const registration = pushTrap();
 
     const onKeyDown = (e: KeyboardEvent) => {
+      if (topTrapId() !== registration.id) return;
       if (e.key === "Escape") {
-        onEscapeRef.current?.();
+        if (!onEscapeRef.current) return;
+        e.preventDefault();
+        e.stopPropagation();
+        onEscapeRef.current();
         return;
       }
       if (e.key !== "Tab") return;
@@ -70,21 +76,21 @@ export function useFocusTrap<T extends HTMLElement>(
       const current = document.activeElement as HTMLElement | null;
       if (e.shiftKey && current === first) {
         e.preventDefault();
-        last.focus();
+        nextFocusable(items, current, true)?.focus();
       } else if (!e.shiftKey && current === last) {
         e.preventDefault();
-        first.focus();
+        nextFocusable(items, current, false)?.focus();
       } else if (!current || !items.includes(current)) {
-        // Focus somehow ended up outside the container — pull it back in.
         e.preventDefault();
-        first.focus();
+        nextFocusable(items, null, false)?.focus();
       }
     };
 
     document.addEventListener("keydown", onKeyDown);
     return () => {
       document.removeEventListener("keydown", onKeyDown);
-      previouslyFocused?.focus();
+      registration.release();
+      pickRestoreElement(previouslyFocused, container)?.focus();
     };
   }, [active, containerRef]);
 }

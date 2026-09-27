@@ -1,7 +1,8 @@
 "use client";
 
-import { useId, type ButtonHTMLAttributes, ReactNode } from "react";
+import { cloneElement, isValidElement, useId, type ButtonHTMLAttributes, type ReactElement, type ReactNode } from "react";
 import { buttonClass, type ButtonVariant } from "@/components/control-styles";
+import { invalidFieldProps } from "@/lib/focus-field";
 
 export { buttonClass, chipClass, controlClass } from "@/components/control-styles";
 
@@ -81,13 +82,22 @@ export function Field({
   error?: string;
   children: ReactNode;
 }) {
+  const hintId = hint && !error ? `${htmlFor}-hint` : undefined;
+  const a11y = invalidFieldProps(htmlFor, error, hintId);
+  const control = isValidElement(children)
+    ? cloneElement(children as ReactElement<Record<string, unknown>>, a11y)
+    : children;
   return (
     <div>
       <label htmlFor={htmlFor} className="mb-1.5 block text-sm font-medium text-charcoal-light">
         {label}
       </label>
-      {children}
-      {hint && !error && <p className="mt-1.5 text-xs text-warm-gray">{hint}</p>}
+      {control}
+      {hint && !error && (
+        <p id={hintId} className="mt-1.5 text-xs text-warm-gray">
+          {hint}
+        </p>
+      )}
       {error && (
         <p id={`${htmlFor}-error`} className="mt-1.5 text-sm text-danger" role="alert">
           {error}

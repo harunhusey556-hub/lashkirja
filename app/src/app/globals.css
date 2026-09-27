@@ -701,9 +701,19 @@ body.signing-out {
   .animate-in,
   .animate-in-delay-1,
   .animate-in-delay-2,
+  .animate-spin,
   .list-stagger > * {
     animation: none !important;
     opacity: 1 !important;
     transform: none !important;
+  }
+
+  .skeleton::after {
+    animation: none !important;
+    opacity: 0 !important;
+  }
+
+  body.signing-out {
+    transition: none !important;
   }
 }

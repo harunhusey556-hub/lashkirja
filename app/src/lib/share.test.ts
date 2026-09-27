@@ -87,6 +87,30 @@ describe("shareContent web fallback", () => {
     expect(shared[0]?.files).toBeUndefined();
   });
 
+  it("reports a dismissed share sheet as cancelled and does not download", async () => {
+    let downloaded = false;
+    const result = await shareContent(
+      { title: "Lasku", file: pdf() },
+      {
+        isNativePlatform: () => true,
+        canShareFiles: () => false,
+        fileUri: async () => "file:///cache/lasku.pdf",
+        share: async () => {
+          throw new DOMException("Share canceled", "AbortError");
+        },
+        webShare: async () => {
+          throw new Error("web share should not run after a native cancel");
+        },
+        download: () => {
+          downloaded = true;
+          return true;
+        },
+      }
+    );
+    expect(result).toBe("cancelled");
+    expect(downloaded).toBe(false);
+  });
+
   it("does not claim a download that never happened", async () => {
     const result = await shareContent(
       { title: "Lasku", file: pdf() },

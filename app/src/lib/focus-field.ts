@@ -28,10 +28,10 @@ export function focusFirstInvalid(
   return key;
 }
 
-export function invalidFieldProps(id: string, error?: string) {
+export function invalidFieldProps(id: string, error?: string, hintId?: string) {
   return {
     id,
-    "aria-invalid": Boolean(error) || undefined,
-    "aria-describedby": error ? `${id}-error` : undefined,
+    "aria-invalid": error ? true : undefined,
+    "aria-describedby": error ? `${id}-error` : hintId,
   };
 }

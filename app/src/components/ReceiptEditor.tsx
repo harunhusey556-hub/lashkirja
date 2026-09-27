@@ -23,6 +23,7 @@ import { Button, FormError, SavePhaseNote } from "@/components/ui";
 import { SelectMenu, SelectOption } from "@/components/SelectMenu";
 import { parseFinnishNumber, parseMoneyInput } from "@/lib/format";
 import { focusFirstInvalid } from "@/lib/focus-field";
+import { filePickDecision } from "@/lib/native-file-flow";
 import { clearDraft } from "@/lib/draft-store";
 import { receiptFieldId, validateReceiptFields } from "@/lib/receipt-form";
 import { RECEIPT_PHASE } from "@/lib/screen-state";
@@ -657,7 +658,7 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
             className="hidden"
             onChange={(e) => {
               const files = Array.from(e.target.files ?? []);
-              if (files.length > 0) uploadQueue.enqueue(files);
+              if (filePickDecision(files.length).kind === "upload") uploadQueue.enqueue(files);
               e.currentTarget.value = "";
             }}
           />
@@ -670,7 +671,7 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
             className="hidden"
             onChange={(e) => {
               const files = Array.from(e.target.files ?? []);
-              if (files.length > 0) uploadQueue.enqueue(files);
+              if (filePickDecision(files.length).kind === "upload") uploadQueue.enqueue(files);
               e.currentTarget.value = "";
             }}
           />

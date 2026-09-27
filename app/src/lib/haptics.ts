@@ -1,4 +1,6 @@
-/** Light native haptics. No-op in the browser and when the plugin is absent. */
+/** Light native haptics. No-op in the browser, when reduced motion is on, and when the plugin is absent. */
+
+import { motionAllowsHaptic } from "@/lib/motion-feedback";
 
 async function nativeHaptics() {
   const { Capacitor } = await import("@capacitor/core");
@@ -7,6 +9,7 @@ async function nativeHaptics() {
 }
 
 export async function hapticSelection(): Promise<void> {
+  if (!motionAllowsHaptic()) return;
   try {
     const haptics = await nativeHaptics();
     if (!haptics) return;
@@ -17,6 +20,7 @@ export async function hapticSelection(): Promise<void> {
 }
 
 export async function hapticNotify(kind: "success" | "error"): Promise<void> {
+  if (!motionAllowsHaptic()) return;
   try {
     const haptics = await nativeHaptics();
     if (!haptics) return;

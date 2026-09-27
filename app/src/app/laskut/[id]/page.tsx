@@ -710,20 +710,20 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
                 <p className="text-base font-medium text-charcoal">Tarkista ennen lähetystä</p>
                 <div className="space-y-1 text-sm">
                   <div className="flex justify-between gap-3">
-                    <span className="text-warm-gray">Vastaanottaja</span>
-                    <span className="text-charcoal">{review.recipient ?? "–"}</span>
+                    <span className="shrink-0 text-warm-gray">Vastaanottaja</span>
+                    <span className="min-w-0 break-all text-right text-charcoal">{review.recipient ?? "–"}</span>
                   </div>
                   <div className="flex justify-between gap-3">
                     <span className="text-warm-gray">Summa</span>
-                    <span className="text-charcoal">{formatEur(review.gross)}</span>
+                    <span className="shrink-0 whitespace-nowrap tabular-nums text-charcoal">{formatEur(review.gross)}</span>
                   </div>
                   <div className="flex justify-between gap-3">
                     <span className="text-warm-gray">Eräpäivä</span>
                     <span className="text-charcoal">{formatDate(review.dueDate)}</span>
                   </div>
                   <div className="flex justify-between gap-3">
-                    <span className="text-warm-gray">Tilinumero</span>
-                    <span className="text-charcoal">{review.iban ?? "–"}</span>
+                    <span className="shrink-0 text-warm-gray">Tilinumero</span>
+                    <span className="min-w-0 break-all text-right text-charcoal">{review.iban ?? "–"}</span>
                   </div>
                   <div className="flex justify-between gap-3">
                     <span className="text-warm-gray">Liite</span>

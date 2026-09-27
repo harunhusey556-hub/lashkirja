@@ -17,6 +17,7 @@ import {
   redirectToLogin,
 } from "@/components/clientFetch";
 import { formatDate, formatEur } from "@/lib/format";
+import { amountClass, longNameClass } from "@/lib/text-layout";
 
 import { INVOICE_LINKS, WorkspaceLinks, linksWithActive } from "@/components/WorkspaceLinks";
 import { Button } from "@/components/ui";
@@ -401,7 +402,7 @@ export default function CustomersPage() {
                   <div className="min-w-0">
                     <Link
                       href={`/asiakkaat/${customer.id}`}
-                      className="text-base font-medium text-charcoal truncate block"
+                      className={`block text-base font-medium text-charcoal ${longNameClass}`}
                     >
                       {customer.name}
                     </Link>
@@ -411,7 +412,7 @@ export default function CustomersPage() {
                     </p>
                   </div>
                   <div className="text-right shrink-0">
-                    <p className="text-base font-semibold text-charcoal">
+                    <p className={`text-base font-semibold text-charcoal ${amountClass}`}>
                       {formatEur(customer.openBalance)}
                     </p>
                     <p className="text-[11px] text-warm-gray">avoinna</p>

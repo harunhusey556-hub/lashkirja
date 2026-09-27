@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { useFocusTrap } from "@/components/useFocusTrap";
 import { settleConfirm } from "@/lib/confirm-action";
 import { useOverlayLock } from "@/lib/overlay-lock";
@@ -29,6 +29,8 @@ export default function ConfirmModal({
 }: ConfirmModalProps) {
   const overlayRef = useRef<HTMLDivElement>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
+  const titleId = useId();
+  const descriptionId = useId();
   const attemptRef = useRef(0);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -131,6 +133,9 @@ export default function ConfirmModal({
         }`}
         role="dialog"
         aria-modal="true"
+        aria-labelledby={titleId}
+        aria-describedby={description ? descriptionId : undefined}
+        tabIndex={-1}
       >
         <div className="flex flex-col items-center text-center">
           {isDestructive ? (
@@ -147,10 +152,10 @@ export default function ConfirmModal({
             </div>
           )}
           
-          <h3 className="text-lg font-medium text-charcoal">{title}</h3>
+          <h3 id={titleId} className="text-lg font-medium text-charcoal">{title}</h3>
           
           {description && (
-            <p className="mt-2 text-sm text-warm-gray">{description}</p>
+            <p id={descriptionId} className="mt-2 text-sm text-warm-gray">{description}</p>
           )}
 
           {error && (

@@ -34,12 +34,9 @@ export const metadata: Metadata = {
 export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
-  // Stops the accidental double-tap / focus zoom that makes typing on iOS
-  // miserable. Safari deliberately ignores these two for pinch gestures
-  // (accessibility), so browser users can still zoom; the installed app
-  // (WKWebView) honours them fully.
-  maximumScale: 1,
-  userScalable: false,
+  // Pinch zoom stays available. Inputs are 16px so iOS does not jump the
+  // page on focus. Double-tap zoom is already off via touch-action.
+  // See app/docs/viewport-zoom.md.
   viewportFit: "cover",
   themeColor: "#f5e6e0",
 };

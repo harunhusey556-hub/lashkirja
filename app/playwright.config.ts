@@ -29,7 +29,9 @@ export default defineConfig({
   projects: [
     {
       name: "mobile-chromium",
-      use: { ...devices["iPhone 13"] },
+      // iPhone 13's device preset selects WebKit. This project is Chromium
+      // with that phone's viewport, touch, and user agent.
+      use: { ...devices["iPhone 13"], browserName: "chromium" },
     },
   ],
   webServer: externalBaseUrl

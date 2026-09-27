@@ -181,10 +181,15 @@ export function BankAccountForm({ initial, submitLabel, busy, onSubmit, onCancel
             value={values.currency}
             onChange={(e) => set("currency", e.target.value.toUpperCase())}
             maxLength={3}
-            aria-invalid={Boolean(errors.currency)}
+            aria-invalid={Boolean(errors.currency) || undefined}
+            aria-describedby={errors.currency ? "ba-currency-error" : undefined}
             aria-required="true"
           />
-          {errors.currency && <p className={errorText}>{errors.currency}</p>}
+          {errors.currency && (
+            <p id="ba-currency-error" className={errorText}>
+              {errors.currency}
+            </p>
+          )}
         </div>
       </div>
 
@@ -217,10 +222,15 @@ export function BankAccountForm({ initial, submitLabel, busy, onSubmit, onCancel
             className={field}
             value={values.openingDate}
             onChange={(e) => set("openingDate", e.target.value)}
-            aria-invalid={Boolean(errors.openingDate)}
+            aria-invalid={Boolean(errors.openingDate) || undefined}
+            aria-describedby={errors.openingDate ? "ba-date-error" : undefined}
             aria-required="true"
           />
-          {errors.openingDate && <p className={errorText}>{errors.openingDate}</p>}
+          {errors.openingDate && (
+            <p id="ba-date-error" className={errorText}>
+              {errors.openingDate}
+            </p>
+          )}
         </div>
       </div>
 

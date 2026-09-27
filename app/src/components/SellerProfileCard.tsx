@@ -233,8 +233,14 @@ export default function SellerProfileCard() {
                 onChange={(e) => set("invoiceIban", e.target.value)}
                 onBlur={(e) => set("invoiceIban", formatIban(e.target.value))}
                 placeholder="FI21 1234 5600 0007 85"
+                aria-invalid={Boolean(errors.invoiceIban) || undefined}
+                aria-describedby={errors.invoiceIban ? "sp-iban-error" : undefined}
               />
-              {errors.invoiceIban && <p className="text-xs text-danger">{errors.invoiceIban}</p>}
+              {errors.invoiceIban && (
+                <p id="sp-iban-error" className="text-xs text-danger">
+                  {errors.invoiceIban}
+                </p>
+              )}
             </div>
             <div className="space-y-1.5">
               <label className={label} htmlFor="sp-bic">BIC</label>
