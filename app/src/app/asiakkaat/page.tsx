@@ -19,7 +19,6 @@ import {
 import { formatDate, formatEur } from "@/lib/format";
 import { amountClass, longNameClass } from "@/lib/text-layout";
 
-import { INVOICE_LINKS, WorkspaceLinks, linksWithActive } from "@/components/WorkspaceLinks";
 import { Button } from "@/components/ui";
 import { newIdempotencyKey } from "@/lib/idempotency-key";
 import { clearDraft } from "@/lib/draft-store";
@@ -253,7 +252,6 @@ export default function CustomersPage() {
           <p className="text-sm text-warm-gray leading-relaxed">
             Asiakasrekisteri ja avoimet saatavat.
           </p>
-          <WorkspaceLinks items={linksWithActive(INVOICE_LINKS, "/asiakkaat")} />
         </header>
 
         {status === "ready" && customers.length > 0 && (

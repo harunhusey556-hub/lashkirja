@@ -103,4 +103,13 @@ describe("chat honesty", () => {
       { label: "Kuitit", href: "/kuitit?month=2026-09" },
     ]);
   });
+
+  it("recognizes the new ALV path as a bare link", () => {
+    expect(
+      sourcesFromText("Katso /kirjanpito/alv?period=2026-09 ja /kuitit?month=2026-09.")
+    ).toEqual([
+      { label: "ALV-raportti", href: "/kirjanpito/alv?period=2026-09" },
+      { label: "Kuitit", href: "/kuitit?month=2026-09" },
+    ]);
+  });
 });

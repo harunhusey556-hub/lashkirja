@@ -79,7 +79,7 @@ export function sourcesFromText(text: string): ChatSource[] {
   };
   for (const match of text.matchAll(/\[[^\]]+\]\((\/[^)\s]+)\)/g)) add(match[1]);
   for (const match of text.matchAll(
-    /(?:^|\s)(\/(?:alv-raportti|raportit|kuitit|laskut|pankki\/tapahtumat|tiliotteet)(?:\?[^\s).,;]*)?)/g
+    /(?:^|\s)(\/(?:kirjanpito\/alv|raportit|kuitit|laskut|pankki\/tapahtumat|tiliotteet)(?:\?[^\s).,;]*)?)/g
   )) {
     add(match[1]);
   }

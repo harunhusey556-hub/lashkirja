@@ -80,11 +80,6 @@ export default function AsetuksetPage() {
             label="Laskuttajan tiedot"
             hint="Y-tunnus, tilinumero ja laskun tiedot"
           />
-          <SettingsRow
-            href="/asetukset/kirjanpito"
-            label="Kirjanpidon lukitus"
-            hint="Sulje valmiit kaudet muutoksilta"
-          />
         </SettingsGroup>
 
         <SettingsGroup label="Tili">
@@ -106,11 +101,6 @@ export default function AsetuksetPage() {
         </SettingsGroup>
 
         <SettingsGroup label="Integraatiot">
-          <SettingsRow
-            href="/asetukset/pankkiyhteys"
-            label="Pankkiyhteys"
-            hint="Pankin tekninen yhteys ja haettavat tilit"
-          />
           <SettingsRow
             href="/asetukset/sahkoposti"
             label="Sähköpostien tuonti"

@@ -14,7 +14,7 @@ import {
 } from "@/components/clientFetch";
 import { formatDate, formatEur } from "@/lib/format";
 
-import { INVOICE_LINKS, WorkspaceLinks, linksWithActive } from "@/components/WorkspaceLinks";
+import { SettingsGroup, SettingsRow } from "@/components/SettingsList";
 import { Button, buttonClass, chipClass } from "@/components/ui";
 import { pageCacheFetchedAt, readPageCache, writePageCache } from "@/lib/page-cache";
 import { isForbidden } from "@/lib/screen-state";
@@ -191,7 +191,6 @@ function InvoicesPageContent() {
           <p className="text-sm text-warm-gray leading-relaxed">
             Laskuta asiakkaita ja seuraa maksuja viitenumerolla.
           </p>
-          <WorkspaceLinks items={linksWithActive(INVOICE_LINKS, "/laskut")} />
         </header>
 
         {aging && (
@@ -332,6 +331,11 @@ function InvoicesPageContent() {
             )}
           </ul>
         )}
+
+        <SettingsGroup label="Myynnin rekisterit">
+          <SettingsRow href="/asiakkaat" label="Asiakkaat" hint="Y-tunnus, maksuaika ja avoin saldo" />
+          <SettingsRow href="/toistuvat" label="Toistuvat laskut" hint="Sama lasku kuukausittain tai vuosittain" />
+        </SettingsGroup>
       </div>
     </>
   );

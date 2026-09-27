@@ -152,7 +152,7 @@ export default function ALVRaporttiPage() {
           <div className="bg-warning/10 rounded-2xl p-4 text-sm text-charcoal">
             <p className="font-medium">OmaVero-luonnos</p>
             <p className="mt-1">
-              Et ole merkinnyt olevasi ALV-rekisterissä (Asetukset). Tämä
+              Et ole merkinnyt olevasi ALV-rekisterissä (<Link href="/asetukset/yritys" className="underline">Asetukset</Link>). Tämä
               raportti on vain arvio — ALV-ilmoitusta ei tarvitse antaa, jos
               et ole ALV-rekisterissä.
             </p>
