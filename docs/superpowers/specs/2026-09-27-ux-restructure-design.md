@@ -247,3 +247,52 @@ Her adım kendi içinde çalışır durumda bırakılır; testler her adımda ye
 - **Satır okuma yalnız AI yolunda:** API anahtarı olmayan kurulumda onay sayfası satırsız görünür; bu kabul edildi.
 - **Yıllık ALV dönemi son tarihi** küçük işletmeler için 28.2. varsayıldı; farklı dönem türü eklenirse `vat-deadline.ts` tek değişiklik noktasıdır.
 - **iOS uygulaması:** tasarım aynı web arayüzünü kullanır; kamera açma mevcut Capacitor eklentisiyle yapılır. Yeni IPA gerekmez, ancak test cihazında denenmesi gerekir.
+
+## 10. Tüm uygulama için görsel dil (eklendi 2026-09-28)
+
+Kullanıcı onaylı mockup'ları gördükten sonra **bütün uygulamanın** bu görünümde olmasını istedi (yalnız §3'teki ana ekranlar değil). Bu yüzden sıra değişti: §8 adım 2 artık "tasarım temeli + tüm sayfalara yeni görünüm"; eski 2-6 adımları 3-7 olur (Kirjanpito tek liste, Koti görevleri, onay sayfası ve fiş satırları, Myynti gruplama + "+" sayfası). Myynti'nin duruma göre gruplanması görsel olduğu için adım 2'ye alındı.
+
+### 10.1 Tokenlar (`globals.css` `@theme`)
+
+| Token | Değer | Kullanım |
+|---|---|---|
+| `--color-canvas` | `#f6f3ef` | sayfa zemini |
+| `--color-surface` | `#fffdfb` | kartlar, satırlar, sekme çubuğu |
+| `--color-line` | `#e7e1da` | kart kenarı ve satır ayırıcı (1px) |
+| `--color-ink` | `#26221f` | ana metin, birincil buton zemini |
+| `--color-ink-2` | `#6a645f` | ikincil metin (surface üzerinde ≥4.5:1) |
+| `--color-accent-soft` | `#f3e6e3` | aksiyon hapı ve vurgu etiketi zemini |
+| `--color-accent` / `--color-success` / `--color-danger` / `--color-warning` | mevcut değerler | durum renkleri |
+| `--radius-card` | `14px` | kartlar ve gruplar; haplar tam yuvarlak |
+
+Kartlarda gölge yok; tek 1px `line` kenarı. Kart içinde kart yok. Büyük harfli, harf aralıklı başlık etiketi yok; bölüm başlıkları cümle düzeninde 13px `ink-2`. Em dash kullanılmaz.
+
+### 10.2 Tipografi
+
+Büyük başlık 32px/700 (−0.02em); bölüm başlığı 13px `ink-2`; satır başlığı 15px/500; ikincil satır 13px `ink-2`; detay tutarı 40px/700 tabular rakam; özet tutarı 28px/700; çip 14px/500. Tutarlar her yerde `formatEur` ile.
+
+### 10.3 Ortak bileşenler (`src/components/ds/`)
+
+`PageTitle`, `Section`, `ListRow`, `ActionPill`, `StatusTag`, `FilterChips`, `SummaryCard`, `DetailHero`, `KeyValueList`, `Timeline`, `BottomActions`, `MoreMenu` (···, alttan sayfa). Durum metinleri ve renkleri tek yerde: `src/lib/status-labels.ts` (satış faturası, alış faturası, fiş inceleme, işlem belge durumu).
+
+### 10.4 Kabuk
+
+Başlık çubuğunda sayfa başlığı gösterilmez: kök ve çalışma alanı sayfaları `PageTitle`, detay sayfaları `DetailHero` taşır; başlık çubuğunda yalnız etiketli geri, asistan ve profil. Detay sayfalarında (registry `kind: "detail"`) sekme çubuğu gizlenir ve `BottomActions` alt güvenli alanın üstüne sabitlenir.
+
+### 10.5 Ekran kapsamı
+
+| Ekran(lar) | Adım 2'de | Sonraki adımlarda |
+|---|---|---|
+| Koti (`/dashboard`) | yeni görünüm (başlık, özet kartları, hızlı işlemler) | adım 4: görevler, ilerleme, son tarih |
+| Kirjanpito kökü | yeni görünüm (gruplu satırlar, değerlerle) | adım 3: tek işlem listesi |
+| ALV, Ostolaskut, Pankkitilit, Suljetut kaudet | yeni görünüm | – |
+| Kuitit listesi ve detayı, Tapahtumat ve tiliote detayı, Täsmäytys, Työt | yeni görünüm | adım 3: tek listeye birleşir; adım 5: onay sayfası |
+| Myynti listesi | yeni görünüm + duruma göre gruplama + sayılı filtre çipleri | – |
+| Lasku detayı | detay kalıbı (§3.5) + ··· menüsü | – |
+| Uusi lasku, Asiakkaat, Asiakas detayı, Toistuvat | yeni görünüm | – |
+| Raportit | yeni görünüm | – |
+| Asetukset ve 12 alt sayfa | yeni görünüm | – |
+| Giriş ve şifre ekranları, pankki paluu | yeni görünüm | – |
+| "+" sayfası | yeni görünüm (mevcut bağlantılar) | adım 7: belge türü tanıma |
+
+Hiçbir mevcut işlev kaybolmaz: seyrek işler ··· menüsüne taşınır ama erişilebilir kalır.
