@@ -2,7 +2,8 @@ import { describe, expect, it } from "vitest";
 import { readdirSync, statSync } from "node:fs";
 import path from "node:path";
 import { NextRequest } from "next/server";
-import { PUBLIC_PAGES, isPublicPage, proxy } from "./proxy";
+import { unstable_doesMiddlewareMatch } from "next/experimental/testing/server";
+import { PUBLIC_PAGES, config, isPublicPage, proxy } from "./proxy";
 
 const APP_DIR = path.resolve(__dirname, "app");
 
@@ -107,4 +108,42 @@ describe("proxy() request handling (signed out, no session cookie)", () => {
     const response = await proxy(request);
     expectPassThrough(response);
   });
+});
+
+/**
+ * Regression: the previous matcher was a single pattern whose extension
+ * exclusion (`.*\.(?:png|jpg|...)$`) also matched API paths ending in one of
+ * those extensions, so an upload route like /api/uploads/abc.jpg never even
+ * reached proxy() — it skipped the gate entirely. This table pins the matcher
+ * config itself, independent of proxy()'s internal logic.
+ */
+describe("proxy matcher config", () => {
+  const OLD_MATCHER = {
+    matcher: [
+      "/((?!_next/|favicon\\.ico|manifest\\.json|offline\\.html|index\\.html|icons/|.*\\.(?:png|svg|jpg|jpeg|webp|ico|txt|webmanifest)$).*)",
+    ],
+  };
+
+  const cases: Array<{ url: string; matched: boolean }> = [
+    { url: "http://127.0.0.1/api/uploads/abc.jpg", matched: true },
+    { url: "http://127.0.0.1/api/receipts", matched: true },
+    { url: "http://127.0.0.1/tyot", matched: true },
+    { url: "http://127.0.0.1/kirjanpito/alv", matched: true },
+    { url: "http://127.0.0.1/_next/static/x.js", matched: false },
+    { url: "http://127.0.0.1/icons/icon-192.png", matched: false },
+    { url: "http://127.0.0.1/manifest.json", matched: false },
+    { url: "http://127.0.0.1/manifest.jsonfoo", matched: true },
+  ];
+
+  it("the OLD matcher let an API upload file skip the gate (documents the bug, not the fix)", () => {
+    expect(unstable_doesMiddlewareMatch({ config: OLD_MATCHER, url: "http://127.0.0.1/api/uploads/abc.jpg" })).toBe(
+      false
+    );
+  });
+
+  for (const { url, matched } of cases) {
+    it(`${matched ? "matches" : "does not match"}: ${url}`, () => {
+      expect(unstable_doesMiddlewareMatch({ config, url })).toBe(matched);
+    });
+  }
 });

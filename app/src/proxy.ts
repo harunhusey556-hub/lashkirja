@@ -7,6 +7,13 @@ import { SessionData, sessionOptions } from "@/lib/session-options";
  * Next.js 16 proxy — the replacement for middleware.ts.
  * Protects both page routes and API routes. New routes are protected by default
  * unless explicitly listed in PUBLIC_API_PREFIXES.
+ *
+ * `config.matcher` below has two separate entries on purpose: one that always
+ * matches every /api/* path, and one for pages that skips Next internals and
+ * static files. Do not fold them back into a single pattern — a combined
+ * extension exclusion (e.g. ".*\\.(?:png|jpg|...)$") also matches API routes
+ * that happen to end in one of those extensions (like /api/uploads/x.jpg),
+ * letting them skip this gate entirely.
  */
 
 /** Signed-out screens. Every other page requires a session. */
@@ -96,7 +103,13 @@ export async function proxy(request: NextRequest) {
 
 export const config = {
   matcher: [
-    // Everything except Next internals and files served from public/.
-    "/((?!_next/|favicon\\.ico|manifest\\.json|offline\\.html|index\\.html|icons/|.*\\.(?:png|svg|jpg|jpeg|webp|ico|txt|webmanifest)$).*)",
+    // Every API route, unconditionally — never skipped by the extension
+    // exclusions below (an upload path like /api/uploads/x.jpg must still
+    // hit the gate).
+    "/api/:path*",
+    // Pages: everything except /api (handled above), Next internals, and
+    // files served from public/. The fixed-name exclusions are anchored
+    // with `$` so a real page like /manifest.jsonfoo is still matched.
+    "/((?!api/|_next/|favicon\\.ico$|manifest\\.json$|offline\\.html$|index\\.html$|icons/|.*\\.(?:png|svg|jpg|jpeg|webp|ico|txt|webmanifest)$).*)",
   ],
 };
