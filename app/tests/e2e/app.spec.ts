@@ -54,7 +54,7 @@ test("login lands on the dashboard and the tab bar navigates", async ({ page }) 
   await expect(page).toHaveURL(/\/raportit$/);
 
   await page.getByRole("button", { name: /Profiili, asetukset/ }).click();
-  await page.getByRole("button", { name: "Asetukset" }).click();
+  await page.getByRole("button", { name: "Asetukset", exact: true }).click();
   await expect(page).toHaveURL(/\/asetukset$/);
 });
 
