@@ -5,6 +5,7 @@ import {
   fallbackBackPath,
   inAppPrevious,
   markHistoryBack,
+  performInAppBack,
   recordRoute,
   resetNavigationForTests,
 } from "./nav-direction";
@@ -64,5 +65,23 @@ describe("in-app back", () => {
     expect(inAppPrevious("/laskut/1")).toBe("/laskut");
     recordRoute("/laskut", "back");
     expect(inAppPrevious("/laskut")).toBeNull();
+  });
+});
+
+describe("performInAppBack fallback", () => {
+  it("replaces to the given parent when there is no in-app history", () => {
+    resetNavigationForTests();
+    const calls: string[] = [];
+    performInAppBack("/asiakkaat", { back: () => calls.push("back"), replace: (href) => calls.push(href) }, "/laskut");
+    expect(calls).toEqual(["/laskut"]);
+  });
+
+  it("still uses history when there is a previous in-app screen", () => {
+    resetNavigationForTests();
+    recordRoute("/laskut", "tab");
+    recordRoute("/asiakkaat", "forward");
+    const calls: string[] = [];
+    performInAppBack("/asiakkaat", { back: () => calls.push("back"), replace: (href) => calls.push(href) }, "/laskut");
+    expect(calls).toEqual(["back"]);
   });
 });

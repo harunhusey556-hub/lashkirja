@@ -68,16 +68,16 @@ export function inAppPrevious(pathname: string): string | null {
 
 export function performInAppBack(
   pathname: string,
-  router: { back: () => void; replace: (href: string) => void }
+  router: { back: () => void; replace: (href: string) => void },
+  fallback: string = fallbackBackPath(pathname)
 ): void {
   if (inAppPrevious(pathname)) {
     markHistoryBack();
     router.back();
     return;
   }
-  const target = fallbackBackPath(pathname);
-  armNavigation(target, "back");
-  router.replace(target);
+  armNavigation(fallback, "back");
+  router.replace(fallback);
 }
 
 /** Remember which way the next landing on `pathname` should animate. */

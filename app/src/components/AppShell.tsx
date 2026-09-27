@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
+import Link from "next/link";
 import { LoadingState } from "@/components/AsyncState";
 import { ConnectionNotice } from "@/components/ScreenState";
 import { OnboardingModal } from "@/components/OnboardingModal";
@@ -36,10 +37,12 @@ import { anyFormDirty, requestLeave } from "@/lib/form-guard";
 import { UnsavedChangesHost } from "@/components/UnsavedChangesHost";
 import {
   avatarRoot,
+  backTarget,
   matchNav,
   rootIsActive,
   shellShowsBack,
   tabRoots,
+  type NavEntry,
 } from "@/lib/navigation";
 
 function RootIcon({ id, active, className }: { id: string; active: boolean; className?: string }) {
@@ -175,7 +178,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   // Stored with the path it was opened on, so a route change closes it without
   // an effect that would re-render twice.
   const [profileOpenOn, setProfileOpenOn] = useState<string | null>(null);
-  const [moreOpenOn, setMoreOpenOn] = useState<string | null>(null);
+  const [addOpenOn, setAddOpenOn] = useState<string | null>(null);
   const [chatOpenOn, setChatOpenOn] = useState<string | null>(null);
   const [signingOut, setSigningOut] = useState(false);
   const [signOutError, setSignOutError] = useState("");
@@ -203,6 +206,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   }
   const direction = navFrame.path === pathname ? navFrame.direction : "none";
   const canGoBack = shellShowsBack(pathname);
+  const back = backTarget(pathname);
 
   useEffect(() => {
     recordRoute(pathname, direction);
@@ -211,7 +215,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   }, [pathname, direction]);
 
   function goBack() {
-    requestLeave(() => performInAppBack(pathname, router));
+    requestLeave(() => performInAppBack(pathname, router, back?.href));
   }
 
   // Browser/OS back (popstate) plays the pop transition even when the route
@@ -463,13 +467,35 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     }
   }
 
-  const moreOpen = moreOpenOn === pathname;
-  const moreActive = [avatarRoot()].some((item) => rootIsActive(pathname, item.id));
+  const addOpen = addOpenOn === pathname;
 
   function goToRoot(href: string) {
     void hapticSelection();
-    setMoreOpenOn(null);
+    setAddOpenOn(null);
+    setProfileOpenOn(null);
     openRoot(href, pathname, router);
+  }
+
+  function renderTab(item: NavEntry) {
+    const active = rootIsActive(pathname, item.id);
+    return (
+      <button
+        key={item.id}
+        type="button"
+        onClick={() => goToRoot(item.path)}
+        className={`flex min-w-0 flex-1 flex-col items-center justify-center gap-0.5 touch-target active:bg-blush/30 transition-colors active-press ${
+          active ? "text-accent-dark" : "text-warm-gray"
+        }`}
+        aria-current={active ? "page" : undefined}
+      >
+        <RootIcon id={item.id} active={active} />
+        <span
+          className={`max-w-full truncate text-[11px] leading-tight ${active ? "font-semibold" : "font-medium"}`}
+        >
+          {item.label}
+        </span>
+      </button>
+    );
   }
 
   return (
@@ -477,6 +503,19 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     {authState.status === "ready" && (
       <aside className="app-sidebar" aria-hidden={false}>
         <p className="px-4 pb-2 pt-4 text-xs font-semibold uppercase tracking-wide text-warm-gray">LashKirja</p>
+        <div className="px-2 pb-3">
+          <button
+            type="button"
+            onClick={() => setAddOpenOn(pathname)}
+            aria-haspopup="dialog"
+            className="flex min-h-11 w-full items-center justify-center gap-2 rounded-xl bg-charcoal text-sm font-semibold text-white active-press"
+          >
+            <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} aria-hidden>
+              <path strokeLinecap="round" d="M12 5v14M5 12h14" />
+            </svg>
+            Lisää
+          </button>
+        </div>
         <nav aria-label="Päävalikko" className="flex flex-1 flex-col gap-1 px-2">
           {tabRoots().map((item) => {
             const active = rootIsActive(pathname, item.id);
@@ -500,6 +539,17 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
             );
           })}
         </nav>
+        <div className="mt-auto px-2 pb-4">
+          <button
+            type="button"
+            onClick={() => goToRoot(avatarRoot().path)}
+            aria-current={rootIsActive(pathname, "asetukset") ? "page" : undefined}
+            className="flex min-h-12 w-full items-center gap-3 rounded-xl px-3 text-left text-sm font-medium text-charcoal active-press"
+          >
+            <RootIcon id="asetukset" active={rootIsActive(pathname, "asetukset")} className="h-5 w-5 text-warm-gray" />
+            Asetukset
+          </button>
+        </div>
       </aside>
     )}
     <div className="app-frame">
@@ -509,24 +559,18 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         onContextMenu={(event) => event.preventDefault()}
       >
         <div className="app-header-row mx-auto min-h-14 max-w-lg px-1 md:max-w-3xl">
-          <div className="flex h-11 w-11 items-center justify-center">
+          <div className="flex h-11 min-w-11 items-center">
             {canGoBack && (
               <button
                 type="button"
                 onClick={goBack}
                 aria-label="Takaisin"
-                className="flex h-11 w-11 items-center justify-center text-accent-dark active-press"
+                className="flex h-11 max-w-full items-center gap-0.5 pl-1 pr-2 text-accent-dark active-press"
               >
-                <svg
-                  className="w-6 h-6"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth={2}
-                  aria-hidden
-                >
+                <svg className="h-6 w-6 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} aria-hidden>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
                 </svg>
+                {back && <span className="truncate text-sm font-medium">{back.label}</span>}
               </button>
             )}
           </div>
@@ -551,7 +595,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
             <button
               type="button"
               onClick={() => setProfileOpenOn((open) => (open === pathname ? null : pathname))}
-              aria-label="Profiili ja uloskirjautuminen"
+              aria-label="Profiili, asetukset ja uloskirjautuminen"
               aria-haspopup="dialog"
               className="flex h-11 w-11 items-center justify-center active-press"
             >
@@ -613,81 +657,60 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
             onContextMenu={(event) => event.preventDefault()}
           >
             <div className="mx-auto flex h-[var(--app-tab-height)] max-w-lg items-stretch">
-              {tabRoots().map((item) => {
-                const active = rootIsActive(pathname, item.id);
-                return (
-                  <button
-                    key={item.id}
-                    type="button"
-                    onClick={() => goToRoot(item.path)}
-                    className={`flex min-w-0 flex-1 flex-col items-center justify-center gap-0.5 touch-target active:bg-blush/30 transition-colors active-press ${
-                      active ? "text-accent-dark" : "text-warm-gray"
-                    }`}
-                    aria-current={active ? "page" : undefined}
-                  >
-                    <RootIcon id={item.id} active={active} />
-                    <span
-                      className={`max-w-full truncate text-[11px] leading-tight ${active ? "font-semibold" : "font-medium"}`}
-                    >
-                      {item.label}
-                    </span>
-                  </button>
-                );
-              })}
-              <button
-                type="button"
-                onClick={() => {
-                  void hapticSelection();
-                  setMoreOpenOn(pathname);
-                }}
-                className={`flex min-w-0 flex-1 flex-col items-center justify-center gap-0.5 touch-target active:bg-blush/30 transition-colors active-press ${
-                  moreActive ? "text-accent-dark" : "text-warm-gray"
-                }`}
-                aria-current={moreActive ? "page" : undefined}
-                aria-haspopup="dialog"
-                aria-expanded={moreOpen}
-              >
-                <svg className={`h-6 w-6 ${moreActive ? "text-accent" : "text-warm-gray"}`} viewBox="0 0 24 24" fill="currentColor" aria-hidden>
-                  <circle cx="6" cy="12" r="1.6" />
-                  <circle cx="12" cy="12" r="1.6" />
-                  <circle cx="18" cy="12" r="1.6" />
-                </svg>
-                <span className={`max-w-full truncate text-[11px] leading-tight ${moreActive ? "font-semibold" : "font-medium"}`}>
-                  Muut
-                </span>
-              </button>
+              {tabRoots().slice(0, 2).map((item) => renderTab(item))}
+              <div className="flex min-w-0 flex-1 items-center justify-center">
+                <button
+                  type="button"
+                  onClick={() => {
+                    void hapticSelection();
+                    setAddOpenOn(pathname);
+                  }}
+                  aria-label="Lisää"
+                  aria-haspopup="dialog"
+                  aria-expanded={addOpen}
+                  className="flex h-12 w-12 items-center justify-center rounded-full bg-charcoal text-white active-press"
+                >
+                  <svg className="h-6 w-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} aria-hidden>
+                    <path strokeLinecap="round" d="M12 5v14M5 12h14" />
+                  </svg>
+                </button>
+              </div>
+              {tabRoots().slice(2).map((item) => renderTab(item))}
             </div>
           </nav>
 
           <BottomSheet
-            isOpen={moreOpen}
-            onClose={() => setMoreOpenOn(null)}
-            title="Muut"
-            labelledBy="more-sheet-title"
-            heightClass="max-h-[60dvh]"
+            isOpen={addOpen}
+            onClose={() => setAddOpenOn(null)}
+            title="Lisää"
+            labelledBy="add-sheet-title"
+            heightClass="max-h-[70dvh]"
           >
-            <div className="space-y-1 px-3 py-2 sheet-safe-bottom">
-              {[avatarRoot()].map((item) => {
-                const active = rootIsActive(pathname, item.id);
-                return (
-                  <button
-                    key={item.id}
-                    type="button"
-                    onClick={() => goToRoot(item.path)}
-                    aria-current={active ? "page" : undefined}
-                    className={`flex w-full items-center gap-3 rounded-2xl px-4 py-3.5 text-left active-press ${
-                      active ? "bg-blush" : "active:bg-blush/40"
-                    }`}
+            <div className="space-y-2 px-3 py-2 sheet-safe-bottom">
+              <Link
+                href="/kuitit/uusi"
+                onClick={() => setAddOpenOn(null)}
+                className="flex items-center gap-3 rounded-2xl bg-charcoal px-4 py-4 text-white active-press"
+              >
+                <span className="text-base font-semibold">Kuvaa kuitti</span>
+              </Link>
+              <div className="overflow-hidden rounded-2xl bg-white shadow-sm divide-y divide-warm-gray-light/25">
+                {[
+                  { href: "/pankki/tapahtumat", label: "Tuo tiliote", hint: "CSV, XLSX, camt tai PDF" },
+                  { href: "/laskut/uusi", label: "Uusi myyntilasku" },
+                  { href: "/asetukset/sahkoposti", label: "Hae sähköpostista" },
+                ].map((row) => (
+                  <Link
+                    key={row.href}
+                    href={row.href}
+                    onClick={() => setAddOpenOn(null)}
+                    className="flex flex-col px-4 py-3.5 active:bg-blush/30 touch-target"
                   >
-                    <RootIcon
-                      id={item.id}
-                      active={active}
-                      className={`h-5 w-5 ${active ? "text-accent" : "text-warm-gray"}`}
-                    />
-                    <span className="text-sm font-medium text-charcoal">{item.label}</span>
-                  </button>
-                );
-              })}
+                    <span className="text-sm font-medium text-charcoal">{row.label}</span>
+                    {row.hint && <span className="mt-0.5 text-xs text-warm-gray">{row.hint}</span>}
+                  </Link>
+                ))}
+              </div>
             </div>
           </BottomSheet>
 
@@ -700,6 +723,14 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
             heightClass="max-h-[60dvh]"
           >
             <div className="px-3 py-2 sheet-safe-bottom space-y-1">
+              <button
+                type="button"
+                onClick={() => goToRoot(avatarRoot().path)}
+                className="w-full flex items-center gap-3 px-4 py-3.5 rounded-2xl text-left active:bg-blush/40 touch-target"
+              >
+                <RootIcon id="asetukset" active={false} className="h-4 w-4 text-warm-gray" />
+                <span className="text-sm font-medium text-charcoal">Asetukset</span>
+              </button>
               {signOutError && (
                 <p className="px-4 text-sm text-danger" role="alert">
                   {signOutError}
