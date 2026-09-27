@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { Button, Field, FormError } from "@/components/ui";
 
@@ -99,6 +100,9 @@ export default function LoginForm() {
           >
             Kirjaudu sisään
           </Button>
+          <Link href="/unohtunut-salasana" className="block text-center text-sm text-accent-dark">
+            Unohditko salasanan?
+          </Link>
         </form>
 
         <p className="text-center text-xs text-warm-gray mt-6">

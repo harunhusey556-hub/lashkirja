@@ -1,4 +1,5 @@
 import { randomUUID } from "crypto";
+import { guardWrite } from "@/lib/http-security";
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { requireSession } from "@/lib/session";
@@ -125,6 +126,8 @@ function sse(payload: unknown): Uint8Array {
 }
 
 export async function POST(req: NextRequest) {
+  const blocked = guardWrite(req);
+  if (blocked) return blocked;
   const session = await requireSession(req);
   if (!session) {
     return NextResponse.json({ error: "Ei kirjautunut" }, { status: 401 });
@@ -342,6 +345,8 @@ export async function POST(req: NextRequest) {
 }
 
 export async function PATCH(req: NextRequest) {
+  const blocked = guardWrite(req);
+  if (blocked) return blocked;
   const session = await requireSession(req);
   if (!session) {
     return NextResponse.json({ error: "Ei kirjautunut" }, { status: 401 });

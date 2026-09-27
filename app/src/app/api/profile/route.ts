@@ -7,11 +7,11 @@ import { isValidBusinessId, normalizeBusinessId } from "@/lib/finnish-reference"
 import { reminderSettingsData } from "@/lib/invoice-reminders";
 import { ValidationError } from "@/lib/api-errors";
 import { ENTITY_TYPES } from "@/lib/onboarding";
+import { guardWrite } from "@/lib/http-security";
 
 const patchSchema = z.object({
   firstName: z.string().min(1).optional(),
   lastName: z.string().min(1).optional(),
-  email: z.string().email().optional(),
   entityType: z.enum(ENTITY_TYPES).optional(),
   vatRegistered: z.boolean().optional(),
   vatPeriod: z.enum(["month", "quarter", "year"]).optional(),
@@ -57,6 +57,7 @@ export async function GET(req: NextRequest) {
       firstName: true,
       lastName: true,
       email: true,
+      pendingEmail: true,
       entityType: true,
       vatRegistered: true,
       vatPeriod: true,
@@ -74,6 +75,8 @@ export async function GET(req: NextRequest) {
 }
 
 export async function PATCH(req: NextRequest) {
+  const blocked = guardWrite(req);
+  if (blocked) return blocked;
   const session = await requireSession(req);
   if (!session) {
     return NextResponse.json({ error: "Ei kirjautunut" }, { status: 401 });
@@ -120,6 +123,7 @@ export async function PATCH(req: NextRequest) {
       firstName: true,
       lastName: true,
       email: true,
+      pendingEmail: true,
       entityType: true,
       vatRegistered: true,
       vatPeriod: true,

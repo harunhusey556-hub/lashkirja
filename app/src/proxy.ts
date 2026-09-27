@@ -1,7 +1,7 @@
 import { unsealData } from "iron-session";
 import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
-import { SessionData, sessionOptions } from "@/lib/session";
+import { SessionData, sessionOptions } from "@/lib/session-options";
 
 /**
  * Next.js 16 proxy — the replacement for middleware.ts.

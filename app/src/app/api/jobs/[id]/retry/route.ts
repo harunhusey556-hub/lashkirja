@@ -1,7 +1,7 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/db";
 import { requireSession } from "@/lib/session";
-import { noStoreJson, rejectCrossSite } from "@/lib/http-security";
+import { noStoreJson, rejectCrossSite, rejectOversizedContentLength } from "@/lib/http-security";
 import { processDocumentJob } from "@/lib/document-jobs";
 import { isStuckRunning, runAfterResponse } from "@/lib/job-tracker";
 
@@ -13,6 +13,8 @@ export async function POST(
   if (!session) return noStoreJson({ error: "Ei kirjautunut" }, { status: 401 });
   const crossSite = rejectCrossSite(req);
   if (crossSite) return crossSite;
+  const oversized = rejectOversizedContentLength(req);
+  if (oversized) return oversized;
   const { id } = await params;
 
   const job = await prisma.backgroundJob.findFirst({

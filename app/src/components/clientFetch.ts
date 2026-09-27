@@ -1,4 +1,5 @@
 import { clearPageCache, invalidateForMutation } from "@/lib/page-cache";
+import { logoutOutcome } from "@/lib/session-policy";
 
 export class ApiError extends Error {
   status: number;
@@ -208,17 +209,31 @@ export function redirectToLogin(): void {
  * login screen. The fade lives on <body> (opacity only — a transform here
  * would re-anchor position:fixed bars mid-fade) so it works from any page.
  */
-export async function signOut(): Promise<void> {
-  document.body.classList.add("signing-out");
-  // Nothing cached may survive the account: the next sign-in must not paint
-  // the previous user's lists while its own fetches are still in flight.
-  clearPageCache();
+/**
+ * Ends the server session. Returns false when the call fails, without
+ * navigating: the cookie may still be valid.
+ */
+export async function signOut(): Promise<boolean> {
   try {
-    await apiFetch("/api/auth/logout", { method: "POST", credentials: "include" });
+    const response = await apiFetch("/api/auth/logout", {
+      method: "POST",
+      credentials: "include",
+      headers: { Accept: "application/json" },
+    });
+    if (!response.ok) return false;
   } catch {
-    // Network hiccup: the cookie may survive, but landing on /login is still
-    // right — the next authenticated fetch redirects back here anyway.
+    return false;
   }
+  clearPageCache();
+  return true;
+}
+
+/** Navigates to login only after the server accepted the logout. */
+export async function leaveAfterSignOut(): Promise<boolean> {
+  const ok = await signOut();
+  if (logoutOutcome(ok) !== "login") return false;
+  document.body.classList.add("signing-out");
   await new Promise((resolve) => setTimeout(resolve, 240));
   window.location.replace("/login");
+  return true;
 }

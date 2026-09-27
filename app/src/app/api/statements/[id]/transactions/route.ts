@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { guardWrite } from "@/lib/http-security";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { requireSession } from "@/lib/session";
@@ -31,6 +32,8 @@ export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const blocked = guardWrite(req);
+  if (blocked) return blocked;
   const session = await requireSession();
   if (!session) {
     return NextResponse.json({ error: "Ei kirjautunut" }, { status: 401 });
@@ -113,6 +116,8 @@ export async function DELETE(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const blocked = guardWrite(req);
+  if (blocked) return blocked;
   const session = await requireSession();
   if (!session) {
     return NextResponse.json({ error: "Ei kirjautunut" }, { status: 401 });

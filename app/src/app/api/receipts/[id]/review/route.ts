@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { guardWrite } from "@/lib/http-security";
 import { prisma } from "@/lib/db";
 import { requireSession } from "@/lib/session";
 import { z } from "zod";
@@ -10,6 +11,8 @@ const reviewSchema = z.object({
 
 export const PATCH = withErrorHandler(
   async (req: NextRequest, { params }: { params: Promise<{ id: string }> }) => {
+  const blocked = guardWrite(req);
+  if (blocked) return blocked;
     const session = await requireSession(req);
     if (!session) {
       return NextResponse.json({ error: "Ei kirjautunut" }, { status: 401 });

@@ -5,7 +5,7 @@ import { useState } from "react";
 import { errorReference } from "@/lib/screen-state";
 import BankConnectCard from "@/components/BankConnectCard";
 import { ConnectionNotice } from "@/components/ScreenState";
-import { signOut } from "@/components/clientFetch";
+import { leaveAfterSignOut } from "@/components/clientFetch";
 import { BuildInfo } from "@/components/BuildInfo";
 import { useProfile } from "./useProfile";
 
@@ -71,6 +71,7 @@ function SettingsRow({
 export default function AsetuksetPage() {
   const { profile, loadError, retry } = useProfile();
   const [signingOut, setSigningOut] = useState(false);
+  const [signOutError, setSignOutError] = useState("");
   const [supportNote, setSupportNote] = useState("");
 
   async function copySupport(kind: "report" | "reference") {
@@ -90,7 +91,12 @@ export default function AsetuksetPage() {
   async function handleSignOut() {
     if (signingOut) return;
     setSigningOut(true);
-    await signOut();
+    setSignOutError("");
+    const left = await leaveAfterSignOut();
+    if (!left) {
+      setSigningOut(false);
+      setSignOutError("Uloskirjautuminen epäonnistui. Istunto voi olla yhä voimassa.");
+    }
   }
 
   if (loadError) {
@@ -157,6 +163,19 @@ export default function AsetuksetPage() {
           />
         </SettingsGroup>
 
+        <SettingsGroup label="Tili">
+          <SettingsRow
+            href="/asetukset/turvallisuus"
+            label="Turvallisuus"
+            hint="Salasana, istunnot ja näytön lukitus"
+          />
+          <SettingsRow
+            href="/asetukset/tietosuoja"
+            label="Tietosuoja ja tiedot"
+            hint="Mihin tiedot menevät, säilytys ja tilin sulku"
+          />
+        </SettingsGroup>
+
         <SettingsGroup label="Automaatio">
           <SettingsRow
             href="/asetukset/sahkoposti"
@@ -207,6 +226,11 @@ export default function AsetuksetPage() {
           </div>
         </SettingsGroup>
 
+        {signOutError && (
+          <p className="text-sm text-danger px-1" role="alert">
+            {signOutError}
+          </p>
+        )}
         <button
           type="button"
           onClick={handleSignOut}

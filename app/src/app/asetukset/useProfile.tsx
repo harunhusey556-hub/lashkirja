@@ -16,6 +16,7 @@ export interface Profile {
   firstName: string;
   lastName: string;
   email: string;
+  pendingEmail?: string | null;
   entityType: string;
   vatRegistered: boolean;
   vatPeriod: string;

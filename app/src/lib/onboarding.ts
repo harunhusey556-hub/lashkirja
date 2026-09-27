@@ -1,5 +1,11 @@
+import { z } from "zod";
+
 /** A chip answers one onboarding question: a flag, a choice or a tag. */
 export type ChipValue = string | boolean;
+
+export const SALES_TYPES = ["ripsipalvelut", "kulmapalvelut", "koulutus", "tuotemyynti"] as const;
+export const EXPENSE_CATEGORIES = ["tarvikkeet", "vuokra", "markkinointi", "koulutuskulut"] as const;
+export const VAT_PERIODS = ["month", "quarter", "year"] as const;
 
 /** Company types shared by onboarding, settings and the profile PATCH schema. */
 export const ENTITY_TYPES = ["toiminimi", "kevytyrittaja", "oy"] as const;
@@ -14,10 +20,29 @@ export const ENTITY_TYPE_OPTIONS: { value: EntityType; label: string }[] = [
 export interface BusinessProfile {
   entityType: EntityType;
   vatRegistered: boolean;
-  vatPeriod: "month" | "quarter" | "year";
+  vatPeriod: (typeof VAT_PERIODS)[number];
   salesTypes: string[];
   expenseCategories: string[];
   summaryNote?: string;
+}
+
+export const businessProfileSchema = z.object({
+  entityType: z.enum(ENTITY_TYPES),
+  vatRegistered: z.boolean(),
+  vatPeriod: z.enum(VAT_PERIODS),
+  salesTypes: z.array(z.enum(SALES_TYPES)).max(8),
+  expenseCategories: z.array(z.enum(EXPENSE_CATEGORIES)).max(8),
+  summaryNote: z.string().trim().max(500).optional(),
+});
+
+export function defaultBusinessProfile(): BusinessProfile {
+  return {
+    entityType: "toiminimi",
+    vatRegistered: false,
+    vatPeriod: "month",
+    salesTypes: ["ripsipalvelut"],
+    expenseCategories: ["tarvikkeet"],
+  };
 }
 
 export interface OnboardingChatStep {
@@ -85,25 +110,13 @@ export const ONBOARDING_STEPS: OnboardingChatStep[] = [
 ];
 
 export function parseBusinessDetails(jsonStr?: string | null): BusinessProfile {
-  if (!jsonStr) {
-    return {
-      entityType: "toiminimi",
-      vatRegistered: false,
-      vatPeriod: "month",
-      salesTypes: ["ripsipalvelut"],
-      expenseCategories: ["tarvikkeet"],
-    };
-  }
+  const fallback = defaultBusinessProfile();
+  if (!jsonStr) return fallback;
   try {
-    return JSON.parse(jsonStr) as BusinessProfile;
+    const parsed = businessProfileSchema.safeParse(JSON.parse(jsonStr));
+    return parsed.success ? parsed.data : fallback;
   } catch {
-    return {
-      entityType: "toiminimi",
-      vatRegistered: false,
-      vatPeriod: "month",
-      salesTypes: ["ripsipalvelut"],
-      expenseCategories: ["tarvikkeet"],
-    };
+    return fallback;
   }
 }
 

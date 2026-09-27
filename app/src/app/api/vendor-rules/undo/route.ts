@@ -1,7 +1,7 @@
 import { NextRequest } from "next/server";
 import { z } from "zod";
 import { requireSession } from "@/lib/session";
-import { noStoreJson, rejectCrossSite } from "@/lib/http-security";
+import { noStoreJson, rejectCrossSite, rejectOversizedContentLength } from "@/lib/http-security";
 import { undoVendorRule } from "@/lib/vendor-rules";
 
 const undoSchema = z.object({
@@ -13,6 +13,8 @@ export async function POST(req: NextRequest) {
   if (!session) return noStoreJson({ error: "Ei kirjautunut" }, { status: 401 });
   const crossSite = rejectCrossSite(req);
   if (crossSite) return crossSite;
+  const oversized = rejectOversizedContentLength(req);
+  if (oversized) return oversized;
   const parsed = undoSchema.safeParse(await req.json().catch(() => null));
   if (!parsed.success) return noStoreJson({ error: "Virheelliset tiedot" }, { status: 400 });
   const rule = await undoVendorRule(session.userId!, parsed.data.vendor);

@@ -55,6 +55,11 @@ export function rejectCrossSite(req: NextRequest): NextResponse | null {
     : NextResponse.json({ error: "Pyyntö estettiin" }, { status: 403 });
 }
 
+/** Cross-site and body-size checks used on invoice writes, applied together. */
+export function guardWrite(req: NextRequest, maximum = JSON_BODY_LIMIT): NextResponse | null {
+  return rejectCrossSite(req) ?? rejectOversizedContentLength(req, maximum);
+}
+
 export function rejectOversizedContentLength(
   req: NextRequest,
   maximum = JSON_BODY_LIMIT

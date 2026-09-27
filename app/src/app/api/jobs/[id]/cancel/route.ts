@@ -1,7 +1,7 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/db";
 import { requireSession } from "@/lib/session";
-import { noStoreJson, rejectCrossSite } from "@/lib/http-security";
+import { noStoreJson, rejectCrossSite, rejectOversizedContentLength } from "@/lib/http-security";
 
 export async function POST(
   req: NextRequest,
@@ -11,6 +11,8 @@ export async function POST(
   if (!session) return noStoreJson({ error: "Ei kirjautunut" }, { status: 401 });
   const crossSite = rejectCrossSite(req);
   if (crossSite) return crossSite;
+  const oversized = rejectOversizedContentLength(req);
+  if (oversized) return oversized;
   const { id } = await params;
 
   const updated = await prisma.backgroundJob.updateMany({

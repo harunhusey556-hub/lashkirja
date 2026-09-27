@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   parseBusinessDetails,
   generateProfileSummary,
+  businessProfileSchema,
   ENTITY_TYPES,
   ENTITY_TYPE_OPTIONS,
   ONBOARDING_STEPS,
@@ -30,6 +31,31 @@ describe("onboarding lib", () => {
     expect(profile.vatRegistered).toBe(true);
     expect(profile.vatPeriod).toBe("quarter");
     expect(profile.salesTypes).toEqual(["ripsipalvelut", "tuotemyynti"]);
+  });
+
+  it("rejects an unknown company type, tax period, and list value", () => {
+    expect(businessProfileSchema.safeParse({
+      entityType: "osuuskunta",
+      vatRegistered: true,
+      vatPeriod: "month",
+      salesTypes: ["ripsipalvelut"],
+      expenseCategories: ["tarvikkeet"],
+    }).success).toBe(false);
+    expect(businessProfileSchema.safeParse({
+      entityType: "oy",
+      vatRegistered: true,
+      vatPeriod: "viikko",
+      salesTypes: ["ripsipalvelut"],
+      expenseCategories: ["tarvikkeet"],
+    }).success).toBe(false);
+    expect(businessProfileSchema.safeParse({
+      entityType: "oy",
+      vatRegistered: false,
+      vatPeriod: "year",
+      salesTypes: ["jotain-muuta"],
+      expenseCategories: ["tarvikkeet"],
+    }).success).toBe(false);
+    expect(parseBusinessDetails(JSON.stringify({ entityType: "osuuskunta" })).entityType).toBe("toiminimi");
   });
 
   it("generates a clear Finnish profile summary", () => {

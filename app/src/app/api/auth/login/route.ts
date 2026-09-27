@@ -11,6 +11,7 @@ import {
   opaqueRateKey,
   requestClientKey,
 } from "@/lib/rate-limit";
+import { openAuthSession } from "@/lib/account-security";
 
 const credentialsSchema = z.object({
   email: z.string().trim().toLowerCase().email().max(254),
@@ -32,10 +33,12 @@ async function writeSession(
   res: NextResponse,
   user: { id: string; email: string; firstName: string }
 ) {
+  const row = await openAuthSession(user.id, req.headers.get("user-agent"));
   const session = await getIronSession<SessionData>(req, res, sessionOptions);
   session.userId = user.id;
   session.email = user.email;
   session.firstName = user.firstName;
+  session.sessionId = row.id;
   await session.save();
 }
 

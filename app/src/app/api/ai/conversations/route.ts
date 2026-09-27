@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { guardWrite } from "@/lib/http-security";
 import { requireSession } from "@/lib/session";
 import { errorText } from "@/lib/api-errors";
 import { DEFAULT_CONVERSATION_TITLE } from "@/lib/chat-turn";
@@ -14,6 +15,8 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
+  const blocked = guardWrite(req);
+  if (blocked) return blocked;
   const session = await requireSession(req);
   if (!session) return NextResponse.json({ error: "Ei kirjautunut" }, { status: 401 });
   const body = await req.json().catch(() => null);
@@ -28,6 +31,8 @@ export async function POST(req: NextRequest) {
 }
 
 export async function PATCH(req: NextRequest) {
+  const blocked = guardWrite(req);
+  if (blocked) return blocked;
   const session = await requireSession(req);
   if (!session) return NextResponse.json({ error: "Ei kirjautunut" }, { status: 401 });
   const body = await req.json().catch(() => null);

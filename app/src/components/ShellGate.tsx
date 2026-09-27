@@ -31,7 +31,12 @@ export default function ShellGate({ children }: { children: React.ReactNode }) {
     };
   }, []);
 
-  const bare = pathname === "/login" || pathname.startsWith("/bank");
+  const bare =
+    pathname === "/login" ||
+    pathname.startsWith("/bank") ||
+    pathname.startsWith("/unohtunut-salasana") ||
+    pathname.startsWith("/palauta-salasana") ||
+    pathname.startsWith("/vahvista-sahkoposti");
   if (bare) return children;
   return <AppShell>{children}</AppShell>;
 }

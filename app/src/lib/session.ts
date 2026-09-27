@@ -1,45 +1,11 @@
-import { getIronSession, IronSession, SessionOptions } from "iron-session";
+import { getIronSession, IronSession } from "iron-session";
 import { cookies } from "next/headers";
 import { NextRequest, NextResponse } from "next/server";
+import { prisma } from "@/lib/db";
+import { redirectResponse, sessionOptions, type SessionData } from "@/lib/session-options";
 
-const isProduction = process.env.NODE_ENV === "production";
-const configuredSecret = process.env.SESSION_SECRET?.trim();
-const developmentSecret = "lashkirja-local-development-only-secret-32-chars";
-
-if (isProduction && (!configuredSecret || configuredSecret.length < 32)) {
-  throw new Error("SESSION_SECRET must be configured with at least 32 characters in production");
-}
-
-const cookieSecure = process.env.COOKIE_SECURE === undefined
-  ? isProduction
-  : process.env.COOKIE_SECURE === "true";
-
-export interface SessionData {
-  userId?: string;
-  email?: string;
-  firstName?: string;
-}
-
-export const sessionOptions: SessionOptions = {
-  password: configuredSecret || developmentSecret,
-  ttl: 30 * 24 * 60 * 60,
-  cookieName: cookieSecure ? "__Host-lashkirja-session" : "lashkirja-session",
-  cookieOptions: {
-    secure: cookieSecure,
-    httpOnly: true,
-    sameSite: "lax" as const,
-    path: "/",
-    maxAge: 30 * 24 * 60 * 60,
-  },
-};
-
-/** A relative Location is safe across localhost/LAN/Tailscale hostnames. */
-export function redirectResponse(path: string, status = 303): NextResponse {
-  if (!path.startsWith("/") || path.startsWith("//")) {
-    throw new Error("Redirect target must be an application-relative path");
-  }
-  return new NextResponse(null, { status, headers: { Location: path } });
-}
+export { redirectResponse, sessionOptions };
+export type { SessionData };
 
 export async function getSession() {
   const cookieStore = await cookies();
@@ -55,8 +21,28 @@ export async function getSessionFromRequest(req: NextRequest) {
 /** A session that has passed the requireSession check — userId is guaranteed. */
 export type AuthenticatedSession = IronSession<SessionData> & { userId: string };
 
-/** Returns the session if logged in, otherwise null. */
+const SESSION_TOUCH_MS = 5 * 60 * 1000;
+
+/**
+ * Returns the session if logged in, otherwise null.
+ * A cookie that names a session row is refused once that row is revoked.
+ * Cookies sealed before session tracking have no sessionId and stay valid,
+ * so an existing demo login is not dropped by this check.
+ */
 export async function requireSession(req?: NextRequest): Promise<AuthenticatedSession | null> {
   const session = req ? await getSessionFromRequest(req) : await getSession();
-  return session.userId ? (session as AuthenticatedSession) : null;
+  if (!session.userId) return null;
+  if (session.sessionId) {
+    const row = await prisma.authSession.findFirst({
+      where: { id: session.sessionId, userId: session.userId, revokedAt: null },
+      select: { id: true, lastSeenAt: true },
+    });
+    if (!row) return null;
+    if (Date.now() - row.lastSeenAt.getTime() > SESSION_TOUCH_MS) {
+      await prisma.authSession
+        .update({ where: { id: row.id }, data: { lastSeenAt: new Date() } })
+        .catch(() => undefined);
+    }
+  }
+  return session as AuthenticatedSession;
 }

@@ -11,11 +11,12 @@ import {
   isUnauthorized,
   readJson,
   redirectToLogin,
-  signOut,
+  leaveAfterSignOut,
 } from "@/components/clientFetch";
 
 import type { BusinessProfile } from "@/lib/onboarding";
 import BottomSheet from "@/components/BottomSheet";
+import { AppLock } from "@/components/AppLock";
 import { apiFetch } from "@/components/clientFetch";
 import { readPageCache, writePageCache } from "@/lib/page-cache";
 import { helsinkiMonthKey } from "@/lib/validation";
@@ -233,6 +234,8 @@ function pageTitle(pathname: string): string {
   if (pathname.startsWith("/asetukset/laskutus")) return "Laskuttajan tiedot";
   if (pathname.startsWith("/asetukset/kirjanpito")) return "Kirjanpidon lukitus";
   if (pathname.startsWith("/asetukset/sahkoposti")) return "Sähköpostien tuonti";
+  if (pathname.startsWith("/asetukset/turvallisuus")) return "Turvallisuus";
+  if (pathname.startsWith("/asetukset/tietosuoja")) return "Tietosuoja";
   if (pathname.startsWith("/asetukset")) return "Asetukset";
   return "Etusivu";
 }
@@ -250,6 +253,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const [profileOpenOn, setProfileOpenOn] = useState<string | null>(null);
   const [chatOpenOn, setChatOpenOn] = useState<string | null>(null);
   const [signingOut, setSigningOut] = useState(false);
+  const [signOutError, setSignOutError] = useState("");
   const [user, setUser] = useState<ShellUser | null>(() => readPageCache<ShellUser>(AUTH_CACHE_KEY));
   const [onboardingProfile, setOnboardingProfile] = useState<BusinessProfile | null>(null);
 
@@ -519,10 +523,16 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   async function handleSignOut() {
     if (signingOut) return;
     setSigningOut(true);
-    await signOut();
+    setSignOutError("");
+    const left = await leaveAfterSignOut();
+    if (!left) {
+      setSigningOut(false);
+      setSignOutError("Uloskirjautuminen epäonnistui. Istunto voi olla yhä voimassa.");
+    }
   }
 
   return (
+    <AppLock>
     <div className="app-frame">
       <UnsavedChangesHost />
       <header
@@ -702,6 +712,11 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                 </svg>
               </button>
 
+              {signOutError && (
+                <p className="px-4 text-sm text-danger" role="alert">
+                  {signOutError}
+                </p>
+              )}
               <button
                 type="button"
                 onClick={handleSignOut}
@@ -738,6 +753,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         </>
       )}
     </div>
+    </AppLock>
   );
 }
 

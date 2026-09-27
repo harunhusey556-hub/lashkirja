@@ -3,7 +3,7 @@ import { psuContextFromHeaders } from "@/lib/enablebanking/client";
 import { respondToBankError } from "@/lib/enablebanking/respond";
 import { enableBankingStatus, loadEnableBankingConfig } from "@/lib/enablebanking/signing";
 import { syncBankConnection } from "@/lib/enablebanking/sync";
-import { noStoreJson, rejectCrossSite } from "@/lib/http-security";
+import { noStoreJson, rejectCrossSite, rejectOversizedContentLength } from "@/lib/http-security";
 import { consumeRateLimit } from "@/lib/rate-limit";
 import { requireSession } from "@/lib/session";
 
@@ -14,7 +14,7 @@ export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const blocked = rejectCrossSite(req);
+  const blocked = rejectCrossSite(req) ?? rejectOversizedContentLength(req);
   if (blocked) return blocked;
 
   const session = await requireSession(req);

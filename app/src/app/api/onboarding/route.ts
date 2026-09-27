@@ -1,11 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { requireSession } from "@/lib/session";
-import { parseBusinessDetails, type BusinessProfile } from "@/lib/onboarding";
+import { businessProfileSchema, parseBusinessDetails } from "@/lib/onboarding";
 import { errorText } from "@/lib/api-errors";
+import { guardWrite } from "@/lib/http-security";
 
-export async function GET() {
-  const session = await requireSession();
+export async function GET(req: NextRequest) {
+  const session = await requireSession(req);
   if (!session) {
     return NextResponse.json({ error: "Ei kirjautunut" }, { status: 401 });
   }
@@ -25,47 +26,44 @@ export async function GET() {
     return NextResponse.json({ error: "Käyttäjää ei löydy" }, { status: 404 });
   }
 
-  const profile = parseBusinessDetails(user.businessDetails);
+  const stored = parseBusinessDetails(user.businessDetails);
+  const profile = businessProfileSchema.safeParse({
+    ...stored,
+    entityType: user.entityType,
+    vatRegistered: user.vatRegistered,
+    vatPeriod: user.vatPeriod,
+  });
   return NextResponse.json({
     onboarded: user.onboarded,
-    profile: {
-      ...profile,
-      entityType: (user.entityType as BusinessProfile["entityType"]) || profile.entityType,
-      vatRegistered: user.vatRegistered ?? profile.vatRegistered,
-      vatPeriod: (user.vatPeriod as BusinessProfile["vatPeriod"]) || profile.vatPeriod,
-    },
+    profile: profile.success ? profile.data : stored,
   });
 }
 
 export async function POST(req: NextRequest) {
-  const session = await requireSession();
+  const blocked = guardWrite(req);
+  if (blocked) return blocked;
+  const session = await requireSession(req);
   if (!session) {
     return NextResponse.json({ error: "Ei kirjautunut" }, { status: 401 });
   }
 
+  const parsed = businessProfileSchema.safeParse(await req.json().catch(() => null));
+  if (!parsed.success) {
+    return NextResponse.json(
+      { error: "Tarkista yritysmuoto, verokausi ja valinnat." },
+      { status: 400 }
+    );
+  }
+  const profile = parsed.data;
+
   try {
-    const body = (await req.json()) as Partial<BusinessProfile>;
-
-    const entityType = body.entityType || "toiminimi";
-    const vatRegistered = Boolean(body.vatRegistered);
-    const vatPeriod = body.vatPeriod || "month";
-
-    const profile: BusinessProfile = {
-      entityType,
-      vatRegistered,
-      vatPeriod,
-      salesTypes: body.salesTypes || ["ripsipalvelut"],
-      expenseCategories: body.expenseCategories || ["tarvikkeet"],
-      summaryNote: body.summaryNote,
-    };
-
     await prisma.user.update({
       where: { id: session.userId },
       data: {
         onboarded: true,
-        entityType,
-        vatRegistered,
-        vatPeriod,
+        entityType: profile.entityType,
+        vatRegistered: profile.vatRegistered,
+        vatPeriod: profile.vatPeriod,
         businessDetails: JSON.stringify(profile),
       },
     });

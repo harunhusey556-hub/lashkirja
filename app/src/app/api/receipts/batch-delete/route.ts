@@ -3,7 +3,7 @@ import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { requireSession } from "@/lib/session";
 import { removeUserUpload } from "@/lib/storage";
-import { noStoreJson, rejectCrossSite } from "@/lib/http-security";
+import { noStoreJson, rejectCrossSite, rejectOversizedContentLength } from "@/lib/http-security";
 import { withErrorHandler, UnauthorizedError, AppError } from "@/lib/api-errors";
 import { assertPeriodOpen } from "@/lib/period-lock";
 
@@ -16,6 +16,8 @@ export const POST = withErrorHandler(async (req: NextRequest) => {
   if (!session) throw new UnauthorizedError("Ei kirjautunut");
   const crossSite = rejectCrossSite(req);
   if (crossSite) return crossSite;
+  const oversized = rejectOversizedContentLength(req);
+  if (oversized) return oversized;
 
   const parsed = batchDeleteSchema.safeParse(await req.json().catch(() => null));
   if (!parsed.success) {

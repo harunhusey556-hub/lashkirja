@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { guardWrite } from "@/lib/http-security";
 import { requireSession } from "@/lib/session";
 import { ImapFlow } from "imapflow";
 import { prisma } from "@/lib/db";
@@ -15,6 +16,8 @@ const connectSchema = z.object({
 });
 
 export const POST = withErrorHandler(async (req: NextRequest) => {
+  const blocked = guardWrite(req);
+  if (blocked) return blocked;
   const session = await requireSession(req);
   if (!session?.userId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -63,6 +66,8 @@ export const POST = withErrorHandler(async (req: NextRequest) => {
 });
 
 export const DELETE = withErrorHandler(async (req: NextRequest) => {
+  const blocked = guardWrite(req);
+  if (blocked) return blocked;
   const session = await requireSession(req);
   if (!session?.userId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });

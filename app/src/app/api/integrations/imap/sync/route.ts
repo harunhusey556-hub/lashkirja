@@ -1,10 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
+import { guardWrite } from "@/lib/http-security";
 import { requireSession } from "@/lib/session";
 import { prisma } from "@/lib/db";
 import { syncImapAccount } from "@/lib/mail-sync";
 import { withErrorHandler, errorText } from "@/lib/api-errors";
 
 export const POST = withErrorHandler(async (req: NextRequest) => {
+  const blocked = guardWrite(req);
+  if (blocked) return blocked;
   const session = await requireSession(req);
   if (!session?.userId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });

@@ -34,6 +34,9 @@ model User {
   // year, so a default baked into the app would be wrong half the time.
   lateInterestPercent Float?
   reminderFeeCents    Int     @default(500)
+  /// New login email waiting for a confirmation link. The live email stays
+  /// until that link is used.
+  pendingEmail        String?
   /// Months up to and including this one are closed; nothing dated inside
   /// them may be created, edited or deleted. Format "YYYY-MM".
   booksLockedThrough  String?
@@ -56,6 +59,51 @@ model User {
   automationEvents AutomationEvent[]
   vendorCategoryRules VendorCategoryRule[]
   conversations Conversation[]
+  authSessions    AuthSession[]
+  accountTokens   AccountToken[]
+  accountRequests AccountRequest[]
+}
+
+/// A browser or device that logged in. The iron-session cookie stores this id.
+/// A row with revokedAt is dead even if the cookie is still presented.
+model AuthSession {
+  id         String    @id @default(uuid())
+  userId     String
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  label      String
+  createdAt  DateTime  @default(now())
+  lastSeenAt DateTime  @default(now())
+  revokedAt  DateTime?
+
+  @@index([userId, revokedAt])
+}
+
+/// One-time secret for a password reset or an email change. Only the hash is stored.
+model AccountToken {
+  id        String    @id @default(uuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  purpose   String
+  tokenHash String    @unique
+  payload   String?
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId, purpose])
+}
+
+/// A request to close the account or receive a copy of the books. Records stay
+/// until the accounting retention period is over; this row does not delete them.
+model AccountRequest {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  kind      String
+  note      String?
+  createdAt DateTime @default(now())
+
+  @@index([userId, kind])
 }
 
 model Receipt {

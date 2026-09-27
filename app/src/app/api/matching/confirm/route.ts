@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { guardWrite } from "@/lib/http-security";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { requireSession } from "@/lib/session";
@@ -15,6 +16,8 @@ const confirmSchema = z.object({
 });
 
 export const POST = withErrorHandler(async (req: NextRequest) => {
+  const blocked = guardWrite(req);
+  if (blocked) return blocked;
   const session = await requireSession();
   if (!session) {
     throw new AppError("Ei kirjautunut", "UNAUTHORIZED", 401);

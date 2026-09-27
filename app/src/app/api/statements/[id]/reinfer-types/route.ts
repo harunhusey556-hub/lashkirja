@@ -1,13 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
+import { guardWrite } from "@/lib/http-security";
 import { requireSession } from "@/lib/session";
 import { reinferStatementTransactionTypes } from "@/lib/statements";
 import { getStatementForUser } from "@/lib/statement-api";
 import { runMatching } from "@/lib/matching";
 
 export async function POST(
-  _req: NextRequest,
+  req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const blocked = guardWrite(req);
+  if (blocked) return blocked;
   const session = await requireSession();
   if (!session) {
     return NextResponse.json({ error: "Ei kirjautunut" }, { status: 401 });

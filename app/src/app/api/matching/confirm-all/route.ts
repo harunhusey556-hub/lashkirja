@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { guardWrite } from "@/lib/http-security";
 import { z } from "zod";
 import { requireSession } from "@/lib/session";
 import { confirmAllSuggestions } from "@/lib/matching";
@@ -12,6 +13,8 @@ const bodySchema = z
 
 /** Accept every pending kuitti suggestion in one action. */
 export async function POST(req: NextRequest) {
+  const blocked = guardWrite(req);
+  if (blocked) return blocked;
   const session = await requireSession();
   if (!session) {
     return NextResponse.json({ error: "Ei kirjautunut" }, { status: 401 });

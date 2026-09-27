@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 import { requireSession } from "@/lib/session";
-import { noStoreJson, rejectCrossSite } from "@/lib/http-security";
+import { noStoreJson, rejectCrossSite, rejectOversizedContentLength } from "@/lib/http-security";
 import { UnauthorizedError, withErrorHandler } from "@/lib/api-errors";
 import { matchPurchasePaymentsFromBank } from "@/lib/purchase-invoices";
 
@@ -11,6 +11,8 @@ export const POST = withErrorHandler(async (req: NextRequest) => {
 
   const crossSite = rejectCrossSite(req);
   if (crossSite) return crossSite;
+  const oversized = rejectOversizedContentLength(req);
+  if (oversized) return oversized;
 
   return noStoreJson(await matchPurchasePaymentsFromBank(session.userId));
 });
