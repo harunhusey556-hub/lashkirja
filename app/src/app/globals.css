@@ -117,7 +117,7 @@ body {
    The word "Avustaja" only fits once the row is wide enough. */
 .app-header-row {
   display: grid;
-  grid-template-columns: minmax(2.75rem, 8rem) minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
   align-items: center;
   container-type: inline-size;
 }

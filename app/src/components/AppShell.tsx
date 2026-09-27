@@ -559,7 +559,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         onContextMenu={(event) => event.preventDefault()}
       >
         <div className="app-header-row mx-auto min-h-14 max-w-lg px-1 md:max-w-3xl">
-          <div className="flex h-11 min-w-11 items-center">
+          <div className="flex h-11 min-w-11 items-center justify-self-start">
             {canGoBack && (
               <button
                 type="button"
@@ -574,10 +574,10 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
               </button>
             )}
           </div>
-          <p className="min-w-0 truncate text-center text-base font-medium text-charcoal">{title}</p>
+          <p className="min-w-0 max-w-[11rem] truncate text-center text-base font-medium text-charcoal md:max-w-sm">{title}</p>
 
           {authState.status === "ready" ? (
-            <div className="flex items-center justify-end">
+            <div className="flex items-center justify-self-end">
             <button
               type="button"
               onClick={() => {
