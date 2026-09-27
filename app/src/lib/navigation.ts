@@ -143,7 +143,8 @@ export function backTarget(
   while (parent && parent.path.includes(":") && parent.parent) {
     parent = byId.get(parent.parent);
   }
-  return parent ? { label: parent.label, href: parent.path } : null;
+  if (!parent || parent.path.includes(":")) return null;
+  return { label: parent.label, href: parent.path };
 }
 
 const STATEMENT_QUERY_KEYS = ["month", "account", "q"] as const;

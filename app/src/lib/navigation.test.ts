@@ -119,4 +119,14 @@ describe("navigation registry", () => {
     expect(backTarget("/asetukset/tili/salasana")).toEqual({ label: "Tili", href: "/asetukset/tili" });
     expect(backTarget("/dashboard")).toBeNull();
   });
+
+  it("returns null when the parent chain ends on a parameterised parent with no parent of its own", () => {
+    const planted: NavEntry[] = [
+      { id: "x-parent", kind: "workspace", label: "X", path: "/x/:pid" },
+      { id: "x-detail", kind: "detail", label: "X-detail", path: "/x/:pid/:id", parent: "x-parent" },
+    ];
+    // x-parent's own path still has a `:param` and it has no parent to climb
+    // to, so there is no registry-derivable back target left.
+    expect(backTarget("/x/5/9", [...NAV, ...planted])).toBeNull();
+  });
 });
