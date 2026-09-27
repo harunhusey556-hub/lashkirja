@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { apiFetch, errorMessage, leaveAfterSignOut, readJson } from "@/components/clientFetch";
+import { BiometricUnlockCard } from "@/components/BiometricUnlockCard";
 import { Button, controlClass } from "@/components/ui";
 import {
   appLockMatches,
@@ -13,13 +14,7 @@ import {
   writeAppLock,
   writeBiometricUnlock,
 } from "@/lib/app-lock";
-import {
-  biometricEnableLabel,
-  biometricUnavailableCopy,
-  readDeviceBiometry,
-  unlockWithBiometry,
-  type BiometryStatus,
-} from "@/lib/biometry";
+import { readDeviceBiometry, unlockWithBiometry, type BiometryStatus } from "@/lib/biometry";
 
 interface SessionRow {
   id: string;
@@ -49,7 +44,12 @@ export default function TurvallisuusPage() {
     () => Boolean(lockUserId && readBiometricUnlock(lockUserId)),
     () => false
   );
-  const [bio, setBio] = useState<BiometryStatus>({ available: false, kind: "none", host: "web" });
+  const [bio, setBio] = useState<BiometryStatus>({
+    available: false,
+    kind: "none",
+    host: "web",
+    gap: "unsupported",
+  });
 
   useEffect(() => {
     let cancelled = false;
@@ -155,7 +155,7 @@ export default function TurvallisuusPage() {
       return;
     }
     writeBiometricUnlock(lockUserId, true);
-    setLockMsg("Biometrinen avaus on päällä tällä laitteella. Se ei korvaa palvelimen istuntoa.");
+    setLockMsg("Biometrinen avaus on päällä. Se kysytään, kun palaat sovellukseen.");
   }
 
   function disableBiometry() {
@@ -180,6 +180,46 @@ export default function TurvallisuusPage() {
 
   return (
     <div className="space-y-6">
+      <form
+        onSubmit={(event) => void (hasLock ? removeLock(event) : saveLock(event))}
+        className="bg-white rounded-2xl p-6 shadow-sm space-y-4"
+      >
+        <h2 className="text-sm font-medium text-charcoal">Näytön lukitus</h2>
+        <p className="text-sm text-warm-gray">
+          Valinnainen koodi tällä laitteella peittää kirjanpidon, kun sovellus jää taustalle.
+          Lukitus ei korvaa uloskirjautumista.
+        </p>
+        <label htmlFor="lockPin" className="block text-sm font-medium text-charcoal">
+          {hasLock ? "Nykyinen koodi" : "Uusi koodi, 4–8 numeroa"}
+        </label>
+        <input
+          id="lockPin"
+          type="password"
+          inputMode="numeric"
+          autoComplete="off"
+          value={lockPin}
+          onChange={(event) => setLockPin(event.target.value)}
+          className={`${controlClass} min-h-12`}
+        />
+        {lockMsg && !hasLock && (
+          <p className="text-sm text-warm-gray" role="status">
+            {lockMsg}
+          </p>
+        )}
+        <Button type="submit" variant={hasLock ? "secondary" : "primary"}>
+          {hasLock ? "Poista lukitus" : "Ota lukitus käyttöön"}
+        </Button>
+      </form>
+
+      <BiometricUnlockCard
+        hasLock={hasLock}
+        bio={bio}
+        enabled={bioOn}
+        message={hasLock ? lockMsg : undefined}
+        onEnable={() => void enableBiometry()}
+        onDisable={disableBiometry}
+      />
+
       <form onSubmit={(event) => void changePassword(event)} className="bg-white rounded-2xl p-6 shadow-sm space-y-4">
         <h2 className="text-sm font-medium text-charcoal">Vaihda salasana</h2>
         <p className="text-sm text-warm-gray">
@@ -255,51 +295,6 @@ export default function TurvallisuusPage() {
           Sulje muut laitteet
         </Button>
       </section>
-
-      <form
-        onSubmit={(event) => void (hasLock ? removeLock(event) : saveLock(event))}
-        className="bg-white rounded-2xl p-6 shadow-sm space-y-4"
-      >
-        <h2 className="text-sm font-medium text-charcoal">Näytön lukitus</h2>
-        <p className="text-sm text-warm-gray">
-          Valinnainen koodi tällä laitteella peittää kirjanpidon, kun sovellus jää taustalle.
-          Face ID tai Touch ID voi avata saman lukituksen, jos otat sen käyttöön ja sovellus on asennettu.
-          Lukitus ei korvaa uloskirjautumista.
-        </p>
-        <label htmlFor="lockPin" className="block text-sm font-medium text-charcoal">
-          {hasLock ? "Nykyinen koodi" : "Uusi koodi, 4–8 numeroa"}
-        </label>
-        <input
-          id="lockPin"
-          type="password"
-          inputMode="numeric"
-          autoComplete="off"
-          value={lockPin}
-          onChange={(event) => setLockPin(event.target.value)}
-          className={`${controlClass} min-h-12`}
-        />
-        {lockMsg && (
-          <p className="text-sm text-warm-gray" role="status">
-            {lockMsg}
-          </p>
-        )}
-        <Button type="submit" variant={hasLock ? "secondary" : "primary"}>
-          {hasLock ? "Poista lukitus" : "Ota lukitus käyttöön"}
-        </Button>
-        {hasLock && bio.available && !bioOn && (
-          <Button type="button" variant="secondary" onClick={() => void enableBiometry()}>
-            {biometricEnableLabel(bio.kind)}
-          </Button>
-        )}
-        {hasLock && bioOn && (
-          <Button type="button" variant="secondary" onClick={disableBiometry}>
-            Poista biometrinen avaus
-          </Button>
-        )}
-        {hasLock && !bio.available && (
-          <p className="text-sm text-warm-gray">{biometricUnavailableCopy(bio.host)}</p>
-        )}
-      </form>
     </div>
   );
 }

@@ -15,9 +15,12 @@ What the lock does:
   `localStorage` under `lashkirja.app-lock.v1:<userId>`. Another account on
   the same device does not see that hash. An older unscoped key is deleted.
 - Biometric unlock is a separate opt-in, `lashkirja.app-lock.biometric.v1:<userId>`.
-  It is offered under Asetukset → Turvallisuus only after a PIN exists, and
-  only when the device reports Face ID or Touch ID. Turning the PIN off clears
-  the opt-in. Another account does not inherit it.
+  Asetukset → Turvallisuus shows a Face ID / Touch ID card above the password
+  form. Before a PIN exists, the card says to set the code first. After a PIN
+  exists, a native IPA with the plugin shows a switch and "Ota Face ID käyttöön"
+  (or Touch ID). A browser says the switch lives in the installed app. A native
+  build without the plugin says a new IPA is required. Turning the PIN off
+  clears the opt-in. Another account does not inherit it.
 - Opening the app, or returning from the background, covers the books. If
   biometrics are opted in, the system prompt is shown once. Cancel, failure,
   or a missing sensor leaves the PIN field. The PIN field is a password input.

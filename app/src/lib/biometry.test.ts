@@ -77,8 +77,9 @@ describe("biometric preference helpers", () => {
     expect(biometricEnableLabel("touch")).toBe("Ota Touch ID käyttöön");
     expect(classifyBiometryFailure(BiometryErrorType.userCancel)).toBe("cancel");
     expect(classifyBiometryFailure(BiometryErrorType.biometryNotEnrolled)).toBe("unavailable");
-    expect(biometricUnavailableCopy("web")).toMatch(/selaimessa/);
+    expect(biometricUnavailableCopy("web")).toMatch(/selain/);
     expect(biometricUnavailableCopy("native")).toMatch(/koodilla/);
+    expect(biometricUnavailableCopy("native", "missing-plugin")).toMatch(/IPA/);
   });
 
   it("reports unavailable when the plugin is missing and does not throw", async () => {
@@ -87,6 +88,7 @@ describe("biometric preference helpers", () => {
       available: false,
       kind: "none",
       host: "web",
+      gap: "unsupported",
     });
     await expect(unlockWithBiometry()).resolves.toBe("unavailable");
     expect(authenticate).not.toHaveBeenCalled();

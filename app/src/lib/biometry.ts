@@ -16,10 +16,13 @@ import {
 export type BiometryKind = "face" | "touch" | "other" | "none";
 export type BiometryPromptResult = "ok" | "cancel" | "unavailable";
 
+export type BiometryGap = "ready" | "unsupported" | "missing-plugin";
+
 export interface BiometryStatus {
   available: boolean;
   kind: BiometryKind;
   host: "native" | "web";
+  gap: BiometryGap;
 }
 
 export function biometryHost(): "native" | "web" {
@@ -61,16 +64,27 @@ export function biometricEnableLabel(kind: BiometryKind): string {
   return "Ota biometria käyttöön";
 }
 
-export function biometricUnavailableCopy(host: "native" | "web"): string {
+export function biometricUnavailableCopy(
+  host: "native" | "web",
+  gap: Exclude<BiometryGap, "ready"> = "unsupported"
+): string {
+  if (host === "native" && gap === "missing-plugin") {
+    return "Tämä asennus ei vielä kysy Face ID:tä. Uusi IPA tuo kytkimen. Siihen asti avaat lukon koodilla.";
+  }
   if (host === "native") {
     return "Tällä laitteella ei ole käytössä olevaa Face ID:tä tai Touch ID:tä. Lukitus avataan koodilla.";
   }
-  return "Face ID ja Touch ID toimivat asennetussa iOS-sovelluksessa. Tässä selaimessa lukitus avataan koodilla.";
+  return "Tämä on selain. Face ID ja Touch ID kytketään asennetussa iOS-sovelluksessa. Täällä avaat lukon koodilla.";
 }
 
 export function statusFromCheck(result: CheckBiometryResult, host: "native" | "web"): BiometryStatus {
   const available = Boolean(result.isAvailable);
-  return { available, kind: classifyBiometry(result.biometryType, available), host };
+  return {
+    available,
+    kind: classifyBiometry(result.biometryType, available),
+    host,
+    gap: available ? "ready" : "unsupported",
+  };
 }
 
 let inFlight: Promise<BiometryPromptResult> | null = null;
@@ -81,7 +95,12 @@ export async function readDeviceBiometry(): Promise<BiometryStatus> {
     const result = await BiometricAuth.checkBiometry();
     return statusFromCheck(result, host);
   } catch {
-    return { available: false, kind: "none", host };
+    return {
+      available: false,
+      kind: "none",
+      host,
+      gap: host === "native" ? "missing-plugin" : "unsupported",
+    };
   }
 }
 
