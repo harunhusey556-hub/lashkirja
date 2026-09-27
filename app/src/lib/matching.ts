@@ -549,6 +549,17 @@ export async function confirmMatch(
   }
 
   await prisma.$transaction([
+    prisma.automationEvent.create({
+      data: {
+        userId,
+        kind: "match",
+        resourceType: "transaction",
+        resourceId: transactionId,
+        previousValue: tx.matchStatus,
+        newValue: "confirmed",
+        reason: fromSuggestion ? "automaattinen täsmäytys" : "käyttäjän vahvistus",
+      },
+    }),
     prisma.transaction.updateMany({
       where: {
         suggestedReceiptId: receiptId,

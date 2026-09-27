@@ -21,6 +21,7 @@ import {
   type MappedBankTransaction,
 } from "./mapping";
 import type { PsuContext } from "./client";
+import { withTrackedJob } from "../job-tracker";
 
 const DEAD_SESSION_STATUS = new Set(["EXPIRED", "CLOSED", "REVOKED", "CANCELLED", "INVALID"]);
 
@@ -34,6 +35,25 @@ export interface BankSyncResult {
 }
 
 export async function syncBankConnection(
+  userId: string,
+  connectionId: string,
+  options: { attended: boolean; context?: PsuContext | null; client?: EnableBankingClient } = {
+    attended: false,
+  }
+): Promise<BankSyncResult> {
+  return withTrackedJob(
+    userId,
+    {
+      kind: "bank_sync",
+      title: "Pankkitapahtumien haku",
+      resourceType: "bank_connection",
+      resourceId: connectionId,
+    },
+    () => syncBankConnectionUntracked(userId, connectionId, options)
+  );
+}
+
+async function syncBankConnectionUntracked(
   userId: string,
   connectionId: string,
   options: { attended: boolean; context?: PsuContext | null; client?: EnableBankingClient } = {

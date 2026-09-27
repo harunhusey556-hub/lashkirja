@@ -34,6 +34,7 @@ import {
   type ReceiptListPayload,
 } from "@/lib/receipt-list";
 import { Button, buttonClass, chipClass } from "@/components/ui";
+import { batchOutcomeMessage } from "@/lib/upload-queue";
 interface SavedReceipt {
   id: string;
   vendor: string | null;
@@ -110,6 +111,7 @@ export default function KuititPage() {
   const [pendingTruncated, setPendingTruncated] = useState(false);
   const [loadingMorePending, setLoadingMorePending] = useState(false);
   const [bulkReviewing, setBulkReviewing] = useState(false);
+  const [retryApproveIds, setRetryApproveIds] = useState<string[]>([]);
   const [loadingPending, setLoadingPending] = useState(
     () => readPageCache<SavedReceipt[]>("receipts-pending") === null
   );
@@ -403,16 +405,23 @@ export default function KuititPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ receiptIds: ids }),
       });
-      if (!res.ok) {
-        await readJson(res, "Kaikkien kuittien hyväksyntä epäonnistui");
-      }
+      const data = await readJson<{
+        updatedCount?: number;
+        failedCount?: number;
+        failed?: { id: string }[];
+      }>(res, "Hyväksyntä epäonnistui");
+      const failed = data.failed ?? [];
+      const failedCount = data.failedCount ?? failed.length;
+      const updatedCount = data.updatedCount ?? Math.max(0, ids.length - failedCount);
+      setActionError(batchOutcomeMessage("Hyväksyttiin", updatedCount, failedCount));
+      setRetryApproveIds(failed.map((item) => item.id));
       setLoadAttempt((a) => a + 1);
     } catch (error: unknown) {
       if (isUnauthorized(error)) {
         redirectToLogin();
         return;
       }
-      setActionError(errorMessage(error, "Kaikkien kuittien hyväksyntä epäonnistui"));
+      setActionError(errorMessage(error, "Hyväksyntä epäonnistui"));
     } finally {
       setBulkReviewing(false);
     }
@@ -428,20 +437,31 @@ export default function KuititPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ receiptIds: Array.from(selectedIds) }),
       });
-      if (!res.ok) await readJson(res, "Poisto epäonnistui");
-      
-      setListResult((prev) => {
-        const cached = coerceReceiptListCache<SavedReceipt>(readPageCache(`receipts:${query}`));
-        const base: ReceiptListPayload<SavedReceipt> | null =
-          prev?.query === query
-            ? { receipts: prev.receipts, count: prev.count, truncated: prev.truncated }
-            : cached;
-        if (!base) return prev;
-        const next = dropReceipts(base, selectedIds);
-        writePageCache(`receipts:${query}`, next);
-        return { query, ...next };
-      });
-      setSelectedIds(new Set());
+      const data = await readJson<{
+        succeeded?: string[];
+        failed?: { id: string }[];
+        deletedCount?: number;
+        failedCount?: number;
+      }>(res, "Poisto epäonnistui");
+      const succeeded = new Set(data.succeeded ?? []);
+      const failed = data.failed ?? [];
+      const failedCount = data.failedCount ?? failed.length;
+      const deletedCount = data.deletedCount ?? succeeded.size;
+      if (succeeded.size > 0) {
+        setListResult((prev) => {
+          const cached = coerceReceiptListCache<SavedReceipt>(readPageCache(`receipts:${query}`));
+          const base: ReceiptListPayload<SavedReceipt> | null =
+            prev?.query === query
+              ? { receipts: prev.receipts, count: prev.count, truncated: prev.truncated }
+              : cached;
+          if (!base) return prev;
+          const next = dropReceipts(base, succeeded);
+          writePageCache(`receipts:${query}`, next);
+          return { query, ...next };
+        });
+      }
+      setActionError(batchOutcomeMessage("Poistettiin", deletedCount, failedCount));
+      setSelectedIds(new Set(failed.map((item) => item.id)));
       setShowBulkConfirm(false);
     } catch (error: unknown) {
       if (isUnauthorized(error)) {
@@ -544,6 +564,12 @@ export default function KuititPage() {
               <path d="M10.75 4.75a.75.75 0 0 0-1.5 0v4.5h-4.5a.75.75 0 0 0 0 1.5h4.5v4.5a.75.75 0 0 0 1.5 0v-4.5h4.5a.75.75 0 0 0 0-1.5h-4.5v-4.5Z" />
             </svg>
             Lisää
+          </Link>
+          <Link
+            href="/tyot"
+            className="mt-3 flex min-h-11 items-center justify-center text-sm font-medium text-accent"
+          >
+            Työt ja poikkeukset
           </Link>
         </div>
 
@@ -887,10 +913,23 @@ export default function KuititPage() {
 
         {actionError && (
           <div
-            className="text-sm text-danger bg-danger/10 rounded-xl px-4 py-3"
-            role="alert"
+            className={`text-sm rounded-xl px-4 py-3 space-y-2 ${
+              actionError.includes("epäonnistui 0")
+                ? "text-charcoal bg-cream"
+                : "text-danger bg-danger/10"
+            }`}
+            role="status"
           >
-            {actionError}
+            <p>{actionError}</p>
+            {retryApproveIds.length > 0 && (
+              <button
+                type="button"
+                className="min-h-11 text-sm font-medium text-accent"
+                onClick={() => void handleReviewMany(retryApproveIds)}
+              >
+                Yritä epäonnistuneet uudelleen
+              </button>
+            )}
           </div>
         )}
 

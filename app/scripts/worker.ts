@@ -2,6 +2,7 @@ import { prisma } from "../src/lib/db";
 import { enableBankingStatus } from "../src/lib/enablebanking/signing";
 import { syncDueBankConnections } from "../src/lib/enablebanking/sync";
 import { syncImapAccount } from "../src/lib/mail-sync";
+import { drainPendingDocumentJobs } from "../src/lib/document-jobs";
 
 const SYNC_INTERVAL_MS = 10 * 60 * 1000; // 10 minutes
 
@@ -48,11 +49,17 @@ async function main() {
   // Run immediately on start
   await runSyncCycle();
   await runBankSyncCycle();
+  await drainPendingDocumentJobs().catch((error) =>
+    console.error(`[${new Date().toISOString()}] Document jobs failed`, error)
+  );
 
   // Schedule loop. Bank sync itself stays on a 6h gate inside syncDueBankConnections.
   setInterval(async () => {
     await runSyncCycle();
     await runBankSyncCycle();
+    await drainPendingDocumentJobs().catch((error) =>
+      console.error(`[${new Date().toISOString()}] Document jobs failed`, error)
+    );
   }, SYNC_INTERVAL_MS);
 }
 

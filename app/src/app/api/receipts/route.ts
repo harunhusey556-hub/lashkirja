@@ -2,15 +2,14 @@ import { NextRequest, NextResponse } from "next/server";
 import { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/db";
 import { requireSession } from "@/lib/session";
-import { extractReceipt, ReceiptExtractionError, type ExtractedReceipt } from "@/lib/ai";
-import { ensureReceiptPreviewImage } from "@/lib/preview";
+import type { ExtractedReceipt } from "@/lib/ai";
+import { enqueueDocumentAnalysis } from "@/lib/document-jobs";
 import { centsToEuros, eurosToCents } from "@/lib/money";
 import { consumeRateLimit } from "@/lib/rate-limit";
 import {
   MAX_RECEIPT_BYTES,
   UploadValidationError,
   removeUserUpload,
-  resolveUserUploadPath,
   safeOriginalName,
   sha256,
   validateUploadBuffer,
@@ -77,43 +76,20 @@ function extractedFromStagedUpload(upload: StagedUploadRow): ExtractedReceipt {
   };
 }
 
-async function persistExtraction(uploadId: string, extracted: ExtractedReceipt) {
-  const trustedRawText =
-    typeof extracted.rawText === "string"
-      ? extracted.rawText.slice(0, 100_000)
-      : null;
-  const trustedSource = extracted.source === "ai" ? "ai" : "ocr";
-  const trustedConfidence = Number.isFinite(extracted.confidence)
-    ? Math.min(1, Math.max(0, extracted.confidence))
-    : null;
-
-  await prisma.upload.update({
-    where: { id: uploadId },
-    data: {
-      extractedJson: JSON.stringify({
-        vendor: extracted.vendor,
-        date: extracted.date,
-        totalAmount: extracted.totalAmount,
-        vatDetails: extracted.vatDetails,
-        category: extracted.category,
-        notes: extracted.notes,
-        type: extracted.type,
-        reference: extracted.reference,
-        invoiceNumber: extracted.invoiceNumber,
-      }),
-      extractionSource: trustedSource,
-      confidence: trustedConfidence,
-      rawText: trustedRawText,
-    },
-  });
-}
-
 async function discardStagedUpload(userId: string, upload: { id: string; storageKey: string }) {
   await removeUserUpload(userId, upload.storageKey).catch(() => {});
   await prisma.upload.deleteMany({ where: { id: upload.id, userId, claimedAt: null } });
 }
 
-async function reuseStagedUpload(
+function wantsAiUpgrade(upload: StagedUploadRow): boolean {
+  return Boolean(
+    upload.extractedJson &&
+      upload.extractionSource !== "ai" &&
+      (process.env.LLM_API_KEY || process.env.COPILOT_GITHUB_TOKEN)
+  );
+}
+
+async function acceptStagedUpload(
   userId: string,
   upload: StagedUploadRow,
   originalName: string,
@@ -121,23 +97,6 @@ async function reuseStagedUpload(
   profileContext: string,
   vendorPriors: string
 ) {
-  let extracted: ExtractedReceipt;
-  const absolutePath = resolveUserUploadPath(userId, upload.storageKey);
-  const shouldUpgradeToAi =
-    upload.extractedJson &&
-    upload.extractionSource !== "ai" &&
-    Boolean(process.env.LLM_API_KEY || process.env.COPILOT_GITHUB_TOKEN);
-
-  if (upload.extractedJson && !shouldUpgradeToAi) {
-    extracted = extractedFromStagedUpload(upload);
-  } else {
-    extracted = await extractReceipt(absolutePath, mimeType, profileContext, vendorPriors);
-    await persistExtraction(upload.id, extracted);
-  }
-  await ensureReceiptPreviewImage(absolutePath, mimeType).catch((err) =>
-    console.warn("Preview generation failed:", err)
-  );
-
   await prisma.upload.update({
     where: { id: upload.id },
     data: {
@@ -146,8 +105,28 @@ async function reuseStagedUpload(
     },
   });
 
+  if (upload.extractedJson && !wantsAiUpgrade(upload)) {
+    return noStoreJson({
+      extracted: extractedFromStagedUpload(upload),
+      uploadId: upload.id,
+      filePath: upload.storageKey,
+      originalName,
+      status: "done",
+    });
+  }
+
+  const job = await enqueueDocumentAnalysis({
+    userId,
+    uploadId: upload.id,
+    mimeType,
+    storageKey: upload.storageKey,
+    originalName,
+    profileContext,
+    vendorPriors,
+  });
   return noStoreJson({
-    extracted,
+    jobId: job.id,
+    status: job.status,
     uploadId: upload.id,
     filePath: upload.storageKey,
     originalName,
@@ -189,7 +168,6 @@ export async function POST(req: NextRequest) {
   }
 
   let storageKey: string | null = null;
-  let absolutePath: string | null = null;
   let uploadId: string | null = null;
   let checksum: string | null = null;
   
@@ -219,13 +197,24 @@ export async function POST(req: NextRequest) {
 
     const existing = await findReusableStagedUpload(session.userId!, checksum);
     if (existing?.claimedAt) {
-      return noStoreJson({ error: "Tämä kuitti on jo tallennettu" }, { status: 409 });
+      const receipt = await prisma.receipt.findFirst({
+        where: { userId: session.userId!, uploadId: existing.id },
+        select: { id: true },
+      });
+      return noStoreJson(
+        {
+          error: "Tämä kuitti on jo tallennettu",
+          code: "DUPLICATE_DOCUMENT",
+          receiptId: receipt?.id ?? null,
+        },
+        { status: 409 }
+      );
     }
     
     if (existing && existing.expiresAt <= new Date()) {
       await discardStagedUpload(session.userId!, existing);
     } else if (existing) {
-      return reuseStagedUpload(
+      return acceptStagedUpload(
         session.userId!,
         existing,
         originalName,
@@ -235,7 +224,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    ({ storageKey, absolutePath } = await writePrivateUpload(
+    ({ storageKey } = await writePrivateUpload(
       session.userId!,
       detected.extension,
       buffer
@@ -254,27 +243,30 @@ export async function POST(req: NextRequest) {
     });
     uploadId = upload.id;
 
-    const extracted = await extractReceipt(absolutePath, detected.mimeType, profileContext, vendorPriors);
-    await persistExtraction(upload.id, extracted);
-    await ensureReceiptPreviewImage(absolutePath, detected.mimeType).catch((err) =>
-      console.warn("Preview generation failed:", err)
-    );
-
-    return noStoreJson({
-      extracted,
-      uploadId: upload.id,
-      // Kept temporarily for preview URL compatibility; save accepts uploadId only.
-      filePath: storageKey,
+    return acceptStagedUpload(
+      session.userId!,
+      {
+        id: upload.id,
+        storageKey,
+        originalName,
+        mimeType: detected.mimeType,
+        extractedJson: null,
+        extractionSource: null,
+        confidence: null,
+        rawText: null,
+        claimedAt: null,
+        expiresAt: upload.expiresAt,
+      },
       originalName,
-    });
+      detected.mimeType,
+      profileContext,
+      vendorPriors
+    );
   } catch (error) {
-    if (uploadId) await prisma.upload.deleteMany({ where: { id: uploadId } }).catch(() => {});
+    if (uploadId) await prisma.upload.deleteMany({ where: { id: uploadId, claimedAt: null } }).catch(() => {});
     if (storageKey) await removeUserUpload(session.userId!, storageKey).catch(() => {});
     if (error instanceof UploadValidationError) {
       return noStoreJson({ error: error.message }, { status: error.status });
-    }
-    if (error instanceof ReceiptExtractionError) {
-      return noStoreJson({ error: error.message, code: error.code }, { status: 422 });
     }
     if (
       error instanceof Prisma.PrismaClientKnownRequestError &&
@@ -283,7 +275,7 @@ export async function POST(req: NextRequest) {
     ) {
       const raced = await findReusableStagedUpload(session.userId!, checksum);
       if (raced && !raced.claimedAt && raced.expiresAt > new Date()) {
-        return reuseStagedUpload(
+        return acceptStagedUpload(
           session.userId!,
           raced,
           raced.originalName,

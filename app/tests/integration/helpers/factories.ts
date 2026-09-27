@@ -20,6 +20,9 @@ export async function resetDatabase(): Promise<void> {
   await prisma.idempotencyRecord.deleteMany();
   await prisma.catalogItem.deleteMany();
   await prisma.invoiceSequence.deleteMany();
+  await prisma.automationEvent.deleteMany();
+  await prisma.vendorCategoryRule.deleteMany();
+  await prisma.backgroundJob.deleteMany();
   await prisma.user.deleteMany();
 }
 

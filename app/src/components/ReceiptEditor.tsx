@@ -26,15 +26,39 @@ import { focusFirstInvalid } from "@/lib/focus-field";
 import { clearDraft } from "@/lib/draft-store";
 import { receiptFieldId, validateReceiptFields } from "@/lib/receipt-form";
 import { RECEIPT_PHASE } from "@/lib/screen-state";
+import { isLowConfidenceField } from "@/lib/receipt-confidence";
 import {
   categoryLabel,
   isKnownCategory,
   RECEIPT_CATEGORIES,
 } from "@/lib/receipt-categories";
-
-const MAX_UPLOAD_BYTES = 15 * 1024 * 1024;
+import {
+  useReceiptUploadQueue,
+  type ReadyUpload,
+} from "@/components/useReceiptUploadQueue";
 
 const ACCEPTED_UPLOAD = ".pdf,.jpg,.jpeg,.png,.heic,.heif,image/jpeg,image/png,image/heic";
+
+function queueStatusLabel(status: string): string {
+  switch (status) {
+    case "pending":
+      return "Jonossa";
+    case "uploading":
+      return "Lähetetään";
+    case "processing":
+      return "Käsitellään";
+    case "ready":
+      return "Valmis";
+    case "failed":
+      return "Epäonnistui";
+    case "cancelled":
+      return "Peruttu";
+    case "background":
+      return "Taustalla";
+    default:
+      return status;
+  }
+}
 
 const emptyForm = {
   vendor: "",
@@ -53,6 +77,7 @@ interface ExtractedMeta {
   source: string;
   confidence: number | null;
   rawText?: string | null;
+  fieldConfidence?: { vendor?: number; date?: number; totalAmount?: number } | null;
 }
 
 type LinkedBankTx = BankTxMatch;
@@ -94,10 +119,8 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
   const matchPanelRef = useRef<HTMLDivElement>(null);
 
   const [loading, setLoading] = useState(isEdit);
-  const [uploading, setUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState("");
   const [saving, setSaving] = useState(false);
-  const [showPreview, setShowPreview] = useState(false);
   const [formReady, setFormReady] = useState(false);
   const [filePath, setFilePath] = useState("");
   const [uploadId, setUploadId] = useState("");
@@ -119,6 +142,8 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
   const [notFound, setNotFound] = useState(false);
   const [loadAttempt, setLoadAttempt] = useState(0);
   const [forceDuplicate, setForceDuplicate] = useState(false);
+  const [vendorRuleActive, setVendorRuleActive] = useState(false);
+  const [vendorRuleBusy, setVendorRuleBusy] = useState(false);
   const draftKey = receiptId ? `receipt:${receiptId}` : "receipt:new";
   const session = useEditorSession({
     sourceId: draftKey,
@@ -128,6 +153,74 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
     active: !isEdit || formReady,
     onRestore: setFormData,
   });
+
+  function applyUpload(upload: ReadyUpload) {
+    const knownCategory = isKnownCategory(upload.extracted.category);
+    setUploadId(upload.uploadId);
+    setFilePath(upload.filePath);
+    setOriginalName(upload.originalName);
+    setMeta({
+      source: upload.extracted.source || "ocr",
+      confidence: upload.extracted.confidence ?? null,
+      rawText: upload.extracted.rawText,
+      fieldConfidence: upload.extracted.fieldConfidence,
+    });
+    setFormData({
+      vendor: upload.extracted.vendor || "",
+      date: upload.extracted.date || "",
+      totalAmount: upload.extracted.totalAmount?.toString() || "",
+      category: knownCategory ? upload.extracted.category || "" : "",
+      customCategory: knownCategory ? "" : upload.extracted.category || "",
+      notes: upload.extracted.notes || "",
+      type: upload.extracted.type || "meno",
+      vatDetails:
+        upload.extracted.vatDetails && upload.extracted.vatDetails.length > 0
+          ? upload.extracted.vatDetails.map((detail) => ({
+              rate: detail.rate?.toString() || "0",
+              amount: detail.amount?.toString() || "0",
+            }))
+          : [{ rate: "25.5", amount: "" }],
+      reference: upload.extracted.reference || "",
+      invoiceNumber: upload.extracted.invoiceNumber || "",
+    });
+    setUseCustomCategory(!knownCategory && Boolean(upload.extracted.category));
+    setFormReady(true);
+    setError("");
+    setUploadProgress(RECEIPT_PHASE.review);
+  }
+
+  const uploadQueue = useReceiptUploadQueue(applyUpload);
+  const uploading = uploadQueue.rows.some(
+    (row) => row.status === "uploading" || row.status === "processing"
+  );
+  const openExistingId =
+    uploadQueue.rows.find((row) => row.duplicateReceiptId)?.duplicateReceiptId ?? null;
+
+  useEffect(() => {
+    if (!formReady) return;
+    const vendor = formData.vendor.trim();
+    if (!vendor) {
+      setVendorRuleActive(false);
+      return;
+    }
+    const controller = new AbortController();
+    const timer = setTimeout(() => {
+      apiFetch(`/api/vendor-rules?vendor=${encodeURIComponent(vendor)}`, {
+        signal: controller.signal,
+      })
+        .then((response) => readJson<{ rule: { active?: boolean } | null }>(response, "Säännön haku epäonnistui"))
+        .then((data) => {
+          if (!controller.signal.aborted) setVendorRuleActive(Boolean(data.rule?.active));
+        })
+        .catch(() => {
+          if (!controller.signal.aborted) setVendorRuleActive(false);
+        });
+    }, 400);
+    return () => {
+      clearTimeout(timer);
+      controller.abort();
+    };
+  }, [formReady, formData.vendor]);
 
   useEffect(() => {
     if (!receiptId) return;
@@ -216,104 +309,55 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
     return () => controller.abort();
   }, [receiptId, loadAttempt, isNewStep2]);
 
-  function validateUploadFile(file: File): string | null {
-    if (file.size === 0) return "Tiedosto on tyhjä";
-    if (file.size > MAX_UPLOAD_BYTES) return "Tiedosto on liian suuri (enintään 15 Mt)";
-    const name = file.name.toLowerCase();
-    const okExt = /\.(pdf|jpe?g|png|heic|heif)$/.test(name);
-    const okMime =
-      file.type === "application/pdf" ||
-      file.type.startsWith("image/");
-    if (!okExt && !okMime) {
-      return "Tuemme PDF-, JPG-, PNG- ja HEIC-tiedostoja";
-    }
-    return null;
-  }
-
-  async function handleFileUpload(file: File) {
-    const validationError = validateUploadFile(file);
-    if (validationError) {
-      setError(validationError);
+  async function saveVendorRule() {
+    const vendor = formData.vendor.trim();
+    const category = (useCustomCategory ? formData.customCategory : formData.category).trim();
+    if (!vendor || !category) {
+      setError("Anna myyjä ja kategoria ennen sääntöä.");
       return;
     }
-
-    setUploading(true);
-    setUploadProgress(RECEIPT_PHASE.upload);
+    setVendorRuleBusy(true);
     setError("");
-    setFormReady(false);
-    setUploadId("");
-
     try {
-      const fd = new FormData();
-      fd.append("file", file);
-      setUploadProgress(RECEIPT_PHASE.process);
-      const res = await apiFetch("/api/receipts", {
+      const response = await apiFetch("/api/vendor-rules", {
         method: "POST",
-        body: fd,
-        timeoutMs: 120_000,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ vendor, category }),
       });
-      const data = await readJson<{
-        uploadId: string;
-        filePath: string;
-        originalName: string;
-        extracted: Record<string, unknown> & {
-          source?: string;
-          confidence?: number | null;
-          rawText?: string | null;
-          vendor?: string | null;
-          date?: string | null;
-          totalAmount?: number | null;
-          category?: string | null;
-          notes?: string | null;
-          type?: string | null;
-          vatDetails?: { rate?: number; amount?: number }[];
-          reference?: string | null;
-          invoiceNumber?: string | null;
-        };
-      }>(res, "Tiedoston käsittely epäonnistui");
-
-      setUploadId(data.uploadId);
-      setFilePath(data.filePath);
-      setOriginalName(data.originalName);
-      setMeta({
-        source: data.extracted.source || "manual",
-        confidence: data.extracted.confidence ?? null,
-        rawText: data.extracted.rawText,
-      });
-      const knownCategory = isKnownCategory(data.extracted.category);
-      setFormData({
-        vendor: data.extracted.vendor || "",
-        date: data.extracted.date || "",
-        totalAmount: data.extracted.totalAmount?.toString() || "",
-        category: knownCategory ? data.extracted.category || "" : "",
-        customCategory: knownCategory ? "" : data.extracted.category || "",
-        notes: data.extracted.notes || "",
-        type: data.extracted.type || "meno",
-        vatDetails:
-          data.extracted.vatDetails && data.extracted.vatDetails.length > 0
-            ? data.extracted.vatDetails.map((detail) => ({
-                rate: detail.rate?.toString() || "0",
-                amount: detail.amount?.toString() || "0",
-              }))
-            : [{ rate: "25.5", amount: "" }],
-        reference: data.extracted.reference || "",
-        invoiceNumber: data.extracted.invoiceNumber || "",
-      });
-      setUseCustomCategory(
-        !knownCategory && Boolean(data.extracted.category)
-      );
-      setShowPreview(false);
-      setFormReady(true);
-      setUploadProgress(RECEIPT_PHASE.review);
-    } catch (uploadError: unknown) {
-      if (isUnauthorized(uploadError)) {
+      if (!response.ok) await readJson(response, "Säännön tallennus epäonnistui");
+      setVendorRuleActive(true);
+    } catch (ruleError: unknown) {
+      if (isUnauthorized(ruleError)) {
         redirectToLogin();
         return;
       }
-      setError(errorMessage(uploadError, "Lataus epäonnistui"));
-      setUploadProgress("");
+      setError(errorMessage(ruleError, "Säännön tallennus epäonnistui"));
     } finally {
-      setUploading(false);
+      setVendorRuleBusy(false);
+    }
+  }
+
+  async function undoVendorRule() {
+    const vendor = formData.vendor.trim();
+    if (!vendor) return;
+    setVendorRuleBusy(true);
+    setError("");
+    try {
+      const response = await apiFetch("/api/vendor-rules/undo", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ vendor }),
+      });
+      if (!response.ok) await readJson(response, "Säännön kumoaminen epäonnistui");
+      setVendorRuleActive(false);
+    } catch (ruleError: unknown) {
+      if (isUnauthorized(ruleError)) {
+        redirectToLogin();
+        return;
+      }
+      setError(errorMessage(ruleError, "Säännön kumoaminen epäonnistui"));
+    } finally {
+      setVendorRuleBusy(false);
     }
   }
 
@@ -532,6 +576,22 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
     : filePath
       ? `/api/uploads/${encodeURIComponent(filePath)}`
       : null;
+  const lowVendor = isLowConfidenceField({
+    value: formData.vendor,
+    overall: meta?.confidence,
+    field: meta?.fieldConfidence?.vendor,
+  });
+  const lowDate = isLowConfidenceField({
+    value: formData.date,
+    overall: meta?.confidence,
+    field: meta?.fieldConfidence?.date,
+  });
+  const lowAmount = isLowConfidenceField({
+    value: formData.totalAmount,
+    overall: meta?.confidence,
+    field: meta?.fieldConfidence?.totalAmount,
+  });
+  const uncertainClass = "border-warning ring-2 ring-warning";
 
   if (loading) {
     return <LoadingState label="Ladataan kuittia..." />;
@@ -594,11 +654,12 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
             ref={fileInputRef}
             type="file"
             accept={ACCEPTED_UPLOAD}
+            multiple
             aria-label="Valitse kuitti tai lasku tiedostona"
             className="hidden"
             onChange={(e) => {
-              const f = e.target.files?.[0];
-              if (f) handleFileUpload(f);
+              const files = Array.from(e.target.files ?? []);
+              if (files.length > 0) uploadQueue.enqueue(files);
               e.currentTarget.value = "";
             }}
           />
@@ -610,8 +671,8 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
             aria-label="Ota kuva kuitista tai laskusta"
             className="hidden"
             onChange={(e) => {
-              const f = e.target.files?.[0];
-              if (f) handleFileUpload(f);
+              const files = Array.from(e.target.files ?? []);
+              if (files.length > 0) uploadQueue.enqueue(files);
               e.currentTarget.value = "";
             }}
           />
@@ -651,13 +712,71 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
           {uploading && (
             <div className="flex items-center justify-center gap-3 text-sm text-warm-gray pt-4" role="status" aria-live="polite">
               <div className="w-5 h-5 border-2 border-accent border-t-transparent rounded-full animate-spin motion-reduce:animate-none" aria-hidden="true" />
-              {uploadProgress}
+              {uploadQueue.rows.find((row) => row.status === "uploading" || row.status === "processing")?.progress || uploadProgress}
             </div>
           )}
         </div>
       )}
 
+      {!isEdit && uploadQueue.rows.length > 0 && (
+        <div className="bg-white rounded-3xl border border-warm-gray-light/30 shadow-sm p-4 space-y-3">
+          <div className="flex items-center justify-between gap-2">
+            <h3 className="text-sm font-medium text-charcoal">Lähetysjono</h3>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => uploadQueue.cancel()}
+                className="min-h-11 px-3 text-xs font-medium text-charcoal"
+              >
+                Peruuta
+              </button>
+              <button
+                type="button"
+                onClick={() => uploadQueue.retryFailed()}
+                className="min-h-11 px-3 text-xs font-medium text-accent"
+              >
+                Yritä epäonnistuneet
+              </button>
+            </div>
+          </div>
+          <ul className="space-y-2">
+            {uploadQueue.rows.map((row) => (
+              <li key={row.localId} className="rounded-xl border border-warm-gray-light/40 px-3 py-2 text-sm">
+                <div className="flex items-start justify-between gap-3">
+                  <p className="min-w-0 break-words font-medium text-charcoal">{row.name}</p>
+                  <p className="shrink-0 text-xs text-warm-gray">{queueStatusLabel(row.status)}</p>
+                </div>
+                {row.progress && <p className="text-xs text-warm-gray mt-1">{row.progress}</p>}
+                {row.error && <p className="text-xs text-danger mt-1">{row.error}</p>}
+                {row.duplicateReceiptId && (
+                  <Link href={`/kuitit/${row.duplicateReceiptId}`} className="text-xs font-medium text-accent mt-1 inline-flex min-h-11 items-center">
+                    Avaa olemassa oleva
+                  </Link>
+                )}
+                {row.status === "ready" && (
+                  <button
+                    type="button"
+                    onClick={() => uploadQueue.useReady(row.localId)}
+                    className="text-xs font-medium text-accent min-h-11"
+                  >
+                    Käytä lomakkeessa
+                  </button>
+                )}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
       <FormError message={error} className="bg-danger/10 rounded-xl px-4 py-3" />
+      {openExistingId && (
+        <Link
+          href={`/kuitit/${openExistingId}`}
+          className="min-h-11 inline-flex items-center text-sm font-medium text-accent"
+        >
+          Avaa olemassa oleva
+        </Link>
+      )}
 
       {uploadProgress && !uploading && (
         <p className="text-sm text-warm-gray text-center" role="status" aria-live="polite">
@@ -729,25 +848,15 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
             </div>
           )}
 
-          {formPreviewSrc && (
-            <div className="space-y-2">
-              <button
-                type="button"
-                onClick={() => setShowPreview((v) => !v)}
-                className="w-full py-2 rounded-xl border border-warm-gray-light text-xs font-medium text-charcoal hover:bg-cream transition-colors"
-              >
-                {showPreview ? "Piilota esikatselu" : "Näytä kuitti / lasku"}
-              </button>
-              {showPreview && (
-                <ReceiptPreview
-                  src={formPreviewSrc}
-                  fileName={originalName || filePath || "kuitti"}
-                />
-              )}
-            </div>
-          )}
-
           {!isNewStep2 && (
+            <div className="space-y-4">
+            <div className="grid gap-4 lg:grid-cols-2 lg:items-start">
+            {formPreviewSrc && (
+              <ReceiptPreview
+                src={formPreviewSrc}
+                fileName={originalName || filePath || "kuitti"}
+              />
+            )}
             <div className="space-y-4">
             <div>
               <label htmlFor="receipt-vendor" className="block text-[10px] font-medium tracking-wider uppercase text-warm-gray mb-1.5">Myyjä</label>
@@ -761,8 +870,11 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
                 }
                 aria-invalid={Boolean(fieldErrors.vendor) || undefined}
                 aria-describedby={fieldErrors.vendor ? "receipt-vendor-error" : undefined}
-                className="w-full min-h-12 min-w-0 px-3 rounded-xl border border-warm-gray-light/50 bg-white text-sm transition-colors focus:border-accent outline-none focus:ring-1 focus:ring-accent shadow-sm"
+                className={`w-full min-h-12 min-w-0 px-3 rounded-xl border bg-white text-sm transition-colors focus:border-accent outline-none focus:ring-1 focus:ring-accent shadow-sm ${lowVendor ? uncertainClass : "border-warm-gray-light/50"}`}
               />
+              {lowVendor && !fieldErrors.vendor && (
+                <p className="mt-1.5 text-xs text-warning">Epävarma tunnistus</p>
+              )}
               {fieldErrors.vendor && (
                 <p id="receipt-vendor-error" className="mt-1.5 text-xs text-danger" role="alert">
                   {fieldErrors.vendor}
@@ -785,8 +897,11 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
                   }
                   aria-invalid={Boolean(fieldErrors.date) || undefined}
                   aria-describedby={fieldErrors.date ? "receipt-date-error" : undefined}
-                  className="w-full min-h-12 min-w-0 px-3 rounded-xl border border-warm-gray-light/50 bg-white text-sm transition-colors focus:border-accent outline-none focus:ring-1 focus:ring-accent shadow-sm"
+                  className={`w-full min-h-12 min-w-0 px-3 rounded-xl border bg-white text-sm transition-colors focus:border-accent outline-none focus:ring-1 focus:ring-accent shadow-sm ${lowDate ? uncertainClass : "border-warm-gray-light/50"}`}
                 />
+                {lowDate && !fieldErrors.date && (
+                  <p className="mt-1.5 text-xs text-warning">Epävarma tunnistus</p>
+                )}
                 {fieldErrors.date && (
                   <p id="receipt-date-error" className="mt-1.5 text-xs text-danger" role="alert">
                     {fieldErrors.date}
@@ -809,14 +924,19 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
                   }
                   aria-invalid={Boolean(fieldErrors.totalAmount) || undefined}
                   aria-describedby={fieldErrors.totalAmount ? "receipt-total-error" : undefined}
-                  className="w-full min-h-12 min-w-0 px-3 rounded-xl border border-warm-gray-light/50 bg-white text-sm transition-colors focus:border-accent outline-none focus:ring-1 focus:ring-accent shadow-sm"
+                  className={`w-full min-h-12 min-w-0 px-3 rounded-xl border bg-white text-sm transition-colors focus:border-accent outline-none focus:ring-1 focus:ring-accent shadow-sm ${lowAmount ? uncertainClass : "border-warm-gray-light/50"}`}
                 />
+                {lowAmount && !fieldErrors.totalAmount && (
+                  <p className="mt-1.5 text-xs text-warning">Epävarma tunnistus</p>
+                )}
                 {fieldErrors.totalAmount && (
                   <p id="receipt-total-error" className="mt-1.5 text-xs text-danger" role="alert">
                     {fieldErrors.totalAmount}
                   </p>
                 )}
               </div>
+            </div>
+            </div>
             </div>
 
             <fieldset className="space-y-2">
@@ -1049,6 +1169,18 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
                 </p>
               )}
             </fieldset>
+
+            <div className="flex flex-wrap gap-2">
+              {vendorRuleActive ? (
+                <Button type="button" variant="secondary" busy={vendorRuleBusy} onClick={() => void undoVendorRule()}>
+                  Kumoa sääntö
+                </Button>
+              ) : (
+                <Button type="button" variant="secondary" busy={vendorRuleBusy} onClick={() => void saveVendorRule()}>
+                  Käytä tälle myyjälle myöhemmin
+                </Button>
+              )}
+            </div>
 
             <div>
               <label

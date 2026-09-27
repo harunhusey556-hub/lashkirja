@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useFocusTrap } from "@/components/useFocusTrap";
+import { nextRotation, nextZoom } from "@/lib/document-viewer";
 
 type PreviewKind = "rendered" | "raster" | "other";
 
@@ -37,6 +38,8 @@ export default function ReceiptPreview({
   const [fullscreen, setFullscreen] = useState(false);
   const [previewFailed, setPreviewFailed] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [zoom, setZoom] = useState(1);
+  const [rotation, setRotation] = useState(0);
   const dialogRef = useRef<HTMLDivElement>(null);
   const openButtonRef = useRef<HTMLButtonElement>(null);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
@@ -63,22 +66,26 @@ export default function ReceiptPreview({
     };
   }, [fullscreen]);
 
-  const viewer = (
-    <PreviewBody
-      src={src}
-      imageSrc={imageSrc}
-      kind={kind}
-      fileName={fileName}
-      fill={fullscreen}
-      failed={previewFailed}
-      loading={loading}
-      onLoad={() => setLoading(false)}
-      onError={() => {
-        setLoading(false);
-        setPreviewFailed(true);
-      }}
-    />
-  );
+  function renderViewer(fill: boolean) {
+    return (
+      <PreviewBody
+        src={src}
+        imageSrc={imageSrc}
+        kind={kind}
+        fileName={fileName}
+        fill={fill}
+        zoom={fill ? zoom : 1}
+        rotation={fill ? rotation : 0}
+        failed={previewFailed}
+        loading={loading}
+        onLoad={() => setLoading(false)}
+        onError={() => {
+          setLoading(false);
+          setPreviewFailed(true);
+        }}
+      />
+    );
+  }
 
   return (
     <>
@@ -90,7 +97,7 @@ export default function ReceiptPreview({
         }
       >
         <div className={compact ? "h-28" : "h-48 sm:h-56"}>
-          {viewer}
+          {renderViewer(false)}
         </div>
         <button
           ref={openButtonRef}
@@ -117,20 +124,48 @@ export default function ReceiptPreview({
             <p id="receipt-preview-title" className="text-sm text-white truncate pr-4">
               {fileName}
             </p>
-            <button
-              ref={closeButtonRef}
-              type="button"
-              onClick={() => setFullscreen(false)}
-              className="min-h-11 px-4 rounded-lg bg-white/15 text-white text-sm hover:bg-white/25 transition-colors"
-            >
-              Sulje
-            </button>
+            <div className="flex items-center gap-2 shrink-0">
+              <button
+                type="button"
+                data-testid="preview-zoom"
+                onClick={() => setZoom((current) => nextZoom(current))}
+                className="min-h-11 px-3 rounded-lg bg-white/15 text-white text-sm hover:bg-white/25 transition-colors"
+              >
+                Suurenna
+              </button>
+              <button
+                type="button"
+                data-testid="preview-rotate"
+                onClick={() => setRotation((current) => nextRotation(current))}
+                className="min-h-11 px-3 rounded-lg bg-white/15 text-white text-sm hover:bg-white/25 transition-colors"
+              >
+                Kierrä
+              </button>
+              <button
+                ref={closeButtonRef}
+                type="button"
+                onClick={() => {
+                  setFullscreen(false);
+                  setZoom(1);
+                  setRotation(0);
+                }}
+                className="min-h-11 px-4 rounded-lg bg-white/15 text-white text-sm hover:bg-white/25 transition-colors"
+              >
+                Sulje
+              </button>
+            </div>
           </div>
+          {/\.(heic|heif)$/i.test(fileName) && (
+            <p className="px-4 text-xs text-white/80">
+              HEIC-esikatselu riippuu laitteen tuesta. Tätä ei ole varmennettu kameran rullalla.
+            </p>
+          )}
           <div
-            className="flex-1 min-h-0 px-2"
+            className="flex-1 min-h-0 px-2 overflow-auto"
             style={{ paddingBottom: "max(1rem, var(--safe-bottom))" }}
+            data-testid="preview-stage"
           >
-            {viewer}
+            {renderViewer(true)}
           </div>
         </div>
       )}
@@ -144,6 +179,8 @@ function PreviewBody({
   kind,
   fileName,
   fill,
+  zoom,
+  rotation,
   failed,
   loading,
   onLoad,
@@ -154,6 +191,8 @@ function PreviewBody({
   kind: PreviewKind;
   fileName: string;
   fill: boolean;
+  zoom: number;
+  rotation: number;
   failed: boolean;
   loading: boolean;
   onLoad: () => void;
@@ -193,6 +232,12 @@ function PreviewBody({
         onLoad={onLoad}
         onError={onError}
         className="w-full h-full object-contain"
+        data-testid={fill ? "preview-image" : undefined}
+        style={
+          fill
+            ? { transform: `scale(${zoom}) rotate(${rotation}deg)`, transformOrigin: "center center" }
+            : undefined
+        }
       />
       {kind === "rendered" && !loading && (
         <a

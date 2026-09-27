@@ -194,6 +194,23 @@ export const PATCH = withErrorHandler(async (
     },
   });
 
+  if (body.category !== undefined) {
+    const nextCategory = sanitizeText(body.category);
+    if (nextCategory !== owned.category) {
+      await prisma.automationEvent.create({
+        data: {
+          userId: session.userId!,
+          kind: "category",
+          resourceType: "receipt",
+          resourceId: id,
+          previousValue: owned.category,
+          newValue: nextCategory,
+          reason: "käyttäjän korjaus",
+        },
+      });
+    }
+  }
+
   await runMatching(session.userId!).catch((error) =>
     console.error("Matching after receipt edit failed:", error)
   );

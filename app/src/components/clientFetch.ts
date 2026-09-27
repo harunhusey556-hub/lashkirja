@@ -27,6 +27,9 @@ export async function readJson<T>(
     if (payload && typeof payload === "object" && "error" in payload) {
       if (typeof payload.error === "string") {
         message = payload.error;
+        const rest = { ...(payload as Record<string, unknown>) };
+        delete rest.error;
+        if (Object.keys(rest).length > 0) details = rest;
       } else if (payload.error && typeof payload.error === "object") {
         message = payload.error.message || fallbackMessage;
         details = payload.error.details;

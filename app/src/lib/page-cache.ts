@@ -65,7 +65,7 @@ const MUTATION_PREFIXES: Array<{ match: (path: string) => boolean; prefixes: str
   },
   {
     match: (path) => path.includes("/api/receipts") || path.includes("/api/matching"),
-    prefixes: ["receipts", "dashboard:", "report:", "alv:"],
+    prefixes: ["receipts", "jobs", "work-queue", "dashboard:", "report:", "alv:"],
   },
   {
     match: (path) => path.includes("/api/statements"),
@@ -74,7 +74,7 @@ const MUTATION_PREFIXES: Array<{ match: (path: string) => boolean; prefixes: str
   {
     match: (path) =>
       path.includes("/api/bank-accounts") || path.includes("/api/bank/connections"),
-    prefixes: ["bank-overview", "statements", "dashboard:"],
+    prefixes: ["bank-overview", "statements", "jobs", "dashboard:"],
   },
   {
     match: (path) => path.includes("/api/customers"),

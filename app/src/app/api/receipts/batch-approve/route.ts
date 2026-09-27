@@ -16,67 +16,90 @@ export async function POST(req: NextRequest) {
 
   try {
     const body = batchApproveSchema.parse(await req.json());
-    
-    // Only update receipts that belong to the user and are currently pending
-    const updateResult = await prisma.receipt.updateMany({
-      where: {
-        id: { in: body.receiptIds },
-        userId: session.userId,
-        reviewStatus: "pending",
-      },
-      data: {
-        reviewStatus: "approved",
-      },
-    });
-
-    // Auto-link: find all just-approved receipts that have a sourceTransactionId
-    // and link them to their originating bank transaction in one pass.
+    const succeeded: string[] = [];
+    const failed: { id: string; error: string }[] = [];
     let autoLinkedCount = 0;
-    if (updateResult.count > 0) {
-      const approvedWithSource = await prisma.receipt.findMany({
-        where: {
-          id: { in: body.receiptIds },
-          userId: session.userId,
-          reviewStatus: "approved",
-          sourceTransactionId: { not: null },
-        },
-        select: { id: true, sourceTransactionId: true },
-      });
 
-      for (const receipt of approvedWithSource) {
-        try {
-          const tx = await prisma.transaction.findFirst({
-            where: {
-              id: receipt.sourceTransactionId!,
-              statement: { userId: session.userId },
-              receiptId: null, // not already linked
-            },
-          });
-          if (tx) {
-            await prisma.transaction.update({
-              where: { id: tx.id },
-              data: {
-                receiptId: receipt.id,
-                matchStatus: "confirmed",
-                matchScore: 1.0,
-                matchReasons: JSON.stringify(["auto_income", "approved"]),
-                suggestedReceiptId: tx.suggestedReceiptId === receipt.id ? null : tx.suggestedReceiptId,
-              },
-            });
-            autoLinkedCount++;
-          }
-        } catch (e) {
-          console.error(`Auto-link failed for receipt ${receipt.id}:`, e);
-        }
+    for (const id of body.receiptIds) {
+      const receipt = await prisma.receipt.findFirst({
+        where: { id, userId: session.userId },
+        select: { id: true, reviewStatus: true, sourceTransactionId: true },
+      });
+      if (!receipt) {
+        failed.push({ id, error: "Kuittia ei löytynyt" });
+        continue;
+      }
+      if (receipt.reviewStatus !== "pending") {
+        failed.push({ id, error: "Kuitti ei ole tarkastettavana" });
+        continue;
       }
 
-      // Run matching for any remaining non-income receipts
+      await prisma.receipt.update({
+        where: { id: receipt.id },
+        data: { reviewStatus: "approved" },
+      });
+      succeeded.push(receipt.id);
+
+      if (!receipt.sourceTransactionId) continue;
+      try {
+        const tx = await prisma.transaction.findFirst({
+          where: {
+            id: receipt.sourceTransactionId,
+            statement: { userId: session.userId },
+            receiptId: null,
+          },
+        });
+        if (!tx) continue;
+        await prisma.transaction.update({
+          where: { id: tx.id },
+          data: {
+            receiptId: receipt.id,
+            matchStatus: "confirmed",
+            matchScore: 1.0,
+            matchReasons: JSON.stringify(["auto_income", "approved"]),
+            suggestedReceiptId: tx.suggestedReceiptId === receipt.id ? null : tx.suggestedReceiptId,
+          },
+        });
+        await prisma.automationEvent.create({
+          data: {
+            userId: session.userId,
+            kind: "match",
+            resourceType: "transaction",
+            resourceId: tx.id,
+            previousValue: tx.matchStatus,
+            newValue: "confirmed",
+            reason: "automaattinen hyväksyntä",
+          },
+        });
+        autoLinkedCount += 1;
+      } catch (error) {
+        console.error(`Auto-link failed for receipt ${receipt.id}:`, error);
+        await prisma.automationEvent
+          .create({
+            data: {
+              userId: session.userId,
+              kind: "link_error",
+              resourceType: "receipt",
+              resourceId: receipt.id,
+              previousValue: null,
+              newValue: receipt.sourceTransactionId,
+              reason: "Automaattinen linkitys epäonnistui",
+            },
+          })
+          .catch(() => {});
+      }
+    }
+
+    if (succeeded.length > 0) {
       await runMatching(session.userId).catch(console.error);
     }
 
     return NextResponse.json({
       ok: true,
-      updatedCount: updateResult.count,
+      succeeded,
+      failed,
+      updatedCount: succeeded.length,
+      failedCount: failed.length,
       autoLinkedCount,
     });
   } catch (error) {

@@ -11,6 +11,7 @@ import * as fs from "fs";
 import * as os from "os";
 
 import { createHash } from "crypto";
+import { withTrackedJob } from "./job-tracker";
 // We only process attachments that are likely to be receipts.
 const VALID_EXTENSIONS = [".pdf", ".jpg", ".jpeg", ".png", ".heic"];
 
@@ -63,6 +64,24 @@ function isBodyOnlyReceipt(envelope: { subject?: string } | null | undefined): b
 }
 
 export async function syncImapAccount(accountId: string) {
+  const account = await prisma.imapAccount.findUnique({
+    where: { id: accountId },
+    select: { userId: true },
+  });
+  if (!account) throw new Error("Account not found");
+  return withTrackedJob(
+    account.userId,
+    {
+      kind: "email_scan",
+      title: "Sähköpostin tarkistus",
+      resourceType: "imap_account",
+      resourceId: accountId,
+    },
+    () => syncImapAccountUntracked(accountId)
+  );
+}
+
+async function syncImapAccountUntracked(accountId: string) {
   const account = await prisma.imapAccount.findUnique({ where: { id: accountId } });
   if (!account) throw new Error("Account not found");
 

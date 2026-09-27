@@ -375,8 +375,16 @@ export default function StatementDetailView({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
-      if (!res.ok) {
-        await readJson(res, "Kuittilinkityksen päivitys epäonnistui");
+      const data = await readJson<{
+        failedCount?: number;
+        updatedCount?: number;
+        failed?: { error?: string }[];
+      }>(res, "Kuittilinkityksen päivitys epäonnistui");
+      if (url.includes("batch-approve") && (data.failedCount ?? 0) > 0) {
+        setActionError(
+          data.failed?.[0]?.error ||
+            `Hyväksyttiin ${data.updatedCount ?? 0}, epäonnistui ${data.failedCount}.`
+        );
       }
       await reloadStatement();
       setCandidatesFor(null);
@@ -520,7 +528,16 @@ export default function StatementDetailView({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ receiptIds }),
       });
-      if (!res.ok) await readJson(res, "Myyntien hyväksyntä epäonnistui");
+      const data = await readJson<{
+        updatedCount?: number;
+        failedCount?: number;
+        failed?: { id: string; error?: string }[];
+      }>(res, "Myyntien hyväksyntä epäonnistui");
+      const failedCount = data.failedCount ?? data.failed?.length ?? 0;
+      const updatedCount = data.updatedCount ?? Math.max(0, receiptIds.length - failedCount);
+      if (failedCount > 0) {
+        setActionError(`Hyväksyttiin ${updatedCount}, epäonnistui ${failedCount}.`);
+      }
       await reloadStatement();
     } catch (error: unknown) {
       if (isUnauthorized(error)) {
