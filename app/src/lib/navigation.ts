@@ -1,10 +1,13 @@
 /**
- * Single navigation registry. The desktop sidebar and the mobile tab bar
- * render `kind === "root"` only. New product features are workspace, detail,
- * or settings entries — never a new root.
+ * Single navigation registry. The tab bar and sidebar render tab roots;
+ * Asetukset is the avatar root. New product features are workspace, detail,
+ * or settings entries, never a new root.
  */
 
 export type NavKind = "root" | "workspace" | "detail" | "settings";
+
+/** Roots only. `tab` = tab bar and sidebar; `avatar` = opened from the avatar sheet. */
+export type NavPlacement = "tab" | "avatar";
 
 export type NavEntry = {
   id: string;
@@ -13,45 +16,37 @@ export type NavEntry = {
   /** Canonical path. A `:param` segment matches one URL piece. */
   path: string;
   parent?: string;
-  /** Roots only. Primary roots are the mobile tab bar; the rest sit in Muut. */
-  mobile?: "primary" | "more";
+  placement?: NavPlacement;
 };
 
 export const NAV: readonly NavEntry[] = [
-  { id: "etusivu", kind: "root", label: "Etusivu", path: "/dashboard", mobile: "primary" },
-  { id: "pankki", kind: "root", label: "Pankki", path: "/pankki", mobile: "primary" },
-  { id: "kuitit", kind: "root", label: "Kuitit", path: "/kuitit", mobile: "primary" },
-  { id: "myynti", kind: "root", label: "Myynti", path: "/laskut", mobile: "primary" },
-  { id: "kirjanpito", kind: "root", label: "Kirjanpito", path: "/alv-raportti", mobile: "more" },
-  { id: "raportit", kind: "root", label: "Raportit", path: "/raportit", mobile: "more" },
-  { id: "asetukset", kind: "root", label: "Asetukset", path: "/asetukset", mobile: "more" },
+  { id: "etusivu", kind: "root", label: "Koti", path: "/dashboard", placement: "tab" },
+  { id: "myynti", kind: "root", label: "Myynti", path: "/laskut", placement: "tab" },
+  { id: "kirjanpito", kind: "root", label: "Kirjanpito", path: "/kirjanpito", placement: "tab" },
+  { id: "raportit", kind: "root", label: "Raportit", path: "/raportit", placement: "tab" },
+  { id: "asetukset", kind: "root", label: "Asetukset", path: "/asetukset", placement: "avatar" },
 
-  { id: "pankki-tapahtumat", kind: "workspace", label: "Tapahtumat", path: "/pankki/tapahtumat", parent: "pankki" },
-  { id: "pankki-tilit", kind: "workspace", label: "Tilit", path: "/pankki/tilit", parent: "pankki" },
-  { id: "pankki-taydennys", kind: "workspace", label: "Täsmäytys", path: "/pankki/taydennys", parent: "pankki" },
-  {
-    id: "pankki-tapahtuma",
-    kind: "detail",
-    label: "Tiliote",
-    path: "/pankki/tapahtumat/:id",
-    parent: "pankki-tapahtumat",
-  },
-
+  { id: "kuitit", kind: "workspace", label: "Kuitit", path: "/kuitit", parent: "kirjanpito" },
   { id: "kuitit-uusi", kind: "detail", label: "Uusi kuitti", path: "/kuitit/uusi", parent: "kuitit" },
   { id: "kuitti", kind: "detail", label: "Kuitti", path: "/kuitit/:id", parent: "kuitit" },
-  { id: "tyot", kind: "workspace", label: "Työt", path: "/tyot", parent: "kuitit" },
+  { id: "pankki-tapahtumat", kind: "workspace", label: "Tapahtumat", path: "/pankki/tapahtumat", parent: "kirjanpito" },
+  { id: "pankki-tapahtuma", kind: "detail", label: "Tiliote", path: "/pankki/tapahtumat/:id", parent: "pankki-tapahtumat" },
+  { id: "pankki-taydennys", kind: "workspace", label: "Täsmäytys", path: "/pankki/taydennys", parent: "kirjanpito" },
+  { id: "tyot", kind: "workspace", label: "Työt ja poikkeukset", path: "/tyot", parent: "kirjanpito" },
+  { id: "alv", kind: "workspace", label: "ALV-ilmoitus", path: "/kirjanpito/alv", parent: "kirjanpito" },
+  { id: "ostolaskut", kind: "workspace", label: "Ostolaskut", path: "/kirjanpito/ostolaskut", parent: "kirjanpito" },
+  { id: "pankkitilit", kind: "workspace", label: "Pankkitilit", path: "/kirjanpito/pankkitilit", parent: "kirjanpito" },
+  { id: "kaudet", kind: "workspace", label: "Suljetut kaudet", path: "/kirjanpito/kaudet", parent: "kirjanpito" },
 
-  { id: "ostolaskut", kind: "workspace", label: "Ostolaskut", path: "/ostolaskut", parent: "myynti" },
   { id: "asiakkaat", kind: "workspace", label: "Asiakkaat", path: "/asiakkaat", parent: "myynti" },
-  { id: "toistuvat", kind: "workspace", label: "Toistuvat", path: "/toistuvat", parent: "myynti" },
+  { id: "asiakas", kind: "detail", label: "Asiakas", path: "/asiakkaat/:id", parent: "asiakkaat" },
+  { id: "toistuvat", kind: "workspace", label: "Toistuvat laskut", path: "/toistuvat", parent: "myynti" },
   { id: "lasku-uusi", kind: "detail", label: "Uusi lasku", path: "/laskut/uusi", parent: "myynti" },
   { id: "lasku", kind: "detail", label: "Lasku", path: "/laskut/:id", parent: "myynti" },
-  { id: "asiakas", kind: "detail", label: "Asiakas", path: "/asiakkaat/:id", parent: "asiakkaat" },
 
   { id: "asetukset-profiili", kind: "settings", label: "Profiili", path: "/asetukset/profiili", parent: "asetukset" },
   { id: "asetukset-yritys", kind: "settings", label: "Yritysmuoto & ALV", path: "/asetukset/yritys", parent: "asetukset" },
   { id: "asetukset-laskutus", kind: "settings", label: "Laskuttajan tiedot", path: "/asetukset/laskutus", parent: "asetukset" },
-  { id: "asetukset-kirjanpito", kind: "settings", label: "Kirjanpidon lukitus", path: "/asetukset/kirjanpito", parent: "asetukset" },
   { id: "asetukset-tili", kind: "settings", label: "Tili", path: "/asetukset/tili", parent: "asetukset" },
   { id: "asetukset-salasana", kind: "settings", label: "Vaihda salasana", path: "/asetukset/tili/salasana", parent: "asetukset-tili" },
   { id: "asetukset-laitteet", kind: "settings", label: "Laitteet", path: "/asetukset/tili/laitteet", parent: "asetukset-tili" },
@@ -59,59 +54,25 @@ export const NAV: readonly NavEntry[] = [
   { id: "asetukset-lukitus", kind: "settings", label: "Näytön lukitus", path: "/asetukset/turvallisuus/lukitus", parent: "asetukset-turvallisuus" },
   { id: "asetukset-biometria", kind: "settings", label: "Face ID", path: "/asetukset/turvallisuus/biometria", parent: "asetukset-turvallisuus" },
   { id: "asetukset-tietosuoja", kind: "settings", label: "Tietosuoja", path: "/asetukset/tietosuoja", parent: "asetukset" },
-  { id: "asetukset-pankkiyhteys", kind: "settings", label: "Pankkiyhteys", path: "/asetukset/pankkiyhteys", parent: "asetukset" },
   { id: "asetukset-sahkoposti", kind: "settings", label: "Sähköpostien tuonti", path: "/asetukset/sahkoposti", parent: "asetukset" },
   { id: "asetukset-ohje", kind: "settings", label: "Ohje ja tuki", path: "/asetukset/ohje", parent: "asetukset" },
 ];
 
-/** Roots that may appear in Muut. Anything else there is a junk drawer. */
-const MORE_ROOT_IDS = ["kirjanpito", "raportit", "asetukset"] as const;
+const TAB_ROOT_IDS = ["etusivu", "myynti", "kirjanpito", "raportit"] as const;
+const AVATAR_ROOT_ID = "asetukset";
 
-const BANK_TAB_LABELS: Record<string, string> = {
-  pankki: "Yhteenveto",
-  "pankki-tapahtumat": "Tapahtumat",
-  "pankki-tilit": "Tilit",
-  "pankki-taydennys": "Täsmäytys",
-};
-
-export function rootNav(entries: readonly NavEntry[] = NAV): NavEntry[] {
+function roots(entries: readonly NavEntry[]): NavEntry[] {
   return entries.filter((entry) => entry.kind === "root");
 }
 
-export function primaryRoots(entries: readonly NavEntry[] = NAV): NavEntry[] {
-  return rootNav(entries).filter((entry) => entry.mobile === "primary");
+export function tabRoots(entries: readonly NavEntry[] = NAV): NavEntry[] {
+  return roots(entries).filter((entry) => entry.placement === "tab");
 }
 
-export function moreRoots(entries: readonly NavEntry[] = NAV): NavEntry[] {
-  return rootNav(entries).filter((entry) => entry.mobile === "more");
-}
-
-export function childrenOf(parentId: string, entries: readonly NavEntry[] = NAV): NavEntry[] {
-  return entries.filter((entry) => entry.parent === parentId);
-}
-
-/**
- * Bank workspace tabs. Yhteenveto reuses the Pankki root path — it is the
- * module home, not a second registry row.
- */
-export function bankTabs(entries: readonly NavEntry[] = NAV): Array<{ id: string; href: string; label: string }> {
-  const root = entries.find((entry) => entry.id === "pankki");
-  const tabs = [
-    ...(root ? [{ id: root.id, href: root.path, label: BANK_TAB_LABELS.pankki }] : []),
-    ...childrenOf("pankki", entries)
-      .filter((entry) => entry.kind === "workspace")
-      .map((entry) => ({
-        id: entry.id,
-        href: entry.path,
-        label: BANK_TAB_LABELS[entry.id] ?? entry.label,
-      })),
-  ];
-  return tabs;
-}
-
-export function activeBankTab(pathname: string, entries: readonly NavEntry[] = NAV): string {
-  const tabs = [...bankTabs(entries)].sort((a, b) => b.href.length - a.href.length);
-  return tabs.find((tab) => pathname === tab.href || pathname.startsWith(`${tab.href}/`))?.href ?? "/pankki";
+export function avatarRoot(entries: readonly NavEntry[] = NAV): NavEntry {
+  const root = roots(entries).find((entry) => entry.placement === "avatar");
+  if (!root) throw new Error("navigation registry has no avatar root");
+  return root;
 }
 
 function segments(path: string): string[] {
@@ -160,18 +121,29 @@ export function rootIsActive(pathname: string, rootId: string, entries: readonly
   return ancestorChain(match, byId).some((entry) => entry.id === rootId);
 }
 
-/**
- * Shell back is the single back for settings and for modules that do not
- * render PageHeader yet. Bank workspace and bank detail own their back.
- */
+/** Every page below a root has exactly one back: the shell's. */
 export function shellShowsBack(pathname: string, entries: readonly NavEntry[] = NAV): boolean {
   const match = matchNav(pathname, entries);
-  if (!match) return false;
-  if (match.kind === "root" || match.kind === "workspace") return false;
+  return Boolean(match && match.kind !== "root");
+}
+
+/**
+ * Where the shell back points when there is no in-app history, and what it
+ * is called. A parent path with a `:param` cannot be rebuilt from the
+ * registry alone, so it falls back to the parent's own parent.
+ */
+export function backTarget(
+  pathname: string,
+  entries: readonly NavEntry[] = NAV
+): { label: string; href: string } | null {
+  const match = matchNav(pathname, entries);
+  if (!match || match.kind === "root" || !match.parent) return null;
   const byId = new Map(entries.map((entry) => [entry.id, entry]));
-  const underBank = ancestorChain(match, byId).some((entry) => entry.id === "pankki");
-  if (underBank) return false;
-  return match.kind === "detail" || match.kind === "settings";
+  let parent = byId.get(match.parent);
+  while (parent && parent.path.includes(":") && parent.parent) {
+    parent = byId.get(parent.parent);
+  }
+  return parent ? { label: parent.label, href: parent.path } : null;
 }
 
 const STATEMENT_QUERY_KEYS = ["month", "account", "q"] as const;
@@ -205,33 +177,24 @@ export function navigationViolations(entries: readonly NavEntry[] = NAV): string
     if (prior) errors.push(`duplicate path ${entry.path} (${prior} and ${entry.id})`);
     else paths.set(canonical, entry.id);
 
-    if (entry.kind !== "root" && entry.mobile) {
-      errors.push(`${entry.id}: workspace, detail, and settings stay out of root nav and Muut`);
+    if (entry.kind === "root" && entry.placement !== "tab" && entry.placement !== "avatar") {
+      errors.push(`${entry.id}: root needs a placement`);
     }
-    if ((entry.kind === "detail" || entry.kind === "workspace" || entry.kind === "settings") && !entry.parent) {
+    if (entry.kind !== "root" && entry.placement) {
+      errors.push(`${entry.id}: only roots have a placement`);
+    }
+    if (entry.kind !== "root" && !entry.parent) {
       errors.push(`${entry.id}: ${entry.kind} without parent`);
     }
   }
 
-  const roots = rootNav(entries);
-  if (roots.length < 6 || roots.length > 7) {
-    errors.push(`sidebar has ${roots.length} roots; keep 6–7`);
+  const tabs = tabRoots(entries).map((entry) => entry.id).join("|");
+  if (tabs !== TAB_ROOT_IDS.join("|")) {
+    errors.push(`tab roots must be ${TAB_ROOT_IDS.join("|")} (got ${tabs})`);
   }
-  for (const root of roots) {
-    if (root.mobile !== "primary" && root.mobile !== "more") {
-      errors.push(`${root.id}: root needs a mobile slot`);
-    }
-  }
-
-  const more = moreRoots(entries);
-  const allowedMore = new Set<string>(MORE_ROOT_IDS);
-  if (more.length !== allowedMore.size || more.some((entry) => !allowedMore.has(entry.id))) {
-    errors.push("Muut may contain only Kirjanpito, Raportit, and Asetukset");
-  }
-  for (const entry of entries) {
-    if (entry.kind !== "root" && more.some((root) => root.id === entry.id)) {
-      errors.push(`${entry.id}: Muut is not a feature drawer`);
-    }
+  const avatars = roots(entries).filter((entry) => entry.placement === "avatar");
+  if (avatars.length !== 1 || avatars[0].id !== AVATAR_ROOT_ID) {
+    errors.push(`exactly one avatar root (${AVATAR_ROOT_ID}) is allowed`);
   }
 
   for (const entry of entries) {
@@ -245,21 +208,15 @@ export function navigationViolations(entries: readonly NavEntry[] = NAV): string
       errors.push(`${entry.id}: 3-level menu`);
     }
     const chain = ancestorChain(entry, byId);
-    const workspaces = chain.filter((item) => item.kind === "workspace");
-    if (workspaces.length > 1) errors.push(`${entry.id}: 3-level menu`);
+    if (chain.filter((item) => item.kind === "workspace").length > 1) errors.push(`${entry.id}: 3-level menu`);
     if (entry.kind === "settings") {
-      const rooted = chain.some((item) => item.id === "asetukset");
-      if (!rooted) errors.push(`${entry.id}: settings must live under Asetukset`);
+      if (!chain.some((item) => item.id === AVATAR_ROOT_ID)) {
+        errors.push(`${entry.id}: settings must live under Asetukset`);
+      }
       if (chain.some((item) => item.kind === "workspace")) {
         errors.push(`${entry.id}: settings mixed into a workspace menu`);
       }
     }
-  }
-
-  const bank = bankTabs(entries);
-  const bankLabels = bank.map((tab) => tab.label).join("|");
-  if (bankLabels !== "Yhteenveto|Tapahtumat|Tilit|Täsmäytys") {
-    errors.push(`bank tabs must stay Yhteenveto|Tapahtumat|Tilit|Täsmäytys (got ${bankLabels})`);
   }
 
   return errors;

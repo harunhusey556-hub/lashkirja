@@ -1,7 +1,6 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import Link from "next/link";
 import { LoadingState } from "@/components/AsyncState";
 import { ConnectionNotice, StaleBanner } from "@/components/ScreenState";
 import ConfirmModal from "@/components/ConfirmModal";
@@ -12,10 +11,9 @@ import {
 import { BalanceTable, type MonthRow } from "@/components/bank/BalanceTable";
 import { apiFetch, errorMessage, isUnauthorized, readJson, redirectToLogin } from "@/components/clientFetch";
 import { formatEur, formatMonth } from "@/lib/format";
-import { PageHeader } from "@/components/PageHeader";
-import { SectionTabs } from "@/components/SectionTabs";
-import { activeBankTab, bankTabs } from "@/lib/navigation";
 import { maskIban } from "@/lib/iban";
+import BankConnectCard from "@/components/BankConnectCard";
+import { useProfile } from "@/app/asetukset/useProfile";
 
 import { pageCacheFetchedAt, readPageCache, writePageCache } from "@/lib/page-cache";
 import { usePersistedState, useScrollRestoration } from "@/lib/list-ui-state";
@@ -235,28 +233,19 @@ export default function BankAccountsPage() {
     }
   }
 
+  const { profile } = useProfile();
+
   return (
     <>
       <div className="space-y-6 pb-6">
-        <PageHeader
-          crumbs={[{ href: "/pankki", label: "Pankki" }, { label: "Tilit" }]}
-          backHref="/pankki"
-        />
-        <SectionTabs items={bankTabs()} activeHref={activeBankTab("/pankki/tilit")} />
         <header className="flex items-start justify-between gap-3">
           <div className="space-y-2 min-w-0">
             <p className="text-sm text-warm-gray leading-relaxed">
-              Kirjanpidon tilit ja kuukausien loppusaldot. Pankkiyhteyden asetukset ovat Asetuksissa.
+              Kirjanpidon tilit, kuukausien loppusaldot ja pankkiyhteys.
             </p>
           </div>
           {formMode === "hidden" && status === "ready" && (
             <div className="flex shrink-0 gap-2">
-              <Link
-                href="/asetukset/pankkiyhteys"
-                className="mt-1 inline-flex min-h-11 items-center rounded-xl bg-charcoal px-3.5 py-2 text-sm font-medium text-white active-press"
-              >
-                + Yhdistä
-              </Link>
               {(overview?.accounts.length ?? 0) > 0 && (
             // Adding an account is a once-a-year action; it does not deserve a
             // full-width button competing with the balances.
@@ -496,6 +485,11 @@ export default function BankAccountsPage() {
               </button>
             )}
           </>
+        )}
+        {profile && (
+          <section id="pankkiyhteys" aria-label="Pankkiyhteys">
+            <BankConnectCard entityType={profile.entityType} />
+          </section>
         )}
       </div>
 

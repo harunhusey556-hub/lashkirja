@@ -35,12 +35,11 @@ import { hapticSelection } from "@/lib/haptics";
 import { anyFormDirty, requestLeave } from "@/lib/form-guard";
 import { UnsavedChangesHost } from "@/components/UnsavedChangesHost";
 import {
+  avatarRoot,
   matchNav,
-  moreRoots,
-  primaryRoots,
   rootIsActive,
-  rootNav,
   shellShowsBack,
+  tabRoots,
 } from "@/lib/navigation";
 
 function RootIcon({ id, active, className }: { id: string; active: boolean; className?: string }) {
@@ -189,7 +188,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
   const pathname = usePathname();
   const router = useRouter();
-  const title = matchNav(pathname)?.label ?? "Etusivu";
+  const title = matchNav(pathname)?.label ?? "Koti";
   const mainRef = useRef<HTMLElement>(null);
   const swipeLock = useRef(false);
   // Adjusting state during render is how a new pathname picks its enter
@@ -465,7 +464,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   }
 
   const moreOpen = moreOpenOn === pathname;
-  const moreActive = moreRoots().some((item) => rootIsActive(pathname, item.id));
+  const moreActive = [avatarRoot()].some((item) => rootIsActive(pathname, item.id));
 
   function goToRoot(href: string) {
     void hapticSelection();
@@ -479,7 +478,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       <aside className="app-sidebar" aria-hidden={false}>
         <p className="px-4 pb-2 pt-4 text-xs font-semibold uppercase tracking-wide text-warm-gray">LashKirja</p>
         <nav aria-label="Päävalikko" className="flex flex-1 flex-col gap-1 px-2">
-          {rootNav().map((item) => {
+          {tabRoots().map((item) => {
             const active = rootIsActive(pathname, item.id);
             return (
               <button
@@ -614,7 +613,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
             onContextMenu={(event) => event.preventDefault()}
           >
             <div className="mx-auto flex h-[var(--app-tab-height)] max-w-lg items-stretch">
-              {primaryRoots().map((item) => {
+              {tabRoots().map((item) => {
                 const active = rootIsActive(pathname, item.id);
                 return (
                   <button
@@ -668,7 +667,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
             heightClass="max-h-[60dvh]"
           >
             <div className="space-y-1 px-3 py-2 sheet-safe-bottom">
-              {moreRoots().map((item) => {
+              {[avatarRoot()].map((item) => {
                 const active = rootIsActive(pathname, item.id);
                 return (
                   <button

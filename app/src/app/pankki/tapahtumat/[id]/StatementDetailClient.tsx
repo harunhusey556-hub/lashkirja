@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import StatementDetailView from "@/components/StatementDetailView";
-import { PageHeader } from "@/components/PageHeader";
 import { ErrorState, LoadingState } from "@/components/AsyncState";
 import {
   apiFetch,
@@ -55,14 +54,6 @@ export default function StatementDetailPage() {
   return (
     <>
       <div className="space-y-6 pb-6">
-        <PageHeader
-          crumbs={[
-            { href: "/pankki", label: "Pankki" },
-            { href: listHref, label: "Tapahtumat" },
-            { label: "Tiliote" },
-          ]}
-          backHref={listHref}
-        />
         {loadError ? (
           <ErrorState
             message={loadError}

@@ -48,7 +48,7 @@ describe("chat honesty", () => {
     expect(replyUsesCalculatedAmount(answer.text, amount)).toBe(true);
     expect(replyUsesCalculatedAmount(answer.text, "99.00")).toBe(false);
     expect(answer.sources).toEqual([
-      { label: "ALV-raportti", href: "/alv-raportti?period=2026-09" },
+      { label: "ALV-raportti", href: "/kirjanpito/alv?period=2026-09" },
     ]);
     expect(replyClaimsUnperformedAction(answer.text)).toBe(false);
   });
@@ -58,9 +58,9 @@ describe("chat honesty", () => {
       performedActions: [],
       allowedAmounts: ["12.50"],
       allowedRecordIds: ["aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"],
-      allowedHrefs: ["/alv-raportti?period=2026-09"],
+      allowedHrefs: ["/kirjanpito/alv?period=2026-09"],
     };
-    expect(enforceAssistantReply("ALV 12.50 €. Lähde: /alv-raportti?period=2026-09.", ctx).rejected).toBe(false);
+    expect(enforceAssistantReply("ALV 12.50 €. Lähde: /kirjanpito/alv?period=2026-09.", ctx).rejected).toBe(false);
     expect(enforceAssistantReply("Yhdistin kuitin.", ctx).reason).toBe("unperformed");
     expect(enforceAssistantReply("ALV 99.00 €.", ctx).reason).toBe("amount");
     expect(
@@ -97,9 +97,9 @@ describe("chat honesty", () => {
 
   it("collects book links cited in a reply", () => {
     expect(
-      sourcesFromText("Katso [ALV](/alv-raportti?period=2026-09) ja /kuitit?month=2026-09.")
+      sourcesFromText("Katso [ALV](/kirjanpito/alv?period=2026-09) ja /kuitit?month=2026-09.")
     ).toEqual([
-      { label: "ALV-raportti", href: "/alv-raportti?period=2026-09" },
+      { label: "ALV-raportti", href: "/kirjanpito/alv?period=2026-09" },
       { label: "Kuitit", href: "/kuitit?month=2026-09" },
     ]);
   });

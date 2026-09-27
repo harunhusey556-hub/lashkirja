@@ -19,7 +19,7 @@ export const HONESTY_REFUSAL =
   "En vahvistanut väitettä kirjanpidosta. Summat ja toimenpiteet tulevat vain palvelimen laskennasta ja tehdyistä toimista.";
 
 const KNOWN_SCREENS = new Set([
-  "/alv-raportti",
+  "/kirjanpito/alv",
   "/raportit",
   "/kuitit",
   "/laskut",
@@ -53,7 +53,7 @@ export function replyUsesCalculatedAmount(reply: string, expected: string): bool
 }
 
 const SOURCE_RULES: Array<{ prefix: string; label: string }> = [
-  { prefix: "/alv-raportti", label: "ALV-raportti" },
+  { prefix: "/kirjanpito/alv", label: "ALV-raportti" },
   { prefix: "/raportit", label: "Raportit" },
   { prefix: "/kuitit", label: "Kuitit" },
   { prefix: "/laskut", label: "Laskut" },

@@ -37,7 +37,7 @@ export function invoiceDrillHref(filter: { month?: string | null; status?: strin
 }
 
 export function alvDrillHref(period: string): string {
-  return `/alv-raportti?period=${encodeURIComponent(period)}`;
+  return `/kirjanpito/alv?period=${encodeURIComponent(period)}`;
 }
 
 export interface DrillFilters {

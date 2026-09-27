@@ -3,11 +3,8 @@
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { ErrorState, LoadingState } from "@/components/AsyncState";
-import { PageHeader } from "@/components/PageHeader";
-import { SectionTabs } from "@/components/SectionTabs";
 import { apiFetch, errorMessage, isUnauthorized, readJson, redirectToLogin } from "@/components/clientFetch";
 import { formatEur } from "@/lib/format";
-import { activeBankTab, bankTabs } from "@/lib/navigation";
 
 interface UnmatchedTx {
   id: string;
@@ -64,11 +61,6 @@ export default function TaydennysPage() {
 
   return (
     <div className="space-y-6 pb-6">
-      <PageHeader
-        crumbs={[{ href: "/pankki", label: "Pankki" }, { label: "Täsmäytys" }]}
-        backHref="/pankki"
-      />
-      <SectionTabs items={bankTabs()} activeHref={activeBankTab("/pankki/taydennys")} />
       <p className="text-sm leading-relaxed text-warm-gray">
         Avoimet pankkitapahtumat ja kuitit{month ? ` kuukaudelta ${month}` : ""}.
       </p>

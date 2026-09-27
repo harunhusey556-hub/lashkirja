@@ -4,8 +4,6 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { ErrorState, SkeletonList } from "@/components/AsyncState";
-import { PageHeader } from "@/components/PageHeader";
-import { SectionTabs } from "@/components/SectionTabs";
 import StatementSummaryCards from "@/components/StatementSummaryCards";
 import {
   apiFetch,
@@ -21,7 +19,6 @@ import {
 import { readPageCache, writePageCache } from "@/lib/page-cache";
 import { usePersistedState, useScrollRestoration } from "@/lib/list-ui-state";
 import { chooseDocuments, isNativeShell } from "@/lib/native-pick";
-import { activeBankTab, bankTabs } from "@/lib/navigation";
 
 const RECENT_LIMIT = 5;
 
@@ -207,11 +204,6 @@ export default function TapahtumatClient() {
   return (
     <>
       <div className="space-y-8 pb-6">
-        <PageHeader
-          crumbs={[{ href: "/pankki", label: "Pankki" }, { label: "Tapahtumat" }]}
-          backHref="/pankki"
-        />
-        <SectionTabs items={bankTabs()} activeHref={activeBankTab("/pankki/tapahtumat")} />
         <p className="text-sm text-warm-gray leading-relaxed">
           Tapahtumat tulevat yhdistetystä pankista. Tiedoston tuonti on alla, jos tarvitset sen.
         </p>

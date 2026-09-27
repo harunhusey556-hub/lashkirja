@@ -3,14 +3,13 @@ import { readdirSync, statSync } from "node:fs";
 import path from "node:path";
 import {
   NAV,
-  bankTabs,
+  avatarRoot,
+  backTarget,
   matchNav,
-  moreRoots,
   navigationViolations,
-  primaryRoots,
-  rootNav,
   shellShowsBack,
   statementListHref,
+  tabRoots,
   type NavEntry,
 } from "./navigation";
 
@@ -45,81 +44,48 @@ describe("navigation registry", () => {
     expect(navigationViolations()).toEqual([]);
   });
 
-  it("keeps the sidebar and the tab bar to roots", () => {
-    expect(rootNav().every((entry) => entry.kind === "root")).toBe(true);
-    expect(rootNav().map((entry) => entry.label)).toEqual([
-      "Etusivu",
-      "Pankki",
-      "Kuitit",
-      "Myynti",
-      "Kirjanpito",
-      "Raportit",
-      "Asetukset",
-    ]);
-    expect(primaryRoots().map((entry) => entry.label)).toEqual([
-      "Etusivu",
-      "Pankki",
-      "Kuitit",
-      "Myynti",
-    ]);
-    expect(moreRoots().map((entry) => entry.label)).toEqual([
-      "Kirjanpito",
-      "Raportit",
-      "Asetukset",
-    ]);
+  it("has four tab roots in order and Asetukset behind the avatar", () => {
+    expect(tabRoots().map((entry) => entry.label)).toEqual(["Koti", "Myynti", "Kirjanpito", "Raportit"]);
+    expect(tabRoots().map((entry) => entry.path)).toEqual(["/dashboard", "/laskut", "/kirjanpito", "/raportit"]);
+    expect(avatarRoot().id).toBe("asetukset");
+    expect(avatarRoot().path).toBe("/asetukset");
   });
 
-  it("locks the bank workspace to four tabs", () => {
-    expect(bankTabs().map((tab) => tab.label)).toEqual([
-      "Yhteenveto",
-      "Tapahtumat",
-      "Tilit",
-      "Täsmäytys",
-    ]);
+  it("fails when a fifth tab root is added", () => {
+    const extra: NavEntry = { id: "pankki", kind: "root", label: "Pankki", path: "/pankki", placement: "tab" };
+    expect(navigationViolations([...NAV, extra]).some((error) => error.includes("tab roots"))).toBe(true);
   });
 
-  it("fails when a workspace, detail, or settings route is placed in root nav", () => {
+  it("fails when a non-root claims a placement", () => {
     const planted: NavEntry = {
-      id: "säännöt",
+      id: "saannot",
       kind: "workspace",
       label: "Säännöt",
-      path: "/pankki/saannot",
-      parent: "pankki",
-      mobile: "more",
+      path: "/kirjanpito/saannot",
+      parent: "kirjanpito",
+      placement: "tab",
     };
-    expect(navigationViolations([...NAV, planted]).some((error) => error.includes("root nav"))).toBe(true);
-    expect(navigationViolations([...NAV, planted]).some((error) => error.includes("Muut"))).toBe(true);
+    expect(navigationViolations([...NAV, planted]).some((error) => error.includes("placement"))).toBe(true);
   });
 
   it("fails on a third menu level", () => {
     const nested: NavEntry = {
-      id: "pankki-saannot",
+      id: "kuitit-saannot",
       kind: "workspace",
       label: "Säännöt",
-      path: "/pankki/tapahtumat/saannot",
-      parent: "pankki-tapahtumat",
+      path: "/kuitit/saannot",
+      parent: "kuitit",
     };
     expect(navigationViolations([...NAV, nested]).some((error) => error.includes("3-level"))).toBe(true);
   });
 
   it("fails when a detail has no parent", () => {
-    const orphan: NavEntry = {
-      id: "irrallinen",
-      kind: "detail",
-      label: "Irrallinen",
-      path: "/irrallinen/:id",
-    };
+    const orphan: NavEntry = { id: "irrallinen", kind: "detail", label: "Irrallinen", path: "/irrallinen/:id" };
     expect(navigationViolations([...NAV, orphan]).some((error) => error.includes("without parent"))).toBe(true);
   });
 
   it("fails when one route has two canonical nav paths", () => {
-    const alias: NavEntry = {
-      id: "alv-alias",
-      kind: "workspace",
-      label: "ALV",
-      path: "/alv-raportti",
-      parent: "raportit",
-    };
+    const alias: NavEntry = { id: "alv-alias", kind: "workspace", label: "ALV", path: "/kirjanpito/alv", parent: "raportit" };
     expect(navigationViolations([...NAV, alias]).some((error) => error.includes("duplicate path"))).toBe(true);
   });
 
@@ -135,13 +101,22 @@ describe("navigation registry", () => {
     expect(statementListHref("")).toBe("/pankki/tapahtumat");
   });
 
-  it("gives bank pages one back owner", () => {
-    expect(shellShowsBack("/pankki")).toBe(false);
-    expect(shellShowsBack("/pankki/tapahtumat")).toBe(false);
-    expect(shellShowsBack("/pankki/tapahtumat/stmt-1")).toBe(false);
-    expect(shellShowsBack("/pankki/tilit")).toBe(false);
-    expect(shellShowsBack("/asetukset/pankkiyhteys")).toBe(true);
-    expect(shellShowsBack("/laskut/uusi")).toBe(true);
-    expect(shellShowsBack("/dashboard")).toBe(false);
+  it("shows the shell back on every non-root page, never on a root", () => {
+    for (const root of [...tabRoots(), avatarRoot()]) {
+      expect(shellShowsBack(root.path)).toBe(false);
+    }
+    expect(shellShowsBack("/kirjanpito/alv")).toBe(true);
+    expect(shellShowsBack("/pankki/tapahtumat")).toBe(true);
+    expect(shellShowsBack("/asiakkaat")).toBe(true);
+    expect(shellShowsBack("/asetukset/profiili")).toBe(true);
+  });
+
+  it("labels back with the registry parent", () => {
+    expect(backTarget("/kirjanpito/alv")).toEqual({ label: "Kirjanpito", href: "/kirjanpito" });
+    expect(backTarget("/pankki/tapahtumat/abc")).toEqual({ label: "Tapahtumat", href: "/pankki/tapahtumat" });
+    expect(backTarget("/asiakkaat/42")).toEqual({ label: "Asiakkaat", href: "/asiakkaat" });
+    expect(backTarget("/asiakkaat")).toEqual({ label: "Myynti", href: "/laskut" });
+    expect(backTarget("/asetukset/tili/salasana")).toEqual({ label: "Tili", href: "/asetukset/tili" });
+    expect(backTarget("/dashboard")).toBeNull();
   });
 });
