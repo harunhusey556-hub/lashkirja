@@ -386,6 +386,44 @@ describe("purchase payments", () => {
     expect(reopened.invoice.paidAt).toBeNull();
   });
 
+  it("refuses a paid status without a payment or a reason", async () => {
+    const invoice = await makePurchase();
+    const response = await patchPurchase(
+      buildRequest(
+        "PATCH",
+        `/api/purchase-invoices/${invoice.id}`,
+        { status: "paid" },
+        { cookie }
+      ),
+      routeContext({ id: invoice.id })
+    );
+    expect(response.status).toBe(409);
+    expect((await readJson(response)).error.code).toBe("PAID_REQUIRES_SETTLEMENT");
+    const stored = await prisma.purchaseInvoice.findUnique({ where: { id: invoice.id } });
+    expect(stored?.status).toBe("open");
+  });
+
+  it("closes a payable with a reason and reports no open balance", async () => {
+    const invoice = await makePurchase();
+    const closed = await readJson(
+      await patchPurchase(
+        buildRequest(
+          "PATCH",
+          `/api/purchase-invoices/${invoice.id}`,
+          { status: "paid", closeReason: "maksettu käteisellä" },
+          { cookie }
+        ),
+        routeContext({ id: invoice.id })
+      )
+    );
+    expect(closed.invoice).toMatchObject({
+      status: "paid",
+      open: 0,
+      paid: 0,
+      closedReason: "maksettu käteisellä",
+    });
+  });
+
   it("refuses a non-positive payment and a cancelled invoice", async () => {
     const invoice = await makePurchase();
     expect(

@@ -25,6 +25,7 @@ const patchSchema = z
     notes: z.string().trim().max(2000).nullish(),
     receiptId: z.string().uuid().nullish(),
     status: z.enum(["open", "paid", "cancelled"]).optional(),
+    closeReason: z.string().trim().min(3).max(500).optional(),
   })
   .refine((value) => Object.keys(value).length > 0, "Ei muutettavia kenttiä");
 

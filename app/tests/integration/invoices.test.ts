@@ -251,20 +251,44 @@ describe("PATCH / DELETE /api/invoices/[id]", () => {
 });
 
 describe("status transitions", () => {
-  it("walks draft -> sent -> paid", async () => {
+  it("freezes parties when issued and refuses a bare paid flag", async () => {
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { businessName: "Vanha Toiminimi" },
+    });
     const invoice = await makeInvoice();
     const sent = await send(invoice.id);
     expect(sent.status).toBe("sent");
     expect(sent.sentAt).not.toBeNull();
 
-    const paid = await readJson(
+    const stored = await prisma.salesInvoice.findUnique({ where: { id: invoice.id } });
+    expect(stored?.partySnapshot).toContain("Vanha Toiminimi");
+    expect(stored?.partySnapshot).toContain("Anna Asiakas");
+
+    const bare = await setStatus(
+      buildRequest("POST", `/api/invoices/${invoice.id}/status`, { status: "paid" }, { cookie }),
+      routeContext({ id: invoice.id })
+    );
+    expect(bare.status).toBe(409);
+    expect((await readJson(bare)).error.code).toBe("PAID_REQUIRES_SETTLEMENT");
+
+    const closed = await readJson(
       await setStatus(
-        buildRequest("POST", `/api/invoices/${invoice.id}/status`, { status: "paid" }, { cookie }),
+        buildRequest(
+          "POST",
+          `/api/invoices/${invoice.id}/status`,
+          { status: "paid", closeReason: "luottotappio" },
+          { cookie }
+        ),
         routeContext({ id: invoice.id })
       )
     );
-    expect(paid.invoice.status).toBe("paid");
-    expect(paid.invoice.paidAt).not.toBeNull();
+    expect(closed.invoice).toMatchObject({
+      status: "paid",
+      open: 0,
+      closedReason: "luottotappio",
+    });
+    expect(closed.invoice.paidAt).not.toBeNull();
   });
 
   it("refuses to jump from draft straight to paid", async () => {
@@ -312,6 +336,49 @@ describe("status transitions", () => {
     );
     expect(response.status).toBe(409);
     expect((await readJson(response)).error.code).toBe("INVOICE_HAS_PAYMENTS");
+  });
+
+  it("keeps a written-off invoice closed when its payment is removed", async () => {
+    const invoice = await makeInvoice();
+    await send(invoice.id);
+    const partial = await readJson(
+      await addPayment(
+        buildRequest(
+          "POST",
+          `/api/invoices/${invoice.id}/payments`,
+          { amount: 50, paidDate: "2026-01-15" },
+          { cookie }
+        ),
+        routeContext({ id: invoice.id })
+      )
+    );
+    await setStatus(
+      buildRequest(
+        "POST",
+        `/api/invoices/${invoice.id}/status`,
+        { status: "paid", closeReason: "luottotappio" },
+        { cookie }
+      ),
+      routeContext({ id: invoice.id })
+    );
+
+    const still = await readJson(
+      await deletePayment(
+        buildRequest(
+          "DELETE",
+          `/api/invoices/${invoice.id}/payments?paymentId=${partial.invoice.payments[0].id}`,
+          undefined,
+          { cookie }
+        ),
+        routeContext({ id: invoice.id })
+      )
+    );
+    expect(still.invoice).toMatchObject({
+      status: "paid",
+      open: 0,
+      paid: 0,
+      closedReason: "luottotappio",
+    });
   });
 
   it("refuses paid -> draft outright", async () => {

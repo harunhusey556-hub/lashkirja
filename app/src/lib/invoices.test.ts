@@ -5,6 +5,7 @@ import {
   buildAging,
   buildAgingReport,
   canTransition,
+  openPosition,
   computeInvoiceTotals,
   daysOverdue,
   displayStatus,
@@ -224,6 +225,15 @@ describe("daysOverdue and aging buckets", () => {
 describe("buildAgingReport", () => {
   const now = new Date("2026-06-01T00:00:00Z");
 
+  it("keeps a paid flag without money or a reason in the aging", () => {
+    const report = buildAgingReport(
+      [{ status: "paid", dueDate: "2026-05-01", grossCents: 8_000 }],
+      now
+    );
+    expect(report.totalOpenCents).toBe(8_000);
+    expect(report.buckets["31-60"].count).toBe(1);
+  });
+
   it("sums only outstanding sent invoices", () => {
     const report = buildAgingReport(
       [
@@ -231,7 +241,8 @@ describe("buildAgingReport", () => {
         { status: "sent", dueDate: "2026-05-20", grossCents: 20_000 }, // 12 days
         { status: "sent", dueDate: "2026-04-01", grossCents: 30_000 }, // 61 days
         { status: "draft", dueDate: "2026-01-01", grossCents: 99_000 },
-        { status: "paid", dueDate: "2026-01-01", grossCents: 99_000 },
+        { status: "paid", dueDate: "2026-01-01", grossCents: 99_000, paidCents: 99_000 },
+        { status: "paid", dueDate: "2026-01-01", grossCents: 50_000, closedReason: "luottotappio" },
         { status: "credited", dueDate: "2026-01-01", grossCents: 99_000 },
       ],
       now
@@ -264,6 +275,56 @@ describe("buildAgingReport", () => {
     expect(report.totalOpenCents).toBe(0);
     expect(report.overdueCount).toBe(0);
     expect(Object.keys(report.buckets)).toEqual(["not_due", "1-30", "31-60", "61-90", "90+"]);
+  });
+});
+
+describe("openPosition", () => {
+  it("keeps an unpaid sent invoice collectible", () => {
+    expect(openPosition({ status: "sent", grossCents: 10_000, paidCents: 4_000 })).toEqual({
+      openCents: 6_000,
+      collectible: true,
+      settled: false,
+    });
+  });
+
+  it("settles a covered invoice and keeps an overpayment visible", () => {
+    expect(openPosition({ status: "paid", grossCents: 10_000, paidCents: 10_000 }).collectible).toBe(
+      false
+    );
+    expect(openPosition({ status: "sent", grossCents: 10_000, paidCents: 12_000 })).toMatchObject({
+      openCents: -2_000,
+      collectible: false,
+      settled: true,
+    });
+  });
+
+  it("treats an explicit close as settled with a zero open balance", () => {
+    expect(
+      openPosition({
+        status: "paid",
+        grossCents: 10_000,
+        paidCents: 0,
+        closedReason: "luottotappio",
+      })
+    ).toEqual({ openCents: 0, collectible: false, settled: true });
+  });
+
+  it("does not let a bare paid flag hide an unpaid invoice", () => {
+    const position = openPosition({ status: "paid", grossCents: 10_000, paidCents: 0 });
+    expect(position).toEqual({ openCents: 10_000, collectible: true, settled: false });
+  });
+
+  it("drops drafts, credits and cancellations from collections", () => {
+    expect(openPosition({ status: "draft", grossCents: 5_000 }).collectible).toBe(false);
+    expect(openPosition({ status: "credited", grossCents: 5_000 })).toMatchObject({
+      openCents: 0,
+      collectible: false,
+      settled: true,
+    });
+    expect(openPosition({ status: "cancelled", grossCents: 5_000, paidCents: 1_000 })).toMatchObject({
+      openCents: 0,
+      collectible: false,
+    });
   });
 });
 

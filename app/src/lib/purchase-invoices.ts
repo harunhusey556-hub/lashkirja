@@ -12,7 +12,7 @@ import { centsToEuros, eurosToCents } from "./money";
 import { isoDateToUtc } from "./validation";
 import { isValidBusinessId, isValidReferenceNumber, normalizeBusinessId, normalizeReference } from "./finnish-reference";
 import { isValidIban, normalizeIban } from "./iban";
-import { buildAging, displayStatus, type AgingReport } from "./invoices";
+import { buildAging, displayStatus, openPosition, type AgingReport } from "./invoices";
 import { assertPeriodOpen, PeriodLockedError } from "./period-lock";
 
 export type PurchaseStatus = "open" | "paid" | "cancelled";
@@ -48,6 +48,7 @@ export interface PublicPurchaseInvoice {
   net: number;
   paid: number;
   open: number;
+  closedReason: string | null;
   category: string | null;
   notes: string | null;
   paidAt: string | null;
@@ -78,6 +79,7 @@ type PurchaseRow = {
   category: string | null;
   notes: string | null;
   paidAt: Date | null;
+  closedReason: string | null;
   receiptId: string | null;
   payments: Array<{
     id: string;
@@ -96,6 +98,12 @@ export function toPublicPurchaseInvoice(
   now: Date = new Date()
 ): PublicPurchaseInvoice {
   const paidCents = invoice.payments.reduce((sum, payment) => sum + payment.amountCents, 0);
+  const position = openPosition({
+    status: invoice.status,
+    grossCents: invoice.grossCents,
+    paidCents,
+    closedReason: invoice.closedReason,
+  });
   // An open payable ages exactly like an unpaid sales invoice.
   const derived =
     invoice.status === "open"
@@ -119,7 +127,8 @@ export function toPublicPurchaseInvoice(
     vat: centsToEuros(invoice.vatCents),
     net: centsToEuros(invoice.netCents),
     paid: centsToEuros(paidCents),
-    open: centsToEuros(invoice.grossCents - paidCents),
+    open: centsToEuros(position.openCents),
+    closedReason: invoice.closedReason,
     category: invoice.category,
     notes: invoice.notes,
     paidAt: invoice.paidAt ? invoice.paidAt.toISOString() : null,
@@ -240,7 +249,7 @@ export async function createPurchaseInvoice(
 export async function updatePurchaseInvoice(
   userId: string,
   id: string,
-  input: Partial<PurchaseInvoiceInput> & { status?: PurchaseStatus }
+  input: Partial<PurchaseInvoiceInput> & { status?: PurchaseStatus; closeReason?: string | null }
 ): Promise<PublicPurchaseInvoice> {
   const existing = await prisma.purchaseInvoice.findFirst({
     where: { id, userId },
@@ -318,8 +327,28 @@ export async function updatePurchaseInvoice(
         409
       );
     }
-    data.status = input.status;
-    data.paidAt = input.status === "paid" ? existing.paidAt ?? new Date() : null;
+    if (input.status === "paid") {
+      const paidCents = existing.payments.reduce((sum, payment) => sum + payment.amountCents, 0);
+      const reason = input.closeReason?.trim() ?? "";
+      if (paidCents < existing.grossCents && reason.length < 3) {
+        throw new AppError(
+          "Ostolaskua ei voi merkitä maksetuksi ilman maksukirjausta tai vähintään kolmen merkin perustelua.",
+          "PAID_REQUIRES_SETTLEMENT",
+          409
+        );
+      }
+      data.status = "paid";
+      data.paidAt = existing.paidAt ?? new Date();
+      if (reason) {
+        data.closedReason = reason;
+        data.closedAt = new Date();
+      }
+    } else {
+      data.status = input.status;
+      data.paidAt = null;
+      data.closedReason = null;
+      data.closedAt = null;
+    }
   }
 
   const updated = await prisma.purchaseInvoice.update({
@@ -435,7 +464,7 @@ export async function removePurchasePayment(
 ): Promise<PublicPurchaseInvoice> {
   const invoice = await prisma.purchaseInvoice.findFirst({
     where: { id: invoiceId, userId },
-    select: { id: true, status: true, grossCents: true },
+    select: { id: true, status: true, grossCents: true, closedReason: true },
   });
   if (!invoice) throw new NotFoundError("Ostolaskua ei löytynyt.");
 
@@ -451,7 +480,7 @@ export async function removePurchasePayment(
   });
   if (deleted.count === 0) throw new NotFoundError("Maksua ei löytynyt.");
 
-  if (invoice.status === "paid") {
+  if (invoice.status === "paid" && !invoice.closedReason?.trim()) {
     const remaining = await prisma.purchasePayment.aggregate({
       where: { purchaseInvoiceId: invoiceId },
       _sum: { amountCents: true },
@@ -509,15 +538,29 @@ export async function listPurchaseInvoices(
   }
 
   const open = await prisma.purchaseInvoice.findMany({
-    where: { userId, status: "open" },
-    select: { dueDate: true, grossCents: true, payments: { select: { amountCents: true } } },
+    where: { userId, status: { in: ["open", "paid"] } },
+    select: {
+      status: true,
+      dueDate: true,
+      grossCents: true,
+      closedReason: true,
+      payments: { select: { amountCents: true } },
+    },
   });
   const aging = buildAging(
-    open.map((invoice) => ({
-      dueDate: invoice.dueDate,
-      openCents:
-        invoice.grossCents - invoice.payments.reduce((sum, p) => sum + p.amountCents, 0),
-    })),
+    open.map((invoice) => {
+      const paidCents = invoice.payments.reduce((sum, payment) => sum + payment.amountCents, 0);
+      const position = openPosition({
+        status: invoice.status,
+        grossCents: invoice.grossCents,
+        paidCents,
+        closedReason: invoice.closedReason,
+      });
+      return {
+        dueDate: invoice.dueDate,
+        openCents: position.collectible ? position.openCents : 0,
+      };
+    }),
     now
   );
 

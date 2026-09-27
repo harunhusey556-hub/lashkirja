@@ -18,11 +18,18 @@ import {
   DEFAULT_PAYMENT_TERM_DAYS,
   displayStatus,
   dueDateFor,
+  openPosition,
   type AgingReport,
   type InvoiceDisplayStatus,
   type InvoiceLineInput,
   type InvoiceStatus,
 } from "./invoices";
+import {
+  customerFromCustomer,
+  parsePartySnapshot,
+  sellerFromUser,
+  serializePartySnapshot,
+} from "./invoice-snapshot";
 import { requireActiveCustomer } from "./customers";
 import { assertPeriodOpen, PeriodLockedError } from "./period-lock";
 import type { InvoicePdfData } from "./invoice-pdf";
@@ -143,6 +150,7 @@ export interface PublicInvoice {
   gross: number;
   paid: number;
   open: number;
+  closedReason: string | null;
   customer: { id: string; name: string; email: string | null; businessId: string | null };
   lines: PublicInvoiceLine[];
   payments: Array<{
@@ -169,6 +177,8 @@ type InvoiceWithRelations = {
   netCents: number;
   vatCents: number;
   grossCents: number;
+  partySnapshot: string | null;
+  closedReason: string | null;
   customer: { id: string; name: string; email: string | null; businessId: string | null };
   lines: Array<{
     id: string;
@@ -201,6 +211,12 @@ export function toPublicInvoice(
   now: Date = new Date()
 ): PublicInvoice {
   const paidCents = invoice.payments.reduce((sum, payment) => sum + payment.amountCents, 0);
+  const position = openPosition({
+    status: invoice.status,
+    grossCents: invoice.grossCents,
+    paidCents,
+    closedReason: invoice.closedReason,
+  });
   return {
     id: invoice.id,
     number: invoice.number,
@@ -220,7 +236,8 @@ export function toPublicInvoice(
     vat: centsToEuros(invoice.vatCents),
     gross: centsToEuros(invoice.grossCents),
     paid: centsToEuros(paidCents),
-    open: centsToEuros(invoice.grossCents - paidCents),
+    open: centsToEuros(position.openCents),
+    closedReason: invoice.closedReason,
     customer: invoice.customer,
     lines: invoice.lines.map((line) => ({
       id: line.id,
@@ -418,7 +435,8 @@ export async function deleteInvoice(userId: string, id: string): Promise<void> {
 export async function setInvoiceStatus(
   userId: string,
   id: string,
-  target: InvoiceStatus
+  target: InvoiceStatus,
+  options: { closeReason?: string | null } = {}
 ): Promise<PublicInvoice> {
   const existing = await prisma.salesInvoice.findFirst({
     where: { id, userId },
@@ -451,11 +469,36 @@ export async function setInvoiceStatus(
   if (target === "sent") {
     data.sentAt = existing.sentAt ?? new Date();
     data.paidAt = null;
+    data.closedReason = null;
+    data.closedAt = null;
   }
-  if (target === "paid") data.paidAt = new Date();
+  if (target === "paid") {
+    const paidCents = existing.payments.reduce((sum, payment) => sum + payment.amountCents, 0);
+    const reason = options.closeReason?.trim() ?? "";
+    const covered = paidCents >= existing.grossCents;
+    if (!covered && reason.length < 3) {
+      throw new AppError(
+        "Laskua ei voi merkitä maksetuksi ilman maksukirjausta tai vähintään kolmen merkin perustelua.",
+        "PAID_REQUIRES_SETTLEMENT",
+        409
+      );
+    }
+    data.paidAt = new Date();
+    if (reason) {
+      data.closedReason = reason;
+      data.closedAt = new Date();
+    }
+  }
   if (target === "draft") {
     data.sentAt = null;
     data.paidAt = null;
+    data.partySnapshot = null;
+    data.closedReason = null;
+    data.closedAt = null;
+  }
+  if ((target === "sent" || target === "credited") && current === "draft") {
+    data.partySnapshot =
+      existing.partySnapshot ?? (await capturePartySnapshot(userId, existing.customerId));
   }
 
   await prisma.salesInvoice.update({ where: { id }, data });
@@ -542,7 +585,7 @@ export async function removePayment(
 ): Promise<PublicInvoice> {
   const invoice = await prisma.salesInvoice.findFirst({
     where: { id: invoiceId, userId },
-    select: { id: true, status: true },
+    select: { id: true, status: true, closedReason: true },
   });
   if (!invoice) throw new NotFoundError("Laskua ei löytynyt.");
 
@@ -558,8 +601,8 @@ export async function removePayment(
   });
   if (deleted.count === 0) throw new NotFoundError("Maksua ei löytynyt.");
 
-  // Removing a payment reopens an invoice that was only closed by it.
-  if (invoice.status === "paid") {
+  // A write-off stays closed. A payment-only close reopens when the cover is gone.
+  if (invoice.status === "paid" && !invoice.closedReason?.trim()) {
     const remaining = await prisma.invoicePayment.aggregate({
       where: { invoiceId },
       _sum: { amountCents: true },
@@ -618,8 +661,14 @@ export async function listInvoices(
   }
 
   const allOpen = await prisma.salesInvoice.findMany({
-    where: { userId, status: "sent" },
-    select: { status: true, dueDate: true, grossCents: true, payments: { select: { amountCents: true } } },
+    where: { userId, status: { in: ["sent", "paid"] } },
+    select: {
+      status: true,
+      dueDate: true,
+      grossCents: true,
+      closedReason: true,
+      payments: { select: { amountCents: true } },
+    },
   });
   const aging = buildAgingReport(
     allOpen.map((invoice) => ({
@@ -627,6 +676,7 @@ export async function listInvoices(
       dueDate: invoice.dueDate,
       grossCents: invoice.grossCents,
       paidCents: invoice.payments.reduce((sum, payment) => sum + payment.amountCents, 0),
+      closedReason: invoice.closedReason,
     })),
     now
   );
@@ -752,10 +802,18 @@ export async function matchInvoicePaymentsFromBank(
 /* PDF                                                                 */
 /* ------------------------------------------------------------------ */
 
+/** Seller and customer as they should be printed, serialised for storage. */
+export async function capturePartySnapshot(userId: string, customerId: string): Promise<string> {
+  const user = await prisma.user.findUnique({ where: { id: userId } });
+  if (!user) throw new NotFoundError("Käyttäjää ei löytynyt.");
+  const customer = await prisma.customer.findFirst({ where: { id: customerId, userId } });
+  if (!customer) throw new NotFoundError("Asiakasta ei löytynyt.");
+  return serializePartySnapshot(sellerFromUser(user), customerFromCustomer(customer));
+}
+
 /**
- * Assembles everything the PDF needs. The seller block comes from the user's
- * own profile, so an incomplete profile produces a visibly incomplete invoice
- * rather than a plausible-looking one with invented details.
+ * Assembles everything the PDF needs. A draft reads the live profile. An
+ * issued invoice is regenerated only from the snapshot taken when it left draft.
  */
 export async function buildInvoicePdfData(
   userId: string,
@@ -770,8 +828,36 @@ export async function buildInvoicePdfData(
   });
   if (!invoice) throw new NotFoundError("Laskua ei löytynyt.");
 
-  const user = await prisma.user.findUnique({ where: { id: userId } });
-  if (!user) throw new NotFoundError("Käyttäjää ei löytynyt.");
+  let parties = parsePartySnapshot(invoice.partySnapshot);
+  if (!parties && invoice.status !== "draft") {
+    const raw = await capturePartySnapshot(userId, invoice.customerId);
+    await prisma.salesInvoice.update({
+      where: { id: invoice.id },
+      data: { partySnapshot: raw },
+    });
+    parties = parsePartySnapshot(raw);
+  }
+  if (!parties) {
+    const accepted = await prisma.invoiceEmailSend.findFirst({
+      where: {
+        invoiceId: invoice.id,
+        status: { in: ["pending", "sent"] },
+        partySnapshot: { not: null },
+      },
+      orderBy: { createdAt: "desc" },
+      select: { partySnapshot: true },
+    });
+    parties = parsePartySnapshot(accepted?.partySnapshot);
+  }
+
+  let seller = parties?.seller;
+  let customer = parties?.customer;
+  if (!seller || !customer) {
+    const user = await prisma.user.findUnique({ where: { id: userId } });
+    if (!user) throw new NotFoundError("Käyttäjää ei löytynyt.");
+    seller = sellerFromUser(user);
+    customer = customerFromCustomer(invoice.customer);
+  }
 
   const totals = computeInvoiceTotals(
     invoice.lines.map((line) => ({
@@ -791,27 +877,8 @@ export async function buildInvoicePdfData(
     vatCents: invoice.vatCents,
     grossCents: invoice.grossCents,
     breakdown: totals.breakdown,
-    seller: {
-      name: user.businessName?.trim() || `${user.firstName} ${user.lastName}`.trim(),
-      businessId: user.businessId,
-      addressStreet: user.addressStreet,
-      addressPostalCode: user.addressPostalCode,
-      addressCity: user.addressCity,
-      email: user.email,
-      phone: user.phone,
-      iban: user.invoiceIban,
-      bic: user.invoiceBic,
-      terms: user.invoiceTerms,
-      vatRegistered: user.vatRegistered,
-    },
-    customer: {
-      name: invoice.customer.name,
-      businessId: invoice.customer.businessId,
-      email: invoice.customer.email,
-      addressStreet: invoice.customer.addressStreet,
-      addressPostalCode: invoice.customer.addressPostalCode,
-      addressCity: invoice.customer.addressCity,
-    },
+    seller,
+    customer,
     lines: invoice.lines.map((line) => ({
       description: line.description,
       quantityMilli: line.quantityMilli,

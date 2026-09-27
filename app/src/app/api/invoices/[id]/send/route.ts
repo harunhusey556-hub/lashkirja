@@ -33,6 +33,8 @@ export const POST = withErrorHandler(
       ok: true,
       sentTo: result.sentTo,
       messageId: result.messageId,
+      recorded: result.recorded,
+      notice: result.notice,
       invoice: await getInvoice(session.userId, id),
     });
   }

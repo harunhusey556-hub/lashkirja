@@ -185,6 +185,55 @@ export interface ReceivableLike {
   dueDate: Date | string;
   grossCents: number;
   paidCents?: number;
+  closedReason?: string | null;
+}
+
+export interface OpenPositionInput {
+  status: string;
+  grossCents: number;
+  paidCents?: number;
+  closedReason?: string | null;
+}
+
+export interface OpenPosition {
+  /** Cents still owed. Zero when written off, negative when overpaid. */
+  openCents: number;
+  /** True when this row belongs in collections and aging. */
+  collectible: boolean;
+  settled: boolean;
+}
+
+const NOT_A_RECEIVABLE = new Set(["draft", "credited", "cancelled"]);
+
+/**
+ * Status, collections, and the open balance all read this.
+ *
+ * An invoice is settled when payments cover it, or when an explicit close
+ * recorded a reason. A stored "paid" flag with neither does not hide the
+ * remainder: it stays collectible.
+ */
+export function openPosition(input: OpenPositionInput): OpenPosition {
+  const paid = input.paidCents ?? 0;
+  const remainder = input.grossCents - paid;
+  const writtenOff = Boolean(input.closedReason?.trim());
+
+  if (NOT_A_RECEIVABLE.has(input.status)) {
+    return {
+      openCents: input.status === "draft" ? remainder : Math.min(remainder, 0),
+      collectible: false,
+      settled: input.status !== "draft",
+    };
+  }
+
+  if (writtenOff) {
+    return { openCents: 0, collectible: false, settled: true };
+  }
+
+  if (remainder <= 0) {
+    return { openCents: remainder, collectible: false, settled: true };
+  }
+
+  return { openCents: remainder, collectible: true, settled: false };
 }
 
 export interface AgingReport {
@@ -234,13 +283,18 @@ export function buildAgingReport(
   now: Date = new Date()
 ): AgingReport {
   return buildAging(
-    invoices
-      // Drafts are not receivables and credited/paid invoices are settled.
-      .filter((invoice) => invoice.status === "sent")
-      .map((invoice) => ({
+    invoices.map((invoice) => {
+      const position = openPosition({
+        status: invoice.status,
+        grossCents: invoice.grossCents,
+        paidCents: invoice.paidCents,
+        closedReason: invoice.closedReason,
+      });
+      return {
         dueDate: invoice.dueDate,
-        openCents: invoice.grossCents - (invoice.paidCents ?? 0),
-      })),
+        openCents: position.collectible ? position.openCents : 0,
+      };
+    }),
     now
   );
 }

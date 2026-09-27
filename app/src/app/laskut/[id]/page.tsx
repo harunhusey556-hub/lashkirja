@@ -42,6 +42,7 @@ interface Invoice {
   gross: number;
   paid: number;
   open: number;
+  closedReason: string | null;
   customer: { id: string; name: string; email: string | null; businessId: string | null };
   lines: Array<{
     id: string;
@@ -85,6 +86,7 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
   const [sharing, setSharing] = useState(false);
   const [reminder, setReminder] = useState<ReminderPreview | null>(null);
   const [remindingBusy, setRemindingBusy] = useState(false);
+  const [closeReason, setCloseReason] = useState("");
 
   const load = useCallback(async () => {
     try {
@@ -124,7 +126,7 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
     void load();
   }, [load]);
 
-  async function changeStatus(status: Invoice["status"]) {
+  async function changeStatus(status: Invoice["status"], reason?: string) {
     setBusy(true);
     setMessage(null);
     try {
@@ -132,15 +134,25 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status }),
+        body: JSON.stringify(reason ? { status, closeReason: reason } : { status }),
       });
       await readJson(response, "Tilan vaihto epäonnistui");
+      setCloseReason("");
       await load();
     } catch (error) {
       setMessage(errorMessage(error, "Tilan vaihto epäonnistui"));
     } finally {
       setBusy(false);
     }
+  }
+
+  function closeWithReason() {
+    const reason = closeReason.trim();
+    if (reason.length < 3) {
+      setMessage("Kirjoita perustelu, vähintään kolme merkkiä.");
+      return;
+    }
+    void changeStatus("paid", reason);
   }
 
   async function addPayment() {
@@ -224,8 +236,18 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({}),
       });
-      const result = await readJson<{ sentTo: string }>(response, "Lähetys epäonnistui");
-      setMessage(`Lasku lähetettiin osoitteeseen ${result.sentTo}.`);
+      const result = await readJson<{ sentTo: string; recorded?: boolean; notice?: string | null }>(
+        response,
+        "Lähetys epäonnistui"
+      );
+      if (result.recorded === false) {
+        setMessage(
+          result.notice ??
+            "Viesti lähti, mutta lähetyksen kirjausta ei saatu tallennettua. Älä lähetä samaa laskua uudelleen ennen tarkistusta."
+        );
+      } else {
+        setMessage(`Lasku lähetettiin osoitteeseen ${result.sentTo}.`);
+      }
       await load();
     } catch (error) {
       setMessage(errorMessage(error, "Lähetys epäonnistui"));
@@ -365,6 +387,9 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
                     <span>{formatEur(invoice.open)}</span>
                   </div>
                 )}
+                {invoice.closedReason && (
+                  <p className="text-xs text-warm-gray pt-1">Suljettu: {invoice.closedReason}</p>
+                )}
               </div>
               {invoice.notes && (
                 <p className="text-sm text-warm-gray border-t border-warm-gray-light/30 pt-3">
@@ -409,10 +434,24 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
                     Merkitse lähetetyksi
                   </Button>
                 )}
-                {invoice.status === "sent" && (
+                {invoice.status === "sent" && invoice.open <= 0 && (
                   <Button disabled={busy} onClick={() => void changeStatus("paid")}>
                     Merkitse maksetuksi
                   </Button>
+                )}
+                {invoice.status === "sent" && invoice.open > 0 && (
+                  <div className="flex min-w-full flex-col gap-2">
+                    <input
+                      aria-label="Sulkemisen perustelu"
+                      className={`${controlClass} min-h-12`}
+                      value={closeReason}
+                      onChange={(event) => setCloseReason(event.target.value)}
+                      placeholder="Perustelu, esim. käteinen tai luottotappio"
+                    />
+                    <Button disabled={busy} onClick={closeWithReason}>
+                      Sulje perustelulla
+                    </Button>
+                  </div>
                 )}
                 {invoice.status !== "credited" && invoice.status !== "draft" && (
                   <Button variant="secondary" disabled={busy} onClick={() => void changeStatus("credited")}>

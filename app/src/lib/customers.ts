@@ -2,7 +2,7 @@
 import { prisma } from "./db";
 import { AppError, NotFoundError, ValidationError } from "./api-errors";
 import { isValidBusinessId, normalizeBusinessId } from "./finnish-reference";
-import { DEFAULT_PAYMENT_TERM_DAYS, MAX_PAYMENT_TERM_DAYS } from "./invoices";
+import { DEFAULT_PAYMENT_TERM_DAYS, MAX_PAYMENT_TERM_DAYS, openPosition } from "./invoices";
 import { centsToEuros } from "./money";
 
 export interface CustomerInput {
@@ -214,6 +214,7 @@ export async function listCustomers(
           status: true,
           grossCents: true,
           issueDate: true,
+          closedReason: true,
           payments: { select: { amountCents: true } },
         },
       },
@@ -230,13 +231,16 @@ export async function listCustomers(
       if (invoice.status !== "draft" && invoice.status !== "credited") {
         invoicedCents += invoice.grossCents;
       }
-      if (invoice.status === "sent") {
-        const paid = invoice.payments.reduce((sum, p) => sum + p.amountCents, 0);
-        const open = invoice.grossCents - paid;
-        if (open > 0) {
-          openBalanceCents += open;
-          openInvoiceCount += 1;
-        }
+      const paid = invoice.payments.reduce((sum, payment) => sum + payment.amountCents, 0);
+      const position = openPosition({
+        status: invoice.status,
+        grossCents: invoice.grossCents,
+        paidCents: paid,
+        closedReason: invoice.closedReason,
+      });
+      if (position.collectible) {
+        openBalanceCents += position.openCents;
+        openInvoiceCount += 1;
       }
       if (!lastInvoiceDate || invoice.issueDate > lastInvoiceDate) {
         lastInvoiceDate = invoice.issueDate;

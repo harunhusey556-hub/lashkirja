@@ -5,7 +5,10 @@ import { noStoreJson, rejectCrossSite, rejectOversizedContentLength } from "@/li
 import { UnauthorizedError, withErrorHandler } from "@/lib/api-errors";
 import { setInvoiceStatus } from "@/lib/sales-invoices";
 
-const bodySchema = z.object({ status: z.enum(["draft", "sent", "paid", "credited"]) });
+const bodySchema = z.object({
+  status: z.enum(["draft", "sent", "paid", "credited"]),
+  closeReason: z.string().trim().min(3).max(500).optional(),
+});
 
 export const POST = withErrorHandler(
   async (req: NextRequest, context: { params: Promise<{ id: string }> }) => {
@@ -18,7 +21,9 @@ export const POST = withErrorHandler(
     if (oversized) return oversized;
 
     const { id } = await context.params;
-    const { status } = bodySchema.parse(await req.json());
-    return noStoreJson({ invoice: await setInvoiceStatus(session.userId, id, status) });
+    const { status, closeReason } = bodySchema.parse(await req.json());
+    return noStoreJson({
+      invoice: await setInvoiceStatus(session.userId, id, status, { closeReason }),
+    });
   }
 );

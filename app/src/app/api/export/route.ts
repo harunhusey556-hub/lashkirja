@@ -6,7 +6,7 @@ import { UnauthorizedError, withErrorHandler } from "@/lib/api-errors";
 import { csvAttachmentHeaders, csvMoney, toCsv, type CsvValue } from "@/lib/csv";
 import { centsToEuros } from "@/lib/money";
 import { monthSchema } from "@/lib/validation";
-import { displayStatus, type InvoiceStatus } from "@/lib/invoices";
+import { displayStatus, openPosition, type InvoiceStatus } from "@/lib/invoices";
 
 const typeSchema = z.enum([
   "receipts",
@@ -132,7 +132,16 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
         csvMoney(centsToEuros(invoice.vatCents)),
         csvMoney(centsToEuros(invoice.grossCents)),
         csvMoney(centsToEuros(paidCents)),
-        csvMoney(centsToEuros(invoice.grossCents - paidCents)),
+        csvMoney(
+          centsToEuros(
+            openPosition({
+              status: invoice.status,
+              grossCents: invoice.grossCents,
+              paidCents,
+              closedReason: invoice.closedReason,
+            }).openCents
+          )
+        ),
         displayStatus({ status: invoice.status as InvoiceStatus, dueDate: invoice.dueDate }),
       ];
     });
@@ -159,7 +168,16 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
         csvMoney(centsToEuros(invoice.vatCents)),
         csvMoney(centsToEuros(invoice.grossCents)),
         csvMoney(centsToEuros(paidCents)),
-        csvMoney(centsToEuros(invoice.grossCents - paidCents)),
+        csvMoney(
+          centsToEuros(
+            openPosition({
+              status: invoice.status,
+              grossCents: invoice.grossCents,
+              paidCents,
+              closedReason: invoice.closedReason,
+            }).openCents
+          )
+        ),
         invoice.status,
         invoice.category,
       ];

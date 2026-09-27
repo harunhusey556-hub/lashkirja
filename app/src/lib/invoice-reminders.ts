@@ -9,7 +9,7 @@ import { prisma } from "./db";
 import { AppError, NotFoundError, ValidationError } from "./api-errors";
 import { centsToEuros } from "./money";
 import { buildReminderTotals, daysLate } from "./late-interest";
-import { addDaysUtc } from "./invoices";
+import { addDaysUtc, openPosition } from "./invoices";
 import { buildInvoicePdfData, getInvoice, type PublicInvoice } from "./sales-invoices";
 import { renderReminderPdf, type ReminderPdfData } from "./invoice-pdf";
 
@@ -189,7 +189,7 @@ export async function listOverdueInvoices(
   now: Date = new Date()
 ): Promise<OverdueSummary[]> {
   const invoices = await prisma.salesInvoice.findMany({
-    where: { userId, status: "sent" },
+    where: { userId, status: { in: ["sent", "paid"] } },
     include: {
       customer: { select: { name: true, email: true } },
       payments: { select: { amountCents: true } },
@@ -202,6 +202,12 @@ export async function listOverdueInvoices(
   return invoices
     .map((invoice) => {
       const paid = invoice.payments.reduce((sum, payment) => sum + payment.amountCents, 0);
+      const position = openPosition({
+        status: invoice.status,
+        grossCents: invoice.grossCents,
+        paidCents: paid,
+        closedReason: invoice.closedReason,
+      });
       return {
         invoiceId: invoice.id,
         number: invoice.number,
@@ -209,7 +215,7 @@ export async function listOverdueInvoices(
         customerEmail: invoice.customer.email,
         dueDate: invoice.dueDate.toISOString().slice(0, 10),
         daysLate: daysLate(invoice.dueDate, now),
-        open: centsToEuros(invoice.grossCents - paid),
+        open: centsToEuros(position.collectible ? position.openCents : 0),
         reminderCount: invoice._count.reminders,
         lastReminderAt: invoice.reminders[0]?.sentAt.toISOString() ?? null,
       };

@@ -109,6 +109,50 @@ describe("GET /api/invoices/[id]/pdf", () => {
     expect(text.replace(/\s/g, "")).toContain(invoice.reference);
   });
 
+  it("keeps the issued PDF on the snapshot after the profile and customer change", async () => {
+    await prisma.user.update({
+      where: { id: user.id },
+      data: {
+        businessName: "Vanha Studio",
+        businessId: "0201256-6",
+        invoiceIban: "FI2112345600000785",
+      },
+    });
+    const invoice = await makeInvoice();
+    await setStatus(
+      buildRequest("POST", `/api/invoices/${invoice.id}/status`, { status: "sent" }, { cookie }),
+      routeContext({ id: invoice.id })
+    );
+
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { businessName: "Uusi Studio", invoiceIban: "FI4950000123456786" },
+    });
+    await prisma.customer.update({
+      where: { id: customerId },
+      data: { name: "Muutettu Asiakas", addressCity: "Turku" },
+    });
+
+    const response = await invoicePdf(
+      buildRequest("GET", `/api/invoices/${invoice.id}/pdf`, undefined, { cookie }),
+      routeContext({ id: invoice.id })
+    );
+    const text = await extractPdfText(Buffer.from(await response.arrayBuffer()));
+    expect(text).toContain("Vanha Studio");
+    expect(text).toContain("Anna Asiakas");
+    expect(text).not.toContain("Uusi Studio");
+    expect(text).not.toContain("Muutettu Asiakas");
+
+    const draft = await makeInvoice();
+    const draftPdf = await invoicePdf(
+      buildRequest("GET", `/api/invoices/${draft.id}/pdf`, undefined, { cookie }),
+      routeContext({ id: draft.id })
+    );
+    const draftText = await extractPdfText(Buffer.from(await draftPdf.arrayBuffer()));
+    expect(draftText).toContain("Uusi Studio");
+    expect(draftText).toContain("Muutettu Asiakas");
+  });
+
   it("falls back to the person's own name when no business name is set", async () => {
     const invoice = await makeInvoice();
     const response = await invoicePdf(
@@ -160,6 +204,74 @@ describe("POST /api/invoices/[id]/send", () => {
 
     const stored = await prisma.salesInvoice.findUnique({ where: { id: invoice.id } });
     expect(stored?.status).toBe("sent");
+    expect(stored?.partySnapshot).toContain("Anna Asiakas");
+
+    const sends = await prisma.invoiceEmailSend.findMany({ where: { invoiceId: invoice.id } });
+    expect(sends).toEqual([
+      expect.objectContaining({ status: "sent", toAddress: "anna@example.fi" }),
+    ]);
+    expect(sends[0]?.partySnapshot).toContain("Anna Asiakas");
+  });
+
+  it("blocks a locked period before SMTP and leaves no send row", async () => {
+    await connectMailAccount(user.id);
+    const invoice = await makeInvoice();
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { booksLockedThrough: "2026-01" },
+    });
+
+    const response = await sendInvoice(
+      buildRequest("POST", `/api/invoices/${invoice.id}/send`, {}, { cookie }),
+      routeContext({ id: invoice.id })
+    );
+    expect(response.status).toBe(409);
+    expect((await readJson(response)).error.code).toBe("PERIOD_LOCKED");
+    expect(await prisma.invoiceEmailSend.count({ where: { invoiceId: invoice.id } })).toBe(0);
+    const stored = await prisma.salesInvoice.findUnique({ where: { id: invoice.id } });
+    expect(stored?.status).toBe("draft");
+  });
+
+  it("records a failed delivery and does not mark the invoice sent", async () => {
+    await connectMailAccount(user.id);
+    const invoice = await makeInvoice();
+    const { sendInvoiceByEmail } = await import("@/lib/invoice-mail");
+
+    await expect(
+      sendInvoiceByEmail(user.id, invoice.id, {}, {
+        deliver: async () => {
+          throw new Error("smtp down");
+        },
+      })
+    ).rejects.toThrow(/smtp down/);
+
+    const stored = await prisma.salesInvoice.findUnique({ where: { id: invoice.id } });
+    expect(stored?.status).toBe("draft");
+    const sends = await prisma.invoiceEmailSend.findMany({ where: { invoiceId: invoice.id } });
+    expect(sends.map((row) => row.status)).toEqual(["failed"]);
+  });
+
+  it("reports that the mail left when the outcome cannot be stored", async () => {
+    await connectMailAccount(user.id);
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { businessName: "Lähtenyt Oy" },
+    });
+    const invoice = await makeInvoice();
+    const { sendInvoiceByEmail } = await import("@/lib/invoice-mail");
+
+    const result = await sendInvoiceByEmail(user.id, invoice.id, {}, {
+      persist: async () => false,
+    });
+
+    expect(result.recorded).toBe(false);
+    expect(result.notice).toMatch(/lähti/);
+    expect(result.sentTo).toBe("anna@example.fi");
+    const stored = await prisma.salesInvoice.findUnique({ where: { id: invoice.id } });
+    expect(stored?.status).toBe("draft");
+    const send = await prisma.invoiceEmailSend.findFirst({ where: { invoiceId: invoice.id } });
+    expect(send?.status).toBe("pending");
+    expect(send?.partySnapshot).toContain("Lähtenyt Oy");
   });
 
   it("attaches the invoice PDF under its own filename", async () => {

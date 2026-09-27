@@ -372,12 +372,19 @@ model SalesInvoice {
   netCents   Int       @default(0)
   vatCents   Int       @default(0)
   grossCents Int       @default(0)
+  /// Seller and customer block printed on the PDF, frozen when the invoice
+  /// leaves draft. Later profile or customer edits must not rewrite it.
+  partySnapshot String?
+  /// Set only by an explicit close that is not covered by payments.
+  closedReason  String?
+  closedAt      DateTime?
   createdAt  DateTime  @default(now())
   updatedAt  DateTime  @updatedAt
 
   lines        InvoiceLine[]
   payments     InvoicePayment[]
   reminders    InvoiceReminder[]
+  emailSends   InvoiceEmailSend[]
   recurringRun RecurringInvoiceRun?
 
   @@unique([userId, number])
@@ -441,6 +448,9 @@ model PurchaseInvoice {
   category           String?
   notes              String?
   paidAt             DateTime?
+  /// Set only by an explicit close that is not covered by payments.
+  closedReason       String?
+  closedAt           DateTime?
   // The receipt that documents this purchase, once it exists.
   receiptId          String?   @unique
   receipt            Receipt?  @relation(fields: [receiptId], references: [id], onDelete: SetNull)
@@ -466,6 +476,28 @@ model PurchasePayment {
   createdAt         DateTime        @default(now())
 
   @@index([purchaseInvoiceId])
+}
+
+// One row per attempt to email a sales invoice. Written before SMTP so a
+// later failure to update the invoice cannot pretend the message never left.
+model InvoiceEmailSend {
+  id            String       @id @default(uuid())
+  invoiceId     String
+  invoice       SalesInvoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  toAddress     String
+  subject       String
+  /// pending | sent | failed. pending means SMTP was started and the outcome
+  /// was not stored; it is not a failure.
+  status        String
+  messageId     String?
+  error         String?
+  /// Parties that were rendered into the attachment, kept even if the invoice
+  /// row itself could not be updated after the message was accepted.
+  partySnapshot String?
+  createdAt     DateTime     @default(now())
+  finishedAt    DateTime?
+
+  @@index([invoiceId, createdAt])
 }
 
 // A payment reminder that was actually sent. Stored because what was demanded

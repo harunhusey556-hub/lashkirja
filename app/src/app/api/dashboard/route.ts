@@ -5,7 +5,7 @@ import { VAT_REGISTRATION_THRESHOLD_EUR } from "@/lib/vero/omavero-fields";
 import { centsToEuros } from "@/lib/money";
 import { parseBusinessDetails, deriveVatProfile } from "@/lib/onboarding";
 import { getBankOverview } from "@/lib/bank-accounts";
-import { buildAging, buildAgingReport, type InvoiceStatus } from "@/lib/invoices";
+import { buildAging, buildAgingReport, openPosition, type InvoiceStatus } from "@/lib/invoices";
 import { computeAlvReport } from "@/lib/alv";
 import { loadAlvPeriodSources } from "@/lib/alv-period";
 
@@ -145,24 +145,39 @@ export async function GET(req: NextRequest) {
   // first, and neither was visible on the front page before.
   const bankOverview = await getBankOverview(session.userId);
   const openInvoices = await prisma.salesInvoice.findMany({
-    where: { userId: session.userId, status: "sent" },
+    where: { userId: session.userId, status: { in: ["sent", "paid"] } },
     select: {
       status: true,
       dueDate: true,
       grossCents: true,
+      closedReason: true,
       payments: { select: { amountCents: true } },
     },
   });
   const openPayables = await prisma.purchaseInvoice.findMany({
-    where: { userId: session.userId, status: "open" },
-    select: { dueDate: true, grossCents: true, payments: { select: { amountCents: true } } },
+    where: { userId: session.userId, status: { in: ["open", "paid"] } },
+    select: {
+      status: true,
+      dueDate: true,
+      grossCents: true,
+      closedReason: true,
+      payments: { select: { amountCents: true } },
+    },
   });
   const payablesAging = buildAging(
-    openPayables.map((invoice) => ({
-      dueDate: invoice.dueDate,
-      openCents:
-        invoice.grossCents - invoice.payments.reduce((sum, p) => sum + p.amountCents, 0),
-    })),
+    openPayables.map((invoice) => {
+      const paidCents = invoice.payments.reduce((sum, payment) => sum + payment.amountCents, 0);
+      const position = openPosition({
+        status: invoice.status,
+        grossCents: invoice.grossCents,
+        paidCents,
+        closedReason: invoice.closedReason,
+      });
+      return {
+        dueDate: invoice.dueDate,
+        openCents: position.collectible ? position.openCents : 0,
+      };
+    }),
     now
   );
 
@@ -172,6 +187,7 @@ export async function GET(req: NextRequest) {
       dueDate: invoice.dueDate,
       grossCents: invoice.grossCents,
       paidCents: invoice.payments.reduce((sum, payment) => sum + payment.amountCents, 0),
+      closedReason: invoice.closedReason,
     })),
     now
   );
