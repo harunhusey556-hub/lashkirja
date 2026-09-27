@@ -6,10 +6,17 @@ import {
   clearAppLock,
   deviceHasAnyAppLock,
   readAppLock,
+  readBiometricUnlock,
   readPinAttempts,
   registerPinFailure,
   writePinAttempts,
 } from "@/lib/app-lock";
+import {
+  biometricUnlockLabel,
+  readDeviceBiometry,
+  unlockWithBiometry,
+  type BiometryStatus,
+} from "@/lib/biometry";
 import { nextLockView, type LockView } from "@/lib/session-policy";
 import { Button } from "@/components/ui";
 import { apiFetch, leaveAfterSignOut, readJson } from "@/components/clientFetch";
@@ -67,7 +74,8 @@ function clientLockView(): LockView {
 
 /**
  * Covers the books when a local code is set for this user. The server session stays.
- * Face ID is not available in this web build; see app/docs/app-lock.md.
+ * Face ID or Touch ID can dismiss the cover when this user opted in and the
+ * native plugin is in the IPA. Otherwise the PIN remains.
  */
 export function AppLock({ children }: { children: React.ReactNode }) {
   const view = useSyncExternalStore(subscribeView, clientLockView, () => "open" as LockView);
@@ -78,6 +86,8 @@ export function AppLock({ children }: { children: React.ReactNode }) {
   const [checking, setChecking] = useState(false);
   const [confirmForget, setConfirmForget] = useState(false);
   const [now, setNow] = useState(() => Date.now());
+  const [bio, setBio] = useState<BiometryStatus | null>(null);
+  const [bioNote, setBioNote] = useState("");
 
   useEffect(() => {
     let cancelled = false;
@@ -111,6 +121,42 @@ export function AppLock({ children }: { children: React.ReactNode }) {
     const handle = window.setInterval(() => setNow(Date.now()), 250);
     return () => window.clearInterval(handle);
   }, [waitMs]);
+
+  useEffect(() => {
+    if (view !== "locked" || !ready || !userId || !readBiometricUnlock(userId)) return;
+    let cancelled = false;
+    void readDeviceBiometry()
+      .then(async (status) => {
+        if (cancelled) return;
+        setBio(status);
+        if (!status.available) {
+          setBioNote("Biometria ei ole käytettävissä. Käytä koodia.");
+          return;
+        }
+        const result = await unlockWithBiometry();
+        if (cancelled || result === "ok") {
+          if (!cancelled && result === "ok") publishView(nextLockView(true, "unlock"));
+          return;
+        }
+        setBioNote(result === "unavailable" ? "Biometria ei ole käytettävissä. Käytä koodia." : "Biometria ei onnistunut. Käytä koodia.");
+      })
+      .catch(() => {
+        if (!cancelled) setBioNote("Biometria ei ole käytettävissä. Käytä koodia.");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [view, ready, userId]);
+
+  async function retryBiometry() {
+    setBioNote("");
+    const result = await unlockWithBiometry();
+    if (result === "ok") {
+      publishView(nextLockView(true, "unlock"));
+      return;
+    }
+    setBioNote(result === "unavailable" ? "Biometria ei ole käytettävissä. Käytä koodia." : "Biometria ei onnistunut. Käytä koodia.");
+  }
 
   if (view === "open") return <>{children}</>;
   if (!ready) {
@@ -160,9 +206,19 @@ export function AppLock({ children }: { children: React.ReactNode }) {
       >
         <h1 className="text-2xl font-light text-charcoal text-center">LashKirja</h1>
         <p className="text-sm text-warm-gray text-center">
-          Näyttö on lukittu tällä laitteella. Kirjanpito ei näy, ennen kuin koodi annetaan.
+          Näyttö on lukittu tällä laitteella. Kirjanpito ei näy, ennen kuin koodi tai biometria avaa sen.
           Palvelimen istunto pysyy.
         </p>
+        {bio?.available && (
+          <Button type="button" variant="secondary" className="w-full" onClick={() => void retryBiometry()}>
+            {biometricUnlockLabel(bio.kind)}
+          </Button>
+        )}
+        {bioNote && (
+          <p className="text-sm text-warm-gray text-center" role="status">
+            {bioNote}
+          </p>
+        )}
         <label htmlFor="app-lock-pin" className="block text-sm font-medium text-charcoal">
           Lukituskoodi
         </label>

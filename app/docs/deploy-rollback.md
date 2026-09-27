@@ -5,7 +5,7 @@ Three pieces move on different clocks. Ship them in this order, and do not point
 ## Web, IPA, and the database
 
 - **Web.** This Next.js server. An IPA whose `CAPACITOR_SERVER_URL` already points here picks up shell, API, and page changes on refresh. Those changes do not need a new binary.
-- **IPA.** A new binary is required when Capacitor plugins, `Info.plist`, the URL scheme, or `scrollEnabled` change. The gaps that still need one are the bank return scheme (`app/docs/bank-return.md`), attaching a PDF from the share sheet and the baked offline page (`app/docs/native-files.md`), and Face ID (`app/docs/app-lock.md`). Playwright in CI is not that smoke.
+- **IPA.** A new binary is required when Capacitor plugins, `Info.plist`, the URL scheme, or `scrollEnabled` change. Face ID is in the project now (`app/docs/app-lock.md`); an already installed IPA does not prompt until the next `build-ipa.yml` sync. The bank return scheme (`app/docs/bank-return.md`) and attaching a PDF from the share sheet plus the baked offline page (`app/docs/native-files.md`) still need that same rebuild if the installed binary predates them. Playwright in CI is not that smoke.
 - **Database.** `npx prisma migrate deploy` before the new web process serves traffic. Migrations on this branch add tables and columns. They do not rename or drop bookkeeping data.
 
 ## Compatibility window

@@ -53,7 +53,8 @@ the Organizer window produces the same IPA.
 - Point `CAPACITOR_SERVER_URL` at a host running `next build && next start`.
   `next dev` shows Next's red Issue badge; that badge is not hidden. A web
   commit does not update an already installed IPA.
-- After `cap sync`, `scripts/patch-ios-url-scheme.ts` adds the `lashkirja` URL scheme to `Info.plist`. The IPA script runs that patch. A closed app can then open `lashkirja://bank/callback`. An IPA built before this patch does not.
+- After `cap sync`, `scripts/patch-ios-url-scheme.ts` adds the `lashkirja` URL scheme to `Info.plist`. The IPA script runs that patch. A closed app can then open `lashkirja://bank/callback`. An IPA built before this patch does not. `build-ipa.yml` runs `npx cap sync ios` and does not run that patch; the scheme still needs the script or a plist that already contains it.
+- Face ID / Touch ID uses `@aparajita/capacitor-biometric-auth`. `cap sync` links it. `NSFaceIDUsageDescription` is already in `ios/App/App/Info.plist`. An IPA built before this plugin cannot prompt. See `docs/app-lock.md`.
 - `server.errorPath` is `offline.html` whenever `CAPACITOR_SERVER_URL` is set. `@capacitor/filesystem` and `@capacitor/share` are dependencies, so the same sync includes PDF share into Files.
 - `ios.scrollEnabled: false` is already in `capacitor.config.ts`, but an
   installed IPA keeps the WebView bounce until you rebuild and reinstall.

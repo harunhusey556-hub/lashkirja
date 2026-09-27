@@ -2,6 +2,7 @@ import { acceptableAppPin } from "@/lib/session-policy";
 
 export const APP_LOCK_STORAGE_KEY = "lashkirja.app-lock.v1";
 const ATTEMPT_PREFIX = "lashkirja.app-lock.attempts.v1:";
+const BIOMETRIC_PREFIX = "lashkirja.app-lock.biometric.v1:";
 
 export interface AppLockRecord {
   salt: string;
@@ -125,7 +126,34 @@ export function clearAppLock(userId: string | null, storage: LockStorage | null 
   if (userId) {
     storage.remove(appLockStorageKey(userId));
     storage.remove(ATTEMPT_PREFIX + userId);
+    storage.remove(BIOMETRIC_PREFIX + userId);
   }
+  emitAppLock();
+}
+
+export function biometricUnlockKey(userId: string): string {
+  return BIOMETRIC_PREFIX + userId;
+}
+
+/** Opt-in Face ID / Touch ID for this user's glance lock. Useless without a PIN. */
+export function readBiometricUnlock(
+  userId: string | null,
+  storage: LockStorage | null = browserLockStorage()
+): boolean {
+  if (!storage || !userId) return false;
+  if (!readAppLock(userId, storage)) return false;
+  return storage.get(biometricUnlockKey(userId)) === "1";
+}
+
+export function writeBiometricUnlock(
+  userId: string,
+  enabled: boolean,
+  storage: LockStorage | null = browserLockStorage()
+): void {
+  if (!storage || !userId) return;
+  const key = biometricUnlockKey(userId);
+  if (enabled) storage.set(key, "1");
+  else storage.remove(key);
   emitAppLock();
 }
 

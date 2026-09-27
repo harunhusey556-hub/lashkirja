@@ -5,8 +5,10 @@ import {
   createAppLockRecord,
   pinBackoffMs,
   readAppLock,
+  readBiometricUnlock,
   registerPinFailure,
   writeAppLock,
+  writeBiometricUnlock,
   type LockStorage,
 } from "./app-lock";
 
@@ -34,8 +36,14 @@ describe("app lock scope and backoff", () => {
     expect(readAppLock("user-b", storage)).toBeNull();
     expect(readAppLock("user-a", storage)?.hash).toBe(record!.hash);
     expect(appLockStorageKey("user-a")).not.toBe(appLockStorageKey("user-b"));
+    writeBiometricUnlock("user-c", true, storage);
+    expect(readBiometricUnlock("user-c", storage)).toBe(false);
+    writeBiometricUnlock("user-a", true, storage);
+    expect(readBiometricUnlock("user-a", storage)).toBe(true);
+    expect(readBiometricUnlock("user-b", storage)).toBe(false);
     clearAppLock("user-a", storage);
     expect(readAppLock("user-a", storage)).toBeNull();
+    expect(readBiometricUnlock("user-a", storage)).toBe(false);
   });
 
   it("waits longer after each wrong code, up to 30 seconds", () => {

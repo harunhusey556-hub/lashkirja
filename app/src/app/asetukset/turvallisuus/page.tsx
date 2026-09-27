@@ -8,9 +8,18 @@ import {
   clearAppLock,
   createAppLockRecord,
   readAppLock,
+  readBiometricUnlock,
   subscribeAppLock,
   writeAppLock,
+  writeBiometricUnlock,
 } from "@/lib/app-lock";
+import {
+  biometricEnableLabel,
+  biometricUnavailableCopy,
+  readDeviceBiometry,
+  unlockWithBiometry,
+  type BiometryStatus,
+} from "@/lib/biometry";
 
 interface SessionRow {
   id: string;
@@ -35,6 +44,12 @@ export default function TurvallisuusPage() {
     () => Boolean(lockUserId && readAppLock(lockUserId)),
     () => false
   );
+  const bioOn = useSyncExternalStore(
+    subscribeAppLock,
+    () => Boolean(lockUserId && readBiometricUnlock(lockUserId)),
+    () => false
+  );
+  const [bio, setBio] = useState<BiometryStatus>({ available: false, kind: "none", host: "web" });
 
   useEffect(() => {
     let cancelled = false;
@@ -54,6 +69,16 @@ export default function TurvallisuusPage() {
       .catch((error: unknown) => {
         if (!cancelled) setSessionError(errorMessage(error, "Istuntoja ei saatu ladattua"));
       });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    void readDeviceBiometry().then((status) => {
+      if (!cancelled) setBio(status);
+    });
     return () => {
       cancelled = true;
     };
@@ -115,7 +140,28 @@ export default function TurvallisuusPage() {
     }
     writeAppLock(lockUserId, record);
     setLockPin("");
-    setLockMsg("Lukitus on päällä tällä laitteella. Se ei kirjaa sinua ulos palvelimelta.");
+    setLockMsg(
+      bio.available
+        ? "Lukitus on päällä tällä laitteella. Voit ottaa biometrisen avauksen käyttöön alta. Se ei kirjaa sinua ulos palvelimelta."
+        : "Lukitus on päällä tällä laitteella. Se ei kirjaa sinua ulos palvelimelta."
+    );
+  }
+
+  async function enableBiometry() {
+    if (!lockUserId || !hasLock) return;
+    const result = await unlockWithBiometry();
+    if (result !== "ok") {
+      setLockMsg("Biometria ei vahvistunut. Koodi jää käyttöön.");
+      return;
+    }
+    writeBiometricUnlock(lockUserId, true);
+    setLockMsg("Biometrinen avaus on päällä tällä laitteella. Se ei korvaa palvelimen istuntoa.");
+  }
+
+  function disableBiometry() {
+    if (!lockUserId) return;
+    writeBiometricUnlock(lockUserId, false);
+    setLockMsg("Biometrinen avaus poistettu. Koodi jää käyttöön.");
   }
 
   async function removeLock(event: React.FormEvent) {
@@ -217,7 +263,8 @@ export default function TurvallisuusPage() {
         <h2 className="text-sm font-medium text-charcoal">Näytön lukitus</h2>
         <p className="text-sm text-warm-gray">
           Valinnainen koodi tällä laitteella peittää kirjanpidon, kun sovellus jää taustalle.
-          Face ID vaatii uuden asennuspaketin, joten sitä ei ole tässä versiossa. Lukitus ei korvaa uloskirjautumista.
+          Face ID tai Touch ID voi avata saman lukituksen, jos otat sen käyttöön ja sovellus on asennettu.
+          Lukitus ei korvaa uloskirjautumista.
         </p>
         <label htmlFor="lockPin" className="block text-sm font-medium text-charcoal">
           {hasLock ? "Nykyinen koodi" : "Uusi koodi, 4–8 numeroa"}
@@ -239,6 +286,19 @@ export default function TurvallisuusPage() {
         <Button type="submit" variant={hasLock ? "secondary" : "primary"}>
           {hasLock ? "Poista lukitus" : "Ota lukitus käyttöön"}
         </Button>
+        {hasLock && bio.available && !bioOn && (
+          <Button type="button" variant="secondary" onClick={() => void enableBiometry()}>
+            {biometricEnableLabel(bio.kind)}
+          </Button>
+        )}
+        {hasLock && bioOn && (
+          <Button type="button" variant="secondary" onClick={disableBiometry}>
+            Poista biometrinen avaus
+          </Button>
+        )}
+        {hasLock && !bio.available && (
+          <p className="text-sm text-warm-gray">{biometricUnavailableCopy(bio.host)}</p>
+        )}
       </form>
     </div>
   );

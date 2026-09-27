@@ -72,6 +72,8 @@
 	<string>Tilikirja tarvitsee pääsyn kuviin kuittien liittämiseksi.</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
 	<string>Tilikirja voi tallentaa kuittikuvia kuvakirjastoon.</string>
+	<key>NSFaceIDUsageDescription</key>
+	<string>Tilikirja käyttää Face ID:tä näytön lukituksen avaamiseen tällä laitteella.</string>
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<key>NSAllowsLocalNetworking</key>
