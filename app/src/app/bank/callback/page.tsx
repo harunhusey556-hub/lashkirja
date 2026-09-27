@@ -3,6 +3,8 @@
 import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { apiFetch, errorMessage, isUnauthorized, readJson, redirectToLogin } from "@/components/clientFetch";
+import { classifyBankReturn } from "@/lib/bank-return";
+import { clearBankAuth } from "@/lib/open-bank-auth";
 
 interface CallbackResult {
   ok: true;
@@ -36,23 +38,24 @@ function BankCallback() {
   const code = params.get("code") || "";
   const state = params.get("state") || "";
   const bankError = params.get("error");
+  const initial = classifyBankReturn({ code, state, error: bankError });
   const [phase, setPhase] = useState<"working" | "done" | "error">(
-    bankError || !code || !state ? "error" : "working"
+    initial.kind === "success" ? "working" : "error"
   );
-  const [message, setMessage] = useState(() => {
-    if (bankError === "access_denied") return "Yhdistäminen peruutettiin.";
-    if (bankError) return "Pankki ei vahvistanut yhteyttä. Yritä uudelleen.";
-    if (!code || !state) return "Pankin paluuosoitteesta puuttui vahvistus. Yhdistä uudelleen.";
-    return "Yhdistetään pankkiin...";
-  });
+  const [message, setMessage] = useState(initial.message);
 
   useEffect(() => {
-    if (!code || !state || bankError) return;
+    if (initial.kind !== "success") clearBankAuth();
+  }, [initial.kind]);
+
+  useEffect(() => {
+    if (initial.kind !== "success") return;
     let cancelled = false;
     const key = `${code}:${state}`;
     exchangeOnce(key, () => postCallback(code, state))
       .then(() => {
         if (cancelled) return;
+        clearBankAuth();
         setPhase("done");
         setMessage("Pankki yhdistetty. Valitse tilit, jotka kuuluvat kirjanpitoon.");
         window.setTimeout(() => router.replace("/asetukset#pankkiyhteys"), 700);
@@ -63,13 +66,14 @@ function BankCallback() {
           redirectToLogin();
           return;
         }
+        clearBankAuth();
         setPhase("error");
         setMessage(errorMessage(error, "Pankin vahvistus epäonnistui"));
       });
     return () => {
       cancelled = true;
     };
-  }, [bankError, code, router, state]);
+  }, [code, initial.kind, router, state]);
 
   return (
     <main className="min-h-dvh bg-cream flex items-center justify-center px-4 py-10">
@@ -81,12 +85,12 @@ function BankCallback() {
         >
           {message}
         </p>
-        {phase === "error" && (
+        {phase !== "working" && (
           <a
             href="/asetukset#pankkiyhteys"
             className="inline-flex w-full justify-center px-4 py-3 rounded-xl bg-accent text-white text-sm font-medium hover:bg-accent-dark"
           >
-            Takaisin asetuksiin
+            {phase === "done" ? "Jatka asetuksiin" : "Takaisin asetuksiin"}
           </a>
         )}
       </section>

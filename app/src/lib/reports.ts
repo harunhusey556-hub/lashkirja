@@ -7,6 +7,7 @@
  * 25,5 % - a guessed VAT figure in a P&L is worse than a visible gap.
  */
 import { parseVatDetails } from "./alv";
+import { monthKey } from "./bank-balances";
 import { centsToEuros } from "./money";
 
 export interface ReportReceipt {
@@ -47,8 +48,7 @@ export interface ProfitLossPeriod {
 export const UNCATEGORISED = "Luokittelematon";
 
 function monthOf(value: Date | string): string {
-  const date = value instanceof Date ? value : new Date(value);
-  return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}`;
+  return monthKey(value);
 }
 
 function emptyPeriod(month: string | null): ProfitLossPeriod {

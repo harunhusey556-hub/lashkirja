@@ -50,6 +50,7 @@ export async function POST(
       skipped: result.skipped,
       statementId: result.statementId,
       statementIds: result.statementIds,
+      accounts: result.accounts,
     });
   } catch (error) {
     return respondToBankError(error);

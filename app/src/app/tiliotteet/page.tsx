@@ -19,6 +19,7 @@ import {
 import { BANK_LINKS, WorkspaceLinks, linksWithActive } from "@/components/WorkspaceLinks";
 import { readPageCache, writePageCache } from "@/lib/page-cache";
 import { usePersistedState, useScrollRestoration } from "@/lib/list-ui-state";
+import { drillFromSearch } from "@/lib/report-drill";
 
 const RECENT_LIMIT = 5;
 
@@ -43,6 +44,11 @@ export default function TiliotteetPage() {
   // Persisted so back-navigation restores the active filter/tab instead of
   // resetting to the defaults.
   const [monthFilter, setMonthFilter] = usePersistedState("tiliotteet.monthFilter", "");
+  useEffect(() => {
+    const drill = drillFromSearch(window.location.search);
+    if (drill.month) setMonthFilter(drill.month);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const [showAllStatements, setShowAllStatements] = usePersistedState(
     "tiliotteet.showAllStatements",
     false

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { LoadingState } from "@/components/AsyncState";
 import { ConnectionNotice, StaleBanner } from "@/components/ScreenState";
 import {
@@ -12,6 +13,8 @@ import {
 
 import { REPORT_LINKS, WorkspaceLinks, linksWithActive } from "@/components/WorkspaceLinks";
 import { formatEur } from "@/lib/format";
+import { receiptDrillHref } from "@/lib/report-drill";
+import { helsinkiMonthKey, helsinkiQuarterKey } from "@/lib/validation";
 import { pageCacheFetchedAt, readPageCache, writePageCache } from "@/lib/page-cache";
 import { usePersistedState, useScrollRestoration } from "@/lib/list-ui-state";
 interface SalesField {
@@ -53,13 +56,13 @@ const MONTHS = [
 
 export default function ALVRaporttiPage() {
   const now = new Date();
-  const defaultPeriod = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+  const defaultPeriod = helsinkiMonthKey(now);
 
   const [periodType, setPeriodType] = usePersistedState<"month" | "quarter">("alv.periodType", "month");
   const [selectedMonth, setSelectedMonth] = usePersistedState("alv.month", defaultPeriod);
   const [selectedQuarter, setSelectedQuarter] = usePersistedState(
     "alv.quarter",
-    `${now.getFullYear()}-Q${Math.ceil((now.getMonth() + 1) / 3)}`
+    helsinkiQuarterKey(now)
   );
   const [result, setResult] = useState<{
     period: string;
@@ -69,6 +72,20 @@ export default function ALVRaporttiPage() {
   const [loadAttempt, setLoadAttempt] = useState(0);
 
   const period = periodType === "month" ? selectedMonth : selectedQuarter;
+
+  useEffect(() => {
+    const raw = new URLSearchParams(window.location.search).get("period");
+    if (!raw) return;
+    if (/^\d{4}-(0[1-9]|1[0-2])$/.test(raw)) {
+      setPeriodType("month");
+      setSelectedMonth(raw);
+    } else if (/^\d{4}-Q[1-4]$/.test(raw)) {
+      setPeriodType("quarter");
+      setSelectedQuarter(raw);
+    }
+    // The link's period wins over the last period the page remembered.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -107,7 +124,7 @@ export default function ALVRaporttiPage() {
 
   function buildMonthOptions() {
     const opts: { value: string; label: string }[] = [];
-    const year = now.getFullYear();
+    const year = Number(helsinkiMonthKey(now).slice(0, 4));
     for (let m = 0; m < 12; m++) {
       const val = `${year}-${String(m + 1).padStart(2, "0")}`;
       opts.push({ value: val, label: `${MONTHS[m]} ${year}` });
@@ -116,7 +133,7 @@ export default function ALVRaporttiPage() {
   }
 
   function buildQuarterOptions() {
-    const year = now.getFullYear();
+    const year = Number(helsinkiMonthKey(now).slice(0, 4));
     return [1, 2, 3, 4].map((q) => ({
       value: `${year}-Q${q}`,
       label: `Q${q} / ${year}`,
@@ -280,6 +297,10 @@ export default function ALVRaporttiPage() {
               label="Vero kotimaan myynnistä 25,5 %"
               sales={data.field301.netSales}
               vat={data.field301.vat}
+              href={receiptDrillHref({
+                month: periodType === "month" ? period : null,
+                type: "tulo",
+              })}
             />
             <OmaVeroField
               code="302"
@@ -322,9 +343,16 @@ export default function ALVRaporttiPage() {
                     Verokauden vähennettävä vero
                   </p>
                 </div>
-                <p className="text-lg font-medium text-charcoal">
+                <Link
+                  href={receiptDrillHref({
+                    month: periodType === "month" ? period : null,
+                    type: "meno",
+                  })}
+                  aria-label="Avaa ostokuitit"
+                  className="text-lg font-medium text-charcoal underline decoration-warm-gray-light underline-offset-2"
+                >
                   {formatEur(data.field307.amount)}
-                </p>
+                </Link>
               </div>
             </div>
 
@@ -369,12 +397,26 @@ function OmaVeroField({
   label,
   sales,
   vat,
+  href,
 }: {
   code: string;
   label: string;
   sales: number;
   vat: number;
+  href?: string;
 }) {
+  const amount = (value: number, labelText: string) =>
+    href ? (
+      <Link
+        href={href}
+        aria-label={labelText}
+        className="text-charcoal font-medium underline decoration-warm-gray-light underline-offset-2"
+      >
+        {formatEur(value)}
+      </Link>
+    ) : (
+      <span className="text-charcoal font-medium">{formatEur(value)}</span>
+    );
   return (
     <div className="bg-white rounded-2xl p-5 shadow-sm">
       <div className="flex items-start justify-between">
@@ -385,11 +427,11 @@ function OmaVeroField({
       </div>
       <div className="flex justify-between mt-3 text-sm">
         <span className="text-warm-gray">Myynti (veroton)</span>
-        <span className="text-charcoal font-medium">{formatEur(sales)}</span>
+        {amount(sales, `Avaa kuitit kentälle ${code}`)}
       </div>
       <div className="flex justify-between mt-1 text-sm">
         <span className="text-warm-gray">Vero</span>
-        <span className="text-charcoal font-medium">{formatEur(vat)}</span>
+        {amount(vat, `Avaa kuitit kentälle ${code}`)}
       </div>
     </div>
   );

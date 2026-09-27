@@ -86,12 +86,17 @@ export default function InvoicesPage() {
 function InvoicesPageContent() {
   const searchParams = useSearchParams();
   const customerFilter = searchParams.get("customerId") ?? "";
+  const monthFilter = /^\d{4}-(0[1-9]|1[0-2])$/.test(searchParams.get("month") || "")
+    ? searchParams.get("month")!
+    : "";
+  const statusFromUrl = searchParams.get("status");
 
   // The cache only ever holds the unfiltered list, so a customer-scoped link
   // must not paint it as if it were the filtered result.
-  const cached = customerFilter
-    ? null
-    : readPageCache<{ invoices: InvoiceSummary[]; aging: Aging }>("invoices");
+  const cached =
+    customerFilter || monthFilter
+      ? null
+      : readPageCache<{ invoices: InvoiceSummary[]; aging: Aging }>("invoices");
   const [invoices, setInvoices] = useState<InvoiceSummary[]>(cached?.invoices ?? []);
   const [aging, setAging] = useState<Aging | null>(cached?.aging ?? null);
   const [customers, setCustomers] = useState<
@@ -106,6 +111,12 @@ function InvoicesPageContent() {
     "laskut.filter",
     "all"
   );
+  useEffect(() => {
+    if (statusFromUrl && FILTERS.some((item) => item.id === statusFromUrl)) {
+      setFilter(statusFromUrl as (typeof FILTERS)[number]["id"]);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [statusFromUrl]);
   const [message, setMessage] = useState<string | null>(null);
   const [loadFailure, setLoadFailure] = useState<unknown>(null);
   const [creating, setCreating] = useState(false);
@@ -120,6 +131,7 @@ function InvoicesPageContent() {
       const params = new URLSearchParams();
       if (filter !== "all") params.set("status", filter);
       if (customerFilter) params.set("customerId", customerFilter);
+      if (monthFilter) params.set("month", monthFilter);
       const response = await apiFetch(`/api/invoices?${params.toString()}`, {
         credentials: "include",
         signal,
@@ -129,7 +141,7 @@ function InvoicesPageContent() {
         "Laskujen haku epäonnistui"
       );
       if (signal?.aborted) return;
-      if (filter === "all" && !customerFilter) writePageCache("invoices", data);
+      if (filter === "all" && !customerFilter && !monthFilter) writePageCache("invoices", data);
       setInvoices(data.invoices);
       setAging(data.aging);
       setLoadFailure(null);
@@ -144,7 +156,7 @@ function InvoicesPageContent() {
       setMessage(errorMessage(error, "Laskujen haku epäonnistui"));
       setStatus((current) => (current === "ready" ? "ready" : "error"));
     }
-  }, [filter, customerFilter]);
+  }, [filter, customerFilter, monthFilter]);
 
   useEffect(() => {
     const controller = new AbortController();

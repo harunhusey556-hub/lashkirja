@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import Link from "next/link";
 import { LoadingState } from "@/components/AsyncState";
 import { ConnectionNotice, StaleBanner } from "@/components/ScreenState";
 import {
@@ -13,6 +14,7 @@ import {
 import { REPORT_LINKS, WorkspaceLinks, linksWithActive } from "@/components/WorkspaceLinks";
 import { buttonClass } from "@/components/control-styles";
 import { formatEur, formatMonthShort } from "@/lib/format";
+import { receiptDrillHref } from "@/lib/report-drill";
 import { pageCacheFetchedAt, readPageCache, writePageCache } from "@/lib/page-cache";
 import { usePersistedState, useScrollRestoration } from "@/lib/list-ui-state";
 
@@ -66,6 +68,7 @@ export default function ReportsPage() {
     () => (readPageCache<Report>(`report:${currentYear}`) ? "ready" : "loading")
   );
   const [message, setMessage] = useState<string | null>(null);
+  const [packageMonth, setPackageMonth] = useState(`${currentYear}-01`);
 
   const load = useCallback(async () => {
     // Show the cached year immediately and refresh it silently; a year that
@@ -172,11 +175,23 @@ export default function ReportsPage() {
               <div className="grid grid-cols-2 gap-3 pt-1 text-sm">
                 <div>
                   <p className="text-warm-gray text-xs">Tulot</p>
-                  <p className="text-charcoal font-medium">{formatEur(report.total.incomeNet)}</p>
+                  <Link
+                    href={receiptDrillHref({ type: "tulo" })}
+                    aria-label="Avaa tulokuitit"
+                    className="text-charcoal font-medium underline decoration-warm-gray-light underline-offset-2"
+                  >
+                    {formatEur(report.total.incomeNet)}
+                  </Link>
                 </div>
                 <div>
                   <p className="text-warm-gray text-xs">Menot</p>
-                  <p className="text-charcoal font-medium">{formatEur(report.total.expenseNet)}</p>
+                  <Link
+                    href={receiptDrillHref({ type: "meno" })}
+                    aria-label="Avaa menokuitit"
+                    className="text-charcoal font-medium underline decoration-warm-gray-light underline-offset-2"
+                  >
+                    {formatEur(report.total.expenseNet)}
+                  </Link>
                 </div>
               </div>
               <p className="text-xs text-warm-gray">
@@ -203,13 +218,17 @@ export default function ReportsPage() {
                     <li key={month.month} className="space-y-1">
                       <div className="flex justify-between text-sm">
                         <span className="text-charcoal">{formatMonthShort(month.month!)}</span>
-                        <span
+                        <Link
+                          href={receiptDrillHref({ month: month.month })}
+                          aria-label={`Avaa kuitit ${formatMonthShort(month.month!)}`}
                           className={
-                            month.profitNet < 0 ? "text-danger font-medium" : "text-charcoal font-medium"
+                            month.profitNet < 0
+                              ? "text-danger font-medium underline decoration-warm-gray-light underline-offset-2"
+                              : "text-charcoal font-medium underline decoration-warm-gray-light underline-offset-2"
                           }
                         >
                           {formatEur(month.profitNet)}
-                        </span>
+                        </Link>
                       </div>
                       <div className="flex gap-1 h-2" aria-hidden>
                         <div
@@ -240,7 +259,13 @@ export default function ReportsPage() {
                         <p className="text-xs text-warm-gray">{row.count} kuittia</p>
                       </div>
                       <div className="text-right shrink-0">
-                        <p className="text-charcoal">{formatEur(row.net)}</p>
+                        <Link
+                          href={receiptDrillHref({ type: "meno", category: row.category })}
+                          aria-label={`Avaa kuitit: ${row.category}`}
+                          className="text-charcoal underline decoration-warm-gray-light underline-offset-2"
+                        >
+                          {formatEur(row.net)}
+                        </Link>
                         <p className="text-xs text-warm-gray">brutto {formatEur(row.gross)}</p>
                       </div>
                     </li>
@@ -256,12 +281,48 @@ export default function ReportsPage() {
                   {report.total.incomeByCategory.map((row) => (
                     <li key={row.category} className="flex justify-between text-sm">
                       <span className="text-charcoal truncate">{row.category}</span>
-                      <span className="text-charcoal shrink-0">{formatEur(row.net)}</span>
+                      <Link
+                        href={receiptDrillHref({ type: "tulo", category: row.category })}
+                        aria-label={`Avaa kuitit: ${row.category}`}
+                        className="text-charcoal shrink-0 underline decoration-warm-gray-light underline-offset-2"
+                      >
+                        {formatEur(row.net)}
+                      </Link>
                     </li>
                   ))}
                 </ul>
               </section>
             )}
+
+            <section className="bg-white rounded-3xl border border-warm-gray-light/20 shadow-sm p-6 space-y-3">
+              <p className="text-base font-medium text-charcoal">Kirjanpitopaketti</p>
+              <p className="text-xs text-warm-gray">
+                Zip kaudelta: tuloslaskelma, ALV, CSV, kohdistukset ja tositteet.
+              </p>
+              <div className="flex gap-2">
+                <select
+                  aria-label="Paketin kuukausi"
+                  className="flex-1 px-3 py-2.5 rounded-xl border border-warm-gray-light/60 bg-white text-sm"
+                  value={packageMonth.startsWith(`${year}-`) ? packageMonth : `${year}-01`}
+                  onChange={(event) => setPackageMonth(event.target.value)}
+                >
+                  {Array.from({ length: 12 }, (_, index) => {
+                    const month = `${year}-${String(index + 1).padStart(2, "0")}`;
+                    return (
+                      <option key={month} value={month}>
+                        {formatMonthShort(month)}
+                      </option>
+                    );
+                  })}
+                </select>
+                <a
+                  href={`/api/export/package?month=${packageMonth.startsWith(`${year}-`) ? packageMonth : `${year}-01`}`}
+                  className={buttonClass("primary", "shrink-0")}
+                >
+                  Lataa zip
+                </a>
+              </div>
+            </section>
 
             <section className="bg-white rounded-3xl border border-warm-gray-light/20 shadow-sm p-6 space-y-3">
               <p className="text-base font-medium text-charcoal">Vie CSV-tiedostona</p>

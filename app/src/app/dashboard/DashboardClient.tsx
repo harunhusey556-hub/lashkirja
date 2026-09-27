@@ -13,6 +13,8 @@ import {
 } from "@/components/clientFetch";
 
 import { formatEur } from "@/lib/format";
+import { alvDrillHref, receiptDrillHref, statementDrillHref } from "@/lib/report-drill";
+import { helsinkiMonthKey } from "@/lib/validation";
 import { pageCacheFetchedAt, readPageCache, writePageCache } from "@/lib/page-cache";
 interface DashboardData {
   firstName: string;
@@ -65,8 +67,7 @@ const MONTH_NAMES = [
 
 
 function currentMonth(): string {
-  const now = new Date();
-  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+  return helsinkiMonthKey();
 }
 
 function shiftMonth(month: string, delta: number): string {
@@ -236,17 +237,33 @@ export default function DashboardClient({
           <>
             {/* Modern Metrics Grid */}
             <div className="grid grid-cols-2 gap-4 animate-in-delay-1">
-              <div className="bg-gradient-to-br from-white to-slate-50 rounded-3xl p-5 shadow-[0_2px_10px_-4px_rgba(0,0,0,0.05)] border border-slate-100 relative overflow-hidden group hover-lift transition-all">
+              <Link
+                href={
+                  data.source === "tiliote"
+                    ? statementDrillHref(month)
+                    : receiptDrillHref({ month, type: "tulo" })
+                }
+                aria-label="Avaa tulot"
+                className="bg-gradient-to-br from-white to-slate-50 rounded-3xl p-5 shadow-[0_2px_10px_-4px_rgba(0,0,0,0.05)] border border-slate-100 relative overflow-hidden group hover-lift transition-all"
+              >
                 <div className="absolute top-0 right-0 w-24 h-24 bg-success/5 rounded-bl-full -mr-4 -mt-4 transition-transform group-hover:scale-110" />
                 <p className="text-xs text-warm-gray uppercase tracking-widest font-medium mb-1">Tulot</p>
                 <p className="text-2xl font-semibold text-success tracking-tight">{formatEur(data.income)}</p>
-              </div>
+              </Link>
 
-              <div className="bg-gradient-to-br from-white to-slate-50 rounded-3xl p-5 shadow-[0_2px_10px_-4px_rgba(0,0,0,0.05)] border border-slate-100 relative overflow-hidden group hover-lift transition-all">
+              <Link
+                href={
+                  data.source === "tiliote"
+                    ? statementDrillHref(month)
+                    : receiptDrillHref({ month, type: "meno" })
+                }
+                aria-label="Avaa menot"
+                className="bg-gradient-to-br from-white to-slate-50 rounded-3xl p-5 shadow-[0_2px_10px_-4px_rgba(0,0,0,0.05)] border border-slate-100 relative overflow-hidden group hover-lift transition-all"
+              >
                 <div className="absolute top-0 right-0 w-24 h-24 bg-accent/5 rounded-bl-full -mr-4 -mt-4 transition-transform group-hover:scale-110" />
                 <p className="text-xs text-warm-gray uppercase tracking-widest font-medium mb-1">Menot</p>
                 <p className="text-2xl font-semibold text-accent tracking-tight">{formatEur(data.expenses)}</p>
-              </div>
+              </Link>
             </div>
 
             <div className="grid grid-cols-2 gap-4 animate-in-delay-1">
@@ -274,9 +291,13 @@ export default function DashboardClient({
                       {data.sectionErrors.vat} Yritä uudelleen
                     </button>
                   ) : (
-                    <p className={`text-xl font-semibold ${data.isRefund ? "text-success" : "text-accent"}`}>
+                    <Link
+                      href={alvDrillHref(month)}
+                      aria-label="Avaa ALV-raportti"
+                      className={`text-xl font-semibold ${data.isRefund ? "text-success" : "text-accent"}`}
+                    >
                       {data.isRefund ? "−" : ""}{formatEur(Math.abs(data.estimatedVat))}
-                    </p>
+                    </Link>
                   )}
                   <p className="text-[10px] text-warm-gray mt-0.5 uppercase tracking-wide">{data.isRefund ? "palautettava" : "maksettava"}</p>
                 </div>

@@ -50,6 +50,17 @@ export function helsinkiCalendarDate(now: Date = new Date()): string {
   }).format(now);
 }
 
+/** YYYY-MM in Europe/Helsinki. Defaults for "this month" use this, not the server's zone. */
+export function helsinkiMonthKey(now: Date = new Date()): string {
+  return helsinkiCalendarDate(now).slice(0, 7);
+}
+
+/** YYYY-Q[1-4] in Europe/Helsinki. */
+export function helsinkiQuarterKey(now: Date = new Date()): string {
+  const [year, monthNumber] = helsinkiCalendarDate(now).split("-").map(Number);
+  return `${year}-Q${Math.ceil(monthNumber / 3)}`;
+}
+
 export function monthBoundsUtc(month: string): { start: Date; end: Date } {
   const parsed = monthSchema.parse(month);
   const [year, monthNumber] = parsed.split("-").map(Number);

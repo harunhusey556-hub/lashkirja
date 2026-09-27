@@ -22,6 +22,8 @@ import {
 } from "./mapping";
 import type { PsuContext } from "./client";
 import { withTrackedJob } from "../job-tracker";
+import { fallbackStatementMonth, statementMonthOrFallback } from "../report-calendar";
+import type { AccountSyncRow } from "../bank-sync-summary";
 
 const DEAD_SESSION_STATUS = new Set(["EXPIRED", "CLOSED", "REVOKED", "CANCELLED", "INVALID"]);
 
@@ -32,6 +34,7 @@ export interface BankSyncResult {
   skipped: number;
   statementId: string | null;
   statementIds: string[];
+  accounts: AccountSyncRow[];
 }
 
 export async function syncBankConnection(
@@ -136,7 +139,14 @@ async function syncBankConnectionUntracked(
   let skipped = 0;
   const statementIds = new Set<string>();
   const failures: string[] = [];
+  const accounts: AccountSyncRow[] = [];
   let succeeded = 0;
+
+  const accountName = (account: { label: string | null; iban: string }) => {
+    const label = account.label?.trim();
+    const iban = formatIbanDisplay(account.iban);
+    return label ? `${label} ${iban}` : iban;
+  };
 
   for (const account of inScope) {
     try {
@@ -175,6 +185,14 @@ async function syncBankConnectionUntracked(
         });
       }
       succeeded += 1;
+      accounts.push({
+        accountId: account.id,
+        name: accountName(account),
+        ok: true,
+        imported: written.imported,
+        skipped: written.skipped,
+        error: null,
+      });
     } catch (error) {
       const terminal = sessionTerminalStatus(error);
       if (terminal) {
@@ -185,6 +203,14 @@ async function syncBankConnectionUntracked(
       const message =
         error instanceof EnableBankingError ? publicBankError(error).message : "Tapahtumien haku epäonnistui.";
       failures.push(message);
+      accounts.push({
+        accountId: account.id,
+        name: accountName(account),
+        ok: false,
+        imported: 0,
+        skipped: 0,
+        error: message,
+      });
       console.error("Enable Banking account sync failed", {
         connectionId: connection.id,
         code: error instanceof EnableBankingError ? error.code : "unknown",
@@ -227,6 +253,7 @@ async function syncBankConnectionUntracked(
     skipped,
     statementId,
     statementIds: [...statementIds],
+    accounts,
   };
 }
 
@@ -304,9 +331,9 @@ async function writeTransactions(input: {
   if (fresh.length === 0) return { imported: 0, skipped, statementIds: [] };
 
   const byMonth = new Map<string, MappedBankTransaction[]>();
-  const fallbackMonth = new Date().toISOString().slice(0, 7);
+  const fallbackMonth = fallbackStatementMonth();
   for (const row of fresh) {
-    const month = row.date?.slice(0, 7) || fallbackMonth;
+    const month = row.date ? statementMonthOrFallback(row.date, fallbackMonth) : fallbackMonth;
     const bucket = byMonth.get(month) ?? [];
     bucket.push(row);
     byMonth.set(month, bucket);

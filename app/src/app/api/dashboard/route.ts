@@ -8,6 +8,7 @@ import { getBankOverview } from "@/lib/bank-accounts";
 import { buildAging, buildAgingReport, openPosition, type InvoiceStatus } from "@/lib/invoices";
 import { computeAlvReport } from "@/lib/alv";
 import { loadAlvPeriodSources } from "@/lib/alv-period";
+import { helsinkiMonthKey } from "@/lib/validation";
 
 function round2(n: number): number {
   return Math.round(n * 100) / 100;
@@ -20,7 +21,7 @@ export async function GET(req: NextRequest) {
   }
 
   const now = new Date();
-  const currentMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+  const currentMonth = helsinkiMonthKey(now);
   const monthParam = new URL(req.url).searchParams.get("month");
   const month = /^\d{4}-(0[1-9]|1[0-2])$/.test(monthParam || "")
     ? monthParam!

@@ -25,6 +25,7 @@ import { pageCacheFetchedAt, readPageCache, writePageCache } from "@/lib/page-ca
 import { usePersistedState, useScrollRestoration } from "@/lib/list-ui-state";
 
 import { formatEur, formatMonth, parseFinnishNumber } from "@/lib/format";
+import { drillFromSearch } from "@/lib/report-drill";
 import {
   coerceReceiptListCache,
   dropReceipt,
@@ -130,6 +131,23 @@ export default function KuititPage() {
       return next;
     });
   }
+
+  useEffect(() => {
+    const drill = drillFromSearch(window.location.search);
+    if (!drill.month && !drill.type && !drill.category) return;
+    if (drill.month) setMonthFilter(drill.month);
+    if (drill.type || drill.category) {
+      const next = {
+        ...emptyAdvanced,
+        type: drill.type || "",
+        category: drill.category || "",
+      };
+      setAdvanced(next);
+      setAppliedAdvanced(next);
+    }
+    // A report link sets the filter once; later edits stay on this page.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Debounce search typing
   useEffect(() => {

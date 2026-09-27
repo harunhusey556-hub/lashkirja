@@ -18,6 +18,7 @@ import type { BusinessProfile } from "@/lib/onboarding";
 import BottomSheet from "@/components/BottomSheet";
 import { apiFetch } from "@/components/clientFetch";
 import { readPageCache, writePageCache } from "@/lib/page-cache";
+import { helsinkiMonthKey } from "@/lib/validation";
 import { bumpNavEpoch } from "@/lib/screen-state";
 import {
   armNavigation,
@@ -152,8 +153,7 @@ const ONBOARDED_CACHE_KEY = "shell-onboarded";
 let warmedTabs = false;
 
 function currentMonthKey(): string {
-  const now = new Date();
-  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+  return helsinkiMonthKey();
 }
 
 /**

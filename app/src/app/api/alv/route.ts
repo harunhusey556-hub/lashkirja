@@ -6,7 +6,7 @@ import { loadAlvPeriodSources } from "@/lib/alv-period";
 import { OMAVERO_FIELDS } from "@/lib/vero/omavero-fields";
 import { noStoreJson } from "@/lib/http-security";
 import { UnauthorizedError, withErrorHandler } from "@/lib/api-errors";
-import { alvPeriodBoundsUtc, alvPeriodSchema } from "@/lib/validation";
+import { alvPeriodBoundsUtc, alvPeriodSchema, helsinkiMonthKey } from "@/lib/validation";
 
 export const GET = withErrorHandler(async (req: NextRequest) => {
   const session = await requireSession(req);
@@ -17,7 +17,7 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
   const raw = req.nextUrl.searchParams.get("period");
   const period = raw
     ? alvPeriodSchema.parse(raw)
-    : `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, "0")}`;
+    : helsinkiMonthKey(now);
   // UTC bounds: receipt dates are stored as UTC midnight, so building the
   // window in server-local time would move rows across period boundaries.
   const { start, end } = alvPeriodBoundsUtc(period);

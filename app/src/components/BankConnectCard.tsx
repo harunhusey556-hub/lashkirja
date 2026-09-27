@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import ConfirmModal from "@/components/ConfirmModal";
 import {
   apiFetch,
@@ -9,6 +10,9 @@ import {
   readJson,
   redirectToLogin,
 } from "@/components/clientFetch";
+import { consentReconnectCopy } from "@/lib/bank-consent-copy";
+import { consumeInterruptedBankAuth, leaveForBank } from "@/lib/open-bank-auth";
+import { syncOutcomeMessage, type AccountSyncRow } from "@/lib/bank-sync-summary";
 
 interface BankAccount {
   id: string;
@@ -84,6 +88,8 @@ export default function BankConnectCard({ entityType }: { entityType: string }) 
   const [busyId, setBusyId] = useState<string | null>(null);
   const [message, setMessage] = useState("");
   const [messageTone, setMessageTone] = useState<"ok" | "err">("ok");
+  const [syncAccounts, setSyncAccounts] = useState<AccountSyncRow[] | null>(null);
+  const [statementHref, setStatementHref] = useState<string | null>(null);
   const [disconnectId, setDisconnectId] = useState<string | null>(null);
 
   const loadConnections = useCallback(async () => {
@@ -121,6 +127,17 @@ export default function BankConnectCard({ entityType }: { entityType: string }) 
     } finally {
       setBanksLoading(false);
     }
+  }, []);
+
+  useEffect(() => {
+    const showInterrupted = () => {
+      if (!consumeInterruptedBankAuth()) return;
+      setMessageTone("err");
+      setMessage("Yhdistäminen keskeytyi tai pankin istunto vanheni. Voit yrittää uudelleen.");
+    };
+    showInterrupted();
+    window.addEventListener("pageshow", showInterrupted);
+    return () => window.removeEventListener("pageshow", showInterrupted);
   }, []);
 
   useEffect(() => {
@@ -181,7 +198,7 @@ export default function BankConnectCard({ entityType }: { entityType: string }) 
         }),
       });
       const data = await readJson<{ url: string }>(response, "Yhdistäminen epäonnistui");
-      window.location.assign(data.url);
+      leaveForBank(data.url);
     } catch (error: unknown) {
       if (isUnauthorized(error)) {
         redirectToLogin();
@@ -253,25 +270,25 @@ export default function BankConnectCard({ entityType }: { entityType: string }) 
       const response = await apiFetch(`/api/bank/connections/${connectionId}/sync`, {
         method: "POST",
       });
-      const data = await readJson<{ imported: number; statementId: string | null }>(
-        response,
-        "Synkronointi epäonnistui"
-      );
+      const data = await readJson<{
+        imported: number;
+        statementId: string | null;
+        accounts?: AccountSyncRow[];
+      }>(response, "Synkronointi epäonnistui");
       await loadConnections();
-      setMessageTone("ok");
-      setMessage(
-        data.imported > 0
-          ? `Haettiin ${data.imported} uutta tapahtumaa.`
-          : "Ei uusia tapahtumia."
-      );
-      if (data.statementId && data.imported > 0) {
-        window.location.assign(`/tiliotteet/${data.statementId}`);
-      }
+      const accounts = data.accounts || [];
+      const outcome = syncOutcomeMessage(accounts, data.imported);
+      setSyncAccounts(accounts);
+      setStatementHref(data.statementId ? `/tiliotteet/${data.statementId}` : null);
+      setMessageTone(outcome.tone);
+      setMessage(outcome.text);
     } catch (error: unknown) {
       if (isUnauthorized(error)) {
         redirectToLogin();
         return;
       }
+      setSyncAccounts(null);
+      setStatementHref(null);
       setMessageTone("err");
       setMessage(errorMessage(error, "Synkronointi epäonnistui"));
       await loadConnections().catch(() => undefined);
@@ -337,10 +354,8 @@ export default function BankConnectCard({ entityType }: { entityType: string }) 
       ) : (
         <>
           {connections.map((connection) => {
-            const needsReconnect =
-              connection.status === "expired" ||
-              connection.status === "error" ||
-              connection.status === "revoked";
+            const reconnect = consentReconnectCopy(connection);
+            const needsReconnect = reconnect !== null;
             const canSync = connection.status === "active";
             const hasScope = connection.accounts.some((account) => account.inScope);
             return (
@@ -366,12 +381,33 @@ export default function BankConnectCard({ entityType }: { entityType: string }) 
                       {connection.psuType === "business" ? "Yritystili" : "Henkilötili"}
                     </p>
                     <p className="text-xs text-warm-gray mt-1">
-                      Viimeksi haettu {formatWhen(connection.lastSuccessAt || connection.lastSyncAt)}
+                      Viimeisin onnistunut haku {formatWhen(connection.lastSuccessAt)}
                     </p>
                   </div>
                 </div>
 
-                {connection.lastError && (
+                {reconnect && (
+                    <div className="rounded-xl bg-blush/40 px-3 py-3 space-y-1" role="status">
+                      <p className="text-sm font-medium text-charcoal">Yhteys pitää yhdistää uudelleen</p>
+                      <p className="text-sm text-charcoal leading-relaxed">Syy: {reconnect.reason}</p>
+                      <p className="text-sm text-charcoal leading-relaxed">
+                        Tilit: {reconnect.accounts.length > 0 ? reconnect.accounts.join(", ") : "ei tilejä"}
+                      </p>
+                      <p className="text-xs text-warm-gray">
+                        Viimeisin onnistunut haku:{" "}
+                        {reconnect.lastSuccessAt
+                          ? formatWhen(reconnect.lastSuccessAt)
+                          : "ei vielä onnistunutta hakua"}
+                      </p>
+                      {reconnect.lastAttemptAt && (
+                        <p className="text-xs text-warm-gray">
+                          Viimeisin yritys: {formatWhen(reconnect.lastAttemptAt)}
+                        </p>
+                      )}
+                    </div>
+                  )}
+
+                {connection.lastError && connection.status === "active" && (
                   <p className="text-sm text-danger leading-relaxed" role="alert">
                     {connection.lastError}
                   </p>
@@ -559,12 +595,30 @@ export default function BankConnectCard({ entityType }: { entityType: string }) 
       )}
 
       {message && !loadFailed && (
-        <p
-          className={`text-sm leading-relaxed ${messageTone === "err" ? "text-danger" : "text-success"}`}
-          role={messageTone === "err" ? "alert" : "status"}
-        >
-          {message}
-        </p>
+        <div className="space-y-2" role={messageTone === "err" ? "alert" : "status"}>
+          <p className={`text-sm leading-relaxed ${messageTone === "err" ? "text-danger" : "text-success"}`}>
+            {message}
+          </p>
+          {syncAccounts && syncAccounts.length > 0 && (
+            <ul className="space-y-1">
+              {syncAccounts.map((account) => (
+                <li key={account.accountId} className="text-sm text-charcoal leading-relaxed">
+                  {account.name}:{" "}
+                  {account.ok
+                    ? account.imported > 0
+                      ? `${account.imported} uutta tapahtumaa`
+                      : "ei uusia tapahtumia"
+                    : `epäonnistui — ${account.error || "Tapahtumien haku epäonnistui."}`}
+                </li>
+              ))}
+            </ul>
+          )}
+          {statementHref && (
+            <Link href={statementHref} className="inline-flex text-sm font-medium text-accent">
+              Avaa tiliote
+            </Link>
+          )}
+        </div>
       )}
 
       <ConfirmModal

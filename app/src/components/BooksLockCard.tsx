@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { apiFetch, errorMessage, readJson } from "@/components/clientFetch";
 import { currentMonthKey, formatMonth } from "@/lib/format";
+import Link from "next/link";
 import { ErrorState, LoadingState } from "@/components/AsyncState";
 
 /**
@@ -10,6 +11,28 @@ import { ErrorState, LoadingState } from "@/components/AsyncState";
  * read-only, which is what a filed VAT return needs. Reopening is possible on
  * purpose - corrections happen - but it is a deliberate act.
  */
+interface PrecheckItem {
+  id: string;
+  title: string;
+  detail: string;
+  href: string;
+}
+
+interface PeriodPrecheck {
+  month: string;
+  missingDocuments: PrecheckItem[];
+  unmatchedTransactions: PrecheckItem[];
+  draftInvoices: PrecheckItem[];
+}
+
+function precheckCount(precheck: PeriodPrecheck): number {
+  return (
+    precheck.missingDocuments.length +
+    precheck.unmatchedTransactions.length +
+    precheck.draftInvoices.length
+  );
+}
+
 export default function BooksLockCard() {
   const [lockedThrough, setLockedThrough] = useState<string | null>(null);
   // null means "whatever the server says". A pending load must never overwrite
@@ -19,6 +42,7 @@ export default function BooksLockCard() {
   const [message, setMessage] = useState<string | null>(null);
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [precheck, setPrecheck] = useState<PeriodPrecheck | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -40,10 +64,18 @@ export default function BooksLockCard() {
     void load();
   }, [load]);
 
-  async function save(month: string | null) {
+  async function save(month: string | null, force = false) {
     setBusy(true);
     setMessage(null);
     try {
+      if (month && !force) {
+        const preview = await apiFetch(`/api/period-lock/precheck?month=${month}`, {
+          credentials: "include",
+        });
+        const listed = await readJson<PeriodPrecheck>(preview, "Tarkistus epäonnistui");
+        setPrecheck(listed);
+        if (precheckCount(listed) > 0) return;
+      }
       const response = await apiFetch("/api/period-lock", {
         method: "PUT",
         credentials: "include",
@@ -56,6 +88,7 @@ export default function BooksLockCard() {
       );
       setLockedThrough(data.lockedThrough);
       setChoice(null);
+      setPrecheck(null);
       setMessage(
         data.lockedThrough
           ? `Kirjanpito lukittu ${formatMonth(data.lockedThrough)} asti.`
@@ -117,7 +150,10 @@ export default function BooksLockCard() {
               aria-label="Lukitse kaudet tähän kuukauteen asti"
               className="flex-1 px-3 py-2.5 rounded-xl border border-warm-gray-light/60 bg-white text-sm"
               value={choice ?? lockedThrough ?? ""}
-              onChange={(e) => setChoice(e.target.value)}
+              onChange={(e) => {
+                setChoice(e.target.value);
+                setPrecheck(null);
+              }}
             >
               <option value="">Ei lukitusta</option>
               {options.map((option) => (
@@ -128,13 +164,33 @@ export default function BooksLockCard() {
             </select>
             <button
               type="button"
-              onClick={() => void save((choice ?? lockedThrough) || null)}
+              onClick={() => {
+                const month = (choice ?? lockedThrough) || null;
+                const acknowledged =
+                  Boolean(month) && precheck?.month === month && precheckCount(precheck) > 0;
+                void save(month, acknowledged);
+              }}
               disabled={busy}
               className="min-h-11 px-4 py-2.5 rounded-xl bg-accent text-white text-sm font-medium disabled:opacity-50"
             >
-              {busy ? "Tallennetaan…" : "Tallenna"}
+              {busy ? "Tallennetaan…" : precheck && precheckCount(precheck) > 0 ? "Lukitse silti" : "Tallenna"}
             </button>
           </div>
+
+          {precheck && (
+            <div className="space-y-3 rounded-xl bg-cream/70 px-3 py-3" role="status">
+              <p className="text-sm font-medium text-charcoal">
+                Ennen lukitusta ({formatMonth(precheck.month)})
+              </p>
+              <PrecheckList title="Puuttuvat tositteet" items={precheck.missingDocuments} empty="Ei puuttuvia tositteita." />
+              <PrecheckList
+                title="Täsmäyttämättömät tapahtumat"
+                items={precheck.unmatchedTransactions}
+                empty="Ei avoimia täsmäytyksiä."
+              />
+              <PrecheckList title="Luonnoslaskut" items={precheck.draftInvoices} empty="Ei luonnoslaskuja." />
+            </div>
+          )}
 
           {lockedThrough && (
             <button
@@ -153,6 +209,38 @@ export default function BooksLockCard() {
             </p>
           )}
         </>
+      )}
+    </div>
+  );
+}
+
+function PrecheckList({
+  title,
+  items,
+  empty,
+}: {
+  title: string;
+  items: PrecheckItem[];
+  empty: string;
+}) {
+  return (
+    <div className="space-y-1">
+      <p className="text-xs font-medium text-warm-gray">
+        {title} ({items.length})
+      </p>
+      {items.length === 0 ? (
+        <p className="text-sm text-warm-gray">{empty}</p>
+      ) : (
+        <ul className="space-y-1">
+          {items.map((item) => (
+            <li key={item.id}>
+              <Link href={item.href} className="block text-sm text-charcoal leading-relaxed">
+                <span className="font-medium">{item.title}</span>
+                <span className="text-warm-gray"> · {item.detail}</span>
+              </Link>
+            </li>
+          ))}
+        </ul>
       )}
     </div>
   );
