@@ -233,7 +233,7 @@ export default function BankAccountsPage() {
     }
   }
 
-  const { profile } = useProfile();
+  const { profile, loadError: profileLoadError, retry: retryProfile } = useProfile();
 
   return (
     <>
@@ -486,10 +486,16 @@ export default function BankAccountsPage() {
             )}
           </>
         )}
-        {profile && (
-          <section id="pankkiyhteys" aria-label="Pankkiyhteys">
-            <BankConnectCard entityType={profile.entityType} />
-          </section>
+        {profileLoadError ? (
+          <ConnectionNotice
+            error={new Error(profileLoadError)}
+            fallback={profileLoadError}
+            onRetry={retryProfile}
+          />
+        ) : profile ? (
+          <BankConnectCard entityType={profile.entityType} />
+        ) : (
+          <div className="h-40 animate-pulse rounded-3xl bg-warm-gray-light/20" aria-hidden />
         )}
       </div>
 
