@@ -222,6 +222,7 @@ function pageTitle(pathname: string): string {
   if (/^\/kuitit\/[^/]+$/.test(pathname)) return "Kuitti";
   if (pathname.startsWith("/kuitit")) return "Kuitit ja laskut";
   if (pathname.startsWith("/pankkitilit")) return "Pankkitilit";
+  if (pathname === "/laskut/uusi") return "Uusi lasku";
   if (/^\/laskut\/[^/]+$/.test(pathname)) return "Lasku";
   if (pathname.startsWith("/laskut")) return "Myyntilaskut";
   if (pathname.startsWith("/asiakkaat")) return "Asiakkaat";

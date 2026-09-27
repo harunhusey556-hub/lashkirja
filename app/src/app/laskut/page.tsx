@@ -1,11 +1,10 @@
 "use client";
 
-import { Suspense, useCallback, useEffect, useRef, useState } from "react";
+import { Suspense, useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { LoadingState, SkeletonList } from "@/components/AsyncState";
 import { ConnectionNotice, EmptyState, StaleBanner } from "@/components/ScreenState";
-import { InvoiceForm, type InvoicePayload } from "@/components/invoices/InvoiceForm";
 import {
   apiFetch,
   errorMessage,
@@ -16,8 +15,7 @@ import {
 import { formatDate, formatEur } from "@/lib/format";
 
 import { INVOICE_LINKS, WorkspaceLinks, linksWithActive } from "@/components/WorkspaceLinks";
-import { Button, chipClass } from "@/components/ui";
-import { newIdempotencyKey } from "@/lib/idempotency-key";
+import { Button, buttonClass, chipClass } from "@/components/ui";
 import { pageCacheFetchedAt, readPageCache, writePageCache } from "@/lib/page-cache";
 import { isForbidden } from "@/lib/screen-state";
 import { usePersistedState, useScrollRestoration } from "@/lib/list-ui-state";
@@ -99,9 +97,6 @@ function InvoicesPageContent() {
       : readPageCache<{ invoices: InvoiceSummary[]; aging: Aging }>("invoices");
   const [invoices, setInvoices] = useState<InvoiceSummary[]>(cached?.invoices ?? []);
   const [aging, setAging] = useState<Aging | null>(cached?.aging ?? null);
-  const [customers, setCustomers] = useState<
-    Array<{ id: string; name: string; defaultPaymentTermDays: number }>
-  >([]);
   const [status, setStatus] = useState<"loading" | "ready" | "error">(
     cached ? "ready" : "loading"
   );
@@ -119,9 +114,7 @@ function InvoicesPageContent() {
   }, [statusFromUrl]);
   const [message, setMessage] = useState<string | null>(null);
   const [loadFailure, setLoadFailure] = useState<unknown>(null);
-  const [creating, setCreating] = useState(false);
   const [busy, setBusy] = useState(false);
-  const createKey = useRef(newIdempotencyKey());
 
   // `signal` is only ever passed by the mount/filter-change effect below —
   // manual call sites (retry button, post-mutation refresh) call load() with
@@ -166,39 +159,6 @@ function InvoicesPageContent() {
   }, [load]);
 
   useScrollRestoration("laskut", status === "ready");
-
-  useEffect(() => {
-    apiFetch("/api/customers", { credentials: "include" })
-      .then((response) => readJson<{ customers: typeof customers }>(response, ""))
-      .then((data) => setCustomers(data.customers ?? []))
-      .catch(() => {});
-  }, []);
-
-  async function createInvoice(payload: InvoicePayload) {
-    setBusy(true);
-    setMessage(null);
-    try {
-      const response = await apiFetch("/api/invoices", {
-        method: "POST",
-        credentials: "include",
-        headers: {
-          "Content-Type": "application/json",
-          "Idempotency-Key": createKey.current,
-        },
-        body: JSON.stringify(payload),
-      });
-      const data = await readJson<{ invoice: InvoiceSummary }>(response, "Laskun luonti epäonnistui");
-      createKey.current = newIdempotencyKey();
-      setCreating(false);
-      setMessage(`Lasku ${data.invoice.number} luotiin luonnoksena.`);
-      await load();
-    } catch (error) {
-      if (isUnauthorized(error)) redirectToLogin();
-      throw error;
-    } finally {
-      setBusy(false);
-    }
-  }
 
   async function runBankMatch() {
     setBusy(true);
@@ -264,40 +224,23 @@ function InvoicesPageContent() {
           </p>
         )}
 
-        {creating ? (
-          <section className="bg-white rounded-3xl border border-warm-gray-light/20 shadow-sm p-6 space-y-4">
-            <p className="text-base font-medium text-charcoal">Uusi lasku</p>
-            {customers.length === 0 ? (
-              <p className="text-sm text-warm-gray">
-                Lisää ensin asiakas <Link className="text-accent" href="/asiakkaat">Asiakkaat</Link>-sivulla.
-              </p>
-            ) : (
-              <InvoiceForm
-                customers={customers}
-                submitLabel="Luo lasku"
-                busy={busy}
-                initial={customerFilter ? { customerId: customerFilter } : undefined}
-                onSubmit={createInvoice}
-                onCancel={() => setCreating(false)}
-              />
-            )}
-          </section>
-        ) : (
-          <div className="flex gap-3">
-            <Button type="button" className="flex-1" onClick={() => setCreating(true)}>
-              Uusi lasku
-            </Button>
-            <Button
-              type="button"
-              variant="secondary"
-              onClick={() => void runBankMatch()}
-              busy={busy}
-              busyLabel="Kohdistetaan…"
-            >
-              Kohdista maksut
-            </Button>
-          </div>
-        )}
+        <div className="flex gap-3">
+          <Link
+            href={customerFilter ? `/laskut/uusi?customerId=${encodeURIComponent(customerFilter)}` : "/laskut/uusi"}
+            className={`${buttonClass()} flex-1`}
+          >
+            Uusi lasku
+          </Link>
+          <Button
+            type="button"
+            variant="secondary"
+            onClick={() => void runBankMatch()}
+            busy={busy}
+            busyLabel="Kohdistetaan…"
+          >
+            Kohdista maksut
+          </Button>
+        </div>
 
         <div className="flex gap-2 overflow-x-auto scrollbar-none">
           {FILTERS.map((entry) => (

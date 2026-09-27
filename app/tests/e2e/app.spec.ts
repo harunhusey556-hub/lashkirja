@@ -92,7 +92,7 @@ test("invoice goes from draft to paid", async ({ page }) => {
   await expect(page.getByText("E2E Asiakas")).toBeVisible();
 
   await page.goto("/laskut");
-  await page.getByRole("button", { name: "Uusi lasku" }).click();
+  await page.getByRole("link", { name: "Uusi lasku" }).click();
   await page.getByLabel("Asiakas").selectOption({ label: "E2E Asiakas" });
   await page.getByLabel("Rivin 1 kuvaus").fill("Ripsienpidennys");
   await page.getByLabel("Rivin 1 määrä").fill("1");
@@ -143,7 +143,7 @@ test("an invoice can be downloaded as a PDF", async ({ page, context }) => {
   await page.getByRole("button", { name: "Lisää asiakas" }).click();
 
   await page.goto("/laskut");
-  await page.getByRole("button", { name: "Uusi lasku" }).click();
+  await page.getByRole("link", { name: "Uusi lasku" }).click();
   await page.getByLabel("Asiakas").selectOption({ label: "PDF Asiakas" });
   await page.getByLabel("Rivin 1 kuvaus").fill("Ripsienpidennys");
   await page.getByLabel("Rivin 1 hinta").fill("100");
@@ -201,7 +201,7 @@ test("closing the books makes an earlier period read-only", async ({ page }) => 
   await page.getByRole("button", { name: "Lisää asiakas" }).click();
 
   await page.goto("/laskut");
-  await page.getByRole("button", { name: "Uusi lasku" }).click();
+  await page.getByRole("link", { name: "Uusi lasku" }).click();
   await page.getByLabel("Asiakas").selectOption({ label: "Lukko Asiakas" });
   await page.getByLabel("Rivin 1 kuvaus").fill("Lukittu kausi");
   await page.getByLabel("Rivin 1 hinta").fill("50");
