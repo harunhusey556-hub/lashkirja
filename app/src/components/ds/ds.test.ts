@@ -22,30 +22,46 @@ describe("design system components", () => {
     expect(out).toContain(">Myynti</h1>");
   });
 
-  it("ListRow with href uses a named stretched link and never nests the action inside it", () => {
+  it("ActionPill keeps its 36px visual height but its hit area is stretched to at least 44px", () => {
+    // eslint-disable-next-line react/no-children-prop -- non-JSX createElement call; ActionPill's `children` is a required prop, so createElement's typing needs it in the props object rather than as a rest arg.
+    const out = html(createElement(ActionPill, { href: "/x", children: "Toiminto" }));
+    expect(out).toContain("min-h-9");
+    expect(out).toContain("before:absolute");
+    expect(out).toContain("before:inset-x-0");
+    expect(out).toContain("before:-inset-y-1");
+  });
+
+  it("ListRow with href composes a full accessible name and keeps the trailing action out of the hidden block", () => {
     const out = html(createElement(ListRow, {
       title: "Anna Asiakas",
       amount: "602,40 €",
       secondary: "Lasku 2",
       href: "/laskut/2",
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- createElement cannot type a required `children` prop supplied via rest args (not the props object); mirrors JSX at runtime, test-file-only.
-      trailing: createElement(ActionPill, { href: "/laskut/2?toiminto=muistutus" } as any, "Muistuta"),
+      // eslint-disable-next-line react/no-children-prop -- see ActionPill test above.
+      trailing: createElement(ActionPill, { href: "/laskut/2?toiminto=muistutus", children: "Muistuta" }),
     }));
-    expect(out).toContain('aria-label="Anna Asiakas"');
+    expect(out).toContain('aria-label="Anna Asiakas, 602,40 €, Lasku 2"');
     const firstLinkEnd = out.indexOf("</a>");
     expect(out.indexOf("Muistuta")).toBeGreaterThan(firstLinkEnd);
     expect(out).toContain("row-link");
+
+    // The trailing action pill must stay outside any aria-hidden ancestor: the last aria-hidden="true"
+    // block in the row (the visible text) closes before "Muistuta" appears.
+    const lastHiddenAttr = out.lastIndexOf('aria-hidden="true"');
+    const hiddenBlockCloses = out.indexOf("</span>", lastHiddenAttr);
+    expect(out.indexOf("Muistuta")).toBeGreaterThan(hiddenBlockCloses);
   });
 
-  it("ListRow without href or onClick is not interactive", () => {
+  it("ListRow without href or onClick is not interactive and is never aria-hidden", () => {
     const out = html(createElement(ListRow, { title: "Elisa Oyj", amount: "−29,90 €" }));
     expect(out).not.toContain("<a");
     expect(out).not.toContain("<button");
+    expect(out).not.toContain('aria-hidden="true"');
   });
 
   it("StatusTag shows its words", () => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- see ActionPill call above.
-    expect(html(createElement(StatusTag, { tone: "danger" } as any, "Myöhässä"))).toContain("Myöhässä");
+    // eslint-disable-next-line react/no-children-prop -- see ActionPill test above.
+    expect(html(createElement(StatusTag, { tone: "danger", children: "Myöhässä" }))).toContain("Myöhässä");
   });
 
   it("FilterChips marks exactly the selected chip pressed and shows counts", () => {
@@ -62,8 +78,8 @@ describe("design system components", () => {
   });
 
   it("Section shows its title and wraps rows in one card", () => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- see ActionPill call above.
-    const out = html(createElement(Section, { title: "Myöhässä", count: 1 } as any, createElement("div", null, "rivi")));
+    // eslint-disable-next-line react/no-children-prop -- see ActionPill test above.
+    const out = html(createElement(Section, { title: "Myöhässä", count: 1, children: createElement("div", null, "rivi") }));
     expect(out).toContain(">Myöhässä</h2>");
     expect(out).toContain("rounded-card");
   });

@@ -7,6 +7,18 @@ export function ListRow({ title, amount, amountTone = "default", secondary, trai
   title: string; amount?: ReactNode; amountTone?: keyof typeof AMOUNT_TONE; secondary?: ReactNode;
   trailing?: ReactNode; leading?: ReactNode; href?: string; onClick?: () => void; ariaLabel?: string;
 }) {
+  const interactive = Boolean(href || onClick);
+  // The overlay link/button below needs one accessible name that actually distinguishes financial rows —
+  // the title alone is not unique (many rows share a customer name), and it's exactly the amount/status
+  // that tells rows apart. Compose it from the visible parts that are plain strings. A `ReactNode` amount
+  // or secondary (e.g. a formatted element, not a bare string) is skipped here, so callers MUST pass
+  // `ariaLabel` explicitly whenever amount or secondary is not a plain string.
+  const composedLabel =
+    ariaLabel ??
+    [title, typeof amount === "string" ? amount : null, typeof secondary === "string" ? secondary : null]
+      .filter((part): part is string => Boolean(part))
+      .join(", ");
+
   const body = (
     <>
       {leading ? (
@@ -15,13 +27,17 @@ export function ListRow({ title, amount, amountTone = "default", secondary, trai
         </span>
       ) : null}
       <span className="pointer-events-none min-w-0 flex-1">
-        <span className="flex items-baseline justify-between gap-3 text-[15px] font-medium text-ink">
+        {/* Hidden from screen readers while the row is interactive: this text is already the overlay
+            link/button's accessible name above, and linear reading would otherwise announce it twice. */}
+        <span aria-hidden={interactive || undefined} className="flex items-baseline justify-between gap-3 text-[15px] font-medium text-ink">
           <span className="min-w-0 truncate">{title}</span>
           {amount !== undefined ? <span className={`shrink-0 tabular-nums ${AMOUNT_TONE[amountTone]}`}>{amount}</span> : null}
         </span>
         {secondary || trailing ? (
           <span className="mt-0.5 flex items-center justify-between gap-3">
-            <span className="min-w-0 truncate text-[13px] text-ink-2">{secondary}</span>
+            <span aria-hidden={interactive || undefined} className="min-w-0 truncate text-[13px] text-ink-2">{secondary}</span>
+            {/* trailing (e.g. an ActionPill) stays outside the aria-hidden text above: it is its own
+                interactive control and must remain reachable and named for assistive tech. */}
             {trailing ? <span className="pointer-events-auto relative z-10 shrink-0">{trailing}</span> : null}
           </span>
         ) : null}
@@ -32,7 +48,7 @@ export function ListRow({ title, amount, amountTone = "default", secondary, trai
   if (href) {
     return (
       <div className={row}>
-        <Link href={href} aria-label={ariaLabel ?? title} className="row-link active-press absolute inset-0" />
+        <Link href={href} aria-label={composedLabel} className="row-link active-press absolute inset-0" />
         {body}
       </div>
     );
@@ -40,7 +56,7 @@ export function ListRow({ title, amount, amountTone = "default", secondary, trai
   if (onClick) {
     return (
       <div className={row}>
-        <button type="button" onClick={onClick} aria-label={ariaLabel ?? title} className="row-link active-press absolute inset-0" />
+        <button type="button" onClick={onClick} aria-label={composedLabel} className="row-link active-press absolute inset-0" />
         {body}
       </div>
     );

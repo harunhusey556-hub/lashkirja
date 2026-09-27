@@ -1,5 +1,7 @@
 import type { ReactNode } from "react";
 
+// Section already renders one bordered, rounded card around its children below — never nest Card or
+// SummaryCard inside it, or you get a card-in-card.
 export function Section({ title, count, action, children, className = "" }: {
   title?: string; count?: number; action?: ReactNode; children: ReactNode; className?: string;
 }) {
