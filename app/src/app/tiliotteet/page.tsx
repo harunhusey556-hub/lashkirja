@@ -37,7 +37,6 @@ export default function TiliotteetPage() {
     () => readPageCache<StatementData[]>("statements") ?? []
   );
   const [uploading, setUploading] = useState(false);
-  const [bankSyncing, setBankSyncing] = useState(false);
   const [uploadMsg, setUploadMsg] = useState("");
   const [loading, setLoading] = useState(
     () => readPageCache<StatementData[]>("statements") === null
@@ -117,60 +116,6 @@ export default function TiliotteetPage() {
     };
   }, []);
 
-  async function handleBankSync() {
-    if (bankSyncing || uploading) return;
-    setBankSyncing(true);
-    setUploadMsg("Haetaan tapahtumia pankista...");
-    try {
-      const listResponse = await apiFetch("/api/bank/connections");
-      const list = await readJson<{
-        ready?: boolean;
-        connections?: Array<{
-          id: string;
-          status: string;
-          accounts: Array<{ inScope: boolean }>;
-        }>;
-      }>(listResponse, "Pankkiyhteyksien lataus epäonnistui");
-      const targets = (list.connections || []).filter(
-        (connection) =>
-          connection.status === "active" &&
-          connection.accounts.some((account) => account.inScope)
-      );
-      if (!list.ready || targets.length === 0) {
-        setUploadMsg("");
-        router.push("/pankki");
-        return;
-      }
-      let imported = 0;
-      let statementId: string | null = null;
-      for (const connection of targets) {
-        const response = await apiFetch(`/api/bank/connections/${connection.id}/sync`, {
-          method: "POST",
-        });
-        const data = await readJson<{ imported: number; statementId: string | null }>(
-          response,
-          "Pankin haku epäonnistui"
-        );
-        imported += data.imported;
-        if (data.statementId) statementId = data.statementId;
-      }
-      if (statementId && imported > 0) {
-        router.push(`/tiliotteet/${statementId}`);
-        return;
-      }
-      setUploadMsg(imported > 0 ? `${imported} uutta tapahtumaa` : "Ei uusia tapahtumia");
-      await loadStatements();
-    } catch (error: unknown) {
-      if (isUnauthorized(error)) {
-        redirectToLogin();
-        return;
-      }
-      setUploadMsg(`Virhe: ${errorMessage(error, "Pankin haku epäonnistui")}`);
-    } finally {
-      setBankSyncing(false);
-    }
-  }
-
   async function handleUpload(file: File) {
     setUploading(true);
     setUploadMsg("Käsitellään tiliotetta...");
@@ -248,20 +193,27 @@ export default function TiliotteetPage() {
       <div className="space-y-8 pb-6">
         <header className="space-y-2">
           <p className="text-sm text-warm-gray leading-relaxed">
-            Tuo tiliote tiedostona tai hae tapahtumat yhdistetystä pankista.
+            Tapahtumat tulevat yhdistetystä pankista. Tiedoston tuonti on alla, jos tarvitset sen.
           </p>
           <WorkspaceLinks items={linksWithActive(BANK_LINKS, "/tiliotteet")} />
         </header>
 
-        <section className="bg-white rounded-3xl border border-warm-gray-light/20 shadow-sm p-6 space-y-5">
-          <div className="space-y-1">
-            <p className="text-base font-medium text-charcoal">
-              Uusi tiliote
-            </p>
-            <p className="text-sm text-warm-gray leading-relaxed">
-              PDF, XML, XLSX tai CSV
-            </p>
-          </div>
+        <Link
+          href="/pankki"
+          className="flex items-center justify-between gap-3 bg-charcoal text-white rounded-3xl px-5 py-4 active-press"
+        >
+          <span>
+            <span className="block text-sm font-medium">Hae tapahtumat</span>
+            <span className="block text-xs text-white/70 mt-0.5">Tilit ja synkronointi</span>
+          </span>
+          <span aria-hidden>→</span>
+        </Link>
+
+        <details className="bg-white rounded-3xl border border-warm-gray-light/20 shadow-sm p-6 space-y-5">
+          <summary className="text-sm font-medium text-charcoal cursor-pointer min-h-11">
+            Tuo tiliote tiedostona
+          </summary>
+          <p className="text-sm text-warm-gray leading-relaxed pt-3">PDF, XML, XLSX tai CSV</p>
 
           {accounts.length > 0 && (
             <div className="space-y-1.5">
@@ -288,24 +240,14 @@ export default function TiliotteetPage() {
             </div>
           )}
 
-          <div className="grid grid-cols-1 gap-3">
-            <button
-              type="button"
-              onClick={() => void pickStatementFile()}
-              disabled={uploading || bankSyncing}
-              className="touch-target w-full min-h-12 rounded-2xl bg-accent text-sm font-medium text-white transition-colors hover:bg-accent-dark disabled:opacity-50 active-press"
-            >
-              {uploading ? "Käsitellään..." : "Tuo tiedosto"}
-            </button>
-            <button
-              type="button"
-              onClick={() => void handleBankSync()}
-              disabled={uploading || bankSyncing}
-              className="touch-target w-full min-h-12 rounded-2xl border border-warm-gray-light text-sm font-medium text-charcoal transition-colors hover:bg-cream disabled:opacity-50"
-            >
-              {bankSyncing ? "Haetaan pankista..." : "Hae pankista"}
-            </button>
-          </div>
+          <button
+            type="button"
+            onClick={() => void pickStatementFile()}
+            disabled={uploading}
+            className="touch-target w-full min-h-12 rounded-2xl border border-warm-gray-light text-sm font-medium text-charcoal transition-colors hover:bg-cream disabled:opacity-50 active-press"
+          >
+            {uploading ? "Käsitellään..." : "Tuo tiedosto"}
+          </button>
 
           <input
             ref={fileInputRef}
@@ -332,7 +274,7 @@ export default function TiliotteetPage() {
               role={uploadMsg.startsWith("Virhe") ? "alert" : "status"}
               aria-live="polite"
             >
-              {(uploading || bankSyncing) && (
+              {uploading && (
                 <span
                   className="inline-block w-4 h-4 border-2 border-accent border-t-transparent rounded-full animate-spin motion-reduce:animate-none mr-2 align-middle"
                   aria-hidden="true"
@@ -341,7 +283,7 @@ export default function TiliotteetPage() {
               {uploadMsg}
             </p>
           )}
-        </section>
+        </details>
 
         {months.length > 1 && (
           <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3 px-1">

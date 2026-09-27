@@ -235,7 +235,7 @@ function pageTitle(pathname: string): string {
   if (pathname.startsWith("/ostolaskut")) return "Ostolaskut";
   if (pathname.startsWith("/toistuvat")) return "Toistuvat laskut";
   if (/^\/tiliotteet\/[^/]+$/.test(pathname)) return "Tiliote";
-  if (pathname.startsWith("/tiliotteet")) return "Tiliotteet";
+  if (pathname.startsWith("/tiliotteet")) return "Tapahtumat";
   if (pathname.startsWith("/alv-raportti")) return "ALV-raportti";
   if (pathname.startsWith("/asetukset/profiili")) return "Profiili";
   if (pathname.startsWith("/asetukset/yritys")) return "Yritysmuoto & ALV";

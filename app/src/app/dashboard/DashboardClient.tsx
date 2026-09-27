@@ -403,13 +403,13 @@ export default function DashboardClient({
           </Link>
           
           <Link
-            href="/tiliotteet"
+            href="/pankki"
             className="flex flex-col items-center justify-center gap-2 bg-white border-2 border-charcoal/5 text-charcoal rounded-3xl p-5 hover:bg-slate-50 transition-all hover:-translate-y-1 hover:shadow-lg active-press"
           >
             <div className="w-10 h-10 rounded-full bg-charcoal/5 flex items-center justify-center">
-              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-5 h-5"><path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5M16.5 12 12 16.5m0 0L7.5 12m4.5 4.5V3" /></svg>
+              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-5 h-5"><path strokeLinecap="round" strokeLinejoin="round" d="M3 10h18M5 10V8.5L12 4l7 4.5V10M6 10v7m4-7v7m4-7v7m4-7v7M4 20h16" /></svg>
             </div>
-            <span className="text-sm font-medium">Tiliote</span>
+            <span className="text-sm font-medium">Pankki</span>
           </Link>
         </div>
         

@@ -56,8 +56,8 @@ export function matchStatusReply(input: {
 }): string | null {
   if (input.totalTransactions === 0) {
     return input.english
-      ? "There are no bank transactions yet. Import a statement from the Pankki tab. That is not the same as everything being matched."
-      : "Tiliotteen tapahtumia ei ole vielä. Tuo tiliote Pankki-välilehdeltä. Tämä ei tarkoita, että kaikki olisi täsmäytetty.";
+      ? "There are no bank transactions yet. Open the Pankki tab to sync the linked bank. A statement file can still be imported there. That is not the same as everything being matched."
+      : "Pankkitapahtumia ei ole vielä. Avaa Pankki-välilehti ja hae tapahtumat. Tiliotteen voi yhä tuoda sieltä. Tämä ei tarkoita, että kaikki olisi täsmäytetty.";
   }
   if (input.unmatched === 0) {
     return input.english

@@ -38,7 +38,7 @@ export const INVOICE_LINKS = [
 
 export const BANK_LINKS = [
   { href: "/pankkitilit", label: "Tilit" },
-  { href: "/tiliotteet", label: "Tiliotteet" },
+  { href: "/tiliotteet", label: "Tapahtumat" },
   { href: "/pankki", label: "Pankki" },
 ] as const;
 

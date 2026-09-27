@@ -239,7 +239,7 @@ export default function BankAccountsPage() {
         <header className="flex items-start justify-between gap-3">
           <div className="space-y-2 min-w-0">
             <p className="text-sm text-warm-gray leading-relaxed">
-              Lisää jokainen pankkitili ja seuraa kuukausien loppusaldoja.
+              Kirjanpidon tilit ja kuukausien loppusaldot. Yhdistetty pankki on Pankki-välilehdellä.
             </p>
             <WorkspaceLinks items={linksWithActive(BANK_LINKS, "/pankkitilit")} />
           </div>
