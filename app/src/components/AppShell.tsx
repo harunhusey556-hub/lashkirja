@@ -523,7 +523,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     <AppLock>
     {authState.status === "ready" && (
       <aside className="app-sidebar" aria-hidden={false}>
-        <p className="px-4 pb-2 pt-4 text-xs font-semibold uppercase tracking-wide text-warm-gray">LashKirja</p>
+        <p className="px-4 pb-3 pt-5 text-[17px] font-bold tracking-[-0.01em] text-ink">LashKirja</p>
         <div className="px-2 pb-3">
           <button
             type="button"
