@@ -9,6 +9,7 @@ import { resolveUserUploadPath } from "./storage";
 import { RECEIPT_PHASE } from "./screen-state";
 import { findActiveVendorRule } from "./vendor-rules";
 import { isStuckRunning, runAfterResponse } from "./job-tracker";
+import { noteJobFailure } from "./observe";
 
 type Extractor = typeof extractReceipt;
 
@@ -140,6 +141,7 @@ export async function processDocumentJob(jobId: string): Promise<void> {
 
   const payload = parsePayload(job.payload);
   if (!payload) {
+    noteJobFailure(job.kind, "Työn tiedot puuttuvat");
     await prisma.backgroundJob.update({
       where: { id: jobId },
       data: {
@@ -208,6 +210,7 @@ export async function processDocumentJob(jobId: string): Promise<void> {
       error instanceof ReceiptExtractionError
         ? error.message
         : "Tiedoston käsittely epäonnistui";
+    noteJobFailure(job.kind, message);
     await prisma.backgroundJob.updateMany({
       where: { id: jobId, status: "running" },
       data: {

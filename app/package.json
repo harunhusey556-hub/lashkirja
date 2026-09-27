@@ -12,6 +12,7 @@
     "test": "vitest run",
     "test:parsers": "tsx scripts/test-parsers.ts",
     "test:e2e": "npm run build && playwright test",
+    "test:e2e:viewport": "playwright test tests/e2e/viewport.spec.ts",
     "check": "npm run lint && npm run typecheck && npm run test:all && npm run build",
     "ios:sync": "npx cap sync ios",
     "ios:open": "npx cap open ios",

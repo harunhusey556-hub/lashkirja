@@ -717,3 +717,10 @@ body.signing-out {
     transition: none !important;
   }
 }
+
+/* A backgrounded document stops motion. Polling stops in page-activity.ts. */
+html[data-page-hidden] *,
+html[data-page-hidden] *::before,
+html[data-page-hidden] *::after {
+  animation-play-state: paused !important;
+}

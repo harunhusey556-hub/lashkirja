@@ -33,6 +33,12 @@ export default defineConfig({
       // with that phone's viewport, touch, and user agent.
       use: { ...devices["iPhone 13"], browserName: "chromium" },
     },
+    {
+      name: "mobile-webkit",
+      // Real WebKit at an iPhone size. This is still not a WKWebView IPA
+      // smoke: CI has no notch, home indicator, or system keyboard.
+      use: { ...devices["iPhone 13"], browserName: "webkit" },
+    },
   ],
   webServer: externalBaseUrl
     ? undefined

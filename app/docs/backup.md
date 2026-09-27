@@ -54,3 +54,11 @@ sqlite3 data/backups/lashkirja-YYYY-MM-DD-HHMMSS/lashkirja.db "PRAGMA integrity_
 ```
 
 A restore is the snapshot database plus its `uploads/` directory, put back as `data/lashkirja.db` and `data/uploads/`. Do not restore a `-wal` file next to this snapshot. The snapshot is already consistent.
+
+Prove a snapshot before you need it:
+
+```bash
+bash scripts/restore-drill.sh data/backups/lashkirja-YYYY-MM-DD-HHMMSS
+```
+
+The script copies the snapshot into a fresh temporary directory, runs `PRAGMA integrity_check`, and checks the manifest hash and upload count. `LASHKIRJA_RESTORE_SQL` can require a known row. `LASHKIRJA_RESTORE_CLEAN=1` deletes the temporary copy after a successful check. See `app/docs/deploy-rollback.md` for when to point `DATABASE_URL` at that copy.

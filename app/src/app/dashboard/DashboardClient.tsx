@@ -16,6 +16,7 @@ import { formatEur } from "@/lib/format";
 import { alvDrillHref, receiptDrillHref, statementDrillHref } from "@/lib/report-drill";
 import { helsinkiMonthKey } from "@/lib/validation";
 import { pageCacheFetchedAt, readPageCache, writePageCache } from "@/lib/page-cache";
+import { pollDelay, syncPageHiddenFlag } from "@/lib/page-activity";
 interface DashboardData {
   firstName: string;
   month: string;
@@ -89,12 +90,26 @@ export default function DashboardClient({
   const [refreshFailed, setRefreshFailed] = useState<unknown>(null);
   const [loadAttempt, setLoadAttempt] = useState(0);
 
-  // Poll for updates every 30 seconds to catch background cron job changes
+  // Poll while the page is visible. A hidden document does not keep asking.
   useEffect(() => {
-    const interval = setInterval(() => {
-      setLoadAttempt((a) => a + 1);
-    }, 30000);
-    return () => clearInterval(interval);
+    let interval = 0;
+    const arm = () => {
+      window.clearInterval(interval);
+      const delay = pollDelay(document.visibilityState, 30_000);
+      syncPageHiddenFlag(delay == null);
+      if (delay == null) return;
+      interval = window.setInterval(() => setLoadAttempt((a) => a + 1), delay);
+    };
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") setLoadAttempt((a) => a + 1);
+      arm();
+    };
+    arm();
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      window.clearInterval(interval);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
   }, []);
 
   useEffect(() => {

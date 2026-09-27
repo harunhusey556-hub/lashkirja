@@ -247,6 +247,48 @@ export default function KuititPage() {
 
   useScrollRestoration("kuitit", !loadingList);
 
+  useEffect(() => {
+    if (!expandedId || document.visibilityState === "hidden") return;
+    let cancelled = false;
+    apiFetch(`/api/receipts/${expandedId}`)
+      .then((response) =>
+        readJson<{ receipt?: { match?: ReceiptMatchData } }>(
+          response,
+          "Täsmäytyksen lataus epäonnistui"
+        )
+      )
+      .then((data) => {
+        if (cancelled || !data.receipt?.match) return;
+        const match = { ...data.receipt.match, candidatesDeferred: false };
+        setListResult((prev) => {
+          if (!prev) return prev;
+          return {
+            ...prev,
+            receipts: prev.receipts.map((item) =>
+              item.id === expandedId ? { ...item, match } : item
+            ),
+          };
+        });
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setListResult((prev) => {
+          if (!prev) return prev;
+          return {
+            ...prev,
+            receipts: prev.receipts.map((item) =>
+              item.id === expandedId
+                ? { ...item, match: { ...item.match, candidatesDeferred: false } }
+                : item
+            ),
+          };
+        });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [expandedId]);
+
   const activeChips = useMemo(() => {
     const chips: { key: string; label: string; clear: () => void }[] = [];
     if (monthFilter) {

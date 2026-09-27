@@ -18,6 +18,8 @@ export interface ReceiptMatchData {
   status: "linked" | "suggested" | "unlinked";
   suggestedTransaction?: BankTxMatch | null;
   matchCandidates?: BankTxMatch[];
+  /** List GET does not score candidates. The open row loads them. */
+  candidatesDeferred?: boolean;
 }
 
 
@@ -128,6 +130,13 @@ export default function ReceiptMatchPanel({
   }
 
   const candidates = match.matchCandidates ?? [];
+  if (match.candidatesDeferred && candidates.length === 0) {
+    return (
+      <p className="text-xs text-warm-gray bg-cream/60 rounded-xl px-3 py-2">
+        Ladataan ehdotuksia…
+      </p>
+    );
+  }
   if (candidates.length === 0) {
     return (
       <p className="text-xs text-warm-gray bg-cream/60 rounded-xl px-3 py-2">

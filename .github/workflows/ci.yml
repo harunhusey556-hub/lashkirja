@@ -62,6 +62,13 @@ jobs:
       - name: Production build
         run: npm run build
 
+      # Phone viewport on Chromium and WebKit. Not a WKWebView IPA smoke.
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium webkit
+
+      - name: Playwright viewport
+        run: npm run test:e2e:viewport
+
   lint:
     name: Lint
     runs-on: ubuntu-latest

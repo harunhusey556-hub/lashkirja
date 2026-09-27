@@ -9,10 +9,25 @@
  * Deliberately not persisted: bookkeeping data has no business surviving in
  * storage after the tab is closed.
  */
+/** A copy older than this is treated as missing. The screen refetches. */
+export const PAGE_CACHE_TTL_MS = 5 * 60 * 1000;
+/** Bound the in-memory map so a long session cannot keep every list forever. */
+export const PAGE_CACHE_MAX_ENTRIES = 40;
+
 const cache = new Map<string, unknown>();
 const fetchedAt = new Map<string, number>();
 
-export function readPageCache<T>(key: string): T | null {
+export function pageCacheSize(): number {
+  return cache.size;
+}
+
+export function readPageCache<T>(key: string, now = Date.now()): T | null {
+  const at = fetchedAt.get(key);
+  if (at == null) return null;
+  if (now - at > PAGE_CACHE_TTL_MS) {
+    dropKey(key);
+    return null;
+  }
   return (cache.get(key) as T | undefined) ?? null;
 }
 
@@ -20,9 +35,25 @@ export function pageCacheFetchedAt(key: string): number | null {
   return fetchedAt.get(key) ?? null;
 }
 
+function evictToLimit(): void {
+  while (cache.size > PAGE_CACHE_MAX_ENTRIES) {
+    let oldestKey: string | null = null;
+    let oldest = Infinity;
+    for (const [key, at] of fetchedAt) {
+      if (at < oldest) {
+        oldest = at;
+        oldestKey = key;
+      }
+    }
+    if (!oldestKey) break;
+    dropKey(oldestKey);
+  }
+}
+
 export function writePageCache<T>(key: string, value: T, at = Date.now()): void {
   cache.set(key, value);
   fetchedAt.set(key, at);
+  evictToLimit();
 }
 
 function dropKey(key: string): void {

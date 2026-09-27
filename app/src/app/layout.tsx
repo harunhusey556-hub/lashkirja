@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import { Inter } from "next/font/google";
+import ClientErrorReporter from "@/components/ClientErrorReporter";
 import ShellGate from "@/components/ShellGate";
 import { UsableArea } from "@/components/UsableArea";
 import "./globals.css";
@@ -145,6 +146,7 @@ export default function RootLayout({
     <html lang="fi">
       <body className={`${inter.className} bg-cream`}>
         <UsableArea />
+        <ClientErrorReporter />
         <TouchActiveShim />
         <ShellGate>{children}</ShellGate>
       </body>

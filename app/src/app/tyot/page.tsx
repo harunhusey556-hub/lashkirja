@@ -5,6 +5,7 @@ import { useCallback, useEffect, useState } from "react";
 import { apiFetch, errorMessage, isUnauthorized, readJson, redirectToLogin } from "@/components/clientFetch";
 import { Button } from "@/components/ui";
 import { jobKindLabel, jobStatusLabel, workKindLabel } from "@/lib/job-labels";
+import { pollDelay, syncPageHiddenFlag } from "@/lib/page-activity";
 
 interface JobRow {
   id: string;
@@ -66,10 +67,26 @@ export default function TyotPage() {
   }, []);
 
   useEffect(() => {
-    const timer = setInterval(() => {
-      void load();
-    }, 4000);
-    return () => clearInterval(timer);
+    let timer = 0;
+    const arm = () => {
+      window.clearInterval(timer);
+      const delay = pollDelay(document.visibilityState, 4000);
+      syncPageHiddenFlag(delay == null);
+      if (delay == null) return;
+      timer = window.setInterval(() => {
+        void load();
+      }, delay);
+    };
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") void load();
+      arm();
+    };
+    arm();
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
   }, [load]);
 
   useEffect(() => {

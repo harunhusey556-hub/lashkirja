@@ -117,4 +117,38 @@ describe("backup-db.sh", () => {
       holder.kill("SIGTERM");
     }
   });
+
+  it("restores the snapshot database and uploads into a fresh directory", () => {
+    const root = mkdtempSync(path.join(tmpdir(), "lashkirja-restore-"));
+    const db = path.join(root, "lashkirja.db");
+    const uploads = path.join(root, "uploads");
+    const backups = path.join(root, "backups");
+    execFileSync("mkdir", ["-p", uploads]);
+    execFileSync("sqlite3", [db, "CREATE TABLE notes(body TEXT); INSERT INTO notes VALUES ('säilyy');"]);
+    writeFileSync(path.join(uploads, "kuitti.txt"), "kuitti-bytes");
+
+    execFileSync("bash", [script], {
+      env: {
+        ...process.env,
+        LASHKIRJA_DB_PATH: db,
+        LASHKIRJA_UPLOADS_DIR: uploads,
+        LASHKIRJA_BACKUP_DIR: backups,
+        LASHKIRJA_BACKUP_KEEP: "2",
+      },
+    });
+    const snapshot = execFileSync("find", [backups, "-mindepth", "1", "-maxdepth", "1", "-type", "d"], {
+      encoding: "utf8",
+    }).trim();
+    const output = execFileSync("bash", [path.join(process.cwd(), "scripts/restore-drill.sh"), snapshot], {
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        LASHKIRJA_RESTORE_SQL: "SELECT body FROM notes;",
+        LASHKIRJA_RESTORE_CLEAN: "1",
+      },
+    });
+    expect(output).toContain("integrity=ok");
+    expect(output).toContain("row=säilyy");
+    expect(output).toContain("Restore drill ok.");
+  });
 });

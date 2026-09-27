@@ -24,7 +24,7 @@ const protectedPrefixes = [
   "/bank",
 ];
 
-const PUBLIC_API_PREFIXES = ["/api/auth/", "/api/cron/"];
+const PUBLIC_API_PREFIXES = ["/api/auth/", "/api/cron/", "/api/health"];
 
 function isPublicApi(pathname: string): boolean {
   return PUBLIC_API_PREFIXES.some((prefix) => pathname.startsWith(prefix));

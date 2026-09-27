@@ -1,5 +1,6 @@
 import { after } from "next/server";
 import { prisma } from "./db";
+import { noteJobFailure } from "./observe";
 
 const STUCK_RUNNING_MS = 10 * 60 * 1000;
 
@@ -56,6 +57,7 @@ export async function withTrackedJob<T>(
   } catch (error) {
     if (jobId) {
       const message = error instanceof Error ? error.message.slice(0, 300) : "Epäonnistui";
+      noteJobFailure(meta.kind, message);
       await prisma.backgroundJob
         .update({
           where: { id: jobId },

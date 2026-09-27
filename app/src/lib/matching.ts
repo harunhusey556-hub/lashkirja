@@ -368,7 +368,14 @@ function toBankTxSummary(tx: {
   };
 }
 
-/** Match state per receipt for list/detail UI (linked, suggested, or top picks). */
+/**
+ * Match state per receipt for list/detail UI (linked, suggested, or top picks).
+ *
+ * The receipt list passes `candidates: false`. Scoring every open bank row
+ * against every row on the page is the expensive part, and the list only
+ * needs the stored link or suggestion. Opening one receipt (or expanding it)
+ * passes the default and computes that receipt's shortlist.
+ */
 export async function buildReceiptMatchViews(
   userId: string,
   receipts: Array<{
@@ -389,13 +396,17 @@ export async function buildReceiptMatchViews(
       matchReasons: string | null;
       statement: { periodMonth: string | null; fileName: string } | null;
     } | null;
-  }>
+  }>,
+  options?: { candidates?: boolean }
 ): Promise<Map<string, ReceiptMatchView>> {
   const result = new Map<string, ReceiptMatchView>();
   if (receipts.length === 0) return result;
 
+  const includeCandidates = options?.candidates !== false;
   const receiptIds = receipts.map((r) => r.id);
-  const needsCandidates = receipts.filter((r) => !r.linkedTransaction);
+  const needsCandidates = includeCandidates
+    ? receipts.filter((r) => !r.linkedTransaction)
+    : [];
 
   const [suggestedTxs, openTxs, rejections] = await Promise.all([
     prisma.transaction.findMany({
@@ -439,10 +450,12 @@ export async function buildReceiptMatchViews(
           },
         })
       : Promise.resolve([]),
-    prisma.matchRejection.findMany({
-      where: { receiptId: { in: receiptIds } },
-      select: { transactionId: true, receiptId: true },
-    }),
+    includeCandidates
+      ? prisma.matchRejection.findMany({
+          where: { receiptId: { in: receiptIds } },
+          select: { transactionId: true, receiptId: true },
+        })
+      : Promise.resolve([]),
   ]);
 
   const suggestedByReceipt = new Map(

@@ -41,11 +41,12 @@ describe("classifyConnection", () => {
 
 describe("page cache invalidation", () => {
   it("records when a copy was stored and drops related screens after a write", () => {
-    writePageCache("invoices", [1], 1_700_000_000_000);
-    writePageCache("dashboard:2026-09", { income: 1 }, 1_700_000_000_000);
-    writePageCache("receipts:all", [], 1_700_000_000_000);
-    writePageCache("profile", { email: "a@b.c" }, 1_700_000_000_000);
-    expect(pageCacheFetchedAt("invoices")).toBe(1_700_000_000_000);
+    const at = Date.now();
+    writePageCache("invoices", [1], at);
+    writePageCache("dashboard:2026-09", { income: 1 }, at);
+    writePageCache("receipts:all", [], at);
+    writePageCache("profile", { email: "a@b.c" }, at);
+    expect(pageCacheFetchedAt("invoices")).toBe(at);
 
     const removed = invalidateForMutation("/api/invoices/abc/payments");
     expect(removed).toContain("invoices");

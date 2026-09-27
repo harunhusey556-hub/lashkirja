@@ -17,6 +17,7 @@ import {
 } from "@/lib/storage";
 import { monthBoundsUtc, monthSchema } from "@/lib/validation";
 import { buildReceiptMatchViews } from "@/lib/matching";
+import { noteRequest, timeDb } from "@/lib/observe";
 import {
   noStoreJson,
   rejectCrossSite,
@@ -291,6 +292,7 @@ export async function POST(req: NextRequest) {
 }
 
 export async function GET(req: NextRequest) {
+  const started = Date.now();
   const session = await requireSession(req);
   if (!session) return noStoreJson({ error: "Ei kirjautunut" }, { status: 401 });
 
@@ -352,7 +354,7 @@ export async function GET(req: NextRequest) {
   else if (sort === "amount_asc") orderBy = { totalAmountCents: "asc" };
   else if (sort === "created_desc") orderBy = { createdAt: "desc" };
 
-  const [receipts, count] = await Promise.all([
+  const [receipts, count] = await timeDb("Receipt", "list", () => Promise.all([
     prisma.receipt.findMany({
       where,
       orderBy,
@@ -387,7 +389,7 @@ export async function GET(req: NextRequest) {
       },
     }),
     prisma.receipt.count({ where }),
-  ]);
+  ]));
 
   const matchViews = await buildReceiptMatchViews(
     session.userId!,
@@ -395,10 +397,11 @@ export async function GET(req: NextRequest) {
       ...receipt,
       totalAmount: totalAmountCents == null ? null : centsToEuros(totalAmountCents),
       linkedTransaction,
-    }))
+    })),
+    { candidates: false }
   );
 
-  return noStoreJson({
+  const response = noStoreJson({
     receipts: receipts.map(({ totalAmountCents, linkedTransaction, ...receipt }) => {
       const match = matchViews.get(receipt.id);
       return {
@@ -423,14 +426,14 @@ export async function GET(req: NextRequest) {
                 date: match.suggestedTransaction.date?.toISOString() ?? null,
               }
             : null,
-          matchCandidates: (match?.matchCandidates ?? []).map((c) => ({
-            ...c,
-            date: c.date?.toISOString() ?? null,
-          })),
+          matchCandidates: [],
+          candidatesDeferred: (match?.status ?? "unlinked") === "unlinked",
         },
       };
     }),
     count,
     truncated: count > offset + receipts.length,
   });
+  noteRequest({ route: "GET /api/receipts", status: 200, durationMs: Date.now() - started });
+  return response;
 }

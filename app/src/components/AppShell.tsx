@@ -19,6 +19,7 @@ import BottomSheet from "@/components/BottomSheet";
 import { AppLock } from "@/components/AppLock";
 import { apiFetch } from "@/components/clientFetch";
 import { readPageCache, writePageCache } from "@/lib/page-cache";
+import { syncPageHiddenFlag } from "@/lib/page-activity";
 import { helsinkiMonthKey } from "@/lib/validation";
 import { bumpNavEpoch } from "@/lib/screen-state";
 import {
@@ -500,7 +501,9 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   // does anything.
   useEffect(() => {
     const onVisibility = () => {
-      if (document.visibilityState !== "visible") return;
+      const hidden = document.visibilityState === "hidden";
+      syncPageHiddenFlag(hidden);
+      if (hidden) return;
       apiFetch("/api/auth/me", { credentials: "include" })
         .then((res) => {
           if (res.status === 401) redirectToLogin();
