@@ -83,6 +83,40 @@ function RootIcon({ id, active, className }: { id: string; active: boolean; clas
   );
 }
 
+/** Leading icons for the Lisää sheet's rows. */
+function AddSheetIcon({ id, className = "h-5 w-5" }: { id: "camera" | "file" | "invoice" | "mail"; className?: string }) {
+  if (id === "camera") {
+    return (
+      <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.75} d="M4 8.5A1.5 1.5 0 0 1 5.5 7h2l1-2h7l1 2h2A1.5 1.5 0 0 1 20 8.5v9A1.5 1.5 0 0 1 18.5 19h-13A1.5 1.5 0 0 1 4 17.5v-9Z" />
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.75} d="M12 16a3.25 3.25 0 1 0 0-6.5 3.25 3.25 0 0 0 0 6.5Z" />
+      </svg>
+    );
+  }
+  if (id === "file") {
+    return (
+      <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.75} d="M7 3.5h6.5L18 8v11.5a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V4.5a1 1 0 0 1 1-1Z" />
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.75} d="M13.5 3.5V8H18M9 12.5h6M9 15.5h4" />
+      </svg>
+    );
+  }
+  if (id === "invoice") {
+    return (
+      <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.75} d="M7 3h10v18l-2-1.4-2 1.4-2-1.4-2 1.4-2-1.4V3Z" />
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.75} d="M9.5 8h5M9.5 11.5h5M9.5 15h3" />
+      </svg>
+    );
+  }
+  return (
+    <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.75} d="M4.5 6h15a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1h-15a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1Z" />
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.75} d="m4 7 8 6 8-6" />
+    </svg>
+  );
+}
+
 type ShellUser = { userId?: string; email?: string; firstName?: string };
 
 /**
@@ -176,7 +210,9 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
   const pathname = usePathname();
   const router = useRouter();
-  const title = matchNav(pathname)?.label ?? "Koti";
+  const navEntry = matchNav(pathname);
+  const title = navEntry?.label ?? "Koti";
+  const isDetail = navEntry?.kind === "detail";
   const mainRef = useRef<HTMLElement>(null);
   const swipeLock = useRef(false);
   // Adjusting state during render is how a new pathname picks its enter
@@ -332,7 +368,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       clearInline();
       swipeLock.current = false;
     };
-  }, [canGoBack, pathname, router, back]);
+  }, [canGoBack, pathname, router, back?.href]);
 
   // UsableArea owns frame size. This only keeps a focused field inside the
   // content scroller when the keyboard changes the visual viewport.
@@ -540,10 +576,10 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         </div>
       </aside>
     )}
-    <div className="app-frame">
+    <div className="app-frame" data-tabs={isDetail ? "hidden" : undefined}>
       <UnsavedChangesHost />
       <header
-        className="app-header z-40 bg-white/90 backdrop-blur-md border-b border-warm-gray-light/30"
+        className="app-header z-40 bg-surface/90 backdrop-blur-md border-b border-line"
         onContextMenu={(event) => event.preventDefault()}
       >
         <div className="app-header-row mx-auto min-h-14 max-w-lg px-1 md:max-w-3xl">
@@ -639,33 +675,35 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
             }}
           />
 
-          <nav
-            className="app-tab-bar z-50 bg-white/95 backdrop-blur-md border-t border-warm-gray-light/40"
-            aria-label="Päävalikko"
-            onContextMenu={(event) => event.preventDefault()}
-          >
-            <div className="mx-auto flex h-[var(--app-tab-height)] max-w-lg items-stretch">
-              {tabRoots().slice(0, 2).map((item) => renderTab(item))}
-              <div className="flex min-w-0 flex-1 items-center justify-center">
-                <button
-                  type="button"
-                  onClick={() => {
-                    void hapticSelection();
-                    setAddOpenOn(pathname);
-                  }}
-                  aria-label="Lisää"
-                  aria-haspopup="dialog"
-                  aria-expanded={addOpen}
-                  className="flex h-12 w-12 items-center justify-center rounded-full bg-charcoal text-white active-press"
-                >
-                  <svg className="h-6 w-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} aria-hidden>
-                    <path strokeLinecap="round" d="M12 5v14M5 12h14" />
-                  </svg>
-                </button>
+          {!isDetail && (
+            <nav
+              className="app-tab-bar z-50 bg-surface/95 backdrop-blur-md border-t border-line"
+              aria-label="Päävalikko"
+              onContextMenu={(event) => event.preventDefault()}
+            >
+              <div className="mx-auto flex h-[var(--app-tab-height)] max-w-lg items-stretch">
+                {tabRoots().slice(0, 2).map((item) => renderTab(item))}
+                <div className="flex min-w-0 flex-1 items-center justify-center">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      void hapticSelection();
+                      setAddOpenOn(pathname);
+                    }}
+                    aria-label="Lisää"
+                    aria-haspopup="dialog"
+                    aria-expanded={addOpen}
+                    className="flex h-12 w-12 items-center justify-center rounded-full bg-charcoal text-white active-press"
+                  >
+                    <svg className="h-6 w-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} aria-hidden>
+                      <path strokeLinecap="round" d="M12 5v14M5 12h14" />
+                    </svg>
+                  </button>
+                </div>
+                {tabRoots().slice(2).map((item) => renderTab(item))}
               </div>
-              {tabRoots().slice(2).map((item) => renderTab(item))}
-            </div>
-          </nav>
+            </nav>
+          )}
 
           <BottomSheet
             isOpen={addOpen}
@@ -674,7 +712,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
             labelledBy="add-sheet-title"
             heightClass="max-h-[70dvh]"
           >
-            <div className="space-y-2 px-3 py-2 sheet-safe-bottom">
+            <div className="space-y-3 px-3 py-2 sheet-safe-bottom">
               <button
                 type="button"
                 onClick={() => {
@@ -684,16 +722,24 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                     router.push("/kuitit/uusi");
                   });
                 }}
-                className="flex w-full items-center gap-3 rounded-2xl bg-charcoal px-4 py-4 text-left text-white active-press"
+                className="flex w-full items-center gap-3 rounded-card bg-ink px-4 py-4 text-left text-canvas active-press"
               >
-                <span className="text-base font-semibold">Kuvaa kuitti</span>
+                <AddSheetIcon id="camera" className="h-6 w-6 shrink-0" />
+                <span className="min-w-0">
+                  <span className="block text-base font-semibold">Kuvaa kuitti</span>
+                  <span className="block text-[13px] text-canvas/70">
+                    Luetaan automaattisesti ja liitetään tapahtumaan
+                  </span>
+                </span>
               </button>
-              <div className="overflow-hidden rounded-2xl bg-white shadow-sm divide-y divide-warm-gray-light/25">
-                {[
-                  { href: "/pankki/tapahtumat", label: "Tuo tiliote", hint: "CSV, XLSX, camt tai PDF" },
-                  { href: "/laskut/uusi", label: "Uusi myyntilasku" },
-                  { href: "/asetukset/sahkoposti", label: "Hae sähköpostista" },
-                ].map((row) => (
+              <div className="overflow-hidden rounded-card border border-line bg-surface divide-y divide-line">
+                {(
+                  [
+                    { href: "/pankki/tapahtumat", label: "Tuo tiliote", hint: "CSV, XLSX, camt tai PDF", icon: "file" },
+                    { href: "/laskut/uusi", label: "Uusi myyntilasku", hint: undefined, icon: "invoice" },
+                    { href: "/asetukset/sahkoposti", label: "Hae sähköpostista", hint: undefined, icon: "mail" },
+                  ] as const satisfies readonly { href: string; label: string; hint?: string; icon: "file" | "invoice" | "mail" }[]
+                ).map((row) => (
                   <button
                     key={row.href}
                     type="button"
@@ -704,10 +750,15 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                         router.push(row.href);
                       });
                     }}
-                    className="flex w-full flex-col px-4 py-3.5 text-left active:bg-blush/30 touch-target"
+                    className="flex w-full items-center gap-3 px-4 py-3.5 text-left active-press touch-target"
                   >
-                    <span className="text-sm font-medium text-charcoal">{row.label}</span>
-                    {row.hint && <span className="mt-0.5 text-xs text-warm-gray">{row.hint}</span>}
+                    <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-canvas text-ink-2">
+                      <AddSheetIcon id={row.icon} />
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block text-[15px] font-medium text-ink">{row.label}</span>
+                      {row.hint && <span className="mt-0.5 block truncate text-[13px] text-ink-2">{row.hint}</span>}
+                    </span>
                   </button>
                 ))}
               </div>
@@ -722,52 +773,58 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
             labelledBy="profile-sheet-title"
             heightClass="max-h-[60dvh]"
           >
-            <div className="px-3 py-2 sheet-safe-bottom space-y-1">
-              <button
-                type="button"
-                onClick={() => goToRoot(avatarRoot().path)}
-                aria-current={rootIsActive(pathname, "asetukset") ? "page" : undefined}
-                className="w-full flex items-center gap-3 px-4 py-3.5 rounded-2xl text-left active:bg-blush/40 touch-target"
-              >
-                <RootIcon id="asetukset" active={false} className="h-4 w-4 text-warm-gray" />
-                <span className="text-sm font-medium text-charcoal">Asetukset</span>
-              </button>
+            <div className="px-3 py-2 sheet-safe-bottom">
               {signOutError && (
-                <p className="px-4 text-sm text-danger" role="alert">
+                <p className="mb-2 px-1 text-sm text-danger" role="alert">
                   {signOutError}
                 </p>
               )}
-              <button
-                type="button"
-                onClick={handleSignOut}
-                disabled={signingOut}
-                className="w-full flex items-center gap-3 px-4 py-3.5 rounded-2xl text-left transition-colors active:bg-danger/10 disabled:opacity-60 touch-target"
-              >
-                {signingOut ? (
-                  <span
-                    className="w-4 h-4 border-2 border-danger/40 border-t-danger rounded-full animate-spin motion-reduce:animate-none"
-                    aria-hidden
-                  />
-                ) : (
-                  <svg
-                    className="w-4 h-4 text-danger shrink-0"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth={1.75}
-                    aria-hidden
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      d="M15.75 9V5.25A2.25 2.25 0 0 0 13.5 3h-6a2.25 2.25 0 0 0-2.25 2.25v13.5A2.25 2.25 0 0 0 7.5 21h6a2.25 2.25 0 0 0 2.25-2.25V15m3 0 3-3m0 0-3-3m3 3H9"
-                    />
-                  </svg>
-                )}
-                <span className="text-sm font-medium text-danger">
-                  {signingOut ? "Kirjaudutaan ulos…" : "Kirjaudu ulos"}
-                </span>
-              </button>
+              <div className="overflow-hidden rounded-card border border-line bg-surface divide-y divide-line">
+                <button
+                  type="button"
+                  onClick={() => goToRoot(avatarRoot().path)}
+                  aria-current={rootIsActive(pathname, "asetukset") ? "page" : undefined}
+                  className="w-full flex items-center gap-3 px-4 py-3.5 text-left active-press touch-target"
+                >
+                  <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-canvas text-ink-2">
+                    <RootIcon id="asetukset" active={false} className="h-4 w-4" />
+                  </span>
+                  <span className="text-[15px] font-medium text-ink">Asetukset</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSignOut}
+                  disabled={signingOut}
+                  className="w-full flex items-center gap-3 px-4 py-3.5 text-left active-press disabled:opacity-60 touch-target"
+                >
+                  <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-canvas text-danger">
+                    {signingOut ? (
+                      <span
+                        className="w-4 h-4 border-2 border-danger/40 border-t-danger rounded-full animate-spin motion-reduce:animate-none"
+                        aria-hidden
+                      />
+                    ) : (
+                      <svg
+                        className="w-4 h-4 shrink-0"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth={1.75}
+                        aria-hidden
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          d="M15.75 9V5.25A2.25 2.25 0 0 0 13.5 3h-6a2.25 2.25 0 0 0-2.25 2.25v13.5A2.25 2.25 0 0 0 7.5 21h6a2.25 2.25 0 0 0 2.25-2.25V15m3 0 3-3m0 0-3-3m3 3H9"
+                        />
+                      </svg>
+                    )}
+                  </span>
+                  <span className="text-[15px] font-medium text-danger">
+                    {signingOut ? "Kirjaudutaan ulos…" : "Kirjaudu ulos"}
+                  </span>
+                </button>
+              </div>
             </div>
           </BottomSheet>
         </>

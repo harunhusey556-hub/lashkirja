@@ -31,7 +31,7 @@ export function SkeletonList({ rows = 5 }: { rows?: number }) {
   return (
     <div className="space-y-3 list-stagger" role="status" aria-label="Ladataan…">
       {Array.from({ length: rows }).map((_, index) => (
-        <div key={index} className="bg-white rounded-2xl p-4 shadow-sm">
+        <div key={index} className="rounded-card border border-line bg-surface p-4">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-full bg-warm-gray-light/30 skeleton shrink-0" />
             <div className="flex-1 space-y-2 min-w-0">
@@ -65,7 +65,7 @@ export function ErrorState({
         <button
           type="button"
           onClick={onRetry}
-          className="mt-3 min-h-11 px-4 rounded-xl bg-white border border-danger/30 font-medium hover:bg-danger/5 transition-colors"
+          className="mt-3 min-h-11 px-4 rounded-xl bg-surface border border-danger/30 font-medium hover:bg-danger/5 transition-colors"
         >
           Yritä uudelleen
         </button>

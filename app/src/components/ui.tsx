@@ -89,7 +89,7 @@ export function Field({
     : children;
   return (
     <div>
-      <label htmlFor={htmlFor} className="mb-1.5 block text-sm font-medium text-charcoal-light">
+      <label htmlFor={htmlFor} className="mb-1.5 block text-[13px] font-normal text-ink-2">
         {label}
       </label>
       {control}

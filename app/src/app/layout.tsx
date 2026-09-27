@@ -39,7 +39,7 @@ export const viewport: Viewport = {
   // page on focus. Double-tap zoom is already off via touch-action.
   // See app/docs/viewport-zoom.md.
   viewportFit: "cover",
-  themeColor: "#f5e6e0",
+  themeColor: "#f6f3ef",
 };
 
 /**

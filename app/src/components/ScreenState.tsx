@@ -37,7 +37,7 @@ export function ConnectionNotice({
         kind === "expired"
           ? "border-warning/40 bg-warning/10 text-charcoal"
           : kind === "offline"
-            ? "border-warm-gray-light bg-white text-charcoal"
+            ? "border-line bg-surface text-ink"
             : kind === "unreachable"
               ? "border-accent/30 bg-blush/40 text-charcoal"
               : "border-danger/30 bg-danger/10 text-danger"
@@ -83,7 +83,7 @@ export function StaleBanner({
         <button
           type="button"
           onClick={onRetry}
-          className="min-h-11 px-3 rounded-xl bg-white border border-warning/40 font-medium"
+          className="min-h-11 px-3 rounded-xl bg-surface border border-warning/40 font-medium"
         >
           Yritä uudelleen
         </button>

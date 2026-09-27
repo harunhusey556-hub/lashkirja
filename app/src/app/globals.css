@@ -89,7 +89,8 @@ body {
   flex-direction: column;
   width: 100%;
   overflow: hidden;
-  background: var(--color-cream);
+  background: var(--color-canvas);
+  --app-sidebar-width: 0px;
 }
 
 .app-sidebar {
@@ -114,6 +115,7 @@ body {
   .app-frame {
     left: 15rem;
     width: auto;
+    --app-sidebar-width: 15rem;
   }
 
   .app-tab-bar {
@@ -152,6 +154,7 @@ body {
 
 body {
   color: var(--color-charcoal);
+  background: var(--color-canvas);
   -webkit-tap-highlight-color: transparent;
 }
 
@@ -296,6 +299,7 @@ button:disabled {
 .app-main {
   flex: 1 1 auto;
   min-height: 0;
+  background: var(--color-canvas);
   padding-right: max(1rem, env(safe-area-inset-right, 0px));
   padding-bottom: 1.25rem;
   scroll-padding-bottom: 1.5rem;
@@ -308,6 +312,14 @@ button:disabled {
 .app-main[data-scroll-lock="true"] {
   overflow: hidden;
   touch-action: none;
+}
+
+/* The tab bar normally carries the home-indicator inset itself
+   (padding-bottom: var(--safe-bottom) below). On a detail page the tab bar
+   is not rendered at all (AppShell sets data-tabs="hidden"), so .app-main
+   picks up that inset directly instead of losing it. */
+.app-frame[data-tabs="hidden"] > .app-main {
+  padding-bottom: max(1.25rem, calc(var(--safe-bottom) + 1.25rem));
 }
 
 .app-header {
@@ -656,7 +668,7 @@ button.ds-chip[aria-pressed="true"] { box-shadow: none; }
   width: 2.25rem;
   height: 0.25rem;
   border-radius: 9999px;
-  background: var(--color-warm-gray-light);
+  background: var(--color-line);
   margin: 0.5rem auto 0.25rem;
 }
 

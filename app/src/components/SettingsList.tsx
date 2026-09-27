@@ -24,10 +24,10 @@ export function SettingsGroup({
 }) {
   return (
     <section>
-      <h3 className="px-4 mb-2 text-xs font-medium uppercase tracking-widest text-warm-gray">
+      <h3 className="px-4 mb-2 text-[13px] font-normal text-ink-2">
         {label}
       </h3>
-      <div className="bg-white rounded-2xl shadow-sm overflow-hidden divide-y divide-warm-gray-light/25">
+      <div className="overflow-hidden rounded-card border border-line bg-surface divide-y divide-line">
         {children}
       </div>
     </section>
@@ -49,8 +49,8 @@ export function SettingsRow({
       className="flex items-center gap-3 px-4 py-3.5 transition-colors active:bg-blush/30 touch-target"
     >
       <span className="flex-1 min-w-0">
-        <span className="block text-sm font-medium text-charcoal">{label}</span>
-        {hint && <span className="block text-xs text-warm-gray truncate mt-0.5">{hint}</span>}
+        <span className="block text-[15px] font-medium text-ink">{label}</span>
+        {hint && <span className="block text-[13px] text-ink-2 truncate mt-0.5">{hint}</span>}
       </span>
       <SettingsChevron />
     </Link>

@@ -222,7 +222,7 @@ export default function BottomSheet({
         role="dialog"
         aria-modal="true"
         aria-labelledby={labelledBy}
-        className={`absolute inset-x-0 bottom-0 mx-auto w-full max-w-lg bg-white rounded-t-3xl shadow-2xl flex flex-col overflow-hidden ${
+        className={`absolute inset-x-0 bottom-0 mx-auto w-full max-w-lg bg-canvas rounded-t-3xl shadow-2xl flex flex-col overflow-hidden ${
           exitingViaDrag ? "" : closing ? "animate-sheet-out" : "animate-sheet"
         } ${heightClass}`}
       >
@@ -233,7 +233,7 @@ export default function BottomSheet({
             <div className="flex items-start justify-between gap-3 px-5 pt-2 pb-3 border-b border-warm-gray-light/30">
               <div className="min-w-0">
                 {title && (
-                  <p id={labelledBy} className="text-base font-medium text-charcoal truncate">
+                  <p id={labelledBy} className="text-[20px] font-bold text-ink truncate">
                     {title}
                   </p>
                 )}

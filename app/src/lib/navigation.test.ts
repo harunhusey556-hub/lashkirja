@@ -120,6 +120,15 @@ describe("navigation registry", () => {
     expect(backTarget("/dashboard")).toBeNull();
   });
 
+  it("returns a fresh object every call, so a React effect must depend on a field (e.g. href) rather than the object itself", () => {
+    const first = backTarget("/kirjanpito/alv");
+    const second = backTarget("/kirjanpito/alv");
+    expect(first).not.toBeNull();
+    expect(first).not.toBe(second);
+    expect(first).toEqual(second);
+    expect(first?.href).toBe(second?.href);
+  });
+
   it("returns null when the parent chain ends on a parameterised parent with no parent of its own", () => {
     const planted: NavEntry[] = [
       { id: "x-parent", kind: "workspace", label: "X", path: "/x/:pid" },
