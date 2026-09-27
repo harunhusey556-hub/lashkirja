@@ -27,8 +27,21 @@ describe("page protection", () => {
   });
 
   it("protects every other page, including ones added later", () => {
-    const exposed = pagesIn(APP_DIR, "").filter((route) => isPublicPage(route) && !PUBLIC_PAGES.includes(route));
-    expect(exposed).toEqual([]);
+    const pages = pagesIn(APP_DIR, "");
+
+    // Independent of PUBLIC_PAGES/isPublicPage: an inline literal, so a page
+    // made public by accident (or a bug in isPublicPage itself) is caught.
+    const acceptedAsPublic = pages.filter((route) => isPublicPage(route)).sort();
+    expect(acceptedAsPublic).toEqual(
+      ["/login", "/palauta-salasana", "/unohtunut-salasana", "/vahvista-sahkoposti"].sort()
+    );
+
+    // Every declared public page must actually exist as a walked route (catches
+    // a stale or typo'd PUBLIC_PAGES entry).
+    for (const page of PUBLIC_PAGES) {
+      expect(pages).toContain(page);
+    }
+
     expect(isPublicPage("/tyot")).toBe(false);
     expect(isPublicPage("/kirjanpito/alv")).toBe(false);
     expect(isPublicPage("/bank/callback")).toBe(false);
