@@ -47,7 +47,7 @@ test("login lands on the dashboard and the tab bar navigates", async ({ page }) 
   await expect(page).toHaveURL(/\/kirjanpito$/);
 
   await nav.getByRole("button", { name: "Lisää" }).click();
-  await expect(page.getByRole("link", { name: "Kuvaa kuitti" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Kuvaa kuitti" })).toBeVisible();
   await page.keyboard.press("Escape");
 
   await nav.getByRole("button", { name: "Raportit" }).click();
@@ -60,7 +60,7 @@ test("login lands on the dashboard and the tab bar navigates", async ({ page }) 
 
 test("a bank account can be added and a month reconciled", async ({ page }) => {
   await login(page);
-  await page.goto("/pankkitilit");
+  await page.goto("/kirjanpito/pankkitilit");
 
   await page.getByRole("button", { name: /Lisää (ensimmäinen )?pankkitili/ }).click();
   await page.getByLabel("Tilin nimi").fill("E2E Käyttötili");
@@ -84,7 +84,7 @@ test("a bank account can be added and a month reconciled", async ({ page }) => {
 
 test("a rejected IBAN never reaches the server", async ({ page }) => {
   await login(page);
-  await page.goto("/pankkitilit");
+  await page.goto("/kirjanpito/pankkitilit");
 
   await page.getByRole("button", { name: /Lisää (ensimmäinen )?pankkitili/ }).click();
   await page.getByLabel("Tilin nimi").fill("Virheellinen");
@@ -129,7 +129,7 @@ test("invoice goes from draft to paid", async ({ page }) => {
 
 test("a purchase invoice can be added and marked paid", async ({ page }) => {
   await login(page);
-  await page.goto("/ostolaskut");
+  await page.goto("/kirjanpito/ostolaskut");
 
   await page.getByRole("button", { name: "Uusi ostolasku" }).click();
   await page.getByLabel("Toimittaja").fill("E2E Tukku");

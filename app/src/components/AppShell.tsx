@@ -2,7 +2,6 @@
 
 import { useEffect, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
-import Link from "next/link";
 import { LoadingState } from "@/components/AsyncState";
 import { ConnectionNotice } from "@/components/ScreenState";
 import { OnboardingModal } from "@/components/OnboardingModal";
@@ -54,24 +53,10 @@ function RootIcon({ id, active, className }: { id: string; active: boolean; clas
       </svg>
     );
   }
-  if (id === "kuitit") {
-    return (
-      <svg className={tone} fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.75} d="M9 12h6m-6 4h6m2 5H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5.586a1 1 0 0 1 .707.293l5.414 5.414a1 1 0 0 1 .293.707V19a2 2 0 0 1-2 2Z" />
-      </svg>
-    );
-  }
   if (id === "myynti") {
     return (
       <svg className={tone} fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.75} d="M3 6h18M3 12h18M3 18h10" />
-      </svg>
-    );
-  }
-  if (id === "pankki") {
-    return (
-      <svg className={tone} fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.75} d="M3 10h18M5 10V8.5L12 4l7 4.5V10M6 10v7m4-7v7m4-7v7m4-7v7M4 20h16" />
       </svg>
     );
   }
@@ -309,7 +294,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         const go = () => {
           swipeLock.current = true;
           const navigate = () => {
-            performInAppBack(pathname, router);
+            performInAppBack(pathname, router, back?.href);
           };
           if (reduceMotion) {
             clearInline();
@@ -347,7 +332,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       clearInline();
       swipeLock.current = false;
     };
-  }, [canGoBack, pathname, router]);
+  }, [canGoBack, pathname, router, back]);
 
   // UsableArea owns frame size. This only keeps a focused field inside the
   // content scroller when the keyboard changes the visual viewport.
@@ -508,6 +493,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
             type="button"
             onClick={() => setAddOpenOn(pathname)}
             aria-haspopup="dialog"
+            aria-expanded={addOpen}
             className="flex min-h-11 w-full items-center justify-center gap-2 rounded-xl bg-charcoal text-sm font-semibold text-white active-press"
           >
             <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} aria-hidden>
@@ -544,7 +530,9 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
             type="button"
             onClick={() => goToRoot(avatarRoot().path)}
             aria-current={rootIsActive(pathname, "asetukset") ? "page" : undefined}
-            className="flex min-h-12 w-full items-center gap-3 rounded-xl px-3 text-left text-sm font-medium text-charcoal active-press"
+            className={`flex min-h-12 w-full items-center gap-3 rounded-xl px-3 text-left text-sm active-press ${
+              rootIsActive(pathname, "asetukset") ? "bg-blush font-semibold text-accent-dark" : "font-medium text-charcoal"
+            }`}
           >
             <RootIcon id="asetukset" active={rootIsActive(pathname, "asetukset")} className="h-5 w-5 text-warm-gray" />
             Asetukset
@@ -564,7 +552,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
               <button
                 type="button"
                 onClick={goBack}
-                aria-label="Takaisin"
+                aria-label={back ? `Takaisin: ${back.label}` : "Takaisin"}
                 className="flex h-11 max-w-full items-center gap-0.5 pl-1 pr-2 text-accent-dark active-press"
               >
                 <svg className="h-6 w-6 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} aria-hidden>
@@ -687,28 +675,40 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
             heightClass="max-h-[70dvh]"
           >
             <div className="space-y-2 px-3 py-2 sheet-safe-bottom">
-              <Link
-                href="/kuitit/uusi"
-                onClick={() => setAddOpenOn(null)}
-                className="flex items-center gap-3 rounded-2xl bg-charcoal px-4 py-4 text-white active-press"
+              <button
+                type="button"
+                onClick={() => {
+                  setAddOpenOn(null);
+                  requestLeave(() => {
+                    armNavigation("/kuitit/uusi", "forward");
+                    router.push("/kuitit/uusi");
+                  });
+                }}
+                className="flex w-full items-center gap-3 rounded-2xl bg-charcoal px-4 py-4 text-left text-white active-press"
               >
                 <span className="text-base font-semibold">Kuvaa kuitti</span>
-              </Link>
+              </button>
               <div className="overflow-hidden rounded-2xl bg-white shadow-sm divide-y divide-warm-gray-light/25">
                 {[
                   { href: "/pankki/tapahtumat", label: "Tuo tiliote", hint: "CSV, XLSX, camt tai PDF" },
                   { href: "/laskut/uusi", label: "Uusi myyntilasku" },
                   { href: "/asetukset/sahkoposti", label: "Hae sähköpostista" },
                 ].map((row) => (
-                  <Link
+                  <button
                     key={row.href}
-                    href={row.href}
-                    onClick={() => setAddOpenOn(null)}
-                    className="flex flex-col px-4 py-3.5 active:bg-blush/30 touch-target"
+                    type="button"
+                    onClick={() => {
+                      setAddOpenOn(null);
+                      requestLeave(() => {
+                        armNavigation(row.href, "forward");
+                        router.push(row.href);
+                      });
+                    }}
+                    className="flex w-full flex-col px-4 py-3.5 text-left active:bg-blush/30 touch-target"
                   >
                     <span className="text-sm font-medium text-charcoal">{row.label}</span>
                     {row.hint && <span className="mt-0.5 text-xs text-warm-gray">{row.hint}</span>}
-                  </Link>
+                  </button>
                 ))}
               </div>
             </div>
@@ -726,6 +726,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
               <button
                 type="button"
                 onClick={() => goToRoot(avatarRoot().path)}
+                aria-current={rootIsActive(pathname, "asetukset") ? "page" : undefined}
                 className="w-full flex items-center gap-3 px-4 py-3.5 rounded-2xl text-left active:bg-blush/40 touch-target"
               >
                 <RootIcon id="asetukset" active={false} className="h-4 w-4 text-warm-gray" />
