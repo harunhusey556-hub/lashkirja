@@ -1,9 +1,10 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { ErrorState, LoadingState } from "@/components/AsyncState";
+import { LoadingState } from "@/components/AsyncState";
+import { ConnectionNotice, StaleBanner } from "@/components/ScreenState";
 import {
-  errorMessage,
+  apiFetch,
   isUnauthorized,
   readJson,
   redirectToLogin,
@@ -11,7 +12,8 @@ import {
 
 import { REPORT_LINKS, WorkspaceLinks, linksWithActive } from "@/components/WorkspaceLinks";
 import { formatEur } from "@/lib/format";
-import { readPageCache, writePageCache } from "@/lib/page-cache";
+import { pageCacheFetchedAt, readPageCache, writePageCache } from "@/lib/page-cache";
+import { usePersistedState, useScrollRestoration } from "@/lib/list-ui-state";
 interface SalesField {
   label: string;
   netSales: number;
@@ -53,23 +55,24 @@ export default function ALVRaporttiPage() {
   const now = new Date();
   const defaultPeriod = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
 
-  const [periodType, setPeriodType] = useState<"month" | "quarter">("month");
-  const [selectedMonth, setSelectedMonth] = useState(defaultPeriod);
-  const [selectedQuarter, setSelectedQuarter] = useState(
+  const [periodType, setPeriodType] = usePersistedState<"month" | "quarter">("alv.periodType", "month");
+  const [selectedMonth, setSelectedMonth] = usePersistedState("alv.month", defaultPeriod);
+  const [selectedQuarter, setSelectedQuarter] = usePersistedState(
+    "alv.quarter",
     `${now.getFullYear()}-Q${Math.ceil((now.getMonth() + 1) / 3)}`
   );
   const [result, setResult] = useState<{
     period: string;
     data: ALVData;
   } | null>(null);
-  const [loadError, setLoadError] = useState("");
+  const [loadError, setLoadError] = useState<unknown>(null);
   const [loadAttempt, setLoadAttempt] = useState(0);
 
   const period = periodType === "month" ? selectedMonth : selectedQuarter;
 
   useEffect(() => {
     const controller = new AbortController();
-    fetch(`/api/alv?period=${period}`, { signal: controller.signal })
+    apiFetch(`/api/alv?period=${period}`, { signal: controller.signal })
       .then((response) =>
         readJson<ALVData>(response, "ALV-raportin lataus epäonnistui")
       )
@@ -78,7 +81,7 @@ export default function ALVRaporttiPage() {
         if (!data.field301 || !data.field307 || !data.field308) {
           throw new Error("Palvelin palautti virheellisen ALV-raportin");
         }
-        setLoadError("");
+        setLoadError(null);
         writePageCache(`alv:${period}`, data);
         setResult({ period, data });
       })
@@ -88,9 +91,7 @@ export default function ALVRaporttiPage() {
           redirectToLogin();
           return;
         }
-        setLoadError(
-          errorMessage(error, "ALV-raportin lataus epäonnistui")
-        );
+        setLoadError(error);
       });
     return () => controller.abort();
   }, [period, loadAttempt]);
@@ -102,6 +103,7 @@ export default function ALVRaporttiPage() {
       ? result.data
       : readPageCache<ALVData>(`alv:${period}`);
   const loading = !data && !loadError;
+  useScrollRestoration("alv", Boolean(data));
 
   function buildMonthOptions() {
     const opts: { value: string; label: string }[] = [];
@@ -147,7 +149,7 @@ export default function ALVRaporttiPage() {
             <button
               type="button"
               onClick={() => {
-                setLoadError("");
+                setLoadError(null);
                 setPeriodType("month");
               }}
               aria-pressed={periodType === "month"}
@@ -162,7 +164,7 @@ export default function ALVRaporttiPage() {
             <button
               type="button"
               onClick={() => {
-                setLoadError("");
+                setLoadError(null);
                 setPeriodType("quarter");
               }}
               aria-pressed={periodType === "quarter"}
@@ -181,7 +183,7 @@ export default function ALVRaporttiPage() {
               aria-label="ALV-raportin kuukausi"
               value={selectedMonth}
               onChange={(e) => {
-                setLoadError("");
+                setLoadError(null);
                 setSelectedMonth(e.target.value);
               }}
               className="w-full min-h-12 min-w-0 px-3 rounded-xl border border-warm-gray-light bg-white text-sm"
@@ -197,7 +199,7 @@ export default function ALVRaporttiPage() {
               aria-label="ALV-raportin neljännes"
               value={selectedQuarter}
               onChange={(e) => {
-                setLoadError("");
+                setLoadError(null);
                 setSelectedQuarter(e.target.value);
               }}
               className="w-full min-h-12 min-w-0 px-3 rounded-xl border border-warm-gray-light bg-white text-sm"
@@ -211,11 +213,18 @@ export default function ALVRaporttiPage() {
           )}
         </div>
 
-        {loadError ? (
-          <ErrorState
-            message={loadError}
+        {loadError != null && data ? (
+          <StaleBanner
+            fetchedAt={pageCacheFetchedAt(`alv:${period}`)}
+            onRetry={() => setLoadAttempt((attempt) => attempt + 1)}
+          />
+        ) : null}
+        {loadError != null && !data ? (
+          <ConnectionNotice
+            error={loadError}
+            fallback="ALV-raportin lataus epäonnistui"
             onRetry={() => {
-              setLoadError("");
+              setLoadError(null);
               setLoadAttempt((attempt) => attempt + 1);
             }}
             compact

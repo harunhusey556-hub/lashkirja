@@ -2,7 +2,8 @@
 
 import { useEffect, useRef, useState } from "react";
 import { ChatMatchProposal } from "@/lib/ai-assistant";
-import { errorMessage, readJson } from "@/components/clientFetch";
+import { apiFetch, errorMessage, readJson } from "@/components/clientFetch";
+import { STREAM_IDLE_MS, armIdleTimeout, subscribeOverlayClose } from "@/lib/screen-state";
 import { ChatMarkdown } from "@/components/ChatMarkdown";
 import { Button, FormError } from "@/components/ui";
 import { hapticNotify } from "@/lib/haptics";
@@ -57,6 +58,12 @@ export function AiChatDrawer({
   const abortRef = useRef<AbortController | null>(null);
   const loadingRef = useRef(false);
   useOverlayLock(open);
+  const closeRef = useRef(onClose);
+  closeRef.current = onClose;
+  useEffect(() => {
+    if (!open) return;
+    return subscribeOverlayClose(() => closeRef.current());
+  }, [open]);
 
   const visible = messages.filter((message) => !cutoff || message.createdAt >= cutoff);
 
@@ -83,7 +90,7 @@ export function AiChatDrawer({
     setHistoryError("");
     try {
       const url = before ? `/api/ai/chat?before=${encodeURIComponent(before)}` : "/api/ai/chat";
-      const response = await fetch(url);
+      const response = await apiFetch(url);
       const data = await readJson<{ messages: ChatMessageItem[]; hasMore?: boolean }>(
         response,
         "Keskusteluhistorian lataus epäonnistui"
@@ -158,6 +165,11 @@ export function AiChatDrawer({
     stickRef.current = true;
     const controller = new AbortController();
     abortRef.current = controller;
+    let idleAbort = false;
+    const idle = armIdleTimeout(STREAM_IDLE_MS, () => {
+      idleAbort = true;
+      controller.abort();
+    });
     const placeholderId = `stream-${clientId}`;
     let placeholderAdded = false;
     let sawDone = false;
@@ -218,6 +230,7 @@ export function AiChatDrawer({
       let content = "";
       while (true) {
         const { done, value } = await reader.read();
+        idle.bump();
         if (done) break;
         buffer += decoder.decode(value, { stream: true });
         const parts = buffer.split("\n\n");
@@ -282,6 +295,21 @@ export function AiChatDrawer({
         void hapticNotify("error");
       }
     } catch (error) {
+      if (idleAbort) {
+        setFailed({ text: query, clientId });
+        setMessages((prev) =>
+          prev.map((message) =>
+            message.id === placeholderId
+              ? {
+                  ...message,
+                  incomplete: true,
+                  content: message.content || "Vastaus ei edennyt. Yritä uudelleen.",
+                }
+              : message
+          )
+        );
+        return;
+      }
       if (controller.signal.aborted) {
         setMessages((prev) =>
           prev.map((message) =>
@@ -306,6 +334,7 @@ export function AiChatDrawer({
       ]);
       void hapticNotify("error");
     } finally {
+      idle.stop();
       setLoading(false);
       loadingRef.current = false;
       abortRef.current = null;
@@ -327,7 +356,7 @@ export function AiChatDrawer({
   }
 
   async function persistDecision(id: string, decision: "accepted" | "rejected") {
-    const response = await fetch("/api/ai/chat", {
+    const response = await apiFetch("/api/ai/chat", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ id, decision }),
@@ -339,7 +368,7 @@ export function AiChatDrawer({
     setMatchBusyId(msgId);
     setActionError("");
     try {
-      const response = await fetch("/api/matching/confirm", {
+      const response = await apiFetch("/api/matching/confirm", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

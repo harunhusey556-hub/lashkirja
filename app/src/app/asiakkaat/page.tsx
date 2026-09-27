@@ -2,7 +2,8 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { ErrorState, LoadingState } from "@/components/AsyncState";
+import { LoadingState } from "@/components/AsyncState";
+import { ConnectionNotice, EmptyState, StaleBanner } from "@/components/ScreenState";
 import ConfirmModal from "@/components/ConfirmModal";
 import {
   CustomerForm,
@@ -21,7 +22,9 @@ import { INVOICE_LINKS, WorkspaceLinks, linksWithActive } from "@/components/Wor
 import { Button } from "@/components/ui";
 import { newIdempotencyKey } from "@/lib/idempotency-key";
 import { clearDraft } from "@/lib/draft-store";
-import { readPageCache, writePageCache } from "@/lib/page-cache";
+import { pageCacheFetchedAt, readPageCache, writePageCache } from "@/lib/page-cache";
+import { usePersistedState, useScrollRestoration } from "@/lib/list-ui-state";
+import { isForbidden } from "@/lib/screen-state";
 interface Customer {
   id: string;
   name: string;
@@ -49,8 +52,9 @@ export default function CustomersPage() {
     cached ? "ready" : "loading"
   );
   const [message, setMessage] = useState<string | null>(null);
-  const [search, setSearch] = useState("");
-  const [showArchived, setShowArchived] = useState(false);
+  const [loadFailure, setLoadFailure] = useState<unknown>(null);
+  const [search, setSearch] = usePersistedState("asiakkaat.search", "");
+  const [showArchived, setShowArchived] = usePersistedState("asiakkaat.showArchived", false);
   const [formMode, setFormMode] = useState<"hidden" | "create" | { edit: Customer }>("hidden");
   const [busy, setBusy] = useState(false);
   const [confirmRemove, setConfirmRemove] = useState<Customer | null>(null);
@@ -78,16 +82,20 @@ export default function CustomersPage() {
       );
       writePageCache("customers", data.customers);
       setCustomers(data.customers);
+      setLoadFailure(null);
       setStatus("ready");
     } catch (error) {
       if (isUnauthorized(error)) {
         redirectToLogin();
         return;
       }
+      setLoadFailure(error);
       setMessage(errorMessage(error, "Asiakkaiden haku epäonnistui"));
-      setStatus("error");
+      setStatus(readPageCache("customers") ? "ready" : "error");
     }
   }, [search, showArchived]);
+
+  useScrollRestoration("asiakkaat", status !== "loading");
 
   useEffect(() => {
     const timer = setTimeout(() => void load(), search ? 250 : 0);
@@ -277,11 +285,22 @@ export default function CustomersPage() {
         )}
 
         {status === "loading" && <LoadingState label="Haetaan asiakkaita…" />}
-        {status === "error" && (
-          <ErrorState message={message || "Haku epäonnistui"} onRetry={() => void load()} />
+        {loadFailure != null && customers.length > 0 && (
+          <StaleBanner fetchedAt={pageCacheFetchedAt("customers")} onRetry={() => void load()} />
+        )}
+        {status === "error" && customers.length === 0 && (
+          isForbidden(loadFailure) ? (
+            <EmptyState kind="forbidden" />
+          ) : (
+            <ConnectionNotice
+              error={loadFailure}
+              fallback={message || "Asiakkaiden haku epäonnistui"}
+              onRetry={() => void load()}
+            />
+          )
         )}
 
-        {status === "ready" && (
+        {(status === "ready" || customers.length > 0) && (
           <ul className="space-y-3">
             {customers.map((customer) => (
               <li
@@ -356,16 +375,21 @@ export default function CustomersPage() {
             ))}
 
             {customers.length === 0 && (
-              <div className="text-center py-8 space-y-3">
-                <p className="text-sm text-warm-gray">
-                  {search ? "Ei osumia." : "Ei vielä asiakkaita."}
-                </p>
-                {!search && formMode === "hidden" && (
-                  <Button type="button" onClick={() => setFormMode("create")}>
-                    Lisää asiakas
-                  </Button>
-                )}
-              </div>
+              <EmptyState
+                kind={search || showArchived ? "filtered" : "records"}
+                title={search || showArchived ? "Ei osumia" : "Ei asiakkaita vielä"}
+                body={
+                  search || showArchived
+                    ? "Yksikään asiakas ei vastaa hakua."
+                    : "Lisää ensimmäinen asiakas, niin laskutus löytää sen."
+                }
+                onCreate={formMode === "hidden" ? () => setFormMode("create") : undefined}
+                createLabel="Lisää asiakas"
+                onClear={() => {
+                  setSearch("");
+                  setShowArchived(false);
+                }}
+              />
             )}
           </ul>
         )}

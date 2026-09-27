@@ -11,6 +11,10 @@ const config: CapacitorConfig = {
         url: serverUrl,
         cleartext: serverUrl.startsWith("http://"),
         androidScheme: "https",
+        // Local page in webDir, shown when the remote URL fails before the
+        // app boots. cap sync bakes this into the IPA; an already installed
+        // build does not pick it up until the next IPA.
+        errorPath: "offline.html",
       }
     : undefined,
   ios: {

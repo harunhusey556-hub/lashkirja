@@ -1,7 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { ErrorState, LoadingState } from "@/components/AsyncState";
+import { LoadingState } from "@/components/AsyncState";
+import { ConnectionNotice, StaleBanner } from "@/components/ScreenState";
 import {
   apiFetch,
   errorMessage,
@@ -12,7 +13,8 @@ import {
 import { REPORT_LINKS, WorkspaceLinks, linksWithActive } from "@/components/WorkspaceLinks";
 import { buttonClass } from "@/components/control-styles";
 import { formatEur, formatMonthShort } from "@/lib/format";
-import { readPageCache, writePageCache } from "@/lib/page-cache";
+import { pageCacheFetchedAt, readPageCache, writePageCache } from "@/lib/page-cache";
+import { usePersistedState, useScrollRestoration } from "@/lib/list-ui-state";
 
 interface CategoryRow {
   category: string;
@@ -55,7 +57,8 @@ const EXPORTS = [
 
 export default function ReportsPage() {
   const currentYear = new Date().getUTCFullYear();
-  const [year, setYear] = useState(currentYear);
+  const [year, setYear] = usePersistedState("raportit.year", currentYear);
+  const [loadFailure, setLoadFailure] = useState<unknown>(null);
   const [report, setReport] = useState<Report | null>(
     () => readPageCache<Report>(`report:${currentYear}`)
   );
@@ -82,14 +85,16 @@ export default function ReportsPage() {
       const data = await readJson<Report>(response, "Raportin haku epäonnistui");
       writePageCache(`report:${year}`, data);
       setReport(data);
+      setLoadFailure(null);
       setStatus("ready");
     } catch (error) {
       if (isUnauthorized(error)) {
         redirectToLogin();
         return;
       }
+      setLoadFailure(error);
       setMessage(errorMessage(error, "Raportin haku epäonnistui"));
-      setStatus("error");
+      setStatus((current) => (current === "ready" ? "ready" : "error"));
     }
   }, [year]);
 
@@ -97,6 +102,8 @@ export default function ReportsPage() {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional fetch-on-mount: flipping to a loading state and storing the response is exactly the external-system sync this effect exists for
     void load();
   }, [load]);
+
+  useScrollRestoration("raportit", status === "ready");
 
   const maxMonthValue = report
     ? Math.max(
@@ -136,9 +143,19 @@ export default function ReportsPage() {
           </button>
         </div>
 
+        {loadFailure != null && status === "ready" && (
+          <StaleBanner
+            fetchedAt={pageCacheFetchedAt(`report:${year}`)}
+            onRetry={() => void load()}
+          />
+        )}
         {status === "loading" && <LoadingState label="Lasketaan raporttia…" />}
         {status === "error" && (
-          <ErrorState message={message || "Haku epäonnistui"} onRetry={() => void load()} />
+          <ConnectionNotice
+            error={loadFailure}
+            fallback={message || "Raportin haku epäonnistui"}
+            onRetry={() => void load()}
+          />
         )}
 
         {status === "ready" && report && (

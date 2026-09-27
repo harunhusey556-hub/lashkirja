@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { apiFetch, ApiGatewayError, ApiTimeoutError } from "./clientFetch";
+import { clearPageCache, readPageCache, writePageCache } from "@/lib/page-cache";
 
 function jsonResponse(status: number, body: unknown = {}) {
   return new Response(JSON.stringify(body), { status });
@@ -30,6 +31,20 @@ describe("apiFetch", () => {
   afterEach(() => {
     vi.useRealTimers();
     vi.unstubAllGlobals();
+    clearPageCache();
+  });
+
+  it("clears related caches after a successful write and leaves them after a read", async () => {
+    writePageCache("invoices", [{ id: "1" }]);
+    writePageCache("profile", { email: "a@b.c" });
+    vi.stubGlobal("fetch", vi.fn(fetchThatRespectsAbort(jsonResponse(200))));
+    await apiFetch("/api/invoices", { method: "POST" });
+    expect(readPageCache("invoices")).toBeNull();
+    expect(readPageCache("profile")).toEqual({ email: "a@b.c" });
+
+    writePageCache("invoices", [{ id: "1" }]);
+    await apiFetch("/api/invoices");
+    expect(readPageCache("invoices")).toEqual([{ id: "1" }]);
   });
 
   it("returns the response as-is on success", async () => {

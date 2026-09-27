@@ -7,7 +7,7 @@ import {
   generateProfileSummary,
   type ChipValue,
 } from "@/lib/onboarding";
-import { errorMessage, readJson } from "@/components/clientFetch";
+import { apiFetch, errorMessage, readJson } from "@/components/clientFetch";
 import { useFocusTrap } from "@/components/useFocusTrap";
 import { useOverlayLock } from "@/lib/overlay-lock";
 
@@ -86,7 +86,7 @@ export function OnboardingModal({
     setSaving(true);
     setError("");
     try {
-      const res = await fetch("/api/onboarding", {
+      const res = await apiFetch("/api/onboarding", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(profile),

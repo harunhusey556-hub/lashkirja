@@ -1,7 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { ErrorState, LoadingState } from "@/components/AsyncState";
+import { LoadingState } from "@/components/AsyncState";
+import { ConnectionNotice, StaleBanner } from "@/components/ScreenState";
 import ConfirmModal from "@/components/ConfirmModal";
 import {
   BankAccountForm,
@@ -13,7 +14,8 @@ import { formatEur, formatMonth } from "@/lib/format";
 import { BANK_LINKS, WorkspaceLinks, linksWithActive } from "@/components/WorkspaceLinks";
 import { maskIban } from "@/lib/iban";
 
-import { readPageCache, writePageCache } from "@/lib/page-cache";
+import { pageCacheFetchedAt, readPageCache, writePageCache } from "@/lib/page-cache";
+import { usePersistedState, useScrollRestoration } from "@/lib/list-ui-state";
 interface AccountSummary {
   id: string;
   name: string;
@@ -74,7 +76,8 @@ export default function BankAccountsPage() {
   const [rollforward, setRollforward] = useState<Rollforward | null>(null);
   const [busyMonth, setBusyMonth] = useState<string | null>(null);
   const [confirmRemove, setConfirmRemove] = useState<AccountSummary | null>(null);
-  const [showArchived, setShowArchived] = useState(false);
+  const [showArchived, setShowArchived] = usePersistedState("pankkitilit.showArchived", false);
+  const [loadFailure, setLoadFailure] = useState<unknown>(null);
 
   const load = useCallback(async () => {
     try {
@@ -85,14 +88,15 @@ export default function BankAccountsPage() {
       const data = await readJson<Overview>(response, "Pankkitilien haku epäonnistui");
       writePageCache("bank-overview", data);
       setOverview(data);
+      setLoadFailure(null);
       setStatus("ready");
     } catch (error) {
       if (isUnauthorized(error)) {
         redirectToLogin();
         return;
       }
-      showError(errorMessage(error, "Pankkitilien haku epäonnistui"));
-      setStatus("error");
+      setLoadFailure(error);
+      setStatus((current) => (current === "ready" ? "ready" : "error"));
     }
   }, [showArchived]);
 
@@ -100,6 +104,8 @@ export default function BankAccountsPage() {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional fetch-on-mount: flipping to a loading state and storing the response is exactly the external-system sync this effect exists for
     void load();
   }, [load]);
+
+  useScrollRestoration("pankkitilit", status === "ready");
 
   const loadRollforward = useCallback(async (accountId: string) => {
     setRollforward(null);
@@ -250,9 +256,16 @@ export default function BankAccountsPage() {
           )}
         </header>
 
+        {loadFailure != null && status === "ready" && (
+          <StaleBanner fetchedAt={pageCacheFetchedAt("bank-overview")} onRetry={() => void load()} />
+        )}
         {status === "loading" && <LoadingState label="Haetaan pankkitilejä…" />}
         {status === "error" && (
-          <ErrorState message={message || "Haku epäonnistui"} onRetry={() => void load()} />
+          <ConnectionNotice
+            error={loadFailure}
+            fallback="Pankkitilien haku epäonnistui"
+            onRetry={() => void load()}
+          />
         )}
 
         {status === "ready" && overview && (

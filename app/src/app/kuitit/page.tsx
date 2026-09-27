@@ -8,7 +8,8 @@ import ReceiptMatchPanel, {
   type ReceiptMatchData,
   type BankTxMatch,
 } from "@/components/ReceiptMatchPanel";
-import { ErrorState, SkeletonList } from "@/components/AsyncState";
+import { SkeletonList } from "@/components/AsyncState";
+import { ConnectionNotice, EmptyState, StaleBanner } from "@/components/ScreenState";
 import {
   apiFetch,
   errorMessage,
@@ -20,7 +21,7 @@ import {
   categoryLabel,
   RECEIPT_CATEGORIES,
 } from "@/lib/receipt-categories";
-import { readPageCache, writePageCache } from "@/lib/page-cache";
+import { pageCacheFetchedAt, readPageCache, writePageCache } from "@/lib/page-cache";
 import { usePersistedState, useScrollRestoration } from "@/lib/list-ui-state";
 
 import { formatEur, formatMonth, parseFinnishNumber } from "@/lib/format";
@@ -99,7 +100,7 @@ export default function KuititPage() {
     "kuitit.showAllReceipts",
     false
   );
-  const [loadError, setLoadError] = useState<{ query: string; message: string } | null>(null);
+  const [loadError, setLoadError] = useState<{ query: string; error: unknown } | null>(null);
   const [actionError, setActionError] = useState("");
   const [loadAttempt, setLoadAttempt] = useState(0);
 
@@ -185,10 +186,7 @@ export default function KuititPage() {
           redirectToLogin();
           return;
         }
-        setLoadError({
-          query,
-          message: errorMessage(error, "Kuittien lataus epäonnistui"),
-        });
+        setLoadError({ query, error });
       });
 
     apiFetch("/api/receipts?reviewStatus=pending")
@@ -223,7 +221,7 @@ export default function KuititPage() {
     listResult?.query === query ? listResult.count : cachedList?.count ?? receipts.length;
   const truncated =
     listResult?.query === query ? listResult.truncated : cachedList?.truncated ?? false;
-  const currentLoadError = loadError?.query === query ? loadError.message : "";
+  const currentLoadError = loadError?.query === query ? loadError.error : null;
   const loadingList =
     listResult?.query !== query && cachedList === null && !currentLoadError;
 
@@ -324,7 +322,7 @@ export default function KuititPage() {
     setMatchBusyId(receiptId);
     setActionError("");
     try {
-      const res = await fetch("/api/matching/confirm", {
+      const res = await apiFetch("/api/matching/confirm", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ transactionId, receiptId }),
@@ -348,7 +346,7 @@ export default function KuititPage() {
     setDeletingId(id);
     setActionError("");
     try {
-      const res = await fetch(`/api/receipts/${id}`, { method: "DELETE" });
+      const res = await apiFetch(`/api/receipts/${id}`, { method: "DELETE" });
       if (!res.ok) {
         await readJson(res, "Kuitin poistaminen epäonnistui");
       }
@@ -379,7 +377,7 @@ export default function KuititPage() {
   async function handleReview(id: string, status: "approved" | "rejected") {
     setActionError("");
     try {
-      const res = await fetch(`/api/receipts/${id}/review`, {
+      const res = await apiFetch(`/api/receipts/${id}/review`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ reviewStatus: status }),
@@ -400,7 +398,7 @@ export default function KuititPage() {
     setActionError("");
     setBulkReviewing(true);
     try {
-      const res = await fetch("/api/receipts/batch-approve", {
+      const res = await apiFetch("/api/receipts/batch-approve", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ receiptIds: ids }),
@@ -425,7 +423,7 @@ export default function KuititPage() {
     setBulkDeleting(true);
     setActionError("");
     try {
-      const res = await fetch("/api/receipts/batch-delete", {
+      const res = await apiFetch("/api/receipts/batch-delete", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ receiptIds: Array.from(selectedIds) }),
@@ -938,9 +936,19 @@ export default function KuititPage() {
             </div>
           </div>
 
-          {currentLoadError ? (
-            <ErrorState
-              message={currentLoadError}
+          {currentLoadError != null && receipts.length > 0 ? (
+            <StaleBanner
+              fetchedAt={pageCacheFetchedAt(`receipts:${query}`)}
+              onRetry={() => {
+                setLoadError(null);
+                setLoadAttempt((attempt) => attempt + 1);
+              }}
+            />
+          ) : null}
+          {currentLoadError != null && receipts.length === 0 ? (
+            <ConnectionNotice
+              error={currentLoadError}
+              fallback="Kuittien lataus epäonnistui"
               onRetry={() => {
                 setLoadError(null);
                 setLoadAttempt((attempt) => attempt + 1);
@@ -950,22 +958,23 @@ export default function KuititPage() {
           ) : loadingList ? (
             <SkeletonList rows={5} />
           ) : receipts.length === 0 ? (
-            <div className="text-center py-8 space-y-3">
-              <p className="text-sm text-warm-gray">
-                {hasFilters
-                  ? "Ei kuitteja näillä suodattimilla"
-                  : "Ei kuitteja vielä"}
-              </p>
-              {hasFilters ? (
-                <Button type="button" variant="secondary" onClick={clearAllFilters}>
-                  Tyhjennä suodattimet
-                </Button>
-              ) : (
-                <Link href="/kuitit/uusi" className={buttonClass("primary")}>
-                  Lisää ensimmäinen kuitti
-                </Link>
-              )}
-            </div>
+            <EmptyState
+              kind={hasFilters ? "filtered" : "records"}
+              title={hasFilters ? "Ei kuitteja näillä suodattimilla" : "Ei kuitteja vielä"}
+              body={
+                hasFilters
+                  ? "Kokeile väljempää hakua."
+                  : "Lisää ensimmäinen kuitti kuvana tai PDF-tiedostona."
+              }
+              onClear={hasFilters ? clearAllFilters : undefined}
+              action={
+                hasFilters ? undefined : (
+                  <Link href="/kuitit/uusi" className={buttonClass("primary")}>
+                    Lisää ensimmäinen kuitti
+                  </Link>
+                )
+              }
+            />
           ) : (
             <div className="space-y-2">
               {(showAllReceipts

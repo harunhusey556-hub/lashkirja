@@ -424,6 +424,41 @@ a[data-pressed="true"],
   transition: none;
 }
 
+/* Focus is a ring. Selected is a persistent mark. Pressed is the brightness
+   above. They are not the same paint. */
+button:focus-visible,
+a:focus-visible,
+[role="button"]:focus-visible,
+[role="switch"]:focus-visible {
+  outline: 2px solid var(--color-accent-dark);
+  outline-offset: 3px;
+  box-shadow: 0 0 0 4px rgba(154, 86, 80, 0.28);
+}
+
+button[aria-pressed="true"]:not([data-pressed="true"]) {
+  box-shadow: inset 0 -3px 0 rgba(255, 255, 255, 0.72);
+}
+
+button[aria-pressed="true"]:focus-visible {
+  box-shadow: inset 0 -3px 0 rgba(255, 255, 255, 0.72), 0 0 0 4px rgba(154, 86, 80, 0.28);
+}
+
+.app-tab-bar button[aria-current="page"] {
+  box-shadow: inset 0 3px 0 var(--color-accent);
+}
+
+.app-tab-bar button[aria-current="page"]:focus-visible {
+  box-shadow: inset 0 3px 0 var(--color-accent), 0 0 0 4px rgba(154, 86, 80, 0.28);
+}
+
+button[role="switch"][aria-checked="true"] {
+  box-shadow: inset 0 0 0 2px var(--color-accent-dark);
+}
+
+button[role="switch"][data-pressed="true"] {
+  filter: brightness(0.82);
+}
+
 /* Custom Dropdown & Popover Animations */
 @keyframes popoverIn {
   from {

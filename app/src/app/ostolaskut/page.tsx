@@ -1,7 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { ErrorState, LoadingState } from "@/components/AsyncState";
+import { LoadingState } from "@/components/AsyncState";
+import { ConnectionNotice, EmptyState, StaleBanner } from "@/components/ScreenState";
 import ConfirmModal from "@/components/ConfirmModal";
 import {
   apiFetch,
@@ -15,7 +16,8 @@ import { isValidReferenceNumber, normalizeReference } from "@/lib/finnish-refere
 
 import { INVOICE_LINKS, WorkspaceLinks, linksWithActive } from "@/components/WorkspaceLinks";
 import { Button, chipClass, controlClass } from "@/components/ui";
-import { readPageCache, writePageCache } from "@/lib/page-cache";
+import { pageCacheFetchedAt, readPageCache, writePageCache } from "@/lib/page-cache";
+import { isForbidden } from "@/lib/screen-state";
 import { usePersistedState, useScrollRestoration } from "@/lib/list-ui-state";
 interface PurchaseInvoice {
   id: string;
@@ -80,6 +82,7 @@ export default function PurchaseInvoicesPage() {
     "open"
   );
   const [message, setMessage] = useState<string | null>(null);
+  const [loadFailure, setLoadFailure] = useState<unknown>(null);
   const [busy, setBusy] = useState(false);
   const [creating, setCreating] = useState(false);
   const [expanded, setExpanded] = useState<string | null>(null);
@@ -117,6 +120,7 @@ export default function PurchaseInvoicesPage() {
       writePageCache("purchases", data);
       setInvoices(data.invoices);
       setAging(data.aging);
+      setLoadFailure(null);
       setStatus("ready");
     } catch (error) {
       if (signal?.aborted) return;
@@ -124,8 +128,9 @@ export default function PurchaseInvoicesPage() {
         redirectToLogin();
         return;
       }
+      setLoadFailure(error);
       setMessage(errorMessage(error, "Ostolaskujen haku epäonnistui"));
-      setStatus("error");
+      setStatus((current) => (current === "ready" ? "ready" : "error"));
     }
   }, [filter]);
 
@@ -451,10 +456,20 @@ export default function PurchaseInvoicesPage() {
           ))}
         </div>
 
-        {status === "loading" && <LoadingState label="Haetaan ostolaskuja…" />}
-        {status === "error" && (
-          <ErrorState message={message || "Haku epäonnistui"} onRetry={() => void load()} />
+        {loadFailure != null && status === "ready" && (
+          <StaleBanner fetchedAt={pageCacheFetchedAt("purchases")} onRetry={() => void load()} />
         )}
+        {status === "loading" && <LoadingState label="Haetaan ostolaskuja…" />}
+        {status === "error" &&
+          (isForbidden(loadFailure) ? (
+            <EmptyState kind="forbidden" />
+          ) : (
+            <ConnectionNotice
+              error={loadFailure}
+              fallback={message || "Ostolaskujen haku epäonnistui"}
+              onRetry={() => void load()}
+            />
+          ))}
 
         {status === "ready" && (
           <ul className="space-y-3">
@@ -574,16 +589,13 @@ export default function PurchaseInvoicesPage() {
             ))}
 
             {invoices.length === 0 && (
-              <div className="text-center py-8 space-y-3">
-                <p className="text-sm text-warm-gray">
-                  {filter !== "all" ? "Ei ostolaskuja tällä suodattimella." : "Ei ostolaskuja vielä."}
-                </p>
-                {filter !== "all" && (
-                  <Button type="button" variant="secondary" onClick={() => setFilter("all")}>
-                    Tyhjennä suodatin
-                  </Button>
-                )}
-              </div>
+              <EmptyState
+                kind={filter !== "all" ? "filtered" : "records"}
+                title={filter !== "all" ? "Ei ostolaskuja tällä suodattimella" : "Ei ostolaskuja vielä"}
+                body={filter !== "all" ? "Kokeile toista suodatinta." : "Lisää ensimmäinen ostolasku."}
+                onClear={filter !== "all" ? () => setFilter("all") : undefined}
+                clearLabel="Tyhjennä suodatin"
+              />
             )}
           </ul>
         )}

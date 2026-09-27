@@ -3,7 +3,8 @@
 import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { ErrorState, LoadingState, SkeletonList } from "@/components/AsyncState";
+import { LoadingState, SkeletonList } from "@/components/AsyncState";
+import { ConnectionNotice, EmptyState, StaleBanner } from "@/components/ScreenState";
 import { InvoiceForm, type InvoicePayload } from "@/components/invoices/InvoiceForm";
 import {
   apiFetch,
@@ -17,7 +18,8 @@ import { formatDate, formatEur } from "@/lib/format";
 import { INVOICE_LINKS, WorkspaceLinks, linksWithActive } from "@/components/WorkspaceLinks";
 import { Button, chipClass } from "@/components/ui";
 import { newIdempotencyKey } from "@/lib/idempotency-key";
-import { readPageCache, writePageCache } from "@/lib/page-cache";
+import { pageCacheFetchedAt, readPageCache, writePageCache } from "@/lib/page-cache";
+import { isForbidden } from "@/lib/screen-state";
 import { usePersistedState, useScrollRestoration } from "@/lib/list-ui-state";
 interface InvoiceSummary {
   id: string;
@@ -105,6 +107,7 @@ function InvoicesPageContent() {
     "all"
   );
   const [message, setMessage] = useState<string | null>(null);
+  const [loadFailure, setLoadFailure] = useState<unknown>(null);
   const [creating, setCreating] = useState(false);
   const [busy, setBusy] = useState(false);
   const createKey = useRef(newIdempotencyKey());
@@ -129,6 +132,7 @@ function InvoicesPageContent() {
       if (filter === "all" && !customerFilter) writePageCache("invoices", data);
       setInvoices(data.invoices);
       setAging(data.aging);
+      setLoadFailure(null);
       setStatus("ready");
     } catch (error) {
       if (signal?.aborted) return;
@@ -136,8 +140,9 @@ function InvoicesPageContent() {
         redirectToLogin();
         return;
       }
+      setLoadFailure(error);
       setMessage(errorMessage(error, "Laskujen haku epäonnistui"));
-      setStatus("error");
+      setStatus((current) => (current === "ready" ? "ready" : "error"));
     }
   }, [filter, customerFilter]);
 
@@ -296,10 +301,20 @@ function InvoicesPageContent() {
           ))}
         </div>
 
-        {status === "loading" && <SkeletonList rows={4} />}
-        {status === "error" && (
-          <ErrorState message={message || "Haku epäonnistui"} onRetry={() => void load()} />
+        {loadFailure != null && status === "ready" && (
+          <StaleBanner fetchedAt={pageCacheFetchedAt("invoices")} onRetry={() => void load()} />
         )}
+        {status === "loading" && <SkeletonList rows={4} />}
+        {status === "error" &&
+          (isForbidden(loadFailure) ? (
+            <EmptyState kind="forbidden" />
+          ) : (
+            <ConnectionNotice
+              error={loadFailure}
+              fallback={message || "Laskujen haku epäonnistui"}
+              onRetry={() => void load()}
+            />
+          ))}
 
         {status === "ready" && (
           <ul className="space-y-3 list-stagger">
@@ -346,16 +361,19 @@ function InvoicesPageContent() {
             ))}
 
             {invoices.length === 0 && (
-              <div className="text-center py-8 space-y-3">
-                <p className="text-sm text-warm-gray">
-                  {filter !== "all" ? "Ei laskuja tällä suodattimella." : "Ei laskuja vielä."}
-                </p>
-                {filter !== "all" && (
-                  <Button type="button" variant="secondary" onClick={() => setFilter("all")}>
-                    Tyhjennä suodatin
-                  </Button>
-                )}
-              </div>
+              <EmptyState
+                kind={filter !== "all" || customerFilter ? "filtered" : "records"}
+                title={filter !== "all" || customerFilter ? "Ei laskuja tällä suodattimella" : "Ei laskuja vielä"}
+                body={
+                  filter !== "all" || customerFilter
+                    ? "Kokeile toista suodatinta."
+                    : "Luo ensimmäinen myyntilasku."
+                }
+                onClear={
+                  filter !== "all" || customerFilter ? () => setFilter("all") : undefined
+                }
+                clearLabel="Tyhjennä suodatin"
+              />
             )}
           </ul>
         )}

@@ -2,6 +2,7 @@
 
 import { useCallback, useState, type ReactNode } from "react";
 import {
+  apiFetch,
   errorMessage,
   isUnauthorized,
   readJson,
@@ -136,7 +137,7 @@ export default function StatementDetailView({
 
   const reloadStatement = useCallback(async () => {
     try {
-      const res = await fetch(`/api/statements/${statement.id}`);
+      const res = await apiFetch(`/api/statements/${statement.id}`);
       const data = await readJson<{ statement?: StatementData }>(
         res,
         "Tiliotteen lataus epäonnistui"
@@ -207,7 +208,7 @@ export default function StatementDetailView({
           : txForm.type === "meno" || txForm.type === "palkka"
             ? -Math.abs(amount)
             : amount;
-      const res = await fetch(
+      const res = await apiFetch(
         `/api/statements/${statement.id}/transactions`,
         {
           method: "PATCH",
@@ -250,7 +251,7 @@ export default function StatementDetailView({
     setSavingPeriod(true);
     setActionError("");
     try {
-      const res = await fetch(`/api/statements/${statement.id}`, {
+      const res = await apiFetch(`/api/statements/${statement.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ periodMonth }),
@@ -281,7 +282,7 @@ export default function StatementDetailView({
     setDeleting(true);
     setActionError("");
     try {
-      const res = await fetch(`/api/statements/${statement.id}`, {
+      const res = await apiFetch(`/api/statements/${statement.id}`, {
         method: "DELETE",
       });
       if (!res.ok) {
@@ -306,7 +307,7 @@ export default function StatementDetailView({
     setBulkBusy(true);
     setActionError("");
     try {
-      const res = await fetch("/api/matching/confirm-all", {
+      const res = await apiFetch("/api/matching/confirm-all", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ statementId: statement.id }),
@@ -336,7 +337,7 @@ export default function StatementDetailView({
     setBulkBusy(true);
     setActionError("");
     try {
-      const res = await fetch("/api/matching/run", { method: "POST" });
+      const res = await apiFetch("/api/matching/run", { method: "POST" });
       const data = await readJson<{
         autoConfirmed?: number;
         suggested?: number;
@@ -369,7 +370,7 @@ export default function StatementDetailView({
     setMatchBusyTxId(txId);
     setActionError("");
     try {
-      const res = await fetch(url, {
+      const res = await apiFetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
@@ -404,7 +405,7 @@ export default function StatementDetailView({
     setLoadingCandidates(true);
     setActionError("");
     try {
-      const res = await fetch(
+      const res = await apiFetch(
         `/api/matching/candidates?transactionId=${txId}`
       );
       const data = await readJson<{ candidates?: MatchCandidate[] }>(
@@ -428,7 +429,7 @@ export default function StatementDetailView({
     setActionError("");
     setStatusMsg("");
     try {
-      const res = await fetch(
+      const res = await apiFetch(
         `/api/statements/${statement.id}/reinfer-types`,
         { method: "POST" }
       );
@@ -459,7 +460,7 @@ export default function StatementDetailView({
     setDeletingTxId(transactionId);
     setActionError("");
     try {
-      const res = await fetch(
+      const res = await apiFetch(
         `/api/statements/${statement.id}/transactions`,
         {
           method: "DELETE",
@@ -514,7 +515,7 @@ export default function StatementDetailView({
     setActionError("");
     try {
       const receiptIds = incomeDrafts.map((t) => t.suggestedReceiptId!);
-      const res = await fetch("/api/receipts/batch-approve", {
+      const res = await apiFetch("/api/receipts/batch-approve", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ receiptIds }),

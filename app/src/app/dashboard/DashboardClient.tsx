@@ -2,7 +2,8 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { ErrorState, LoadingState } from "@/components/AsyncState";
+import { ErrorState } from "@/components/AsyncState";
+import { ConnectionNotice, StaleBanner } from "@/components/ScreenState";
 import {
   apiFetch,
   errorMessage,
@@ -12,7 +13,7 @@ import {
 } from "@/components/clientFetch";
 
 import { formatEur } from "@/lib/format";
-import { readPageCache, writePageCache } from "@/lib/page-cache";
+import { pageCacheFetchedAt, readPageCache, writePageCache } from "@/lib/page-cache";
 interface DashboardData {
   firstName: string;
   month: string;
@@ -34,6 +35,9 @@ interface DashboardData {
   pendingReceiptsCount?: number;
   isSingleVatProfile?: boolean;
   singleVatRate?: number;
+  sectionErrors?: Partial<
+    Record<"matching" | "vat" | "pending" | "threshold" | "position" | "receipts", string>
+  >;
 }
 
 function getGreeting(firstName: string): string {
@@ -81,7 +85,7 @@ export default function DashboardClient({
     data: DashboardData;
   } | null>(null);
   const [month, setMonth] = useState(currentMonth());
-  const [loadError, setLoadError] = useState("");
+  const [refreshFailed, setRefreshFailed] = useState<unknown>(null);
   const [loadAttempt, setLoadAttempt] = useState(0);
 
   // Poll for updates every 30 seconds to catch background cron job changes
@@ -107,7 +111,7 @@ export default function DashboardClient({
         ) {
           throw new Error("Palvelin palautti virheelliset etusivun tiedot");
         }
-        setLoadError("");
+        setRefreshFailed(null);
         writePageCache(`dashboard:${month}`, data);
         setResult({ month, data });
       })
@@ -117,9 +121,7 @@ export default function DashboardClient({
           redirectToLogin();
           return;
         }
-        setLoadError(
-          errorMessage(error, "Etusivun tietojen lataus epäonnistui")
-        );
+        setRefreshFailed(error);
       });
     return () => {
       cancelled = true;
@@ -142,7 +144,13 @@ export default function DashboardClient({
       <div className="space-y-6 pb-20">
         
         {/* Dynamic Action Banner for Pending Receipts */}
-        {data && data.pendingReceiptsCount !== undefined && data.pendingReceiptsCount > 0 && (
+        {data?.sectionErrors?.pending ? (
+          <ErrorState
+            compact
+            message={data.sectionErrors.pending}
+            onRetry={() => setLoadAttempt((a) => a + 1)}
+          />
+        ) : data && data.pendingReceiptsCount !== undefined && data.pendingReceiptsCount > 0 && (
           <Link href="/kuitit" className="block relative overflow-hidden group animate-in">
             <div className="absolute inset-0 bg-gradient-to-r from-warning/20 to-warning-dark/20 animate-pulse motion-reduce:animate-none rounded-2xl" />
             <div className="relative bg-white/80 backdrop-blur-md border border-warning/40 rounded-2xl p-4 shadow-[0_4px_20px_-4px_rgba(138,105,30,0.3)] flex items-center justify-between transition-all group-hover:shadow-[0_4px_25px_-4px_rgba(138,105,30,0.5)] group-hover:bg-white">
@@ -184,7 +192,7 @@ export default function DashboardClient({
             <button
               type="button"
               aria-label="Edellinen kuukausi"
-              onClick={() => { setLoadError(""); setMonth(shiftMonth(month, -1)); }}
+              onClick={() => { setRefreshFailed(null); setMonth(shiftMonth(month, -1)); }}
               className="touch-target flex items-center justify-center rounded-lg text-charcoal hover:bg-blush/40 transition-colors"
             >
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7"/></svg>
@@ -195,7 +203,7 @@ export default function DashboardClient({
             <button
               type="button"
               aria-label="Seuraava kuukausi"
-              onClick={() => { setLoadError(""); setMonth(shiftMonth(month, 1)); }}
+              onClick={() => { setRefreshFailed(null); setMonth(shiftMonth(month, 1)); }}
               disabled={month >= currentMonth()}
               className="touch-target flex items-center justify-center rounded-lg text-charcoal hover:bg-blush/40 transition-colors disabled:opacity-30"
             >
@@ -204,8 +212,18 @@ export default function DashboardClient({
           </div>
         </div>
 
-        {loadError ? (
-          <ErrorState message={loadError} onRetry={() => { setLoadError(""); setLoadAttempt((a) => a + 1); }} />
+        {refreshFailed && data ? (
+          <StaleBanner
+            fetchedAt={pageCacheFetchedAt(`dashboard:${month}`)}
+            onRetry={() => setLoadAttempt((a) => a + 1)}
+          />
+        ) : null}
+        {refreshFailed && !data ? (
+          <ConnectionNotice
+            error={refreshFailed}
+            fallback={errorMessage(refreshFailed, "Etusivun tietojen lataus epäonnistui")}
+            onRetry={() => setLoadAttempt((a) => a + 1)}
+          />
         ) : !data ? (
           <div className="space-y-4">
             <div className="grid grid-cols-2 gap-4">
@@ -235,7 +253,13 @@ export default function DashboardClient({
               <div className="bg-white rounded-3xl p-5 shadow-sm border border-slate-100 flex items-center justify-between hover-lift">
                 <div>
                   <p className="text-xs text-warm-gray uppercase tracking-widest font-medium mb-1">Kuitteja</p>
-                  <p className="text-xl font-semibold text-charcoal">{data.receiptCount}</p>
+                  {data.sectionErrors?.receipts ? (
+                    <button type="button" className="text-left text-xs text-danger underline" onClick={() => setLoadAttempt((a) => a + 1)}>
+                      {data.sectionErrors.receipts} Yritä uudelleen
+                    </button>
+                  ) : (
+                    <p className="text-xl font-semibold text-charcoal">{data.receiptCount}</p>
+                  )}
                 </div>
                 <div className="w-10 h-10 rounded-full bg-slate-50 flex items-center justify-center text-slate-400">
                   <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5"><path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 0 0-3.375-3.375h-1.5A1.125 1.125 0 0 1 13.5 7.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H8.25m6.75 12H9m1.5-12H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 0 0-9-9Z" /></svg>
@@ -245,9 +269,15 @@ export default function DashboardClient({
               <div className="bg-white rounded-3xl p-5 shadow-sm border border-slate-100 flex items-center justify-between hover-lift">
                 <div>
                   <p className="text-xs text-warm-gray uppercase tracking-widest font-medium mb-1">ALV-arvio</p>
-                  <p className={`text-xl font-semibold ${data.isRefund ? "text-success" : "text-accent"}`}>
-                    {data.isRefund ? "−" : ""}{formatEur(Math.abs(data.estimatedVat))}
-                  </p>
+                  {data.sectionErrors?.vat ? (
+                    <button type="button" className="text-left text-xs text-danger underline" onClick={() => setLoadAttempt((a) => a + 1)}>
+                      {data.sectionErrors.vat} Yritä uudelleen
+                    </button>
+                  ) : (
+                    <p className={`text-xl font-semibold ${data.isRefund ? "text-success" : "text-accent"}`}>
+                      {data.isRefund ? "−" : ""}{formatEur(Math.abs(data.estimatedVat))}
+                    </p>
+                  )}
                   <p className="text-[10px] text-warm-gray mt-0.5 uppercase tracking-wide">{data.isRefund ? "palautettava" : "maksettava"}</p>
                 </div>
               </div>
@@ -266,7 +296,13 @@ export default function DashboardClient({
               </p>
             </div>
 
-            {data.matching && data.matching.matchable > 0 && (
+            {data.sectionErrors?.matching ? (
+              <ErrorState
+                compact
+                message={data.sectionErrors.matching}
+                onRetry={() => setLoadAttempt((a) => a + 1)}
+              />
+            ) : data.matching && data.matching.matchable > 0 && (
               <Link href="/tiliotteet" className="block mt-2 animate-in-delay-2">
                 <div className="bg-white rounded-2xl p-4 shadow-sm border border-slate-100 flex items-center justify-between hover:border-charcoal/20 transition-colors group">
                   <div>
@@ -293,7 +329,21 @@ export default function DashboardClient({
               </Link>
             )}
 
-            {!data.vat.registered && data.vat.ytdRevenue >= data.vat.threshold * 0.75 && (
+            {data.sectionErrors?.position && (
+              <ErrorState
+                compact
+                message={data.sectionErrors.position}
+                onRetry={() => setLoadAttempt((a) => a + 1)}
+              />
+            )}
+
+            {data.sectionErrors?.threshold ? (
+              <ErrorState
+                compact
+                message={data.sectionErrors.threshold}
+                onRetry={() => setLoadAttempt((a) => a + 1)}
+              />
+            ) : !data.vat.registered && data.vat.ytdRevenue >= data.vat.threshold * 0.75 && (
               <div className={`rounded-2xl p-4 text-sm ${data.vat.ytdRevenue >= data.vat.threshold ? "bg-danger/10 text-danger border border-danger/20" : "bg-warning/10 text-charcoal border border-warning/20"}`}>
                 <p className="font-semibold">{data.vat.ytdRevenue >= data.vat.threshold ? "ALV-raja ylittynyt" : "ALV-raja lähestyy"}</p>
                 <p className="mt-1 leading-relaxed">

@@ -5,6 +5,7 @@ import { useParams, useRouter } from "next/navigation";
 import StatementDetailView from "@/components/StatementDetailView";
 import { ErrorState, LoadingState } from "@/components/AsyncState";
 import {
+  apiFetch,
   errorMessage,
   isUnauthorized,
   readJson,
@@ -23,7 +24,7 @@ export default function StatementDetailPage() {
 
   const loadStatement = useCallback(async () => {
     try {
-      const res = await fetch(`/api/statements/${statementId}`);
+      const res = await apiFetch(`/api/statements/${statementId}`);
       const data = await readJson<{ statement?: StatementData }>(
         res,
         "Tiliotteen lataus epäonnistui"

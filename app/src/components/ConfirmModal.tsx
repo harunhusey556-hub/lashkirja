@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { useFocusTrap } from "@/components/useFocusTrap";
 import { settleConfirm } from "@/lib/confirm-action";
 import { useOverlayLock } from "@/lib/overlay-lock";
+import { subscribeOverlayClose } from "@/lib/screen-state";
 
 interface ConfirmModalProps {
   isOpen: boolean;
@@ -72,6 +73,25 @@ export default function ConfirmModal({
 
   useFocusTrap(dialogRef, isOpen, { onEscape: dismiss });
   useOverlayLock(isOpen);
+
+  const cancelRef = useRef(onCancel);
+  cancelRef.current = onCancel;
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const close = () => {
+      attemptRef.current += 1;
+      setBusy(false);
+      cancelRef.current();
+    };
+    const unsubscribe = subscribeOverlayClose(close);
+    const onPop = () => close();
+    window.addEventListener("popstate", onPop);
+    return () => {
+      unsubscribe();
+      window.removeEventListener("popstate", onPop);
+    };
+  }, [isOpen]);
 
   useEffect(() => {
     if (isOpen) {

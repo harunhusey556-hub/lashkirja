@@ -2,8 +2,9 @@
 
 import Link from "next/link";
 import { useState } from "react";
+import { errorReference } from "@/lib/screen-state";
 import BankConnectCard from "@/components/BankConnectCard";
-import { ErrorState } from "@/components/AsyncState";
+import { ConnectionNotice } from "@/components/ScreenState";
 import { signOut } from "@/components/clientFetch";
 import { BuildInfo } from "@/components/BuildInfo";
 import { useProfile } from "./useProfile";
@@ -70,6 +71,21 @@ function SettingsRow({
 export default function AsetuksetPage() {
   const { profile, loadError, retry } = useProfile();
   const [signingOut, setSigningOut] = useState(false);
+  const [supportNote, setSupportNote] = useState("");
+
+  async function copySupport(kind: "report" | "reference") {
+    const reference = errorReference(process.env.NEXT_PUBLIC_GIT_COMMIT || "unknown");
+    const text =
+      kind === "reference"
+        ? reference
+        : `LashKirja-ongelma\nViite: ${reference}\nSivu: ${window.location.pathname}`;
+    try {
+      await navigator.clipboard.writeText(text);
+      setSupportNote(kind === "reference" ? "Virheviite kopioitu." : "Tukiviesti kopioitu. Liitä se sähköpostiin.");
+    } catch {
+      setSupportNote(text);
+    }
+  }
 
   async function handleSignOut() {
     if (signingOut) return;
@@ -79,9 +95,9 @@ export default function AsetuksetPage() {
 
   if (loadError) {
     return (
-      <>
-        <ErrorState message={loadError} onRetry={retry} />
-      </>
+      <div className="space-y-6">
+        <ConnectionNotice error={new Error(loadError)} fallback={loadError} onRetry={retry} />
+      </div>
     );
   }
 
@@ -162,6 +178,35 @@ export default function AsetuksetPage() {
           )}
         </section>
 
+        <SettingsGroup label="Ohje ja tuki">
+          <div className="px-4 py-3.5 space-y-3">
+            <p className="text-sm text-charcoal leading-relaxed">
+              Kuitit, laskut ja ALV löytyvät omista näkymistään. Jos jokin epäonnistuu,
+              kopioi virheviite ja liitä se tukiviestiin.
+            </p>
+            <button
+              type="button"
+              className="w-full min-h-11 rounded-xl border border-warm-gray-light/70 text-sm font-medium text-charcoal"
+              onClick={() => void copySupport("report")}
+            >
+              Ilmoita ongelmasta
+            </button>
+            <button
+              type="button"
+              className="w-full min-h-11 rounded-xl border border-warm-gray-light/70 text-sm font-medium text-charcoal"
+              onClick={() => void copySupport("reference")}
+            >
+              Kopioi virheviite
+            </button>
+            {supportNote && (
+              <p className="text-xs text-warm-gray" role="status">
+                {supportNote}
+              </p>
+            )}
+            <BuildInfo />
+          </div>
+        </SettingsGroup>
+
         <button
           type="button"
           onClick={handleSignOut}
@@ -176,8 +221,6 @@ export default function AsetuksetPage() {
           )}
           {signingOut ? "Kirjaudutaan ulos…" : "Kirjaudu ulos"}
         </button>
-
-        <BuildInfo />
       </div>
     </>
   );

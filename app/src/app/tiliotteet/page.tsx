@@ -115,7 +115,7 @@ export default function TiliotteetPage() {
     setBankSyncing(true);
     setUploadMsg("Haetaan tapahtumia pankista...");
     try {
-      const listResponse = await fetch("/api/bank/connections");
+      const listResponse = await apiFetch("/api/bank/connections");
       const list = await readJson<{
         ready?: boolean;
         connections?: Array<{
@@ -137,7 +137,7 @@ export default function TiliotteetPage() {
       let imported = 0;
       let statementId: string | null = null;
       for (const connection of targets) {
-        const response = await fetch(`/api/bank/connections/${connection.id}/sync`, {
+        const response = await apiFetch(`/api/bank/connections/${connection.id}/sync`, {
           method: "POST",
         });
         const data = await readJson<{ imported: number; statementId: string | null }>(
@@ -172,7 +172,11 @@ export default function TiliotteetPage() {
       fd.append("file", file);
       if (targetAccountId) fd.append("bankAccountId", targetAccountId);
 
-      const res = await fetch("/api/statements", { method: "POST", body: fd });
+      const res = await apiFetch("/api/statements", {
+        method: "POST",
+        body: fd,
+        timeoutMs: 120_000,
+      });
       const data = await readJson<{
         count: number;
         statement?: { id?: string };

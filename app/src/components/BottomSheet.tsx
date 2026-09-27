@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useFocusTrap } from "@/components/useFocusTrap";
 import { useOverlayLock } from "@/lib/overlay-lock";
+import { subscribeOverlayClose } from "@/lib/screen-state";
 
 interface BottomSheetProps {
   isOpen: boolean;
@@ -187,6 +188,13 @@ export default function BottomSheet({
   }, [isOpen]);
 
   useOverlayLock(isOpen);
+
+  const closeRef = useRef(onClose);
+  closeRef.current = onClose;
+  useEffect(() => {
+    if (!isOpen) return;
+    return subscribeOverlayClose(() => closeRef.current());
+  }, [isOpen]);
 
   if (!isOpen && !closing) return null;
 

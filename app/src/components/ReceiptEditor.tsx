@@ -11,6 +11,7 @@ import ReceiptMatchPanel, {
 import { ErrorState, LoadingState } from "@/components/AsyncState";
 import {
   ApiError,
+  apiFetch,
   errorMessage,
   isUnauthorized,
   readJson,
@@ -24,6 +25,7 @@ import { parseFinnishNumber, parseMoneyInput } from "@/lib/format";
 import { focusFirstInvalid } from "@/lib/focus-field";
 import { clearDraft } from "@/lib/draft-store";
 import { receiptFieldId, validateReceiptFields } from "@/lib/receipt-form";
+import { RECEIPT_PHASE } from "@/lib/screen-state";
 import {
   categoryLabel,
   isKnownCategory,
@@ -130,7 +132,7 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
   useEffect(() => {
     if (!receiptId) return;
     const controller = new AbortController();
-    fetch(`/api/receipts/${receiptId}`, { signal: controller.signal })
+    apiFetch(`/api/receipts/${receiptId}`, { signal: controller.signal })
       .then((response) =>
         readJson<ReceiptResponse>(response, "Kuitin lataus epäonnistui")
       )
@@ -236,7 +238,7 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
     }
 
     setUploading(true);
-    setUploadProgress("Lähetetään tiedostoa...");
+    setUploadProgress(RECEIPT_PHASE.upload);
     setError("");
     setFormReady(false);
     setUploadId("");
@@ -244,8 +246,12 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
     try {
       const fd = new FormData();
       fd.append("file", file);
-      setUploadProgress("Analysoidaan kuitin tietoja...");
-      const res = await fetch("/api/receipts", { method: "POST", body: fd });
+      setUploadProgress(RECEIPT_PHASE.process);
+      const res = await apiFetch("/api/receipts", {
+        method: "POST",
+        body: fd,
+        timeoutMs: 120_000,
+      });
       const data = await readJson<{
         uploadId: string;
         filePath: string;
@@ -298,22 +304,22 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
       );
       setShowPreview(false);
       setFormReady(true);
-      setUploadProgress("");
+      setUploadProgress(RECEIPT_PHASE.review);
     } catch (uploadError: unknown) {
       if (isUnauthorized(uploadError)) {
         redirectToLogin();
         return;
       }
       setError(errorMessage(uploadError, "Lataus epäonnistui"));
-    } finally {
       setUploadProgress("");
+    } finally {
       setUploading(false);
     }
   }
 
   async function reloadReceiptMatch() {
     if (!receiptId) return;
-    const response = await fetch(`/api/receipts/${receiptId}`);
+    const response = await apiFetch(`/api/receipts/${receiptId}`);
     const data = await readJson<ReceiptResponse>(
       response,
       "Kuitin lataus epäonnistui"
@@ -332,7 +338,7 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
     setMatchBusy(true);
     setError("");
     try {
-      const res = await fetch("/api/matching/confirm", {
+      const res = await apiFetch("/api/matching/confirm", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ transactionId, receiptId }),
@@ -355,7 +361,7 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
     setMatchBusy(true);
     setError("");
     try {
-      const res = await fetch("/api/matching/unlink", {
+      const res = await apiFetch("/api/matching/unlink", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ transactionId: linkedTx.id }),
@@ -440,7 +446,7 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
       };
 
       const res = isEdit
-        ? await fetch(`/api/receipts/${receiptId}`, {
+        ? await apiFetch(`/api/receipts/${receiptId}`, {
             method: "PATCH",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
@@ -448,7 +454,7 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
               ...(updatedAt ? { expectedUpdatedAt: updatedAt } : {}),
             }),
           })
-        : await fetch("/api/receipts/save", {
+        : await apiFetch("/api/receipts/save", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
@@ -491,6 +497,7 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
       const data = await readJson<ReceiptResponse>(res, "Tallennus epäonnistui");
       session.clearSavedDraft();
       session.setPhase("saved");
+      setUploadProgress(RECEIPT_PHASE.done);
       setBaseline(formData);
       if (data.receipt?.updatedAt) setUpdatedAt(String(data.receipt.updatedAt));
 
@@ -651,6 +658,12 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
       )}
 
       <FormError message={error} className="bg-danger/10 rounded-xl px-4 py-3" />
+
+      {uploadProgress && !uploading && (
+        <p className="text-sm text-warm-gray text-center" role="status" aria-live="polite">
+          {uploadProgress}
+        </p>
+      )}
 
       {formReady && (
         <form

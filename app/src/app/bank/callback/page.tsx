@@ -2,7 +2,7 @@
 
 import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { errorMessage, isUnauthorized, readJson, redirectToLogin } from "@/components/clientFetch";
+import { apiFetch, errorMessage, isUnauthorized, readJson, redirectToLogin } from "@/components/clientFetch";
 
 interface CallbackResult {
   ok: true;
@@ -22,7 +22,7 @@ function exchangeOnce(key: string, run: () => Promise<CallbackResult>): Promise<
 }
 
 async function postCallback(code: string, state: string): Promise<CallbackResult> {
-  const response = await fetch("/api/bank/connections/callback", {
+  const response = await apiFetch("/api/bank/connections/callback", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ code, state }),

@@ -3,7 +3,7 @@
 import { useState } from "react";
 import ConfirmModal from "@/components/ConfirmModal";
 import { ErrorState, LoadingState } from "@/components/AsyncState";
-import { errorMessage } from "@/components/clientFetch";
+import { apiFetch, errorMessage } from "@/components/clientFetch";
 import { useProfile } from "../useProfile";
 
 type ProviderType = "gmail" | "outlook" | "icloud" | "other" | null;
@@ -29,7 +29,7 @@ export default function SahkopostiPage() {
     setSyncing(true);
     setSyncMsg("Etsitään kuitteja...");
     try {
-      const res = await fetch("/api/integrations/imap/sync", { method: "POST" });
+      const res = await apiFetch("/api/integrations/imap/sync", { method: "POST" });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Synkronointi epäonnistui");
       setSyncMsg(`Synkronoitu onnistuneesti! Löydettiin ${data.count} uutta kuittia.`);
@@ -240,7 +240,7 @@ export default function SahkopostiPage() {
                         setImapSaving(true);
                         setImapMsg("Yhdistetään ja testataan...");
                         try {
-                          const res = await fetch("/api/integrations/imap", {
+                          const res = await apiFetch("/api/integrations/imap", {
                             method: "POST",
                             headers: { "Content-Type": "application/json" },
                             body: JSON.stringify({
@@ -375,7 +375,7 @@ export default function SahkopostiPage() {
           if (!accountToDisconnect) return;
           const id = accountToDisconnect;
           try {
-            const res = await fetch(`/api/integrations/imap?id=${id}`, { method: "DELETE" });
+            const res = await apiFetch(`/api/integrations/imap?id=${id}`, { method: "DELETE" });
             if (!res.ok) {
               const message = "Yhteyden katkaisu epäonnistui. Yritä uudelleen.";
               setSyncMsg(message);

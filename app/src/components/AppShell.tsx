@@ -2,7 +2,8 @@
 
 import { useEffect, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
-import { ErrorState, LoadingState } from "@/components/AsyncState";
+import { LoadingState } from "@/components/AsyncState";
+import { ConnectionNotice } from "@/components/ScreenState";
 import { OnboardingModal } from "@/components/OnboardingModal";
 import { AiChatDrawer } from "@/components/AiChatDrawer";
 import {
@@ -17,6 +18,7 @@ import type { BusinessProfile } from "@/lib/onboarding";
 import BottomSheet from "@/components/BottomSheet";
 import { apiFetch } from "@/components/clientFetch";
 import { readPageCache, writePageCache } from "@/lib/page-cache";
+import { bumpNavEpoch } from "@/lib/screen-state";
 import {
   armNavigation,
   consumeDirection,
@@ -238,7 +240,7 @@ function pageTitle(pathname: string): string {
 export default function AppShell({ children }: { children: React.ReactNode }) {
   const [authAttempt, setAuthAttempt] = useState(0);
   const [authState, setAuthState] = useState<
-    { status: "checking" | "ready" | "error"; message?: string }
+    { status: "checking" | "ready" | "error"; message?: string; error?: unknown }
   >(() =>
     readPageCache<ShellUser>(AUTH_CACHE_KEY) ? { status: "ready" } : { status: "checking" }
   );
@@ -246,7 +248,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   // Stored with the path it was opened on, so a route change closes it without
   // an effect that would re-render twice.
   const [profileOpenOn, setProfileOpenOn] = useState<string | null>(null);
-  const [chatOpen, setChatOpen] = useState(false);
+  const [chatOpenOn, setChatOpenOn] = useState<string | null>(null);
   const [signingOut, setSigningOut] = useState(false);
   const [user, setUser] = useState<ShellUser | null>(() => readPageCache<ShellUser>(AUTH_CACHE_KEY));
   const [onboardingProfile, setOnboardingProfile] = useState<BusinessProfile | null>(null);
@@ -272,6 +274,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     recordRoute(pathname, direction);
     document.dispatchEvent(new Event("lashkirja-dismiss-press"));
+    bumpNavEpoch();
   }, [pathname, direction]);
 
   function goBack() {
@@ -436,7 +439,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     const controller = new AbortController();
 
-    fetch("/api/auth/me", {
+    apiFetch("/api/auth/me", {
       credentials: "include",
       signal: controller.signal,
     })
@@ -454,7 +457,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         warmTabCaches();
         // Check onboarding state; skip once it has been confirmed done.
         if (readPageCache<boolean>(ONBOARDED_CACHE_KEY)) return;
-        return fetch("/api/onboarding", { signal: controller.signal })
+        return apiFetch("/api/onboarding", { signal: controller.signal })
           .then((res) => readJson<{ onboarded: boolean; profile: BusinessProfile | null }>(res, ""))
           .then((data) => {
             if (!data) return;
@@ -480,6 +483,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         setAuthState({
           status: "error",
           message: errorMessage(error, "Istunnon tarkistus epäonnistui"),
+          error,
         });
       });
 
@@ -493,7 +497,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     const onVisibility = () => {
       if (document.visibilityState !== "visible") return;
-      fetch("/api/auth/me", { credentials: "include" })
+      apiFetch("/api/auth/me", { credentials: "include" })
         .then((res) => {
           if (res.status === 401) redirectToLogin();
         })
@@ -509,6 +513,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   }
 
   const showProfile = profileOpenOn === pathname;
+  const chatOpen = chatOpenOn === pathname;
   const initials = (user?.firstName?.trim()?.[0] || user?.email?.trim()?.[0] || "").toUpperCase();
 
   async function handleSignOut() {
@@ -554,7 +559,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
               type="button"
               onClick={() => {
                 void hapticSelection();
-                setChatOpen(true);
+                setChatOpenOn(pathname);
               }}
               aria-label="Avustaja"
               className="assistant-button active-press flex h-11 items-center justify-center gap-1 rounded-full bg-accent px-2.5 text-sm font-medium text-white"
@@ -601,8 +606,9 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         {authState.status === "checking" ? (
           <LoadingState label="Tarkistetaan istuntoa..." />
         ) : authState.status === "error" ? (
-          <ErrorState
-            message={authState.message || "Istunnon tarkistus epäonnistui"}
+          <ConnectionNotice
+            error={authState.error}
+            fallback={authState.message || "Istunnon tarkistus epäonnistui"}
             onRetry={retryAuth}
           />
         ) : (
@@ -612,7 +618,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
       {authState.status === "ready" && (
         <>
-          <AiChatDrawer open={chatOpen} onClose={() => setChatOpen(false)} />
+          <AiChatDrawer open={chatOpen} onClose={() => setChatOpenOn(null)} />
           <OnboardingModal
             isOpen={showOnboarding}
             initialProfile={onboardingProfile ?? undefined}

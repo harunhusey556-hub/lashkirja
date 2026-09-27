@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import {
+  apiFetch,
   errorMessage,
   isUnauthorized,
   readJson,
@@ -36,7 +37,7 @@ export function useProfile() {
 
   useEffect(() => {
     const controller = new AbortController();
-    fetch("/api/profile", { signal: controller.signal })
+    apiFetch("/api/profile", { signal: controller.signal })
       .then((response) =>
         readJson<{ profile: Profile }>(response, "Asetusten lataus epäonnistui")
       )
@@ -73,7 +74,7 @@ export function useProfile() {
       setSaving(true);
       setSavedMsg("");
       try {
-        const res = await fetch("/api/profile", {
+        const res = await apiFetch("/api/profile", {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(update),

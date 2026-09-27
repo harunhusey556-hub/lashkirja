@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import ConfirmModal from "@/components/ConfirmModal";
 import {
+  apiFetch,
   errorMessage,
   isUnauthorized,
   readJson,
@@ -86,7 +87,7 @@ export default function BankConnectCard({ entityType }: { entityType: string }) 
   const [disconnectId, setDisconnectId] = useState<string | null>(null);
 
   const loadConnections = useCallback(async () => {
-    const response = await fetch("/api/bank/connections");
+    const response = await apiFetch("/api/bank/connections");
     const data = await readJson<{
       enabled: boolean;
       ready: boolean;
@@ -103,7 +104,7 @@ export default function BankConnectCard({ entityType }: { entityType: string }) 
   const loadBanks = useCallback(async (type: "personal" | "business") => {
     setBanksLoading(true);
     try {
-      const response = await fetch(`/api/bank/aspsps?country=FI&psuType=${type}`);
+      const response = await apiFetch(`/api/bank/aspsps?country=FI&psuType=${type}`);
       const data = await readJson<{ aspsps?: Aspsp[] }>(
         response,
         "Pankkilistan lataus epäonnistui"
@@ -124,7 +125,7 @@ export default function BankConnectCard({ entityType }: { entityType: string }) 
 
   useEffect(() => {
     const controller = new AbortController();
-    fetch("/api/bank/connections", { signal: controller.signal })
+    apiFetch("/api/bank/connections", { signal: controller.signal })
       .then((response) =>
         readJson<{
           enabled: boolean;
@@ -170,7 +171,7 @@ export default function BankConnectCard({ entityType }: { entityType: string }) 
     setBusyId(bank.name);
     setMessage("");
     try {
-      const response = await fetch("/api/bank/connections", {
+      const response = await apiFetch("/api/bank/connections", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -207,7 +208,7 @@ export default function BankConnectCard({ entityType }: { entityType: string }) 
       )
     );
     try {
-      const response = await fetch(`/api/bank/connections/${connectionId}`, {
+      const response = await apiFetch(`/api/bank/connections/${connectionId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ accounts: [{ id: account.id, inScope: next }] }),
@@ -249,7 +250,7 @@ export default function BankConnectCard({ entityType }: { entityType: string }) 
     setMessage("Haetaan tapahtumia pankista...");
     setMessageTone("ok");
     try {
-      const response = await fetch(`/api/bank/connections/${connectionId}/sync`, {
+      const response = await apiFetch(`/api/bank/connections/${connectionId}/sync`, {
         method: "POST",
       });
       const data = await readJson<{ imported: number; statementId: string | null }>(
@@ -282,7 +283,7 @@ export default function BankConnectCard({ entityType }: { entityType: string }) 
   async function disconnect(connectionId: string) {
     setBusyId(connectionId);
     try {
-      const response = await fetch(`/api/bank/connections/${connectionId}`, {
+      const response = await apiFetch(`/api/bank/connections/${connectionId}`, {
         method: "DELETE",
       });
       await readJson(response, "Yhteyden katkaisu epäonnistui");

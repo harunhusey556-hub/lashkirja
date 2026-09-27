@@ -1,4 +1,4 @@
-import { clearPageCache } from "@/lib/page-cache";
+import { clearPageCache, invalidateForMutation } from "@/lib/page-cache";
 
 export class ApiError extends Error {
   status: number;
@@ -66,10 +66,12 @@ export class ApiGatewayError extends Error {
   }
 }
 
+export type ApiFetchInit = RequestInit & { timeoutMs?: number };
+
 /** Aborts when either the caller's own signal or our timeout fires, whichever comes first. */
-function withTimeout(externalSignal: AbortSignal | null | undefined) {
+function withTimeout(externalSignal: AbortSignal | null | undefined, timeoutMs = REQUEST_TIMEOUT_MS) {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
   const onExternalAbort = () => controller.abort();
   externalSignal?.addEventListener("abort", onExternalAbort);
   return {
@@ -106,7 +108,7 @@ function requestUrl(input: RequestInfo | URL): string {
  * Each caller receives its own clone so the body can be read twice.
  * A caller-supplied abort signal opts out: that request has its own lifetime.
  */
-export async function apiFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+export async function apiFetch(input: RequestInfo | URL, init?: ApiFetchInit): Promise<Response> {
   const method = (init?.method || "GET").toUpperCase();
   const shareable = IDEMPOTENT_METHODS.has(method) && !init?.signal;
   const key = shareable ? `${method} ${requestUrl(input)}` : null;
@@ -127,22 +129,28 @@ export async function apiFetch(input: RequestInfo | URL, init?: RequestInit): Pr
   return promise;
 }
 
-async function apiFetchAttempt(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+async function apiFetchAttempt(input: RequestInfo | URL, init?: ApiFetchInit): Promise<Response> {
   const method = (init?.method || "GET").toUpperCase();
   const maxRetries = IDEMPOTENT_METHODS.has(method) ? 3 : 1;
+  const timeoutMs = init?.timeoutMs ?? REQUEST_TIMEOUT_MS;
+  const rest: RequestInit = { ...(init ?? {}) };
+  delete (rest as ApiFetchInit).timeoutMs;
   let attempt = 0;
 
   while (attempt < maxRetries) {
-    const { signal, cleanup } = withTimeout(init?.signal);
+    const { signal, cleanup } = withTimeout(rest.signal, timeoutMs);
     try {
-      const response = await fetch(input, { ...init, signal });
+      const response = await fetch(input, { ...rest, signal });
       // If it's a 502/503/504 gateway/timeout error, we should retry!
       if (response.status === 502 || response.status === 503 || response.status === 504) {
         throw new ApiGatewayError(response.status);
       }
+      if (response.ok && !IDEMPOTENT_METHODS.has(method)) {
+        invalidateForMutation(requestUrl(input));
+      }
       return response; // 2xx, 4xx, and 500 (logic errors) are returned normally
     } catch (error) {
-      if (init?.signal?.aborted) throw error; // caller cancelled — not a timeout, not retryable
+      if (rest.signal?.aborted) throw error; // caller cancelled — not a timeout, not retryable
       if (
         error instanceof DOMException &&
         error.name === "AbortError"
@@ -203,7 +211,7 @@ export async function signOut(): Promise<void> {
   // the previous user's lists while its own fetches are still in flight.
   clearPageCache();
   try {
-    await fetch("/api/auth/logout", { method: "POST", credentials: "include" });
+    await apiFetch("/api/auth/logout", { method: "POST", credentials: "include" });
   } catch {
     // Network hiccup: the cookie may survive, but landing on /login is still
     // right — the next authenticated fetch redirects back here anyway.
