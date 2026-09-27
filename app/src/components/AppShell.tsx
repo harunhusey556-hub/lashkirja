@@ -96,7 +96,7 @@ const NAV_ITEMS = [
     ),
   },
   {
-    href: "/pankkitilit",
+    href: "/pankki",
     label: "Pankki",
     icon: (active: boolean) => (
       <svg
@@ -208,8 +208,12 @@ function navActive(pathname: string, href: string): boolean {
       pathname.startsWith("/toistuvat")
     );
   }
-  if (href === "/pankkitilit") {
-    return pathname.startsWith("/pankkitilit") || pathname.startsWith("/tiliotteet");
+  if (href === "/pankki") {
+    return (
+      pathname.startsWith("/pankki") ||
+      pathname.startsWith("/pankkitilit") ||
+      pathname.startsWith("/tiliotteet")
+    );
   }
   if (href === "/raportit") {
     return pathname.startsWith("/raportit") || pathname.startsWith("/alv-raportti");
@@ -221,6 +225,7 @@ function pageTitle(pathname: string): string {
   if (pathname === "/kuitit/uusi") return "Uusi kuitti";
   if (/^\/kuitit\/[^/]+$/.test(pathname)) return "Kuitti";
   if (pathname.startsWith("/kuitit")) return "Kuitit ja laskut";
+  if (pathname === "/pankki") return "Pankki";
   if (pathname.startsWith("/pankkitilit")) return "Pankkitilit";
   if (pathname === "/laskut/uusi") return "Uusi lasku";
   if (/^\/laskut\/[^/]+$/.test(pathname)) return "Lasku";

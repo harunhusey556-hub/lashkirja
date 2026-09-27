@@ -38,7 +38,7 @@ test("login lands on the dashboard and the tab bar navigates", async ({ page }) 
   await expect(page).toHaveURL(/\/laskut$/);
 
   await nav.getByRole("button", { name: "Pankki" }).click();
-  await expect(page).toHaveURL(/\/pankkitilit$/);
+  await expect(page).toHaveURL(/\/pankki$/);
 
   await nav.getByRole("button", { name: "Raportit" }).click();
   await expect(page).toHaveURL(/\/raportit$/);

@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import Link from "next/link";
 import { LoadingState } from "@/components/AsyncState";
 import { ConnectionNotice, StaleBanner } from "@/components/ScreenState";
 import ConfirmModal from "@/components/ConfirmModal";
@@ -290,16 +291,22 @@ export default function BankAccountsPage() {
               </section>
             ) : formMode === "hidden" ? (
               <section className="bg-white rounded-3xl border border-warm-gray-light/20 shadow-sm p-8 text-center space-y-3">
-                <p className="text-base font-medium text-charcoal">Ei vielä pankkitilejä</p>
+                <p className="text-base font-medium text-charcoal">Ei vielä kirjanpidon tilejä</p>
                 <p className="text-sm text-warm-gray leading-relaxed">
-                  Saldo ja täsmäytys näkyvät tässä, kun ensimmäinen tili on lisätty.
+                  Yhdistetty pankki näkyy Pankki-välilehdellä. Tänne lisätään tili vain, jos seuraat saldoa käsin.
                 </p>
+                <Link
+                  href="/pankki"
+                  className="active-press inline-flex min-h-12 items-center justify-center rounded-xl bg-charcoal px-4 text-sm font-medium text-white"
+                >
+                  Avaa pankkiyhteys
+                </Link>
                 <button
                   type="button"
                   onClick={() => setFormMode("create")}
-                  className="active-press inline-flex min-h-12 items-center justify-center rounded-xl bg-accent px-4 text-sm font-medium text-white"
+                  className="active-press inline-flex min-h-12 items-center justify-center rounded-xl border border-warm-gray-light px-4 text-sm font-medium text-charcoal"
                 >
-                  Lisää ensimmäinen pankkitili
+                  Lisää pankkitili
                 </button>
               </section>
             ) : null}

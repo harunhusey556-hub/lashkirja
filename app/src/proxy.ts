@@ -20,6 +20,7 @@ const protectedPrefixes = [
   "/ostolaskut",
   "/toistuvat",
   "/pankkitilit",
+  "/pankki",
   "/raportit",
   "/bank",
 ];
@@ -114,6 +115,8 @@ export const config = {
     "/ostolaskut/:path*",
     "/toistuvat/:path*",
     "/pankkitilit/:path*",
+    "/pankki",
+    "/pankki/:path*",
     "/raportit/:path*",
     "/bank/:path*",
     "/login",
