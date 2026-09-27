@@ -34,17 +34,28 @@ test("login lands on the dashboard and the tab bar navigates", async ({ page }) 
   await expect(page.getByText("Tulot", { exact: true })).toBeVisible();
 
   const nav = page.getByRole("navigation", { name: "Päävalikko" });
+  await expect(nav.getByRole("button", { name: "Muut" })).toHaveCount(0);
+
   await nav.getByRole("button", { name: "Myynti" }).click();
   await expect(page).toHaveURL(/\/laskut$/);
 
-  await nav.getByRole("button", { name: "Pankki" }).click();
-  await expect(page).toHaveURL(/\/pankki$/);
-  await expect(page.getByRole("navigation", { name: "Osio" }).getByRole("button", { name: "Täsmäytys" })).toBeVisible();
+  await nav.getByRole("button", { name: "Kirjanpito" }).click();
+  await expect(page).toHaveURL(/\/kirjanpito$/);
+  await page.getByRole("link", { name: /ALV-ilmoitus/ }).click();
+  await expect(page).toHaveURL(/\/kirjanpito\/alv$/);
+  await page.getByRole("button", { name: "Takaisin" }).click();
+  await expect(page).toHaveURL(/\/kirjanpito$/);
 
-  await nav.getByRole("button", { name: "Muut" }).click();
-  await page.getByRole("button", { name: "Raportit" }).click();
+  await nav.getByRole("button", { name: "Lisää" }).click();
+  await expect(page.getByRole("link", { name: "Kuvaa kuitti" })).toBeVisible();
+  await page.keyboard.press("Escape");
+
+  await nav.getByRole("button", { name: "Raportit" }).click();
   await expect(page).toHaveURL(/\/raportit$/);
-  await expect(nav.getByRole("button", { name: "Lisää", exact: true })).toHaveCount(0);
+
+  await page.getByRole("button", { name: /Profiili, asetukset/ }).click();
+  await page.getByRole("button", { name: "Asetukset" }).click();
+  await expect(page).toHaveURL(/\/asetukset$/);
 });
 
 test("a bank account can be added and a month reconciled", async ({ page }) => {

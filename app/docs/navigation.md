@@ -1,23 +1,18 @@
 # Navigointi
 
-Yksi rekisteri: `app/src/lib/navigation.ts`. Sivupalkki ja mobiilin välilehdet piirtävät vain `kind === "root"`. Uusi ominaisuus ei saa uutta juurta.
+Yksi rekisteri: `app/src/lib/navigation.ts`. Välilehtipalkki ja sivupalkki piirtävät vain `placement: "tab"` -juuret. Asetukset on `placement: "avatar"` ja aukeaa profiilikuvasta.
 
-Juuret: Etusivu, Pankki, Kuitit, Myynti, Kirjanpito, Raportit, Asetukset.
-Mobiilin Muut: vain Kirjanpito, Raportit ja Asetukset.
-Pankki on esimerkkityötila: Yhteenveto, Tapahtumat, Tilit, Täsmäytys.
-Pankkiyhteyden tekninen asetus: Asetukset → Integraatiot → Pankkiyhteys. Tilillä oleva + Yhdistä on toiminto, ei toinen valikko.
+Juuret: Koti, Myynti, Kirjanpito, Raportit. Mobiilissa Myynnin ja Kirjanpidon välissä on Lisää (+).
 
-## Kymmenen sääntöä
+## Säännöt
 
-1. Työpöydän sivupalkissa on enintään 6–7 juurta.
-2. Moduulissa on enintään yksi toinen navigointitaso.
-3. Kolmitasoinen valikko on kielletty (juuri → työtila → työtila).
-4. Detail-, luonti- ja muokkausnäkymät eivät ole päävalikossa.
-5. Tekninen ja harvinainen asetus kuuluu Asetuksiin.
-6. Päivittäinen työ hoituu enintään kahdella siirrolla.
-7. Samalla toiminnolla ei ole kahta pysyvää valikkopolkua.
-8. Detail-näkymässä on murupolku ja yksi Takaisin. Sovelluksen kuoren Takaisin ja sivun Takaisin eivät näy yhtä aikaa.
-9. Uusi reitti vaatii `kind`-arvon (`root`, `workspace`, `detail` tai `settings`) rekisterissä.
-10. Ominaisuutta ei työnnetä Muut-valikkoon. Muut sisältää vain jäljelle jäävät juuret.
+1. Välilehtijuuria on tasan neljä, avatar-juuria yksi (Asetukset). Uusi ominaisuus ei saa uutta juurta.
+2. Moduulissa on enintään yksi toinen navigointitaso; kolmitasoinen valikko on kielletty.
+3. Detail-, luonti- ja muokkausnäkymät eivät ole päävalikossa.
+4. Samalla toiminnolla ei ole kahta pysyvää valikkopolkua.
+5. Juuren alapuolisella sivulla on yksi Takaisin: kuoren painike, jonka teksti on rekisterin vanhemman nimi. Ei murupolkuja, ei sivun omaa Takaisin-painiketta.
+6. Suodattimet eivät vaihda sivua. Sivulla on enintään yksi suodatinrivi.
+7. Luonti alkaa Lisää-valikosta. Myynnin "Uusi lasku" on saman reitin pikavalinta.
+8. Uusi reitti vaatii `kind`-arvon rekisterissä; kaikki sivut ovat suojattuja, ellei niitä ole lueteltu `proxy.ts`:n `PUBLIC_PAGES`-listassa.
 
-`navigationViolations()` ja `navigation.test.ts` kaatavat buildin, jos rekisteri rikkoo näitä.
+`navigationViolations()`, `navigation.test.ts` ja `proxy.test.ts` kaatavat testit, jos rekisteri tai suojaus rikkoo näitä.
