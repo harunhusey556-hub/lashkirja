@@ -1,0 +1,19 @@
+import type { ReactNode } from "react";
+import type { Tone } from "@/lib/status-labels";
+
+const TONE: Record<Tone, string> = {
+  neutral: "bg-canvas text-ink-2",
+  accent: "bg-accent-soft text-accent",
+  danger: "bg-danger/10 text-danger",
+  success: "bg-success/10 text-success",
+  warning: "bg-warning/10 text-warning",
+};
+
+export function StatusTag({ tone, children, icon }: { tone: Tone; children: ReactNode; icon?: ReactNode }) {
+  return (
+    <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[13px] font-semibold ${TONE[tone]}`}>
+      {icon ? <span aria-hidden className="flex">{icon}</span> : null}
+      {children}
+    </span>
+  );
+}

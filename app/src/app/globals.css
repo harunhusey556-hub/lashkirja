@@ -31,6 +31,14 @@
   --color-warning-dark: #6e5418;
   --color-danger: #a83232;
 
+  --color-canvas: #f6f3ef;
+  --color-surface: #fffdfb;
+  --color-line: #e7e1da;
+  --color-ink: #26221f;
+  --color-ink-2: #6a645f;
+  --color-accent-soft: #f3e6e3;
+  --radius-card: 14px;
+
   --app-tab-height: 4.5rem;
 }
 
@@ -487,6 +495,14 @@ button[role="switch"][aria-checked="true"] {
 button[role="switch"][data-pressed="true"] {
   filter: brightness(0.82);
 }
+
+/* ListRow's stretched link: the press paints the row, not the invisible overlay. */
+.row-link[data-pressed="true"] { background: rgb(38 34 31 / 0.05); }
+/* FilterChips use aria-pressed for state; the generic inset shadow is not their
+   look. `button[aria-pressed="true"]:not([data-pressed="true"])` above has the
+   same (element, class/attr) specificity tie once qualified with the element,
+   so this must repeat the `button` type selector to win by source order. */
+button.ds-chip[aria-pressed="true"] { box-shadow: none; }
 
 /* Custom Dropdown & Popover Animations */
 @keyframes popoverIn {
