@@ -407,7 +407,10 @@ export default function DashboardClient({
             className="flex flex-col items-center justify-center gap-2 bg-white border-2 border-charcoal/5 text-charcoal rounded-3xl p-5 hover:bg-slate-50 transition-all hover:-translate-y-1 hover:shadow-lg active-press"
           >
             <div className="w-10 h-10 rounded-full bg-charcoal/5 flex items-center justify-center">
-              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-5 h-5"><path strokeLinecap="round" strokeLinejoin="round" d="M3 10h18M5 10V8.5L12 4l7 4.5V10M6 10v7m4-7v7m4-7v7m4-7v7M4 20h16" /></svg>
+              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.75} stroke="currentColor" className="w-5 h-5">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M7 3.5h8.5L19 7v13.5H7A2.5 2.5 0 0 1 4.5 18V6A2.5 2.5 0 0 1 7 3.5Z" />
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6M9 16h4" />
+              </svg>
             </div>
             <span className="text-sm font-medium">Kirjanpito</span>
           </Link>
