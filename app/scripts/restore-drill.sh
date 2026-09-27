@@ -56,6 +56,34 @@ if [ -f "$SNAPSHOT/MANIFEST.txt" ]; then
     echo "ERROR: restored upload count $ACTUAL_UPLOADS != manifest $EXPECT_UPLOADS" >&2
     exit 1
   fi
+  while IFS=$'\t' read -r kind hash rel; do
+    [ "$kind" = "file" ] || continue
+    if [ ! -f "$WORK/data/$rel" ]; then
+      echo "ERROR: restored file missing: $rel" >&2
+      exit 1
+    fi
+    ACTUAL="$(sha256sum "$WORK/data/$rel" | awk '{print $1}')"
+    if [ "$ACTUAL" != "$hash" ]; then
+      echo "ERROR: restored file hash mismatch: $rel" >&2
+      exit 1
+    fi
+    echo "file=$rel"
+  done < "$SNAPSHOT/MANIFEST.txt"
+fi
+
+if [ -n "${LASHKIRJA_RESTORE_FILE:-}" ]; then
+  TARGET="$WORK/data/${LASHKIRJA_RESTORE_FILE}"
+  if [ ! -f "$TARGET" ]; then
+    echo "ERROR: restore drill file missing: $LASHKIRJA_RESTORE_FILE" >&2
+    exit 1
+  fi
+  ACTUAL="$(sha256sum "$TARGET" | awk '{print $1}')"
+  if [ -n "${LASHKIRJA_RESTORE_SHA256:-}" ] && [ "$ACTUAL" != "$LASHKIRJA_RESTORE_SHA256" ]; then
+    echo "ERROR: restore drill hash mismatch for $LASHKIRJA_RESTORE_FILE" >&2
+    exit 1
+  fi
+  echo "checked=$LASHKIRJA_RESTORE_FILE"
+  echo "sha256=$ACTUAL"
 fi
 
 if [ -n "${LASHKIRJA_RESTORE_SQL:-}" ]; then

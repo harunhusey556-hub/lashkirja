@@ -107,6 +107,8 @@ describe("backup-db.sh", () => {
         execFileSync("sqlite3", [snapshotDb, "SELECT body FROM notes;"], { encoding: "utf8" }).trim()
       ).toBe("only-wal");
       expect(readFileSync(path.join(snapshot, "uploads", "kuitti.txt"), "utf8")).toBe("kuitti-bytes");
+      const manifest = readFileSync(path.join(snapshot, "MANIFEST.txt"), "utf8");
+      expect(manifest).toContain(`file\t${sha256(path.join(snapshot, "uploads", "kuitti.txt"))}\tuploads/kuitti.txt`);
 
       const remoteDb = path.join(remote, path.basename(snapshot), "lashkirja.db");
       expect(sha256(remoteDb)).toBe(sha256(snapshotDb));
@@ -139,16 +141,65 @@ describe("backup-db.sh", () => {
     const snapshot = execFileSync("find", [backups, "-mindepth", "1", "-maxdepth", "1", "-type", "d"], {
       encoding: "utf8",
     }).trim();
+    const fileHash = sha256(path.join(uploads, "kuitti.txt"));
     const output = execFileSync("bash", [path.join(process.cwd(), "scripts/restore-drill.sh"), snapshot], {
       encoding: "utf8",
       env: {
         ...process.env,
         LASHKIRJA_RESTORE_SQL: "SELECT body FROM notes;",
         LASHKIRJA_RESTORE_CLEAN: "1",
+        LASHKIRJA_RESTORE_FILE: "uploads/kuitti.txt",
+        LASHKIRJA_RESTORE_SHA256: fileHash,
       },
     });
     expect(output).toContain("integrity=ok");
     expect(output).toContain("row=säilyy");
+    expect(output).toContain("file=uploads/kuitti.txt");
+    expect(output).toContain(`sha256=${fileHash}`);
     expect(output).toContain("Restore drill ok.");
+  });
+
+  it("refuses a snapshot whose upload bytes do not match the database hash", () => {
+    const root = mkdtempSync(path.join(tmpdir(), "lashkirja-backup-ref-"));
+    const db = path.join(root, "lashkirja.db");
+    const uploads = path.join(root, "uploads", "user-1");
+    const backups = path.join(root, "backups");
+    execFileSync("mkdir", ["-p", uploads]);
+    writeFileSync(path.join(uploads, "kuitti.txt"), "oikea");
+    const hash = sha256(path.join(uploads, "kuitti.txt"));
+    execFileSync("sqlite3", [
+      db,
+      [
+        "CREATE TABLE Upload (userId TEXT, storageKey TEXT, sha256 TEXT);",
+        "CREATE TABLE Receipt (userId TEXT, filePath TEXT);",
+        `INSERT INTO Upload VALUES ('user-1', 'kuitti.txt', '${hash}');`,
+        "INSERT INTO Receipt VALUES ('user-1', 'enablebanking');",
+        "INSERT INTO Receipt VALUES ('user-1', 'kuitti.txt');",
+      ].join(" "),
+    ]);
+
+    execFileSync("bash", [script], {
+      env: {
+        ...process.env,
+        LASHKIRJA_DB_PATH: db,
+        LASHKIRJA_UPLOADS_DIR: path.join(root, "uploads"),
+        LASHKIRJA_BACKUP_DIR: backups,
+        LASHKIRJA_BACKUP_KEEP: "2",
+      },
+    });
+
+    execFileSync("sqlite3", [db, "UPDATE Upload SET sha256 = 'ei-täsmää';"]);
+    expect(() =>
+      execFileSync("bash", [script], {
+        env: {
+          ...process.env,
+          LASHKIRJA_DB_PATH: db,
+          LASHKIRJA_UPLOADS_DIR: path.join(root, "uploads"),
+          LASHKIRJA_BACKUP_DIR: backups,
+          LASHKIRJA_BACKUP_KEEP: "2",
+        },
+        stdio: "pipe",
+      })
+    ).toThrow();
   });
 });

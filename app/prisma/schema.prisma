@@ -40,6 +40,10 @@ model User {
   /// Months up to and including this one are closed; nothing dated inside
   /// them may be created, edited or deleted. Format "YYYY-MM".
   booksLockedThrough  String?
+  /// Set when every device must sign in again. Cookies sealed before session
+  /// rows existed have no session id; this cutoff is what makes logout-all
+  /// and a password reset refuse them.
+  legacySessionsRevokedAt DateTime?
   createdAt     DateTime    @default(now())
   receipts      Receipt[]
   statements    Statement[]
@@ -245,6 +249,9 @@ model BackgroundJob {
   resourceType  String?
   resourceId    String?
   payload       String?
+  /// Ownership of the current attempt. A cancel or retry clears it so a
+  /// run that is still in OCR cannot write the result.
+  attemptToken  String?
   createdAt     DateTime  @default(now())
   startedAt     DateTime?
   finishedAt    DateTime?
@@ -516,6 +523,14 @@ model SalesInvoice {
   /// Seller and customer block printed on the PDF, frozen when the invoice
   /// leaves draft. Later profile or customer edits must not rewrite it.
   partySnapshot String?
+  /// Held from the moment a send starts until SMTP fails or the outcome is
+  /// stored. Edits must not land while this is set.
+  sendLockToken String?
+  sendLockAt    DateTime?
+  /// sha256 of the PDF that was actually sent, plus the document it was
+  /// built from. A later draft edit must not change these.
+  sentContentHash      String?
+  sentDocumentSnapshot String?
   /// Set only by an explicit close that is not covered by payments.
   closedReason  String?
   closedAt      DateTime?
@@ -635,11 +650,17 @@ model InvoiceEmailSend {
   invoice       SalesInvoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
   toAddress     String
   subject       String
-  /// pending | sent | failed. pending means SMTP was started and the outcome
-  /// was not stored; it is not a failure.
+  /// pending: PDF is built, SMTP has not been called (a crash here is a safe
+  /// resend). sending: SMTP was called and the outcome is not stored yet
+  /// (ambiguous — do not send again). ambiguous: the server accepted the
+  /// message and the invoice row could not be updated. sent | failed.
   status        String
   messageId     String?
   error         String?
+  /// sha256 of the PDF bytes for this attempt.
+  contentHash   String?
+  /// Full document the PDF was built from (lines, totals, parties).
+  documentSnapshot String?
   /// Parties that were rendered into the attachment, kept even if the invoice
   /// row itself could not be updated after the message was accepted.
   partySnapshot String?
@@ -746,6 +767,9 @@ model IdempotencyRecord {
   key        String
   statusCode Int
   body       String
+  /// sha256 of the request body. A second call with the same key and a
+  /// different hash is refused. Empty means the row predates the check.
+  requestHash String   @default("")
   createdAt  DateTime @default(now())
 
   @@unique([userId, scope, key])

@@ -273,8 +273,9 @@ describe("POST /api/invoices/[id]/send", () => {
     expect(result.sentTo).toBe("anna@example.fi");
     const stored = await prisma.salesInvoice.findUnique({ where: { id: invoice.id } });
     expect(stored?.status).toBe("draft");
+    expect(stored?.sendLockToken).toBeTruthy();
     const send = await prisma.invoiceEmailSend.findFirst({ where: { invoiceId: invoice.id } });
-    expect(send?.status).toBe("pending");
+    expect(send?.status).toBe("ambiguous");
     expect(send?.partySnapshot).toContain("Lähtenyt Oy");
   });
 

@@ -1,3 +1,4 @@
+import { clearAllDrafts } from "@/lib/draft-store";
 import { clearPageCache, invalidateForMutation } from "@/lib/page-cache";
 import { logoutOutcome } from "@/lib/session-policy";
 
@@ -225,6 +226,7 @@ export async function signOut(): Promise<boolean> {
     return false;
   }
   clearPageCache();
+  clearAllDrafts();
   return true;
 }
 

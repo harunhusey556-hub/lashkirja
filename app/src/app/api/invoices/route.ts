@@ -3,7 +3,7 @@ import { z } from "zod";
 import { requireSession } from "@/lib/session";
 import { noStoreJson, rejectCrossSite, rejectOversizedContentLength } from "@/lib/http-security";
 import { UnauthorizedError, withErrorHandler } from "@/lib/api-errors";
-import { idempotencyKeyFrom, withIdempotency } from "@/lib/idempotency";
+import { hashIdempotencyPayload, idempotencyKeyFrom, withIdempotency } from "@/lib/idempotency";
 import { createInvoice, listInvoices } from "@/lib/sales-invoices";
 import { isoDateSchema, monthSchema, moneySchema } from "@/lib/validation";
 
@@ -57,7 +57,11 @@ export const POST = withErrorHandler(async (req: NextRequest) => {
     session.userId,
     "invoice.create",
     idempotencyKeyFrom(req),
-    async () => ({ status: 201, body: { invoice: await createInvoice(session.userId, input) } })
+    async (tx) => ({
+      status: 201,
+      body: { invoice: await createInvoice(session.userId, input, tx ?? undefined) },
+    }),
+    hashIdempotencyPayload(input)
   );
   return noStoreJson(result.body, { status: result.status });
 });

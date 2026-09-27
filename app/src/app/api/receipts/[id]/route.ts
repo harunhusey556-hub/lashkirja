@@ -11,11 +11,11 @@ import {
   rejectCrossSite,
   rejectOversizedContentLength,
 } from "@/lib/http-security";
-import { withErrorHandler, UnauthorizedError, AppError, NotFoundError } from "@/lib/api-errors";
+import { withErrorHandler, UnauthorizedError, NotFoundError } from "@/lib/api-errors";
 import { sanitizeText } from "@/lib/sanitizer";
 
 import { assertPeriodOpen } from "@/lib/period-lock";
-import { assertCurrentVersion } from "@/lib/edit-conflict";
+import { expectedUpdatedAtDate, versionConflict } from "@/lib/edit-conflict";
 const patchSchema = z.object({
   vendor: z.string().trim().max(300).nullish(),
   date: isoDateSchema.nullish(),
@@ -150,7 +150,7 @@ export const PATCH = withErrorHandler(async (
   if (Object.keys(body).length === 0) {
     return noStoreJson({ error: "Ei päivitettäviä kenttiä" }, { status: 400 });
   }
-  assertCurrentVersion(owned.updatedAt, expectedUpdatedAt);
+  const expected = expectedUpdatedAtDate(expectedUpdatedAt);
 
   // Both where the receipt is now and where it would move to must be open.
   await assertPeriodOpen(session.userId!, [
@@ -158,9 +158,14 @@ export const PATCH = withErrorHandler(async (
     body.date ? isoDateToUtc(body.date) : null,
   ]);
 
-  const receipt = await prisma.receipt.update({
-    where: { id },
-    data: {
+  const receipt = await prisma.$transaction(async (tx) => {
+    const won = await tx.receipt.updateMany({
+      where: {
+        id,
+        userId: session.userId!,
+        ...(expected ? { updatedAt: expected } : {}),
+      },
+      data: {
       ...(body.vendor !== undefined ? { vendor: sanitizeText(body.vendor) } : {}),
       ...(body.date !== undefined ? { date: body.date ? isoDateToUtc(body.date) : null } : {}),
       ...(body.totalAmount !== undefined
@@ -174,42 +179,54 @@ export const PATCH = withErrorHandler(async (
       ...(body.type !== undefined ? { type: body.type } : {}),
       ...(body.reference !== undefined ? { reference: sanitizeText(body.reference) } : {}),
       ...(body.invoiceNumber !== undefined ? { invoiceNumber: sanitizeText(body.invoiceNumber) } : {}),
-    },
-    select: {
-      id: true,
-      vendor: true,
-      date: true,
-      totalAmountCents: true,
-      vatDetails: true,
-      category: true,
-      notes: true,
-      type: true,
-      reference: true,
-      invoiceNumber: true,
-      fileName: true,
-      source: true,
-      confidence: true,
-      createdAt: true,
-      updatedAt: true,
-    },
-  });
-
-  if (body.category !== undefined) {
-    const nextCategory = sanitizeText(body.category);
-    if (nextCategory !== owned.category) {
-      await prisma.automationEvent.create({
-        data: {
-          userId: session.userId!,
-          kind: "category",
-          resourceType: "receipt",
-          resourceId: id,
-          previousValue: owned.category,
-          newValue: nextCategory,
-          reason: "käyttäjän korjaus",
-        },
+      },
+    });
+    if (won.count === 0) {
+      const still = await tx.receipt.findFirst({
+        where: { id, userId: session.userId! },
+        select: { id: true },
       });
+      if (!still) throw new NotFoundError("Kuittia ei löytynyt");
+      throw versionConflict();
     }
-  }
+    if (body.category !== undefined) {
+      const nextCategory = sanitizeText(body.category);
+      if (nextCategory !== owned.category) {
+        await tx.automationEvent.create({
+          data: {
+            userId: session.userId!,
+            kind: "category",
+            resourceType: "receipt",
+            resourceId: id,
+            previousValue: owned.category,
+            newValue: nextCategory,
+            reason: "käyttäjän korjaus",
+          },
+        });
+      }
+    }
+    return tx.receipt.findFirst({
+      where: { id },
+      select: {
+        id: true,
+        vendor: true,
+        date: true,
+        totalAmountCents: true,
+        vatDetails: true,
+        category: true,
+        notes: true,
+        type: true,
+        reference: true,
+        invoiceNumber: true,
+        fileName: true,
+        source: true,
+        confidence: true,
+        createdAt: true,
+        updatedAt: true,
+      },
+    });
+  });
+  if (!receipt) throw new NotFoundError("Kuittia ei löytynyt");
 
   await runMatching(session.userId!).catch((error) =>
     console.error("Matching after receipt edit failed:", error)

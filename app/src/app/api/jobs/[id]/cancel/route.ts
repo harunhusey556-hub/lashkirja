@@ -24,6 +24,7 @@ export async function POST(
     },
     data: {
       status: "cancelled",
+      attemptToken: null,
       finishedAt: new Date(),
       progressLabel: "Peruttu",
     },

@@ -7,7 +7,10 @@
  * deletion alike, because deleting a receipt changes a filed return exactly as
  * much as editing one does.
  */
+import type { Prisma } from "@/generated/prisma/client";
 import { prisma } from "./db";
+
+type LockReader = Prisma.TransactionClient | typeof prisma;
 import { AppError, ValidationError } from "./api-errors";
 import { isMonthKey, monthKey } from "./bank-balances";
 
@@ -37,8 +40,8 @@ export function isDateLocked(
   return isMonthLocked(lockedThrough, monthKey(date));
 }
 
-export async function getLockedThrough(userId: string): Promise<string | null> {
-  const user = await prisma.user.findUnique({
+export async function getLockedThrough(userId: string, db: LockReader = prisma): Promise<string | null> {
+  const user = await db.user.findUnique({
     where: { id: userId },
     select: { booksLockedThrough: true },
   });
@@ -51,9 +54,10 @@ export async function getLockedThrough(userId: string): Promise<string | null> {
  */
 export async function assertPeriodOpen(
   userId: string,
-  dates: Array<Date | string | null | undefined>
+  dates: Array<Date | string | null | undefined>,
+  db: LockReader = prisma
 ): Promise<void> {
-  const lockedThrough = await getLockedThrough(userId);
+  const lockedThrough = await getLockedThrough(userId, db);
   if (!lockedThrough) return;
 
   for (const date of dates) {

@@ -7,6 +7,7 @@
  * first. After the server accepts the message, the outcome is written again.
  * If that write fails, the caller still reports that the mail left.
  */
+import { createHash, randomUUID } from "crypto";
 import { AppError, ValidationError } from "./api-errors";
 import { formatEur } from "./format";
 import { formatReference } from "./finnish-reference";
@@ -64,14 +65,69 @@ function defaultMessage(data: {
 const UNRECORDED_NOTICE =
   "Viesti lähti, mutta lähetyksen kirjausta ei saatu tallennettua. Älä lähetä samaa laskua uudelleen ennen tarkistusta.";
 
+const SEND_LOCK_STALE_MS = 2 * 60 * 1000;
+const AMBIGUOUS_SEND =
+  "Edellinen lähetys jäi epäselväksi. Älä lähetä samaa laskua uudelleen ennen tarkistusta.";
+const SEND_IN_PROGRESS = "Laskua lähetetään juuri nyt. Odota hetki.";
+
+async function claimSendLock(userId: string, invoiceId: string): Promise<string> {
+  const token = randomUUID();
+  const claimed = await prisma.salesInvoice.updateMany({
+    where: { id: invoiceId, userId, sendLockToken: null },
+    data: { sendLockToken: token, sendLockAt: new Date() },
+  });
+  if (claimed.count === 1) return token;
+
+  const row = await prisma.salesInvoice.findFirst({
+    where: { id: invoiceId, userId },
+    select: { sendLockToken: true, sendLockAt: true },
+  });
+  if (!row) throw new AppError("Laskua ei löytynyt.", "NOT_FOUND", 404);
+
+  const ambiguous = await prisma.invoiceEmailSend.findFirst({
+    where: { invoiceId, status: { in: ["sending", "ambiguous"] } },
+    select: { id: true },
+  });
+  if (ambiguous) {
+    throw new AppError(AMBIGUOUS_SEND, "SEND_AMBIGUOUS", 409);
+  }
+
+  const stale = Boolean(row.sendLockAt && Date.now() - row.sendLockAt.getTime() > SEND_LOCK_STALE_MS);
+  if (stale && row.sendLockToken) {
+    const reclaimed = await prisma.salesInvoice.updateMany({
+      where: { id: invoiceId, userId, sendLockToken: row.sendLockToken },
+      data: { sendLockToken: token, sendLockAt: new Date() },
+    });
+    if (reclaimed.count === 1) return token;
+  }
+
+  throw new AppError(SEND_IN_PROGRESS, "SEND_IN_PROGRESS", 409);
+}
+
+async function releaseSendLock(invoiceId: string, token: string): Promise<void> {
+  await prisma.salesInvoice.updateMany({
+    where: { id: invoiceId, sendLockToken: token },
+    data: { sendLockToken: null, sendLockAt: null },
+  });
+}
+
 async function persistAcceptedMail(input: {
   sendId: string;
   invoiceId: string;
   messageId: string;
   wasDraft: boolean;
   partySnapshot: string;
+  lockToken: string;
+  contentHash: string;
+  documentSnapshot: string;
 }): Promise<boolean> {
-  const invoiceData: Record<string, unknown> = { partySnapshot: input.partySnapshot };
+  const invoiceData: Record<string, unknown> = {
+    partySnapshot: input.partySnapshot,
+    sendLockToken: null,
+    sendLockAt: null,
+    sentContentHash: input.contentHash,
+    sentDocumentSnapshot: input.documentSnapshot,
+  };
   if (input.wasDraft) {
     invoiceData.status = "sent";
     invoiceData.sentAt = new Date();
@@ -80,29 +136,33 @@ async function persistAcceptedMail(input: {
 
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
-      await prisma.$transaction([
-        prisma.invoiceEmailSend.update({
+      await prisma.$transaction(async (tx) => {
+        const locked = await tx.salesInvoice.updateMany({
+          where: { id: input.invoiceId, sendLockToken: input.lockToken },
+          data: invoiceData,
+        });
+        if (locked.count !== 1) throw new Error("send lock lost");
+        await tx.invoiceEmailSend.update({
           where: { id: input.sendId },
           data: {
             status: "sent",
             messageId: input.messageId,
             error: null,
             finishedAt: new Date(),
+            contentHash: input.contentHash,
+            documentSnapshot: input.documentSnapshot,
           },
-        }),
-        prisma.salesInvoice.update({ where: { id: input.invoiceId }, data: invoiceData }),
-        ...(input.wasDraft
-          ? [
-              prisma.invoiceActivity.create({
-                data: {
-                  invoiceId: input.invoiceId,
-                  kind: "sent",
-                  summary: "Lasku lähetettiin sähköpostilla.",
-                },
-              }),
-            ]
-          : []),
-      ]);
+        });
+        if (input.wasDraft) {
+          await tx.invoiceActivity.create({
+            data: {
+              invoiceId: input.invoiceId,
+              kind: "sent",
+              summary: "Lasku lähetettiin sähköpostilla.",
+            },
+          });
+        }
+      });
       return true;
     } catch (error) {
       if (attempt === 2) {
@@ -156,115 +216,180 @@ export async function sendInvoiceByEmail(
     );
   }
 
-  const stored = await prisma.salesInvoice.findFirst({
+  const early = await prisma.salesInvoice.findFirst({
     where: { id: invoiceId, userId },
-    select: {
-      issueDate: true,
-      customerId: true,
-      partySnapshot: true,
-      status: true,
-      documentKind: true,
-      grossCents: true,
-      number: true,
-    },
+    select: { issueDate: true },
   });
-  if (!stored) throw new AppError("Laskua ei löytynyt.", "NOT_FOUND", 404);
+  if (!early) throw new AppError("Laskua ei löytynyt.", "NOT_FOUND", 404);
+  await assertPeriodOpen(userId, [early.issueDate]);
 
-  await assertPeriodOpen(userId, [stored.issueDate]);
-
-  const partySnapshot =
-    parsePartySnapshot(stored.partySnapshot) != null
-      ? stored.partySnapshot!
-      : await capturePartySnapshot(userId, stored.customerId);
-
-  const data: InvoicePdfData = await buildInvoicePdfData(userId, invoiceId);
-  // Prefer the snapshot we are about to store, so the attachment matches it
-  // even when the invoice row is still a draft and the builder read live data.
-  const frozen = parsePartySnapshot(partySnapshot);
-  if (frozen) {
-    data.seller = frozen.seller;
-    data.customer = frozen.customer;
-  }
-  const missing = missingSellerSendFields(data.seller);
-  if (missing.length > 0) {
-    throw new AppError(
-      "Lähettäjän nimi tai tilinumero puuttuu. Täydennä yrityksen tiedot ennen lähetystä.",
-      "SELLER_INCOMPLETE",
-      409
-    );
-  }
-  const pdf = await renderInvoicePdf(data);
-  const creditNote = stored.documentKind === "credit_note";
-  const attachment = invoicePdfFileName(invoice.number, creditNote ? "credit_note" : "invoice");
-  const subject =
-    input.subject ??
-    `${creditNote ? "Hyvityslasku" : "Lasku"} ${invoice.number} · ${data.seller.name}`;
-  const text =
-    input.message ??
-    defaultMessage({
-      number: invoice.number,
-      gross: formatEur(invoice.gross),
-      dueDate: invoice.dueDate,
-      reference: formatReference(invoice.reference),
-      sellerName: data.seller.name,
-      creditNote,
-    });
-
-  const attempt = await prisma.invoiceEmailSend.create({
-    data: {
-      invoiceId,
-      toAddress: to,
-      subject,
-      status: "pending",
-      partySnapshot,
-      attachmentName: attachment,
-      grossCents: stored.grossCents,
-    },
-  });
-
-  const deliver = deps.deliver ?? sendMail;
-  let sent: SentMail;
+  const lockToken = await claimSendLock(userId, invoiceId);
+  let attemptId: string | null = null;
+  let frozenInvoice = invoice;
+  let attachment = "";
+  let contentHash = "";
+  let documentSnapshot = "";
+  let partySnapshot = "";
   try {
-    sent = await deliver(account, {
-      to,
-      subject,
-      text,
-      attachments: [
-        {
-          filename: attachment,
-          content: pdf,
-          contentType: "application/pdf",
-        },
-      ],
+    frozenInvoice = await getInvoice(userId, invoiceId);
+    const stored = await prisma.salesInvoice.findFirst({
+      where: { id: invoiceId, userId },
+      select: {
+        customerId: true,
+        partySnapshot: true,
+        documentKind: true,
+        grossCents: true,
+        number: true,
+        lines: { orderBy: { sortOrder: "asc" } },
+      },
     });
+    if (!stored) throw new AppError("Laskua ei löytynyt.", "NOT_FOUND", 404);
+
+    partySnapshot =
+      parsePartySnapshot(stored.partySnapshot) != null
+        ? stored.partySnapshot!
+        : await capturePartySnapshot(userId, stored.customerId);
+
+    const data: InvoicePdfData = await buildInvoicePdfData(userId, invoiceId);
+    const frozen = parsePartySnapshot(partySnapshot);
+    if (frozen) {
+      data.seller = frozen.seller;
+      data.customer = frozen.customer;
+    }
+    const missing = missingSellerSendFields(data.seller);
+    if (missing.length > 0) {
+      throw new AppError(
+        "Lähettäjän nimi tai tilinumero puuttuu. Täydennä yrityksen tiedot ennen lähetystä.",
+        "SELLER_INCOMPLETE",
+        409
+      );
+    }
+    const pdf = await renderInvoicePdf(data);
+    contentHash = createHash("sha256").update(pdf).digest("hex");
+    documentSnapshot = JSON.stringify({
+      number: stored.number,
+      grossCents: stored.grossCents,
+      partySnapshot,
+      lines: stored.lines.map((line) => ({
+        description: line.description,
+        quantityMilli: line.quantityMilli,
+        unitPriceCents: line.unitPriceCents,
+        vatRatePermille: line.vatRatePermille,
+        netCents: line.netCents,
+      })),
+    });
+    const creditNote = stored.documentKind === "credit_note";
+    attachment = invoicePdfFileName(frozenInvoice.number, creditNote ? "credit_note" : "invoice");
+    const subject =
+      input.subject ??
+      `${creditNote ? "Hyvityslasku" : "Lasku"} ${frozenInvoice.number} · ${data.seller.name}`;
+    const text =
+      input.message ??
+      defaultMessage({
+        number: frozenInvoice.number,
+        gross: formatEur(frozenInvoice.gross),
+        dueDate: frozenInvoice.dueDate,
+        reference: formatReference(frozenInvoice.reference),
+        sellerName: data.seller.name,
+        creditNote,
+      });
+
+    const attempt = await prisma.invoiceEmailSend.create({
+      data: {
+        invoiceId,
+        toAddress: to,
+        subject,
+        status: "pending",
+        partySnapshot,
+        attachmentName: attachment,
+        grossCents: stored.grossCents,
+        contentHash,
+        documentSnapshot,
+      },
+    });
+    attemptId = attempt.id;
+
+    await prisma.invoiceEmailSend.update({
+      where: { id: attempt.id },
+      data: { status: "sending" },
+    });
+
+    const deliver = deps.deliver ?? sendMail;
+    let sent: SentMail;
+    try {
+      sent = await deliver(account, {
+        to,
+        subject,
+        text,
+        attachments: [{ filename: attachment, content: pdf, contentType: "application/pdf" }],
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "tuntematon virhe";
+      await prisma.invoiceEmailSend
+        .update({
+          where: { id: attempt.id },
+          data: { status: "failed", error: message.slice(0, 500), finishedAt: new Date() },
+        })
+        .catch(() => undefined);
+      await releaseSendLock(invoiceId, lockToken);
+      throw error;
+    }
+
+    let recorded = false;
+    try {
+      recorded = await (deps.persist ?? persistAcceptedMail)({
+        sendId: attempt.id,
+        invoiceId,
+        messageId: sent.messageId,
+        wasDraft: frozenInvoice.status === "draft",
+        partySnapshot,
+        lockToken,
+        contentHash,
+        documentSnapshot,
+      });
+    } catch (error) {
+      console.error("Invoice mail was accepted but the outcome was not stored", error);
+      recorded = false;
+    }
+    if (!recorded) {
+      await prisma.invoiceEmailSend
+        .update({ where: { id: attempt.id }, data: { status: "ambiguous" } })
+        .catch(() => undefined);
+    }
+
+    return {
+      sentTo: sent.to,
+      messageId: sent.messageId,
+      invoiceNumber: frozenInvoice.number,
+      attachment,
+      statusChanged: recorded && frozenInvoice.status === "draft",
+      recorded,
+      notice: recorded ? null : UNRECORDED_NOTICE,
+    };
   } catch (error) {
-    const message = error instanceof Error ? error.message : "tuntematon virhe";
-    await prisma.invoiceEmailSend
-      .update({
-        where: { id: attempt.id },
-        data: { status: "failed", error: message.slice(0, 500), finishedAt: new Date() },
-      })
-      .catch(() => undefined);
+    if (attemptId) {
+      const row = await prisma.invoiceEmailSend.findUnique({
+        where: { id: attemptId },
+        select: { status: true },
+      });
+      if (row && (row.status === "pending" || row.status === "sending")) {
+        await prisma.invoiceEmailSend
+          .update({
+            where: { id: attemptId },
+            data: {
+              status: "failed",
+              error: error instanceof Error ? error.message.slice(0, 500) : "tuntematon virhe",
+              finishedAt: new Date(),
+            },
+          })
+          .catch(() => undefined);
+        await releaseSendLock(invoiceId, lockToken);
+      }
+    } else {
+      await releaseSendLock(invoiceId, lockToken);
+    }
     throw error;
   }
-
-  const recorded = await (deps.persist ?? persistAcceptedMail)({
-    sendId: attempt.id,
-    invoiceId,
-    messageId: sent.messageId,
-    wasDraft: invoice.status === "draft",
-    partySnapshot,
-  });
-
-  return {
-    sentTo: sent.to,
-    messageId: sent.messageId,
-    invoiceNumber: invoice.number,
-    attachment,
-    statusChanged: recorded && invoice.status === "draft",
-    recorded,
-    notice: recorded ? null : UNRECORDED_NOTICE,
-  };
 }
 
 export interface SendPreview {

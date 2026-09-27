@@ -33,6 +33,18 @@ curl -fsS -H "Authorization: Bearer $HEALTH_TOKEN" https://example.invalid/api/h
 
 A non-zero curl exit is the alert. Point a scheduler at that command if you want a page.
 
+## Reliability
+
+A cookie with a session id is accepted only while that `AuthSession` row is still live. Logout-all and a password reset also set `User.legacySessionsRevokedAt`, so a cookie that only has a user id stops working and the device must sign in again. See `app/docs/account-recovery.md`.
+
+Create requests that send `Idempotency-Key` store the response in the same database transaction as the new row. A failed response write rolls the insert back. The same key with a different body is refused. A `processing` row older than two minutes can be claimed again.
+
+A customer, invoice, or receipt save that sends `expectedUpdatedAt` updates with `WHERE id AND updatedAt = that instant`. Zero rows is a 409. Invoice line replacements run in that same transaction. An invoice send takes `sendLockToken` before the PDF is built; edits are refused until SMTP fails (safe to resend) or the outcome is stored. If SMTP accepted the message and the outcome was not stored, the lock stays and another send is refused as ambiguous. The sent PDF's sha256 and a document snapshot are kept on the invoice and on the send row.
+
+Document analysis writes the extraction only when the job's `attemptToken` still matches the run that finished OCR. Cancel and retry clear that token first, so a late run cannot overwrite the new one.
+
+Backups are described in `app/docs/backup.md`.
+
 ## What is not collected
 
 Bank session secrets, mailbox passwords, invoice PDFs, and receipt files stay out of these events. A slow query does not log the bound values.

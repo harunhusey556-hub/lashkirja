@@ -33,15 +33,24 @@ export async function POST(
     return noStoreJson({ error: "Työ on jo käynnissä tai valmis" }, { status: 409 });
   }
 
-  await prisma.backgroundJob.update({
-    where: { id: job.id },
+  const stuck = job.status === "running" && isStuckRunning(job.startedAt);
+  const reset = await prisma.backgroundJob.updateMany({
+    where: {
+      id: job.id,
+      userId: session.userId!,
+      ...(stuck ? { status: "running", startedAt: job.startedAt } : { status: job.status }),
+    },
     data: {
       status: "pending",
+      attemptToken: null,
       error: null,
       finishedAt: null,
       progressLabel: "Jonossa",
     },
   });
+  if (reset.count === 0) {
+    return noStoreJson({ error: "Työ on jo käynnissä tai valmis" }, { status: 409 });
+  }
   runAfterResponse(() => processDocumentJob(job.id));
   return noStoreJson({ ok: true, jobId: job.id, status: "pending" });
 }

@@ -39,14 +39,23 @@ export async function openAuthSession(userId: string, userAgent: string | null) 
 }
 
 export async function revokeAuthSessions(userId: string, exceptId?: string) {
-  await prisma.authSession.updateMany({
-    where: {
-      userId,
-      revokedAt: null,
-      ...(exceptId ? { id: { not: exceptId } } : {}),
-    },
-    data: { revokedAt: new Date() },
-  });
+  const now = new Date();
+  await prisma.$transaction([
+    prisma.authSession.updateMany({
+      where: {
+        userId,
+        revokedAt: null,
+        ...(exceptId ? { id: { not: exceptId } } : {}),
+      },
+      data: { revokedAt: now },
+    }),
+    // Cookies that never received a session id cannot be found in AuthSession.
+    // The cutoff is what makes those cookies fail requireSession.
+    prisma.user.update({
+      where: { id: userId },
+      data: { legacySessionsRevokedAt: now },
+    }),
+  ]);
 }
 
 export async function listAuthSessions(userId: string, currentId?: string) {

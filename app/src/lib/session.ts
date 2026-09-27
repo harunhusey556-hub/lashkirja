@@ -26,23 +26,30 @@ const SESSION_TOUCH_MS = 5 * 60 * 1000;
 /**
  * Returns the session if logged in, otherwise null.
  * A cookie that names a session row is refused once that row is revoked.
- * Cookies sealed before session tracking have no sessionId and stay valid,
- * so an existing demo login is not dropped by this check.
+ * A cookie sealed before session tracking has no sessionId. It works only
+ * until logout-all or a password change sets User.legacySessionsRevokedAt.
+ * After that the only path back in is a new login, which seals a session id.
  */
 export async function requireSession(req?: NextRequest): Promise<AuthenticatedSession | null> {
   const session = req ? await getSessionFromRequest(req) : await getSession();
   if (!session.userId) return null;
-  if (session.sessionId) {
-    const row = await prisma.authSession.findFirst({
-      where: { id: session.sessionId, userId: session.userId, revokedAt: null },
-      select: { id: true, lastSeenAt: true },
+  if (!session.sessionId) {
+    const user = await prisma.user.findUnique({
+      where: { id: session.userId },
+      select: { legacySessionsRevokedAt: true },
     });
-    if (!row) return null;
-    if (Date.now() - row.lastSeenAt.getTime() > SESSION_TOUCH_MS) {
-      await prisma.authSession
-        .update({ where: { id: row.id }, data: { lastSeenAt: new Date() } })
-        .catch(() => undefined);
-    }
+    if (!user || user.legacySessionsRevokedAt) return null;
+    return session as AuthenticatedSession;
+  }
+  const row = await prisma.authSession.findFirst({
+    where: { id: session.sessionId, userId: session.userId, revokedAt: null },
+    select: { id: true, lastSeenAt: true },
+  });
+  if (!row) return null;
+  if (Date.now() - row.lastSeenAt.getTime() > SESSION_TOUCH_MS) {
+    await prisma.authSession
+      .update({ where: { id: row.id }, data: { lastSeenAt: new Date() } })
+      .catch(() => undefined);
   }
   return session as AuthenticatedSession;
 }

@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { ApiError } from "@/components/clientFetch";
-import { clearDraft, readDraft, saveDraft } from "@/lib/draft-store";
+import { clearDraft, currentDraftOwner, readDraft, saveDraft, subscribeDraftOwner } from "@/lib/draft-store";
 import { registerDirtySource, requestLeave } from "@/lib/form-guard";
 
 export type SavePhase = "clean" | "dirty" | "saving" | "saved" | "failed";
@@ -43,6 +43,9 @@ export function useEditorSession<T>(options: {
   draftKeyRef.current = options.draftKey;
   const [notice, setNotice] = useState("");
   const [phase, setPhase] = useState<SavePhase>("clean");
+  const [ownerTick, setOwnerTick] = useState(0);
+
+  useEffect(() => subscribeDraftOwner(() => setOwnerTick((tick) => tick + 1)), []);
 
   useEffect(() => {
     return registerDirtySource(options.sourceId, () => dirtyRef.current);
@@ -50,13 +53,16 @@ export function useEditorSession<T>(options: {
 
   useEffect(() => {
     if (!active || !options.draftKey) return;
-    if (restored.current === options.draftKey) return;
-    restored.current = options.draftKey;
+    const owner = currentDraftOwner();
+    if (!owner) return;
+    const token = `${owner}:${options.draftKey}`;
+    if (restored.current === token) return;
+    restored.current = token;
     const draft = readDraft<T>(options.draftKey);
     if (!draft || JSON.stringify(draft.value) === baselineKey) return;
     onRestore.current(draft.value);
     setNotice("Luonnos palautettiin.");
-  }, [active, options.draftKey, baselineKey]);
+  }, [active, options.draftKey, baselineKey, ownerTick]);
 
   useEffect(() => {
     if (!options.draftKey || !dirty) return;

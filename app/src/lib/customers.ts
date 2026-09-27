@@ -1,7 +1,10 @@
 /** Customer register: the counterparties a user invoices. */
+import type { Prisma } from "@/generated/prisma/client";
 import { prisma } from "./db";
 import { AppError, NotFoundError, ValidationError } from "./api-errors";
-import { assertCurrentVersion } from "./edit-conflict";
+import { expectedUpdatedAtDate, versionConflict } from "./edit-conflict";
+
+type Writer = Prisma.TransactionClient | typeof prisma;
 import { isValidBusinessId, normalizeBusinessId } from "./finnish-reference";
 import { parseCustomerCsv, type CustomerCsvRow } from "./customer-import";
 import {
@@ -124,12 +127,13 @@ function text(value: string | null | undefined): string | null {
 
 export async function createCustomer(
   userId: string,
-  input: CustomerInput
+  input: CustomerInput,
+  db: Writer = prisma
 ): Promise<PublicCustomer> {
   const name = input.name.trim();
   if (!name) throw new ValidationError("Asiakkaan nimi puuttuu.");
 
-  const created = await prisma.customer.create({
+  const created = await db.customer.create({
     data: {
       userId,
       name,
@@ -155,9 +159,9 @@ export async function updateCustomer(
 ): Promise<PublicCustomer> {
   const existing = await prisma.customer.findFirst({ where: { id, userId } });
   if (!existing) throw new NotFoundError("Asiakasta ei löytynyt.");
-  assertCurrentVersion(existing.updatedAt, input.expectedUpdatedAt);
+  const expected = expectedUpdatedAtDate(input.expectedUpdatedAt);
 
-  const data: Record<string, unknown> = {};
+  const data: Prisma.CustomerUpdateManyMutationInput = {};
   if (input.name !== undefined) {
     const name = input.name.trim();
     if (!name) throw new ValidationError("Asiakkaan nimi puuttuu.");
@@ -178,9 +182,20 @@ export async function updateCustomer(
   }
   if (input.notes !== undefined) data.notes = text(input.notes);
   if (input.archived !== undefined) data.archivedAt = input.archived ? new Date() : null;
+  if (Object.keys(data).length === 0) return toPublicCustomer(existing);
 
-  const updated = await prisma.customer.update({ where: { id }, data });
-  return toPublicCustomer(updated);
+  const updated = await prisma.customer.updateMany({
+    where: { id, userId, ...(expected ? { updatedAt: expected } : {}) },
+    data,
+  });
+  if (updated.count === 0) {
+    const still = await prisma.customer.findFirst({ where: { id, userId }, select: { id: true } });
+    if (!still) throw new NotFoundError("Asiakasta ei löytynyt.");
+    throw versionConflict();
+  }
+  const row = await prisma.customer.findFirst({ where: { id, userId } });
+  if (!row) throw new NotFoundError("Asiakasta ei löytynyt.");
+  return toPublicCustomer(row);
 }
 
 export interface CustomerDeleteOutcome {
@@ -438,8 +453,8 @@ export async function importCustomers(
 }
 
 /** Guard used by invoice creation. */
-export async function requireActiveCustomer(userId: string, id: string) {
-  const customer = await prisma.customer.findFirst({ where: { id, userId } });
+export async function requireActiveCustomer(userId: string, id: string, db: Writer = prisma) {
+  const customer = await db.customer.findFirst({ where: { id, userId } });
   if (!customer) throw new NotFoundError("Asiakasta ei löytynyt.");
   if (customer.archivedAt) {
     throw new AppError("Asiakas on arkistoitu.", "CUSTOMER_ARCHIVED", 409);

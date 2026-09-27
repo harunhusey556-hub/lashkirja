@@ -1,3 +1,5 @@
+import { randomUUID } from "crypto";
+import type { Prisma } from "@/generated/prisma/client";
 import { prisma } from "./db";
 import {
   extractReceipt,
@@ -42,10 +44,14 @@ function parsePayload(raw: string | null): DocumentJobPayload | null {
   }
 }
 
-async function persistExtraction(uploadId: string, extracted: ExtractedReceipt) {
+async function persistExtraction(
+  tx: Prisma.TransactionClient,
+  uploadId: string,
+  extracted: ExtractedReceipt
+) {
   const trustedRawText =
     typeof extracted.rawText === "string" ? extracted.rawText.slice(0, 100_000) : null;
-  await prisma.upload.update({
+  await tx.upload.update({
     where: { id: uploadId },
     data: {
       extractedJson: JSON.stringify({
@@ -122,15 +128,17 @@ export async function processDocumentJob(jobId: string): Promise<void> {
     if (!isStuckRunning(job.startedAt)) return;
     const reset = await prisma.backgroundJob.updateMany({
       where: { id: jobId, status: "running", startedAt: job.startedAt },
-      data: { status: "pending", progressLabel: "Jonossa" },
+      data: { status: "pending", attemptToken: null, progressLabel: "Jonossa" },
     });
     if (reset.count === 0) return;
   }
 
+  const attemptToken = randomUUID();
   const claimed = await prisma.backgroundJob.updateMany({
     where: { id: jobId, status: "pending" },
     data: {
       status: "running",
+      attemptToken,
       startedAt: new Date(),
       finishedAt: null,
       error: null,
@@ -142,8 +150,8 @@ export async function processDocumentJob(jobId: string): Promise<void> {
   const payload = parsePayload(job.payload);
   if (!payload) {
     noteJobFailure(job.kind, "Työn tiedot puuttuvat");
-    await prisma.backgroundJob.update({
-      where: { id: jobId },
+    await prisma.backgroundJob.updateMany({
+      where: { id: jobId, status: "running", attemptToken },
       data: {
         status: "failed",
         finishedAt: new Date(),
@@ -166,28 +174,16 @@ export async function processDocumentJob(jobId: string): Promise<void> {
       console.warn("Preview generation failed:", error)
     );
 
-    let appliedRule: { vendor: string; category: string } | null = null;
+    let appliedRule: { vendor: string; category: string; previous: string | null } | null = null;
     if (extracted.vendor) {
       const rule = await findActiveVendorRule(job.userId, extracted.vendor);
       if (rule?.active && rule.category !== extracted.category) {
         const previous = extracted.category;
         extracted = { ...extracted, category: rule.category };
-        appliedRule = { vendor: rule.vendor, category: rule.category };
-        await prisma.automationEvent.create({
-          data: {
-            userId: job.userId,
-            kind: "category",
-            resourceType: "upload",
-            resourceId: payload.uploadId,
-            previousValue: previous,
-            newValue: rule.category,
-            reason: "käyttäjän sääntö",
-          },
-        });
+        appliedRule = { vendor: rule.vendor, category: rule.category, previous };
       }
     }
 
-    await persistExtraction(payload.uploadId, extracted);
     const stored: DocumentJobPayload = {
       ...payload,
       profileContext: "",
@@ -195,15 +191,32 @@ export async function processDocumentJob(jobId: string): Promise<void> {
       extracted,
       appliedRule,
     };
-    await prisma.backgroundJob.updateMany({
-      where: { id: jobId, status: "running" },
-      data: {
-        status: "done",
-        finishedAt: new Date(),
-        error: null,
-        progressLabel: RECEIPT_PHASE.review,
-        payload: JSON.stringify(stored),
-      },
+    await prisma.$transaction(async (tx) => {
+      const won = await tx.backgroundJob.updateMany({
+        where: { id: jobId, status: "running", attemptToken },
+        data: {
+          status: "done",
+          finishedAt: new Date(),
+          error: null,
+          progressLabel: RECEIPT_PHASE.review,
+          payload: JSON.stringify(stored),
+        },
+      });
+      if (won.count === 0) return;
+      await persistExtraction(tx, payload.uploadId, extracted);
+      if (appliedRule && extracted.vendor) {
+        await tx.automationEvent.create({
+          data: {
+            userId: job.userId,
+            kind: "category",
+            resourceType: "upload",
+            resourceId: payload.uploadId,
+            previousValue: appliedRule.previous,
+            newValue: appliedRule.category,
+            reason: "käyttäjän sääntö",
+          },
+        });
+      }
     });
   } catch (error) {
     const message =
@@ -212,7 +225,7 @@ export async function processDocumentJob(jobId: string): Promise<void> {
         : "Tiedoston käsittely epäonnistui";
     noteJobFailure(job.kind, message);
     await prisma.backgroundJob.updateMany({
-      where: { id: jobId, status: "running" },
+      where: { id: jobId, status: "running", attemptToken },
       data: {
         status: "failed",
         finishedAt: new Date(),
@@ -236,7 +249,7 @@ export async function drainPendingDocumentJobs(limit = 5): Promise<number> {
       status: "running",
       OR: [{ startedAt: null }, { startedAt: { lt: stuckBefore } }],
     },
-    data: { status: "pending", progressLabel: "Jonossa" },
+    data: { status: "pending", attemptToken: null, progressLabel: "Jonossa" },
   });
   const jobs = await prisma.backgroundJob.findMany({
     where: { kind: "document_analysis", status: "pending" },

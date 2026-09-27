@@ -7,8 +7,11 @@
  * app. Support with access to this server can mint one link and pass it to
  * the user on a channel they already trust.
  *
- * The books are not involved. A reset only replaces the password and revokes
- * tracked sessions.
+ * The books are not involved. A reset replaces the password, revokes every
+ * tracked session, and sets a cutoff on the user. A cookie sealed before
+ * session tracking (it only carries the user id) is refused after that
+ * cutoff. The same cutoff is set by logout-all and by a password change.
+ * The way back in is a new login, which seals a session id.
  *
  * ## User
  *

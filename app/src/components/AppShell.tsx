@@ -18,6 +18,7 @@ import type { BusinessProfile } from "@/lib/onboarding";
 import BottomSheet from "@/components/BottomSheet";
 import { AppLock } from "@/components/AppLock";
 import { apiFetch } from "@/components/clientFetch";
+import { setDraftOwner } from "@/lib/draft-store";
 import { readPageCache, writePageCache } from "@/lib/page-cache";
 import { syncPageHiddenFlag } from "@/lib/page-activity";
 import { helsinkiMonthKey } from "@/lib/validation";
@@ -140,7 +141,7 @@ function routeDepth(pathname: string): number {
   return pathname.split("/").filter(Boolean).length;
 }
 
-type ShellUser = { email?: string; firstName?: string };
+type ShellUser = { userId?: string; email?: string; firstName?: string };
 
 /**
  * The session check lives in the page cache so the first paint after a full
@@ -257,6 +258,10 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const [signOutError, setSignOutError] = useState("");
   const [user, setUser] = useState<ShellUser | null>(() => readPageCache<ShellUser>(AUTH_CACHE_KEY));
   const [onboardingProfile, setOnboardingProfile] = useState<BusinessProfile | null>(null);
+
+  useEffect(() => {
+    setDraftOwner(user?.userId ?? null);
+  }, [user?.userId]);
 
   const pathname = usePathname();
   const router = useRouter();
@@ -457,6 +462,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       .then((me) => {
         const nextUser: ShellUser = me.user ?? {};
         writePageCache(AUTH_CACHE_KEY, nextUser);
+        setDraftOwner(nextUser.userId ?? null);
         setUser(nextUser);
         setAuthState({ status: "ready" });
         warmTabCaches();

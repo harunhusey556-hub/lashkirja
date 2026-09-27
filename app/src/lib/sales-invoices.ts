@@ -7,8 +7,8 @@
  */
 import type { Prisma } from "@/generated/prisma/client";
 import { prisma } from "./db";
-import { AppError, NotFoundError, ValidationError } from "./api-errors";
-import { assertCurrentVersion } from "./edit-conflict";
+import { AppError, ConflictError, NotFoundError, ValidationError } from "./api-errors";
+import { expectedUpdatedAtDate, versionConflict } from "./edit-conflict";
 import { centsToEuros, eurosToCents } from "./money";
 import { formatEur } from "./format";
 import { allocateInvoiceNumber, peekInvoiceNumber } from "./invoice-sequence";
@@ -340,16 +340,62 @@ export function toPublicInvoice(
   };
 }
 
+type InvoiceWriter = Prisma.TransactionClient | typeof prisma;
+
+async function insertInvoice(
+  tx: Prisma.TransactionClient,
+  userId: string,
+  prepared: {
+    customerId: string;
+    issueDate: Date;
+    dueDate: Date;
+    notes: string | null;
+    totals: ReturnType<typeof computeInvoiceTotals>;
+    lineInputs: ReturnType<typeof toLineInputs>;
+  }
+): Promise<string> {
+  const number = await allocateInvoiceNumber(tx, userId);
+  const created = await tx.salesInvoice.create({
+    data: {
+      userId,
+      customerId: prepared.customerId,
+      number,
+      reference: referenceForInvoice(number),
+      issueDate: prepared.issueDate,
+      dueDate: prepared.dueDate,
+      notes: prepared.notes,
+      netCents: prepared.totals.netCents,
+      vatCents: prepared.totals.vatCents,
+      grossCents: prepared.totals.grossCents,
+      lines: {
+        create: prepared.lineInputs.map((line, index) => ({
+          sortOrder: index,
+          description: line.description,
+          unit: line.unit,
+          quantityMilli: line.quantityMilli,
+          unitPriceCents: line.unitPriceCents,
+          vatRatePermille: line.vatRatePermille,
+          netCents: prepared.totals.lines[index].netCents,
+        })),
+      },
+    },
+    select: { id: true },
+  });
+  await recordActivity(tx, created.id, "created", "Lasku luotiin.");
+  return created.id;
+}
+
 export async function createInvoice(
   userId: string,
-  input: CreateInvoiceInput
+  input: CreateInvoiceInput,
+  db?: Prisma.TransactionClient
 ): Promise<PublicInvoice> {
-  const customer = await requireActiveCustomer(userId, input.customerId);
+  const customer = await requireActiveCustomer(userId, input.customerId, db ?? prisma);
   const lineInputs = toLineInputs(input.lines);
   const totals = computeInvoiceTotals(lineInputs);
 
   const issueDate = isoDateToUtc(input.issueDate);
-  await assertPeriodOpen(userId, [issueDate]);
+  await assertPeriodOpen(userId, [issueDate], db ?? prisma);
   let dueDate: Date;
   try {
     dueDate = input.dueDate
@@ -363,42 +409,27 @@ export async function createInvoice(
     throw new ValidationError("Eräpäivä ei voi olla ennen laskun päivää.");
   }
 
+  const prepared = {
+    customerId: customer.id,
+    issueDate,
+    dueDate,
+    notes: input.notes?.trim() || null,
+    totals,
+    lineInputs,
+  };
+
   // The number is consumed inside the same transaction as the insert. A rolled
   // back attempt does not burn it, and two parallel creates cannot take the
-  // same integer. The unique index is the backstop.
+  // same integer. The unique index is the backstop. When the caller already
+  // owns the transaction, a unique conflict propagates so that caller can retry.
+  if (db) {
+    const createdId = await insertInvoice(db, userId, prepared);
+    return getInvoice(userId, createdId, db);
+  }
+
   for (let attempt = 0; attempt < 5; attempt += 1) {
     try {
-      const createdId = await prisma.$transaction(async (tx) => {
-        const number = await allocateInvoiceNumber(tx, userId);
-        const created = await tx.salesInvoice.create({
-          data: {
-            userId,
-            customerId: customer.id,
-            number,
-            reference: referenceForInvoice(number),
-            issueDate,
-            dueDate,
-            notes: input.notes?.trim() || null,
-            netCents: totals.netCents,
-            vatCents: totals.vatCents,
-            grossCents: totals.grossCents,
-            lines: {
-              create: lineInputs.map((line, index) => ({
-                sortOrder: index,
-                description: line.description,
-                unit: line.unit,
-                quantityMilli: line.quantityMilli,
-                unitPriceCents: line.unitPriceCents,
-                vatRatePermille: line.vatRatePermille,
-                netCents: totals.lines[index].netCents,
-              })),
-            },
-          },
-          select: { id: true },
-        });
-        await recordActivity(tx, created.id, "created", "Lasku luotiin.");
-        return created.id;
-      });
+      const createdId = await prisma.$transaction((tx) => insertInvoice(tx, userId, prepared));
       return getInvoice(userId, createdId);
     } catch (error) {
       const code = (error as { code?: string }).code;
@@ -408,8 +439,12 @@ export async function createInvoice(
   throw new AppError("Laskunumeron varaus epäonnistui, yritä uudelleen.", "NUMBER_RACE", 409);
 }
 
-export async function getInvoice(userId: string, id: string): Promise<PublicInvoice> {
-  const invoice = await prisma.salesInvoice.findFirst({
+export async function getInvoice(
+  userId: string,
+  id: string,
+  db: InvoiceWriter = prisma
+): Promise<PublicInvoice> {
+  const invoice = await db.salesInvoice.findFirst({
     where: { id, userId },
     include: invoiceInclude,
   });
@@ -448,7 +483,7 @@ export async function updateInvoice(
     },
   });
   if (!existing) throw new NotFoundError("Laskua ei löytynyt.");
-  assertCurrentVersion(existing.updatedAt, input.expectedUpdatedAt);
+  const expected = expectedUpdatedAtDate(input.expectedUpdatedAt);
 
   await assertPeriodOpen(userId, [
     existing.issueDate,
@@ -464,7 +499,7 @@ export async function updateInvoice(
     );
   }
 
-  const data: Record<string, unknown> = {};
+  const data: Prisma.SalesInvoiceUncheckedUpdateManyInput = {};
   if (input.notes !== undefined) data.notes = input.notes?.trim() || null;
   if (input.customerId) {
     const customer = await requireActiveCustomer(userId, input.customerId);
@@ -488,6 +523,7 @@ export async function updateInvoice(
     data.grossCents = totals.grossCents;
 
     await prisma.$transaction(async (tx) => {
+      await applyInvoiceUpdate(tx, userId, id, expected, data);
       await tx.invoiceLine.deleteMany({ where: { invoiceId: id } });
       await tx.invoiceLine.createMany({
         data: lineInputs.map((line, index) => ({
@@ -501,7 +537,6 @@ export async function updateInvoice(
           netCents: totals.lines[index].netCents,
         })),
       });
-      await tx.salesInvoice.update({ where: { id }, data });
       if (totals.grossCents !== existing.grossCents) {
         await recordActivity(
           tx,
@@ -512,10 +547,41 @@ export async function updateInvoice(
       }
     });
   } else if (Object.keys(data).length > 0) {
-    await prisma.salesInvoice.update({ where: { id }, data });
+    await prisma.$transaction((tx) => applyInvoiceUpdate(tx, userId, id, expected, data));
   }
 
   return getInvoice(userId, id);
+}
+
+async function applyInvoiceUpdate(
+  tx: Prisma.TransactionClient,
+  userId: string,
+  id: string,
+  expected: Date | null,
+  data: Prisma.SalesInvoiceUncheckedUpdateManyInput
+): Promise<void> {
+  const updated = await tx.salesInvoice.updateMany({
+    where: {
+      id,
+      userId,
+      sendLockToken: null,
+      ...(expected ? { updatedAt: expected } : {}),
+    },
+    data,
+  });
+  if (updated.count > 0) return;
+  const still = await tx.salesInvoice.findFirst({
+    where: { id, userId },
+    select: { sendLockToken: true },
+  });
+  if (!still) throw new NotFoundError("Laskua ei löytynyt.");
+  if (still.sendLockToken) {
+    throw new ConflictError(
+      "Laskua lähetetään juuri nyt. Odota hetki ja lataa tiedot uudelleen.",
+      "SEND_IN_PROGRESS"
+    );
+  }
+  throw versionConflict();
 }
 
 export async function deleteInvoice(userId: string, id: string): Promise<void> {
@@ -797,9 +863,11 @@ export interface RecordPaymentInput {
 export async function recordPayment(
   userId: string,
   invoiceId: string,
-  input: RecordPaymentInput
+  input: RecordPaymentInput,
+  db?: Prisma.TransactionClient
 ): Promise<PublicInvoice> {
-  const invoice = await prisma.salesInvoice.findFirst({
+  const conn = db ?? prisma;
+  const invoice = await conn.salesInvoice.findFirst({
     where: { id: invoiceId, userId },
     include: { payments: { select: { amountCents: true } } },
   });
@@ -811,18 +879,18 @@ export async function recordPayment(
     throw new AppError("Hyvitetylle laskulle ei voi kirjata maksua.", "INVOICE_CREDITED", 409);
   }
 
-  await assertPeriodOpen(userId, [isoDateToUtc(input.paidDate)]);
+  await assertPeriodOpen(userId, [isoDateToUtc(input.paidDate)], conn);
 
   const amountCents = eurosToCents(input.amount);
   if (amountCents === 0) throw new ValidationError("Maksun summa ei voi olla nolla.");
 
   if (input.transactionId) {
-    const transaction = await prisma.transaction.findFirst({
+    const transaction = await conn.transaction.findFirst({
       where: { id: input.transactionId, statement: { userId } },
       select: { id: true },
     });
     if (!transaction) throw new NotFoundError("Tapahtumaa ei löytynyt.");
-    const taken = await prisma.invoicePayment.findUnique({
+    const taken = await conn.invoicePayment.findUnique({
       where: { transactionId: input.transactionId },
       select: { invoiceId: true },
     });
@@ -841,7 +909,7 @@ export async function recordPayment(
   const reopens =
     invoice.status === "paid" && !invoice.closedReason?.trim() && paidCents < invoice.grossCents;
 
-  await prisma.$transaction(async (tx) => {
+  const writePayment = async (tx: Prisma.TransactionClient) => {
     await tx.invoicePayment.create({
       data: {
         invoiceId,
@@ -873,9 +941,11 @@ export async function recordPayment(
       });
       await recordActivity(tx, invoiceId, "status_changed", "Tila muuttui: Maksettu → Lähetetty.");
     }
-  });
+  };
+  if (db) await writePayment(db);
+  else await prisma.$transaction(writePayment);
 
-  return getInvoice(userId, invoiceId);
+  return getInvoice(userId, invoiceId, conn);
 }
 
 export async function removePayment(
