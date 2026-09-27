@@ -15,6 +15,7 @@ import { withErrorHandler, UnauthorizedError, AppError, NotFoundError } from "@/
 import { sanitizeText } from "@/lib/sanitizer";
 
 import { assertPeriodOpen } from "@/lib/period-lock";
+import { assertCurrentVersion } from "@/lib/edit-conflict";
 const patchSchema = z.object({
   vendor: z.string().trim().max(300).nullish(),
   date: isoDateSchema.nullish(),
@@ -28,6 +29,7 @@ const patchSchema = z.object({
   type: z.enum(["meno", "tulo"]).optional(),
   reference: z.string().trim().max(40).nullish(),
   invoiceNumber: z.string().trim().max(40).nullish(),
+  expectedUpdatedAt: z.string().max(40).optional(),
 }).strict();
 
 async function findOwnedReceipt(id: string, userId: string) {
@@ -144,7 +146,11 @@ export const PATCH = withErrorHandler(async (
   if (Object.keys(parsed.data).length === 0) {
     return noStoreJson({ error: "Ei päivitettäviä kenttiä" }, { status: 400 });
   }
-  const body = parsed.data;
+  const { expectedUpdatedAt, ...body } = parsed.data;
+  if (Object.keys(body).length === 0) {
+    return noStoreJson({ error: "Ei päivitettäviä kenttiä" }, { status: 400 });
+  }
+  assertCurrentVersion(owned.updatedAt, expectedUpdatedAt);
 
   // Both where the receipt is now and where it would move to must be open.
   await assertPeriodOpen(session.userId!, [

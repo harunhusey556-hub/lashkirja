@@ -21,8 +21,12 @@ const patchSchema = z
     dueDate: isoDateSchema.optional(),
     notes: z.string().trim().max(2000).nullish(),
     lines: z.array(lineSchema).min(1).max(200).optional(),
+    expectedUpdatedAt: z.string().max(40).optional(),
   })
-  .refine((value) => Object.keys(value).length > 0, "Ei muutettavia kenttiä");
+  .refine(
+    (value) => Object.keys(value).filter((key) => key !== "expectedUpdatedAt").length > 0,
+    "Ei muutettavia kenttiä"
+  );
 
 type RouteContext = { params: Promise<{ id: string }> };
 

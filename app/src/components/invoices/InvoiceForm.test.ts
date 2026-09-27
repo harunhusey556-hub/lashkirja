@@ -1,5 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { EMPTY_LINE, previewTotals } from "./InvoiceForm";
+import { firstInvalidKey } from "@/lib/focus-field";
+import {
+  EMPTY_LINE,
+  invoiceFieldId,
+  invoiceFieldOrder,
+  previewTotals,
+  validateInvoiceForm,
+  type InvoiceFormValues,
+} from "./InvoiceForm";
 
 describe("previewTotals", () => {
   it("prices a line written with a Finnish comma", () => {
@@ -36,5 +44,59 @@ describe("previewTotals", () => {
       { ...EMPTY_LINE, quantity: "2", unitPrice: "10.00", vatRate: 0 },
     ]);
     expect(totals).toEqual({ netCents: 2000, vatCents: 0, grossCents: 2000 });
+  });
+});
+
+function values(patch: Partial<InvoiceFormValues> = {}): InvoiceFormValues {
+  return {
+    customerId: "customer-1",
+    issueDate: "2026-03-29",
+    dueDate: "2026-04-12",
+    notes: "",
+    lines: [{ ...EMPTY_LINE, description: "Työ", quantity: "1", unitPrice: "12,50" }],
+    ...patch,
+  };
+}
+
+describe("validateInvoiceForm", () => {
+  it("accepts comma, dot and a pasted euro sign as the same money", () => {
+    for (const unitPrice of ["12,50", "12.50", "12,50 €", "€12.50"]) {
+      const result = validateInvoiceForm(values({ lines: [{ ...EMPTY_LINE, description: "Työ", unitPrice }] }));
+      expect(result.ok, unitPrice).toBe(true);
+      if (result.ok) expect(result.payload.lines[0].unitPrice).toBe(12.5);
+    }
+  });
+
+  it("rejects an empty, negative or huge price on the price field", () => {
+    const empty = validateInvoiceForm(values({ lines: [{ ...EMPTY_LINE, description: "Työ", unitPrice: "" }] }));
+    const negative = validateInvoiceForm(
+      values({ lines: [{ ...EMPTY_LINE, description: "Työ", unitPrice: "-1,50" }] })
+    );
+    const huge = validateInvoiceForm(
+      values({ lines: [{ ...EMPTY_LINE, description: "Työ", unitPrice: "999999999" }] })
+    );
+    const symbol = validateInvoiceForm(
+      values({ lines: [{ ...EMPTY_LINE, description: "Työ", unitPrice: "€" }] })
+    );
+    expect(empty.ok).toBe(false);
+    expect(negative.ok).toBe(false);
+    expect(huge.ok).toBe(false);
+    expect(symbol.ok).toBe(false);
+    if (!empty.ok) expect(empty.errors["line-0-unitPrice"]).toMatch(/puuttuu/i);
+    if (!negative.ok) expect(negative.errors["line-0-unitPrice"]).toMatch(/negatiivinen/i);
+    if (!huge.ok) expect(huge.errors["line-0-unitPrice"]).toMatch(/kelvollinen/i);
+  });
+
+  it("rejects a due date before the issue date and an impossible day", () => {
+    const due = validateInvoiceForm(values({ issueDate: "2026-04-12", dueDate: "2026-04-01" }));
+    const leap = validateInvoiceForm(values({ issueDate: "2025-02-29", dueDate: "2025-03-01" }));
+    expect(due.ok).toBe(false);
+    expect(leap.ok).toBe(false);
+    if (!due.ok) {
+      expect(due.errors.dueDate).toMatch(/ennen laskun päivää/);
+      expect(firstInvalidKey(due.errors, invoiceFieldOrder(1))).toBe("dueDate");
+      expect(invoiceFieldId("dueDate")).toBe("if-due");
+    }
+    if (!leap.ok) expect(leap.errors.issueDate).toBeTruthy();
   });
 });

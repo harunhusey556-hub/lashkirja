@@ -1,13 +1,17 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Button, controlClass } from "@/components/ui";
-import { formatEur, parseFinnishNumber } from "@/lib/format";
+import { useEditorSession } from "@/components/form-session";
+import { Button, controlClass, SavePhaseNote } from "@/components/ui";
+import { errorMessage } from "@/components/clientFetch";
+import { focusFirstInvalid, invalidFieldProps } from "@/lib/focus-field";
+import { formatEur, parseFinnishNumber, parseMoneyInput } from "@/lib/format";
 import {
   computeInvoiceTotals,
   InvoiceValidationError,
   VAT_RATES_PERMILLE,
 } from "@/lib/invoices";
+import { helsinkiCalendarDate, isStrictIsoDate } from "@/lib/validation";
 
 export interface InvoiceFormLine {
   description: string;
@@ -52,19 +56,26 @@ export function validateInvoiceForm(
 ): { ok: true; payload: InvoicePayload } | { ok: false; errors: Record<string, string> } {
   const errors: Record<string, string> = {};
   if (!values.customerId) errors.customerId = "Valitse asiakas.";
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(values.issueDate)) errors.issueDate = "Valitse laskun päivä.";
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(values.dueDate)) errors.dueDate = "Valitse eräpäivä.";
-  if (values.issueDate && values.dueDate && values.dueDate < values.issueDate) {
+  if (!isStrictIsoDate(values.issueDate)) errors.issueDate = "Valitse laskun päivä.";
+  if (!isStrictIsoDate(values.dueDate)) errors.dueDate = "Valitse eräpäivä.";
+  if (
+    isStrictIsoDate(values.issueDate) &&
+    isStrictIsoDate(values.dueDate) &&
+    values.dueDate < values.issueDate
+  ) {
     errors.dueDate = "Eräpäivä ei voi olla ennen laskun päivää.";
   }
 
   const lines: InvoicePayload["lines"] = [];
   values.lines.forEach((line, index) => {
     const quantity = parseFinnishNumber(line.quantity);
-    const unitPrice = parseFinnishNumber(line.unitPrice);
+    const unitPrice = parseMoneyInput(line.unitPrice);
     if (!line.description.trim()) errors[`line-${index}-description`] = "Kuvaus puuttuu.";
     if (quantity === null || quantity === 0) errors[`line-${index}-quantity`] = "Määrä puuttuu.";
-    if (unitPrice === null) errors[`line-${index}-unitPrice`] = "Hinta puuttuu.";
+    else if (quantity < 0) errors[`line-${index}-quantity`] = "Määrä ei voi olla negatiivinen.";
+    if (!line.unitPrice.trim()) errors[`line-${index}-unitPrice`] = "Hinta puuttuu.";
+    else if (unitPrice === null) errors[`line-${index}-unitPrice`] = "Hinta ei ole kelvollinen summa.";
+    else if (unitPrice < 0) errors[`line-${index}-unitPrice`] = "Hinta ei voi olla negatiivinen.";
     if (quantity !== null && unitPrice !== null && line.description.trim()) {
       lines.push({
         description: line.description.trim(),
@@ -118,11 +129,35 @@ export function previewTotals(lines: InvoiceFormLine[]) {
   }
 }
 
+export function invoiceFieldOrder(lineCount: number): string[] {
+  const order = ["customerId", "issueDate", "dueDate"];
+  for (let index = 0; index < lineCount; index += 1) {
+    order.push(
+      `line-${index}-description`,
+      `line-${index}-quantity`,
+      `line-${index}-unitPrice`
+    );
+  }
+  order.push("lines");
+  return order;
+}
+
+export function invoiceFieldId(key: string): string {
+  if (key === "customerId") return "if-customer";
+  if (key === "issueDate") return "if-issue";
+  if (key === "dueDate") return "if-due";
+  const line = /^line-(\d+)-(description|quantity|unitPrice)$/.exec(key);
+  if (!line) return "if-customer";
+  const slot = line[2] === "description" ? "desc" : line[2] === "quantity" ? "qty" : "price";
+  return `if-line-${line[1]}-${slot}`;
+}
+
 interface Props {
   customers: Array<{ id: string; name: string; defaultPaymentTermDays: number }>;
   initial?: Partial<InvoiceFormValues>;
   submitLabel: string;
   busy?: boolean;
+  draftKey?: string;
   onSubmit: (payload: InvoicePayload) => void | Promise<void>;
   onCancel: () => void;
 }
@@ -134,17 +169,34 @@ function addDays(date: string, days: number): string {
   return parsed.toISOString().slice(0, 10);
 }
 
-export function InvoiceForm({ customers, initial, submitLabel, busy, onSubmit, onCancel }: Props) {
-  const today = new Date().toISOString().slice(0, 10);
-  const [values, setValues] = useState<InvoiceFormValues>({
+export function InvoiceForm({
+  customers,
+  initial,
+  submitLabel,
+  busy,
+  draftKey = "invoice:new",
+  onSubmit,
+  onCancel,
+}: Props) {
+  const today = helsinkiCalendarDate();
+  const [baseline] = useState<InvoiceFormValues>(() => ({
     customerId: customers[0]?.id ?? "",
     issueDate: today,
     dueDate: addDays(today, customers[0]?.defaultPaymentTermDays ?? 14),
     notes: "",
     lines: [{ ...EMPTY_LINE }],
     ...initial,
-  });
+  }));
+  const [values, setValues] = useState<InvoiceFormValues>(baseline);
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const [saveError, setSaveError] = useState("");
+  const session = useEditorSession({
+    sourceId: draftKey,
+    draftKey,
+    baseline,
+    value: values,
+    onRestore: setValues,
+  });
 
   const totals = useMemo(() => previewTotals(values.lines), [values.lines]);
 
@@ -178,10 +230,22 @@ export function InvoiceForm({ customers, initial, submitLabel, busy, onSubmit, o
         const result = validateInvoiceForm(values);
         if (!result.ok) {
           setErrors(result.errors);
+          setSaveError("");
+          focusFirstInvalid(result.errors, invoiceFieldOrder(values.lines.length), invoiceFieldId);
           return;
         }
         setErrors({});
-        void onSubmit(result.payload);
+        setSaveError("");
+        session.setPhase("saving");
+        void Promise.resolve(onSubmit(result.payload))
+          .then(() => {
+            session.clearSavedDraft();
+            session.setPhase("saved");
+          })
+          .catch((error: unknown) => {
+            session.setPhase("failed");
+            setSaveError(errorMessage(error, "Tallennus epäonnistui"));
+          });
       }}
     >
       <div className="space-y-1.5">
@@ -189,12 +253,11 @@ export function InvoiceForm({ customers, initial, submitLabel, busy, onSubmit, o
           Asiakas <span className="text-danger" aria-hidden="true">*</span>
         </label>
         <select
-          id="if-customer"
           className={field}
           value={values.customerId}
           onChange={(e) => pickCustomer(e.target.value)}
-          aria-invalid={Boolean(errors.customerId)}
           aria-required="true"
+          {...invalidFieldProps("if-customer", errors.customerId)}
         >
           <option value="">Valitse asiakas</option>
           {customers.map((customer) => (
@@ -203,7 +266,11 @@ export function InvoiceForm({ customers, initial, submitLabel, busy, onSubmit, o
             </option>
           ))}
         </select>
-        {errors.customerId && <p className="text-xs text-danger">{errors.customerId}</p>}
+        {errors.customerId && (
+          <p id="if-customer-error" className="text-xs text-danger" role="alert">
+            {errors.customerId}
+          </p>
+        )}
       </div>
 
       <div className="field-dates">
@@ -212,7 +279,6 @@ export function InvoiceForm({ customers, initial, submitLabel, busy, onSubmit, o
             Laskun päivä <span className="text-danger" aria-hidden="true">*</span>
           </label>
           <input
-            id="if-issue"
             type="date"
             className={field}
             value={values.issueDate}
@@ -220,22 +286,31 @@ export function InvoiceForm({ customers, initial, submitLabel, busy, onSubmit, o
               setValues((current) => ({ ...current, issueDate: e.target.value }))
             }
             aria-required="true"
+            {...invalidFieldProps("if-issue", errors.issueDate)}
           />
-          {errors.issueDate && <p className="text-xs text-danger">{errors.issueDate}</p>}
+          {errors.issueDate && (
+            <p id="if-issue-error" className="text-xs text-danger" role="alert">
+              {errors.issueDate}
+            </p>
+          )}
         </div>
         <div className="space-y-1.5">
           <label className={label} htmlFor="if-due">
             Eräpäivä <span className="text-danger" aria-hidden="true">*</span>
           </label>
           <input
-            id="if-due"
             type="date"
             className={field}
             value={values.dueDate}
             onChange={(e) => setValues((current) => ({ ...current, dueDate: e.target.value }))}
             aria-required="true"
+            {...invalidFieldProps("if-due", errors.dueDate)}
           />
-          {errors.dueDate && <p className="text-xs text-danger">{errors.dueDate}</p>}
+          {errors.dueDate && (
+            <p id="if-due-error" className="text-xs text-danger" role="alert">
+              {errors.dueDate}
+            </p>
+          )}
         </div>
       </div>
 
@@ -250,27 +325,37 @@ export function InvoiceForm({ customers, initial, submitLabel, busy, onSubmit, o
               Kuvaus <span className="text-danger" aria-hidden="true">*</span>
             </label>
             <input
-              id={`if-line-${index}-desc`}
               aria-required="true"
               className={field}
               value={line.description}
               onChange={(e) => setLine(index, { description: e.target.value })}
               placeholder="Kuvaus"
               maxLength={200}
+              {...invalidFieldProps(`if-line-${index}-desc`, errors[`line-${index}-description`])}
             />
+            {errors[`line-${index}-description`] && (
+              <p id={`if-line-${index}-desc-error`} className="text-xs text-danger" role="alert">
+                {errors[`line-${index}-description`]}
+              </p>
+            )}
             <div className="field-grid field-grid-3">
               <div>
                 <label className={lineLabel} htmlFor={`if-line-${index}-qty`}>
                   Määrä <span className="text-danger" aria-hidden="true">*</span>
                 </label>
                 <input
-                  id={`if-line-${index}-qty`}
                   aria-required="true"
                   className={field}
                   value={line.quantity}
                   onChange={(e) => setLine(index, { quantity: e.target.value })}
                   inputMode="decimal"
+                  {...invalidFieldProps(`if-line-${index}-qty`, errors[`line-${index}-quantity`])}
                 />
+                {errors[`line-${index}-quantity`] && (
+                  <p id={`if-line-${index}-qty-error`} className="text-xs text-danger" role="alert">
+                    {errors[`line-${index}-quantity`]}
+                  </p>
+                )}
               </div>
               <div>
                 <label className={lineLabel} htmlFor={`if-line-${index}-unit`}>Yksikkö</label>
@@ -287,14 +372,19 @@ export function InvoiceForm({ customers, initial, submitLabel, busy, onSubmit, o
                   Hinta € <span className="text-danger" aria-hidden="true">*</span>
                 </label>
                 <input
-                  id={`if-line-${index}-price`}
                   aria-required="true"
                   className={field}
                   value={line.unitPrice}
                   onChange={(e) => setLine(index, { unitPrice: e.target.value })}
                   inputMode="decimal"
                   placeholder="0,00"
+                  {...invalidFieldProps(`if-line-${index}-price`, errors[`line-${index}-unitPrice`])}
                 />
+                {errors[`line-${index}-unitPrice`] && (
+                  <p id={`if-line-${index}-price-error`} className="text-xs text-danger" role="alert">
+                    {errors[`line-${index}-unitPrice`]}
+                  </p>
+                )}
               </div>
             </div>
             <div className="flex items-end gap-2">
@@ -329,15 +419,6 @@ export function InvoiceForm({ customers, initial, submitLabel, busy, onSubmit, o
                 </Button>
               )}
             </div>
-            {(errors[`line-${index}-description`] ||
-              errors[`line-${index}-quantity`] ||
-              errors[`line-${index}-unitPrice`]) && (
-              <p className="text-xs text-danger">
-                {errors[`line-${index}-description`] ||
-                  errors[`line-${index}-quantity`] ||
-                  errors[`line-${index}-unitPrice`]}
-              </p>
-            )}
           </div>
         ))}
 
@@ -385,11 +466,39 @@ export function InvoiceForm({ customers, initial, submitLabel, busy, onSubmit, o
         />
       </div>
 
+      {session.notice && (
+        <p className="text-sm text-charcoal" role="status">
+          {session.notice}{" "}
+          <button
+            type="button"
+            className="font-medium text-accent-dark underline"
+            onClick={() => {
+              session.clearSavedDraft();
+              setValues(baseline);
+            }}
+          >
+            Hylkää luonnos
+          </button>
+        </p>
+      )}
+      <SavePhaseNote phase={session.phase} error={saveError} />
       <div className="flex gap-3">
-        <Button type="button" variant="secondary" className="flex-1" onClick={onCancel}>
+        <Button
+          type="button"
+          variant="secondary"
+          className="flex-1"
+          onClick={() => session.requestCancel(onCancel)}
+        >
           Peruuta
         </Button>
-        <Button type="submit" className="flex-1" busy={busy} busyLabel="Tallennetaan…">
+        <Button
+          type="submit"
+          className="flex-1"
+          busy={busy || session.phase === "saving"}
+          busyLabel="Tallennetaan…"
+          disabled={customers.length === 0}
+          disabledReason={customers.length === 0 ? "Lisää ensin asiakas." : undefined}
+        >
           {submitLabel}
         </Button>
       </div>

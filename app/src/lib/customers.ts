@@ -1,6 +1,7 @@
 /** Customer register: the counterparties a user invoices. */
 import { prisma } from "./db";
 import { AppError, NotFoundError, ValidationError } from "./api-errors";
+import { assertCurrentVersion } from "./edit-conflict";
 import { isValidBusinessId, normalizeBusinessId } from "./finnish-reference";
 import { DEFAULT_PAYMENT_TERM_DAYS, MAX_PAYMENT_TERM_DAYS, openPosition } from "./invoices";
 import { centsToEuros } from "./money";
@@ -33,6 +34,7 @@ export interface PublicCustomer {
   defaultPaymentTermDays: number;
   notes: string | null;
   archivedAt: string | null;
+  updatedAt: string;
 }
 
 export interface CustomerWithStats extends PublicCustomer {
@@ -57,6 +59,7 @@ type CustomerRow = {
   defaultPaymentTermDays: number;
   notes: string | null;
   archivedAt: Date | null;
+  updatedAt: Date;
 };
 
 export function toPublicCustomer(row: CustomerRow): PublicCustomer {
@@ -74,6 +77,7 @@ export function toPublicCustomer(row: CustomerRow): PublicCustomer {
     defaultPaymentTermDays: row.defaultPaymentTermDays,
     notes: row.notes,
     archivedAt: row.archivedAt ? row.archivedAt.toISOString() : null,
+    updatedAt: row.updatedAt.toISOString(),
   };
 }
 
@@ -141,10 +145,11 @@ export async function createCustomer(
 export async function updateCustomer(
   userId: string,
   id: string,
-  input: Partial<CustomerInput> & { archived?: boolean }
+  input: Partial<CustomerInput> & { archived?: boolean; expectedUpdatedAt?: string | null }
 ): Promise<PublicCustomer> {
   const existing = await prisma.customer.findFirst({ where: { id, userId } });
   if (!existing) throw new NotFoundError("Asiakasta ei löytynyt.");
+  assertCurrentVersion(existing.updatedAt, input.expectedUpdatedAt);
 
   const data: Record<string, unknown> = {};
   if (input.name !== undefined) {

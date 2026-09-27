@@ -47,6 +47,12 @@ export class NotFoundError extends AppError {
   }
 }
 
+export class ConflictError extends AppError {
+  constructor(message: string, code = "CONFLICT") {
+    super(message, code, 409);
+  }
+}
+
 /**
  * Wraps an API route handler to uniformly capture and format errors.
  */

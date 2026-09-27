@@ -19,8 +19,12 @@ const patchSchema = z
     defaultPaymentTermDays: z.number().int().min(0).max(365).optional(),
     notes: z.string().trim().max(2000).nullish(),
     archived: z.boolean().optional(),
+    expectedUpdatedAt: z.string().max(40).optional(),
   })
-  .refine((value) => Object.keys(value).length > 0, "Ei muutettavia kenttiä");
+  .refine(
+    (value) => Object.keys(value).filter((key) => key !== "expectedUpdatedAt").length > 0,
+    "Ei muutettavia kenttiä"
+  );
 
 type RouteContext = { params: Promise<{ id: string }> };
 

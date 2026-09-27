@@ -1,6 +1,6 @@
 "use client";
 
-import type { ButtonHTMLAttributes, ReactNode } from "react";
+import { useId, type ButtonHTMLAttributes, ReactNode } from "react";
 import { buttonClass, type ButtonVariant } from "@/components/control-styles";
 
 export { buttonClass, chipClass, controlClass } from "@/components/control-styles";
@@ -11,6 +11,8 @@ type ButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & {
   /** Native form posts must stay enabled or the browser drops the submit. */
   allowBusySubmit?: boolean;
   variant?: ButtonVariant;
+  /** Shown when the control is disabled, so the reason is not only a tooltip. */
+  disabledReason?: string;
 };
 
 /**
@@ -26,16 +28,22 @@ export function Button({
   className = "",
   children,
   disabled,
+  disabledReason,
   type = "button",
   ...props
 }: ButtonProps) {
   const isBusy = busy;
+  const isDisabled = Boolean(disabled || (isBusy && !allowBusySubmit));
+  const reasonId = useId();
+  const showReason = Boolean(isDisabled && disabledReason && !isBusy);
   return (
     <button
       type={type}
       {...props}
-      disabled={disabled || (isBusy && !allowBusySubmit)}
+      disabled={isDisabled}
       aria-busy={isBusy || undefined}
+      aria-describedby={showReason ? reasonId : props["aria-describedby"]}
+      title={showReason ? disabledReason : props.title}
       className={buttonClass(variant, className)}
     >
       {isBusy && (
@@ -44,7 +52,18 @@ export function Button({
           aria-hidden
         />
       )}
-      {isBusy && busyLabel ? busyLabel : children}
+      {isBusy && busyLabel ? (
+        busyLabel
+      ) : showReason ? (
+        <span className="flex flex-col items-center leading-tight">
+          <span>{children}</span>
+          <span id={reasonId} className="text-[11px] font-normal opacity-80">
+            {disabledReason}
+          </span>
+        </span>
+      ) : (
+        children
+      )}
     </button>
   );
 }
@@ -85,6 +104,40 @@ export function FormError({ message, className = "" }: { message: string; classN
       {message}
     </p>
   );
+}
+
+export function SavePhaseNote({
+  phase,
+  error = "",
+}: {
+  phase: "clean" | "dirty" | "saving" | "saved" | "failed";
+  error?: string;
+}) {
+  if (phase === "saving") {
+    return (
+      <p className="text-sm text-warm-gray" role="status">
+        Tallennetaan…
+      </p>
+    );
+  }
+  if (phase === "saved") {
+    return (
+      <p className="text-sm text-success" role="status">
+        Tallennettu
+      </p>
+    );
+  }
+  if (phase === "failed") {
+    return <FormError message={error || "Tallennus epäonnistui"} />;
+  }
+  if (phase === "dirty") {
+    return (
+      <p className="text-sm text-warm-gray" role="status">
+        Tallentamattomia muutoksia
+      </p>
+    );
+  }
+  return null;
 }
 
 export function SavedNote({ message, className = "" }: { message: string; className?: string }) {

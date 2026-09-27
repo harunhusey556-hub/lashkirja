@@ -1,6 +1,6 @@
 "use client";
 
-import { use, useCallback, useEffect, useState } from "react";
+import { use, useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ErrorState, LoadingState } from "@/components/AsyncState";
 import ConfirmModal from "@/components/ConfirmModal";
@@ -11,7 +11,9 @@ import {
   readJson,
   redirectToLogin,
 } from "@/components/clientFetch";
-import { formatDate, formatEur, parseFinnishNumber } from "@/lib/format";
+import { formatDate, formatEur, parseMoneyInput } from "@/lib/format";
+import { newIdempotencyKey } from "@/lib/idempotency-key";
+import { helsinkiCalendarDate } from "@/lib/validation";
 import { formatReference } from "@/lib/finnish-reference";
 import { shareContent } from "@/lib/share";
 import { Button, buttonClass, controlClass } from "@/components/ui";
@@ -79,7 +81,9 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
   const [message, setMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [paymentAmount, setPaymentAmount] = useState("");
-  const [paymentDate, setPaymentDate] = useState(new Date().toISOString().slice(0, 10));
+  const [paymentError, setPaymentError] = useState("");
+  const [paymentDate, setPaymentDate] = useState(() => helsinkiCalendarDate());
+  const paymentKey = useRef(newIdempotencyKey());
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [confirmRemovePayment, setConfirmRemovePayment] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
@@ -156,21 +160,35 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
   }
 
   async function addPayment() {
-    const amount = parseFinnishNumber(paymentAmount);
-    if (amount === null || amount === 0) {
-      setMessage("Anna maksun summa, esim. 125,50.");
+    const amount = parseMoneyInput(paymentAmount);
+    if (!paymentAmount.trim() || amount === null) {
+      setPaymentError(
+        paymentAmount.trim() ? "Summa ei ole kelvollinen." : "Anna maksun summa, esim. 125,50."
+      );
+      document.getElementById("payment-amount")?.focus();
       return;
     }
+    if (amount <= 0) {
+      setPaymentError("Summa ei voi olla negatiivinen tai nolla.");
+      document.getElementById("payment-amount")?.focus();
+      return;
+    }
+    setPaymentError("");
     setBusy(true);
     setMessage(null);
     try {
       const response = await apiFetch(`/api/invoices/${id}/payments`, {
         method: "POST",
         credentials: "include",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          "Idempotency-Key": paymentKey.current,
+        },
         body: JSON.stringify({ amount, paidDate: paymentDate }),
       });
       await readJson(response, "Maksun kirjaus epäonnistui");
+      paymentKey.current = newIdempotencyKey();
+      setPaymentAmount("");
       await load();
     } catch (error) {
       setMessage(errorMessage(error, "Maksun kirjaus epäonnistui"));
@@ -472,7 +490,10 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
                   <p className="text-sm font-medium text-charcoal">Kirjaa maksu</p>
                   <div className="field-dates">
                     <input
+                      id="payment-amount"
                       aria-label="Maksun summa"
+                      aria-invalid={Boolean(paymentError) || undefined}
+                      aria-describedby={paymentError ? "payment-amount-error" : undefined}
                       className={`${controlClass} min-h-12`}
                       value={paymentAmount}
                       onChange={(e) => setPaymentAmount(e.target.value)}
@@ -487,7 +508,18 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
                       onChange={(e) => setPaymentDate(e.target.value)}
                     />
                   </div>
-                  <Button type="button" className="w-full" disabled={busy} onClick={() => void addPayment()}>
+                  {paymentError && (
+                    <p id="payment-amount-error" className="text-sm text-danger" role="alert">
+                      {paymentError}
+                    </p>
+                  )}
+                  <Button
+                    type="button"
+                    className="w-full"
+                    disabled={busy}
+                    disabledReason={busy ? "Tallennus on kesken." : undefined}
+                    onClick={() => void addPayment()}
+                  >
                     Lisää
                   </Button>
                 </div>

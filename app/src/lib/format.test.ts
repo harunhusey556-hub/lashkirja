@@ -7,6 +7,7 @@ import {
   formatMonth,
   formatMonthShort,
   parseFinnishNumber,
+  parseMoneyInput,
 } from "./format";
 
 /** Finnish formatting uses non-breaking spaces; compare on normalised text. */
@@ -81,8 +82,34 @@ describe("parseFinnishNumber", () => {
   });
 
   it("rejects junk instead of returning NaN or a partial number", () => {
-    for (const bad of ["", "  ", "abc", "12,3,4", "1.2.3", "12€", "--5"]) {
+    for (const bad of ["", "  ", "abc", "12,3,4", "1.2.3", "--5"]) {
       expect(parseFinnishNumber(bad), bad).toBeNull();
     }
+  });
+
+  it("reads a pasted euro amount the same way as a plain number", () => {
+    expect(parseFinnishNumber("12,50")).toBe(12.5);
+    expect(parseFinnishNumber("12.50")).toBe(12.5);
+    expect(parseFinnishNumber("12,50 €")).toBe(12.5);
+    expect(parseFinnishNumber("€12.50")).toBe(12.5);
+    expect(parseFinnishNumber("")).toBeNull();
+    expect(parseFinnishNumber("-12,50")).toBe(-12.5);
+  });
+});
+
+describe("parseMoneyInput", () => {
+  it("keeps comma, dot and a pasted euro sign on the same scale", () => {
+    expect(parseMoneyInput("12,50")).toBe(12.5);
+    expect(parseMoneyInput("12.50")).toBe(12.5);
+    expect(parseMoneyInput("12,50 €")).toBe(12.5);
+    expect(parseMoneyInput("")).toBeNull();
+    expect(parseMoneyInput("   ")).toBeNull();
+  });
+
+  it("returns a negative amount and refuses a value that is not cents", () => {
+    expect(parseMoneyInput("-1,50")).toBe(-1.5);
+    expect(parseMoneyInput("12,555")).toBeNull();
+    expect(parseMoneyInput("999999999")).toBeNull();
+    expect(parseMoneyInput("€")).toBeNull();
   });
 });

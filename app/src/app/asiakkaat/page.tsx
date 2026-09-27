@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { ErrorState, LoadingState } from "@/components/AsyncState";
 import ConfirmModal from "@/components/ConfirmModal";
@@ -19,6 +19,8 @@ import { formatDate, formatEur } from "@/lib/format";
 
 import { INVOICE_LINKS, WorkspaceLinks, linksWithActive } from "@/components/WorkspaceLinks";
 import { Button } from "@/components/ui";
+import { newIdempotencyKey } from "@/lib/idempotency-key";
+import { clearDraft } from "@/lib/draft-store";
 import { readPageCache, writePageCache } from "@/lib/page-cache";
 interface Customer {
   id: string;
@@ -32,6 +34,7 @@ interface Customer {
   defaultPaymentTermDays: number;
   notes: string | null;
   archivedAt: string | null;
+  updatedAt?: string;
   invoiceCount: number;
   openInvoiceCount: number;
   openBalance: number;
@@ -51,6 +54,15 @@ export default function CustomersPage() {
   const [formMode, setFormMode] = useState<"hidden" | "create" | { edit: Customer }>("hidden");
   const [busy, setBusy] = useState(false);
   const [confirmRemove, setConfirmRemove] = useState<Customer | null>(null);
+  const [formKey, setFormKey] = useState(0);
+  const [undo, setUndo] = useState<{ id: string; name: string } | null>(null);
+  const createKey = useRef(newIdempotencyKey());
+
+  useEffect(() => {
+    if (!undo) return;
+    const timer = window.setTimeout(() => setUndo(null), 8000);
+    return () => window.clearTimeout(timer);
+  }, [undo]);
 
   const load = useCallback(async () => {
     try {
@@ -92,15 +104,55 @@ export default function CustomersPage() {
         {
           method: editing ? "PATCH" : "POST",
           credentials: "include",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload),
+          headers: {
+            "Content-Type": "application/json",
+            ...(editing ? {} : { "Idempotency-Key": createKey.current }),
+          },
+          body: JSON.stringify({
+            ...payload,
+            ...(editing?.updatedAt ? { expectedUpdatedAt: editing.updatedAt } : {}),
+          }),
         }
       );
       await readJson(response, "Tallennus epäonnistui");
+      if (!editing) createKey.current = newIdempotencyKey();
       setFormMode("hidden");
       await load();
     } catch (error) {
-      setMessage(errorMessage(error, "Tallennus epäonnistui"));
+      if (isUnauthorized(error)) redirectToLogin();
+      throw error;
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function reloadEditing() {
+    const editing = typeof formMode === "object" ? formMode.edit : null;
+    if (!editing) return;
+    clearDraft(`customer:${editing.id}`);
+    const response = await apiFetch(`/api/customers/${editing.id}`, { credentials: "include" });
+    const data = await readJson<{ customer: Customer }>(response, "Asiakkaan haku epäonnistui");
+    setFormMode({ edit: { ...editing, ...data.customer } });
+    setFormKey((key) => key + 1);
+  }
+
+  async function undoArchive() {
+    if (!undo) return;
+    const target = undo;
+    setUndo(null);
+    setBusy(true);
+    try {
+      const response = await apiFetch(`/api/customers/${target.id}`, {
+        method: "PATCH",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ archived: false }),
+      });
+      await readJson(response, "Kumoaminen epäonnistui");
+      setMessage(`${target.name} palautettiin.`);
+      await load();
+    } catch (error) {
+      setMessage(errorMessage(error, "Kumoaminen epäonnistui"));
     } finally {
       setBusy(false);
     }
@@ -117,11 +169,13 @@ export default function CustomersPage() {
         response,
         "Poisto epäonnistui"
       );
-      setMessage(
-        result.archived
-          ? `Asiakkaalla on ${result.invoiceCount} laskua, joten se arkistoitiin poiston sijaan.`
-          : "Asiakas poistettiin."
-      );
+      if (result.archived) {
+        setUndo({ id: customer.id, name: customer.name });
+        setMessage(null);
+      } else {
+        setUndo(null);
+        setMessage("Asiakas poistettiin.");
+      }
       setConfirmRemove(null);
       await load();
     } catch (error) {
@@ -155,6 +209,22 @@ export default function CustomersPage() {
           </section>
         )}
 
+        {undo && (
+          <div
+            className="flex items-center justify-between gap-3 rounded-2xl bg-blush/40 px-4 py-3"
+            role="status"
+          >
+            <p className="text-sm text-charcoal">{undo.name} arkistoitiin.</p>
+            <button
+              type="button"
+              className="text-sm font-medium text-accent-dark underline"
+              onClick={() => void undoArchive()}
+            >
+              Kumoa
+            </button>
+          </div>
+        )}
+
         {message && (
           <p className="text-sm text-charcoal bg-blush/40 rounded-2xl px-4 py-3" role="status">
             {message}
@@ -180,8 +250,11 @@ export default function CustomersPage() {
               {formMode === "create" ? "Uusi asiakas" : "Muokkaa asiakasta"}
             </p>
             <CustomerForm
+              key={formMode === "create" ? `new-${formKey}` : formMode.edit.id + formKey}
+              draftKey={formMode === "create" ? "customer:new" : `customer:${formMode.edit.id}`}
               submitLabel={formMode === "create" ? "Lisää asiakas" : "Tallenna"}
               busy={busy}
+              onReload={() => void reloadEditing()}
               initial={
                 typeof formMode === "object"
                   ? {

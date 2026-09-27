@@ -3,6 +3,7 @@ import { z } from "zod";
 import { requireSession } from "@/lib/session";
 import { noStoreJson, rejectCrossSite, rejectOversizedContentLength } from "@/lib/http-security";
 import { UnauthorizedError, ValidationError, withErrorHandler } from "@/lib/api-errors";
+import { idempotencyKeyFrom, withIdempotency } from "@/lib/idempotency";
 import { recordPayment, removePayment } from "@/lib/sales-invoices";
 import { isoDateSchema, moneySchema } from "@/lib/validation";
 
@@ -25,8 +26,14 @@ export const POST = withErrorHandler(async (req: NextRequest, context: RouteCont
   if (oversized) return oversized;
 
   const { id } = await context.params;
-  const invoice = await recordPayment(session.userId, id, bodySchema.parse(await req.json()));
-  return noStoreJson({ invoice }, { status: 201 });
+  const input = bodySchema.parse(await req.json());
+  const result = await withIdempotency(
+    session.userId,
+    `invoice.payment:${id}`,
+    idempotencyKeyFrom(req),
+    async () => ({ status: 201, body: { invoice: await recordPayment(session.userId, id, input) } })
+  );
+  return noStoreJson(result.body, { status: result.status });
 });
 
 export const DELETE = withErrorHandler(async (req: NextRequest, context: RouteContext) => {

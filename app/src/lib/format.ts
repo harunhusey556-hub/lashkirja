@@ -1,4 +1,5 @@
 /** Shared Finnish formatting so every screen shows money and months alike. */
+import { isCentAmount } from "./money";
 
 const eurFormatter = new Intl.NumberFormat("fi-FI", {
   style: "currency",
@@ -50,12 +51,31 @@ export function formatDate(value: string | null | undefined): string {
   }).format(date);
 }
 
-/** Accepts "1 234,56" and "1234.56" alike; returns null when unparsable. */
+/**
+ * Accepts "1 234,56", "1234.56" and a pasted "12,50 €".
+ * Empty and junk are null. A leading minus is kept.
+ */
 export function parseFinnishNumber(value: string): number | null {
-  const cleaned = value.replace(/\s| /g, "").replace(",", ".");
+  const cleaned = value
+    .replace(/€/g, "")
+    .replace(/eur/gi, "")
+    .replace(/\s| /g, "")
+    .replace(",", ".");
   if (!cleaned || !/^-?\d+(\.\d+)?$/.test(cleaned)) return null;
   const parsed = Number(cleaned);
   return Number.isFinite(parsed) ? parsed : null;
+}
+
+/**
+ * Money typed into a field. Same rules everywhere: comma or dot, optional €,
+ * empty is null, more than two decimals or a huge amount is null.
+ * A negative amount is returned so the field can explain it; it is still a number.
+ */
+export function parseMoneyInput(value: string): number | null {
+  const parsed = parseFinnishNumber(value);
+  if (parsed === null) return null;
+  if (!isCentAmount(parsed)) return null;
+  return parsed;
 }
 
 export function currentMonthKey(now = new Date()): string {

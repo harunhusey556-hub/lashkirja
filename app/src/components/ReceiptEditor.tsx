@@ -17,9 +17,13 @@ import {
   redirectToLogin,
 } from "@/components/clientFetch";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
-import { Button, FormError } from "@/components/ui";
+import { useEditorSession } from "@/components/form-session";
+import { Button, FormError, SavePhaseNote } from "@/components/ui";
 import { SelectMenu, SelectOption } from "@/components/SelectMenu";
-import { parseFinnishNumber } from "@/lib/format";
+import { parseFinnishNumber, parseMoneyInput } from "@/lib/format";
+import { focusFirstInvalid } from "@/lib/focus-field";
+import { clearDraft } from "@/lib/draft-store";
+import { receiptFieldId, validateReceiptFields } from "@/lib/receipt-form";
 import {
   categoryLabel,
   isKnownCategory,
@@ -72,6 +76,7 @@ interface ReceiptResponse {
     type?: string | null;
     reference?: string | null;
     invoiceNumber?: string | null;
+    updatedAt?: string;
     linkedTransaction?: LinkedBankTx | null;
     match?: ReceiptMatchData;
   };
@@ -97,6 +102,10 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
   const [originalName, setOriginalName] = useState("");
   const [meta, setMeta] = useState<ExtractedMeta | null>(null);
   const [formData, setFormData] = useState(emptyForm);
+  const [baseline, setBaseline] = useState(emptyForm);
+  const [updatedAt, setUpdatedAt] = useState("");
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+  const [conflict, setConflict] = useState(false);
   const [useCustomCategory, setUseCustomCategory] = useState(false);
   const [linkedTx, setLinkedTx] = useState<LinkedBankTx | null>(null);
   const [matchData, setMatchData] = useState<ReceiptMatchData>({
@@ -108,6 +117,15 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
   const [notFound, setNotFound] = useState(false);
   const [loadAttempt, setLoadAttempt] = useState(0);
   const [forceDuplicate, setForceDuplicate] = useState(false);
+  const draftKey = receiptId ? `receipt:${receiptId}` : "receipt:new";
+  const session = useEditorSession({
+    sourceId: draftKey,
+    draftKey,
+    baseline,
+    value: formData,
+    active: !isEdit || formReady,
+    onRestore: setFormData,
+  });
 
   useEffect(() => {
     if (!receiptId) return;
@@ -144,7 +162,7 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
           rawText: r.rawText,
         });
         const knownCategory = isKnownCategory(r.category);
-        setFormData({
+        const loaded = {
           vendor: r.vendor || "",
           date: r.date ? String(r.date).slice(0, 10) : "",
           totalAmount: r.totalAmount != null ? String(r.totalAmount) : "",
@@ -155,7 +173,11 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
           vatDetails,
           reference: r.reference || "",
           invoiceNumber: r.invoiceNumber || "",
-        });
+        };
+        setFormData(loaded);
+        setBaseline(loaded);
+        setUpdatedAt(r.updatedAt ? String(r.updatedAt) : "");
+        setConflict(false);
         setUseCustomCategory(!knownCategory && Boolean(r.category));
         setLinkedTx(r.linkedTransaction || null);
         setMatchData(
@@ -352,7 +374,16 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
   }
 
   async function handleSave() {
-    const totalAmount = parseFinnishNumber(formData.totalAmount) ?? NaN;
+    const resolvedCategory = useCustomCategory
+      ? formData.customCategory.trim()
+      : formData.category.trim();
+    const nextFieldErrors = validateReceiptFields({
+      vendor: formData.vendor,
+      date: formData.date,
+      totalAmount: formData.totalAmount,
+      category: resolvedCategory,
+    });
+    const totalAmount = parseMoneyInput(formData.totalAmount) ?? NaN;
     const populatedVatRows = formData.vatDetails.filter(
       (detail) => detail.amount !== ""
     );
@@ -365,7 +396,7 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
     }
     const vatDetails = populatedVatRows.map((detail) => ({
       rate: Number(detail.rate),
-      amount: parseFinnishNumber(detail.amount) ?? NaN,
+      amount: parseMoneyInput(detail.amount) ?? NaN,
     }));
     const invalidVat = vatDetails.some(
       (detail) =>
@@ -374,36 +405,27 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
         detail.amount < 0
     );
     const totalVat = vatDetails.reduce((sum, detail) => sum + detail.amount, 0);
-    if (!formData.vendor.trim()) {
-      setError("Myyjä on pakollinen");
-      return;
-    }
-    if (!formData.date) {
-      setError("Päivämäärä on pakollinen");
-      return;
-    }
-    if (!Number.isFinite(totalAmount) || totalAmount <= 0) {
-      setError("Summan pitää olla suurempi kuin nolla");
-      return;
-    }
-    const resolvedCategory = useCustomCategory
-      ? formData.customCategory.trim()
-      : formData.category.trim();
-    if (!resolvedCategory) {
-      setError(
-        useCustomCategory
-          ? "Kirjoita kategoria tai valitse listasta"
-          : "Valitse kategoria"
+    if (Object.keys(nextFieldErrors).length > 0) {
+      setFieldErrors(nextFieldErrors);
+      setError("");
+      focusFirstInvalid(
+        nextFieldErrors,
+        ["vendor", "date", "totalAmount", "category"],
+        (key) => (key === "category" && useCustomCategory ? "receipt-custom-category" : receiptFieldId(key))
       );
       return;
     }
     if (invalidVat || totalVat > totalAmount) {
+      setFieldErrors({});
       setError("Tarkista ALV-summa");
       return;
     }
+    setFieldErrors({});
 
     setSaving(true);
     setError("");
+    setConflict(false);
+    session.setPhase("saving");
     try {
       const payload = {
         vendor: formData.vendor || null,
@@ -415,14 +437,16 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
         type: formData.type,
         reference: formData.reference || null,
         invoiceNumber: formData.invoiceNumber || null,
-        forceDuplicate,
       };
 
       const res = isEdit
         ? await fetch(`/api/receipts/${receiptId}`, {
             method: "PATCH",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(payload),
+            body: JSON.stringify({
+              ...payload,
+              ...(updatedAt ? { expectedUpdatedAt: updatedAt } : {}),
+            }),
           })
         : await fetch("/api/receipts/save", {
             method: "POST",
@@ -430,6 +454,7 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
             body: JSON.stringify({
               ...payload,
               uploadId,
+              forceDuplicate,
             }),
           });
 
@@ -447,6 +472,14 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
           if (duplicate) {
             setForceDuplicate(true);
             setError(e.message);
+            session.setPhase("failed");
+            setSaving(false);
+            return;
+          }
+          if (e instanceof ApiError && e.message.includes("Lataa tiedot uudelleen")) {
+            setConflict(true);
+            setError(e.message);
+            session.setPhase("failed");
             setSaving(false);
             return;
           }
@@ -456,6 +489,10 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
       }
 
       const data = await readJson<ReceiptResponse>(res, "Tallennus epäonnistui");
+      session.clearSavedDraft();
+      session.setPhase("saved");
+      setBaseline(formData);
+      if (data.receipt?.updatedAt) setUpdatedAt(String(data.receipt.updatedAt));
 
       if (!isEdit && data.receipt && data.receipt.match) {
         const matchStatus = data.receipt.match.status;
@@ -477,6 +514,7 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
         return;
       }
       setError(errorMessage(saveError, "Tallennus epäonnistui"));
+      session.setPhase("failed");
     } finally {
       setSaving(false);
     }
@@ -708,8 +746,15 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
                 onChange={(e) =>
                   setFormData({ ...formData, vendor: e.target.value })
                 }
+                aria-invalid={Boolean(fieldErrors.vendor) || undefined}
+                aria-describedby={fieldErrors.vendor ? "receipt-vendor-error" : undefined}
                 className="w-full min-h-12 min-w-0 px-3 rounded-xl border border-warm-gray-light/50 bg-white text-sm transition-colors focus:border-accent outline-none focus:ring-1 focus:ring-accent shadow-sm"
               />
+              {fieldErrors.vendor && (
+                <p id="receipt-vendor-error" className="mt-1.5 text-xs text-danger" role="alert">
+                  {fieldErrors.vendor}
+                </p>
+              )}
             </div>
 
             <div className="field-dates">
@@ -725,8 +770,15 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
                   onChange={(e) =>
                     setFormData({ ...formData, date: e.target.value })
                   }
+                  aria-invalid={Boolean(fieldErrors.date) || undefined}
+                  aria-describedby={fieldErrors.date ? "receipt-date-error" : undefined}
                   className="w-full min-h-12 min-w-0 px-3 rounded-xl border border-warm-gray-light/50 bg-white text-sm transition-colors focus:border-accent outline-none focus:ring-1 focus:ring-accent shadow-sm"
                 />
+                {fieldErrors.date && (
+                  <p id="receipt-date-error" className="mt-1.5 text-xs text-danger" role="alert">
+                    {fieldErrors.date}
+                  </p>
+                )}
               </div>
               <div>
                 <label htmlFor="receipt-total" className="block text-[10px] font-medium tracking-wider uppercase text-warm-gray mb-1.5">
@@ -742,8 +794,15 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
                   onChange={(e) =>
                     setFormData({ ...formData, totalAmount: e.target.value })
                   }
+                  aria-invalid={Boolean(fieldErrors.totalAmount) || undefined}
+                  aria-describedby={fieldErrors.totalAmount ? "receipt-total-error" : undefined}
                   className="w-full min-h-12 min-w-0 px-3 rounded-xl border border-warm-gray-light/50 bg-white text-sm transition-colors focus:border-accent outline-none focus:ring-1 focus:ring-accent shadow-sm"
                 />
+                {fieldErrors.totalAmount && (
+                  <p id="receipt-total-error" className="mt-1.5 text-xs text-danger" role="alert">
+                    {fieldErrors.totalAmount}
+                  </p>
+                )}
               </div>
             </div>
 
@@ -971,6 +1030,11 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
                   </button>
                 </div>
               )}
+              {fieldErrors.category && (
+                <p id="receipt-category-error" className="text-xs text-danger" role="alert">
+                  {fieldErrors.category}
+                </p>
+              )}
             </fieldset>
 
             <div>
@@ -1024,6 +1088,35 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
           </div>
           )}
 
+          {session.notice && (
+            <p className="text-sm text-charcoal" role="status">
+              {session.notice}{" "}
+              <button
+                type="button"
+                className="font-medium text-accent-dark underline"
+                onClick={() => {
+                  session.clearSavedDraft();
+                  setFormData(baseline);
+                }}
+              >
+                Hylkää luonnos
+              </button>
+            </p>
+          )}
+          <SavePhaseNote phase={session.phase} error={error} />
+          {conflict && (
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => {
+                clearDraft(draftKey);
+                setConflict(false);
+                setLoadAttempt((attempt) => attempt + 1);
+              }}
+            >
+              Lataa uudelleen
+            </Button>
+          )}
           <div className="flex gap-3 pt-4 border-t border-warm-gray-light/20 mt-4">
             {isNewStep2 ? (
               <Link
@@ -1034,17 +1127,20 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
               </Link>
             ) : (
               <>
-                <Link
-                  href="/kuitit"
-                  className="flex-1 py-3 px-4 rounded-full bg-white text-charcoal text-sm font-medium border border-warm-gray-light/50 hover:bg-cream/50 shadow-sm transition-colors text-center active:scale-95"
+                <Button
+                  type="button"
+                  variant="secondary"
+                  className="flex-1"
+                  onClick={() => session.requestCancel(() => router.push("/kuitit"))}
                 >
                   Peruuta
-                </Link>
+                </Button>
                 <Button
                   type="submit"
                   busy={saving}
                   busyLabel="Tallennetaan…"
                   disabled={!isEdit && !uploadId}
+                  disabledReason={!isEdit && !uploadId ? "Liitä ensin kuitti." : undefined}
                   className={`flex-1 ${forceDuplicate ? "bg-warning-dark! hover:bg-warning!" : ""}`}
                 >
                   {forceDuplicate ? "Tallenna silti" : isEdit ? "Tallenna muutokset" : "Tallenna"}

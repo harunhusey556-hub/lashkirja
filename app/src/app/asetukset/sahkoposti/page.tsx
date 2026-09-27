@@ -337,11 +337,24 @@ export default function SahkopostiPage() {
                         <button
                           type="submit"
                           disabled={imapSaving || !imapEmail || !imapPass || !imapHost}
+                          aria-describedby={
+                            !imapEmail || !imapPass || !imapHost ? "imap-connect-reason" : undefined
+                          }
                           className="flex-1 bg-charcoal text-white rounded-xl py-2.5 text-sm font-medium hover:bg-black transition-colors disabled:opacity-50 shadow-sm active-press touch-target"
                         >
                           {imapSaving ? "Yhdistetään..." : "Yhdistä"}
                         </button>
                       </div>
+                      {(!imapEmail || !imapPass || !imapHost) && (
+                        <p id="imap-connect-reason" className="text-xs text-warm-gray">
+                          Täytä sähköposti, salasana ja palvelin.
+                        </p>
+                      )}
+                      {imapSaving && (
+                        <p className="text-xs text-warm-gray" role="status">
+                          Yhdistäminen on kesken.
+                        </p>
+                      )}
 
                       {imapMsg && <p className="text-xs text-danger">{imapMsg}</p>}
                     </form>

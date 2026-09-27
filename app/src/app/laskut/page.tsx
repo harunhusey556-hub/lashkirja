@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useCallback, useEffect, useState } from "react";
+import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { ErrorState, LoadingState, SkeletonList } from "@/components/AsyncState";
@@ -16,6 +16,7 @@ import { formatDate, formatEur } from "@/lib/format";
 
 import { INVOICE_LINKS, WorkspaceLinks, linksWithActive } from "@/components/WorkspaceLinks";
 import { Button, chipClass } from "@/components/ui";
+import { newIdempotencyKey } from "@/lib/idempotency-key";
 import { readPageCache, writePageCache } from "@/lib/page-cache";
 import { usePersistedState, useScrollRestoration } from "@/lib/list-ui-state";
 interface InvoiceSummary {
@@ -106,6 +107,7 @@ function InvoicesPageContent() {
   const [message, setMessage] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [busy, setBusy] = useState(false);
+  const createKey = useRef(newIdempotencyKey());
 
   // `signal` is only ever passed by the mount/filter-change effect below —
   // manual call sites (retry button, post-mutation refresh) call load() with
@@ -162,15 +164,20 @@ function InvoicesPageContent() {
       const response = await apiFetch("/api/invoices", {
         method: "POST",
         credentials: "include",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          "Idempotency-Key": createKey.current,
+        },
         body: JSON.stringify(payload),
       });
       const data = await readJson<{ invoice: InvoiceSummary }>(response, "Laskun luonti epäonnistui");
+      createKey.current = newIdempotencyKey();
       setCreating(false);
       setMessage(`Lasku ${data.invoice.number} luotiin luonnoksena.`);
       await load();
     } catch (error) {
-      setMessage(errorMessage(error, "Laskun luonti epäonnistui"));
+      if (isUnauthorized(error)) redirectToLogin();
+      throw error;
     } finally {
       setBusy(false);
     }

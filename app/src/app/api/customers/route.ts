@@ -4,6 +4,7 @@ import { requireSession } from "@/lib/session";
 import { noStoreJson, rejectCrossSite, rejectOversizedContentLength } from "@/lib/http-security";
 import { UnauthorizedError, withErrorHandler } from "@/lib/api-errors";
 import { createCustomer, listCustomers } from "@/lib/customers";
+import { idempotencyKeyFrom, withIdempotency } from "@/lib/idempotency";
 
 const createSchema = z.object({
   name: z.string().trim().min(1, "Asiakkaan nimi puuttuu").max(120),
@@ -40,6 +41,12 @@ export const POST = withErrorHandler(async (req: NextRequest) => {
   const oversized = rejectOversizedContentLength(req);
   if (oversized) return oversized;
 
-  const customer = await createCustomer(session.userId, createSchema.parse(await req.json()));
-  return noStoreJson({ customer }, { status: 201 });
+  const input = createSchema.parse(await req.json());
+  const result = await withIdempotency(
+    session.userId,
+    "customer.create",
+    idempotencyKeyFrom(req),
+    async () => ({ status: 201, body: { customer: await createCustomer(session.userId, input) } })
+  );
+  return noStoreJson(result.body, { status: result.status });
 });

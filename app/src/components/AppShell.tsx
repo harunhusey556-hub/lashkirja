@@ -26,6 +26,8 @@ import {
   type NavDirection,
 } from "@/lib/nav-direction";
 import { hapticSelection } from "@/lib/haptics";
+import { anyFormDirty, requestLeave } from "@/lib/form-guard";
+import { UnsavedChangesHost } from "@/components/UnsavedChangesHost";
 const NAV_ITEMS = [
   {
     href: "/dashboard",
@@ -273,7 +275,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   }, [pathname, direction]);
 
   function goBack() {
-    performInAppBack(pathname, router);
+    requestLeave(() => performInAppBack(pathname, router));
   }
 
   // Browser/OS back (popstate) plays the pop transition even when the route
@@ -364,19 +366,27 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       ).matches;
 
       if (commit) {
-        swipeLock.current = true;
-        const navigate = () => {
-          performInAppBack(pathname, router);
+        const go = () => {
+          swipeLock.current = true;
+          const navigate = () => {
+            performInAppBack(pathname, router);
+          };
+          if (reduceMotion) {
+            clearInline();
+            navigate();
+            return;
+          }
+          main.style.transition = "transform 0.18s ease-out, opacity 0.18s ease-out";
+          main.style.transform = "translateX(100%)";
+          main.style.opacity = "0.4";
+          window.setTimeout(navigate, 170);
         };
-        if (reduceMotion) {
+        if (anyFormDirty()) {
           clearInline();
-          navigate();
+          requestLeave(go);
           return;
         }
-        main.style.transition = "transform 0.18s ease-out, opacity 0.18s ease-out";
-        main.style.transform = "translateX(100%)";
-        main.style.opacity = "0.4";
-        window.setTimeout(navigate, 170);
+        go();
       } else {
         main.style.transition =
           "transform 0.2s cubic-bezier(0.32, 0.72, 0, 1)";
@@ -509,6 +519,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="app-frame">
+      <UnsavedChangesHost />
       <header
         className="app-header z-40 bg-white/90 backdrop-blur-md border-b border-warm-gray-light/30"
         onContextMenu={(event) => event.preventDefault()}
@@ -626,8 +637,10 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                     onClick={() => {
                       void hapticSelection();
                       if (item.href === pathname) return;
-                      armNavigation(item.href, "tab");
-                      router.push(item.href);
+                      requestLeave(() => {
+                        armNavigation(item.href, "tab");
+                        router.push(item.href);
+                      });
                     }}
                     className={`flex min-w-0 flex-1 flex-col items-center justify-center gap-0.5 touch-target active:bg-blush/30 transition-colors active-press ${
                       active ? "text-accent-dark" : "text-warm-gray"
@@ -658,10 +671,12 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
               <button
                 type="button"
                 onClick={() => {
-                  setProfileOpenOn(null);
-                  if (pathname === "/asetukset") return;
-                  armNavigation("/asetukset", "tab");
-                  router.push("/asetukset");
+                  requestLeave(() => {
+                    setProfileOpenOn(null);
+                    if (pathname === "/asetukset") return;
+                    armNavigation("/asetukset", "tab");
+                    router.push("/asetukset");
+                  });
                 }}
                 className="flex w-full items-center gap-3 px-4 py-3.5 rounded-2xl text-left transition-colors active:bg-blush/40"
               >

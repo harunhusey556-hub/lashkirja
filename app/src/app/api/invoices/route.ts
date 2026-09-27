@@ -3,6 +3,7 @@ import { z } from "zod";
 import { requireSession } from "@/lib/session";
 import { noStoreJson, rejectCrossSite, rejectOversizedContentLength } from "@/lib/http-security";
 import { UnauthorizedError, withErrorHandler } from "@/lib/api-errors";
+import { idempotencyKeyFrom, withIdempotency } from "@/lib/idempotency";
 import { createInvoice, listInvoices } from "@/lib/sales-invoices";
 import { isoDateSchema, monthSchema, moneySchema } from "@/lib/validation";
 
@@ -51,6 +52,12 @@ export const POST = withErrorHandler(async (req: NextRequest) => {
   const oversized = rejectOversizedContentLength(req);
   if (oversized) return oversized;
 
-  const invoice = await createInvoice(session.userId, createSchema.parse(await req.json()));
-  return noStoreJson({ invoice }, { status: 201 });
+  const input = createSchema.parse(await req.json());
+  const result = await withIdempotency(
+    session.userId,
+    "invoice.create",
+    idempotencyKeyFrom(req),
+    async () => ({ status: 201, body: { invoice: await createInvoice(session.userId, input) } })
+  );
+  return noStoreJson(result.body, { status: result.status });
 });

@@ -49,6 +49,7 @@ model User {
   salesInvoices SalesInvoice[]
   purchaseInvoices PurchaseInvoice[]
   recurringInvoices RecurringInvoice[]
+  idempotencyRecords IdempotencyRecord[]
 }
 
 model Receipt {
@@ -581,4 +582,19 @@ model RecurringInvoiceRun {
 
   @@unique([recurringInvoiceId, issueDate])
   @@index([recurringInvoiceId, createdAt])
+}
+
+/// Replay of a create that the client already sent. The key is per user and
+/// route, so a double tap cannot insert a second invoice, payment, or customer.
+model IdempotencyRecord {
+  id         String   @id @default(uuid())
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  scope      String
+  key        String
+  statusCode Int
+  body       String
+  createdAt  DateTime @default(now())
+
+  @@unique([userId, scope, key])
 }

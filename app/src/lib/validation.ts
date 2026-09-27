@@ -35,6 +35,21 @@ export function isoDateToUtc(value: string): Date {
   return new Date(Date.UTC(year, month - 1, day));
 }
 
+/**
+ * The calendar date in Europe/Helsinki.
+ * Stored invoice dates stay UTC midnights of the day the user picked.
+ * "Today" on a new form follows Helsinki, so a minute past local midnight
+ * is not still yesterday in UTC.
+ */
+export function helsinkiCalendarDate(now: Date = new Date()): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Europe/Helsinki",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(now);
+}
+
 export function monthBoundsUtc(month: string): { start: Date; end: Date } {
   const parsed = monthSchema.parse(month);
   const [year, monthNumber] = parsed.split("-").map(Number);

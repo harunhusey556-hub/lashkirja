@@ -89,6 +89,9 @@ export function useProfile() {
         });
         setSavedMsg("Tallennettu");
         void hapticNotify("success");
+        window.setTimeout(() => {
+          setSavedMsg((current) => (current === "Tallennettu" ? "" : current));
+        }, 8000);
         return true;
       } catch (error: unknown) {
         if (isUnauthorized(error)) {
@@ -101,7 +104,6 @@ export function useProfile() {
         return false;
       } finally {
         setSaving(false);
-        setTimeout(() => setSavedMsg(""), 3000);
       }
     },
     [profile, saving]

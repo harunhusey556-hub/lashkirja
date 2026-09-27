@@ -7,6 +7,7 @@
  */
 import { prisma } from "./db";
 import { AppError, NotFoundError, ValidationError } from "./api-errors";
+import { assertCurrentVersion } from "./edit-conflict";
 import { centsToEuros, eurosToCents } from "./money";
 import { isoDateToUtc } from "./validation";
 import { normalizeReference, referenceForInvoice } from "./finnish-reference";
@@ -152,6 +153,7 @@ export interface PublicInvoice {
   paid: number;
   open: number;
   closedReason: string | null;
+  updatedAt: string;
   customer: { id: string; name: string; email: string | null; businessId: string | null };
   lines: PublicInvoiceLine[];
   payments: Array<{
@@ -180,6 +182,7 @@ type InvoiceWithRelations = {
   grossCents: number;
   partySnapshot: string | null;
   closedReason: string | null;
+  updatedAt: Date;
   customer: { id: string; name: string; email: string | null; businessId: string | null };
   lines: Array<{
     id: string;
@@ -239,6 +242,7 @@ export function toPublicInvoice(
     paid: centsToEuros(paidCents),
     open: centsToEuros(position.openCents),
     closedReason: invoice.closedReason,
+    updatedAt: invoice.updatedAt.toISOString(),
     customer: invoice.customer,
     lines: invoice.lines.map((line) => ({
       id: line.id,
@@ -338,6 +342,7 @@ export interface UpdateInvoiceInput {
   dueDate?: string;
   notes?: string | null;
   lines?: InvoiceLinePayload[];
+  expectedUpdatedAt?: string | null;
 }
 
 /**
@@ -352,9 +357,10 @@ export async function updateInvoice(
 ): Promise<PublicInvoice> {
   const existing = await prisma.salesInvoice.findFirst({
     where: { id, userId },
-    select: { id: true, status: true, issueDate: true, dueDate: true },
+    select: { id: true, status: true, issueDate: true, dueDate: true, updatedAt: true },
   });
   if (!existing) throw new NotFoundError("Laskua ei löytynyt.");
+  assertCurrentVersion(existing.updatedAt, input.expectedUpdatedAt);
 
   await assertPeriodOpen(userId, [
     existing.issueDate,
