@@ -62,12 +62,14 @@ jobs:
       - name: Production build
         run: npm run build
 
-      # Phone viewport on Chromium and WebKit. Not a WKWebView IPA smoke.
+      # Phone viewport on Chromium and WebKit, plus login, navigation,
+      # bank-account smoke, and the privacy/PIN/draft screen on Chromium.
+      # Not a WKWebView IPA smoke.
       - name: Install Playwright browsers
         run: npx playwright install --with-deps chromium webkit
 
-      - name: Playwright viewport
-        run: npm run test:e2e:viewport
+      - name: Playwright critical journeys
+        run: npm run test:e2e:ci
 
   lint:
     name: Lint

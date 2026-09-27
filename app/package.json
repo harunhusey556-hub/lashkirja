@@ -13,6 +13,7 @@
     "test:parsers": "tsx scripts/test-parsers.ts",
     "test:e2e": "npm run build && playwright test",
     "test:e2e:viewport": "playwright test tests/e2e/viewport.spec.ts",
+    "test:e2e:ci": "playwright test tests/e2e/viewport.spec.ts && playwright test tests/e2e/app.spec.ts --project=mobile-chromium --grep \"protected pages redirect to login|login lands on the dashboard and the tab bar navigates|a bank account can be added and a month reconciled|a rejected IBAN never reaches the server|privacy request status is visible and the lock PIN is masked\"",
     "check": "npm run lint && npm run typecheck && npm run test:all && npm run build",
     "ios:sync": "npx cap sync ios",
     "ios:open": "npx cap open ios",

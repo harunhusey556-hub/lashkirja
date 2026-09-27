@@ -11,6 +11,7 @@ const ERROR_MESSAGES: Record<string, string> = {
   server: "Kirjautuminen epäonnistui",
   rate: "Liian monta kirjautumisyritystä. Yritä muutaman minuutin kuluttua uudelleen.",
   expired: "Istuntosi vanhentui. Kirjaudu sisään uudelleen.",
+  closed: "Tilin käyttö on suljettu. Kirjanpitoaineisto säilyy säilytysajan.",
 };
 
 export default function LoginForm() {

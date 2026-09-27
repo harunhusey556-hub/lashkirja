@@ -1,15 +1,47 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { apiFetch, errorMessage, readJson } from "@/components/clientFetch";
 import { Button, controlClass } from "@/components/ui";
 import { ACCOUNTING_RETENTION_YEARS } from "@/lib/session-policy";
 
+interface AccountRequestRow {
+  id: string;
+  kindLabel: string;
+  statusLabel: string;
+  downloadable: boolean;
+  createdAt: string;
+}
+
 export default function TietosuojaPage() {
   const [password, setPassword] = useState("");
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState<"close" | "export" | null>(null);
+  const [requests, setRequests] = useState<AccountRequestRow[]>([]);
+
+  function loadRequests() {
+    return apiFetch("/api/account/request")
+      .then((response) => readJson<{ requests: AccountRequestRow[] }>(response, "Pyyntöjä ei saatu ladattua"))
+      .then((data) => {
+        setRequests(data.requests ?? []);
+      });
+  }
+
+  useEffect(() => {
+    let cancelled = false;
+    void apiFetch("/api/account/request")
+      .then((response) => readJson<{ requests: AccountRequestRow[] }>(response, "Pyyntöjä ei saatu ladattua"))
+      .then((data) => {
+        if (!cancelled) setRequests(data.requests ?? []);
+      })
+      .catch(() => {
+        if (!cancelled) setRequests([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   async function request(kind: "close" | "export") {
     setBusy(kind);
@@ -23,6 +55,7 @@ export default function TietosuojaPage() {
       const data = await readJson<{ message: string }>(response, "Pyyntö epäonnistui");
       setMessage(data.message);
       setPassword("");
+      await loadRequests();
     } catch (error: unknown) {
       setMessage(errorMessage(error, "Pyyntö epäonnistui"));
     } finally {
@@ -66,7 +99,25 @@ export default function TietosuojaPage() {
         <h2 className="text-sm font-medium text-charcoal">Pyyntö tuelle</h2>
         <p className="text-sm text-warm-gray">
           Nykyinen salasana vahvistaa, että pyyntö tulee sinulta. Tuki käsittelee sen. Aineistoa ei tuhota tästä näkymästä.
+          Sulkeminen estää kirjautumisen, kun pyyntö on valmis. Kuitit ja laskut säilyvät.
         </p>
+        {requests.length > 0 && (
+          <ul className="divide-y divide-warm-gray-light/30 text-sm">
+            {requests.map((row) => (
+              <li key={row.id} className="py-2 flex items-center gap-3">
+                <span className="flex-1 min-w-0">
+                  <span className="block text-charcoal">{row.kindLabel}</span>
+                  <span className="block text-warm-gray">{row.statusLabel}</span>
+                </span>
+                {row.downloadable && (
+                  <a className="text-accent-dark underline min-h-11 inline-flex items-center" href={`/api/account/request/${row.id}/package`}>
+                    Lataa
+                  </a>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
         <label htmlFor="privacyPassword" className="block text-sm font-medium text-charcoal">
           Nykyinen salasana
         </label>

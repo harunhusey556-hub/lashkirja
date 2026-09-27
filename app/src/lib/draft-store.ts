@@ -140,12 +140,24 @@ function storageKeyFor(logicalKey: string): string | null {
   return STORAGE_PREFIX + scopedDraftKey(draftOwner, logicalKey);
 }
 
-export function saveDraft<T>(key: string, value: T, now = Date.now(), storage: DraftStorage | null = browserStorage()): boolean {
+export type DraftSaveResult = "saved" | "refused" | "failed" | "unavailable";
+
+export function saveDraft<T>(
+  key: string,
+  value: T,
+  now = Date.now(),
+  storage: DraftStorage | null = browserStorage()
+): DraftSaveResult {
   const storageKey = storageKeyFor(key);
-  if (!storage || !storageKey || draftHasSecret(value)) return false;
+  if (!storage || !storageKey) return "unavailable";
+  if (draftHasSecret(value)) return "refused";
   const envelope: DraftEnvelope<T> = { savedAt: now, value };
-  storage.set(storageKey, JSON.stringify(envelope));
-  return true;
+  try {
+    storage.set(storageKey, JSON.stringify(envelope));
+  } catch {
+    return "failed";
+  }
+  return "saved";
 }
 
 export function readDraft<T>(
@@ -155,7 +167,12 @@ export function readDraft<T>(
 ): DraftEnvelope<T> | null {
   const storageKey = storageKeyFor(key);
   if (!storage || !storageKey) return null;
-  const raw = storage.get(storageKey);
+  let raw: string | null;
+  try {
+    raw = storage.get(storageKey);
+  } catch {
+    return null;
+  }
   if (!raw) return null;
   try {
     const parsed = JSON.parse(raw) as DraftEnvelope<T>;
@@ -177,5 +194,10 @@ export function readDraft<T>(
 
 export function clearDraft(key: string, storage: DraftStorage | null = browserStorage()): void {
   const storageKey = storageKeyFor(key);
-  if (storageKey) storage?.remove(storageKey);
+  if (!storageKey || !storage) return;
+  try {
+    storage.remove(storageKey);
+  } catch {
+    // A full disk must not break discarding the form.
+  }
 }

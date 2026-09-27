@@ -61,7 +61,8 @@ export function useEditorSession<T>(options: {
     const draft = readDraft<T>(options.draftKey);
     if (!draft || JSON.stringify(draft.value) === baselineKey) return;
     onRestore.current(draft.value);
-    setNotice("Luonnos palautettiin.");
+    const when = new Date(draft.savedAt).toLocaleString("fi-FI", { timeZone: "Europe/Helsinki" });
+    setNotice(`Luonnos palautettiin. Tallennettu ${when}.`);
   }, [active, options.draftKey, baselineKey, ownerTick]);
 
   useEffect(() => {
@@ -69,7 +70,14 @@ export function useEditorSession<T>(options: {
     skipSave.current = false;
     const key = options.draftKey;
     const handle = window.setTimeout(() => {
-      if (!skipSave.current) saveDraft(key, valueRef.current);
+      if (skipSave.current) return;
+      const result = saveDraft(key, valueRef.current);
+      setNotice((current) => {
+        if (result === "failed") return "Luonnosta ei voitu tallentaa.";
+        if (result === "saved" && current.startsWith("Luonnos palautettiin")) return current;
+        if (result === "saved") return "Luonnos tallennettu.";
+        return current;
+      });
     }, 300);
     return () => window.clearTimeout(handle);
   }, [options.draftKey, options.value, dirty]);

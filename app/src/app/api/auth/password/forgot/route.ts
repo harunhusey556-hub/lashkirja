@@ -4,13 +4,14 @@ import { prisma } from "@/lib/db";
 import { guardWrite } from "@/lib/http-security";
 import { consumeRateLimit, opaqueRateKey, requestClientKey } from "@/lib/rate-limit";
 import { issuePasswordReset, normalizeLoginEmail, sendAccountMail } from "@/lib/account-security";
+import { queueRecoveryRequest } from "@/lib/account-requests";
 
 const bodySchema = z.object({
   email: z.string().trim().toLowerCase().email().max(254),
 });
 
 const GENERIC =
-  "Jos tilille voidaan lähettää postia, palautuslinkki on matkalla. Muuten pyydä palautus tuesta.";
+  "Jos tilille voidaan lähettää postia, palautuslinkki on matkalla. Muuten pyydä palautus tuesta. Pyyntö näkyy Tietosuojassa, kun kirjaudut.";
 
 function resetLink(req: NextRequest, token: string): string {
   const configured = process.env.APP_ORIGIN?.trim().replace(/\/$/, "");
@@ -38,11 +39,12 @@ export async function POST(req: NextRequest) {
   const user = await prisma.user.findUnique({ where: { email }, select: { id: true } });
   if (user) {
     const token = await issuePasswordReset(user.id);
-    await sendAccountMail(user.id, {
+    const mailed = await sendAccountMail(user.id, {
       to: email,
       subject: "LashKirjan salasanan palautus",
       text: `Avaa linkki 30 minuutin kuluessa ja valitse uusi salasana:\n${resetLink(req, token)}\n\nJos et pyytänyt palautusta, voit ohittaa tämän viestin.`,
     });
+    if (!mailed) await queueRecoveryRequest(user.id);
   }
   return NextResponse.json({ ok: true, message: GENERIC });
 }

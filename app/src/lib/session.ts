@@ -33,12 +33,14 @@ const SESSION_TOUCH_MS = 5 * 60 * 1000;
 export async function requireSession(req?: NextRequest): Promise<AuthenticatedSession | null> {
   const session = req ? await getSessionFromRequest(req) : await getSession();
   if (!session.userId) return null;
+  const user = await prisma.user.findUnique({
+    where: { id: session.userId },
+    select: { legacySessionsRevokedAt: true, accessDisabledAt: true },
+  });
+  // A completed close request disables access and leaves the books in place.
+  if (!user || user.accessDisabledAt) return null;
   if (!session.sessionId) {
-    const user = await prisma.user.findUnique({
-      where: { id: session.userId },
-      select: { legacySessionsRevokedAt: true },
-    });
-    if (!user || user.legacySessionsRevokedAt) return null;
+    if (user.legacySessionsRevokedAt) return null;
     return session as AuthenticatedSession;
   }
   const row = await prisma.authSession.findFirst({

@@ -45,6 +45,8 @@ Document analysis writes the extraction only when the job's `attemptToken` still
 
 Backups are described in `app/docs/backup.md`.
 
+Account close, a data copy, and a password recovery that could not be mailed are `AccountRequest` rows. `npx tsx scripts/account-requests.ts list` shows them. `set <id> in_progress|needs_info|denied` moves an open row. `complete-export` writes `data/account-packages/<userId>/<id>.zip` and the user downloads it from Tietosuoja. `complete-close` sets `User.accessDisabledAt` and revokes sessions. Receipts and invoices stay for the retention period. Password links prefer `PLATFORM_SMTP_*` and do not require the user's invoice mailbox. See `app/docs/account-recovery.md`.
+
 ## What is not collected
 
 Bank session secrets, mailbox passwords, invoice PDFs, and receipt files stay out of these events. A slow query does not log the bound values.

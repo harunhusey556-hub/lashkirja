@@ -27,6 +27,7 @@ echo "next dev shows a red Issue badge and is not a production target."
 echo "Native plugin or scroll changes need a new IPA. A web commit alone does not update an installed app."
 echo "Syncing Capacitor iOS project..."
 npx cap sync ios
+npx tsx scripts/patch-ios-url-scheme.ts
 
 # Capacitor SPM ships ios/App/App.xcodeproj. App.xcworkspace exists only after CocoaPods.
 echo "Archiving $SCHEME ($CONFIGURATION)..."

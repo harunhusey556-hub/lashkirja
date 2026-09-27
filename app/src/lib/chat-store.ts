@@ -1,5 +1,5 @@
 import { prisma } from "./db";
-import { mergeSources } from "./chat-honesty";
+import { EMPTY_HONESTY, guardStreamReply, mergeSources, type HonestyContext } from "./chat-honesty";
 import {
   CHAT_PAGE_SIZE,
   DEFAULT_CONVERSATION_TITLE,
@@ -48,9 +48,12 @@ export async function listConversations(input: {
   userId: string;
   query?: string;
   archived?: boolean;
+  before?: { updatedAt: Date; id: string } | null;
+  take?: number;
 }) {
   const query = input.query?.trim();
-  return prisma.conversation.findMany({
+  const take = input.take ?? CHAT_PAGE_SIZE;
+  const rows = await prisma.conversation.findMany({
     where: {
       userId: input.userId,
       deletedAt: null,
@@ -63,9 +66,21 @@ export async function listConversations(input: {
             ],
           }
         : {}),
+      ...(input.before
+        ? {
+            AND: [
+              {
+                OR: [
+                  { updatedAt: { lt: input.before.updatedAt } },
+                  { AND: [{ updatedAt: input.before.updatedAt }, { id: { lt: input.before.id } }] },
+                ],
+              },
+            ],
+          }
+        : {}),
     },
     orderBy: [{ updatedAt: "desc" }, { id: "desc" }],
-    take: 50,
+    take: take + 1,
     select: {
       id: true,
       title: true,
@@ -74,6 +89,8 @@ export async function listConversations(input: {
       createdAt: true,
     },
   });
+  const hasMore = rows.length > take;
+  return { conversations: rows.slice(0, take), hasMore };
 }
 
 export async function updateConversation(
@@ -310,6 +327,7 @@ export async function runAssistantTurn(input: {
   timeoutMs?: number;
   local?: { content: string; proposalData?: string | null; sources?: ChatSource[]; limited?: boolean };
   failureNotice?: string;
+  honesty?: HonestyContext;
   stream?: (signal: AbortSignal) => AsyncGenerator<string>;
   onDelta?: (delta: string) => void;
 }): Promise<{
@@ -402,14 +420,17 @@ export async function runAssistantTurn(input: {
 
   const timedOut = timeout.signal.aborted;
   const reason = streamEndReason({ signal: input.signal, timedOut, threw: threw && !timedOut });
-  const settled = settleChatStream({ reason, collected });
+  const settled = guardStreamReply(
+    settleChatStream({ reason, collected }),
+    input.honesty ?? EMPTY_HONESTY
+  );
   let content = settled.content;
-  let limited = false;
+  let limited = settled.rejected;
   if (settled.status === "failed" && !collected.trim() && input.failureNotice) {
     content = input.failureNotice;
     limited = true;
   }
-  const sources = mergeSources(undefined, content);
+  const sources = settled.rejected ? [] : mergeSources(undefined, content);
   const saved = await finishAssistantReply({
     messageId: claim.messageId,
     owner: input.owner,

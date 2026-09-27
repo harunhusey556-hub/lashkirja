@@ -4,12 +4,20 @@ import { requireSession } from "@/lib/session";
 import { guardWrite } from "@/lib/http-security";
 import { consumeRateLimit } from "@/lib/rate-limit";
 import { AccountSecurityError, recordAccountRequest } from "@/lib/account-security";
+import { listUserAccountRequests } from "@/lib/account-requests";
 import { ACCOUNTING_RETENTION_YEARS } from "@/lib/session-policy";
 
 const bodySchema = z.object({
   kind: z.enum(["close", "export"]),
   currentPassword: z.string().min(1).max(1024),
 });
+
+export async function GET(req: NextRequest) {
+  const session = await requireSession(req);
+  if (!session) return NextResponse.json({ error: "Ei kirjautunut" }, { status: 401 });
+  const requests = await listUserAccountRequests(session.userId);
+  return NextResponse.json({ requests });
+}
 
 export async function POST(req: NextRequest) {
   const blocked = guardWrite(req);

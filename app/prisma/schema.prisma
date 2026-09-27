@@ -44,6 +44,9 @@ model User {
   /// rows existed have no session id; this cutoff is what makes logout-all
   /// and a password reset refuse them.
   legacySessionsRevokedAt DateTime?
+  /// Login and API sessions stop. Receipts and invoices stay for the
+  /// accounting retention period. This is not a delete.
+  accessDisabledAt DateTime?
   createdAt     DateTime    @default(now())
   receipts      Receipt[]
   statements    Statement[]
@@ -97,17 +100,26 @@ model AccountToken {
   @@index([userId, purpose])
 }
 
-/// A request to close the account or receive a copy of the books. Records stay
-/// until the accounting retention period is over; this row does not delete them.
+/// A request to close the account, receive a copy of the books, or recover a
+/// password when mail could not be sent. Records stay until the accounting
+/// retention period is over; completing a close request disables access and
+/// does not delete receipts or invoices.
+/// status: pending | in_progress | needs_info | completed | denied
 model AccountRequest {
-  id        String   @id @default(uuid())
-  userId    String
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  kind      String
-  note      String?
-  createdAt DateTime @default(now())
+  id          String    @id @default(uuid())
+  userId      String
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  kind        String
+  status      String    @default("pending")
+  note        String?
+  /// Relative path under data/account-packages, set when an export is completed.
+  packagePath String?
+  resolvedAt  DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
 
   @@index([userId, kind])
+  @@index([status])
 }
 
 model Receipt {

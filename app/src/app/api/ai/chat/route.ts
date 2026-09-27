@@ -281,6 +281,7 @@ export async function POST(req: NextRequest) {
             owner,
             signal: req.signal,
             failureNotice: limitedModeNotice(prepared.english),
+            honesty: prepared.honesty,
             onDelta: (delta) => controller.enqueue(sse({ delta })),
             stream: token
               ? (signal) => askCopilotStream(prepared.systemPrompt, prepared.userMessage, token, signal, prior)

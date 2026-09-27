@@ -8,6 +8,18 @@ async function login(page: Page) {
     page.waitForURL("**/dashboard"),
     page.getByRole("button", { name: "Kirjaudu sisään" }).click(),
   ]);
+  // The demo seed is not onboarded. The perehdytys dialog covers the tab bar
+  // until this is saved. Same call the viewport suite already uses.
+  await page.request.post("/api/onboarding", {
+    data: {
+      entityType: "toiminimi",
+      vatRegistered: false,
+      vatPeriod: "month",
+      salesTypes: ["ripsipalvelut"],
+      expenseCategories: ["tarvikkeet"],
+    },
+  });
+  await page.reload();
 }
 
 test("protected pages redirect to login", async ({ page }) => {
@@ -22,13 +34,13 @@ test("login lands on the dashboard and the tab bar navigates", async ({ page }) 
   await expect(page.getByText("Tulot", { exact: true })).toBeVisible();
 
   const nav = page.getByRole("navigation", { name: "Päävalikko" });
-  await nav.getByRole("link", { name: "Laskut" }).click();
+  await nav.getByRole("button", { name: "Laskut" }).click();
   await expect(page).toHaveURL(/\/laskut$/);
 
-  await nav.getByRole("link", { name: "Pankki" }).click();
+  await nav.getByRole("button", { name: "Pankki" }).click();
   await expect(page).toHaveURL(/\/pankkitilit$/);
 
-  await nav.getByRole("link", { name: "Raportit" }).click();
+  await nav.getByRole("button", { name: "Raportit" }).click();
   await expect(page).toHaveURL(/\/raportit$/);
   await expect(nav.getByRole("button", { name: "Lisää", exact: true })).toHaveCount(0);
 });
@@ -227,4 +239,26 @@ test("a recurring invoice generates a real invoice", async ({ page }) => {
 
   await page.goto("/laskut");
   await expect(page.getByText("Toisto Asiakas").first()).toBeVisible();
+});
+
+test("privacy request status is visible and the lock PIN is masked", async ({ page }) => {
+  await login(page);
+  const requested = await page.request.post("/api/account/request", {
+    data: { kind: "export", currentPassword: "demo123" },
+  });
+  expect(requested.ok()).toBe(true);
+
+  await page.goto("/asetukset/tietosuoja");
+  await expect(page.getByText("Tietojen kopio")).toBeVisible();
+  await expect(page.getByText("Odottaa")).toBeVisible();
+
+  await page.goto("/asetukset/turvallisuus");
+  await expect(page.locator("#lockPin")).toHaveAttribute("type", "password");
+
+  await page.goto("/asiakkaat");
+  await page.getByRole("main").getByRole("button", { name: "Lisää", exact: true }).click();
+  await page.getByLabel("Nimi").fill("Luonnos Asiakas");
+  await expect(page.getByText("Luonnos tallennettu.")).toBeVisible();
+  await page.getByRole("button", { name: "Sulje" }).click();
+  await expect(page.getByText("Luonnos tallennettu.")).toBeHidden();
 });

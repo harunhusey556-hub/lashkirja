@@ -6,4 +6,4 @@ Yhdistäminen lähtee pankin sivulle tavallisella sivun vaihdolla. Sekä selain 
 - Jos käyttäjä palaa asetuksiin ilman callbackia, sivu kertoo että yhdistäminen keskeytyi tai istunto vanheni.
 - `@capacitor/app` kuuntelee `appUrlOpen`-osoitetta ja avaa callback-polun, jos käyttöjärjestelmä tuo sovelluksen takaisin sillä osoitteella.
 
-Nykyisessä IPA:ssa ei ole omaa URL-skeemaa. Pankin ohjaus toimii webview’n sisällä, kun paluuosoite on sovelluksen oma osoite. Erillinen deep link suljettuun sovellukseen vaatii uuden IPA:n.
+Web käsittelee paluun sekä osoitteessa `https://…/bank/callback` että skeemassa `lashkirja://bank/callback`. `scripts/patch-ios-url-scheme.ts` lisää skeeman `Info.plist`-tiedostoon `cap sync` -ajon jälkeen (`scripts/build-ios-ipa.sh` kutsuu sitä). Jo asennettu IPA ei saa skeemaa ennen seuraavaa käännöstä. `capacitor.config.ts` osoittaa `errorPath`: `offline.html`, joten sama käännös näyttää offline-sivun, jos etäosoite ei aukea. `@capacitor/filesystem` ja `@capacitor/share` ovat riippuvuuksina, ja `cap sync` vie ne mukaan PDF-jakoon.

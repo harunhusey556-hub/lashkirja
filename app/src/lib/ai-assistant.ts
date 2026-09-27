@@ -5,7 +5,13 @@ import { candidatesFor, MatchTx, MatchReceipt } from "./matching";
 import { askCopilot, type CopilotTurn } from "./copilot";
 import { computeAlvReport } from "./alv";
 import { loadAlvPeriodSources } from "./alv-period";
-import { formatBookedVatAnswer, mergeSources } from "./chat-honesty";
+import {
+  EMPTY_HONESTY,
+  enforceAssistantReply,
+  formatBookedVatAnswer,
+  mergeSources,
+  type HonestyContext,
+} from "./chat-honesty";
 import { receiptDrillHref, statementDrillHref } from "./report-drill";
 import type { ChatSource, ContextTurn } from "./chat-turn";
 import {
@@ -35,8 +41,22 @@ export interface ChatAssistantResult {
 }
 
 export type PreparedChat =
-  | { kind: "local"; reply: string; proposal?: ChatMatchProposal; limited?: boolean; sources?: ChatSource[] }
-  | { kind: "provider"; systemPrompt: string; userMessage: string; english: boolean; sources?: ChatSource[] };
+  | {
+      kind: "local";
+      reply: string;
+      proposal?: ChatMatchProposal;
+      limited?: boolean;
+      sources?: ChatSource[];
+      honesty?: HonestyContext;
+    }
+  | {
+      kind: "provider";
+      systemPrompt: string;
+      userMessage: string;
+      english: boolean;
+      sources?: ChatSource[];
+      honesty: HonestyContext;
+    };
 
 function monthKey(date: Date | null | undefined): string | null {
   if (!date) return null;
@@ -209,6 +229,8 @@ export async function prepareChat(
       }
 
       if (bestProposal) {
+        const amounts = [bestProposal.txSummary, bestProposal.receiptSummary]
+          .flatMap((line) => [...line.matchAll(/(\d+\.\d{2})/g)].map((match) => match[1]));
         return {
           kind: "local",
           reply: english
@@ -216,6 +238,12 @@ export async function prepareChat(
             : "Tarkistin pankkitapahtumasi ja kuitit. Löysin yhden ehdotuksen. Vahvista se alta. En ole vielä yhdistänyt niitä.",
           proposal: bestProposal,
           sources: matchSources,
+          honesty: {
+            performedActions: [],
+            allowedAmounts: amounts,
+            allowedRecordIds: [bestProposal.transactionId, bestProposal.receiptId],
+            allowedHrefs: (matchSources ?? []).map((source) => source.href),
+          },
         };
       }
       return {
@@ -265,6 +293,12 @@ export async function prepareChat(
         limited: true,
         reply,
         sources: mergeSources(vatAnswer?.sources, reply),
+        honesty: {
+          performedActions: [],
+          allowedAmounts: vatAnswer ? [vatAnswer.text.match(/(\d+\.\d{2})/)?.[1] ?? ""].filter(Boolean) : [],
+          allowedRecordIds: [],
+          allowedHrefs: (vatAnswer?.sources ?? []).map((source) => source.href),
+        },
       };
     }
     if (asksDeduction) {
@@ -302,7 +336,19 @@ export async function prepareChat(
     .filter(Boolean)
     .join("\n");
 
-  return { kind: "provider", systemPrompt, userMessage, english, sources: vatAnswer?.sources };
+  return {
+    kind: "provider",
+    systemPrompt,
+    userMessage,
+    english,
+    sources: vatAnswer?.sources,
+    honesty: {
+      performedActions: [],
+      allowedAmounts: vatAnswer ? [vatAnswer.text.match(/(\d+\.\d{2})/)?.[1] ?? ""].filter(Boolean) : [],
+      allowedRecordIds: [],
+      allowedHrefs: (vatAnswer?.sources ?? []).map((source) => source.href),
+    },
+  };
 }
 
 export async function processAiChatMessage(
@@ -328,6 +374,10 @@ export async function processAiChatMessage(
     if (!reply.trim()) {
       console.error("Copilot chat returned an empty reply");
       return { reply: limitedModeNotice(prepared.english), limited: true, sources: prepared.sources };
+    }
+    const guarded = enforceAssistantReply(reply, prepared.honesty ?? EMPTY_HONESTY);
+    if (guarded.rejected) {
+      return { reply: guarded.text, limited: true, sources: prepared.sources };
     }
     return { reply, sources: mergeSources(prepared.sources, reply) };
   } catch (error) {

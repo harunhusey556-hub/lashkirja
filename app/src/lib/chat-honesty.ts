@@ -1,5 +1,25 @@
 import { alvDrillHref } from "./report-drill";
-import type { ChatSource } from "./chat-turn";
+import type { ChatSource, ChatTurnStatus } from "./chat-turn";
+
+export interface HonestyContext {
+  performedActions: readonly string[];
+  allowedAmounts: readonly string[];
+  allowedRecordIds: readonly string[];
+  allowedHrefs: readonly string[];
+}
+
+export const EMPTY_HONESTY: HonestyContext = {
+  performedActions: [],
+  allowedAmounts: [],
+  allowedRecordIds: [],
+  allowedHrefs: [],
+};
+
+export const HONESTY_REFUSAL =
+  "En vahvistanut väitettä kirjanpidosta. Summat ja toimenpiteet tulevat vain palvelimen laskennasta ja tehdyistä toimista.";
+
+const KNOWN_SCREENS = new Set(["/alv-raportti", "/raportit", "/kuitit", "/laskut", "/tiliotteet"]);
+const RECORD_ID_SOURCE = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
 
 const UNPERFORMED_ACTION =
   /olen yhdistänyt|yhdistin kuitin|hyväksyin täsmäytyksen|muutin kirjanpidon|lähetin laskun|kirjasin maksun|i (?:have )?matched your|i updated your books|i sent the invoice/i;
@@ -56,6 +76,56 @@ export function sourcesFromText(text: string): ChatSource[] {
     add(match[1]);
   }
   return found;
+}
+
+function sourceIsAllowed(href: string, allowed: readonly string[]): boolean {
+  if (allowed.includes(href)) return true;
+  const [path, query] = href.split("?");
+  if (query) return false;
+  return KNOWN_SCREENS.has(path);
+}
+
+/**
+ * A model reply may describe only actions that already completed, euro amounts
+ * the server calculated, and record ids or period links that were in context.
+ */
+export function enforceAssistantReply(
+  text: string,
+  ctx: HonestyContext = EMPTY_HONESTY
+): { text: string; rejected: boolean; reason: "unperformed" | "amount" | "record" | "source" | null } {
+  if (replyClaimsUnperformedAction(text) && ctx.performedActions.length === 0) {
+    return { text: HONESTY_REFUSAL, rejected: true, reason: "unperformed" };
+  }
+  const amounts = citedEuroAmounts(text);
+  if (amounts.some((amount) => !ctx.allowedAmounts.includes(amount))) {
+    return { text: HONESTY_REFUSAL, rejected: true, reason: "amount" };
+  }
+  const allowedIds = new Set(ctx.allowedRecordIds.map((id) => id.toLowerCase()));
+  const citedIds = [...text.matchAll(new RegExp(RECORD_ID_SOURCE, "gi"))].map((match) => match[0].toLowerCase());
+  if (citedIds.some((id) => !allowedIds.has(id))) {
+    return { text: HONESTY_REFUSAL, rejected: true, reason: "record" };
+  }
+  if (sourcesFromText(text).some((source) => !sourceIsAllowed(source.href, ctx.allowedHrefs))) {
+    return { text: HONESTY_REFUSAL, rejected: true, reason: "source" };
+  }
+  return { text, rejected: false, reason: null };
+}
+
+/** Half a stream, a timeout, or a finished reply that invents a book change. */
+export function guardStreamReply(
+  settled: { status: ChatTurnStatus; content: string },
+  ctx: HonestyContext = EMPTY_HONESTY
+): { status: ChatTurnStatus; content: string; rejected: boolean } {
+  if (settled.status === "cancelled" || settled.status === "failed") {
+    return { ...settled, rejected: false };
+  }
+  const guarded = enforceAssistantReply(settled.content, ctx);
+  if (!guarded.rejected) return { ...settled, rejected: false };
+  return {
+    status: settled.status === "complete" ? "incomplete" : settled.status,
+    content: guarded.text,
+    rejected: true,
+  };
 }
 
 export function mergeSources(explicit: ChatSource[] | undefined, text: string): ChatSource[] {

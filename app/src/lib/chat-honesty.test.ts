@@ -6,8 +6,12 @@ import {
   formatBookedVatAnswer,
   replyClaimsUnperformedAction,
   replyUsesCalculatedAmount,
+  EMPTY_HONESTY,
+  enforceAssistantReply,
+  guardStreamReply,
   sourcesFromText,
 } from "./chat-honesty";
+import { settleChatStream } from "./chat-turn";
 
 describe("chat honesty", () => {
   it("does not claim a bookkeeping action in a greeting, a status, or limited mode", () => {
@@ -47,6 +51,48 @@ describe("chat honesty", () => {
       { label: "ALV-raportti", href: "/alv-raportti?period=2026-09" },
     ]);
     expect(replyClaimsUnperformedAction(answer.text)).toBe(false);
+  });
+
+  it("rejects a fabricated action, amount, record, or period link", () => {
+    const ctx = {
+      performedActions: [],
+      allowedAmounts: ["12.50"],
+      allowedRecordIds: ["aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"],
+      allowedHrefs: ["/alv-raportti?period=2026-09"],
+    };
+    expect(enforceAssistantReply("ALV 12.50 €. Lähde: /alv-raportti?period=2026-09.", ctx).rejected).toBe(false);
+    expect(enforceAssistantReply("Yhdistin kuitin.", ctx).reason).toBe("unperformed");
+    expect(enforceAssistantReply("ALV 99.00 €.", ctx).reason).toBe("amount");
+    expect(
+      enforceAssistantReply("Kuitti bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb.", ctx).reason
+    ).toBe("record");
+    expect(enforceAssistantReply("Katso /kuitit?month=1999-01.", ctx).reason).toBe("source");
+    expect(enforceAssistantReply("Katso /kuitit.", ctx).rejected).toBe(false);
+    expect(enforceAssistantReply("Yhdistin kuitin.", { ...ctx, performedActions: ["match"] }).rejected).toBe(
+      false
+    );
+  });
+
+  it("does not keep a half stream or a timeout that invents a book change", () => {
+    const timedOut = guardStreamReply(
+      settleChatStream({ reason: "timeout", collected: "Yhdistin kuitin 99,00 €." }),
+      EMPTY_HONESTY
+    );
+    expect(timedOut.rejected).toBe(true);
+    expect(timedOut.status).toBe("incomplete");
+    expect(timedOut.content).not.toMatch(/Yhdistin/);
+    const finished = guardStreamReply(
+      settleChatStream({ reason: "complete", collected: "I updated your books." }),
+      EMPTY_HONESTY
+    );
+    expect(finished.status).toBe("incomplete");
+    expect(finished.content).not.toMatch(/updated your books/i);
+    const emptyTimeout = guardStreamReply(
+      settleChatStream({ reason: "timeout", collected: "" }),
+      EMPTY_HONESTY
+    );
+    expect(emptyTimeout.status).toBe("failed");
+    expect(emptyTimeout.rejected).toBe(false);
   });
 
   it("collects book links cited in a reply", () => {

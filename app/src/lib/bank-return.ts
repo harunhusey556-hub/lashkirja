@@ -70,12 +70,24 @@ export function readPendingBankAuth(raw: string | null, now = Date.now()): Pendi
   }
 }
 
-/** In-app path for a callback URL, or null when the URL is not our return. */
+export const APP_URL_SCHEME = "lashkirja";
+
+/**
+ * In-app path for a callback URL, or null when the URL is not our return.
+ * Accepts https://host/bank/callback and the custom scheme a later IPA registers:
+ * lashkirja://bank/callback or lashkirja:///bank/callback.
+ */
 export function bankCallbackPath(url: string): string | null {
   try {
     const parsed = new URL(url);
-    if (parsed.pathname !== "/bank/callback") return null;
-    return `${parsed.pathname}${parsed.search}`;
+    const path =
+      parsed.protocol === `${APP_URL_SCHEME}:`
+        ? parsed.hostname
+          ? `/${parsed.hostname}${parsed.pathname === "/" ? "" : parsed.pathname}`
+          : parsed.pathname
+        : parsed.pathname;
+    if (path !== "/bank/callback") return null;
+    return `/bank/callback${parsed.search}`;
   } catch {
     return null;
   }

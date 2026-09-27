@@ -40,5 +40,10 @@ describe("bankCallbackPath", () => {
     );
     expect(bankCallbackPath("https://app.example/asetukset")).toBeNull();
     expect(bankCallbackPath("not a url")).toBeNull();
+    expect(bankCallbackPath("lashkirja://bank/callback?code=1&state=2")).toBe(
+      "/bank/callback?code=1&state=2"
+    );
+    expect(bankCallbackPath("lashkirja:///bank/callback?code=9")).toBe("/bank/callback?code=9");
+    expect(bankCallbackPath("lashkirja://asetukset")).toBeNull();
   });
 });

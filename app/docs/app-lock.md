@@ -10,7 +10,13 @@ JavaScript would throw on device.
 What shipped instead is a local glance lock:
 
 - Optional 4–8 digit code, stored as a salted hash in this browser's
-  `localStorage` (`lashkirja.app-lock.v1`).
+  `localStorage` under `lashkirja.app-lock.v1:<userId>`. Another account on
+  the same device does not see that hash. An older unscoped key is deleted.
+- The field is a password input, so the digits are not shown.
+- A wrong code waits 1s, then 2s, 4s, 8s, 16s, and at most 30s before the
+  next try. After several failures the screen says to sign out.
+- Unohdin koodin removes this user's lock and signs out of the server
+  session. The lock is not a substitute for that session.
 - Opening the app, or returning from the background, covers the books until
   the code is entered.
 - Hiding the app covers the screen so the app switcher is less likely to

@@ -71,7 +71,7 @@ test.describe("long text at 390", () => {
 
   test("a long customer name stays inside the card", async ({ page }) => {
     await login(page);
-    const name = "Ääkkönen Ripsistudio ja Kauneushoitola Oy";
+    const name = `Ääkkönen Ripsistudio ja Kauneushoitola Oy ${test.info().project.name}`;
     await page.goto("/asiakkaat");
     await page.getByRole("main").getByRole("button", { name: "Lisää", exact: true }).click();
     await page.getByLabel("Nimi").fill(name);
@@ -95,9 +95,10 @@ test.describe("confirm dialog", () => {
     await login(page);
     await page.goto("/asiakkaat");
     await page.getByRole("main").getByRole("button", { name: "Lisää", exact: true }).click();
-    await page.getByLabel("Nimi").fill("Fokus Asiakas");
+    const name = `Fokus Asiakas ${test.info().project.name}`;
+    await page.getByLabel("Nimi").fill(name);
     await page.getByRole("button", { name: "Lisää asiakas" }).click();
-    const card = page.locator("li").filter({ hasText: "Fokus Asiakas" });
+    const card = page.locator("li").filter({ hasText: name });
     const remove = card.getByRole("button", { name: "Poista" });
     await remove.click();
     const dialog = page.getByRole("dialog", { name: "Poistetaanko asiakas?" });

@@ -280,6 +280,13 @@ export function CustomerForm({
           <button
             type="button"
             className="font-medium text-accent-dark underline"
+            onClick={() => session.setNotice("")}
+          >
+            Sulje
+          </button>{" "}
+          <button
+            type="button"
+            className="font-medium text-accent-dark underline"
             onClick={() => {
               session.clearSavedDraft();
               setValues(baseline);

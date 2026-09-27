@@ -18,7 +18,7 @@ describe("draft recovery", () => {
     resetDraftMemory();
     setDraftOwner("user-a", memoryDraftStorage);
     const now = 1_000;
-    expect(saveDraft("invoice:new", { notes: "Ripsienpidennys" }, now, memoryDraftStorage)).toBe(true);
+    expect(saveDraft("invoice:new", { notes: "Ripsienpidennys" }, now, memoryDraftStorage)).toBe("saved");
     expect(readDraft("invoice:new", now + 1000, memoryDraftStorage)?.value).toEqual({
       notes: "Ripsienpidennys",
     });
@@ -43,7 +43,7 @@ describe("draft recovery", () => {
     expect(readDraft("invoice:new", 0, memoryDraftStorage)).toBeNull();
     expect(memoryDraftStorage.get(`lashkirja.draft.v1:${scopedDraftKey("user-a", "customer:new")}`)).toBeNull();
 
-    expect(saveDraft("customer:new", { name: "Bertta" }, 0, memoryDraftStorage)).toBe(true);
+    expect(saveDraft("customer:new", { name: "Bertta" }, 0, memoryDraftStorage)).toBe("saved");
     expect(readDraft("customer:new", 0, memoryDraftStorage)?.value).toEqual({ name: "Bertta" });
   });
 
@@ -74,8 +74,21 @@ describe("draft recovery", () => {
     expect(draftHasSecret({ password: "x" })).toBe(true);
     expect(draftHasSecret({ nested: { imapPass: "x" } })).toBe(true);
     expect(draftHasSecret({ iban: "FI2112345600000785" })).toBe(true);
-    expect(saveDraft("receipt:1", { token: "abc" }, 0, memoryDraftStorage)).toBe(false);
+    expect(saveDraft("receipt:1", { token: "abc" }, 0, memoryDraftStorage)).toBe("refused");
     expect(readDraft("receipt:1", 0, memoryDraftStorage)).toBeNull();
+  });
+
+  it("reports a storage failure without throwing", () => {
+    resetDraftMemory();
+    setDraftOwner("user-a", memoryDraftStorage);
+    const failing = {
+      ...memoryDraftStorage,
+      set() {
+        throw new Error("quota");
+      },
+    };
+    expect(saveDraft("invoice:new", { notes: "A" }, 0, failing)).toBe("failed");
+    expect(readDraft("invoice:new", 0, memoryDraftStorage)).toBeNull();
   });
 
   it("clears a draft on discard", () => {

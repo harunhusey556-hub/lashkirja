@@ -29,14 +29,23 @@ export default function TurvallisuusPage() {
   const [sessionError, setSessionError] = useState("");
   const [lockPin, setLockPin] = useState("");
   const [lockMsg, setLockMsg] = useState("");
+  const [lockUserId, setLockUserId] = useState<string | null>(null);
   const hasLock = useSyncExternalStore(
     subscribeAppLock,
-    () => Boolean(readAppLock()),
+    () => Boolean(lockUserId && readAppLock(lockUserId)),
     () => false
   );
 
   useEffect(() => {
     let cancelled = false;
+    void apiFetch("/api/auth/me")
+      .then((response) => readJson<{ user: { userId?: string } | null }>(response, ""))
+      .then((data) => {
+        if (!cancelled) setLockUserId(data.user?.userId ?? null);
+      })
+      .catch(() => {
+        if (!cancelled) setLockUserId(null);
+      });
     void apiFetch("/api/auth/sessions")
       .then((response) => readJson<{ sessions: SessionRow[] }>(response, "Istuntoja ei saatu ladattua"))
       .then((data) => {
@@ -95,26 +104,30 @@ export default function TurvallisuusPage() {
 
   async function saveLock(event: React.FormEvent) {
     event.preventDefault();
+    if (!lockUserId) {
+      setLockMsg("Kirjaudu sisään, ennen kuin otat lukituksen käyttöön.");
+      return;
+    }
     const record = await createAppLockRecord(lockPin);
     if (!record) {
       setLockMsg("Koodissa on 4–8 numeroa.");
       return;
     }
-    writeAppLock(record);
+    writeAppLock(lockUserId, record);
     setLockPin("");
     setLockMsg("Lukitus on päällä tällä laitteella. Se ei kirjaa sinua ulos palvelimelta.");
   }
 
   async function removeLock(event: React.FormEvent) {
     event.preventDefault();
-    const record = readAppLock();
-    if (!record) return;
+    const record = readAppLock(lockUserId);
+    if (!record || !lockUserId) return;
     const ok = await appLockMatches(record, lockPin);
     if (!ok) {
       setLockMsg("Koodi ei täsmää.");
       return;
     }
-    clearAppLock();
+    clearAppLock(lockUserId);
     setLockPin("");
     setLockMsg("Lukitus poistettu tältä laitteelta.");
   }
@@ -211,6 +224,7 @@ export default function TurvallisuusPage() {
         </label>
         <input
           id="lockPin"
+          type="password"
           inputMode="numeric"
           autoComplete="off"
           value={lockPin}

@@ -1230,6 +1230,13 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
               <button
                 type="button"
                 className="font-medium text-accent-dark underline"
+                onClick={() => session.setNotice("")}
+              >
+                Sulje
+              </button>{" "}
+              <button
+                type="button"
+                className="font-medium text-accent-dark underline"
                 onClick={() => {
                   session.clearSavedDraft();
                   setFormData(baseline);

@@ -18,6 +18,7 @@ interface ConversationItem {
   id: string;
   title: string;
   archivedAt?: string | null;
+  updatedAt?: string;
 }
 
 interface ChatMessageItem {
@@ -73,6 +74,8 @@ export function AiChatDrawer({
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [conversationTitle, setConversationTitle] = useState("Avustaja");
   const [conversations, setConversations] = useState<ConversationItem[]>([]);
+  const [conversationsHasMore, setConversationsHasMore] = useState(false);
+  const [loadingConversations, setLoadingConversations] = useState(false);
   const [conversationQuery, setConversationQuery] = useState("");
   const [showArchived, setShowArchived] = useState(false);
   const [renamingId, setRenamingId] = useState<string | null>(null);
@@ -147,13 +150,31 @@ export function AiChatDrawer({
     }
   }
 
-  async function loadConversations(query = conversationQuery, archived = showArchived) {
-    const params = new URLSearchParams();
-    if (query.trim()) params.set("q", query.trim());
-    if (archived) params.set("archived", "1");
-    const response = await apiFetch(`/api/ai/conversations?${params.toString()}`);
-    const data = await readJson<{ conversations: ConversationItem[] }>(response, "Keskustelulistan lataus epäonnistui");
-    setConversations(data.conversations ?? []);
+  async function loadConversations(
+    query = conversationQuery,
+    archived = showArchived,
+    before?: { updatedAt: string; id: string }
+  ) {
+    setLoadingConversations(true);
+    try {
+      const params = new URLSearchParams();
+      if (query.trim()) params.set("q", query.trim());
+      if (archived) params.set("archived", "1");
+      if (before) {
+        params.set("before", before.updatedAt);
+        params.set("beforeId", before.id);
+      }
+      const response = await apiFetch(`/api/ai/conversations?${params.toString()}`);
+      const data = await readJson<{ conversations: ConversationItem[]; hasMore?: boolean }>(
+        response,
+        "Keskustelulistan lataus epäonnistui"
+      );
+      const page = data.conversations ?? [];
+      setConversations((current) => (before ? [...current, ...page] : page));
+      setConversationsHasMore(Boolean(data.hasMore));
+    } finally {
+      setLoadingConversations(false);
+    }
   }
 
   useEffect(() => {
@@ -689,6 +710,26 @@ export function AiChatDrawer({
               </div>
             </div>
           ))}
+          {conversationsHasMore && (
+            <button
+              type="button"
+              className="block min-h-11 w-full rounded-xl px-3 text-left text-sm text-accent-dark"
+              disabled={loadingConversations}
+              onClick={() => {
+                const last = conversations[conversations.length - 1];
+                if (!last?.updatedAt) return;
+                void loadConversations(conversationQuery, showArchived, {
+                  updatedAt: last.updatedAt,
+                  id: last.id,
+                });
+              }}
+            >
+              {loadingConversations ? "Ladataan…" : "Näytä vanhemmat"}
+            </button>
+          )}
+          {loadingConversations && conversations.length === 0 && (
+            <p className="px-3 text-sm text-warm-gray">Ladataan…</p>
+          )}
           {removedConversation && (
             <div className="flex items-center justify-between gap-2 rounded-xl bg-white px-3 py-2 text-sm">
               <span>Keskustelu poistettu</span>

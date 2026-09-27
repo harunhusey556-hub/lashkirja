@@ -10,8 +10,21 @@ export async function GET(req: NextRequest) {
   if (!session) return NextResponse.json({ error: "Ei kirjautunut" }, { status: 401 });
   const query = req.nextUrl.searchParams.get("q") ?? "";
   const archived = req.nextUrl.searchParams.get("archived") === "1";
-  const conversations = await listConversations({ userId: session.userId, query, archived });
-  return NextResponse.json({ conversations });
+  const beforeRaw = req.nextUrl.searchParams.get("before");
+  const beforeId = req.nextUrl.searchParams.get("beforeId");
+  if (Boolean(beforeRaw) !== Boolean(beforeId)) {
+    return NextResponse.json({ error: "Sivutus tarvitsee ajan ja tunnisteen." }, { status: 400 });
+  }
+  let before: { updatedAt: Date; id: string } | null = null;
+  if (beforeRaw && beforeId) {
+    const updatedAt = new Date(beforeRaw);
+    if (Number.isNaN(updatedAt.getTime())) {
+      return NextResponse.json({ error: "Sivutus tarvitsee ajan ja tunnisteen." }, { status: 400 });
+    }
+    before = { updatedAt, id: beforeId };
+  }
+  const page = await listConversations({ userId: session.userId, query, archived, before });
+  return NextResponse.json(page);
 }
 
 export async function POST(req: NextRequest) {

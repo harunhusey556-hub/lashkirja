@@ -14,6 +14,8 @@ const config: CapacitorConfig = {
         // Local page in webDir, shown when the remote URL fails before the
         // app boots. cap sync bakes this into the IPA; an already installed
         // build does not pick it up until the next IPA.
+        // The lashkirja:// scheme is not a Capacitor config key. The IPA
+        // script patches it into Info.plist after sync.
         errorPath: "offline.html",
       }
     : undefined,

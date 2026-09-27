@@ -116,6 +116,15 @@ export async function POST(req: NextRequest) {
       }
       return loginRedirect("auth");
     }
+    if (user.accessDisabledAt) {
+      if (wantsJson) {
+        return NextResponse.json(
+          { error: "Tilin käyttö on suljettu. Kirjanpitoaineisto säilyy säilytysajan." },
+          { status: 403 }
+        );
+      }
+      return loginRedirect("closed");
+    }
 
     clearRateLimit(accountRateKey);
 

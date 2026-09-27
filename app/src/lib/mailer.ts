@@ -107,3 +107,60 @@ export async function sendMail(
     );
   }
 }
+
+/** App mail that does not use the customer's invoice mailbox. */
+export interface PlatformMailConfig {
+  host: string;
+  port: number;
+  user: string;
+  pass: string;
+  from: string;
+}
+
+export function platformMailConfig(
+  env: NodeJS.ProcessEnv = process.env
+): PlatformMailConfig | null {
+  const host = env.PLATFORM_SMTP_HOST?.trim() ?? "";
+  const from = env.PLATFORM_SMTP_FROM?.trim() ?? "";
+  if (!host || !from) return null;
+  const parsed = Number(env.PLATFORM_SMTP_PORT || 587);
+  const port = Number.isFinite(parsed) && parsed > 0 ? parsed : 587;
+  return {
+    host,
+    port,
+    user: env.PLATFORM_SMTP_USER?.trim() ?? "",
+    pass: env.PLATFORM_SMTP_PASS ?? "",
+    from,
+  };
+}
+
+/** Sends with PLATFORM_SMTP_*. Uses the JSON transport when MAIL_TRANSPORT=json. */
+export async function sendPlatformMail(mail: OutgoingMail): Promise<SentMail> {
+  const config = platformMailConfig();
+  if (!config) {
+    throw new AppError("Alustan postia ei ole määritetty.", "PLATFORM_MAIL_MISSING", 503);
+  }
+  const useJsonTransport = process.env.MAIL_TRANSPORT === "json";
+  const transporter = useJsonTransport
+    ? nodemailer.createTransport({ jsonTransport: true })
+    : nodemailer.createTransport({
+        host: config.host,
+        port: config.port,
+        secure: smtpSecureForPort(config.port),
+        auth: config.user ? { user: config.user, pass: config.pass } : undefined,
+      });
+  const info = await transporter.sendMail({
+    from: config.from,
+    to: mail.to,
+    subject: mail.subject,
+    text: mail.text,
+    attachments: mail.attachments,
+  });
+  return {
+    messageId: info.messageId,
+    from: config.from,
+    to: mail.to,
+    accepted: (info.accepted ?? []).map(String),
+    raw: useJsonTransport ? (info as unknown as { message: string }).message : undefined,
+  };
+}

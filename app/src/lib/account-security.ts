@@ -1,7 +1,7 @@
 import { createHash, randomBytes, timingSafeEqual } from "crypto";
 import bcrypt from "bcryptjs";
 import { prisma } from "@/lib/db";
-import { findSenderAccount, sendMail } from "@/lib/mailer";
+import { findSenderAccount, platformMailConfig, sendMail, sendPlatformMail } from "@/lib/mailer";
 import { passwordProblem, deviceLabel } from "@/lib/session-policy";
 
 const RESET_TTL_MS = 30 * 60 * 1000;
@@ -191,11 +191,23 @@ export async function confirmEmailChange(token: string) {
   return { userId: row.userId, email: row.payload };
 }
 
-/** Sends through the mailbox the user already connected for invoices. */
+/**
+ * Password and email links. Prefer the platform mailbox (PLATFORM_SMTP_*),
+ * which does not depend on the user's invoice SMTP. Fall back to that
+ * mailbox only when the platform path is missing or fails.
+ */
 export async function sendAccountMail(
   userId: string,
   mail: { to: string; subject: string; text: string }
 ): Promise<boolean> {
+  if (platformMailConfig()) {
+    try {
+      await sendPlatformMail(mail);
+      return true;
+    } catch (error) {
+      console.error("Platform account mail failed", error);
+    }
+  }
   const account = await findSenderAccount(userId);
   if (!account) return false;
   try {
@@ -210,7 +222,7 @@ export async function sendAccountMail(
 export async function recordAccountRequest(userId: string, kind: "close" | "export", currentPassword: string) {
   await requireCurrentPassword(userId, currentPassword);
   return prisma.accountRequest.create({
-    data: { userId, kind },
-    select: { id: true, kind: true, createdAt: true },
+    data: { userId, kind, status: "pending" },
+    select: { id: true, kind: true, status: true, createdAt: true },
   });
 }

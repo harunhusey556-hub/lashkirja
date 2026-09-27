@@ -1,11 +1,15 @@
 /**
  * Password recovery when the user cannot sign in.
  *
- * LashKirja does not run its own mail server. A reset link is sent with the
- * invoice mailbox the user already connected (Asetukset → Sähköpostien tuonti).
- * If that mailbox is missing, or sending fails, the link is not shown in the
- * app. Support with access to this server can mint one link and pass it to
- * the user on a channel they already trust.
+ * A reset link is sent with the platform mailbox when `PLATFORM_SMTP_HOST`
+ * and `PLATFORM_SMTP_FROM` are set (`PLATFORM_SMTP_PORT`, `PLATFORM_SMTP_USER`,
+ * and `PLATFORM_SMTP_PASS` are optional). That path does not use the invoice
+ * mailbox. If the platform mailbox is missing or fails, the app tries the
+ * mailbox the user connected under Asetukset → Sähköpostien tuonti.
+ * If neither sends, the link is not shown. A recovery request is stored
+ * (`kind=recovery`, status pending) and the user sees it under Tietosuoja
+ * after they can sign in. Support with access to this server can mint one
+ * link and mark the request. See `npx tsx scripts/account-requests.ts list`.
  *
  * The books are not involved. A reset replaces the password, revokes every
  * tracked session, and sets a cutoff on the user. A cookie sealed before
