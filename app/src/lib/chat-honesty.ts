@@ -54,6 +54,11 @@ export function replyUsesCalculatedAmount(reply: string, expected: string): bool
 
 const SOURCE_RULES: Array<{ prefix: string; label: string }> = [
   { prefix: "/kirjanpito/alv", label: "ALV-raportti" },
+  // Legacy alias: a model can still emit the pre-restructure path from an
+  // older prompt or cached memory. Keeping it recognised here means the
+  // period/href honesty guard still checks it instead of silently letting
+  // it through unexamined.
+  { prefix: "/alv-raportti", label: "ALV-raportti" },
   { prefix: "/raportit", label: "Raportit" },
   { prefix: "/kuitit", label: "Kuitit" },
   { prefix: "/laskut", label: "Laskut" },

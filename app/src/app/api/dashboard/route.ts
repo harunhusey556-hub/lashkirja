@@ -100,7 +100,7 @@ export async function GET(req: NextRequest) {
 
   // The estimate is computed from exactly the same sources as the VAT return,
   // including sales invoices and the double-counting exclusion. Computing it
-  // separately here is how the front page and /alv-raportti drifted apart.
+  // separately here is how the front page and /kirjanpito/alv drifted apart.
   let estimatedVat = 0;
   try {
     const vatSources = await loadAlvPeriodSources(session.userId, startOfMonth, endOfMonth);

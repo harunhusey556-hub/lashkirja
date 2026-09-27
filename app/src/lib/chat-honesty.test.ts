@@ -112,4 +112,16 @@ describe("chat honesty", () => {
       { label: "Kuitit", href: "/kuitit?month=2026-09" },
     ]);
   });
+
+  it("still checks the legacy /alv-raportti link against allowedHrefs", () => {
+    const ctx = {
+      performedActions: [],
+      allowedAmounts: [],
+      allowedRecordIds: [],
+      allowedHrefs: [],
+    };
+    const result = enforceAssistantReply("[ALV](/alv-raportti?period=1999-01)", ctx);
+    expect(result.rejected).toBe(true);
+    expect(result.reason).toBe("source");
+  });
 });

@@ -452,7 +452,7 @@ describe("honest book answers", () => {
     const report = computeAlvReport(sources.receipts, sources.invoices);
     expect(replyUsesCalculatedAmount(sent.body.content, report.field308.amount.toFixed(2))).toBe(true);
     expect(sent.body.sources).toEqual(
-      expect.arrayContaining([{ label: "ALV-raportti", href: expect.stringContaining("/alv-raportti?period=") }])
+      expect.arrayContaining([{ label: "ALV-raportti", href: expect.stringContaining("/kirjanpito/alv?period=") }])
     );
   });
 });

@@ -285,8 +285,8 @@ export async function prepareChat(
     if (asksVat) {
       const reply = `${limitedModeNotice(english)}\n\n${vatLine ?? ""}\n\n${
         english
-          ? "Standard rate for lash services in 2026 is **25.5%**. See /alv-raportti."
-          : "Ripsipalveluiden yleinen ALV-kanta 2026 on **25,5 %**. Katso /alv-raportti."
+          ? "Standard rate for lash services in 2026 is **25.5%**. See /kirjanpito/alv."
+          : "Ripsipalveluiden yleinen ALV-kanta 2026 on **25,5 %**. Katso /kirjanpito/alv."
       }`.trim();
       return {
         kind: "local",
@@ -330,7 +330,7 @@ export async function prepareChat(
     "Separate information from actions. Do not claim you changed the books.",
     asksProfile ? `Profile: ${profileSummary}` : `Business form: ${who}.`,
     vatLine ? `Use this calculated figure, do not invent another: ${vatLine}` : "",
-    "When you cite an amount from the books, name the screen (/alv-raportti, /raportit, /kuitit, /laskut).",
+    "When you cite an amount from the books, name the screen (/kirjanpito/alv, /raportit, /kuitit, /laskut).",
     prior.length > 0 ? "Use the earlier turns. Answer the latest question." : "",
   ]
     .filter(Boolean)
