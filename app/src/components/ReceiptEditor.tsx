@@ -193,8 +193,6 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
   const uploading = uploadQueue.rows.some(
     (row) => row.status === "uploading" || row.status === "processing"
   );
-  const openExistingId =
-    uploadQueue.rows.find((row) => row.duplicateReceiptId)?.duplicateReceiptId ?? null;
 
   useEffect(() => {
     if (!formReady) return;
@@ -769,14 +767,6 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
       )}
 
       <FormError message={error} className="bg-danger/10 rounded-xl px-4 py-3" />
-      {openExistingId && (
-        <Link
-          href={`/kuitit/${openExistingId}`}
-          className="min-h-11 inline-flex items-center text-sm font-medium text-accent"
-        >
-          Avaa olemassa oleva
-        </Link>
-      )}
 
       {uploadProgress && !uploading && (
         <p className="text-sm text-warm-gray text-center" role="status" aria-live="polite">
