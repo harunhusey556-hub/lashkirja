@@ -67,11 +67,11 @@
 	<key>UIViewControllerBasedStatusBarAppearance</key>
 	<true/>
 	<key>NSCameraUsageDescription</key>
-	<string>Tilikirja tarvitsee kameran kuittien kuvaamiseen.</string>
+	<string>Tilikirja käyttää kameraa, kun otat kuvan kuitista tai laskusta.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
-	<string>Tilikirja tarvitsee pääsyn kuviin kuittien liittämiseksi.</string>
+	<string>Tilikirja tarvitsee kuvat, myös rajatun valinnan, jotta voit liittää kuitin kuvakirjastosta.</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
-	<string>Tilikirja voi tallentaa kuittikuvia kuvakirjastoon.</string>
+	<string>Tilikirja voi tallentaa kuittikuvan kuvakirjastoon, jos tallennat sen sinne.</string>
 	<key>NSFaceIDUsageDescription</key>
 	<string>Tilikirja käyttää Face ID:tä näytön lukituksen avaamiseen tällä laitteella.</string>
 	<key>NSAppTransportSecurity</key>

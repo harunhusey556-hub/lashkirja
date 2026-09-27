@@ -55,6 +55,7 @@ the Organizer window produces the same IPA.
   commit does not update an already installed IPA.
 - After `cap sync`, `scripts/patch-ios-url-scheme.ts` adds the `lashkirja` URL scheme to `Info.plist`. `scripts/build-ios-ipa.sh` and `build-ipa.yml` both run that patch after `npx cap sync ios`. A closed app can then open `lashkirja://bank/callback`. An IPA built before this patch does not.
 - Face ID / Touch ID uses `@aparajita/capacitor-biometric-auth`. `cap sync` links it. `NSFaceIDUsageDescription` is already in `ios/App/App/Info.plist`. An IPA built before this plugin cannot prompt. See `docs/app-lock.md`.
+- Camera, photo library (including limited library), and the Files picker are requested when the user taps Ota kuva, Valitse kuvista, or Valitse tiedosto. The Finnish usage strings live in `Info.plist`. `@capacitor/camera` and `@capawesome/capacitor-file-picker` are linked by `cap sync`. An IPA built before those plugins still falls back to the web file input and will not show the new prompts. See `docs/native-files.md`.
 - `server.errorPath` is `offline.html` whenever `CAPACITOR_SERVER_URL` is set. `@capacitor/filesystem` and `@capacitor/share` are dependencies, so the same sync includes PDF share into Files.
 - `ios.scrollEnabled: false` is already in `capacitor.config.ts`, but an
   installed IPA keeps the WebView bounce until you rebuild and reinstall.

@@ -20,6 +20,7 @@ import { BANK_LINKS, WorkspaceLinks, linksWithActive } from "@/components/Worksp
 import { readPageCache, writePageCache } from "@/lib/page-cache";
 import { usePersistedState, useScrollRestoration } from "@/lib/list-ui-state";
 import { drillFromSearch } from "@/lib/report-drill";
+import { chooseDocuments, isNativeShell } from "@/lib/native-pick";
 
 const RECENT_LIMIT = 5;
 
@@ -204,6 +205,31 @@ export default function TiliotteetPage() {
     }
   }
 
+  async function pickStatementFile() {
+    if (!isNativeShell()) {
+      fileInputRef.current?.click();
+      return;
+    }
+    const picked = await chooseDocuments([
+      "application/pdf",
+      "text/xml",
+      "application/xml",
+      "text/csv",
+      "application/vnd.ms-excel",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    ]);
+    if (picked.kind === "unavailable") {
+      fileInputRef.current?.click();
+      return;
+    }
+    if (picked.kind === "denied") {
+      setUploadMsg(picked.message);
+      return;
+    }
+    const file = picked.kind === "files" ? picked.files[0] : null;
+    if (file) void handleUpload(file);
+  }
+
   const months = [
     ...new Set(
       statements.map((s) => s.periodMonth).filter((m): m is string => !!m)
@@ -265,9 +291,9 @@ export default function TiliotteetPage() {
           <div className="grid grid-cols-1 gap-3">
             <button
               type="button"
-              onClick={() => fileInputRef.current?.click()}
+              onClick={() => void pickStatementFile()}
               disabled={uploading || bankSyncing}
-              className="touch-target w-full min-h-12 rounded-2xl bg-accent text-sm font-medium text-white transition-colors hover:bg-accent-dark disabled:opacity-50"
+              className="touch-target w-full min-h-12 rounded-2xl bg-accent text-sm font-medium text-white transition-colors hover:bg-accent-dark disabled:opacity-50 active-press"
             >
               {uploading ? "Käsitellään..." : "Tuo tiedosto"}
             </button>

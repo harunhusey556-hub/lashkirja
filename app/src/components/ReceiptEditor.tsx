@@ -24,6 +24,13 @@ import { SelectMenu, SelectOption } from "@/components/SelectMenu";
 import { parseFinnishNumber, parseMoneyInput } from "@/lib/format";
 import { focusFirstInvalid } from "@/lib/focus-field";
 import { filePickDecision } from "@/lib/native-file-flow";
+import {
+  captureWithCamera,
+  chooseDocuments,
+  choosePhotoLibrary,
+  isNativeShell,
+  type NativePick,
+} from "@/lib/native-pick";
 import { clearDraft } from "@/lib/draft-store";
 import { receiptFieldId, validateReceiptFields } from "@/lib/receipt-form";
 import { RECEIPT_PHASE } from "@/lib/screen-state";
@@ -117,6 +124,7 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
   const isNewStep2 = searchParams.get("new") === "true";
   const fileInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
+  const photoInputRef = useRef<HTMLInputElement>(null);
   const matchPanelRef = useRef<HTMLDivElement>(null);
 
   const [loading, setLoading] = useState(isEdit);
@@ -191,6 +199,29 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
   }
 
   const uploadQueue = useReceiptUploadQueue(applyUpload);
+
+  async function pickNativeOrInput(
+    native: () => Promise<NativePick>,
+    input: HTMLInputElement | null
+  ) {
+    if (!isNativeShell()) {
+      input?.click();
+      return;
+    }
+    const picked = await native();
+    if (picked.kind === "unavailable") {
+      input?.click();
+      return;
+    }
+    if (picked.kind === "denied") {
+      setError(picked.message);
+      return;
+    }
+    if (picked.kind === "files") {
+      setError("");
+      uploadQueue.enqueue(picked.files);
+    }
+  }
   const uploading = uploadQueue.rows.some(
     (row) => row.status === "uploading" || row.status === "processing"
   );
@@ -675,6 +706,19 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
               e.currentTarget.value = "";
             }}
           />
+          <input
+            ref={photoInputRef}
+            type="file"
+            accept="image/*,.heic,.heif,image/heic"
+            multiple
+            aria-label="Valitse kuvia kuvakirjastosta"
+            className="hidden"
+            onChange={(e) => {
+              const files = Array.from(e.target.files ?? []);
+              if (filePickDecision(files.length).kind === "upload") uploadQueue.enqueue(files);
+              e.currentTarget.value = "";
+            }}
+          />
         </>
       )}
 
@@ -689,22 +733,35 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
             Lisää kuitti tai lasku kuvana tai PDF-tiedostona
           </p>
 
-          <div className="flex flex-col sm:flex-row gap-3 justify-center max-w-sm mx-auto">
+          <div className="flex flex-col gap-3 justify-center max-w-sm mx-auto">
             <button
               type="button"
-              onClick={() => fileInputRef.current?.click()}
+              onClick={() => void pickNativeOrInput(() => captureWithCamera(), cameraInputRef.current)}
               disabled={uploading}
-              className="flex-1 py-3 px-4 rounded-full bg-charcoal text-white text-sm font-medium shadow-sm hover:bg-black transition-colors disabled:opacity-50 active:scale-95"
+              className="w-full min-h-12 py-3 px-4 rounded-full bg-charcoal text-white text-sm font-medium shadow-sm hover:bg-black transition-colors disabled:opacity-50 active-press"
             >
-              Valitse tiedosto
+              Ota kuva
             </button>
             <button
               type="button"
-              onClick={() => cameraInputRef.current?.click()}
+              onClick={() => void pickNativeOrInput(() => choosePhotoLibrary(), photoInputRef.current)}
               disabled={uploading}
-              className="flex-1 py-3 px-4 rounded-full bg-white text-charcoal text-sm font-medium hover:bg-cream/50 shadow-sm transition-colors disabled:opacity-50 active:scale-95"
+              className="w-full min-h-12 py-3 px-4 rounded-full bg-white text-charcoal text-sm font-medium hover:bg-cream/50 shadow-sm transition-colors disabled:opacity-50 active-press"
             >
-              Ota kuva
+              Valitse kuvista
+            </button>
+            <button
+              type="button"
+              onClick={() =>
+                void pickNativeOrInput(
+                  () => chooseDocuments(["image/jpeg", "image/png", "image/heic", "application/pdf"]),
+                  fileInputRef.current
+                )
+              }
+              disabled={uploading}
+              className="w-full min-h-12 py-3 px-4 rounded-full bg-white text-charcoal text-sm font-medium hover:bg-cream/50 shadow-sm transition-colors disabled:opacity-50 active-press"
+            >
+              Valitse tiedosto
             </button>
           </div>
 
@@ -791,7 +848,12 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
               {!isEdit && (
                 <button
                   type="button"
-                  onClick={() => fileInputRef.current?.click()}
+                  onClick={() =>
+                    void pickNativeOrInput(
+                      () => chooseDocuments(["image/jpeg", "image/png", "image/heic", "application/pdf"]),
+                      fileInputRef.current
+                    )
+                  }
                   disabled={uploading}
                   className="min-h-11 inline-flex items-center px-2 -mx-2 text-xs text-accent hover:underline disabled:opacity-50"
                 >
