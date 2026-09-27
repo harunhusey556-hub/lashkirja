@@ -54,8 +54,12 @@ async function authenticated(request: NextRequest) {
 export async function proxy(request: NextRequest) {
   const pathname = request.nextUrl.pathname;
 
-  // --- Protected API routes (everything under /api/ except auth and cron) ---
-  if (pathname.startsWith("/api/") && !isPublicApi(pathname)) {
+  // --- API routes: decided once, and never fall through to the page gate ---
+  if (pathname.startsWith("/api/")) {
+    if (isPublicApi(pathname)) {
+      return NextResponse.next();
+    }
+    // Protected API routes (everything under /api/ except auth, cron, health).
     const isAuthenticated = await authenticated(request);
     if (!isAuthenticated) {
       return NextResponse.json(
