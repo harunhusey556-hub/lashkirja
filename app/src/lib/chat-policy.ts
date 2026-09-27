@@ -56,8 +56,8 @@ export function matchStatusReply(input: {
 }): string | null {
   if (input.totalTransactions === 0) {
     return input.english
-      ? "There are no bank transactions yet. Open the Pankki tab to sync the linked bank. A statement file can still be imported there. That is not the same as everything being matched."
-      : "Pankkitapahtumia ei ole vielä. Avaa Pankki-välilehti ja hae tapahtumat. Tiliotteen voi yhä tuoda sieltä. Tämä ei tarkoita, että kaikki olisi täsmäytetty.";
+      ? 'There are no bank transactions yet. Go to Kirjanpito → Pankkitilit to connect or sync the bank. A statement file can still be imported there. That is not the same as everything being matched.'
+      : "Pankkitapahtumia ei ole vielä. Siirry Kirjanpito → Pankkitilit ja yhdistä tai hae pankki. Tiliotteen voi yhä tuoda sieltä. Tämä ei tarkoita, että kaikki olisi täsmäytetty.";
   }
   if (input.unmatched === 0) {
     return input.english
@@ -66,8 +66,8 @@ export function matchStatusReply(input: {
   }
   if (input.openReceipts === 0) {
     return input.english
-      ? `There are ${input.unmatched} unmatched bank transactions and no open receipts. Add a receipt from Kuitit.`
-      : `Täsmäyttämättömiä pankkitapahtumia on ${input.unmatched}, mutta avoimia kuitteja ei ole. Lisää kuitti Kuitit-välilehdeltä.`;
+      ? `There are ${input.unmatched} unmatched bank transactions and no open receipts. Add one from "+" → "Kuvaa kuitti".`
+      : `Täsmäyttämättömiä pankkitapahtumia on ${input.unmatched}, mutta avoimia kuitteja ei ole. Lisää kuitti "+"-valikosta (Kuvaa kuitti).`;
   }
   return null;
 }
