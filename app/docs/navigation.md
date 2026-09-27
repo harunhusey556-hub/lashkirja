@@ -14,5 +14,7 @@ Juuret: Koti, Myynti, Kirjanpito, Raportit. Mobiilissa Myynnin ja Kirjanpidon v�
 6. Suodattimet eivät vaihda sivua. Sivulla on enintään yksi suodatinrivi.
 7. Luonti alkaa Lisää-valikosta. Myynnin "Uusi lasku" on saman reitin pikavalinta.
 8. Uusi reitti vaatii `kind`-arvon rekisterissä; kaikki sivut ovat suojattuja, ellei niitä ole lueteltu `proxy.ts`:n `PUBLIC_PAGES`-listassa.
+9. Tekninen ja harvinainen asetus kuuluu Asetuksiin.
+10. Päivittäinen työ hoituu enintään kahdella siirrolla.
 
 `navigationViolations()`, `navigation.test.ts` ja `proxy.test.ts` kaatavat testit, jos rekisteri tai suojaus rikkoo näitä.
