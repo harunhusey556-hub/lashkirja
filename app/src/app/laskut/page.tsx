@@ -12,13 +12,29 @@ import {
   readJson,
   redirectToLogin,
 } from "@/components/clientFetch";
-import { formatDate, formatEur } from "@/lib/format";
+import { formatDayMonth, formatEur } from "@/lib/format";
+import {
+  ActionPill,
+  FilterChips,
+  ListRow,
+  PageTitle,
+  Section,
+  StatusTag,
+  SummaryCard,
+} from "@/components/ds";
+import { SALES_STATUS } from "@/lib/status-labels";
+import {
+  SALES_FILTER_IDS,
+  salesFilterChips,
+  salesInvoiceGroups,
+  type SalesFilterId,
+} from "@/lib/invoice-groups";
 
-import { SettingsGroup, SettingsRow } from "@/components/SettingsList";
-import { Button, buttonClass, chipClass } from "@/components/ui";
+import { Button } from "@/components/ui";
 import { pageCacheFetchedAt, readPageCache, writePageCache } from "@/lib/page-cache";
 import { isForbidden } from "@/lib/screen-state";
 import { usePersistedState, useScrollRestoration } from "@/lib/list-ui-state";
+
 interface InvoiceSummary {
   id: string;
   number: number;
@@ -39,29 +55,52 @@ interface Aging {
   overdueCount: number;
 }
 
-const STATUS_LABEL: Record<InvoiceSummary["displayStatus"], string> = {
-  draft: "Luonnos",
-  sent: "Lähetetty",
-  overdue: "Myöhässä",
-  paid: "Maksettu",
-  credited: "Hyvitetty",
-};
+const AGING_BUCKETS = ["1-30", "31-60", "61-90", "90+"] as const;
 
-const STATUS_CLASS: Record<InvoiceSummary["displayStatus"], string> = {
-  draft: "bg-warm-gray-light/30 text-warm-gray",
-  sent: "bg-blush text-accent-dark",
-  overdue: "bg-danger/10 text-danger",
-  paid: "bg-success/10 text-success",
-  credited: "bg-warm-gray-light/30 text-warm-gray",
-};
+/** Leading icon for the "Asiakkaat" registry row. */
+function CustomersIcon() {
+  return (
+    <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.75} aria-hidden>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8Zm-7 8a7 7 0 0 1 14 0" />
+    </svg>
+  );
+}
 
-const FILTERS = [
-  { id: "all", label: "Kaikki" },
-  { id: "draft", label: "Luonnokset" },
-  { id: "sent", label: "Lähetetyt" },
-  { id: "overdue", label: "Myöhässä" },
-  { id: "paid", label: "Maksetut" },
-] as const;
+/** Leading icon for the "Toistuvat laskut" registry row. */
+function RecurringIcon() {
+  return (
+    <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.75} aria-hidden>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M4 7h11a4 4 0 0 1 4 4v1M20 17H9a4 4 0 0 1-4-4v-1" />
+      <path strokeLinecap="round" strokeLinejoin="round" d="m15 4 3 3-3 3M9 20l-3-3 3-3" />
+    </svg>
+  );
+}
+
+/** "Lasku N, eräpäivä d.m." - "erääntyi" once overdue, no date at all while still a draft. */
+function rowSecondary(invoice: InvoiceSummary): string {
+  if (invoice.displayStatus === "draft") return `Lasku ${invoice.number}`;
+  const datePhrase = invoice.displayStatus === "overdue" ? "erääntyi" : "eräpäivä";
+  return `Lasku ${invoice.number}, ${datePhrase} ${formatDayMonth(invoice.dueDate)}`;
+}
+
+function rowTrailing(invoice: InvoiceSummary) {
+  if (invoice.displayStatus === "overdue") {
+    return (
+      <ActionPill href={`/laskut/${invoice.id}`} ariaLabel={`Muistuta: ${invoice.customer.name}`}>
+        Muistuta
+      </ActionPill>
+    );
+  }
+  if (invoice.displayStatus === "draft") {
+    return (
+      <ActionPill href={`/laskut/${invoice.id}`} ariaLabel={`Lähetä: ${invoice.customer.name}`}>
+        Lähetä
+      </ActionPill>
+    );
+  }
+  const status = SALES_STATUS[invoice.displayStatus];
+  return <StatusTag tone={status.tone}>{status.label}</StatusTag>;
+}
 
 /**
  * useSearchParams opts the tree out of static rendering, so the reader lives
@@ -102,27 +141,24 @@ function InvoicesPageContent() {
   );
   // Persisted (not just in-memory) so back-navigation restores the active
   // tab instead of resetting the list to "Kaikki".
-  const [filter, setFilter] = usePersistedState<(typeof FILTERS)[number]["id"]>(
-    "laskut.filter",
-    "all"
-  );
+  const [filter, setFilter] = usePersistedState<SalesFilterId>("laskut.filter", "all");
   useEffect(() => {
-    if (statusFromUrl && FILTERS.some((item) => item.id === statusFromUrl)) {
-      setFilter(statusFromUrl as (typeof FILTERS)[number]["id"]);
+    if (statusFromUrl && (SALES_FILTER_IDS as readonly string[]).includes(statusFromUrl)) {
+      setFilter(statusFromUrl as SalesFilterId);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [statusFromUrl]);
   const [message, setMessage] = useState<string | null>(null);
   const [loadFailure, setLoadFailure] = useState<unknown>(null);
   const [busy, setBusy] = useState(false);
+  const [registryCounts, setRegistryCounts] = useState<{ customers?: number; recurring?: number }>({});
 
-  // `signal` is only ever passed by the mount/filter-change effect below —
-  // manual call sites (retry button, post-mutation refresh) call load() with
-  // no signal so they are never cancelled out from under themselves.
+  // The list is always fetched unfiltered: filtering/grouping by status
+  // happens locally (see salesInvoiceGroups) so every filter chip's count
+  // stays correct no matter which tab is currently selected.
   const load = useCallback(async (signal?: AbortSignal) => {
     try {
       const params = new URLSearchParams();
-      if (filter !== "all") params.set("status", filter);
       if (customerFilter) params.set("customerId", customerFilter);
       if (monthFilter) params.set("month", monthFilter);
       const response = await apiFetch(`/api/invoices?${params.toString()}`, {
@@ -134,7 +170,7 @@ function InvoicesPageContent() {
         "Laskujen haku epäonnistui"
       );
       if (signal?.aborted) return;
-      if (filter === "all" && !customerFilter && !monthFilter) writePageCache("invoices", data);
+      if (!customerFilter && !monthFilter) writePageCache("invoices", data);
       setInvoices(data.invoices);
       setAging(data.aging);
       setLoadFailure(null);
@@ -149,7 +185,7 @@ function InvoicesPageContent() {
       setMessage(errorMessage(error, "Laskujen haku epäonnistui"));
       setStatus((current) => (current === "ready" ? "ready" : "error"));
     }
-  }, [filter, customerFilter, monthFilter]);
+  }, [customerFilter, monthFilter]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -157,6 +193,22 @@ function InvoicesPageContent() {
     void load(controller.signal);
     return () => controller.abort();
   }, [load]);
+
+  // Best-effort counts for the registry rows at the bottom of the page; a
+  // failure here must not block the invoice list itself, so errors are
+  // swallowed and the row simply renders without a count.
+  useEffect(() => {
+    const controller = new AbortController();
+    apiFetch("/api/customers", { credentials: "include", signal: controller.signal })
+      .then((res) => readJson<{ customers: unknown[] }>(res, ""))
+      .then((data) => setRegistryCounts((prev) => ({ ...prev, customers: data.customers.length })))
+      .catch(() => {});
+    apiFetch("/api/recurring-invoices", { credentials: "include", signal: controller.signal })
+      .then((res) => readJson<{ recurring: unknown[] }>(res, ""))
+      .then((data) => setRegistryCounts((prev) => ({ ...prev, recurring: data.recurring.length })))
+      .catch(() => {});
+    return () => controller.abort();
+  }, []);
 
   useScrollRestoration("laskut", status === "ready");
 
@@ -184,159 +236,125 @@ function InvoicesPageContent() {
     }
   }
 
+  const filterChips = salesFilterChips(invoices);
+  const groups = salesInvoiceGroups(invoices, filter);
+  const visibleCount = groups.reduce((sum, group) => sum + group.items.length, 0);
+  const filtered = filter !== "all" || Boolean(customerFilter);
+
   return (
-    <>
-      <div className="space-y-6 pb-6">
-        <header className="space-y-2">
-          <p className="text-sm text-warm-gray leading-relaxed">
-            Laskuta asiakkaita ja seuraa maksuja viitenumerolla.
-          </p>
-        </header>
-
-        {aging && (
-          <section className="bg-white rounded-3xl border border-warm-gray-light/20 shadow-sm p-6 space-y-3">
-            <p className="text-sm text-warm-gray">Avoimet saatavat</p>
-            <p className="text-3xl font-semibold text-charcoal tracking-tight">
-              {formatEur(aging.totalOpen)}
-            </p>
-            {aging.overdueCount > 0 && (
-              <p className="text-xs text-danger">
-                {formatEur(aging.overdue)} myöhässä ({aging.overdueCount} laskua)
-              </p>
-            )}
-            <div className="grid grid-cols-4 gap-2 pt-1 text-center">
-              {["1-30", "31-60", "61-90", "90+"].map((bucket) => (
-                <div key={bucket} className="rounded-xl bg-cream/70 py-2">
-                  <p className="text-[11px] text-warm-gray">{bucket} pv</p>
-                  <p className="text-xs font-medium text-charcoal">
-                    {formatEur((aging.buckets[bucket]?.openCents ?? 0) / 100)}
-                  </p>
-                </div>
-              ))}
-            </div>
-          </section>
-        )}
-
-        {message && (
-          <p className="text-sm text-charcoal bg-blush/40 rounded-2xl px-4 py-3" role="status">
-            {message}
-          </p>
-        )}
-
-        <div className="flex gap-3">
+    <div className="space-y-6 pb-6">
+      <PageTitle
+        title="Myynti"
+        action={
           <Link
             href={customerFilter ? `/laskut/uusi?customerId=${encodeURIComponent(customerFilter)}` : "/laskut/uusi"}
-            className={`${buttonClass()} flex-1`}
+            className="active-press relative inline-flex min-h-9 items-center gap-1 rounded-full bg-ink px-3.5 text-[13px] font-semibold text-canvas before:absolute before:inset-x-0 before:-inset-y-1 before:content-['']"
           >
+            <svg className="h-3.5 w-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} aria-hidden>
+              <path strokeLinecap="round" d="M12 5v14M5 12h14" />
+            </svg>
             Uusi lasku
           </Link>
-          <Button
-            type="button"
-            variant="secondary"
-            onClick={() => void runBankMatch()}
-            busy={busy}
-            busyLabel="Kohdistetaan…"
-          >
-            Kohdista maksut
-          </Button>
-        </div>
+        }
+      />
 
-        <div className="flex gap-2 overflow-x-auto scrollbar-none">
-          {FILTERS.map((entry) => (
-            <button
-              key={entry.id}
-              type="button"
-              onClick={() => setFilter(entry.id)}
-              aria-pressed={filter === entry.id}
-              className={chipClass(filter === entry.id)}
-            >
-              {entry.label}
-            </button>
-          ))}
-        </div>
-
-        {loadFailure != null && status === "ready" && (
-          <StaleBanner fetchedAt={pageCacheFetchedAt("invoices")} onRetry={() => void load()} />
-        )}
-        {status === "loading" && <SkeletonList rows={4} />}
-        {status === "error" &&
-          (isForbidden(loadFailure) ? (
-            <EmptyState kind="forbidden" />
-          ) : (
-            <ConnectionNotice
-              error={loadFailure}
-              fallback={message || "Laskujen haku epäonnistui"}
-              onRetry={() => void load()}
-            />
-          ))}
-
-        {status === "ready" && (
-          <ul className="space-y-3 list-stagger">
-            {invoices.map((invoice) => (
-              <li key={invoice.id}>
-                <Link
-                  href={`/laskut/${invoice.id}`}
-                  className="block bg-white rounded-3xl border border-warm-gray-light/20 shadow-sm p-5 space-y-2 hover:border-accent/20"
-                >
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <p className="text-base font-medium text-charcoal truncate">
-                        {invoice.customer.name}
-                      </p>
-                      <p className="text-xs text-warm-gray">
-                        Lasku {invoice.number} · {formatDate(invoice.issueDate)}
-                      </p>
-                    </div>
-                    <div className="text-right shrink-0">
-                      <p className="text-base font-semibold text-charcoal">
-                        {formatEur(invoice.gross)}
-                      </p>
-                      {invoice.open !== 0 && invoice.open !== invoice.gross && (
-                        <p className="text-[11px] text-warm-gray">
-                          avoinna {formatEur(invoice.open)}
-                        </p>
-                      )}
-                    </div>
-                  </div>
-                  <div className="flex flex-wrap items-center gap-1.5">
-                    <span
-                      className={`text-[11px] font-medium px-2.5 py-1 rounded-full ${
-                        STATUS_CLASS[invoice.displayStatus]
-                      }`}
-                    >
-                      {STATUS_LABEL[invoice.displayStatus]}
-                    </span>
-                    <span className="text-[11px] text-warm-gray">
-                      Eräpäivä {formatDate(invoice.dueDate)}
-                    </span>
-                  </div>
-                </Link>
-              </li>
+      {aging && (
+        <>
+          <SummaryCard
+            label="Avoinna"
+            value={formatEur(aging.totalOpen)}
+            note={aging.overdueCount > 0 ? `${formatEur(aging.overdue)} myöhässä` : undefined}
+          />
+          <div className="grid grid-cols-4 divide-x divide-line overflow-hidden rounded-card border border-line bg-surface text-center">
+            {AGING_BUCKETS.map((bucket) => (
+              <div key={bucket} className="px-2 py-3">
+                <p className="text-[11px] text-ink-2">{bucket} pv</p>
+                <p className="mt-0.5 text-[13px] font-medium tabular-nums text-ink">
+                  {formatEur((aging.buckets[bucket]?.openCents ?? 0) / 100)}
+                </p>
+              </div>
             ))}
+          </div>
+        </>
+      )}
 
-            {invoices.length === 0 && (
-              <EmptyState
-                kind={filter !== "all" || customerFilter ? "filtered" : "records"}
-                title={filter !== "all" || customerFilter ? "Ei laskuja tällä suodattimella" : "Ei laskuja vielä"}
-                body={
-                  filter !== "all" || customerFilter
-                    ? "Kokeile toista suodatinta."
-                    : "Luo ensimmäinen myyntilasku."
-                }
-                onClear={
-                  filter !== "all" || customerFilter ? () => setFilter("all") : undefined
-                }
-                clearLabel="Tyhjennä suodatin"
-              />
-            )}
-          </ul>
-        )}
+      <Button
+        type="button"
+        variant="secondary"
+        onClick={() => void runBankMatch()}
+        busy={busy}
+        busyLabel="Kohdistetaan…"
+        className="w-full"
+      >
+        Kohdista maksut
+      </Button>
 
-        <SettingsGroup label="Myynnin rekisterit">
-          <SettingsRow href="/asiakkaat" label="Asiakkaat" hint="Y-tunnus, maksuaika ja avoin saldo" />
-          <SettingsRow href="/toistuvat" label="Toistuvat laskut" hint="Sama lasku kuukausittain tai vuosittain" />
-        </SettingsGroup>
-      </div>
-    </>
+      {message && (
+        <p className="rounded-card bg-accent-soft px-4 py-3 text-sm text-ink" role="status">
+          {message}
+        </p>
+      )}
+
+      <FilterChips label="Suodata laskut" items={filterChips} value={filter} onChange={setFilter} />
+
+      {loadFailure != null && status === "ready" && (
+        <StaleBanner fetchedAt={pageCacheFetchedAt("invoices")} onRetry={() => void load()} />
+      )}
+      {status === "loading" && <SkeletonList rows={4} />}
+      {status === "error" &&
+        (isForbidden(loadFailure) ? (
+          <EmptyState kind="forbidden" />
+        ) : (
+          <ConnectionNotice
+            error={loadFailure}
+            fallback={message || "Laskujen haku epäonnistui"}
+            onRetry={() => void load()}
+          />
+        ))}
+
+      {status === "ready" && (
+        <>
+          {groups.map((group) => (
+            <Section key={group.id} title={group.label} count={group.items.length}>
+              {group.items.map((invoice) => (
+                <ListRow
+                  key={invoice.id}
+                  href={`/laskut/${invoice.id}`}
+                  title={invoice.customer.name}
+                  amount={formatEur(invoice.gross)}
+                  secondary={rowSecondary(invoice)}
+                  trailing={rowTrailing(invoice)}
+                />
+              ))}
+            </Section>
+          ))}
+
+          {visibleCount === 0 && (
+            <EmptyState
+              kind={filtered ? "filtered" : "records"}
+              title={filtered ? "Ei laskuja tällä suodattimella" : "Ei laskuja vielä"}
+              body={filtered ? "Kokeile toista suodatinta." : "Luo ensimmäinen myyntilasku."}
+              onClear={filtered ? () => setFilter("all") : undefined}
+              clearLabel="Tyhjennä suodatin"
+            />
+          )}
+        </>
+      )}
+
+      <Section>
+        <ListRow
+          leading={<CustomersIcon />}
+          title="Asiakkaat"
+          amount={registryCounts.customers !== undefined ? String(registryCounts.customers) : undefined}
+          href="/asiakkaat"
+        />
+        <ListRow
+          leading={<RecurringIcon />}
+          title="Toistuvat laskut"
+          amount={registryCounts.recurring !== undefined ? String(registryCounts.recurring) : undefined}
+          href="/toistuvat"
+        />
+      </Section>
+    </div>
   );
 }

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   currentMonthKey,
   formatDate,
+  formatDayMonth,
   formatEur,
   formatEurSigned,
   formatMonth,
@@ -70,6 +71,19 @@ describe("formatDate", () => {
     expect(formatDate(null)).toBe("–");
     expect(formatDate("")).toBe("–");
     expect(formatDate("not-a-date")).toBe("–");
+  });
+});
+
+describe("formatDayMonth", () => {
+  it("formats a short day.month. without the year, without timezone drift", () => {
+    expect(formatDayMonth("2026-10-06T00:00:00.000Z")).toBe("6.10.");
+    expect(formatDayMonth("2026-09-12")).toBe("12.9.");
+  });
+
+  it("returns a dash for empty and invalid input", () => {
+    expect(formatDayMonth(null)).toBe("–");
+    expect(formatDayMonth("")).toBe("–");
+    expect(formatDayMonth("not-a-date")).toBe("–");
   });
 });
 

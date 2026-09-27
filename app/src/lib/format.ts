@@ -52,6 +52,18 @@ export function formatDate(value: string | null | undefined): string {
 }
 
 /**
+ * Short "d.m." form (no year) for list rows - e.g. list-row due dates. Built
+ * from the UTC fields directly rather than through Intl, so the trailing dot
+ * and lack of leading zeros don't depend on ICU data for the fi-FI locale.
+ */
+export function formatDayMonth(value: string | null | undefined): string {
+  if (!value) return "–";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "–";
+  return `${date.getUTCDate()}.${date.getUTCMonth() + 1}.`;
+}
+
+/**
  * Accepts "1 234,56", "1234.56" and a pasted "12,50 €".
  * Empty and junk are null. A leading minus is kept.
  */
