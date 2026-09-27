@@ -50,6 +50,8 @@ model User {
   purchaseInvoices PurchaseInvoice[]
   recurringInvoices RecurringInvoice[]
   idempotencyRecords IdempotencyRecord[]
+  invoiceSequence InvoiceSequence?
+  catalogItems    CatalogItem[]
 }
 
 model Receipt {
@@ -379,6 +381,12 @@ model SalesInvoice {
   /// Set only by an explicit close that is not covered by payments.
   closedReason  String?
   closedAt      DateTime?
+  /// invoice | credit_note. A credit note is its own document, not a status.
+  documentKind     String  @default("invoice")
+  /// The invoice this credit note corrects. Null on ordinary invoices.
+  creditsInvoiceId String?
+  creditsInvoice   SalesInvoice?  @relation("InvoiceCredit", fields: [creditsInvoiceId], references: [id], onDelete: SetNull)
+  creditNotes      SalesInvoice[] @relation("InvoiceCredit")
   createdAt  DateTime  @default(now())
   updatedAt  DateTime  @updatedAt
 
@@ -386,12 +394,14 @@ model SalesInvoice {
   payments     InvoicePayment[]
   reminders    InvoiceReminder[]
   emailSends   InvoiceEmailSend[]
+  activities   InvoiceActivity[]
   recurringRun RecurringInvoiceRun?
 
   @@unique([userId, number])
   @@unique([userId, reference])
   @@index([userId, status, dueDate])
   @@index([customerId, issueDate])
+  @@index([creditsInvoiceId])
 }
 
 model InvoiceLine {
@@ -495,6 +505,10 @@ model InvoiceEmailSend {
   /// Parties that were rendered into the attachment, kept even if the invoice
   /// row itself could not be updated after the message was accepted.
   partySnapshot String?
+  /// Filename of the PDF attached to this attempt.
+  attachmentName String?
+  /// Gross amount on that PDF, in cents, so history survives a later edit.
+  grossCents     Int?
   createdAt     DateTime     @default(now())
   finishedAt    DateTime?
 
@@ -597,4 +611,40 @@ model IdempotencyRecord {
   createdAt  DateTime @default(now())
 
   @@unique([userId, scope, key])
+}
+
+/// One row per user. nextNumber is the next integer to hand out. Deleting a
+/// draft does not move it backwards, and a new calendar year does not reset it.
+model InvoiceSequence {
+  userId     String @id
+  user       User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  nextNumber Int
+}
+
+/// Readable history on one invoice. Summaries are Finnish sentences, not dumps.
+model InvoiceActivity {
+  id        String       @id @default(uuid())
+  invoiceId String
+  invoice   SalesInvoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  /// created | amount_changed | payment_added | payment_removed | status_changed | sent | credit_issued | duplicated
+  kind      String
+  summary   String
+  createdAt DateTime     @default(now())
+
+  @@index([invoiceId, createdAt])
+}
+
+/// A line the user invoices often. Picking one fills an invoice row.
+model CatalogItem {
+  id              String    @id @default(uuid())
+  userId          String
+  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name            String
+  unit            String    @default("kpl")
+  unitPriceCents  Int
+  vatRatePermille Int       @default(255)
+  archivedAt      DateTime?
+  createdAt       DateTime  @default(now())
+
+  @@index([userId, archivedAt])
 }

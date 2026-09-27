@@ -259,6 +259,10 @@ describe("running a schedule", () => {
         encryptedPass: encrypt("app-password"),
       },
     });
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { invoiceIban: "FI2112345600000785" },
+    });
     await makeRecurring({ anchorDay: 1, startDate: "2026-01-01", autoSend: true });
 
     const { sendInvoiceByEmail } = await import("@/lib/invoice-mail");
@@ -270,6 +274,74 @@ describe("running a schedule", () => {
     expect(result.generated[0].sent).toBe(true);
     const invoice = await prisma.salesInvoice.findFirst();
     expect(invoice?.status).toBe("sent");
+  });
+
+  it("keeps a failed email as history and leaves the invoice a draft", async () => {
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { invoiceIban: "FI2112345600000785" },
+    });
+    await prisma.imapAccount.create({
+      data: {
+        userId: user.id,
+        email: "liisa@example.fi",
+        host: "imap.gmail.com",
+        port: 993,
+        encryptedPass: encrypt("app-password"),
+      },
+    });
+    await makeRecurring({ anchorDay: 1, startDate: "2026-01-01", autoSend: true });
+    const { sendInvoiceByEmail } = await import("@/lib/invoice-mail");
+    const result = await run("2026-01-15", {
+      send: (invoiceId: string) =>
+        sendInvoiceByEmail(user.id, invoiceId, {}, {
+          deliver: async () => {
+            throw new Error("SMTP down");
+          },
+        }).then(() => undefined),
+    });
+    expect(result.generated[0].sent).toBe(false);
+    expect(result.generated[0].sendError).toContain("SMTP");
+    const invoice = await prisma.salesInvoice.findFirst();
+    expect(invoice?.status).toBe("draft");
+    const sends = await prisma.invoiceEmailSend.findMany({ where: { invoiceId: invoice?.id } });
+    expect(sends.map((send) => send.status)).toEqual(["failed"]);
+  });
+
+  it("issues the 31st, clamps February, then returns to the 31st", async () => {
+    await makeRecurring({ anchorDay: 31, startDate: "2026-01-31", interval: "monthly" });
+    const result = await run("2026-03-31");
+    expect(result.generated.map((entry) => entry.issueDate)).toEqual([
+      "2026-01-31",
+      "2026-02-28",
+      "2026-03-31",
+    ]);
+  });
+
+  it("resumes a paused schedule on the next run", async () => {
+    const recurring = await makeRecurring({ anchorDay: 1, startDate: "2026-01-01" });
+    await patchRecurring(
+      buildRequest("PATCH", `/api/recurring-invoices/${recurring.id}`, { active: false }, { cookie }),
+      routeContext({ id: recurring.id })
+    );
+    expect((await run("2026-01-15")).generated).toHaveLength(0);
+    await patchRecurring(
+      buildRequest("PATCH", `/api/recurring-invoices/${recurring.id}`, { active: true }, { cookie }),
+      routeContext({ id: recurring.id })
+    );
+    expect((await run("2026-01-15")).generated).toHaveLength(1);
+  });
+
+  it("does not invoice an archived customer", async () => {
+    await makeRecurring({ anchorDay: 1, startDate: "2026-01-01" });
+    await prisma.customer.update({
+      where: { id: customerId },
+      data: { archivedAt: new Date("2026-01-02T00:00:00.000Z") },
+    });
+    const result = await run("2026-01-15");
+    expect(result.generated).toHaveLength(0);
+    expect(result.skipped[0]).toMatchObject({ reason: "failed" });
+    expect(result.skipped[0].detail).toContain("arkistoitu");
   });
 
   it("never generates for another user's schedule", async () => {

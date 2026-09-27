@@ -3,7 +3,13 @@ import { prisma } from "./db";
 import { AppError, NotFoundError, ValidationError } from "./api-errors";
 import { assertCurrentVersion } from "./edit-conflict";
 import { isValidBusinessId, normalizeBusinessId } from "./finnish-reference";
-import { DEFAULT_PAYMENT_TERM_DAYS, MAX_PAYMENT_TERM_DAYS, openPosition } from "./invoices";
+import { parseCustomerCsv, type CustomerCsvRow } from "./customer-import";
+import {
+  DEFAULT_PAYMENT_TERM_DAYS,
+  displayStatus,
+  MAX_PAYMENT_TERM_DAYS,
+  openPosition,
+} from "./invoices";
 import { centsToEuros } from "./money";
 
 export interface CustomerInput {
@@ -217,6 +223,7 @@ export async function listCustomers(
       invoices: {
         select: {
           status: true,
+          documentKind: true,
           grossCents: true,
           issueDate: true,
           closedReason: true,
@@ -233,7 +240,11 @@ export async function listCustomers(
     let lastInvoiceDate: Date | null = null;
 
     for (const invoice of customer.invoices) {
-      if (invoice.status !== "draft" && invoice.status !== "credited") {
+      if (
+        invoice.documentKind !== "credit_note" &&
+        invoice.status !== "draft" &&
+        invoice.status !== "credited"
+      ) {
         invoicedCents += invoice.grossCents;
       }
       const paid = invoice.payments.reduce((sum, payment) => sum + payment.amountCents, 0);
@@ -267,6 +278,163 @@ export async function getCustomer(userId: string, id: string): Promise<PublicCus
   const customer = await prisma.customer.findFirst({ where: { id, userId } });
   if (!customer) throw new NotFoundError("Asiakasta ei löytynyt.");
   return toPublicCustomer(customer);
+}
+
+export interface CustomerInvoiceRow {
+  id: string;
+  number: number;
+  status: string;
+  displayStatus: string;
+  issueDate: string;
+  dueDate: string;
+  gross: number;
+  open: number;
+}
+
+export interface CustomerDetail {
+  customer: PublicCustomer;
+  openBalance: number;
+  openInvoiceCount: number;
+  invoicedTotal: number;
+  lastPayment: { paidDate: string; amount: number; invoiceNumber: number } | null;
+  invoices: CustomerInvoiceRow[];
+}
+
+export async function getCustomerDetail(userId: string, id: string): Promise<CustomerDetail> {
+  const customer = await prisma.customer.findFirst({
+    where: { id, userId },
+    include: {
+      invoices: {
+        orderBy: [{ issueDate: "desc" }, { number: "desc" }],
+        include: { payments: { select: { paidDate: true, amountCents: true } } },
+      },
+    },
+  });
+  if (!customer) throw new NotFoundError("Asiakasta ei löytynyt.");
+
+  let openBalanceCents = 0;
+  let invoicedCents = 0;
+  let openInvoiceCount = 0;
+  let lastPayment: CustomerDetail["lastPayment"] = null;
+
+  const invoices: CustomerInvoiceRow[] = customer.invoices.map((invoice) => {
+    const paid = invoice.payments.reduce((sum, payment) => sum + payment.amountCents, 0);
+    const position = openPosition({
+      status: invoice.status,
+      grossCents: invoice.grossCents,
+      paidCents: paid,
+      closedReason: invoice.closedReason,
+    });
+    if (
+      invoice.documentKind !== "credit_note" &&
+      invoice.status !== "draft" &&
+      invoice.status !== "credited"
+    ) {
+      invoicedCents += invoice.grossCents;
+    }
+    if (position.collectible) {
+      openBalanceCents += position.openCents;
+      openInvoiceCount += 1;
+    }
+    for (const payment of invoice.payments) {
+      if (!lastPayment || payment.paidDate.toISOString() > lastPayment.paidDate) {
+        lastPayment = {
+          paidDate: payment.paidDate.toISOString(),
+          amount: centsToEuros(payment.amountCents),
+          invoiceNumber: invoice.number,
+        };
+      }
+    }
+    return {
+      id: invoice.id,
+      number: invoice.number,
+      status: invoice.status,
+      displayStatus: displayStatus({
+        status: invoice.status as "draft" | "sent" | "paid" | "credited",
+        dueDate: invoice.dueDate,
+        documentKind: invoice.documentKind,
+      }),
+      issueDate: invoice.issueDate.toISOString().slice(0, 10),
+      dueDate: invoice.dueDate.toISOString().slice(0, 10),
+      gross: centsToEuros(invoice.grossCents),
+      open: centsToEuros(position.openCents),
+    };
+  });
+
+  return {
+    customer: toPublicCustomer(customer),
+    openBalance: centsToEuros(openBalanceCents),
+    openInvoiceCount,
+    invoicedTotal: centsToEuros(invoicedCents),
+    lastPayment,
+    invoices,
+  };
+}
+
+/** Moves invoices and schedules onto the survivor, then archives the duplicate. */
+export async function mergeCustomers(
+  userId: string,
+  keepId: string,
+  mergeId: string
+): Promise<CustomerDetail> {
+  if (keepId === mergeId) {
+    throw new ValidationError("Asiakasta ei voi yhdistää itseensä.");
+  }
+  const keep = await prisma.customer.findFirst({ where: { id: keepId, userId } });
+  const merge = await prisma.customer.findFirst({ where: { id: mergeId, userId } });
+  if (!keep || !merge) throw new NotFoundError("Asiakasta ei löytynyt.");
+
+  const note = `Yhdistetty asiakkaaseen ${keep.name}.`;
+  await prisma.$transaction([
+    prisma.salesInvoice.updateMany({
+      where: { userId, customerId: mergeId },
+      data: { customerId: keepId },
+    }),
+    prisma.recurringInvoice.updateMany({
+      where: { userId, customerId: mergeId },
+      data: { customerId: keepId },
+    }),
+    prisma.customer.update({
+      where: { id: mergeId },
+      data: {
+        archivedAt: merge.archivedAt ?? new Date(),
+        notes: [merge.notes, note].filter(Boolean).join("\n"),
+      },
+    }),
+  ]);
+  return getCustomerDetail(userId, keepId);
+}
+
+export interface CustomerImportResult {
+  rows: CustomerCsvRow[];
+  created: number;
+}
+
+/** Previews every row. Inserts only the valid ones when `commit` is set. */
+export async function importCustomers(
+  userId: string,
+  csv: string,
+  commit: boolean
+): Promise<CustomerImportResult> {
+  const rows = parseCustomerCsv(csv);
+  if (!commit) return { rows, created: 0 };
+
+  let created = 0;
+  for (const row of rows) {
+    if (row.errors.length > 0 || !row.name) continue;
+    try {
+      await createCustomer(userId, {
+        name: row.name,
+        email: row.email,
+        phone: row.phone,
+        businessId: row.businessId,
+      });
+      created += 1;
+    } catch (error) {
+      row.errors.push(error instanceof Error ? error.message : "Riviä ei voitu tallentaa.");
+    }
+  }
+  return { rows, created };
 }
 
 /** Guard used by invoice creation. */

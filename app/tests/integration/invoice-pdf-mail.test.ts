@@ -71,6 +71,10 @@ async function extractPdfText(bytes: Buffer): Promise<string> {
 beforeEach(async () => {
   await resetDatabase();
   user = await createUser();
+  await prisma.user.update({
+    where: { id: user.id },
+    data: { invoiceIban: "FI2112345600000785" },
+  });
   cookie = await sessionCookie(user);
   otherUser = await createUser();
   otherCookie = await sessionCookie(otherUser);
@@ -348,15 +352,12 @@ describe("POST /api/invoices/[id]/send", () => {
       buildRequest("POST", `/api/invoices/${invoice.id}/status`, { status: "sent" }, { cookie }),
       routeContext({ id: invoice.id })
     );
-    await setStatus(
-      buildRequest(
-        "POST",
-        `/api/invoices/${invoice.id}/status`,
-        { status: "credited" },
-        { cookie }
-      ),
+    const { POST: creditNote } = await import("@/app/api/invoices/[id]/credit/route");
+    const note = await creditNote(
+      buildRequest("POST", `/api/invoices/${invoice.id}/credit`, {}, { cookie }),
       routeContext({ id: invoice.id })
     );
+    expect(note.status).toBe(201);
 
     const credited = await sendInvoice(
       buildRequest("POST", `/api/invoices/${invoice.id}/send`, {}, { cookie }),

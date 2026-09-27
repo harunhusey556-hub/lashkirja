@@ -39,6 +39,14 @@ export interface CustomerSource {
   addressCity?: string | null;
 }
 
+/** Fields that must exist before an invoice may be emailed. */
+export function missingSellerSendFields(seller: InvoicePdfSeller): string[] {
+  const missing: string[] = [];
+  if (!seller.name.trim()) missing.push("nimi");
+  if (!seller.iban?.trim()) missing.push("tilinumero");
+  return missing;
+}
+
 export function sellerFromUser(user: SellerSource): InvoicePdfSeller {
   const person = `${user.firstName} ${user.lastName}`.trim();
   return {

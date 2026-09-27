@@ -5,11 +5,14 @@
  * rules that need the database: the per-user invoice number sequence, which
  * edits a non-draft invoice still allows, and how a bank row becomes a payment.
  */
+import type { Prisma } from "@/generated/prisma/client";
 import { prisma } from "./db";
 import { AppError, NotFoundError, ValidationError } from "./api-errors";
 import { assertCurrentVersion } from "./edit-conflict";
 import { centsToEuros, eurosToCents } from "./money";
-import { isoDateToUtc } from "./validation";
+import { formatEur } from "./format";
+import { allocateInvoiceNumber, peekInvoiceNumber } from "./invoice-sequence";
+import { helsinkiCalendarDate, isoDateToUtc } from "./validation";
 import { normalizeReference, referenceForInvoice } from "./finnish-reference";
 import {
   buildAgingReport,
@@ -113,16 +116,31 @@ export function toLineInputs(lines: InvoiceLinePayload[]): Array<InvoiceLineInpu
 }
 
 /**
- * Next number in the user's own sequence. The unique index on (userId, number)
- * is the real guard; this only proposes the value.
+ * Next number in the user's own sequence, without consuming it.
+ * Allocation itself happens inside the create transaction.
  */
 export async function nextInvoiceNumber(userId: string): Promise<number> {
-  const latest = await prisma.salesInvoice.findFirst({
-    where: { userId },
-    orderBy: { number: "desc" },
-    select: { number: true },
-  });
-  return (latest?.number ?? 0) + 1;
+  return peekInvoiceNumber(userId);
+}
+
+const STATUS_FI: Record<string, string> = {
+  draft: "Luonnos",
+  sent: "Lähetetty",
+  paid: "Maksettu",
+  credited: "Hyvitetty",
+};
+
+function statusFi(status: string): string {
+  return STATUS_FI[status] ?? status;
+}
+
+async function recordActivity(
+  db: Prisma.TransactionClient | typeof prisma,
+  invoiceId: string,
+  kind: string,
+  summary: string
+): Promise<void> {
+  await db.invoiceActivity.create({ data: { invoiceId, kind, summary } });
 }
 
 export interface PublicInvoiceLine {
@@ -154,6 +172,9 @@ export interface PublicInvoice {
   open: number;
   closedReason: string | null;
   updatedAt: string;
+  documentKind: "invoice" | "credit_note";
+  creditsInvoice: { id: string; number: number } | null;
+  creditNotes: Array<{ id: string; number: number; status: string }>;
   customer: { id: string; name: string; email: string | null; businessId: string | null };
   lines: PublicInvoiceLine[];
   payments: Array<{
@@ -164,6 +185,17 @@ export interface PublicInvoice {
     transactionId: string | null;
     note: string | null;
   }>;
+  sends: Array<{
+    id: string;
+    toAddress: string;
+    status: string;
+    attachmentName: string | null;
+    gross: number | null;
+    error: string | null;
+    createdAt: string;
+    finishedAt: string | null;
+  }>;
+  activity: Array<{ id: string; kind: string; summary: string; createdAt: string }>;
 }
 
 type InvoiceWithRelations = {
@@ -183,6 +215,9 @@ type InvoiceWithRelations = {
   partySnapshot: string | null;
   closedReason: string | null;
   updatedAt: Date;
+  documentKind: string;
+  creditsInvoice: { id: string; number: number } | null;
+  creditNotes: Array<{ id: string; number: number; status: string }>;
   customer: { id: string; name: string; email: string | null; businessId: string | null };
   lines: Array<{
     id: string;
@@ -202,12 +237,30 @@ type InvoiceWithRelations = {
     transactionId: string | null;
     note: string | null;
   }>;
+  emailSends: Array<{
+    id: string;
+    toAddress: string;
+    status: string;
+    attachmentName: string | null;
+    grossCents: number | null;
+    error: string | null;
+    createdAt: Date;
+    finishedAt: Date | null;
+  }>;
+  activities: Array<{ id: string; kind: string; summary: string; createdAt: Date }>;
 };
 
 const invoiceInclude = {
   customer: { select: { id: true, name: true, email: true, businessId: true } },
   lines: { orderBy: { sortOrder: "asc" as const } },
   payments: { orderBy: { paidDate: "asc" as const } },
+  creditsInvoice: { select: { id: true, number: true } },
+  creditNotes: {
+    select: { id: true, number: true, status: true },
+    orderBy: { createdAt: "desc" as const },
+  },
+  emailSends: { orderBy: { createdAt: "desc" as const } },
+  activities: { orderBy: { createdAt: "asc" as const } },
 };
 
 export function toPublicInvoice(
@@ -227,7 +280,11 @@ export function toPublicInvoice(
     reference: invoice.reference,
     status: invoice.status as InvoiceStatus,
     displayStatus: displayStatus(
-      { status: invoice.status as InvoiceStatus, dueDate: invoice.dueDate },
+      {
+        status: invoice.status as InvoiceStatus,
+        dueDate: invoice.dueDate,
+        documentKind: invoice.documentKind,
+      },
       now
     ),
     issueDate: invoice.issueDate.toISOString().slice(0, 10),
@@ -243,6 +300,9 @@ export function toPublicInvoice(
     open: centsToEuros(position.openCents),
     closedReason: invoice.closedReason,
     updatedAt: invoice.updatedAt.toISOString(),
+    documentKind: invoice.documentKind === "credit_note" ? "credit_note" : "invoice",
+    creditsInvoice: invoice.creditsInvoice,
+    creditNotes: invoice.creditNotes,
     customer: invoice.customer,
     lines: invoice.lines.map((line) => ({
       id: line.id,
@@ -260,6 +320,22 @@ export function toPublicInvoice(
       source: payment.source,
       transactionId: payment.transactionId,
       note: payment.note,
+    })),
+    sends: invoice.emailSends.map((send) => ({
+      id: send.id,
+      toAddress: send.toAddress,
+      status: send.status,
+      attachmentName: send.attachmentName,
+      gross: send.grossCents == null ? null : centsToEuros(send.grossCents),
+      error: send.error,
+      createdAt: send.createdAt.toISOString(),
+      finishedAt: send.finishedAt ? send.finishedAt.toISOString() : null,
+    })),
+    activity: invoice.activities.map((entry) => ({
+      id: entry.id,
+      kind: entry.kind,
+      summary: entry.summary,
+      createdAt: entry.createdAt.toISOString(),
     })),
   };
 }
@@ -287,38 +363,43 @@ export async function createInvoice(
     throw new ValidationError("Eräpäivä ei voi olla ennen laskun päivää.");
   }
 
-  // Two invoices created at the same moment would propose the same number; the
-  // unique index rejects the loser, so retry with a fresh number.
+  // The number is consumed inside the same transaction as the insert. A rolled
+  // back attempt does not burn it, and two parallel creates cannot take the
+  // same integer. The unique index is the backstop.
   for (let attempt = 0; attempt < 5; attempt += 1) {
-    const number = await nextInvoiceNumber(userId);
     try {
-      const created = await prisma.salesInvoice.create({
-        data: {
-          userId,
-          customerId: customer.id,
-          number,
-          reference: referenceForInvoice(number),
-          issueDate,
-          dueDate,
-          notes: input.notes?.trim() || null,
-          netCents: totals.netCents,
-          vatCents: totals.vatCents,
-          grossCents: totals.grossCents,
-          lines: {
-            create: lineInputs.map((line, index) => ({
-              sortOrder: index,
-              description: line.description,
-              unit: line.unit,
-              quantityMilli: line.quantityMilli,
-              unitPriceCents: line.unitPriceCents,
-              vatRatePermille: line.vatRatePermille,
-              netCents: totals.lines[index].netCents,
-            })),
+      const createdId = await prisma.$transaction(async (tx) => {
+        const number = await allocateInvoiceNumber(tx, userId);
+        const created = await tx.salesInvoice.create({
+          data: {
+            userId,
+            customerId: customer.id,
+            number,
+            reference: referenceForInvoice(number),
+            issueDate,
+            dueDate,
+            notes: input.notes?.trim() || null,
+            netCents: totals.netCents,
+            vatCents: totals.vatCents,
+            grossCents: totals.grossCents,
+            lines: {
+              create: lineInputs.map((line, index) => ({
+                sortOrder: index,
+                description: line.description,
+                unit: line.unit,
+                quantityMilli: line.quantityMilli,
+                unitPriceCents: line.unitPriceCents,
+                vatRatePermille: line.vatRatePermille,
+                netCents: totals.lines[index].netCents,
+              })),
+            },
           },
-        },
-        include: invoiceInclude,
+          select: { id: true },
+        });
+        await recordActivity(tx, created.id, "created", "Lasku luotiin.");
+        return created.id;
       });
-      return toPublicInvoice(created);
+      return getInvoice(userId, createdId);
     } catch (error) {
       const code = (error as { code?: string }).code;
       if (code !== "P2002") throw error;
@@ -357,7 +438,14 @@ export async function updateInvoice(
 ): Promise<PublicInvoice> {
   const existing = await prisma.salesInvoice.findFirst({
     where: { id, userId },
-    select: { id: true, status: true, issueDate: true, dueDate: true, updatedAt: true },
+    select: {
+      id: true,
+      status: true,
+      issueDate: true,
+      dueDate: true,
+      updatedAt: true,
+      grossCents: true,
+    },
   });
   if (!existing) throw new NotFoundError("Laskua ei löytynyt.");
   assertCurrentVersion(existing.updatedAt, input.expectedUpdatedAt);
@@ -399,9 +487,9 @@ export async function updateInvoice(
     data.vatCents = totals.vatCents;
     data.grossCents = totals.grossCents;
 
-    await prisma.$transaction([
-      prisma.invoiceLine.deleteMany({ where: { invoiceId: id } }),
-      prisma.invoiceLine.createMany({
+    await prisma.$transaction(async (tx) => {
+      await tx.invoiceLine.deleteMany({ where: { invoiceId: id } });
+      await tx.invoiceLine.createMany({
         data: lineInputs.map((line, index) => ({
           invoiceId: id,
           sortOrder: index,
@@ -412,9 +500,17 @@ export async function updateInvoice(
           vatRatePermille: line.vatRatePermille,
           netCents: totals.lines[index].netCents,
         })),
-      }),
-      prisma.salesInvoice.update({ where: { id }, data }),
-    ]);
+      });
+      await tx.salesInvoice.update({ where: { id }, data });
+      if (totals.grossCents !== existing.grossCents) {
+        await recordActivity(
+          tx,
+          id,
+          "amount_changed",
+          `Summa muuttui ${formatEur(centsToEuros(existing.grossCents))} → ${formatEur(centsToEuros(totals.grossCents))}.`
+        );
+      }
+    });
   } else if (Object.keys(data).length > 0) {
     await prisma.salesInvoice.update({ where: { id }, data });
   }
@@ -439,6 +535,165 @@ export async function deleteInvoice(userId: string, id: string): Promise<void> {
   await prisma.salesInvoice.delete({ where: { id } });
 }
 
+/**
+ * Issues a numbered credit note that reverses the original lines and marks
+ * the original credited. Status alone is not a credit note.
+ */
+export async function createCreditNote(userId: string, invoiceId: string): Promise<PublicInvoice> {
+  const original = await prisma.salesInvoice.findFirst({
+    where: { id: invoiceId, userId },
+    include: { lines: { orderBy: { sortOrder: "asc" } } },
+  });
+  if (!original) throw new NotFoundError("Laskua ei löytynyt.");
+  if (original.documentKind === "credit_note") {
+    throw new AppError("Hyvityslaskua ei hyvitetä uudelleen.", "CREDIT_NOTE_REQUIRED", 409);
+  }
+  if (original.status === "draft") {
+    throw new AppError("Luonnosta ei hyvitetä. Poista luonnos.", "INVOICE_IS_DRAFT", 409);
+  }
+  if (original.status === "credited") {
+    throw new AppError("Lasku on jo hyvitetty.", "ALREADY_CREDITED", 409);
+  }
+  const existingNote = await prisma.salesInvoice.findFirst({
+    where: { userId, creditsInvoiceId: original.id },
+    select: { id: true },
+  });
+  if (existingNote) {
+    throw new AppError("Laskulla on jo hyvityslasku.", "ALREADY_CREDITED", 409);
+  }
+  if (original.lines.length === 0) {
+    throw new ValidationError("Tyhjää laskua ei voi hyvittää.");
+  }
+
+  const issueDate = isoDateToUtc(helsinkiCalendarDate());
+  await assertPeriodOpen(userId, [issueDate, original.issueDate]);
+  const dueDate = issueDate;
+  const lineInputs = toLineInputs(
+    original.lines.map((line) => ({
+      description: line.description,
+      quantity: line.quantityMilli / 1000,
+      unit: line.unit,
+      unitPrice: centsToEuros(-line.unitPriceCents),
+      vatRate: line.vatRatePermille / 10,
+    }))
+  );
+  const totals = computeInvoiceTotals(lineInputs);
+  const snapshot = await capturePartySnapshot(userId, original.customerId);
+
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    try {
+      const createdId = await prisma.$transaction(async (tx) => {
+        const number = await allocateInvoiceNumber(tx, userId);
+        const created = await tx.salesInvoice.create({
+          data: {
+            userId,
+            customerId: original.customerId,
+            number,
+            reference: referenceForInvoice(number),
+            issueDate,
+            dueDate,
+            status: "sent",
+            sentAt: new Date(),
+            documentKind: "credit_note",
+            creditsInvoiceId: original.id,
+            partySnapshot: snapshot,
+            notes: `Hyvitys laskulle ${original.number}`,
+            netCents: totals.netCents,
+            vatCents: totals.vatCents,
+            grossCents: totals.grossCents,
+            lines: {
+              create: lineInputs.map((line, index) => ({
+                sortOrder: index,
+                description: line.description,
+                unit: line.unit,
+                quantityMilli: line.quantityMilli,
+                unitPriceCents: line.unitPriceCents,
+                vatRatePermille: line.vatRatePermille,
+                netCents: totals.lines[index].netCents,
+              })),
+            },
+          },
+          select: { id: true, number: true },
+        });
+        await tx.salesInvoice.update({
+          where: { id: original.id },
+          data: { status: "credited" },
+        });
+        await recordActivity(
+          tx,
+          created.id,
+          "credit_issued",
+          `Hyvityslasku luotiin laskulle ${original.number}.`
+        );
+        await recordActivity(
+          tx,
+          original.id,
+          "credit_issued",
+          `Hyvityslasku ${created.number} kirjattiin.`
+        );
+        await recordActivity(
+          tx,
+          original.id,
+          "status_changed",
+          `Tila muuttui: ${statusFi(original.status)} → Hyvitetty.`
+        );
+        return created.id;
+      });
+      return getInvoice(userId, createdId);
+    } catch (error) {
+      const code = (error as { code?: string }).code;
+      if (code !== "P2002") throw error;
+    }
+  }
+  throw new AppError("Laskunumeron varaus epäonnistui, yritä uudelleen.", "NUMBER_RACE", 409);
+}
+
+/** Copies lines into a new draft with a new number, dates and status. */
+export async function duplicateInvoice(userId: string, invoiceId: string): Promise<PublicInvoice> {
+  const source = await prisma.salesInvoice.findFirst({
+    where: { id: invoiceId, userId },
+    include: {
+      lines: { orderBy: { sortOrder: "asc" } },
+      customer: { select: { defaultPaymentTermDays: true } },
+    },
+  });
+  if (!source) throw new NotFoundError("Laskua ei löytynyt.");
+  if (source.lines.length === 0) throw new ValidationError("Tyhjää laskua ei voi kopioida.");
+
+  const sign = source.documentKind === "credit_note" ? -1 : 1;
+  const issueDate = helsinkiCalendarDate();
+  const copy = await createInvoice(userId, {
+    customerId: source.customerId,
+    issueDate,
+    paymentTermDays: source.customer.defaultPaymentTermDays,
+    notes: source.notes,
+    lines: source.lines.map((line) => ({
+      description: line.description,
+      quantity: line.quantityMilli / 1000,
+      unit: line.unit,
+      unitPrice: centsToEuros(line.unitPriceCents * sign),
+      vatRate: line.vatRatePermille / 10,
+    })),
+  });
+  await prisma.$transaction([
+    prisma.invoiceActivity.create({
+      data: {
+        invoiceId: copy.id,
+        kind: "duplicated",
+        summary: `Kopioitu laskusta ${source.number}.`,
+      },
+    }),
+    prisma.invoiceActivity.create({
+      data: {
+        invoiceId: source.id,
+        kind: "duplicated",
+        summary: `Kopioitu luonnokseksi ${copy.number}.`,
+      },
+    }),
+  ]);
+  return getInvoice(userId, copy.id);
+}
+
 export async function setInvoiceStatus(
   userId: string,
   id: string,
@@ -452,6 +707,14 @@ export async function setInvoiceStatus(
   if (!existing) throw new NotFoundError("Laskua ei löytynyt.");
 
   await assertPeriodOpen(userId, [existing.issueDate]);
+
+  if (target === "credited") {
+    throw new AppError(
+      "Hyvitys tehdään erillisellä hyvityslaskulla.",
+      "CREDIT_NOTE_REQUIRED",
+      409
+    );
+  }
 
   const current = existing.status as InvoiceStatus;
   if (!canTransition(current, target)) {
@@ -503,12 +766,22 @@ export async function setInvoiceStatus(
     data.closedReason = null;
     data.closedAt = null;
   }
-  if ((target === "sent" || target === "credited") && current === "draft") {
+  if (target === "sent" && current === "draft") {
     data.partySnapshot =
       existing.partySnapshot ?? (await capturePartySnapshot(userId, existing.customerId));
   }
 
-  await prisma.salesInvoice.update({ where: { id }, data });
+  await prisma.$transaction(async (tx) => {
+    await tx.salesInvoice.update({ where: { id }, data });
+    if (current !== target) {
+      await recordActivity(
+        tx,
+        id,
+        "status_changed",
+        `Tila muuttui: ${statusFi(current)} → ${statusFi(target)}.`
+      );
+    }
+  });
   return getInvoice(userId, id);
 }
 
@@ -534,7 +807,7 @@ export async function recordPayment(
   if (invoice.status === "draft") {
     throw new AppError("Luonnokselle ei voi kirjata maksua.", "INVOICE_IS_DRAFT", 409);
   }
-  if (invoice.status === "credited") {
+  if (invoice.status === "credited" || invoice.documentKind === "credit_note") {
     throw new AppError("Hyvitetylle laskulle ei voi kirjata maksua.", "INVOICE_CREDITED", 409);
   }
 
@@ -562,25 +835,45 @@ export async function recordPayment(
     }
   }
 
-  await prisma.invoicePayment.create({
-    data: {
-      invoiceId,
-      transactionId: input.transactionId ?? null,
-      paidDate: isoDateToUtc(input.paidDate),
-      amountCents,
-      source: input.source ?? "manual",
-      note: input.note?.trim() || null,
-    },
-  });
-
   const paidCents =
     invoice.payments.reduce((sum, payment) => sum + payment.amountCents, 0) + amountCents;
-  if (paidCents >= invoice.grossCents && invoice.status === "sent") {
-    await prisma.salesInvoice.update({
-      where: { id: invoiceId },
-      data: { status: "paid", paidAt: isoDateToUtc(input.paidDate) },
+  const covered = paidCents >= invoice.grossCents;
+  const reopens =
+    invoice.status === "paid" && !invoice.closedReason?.trim() && paidCents < invoice.grossCents;
+
+  await prisma.$transaction(async (tx) => {
+    await tx.invoicePayment.create({
+      data: {
+        invoiceId,
+        transactionId: input.transactionId ?? null,
+        paidDate: isoDateToUtc(input.paidDate),
+        amountCents,
+        source: input.source ?? "manual",
+        note: input.note?.trim() || null,
+      },
     });
-  }
+    await recordActivity(
+      tx,
+      invoiceId,
+      "payment_added",
+      amountCents < 0
+        ? `Hyvitys ${formatEur(centsToEuros(amountCents))} kirjattiin.`
+        : `Maksu ${formatEur(centsToEuros(amountCents))} kirjattiin.`
+    );
+    if (covered && invoice.status === "sent") {
+      await tx.salesInvoice.update({
+        where: { id: invoiceId },
+        data: { status: "paid", paidAt: isoDateToUtc(input.paidDate) },
+      });
+      await recordActivity(tx, invoiceId, "status_changed", "Tila muuttui: Lähetetty → Maksettu.");
+    } else if (reopens) {
+      await tx.salesInvoice.update({
+        where: { id: invoiceId },
+        data: { status: "sent", paidAt: null },
+      });
+      await recordActivity(tx, invoiceId, "status_changed", "Tila muuttui: Maksettu → Lähetetty.");
+    }
+  });
 
   return getInvoice(userId, invoiceId);
 }
@@ -603,28 +896,34 @@ export async function removePayment(
   if (!payment) throw new NotFoundError("Maksua ei löytynyt.");
   await assertPeriodOpen(userId, [payment.paidDate]);
 
-  const deleted = await prisma.invoicePayment.deleteMany({
-    where: { id: paymentId, invoiceId },
-  });
-  if (deleted.count === 0) throw new NotFoundError("Maksua ei löytynyt.");
+  const removed = await prisma.$transaction(async (tx) => {
+    const deleted = await tx.invoicePayment.deleteMany({
+      where: { id: paymentId, invoiceId },
+    });
+    if (deleted.count === 0) return false;
+    await recordActivity(tx, invoiceId, "payment_removed", "Maksu poistettiin.");
 
-  // A write-off stays closed. A payment-only close reopens when the cover is gone.
-  if (invoice.status === "paid" && !invoice.closedReason?.trim()) {
-    const remaining = await prisma.invoicePayment.aggregate({
-      where: { invoiceId },
-      _sum: { amountCents: true },
-    });
-    const full = await prisma.salesInvoice.findUnique({
-      where: { id: invoiceId },
-      select: { grossCents: true },
-    });
-    if ((remaining._sum.amountCents ?? 0) < (full?.grossCents ?? 0)) {
-      await prisma.salesInvoice.update({
-        where: { id: invoiceId },
-        data: { status: "sent", paidAt: null },
+    // A write-off stays closed. A payment-only close reopens when the cover is gone.
+    if (invoice.status === "paid" && !invoice.closedReason?.trim()) {
+      const remaining = await tx.invoicePayment.aggregate({
+        where: { invoiceId },
+        _sum: { amountCents: true },
       });
+      const full = await tx.salesInvoice.findUnique({
+        where: { id: invoiceId },
+        select: { grossCents: true },
+      });
+      if ((remaining._sum.amountCents ?? 0) < (full?.grossCents ?? 0)) {
+        await tx.salesInvoice.update({
+          where: { id: invoiceId },
+          data: { status: "sent", paidAt: null },
+        });
+        await recordActivity(tx, invoiceId, "status_changed", "Tila muuttui: Maksettu → Lähetetty.");
+      }
     }
-  }
+    return true;
+  });
+  if (!removed) throw new NotFoundError("Maksua ei löytynyt.");
 
   return getInvoice(userId, invoiceId);
 }
@@ -654,6 +953,7 @@ export async function listInvoices(
     // Filter in the database before `take`. A post-query filter would hide an
     // old overdue invoice behind 200 newer ones that are not overdue.
     where.status = "sent";
+    where.documentKind = "invoice";
     where.dueDate = { lt: overdueBefore(now) };
   } else if (options.status && options.status !== "all") {
     where.status = options.status;
@@ -669,7 +969,7 @@ export async function listInvoices(
   const invoices = rows.map((row) => toPublicInvoice(row, now));
 
   const allOpen = await prisma.salesInvoice.findMany({
-    where: { userId, status: { in: ["sent", "paid"] } },
+    where: { userId, status: { in: ["sent", "paid"] }, documentKind: "invoice" },
     select: {
       status: true,
       dueDate: true,
@@ -724,7 +1024,7 @@ export async function matchInvoicePaymentsFromBank(
   now: Date = new Date()
 ): Promise<BankMatchResult> {
   const openInvoices = await prisma.salesInvoice.findMany({
-    where: { userId, status: "sent" },
+    where: { userId, status: "sent", documentKind: "invoice" },
     include: { payments: { select: { amountCents: true } } },
   });
   if (openInvoices.length === 0) return { applied: [], suggestions: [], skippedLocked: [] };
@@ -832,6 +1132,7 @@ export async function buildInvoicePdfData(
     include: {
       customer: true,
       lines: { orderBy: { sortOrder: "asc" } },
+      creditsInvoice: { select: { number: true } },
     },
   });
   if (!invoice) throw new NotFoundError("Laskua ei löytynyt.");
@@ -877,6 +1178,8 @@ export async function buildInvoicePdfData(
 
   return {
     number: invoice.number,
+    documentKind: invoice.documentKind === "credit_note" ? "credit_note" : "invoice",
+    originalNumber: invoice.creditsInvoice?.number ?? null,
     reference: invoice.reference,
     issueDate: invoice.issueDate.toISOString().slice(0, 10),
     dueDate: invoice.dueDate.toISOString().slice(0, 10),
@@ -899,6 +1202,10 @@ export async function buildInvoicePdfData(
 }
 
 /** Filename used for downloads and email attachments. */
-export function invoicePdfFileName(number: number): string {
-  return `lasku-${String(number).padStart(4, "0")}.pdf`;
+export function invoicePdfFileName(
+  number: number,
+  documentKind: "invoice" | "credit_note" = "invoice"
+): string {
+  const prefix = documentKind === "credit_note" ? "hyvitys" : "lasku";
+  return `${prefix}-${String(number).padStart(4, "0")}.pdf`;
 }

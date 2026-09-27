@@ -46,6 +46,8 @@ export interface InvoicePdfLine {
 
 export interface InvoicePdfData {
   number: number;
+  documentKind?: "invoice" | "credit_note";
+  originalNumber?: number | null;
   reference: string;
   issueDate: string; // YYYY-MM-DD
   dueDate: string;
@@ -108,8 +110,12 @@ export function renderInvoicePdf(data: InvoicePdfData): Promise<Buffer> {
       doc.text("Ei arvonlisäverovelvollinen (AVL 3 §)");
     }
 
+    const creditNote = data.documentKind === "credit_note";
     // Invoice header block, right-aligned
-    doc.font("Helvetica-Bold").fontSize(20).text("LASKU", left, 48, { width, align: "right" });
+    doc
+      .font("Helvetica-Bold")
+      .fontSize(20)
+      .text(creditNote ? "HYVITYSLASKU" : "LASKU", left, 48, { width, align: "right" });
     doc.font("Helvetica").fontSize(9);
     const headerRows: Array<[string, string]> = [
       ["Laskun numero", String(data.number)],
@@ -117,6 +123,9 @@ export function renderInvoicePdf(data: InvoicePdfData): Promise<Buffer> {
       ["Eräpäivä", fiDate(data.dueDate)],
       ["Viitenumero", formatReference(data.reference)],
     ];
+    if (creditNote && data.originalNumber) {
+      headerRows.push(["Hyvittää laskun", String(data.originalNumber)]);
+    }
     let headerY = 74;
     for (const [label, value] of headerRows) {
       doc.text(`${label}: ${value}`, left, headerY, { width, align: "right" });

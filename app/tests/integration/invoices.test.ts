@@ -304,10 +304,20 @@ describe("status transitions", () => {
   it("makes crediting final", async () => {
     const invoice = await makeInvoice();
     await send(invoice.id);
-    await setStatus(
+    const direct = await setStatus(
       buildRequest("POST", `/api/invoices/${invoice.id}/status`, { status: "credited" }, { cookie }),
       routeContext({ id: invoice.id })
     );
+    expect(direct.status).toBe(409);
+    expect((await readJson(direct)).error.code).toBe("CREDIT_NOTE_REQUIRED");
+
+    const { POST: creditInvoice } = await import("@/app/api/invoices/[id]/credit/route");
+    const credited = await creditInvoice(
+      buildRequest("POST", `/api/invoices/${invoice.id}/credit`, {}, { cookie }),
+      routeContext({ id: invoice.id })
+    );
+    expect(credited.status).toBe(201);
+
     const back = await setStatus(
       buildRequest("POST", `/api/invoices/${invoice.id}/status`, { status: "sent" }, { cookie }),
       routeContext({ id: invoice.id })

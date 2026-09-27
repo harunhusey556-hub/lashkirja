@@ -60,6 +60,11 @@ export default function CustomersPage() {
   const [confirmRemove, setConfirmRemove] = useState<Customer | null>(null);
   const [formKey, setFormKey] = useState(0);
   const [undo, setUndo] = useState<{ id: string; name: string } | null>(null);
+  const [importOpen, setImportOpen] = useState(false);
+  const [csv, setCsv] = useState("nimi,sähköposti,puhelin,y-tunnus\n");
+  const [csvRows, setCsvRows] = useState<
+    Array<{ line: number; name: string | null; errors: string[] }> | null
+  >(null);
   const createKey = useRef(newIdempotencyKey());
 
   useEffect(() => {
@@ -142,6 +147,49 @@ export default function CustomersPage() {
     const data = await readJson<{ customer: Customer }>(response, "Asiakkaan haku epäonnistui");
     setFormMode({ edit: { ...editing, ...data.customer } });
     setFormKey((key) => key + 1);
+  }
+
+  async function previewCsv() {
+    setBusy(true);
+    setMessage(null);
+    try {
+      const response = await apiFetch("/api/customers/import", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ csv }),
+      });
+      const data = await readJson<{
+        rows: Array<{ line: number; name: string | null; errors: string[] }>;
+      }>(response, "Tuonnin tarkistus epäonnistui");
+      setCsvRows(data.rows);
+    } catch (error) {
+      setMessage(errorMessage(error, "Tuonnin tarkistus epäonnistui"));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function commitCsv() {
+    setBusy(true);
+    setMessage(null);
+    try {
+      const response = await apiFetch("/api/customers/import", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ csv, commit: true }),
+      });
+      const data = await readJson<{ created: number }>(response, "Tuonti epäonnistui");
+      setMessage(`Tuotiin ${data.created} asiakasta.`);
+      setImportOpen(false);
+      setCsvRows(null);
+      await load();
+    } catch (error) {
+      setMessage(errorMessage(error, "Tuonti epäonnistui"));
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function undoArchive() {
@@ -240,7 +288,7 @@ export default function CustomersPage() {
         )}
 
         {formMode === "hidden" ? (
-          <div className="flex gap-3">
+          <div className="flex flex-wrap gap-3">
             <input
               aria-label="Hae asiakasta"
               value={search}
@@ -250,6 +298,9 @@ export default function CustomersPage() {
             />
             <Button type="button" onClick={() => setFormMode("create")}>
               Lisää
+            </Button>
+            <Button type="button" variant="secondary" onClick={() => setImportOpen((open) => !open)}>
+              Tuo CSV
             </Button>
           </div>
         ) : (
@@ -284,6 +335,43 @@ export default function CustomersPage() {
           </section>
         )}
 
+        {importOpen && formMode === "hidden" && (
+          <section className="bg-white rounded-3xl border border-warm-gray-light/20 shadow-sm p-6 space-y-3">
+            <p className="text-base font-medium text-charcoal">Tuo asiakkaita</p>
+            <textarea
+              aria-label="CSV-tiedosto"
+              className="min-h-28 w-full rounded-2xl border border-warm-gray-light/60 bg-white p-3 text-sm"
+              value={csv}
+              onChange={(event) => {
+                setCsv(event.target.value);
+                setCsvRows(null);
+              }}
+            />
+            <div className="flex flex-wrap gap-2">
+              <Button type="button" variant="secondary" disabled={busy} onClick={() => void previewCsv()}>
+                Tarkista
+              </Button>
+              <Button
+                type="button"
+                disabled={busy || !csvRows || csvRows.every((row) => row.errors.length > 0)}
+                onClick={() => void commitCsv()}
+              >
+                Tuo kelvolliset
+              </Button>
+            </div>
+            {csvRows && (
+              <ul className="space-y-1 text-sm">
+                {csvRows.map((row) => (
+                  <li key={row.line} className={row.errors.length ? "text-danger" : "text-charcoal"}>
+                    Rivi {row.line}: {row.name ?? "–"}
+                    {row.errors.length > 0 ? ` — ${row.errors.join(" ")}` : " — kelvollinen"}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+        )}
+
         {status === "loading" && <LoadingState label="Haetaan asiakkaita…" />}
         {loadFailure != null && customers.length > 0 && (
           <StaleBanner fetchedAt={pageCacheFetchedAt("customers")} onRetry={() => void load()} />
@@ -311,7 +399,12 @@ export default function CustomersPage() {
               >
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
-                    <p className="text-base font-medium text-charcoal truncate">{customer.name}</p>
+                    <Link
+                      href={`/asiakkaat/${customer.id}`}
+                      className="text-base font-medium text-charcoal truncate block"
+                    >
+                      {customer.name}
+                    </Link>
                     <p className="text-xs text-warm-gray truncate">
                       {[customer.businessId, customer.email].filter(Boolean).join(" · ") ||
                         "Yksityisasiakas"}

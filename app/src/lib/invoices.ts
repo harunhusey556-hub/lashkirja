@@ -141,6 +141,7 @@ export function dueDateFor(issueDate: Date, termDays: number): Date {
 export interface InvoiceLike {
   status: InvoiceStatus;
   dueDate: Date | string;
+  documentKind?: string;
 }
 
 /**
@@ -156,6 +157,7 @@ export function overdueBefore(now: Date = new Date()): Date {
 
 /** An unpaid sent invoice becomes overdue the day AFTER its due date. */
 export function displayStatus(invoice: InvoiceLike, now: Date = new Date()): InvoiceDisplayStatus {
+  if (invoice.documentKind === "credit_note") return invoice.status;
   if (invoice.status !== "sent") return invoice.status;
   const due = invoice.dueDate instanceof Date ? invoice.dueDate : new Date(invoice.dueDate);
   const dueEnd = Date.UTC(

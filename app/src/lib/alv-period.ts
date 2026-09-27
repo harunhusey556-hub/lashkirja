@@ -36,6 +36,7 @@ export async function loadAlvPeriodSources(
       where: {
         userId,
         status: { in: REPORTED_INVOICE_STATUSES },
+        documentKind: "invoice",
         issueDate: { gte: start, lt: end },
       },
       include: { lines: true },

@@ -119,10 +119,12 @@ describe("GET /api/alv - sales invoices", () => {
     await makeInvoice(); // stays a draft
     const credited = await makeInvoice();
     await send(credited.id);
-    await setStatus(
-      buildRequest("POST", `/api/invoices/${credited.id}/status`, { status: "credited" }, { cookie }),
+    const { POST: creditInvoice } = await import("@/app/api/invoices/[id]/credit/route");
+    const credit = await creditInvoice(
+      buildRequest("POST", `/api/invoices/${credited.id}/credit`, {}, { cookie }),
       routeContext({ id: credited.id })
     );
+    expect(credit.status).toBe(201);
 
     const body = await report();
     expect(body.sources.invoiceCount).toBe(0);

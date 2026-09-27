@@ -3,7 +3,7 @@ import { z } from "zod";
 import { requireSession } from "@/lib/session";
 import { noStoreJson, rejectCrossSite, rejectOversizedContentLength } from "@/lib/http-security";
 import { UnauthorizedError, withErrorHandler } from "@/lib/api-errors";
-import { sendInvoiceByEmail } from "@/lib/invoice-mail";
+import { previewInvoiceSend, sendInvoiceByEmail } from "@/lib/invoice-mail";
 import { getInvoice } from "@/lib/sales-invoices";
 
 const bodySchema = z
@@ -13,6 +13,15 @@ const bodySchema = z
     message: z.string().trim().max(4000).optional(),
   })
   .default({});
+
+export const GET = withErrorHandler(
+  async (req: NextRequest, context: { params: Promise<{ id: string }> }) => {
+    const session = await requireSession(req);
+    if (!session) throw new UnauthorizedError();
+    const { id } = await context.params;
+    return noStoreJson({ preview: await previewInvoiceSend(session.userId, id) });
+  }
+);
 
 export const POST = withErrorHandler(
   async (req: NextRequest, context: { params: Promise<{ id: string }> }) => {

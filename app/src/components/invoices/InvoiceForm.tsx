@@ -1,9 +1,9 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useEditorSession } from "@/components/form-session";
 import { Button, controlClass, SavePhaseNote } from "@/components/ui";
-import { errorMessage } from "@/components/clientFetch";
+import { apiFetch, errorMessage, readJson } from "@/components/clientFetch";
 import { focusFirstInvalid, invalidFieldProps } from "@/lib/focus-field";
 import { formatEur, parseFinnishNumber, parseMoneyInput } from "@/lib/format";
 import {
@@ -190,6 +190,9 @@ export function InvoiceForm({
   const [values, setValues] = useState<InvoiceFormValues>(baseline);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [saveError, setSaveError] = useState("");
+  const [catalog, setCatalog] = useState<
+    Array<{ id: string; name: string; unit: string; unitPrice: number; vatRate: number }>
+  >([]);
   const session = useEditorSession({
     sourceId: draftKey,
     draftKey,
@@ -198,7 +201,55 @@ export function InvoiceForm({
     onRestore: setValues,
   });
 
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const response = await apiFetch("/api/catalog", { credentials: "include" });
+        const data = await readJson<{
+          items: Array<{ id: string; name: string; unit: string; unitPrice: number; vatRate: number }>;
+        }>(response, "Tuotteiden haku epäonnistui");
+        if (!cancelled) setCatalog(data.items);
+      } catch {
+        // The invoice form still works when the catalog cannot be loaded.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const totals = useMemo(() => previewTotals(values.lines), [values.lines]);
+
+  async function saveLineAsProduct(index: number) {
+    const line = values.lines[index];
+    if (!line) return;
+    const unitPrice = parseMoneyInput(line.unitPrice);
+    if (!line.description.trim() || unitPrice === null || unitPrice < 0) {
+      setSaveError("Tallenna tuotteeksi vasta kun kuvaus ja hinta ovat kunnossa.");
+      return;
+    }
+    try {
+      const response = await apiFetch("/api/catalog", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: line.description.trim(),
+          unit: line.unit.trim() || "kpl",
+          unitPrice,
+          vatRate: line.vatRate,
+        }),
+      });
+      const data = await readJson<{
+        item: { id: string; name: string; unit: string; unitPrice: number; vatRate: number };
+      }>(response, "Tuotteen tallennus epäonnistui");
+      setCatalog((current) => [...current, data.item].sort((a, b) => a.name.localeCompare(b.name, "fi")));
+      setSaveError("");
+    } catch (error) {
+      setSaveError(errorMessage(error, "Tuotteen tallennus epäonnistui"));
+    }
+  }
 
   function setLine(index: number, patch: Partial<InvoiceFormLine>) {
     setValues((current) => ({
@@ -321,6 +372,35 @@ export function InvoiceForm({
             key={index}
             className="rounded-2xl border border-warm-gray-light/40 p-3 space-y-2 bg-cream/40"
           >
+            {catalog.length > 0 && (
+              <div>
+                <label className={lineLabel} htmlFor={`if-line-${index}-product`}>
+                  Tuote
+                </label>
+                <select
+                  id={`if-line-${index}-product`}
+                  className={field}
+                  value=""
+                  onChange={(event) => {
+                    const item = catalog.find((entry) => entry.id === event.target.value);
+                    if (!item) return;
+                    setLine(index, {
+                      description: item.name,
+                      unit: item.unit,
+                      unitPrice: String(item.unitPrice).replace(".", ","),
+                      vatRate: item.vatRate,
+                    });
+                  }}
+                >
+                  <option value="">Valitse tuote</option>
+                  {catalog.map((item) => (
+                    <option key={item.id} value={item.id}>
+                      {item.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
             <label className={lineLabel} htmlFor={`if-line-${index}-desc`}>
               Kuvaus <span className="text-danger" aria-hidden="true">*</span>
             </label>
@@ -403,6 +483,14 @@ export function InvoiceForm({
                   ))}
                 </select>
               </div>
+              <Button
+                type="button"
+                variant="secondary"
+                className="shrink-0"
+                onClick={() => void saveLineAsProduct(index)}
+              >
+                Tallenna tuotteeksi
+              </Button>
               {values.lines.length > 1 && (
                 <Button
                   type="button"

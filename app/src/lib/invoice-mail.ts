@@ -11,7 +11,7 @@ import { AppError, ValidationError } from "./api-errors";
 import { formatEur } from "./format";
 import { formatReference } from "./finnish-reference";
 import { renderInvoicePdf, type InvoicePdfData } from "./invoice-pdf";
-import { parsePartySnapshot } from "./invoice-snapshot";
+import { missingSellerSendFields, parsePartySnapshot } from "./invoice-snapshot";
 import { findSenderAccount, sendMail, type MailSenderAccount, type SentMail } from "./mailer";
 import { assertPeriodOpen } from "./period-lock";
 import {
@@ -45,11 +45,12 @@ function defaultMessage(data: {
   dueDate: string;
   reference: string;
   sellerName: string;
+  creditNote?: boolean;
 }): string {
   return [
     "Hei,",
     "",
-    `liitteenä lasku ${data.number}.`,
+    data.creditNote ? `liitteenä hyvityslasku ${data.number}.` : `liitteenä lasku ${data.number}.`,
     "",
     `Summa: ${data.gross}`,
     `Eräpäivä: ${data.dueDate}`,
@@ -90,6 +91,17 @@ async function persistAcceptedMail(input: {
           },
         }),
         prisma.salesInvoice.update({ where: { id: input.invoiceId }, data: invoiceData }),
+        ...(input.wasDraft
+          ? [
+              prisma.invoiceActivity.create({
+                data: {
+                  invoiceId: input.invoiceId,
+                  kind: "sent",
+                  summary: "Lasku lähetettiin sähköpostilla.",
+                },
+              }),
+            ]
+          : []),
       ]);
       return true;
     } catch (error) {
@@ -146,7 +158,15 @@ export async function sendInvoiceByEmail(
 
   const stored = await prisma.salesInvoice.findFirst({
     where: { id: invoiceId, userId },
-    select: { issueDate: true, customerId: true, partySnapshot: true, status: true },
+    select: {
+      issueDate: true,
+      customerId: true,
+      partySnapshot: true,
+      status: true,
+      documentKind: true,
+      grossCents: true,
+      number: true,
+    },
   });
   if (!stored) throw new AppError("Laskua ei löytynyt.", "NOT_FOUND", 404);
 
@@ -165,8 +185,20 @@ export async function sendInvoiceByEmail(
     data.seller = frozen.seller;
     data.customer = frozen.customer;
   }
+  const missing = missingSellerSendFields(data.seller);
+  if (missing.length > 0) {
+    throw new AppError(
+      "Lähettäjän nimi tai tilinumero puuttuu. Täydennä yrityksen tiedot ennen lähetystä.",
+      "SELLER_INCOMPLETE",
+      409
+    );
+  }
   const pdf = await renderInvoicePdf(data);
-  const subject = input.subject ?? `Lasku ${invoice.number} · ${data.seller.name}`;
+  const creditNote = stored.documentKind === "credit_note";
+  const attachment = invoicePdfFileName(invoice.number, creditNote ? "credit_note" : "invoice");
+  const subject =
+    input.subject ??
+    `${creditNote ? "Hyvityslasku" : "Lasku"} ${invoice.number} · ${data.seller.name}`;
   const text =
     input.message ??
     defaultMessage({
@@ -175,6 +207,7 @@ export async function sendInvoiceByEmail(
       dueDate: invoice.dueDate,
       reference: formatReference(invoice.reference),
       sellerName: data.seller.name,
+      creditNote,
     });
 
   const attempt = await prisma.invoiceEmailSend.create({
@@ -184,6 +217,8 @@ export async function sendInvoiceByEmail(
       subject,
       status: "pending",
       partySnapshot,
+      attachmentName: attachment,
+      grossCents: stored.grossCents,
     },
   });
 
@@ -196,7 +231,7 @@ export async function sendInvoiceByEmail(
       text,
       attachments: [
         {
-          filename: invoicePdfFileName(invoice.number),
+          filename: attachment,
           content: pdf,
           contentType: "application/pdf",
         },
@@ -225,9 +260,61 @@ export async function sendInvoiceByEmail(
     sentTo: sent.to,
     messageId: sent.messageId,
     invoiceNumber: invoice.number,
-    attachment: invoicePdfFileName(invoice.number),
+    attachment,
     statusChanged: recorded && invoice.status === "draft",
     recorded,
     notice: recorded ? null : UNRECORDED_NOTICE,
+  };
+}
+
+export interface SendPreview {
+  recipient: string | null;
+  gross: number;
+  dueDate: string;
+  iban: string | null;
+  attachment: string;
+  missing: string[];
+  blockedReason: string | null;
+}
+
+/** What the sender confirms before SMTP. Does not send. */
+export async function previewInvoiceSend(userId: string, invoiceId: string): Promise<SendPreview> {
+  const invoice = await getInvoice(userId, invoiceId);
+  const stored = await prisma.salesInvoice.findFirst({
+    where: { id: invoiceId, userId },
+    select: { partySnapshot: true, customerId: true, documentKind: true },
+  });
+  if (!stored) throw new AppError("Laskua ei löytynyt.", "NOT_FOUND", 404);
+
+  const partySnapshot =
+    parsePartySnapshot(stored.partySnapshot) != null
+      ? stored.partySnapshot!
+      : await capturePartySnapshot(userId, stored.customerId);
+  const data = await buildInvoicePdfData(userId, invoiceId);
+  const frozen = parsePartySnapshot(partySnapshot);
+  if (frozen) {
+    data.seller = frozen.seller;
+    data.customer = frozen.customer;
+  }
+  const missing = missingSellerSendFields(data.seller);
+  const creditNote = stored.documentKind === "credit_note";
+  let blockedReason: string | null = null;
+  if (invoice.status === "credited") {
+    blockedReason = "Hyvitettyä laskua ei lähetetä.";
+  } else if (missing.length > 0) {
+    blockedReason =
+      "Lähettäjän nimi tai tilinumero puuttuu. Täydennä yrityksen tiedot ennen lähetystä.";
+  } else if (!invoice.customer.email) {
+    blockedReason = "Vastaanottaja puuttuu.";
+  }
+
+  return {
+    recipient: invoice.customer.email,
+    gross: invoice.gross,
+    dueDate: invoice.dueDate,
+    iban: data.seller.iban ?? null,
+    attachment: invoicePdfFileName(invoice.number, creditNote ? "credit_note" : "invoice"),
+    missing,
+    blockedReason,
   };
 }

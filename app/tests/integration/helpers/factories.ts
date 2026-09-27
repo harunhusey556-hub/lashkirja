@@ -18,6 +18,8 @@ export async function resetDatabase(): Promise<void> {
   await prisma.chatMessage.deleteMany();
   await prisma.imapAccount.deleteMany();
   await prisma.idempotencyRecord.deleteMany();
+  await prisma.catalogItem.deleteMany();
+  await prisma.invoiceSequence.deleteMany();
   await prisma.user.deleteMany();
 }
 

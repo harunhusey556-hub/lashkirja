@@ -30,12 +30,25 @@ interface ReminderPreview {
   previousReminders: Array<{ level: number; sentAt: string; total: number }>;
 }
 
+interface SendPreview {
+  recipient: string | null;
+  gross: number;
+  dueDate: string;
+  iban: string | null;
+  attachment: string;
+  missing: string[];
+  blockedReason: string | null;
+}
+
 interface Invoice {
   id: string;
   number: number;
   reference: string;
   status: "draft" | "sent" | "paid" | "credited";
   displayStatus: "draft" | "sent" | "paid" | "credited" | "overdue";
+  documentKind?: "invoice" | "credit_note";
+  creditsInvoice?: { id: string; number: number } | null;
+  creditNotes?: Array<{ id: string; number: number; status: string }>;
   issueDate: string;
   dueDate: string;
   notes: string | null;
@@ -62,6 +75,17 @@ interface Invoice {
     source: string;
     note: string | null;
   }>;
+  sends?: Array<{
+    id: string;
+    toAddress: string;
+    status: string;
+    attachmentName: string | null;
+    gross: number | null;
+    error: string | null;
+    createdAt: string;
+    finishedAt: string | null;
+  }>;
+  activity?: Array<{ id: string; kind: string; summary: string; createdAt: string }>;
 }
 
 const STATUS_LABEL: Record<Invoice["displayStatus"], string> = {
@@ -86,6 +110,7 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
   const paymentKey = useRef(newIdempotencyKey());
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [confirmRemovePayment, setConfirmRemovePayment] = useState<string | null>(null);
+  const [review, setReview] = useState<SendPreview | null>(null);
   const [sending, setSending] = useState(false);
   const [sharing, setSharing] = useState(false);
   const [reminder, setReminder] = useState<ReminderPreview | null>(null);
@@ -245,6 +270,54 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
     }
   }
 
+  async function openReview() {
+    setSending(true);
+    setMessage(null);
+    try {
+      const response = await apiFetch(`/api/invoices/${id}/send`, { credentials: "include" });
+      const result = await readJson<{ preview: SendPreview }>(response, "Tarkistuksen haku epäonnistui");
+      setReview(result.preview);
+    } catch (error) {
+      setMessage(errorMessage(error, "Tarkistuksen haku epäonnistui"));
+    } finally {
+      setSending(false);
+    }
+  }
+
+  async function createCreditNote() {
+    setBusy(true);
+    setMessage(null);
+    try {
+      const response = await apiFetch(`/api/invoices/${id}/credit`, {
+        method: "POST",
+        credentials: "include",
+      });
+      const result = await readJson<{ invoice: { id: string } }>(response, "Hyvitys epäonnistui");
+      router.push(`/laskut/${result.invoice.id}`);
+    } catch (error) {
+      setMessage(errorMessage(error, "Hyvitys epäonnistui"));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function duplicateInvoice() {
+    setBusy(true);
+    setMessage(null);
+    try {
+      const response = await apiFetch(`/api/invoices/${id}/duplicate`, {
+        method: "POST",
+        credentials: "include",
+      });
+      const result = await readJson<{ invoice: { id: string } }>(response, "Kopiointi epäonnistui");
+      router.push(`/laskut/${result.invoice.id}`);
+    } catch (error) {
+      setMessage(errorMessage(error, "Kopiointi epäonnistui"));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function sendByEmail() {
     setSending(true);
     setMessage(null);
@@ -267,6 +340,7 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
       } else {
         setMessage(`Lasku lähetettiin osoitteeseen ${result.sentTo}.`);
       }
+      setReview(null);
       await load();
     } catch (error) {
       setMessage(errorMessage(error, "Lähetys epäonnistui"));
@@ -330,8 +404,18 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
           <>
             <header className="select-text space-y-2">
               <h2 className="text-2xl font-semibold text-charcoal tracking-tight">
-                Lasku {invoice.number}
+                {invoice.documentKind === "credit_note" ? "Hyvityslasku" : "Lasku"} {invoice.number}
               </h2>
+              {invoice.creditsInvoice && (
+                <p className="text-sm text-warm-gray">
+                  Hyvittää laskun {invoice.creditsInvoice.number}
+                </p>
+              )}
+              {invoice.creditNotes && invoice.creditNotes.length > 0 && (
+                <p className="text-sm text-warm-gray">
+                  Hyvityslasku {invoice.creditNotes.map((note) => note.number).join(", ")}
+                </p>
+              )}
               <p className="text-sm text-warm-gray">
                 {invoice.customer.name}
                 {invoice.customer.businessId ? ` · ${invoice.customer.businessId}` : ""}
@@ -442,13 +526,16 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
                   <Button
                     variant="secondary"
                     busy={sending}
-                    busyLabel="Lähetetään…"
+                    busyLabel="Tarkistetaan…"
                     disabled={busy}
-                    onClick={() => void sendByEmail()}
+                    onClick={() => void openReview()}
                   >
                     Lähetä sähköpostilla
                   </Button>
                 )}
+                <Button variant="secondary" disabled={busy} onClick={() => void duplicateInvoice()}>
+                  Kopioi luonnokseksi
+                </Button>
                 {invoice.status === "draft" && (
                   <Button disabled={busy} onClick={() => void changeStatus("sent")}>
                     Merkitse lähetetyksi
@@ -473,11 +560,13 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
                     </Button>
                   </div>
                 )}
-                {invoice.status !== "credited" && invoice.status !== "draft" && (
-                  <Button variant="secondary" disabled={busy} onClick={() => void changeStatus("credited")}>
-                    Hyvitä
-                  </Button>
-                )}
+                {invoice.documentKind !== "credit_note" &&
+                  invoice.status !== "credited" &&
+                  invoice.status !== "draft" && (
+                    <Button variant="secondary" disabled={busy} onClick={() => void createCreditNote()}>
+                      Hyvitä
+                    </Button>
+                  )}
                 {invoice.status === "draft" && (
                   <Button variant="danger" disabled={busy} onClick={() => setConfirmDelete(true)}>
                     Poista luonnos
@@ -610,6 +699,98 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
                       >
                         Poista
                       </Button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </section>
+
+            {review && (
+              <section className="bg-white rounded-3xl border border-warm-gray-light/20 shadow-sm p-6 space-y-3">
+                <p className="text-base font-medium text-charcoal">Tarkista ennen lähetystä</p>
+                <div className="space-y-1 text-sm">
+                  <div className="flex justify-between gap-3">
+                    <span className="text-warm-gray">Vastaanottaja</span>
+                    <span className="text-charcoal">{review.recipient ?? "–"}</span>
+                  </div>
+                  <div className="flex justify-between gap-3">
+                    <span className="text-warm-gray">Summa</span>
+                    <span className="text-charcoal">{formatEur(review.gross)}</span>
+                  </div>
+                  <div className="flex justify-between gap-3">
+                    <span className="text-warm-gray">Eräpäivä</span>
+                    <span className="text-charcoal">{formatDate(review.dueDate)}</span>
+                  </div>
+                  <div className="flex justify-between gap-3">
+                    <span className="text-warm-gray">Tilinumero</span>
+                    <span className="text-charcoal">{review.iban ?? "–"}</span>
+                  </div>
+                  <div className="flex justify-between gap-3">
+                    <span className="text-warm-gray">Liite</span>
+                    <span className="text-charcoal">{review.attachment}</span>
+                  </div>
+                </div>
+                {review.blockedReason && (
+                  <p className="text-sm text-danger" role="alert">
+                    {review.blockedReason}
+                  </p>
+                )}
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    type="button"
+                    disabled={Boolean(review.blockedReason) || busy}
+                    disabledReason={review.blockedReason ?? undefined}
+                    busy={sending}
+                    busyLabel="Lähetetään…"
+                    onClick={() => void sendByEmail()}
+                  >
+                    Lähetä
+                  </Button>
+                  <Button type="button" variant="secondary" onClick={() => setReview(null)}>
+                    Peruuta
+                  </Button>
+                </div>
+              </section>
+            )}
+
+            <section className="select-text bg-white rounded-3xl border border-warm-gray-light/20 shadow-sm p-6 space-y-3">
+              <p className="text-base font-medium text-charcoal">Lähetykset</p>
+              {(invoice.sends ?? []).length === 0 ? (
+                <p className="text-sm text-warm-gray">Ei lähetysyrityksiä.</p>
+              ) : (
+                <ul className="space-y-2">
+                  {(invoice.sends ?? []).map((send) => (
+                    <li key={send.id} className="text-sm">
+                      <p className="text-charcoal">
+                        {send.toAddress} ·{" "}
+                        {send.status === "sent"
+                          ? "lähetetty"
+                          : send.status === "failed"
+                            ? "epäonnistui"
+                            : "kesken"}
+                      </p>
+                      <p className="text-xs text-warm-gray">
+                        {formatDate(send.createdAt)}
+                        {send.attachmentName ? ` · ${send.attachmentName}` : ""}
+                        {send.gross != null ? ` · ${formatEur(send.gross)}` : ""}
+                        {send.error ? ` · ${send.error}` : ""}
+                      </p>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </section>
+
+            <section className="select-text bg-white rounded-3xl border border-warm-gray-light/20 shadow-sm p-6 space-y-3">
+              <p className="text-base font-medium text-charcoal">Tapahtumat</p>
+              {(invoice.activity ?? []).length === 0 ? (
+                <p className="text-sm text-warm-gray">Ei tapahtumia.</p>
+              ) : (
+                <ul className="space-y-2">
+                  {(invoice.activity ?? []).map((entry) => (
+                    <li key={entry.id} className="text-sm">
+                      <p className="text-charcoal">{entry.summary}</p>
+                      <p className="text-xs text-warm-gray">{formatDate(entry.createdAt)}</p>
                     </li>
                   ))}
                 </ul>

@@ -3,7 +3,7 @@ import { z } from "zod";
 import { requireSession } from "@/lib/session";
 import { noStoreJson, rejectCrossSite, rejectOversizedContentLength } from "@/lib/http-security";
 import { UnauthorizedError, withErrorHandler } from "@/lib/api-errors";
-import { getCustomer, removeCustomer, updateCustomer } from "@/lib/customers";
+import { getCustomerDetail, removeCustomer, updateCustomer } from "@/lib/customers";
 
 const patchSchema = z
   .object({
@@ -32,7 +32,8 @@ export const GET = withErrorHandler(async (req: NextRequest, context: RouteConte
   const session = await requireSession(req);
   if (!session) throw new UnauthorizedError();
   const { id } = await context.params;
-  return noStoreJson({ customer: await getCustomer(session.userId, id) });
+  const detail = await getCustomerDetail(session.userId, id);
+  return noStoreJson(detail);
 });
 
 export const PATCH = withErrorHandler(async (req: NextRequest, context: RouteContext) => {
