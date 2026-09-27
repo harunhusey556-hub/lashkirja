@@ -2,91 +2,15 @@
 
 import Link from "next/link";
 import { useState } from "react";
-import { errorReference } from "@/lib/screen-state";
-import BankConnectCard from "@/components/BankConnectCard";
 import { ConnectionNotice } from "@/components/ScreenState";
 import { leaveAfterSignOut } from "@/components/clientFetch";
-import { BuildInfo } from "@/components/BuildInfo";
+import { SettingsChevron, SettingsGroup, SettingsRow } from "@/components/SettingsList";
 import { useProfile } from "./useProfile";
-
-function Chevron() {
-  return (
-    <svg
-      className="w-4 h-4 text-warm-gray-light shrink-0"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth={2}
-      aria-hidden
-    >
-      <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-    </svg>
-  );
-}
-
-function SettingsGroup({
-  label,
-  children,
-}: {
-  label: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <section>
-      <h3 className="px-4 mb-2 text-xs font-medium uppercase tracking-widest text-warm-gray">
-        {label}
-      </h3>
-      <div className="bg-white rounded-2xl shadow-sm overflow-hidden divide-y divide-warm-gray-light/25">
-        {children}
-      </div>
-    </section>
-  );
-}
-
-function SettingsRow({
-  href,
-  label,
-  hint,
-}: {
-  href: string;
-  label: string;
-  hint?: string;
-}) {
-  return (
-    <Link
-      href={href}
-      className="flex items-center gap-3 px-4 py-3.5 transition-colors active:bg-blush/30 touch-target"
-    >
-      <span className="flex-1 min-w-0">
-        <span className="block text-sm font-medium text-charcoal">{label}</span>
-        {hint && (
-          <span className="block text-xs text-warm-gray truncate mt-0.5">{hint}</span>
-        )}
-      </span>
-      <Chevron />
-    </Link>
-  );
-}
 
 export default function AsetuksetPage() {
   const { profile, loadError, retry } = useProfile();
   const [signingOut, setSigningOut] = useState(false);
   const [signOutError, setSignOutError] = useState("");
-  const [supportNote, setSupportNote] = useState("");
-
-  async function copySupport(kind: "report" | "reference") {
-    const reference = errorReference(process.env.NEXT_PUBLIC_GIT_COMMIT || "unknown");
-    const text =
-      kind === "reference"
-        ? reference
-        : `LashKirja-ongelma\nViite: ${reference}\nSivu: ${window.location.pathname}`;
-    try {
-      await navigator.clipboard.writeText(text);
-      setSupportNote(kind === "reference" ? "Virheviite kopioitu." : "Tukiviesti kopioitu. Liitä se sähköpostiin.");
-    } catch {
-      setSupportNote(text);
-    }
-  }
 
   async function handleSignOut() {
     if (signingOut) return;
@@ -133,7 +57,7 @@ export default function AsetuksetPage() {
                 {profile.email}
               </span>
             </span>
-            <Chevron />
+            <SettingsChevron />
           </Link>
         ) : (
           <div className="flex items-center gap-4 bg-white rounded-2xl p-4 shadow-sm">
@@ -165,9 +89,14 @@ export default function AsetuksetPage() {
 
         <SettingsGroup label="Tili">
           <SettingsRow
+            href="/asetukset/tili"
+            label="Tili"
+            hint="Salasana ja kirjautuneet laitteet"
+          />
+          <SettingsRow
             href="/asetukset/turvallisuus"
             label="Turvallisuus"
-            hint="Salasana, istunnot ja näytön lukitus"
+            hint="Näytön koodi ja Face ID"
           />
           <SettingsRow
             href="/asetukset/tietosuoja"
@@ -176,7 +105,12 @@ export default function AsetuksetPage() {
           />
         </SettingsGroup>
 
-        <SettingsGroup label="Automaatio">
+        <SettingsGroup label="Pankki ja sähköposti">
+          <SettingsRow
+            href="/asetukset/pankkiyhteys"
+            label="Pankkiyhteys"
+            hint="Yhdistä pankki ja hae tapahtumat"
+          />
           <SettingsRow
             href="/asetukset/sahkoposti"
             label="Sähköpostien tuonti"
@@ -184,46 +118,12 @@ export default function AsetuksetPage() {
           />
         </SettingsGroup>
 
-        <section id="pankkiyhteys" className="scroll-mt-24 space-y-2">
-          <h3 className="px-4 text-xs font-medium uppercase tracking-widest text-warm-gray">
-            Pankkiyhteys
-          </h3>
-          {profile ? (
-            <BankConnectCard entityType={profile.entityType} />
-          ) : (
-            <div className="bg-white rounded-2xl p-6 shadow-sm">
-              <div className="h-24 rounded-xl bg-warm-gray-light/20 skeleton" />
-            </div>
-          )}
-        </section>
-
-        <SettingsGroup label="Ohje ja tuki">
-          <div className="px-4 py-3.5 space-y-3">
-            <p className="text-sm text-charcoal leading-relaxed">
-              Kuitit, laskut ja ALV löytyvät omista näkymistään. Jos jokin epäonnistuu,
-              kopioi virheviite ja liitä se tukiviestiin.
-            </p>
-            <button
-              type="button"
-              className="w-full min-h-11 rounded-xl border border-warm-gray-light/70 text-sm font-medium text-charcoal"
-              onClick={() => void copySupport("report")}
-            >
-              Ilmoita ongelmasta
-            </button>
-            <button
-              type="button"
-              className="w-full min-h-11 rounded-xl border border-warm-gray-light/70 text-sm font-medium text-charcoal"
-              onClick={() => void copySupport("reference")}
-            >
-              Kopioi virheviite
-            </button>
-            {supportNote && (
-              <p className="text-xs text-warm-gray" role="status">
-                {supportNote}
-              </p>
-            )}
-            <BuildInfo />
-          </div>
+        <SettingsGroup label="Ohje">
+          <SettingsRow
+            href="/asetukset/ohje"
+            label="Ohje ja tuki"
+            hint="Virheviite ja tukiviesti"
+          />
         </SettingsGroup>
 
         {signOutError && (

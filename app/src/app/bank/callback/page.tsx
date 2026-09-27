@@ -58,7 +58,7 @@ function BankCallback() {
         clearBankAuth();
         setPhase("done");
         setMessage("Pankki yhdistetty. Valitse tilit, jotka kuuluvat kirjanpitoon.");
-        window.setTimeout(() => router.replace("/asetukset#pankkiyhteys"), 700);
+        window.setTimeout(() => router.replace("/asetukset/pankkiyhteys"), 700);
       })
       .catch((error: unknown) => {
         if (cancelled) return;
@@ -87,7 +87,7 @@ function BankCallback() {
         </p>
         {phase !== "working" && (
           <a
-            href="/asetukset#pankkiyhteys"
+            href="/asetukset/pankkiyhteys"
             className="inline-flex w-full justify-center px-4 py-3 rounded-xl bg-accent text-white text-sm font-medium hover:bg-accent-dark"
           >
             {phase === "done" ? "Jatka asetuksiin" : "Takaisin asetuksiin"}

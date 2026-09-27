@@ -138,7 +138,7 @@ export default function TiliotteetPage() {
       );
       if (!list.ready || targets.length === 0) {
         setUploadMsg("");
-        router.push("/asetukset#pankkiyhteys");
+        router.push("/asetukset/pankkiyhteys");
         return;
       }
       let imported = 0;

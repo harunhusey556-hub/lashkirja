@@ -252,7 +252,7 @@ test("privacy request status is visible and the lock PIN is masked", async ({ pa
   await expect(page.getByText("Tietojen kopio")).toBeVisible();
   await expect(page.getByText("Odottaa")).toBeVisible();
 
-  await page.goto("/asetukset/turvallisuus");
+  await page.goto("/asetukset/turvallisuus/lukitus");
   await expect(page.locator("#lockPin")).toHaveAttribute("type", "password");
 
   await page.goto("/asiakkaat");

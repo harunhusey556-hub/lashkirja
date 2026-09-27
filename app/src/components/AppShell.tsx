@@ -236,7 +236,14 @@ function pageTitle(pathname: string): string {
   if (pathname.startsWith("/asetukset/laskutus")) return "Laskuttajan tiedot";
   if (pathname.startsWith("/asetukset/kirjanpito")) return "Kirjanpidon lukitus";
   if (pathname.startsWith("/asetukset/sahkoposti")) return "Sähköpostien tuonti";
+  if (pathname.startsWith("/asetukset/tili/salasana")) return "Vaihda salasana";
+  if (pathname.startsWith("/asetukset/tili/laitteet")) return "Laitteet";
+  if (pathname.startsWith("/asetukset/tili")) return "Tili";
+  if (pathname.startsWith("/asetukset/turvallisuus/lukitus")) return "Näytön lukitus";
+  if (pathname.startsWith("/asetukset/turvallisuus/biometria")) return "Face ID";
   if (pathname.startsWith("/asetukset/turvallisuus")) return "Turvallisuus";
+  if (pathname.startsWith("/asetukset/pankkiyhteys")) return "Pankkiyhteys";
+  if (pathname.startsWith("/asetukset/ohje")) return "Ohje ja tuki";
   if (pathname.startsWith("/asetukset/tietosuoja")) return "Tietosuoja";
   if (pathname.startsWith("/asetukset")) return "Asetukset";
   return "Etusivu";
