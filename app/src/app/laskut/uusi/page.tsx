@@ -13,6 +13,7 @@ import {
 } from "@/components/clientFetch";
 import { newIdempotencyKey } from "@/lib/idempotency-key";
 import { armNavigation } from "@/lib/nav-direction";
+import { DETAIL_ROUTES, detailHref } from "@/lib/routes";
 import { PageTitle } from "@/components/ds";
 
 interface CustomerOption {
@@ -76,8 +77,11 @@ function NewInvoicePage() {
       });
       const data = await readJson<{ invoice: { id: string } }>(response, "Laskun luonti epäonnistui");
       createKey.current = newIdempotencyKey();
-      armNavigation(`/laskut/${data.invoice.id}`, "back");
-      router.replace(`/laskut/${data.invoice.id}`);
+      // armNavigation keys off the pathname the shell later reads with
+      // usePathname(), which never includes the query string, so it arms
+      // the bare detail path here while the actual navigation carries ?id=.
+      armNavigation(DETAIL_ROUTES.invoice, "back");
+      router.replace(detailHref("invoice", data.invoice.id));
     } catch (error) {
       if (isUnauthorized(error)) redirectToLogin();
       throw error;

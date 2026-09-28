@@ -92,7 +92,7 @@ const nextConfig: NextConfig = {
     // 307 on purpose: phases 2 and 3 move these destinations again.
     return [
       { source: "/tiliotteet", destination: "/pankki/tapahtumat", permanent: false },
-      { source: "/tiliotteet/:id", destination: "/pankki/tapahtumat/:id", permanent: false },
+      { source: "/tiliotteet/:id", destination: "/pankki/tapahtumat/tiliote?id=:id", permanent: false },
       { source: "/pankkitilit", destination: "/kirjanpito/pankkitilit", permanent: false },
       { source: "/pankki", destination: "/kirjanpito", permanent: false },
       { source: "/pankki/tilit", destination: "/kirjanpito/pankkitilit", permanent: false },
@@ -100,6 +100,30 @@ const nextConfig: NextConfig = {
       { source: "/ostolaskut", destination: "/kirjanpito/ostolaskut", permanent: false },
       { source: "/asetukset/kirjanpito", destination: "/kirjanpito/kaudet", permanent: false },
       { source: "/asetukset/pankkiyhteys", destination: "/kirjanpito/pankkitilit", permanent: false },
+      // Detail pages moved from dynamic [id] path segments to a query
+      // parameter (?id=) so the mobile static export can serve them as one
+      // static HTML file each. The negative lookahead excludes each
+      // parent's static sibling folders and the new detail path itself.
+      {
+        source: "/laskut/:id((?!uusi$|lasku$)[^/]+)",
+        destination: "/laskut/lasku?id=:id",
+        permanent: false,
+      },
+      {
+        source: "/kuitit/:id((?!uusi$|kuitti$)[^/]+)",
+        destination: "/kuitit/kuitti?id=:id",
+        permanent: false,
+      },
+      {
+        source: "/asiakkaat/:id((?!asiakas$)[^/]+)",
+        destination: "/asiakkaat/asiakas?id=:id",
+        permanent: false,
+      },
+      {
+        source: "/pankki/tapahtumat/:id((?!tiliote$)[^/]+)",
+        destination: "/pankki/tapahtumat/tiliote?id=:id",
+        permanent: false,
+      },
     ];
   },
 };

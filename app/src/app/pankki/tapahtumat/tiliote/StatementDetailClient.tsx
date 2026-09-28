@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { useParams, useRouter, useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import StatementDetailView from "@/components/StatementDetailView";
 import { ErrorState, LoadingState } from "@/components/AsyncState";
 import {
@@ -15,10 +15,9 @@ import type { StatementData } from "@/lib/statement-client";
 import { statementListHref } from "@/lib/navigation";
 
 export default function StatementDetailPage() {
-  const params = useParams<{ id: string }>();
   const router = useRouter();
   const searchParams = useSearchParams();
-  const statementId = params.id;
+  const statementId = searchParams.get("id") ?? "";
   const listHref = statementListHref(searchParams.toString());
 
   const [statement, setStatement] = useState<StatementData | null>(null);
@@ -26,6 +25,12 @@ export default function StatementDetailPage() {
   const [loadError, setLoadError] = useState("");
 
   const loadStatement = useCallback(async () => {
+    if (!statementId) {
+      setStatement(null);
+      setLoadError("");
+      setLoading(false);
+      return;
+    }
     try {
       const res = await apiFetch(`/api/statements/${statementId}`);
       const data = await readJson<{ statement?: StatementData }>(

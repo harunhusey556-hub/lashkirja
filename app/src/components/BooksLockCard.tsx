@@ -6,6 +6,7 @@ import { currentMonthKey, formatMonth } from "@/lib/format";
 import { ErrorState, LoadingState } from "@/components/AsyncState";
 import { Button, controlClass } from "@/components/ui";
 import { Card, ListRow, Section } from "@/components/ds";
+import { normalizeLegacyDetailPath } from "@/lib/routes";
 
 /**
  * Closing the books. Everything dated on or before the chosen month becomes
@@ -224,7 +225,12 @@ function PrecheckRows({ items, empty }: { items: PrecheckItem[]; empty: string }
   return (
     <>
       {items.map((item) => (
-        <ListRow key={item.id} href={item.href} title={item.title} secondary={item.detail} />
+        <ListRow
+          key={item.id}
+          href={normalizeLegacyDetailPath(item.href) ?? item.href}
+          title={item.title}
+          secondary={item.detail}
+        />
       ))}
     </>
   );

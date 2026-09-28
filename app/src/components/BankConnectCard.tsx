@@ -13,6 +13,7 @@ import {
 import { consentReconnectCopy } from "@/lib/bank-consent-copy";
 import { consumeInterruptedBankAuth, leaveForBank } from "@/lib/open-bank-auth";
 import { syncOutcomeMessage, type AccountSyncRow } from "@/lib/bank-sync-summary";
+import { detailHref } from "@/lib/routes";
 
 interface BankAccount {
   id: string;
@@ -279,7 +280,7 @@ export default function BankConnectCard({ entityType }: { entityType: string }) 
       const accounts = data.accounts || [];
       const outcome = syncOutcomeMessage(accounts, data.imported);
       setSyncAccounts(accounts);
-      setStatementHref(data.statementId ? `/pankki/tapahtumat/${data.statementId}` : null);
+      setStatementHref(data.statementId ? detailHref("statement", data.statementId) : null);
       setMessageTone(outcome.tone);
       setMessage(outcome.text);
     } catch (error: unknown) {

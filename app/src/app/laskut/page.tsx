@@ -25,6 +25,7 @@ import {
   SummaryCard,
 } from "@/components/ds";
 import { SALES_STATUS } from "@/lib/status-labels";
+import { detailHref } from "@/lib/routes";
 import {
   INVOICE_LIST_LIMIT,
   SALES_FILTER_IDS,
@@ -73,14 +74,14 @@ function rowSecondary(invoice: InvoiceSummary): string {
 function rowTrailing(invoice: InvoiceSummary) {
   if (invoice.displayStatus === "overdue") {
     return (
-      <ActionPill href={`/laskut/${invoice.id}`} ariaLabel={`Muistuta: ${invoice.customer.name}`}>
+      <ActionPill href={detailHref("invoice", invoice.id)} ariaLabel={`Muistuta: ${invoice.customer.name}`}>
         Muistuta
       </ActionPill>
     );
   }
   if (invoice.displayStatus === "draft") {
     return (
-      <ActionPill href={`/laskut/${invoice.id}`} ariaLabel={`Lähetä: ${invoice.customer.name}`}>
+      <ActionPill href={detailHref("invoice", invoice.id)} ariaLabel={`Lähetä: ${invoice.customer.name}`}>
         Lähetä
       </ActionPill>
     );
@@ -332,7 +333,7 @@ function InvoicesPageContent() {
               {group.items.map((invoice) => (
                 <ListRow
                   key={invoice.id}
-                  href={`/laskut/${invoice.id}`}
+                  href={detailHref("invoice", invoice.id)}
                   title={invoice.customer.name}
                   amount={formatEur(invoice.gross)}
                   secondary={rowSecondary(invoice)}

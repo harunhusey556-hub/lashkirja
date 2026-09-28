@@ -6,6 +6,7 @@ import { prisma } from "./db";
 import { centsToEuros } from "./money";
 import { formatEur } from "./format";
 import { monthBoundsUtc } from "./validation";
+import { detailHref } from "./routes";
 
 export interface PeriodPrecheckItem {
   id: string;
@@ -98,7 +99,7 @@ export async function listPeriodPrecheck(userId: string, month: string): Promise
         id: tx.id,
         title: tx.counterparty || tx.message || "Pankkitapahtuma",
         detail: `${money(tx.amountCents)} · ei tositetta`,
-        href: `/pankki/tapahtumat/${tx.statementId}`,
+        href: detailHref("statement", tx.statementId),
       })),
       ...pending.map((receipt) => ({
         id: receipt.id,
@@ -107,20 +108,20 @@ export async function listPeriodPrecheck(userId: string, month: string): Promise
           receipt.totalAmountCents == null
             ? "Odottaa tarkistusta"
             : `${money(receipt.totalAmountCents)} · odottaa tarkistusta`,
-        href: `/kuitit/${receipt.id}`,
+        href: detailHref("receipt", receipt.id),
       })),
     ],
     unmatchedTransactions: suggested.map((tx) => ({
       id: tx.id,
       title: tx.counterparty || tx.message || "Pankkitapahtuma",
       detail: `${money(tx.amountCents)} · ehdotettu täsmäytys`,
-      href: `/pankki/tapahtumat/${tx.statementId}`,
+      href: detailHref("statement", tx.statementId),
     })),
     draftInvoices: drafts.map((invoice) => ({
       id: invoice.id,
       title: invoice.customer.name,
       detail: `Luonnos ${invoice.number} · ${money(invoice.grossCents)}`,
-      href: `/laskut/${invoice.id}`,
+      href: detailHref("invoice", invoice.id),
     })),
   };
 }

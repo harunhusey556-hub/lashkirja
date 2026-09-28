@@ -28,9 +28,9 @@ export const NAV: readonly NavEntry[] = [
 
   { id: "kuitit", kind: "workspace", label: "Kuitit", path: "/kuitit", parent: "kirjanpito" },
   { id: "kuitit-uusi", kind: "detail", label: "Uusi kuitti", path: "/kuitit/uusi", parent: "kuitit" },
-  { id: "kuitti", kind: "detail", label: "Kuitti", path: "/kuitit/:id", parent: "kuitit" },
+  { id: "kuitti", kind: "detail", label: "Kuitti", path: "/kuitit/kuitti", parent: "kuitit" },
   { id: "pankki-tapahtumat", kind: "workspace", label: "Tapahtumat", path: "/pankki/tapahtumat", parent: "kirjanpito" },
-  { id: "pankki-tapahtuma", kind: "detail", label: "Tiliote", path: "/pankki/tapahtumat/:id", parent: "pankki-tapahtumat" },
+  { id: "pankki-tapahtuma", kind: "detail", label: "Tiliote", path: "/pankki/tapahtumat/tiliote", parent: "pankki-tapahtumat" },
   { id: "pankki-taydennys", kind: "workspace", label: "Täsmäytys", path: "/pankki/taydennys", parent: "kirjanpito" },
   { id: "tyot", kind: "workspace", label: "Työt ja poikkeukset", path: "/tyot", parent: "kirjanpito" },
   { id: "alv", kind: "workspace", label: "ALV-ilmoitus", path: "/kirjanpito/alv", parent: "kirjanpito" },
@@ -39,10 +39,10 @@ export const NAV: readonly NavEntry[] = [
   { id: "kaudet", kind: "workspace", label: "Suljetut kaudet", path: "/kirjanpito/kaudet", parent: "kirjanpito" },
 
   { id: "asiakkaat", kind: "workspace", label: "Asiakkaat", path: "/asiakkaat", parent: "myynti" },
-  { id: "asiakas", kind: "detail", label: "Asiakas", path: "/asiakkaat/:id", parent: "asiakkaat" },
+  { id: "asiakas", kind: "detail", label: "Asiakas", path: "/asiakkaat/asiakas", parent: "asiakkaat" },
   { id: "toistuvat", kind: "workspace", label: "Toistuvat laskut", path: "/toistuvat", parent: "myynti" },
   { id: "lasku-uusi", kind: "detail", label: "Uusi lasku", path: "/laskut/uusi", parent: "myynti" },
-  { id: "lasku", kind: "detail", label: "Lasku", path: "/laskut/:id", parent: "myynti" },
+  { id: "lasku", kind: "detail", label: "Lasku", path: "/laskut/lasku", parent: "myynti" },
 
   { id: "asetukset-profiili", kind: "settings", label: "Profiili", path: "/asetukset/profiili", parent: "asetukset" },
   { id: "asetukset-yritys", kind: "settings", label: "Yritysmuoto & ALV", path: "/asetukset/yritys", parent: "asetukset" },

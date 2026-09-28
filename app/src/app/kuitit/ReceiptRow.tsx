@@ -7,6 +7,7 @@ import { ListRow, MoreMenu, StatusTag } from "@/components/ds";
 import { formatDate, formatEur } from "@/lib/format";
 import { categoryLabel } from "@/lib/receipt-categories";
 import { RECEIPT_MATCH_STATUS, receiptMatchStatusKey } from "@/lib/status-labels";
+import { detailHref } from "@/lib/routes";
 import type { SavedReceipt } from "./types";
 
 const SOURCE_LABEL: Record<string, string> = { ai: "AI", ocr: "OCR" };
@@ -87,7 +88,7 @@ export function ReceiptRow({
                 <MoreMenu
                   label={rowMenuLabel(receipt)}
                   items={[
-                    { label: "Muokkaa", onSelect: () => router.push(`/kuitit/${receipt.id}`) },
+                    { label: "Muokkaa", onSelect: () => router.push(detailHref("receipt", receipt.id)) },
                     {
                       label: "Poista",
                       onSelect: onDeleteRequest,

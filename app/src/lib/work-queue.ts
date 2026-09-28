@@ -1,4 +1,5 @@
 import { prisma } from "./db";
+import { detailHref } from "./routes";
 
 export const AMOUNT_MISMATCH_CENTS = 50;
 export const AMBIGUOUS_SCORE = 0.8;
@@ -97,7 +98,7 @@ export async function listWorkQueue(userId: string): Promise<WorkQueueItem[]> {
       kind: "pending_review",
       title: receipt.vendor || receipt.fileName || "Kuitti",
       detail: "Kuitti odottaa tarkistusta.",
-      href: `/kuitit/${receipt.id}`,
+      href: detailHref("receipt", receipt.id),
     });
   }
 
@@ -107,7 +108,7 @@ export async function listWorkQueue(userId: string): Promise<WorkQueueItem[]> {
       kind: "missing_document",
       title: tx.counterparty || tx.message || "Pankkitapahtuma",
       detail: "Tapahtumalla ei ole tositetta.",
-      href: `/pankki/tapahtumat/${tx.statementId}`,
+      href: detailHref("statement", tx.statementId),
     });
   }
 
@@ -120,7 +121,7 @@ export async function listWorkQueue(userId: string): Promise<WorkQueueItem[]> {
       kind: "amount_mismatch",
       title: tx.receipt?.vendor || tx.counterparty || "Täsmäytys",
       detail: "Linkitetyn kuitin summa eroaa pankkitapahtumasta.",
-      href: tx.receipt ? `/kuitit/${tx.receipt.id}` : `/pankki/tapahtumat/${tx.statementId}`,
+      href: tx.receipt ? detailHref("receipt", tx.receipt.id) : detailHref("statement", tx.statementId),
     });
     if (items.filter((item) => item.kind === "amount_mismatch").length >= TAKE) break;
   }
@@ -141,7 +142,7 @@ export async function listWorkQueue(userId: string): Promise<WorkQueueItem[]> {
       kind: "link_error",
       title: "Linkitys epäonnistui",
       detail: event.reason,
-      href: event.resourceId ? `/kuitit/${event.resourceId}` : null,
+      href: event.resourceId ? detailHref("receipt", event.resourceId) : null,
     });
   }
 
@@ -154,7 +155,7 @@ export async function listWorkQueue(userId: string): Promise<WorkQueueItem[]> {
         tx.matchScore == null
           ? "Useita tai epävarmoja osumia."
           : "Osuma on epävarma.",
-      href: `/pankki/tapahtumat/${tx.statementId}`,
+      href: detailHref("statement", tx.statementId),
     });
   }
 

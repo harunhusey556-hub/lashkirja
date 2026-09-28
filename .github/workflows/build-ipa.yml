@@ -3,13 +3,21 @@ name: Build unsigned IPA
 on:
   workflow_dispatch:
     inputs:
-      capacitor_server_url:
-        description: HTTPS URL the Capacitor WebView loads
+      api_base_url:
+        description: "HTTPS API base URL baked into the bundled UI (NEXT_PUBLIC_API_BASE_URL)"
         required: true
         type: string
 
 permissions:
   contents: read
+
+env:
+  # Throwaway values, matching ci.yml: the mobile export runs a production
+  # `next build` (BUILD_TARGET=mobile), and src/lib/session.ts refuses to
+  # load in production without a >=32 char SESSION_SECRET.
+  DATABASE_URL: "file:./ci-check.db"
+  SESSION_SECRET: "ci-only-secret-not-used-anywhere-real-32plus"
+  CLOUD_AI_ENABLED: "false"
 
 jobs:
   build:
@@ -31,25 +39,47 @@ jobs:
         working-directory: app
         run: npm ci
 
-      - name: Sync Capacitor iOS project
+      # The generated client is gitignored (src/generated/prisma). The mobile
+      # export runs a real `next build`, which type-checks the whole
+      # project, including route handlers that import the generated client
+      # (pageExtensions hides them from the *bundle*, not from typecheck).
+      - name: Generate Prisma client
+        working-directory: app
+        run: npx prisma generate
+
+      - name: Build the mobile static export
         working-directory: app
         env:
-          CAPACITOR_SERVER_URL: ${{ inputs.capacitor_server_url }}
+          API_BASE_URL: ${{ inputs.api_base_url }}
         run: |
-          case "$CAPACITOR_SERVER_URL" in
+          case "$API_BASE_URL" in
             https://*) ;;
             *)
-              echo "capacitor_server_url must be an https:// URL"
+              echo "api_base_url must be an https:// URL"
               exit 1
               ;;
           esac
+          npm run build:mobile -- --api-base-url "$API_BASE_URL"
+
+      - name: Sync Capacitor iOS project
+        working-directory: app
+        env:
+          API_BASE_URL: ${{ inputs.api_base_url }}
+        run: |
           npx cap sync ios
-          grep -F -q "$CAPACITOR_SERVER_URL" ios/App/App/capacitor.config.json
+          if grep -q '"url"' ios/App/App/capacitor.config.json; then
+            echo "capacitor.config.json still has a server.url key; the bundled build must not load a remote WebView server"
+            exit 1
+          fi
+          test -f ios/App/App/public/index.html
+          test -d ios/App/App/public/_next/static
+          if ! grep -rF -q "$API_BASE_URL" ios/App/App/public/_next/static; then
+            echo "API base URL '$API_BASE_URL' was not found baked into the bundled JS"
+            exit 1
+          fi
           npx tsx scripts/patch-ios-url-scheme.ts
           grep -F -q "<string>lashkirja</string>" ios/App/App/Info.plist
-          npx tsx scripts/patch-ios-offline-server.ts
-          grep -F -q "lashkirja-server\" content=\"$CAPACITOR_SERVER_URL\"" ios/App/App/public/offline.html
-          if grep -rq "Tilikirja" ios/App/App/Info.plist ios/App/App/public/offline.html ios/App/App/public/index.html; then
+          if grep -rq "Tilikirja" ios/App/App/Info.plist ios/App/App/public/index.html; then
             echo "The old app name 'Tilikirja' is still present in user-visible native config"
             exit 1
           fi
@@ -85,7 +115,16 @@ jobs:
           cp -R "$APP" Payload/
           zip -qry LashKirja-unsigned.ipa Payload
           rm -rf Payload
-          echo "Size: $(du -h LashKirja-unsigned.ipa | cut -f1)"
+          # A remote-URL shell was about 1 MB; the bundled UI must be
+          # noticeably larger, or the export did not actually land in the IPA.
+          size_bytes=$(stat -f%z LashKirja-unsigned.ipa)
+          size_human=$(du -h LashKirja-unsigned.ipa | cut -f1)
+          echo "Size: $size_human ($size_bytes bytes)"
+          min_bytes=$((2 * 1024 * 1024))
+          if [[ "$size_bytes" -lt "$min_bytes" ]]; then
+            echo "IPA is smaller than 2 MB; the bundled UI export is probably missing"
+            exit 1
+          fi
 
       - name: Upload unsigned IPA
         uses: actions/upload-artifact@v4

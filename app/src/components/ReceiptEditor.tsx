@@ -20,6 +20,7 @@ import {
 } from "@/components/clientFetch";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { useEditorSession } from "@/components/form-session";
+import { detailHref } from "@/lib/routes";
 import { Button, FormError, SavePhaseNote, buttonClass, chipClass, controlClass } from "@/components/ui";
 import { SelectMenu } from "@/components/SelectMenu";
 import { Check, X } from "lucide-react";
@@ -582,7 +583,7 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
           matchStatus === "linked" ||
           (candidates && candidates.length > 0)
         ) {
-          router.push(`/kuitit/${data.receipt.id as string}?new=true`);
+          router.push(detailHref("receipt", data.receipt.id as string, { new: "true" }));
           return;
         }
       }

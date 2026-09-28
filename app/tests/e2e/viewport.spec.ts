@@ -117,7 +117,7 @@ test.describe("confirm dialog", () => {
     // "Poista" now lives on the customer's own detail page, behind its
     // "Lisää toimintoja" menu (MoreMenu), not on the list row directly.
     await page.getByRole("link", { name }).click();
-    await expect(page).toHaveURL(/\/asiakkaat\/[^/]+$/);
+    await expect(page).toHaveURL(/\/asiakkaat\/asiakas\?id=/);
     await page.getByRole("button", { name: "Lisää toimintoja" }).click();
     const remove = page.getByRole("button", { name: "Poista" });
     await remove.click();

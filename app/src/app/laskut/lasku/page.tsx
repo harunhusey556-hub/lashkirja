@@ -1,8 +1,8 @@
 "use client";
 
-import { use, useCallback, useEffect, useRef, useState } from "react";
+import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { ErrorState, LoadingState } from "@/components/AsyncState";
 import ConfirmModal from "@/components/ConfirmModal";
 import BottomSheet from "@/components/BottomSheet";
@@ -20,6 +20,7 @@ import { formatReference } from "@/lib/finnish-reference";
 import { shareContent } from "@/lib/share";
 import { daysOverdue } from "@/lib/invoices";
 import { SALES_STATUS } from "@/lib/status-labels";
+import { detailHref } from "@/lib/routes";
 import { Button, buttonClass, controlClass } from "@/components/ui";
 import { Bell } from "lucide-react";
 import { BottomActions, DetailHero, Icon, KeyValueList, MoreMenu, Section, StatusTag, Timeline } from "@/components/ds";
@@ -156,8 +157,16 @@ function historyItems(invoice: Invoice): HistoryItem[] {
     .map(({ title, meta, tone }) => ({ title, meta, tone }));
 }
 
-export default function InvoiceDetailPage({ params }: { params: Promise<{ id: string }> }) {
-  const { id } = use(params);
+export default function Page() {
+  return (
+    <Suspense fallback={<LoadingState label="Haetaan laskua…" />}>
+      <InvoiceDetail />
+    </Suspense>
+  );
+}
+
+function InvoiceDetail() {
+  const id = useSearchParams().get("id") ?? "";
   const router = useRouter();
 
   const [invoice, setInvoice] = useState<Invoice | null>(null);
@@ -207,6 +216,11 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
   }
 
   const load = useCallback(async () => {
+    if (!id) {
+      setMessage("Laskua ei löytynyt.");
+      setState("error");
+      return;
+    }
     try {
       const response = await apiFetch(`/api/invoices/${id}`, { credentials: "include" });
       const data = await readJson<{ invoice: Invoice }>(response, "Laskun haku epäonnistui");
@@ -388,7 +402,7 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
         credentials: "include",
       });
       const result = await readJson<{ invoice: { id: string } }>(response, "Hyvitys epäonnistui");
-      router.push(`/laskut/${result.invoice.id}`);
+      router.push(detailHref("invoice", result.invoice.id));
     } catch (error) {
       setMessage(errorMessage(error, "Hyvitys epäonnistui"));
     } finally {
@@ -405,7 +419,7 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
         credentials: "include",
       });
       const result = await readJson<{ invoice: { id: string } }>(response, "Kopiointi epäonnistui");
-      router.push(`/laskut/${result.invoice.id}`);
+      router.push(detailHref("invoice", result.invoice.id));
     } catch (error) {
       setMessage(errorMessage(error, "Kopiointi epäonnistui"));
     } finally {
@@ -610,7 +624,7 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
                     </span>
                   )}
                   <span className="block">
-                    <Link href={`/asiakkaat/${invoice.customer.id}`} className="text-accent">
+                    <Link href={detailHref("customer", invoice.customer.id)} className="text-accent">
                       Asiakas
                     </Link>
                     {invoice.customer.businessId ? ` · ${invoice.customer.businessId}` : ""}

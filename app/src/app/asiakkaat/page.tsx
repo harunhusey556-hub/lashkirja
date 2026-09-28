@@ -24,6 +24,7 @@ import { newIdempotencyKey } from "@/lib/idempotency-key";
 import { pageCacheFetchedAt, readPageCache, writePageCache } from "@/lib/page-cache";
 import { usePersistedState, useScrollRestoration } from "@/lib/list-ui-state";
 import { isForbidden } from "@/lib/screen-state";
+import { detailHref } from "@/lib/routes";
 
 interface Customer {
   id: string;
@@ -49,7 +50,7 @@ interface Customer {
  * Read once by this page after a redirect from the customer detail page. Only
  * a hard delete (no invoices on the customer) navigates back here - an
  * archive stays on the detail page and shows its own message there instead
- * (see asiakkaat/[id]/page.tsx).
+ * (see asiakkaat/asiakas/page.tsx).
  */
 const FLASH_KEY = "asiakkaat:flash";
 
@@ -304,7 +305,7 @@ export default function CustomersPage() {
               {customers.map((customer) => (
                 <ListRow
                   key={customer.id}
-                  href={`/asiakkaat/${customer.id}`}
+                  href={detailHref("customer", customer.id)}
                   title={customer.name}
                   amount={formatEur(customer.openBalance)}
                   secondary={rowSecondary(customer)}

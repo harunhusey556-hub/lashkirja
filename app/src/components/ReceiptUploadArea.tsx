@@ -5,6 +5,7 @@ import Link from "next/link";
 import { FileUp } from "lucide-react";
 import { Icon, Section } from "@/components/ds";
 import { filePickDecision } from "@/lib/native-file-flow";
+import { detailHref } from "@/lib/routes";
 import type { useReceiptUploadQueue } from "@/components/useReceiptUploadQueue";
 
 const ACCEPTED_UPLOAD = ".pdf,.jpg,.jpeg,.png,.heic,.heif,image/jpeg,image/png,image/heic";
@@ -171,7 +172,7 @@ export default function ReceiptUploadArea({
               )}
               {row.duplicateReceiptId && (
                 <Link
-                  href={`/kuitit/${row.duplicateReceiptId}`}
+                  href={detailHref("receipt", row.duplicateReceiptId)}
                   className="mt-1 inline-flex min-h-11 items-center text-[13px] font-medium text-accent"
                 >
                   Avaa olemassa oleva

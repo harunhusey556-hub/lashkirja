@@ -6,6 +6,7 @@ import { Button } from "@/components/ui";
 import { ActionPill, Card, FilterChips, ListRow, PageTitle, Section, StatusTag } from "@/components/ds";
 import { jobKindLabel, jobStatusLabel, workKindLabel } from "@/lib/job-labels";
 import { pollDelay, syncPageHiddenFlag } from "@/lib/page-activity";
+import { normalizeLegacyDetailPath } from "@/lib/routes";
 
 interface JobRow {
   id: string;
@@ -206,7 +207,11 @@ export default function TyotPage() {
                 key={item.id}
                 title={item.title}
                 secondary={`${workKindLabel(item.kind)} · ${item.detail}`}
-                trailing={item.href ? <ActionPill href={item.href}>Avaa</ActionPill> : undefined}
+                trailing={
+                  item.href ? (
+                    <ActionPill href={normalizeLegacyDetailPath(item.href) ?? item.href}>Avaa</ActionPill>
+                  ) : undefined
+                }
               />
             ))}
           </Section>

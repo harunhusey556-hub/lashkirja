@@ -119,7 +119,7 @@ test("invoice goes from draft to paid", async ({ page }) => {
   await page.getByRole("button", { name: "Luo lasku" }).click();
 
   await page.getByRole("link", { name: /E2E Asiakas/ }).first().click();
-  await expect(page).toHaveURL(/\/laskut\/[^/]+$/);
+  await expect(page).toHaveURL(/\/laskut\/lasku\?id=/);
   await expect(page.getByText("Luonnos", { exact: true })).toBeVisible();
 
   // "Merkitse lähetetyksi" now lives in the "..." menu: the bottom bar's
@@ -184,7 +184,7 @@ test("an invoice can be downloaded as a PDF", async ({ page, context }) => {
   await page.keyboard.press("Escape");
 
   const url = new URL(page.url());
-  const id = url.pathname.split("/").pop();
+  const id = url.searchParams.get("id");
   const cookies = await context.cookies();
   const response = await page.request.get(`/api/invoices/${id}/pdf`, {
     headers: { cookie: cookies.map((c) => `${c.name}=${c.value}`).join("; ") },

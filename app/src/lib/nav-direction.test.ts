@@ -52,17 +52,17 @@ describe("in-app back", () => {
   });
 
   it("sends a deep link to the parent list", () => {
-    recordRoute("/laskut/1", "none");
-    expect(inAppPrevious("/laskut/1")).toBeNull();
-    expect(fallbackBackPath("/laskut/1")).toBe("/laskut");
-    expect(fallbackBackPath("/kuitit/abc")).toBe("/kuitit");
+    recordRoute("/laskut/lasku", "none");
+    expect(inAppPrevious("/laskut/lasku")).toBeNull();
+    expect(fallbackBackPath("/laskut/lasku")).toBe("/laskut");
+    expect(fallbackBackPath("/kuitit/kuitti")).toBe("/kuitit");
     expect(fallbackBackPath("/asetukset/profiili")).toBe("/asetukset");
   });
 
   it("returns to the previous in-app screen and pops on back", () => {
     recordRoute("/laskut", "none");
-    recordRoute("/laskut/1", "forward");
-    expect(inAppPrevious("/laskut/1")).toBe("/laskut");
+    recordRoute("/laskut/lasku", "forward");
+    expect(inAppPrevious("/laskut/lasku")).toBe("/laskut");
     recordRoute("/laskut", "back");
     expect(inAppPrevious("/laskut")).toBeNull();
   });

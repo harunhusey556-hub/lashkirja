@@ -21,6 +21,7 @@ import { usePersistedState, useScrollRestoration } from "@/lib/list-ui-state";
 import { chooseDocuments, isNativeShell } from "@/lib/native-pick";
 import { Button, controlClass } from "@/components/ui";
 import { ListRow, PageTitle, Section, StatusTag } from "@/components/ds";
+import { detailHref } from "@/lib/routes";
 
 const RECENT_LIMIT = 5;
 
@@ -141,7 +142,7 @@ export default function TapahtumatClient() {
       }>(res, "Tiliotteen käsittely epäonnistui");
       setUploadMsg(`${data.count} tapahtumaa löydetty`);
       if (data.statement?.id) {
-        router.push(`${`/pankki/tapahtumat/${data.statement.id}`}${searchParams.toString() ? `?${searchParams.toString()}` : ""}`);
+        router.push(detailHref("statement", data.statement.id, Object.fromEntries(searchParams.entries())));
       } else {
         await loadStatements();
       }
@@ -387,11 +388,7 @@ export default function TapahtumatClient() {
               return (
                 <ListRow
                   key={s.id}
-                  href={
-                    searchParams.toString()
-                      ? `/pankki/tapahtumat/${s.id}?${searchParams.toString()}`
-                      : `/pankki/tapahtumat/${s.id}`
-                  }
+                  href={detailHref("statement", s.id, Object.fromEntries(searchParams.entries()))}
                   title={s.fileName}
                   secondary={secondary}
                   amount={formatEurSigned(s.totals.net)}

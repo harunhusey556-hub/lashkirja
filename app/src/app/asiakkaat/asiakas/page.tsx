@@ -1,8 +1,8 @@
 "use client";
 
-import { use, useCallback, useEffect, useState } from "react";
+import { Suspense, useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { ErrorState, LoadingState } from "@/components/AsyncState";
 import ConfirmModal from "@/components/ConfirmModal";
 import BottomSheet from "@/components/BottomSheet";
@@ -22,6 +22,7 @@ import { Button, buttonClass, controlClass } from "@/components/ui";
 import { BottomActions, DetailHero, KeyValueList, ListRow, MoreMenu, Section, StatusTag } from "@/components/ds";
 import { SALES_STATUS } from "@/lib/status-labels";
 import { clearDraft } from "@/lib/draft-store";
+import { detailHref } from "@/lib/routes";
 
 interface CustomerDetail {
   customer: {
@@ -56,8 +57,16 @@ interface CustomerDetail {
 /** Left for /asiakkaat to show once, after a hard delete navigates away from here. */
 const FLASH_KEY = "asiakkaat:flash";
 
-export default function CustomerDetailPage({ params }: { params: Promise<{ id: string }> }) {
-  const { id } = use(params);
+export default function Page() {
+  return (
+    <Suspense fallback={<LoadingState label="Haetaan asiakasta…" />}>
+      <CustomerDetail />
+    </Suspense>
+  );
+}
+
+function CustomerDetail() {
+  const id = useSearchParams().get("id") ?? "";
   const router = useRouter();
 
   const [detail, setDetail] = useState<CustomerDetail | null>(null);
@@ -73,6 +82,11 @@ export default function CustomerDetailPage({ params }: { params: Promise<{ id: s
   const [confirmRemove, setConfirmRemove] = useState(false);
 
   const load = useCallback(async () => {
+    if (!id) {
+      setMessage("Asiakasta ei löytynyt.");
+      setState("error");
+      return;
+    }
     try {
       const [response, list] = await Promise.all([
         apiFetch(`/api/customers/${id}`, { credentials: "include" }),
@@ -296,7 +310,7 @@ export default function CustomerDetailPage({ params }: { params: Promise<{ id: s
                 detail.invoices.map((invoice) => (
                   <ListRow
                     key={invoice.id}
-                    href={`/laskut/${invoice.id}`}
+                    href={detailHref("invoice", invoice.id)}
                     title={`Lasku ${invoice.number}`}
                     amount={formatEur(invoice.gross)}
                     secondary={

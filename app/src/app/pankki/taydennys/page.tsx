@@ -7,6 +7,7 @@ import { formatDate, formatEur } from "@/lib/format";
 import { ListRow, PageTitle, Section, StatusTag } from "@/components/ds";
 import { EmptyState } from "@/components/ScreenState";
 import { MONTHS } from "@/lib/finnish-months";
+import { detailHref } from "@/lib/routes";
 
 /** "2026-09" -> "syyskuulta 2026" (every Finnish month name ends in -kuu, ablative -kuulta). */
 function monthAblative(month: string): string {
@@ -104,7 +105,7 @@ export default function TaydennysPage() {
               rows.map((row) => (
                 <ListRow
                   key={row.id}
-                  href={`/pankki/tapahtumat/${row.statementId}`}
+                  href={detailHref("statement", row.statementId)}
                   title={row.counterparty || "Tapahtuma"}
                   amount={formatEur(row.amount)}
                   secondary={formatDate(row.date)}
@@ -126,7 +127,7 @@ export default function TaydennysPage() {
               receipts.map((receipt) => (
                 <ListRow
                   key={receipt.id}
-                  href={`/kuitit/${receipt.id}`}
+                  href={detailHref("receipt", receipt.id)}
                   title={receipt.vendor || "Kuitti"}
                   amount={receipt.totalAmount != null ? formatEur(receipt.totalAmount) : undefined}
                   secondary={formatDate(receipt.date)}

@@ -79,6 +79,56 @@ final class CancelledNavigationIgnoringDelegate: NSObject, WKNavigationDelegate 
     }
 }
 
+/// Serves the bundled Next.js static export (`app/out`, copied into
+/// `ios/App/App/public` by `cap sync`) the same way Next's own file-router
+/// would, instead of Capacitor's default `CapacitorRouter`
+/// (`node_modules/@capacitor/ios/Capacitor/Capacitor/Router.swift:19-28`),
+/// which serves `/index.html` for every extensionless path -- wrong for a
+/// static export, where e.g. `/laskut/lasku` must resolve to
+/// `laskut/lasku.html`.
+///
+/// This is a Swift port of `resolveExportPath` in
+/// `src/lib/export-path.ts` (Task 4). Keep the two in sync by hand: this
+/// build never runs the JS version, so a drift here is silent until a
+/// route 404s on device.
+struct NextExportRouter: Router {
+    // Set by `WebViewAssetHandler.setAssetPath` (`CAPBridgeViewController
+    // .swift:42`) to `configuration.appLocation.path`, the absolute
+    // filesystem path of the bundled `public` directory. `Router.route(for:)`
+    // returns `basePath`-prefixed absolute paths, matching
+    // `CapacitorRouter`'s own convention, which callers turn into a
+    // `URL(fileURLWithPath:)` (`WebViewAssetHandler.swift`).
+    var basePath: String = ""
+
+    func route(for path: String) -> String {
+        let pathUrl = URL(fileURLWithPath: path)
+
+        // Has an extension (e.g. "/logo.png", "/_next/static/chunks/a.js"):
+        // served as is, exactly like CapacitorRouter.
+        if !pathUrl.pathExtension.isEmpty {
+            return basePath + path
+        }
+
+        // "/" or "": the export root.
+        if path.isEmpty || path == "/" {
+            return basePath + "/index.html"
+        }
+
+        // "/a/b" or "/a/b/": prefer the flat "a/b.html" static-export file,
+        // then a nested "a/b/index.html", then fall back to the SPA shell.
+        let trimmed = path.hasSuffix("/") ? String(path.dropLast()) : path
+        let asFile = trimmed + ".html"
+        if FileManager.default.fileExists(atPath: basePath + asFile) {
+            return basePath + asFile
+        }
+        let asIndex = trimmed + "/index.html"
+        if FileManager.default.fileExists(atPath: basePath + asIndex) {
+            return basePath + asIndex
+        }
+        return basePath + "/index.html"
+    }
+}
+
 /// Wires `CancelledNavigationIgnoringDelegate` in as the web view's
 /// navigation delegate right after Capacitor creates its own. Selected in
 /// `Base.lproj/Main.storyboard` as the bridge view controller's custom
@@ -87,6 +137,10 @@ class MainViewController: CAPBridgeViewController {
     // WKWebView.navigationDelegate is `weak`; Capacitor keeps its own
     // handler alive via the bridge, but nothing retains ours unless we do.
     private var cancelledNavigationDelegate: CancelledNavigationIgnoringDelegate?
+
+    override func router() -> Router {
+        NextExportRouter()
+    }
 
     override func capacitorDidLoad() {
         super.capacitorDidLoad()

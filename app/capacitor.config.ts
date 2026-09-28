@@ -1,24 +1,24 @@
 import type { CapacitorConfig } from "@capacitor/cli";
 
-const serverUrl = process.env.CAPACITOR_SERVER_URL?.trim();
-
 const config: CapacitorConfig = {
   appId: "fi.tiyouba.lashkirja",
   appName: "LashKirja",
-  webDir: "public",
-  server: serverUrl
-    ? {
-        url: serverUrl,
-        cleartext: serverUrl.startsWith("http://"),
-        androidScheme: "https",
-        // Local page in webDir, shown when the remote URL fails before the
-        // app boots. cap sync bakes this into the IPA; an already installed
-        // build does not pick it up until the next IPA.
-        // The lashkirja:// scheme is not a Capacitor config key. The IPA
-        // script patches it into Info.plist after sync.
-        errorPath: "offline.html",
-      }
-    : undefined,
+  // The mobile static export (Task 4, `npm run build:mobile`), copied into
+  // the native project by `cap sync`. The UI ships inside the IPA now; there
+  // is no remote `server.url` and no `errorPath` fallback page for a failed
+  // remote load, because there is nothing remote to fail. The app talks to
+  // the API over `fetch` using NEXT_PUBLIC_API_BASE_URL baked into the
+  // export at build time (src/lib/build-target.ts), not a WebView server.
+  webDir: "out",
+  server: {
+    // Both are already Capacitor's own defaults; set explicitly because the
+    // API's CORS allowlist (env MOBILE_APP_ORIGINS, default
+    // "capacitor://localhost") depends on the app origin being exactly
+    // "capacitor://localhost" -- scheme "capacitor" + hostname "localhost".
+    // Changing either here changes the app's Origin header and breaks CORS.
+    iosScheme: "capacitor",
+    hostname: "localhost",
+  },
   ios: {
     // "never" makes WKWebView fill the screen and report REAL safe-area
     // insets through env(safe-area-inset-*), so the web UI can pad the header
@@ -60,6 +60,12 @@ const config: CapacitorConfig = {
     StatusBar: {
       style: "DARK",
       backgroundColor: "#f6f3ef",
+    },
+    // Stays disabled: enabling it would route the app's fetch calls (the
+    // streamed AI chat included) through the native HTTP bridge instead of
+    // WKWebView's own networking stack, breaking the stream.
+    CapacitorHttp: {
+      enabled: false,
     },
   },
 };
