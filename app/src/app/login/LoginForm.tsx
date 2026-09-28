@@ -13,6 +13,7 @@ import { appNavigate } from "@/lib/app-nav";
 import { signIn } from "@/lib/auth-client";
 import { IS_MOBILE_BUILD } from "@/lib/build-target";
 import { bootMobile } from "@/lib/mobile/boot";
+import { markFirstScreen } from "@/lib/splash";
 
 const SHOW_DEMO_LOGIN = !IS_MOBILE_BUILD && process.env.NEXT_PUBLIC_SHOW_DEMO_LOGIN === "true";
 
@@ -107,6 +108,24 @@ export default function LoginForm() {
     };
     window.addEventListener("pageshow", reset);
     return () => window.removeEventListener("pageshow", reset);
+  }, []);
+
+  // Mobile only (Task 7): LoginForm is one of the two possible "first real
+  // screen"s (the other is AppShell's children) -- hides the native splash
+  // once this form has actually painted, two rAFs after mount, same as
+  // AppShell's own timing. Idempotent: harmless if the redirect below fires
+  // moments later and AppShell's own call runs too.
+  useEffect(() => {
+    if (!IS_MOBILE_BUILD) return;
+    let raf1 = 0;
+    let raf2 = 0;
+    raf1 = requestAnimationFrame(() => {
+      raf2 = requestAnimationFrame(() => markFirstScreen());
+    });
+    return () => {
+      cancelAnimationFrame(raf1);
+      cancelAnimationFrame(raf2);
+    };
   }, []);
 
   // Mobile only: a signed-in user who lands on /login (navigating back in

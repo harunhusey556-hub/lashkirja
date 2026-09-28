@@ -13,8 +13,11 @@
 import { apiUrl, IS_MOBILE_BUILD } from "@/lib/build-target";
 import { appNavigate } from "@/lib/app-nav";
 import { secureStore, SECURE_KEYS } from "@/lib/mobile/secure-store";
-import { clearPageCache } from "@/lib/page-cache";
+import { clearPageCache, configurePageCachePersistence } from "@/lib/page-cache";
 import { clearAllDrafts } from "@/lib/draft-store";
+import { wipePersistentCache } from "@/lib/offline/persistent-cache";
+import { configureHttpCachePersistence } from "@/lib/offline/http-cache";
+import { activatePersistentCache } from "@/lib/mobile/boot";
 
 export interface StoredAuth {
   token: string;
@@ -157,6 +160,13 @@ async function signInMobile(input: { email: string; password: string }): Promise
   // its own redirect again.
   expiredThisPeriod = false;
   notifyListeners(stored);
+  // Re-arms the persistent cache for this user. `bootMobile()` itself only
+  // ever runs its own setup once per app launch, so a sign-in that is not
+  // also a fresh launch (this same running session, after an earlier
+  // sign-out) needs this called directly -- it is the same owner-check-and-
+  // wipe logic `bootMobile()` uses, so a leftover different user's rows
+  // (the app killed before a wipe finished) are still caught here.
+  void activatePersistentCache(stored.userId, stored.token).catch(() => {});
   return { ok: true, user: body.user };
 }
 
@@ -187,6 +197,12 @@ async function clearClientAuthState(): Promise<void> {
   await secureStore().remove(SECURE_KEYS.auth);
   clearPageCache();
   clearAllDrafts();
+  // Crypto-shred: every persisted row gone and the cache's own AES-GCM key
+  // deleted, then both page-cache.ts and http-cache.ts un-configured so
+  // nothing keeps writing to a store that no longer has a key.
+  await wipePersistentCache();
+  configurePageCachePersistence(null);
+  configureHttpCachePersistence(null);
   notifyListeners(null);
 }
 

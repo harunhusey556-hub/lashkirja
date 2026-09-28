@@ -32,6 +32,7 @@ import { AppLock } from "@/components/AppLock";
 import { apiFetch } from "@/components/clientFetch";
 import { useSession } from "@/components/SessionProvider";
 import { IS_MOBILE_BUILD } from "@/lib/build-target";
+import { markFirstScreen } from "@/lib/splash";
 import { readPageCache, writePageCache } from "@/lib/page-cache";
 import { helsinkiMonthKey } from "@/lib/validation";
 import { bumpNavEpoch } from "@/lib/screen-state";
@@ -388,6 +389,24 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       if (timeoutHandle !== null) window.clearTimeout(timeoutHandle);
     };
   }, []);
+
+  // Mobile only (Task 7): the shell is one of the two possible "first real
+  // screen"s (the other is LoginForm) -- hides the native splash once
+  // `children` has actually rendered, not merely once this component
+  // mounted (see A1: "unknown" already renders `children`, so this fires
+  // then, not only once a fully confirmed "signed-in" arrives).
+  useEffect(() => {
+    if (!IS_MOBILE_BUILD || sessionStatus === "signed-out") return;
+    let raf1 = 0;
+    let raf2 = 0;
+    raf1 = requestAnimationFrame(() => {
+      raf2 = requestAnimationFrame(() => markFirstScreen());
+    });
+    return () => {
+      cancelAnimationFrame(raf1);
+      cancelAnimationFrame(raf2);
+    };
+  }, [sessionStatus]);
 
   const showProfile = profileOpenOn === pathname;
   const chatOpen = chatOpenOn === pathname;

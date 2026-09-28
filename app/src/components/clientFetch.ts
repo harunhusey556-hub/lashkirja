@@ -5,6 +5,7 @@ import { apiUrl, IS_MOBILE_BUILD } from "@/lib/build-target";
 import { appNavigate } from "@/lib/app-nav";
 import { expireSession, getAccessToken, retryPendingRevoke, signOutThisDevice } from "@/lib/auth-client";
 import { bootMobile } from "@/lib/mobile/boot";
+import { rememberGet, staleResponseFor } from "@/lib/offline/http-cache";
 
 export class ApiError extends Error {
   status: number;
@@ -162,6 +163,22 @@ export async function apiFetch(input: RequestInfo | URL, init?: ApiFetchInit): P
   return promise;
 }
 
+/**
+ * A previously-remembered GET response, only ever offered up once the live
+ * network attempt has definitively failed (a thrown error, or every retry
+ * exhausted) -- never a substitute for a request that might still succeed.
+ * Mobile only; a no-op (returns null) on the web or for a non-idempotent
+ * method, where serving a stale write response would be actively wrong.
+ */
+async function staleFallback(url: RequestInfo | URL, method: string): Promise<Response | null> {
+  if (!IS_MOBILE_BUILD || !IDEMPOTENT_METHODS.has(method)) return null;
+  try {
+    return await staleResponseFor(requestUrl(url));
+  } catch {
+    return null;
+  }
+}
+
 async function apiFetchAttempt(input: RequestInfo | URL, init?: ApiFetchInit): Promise<Response> {
   const method = (init?.method || "GET").toUpperCase();
   const maxRetries = IDEMPOTENT_METHODS.has(method) ? 3 : 1;
@@ -199,6 +216,12 @@ async function apiFetchAttempt(input: RequestInfo | URL, init?: ApiFetchInit): P
       if (response.ok && !IDEMPOTENT_METHODS.has(method)) {
         invalidateForMutation(requestUrl(input));
       }
+      // Mobile GET fallback cache (Task 7): fire-and-forget, never delays
+      // or fails this response. rememberGet's own isCacheableGet check
+      // filters out everything that should not be kept.
+      if (IS_MOBILE_BUILD && IDEMPOTENT_METHODS.has(method) && response.ok) {
+        void rememberGet(requestUrl(input), response.clone()).catch(() => {});
+      }
       // Retry point for a mobile logout whose server call failed earlier
       // (auth-client.ts's pendingRevoke). Fire-and-forget: never delays or
       // fails this response.
@@ -210,10 +233,14 @@ async function apiFetchAttempt(input: RequestInfo | URL, init?: ApiFetchInit): P
         error instanceof DOMException &&
         error.name === "AbortError"
       ) {
+        const stale = await staleFallback(input, method);
+        if (stale) return stale;
         throw new ApiTimeoutError();
       }
       attempt++;
       if (attempt >= maxRetries) {
+        const stale = await staleFallback(input, method);
+        if (stale) return stale;
         throw error; // Bubble up if maximum retries reached
       }
       // Wait exponentially: 500ms, 1000ms, 2000ms...
