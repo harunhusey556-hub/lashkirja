@@ -40,6 +40,11 @@ export function BalanceTable({ months, busyMonth, onSave, onClear }: Props) {
   const [editing, setEditing] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
   const [error, setError] = useState<string | null>(null);
+  // Keyed separately from `error` (the editor's own validation/save error): "Poista" acts
+  // on a row that isn't in edit mode, so it needs its own slot, tagged with which month it
+  // failed for (only one row's "Poista" can be in flight at a time - `busyMonth` already
+  // enforces that upstream).
+  const [clearError, setClearError] = useState<{ month: string; text: string } | null>(null);
 
   function startEdit(row: MonthRow) {
     setEditing(row.month);
@@ -51,15 +56,35 @@ export function BalanceTable({ months, busyMonth, onSave, onClear }: Props) {
     setError(null);
   }
 
+  // `onSave` rethrows on a server failure (see saveBalance in the Pankkitilit page): this
+  // keeps the editor open with whatever the user typed and shows the message right here,
+  // under that row's own input - not a banner elsewhere that a scrolled-down sheet can hide.
   async function commit(month: string) {
     const parsed = parseFinnishNumber(draft);
     if (parsed === null) {
       setError("Anna summa, esim. 1250,50.");
       return;
     }
-    await onSave(month, parsed);
-    setEditing(null);
     setError(null);
+    try {
+      await onSave(month, parsed);
+      setEditing(null);
+      setError(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Saldon tallennus epäonnistui.");
+    }
+  }
+
+  async function handleClear(month: string) {
+    setClearError(null);
+    try {
+      await onClear(month);
+    } catch (err) {
+      setClearError({
+        month,
+        text: err instanceof Error ? err.message : "Saldon poisto epäonnistui.",
+      });
+    }
   }
 
   if (months.length === 0) {
@@ -120,12 +145,14 @@ export function BalanceTable({ months, busyMonth, onSave, onClear }: Props) {
                     onChange={(e) => setDraft(e.target.value)}
                     inputMode="decimal"
                     autoFocus
+                    aria-invalid={Boolean(error) || undefined}
+                    aria-describedby={error ? `bal-${row.month}-error` : undefined}
                   />
                   <button
                     type="button"
                     onClick={() => void commit(row.month)}
                     disabled={busyMonth === row.month}
-                    className="active-press px-4 py-2 rounded-card bg-ink text-canvas text-sm font-semibold disabled:opacity-50"
+                    className="active-press min-h-11 px-4 py-2 rounded-card bg-ink text-canvas text-sm font-semibold disabled:opacity-50"
                   >
                     Tallenna
                   </button>
@@ -135,47 +162,58 @@ export function BalanceTable({ months, busyMonth, onSave, onClear }: Props) {
                       setEditing(null);
                       setError(null);
                     }}
-                    className="active-press px-3 py-2 rounded-card border border-line text-sm text-ink"
+                    className="active-press min-h-11 px-3 py-2 rounded-card border border-line text-sm text-ink"
                   >
                     Peru
                   </button>
                 </div>
-                {error && <p className="text-xs text-danger">{error}</p>}
+                {error && (
+                  <p id={`bal-${row.month}-error`} className="text-xs text-danger" role="alert">
+                    {error}
+                  </p>
+                )}
               </div>
             ) : (
-              <div className="flex items-center justify-between gap-3 pt-1">
-                <div className="text-xs">
-                  <span className="text-ink-2">Pankin saldo: </span>
-                  <span className="text-ink font-medium">
-                    {row.reportedClosing === null ? "–" : formatEur(row.reportedClosing)}
-                  </span>
-                  {row.difference !== null && row.difference !== 0 && (
-                    <span className="text-danger font-medium">
-                      {" "}
-                      (ero {formatEurSigned(row.difference)})
+              <>
+                <div className="flex items-center justify-between gap-3 pt-1">
+                  <div className="text-xs">
+                    <span className="text-ink-2">Pankin saldo: </span>
+                    <span className="text-ink font-medium">
+                      {row.reportedClosing === null ? "–" : formatEur(row.reportedClosing)}
                     </span>
-                  )}
-                </div>
-                <div className="flex gap-2">
-                  <button
-                    type="button"
-                    onClick={() => startEdit(row)}
-                    className="active-press min-h-11 inline-flex items-center px-2 -mx-2 text-xs font-medium text-accent"
-                  >
-                    {row.reportedClosing === null ? "Kirjaa saldo" : "Muokkaa"}
-                  </button>
-                  {row.reportedClosing !== null && (
+                    {row.difference !== null && row.difference !== 0 && (
+                      <span className="text-danger font-medium">
+                        {" "}
+                        (ero {formatEurSigned(row.difference)})
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex gap-2">
                     <button
                       type="button"
-                      onClick={() => void onClear(row.month)}
-                      disabled={busyMonth === row.month}
-                      className="active-press min-h-11 inline-flex items-center px-2 -mx-2 text-xs font-medium text-ink-2 disabled:opacity-50"
+                      onClick={() => startEdit(row)}
+                      className="active-press min-h-11 inline-flex items-center px-2 -mx-2 text-xs font-medium text-accent"
                     >
-                      Poista
+                      {row.reportedClosing === null ? "Kirjaa saldo" : "Muokkaa"}
                     </button>
-                  )}
+                    {row.reportedClosing !== null && (
+                      <button
+                        type="button"
+                        onClick={() => void handleClear(row.month)}
+                        disabled={busyMonth === row.month}
+                        className="active-press min-h-11 inline-flex items-center px-2 -mx-2 text-xs font-medium text-ink-2 disabled:opacity-50"
+                      >
+                        Poista
+                      </button>
+                    )}
+                  </div>
                 </div>
-              </div>
+                {clearError?.month === row.month && (
+                  <p className="text-xs text-danger" role="alert">
+                    {clearError.text}
+                  </p>
+                )}
+              </>
             )}
           </li>
         );

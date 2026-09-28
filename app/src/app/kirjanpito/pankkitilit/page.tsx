@@ -11,7 +11,7 @@ import {
 } from "@/components/bank/BankAccountForm";
 import { BalanceTable, type MonthRow } from "@/components/bank/BalanceTable";
 import { apiFetch, errorMessage, isUnauthorized, readJson, redirectToLogin } from "@/components/clientFetch";
-import { formatEur } from "@/lib/format";
+import { formatEur, formatMonth } from "@/lib/format";
 import { maskIban } from "@/lib/iban";
 import BankConnectCard from "@/components/BankConnectCard";
 import { useProfile } from "@/app/asetukset/useProfile";
@@ -76,22 +76,28 @@ function MessageBanner({ message, isError }: { message: string | null; isError: 
 }
 
 /**
- * "Nordea · FI21 •••• 0785 · Oletus" (whichever pieces are known, plus any
- * status flags). Plain text, not a trailing badge: a `ListRow` `trailing`
- * sits in its own stacking layer above the row's own click target (so a
- * genuinely interactive trailing control, e.g. a MoreMenu, still works over
- * an `onClick`/`href` row) - for a purely decorative flag with nothing to
- * click, that layer only carves out a dead zone where the row itself stops
- * responding to taps.
+ * "Nordea · FI21 •••• 0785 · USD · Oletus · Täsmätty elokuu 2026 · 3 tiliotetta"
+ * (whichever pieces are known). Plain text, not a trailing badge: even though
+ * `ListRow`'s `trailing` wrapper is now `pointer-events-none` by default (a
+ * purely decorative badge there no longer blocks the row's own click - see
+ * ListRow.tsx), a handful of short status words read more calmly as one
+ * secondary line than as a row of small pills competing with the amount for
+ * space on a 390px screen, so this keeps them here rather than moving them
+ * back to `StatusTag`s.
  */
 function accountSecondary(account: AccountSummary): string {
-  const base =
-    [account.bankName, account.iban ? maskIban(account.iban) : null].filter(Boolean).join(" · ") ||
-    "Ei IBANia";
+  const parts = [
+    account.bankName,
+    account.iban ? maskIban(account.iban) : null,
+    account.currency !== "EUR" ? account.currency : null,
+  ].filter(Boolean);
+  const base = parts.join(" · ") || "Ei IBANia";
   const flags: string[] = [];
   if (account.isDefault) flags.push("Oletus");
   if (account.archivedAt) flags.push("Arkistoitu");
   if (account.mismatchCount > 0) flags.push(`${account.mismatchCount} kk ei täsmää`);
+  if (account.lastReconciledMonth) flags.push(`Täsmätty ${formatMonth(account.lastReconciledMonth)}`);
+  flags.push(account.statementCount === 1 ? "1 tiliote" : `${account.statementCount} tiliotetta`);
   return flags.length > 0 ? `${base} · ${flags.join(" · ")}` : base;
 }
 
@@ -158,12 +164,17 @@ export default function BankAccountsPage() {
     }
   }, []);
 
+  // `message` is shared page state (also read by the create/edit sheet's own banner) - it
+  // must never carry an old sheet's leftover error/success text into a sheet that opens
+  // next, so every sheet transition clears it first.
   function openDetail(account: AccountSummary) {
+    setMessage(null);
     setDetailAccount(account);
     void loadRollforward(account.id);
   }
 
   function closeDetail() {
+    setMessage(null);
     setDetailAccount(null);
     setRollforward(null);
   }
@@ -193,9 +204,13 @@ export default function BankAccountsPage() {
     }
   }
 
+  // Rethrows on failure (rather than showing a page/sheet-level banner): `BalanceTable`
+  // itself catches this, keeps the editor open with the typed draft, and shows the
+  // message as a role="alert" right under that month's own input - the only place
+  // guaranteed to still be in the viewport (a banner at the sheet's top can easily be
+  // scrolled out of view once the user has scrolled down to a specific month).
   async function saveBalance(accountId: string, month: string, closingBalance: number) {
     setBusyMonth(month);
-    setMessage(null);
     try {
       const response = await apiFetch(`/api/bank-accounts/${accountId}/balances`, {
         method: "PUT",
@@ -206,7 +221,7 @@ export default function BankAccountsPage() {
       await readJson(response, "Saldon tallennus epäonnistui");
       await Promise.all([loadRollforward(accountId), load()]);
     } catch (error) {
-      showError(errorMessage(error, "Saldon tallennus epäonnistui"));
+      throw new Error(errorMessage(error, "Saldon tallennus epäonnistui"));
     } finally {
       setBusyMonth(null);
     }
@@ -222,7 +237,7 @@ export default function BankAccountsPage() {
       await readJson(response, "Saldon poisto epäonnistui");
       await Promise.all([loadRollforward(accountId), load()]);
     } catch (error) {
-      showError(errorMessage(error, "Saldon poisto epäonnistui"));
+      throw new Error(errorMessage(error, "Saldon poisto epäonnistui"));
     } finally {
       setBusyMonth(null);
     }
@@ -284,7 +299,10 @@ export default function BankAccountsPage() {
             formMode === "hidden" && status === "ready" ? (
               <button
                 type="button"
-                onClick={() => setFormMode("create")}
+                onClick={() => {
+                  setMessage(null);
+                  setFormMode("create");
+                }}
                 className="active-press relative inline-flex min-h-9 items-center gap-1 rounded-full bg-ink px-3.5 text-[13px] font-semibold text-canvas before:absolute before:inset-x-0 before:-inset-y-1 before:content-['']"
               >
                 <svg className="h-3.5 w-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} aria-hidden>
@@ -345,17 +363,23 @@ export default function BankAccountsPage() {
               <MessageBanner message={message} isError={messageIsError} />
             )}
 
-            <Section>
-              {overview.accounts.map((account) => (
-                <ListRow
-                  key={account.id}
-                  onClick={() => openDetail(account)}
-                  title={account.name}
-                  amount={formatEur(account.currentBalance)}
-                  secondary={accountSecondary(account)}
-                />
-              ))}
-            </Section>
+            {overview.accounts.length > 0 && (
+              <Section>
+                {overview.accounts.map((account) => (
+                  // The dimming wrapper is a plain div, not a ListRow prop (ListRow has no
+                  // className escape hatch) - it still works as a Section child for the
+                  // divide-y styling, which only cares about direct children, not their tag.
+                  <div key={account.id} className={account.archivedAt ? "opacity-60" : undefined}>
+                    <ListRow
+                      onClick={() => openDetail(account)}
+                      title={account.name}
+                      amount={formatEur(account.currentBalance)}
+                      secondary={accountSecondary(account)}
+                    />
+                  </div>
+                ))}
+              </Section>
+            )}
 
             {(showArchived || (overview.archivedCount ?? 0) > 0) && (
               <button
@@ -383,7 +407,10 @@ export default function BankAccountsPage() {
 
       <BottomSheet
         isOpen={formMode !== "hidden"}
-        onClose={() => setFormMode("hidden")}
+        onClose={() => {
+          setMessage(null);
+          setFormMode("hidden");
+        }}
         title={formMode === "create" ? "Uusi pankkitili" : "Muokkaa tiliä"}
         labelledBy="ba-sheet-title"
         heightClass="max-h-[94dvh]"
@@ -407,7 +434,10 @@ export default function BankAccountsPage() {
                 : undefined
             }
             onSubmit={submitAccount}
-            onCancel={() => setFormMode("hidden")}
+            onCancel={() => {
+              setMessage(null);
+              setFormMode("hidden");
+            }}
           />
         </div>
       </BottomSheet>
@@ -430,6 +460,7 @@ export default function BankAccountsPage() {
                 type="button"
                 variant="secondary"
                 onClick={() => {
+                  setMessage(null);
                   setDetailAccount(null);
                   setFormMode({ edit: detailAccount });
                 }}
@@ -445,6 +476,7 @@ export default function BankAccountsPage() {
                 type="button"
                 variant="danger"
                 onClick={() => {
+                  setMessage(null);
                   setDetailAccount(null);
                   setConfirmRemove(detailAccount);
                 }}
