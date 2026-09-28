@@ -242,10 +242,31 @@ export async function signOut(): Promise<boolean> {
  * login screen. The fade lives on <body> (opacity only — a transform here
  * would re-anchor position:fixed bars mid-fade) so it works from any page.
  *
- * Navigates exactly once under normal conditions. A 3 s fallback guards the
- * case where that navigation never commits — cancelled by the native shell,
- * blocked, or otherwise dropped — so the page never sits faded and
- * untappable (`pointer-events: none` from `signing-out`) forever.
+ * Navigates exactly once, ever. `location.replace("/login")` is called
+ * once and only once — nothing here starts a second, overlapping
+ * navigation automatically.
+ *
+ * Why: a previous version fired an unconditional `location.assign("/login")`
+ * 3 s later as a "fallback". A provisional navigation that is merely slow
+ * (not dropped) is still pending at 3 s, so that second call cancelled the
+ * first one. WebKit surfaces a cancelled navigation as `NSURLErrorCancelled`
+ * (-999), which Capacitor 8 treats as a load failure and shows
+ * `offline.html` for — recreating the exact lock-up this code exists to
+ * prevent (final review I1, research H1).
+ *
+ * Fix: `pagehide` only fires once the browser actually commits to leaving
+ * this document, so it is the one signal that distinguishes "the replace()
+ * above is really taking the page away" from "nothing happened, or it was
+ * cancelled". If it fires within 3 s, the navigation is real — resolve
+ * `true` and stop watching. If it does not — stalled, cancelled, or just
+ * unusually slow — stop waiting at 3 s, un-fade the body so the page is
+ * tappable again, and resolve `false`. Callers already treat a `false`
+ * result as "sign-out failed" and show an error with the sign-out button
+ * still available, which is the retry: the user's own tap is the only
+ * thing that starts a second navigation. If the original navigation was
+ * only slow and completes on its own after the 3 s mark, the browser still
+ * takes the page to /login by itself — this just stops the app waiting on
+ * it.
  */
 export async function leaveAfterSignOut(): Promise<boolean> {
   const ok = await signOut();
@@ -253,9 +274,22 @@ export async function leaveAfterSignOut(): Promise<boolean> {
   document.body.classList.add("signing-out");
   await new Promise((resolve) => setTimeout(resolve, 240));
   window.location.replace("/login");
-  setTimeout(() => {
-    document.body.classList.remove("signing-out");
-    window.location.assign("/login");
-  }, 3000);
-  return true;
+
+  return new Promise<boolean>((resolve) => {
+    let settled = false;
+    const onPageHide = () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(true);
+    };
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      window.removeEventListener("pagehide", onPageHide);
+      document.body.classList.remove("signing-out");
+      resolve(false);
+    }, 3000);
+    window.addEventListener("pagehide", onPageHide, { once: true });
+  });
 }

@@ -60,8 +60,29 @@ export function opaqueRateKey(value: string): string {
 
 export function requestClientKey(req: NextRequest): string {
   if (process.env.TRUST_PROXY === "true") {
-    const forwarded = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim();
-    if (forwarded) return forwarded.slice(0, 128);
+    const forwarded = req.headers.get("x-forwarded-for");
+    if (forwarded) {
+      // Take the entry closest to us (the rightmost one), not the one
+      // closest to the client (the leftmost one). This app is reachable
+      // only through one trusted hop -- Tailscale Funnel/tailscaled
+      // forwarding to 127.0.0.1:3300 -- and a well-behaved proxy chain
+      // appends each hop's own view of the previous hop's address, so the
+      // rightmost entry is the one that hop actually observed. The
+      // leftmost entry, by contrast, can be set to anything by the
+      // original client and nothing downstream is guaranteed to strip or
+      // overwrite it. Taking the rightmost is never worse than the
+      // leftmost (single-value headers are unaffected) and closes a login
+      // rate-limit bypass if Funnel ever appends to rather than replaces a
+      // client-supplied header (final review M11 -- unverified against
+      // live Funnel traffic, so this is the conservative choice rather
+      // than trusting the leftmost value blindly).
+      const hops = forwarded
+        .split(",")
+        .map((hop) => hop.trim())
+        .filter(Boolean);
+      const nearest = hops[hops.length - 1];
+      if (nearest) return nearest.slice(0, 128);
+    }
   }
   return "direct";
 }

@@ -73,6 +73,13 @@
       (function () {
         "use strict";
         var STORAGE_KEY = "lashkirja-offline-retry-attempt";
+        // If the last recorded attempt is older than this, treat it as a
+        // new outage rather than a continuation of a previous one. Without
+        // this, sessionStorage on capacitor://localhost survives the trip
+        // back to the server once reconnected, so a second, unrelated
+        // outage later in the same app session would start at the steady
+        // 15s gap instead of retrying immediately (final review M5).
+        var RESET_AFTER_MS = 60000;
         var meta = document.querySelector('meta[name="lashkirja-server"]');
         var serverUrl = meta && meta.content ? meta.content.replace(/\/+$/, "") : "";
         var target = serverUrl ? serverUrl + "/dashboard" : null;
@@ -114,36 +121,49 @@
         // retries; every one after that waits the steady 15s gap.
         var GAPS = [0, 2000, 5000, 10000];
         var STEADY_GAP_MS = 15000;
+        // When sessionStorage throws (private mode, full, disabled), there
+        // is no way to count attempts across the reload Capacitor does on
+        // every failed navigation, so readState() always reports attempt 0
+        // -- retrying at the GAPS[0] === 0ms delay forever, a hot reload
+        // loop against a dead server. Floor the delay instead whenever
+        // storage is known to be unavailable.
+        var NO_STORAGE_FLOOR_MS = 2000;
+        var storageAvailable = true;
 
-        function readAttempt() {
+        function readState() {
           try {
             var raw = sessionStorage.getItem(STORAGE_KEY);
-            var parsed = raw === null ? 0 : parseInt(raw, 10);
-            return isNaN(parsed) || parsed < 0 ? 0 : parsed;
+            if (raw === null) return { attempt: 0 };
+            var parsed = JSON.parse(raw);
+            var at = typeof parsed.at === "number" ? parsed.at : 0;
+            if (Date.now() - at > RESET_AFTER_MS) return { attempt: 0 };
+            var attempt = typeof parsed.attempt === "number" && parsed.attempt >= 0 ? parsed.attempt : 0;
+            return { attempt: attempt };
           } catch (e) {
-            return 0;
+            storageAvailable = false;
+            return { attempt: 0 };
           }
         }
 
-        function writeAttempt(attempt) {
+        function writeState(attempt) {
           try {
-            sessionStorage.setItem(STORAGE_KEY, String(attempt));
+            sessionStorage.setItem(STORAGE_KEY, JSON.stringify({ attempt: attempt, at: Date.now() }));
           } catch (e) {
-            // A full or unavailable store just means every load retries
-            // without ever backing off past the first gap - still safe.
+            storageAvailable = false;
           }
         }
 
         function gapForAttempt(attempt) {
+          if (!storageAvailable) return NO_STORAGE_FLOOR_MS;
           return attempt < GAPS.length ? GAPS[attempt] : STEADY_GAP_MS;
         }
 
-        var attempt = readAttempt();
+        var attempt = readState().attempt;
         var gap = gapForAttempt(attempt);
         var timer = null;
 
         function fire() {
-          writeAttempt(attempt + 1);
+          writeState(attempt + 1);
           location.replace(target);
         }
 

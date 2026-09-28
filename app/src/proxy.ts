@@ -97,8 +97,19 @@ async function checkAuth(request: NextRequest, deep: boolean): Promise<AuthCheck
   const session = await unsealSession(request);
   if (!session?.userId) return { authenticated: false, revoked: false };
   if (!deep) return { authenticated: true, revoked: false };
-  const revoked = await isRevoked(session);
-  return { authenticated: !revoked, revoked };
+  try {
+    const revoked = await isRevoked(session);
+    return { authenticated: !revoked, revoked };
+  } catch (error) {
+    // A transient DB error (SQLite busy/locked, a connection hiccup) must
+    // not turn /login or / into a 500 -- fail closed instead: treat the
+    // cookie as signed out. This still renders /login (isProtected is
+    // false there) and, on /, redirects to /login without clearing the
+    // cookie (revoked stays false), so a real, still-valid session is not
+    // lost over a momentary DB blip. Final review M2.
+    console.error("proxy: revocation check failed (DB error); treating as signed out", error);
+    return { authenticated: false, revoked: false };
+  }
 }
 
 /** Full attribute parity with how the cookie was set (path, secure,

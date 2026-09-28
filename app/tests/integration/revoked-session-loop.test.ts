@@ -93,7 +93,11 @@ describe("revoked-session redirect loop", () => {
     expect(cookieWasCleared(afterRevoke)).toBe(true);
   });
 
-  it("still gates /login cheaply (no DB call needed) for a signed-out visitor with no cookie", async () => {
+  // Renamed from "...gates /login cheaply (no DB call needed)...": that name
+  // claimed something this test never asserts (it would still pass if
+  // proxy() made a DB call here). It only checks that /login renders for a
+  // signed-out visitor -- final review M4.
+  it("renders /login for a signed-out visitor with no cookie", async () => {
     const response = await proxy(buildRequest("GET", "/login", undefined, {}));
     expect(isPassThrough(response)).toBe(true);
   });

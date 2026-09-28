@@ -16,10 +16,11 @@ Tailscale Funnel terminates HTTPS on port 8443 and forwards to `http://127.0.0.1
 | Uploads (receipts, statements, PDFs) | `C:\LashKirja\data\uploads\` |
 | Data-copy packages (Tietosuoja) | `C:\LashKirja\data\account-packages\` |
 | Backups | `C:\LashKirja\backups\lashkirja-YYYY-MM-DD.zip`, mirrored to `%OneDrive%\LashKirja-backups\` |
-| Logs | `C:\LashKirja\logs\` (`web-`, `worker-`, `supervisor-`, `backup-` per day; `deploy-<timestamp>.log`) |
+| Logs | `C:\LashKirja\logs\` (`web-`, `worker-`, `supervisor-`, `backup-`, `cron-` per day; `deploy-<timestamp>.log`; `BACKUP-FAILED.txt` only while the most recent backup failed) |
 | Supervisor state | `C:\LashKirja\run\supervisor.pid` |
 | Web server | `next start` on `127.0.0.1:3300` (loopback only) |
 | Background worker | `scripts/worker.ts` (mail sync, bank sync, document jobs, every 10 min) |
+| Cron routes (recurring invoices, upload cleanup) | "LashKirja cron" Scheduled Task, hourly, via `run-cron.ps1` |
 | Dev server (untouched) | `C:\Users\Hhusey\lashkirja`, `next dev` on :3200, demo database |
 
 The app keeps its files under `process.cwd()\data`. There is no separate uploads variable. The supervisor starts both processes with the working directory `C:\LashKirja`, so `data\` resolves to `C:\LashKirja\data` and never to the git checkout. `DATABASE_URL` is absolute as well.
@@ -33,9 +34,10 @@ All four are in `app/scripts/ops/`. Run them with `powershell -NoProfile -Execut
 | Script | What it does |
 | --- | --- |
 | `run-prod.ps1` | Supervisor. Keeps `next start` and the worker alive. A crash restarts after 1 s, then 5 s, then 30 s (the backoff resets after 2 minutes of uptime). `-Stop` stops it cleanly. `-Status` shows the processes and health. |
-| `deploy-local.ps1` | Deploys a git ref: fetch, stop, checkout, `npm ci`, `prisma generate`, backup, `prisma migrate deploy`, build, start and a health check. It rolls back on failure. `-Remote` (default `origin`) and `-Ref` (default `feat/real-app-phase01`). |
-| `backup-local.ps1` | Takes a consistent backup zip, applies retention and mirrors to OneDrive. `-RestoreTest` proves the newest zip. |
-| `install-tasks.ps1` | Registers the two per-user Scheduled Tasks and turns off sleep on AC power. It is idempotent. |
+| `deploy-local.ps1` | Deploys a git ref: fetch, stop, checkout, `npm ci`, `prisma generate`, backup, build, `prisma migrate deploy`, start and a health check. It rolls back code, dependencies, the build AND the database on any failure. `-Remote` (default `origin`) and `-Ref` (default `feat/real-app-phase01`). |
+| `backup-local.ps1` | Takes a consistent backup zip, applies retention and mirrors to OneDrive. `-RestoreTest` proves the newest zip. A failed run writes `C:\LashKirja\logs\BACKUP-FAILED.txt` and tries to log a Windows Application event. |
+| `run-cron.ps1` | Calls the `recurring-invoices` and `cleanup` cron routes on `127.0.0.1:3300` with `CRON_SECRET` read from `.env` at run time. `sync-bank` and `sync-email` are not called here -- the always-on worker already covers them. |
+| `install-tasks.ps1` | Registers the three per-user Scheduled Tasks and turns off sleep on AC power. It is idempotent. |
 
 ## Start, stop, status
 
@@ -71,21 +73,23 @@ The order is:
 3. checkout;
 4. `npm ci --prefer-offline`;
 5. `prisma generate`;
-6. `backup-local.ps1 -Tag predeploy`;
-7. `prisma migrate deploy`;
-8. the previous `.next` becomes `.next.prev`, then `next build`;
+6. `backup-local.ps1 -Tag predeploy` (the zip's path is remembered for an automatic database restore below);
+7. the previous `.next` becomes `.next.prev`, then `next build`;
+8. `prisma migrate deploy`;
 9. start through the task;
 10. poll `/api/health` for 60 s.
+
+The build runs *before* `prisma migrate deploy` (final review I3): `next build` only needs the Prisma client from `prisma generate`, not a migrated database, so a build failure never leaves the database forward-migrated while the old code is what is checked out.
 
 The log is `C:\LashKirja\logs\deploy-<timestamp>.log`.
 
 The app is down during a deploy: 1.5 minutes measured on an idle PC, about 6 minutes while the PC was busy. On Windows, `npm ci` cannot replace native `.node` modules that a running server has loaded. `next build` always writes the `.next` directory that `next start` serves, because `distDir` is fixed in `next.config.ts`. So the build cannot run beside the live server. The previous build is kept as `.next.prev` for rollback.
 
-Failure handling:
+Failure handling -- every case below leaves production fully on the previous version: the git checkout, `node_modules`, the Prisma client, `.next` and the worker (which runs from source via the supervisor, so restoring the checkout restores the worker too):
 
-- **install, generate, backup or build fails:** the previous commit, its `node_modules` and `.next.prev` are put back, and the old version is started again.
-- **health check fails after start:** `.next.prev` is swapped back and started against the same (already migrated) database. The migrations in this repo are additive; see `app/docs/deploy-rollback.md`.
-- **`prisma migrate deploy` fails:** the app stays stopped. Do not serve a database a failed migration touched. Restore the `-predeploy` zip (below), then start the previous build.
+- **install, generate, backup or build fails** (before `prisma migrate deploy` has run): the previous commit is checked out again, `node_modules`/the Prisma client are reinstalled, `.next.prev` is swapped back in if a build was in progress, and the old version is started again. The database was never touched.
+- **`prisma migrate deploy` fails, or is interrupted partway:** the previous commit, `node_modules`, Prisma client and build are restored as above, AND `data\prod.db` is restored automatically from the predeploy backup this run took, verified against that zip's own `MANIFEST.txt` sha256. The migrated-but-failed database is kept, never deleted, at `data\prod.db.post-migrate-failure-<timestamp>`. The previous version is then started and health-checked again. If the automatic database restore itself fails, the app is left **stopped** and the log says so -- do not start it until `data\prod.db` is confirmed restored (see Restore, below).
+- **health check fails after start** (migrate deploy already succeeded by this point): the same full restore as the migrate-failure case above -- code, dependencies, build AND database -- then restarted and re-checked. If that restore cannot be completed safely, the app is left stopped rather than risk serving a broken rollback.
 
 Manual rollback to the previous build:
 
@@ -118,6 +122,22 @@ powershell -NoProfile -ExecutionPolicy Bypass -File C:\LashKirja\prod\app\script
 ```
 
 It extracts to a temp folder and checks the database hash and every upload hash against `MANIFEST.txt`. It runs `PRAGMA integrity_check`, counts `User` rows, and then deletes the temp folder. A non-zero exit means the zip is not usable.
+
+**A failed backup is surfaced**, not just logged to a file nobody reads (final review M9): it writes `C:\LashKirja\logs\BACKUP-FAILED.txt` (cleared automatically on the next successful run) and, best-effort, a Windows Application event log entry under the source `LashKirja`. Check `C:\LashKirja\logs\BACKUP-FAILED.txt` if a backup is ever suspected to have failed; its absence means the most recent run succeeded.
+
+## Cron
+
+Recurring invoices (`/api/cron/recurring-invoices`) and expired-upload cleanup (`/api/cron/cleanup`) have no scheduler other than the "LashKirja cron" Scheduled Task, which runs `run-cron.ps1` hourly (final review I4). Without it, recurring invoices silently never generate or send, and expired uploads accumulate (they are also copied into every backup and the OneDrive mirror).
+
+`sync-bank` and `sync-email` are **not** called by this task: the always-on worker (`scripts/worker.ts`, started by the "LashKirja prod" task) already polls both on a 10 minute loop. Calling their HTTP routes too would just duplicate that work.
+
+`run-cron.ps1` reads `CRON_SECRET` from `C:\LashKirja\prod\app\.env` at run time and sends it only as the `Authorization: Bearer` header of the two requests to `127.0.0.1:3300`. The secret is never written into the Scheduled Task definition and never logged -- `install-tasks.ps1` registers the task with no secret argument at all. Run it manually to check:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File C:\LashKirja\prod\app\scripts\ops\run-cron.ps1
+```
+
+It logs to `C:\LashKirja\logs\cron-YYYY-MM-DD.log` and exits non-zero if either call fails (both are always attempted regardless of the other's result).
 
 ## Restore
 

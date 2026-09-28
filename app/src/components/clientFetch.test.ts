@@ -151,13 +151,33 @@ describe("leaveAfterSignOut", () => {
   let replace: ReturnType<typeof vi.fn>;
   let assign: ReturnType<typeof vi.fn>;
   let classList: { add: ReturnType<typeof vi.fn>; remove: ReturnType<typeof vi.fn> };
+  let listeners: Map<string, Set<(...args: unknown[]) => void>>;
+  let addEventListener: ReturnType<typeof vi.fn>;
+  let removeEventListener: ReturnType<typeof vi.fn>;
+
+  function fireWindowEvent(name: string) {
+    for (const handler of listeners.get(name) ?? []) handler();
+  }
 
   beforeEach(() => {
     vi.useFakeTimers();
     replace = vi.fn();
     assign = vi.fn();
     classList = { add: vi.fn(), remove: vi.fn() };
-    vi.stubGlobal("window", { location: { replace, assign }, localStorage: fakeLocalStorage() });
+    listeners = new Map();
+    addEventListener = vi.fn((name: string, handler: (...args: unknown[]) => void) => {
+      if (!listeners.has(name)) listeners.set(name, new Set());
+      listeners.get(name)!.add(handler);
+    });
+    removeEventListener = vi.fn((name: string, handler: (...args: unknown[]) => void) => {
+      listeners.get(name)?.delete(handler);
+    });
+    vi.stubGlobal("window", {
+      location: { replace, assign },
+      localStorage: fakeLocalStorage(),
+      addEventListener,
+      removeEventListener,
+    });
     vi.stubGlobal("document", { body: { classList } });
   });
 
@@ -167,35 +187,56 @@ describe("leaveAfterSignOut", () => {
     clearPageCache();
   });
 
-  it("navigates to /login once, and the 3s fallback has not fired yet", async () => {
+  it("navigates to /login exactly once and resolves true as soon as the page actually unloads (pagehide)", async () => {
     vi.stubGlobal("fetch", vi.fn(fetchThatRespectsAbort(jsonResponse(200))));
 
     const promise = leaveAfterSignOut();
     await vi.advanceTimersByTimeAsync(240); // the fade delay before the first navigate
-    await expect(promise).resolves.toBe(true);
 
     expect(classList.add).toHaveBeenCalledWith("signing-out");
     expect(replace).toHaveBeenCalledTimes(1);
     expect(replace).toHaveBeenCalledWith("/login");
-    expect(assign).not.toHaveBeenCalled();
 
-    await vi.advanceTimersByTimeAsync(2999); // just under the 3s fallback window
+    // Simulate the browser actually committing to leave this document.
+    fireWindowEvent("pagehide");
+    await expect(promise).resolves.toBe(true);
+
+    // Never a second, overlapping navigation.
     expect(assign).not.toHaveBeenCalled();
+    expect(replace).toHaveBeenCalledTimes(1);
+    // pagehide firing means the document is genuinely gone; no need to un-fade it.
     expect(classList.remove).not.toHaveBeenCalled();
   });
 
-  it("falls back to location.assign and un-fades the body if the page is still there after 3s", async () => {
+  it("never starts a second navigation if /login has not taken the page away after 3s; it un-fades and resolves false instead", async () => {
     vi.stubGlobal("fetch", vi.fn(fetchThatRespectsAbort(jsonResponse(200))));
 
     const promise = leaveAfterSignOut();
     await vi.advanceTimersByTimeAsync(240);
+
+    // No pagehide fires: the first navigation stalled, was cancelled, or is
+    // merely slow. The old code called location.assign("/login") here,
+    // which is exactly the overlapping-navigation bug (I1) — assert it is
+    // gone.
+    await vi.advanceTimersByTimeAsync(3000);
+    await expect(promise).resolves.toBe(false);
+
+    expect(replace).toHaveBeenCalledTimes(1); // still only ever called once
+    expect(assign).not.toHaveBeenCalled(); // NEVER a second, automatic navigation
+    expect(classList.remove).toHaveBeenCalledWith("signing-out");
+  });
+
+  it("resolving via pagehide cancels the 3s fallback so it never un-fades or fires late", async () => {
+    vi.stubGlobal("fetch", vi.fn(fetchThatRespectsAbort(jsonResponse(200))));
+
+    const promise = leaveAfterSignOut();
+    await vi.advanceTimersByTimeAsync(240);
+    fireWindowEvent("pagehide");
     await promise;
 
     await vi.advanceTimersByTimeAsync(3000);
-    expect(replace).toHaveBeenCalledTimes(1); // still only ever called once
-    expect(assign).toHaveBeenCalledTimes(1);
-    expect(assign).toHaveBeenCalledWith("/login");
-    expect(classList.remove).toHaveBeenCalledWith("signing-out");
+    expect(classList.remove).not.toHaveBeenCalled();
+    expect(assign).not.toHaveBeenCalled();
   });
 
   it("never fades the page when the server logout call fails, but still clears cached data", async () => {

@@ -206,6 +206,9 @@ try {
   [System.IO.Compression.ZipFile]::CreateFromDirectory($staging, $partial, [System.IO.Compression.CompressionLevel]::Optimal, $false)
   Move-Item -LiteralPath $partial -Destination $zipPath -Force
   Log ("backup written: {0} ({1:N0} KB, uploads={2})" -f $name, ((Get-Item $zipPath).Length / 1KB), $files.Count)
+  # Clear a stale failure marker from an earlier run now that this one
+  # succeeded, so the marker only ever reflects "currently failing".
+  Remove-Item -LiteralPath (Join-Path $LogDir 'BACKUP-FAILED.txt') -Force -ErrorAction SilentlyContinue
 
   Invoke-Retention $BackupDir $zipPath
 
@@ -221,6 +224,29 @@ try {
 } catch {
   Log "backup FAILED: $($_.Exception.Message)"
   $exitCode = 1
+  # A failed 03:00 run only ever wrote to backup-*.log, which nobody looks
+  # at (final review M9). Surface it two more ways, best-effort -- neither
+  # failing here should mask the real backup failure above.
+  try {
+    $failureFile = Join-Path $LogDir 'BACKUP-FAILED.txt'
+    $message = "{0} backup FAILED: {1}`nSee {2} for details.`n" -f (Get-Date -Format 'yyyy-MM-ddTHH:mm:ss'), $_.Exception.Message, $LogFile
+    Add-Content -LiteralPath $failureFile -Value $message -Encoding UTF8
+  } catch {
+    Log "could not write $failureFile`: $($_.Exception.Message)"
+  }
+  try {
+    $source = 'LashKirja'
+    if (-not [System.Diagnostics.EventLog]::SourceExists($source)) {
+      New-EventLog -LogName Application -Source $source -ErrorAction Stop
+    }
+    Write-EventLog -LogName Application -Source $source -EventId 1 -EntryType Error `
+      -Message "LashKirja backup FAILED: $($_.Exception.Message)`nSee $LogFile" -ErrorAction Stop
+  } catch {
+    # Registering a new event source needs admin rights the first time;
+    # skip quietly if that (or the write itself) is refused. The file
+    # above is the guaranteed signal.
+    Log "could not write to the Windows Application event log: $($_.Exception.Message)"
+  }
 } finally {
   Remove-Item -LiteralPath $staging -Recurse -Force -ErrorAction SilentlyContinue
 }

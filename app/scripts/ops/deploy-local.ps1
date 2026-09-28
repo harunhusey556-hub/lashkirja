@@ -12,17 +12,39 @@
     4. npm ci --prefer-offline
     5. prisma generate
     6. backup-local.ps1 -Tag predeploy (skipped only when prod.db does not exist yet)
-    7. prisma migrate deploy against C:\LashKirja\data\prod.db
-    8. keep the previous build as .next.prev, then next build into a fresh .next
+    7. keep the previous build as .next.prev, then next build into a fresh .next
+    8. prisma migrate deploy against C:\LashKirja\data\prod.db
     9. start the supervisor (the "LashKirja prod" Scheduled Task when registered)
    10. poll http://127.0.0.1:3300/api/health for up to 60 s
 
-  Failure handling:
-    - install, generate, backup or build fails: the previous build (.next.prev) and the
-      previous commit are put back, and the old version is started again.
-    - migrate deploy fails: the app stays stopped. Do not serve a database a
-      failed migration touched; restore the predeploy zip (ops-windows.md).
-    - health fails after start: .next.prev is swapped back and restarted.
+  The build now runs BEFORE migrate deploy (reordered from the original
+  install/generate/backup/migrate/build sequence). `next build` only needs
+  the Prisma client from `prisma generate` (the schema file), not a
+  migrated database, so building first means a build failure never leaves
+  the database forward-migrated with the old code still checked out.
+
+  Failure handling -- in every case below, production ends up fully on the
+  previous version: the git checkout, node_modules, the Prisma client,
+  .next and the worker (which runs from source via the supervisor, so
+  restoring the checkout restores the worker too):
+    - install, generate, backup or build fails (before migrate deploy has
+      run): the previous commit is checked out again, node_modules and the
+      Prisma client are reinstalled/regenerated, .next.prev is swapped back
+      in if a build was in progress, and the old version is started again.
+      The database was never touched, so no database restore is needed.
+    - migrate deploy fails, or a build/migration is otherwise interrupted
+      partway: the previous commit, node_modules, Prisma client and build
+      are restored as above, AND data\prod.db is restored from the
+      predeploy backup this run just took (verified against its
+      MANIFEST.txt sha256). The migrated-but-failed database is kept
+      alongside as data\prod.db.post-migrate-failure-<timestamp>, never
+      deleted. The previous version is then started and health-checked
+      again. If the automatic database restore itself fails, the app is
+      left STOPPED and the failure is logged -- do not start it until
+      data\prod.db is confirmed restored (ops-windows.md, "Restore").
+    - health fails after start (migrate deploy already succeeded by this
+      point): same full restore as the migrate-failure case -- code,
+      dependencies, build AND database -- then restarted and re-checked.
 
   Why the app stops: on Windows, npm ci cannot replace native modules
   (.node files) that the running server has loaded, and next build always
@@ -120,8 +142,21 @@ function Test-Health([int]$TimeoutSeconds) {
 
 function Stop-Supervisor {
   Log 'stopping supervisor'
-  $out = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $OpsDir 'run-prod.ps1') -Stop -Root $Root 2>&1
+  # PS 5.1 turns a child process's stderr lines into ErrorRecords when
+  # captured with 2>&1; under $ErrorActionPreference='Stop' (set globally
+  # above) the first one throws instead of just being collected. Relax the
+  # preference for the call, exactly like Exec() already does for native
+  # commands, and check $LASTEXITCODE instead of relying on a thrown error.
+  $old = $ErrorActionPreference
+  $ErrorActionPreference = 'Continue'
+  try {
+    $out = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $OpsDir 'run-prod.ps1') -Stop -Root $Root 2>&1
+    $code = $LASTEXITCODE
+  } finally {
+    $ErrorActionPreference = $old
+  }
   foreach ($line in $out) { Log ("    " + (Format-Line $line)) }
+  if ($code -ne 0) { Log "run-prod.ps1 -Stop exited with code $code (continuing; it may already be stopped)" }
 }
 
 function Start-Supervisor {
@@ -146,6 +181,63 @@ function Restore-PreviousBuild {
   Rename-Item -LiteralPath $prev -NewName '.next'
   Log 'restored .next.prev as .next'
   return $true
+}
+
+# Restores data\prod.db from the predeploy backup zip this run took, for use
+# when a migration has run (or may have run) against the database and the
+# deploy is being rolled back. Verifies the zip's own MANIFEST.txt sha256
+# before touching the live file, and never deletes the migrated database --
+# it is kept alongside as prod.db.post-migrate-failure-<timestamp> so it can
+# be inspected later.
+function Restore-PredeployDb([string]$ZipPath) {
+  if (-not $ZipPath -or -not (Test-Path -LiteralPath $ZipPath)) {
+    Log 'no predeploy backup zip recorded; cannot restore data\prod.db automatically'
+    return $false
+  }
+  $dbPath = Join-Path $Root 'data\prod.db'
+  $temp = Join-Path $RunDir ("restore-predeploy-" + (Get-Date -Format 'yyyyMMdd-HHmmss'))
+  try {
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    [System.IO.Compression.ZipFile]::ExtractToDirectory($ZipPath, $temp)
+    $manifest = Get-Content -LiteralPath (Join-Path $temp 'MANIFEST.txt') -Encoding UTF8
+    $dbLine = $manifest | Where-Object { $_ -like 'db=*' } | Select-Object -First 1
+    $restoredDb = Join-Path $temp 'prod.db'
+    if (-not $dbLine) { throw 'MANIFEST.txt has no db= line' }
+    if (-not (Test-Path -LiteralPath $restoredDb)) { throw 'zip has no prod.db' }
+    $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $restoredDb).Hash.ToLowerInvariant()
+    if ($hash -ne $dbLine.Substring(3)) { throw 'restored database sha256 does not match MANIFEST.txt' }
+    if (Test-Path -LiteralPath $dbPath) {
+      $quarantine = "$dbPath.post-migrate-failure-{0}" -f (Get-Date -Format 'yyyyMMdd-HHmmss')
+      Move-Item -LiteralPath $dbPath -Destination $quarantine -Force
+      Log "kept the migrated (failed) database at $quarantine"
+    }
+    Copy-Item -LiteralPath $restoredDb -Destination $dbPath -Force
+    Log "restored data\prod.db from predeploy backup $ZipPath"
+    return $true
+  } catch {
+    Log "restoring data\prod.db from predeploy backup FAILED: $($_.Exception.Message)"
+    return $false
+  } finally {
+    Remove-Item -LiteralPath $temp -Recurse -Force -ErrorAction SilentlyContinue
+  }
+}
+
+# Full rollback used after migrate deploy has run (or may have): the
+# previous commit, dependencies, Prisma client, build AND database. Returns
+# $true only if every step succeeded.
+function Restore-FullPreviousVersion([string]$PrevSha, [string]$PredeployZip) {
+  $ok = $true
+  try {
+    if ($PrevSha) { Exec 'git' @('-C', $ProdDir, 'checkout', '--force', '--detach', $PrevSha) $ProdDir }
+    Exec 'npm.cmd' @('ci', '--prefer-offline', '--no-audit', '--no-fund')
+    Exec 'node' @('node_modules\prisma\build\index.js', 'generate')
+  } catch {
+    Log "restoring the previous commit/dependencies FAILED: $($_.Exception.Message)"
+    $ok = $false
+  }
+  [void](Restore-PreviousBuild)
+  if (-not (Restore-PredeployDb $PredeployZip)) { $ok = $false }
+  return $ok
 }
 
 if (Test-Path $LockFile) {
@@ -201,20 +293,33 @@ try {
 
   # 6. backup
   $stage = 'backup'
+  $predeployZip = $null
   if (Test-Path (Join-Path $Root 'data\prod.db')) {
-    $out = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $OpsDir 'backup-local.ps1') -Root $Root -Tag predeploy 2>&1
-    $backupCode = $LASTEXITCODE
+    # Same PS 5.1 stderr-under-Stop issue as Stop-Supervisor: scope the
+    # preference around the capture, then decide success from $LASTEXITCODE.
+    $old = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+      $out = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $OpsDir 'backup-local.ps1') -Root $Root -Tag predeploy 2>&1
+      $backupCode = $LASTEXITCODE
+    } finally {
+      $ErrorActionPreference = $old
+    }
     foreach ($line in $out) { Log ("    " + (Format-Line $line)) }
     if ($backupCode -ne 0) { throw "backup-local.ps1 exited with code $backupCode" }
+    $predeployZip = Get-ChildItem -LiteralPath (Join-Path $Root 'backups') -Filter 'lashkirja-*-predeploy.zip' -File -ErrorAction SilentlyContinue |
+      Sort-Object LastWriteTime -Descending | Select-Object -First 1 | ForEach-Object { $_.FullName }
+    if (-not $predeployZip) { Log 'WARNING: predeploy backup reported success but the zip could not be located afterward; an automatic database restore will not be possible if migrate deploy fails' }
+    else { Log "predeploy backup: $predeployZip" }
   } else {
     Log 'no prod.db yet (first deploy); backup skipped, migrate deploy creates it'
   }
 
-  # 7. migrate
-  $stage = 'migrate'
-  Exec 'node' @('node_modules\prisma\build\index.js', 'migrate', 'deploy')
-
-  # 8. build into a fresh .next, previous kept as .next.prev
+  # 7. build into a fresh .next, previous kept as .next.prev. Deliberately
+  # BEFORE migrate deploy: `next build` only needs the Prisma client
+  # (already regenerated from the schema file above), not a migrated
+  # database, so a build failure never leaves the database forward-migrated
+  # while the old code is what's checked out.
   $stage = 'build'
   $next = Join-Path $AppDir '.next'
   $prev = Join-Path $AppDir '.next.prev'
@@ -224,17 +329,26 @@ try {
   Exec 'node' @('node_modules\next\dist\bin\next', 'build')
   if (-not (Test-Path (Join-Path $next 'BUILD_ID'))) { throw 'build finished without .next\BUILD_ID' }
 
+  # 8. migrate. From here on, a failure must restore the database too, not
+  # just the code -- see the 'migrate' and 'health' branches below.
+  $stage = 'migrate'
+  Exec 'node' @('node_modules\prisma\build\index.js', 'migrate', 'deploy')
+
   # 9-10. start and verify
   $stage = 'health'
   Start-Supervisor
   $stopped = $false
   if (-not (Test-Health $HealthTimeoutSeconds)) {
-    Log 'new build is not healthy; rolling back to .next.prev'
+    Log 'new build is not healthy; rolling back to the previous commit, dependencies, build and database'
     Stop-Supervisor
-    if (Restore-PreviousBuild) {
+    $stopped = $true
+    if (Restore-FullPreviousVersion $prevSha $predeployZip) {
       Start-Supervisor
-      if (Test-Health $HealthTimeoutSeconds) { Log 'rollback healthy (previous build, current database)' }
-      else { Log 'rollback ALSO unhealthy; check logs\web-*.log' }
+      $stopped = $false
+      if (Test-Health $HealthTimeoutSeconds) { Log 'rollback healthy (previous code and database)' }
+      else { Log 'rollback ALSO unhealthy; check logs\web-*.log. The app is left STOPPED to avoid serving a broken rollback.' }
+    } else {
+      Log 'rollback could not be completed safely; the app is left STOPPED. Check the log and restore manually (ops-windows.md, "Restore") before starting it.'
     }
     throw 'deploy failed health check'
   }
@@ -243,6 +357,8 @@ try {
   $exitCode = 1
   Log "deploy FAILED at stage '$stage': $($_.Exception.Message)"
   if ($stage -in @('checkout', 'install', 'generate', 'backup', 'build')) {
+    # migrate deploy has not run yet at any of these stages -- the database
+    # is untouched, so only the code needs restoring.
     try {
       Log "restoring previous commit $prevSha"
       if ($prevSha) { Exec 'git' @('-C', $ProdDir, 'checkout', '--force', '--detach', $prevSha) $ProdDir }
@@ -262,7 +378,18 @@ try {
       Log "restore of the previous version failed: $($_.Exception.Message)"
     }
   } elseif ($stage -eq 'migrate') {
-    Log 'migration failed: the app stays STOPPED. Restore the predeploy backup (ops-windows.md, "Restore") before starting it again.'
+    # migrate deploy failed (or was interrupted) partway -- the database may
+    # be on a partial/new schema. Restore code AND database, then try to
+    # bring the previous version back up rather than leaving it stopped.
+    Log 'migration failed; restoring the previous commit, dependencies, build and database'
+    if (Restore-FullPreviousVersion $prevSha $predeployZip) {
+      Start-Supervisor
+      $stopped = $false
+      if (Test-Health $HealthTimeoutSeconds) { Log 'previous version (code + database) is back up' }
+      else { Log 'previous version did not come back healthy after restore; check logs\web-*.log' }
+    } else {
+      Log 'automatic restore after the migration failure could not be completed safely. The app is left STOPPED -- do not start it until data\prod.db is confirmed restored (ops-windows.md, "Restore").'
+    }
   } elseif ($stage -in @('fetch', 'stop')) {
     if ($stopped) { Start-Supervisor }
   }

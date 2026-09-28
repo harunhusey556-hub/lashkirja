@@ -12,6 +12,15 @@
                         the supervisor itself exits with an error.
     "LashKirja backup"  daily at 03:00: backup-local.ps1. Runs late if the
                         PC was off at 03:00.
+    "LashKirja cron"    hourly: run-cron.ps1, which calls the
+                        recurring-invoices and cleanup routes on
+                        127.0.0.1:3300 (see run-cron.ps1 for why those two
+                        and not sync-bank/sync-email, which the worker
+                        already covers). CRON_SECRET is read from the prod
+                        .env by run-cron.ps1 at run time -- it is never
+                        passed as a task argument, so it never appears in
+                        this task's definition or in Task Scheduler's own
+                        history/logs.
 
   The scripts are taken from the production checkout
   (C:\LashKirja\prod\app\scripts\ops), never from a dev checkout.
@@ -31,7 +40,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $OpsDir = Join-Path $Root 'prod\app\scripts\ops'
-foreach ($script in @('run-prod.ps1', 'backup-local.ps1')) {
+foreach ($script in @('run-prod.ps1', 'backup-local.ps1', 'run-cron.ps1')) {
   if (-not (Test-Path (Join-Path $OpsDir $script))) {
     throw "$OpsDir\$script not found. Deploy a commit that contains the ops scripts first (deploy-local.ps1)."
   }
@@ -61,6 +70,18 @@ $backupSettings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit (New-TimeSpan
 Register-LkTask -Name 'LashKirja backup' -Script 'backup-local.ps1' `
   -Trigger (New-ScheduledTaskTrigger -Daily -At $BackupTime) -Settings $backupSettings `
   -Description 'LashKirja daily backup to C:\LashKirja\backups (+ OneDrive mirror). See app/docs/ops-windows.md.'
+
+# Recurring invoices and expired-upload cleanup (api/cron/recurring-invoices,
+# api/cron/cleanup) have no other scheduler in this deployment -- see
+# run-cron.ps1. Hourly is comfortably inside both routes' date-granularity
+# and their own catch-up handling; StartWhenAvailable covers the PC being
+# off or asleep at any given run.
+$cronSettings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit (New-TimeSpan -Minutes 20) -MultipleInstances IgnoreNew `
+  -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable
+$cronTrigger = New-ScheduledTaskTrigger -Once -At (Get-Date).Date -RepetitionInterval (New-TimeSpan -Hours 1) -RepetitionDuration ([TimeSpan]::MaxValue)
+Register-LkTask -Name 'LashKirja cron' -Script 'run-cron.ps1' `
+  -Trigger $cronTrigger -Settings $cronSettings `
+  -Description 'LashKirja hourly recurring-invoices + cleanup cron calls to 127.0.0.1:3300. CRON_SECRET is read from .env at run time, never stored in this task. See app/docs/ops-windows.md.'
 
 # Keep the PC awake on AC power so the server and the 03:00 backup run.
 try {
