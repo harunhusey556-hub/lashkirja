@@ -12,6 +12,7 @@ import {
   redirectToLogin,
 } from "@/components/clientFetch";
 import { buttonClass, controlClass } from "@/components/control-styles";
+import { AuthedFileLink } from "@/components/AuthedFileLink";
 import { ChevronLeft, ChevronRight, Download } from "lucide-react";
 import { Card, Icon, IconTile, KeyValueList, ListRow, PageTitle, Section } from "@/components/ds";
 import { formatEur, formatMonthShort } from "@/lib/format";
@@ -96,15 +97,31 @@ function sentenceCase(text: string): string {
 }
 
 /**
- * Same markup/classes as `ListRow`, but a real `<a>` instead of `next/link`'s
- * `Link`: these hrefs are file downloads (Content-Disposition: attachment),
- * and a client-side route transition would swallow that instead of letting
- * the browser save the file.
+ * Same markup/classes as `ListRow`, but a real, authenticated file link
+ * instead of `next/link`'s `Link`: these hrefs are file downloads
+ * (Content-Disposition: attachment), and a client-side route transition
+ * would swallow that instead of letting the browser (or, on mobile, the
+ * share sheet) save the file.
  */
-function DownloadRow({ href, title }: { href: string; title: string }) {
+function DownloadRow({
+  href,
+  title,
+  fallbackName,
+}: {
+  href: string;
+  title: string;
+  fallbackName: string;
+}) {
   return (
     <div className="relative flex min-h-16 w-full items-center gap-3 px-4 py-3 text-left">
-      <a href={href} aria-label={title} className="row-link active-press absolute inset-0" />
+      <AuthedFileLink
+        href={href}
+        fallbackName={fallbackName}
+        title={title}
+        className="row-link active-press absolute inset-0"
+      >
+        {null}
+      </AuthedFileLink>
       <IconTile>
         <Icon icon={Download} />
       </IconTile>
@@ -313,18 +330,25 @@ export default function ReportsPage() {
                     );
                   })}
                 </select>
-                <a
+                <AuthedFileLink
                   href={`/api/export/package?month=${packageMonth.startsWith(`${year}-`) ? packageMonth : `${year}-01`}`}
+                  fallbackName={`kirjanpitopaketti-${packageMonth.startsWith(`${year}-`) ? packageMonth : `${year}-01`}.zip`}
+                  title="Kirjanpitopaketti"
                   className={buttonClass("primary", "shrink-0")}
                 >
                   Lataa zip
-                </a>
+                </AuthedFileLink>
               </div>
             </Card>
 
             <Section title="Vie CSV-tiedostona">
               {EXPORTS.map((entry) => (
-                <DownloadRow key={entry.type} href={`/api/export?type=${entry.type}`} title={entry.label} />
+                <DownloadRow
+                  key={entry.type}
+                  href={`/api/export?type=${entry.type}`}
+                  title={entry.label}
+                  fallbackName={`${entry.type}.csv`}
+                />
               ))}
             </Section>
           </>

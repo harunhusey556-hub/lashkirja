@@ -18,6 +18,9 @@ import { newIdempotencyKey } from "@/lib/idempotency-key";
 import { helsinkiCalendarDate } from "@/lib/validation";
 import { formatReference } from "@/lib/finnish-reference";
 import { shareContent } from "@/lib/share";
+import { openAuthedFile } from "@/lib/authed-file";
+import { AuthedFileLink } from "@/components/AuthedFileLink";
+import { IS_MOBILE_BUILD } from "@/lib/build-target";
 import { daysOverdue } from "@/lib/invoices";
 import { SALES_STATUS } from "@/lib/status-labels";
 import { detailHref } from "@/lib/routes";
@@ -364,7 +367,9 @@ function InvoiceDetail() {
       const result = await shareContent({
         title: `Lasku ${invoice.number}`,
         text: `Lasku ${invoice.number}`,
-        url: window.location.href,
+        // On mobile, window.location.href is a capacitor://localhost URL --
+        // meaningless to whoever receives the share, so it is dropped there.
+        url: IS_MOBILE_BUILD ? undefined : window.location.href,
         file,
       });
       if (result === "downloaded") setMessage("PDF ladattiin laitteelle.");
@@ -556,7 +561,12 @@ function InvoiceDetail() {
     ? [
         {
           label: "Avaa PDF",
-          onSelect: () => window.open(`/api/invoices/${invoice.id}/pdf`, "_blank", "noopener,noreferrer"),
+          onSelect: () =>
+            void openAuthedFile(
+              `/api/invoices/${invoice.id}/pdf`,
+              `lasku-${invoice.number}.pdf`,
+              `Lasku ${invoice.number}`
+            ).catch((error: unknown) => setMessage(errorMessage(error, "Tiedoston avaus epäonnistui"))),
         },
         { label: "Jaa", onSelect: () => void shareInvoice(), disabled: busy || sharing },
         ...(invoice.status !== "credited"
@@ -740,14 +750,14 @@ function InvoiceDetail() {
                       <span>{formatEur(reminder.total)}</span>
                     </div>
                   </div>
-                  <a
+                  <AuthedFileLink
                     href={`/api/invoices/${invoice.id}/reminders/pdf`}
-                    target="_blank"
-                    rel="noreferrer"
+                    fallbackName={`muistutus-${invoice.number}.pdf`}
+                    title={`Muistutus, lasku ${invoice.number}`}
                     className={buttonClass("secondary")}
                   >
                     Avaa muistutus
-                  </a>
+                  </AuthedFileLink>
                   {reminder.previousReminders.length > 0 && (
                     <ul className="space-y-1 text-[13px] text-ink-2">
                       {reminder.previousReminders.map((previous) => (

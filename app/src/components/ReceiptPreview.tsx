@@ -2,6 +2,8 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useFocusTrap } from "@/components/useFocusTrap";
+import { AuthedFileLink } from "@/components/AuthedFileLink";
+import { useAuthedObjectUrl } from "@/lib/authed-file";
 import { nextRotation, nextZoom } from "@/lib/document-viewer";
 
 type PreviewKind = "rendered" | "raster" | "other";
@@ -45,12 +47,25 @@ export default function ReceiptPreview({
   const closeButtonRef = useRef<HTMLButtonElement>(null);
   const kind = previewKind(fileName);
   const imageSrc = previewSrc(src, kind);
+  // Web: `authedSrc` is `imageSrc` unchanged, exactly like today. Mobile:
+  // fetched with the bearer token and exposed as a `blob:` object URL --
+  // there is no cookie for a bare `<img src>` to ride along on.
+  const { src: authedSrc, failed: authedFailed } = useAuthedObjectUrl(
+    kind === "other" ? null : imageSrc
+  );
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional fetch-on-mount: flipping to a loading state and storing the response is exactly the external-system sync this effect exists for
     setPreviewFailed(false);
     setLoading(true);
   }, [imageSrc]);
+
+  useEffect(() => {
+    if (!authedFailed) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- syncing external state (the authed fetch failing) into local state, same as the img onError handler below
+    setLoading(false);
+    setPreviewFailed(true);
+  }, [authedFailed]);
 
   useFocusTrap(dialogRef, fullscreen, {
     onEscape: () => setFullscreen(false),
@@ -70,7 +85,7 @@ export default function ReceiptPreview({
     return (
       <PreviewBody
         src={src}
-        imageSrc={imageSrc}
+        imageSrc={authedSrc}
         kind={kind}
         fileName={fileName}
         fill={fill}
@@ -181,7 +196,7 @@ function PreviewBody({
   onError,
 }: {
   src: string;
-  imageSrc: string;
+  imageSrc: string | null;
   kind: PreviewKind;
   fileName: string;
   fill: boolean;
@@ -193,13 +208,14 @@ function PreviewBody({
   onError: () => void;
 }) {
   if (kind === "other") {
-    return <UnsupportedPreview src={src} />;
+    return <UnsupportedPreview src={src} fileName={fileName} />;
   }
 
   if (failed) {
     return (
       <UnsupportedPreview
         src={src}
+        fileName={fileName}
         message={
           kind === "rendered"
             ? "Esikatselun luonti epäonnistui. Voit avata alkuperäisen tiedoston."
@@ -211,7 +227,7 @@ function PreviewBody({
 
   return (
     <div className={`relative w-full h-full bg-surface ${fill ? "rounded-xl" : ""}`}>
-      {loading && (
+      {(loading || !imageSrc) && (
         <div className="absolute inset-0 flex items-center justify-center bg-canvas/80 z-10">
           <div
             className="w-6 h-6 border-2 border-accent border-t-transparent rounded-full animate-spin motion-reduce:animate-none"
@@ -219,29 +235,34 @@ function PreviewBody({
           />
         </div>
       )}
-      {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img
-        src={imageSrc}
-        alt={fileName}
-        onLoad={onLoad}
-        onError={onError}
-        className="w-full h-full object-contain"
-        data-testid={fill ? "preview-image" : undefined}
-        style={
-          fill
-            ? { transform: `scale(${zoom}) rotate(${rotation}deg)`, transformOrigin: "center center" }
-            : undefined
-        }
-      />
-      {kind === "rendered" && !loading && (
-        <a
+      {imageSrc && (
+        // imageSrc is a blob: object URL on mobile (Task 9) or the
+        // authenticated API path on web, neither of which next/image can
+        // optimize, and the mobile static export has no image optimizer anyway.
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={imageSrc}
+          alt={fileName}
+          onLoad={onLoad}
+          onError={onError}
+          className="w-full h-full object-contain"
+          data-testid={fill ? "preview-image" : undefined}
+          style={
+            fill
+              ? { transform: `scale(${zoom}) rotate(${rotation}deg)`, transformOrigin: "center center" }
+              : undefined
+          }
+        />
+      )}
+      {kind === "rendered" && !loading && imageSrc && (
+        <AuthedFileLink
           href={src}
-          target="_blank"
-          rel="noopener noreferrer"
+          fallbackName={fileName}
+          title={fileName}
           className="absolute bottom-2 left-2 right-2 min-h-11 flex items-center justify-center rounded-card bg-ink/75 text-canvas text-[13px] font-medium backdrop-blur-sm"
         >
           Avaa alkuperäinen tiedosto
-        </a>
+        </AuthedFileLink>
       )}
     </div>
   );
@@ -249,22 +270,24 @@ function PreviewBody({
 
 function UnsupportedPreview({
   src,
+  fileName,
   message = "Esikatselu ei ole saatavilla tälle tiedostotyypille.",
 }: {
   src: string;
+  fileName: string;
   message?: string;
 }) {
   return (
     <div className="w-full h-full flex flex-col items-center justify-center gap-2 text-sm text-ink-2 p-4">
       <p className="text-center">{message}</p>
-      <a
+      <AuthedFileLink
         href={src}
-        target="_blank"
-        rel="noopener noreferrer"
+        fallbackName={fileName}
+        title={fileName}
         className="text-accent font-medium hover:underline min-h-11 inline-flex items-center"
       >
         Avaa tiedosto
-      </a>
+      </AuthedFileLink>
     </div>
   );
 }

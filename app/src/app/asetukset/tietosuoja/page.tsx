@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { apiFetch, errorMessage, readJson } from "@/components/clientFetch";
+import { AuthedFileLink } from "@/components/AuthedFileLink";
 import { Card, PageTitle } from "@/components/ds";
 import { Button, Field } from "@/components/ui";
 import { controlClass } from "@/components/control-styles";
@@ -120,12 +121,14 @@ export default function TietosuojaPage() {
                     <span className="block text-[13px] text-ink-2">{row.statusLabel}</span>
                   </span>
                   {row.downloadable && (
-                    <a
+                    <AuthedFileLink
                       className="active-press inline-flex min-h-11 items-center text-accent"
                       href={`/api/account/request/${row.id}/package`}
+                      fallbackName="tietokopio.zip"
+                      title="Tietokopio"
                     >
                       Lataa
-                    </a>
+                    </AuthedFileLink>
                   )}
                 </li>
               ))}
