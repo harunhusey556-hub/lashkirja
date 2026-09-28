@@ -39,12 +39,14 @@ const config: CapacitorConfig = {
   plugins: {
     SplashScreen: {
       launchAutoHide: true,
-      backgroundColor: "#faf7f2",
+      // The app's canvas token, so the splash (icon tile centred on canvas) hands over to the
+      // first page without a colour jump.
+      backgroundColor: "#f6f3ef",
       showSpinner: false,
     },
     StatusBar: {
       style: "DARK",
-      backgroundColor: "#faf7f2",
+      backgroundColor: "#f6f3ef",
     },
   },
 };

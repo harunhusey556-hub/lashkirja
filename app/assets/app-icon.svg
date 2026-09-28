@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <!-- LashKirja app icon: a ledger book ("kirja") with a ribbon bookmark, its cover carrying a
+       closed-eye lash line. Palette: accent #9a5650, canvas #f6f3ef, ink #26221f.
+       Full-bleed opaque square; iOS applies its own corner mask. -->
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#a6605a"/>
+      <stop offset="1" stop-color="#8f4d47"/>
+    </linearGradient>
+  </defs>
+  <rect width="1024" height="1024" fill="url(#bg)"/>
+  <!-- page block under the cover -->
+  <rect x="252" y="188" width="520" height="640" rx="76" fill="#e2d4c8"/>
+  <!-- cover -->
+  <rect x="252" y="188" width="520" height="600" rx="76" fill="#f6f3ef"/>
+  <!-- ribbon bookmark -->
+  <path d="M628 188 H692 V330 L660 304 L628 330 Z" fill="#7f413c"/>
+  <!-- lash line and lashes -->
+  <g fill="none" stroke="#26221f" stroke-linecap="round" stroke-linejoin="round" transform="translate(0 -52)">
+    <path d="M362 478 Q512 618 662 478" stroke-width="42"/>
+    <g stroke-width="32">
+      <path d="M512 548 L512 650"/>
+      <path d="M437 530 Q421 578 400 616"/>
+      <path d="M587 530 Q603 578 624 616"/>
+      <path d="M377 491 Q352 526 322 552"/>
+      <path d="M647 491 Q672 526 702 552"/>
+    </g>
+  </g>
+</svg>

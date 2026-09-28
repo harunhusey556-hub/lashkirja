@@ -17,8 +17,8 @@ export default function GlobalError({
           justifyContent: "center",
           padding: "1rem",
           boxSizing: "border-box",
-          background: "#faf8f5",
-          color: "#2d2d2d",
+          background: "#f6f3ef",
+          color: "#26221f",
           fontFamily: "system-ui, sans-serif",
         }}
       >
@@ -29,12 +29,12 @@ export default function GlobalError({
             type="button"
             onClick={unstable_retry}
             style={{
-              minHeight: "44px",
-              padding: "0 1rem",
+              minHeight: "48px",
+              padding: "0 1.25rem",
               border: 0,
-              borderRadius: "0.75rem",
-              background: "#9a5650",
-              color: "white",
+              borderRadius: "14px",
+              background: "#26221f",
+              color: "#f6f3ef",
               fontWeight: 600,
               cursor: "pointer",
             }}
