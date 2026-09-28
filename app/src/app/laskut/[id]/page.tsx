@@ -186,11 +186,37 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
   const [sending, setSending] = useState(false);
   const [sharing, setSharing] = useState(false);
   const [reminder, setReminder] = useState<ReminderPreview | null>(null);
+  const [reminderLoadFailed, setReminderLoadFailed] = useState(false);
+  const [reminderRetrying, setReminderRetrying] = useState(false);
   const [remindingBusy, setRemindingBusy] = useState(false);
   const [closeReason, setCloseReason] = useState("");
   const [closeReasonOpen, setCloseReasonOpen] = useState(false);
   const [closeReasonError, setCloseReasonError] = useState("");
   const [paymentSheetOpen, setPaymentSheetOpen] = useState(false);
+  const [sendError, setSendError] = useState("");
+
+  // The reminder preview only exists for an invoice that is genuinely
+  // overdue; a 409 here is the expected answer, not an error to show. A
+  // network/500 failure is different: it must leave a usable control behind
+  // (see reminderLoadFailed), not a permanently disabled button, so it's
+  // tracked separately from "haven't heard back yet".
+  const loadReminderPreview = useCallback(async () => {
+    try {
+      const preview = await apiFetch(`/api/invoices/${id}/reminders`, { credentials: "include" });
+      const previewData = await readJson<{ reminder: ReminderPreview }>(preview, "");
+      setReminder(previewData.reminder);
+      setReminderLoadFailed(false);
+    } catch {
+      setReminder(null);
+      setReminderLoadFailed(true);
+    }
+  }, [id]);
+
+  async function retryReminderPreview() {
+    setReminderRetrying(true);
+    await loadReminderPreview();
+    setReminderRetrying(false);
+  }
 
   const load = useCallback(async () => {
     try {
@@ -200,20 +226,11 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
       setPaymentAmount(String(data.invoice.open > 0 ? data.invoice.open : "").replace(".", ","));
       setState("ready");
 
-      // The reminder preview only exists for an invoice that is genuinely
-      // overdue; a 409 here is the expected answer, not an error to show.
       if (data.invoice.displayStatus === "overdue") {
-        try {
-          const preview = await apiFetch(`/api/invoices/${id}/reminders`, {
-            credentials: "include",
-          });
-          const previewData = await readJson<{ reminder: ReminderPreview }>(preview, "");
-          setReminder(previewData.reminder);
-        } catch {
-          setReminder(null);
-        }
+        await loadReminderPreview();
       } else {
         setReminder(null);
+        setReminderLoadFailed(false);
       }
     } catch (error) {
       if (isUnauthorized(error)) {
@@ -223,7 +240,7 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
       setMessage(errorMessage(error, "Laskun haku epäonnistui"));
       setState("error");
     }
-  }, [id]);
+  }, [id, loadReminderPreview]);
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional fetch-on-mount: flipping to a loading state and storing the response is exactly the external-system sync this effect exists for
@@ -294,10 +311,21 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
       setPaymentSheetOpen(false);
       await load();
     } catch (error) {
-      setMessage(errorMessage(error, "Maksun kirjaus epäonnistui"));
+      // Server errors surface inside the sheet the user is looking at, same
+      // as validation errors just above - not the page-level message, which
+      // renders behind the sheet's backdrop and is effectively invisible.
+      setPaymentError(errorMessage(error, "Maksun kirjaus epäonnistui"));
     } finally {
       setBusy(false);
     }
+  }
+
+  /** Opens the payment sheet with a clean slate: no stale error, amount reset to the current open balance. */
+  function openPaymentSheet() {
+    if (!invoice) return;
+    setPaymentError("");
+    setPaymentAmount(String(invoice.open > 0 ? invoice.open : "").replace(".", ","));
+    setPaymentSheetOpen(true);
   }
 
   async function removePayment(paymentId: string) {
@@ -351,6 +379,7 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
   async function openReview() {
     setSending(true);
     setMessage(null);
+    setSendError("");
     try {
       const response = await apiFetch(`/api/invoices/${id}/send`, { credentials: "include" });
       const result = await readJson<{ preview: SendPreview }>(response, "Tarkistuksen haku epäonnistui");
@@ -421,7 +450,9 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
       setReview(null);
       await load();
     } catch (error) {
-      setMessage(errorMessage(error, "Lähetys epäonnistui"));
+      // Same as addPayment: this renders inside the "Lähetä lasku" sheet
+      // (which stays open), not the page-level message behind it.
+      setSendError(errorMessage(error, "Lähetys epäonnistui"));
     } finally {
       setSending(false);
     }
@@ -476,7 +507,7 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
   // function value (and whatever ref it touches, e.g. addPayment's idempotency
   // key) is created inline at render time exactly like every other button on
   // this page, rather than stored on this object and read back out of it.
-  type PrimaryKind = "send" | "remind" | "markPaid" | "pay";
+  type PrimaryKind = "send" | "remind" | "retryReminder" | "markPaid" | "pay";
   type PrimaryAction = { kind: PrimaryKind; label: string; busy: boolean; busyLabel?: string; icon?: boolean };
   const primary: PrimaryAction | null = (() => {
     if (!invoice) return null;
@@ -489,6 +520,18 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
       return { kind: "markPaid", label: "Merkitse maksetuksi", busy: false };
     }
     if (invoice.displayStatus === "overdue") {
+      // A genuine load failure (not just "still in flight") must leave a
+      // usable, enabled control - tapping it retries the preview fetch,
+      // rather than stranding the user behind a button disabled forever.
+      if (reminderLoadFailed) {
+        return {
+          kind: "retryReminder",
+          label: "Yritä uudelleen",
+          busy: reminderRetrying,
+          busyLabel: "Ladataan…",
+          icon: true,
+        };
+      }
       // The reminder preview (fee/total) loads after the invoice itself; the
       // button stays disabled with a loading label until it's here, rather
       // than letting a tap fire the actual send before the numbers are known.
@@ -744,9 +787,11 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
                 ? () => void openReview()
                 : primary.kind === "remind"
                   ? () => void sendReminder()
-                  : primary.kind === "markPaid"
-                    ? () => void changeStatus("paid")
-                    : () => setPaymentSheetOpen(true)
+                  : primary.kind === "retryReminder"
+                    ? () => void retryReminderPreview()
+                    : primary.kind === "markPaid"
+                      ? () => void changeStatus("paid")
+                      : () => openPaymentSheet()
             }
           >
             {primary.icon ? <BellIcon /> : null}
@@ -756,7 +801,7 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
             <button
               type="button"
               className="active-press flex min-h-12 w-full items-center justify-center text-[15px] font-semibold text-accent"
-              onClick={() => setPaymentSheetOpen(true)}
+              onClick={() => openPaymentSheet()}
             >
               Kirjaa maksu
             </button>
@@ -816,7 +861,10 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
 
       <BottomSheet
         isOpen={paymentSheetOpen}
-        onClose={() => setPaymentSheetOpen(false)}
+        onClose={() => {
+          setPaymentSheetOpen(false);
+          setPaymentError("");
+        }}
         title="Kirjaa maksu"
         labelledBy="payment-sheet-title"
       >
@@ -860,7 +908,10 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
 
       <BottomSheet
         isOpen={review !== null}
-        onClose={() => setReview(null)}
+        onClose={() => {
+          setReview(null);
+          setSendError("");
+        }}
         title="Lähetä lasku"
         labelledBy="send-sheet-title"
       >
@@ -895,6 +946,11 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
                 {review.blockedReason}
               </p>
             )}
+            {sendError && (
+              <p className="text-sm text-danger" role="alert">
+                {sendError}
+              </p>
+            )}
             <div className="flex gap-2">
               <Button
                 type="button"
@@ -911,7 +967,10 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
                 type="button"
                 variant="secondary"
                 className="flex-1"
-                onClick={() => setReview(null)}
+                onClick={() => {
+                  setReview(null);
+                  setSendError("");
+                }}
               >
                 Peruuta
               </Button>
