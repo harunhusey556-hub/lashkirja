@@ -66,6 +66,39 @@ Sahibin yapacakları: bir Tailscale hesabı açıp bu bilgisayara Tailscale'i ku
 - **A6:** Kalıcı önbellek eklenir (IndexedDB): uygulama açılınca son veri anında görünür, arka planda yenilenir. Bu adım B için de temel oluşturur.
 - **Ölçüm:** Throttled 4G senaryosunda başarı ölçütü 1 doğrulanır. `app/docs/perf-budgets.md` güncellenir.
 
+### Faz 2b — Apple hissi: algılanan hız ve hareket
+
+Sahibin isteği (2026-09-28) şu: uygulama "Apple hissi" vermeli ve hızlı *hissettirmeli*. Geçiş efektleri, dokunma geri bildirimi ve yükleme animasyonları ayrı bir özenle ele alınacak. Kurallar `design-taste` skill'inin `reference/motion.md` dosyasından gelir:
+- Arayüz animasyonları 300 ms'nin altında kalır.
+- Giriş ve çıkışlarda güçlü ease-out eğrisi kullanılır.
+- Sadece `transform` ve `opacity` animasyonu yapılır.
+- `prefers-reduced-motion` açıkken hareketler anında ya da crossfade ile yapılır.
+- Klavyeyle başlatılan işlemler animasyonsuzdur.
+
+- **Sayfa geçişleri:**
+  - Detay sayfaları iOS'taki gibi sağdan kayarak açılır ve geri gidince sola kayarak kapanır.
+  - Sekmeler arasında kısa bir crossfade olur.
+  - Başlık, büyük başlıktan küçük başlığa yumuşakça geçer.
+  - Bunun için View Transitions API kullanılır (iOS 18 WKWebView). Desteklenmeyen yerde animasyonsuz geçilir.
+- **Dokunma geri bildirimi:**
+  - Mevcut `active-press` ölçeklemesi bütün dokunulabilir öğelerde tutarlı hâle gelir.
+  - Capacitor Haptics eklenir:
+    - chip ve seçim değişiminde `selection`;
+    - birincil işlemlerde `light impact`;
+    - kaydetme, onaylama ve ödeme kaydında `success`;
+    - hatada `error` titreşimi.
+- **Yükleme durumları:**
+  - Sayfa yüklemelerinde spinner yerine son düzenle aynı şekilde iskelet ekranlar (skeleton) gösterilir, ince bir shimmer ile.
+  - Kalıcı önbellekteki veri anında gösterilir, yenilenen veri titremeden yerine oturur.
+  - Butonlar kendi içinde yükleme göstergesi taşır ve genişlikleri değişmez.
+- **İyimser arayüz (optimistic UI):** Tek dokunuşla onay, ödeme kaydı ve bağlantı işlemleri anında görünür. Hata olursa geri alınır ve ekranda açıklanır. Geri alınabilir işlemlerde onay penceresi yerine "Kumoa" (geri al) bildirimi (toast) kullanılır.
+- **Sheet'ler ve listeler:**
+  - Alt sheet'ler yay (spring) hissiyle açılıp kapanır, sürükleyerek ve hızına göre kapatılabilir.
+  - Liste satırı eklenip silinirken yumuşakça yer açılır ya da kapanır.
+  - Aşağı çekince yenileme (pull-to-refresh) native hissiyle çalışır.
+- **Açılış:** Açılış ekranından iskelet ekrana aynı arka plan rengiyle kesintisiz geçilir, beyaz flaş olmaz.
+- **Ölçüm:** Uzun işlemler (long task) ve INP ölçülür. Animasyonlar telefonda 60 fps'te kalır. Her yeni hareket için azaltılmış hareket (reduced motion) karşılığı test edilir.
+
 ## Faz 3 — TestFlight ile gerçek iOS uygulaması
 
 - **İmzalı build:** GitHub Actions'ta imzalı build alınır:
@@ -100,6 +133,7 @@ Sahibin yapacakları: App Store Connect'te uygulama kaydını açmak (bundle id 
 | 0 Sabit sunucu | Tailscale hesabı | Küçük (1 oturum) |
 | 1 Kilitlenmeyen uygulama | — | Küçük |
 | 2 Hız | Faz 1 | Orta |
+| 2b Apple hissi (hareket, haptik, iskelet, iyimser arayüz) | Faz 2 | Orta |
 | 3 TestFlight ve push | Faz 0, Apple anahtarları | Orta |
 | 4 App Store temeli | Faz 2, 3 | Büyük |
 
