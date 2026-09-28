@@ -53,8 +53,21 @@ function runRequest<T>(request: IDBRequest<T>): Promise<T> {
 
 let dbPromise: Promise<IDBDatabase> | null = null;
 
+/** M1: a transient open failure (another tab/webview holding a blocking
+ * version-change transaction, a momentary OS storage hiccup) used to be
+ * memoized just like a success, permanently degrading the app to
+ * memory-only for the rest of that launch even after the underlying cause
+ * cleared. Only a successful open is memoized now -- a rejection resets
+ * `dbPromise` to null first, so the next call (the next cache read/write)
+ * retries `openDatabase()` from scratch instead of reusing the same dead
+ * promise forever. */
 function getDb(): Promise<IDBDatabase> {
-  if (!dbPromise) dbPromise = openDatabase();
+  if (!dbPromise) {
+    dbPromise = openDatabase().catch((error) => {
+      dbPromise = null;
+      throw error;
+    });
+  }
   return dbPromise;
 }
 

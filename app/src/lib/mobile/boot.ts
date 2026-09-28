@@ -5,7 +5,7 @@
  * signed-in user, hydrated into page-cache.ts within a fixed budget so a
  * slow or unavailable IndexedDB never delays the boot decision itself.
  */
-import { loadStoredAuth, refreshTokenIfDue, retryPendingRevoke } from "@/lib/auth-client";
+import { loadStoredAuth, refreshTokenIfDue, retryPendingRevoke, wireTokenRefreshTriggers } from "@/lib/auth-client";
 import { apiUrl } from "@/lib/build-target";
 import { configureHttpCachePersistence } from "@/lib/offline/http-cache";
 import { configurePageCachePersistence, hydratePageCache } from "@/lib/page-cache";
@@ -103,6 +103,11 @@ async function runBoot(): Promise<BootResult> {
   // Fire-and-forget: a slow or failed refresh must not block the boot
   // decision -- the stored token is still valid right up to its own expiry.
   void refreshTokenIfDue();
+  // I4: boot only ever runs this decision once per launch -- wire the
+  // resume/appStateChange/periodic-timer re-checks too, or a long-lived
+  // process that never cold-starts again would never call
+  // refreshTokenIfDue() past this one time.
+  wireTokenRefreshTriggers();
   // Opening IndexedDB, checking the previous owner and decrypting every
   // cached page all happen on the same promise chain. `withBudget` only
   // stops *this* boot decision from waiting past 250 ms for it -- the

@@ -338,7 +338,7 @@ export function errorMessage(error: unknown, fallback: string): string {
 let redirectingToLogin = false;
 export function redirectToLogin(): void {
   if (IS_MOBILE_BUILD) {
-    expireSession();
+    void expireSession();
     return;
   }
   if (redirectingToLogin) return;

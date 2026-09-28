@@ -10,13 +10,14 @@
  * below) makes every queued photo unrecoverable too.
  *
  * Pure queue-state helpers (`nextAttemptDelayMs`, `classifySendResult`,
- * ordering/pruning) are exported separately from the store I/O so they are
- * unit-testable with an in-memory `IdbLike` fake and no real IndexedDB --
- * the same split idb.ts / persistent-cache.ts already use.
+ * `exceedsRetryCap`, ordering/pruning) are exported separately from the
+ * store I/O so they are unit-testable with an in-memory `IdbLike` fake and
+ * no real IndexedDB -- the same split idb.ts / persistent-cache.ts already
+ * use.
  */
 import { RECEIPT_QUEUE_STORE, openIndexedDbLike, type IdbLike } from "./idb";
-import { generateCacheKeyBase64, importCacheKey, isCryptoAvailable } from "./crypto-box";
-import { secureStore, SECURE_KEYS } from "@/lib/mobile/secure-store";
+import { importCacheKey, isCryptoAvailable } from "./crypto-box";
+import { ensureCacheKey } from "./persistent-cache";
 
 export interface QueuedReceipt {
   id: string; // crypto.randomUUID(); also the Idempotency-Key
@@ -45,6 +46,25 @@ export function nextAttemptDelayMs(attempts: number): number {
   return RETRY_DELAYS_MS[index];
 }
 
+/** Security review I2 (client half): a 5xx or network-error outcome used
+ * to retry forever (backoff plateauing at 30 min, but never stopping) --
+ * for a genuinely broken upload (e.g. the 10-15 MB proxy-truncation case,
+ * or a server bug that always 500s) that hammers the endpoint for as long
+ * as the app stays open with no user-visible signal beyond "Ei yhteyttä".
+ * `attempts` past this count (counting the one that just failed) stops
+ * being retried automatically -- the row is surfaced `failed` with the
+ * existing retry/delete affordance instead. A manual "Yritä uudelleen"
+ * (`useOfflineReceiptQueue.ts`'s `retry()`) resets `attempts` to 0, so a
+ * capped row gets a fresh budget once the person explicitly asks again.
+ * 4xx outcomes other than 401/408/429 are already terminal on the first
+ * attempt via `classifySendResult` -- this cap only bounds the
+ * retry-forever ones. */
+export const MAX_SEND_ATTEMPTS = 8;
+
+export function exceedsRetryCap(attempts: number): boolean {
+  return attempts >= MAX_SEND_ATTEMPTS;
+}
+
 export type SendOutcome = "done" | "retry" | "failed" | "paused";
 
 /** 2xx -> done; 401 -> paused (until next sign-in); 408/429/5xx/network ->
@@ -60,19 +80,32 @@ export function classifySendResult(status: number | "network-error"): SendOutcom
 
 const DONE_RETENTION_MS = 24 * 60 * 60 * 1000;
 
-/** Same AES-GCM key persistent-cache.ts's `openPersistentCache` uses
- * (`SECURE_KEYS.cacheKey`), generated and stored on first use by whichever
- * of the two runs first. Kept independent of persistent-cache.ts's own
- * module (no shared helper) so this file has no import-order coupling to
- * it -- both sides agree only through the storage key's name. */
+/** Final review I1: this used to provision `SECURE_KEYS.cacheKey` itself,
+ * independently of persistent-cache.ts's own copy of the same
+ * read-if-absent-generate-and-write -- a receipt capture on a device that
+ * had never opened the cache yet could race `openPersistentCache` and each
+ * would write a different key to the same slot. Both now go through
+ * persistent-cache.ts's `ensureCacheKey()`, the single memoized owner of
+ * that key. */
 async function queueCryptoKey(): Promise<CryptoKey | null> {
   if (!isCryptoAvailable()) return null;
-  let rawKey = await secureStore().get(SECURE_KEYS.cacheKey);
-  if (!rawKey) {
-    rawKey = generateCacheKeyBase64();
-    await secureStore().set(SECURE_KEYS.cacheKey, rawKey);
-  }
+  const rawKey = await ensureCacheKey();
   return importCacheKey(rawKey);
+}
+
+/** Attempts overall a `decryptQueuedReceiptFile` cannot recover from
+ * (final review I2): a bad-key or tampered-tag `OperationError` from
+ * `crypto.subtle.decrypt`, distinguished from the "crypto unavailable"
+ * case (which still returns `null` -- a normal transient-retry signal, not
+ * a permanent failure). Thrown so `sendOne` can tell the two apart and
+ * mark the row `failed` with an actionable message instead of letting the
+ * exception escape the drain loop and strand the row at `status:
+ * "sending"` forever. */
+export class ReceiptDecryptError extends Error {
+  constructor(cause: unknown) {
+    super("Kuvan salauksen purku epäonnistui.", { cause });
+    this.name = "ReceiptDecryptError";
+  }
 }
 
 const IV_BYTES = 12;
@@ -151,13 +184,20 @@ export async function deleteQueuedReceipt(id: string, idbOverride?: IdbLike): Pr
   await idb.delete(RECEIPT_QUEUE_STORE, id);
 }
 
-/** null when crypto is unavailable -- the caller treats this like any other
- * transient send failure and retries later rather than losing the photo. */
+/** `null` when crypto is unavailable -- the caller treats this like any
+ * other transient send failure and retries later rather than losing the
+ * photo. Throws `ReceiptDecryptError` (final review I2) when a key *is*
+ * available but the bytes will not decrypt -- a permanent failure the
+ * caller must not retry identically forever. */
 export async function decryptQueuedReceiptFile(item: QueuedReceipt): Promise<Blob | null> {
   const key = await queueCryptoKey();
   if (!key) return null;
-  const plain = await decryptBytes(key, item.iv, item.data);
-  return new Blob([plain], { type: item.mimeType });
+  try {
+    const plain = await decryptBytes(key, item.iv, item.data);
+    return new Blob([plain], { type: item.mimeType });
+  } catch (error) {
+    throw new ReceiptDecryptError(error);
+  }
 }
 
 /** Crash recovery: the app was killed mid-send. A "sending" row found at

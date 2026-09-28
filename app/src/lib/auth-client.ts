@@ -168,6 +168,11 @@ async function signInMobile(input: { email: string; password: string }): Promise
   // wipe logic `bootMobile()` uses, so a leftover different user's rows
   // (the app killed before a wipe finished) are still caught here.
   void activatePersistentCache(stored.userId, stored.token).catch(() => {});
+  // Same reasoning as the cache re-arm above, for I4: a sign-in that
+  // follows a boot with no stored auth (bootMobile() ran once, found
+  // nothing, and never wires this) still needs the resume/timer re-checks
+  // wired -- idempotent via its own `wired` flag either way.
+  wireTokenRefreshTriggers();
   return { ok: true, user: body.user };
 }
 
@@ -240,11 +245,23 @@ export async function retryPendingRevoke(): Promise<void> {
 
 /** Mobile 401 path. Once per signed-in period (reset by the next signIn):
  * clears everything like a logout, but with no server call -- the server
- * already considers this token gone. */
-export function expireSession(): void {
+ * already considers this token gone.
+ *
+ * Final review I3: this used to fire `void clearClientAuthState()` and
+ * navigate immediately, with nothing sequencing the wipe against a fast
+ * subsequent sign-in's own cache/key setup -- a `signIn()` typed within a
+ * few seconds on the login screen could start writing under a freshly
+ * provisioned key while the stale wipe's `secureStore().remove(cacheKey)`
+ * was still in flight, deleting the *new* session's key out from under
+ * it. Awaiting the wipe before navigating closes that window: by the time
+ * the person can see the login screen and type anything, the wipe (cache
+ * clear, key removal, queue clear) has already fully finished. There is
+ * no user-visible cost -- the person is already looking at the login
+ * screen either way. */
+export async function expireSession(): Promise<void> {
   if (expiredThisPeriod) return;
   expiredThisPeriod = true;
-  void clearClientAuthState();
+  await clearClientAuthState();
   appNavigate("/login?error=expired", { replace: true });
 }
 
@@ -267,7 +284,12 @@ export async function refreshTokenIfDue(now: number = Date.now()): Promise<void>
       headers: { Authorization: `Bearer ${token}` },
     });
     if (response.status === 401) {
-      expireSession();
+      // Awaited (not fire-and-forget): refreshTokenIfDue is itself already
+      // called fire-and-forget by every caller (boot.ts, the I4 triggers
+      // below), so awaiting here costs nothing up the call chain, and it
+      // keeps this function's own promise meaningful -- it does not
+      // resolve until the session is actually torn down.
+      await expireSession();
       return;
     }
     if (!response.ok) return;
@@ -282,5 +304,83 @@ export async function refreshTokenIfDue(now: number = Date.now()): Promise<void>
   } catch {
     // Network error: keep the old token, it is still valid up to its own
     // TTL. The next call to refreshTokenIfDue tries again.
+  }
+}
+
+/** Final review I4: `refreshTokenIfDue()` used to run only once per app
+ * process, from `mobile/boot.ts`'s `runBoot()` -- itself memoized to run
+ * once per launch. A WKWebView process that survives many days of
+ * foreground/background cycles with no cold start (plausible for a "real
+ * daily-use app" the owner keeps switching back to rather than
+ * force-quitting -- iOS gives no fixed termination schedule) never called
+ * this again, so the 7-day soft refresh point could be missed entirely and
+ * the token would ride straight to its 30-day hard TTL, forcing a password
+ * re-entry -- exactly the outcome the soft refresh exists to prevent. */
+const TOKEN_REFRESH_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
+
+let refreshCheckTimer: ReturnType<typeof setInterval> | null = null;
+
+/** The periodic half of I4, split out from `wireTokenRefreshTriggers` so it
+ * needs no DOM/Capacitor to exercise -- `setInterval` alone is enough to
+ * unit-test the due logic with fake timers. Restarting (calling this again
+ * without a reset) replaces any previous timer rather than stacking a
+ * second one. Returns a stop function for tests. */
+export function startPeriodicRefreshCheck(
+  intervalMs: number = TOKEN_REFRESH_CHECK_INTERVAL_MS
+): () => void {
+  if (refreshCheckTimer) clearInterval(refreshCheckTimer);
+  refreshCheckTimer = setInterval(() => void refreshTokenIfDue(), intervalMs);
+  return () => {
+    if (refreshCheckTimer) clearInterval(refreshCheckTimer);
+    refreshCheckTimer = null;
+  };
+}
+
+let refreshTriggersWired = false;
+
+/**
+ * Wires every non-boot re-check for I4: the DOM `visibilitychange` the
+ * WKWebView already fires on resume, the native `App` plugin's own
+ * `resume`/`appStateChange` events as a second, more direct signal (mirrors
+ * `useOfflineReceiptQueue.ts`'s own `wireAppStateChange` -- a dynamic
+ * import so nothing native loads on the web build or outside a real
+ * device), and the periodic foreground timer above. Every trigger just
+ * calls `refreshTokenIfDue()`, whose own early-return already makes this a
+ * cheap no-op except when a refresh is actually due -- called once per
+ * process, from `mobile/boot.ts`'s `runBoot()`.
+ */
+export function wireTokenRefreshTriggers(): void {
+  if (refreshTriggersWired) return;
+  refreshTriggersWired = true;
+
+  startPeriodicRefreshCheck();
+
+  if (typeof document !== "undefined") {
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "visible") void refreshTokenIfDue();
+    });
+  }
+
+  void (async () => {
+    try {
+      const { Capacitor } = await import("@capacitor/core");
+      if (!Capacitor.isNativePlatform()) return;
+      const { App } = await import("@capacitor/app");
+      await App.addListener("appStateChange", (state) => {
+        if (state.isActive) void refreshTokenIfDue();
+      });
+      await App.addListener("resume", () => void refreshTokenIfDue());
+    } catch {
+      // No native App plugin (web, or an IPA built before it was added) --
+      // the visibilitychange/timer triggers above still cover it.
+    }
+  })();
+}
+
+export function resetTokenRefreshTriggersForTests(): void {
+  refreshTriggersWired = false;
+  if (refreshCheckTimer) {
+    clearInterval(refreshCheckTimer);
+    refreshCheckTimer = null;
   }
 }

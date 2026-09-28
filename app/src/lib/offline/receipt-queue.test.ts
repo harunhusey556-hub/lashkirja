@@ -1,16 +1,38 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { IdbLike } from "./idb";
+/** ensureCacheKey (persistent-cache.ts) backs `decryptQueuedReceiptFile`'s
+ * key lookup -- mocked here the same way auth-client.test.ts and
+ * persistent-cache.test.ts mock secure-store.ts, so a real AES-GCM key can
+ * be provisioned with no Keychain and no IndexedDB. */
+const secureStoreState = new Map<string, string>();
+vi.mock("@/lib/mobile/secure-store", () => ({
+  SECURE_KEYS: { cacheKey: "lashkirja.cachekey.v1" },
+  secureStore: () => ({
+    get: async (key: string) => secureStoreState.get(key) ?? null,
+    set: async (key: string, value: string) => {
+      secureStoreState.set(key, value);
+    },
+    remove: async (key: string) => {
+      secureStoreState.delete(key);
+    },
+  }),
+}));
+
 import {
   classifySendResult,
   clearReceiptQueueStore,
+  decryptQueuedReceiptFile,
   deleteQueuedReceipt,
   earliestNextAttemptAt,
   enqueueReceipt,
+  exceedsRetryCap,
   listQueuedReceipts,
+  MAX_SEND_ATTEMPTS,
   nextAttemptDelayMs,
   pickNextQueued,
   pruneDoneReceipts,
   recoverCrashedSends,
+  ReceiptDecryptError,
   saveQueuedReceipt,
   type QueuedReceipt,
 } from "./receipt-queue";
@@ -262,5 +284,42 @@ describe("clearReceiptQueueStore", () => {
     await clearReceiptQueueStore(idb);
 
     expect(await listQueuedReceipts("u1", idb)).toEqual([]);
+  });
+});
+
+describe("decryptQueuedReceiptFile: final review I2 -- a decrypt failure throws instead of escaping silently", () => {
+  it("round-trips a genuinely encrypted item back to its original bytes", async () => {
+    const idb = createFakeIdb();
+    const file = new Blob([new Uint8Array([9, 9, 9])], { type: "image/jpeg" });
+    const item = await enqueueReceipt(
+      { userId: "u1", file, fileName: "a.jpg", mimeType: "image/jpeg", capturedAt: new Date().toISOString() },
+      idb
+    );
+    expect(item).not.toBeNull();
+
+    const blob = await decryptQueuedReceiptFile(item!);
+    expect(blob).not.toBeNull();
+    expect(new Uint8Array(await blob!.arrayBuffer())).toEqual(new Uint8Array([9, 9, 9]));
+  });
+
+  it("throws ReceiptDecryptError on a tampered ciphertext -- a permanent failure, distinct from the 'no key' null case", async () => {
+    const idb = createFakeIdb();
+    const file = new Blob([new Uint8Array([1, 2, 3])], { type: "image/jpeg" });
+    const item = await enqueueReceipt(
+      { userId: "u1", file, fileName: "a.jpg", mimeType: "image/jpeg", capturedAt: new Date().toISOString() },
+      idb
+    );
+    const tamperedBytes = new Uint8Array(item!.data).map((byte) => byte ^ 0xff);
+    const tampered: QueuedReceipt = { ...item!, data: tamperedBytes.buffer };
+
+    await expect(decryptQueuedReceiptFile(tampered)).rejects.toBeInstanceOf(ReceiptDecryptError);
+  });
+});
+
+describe("exceedsRetryCap: security review I2 (client half) -- bounded 5xx/network retries", () => {
+  it("stays false under MAX_SEND_ATTEMPTS and flips true at/after it", () => {
+    expect(exceedsRetryCap(MAX_SEND_ATTEMPTS - 1)).toBe(false);
+    expect(exceedsRetryCap(MAX_SEND_ATTEMPTS)).toBe(true);
+    expect(exceedsRetryCap(MAX_SEND_ATTEMPTS + 5)).toBe(true);
   });
 });

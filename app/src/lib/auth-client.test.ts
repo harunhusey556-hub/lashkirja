@@ -45,10 +45,13 @@ import {
   getAccessToken,
   loadStoredAuth,
   refreshTokenIfDue,
+  resetTokenRefreshTriggersForTests,
   retryPendingRevoke,
   signIn,
   signOutThisDevice,
+  startPeriodicRefreshCheck,
 } from "./auth-client";
+import { ensureCacheKey, resetCacheKeyProvisioning } from "@/lib/offline/persistent-cache";
 
 function jsonResponse(status: number, body: unknown, headers?: Record<string, string>) {
   return new Response(JSON.stringify(body), { status, headers });
@@ -80,6 +83,12 @@ afterEach(async () => {
   store.clear();
   await loadStoredAuth();
   vi.unstubAllGlobals();
+  // I4's periodic timer and "wired once" flag, and I1/I3's cache-key
+  // provisioning lock, are module-level state too -- reset them so one
+  // test's wiring/timer never leaks into the next.
+  resetTokenRefreshTriggersForTests();
+  resetCacheKeyProvisioning();
+  vi.useRealTimers();
 });
 
 describe("signIn (mobile)", () => {
@@ -140,9 +149,7 @@ describe("expireSession", () => {
   it("clears the stored auth and navigates once, then again after a new signIn", async () => {
     await signInAsDemo();
 
-    expireSession();
-    expireSession();
-    expireSession();
+    await Promise.all([expireSession(), expireSession(), expireSession()]);
 
     expect(navigated).toEqual([{ path: "/login?error=expired", replace: true }]);
     expect(getAccessToken()).toBeNull();
@@ -150,11 +157,91 @@ describe("expireSession", () => {
 
     // A fresh sign-in starts a new signed-in period: the guard resets.
     await signInAsDemo();
-    expireSession();
+    await expireSession();
     expect(navigated).toEqual([
       { path: "/login?error=expired", replace: true },
       { path: "/login?error=expired", replace: true },
     ]);
+  });
+
+  it("final review I3: awaits the wipe before navigating, so a fast re-login never inherits a stale cache key", async () => {
+    await signInAsDemo();
+    // Arms the persistent-cache key-provisioning lock, exactly like a
+    // receipt capture or a page-cache write would during this session.
+    const firstKey = await ensureCacheKey();
+
+    // Before the fix, expireSession() fired the wipe fire-and-forget and
+    // returned/navigated immediately -- `await expireSession()` here would
+    // resolve before wipePersistentCache's `secureStore().remove` and
+    // `resetCacheKeyProvisioning()` had actually run, so the very next
+    // `ensureCacheKey()` call below would still see the stale, memoized
+    // key instead of provisioning a fresh one.
+    await expireSession();
+
+    // Fast re-login: a new sign-in re-arms the cache for a new signed-in
+    // period. The next key must be freshly provisioned, never the one the
+    // wipe was supposed to have deleted.
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        jsonResponse(200, {
+          token: "tok-2",
+          expiresAt: "2099-01-01T00:00:00.000Z",
+          user: { userId: "user-2", email: "demo@lashkirja.fi", firstName: "Demo" },
+        })
+      )
+    );
+    await signIn({ email: "demo@lashkirja.fi", password: "demo123" });
+
+    const secondKey = await ensureCacheKey();
+    expect(secondKey).not.toBe(firstKey);
+  });
+});
+
+describe("startPeriodicRefreshCheck (I4's due logic)", () => {
+  it("does not refresh before the 7-day threshold, even across many ticks", async () => {
+    vi.useFakeTimers();
+    await signInAsDemo();
+    const fetchMock = vi.fn(async () => jsonResponse(200, {}));
+    vi.stubGlobal("fetch", fetchMock);
+
+    startPeriodicRefreshCheck(6 * 60 * 60 * 1000);
+    await vi.advanceTimersByTimeAsync(6 * 24 * 60 * 60 * 1000); // 6 days of 6h ticks
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(getAccessToken()).toBe("tok-1");
+  });
+
+  it("refreshes once a periodic tick crosses the 7-day threshold, not only at boot", async () => {
+    vi.useFakeTimers();
+    await signInAsDemo();
+    const fetchMock = vi.fn(async () =>
+      jsonResponse(200, {
+        token: "tok-2",
+        expiresAt: "2099-02-01T00:00:00.000Z",
+        user: { userId: "user-1" },
+      })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    startPeriodicRefreshCheck(6 * 60 * 60 * 1000);
+    await vi.advanceTimersByTimeAsync(8 * 24 * 60 * 60 * 1000); // past the threshold
+
+    expect(fetchMock).toHaveBeenCalled();
+    expect(getAccessToken()).toBe("tok-2");
+  });
+
+  it("a stop function returned by startPeriodicRefreshCheck cancels further ticks", async () => {
+    vi.useFakeTimers();
+    await signInAsDemo();
+    const fetchMock = vi.fn(async () => jsonResponse(200, {}));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const stop = startPeriodicRefreshCheck(6 * 60 * 60 * 1000);
+    stop();
+    await vi.advanceTimersByTimeAsync(30 * 24 * 60 * 60 * 1000); // a full month of ticks
+
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });
 

@@ -181,6 +181,64 @@ export async function peekCacheOwner(): Promise<string | null> {
 }
 
 /**
+ * Final review I1: `openPersistentCache` and `receipt-queue.ts`'s
+ * `queueCryptoKey` each used to independently do their own
+ * read-if-absent-generate-and-write against the same
+ * `SECURE_KEYS.cacheKey` slot, with no lock between them. If both ran in
+ * the same tick with no key present yet (a fresh device's first launch
+ * racing a receipt capture before the cache ever opened), each generated
+ * and wrote a *different* random key -- whichever `secureStore().set()`
+ * finished last silently won, and the loser's already-encrypted data
+ * became permanently undecryptable.
+ *
+ * This module is now the single owner of that key's provisioning.
+ * `ensureCacheKey()` memoizes the in-flight promise so every concurrent
+ * first caller -- this module's own `openPersistentCache` and
+ * `receipt-queue.ts`'s `queueCryptoKey`, which imports this function
+ * instead of running its own copy -- shares one provisioning attempt
+ * instead of racing independent ones. After writing a freshly-generated
+ * key it is read back from the Keychain before being trusted (a write
+ * that silently failed to persist would otherwise decrypt fine for the
+ * rest of this process and then vanish on the next launch). A failed
+ * attempt is not memoized, so the next call retries rather than being
+ * stuck forever on a transient store error.
+ */
+let cacheKeyPromise: Promise<string> | null = null;
+
+async function provisionCacheKey(): Promise<string> {
+  const existing = await secureStore().get(SECURE_KEYS.cacheKey);
+  if (existing) return existing;
+  const generated = generateCacheKeyBase64();
+  await secureStore().set(SECURE_KEYS.cacheKey, generated);
+  const readBack = await secureStore().get(SECURE_KEYS.cacheKey);
+  if (readBack !== generated) {
+    throw new Error("cache key write did not persist");
+  }
+  return readBack;
+}
+
+/** The shared, memoized provisioning lock -- call this, never
+ * `secureStore()` directly, to read or create the cache key. */
+export function ensureCacheKey(): Promise<string> {
+  if (!cacheKeyPromise) {
+    cacheKeyPromise = provisionCacheKey().catch((error) => {
+      cacheKeyPromise = null;
+      throw error;
+    });
+  }
+  return cacheKeyPromise;
+}
+
+/** I3: called by `wipePersistentCache` so a wipe's key removal can never
+ * be shadowed by a stale in-memory promise still holding the *old* key --
+ * the next `ensureCacheKey()` call (a fresh sign-in) is guaranteed to see
+ * "no key" and provision a new one rather than reusing this process's
+ * cached value. */
+export function resetCacheKeyProvisioning(): void {
+  cacheKeyPromise = null;
+}
+
+/**
  * The AES-GCM key lives at `SECURE_KEYS.cacheKey`, generated on first use.
  * `null` when IndexedDB or `crypto.subtle` is unavailable: callers fall
  * back to memory only (secure-store.ts's own memory/emulation/Keychain
@@ -191,11 +249,7 @@ export async function openPersistentCache(userId: string): Promise<PersistentCac
   const idb = await openIndexedDbLike();
   if (!idb) return null;
 
-  let rawKey = await secureStore().get(SECURE_KEYS.cacheKey);
-  if (!rawKey) {
-    rawKey = generateCacheKeyBase64();
-    await secureStore().set(SECURE_KEYS.cacheKey, rawKey);
-  }
+  const rawKey = await ensureCacheKey();
   const key = await importCacheKey(rawKey);
   return createPersistentCache(idb, userId, key);
 }
@@ -220,5 +274,10 @@ export async function wipePersistentCache(): Promise<void> {
     await secureStore().remove(SECURE_KEYS.cacheKey);
   } catch {
     // Nothing more this function can do.
+  } finally {
+    // I3: drop the in-memory provisioning lock too, or a fast re-login
+    // right after this wipe could see `ensureCacheKey()` still resolved to
+    // the just-deleted key instead of provisioning a fresh one.
+    resetCacheKeyProvisioning();
   }
 }

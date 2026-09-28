@@ -1,5 +1,30 @@
-import { describe, expect, it } from "vitest";
-import { createPersistentCache, PERSISTENT_LIMITS } from "./persistent-cache";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+/** Final review I1: `ensureCacheKey` is the single, memoized owner of
+ * `SECURE_KEYS.cacheKey` -- mocking secure-store.ts here (the same way
+ * auth-client.test.ts does) lets these tests exercise the real
+ * provisioning logic (the lock, the read-after-write check) without a
+ * real Keychain or a real IndexedDB. */
+const secureStoreState = new Map<string, string>();
+vi.mock("@/lib/mobile/secure-store", () => ({
+  SECURE_KEYS: { auth: "lashkirja.auth.v1", cacheKey: "lashkirja.cachekey.v1", pendingRevoke: "lashkirja.pending-revoke.v1" },
+  secureStore: () => ({
+    get: async (key: string) => secureStoreState.get(key) ?? null,
+    set: async (key: string, value: string) => {
+      secureStoreState.set(key, value);
+    },
+    remove: async (key: string) => {
+      secureStoreState.delete(key);
+    },
+  }),
+}));
+
+import {
+  createPersistentCache,
+  ensureCacheKey,
+  PERSISTENT_LIMITS,
+  resetCacheKeyProvisioning,
+} from "./persistent-cache";
 import type { IdbLike } from "./idb";
 import { generateCacheKeyBase64, importCacheKey } from "./crypto-box";
 
@@ -216,5 +241,61 @@ describe("createPersistentCache: userId isolation", () => {
 
     expect(await cacheA.get("page:a")).toBeNull();
     expect((await cacheB.get("page:b"))?.value).toBe(2);
+  });
+});
+
+describe("ensureCacheKey: I1 -- shared, memoized key provisioning", () => {
+  beforeEach(() => {
+    secureStoreState.clear();
+    resetCacheKeyProvisioning();
+  });
+
+  it("concurrent first calls resolve to the same key and only one write lands", async () => {
+    // Before the fix, openPersistentCache's and receipt-queue.ts's
+    // queueCryptoKey each ran their own independent
+    // read-if-absent-generate-and-write against the same secure-store
+    // slot -- racing them here (no key provisioned yet) used to be able to
+    // produce two different generated keys, whichever write finished last
+    // silently winning. ensureCacheKey's in-flight-promise lock collapses
+    // every concurrent first caller into one provisioning attempt.
+    const [a, b, c] = await Promise.all([ensureCacheKey(), ensureCacheKey(), ensureCacheKey()]);
+
+    expect(a).toBe(b);
+    expect(b).toBe(c);
+    expect(secureStoreState.size).toBe(1);
+  });
+
+  it("a later call reuses the already-provisioned key instead of generating a new one", async () => {
+    const first = await ensureCacheKey();
+    const second = await ensureCacheKey();
+    expect(second).toBe(first);
+  });
+
+  it("resetCacheKeyProvisioning (wipePersistentCache's own reset) makes the next call provision a fresh key", async () => {
+    // I3: a logout/expiry wipe must not leave a fast re-login reading the
+    // just-deleted key back out of a stale in-memory promise.
+    const first = await ensureCacheKey();
+    resetCacheKeyProvisioning();
+    secureStoreState.delete("lashkirja.cachekey.v1"); // wipePersistentCache's own removal
+    const second = await ensureCacheKey();
+    expect(second).not.toBe(first);
+  });
+
+  it("a failed provisioning attempt is not memoized -- the next call retries", async () => {
+    const store = secureStoreState;
+    const originalSet = store.set.bind(store);
+    let failNextSet = true;
+    store.set = ((key: string, value: string) => {
+      if (failNextSet) {
+        failNextSet = false;
+        throw new Error("transient secure-store write failure");
+      }
+      return originalSet(key, value);
+    }) as typeof store.set;
+
+    await expect(ensureCacheKey()).rejects.toThrow();
+    const key = await ensureCacheKey();
+    expect(typeof key).toBe("string");
+    expect(key.length).toBeGreaterThan(0);
   });
 });

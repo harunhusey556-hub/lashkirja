@@ -29,6 +29,7 @@ import {
   deleteQueuedReceipt,
   earliestNextAttemptAt,
   enqueueReceipt,
+  exceedsRetryCap,
   listQueuedReceipts,
   nextAttemptDelayMs,
   pickNextQueued,
@@ -36,6 +37,7 @@ import {
   recoverCrashedSends,
   saveQueuedReceipt,
   clearReceiptQueueStore,
+  ReceiptDecryptError,
   type QueuedReceipt,
 } from "@/lib/offline/receipt-queue";
 
@@ -95,7 +97,28 @@ async function sendOne(userId: string, item: QueuedReceipt): Promise<void> {
   await saveQueuedReceipt({ ...item, status: "sending" });
   await refresh(userId);
 
-  const blob = await decryptQueuedReceiptFile(item);
+  let blob: Blob | null;
+  try {
+    blob = await decryptQueuedReceiptFile(item);
+  } catch (error) {
+    // Final review I2: a bad-key/tampered-tag decrypt failure is
+    // permanent -- retrying identically would throw the same way forever
+    // (this is the exact failure mode I1's key-provisioning race used to
+    // produce). Caught here so the exception never escapes `drain()`'s
+    // loop and strands the row at "sending" -- it is marked "failed"
+    // instead, with the retry/delete affordance QueuedReceiptsCard already
+    // renders for that status.
+    if (error instanceof ReceiptDecryptError) {
+      await saveQueuedReceipt({
+        ...item,
+        status: "failed",
+        attempts: item.attempts + 1,
+        lastError: "Kuvaa ei voitu lukea. Ota kuva uudelleen.",
+      });
+      return;
+    }
+    throw error;
+  }
   if (!blob) {
     const attempts = item.attempts + 1;
     await saveQueuedReceipt({
@@ -150,6 +173,23 @@ async function sendOne(userId: string, item: QueuedReceipt): Promise<void> {
   }
   const attempts = item.attempts + 1;
   if (outcome === "retry") {
+    // Security review I2 (client half): 5xx and network-error outcomes
+    // used to retry forever. Past MAX_SEND_ATTEMPTS this stops being an
+    // automatic retry and becomes a permanent "failed" -- the existing
+    // retry button (`retry()` below, which resets `attempts`) is how the
+    // person gets another automatic budget.
+    if (exceedsRetryCap(attempts)) {
+      await saveQueuedReceipt({
+        ...item,
+        status: "failed",
+        attempts,
+        lastError:
+          status === "network-error"
+            ? "Ei yhteyttä usean yrityksen jälkeen. Yritä myöhemmin uudelleen."
+            : serverError || "Lähetys epäonnistui usean yrityksen jälkeen. Yritä myöhemmin uudelleen.",
+      });
+      return;
+    }
     await saveQueuedReceipt({
       ...item,
       status: "queued",
@@ -276,7 +316,16 @@ export function useOfflineReceiptQueue() {
     const items = await listQueuedReceipts(userId);
     const item = items.find((row) => row.id === id);
     if (!item) return;
-    await saveQueuedReceipt({ ...item, status: "queued", nextAttemptAt: Date.now(), lastError: undefined });
+    // A manual "Yritä uudelleen" resets `attempts` to 0 -- otherwise a row
+    // the automatic retry cap already failed would immediately hit the
+    // same cap again on its very next automatic attempt.
+    await saveQueuedReceipt({
+      ...item,
+      status: "queued",
+      attempts: 0,
+      nextAttemptAt: Date.now(),
+      lastError: undefined,
+    });
     paused = false;
     await refresh(userId);
     requestDrain(userId);
