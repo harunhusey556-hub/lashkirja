@@ -237,10 +237,13 @@ export default function ALVRaporttiPage() {
         <LoadingState label="Ladataan ALV-raporttia..." compact />
       ) : data ? (
         <>
-          <p className="text-[13px] text-ink-2 text-center">
-            OmaVero-ilmoituksen kentät · {data.receiptCount} kuittia kaudella
+          <p className="px-1 text-[13px] leading-relaxed text-ink-2">
+            OmaVero-ilmoituksen kentät · {data.receiptCount} {data.receiptCount === 1 ? "kuitti" : "kuittia"} kaudella
             {data.sources && data.sources.invoiceCount > 0 && (
-              <> · {data.sources.invoiceCount} myyntilaskua</>
+              <>
+                {" "}
+                · {data.sources.invoiceCount} {data.sources.invoiceCount === 1 ? "myyntilasku" : "myyntilaskua"}
+              </>
             )}
           </p>
 

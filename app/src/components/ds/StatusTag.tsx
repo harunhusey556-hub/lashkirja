@@ -2,7 +2,8 @@ import type { ReactNode } from "react";
 import type { Tone } from "@/lib/status-labels";
 
 const TONE: Record<Tone, string> = {
-  neutral: "bg-canvas text-ink-2",
+  // `line`, not `canvas`: a canvas pill vanishes on the canvas page behind DetailHero.
+  neutral: "bg-line/70 text-ink-2",
   accent: "bg-accent-soft text-accent",
   danger: "bg-danger/10 text-danger",
   success: "bg-success/10 text-success",

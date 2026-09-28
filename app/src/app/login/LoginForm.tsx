@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { controlClass } from "@/components/control-styles";
+import { AppMark } from "@/components/AppMark";
 import { Button, Field, FormError } from "@/components/ui";
 
 const ERROR_MESSAGES: Record<string, string> = {
@@ -41,7 +42,8 @@ export default function LoginForm() {
     // iOS pans the visual viewport itself when the keyboard covers an input.
     <div className="fixed inset-0 flex touch-none items-center justify-center overflow-hidden bg-canvas px-4">
       <div className="w-full max-w-sm">
-        <div className="mb-8 text-center">
+        <div className="mb-8 flex flex-col items-center text-center">
+          <AppMark size={64} className="mb-4" />
           <h1 className="text-[32px] font-bold leading-tight tracking-[-0.02em] text-ink">LashKirja</h1>
           <p className="mt-2 text-[15px] text-ink-2">Kirjanpito yksinkertaisesti</p>
         </div>

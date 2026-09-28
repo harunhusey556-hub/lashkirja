@@ -8,7 +8,7 @@ export default function KirjanpitoAsetuksetPage() {
     <div className="space-y-6 pb-6">
       <PageTitle
         title="Suljetut kaudet"
-        subtitle="Lukitse kirjanpito ilmoitettuun kuukauteen asti - lukitut kaudet muuttuvat vain tarkoituksella."
+        subtitle="Lukitse kirjanpito ilmoitettuun kuukauteen asti. Lukittuja kausia muutetaan vain tarkoituksella."
       />
       <BooksLockCard />
     </div>

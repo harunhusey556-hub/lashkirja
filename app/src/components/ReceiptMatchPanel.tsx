@@ -38,8 +38,15 @@ function reasonLabel(reasons: string[] | null | undefined): string {
     amount: "summa",
     vendor: "myyjä",
     date: "päivä",
+    manual: "linkitetty käsin",
+    auto_income: "tulo tiliotteelta",
+    approved: "hyväksytty",
   };
-  return reasons.map((r) => labels[r] || r).join(", ");
+  // An unknown server value is never shown raw (it would be an English code on screen).
+  return reasons
+    .map((r) => labels[r])
+    .filter((label): label is string => Boolean(label))
+    .join(", ");
 }
 
 function isStrongMatch(
@@ -84,7 +91,7 @@ export default function ReceiptMatchPanel({
         <p className={`text-[13px] text-ink ${compact ? "truncate" : ""}`}>
           {txLabel(tx)}
         </p>
-        {tx.matchReasons && tx.matchReasons.length > 0 && !compact && (
+        {reasonLabel(tx.matchReasons) && !compact && (
           <p className="text-[13px] text-ink-2">
             Peruste: {reasonLabel(tx.matchReasons)}
           </p>
@@ -94,7 +101,7 @@ export default function ReceiptMatchPanel({
             type="button"
             onClick={onUnlink}
             disabled={busy}
-            className="min-h-11 inline-flex items-center px-2 -mx-2 text-[13px] font-medium text-accent disabled:opacity-50"
+            className="active-press min-h-11 inline-flex items-center px-2 -mx-2 text-[13px] font-medium text-accent disabled:opacity-50"
           >
             Poista linkitys
           </button>

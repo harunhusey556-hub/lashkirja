@@ -1,10 +1,20 @@
 "use client";
 
-export function FilterChips<T extends string>({ label, items, value, onChange }: {
+/**
+ * Page level (default): one horizontally scrolling row that bleeds to the screen edge.
+ * `wrap`: for a short option set inside a card, where the bleed would cut the last chip at the
+ * card's edge; the chips wrap onto a second line instead.
+ */
+export function FilterChips<T extends string>({ label, items, value, onChange, wrap = false }: {
   label: string; items: { id: T; label: string; count?: number | string }[]; value: T; onChange: (id: T) => void;
+  wrap?: boolean;
 }) {
   return (
-    <div role="group" aria-label={label} className="-mx-4 flex gap-2 overflow-x-auto px-4 pb-1">
+    <div
+      role="group"
+      aria-label={label}
+      className={wrap ? "flex flex-wrap gap-2" : "-mx-4 flex gap-2 overflow-x-auto px-4 pb-1"}
+    >
       {items.map((item) => {
         const selected = item.id === value;
         return (

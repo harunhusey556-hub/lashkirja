@@ -18,7 +18,8 @@ import {
   type BiometryStatus,
 } from "@/lib/biometry";
 import { nextLockView, type LockView } from "@/lib/session-policy";
-import { Button } from "@/components/ui";
+import { Button, controlClass } from "@/components/ui";
+import { AppMark } from "@/components/AppMark";
 import { apiFetch, leaveAfterSignOut, readJson } from "@/components/clientFetch";
 
 let lockView: LockView = "open";
@@ -161,8 +162,8 @@ export function AppLock({ children }: { children: React.ReactNode }) {
   if (view === "open") return <>{children}</>;
   if (!ready) {
     return (
-      <div className="app-frame bg-cream">
-        <p className="max-w-sm mx-auto mt-24 px-4 text-sm text-warm-gray text-center">Tarkistetaan lukitusta…</p>
+      <div className="app-frame bg-canvas">
+        <p className="mx-auto mt-24 max-w-sm px-4 text-center text-[15px] text-ink-2">Tarkistetaan lukitusta…</p>
       </div>
     );
   }
@@ -199,27 +200,30 @@ export function AppLock({ children }: { children: React.ReactNode }) {
   }
 
   return (
-    <div className="app-frame bg-cream">
+    <div className="app-frame bg-canvas">
       <form
         onSubmit={(event) => void unlock(event)}
-        className="max-w-sm mx-auto mt-24 px-4 space-y-4"
+        className="mx-auto mt-20 w-full max-w-sm space-y-4 px-4"
       >
-        <h1 className="text-2xl font-light text-charcoal text-center">LashKirja</h1>
-        <p className="text-sm text-warm-gray text-center">
-          Näyttö on lukittu tällä laitteella. Kirjanpito ei näy, ennen kuin koodi tai biometria avaa sen.
-          Palvelimen istunto pysyy.
-        </p>
+        <div className="flex flex-col items-center gap-3 pb-2">
+          <AppMark size={64} />
+          <h1 className="text-2xl font-bold tracking-[-0.02em] text-ink">LashKirja</h1>
+          <p className="text-center text-[15px] leading-relaxed text-ink-2">
+            Näyttö on lukittu tällä laitteella. Kirjanpito ei näy, ennen kuin koodi tai biometria avaa sen.
+            Palvelimen istunto pysyy.
+          </p>
+        </div>
         {bio?.available && (
           <Button type="button" variant="secondary" className="w-full" onClick={() => void retryBiometry()}>
             {biometricUnlockLabel(bio.kind)}
           </Button>
         )}
         {bioNote && (
-          <p className="text-sm text-warm-gray text-center" role="status">
+          <p className="text-center text-sm text-ink-2" role="status">
             {bioNote}
           </p>
         )}
-        <label htmlFor="app-lock-pin" className="block text-sm font-medium text-charcoal">
+        <label htmlFor="app-lock-pin" className="mb-1.5 block text-[13px] text-ink-2">
           Lukituskoodi
         </label>
         <input
@@ -229,10 +233,10 @@ export function AppLock({ children }: { children: React.ReactNode }) {
           autoComplete="off"
           value={pin}
           onChange={(event) => setPin(event.target.value)}
-          className="w-full min-h-12 px-4 rounded-xl border border-warm-gray-light bg-white text-charcoal"
+          className={`${controlClass} text-center tracking-[0.3em]`}
         />
         {waitMs > 0 && (
-          <p className="text-sm text-warm-gray" role="status">
+          <p className="text-sm text-ink-2" role="status">
             Odota {Math.ceil(waitMs / 1000)} sekuntia.
           </p>
         )}
@@ -246,16 +250,16 @@ export function AppLock({ children }: { children: React.ReactNode }) {
         </Button>
         {confirmForget ? (
           <div className="space-y-2">
-            <p className="text-sm text-charcoal">Lukitus poistetaan ja sinut kirjataan ulos. Jatka?</p>
+            <p className="text-sm text-ink">Lukitus poistetaan ja sinut kirjataan ulos. Jatka?</p>
             <Button type="button" variant="secondary" className="w-full" onClick={() => void forgetPin()}>
               Kirjaudu ulos
             </Button>
-            <button type="button" className="block min-h-11 w-full text-sm text-warm-gray" onClick={() => setConfirmForget(false)}>
+            <button type="button" className="active-press block min-h-11 w-full text-[15px] text-ink-2" onClick={() => setConfirmForget(false)}>
               Peruuta
             </button>
           </div>
         ) : (
-          <button type="button" className="block min-h-11 w-full text-sm text-accent-dark" onClick={() => setConfirmForget(true)}>
+          <button type="button" className="active-press block min-h-11 w-full text-[15px] font-medium text-accent" onClick={() => setConfirmForget(true)}>
             Unohdin koodin
           </button>
         )}

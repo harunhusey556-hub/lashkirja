@@ -32,7 +32,7 @@ export function BuildInfo() {
   }, []);
 
   return (
-    <div className="space-y-1 pb-2 text-center text-xs text-warm-gray">
+    <div className="space-y-1 pb-2 text-center text-xs text-ink-2">
       <p>LashKirja {appVersion}</p>
       <p>
         Verkko {commit} · {envName}

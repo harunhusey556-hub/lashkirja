@@ -144,7 +144,7 @@ export default function RootLayout({
 }) {
   return (
     <html lang="fi">
-      <body className={`${inter.className} bg-cream`}>
+      <body className={`${inter.className} bg-canvas`}>
         <UsableArea />
         <ClientErrorReporter />
         <TouchActiveShim />

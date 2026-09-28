@@ -547,13 +547,13 @@ export default function StatementDetailView({
       <StatementSummaryCards totals={statement.totals} />
 
       {statement.totals.transfers !== 0 && (
-        <p className="text-[13px] text-ink-2">
+        <p className="px-1 text-[13px] text-ink-2">
           Omat siirrot {formatEur(statement.totals.transfers)}, eivät sisälly
           nettoon
         </p>
       )}
 
-      <Section title="Kohdekuukausi">
+      <Section title="Kuukausi etusivulla">
         <div className="space-y-3 px-4 py-4">
           <div>
             <label htmlFor={`statement-${statement.id}-period`} className={LABEL_CLASS}>

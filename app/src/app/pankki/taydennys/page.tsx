@@ -5,6 +5,15 @@ import { ErrorState, LoadingState } from "@/components/AsyncState";
 import { apiFetch, errorMessage, isUnauthorized, readJson, redirectToLogin } from "@/components/clientFetch";
 import { formatDate, formatEur } from "@/lib/format";
 import { ListRow, PageTitle, Section, StatusTag } from "@/components/ds";
+import { EmptyState } from "@/components/ScreenState";
+import { MONTHS } from "@/lib/finnish-months";
+
+/** "2026-09" -> "syyskuulta 2026" (every Finnish month name ends in -kuu, ablative -kuulta). */
+function monthAblative(month: string): string {
+  const match = /^(\d{4})-(\d{2})$/.exec(month);
+  const name = match ? MONTHS[Number(match[2]) - 1] : undefined;
+  return match && name ? `${name.toLocaleLowerCase("fi-FI")}lta ${match[1]}` : "";
+}
 
 interface UnmatchedTx {
   id: string;
@@ -62,10 +71,10 @@ export default function TaydennysPage() {
 
   return (
     <div className="space-y-6 pb-6">
-      <PageTitle title="Täsmäytys" />
-      <p className="px-1 text-[13px] leading-relaxed text-ink-2">
-        Avoimet pankkitapahtumat ja kuitit{month ? ` kuukaudelta ${month}` : ""}.
-      </p>
+      <PageTitle
+        title="Täsmäytys"
+        subtitle={`Avoimet pankkitapahtumat ja kuitit${monthAblative(month) ? ` ${monthAblative(month)}` : ""}.`}
+      />
 
       {error ? (
         <ErrorState
@@ -81,9 +90,11 @@ export default function TaydennysPage() {
       ) : loading ? (
         <LoadingState label="Haetaan täsmäytystä…" />
       ) : rows.length === 0 && receipts.length === 0 ? (
-        <p className="px-1 text-[13px] text-ink-2">
-          Ei avoimia täsmäytyksiä. Tämän kuukauden tapahtumat on käsitelty.
-        </p>
+        <EmptyState
+          kind="records"
+          title="Ei avoimia täsmäytyksiä"
+          body="Tämän kuukauden tapahtumat on käsitelty."
+        />
       ) : (
         <>
           <Section title="Pankkitapahtumat" count={rows.length}>

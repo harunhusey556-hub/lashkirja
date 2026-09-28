@@ -417,7 +417,7 @@ export default function BankConnectCard({ entityType }: { entityType: string }) 
                   <div className="space-y-2">
                     <p className="text-[13px] text-ink-2 leading-relaxed">
                       Uudet tilit eivät ole mukana automaattisesti. Valitse oman
-                      yrityksesi tili - suostumus voi sisältää myös muita
+                      yrityksesi tili, sillä suostumus voi sisältää myös muita
                       IBAN-numeroita.
                     </p>
                     {connection.accounts.map((account) => (

@@ -540,9 +540,10 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         className="app-header z-40 bg-canvas"
         onContextMenu={(event) => event.preventDefault()}
       >
-        {/* px-2 + the 4px inset of each 36px circle inside its 44px hit box puts both circles'
-            outer edges on the same 16px line as the page content below. */}
-        <div className="app-header-row mx-auto min-h-14 w-full max-w-lg px-2 md:max-w-3xl">
+        {/* px-3 + the 4px inset of each 36px circle inside its 44px hit box puts the avatar's outer
+            edge on the same 16px line as the cards below, and the back chevron's stroke on the
+            page title's 20px line. */}
+        <div className="app-header-row mx-auto min-h-14 w-full max-w-lg px-3 md:max-w-3xl">
           <div className="flex h-11 min-w-11 items-center justify-self-start">
             {canGoBack && (
               <button

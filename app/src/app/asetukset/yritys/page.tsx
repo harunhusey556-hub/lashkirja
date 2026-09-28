@@ -33,6 +33,7 @@ export default function YritysPage() {
           <p className="mb-1.5 text-[13px] text-ink-2">Yritysmuoto</p>
           <FilterChips
             label="Yritysmuoto"
+            wrap
             items={ENTITY_TYPE_OPTIONS.map((option) => ({ id: option.value, label: option.label }))}
             value={profile.entityType as EntityType}
             onChange={(value) => save({ entityType: value })}

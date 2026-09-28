@@ -11,7 +11,7 @@ export function LoadingState({
 }) {
   return (
     <div
-      className={`flex items-center justify-center gap-3 text-sm text-warm-gray ${compact ? "py-8" : "py-20"}`}
+      className={`flex items-center justify-center gap-3 text-sm text-ink-2 ${compact ? "py-8" : "py-20"}`}
       role="status"
       aria-live="polite"
     >
@@ -35,12 +35,12 @@ export function SkeletonList({ rows = 5 }: { rows?: number }) {
       {Array.from({ length: rows }).map((_, index) => (
         <div key={index} className="rounded-card border border-line bg-surface p-4">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-full bg-warm-gray-light/30 skeleton shrink-0" />
+            <div className="h-9 w-9 shrink-0 rounded-[10px] bg-line/70 skeleton" />
             <div className="flex-1 space-y-2 min-w-0">
-              <div className="h-3.5 w-2/5 bg-warm-gray-light/30 rounded skeleton" />
-              <div className="h-3 w-3/5 bg-warm-gray-light/20 rounded skeleton" />
+              <div className="h-3.5 w-2/5 rounded bg-line/70 skeleton" />
+              <div className="h-3 w-3/5 rounded bg-line/50 skeleton" />
             </div>
-            <div className="h-4 w-14 bg-warm-gray-light/30 rounded skeleton shrink-0" />
+            <div className="h-4 w-14 shrink-0 rounded bg-line/70 skeleton" />
           </div>
         </div>
       ))}

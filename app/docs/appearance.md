@@ -22,10 +22,10 @@ is the implementer-facing summary; the spec is binding.
 | `--color-accent` / `--color-success` / `--color-danger` / `--color-warning` | existing values | status colors, unchanged |
 | `--radius-card` | `14px` | cards and groups; pills stay fully round |
 
-The older palette (`charcoal`, `warm-gray`, `blush`, `cream`, `rose`, …) still exists in
-`globals.css` for a small set of screens outside the ds language (see "Known exceptions"
-below) but is not used in any page migrated to the new look. No new or touched UI may
-introduce it.
+The older palette (`charcoal`, `warm-gray`, `blush`, `cream`, `rose`) is gone: the polish round
+moved the last holdouts (AI assistant, app lock, empty and loading states, sheet chrome,
+sidebar, error screen) to the tokens above and then deleted the old `@theme` entries, so a class
+such as `text-charcoal` no longer produces any colour. Use the tokens above only.
 
 Cards never carry a shadow; the only depth cue is the 1px `line` border. Never nest a card
 inside a card. No uppercase, letter-spaced eyebrow labels — section headings are sentence
@@ -44,6 +44,23 @@ secondary text 13px `ink-2`; chips 14px/500. Money is always formatted with `for
 `Card`, `DetailHero`, `KeyValueList`, `Timeline`, `BottomActions`, `MoreMenu`. Status words and
 their tone colors live in one place, `src/lib/status-labels.ts` (sales invoices, purchase
 invoices, receipt review, transaction/document status).
+
+### Icons
+
+Every icon is a [Lucide](https://lucide.dev) glyph (`lucide-react`, ISC licence) rendered through
+`Icon` in `src/components/ds/Icon.tsx`; no hand-drawn inline `<svg>` for UI chrome. Sizes are fixed
+per placement: `inline` 16px (chips, pills, text buttons, month/year chevrons), `row` 20px (the
+36px `IconTile` of `ListRow`/sheet rows/settings rows, header circles, row chevrons), `tab` 24px
+(tab bar, back chevron, the Lisää sheet's camera), `hero` 28px (the round tile of empty, error and
+confirm states). Stroke is 1.75 on the 24px grid (2 at 16px). Icons are always `aria-hidden`; the
+control keeps its own accessible name. Within one group, every row has a leading icon or none.
+Navigation rows (hub, settings) end in a `ChevronRight` (`ListRow`'s `chevron`, `SettingsRow`);
+record rows (a transaction, an invoice) do not.
+
+The brand mark (`src/components/AppMark.tsx`, source `assets/app-icon.svg`) is a ledger book with a
+ribbon bookmark and a closed-eye lash line, on the accent colour. It is the iOS app icon, the web
+icons and favicon, the splash (centred on canvas), and appears in the desktop sidebar and on the
+lock screen. Regenerate the PNGs from the SVG; never hand-edit them.
 
 ### Buttons and controls
 
@@ -72,7 +89,11 @@ exception WCAG's target-size criterion makes for inline links.
 
 The header shows no page title: root and workspace pages carry `PageTitle`, detail pages
 carry `DetailHero`; the header itself renders only the labelled back button, the assistant
-button and the profile avatar. Detail pages (`kind: "detail"` in `src/lib/navigation.ts`) hide
+button and the profile avatar. It sits on `canvas` with no border, as in the mockups. The
+assistant button (`surface` circle with a line border) and the avatar (`accent-soft` circle) are a
+matched pair of 36px circles, each centred in a 44px hit box, 12px apart, with their outer edge on
+the same 16px line as the page content. The current tab is marked by accent colour plus a
+semibold label, with no extra bar. Detail pages (`kind: "detail"` in `src/lib/navigation.ts`) hide
 the tab bar and pin `BottomActions` above the safe area instead.
 
 `BottomSheet`'s fixed overlay used to span the full viewport width, so its `inset-x-0
@@ -95,11 +116,13 @@ visible content area next to the sidebar.
   text now use `surface`/`ink`/`ink-2`, and both its buttons use the shared `<Button>`.
 - **Toggle-switch knobs** (`BiometricUnlockCard`, the ALV switch in `asetukset/yritys`) keep a
   small `shadow-sm`/`shadow` on the round knob — the standard toggle affordance, not a card.
-- **The AI assistant's chat bubbles** (`AiChatDrawer`) keep a `rounded-2xl` bubble radius,
-  a distinct conversational-UI convention, not a content card; its structured "match proposal"
-  card inside the drawer does use `rounded-card`/`bg-surface`/`text-ink`.
-- **`error.tsx`** (the Next.js global crash screen) keeps its pre-existing decorative
-  glass/blur aesthetic. It renders outside the app shell (no navigation, exceedingly rare),
-  was never part of the phase-2 page migration, and its `rounded-2xl`/`glass` card is bundled
-  with decorative blurred background shapes that would need redesigning together.
+- **The AI assistant's chat bubbles** (`AiChatDrawer`) keep a `rounded-2xl` bubble radius
+  (with the tail corner at `rounded-md`), a distinct conversational-UI convention, not a content
+  card: the user's bubble is `ink` on `canvas` text, the assistant's is a `surface` bubble with a
+  `line` border. The drawer itself is `canvas`, its header pairs a close circle and a menu circle,
+  the composer is one rounded field with the send/stop circle inside, and every menu action's
+  failure shows in the menu panel (`role="alert"`). The "match proposal" card uses
+  `rounded-card`/`bg-surface`/`text-ink`.
+- **`error.tsx`** now uses the same `surface` card on `canvas` as `not-found.tsx` (the old
+  glass/blur shapes were removed in the polish round).
 

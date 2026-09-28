@@ -5,7 +5,22 @@ import { ChatMatchProposal } from "@/lib/ai-assistant";
 import { apiFetch, errorMessage, readJson } from "@/components/clientFetch";
 import { STREAM_IDLE_MS, armIdleTimeout, subscribeOverlayClose } from "@/lib/screen-state";
 import { ChatMarkdown } from "@/components/ChatMarkdown";
-import { Button, FormError } from "@/components/ui";
+import { Button, FormError, chipClass, controlClass } from "@/components/ui";
+import {
+  Archive,
+  ArrowDown,
+  ArrowUp,
+  Check,
+  Copy,
+  Link2,
+  MessagesSquare,
+  Plus,
+  RotateCcw,
+  Sparkles,
+  Square,
+  X,
+} from "lucide-react";
+import { Icon } from "@/components/ds/Icon";
 import { hapticNotify } from "@/lib/haptics";
 import { useOverlayLock } from "@/lib/overlay-lock";
 
@@ -81,6 +96,9 @@ export function AiChatDrawer({
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState("");
   const [removedConversation, setRemovedConversation] = useState<ConversationItem | null>(null);
+  // Failures of the conversation menu's own actions (list, new, rename, archive, delete, undo)
+  // show inside the menu panel instead of vanishing as an unhandled rejection.
+  const [menuError, setMenuError] = useState("");
   const scrollerRef = useRef<HTMLDivElement>(null);
   const stickRef = useRef(true);
   const abortRef = useRef<AbortController | null>(null);
@@ -522,36 +540,146 @@ export function AiChatDrawer({
     }
   }
 
+  /** Runs one conversation-menu action; a failure lands in the menu's own alert. */
+  async function runMenuAction(action: () => Promise<void>, fallback: string) {
+    setMenuError("");
+    try {
+      await action();
+    } catch (error) {
+      setMenuError(errorMessage(error, fallback));
+    }
+  }
+
+  function refreshConversations(query = conversationQuery, archived = showArchived) {
+    void runMenuAction(() => loadConversations(query, archived), "Keskustelulistan lataus epäonnistui");
+  }
+
+  async function startNewConversation() {
+    const response = await apiFetch("/api/ai/conversations", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: "{}",
+    });
+    const data = await readJson<{ id: string; title: string }>(response, "Keskustelun luonti epäonnistui");
+    setConversationId(data.id);
+    setConversationTitle(data.title);
+    setMessages([]);
+    setHasMore(false);
+    setHistoryLoaded(true);
+    setFailed(null);
+    setMenuOpen(false);
+    stickRef.current = true;
+    await loadConversations();
+  }
+
+  async function renameConversation(conversation: ConversationItem) {
+    const response = await apiFetch("/api/ai/conversations", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: conversation.id, title: renameValue }),
+    });
+    const data = await readJson<{ title: string }>(response, "Nimen tallennus epäonnistui");
+    if (conversation.id === conversationId) setConversationTitle(data.title);
+    setRenamingId(null);
+    await loadConversations();
+  }
+
+  async function toggleArchive(conversation: ConversationItem) {
+    const response = await apiFetch("/api/ai/conversations", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: conversation.id, archived: !conversation.archivedAt }),
+    });
+    await readJson(response, "Arkistointi epäonnistui");
+    if (conversation.id === conversationId) {
+      setConversationId(null);
+      setConversationTitle("Avustaja");
+      setMessages([]);
+      setHistoryLoaded(false);
+    }
+    await loadConversations();
+  }
+
+  async function removeConversation(conversation: ConversationItem) {
+    const response = await apiFetch("/api/ai/conversations", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: conversation.id, deleted: true }),
+    });
+    await readJson(response, "Poisto epäonnistui");
+    setRemovedConversation(conversation);
+    if (conversation.id === conversationId) {
+      setConversationId(null);
+      setConversationTitle("Avustaja");
+      setMessages([]);
+      setHistoryLoaded(true);
+    }
+    await loadConversations();
+  }
+
+  async function undoRemove(removed: ConversationItem) {
+    const response = await apiFetch("/api/ai/conversations", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: removed.id, deleted: false }),
+    });
+    await readJson(response, "Palautus epäonnistui");
+    setRemovedConversation(null);
+    await loadConversations();
+  }
+
   if (!open) return null;
 
+  const smallAction = "active-press inline-flex min-h-11 items-center px-1 text-[13px] font-medium";
+
   return (
-    <div className="absolute inset-0 z-[70] flex flex-col bg-white" role="dialog" aria-labelledby="ai-chat-title">
-      <header className="app-header flex items-center gap-2 border-b border-warm-gray-light/40 px-3 pb-2">
-        <button type="button" onClick={onClose} className="active-press min-h-11 px-2 text-sm font-medium text-accent-dark">
-          Sulje
+    <div className="absolute inset-0 z-[70] flex flex-col bg-canvas" role="dialog" aria-labelledby="ai-chat-title">
+      {/* Header: close (left), title (centre), conversation menu (right). Both controls are 36px
+          circles in 44px hit boxes, the same pair the app header uses. */}
+      <header className="app-header border-b border-line bg-canvas">
+        {/* Same max width as the thread and the composer, so on desktop the controls frame the
+            conversation instead of sitting at the far edges of the window. */}
+        <div className="mx-auto grid w-full max-w-2xl grid-cols-[44px_minmax(0,1fr)_44px] items-center gap-2 px-3 pb-1.5">
+        <button type="button" onClick={onClose} aria-label="Sulje" className="active-press flex h-11 w-11 items-center justify-center">
+          <span className="flex h-9 w-9 items-center justify-center rounded-full border border-line bg-surface text-ink">
+            <Icon icon={X} />
+          </span>
         </button>
-        <h2 id="ai-chat-title" className="flex-1 truncate text-center text-base font-medium text-charcoal">
-          {conversationTitle || "Avustaja"}
-        </h2>
+        <div className="min-w-0 text-center">
+          <h2 id="ai-chat-title" className="truncate text-[17px] font-semibold text-ink">
+            {conversationTitle || "Avustaja"}
+          </h2>
+          {conversationTitle && conversationTitle !== "Avustaja" && (
+            <p className="truncate text-[12px] text-ink-2">Avustaja</p>
+          )}
+        </div>
         <button
           type="button"
+          aria-label="Valikko"
           aria-expanded={menuOpen}
           onClick={() => {
             setMenuOpen((value) => !value);
-            if (!menuOpen) void loadConversations();
+            if (!menuOpen) refreshConversations();
           }}
-          className="active-press min-h-11 px-2 text-sm font-medium text-charcoal"
+          className="active-press flex h-11 w-11 items-center justify-center"
         >
-          Valikko
+          <span
+            className={`flex h-9 w-9 items-center justify-center rounded-full border ${
+              menuOpen ? "border-ink bg-ink text-canvas" : "border-line bg-surface text-ink"
+            }`}
+          >
+            <Icon icon={MessagesSquare} />
+          </span>
         </button>
+        </div>
       </header>
       {menuOpen && (
-        <div className="max-h-72 space-y-2 overflow-y-auto border-b border-warm-gray-light/30 bg-cream/40 px-3 py-2">
+        <div className="max-h-[55%] space-y-3 overflow-y-auto border-b border-line bg-canvas px-4 py-3 *:mx-auto *:max-w-[40rem]">
           <form
             className="flex gap-2"
             onSubmit={(event) => {
               event.preventDefault();
-              void loadConversations(conversationQuery, showArchived);
+              refreshConversations(conversationQuery, showArchived);
             }}
           >
             <input
@@ -559,209 +687,162 @@ export function AiChatDrawer({
               onChange={(event) => setConversationQuery(event.target.value)}
               aria-label="Hae keskusteluja"
               placeholder="Hae keskusteluja"
-              className="min-h-11 flex-1 rounded-xl border border-warm-gray-light/60 bg-white px-3 text-sm"
+              className={`${controlClass} flex-1`}
             />
             <Button type="submit" variant="secondary">
               Hae
             </Button>
           </form>
-          <button
-            type="button"
-            className="block min-h-11 w-full rounded-xl px-3 text-left text-sm"
-            onClick={() => {
-              void (async () => {
-                const response = await apiFetch("/api/ai/conversations", {
-                  method: "POST",
-                  headers: { "Content-Type": "application/json" },
-                  body: "{}",
-                });
-                const data = await readJson<{ id: string; title: string }>(response, "Keskustelun luonti epäonnistui");
-                setConversationId(data.id);
-                setConversationTitle(data.title);
-                setMessages([]);
-                setHasMore(false);
-                setHistoryLoaded(true);
-                setFailed(null);
-                setMenuOpen(false);
-                stickRef.current = true;
-                void loadConversations();
-              })();
-            }}
-          >
-            Uusi keskustelu
-          </button>
-          <button
-            type="button"
-            className="block min-h-11 w-full rounded-xl px-3 text-left text-sm"
-            onClick={() => {
-              const next = !showArchived;
-              setShowArchived(next);
-              void loadConversations(conversationQuery, next);
-            }}
-          >
-            {showArchived ? "Näytä aktiiviset" : "Näytä arkisto"}
-          </button>
-          {conversations.length === 0 && <p className="px-3 text-sm text-warm-gray">Ei keskusteluja</p>}
-          {conversations.map((conversation) => (
-            <div key={conversation.id} className="rounded-xl bg-white px-3 py-2">
-              {renamingId === conversation.id ? (
-                <form
-                  className="flex gap-2"
-                  onSubmit={(event) => {
-                    event.preventDefault();
-                    void (async () => {
-                      const response = await apiFetch("/api/ai/conversations", {
-                        method: "PATCH",
-                        headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({ id: conversation.id, title: renameValue }),
-                      });
-                      const data = await readJson<{ title: string }>(response, "Nimen tallennus epäonnistui");
-                      if (conversation.id === conversationId) setConversationTitle(data.title);
-                      setRenamingId(null);
-                      void loadConversations();
-                    })();
-                  }}
-                >
-                  <input
-                    value={renameValue}
-                    onChange={(event) => setRenameValue(event.target.value)}
-                    aria-label="Keskustelun nimi"
-                    className="min-h-11 flex-1 rounded-xl border border-warm-gray-light/60 px-3 text-sm"
-                  />
-                  <Button type="submit" variant="secondary">
-                    Tallenna
-                  </Button>
-                </form>
-              ) : (
-                <button
-                  type="button"
-                  className="block min-h-11 w-full text-left text-sm"
-                  onClick={() => {
-                    setConversationId(conversation.id);
-                    setConversationTitle(conversation.title);
-                    setMessages([]);
-                    setHasMore(false);
-                    setHistoryLoaded(false);
-                    setHistoryError("");
-                    setMenuOpen(false);
-                  }}
-                >
-                  {conversation.title}
-                </button>
-              )}
-              <div className="flex flex-wrap gap-2">
-                <button
-                  type="button"
-                  className="min-h-11 text-xs text-accent-dark"
-                  onClick={() => {
-                    setRenamingId(conversation.id);
-                    setRenameValue(conversation.title);
-                  }}
-                >
-                  Nimeä
-                </button>
-                <button
-                  type="button"
-                  className="min-h-11 text-xs text-charcoal"
-                  onClick={() => {
-                    void (async () => {
-                      const response = await apiFetch("/api/ai/conversations", {
-                        method: "PATCH",
-                        headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({ id: conversation.id, archived: !conversation.archivedAt }),
-                      });
-                      await readJson(response, "Arkistointi epäonnistui");
-                      if (conversation.id === conversationId) {
-                        setConversationId(null);
-                        setConversationTitle("Avustaja");
-                        setMessages([]);
-                        setHistoryLoaded(false);
-                      }
-                      void loadConversations();
-                    })();
-                  }}
-                >
-                  {conversation.archivedAt ? "Palauta" : "Arkistoi"}
-                </button>
-                <button
-                  type="button"
-                  className="min-h-11 text-xs text-warm-gray"
-                  onClick={() => {
-                    void (async () => {
-                      const response = await apiFetch("/api/ai/conversations", {
-                        method: "PATCH",
-                        headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({ id: conversation.id, deleted: true }),
-                      });
-                      await readJson(response, "Poisto epäonnistui");
-                      setRemovedConversation(conversation);
-                      if (conversation.id === conversationId) {
-                        setConversationId(null);
-                        setConversationTitle("Avustaja");
-                        setMessages([]);
-                        setHistoryLoaded(true);
-                      }
-                      void loadConversations();
-                    })();
-                  }}
-                >
-                  Poista
-                </button>
-              </div>
-            </div>
-          ))}
-          {conversationsHasMore && (
+          <div className="overflow-hidden rounded-card border border-line bg-surface divide-y divide-line">
             <button
               type="button"
-              className="block min-h-11 w-full rounded-xl px-3 text-left text-sm text-accent-dark"
-              disabled={loadingConversations}
+              className="active-press flex min-h-12 w-full items-center gap-3 px-4 text-left text-[15px] font-medium text-ink"
+              onClick={() => void runMenuAction(startNewConversation, "Keskustelun luonti epäonnistui")}
+            >
+              <Icon icon={Plus} className="text-ink-2" />
+              Uusi keskustelu
+            </button>
+            <button
+              type="button"
+              className="active-press flex min-h-12 w-full items-center gap-3 px-4 text-left text-[15px] font-medium text-ink"
               onClick={() => {
-                const last = conversations[conversations.length - 1];
-                if (!last?.updatedAt) return;
-                void loadConversations(conversationQuery, showArchived, {
-                  updatedAt: last.updatedAt,
-                  id: last.id,
-                });
+                const next = !showArchived;
+                setShowArchived(next);
+                refreshConversations(conversationQuery, next);
               }}
             >
-              {loadingConversations ? "Ladataan…" : "Näytä vanhemmat"}
+              <Icon icon={showArchived ? MessagesSquare : Archive} className="text-ink-2" />
+              {showArchived ? "Näytä aktiiviset" : "Näytä arkisto"}
             </button>
-          )}
-          {loadingConversations && conversations.length === 0 && (
-            <p className="px-3 text-sm text-warm-gray">Ladataan…</p>
+          </div>
+          {menuError && (
+            <p className="rounded-card border border-danger/30 bg-danger/10 px-4 py-3 text-sm text-danger" role="alert">
+              {menuError}
+            </p>
           )}
           {removedConversation && (
-            <div className="flex items-center justify-between gap-2 rounded-xl bg-white px-3 py-2 text-sm">
+            <div className="flex items-center justify-between gap-2 rounded-card border border-line bg-surface px-4 text-[15px] text-ink">
               <span>Keskustelu poistettu</span>
               <button
                 type="button"
-                className="min-h-11 text-accent-dark"
+                className={`${smallAction} text-accent`}
                 onClick={() => {
                   const removed = removedConversation;
-                  void (async () => {
-                    const response = await apiFetch("/api/ai/conversations", {
-                      method: "PATCH",
-                      headers: { "Content-Type": "application/json" },
-                      body: JSON.stringify({ id: removed.id, deleted: false }),
-                    });
-                    await readJson(response, "Palautus epäonnistui");
-                    setRemovedConversation(null);
-                    void loadConversations();
-                  })();
+                  void runMenuAction(() => undoRemove(removed), "Palautus epäonnistui");
                 }}
               >
                 Kumoa
               </button>
             </div>
           )}
+          {conversations.length === 0 && !loadingConversations && (
+            <p className="px-1 text-[13px] text-ink-2">Ei keskusteluja</p>
+          )}
+          {loadingConversations && conversations.length === 0 && (
+            <p className="px-1 text-[13px] text-ink-2">Ladataan…</p>
+          )}
+          {conversations.length > 0 && (
+            <div className="overflow-hidden rounded-card border border-line bg-surface divide-y divide-line">
+              {conversations.map((conversation) => (
+                <div
+                  key={conversation.id}
+                  className={`px-4 py-1 ${conversation.id === conversationId ? "bg-accent-soft/60" : ""}`}
+                >
+                  {renamingId === conversation.id ? (
+                    <form
+                      className="flex gap-2 py-2"
+                      onSubmit={(event) => {
+                        event.preventDefault();
+                        void runMenuAction(() => renameConversation(conversation), "Nimen tallennus epäonnistui");
+                      }}
+                    >
+                      <input
+                        value={renameValue}
+                        onChange={(event) => setRenameValue(event.target.value)}
+                        aria-label="Keskustelun nimi"
+                        className={`${controlClass} flex-1`}
+                      />
+                      <Button type="submit" variant="secondary">
+                        Tallenna
+                      </Button>
+                    </form>
+                  ) : (
+                    <button
+                      type="button"
+                      className="active-press block min-h-11 w-full truncate pt-2 text-left text-[15px] font-medium text-ink"
+                      onClick={() => {
+                        setConversationId(conversation.id);
+                        setConversationTitle(conversation.title);
+                        setMessages([]);
+                        setHasMore(false);
+                        setHistoryLoaded(false);
+                        setHistoryError("");
+                        setMenuOpen(false);
+                      }}
+                    >
+                      {conversation.title}
+                    </button>
+                  )}
+                  <div className="-mt-1 flex flex-wrap gap-x-4">
+                    <button
+                      type="button"
+                      className={`${smallAction} text-accent`}
+                      onClick={() => {
+                        setRenamingId(conversation.id);
+                        setRenameValue(conversation.title);
+                      }}
+                    >
+                      Nimeä
+                    </button>
+                    <button
+                      type="button"
+                      className={`${smallAction} text-ink-2`}
+                      onClick={() => void runMenuAction(() => toggleArchive(conversation), "Arkistointi epäonnistui")}
+                    >
+                      {conversation.archivedAt ? "Palauta" : "Arkistoi"}
+                    </button>
+                    <button
+                      type="button"
+                      className={`${smallAction} text-danger`}
+                      onClick={() => void runMenuAction(() => removeConversation(conversation), "Poisto epäonnistui")}
+                    >
+                      Poista
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+          {conversationsHasMore && (
+            <button
+              type="button"
+              className={`${smallAction} w-full justify-center text-accent`}
+              disabled={loadingConversations}
+              onClick={() => {
+                const last = conversations[conversations.length - 1];
+                const updatedAt = last?.updatedAt;
+                if (!last || !updatedAt) return;
+                void runMenuAction(
+                  () => loadConversations(conversationQuery, showArchived, { updatedAt, id: last.id }),
+                  "Keskustelulistan lataus epäonnistui"
+                );
+              }}
+            >
+              {loadingConversations ? "Ladataan…" : "Näytä vanhemmat"}
+            </button>
+          )}
         </div>
       )}
 
-      <div ref={scrollerRef} onScroll={onScroll} className="relative min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain px-4 py-3">
+      <div
+        ref={scrollerRef}
+        onScroll={onScroll}
+        className="relative mx-auto min-h-0 w-full max-w-2xl flex-1 space-y-4 overflow-y-auto overscroll-contain px-4 py-4"
+      >
         {hasMore && (
           <button
             type="button"
-            className="mx-auto block min-h-11 text-sm text-accent-dark"
+            className="active-press mx-auto block min-h-11 text-[13px] font-medium text-accent"
             disabled={loadingHistory}
             onClick={() => {
               const oldest = messages[0];
@@ -772,7 +853,7 @@ export function AiChatDrawer({
           </button>
         )}
         {historyError && (
-          <div className="space-y-2">
+          <div className="space-y-3 rounded-card border border-danger/30 bg-danger/10 p-4">
             <FormError message={historyError} />
             <Button variant="secondary" onClick={() => void loadHistory()}>
               Yritä ladata historia uudelleen
@@ -780,141 +861,196 @@ export function AiChatDrawer({
           </div>
         )}
         {loadingHistory && messages.length === 0 && (
-          <p className="text-sm text-warm-gray">Ladataan keskustelua…</p>
+          <p className="pt-8 text-center text-[13px] text-ink-2">Ladataan keskustelua…</p>
         )}
-        {!loadingHistory && messages.length === 0 && (
-          <div className="space-y-3 pt-6">
-            <p className="text-sm text-charcoal">Miten voin auttaa?</p>
-            <div className="flex flex-wrap gap-2">
-              <Button variant="secondary" onClick={() => void handleSendMessage("Täsmäytä kuitit")}>
+        {!loadingHistory && !historyError && messages.length === 0 && (
+          <div className="flex flex-col items-center px-2 pt-10 text-center">
+            <span aria-hidden className="flex h-14 w-14 items-center justify-center rounded-full bg-accent-soft text-accent">
+              <Icon icon={Sparkles} size="hero" />
+            </span>
+            <p className="mt-4 text-[17px] font-semibold text-ink">Miten voin auttaa?</p>
+            <p className="mt-1 max-w-xs text-[13px] leading-relaxed text-ink-2">
+              Kysy kuiteista, tapahtumista tai ALV:stä. Ehdotukset hyväksyt aina itse.
+            </p>
+            <div className="mt-5 flex flex-wrap justify-center gap-2">
+              <button type="button" className={chipClass(false)} onClick={() => void handleSendMessage("Täsmäytä kuitit")}>
                 Täsmäytä kuitit
-              </Button>
-              <Button variant="secondary" onClick={() => void handleSendMessage("Mikä on tämän kuun ALV?")}>
+              </button>
+              <button
+                type="button"
+                className={chipClass(false)}
+                onClick={() => void handleSendMessage("Mikä on tämän kuun ALV?")}
+              >
                 Tämän kuun ALV
-              </Button>
+              </button>
             </div>
           </div>
         )}
-        {messages.map((message) => (
-          <div key={message.id} className={`flex flex-col ${message.role === "user" ? "items-end" : "items-start"}`}>
-            <div
-              className={`select-text max-w-[85%] rounded-2xl px-3.5 py-3 text-sm leading-relaxed ${
-                message.role === "user" ? "bg-accent text-white" : "bg-cream text-charcoal"
-              }`}
-            >
-              {message.role === "assistant" ? <ChatMarkdown text={message.content} /> : message.content}
-            </div>
-            {message.limited && message.role === "assistant" && (
-              <p className="mt-1 text-xs text-warm-gray">Rajattu tila</p>
-            )}
-            {message.sources && message.sources.length > 0 && (
-              <div className="mt-1 flex max-w-[85%] flex-wrap gap-2">
-                {message.sources.map((source) => (
-                  <a key={source.href} href={source.href} className="text-xs text-accent-dark underline">
-                    {source.label}
-                  </a>
-                ))}
+        {messages.map((message) => {
+          const mine = message.role === "user";
+          return (
+            <div key={message.id} className={`flex flex-col ${mine ? "items-end" : "items-start"}`}>
+              <div
+                className={`select-text max-w-[85%] rounded-2xl px-4 py-2.5 text-[15px] leading-relaxed ${
+                  mine
+                    ? "rounded-br-md bg-ink text-canvas"
+                    : `rounded-bl-md border bg-surface text-ink ${message.incomplete ? "border-danger/30" : "border-line"}`
+                }`}
+              >
+                {message.role === "assistant" ? <ChatMarkdown text={message.content} /> : message.content}
               </div>
-            )}
-            {message.status === "cancelled" && (
-              <p className="mt-1 text-xs text-warm-gray">Keskeytetty</p>
-            )}
-            {message.role === "assistant" && message.content && (
-              <div className="mt-1 flex gap-2">
-                <button type="button" className="min-h-11 text-xs text-warm-gray" onClick={() => void copyMessage(message)}>
-                  {copiedId === message.id ? "Kopioitu" : "Kopioi"}
-                </button>
-                {message.incomplete && failed && (
-                  <button
-                    type="button"
-                    className="min-h-11 text-xs text-accent-dark"
-                    onClick={() => void handleSendMessage(failed.text, { clientId: failed.clientId })}
-                  >
-                    Yritä uudelleen
-                  </button>
-                )}
-              </div>
-            )}
-            {message.proposal?.transactionId && message.proposal.status !== "accepted" && message.proposal.status !== "rejected" && (
-              <div className="mt-2 max-w-[90%] space-y-2 rounded-card border border-accent/30 bg-surface p-3">
-                <p className="text-xs font-medium text-accent-dark">Ehdotus täsmäytykseksi</p>
-                <p className="text-xs text-ink">{message.proposal.txSummary}</p>
-                <p className="text-xs text-ink">{message.proposal.receiptSummary}</p>
-                <div className="flex gap-2">
-                  <Button
-                    busy={matchBusyId === message.id}
-                    busyLabel="Yhdistetään…"
-                    className="flex-1 text-xs"
-                    onClick={() => void handleConfirmProposal(message.id)}
-                  >
-                    Hyväksy
-                  </Button>
-                  <Button variant="secondary" className="text-xs" onClick={() => void handleRejectProposal(message.id)}>
-                    Hylkää
-                  </Button>
+              {(message.limited && message.role === "assistant") || message.status === "cancelled" ? (
+                <p className="mt-1 px-1 text-[13px] text-ink-2">
+                  {message.limited && message.role === "assistant" ? "Rajattu tila" : null}
+                  {message.limited && message.role === "assistant" && message.status === "cancelled" ? ", " : null}
+                  {message.status === "cancelled" ? "Keskeytetty" : null}
+                </p>
+              ) : null}
+              {/* Sources and the message actions share one quiet row under the bubble. */}
+              {message.role === "assistant" && (message.content || (message.sources && message.sources.length > 0)) && (
+                <div className="flex max-w-[85%] flex-wrap items-center gap-x-4 px-1">
+                  {message.sources?.map((source) => (
+                    <a
+                      key={source.href}
+                      href={source.href}
+                      className="active-press inline-flex min-h-11 items-center gap-1.5 text-[13px] font-medium text-accent"
+                    >
+                      <Icon icon={Link2} size="inline" />
+                      {source.label}
+                    </a>
+                  ))}
+                  {message.content && (
+                    <button
+                      type="button"
+                      className="active-press inline-flex min-h-11 items-center gap-1.5 text-[13px] font-medium text-ink-2"
+                      onClick={() => void copyMessage(message)}
+                    >
+                      <Icon icon={copiedId === message.id ? Check : Copy} size="inline" />
+                      {copiedId === message.id ? "Kopioitu" : "Kopioi"}
+                    </button>
+                  )}
+                  {message.content && message.incomplete && failed && (
+                    <button
+                      type="button"
+                      className="active-press inline-flex min-h-11 items-center gap-1.5 text-[13px] font-medium text-accent"
+                      onClick={() => void handleSendMessage(failed.text, { clientId: failed.clientId })}
+                    >
+                      <Icon icon={RotateCcw} size="inline" />
+                      Yritä uudelleen
+                    </button>
+                  )}
                 </div>
-              </div>
-            )}
-            {message.proposal?.status === "accepted" && (
-              <p className="mt-1 text-xs text-success">Täsmäytys hyväksytty</p>
-            )}
-            {message.proposal?.status === "rejected" && (
-              <p className="mt-1 text-xs text-warm-gray">Ehdotus hylätty</p>
-            )}
-          </div>
-        ))}
+              )}
+              {message.proposal?.transactionId &&
+                message.proposal.status !== "accepted" &&
+                message.proposal.status !== "rejected" && (
+                  <div className="mt-1 w-full max-w-[90%] space-y-3 rounded-card border border-line bg-surface p-4">
+                    <p className="flex items-center gap-2 text-[13px] font-semibold text-accent">
+                      <Icon icon={Link2} size="inline" />
+                      Ehdotus täsmäytykseksi
+                    </p>
+                    <div className="space-y-1 text-[13px] leading-relaxed text-ink">
+                      {/* A no-break space keeps "139,00 €" on one line. */}
+                      <p>{message.proposal.txSummary.replace(/ €/g, " €")}</p>
+                      <p>{message.proposal.receiptSummary.replace(/ €/g, " €")}</p>
+                    </div>
+                    <div className="flex gap-2">
+                      <Button
+                        busy={matchBusyId === message.id}
+                        busyLabel="Yhdistetään…"
+                        className="flex-1"
+                        onClick={() => void handleConfirmProposal(message.id)}
+                      >
+                        Hyväksy
+                      </Button>
+                      <Button variant="secondary" className="flex-1" onClick={() => void handleRejectProposal(message.id)}>
+                        Hylkää
+                      </Button>
+                    </div>
+                  </div>
+                )}
+              {message.proposal?.status === "accepted" && (
+                <p className="mt-1 flex items-center gap-1.5 px-1 text-[13px] font-medium text-success">
+                  <Icon icon={Check} size="inline" />
+                  Täsmäytys hyväksytty
+                </p>
+              )}
+              {message.proposal?.status === "rejected" && (
+                <p className="mt-1 px-1 text-[13px] text-ink-2">Ehdotus hylätty</p>
+              )}
+            </div>
+          );
+        })}
         {showJump && (
           <button
             type="button"
             onClick={jumpToLatest}
-            className="sticky bottom-2 ml-auto block rounded-full bg-charcoal px-3 py-2 text-xs text-white"
+            className="active-press sticky bottom-2 ml-auto flex min-h-11 items-center gap-1.5 rounded-full bg-ink px-4 text-[13px] font-semibold text-canvas"
           >
-            Uusi viesti ↓
+            Uusi viesti
+            <Icon icon={ArrowDown} size="inline" />
           </button>
         )}
       </div>
 
       <form
-        className="sheet-safe-bottom border-t border-warm-gray-light/40 bg-white px-3 py-2"
+        className="sheet-safe-bottom border-t border-line bg-canvas px-3 pt-2"
         onSubmit={(event) => {
           event.preventDefault();
           void handleSendMessage();
         }}
       >
-        <FormError message={actionError} />
-        {failed && !loading && (
-          <Button
-            variant="secondary"
-            className="mb-2 text-xs"
-            onClick={() => void handleSendMessage(failed.text, { clientId: failed.clientId })}
-          >
-            Yritä uudelleen
-          </Button>
-        )}
-        <div className="flex items-end gap-2">
-          <textarea
-            value={input}
-            rows={1}
-            aria-label="Viesti avustajalle"
-            placeholder="Kirjoita viesti…"
-            onChange={(event) => {
-              setInput(event.target.value);
-              const field = event.target;
-              field.style.height = "auto";
-              field.style.height = `${Math.min(field.scrollHeight, 120)}px`;
-            }}
-            maxLength={4000}
-            className="max-h-[120px] min-h-12 flex-1 resize-none rounded-xl border border-warm-gray-light/60 bg-cream/40 px-3 py-2.5 text-sm"
-          />
-          {loading ? (
-            <Button type="button" variant="secondary" onClick={stop}>
-              Pysäytä
-            </Button>
-          ) : (
-            <Button type="submit" disabled={!input.trim()}>
-              Lähetä
+        <div className="mx-auto w-full max-w-[40rem] space-y-2">
+          {actionError && (
+            <p className="rounded-card border border-danger/30 bg-danger/10 px-4 py-3 text-sm text-danger" role="alert">
+              {actionError}
+            </p>
+          )}
+          {failed && !loading && (
+            <Button
+              variant="secondary"
+              className="w-full"
+              onClick={() => void handleSendMessage(failed.text, { clientId: failed.clientId })}
+            >
+              <Icon icon={RotateCcw} size="inline" />
+              Yritä uudelleen
             </Button>
           )}
+          {/* One rounded field with the send/stop control inside it, as in native messaging apps. */}
+          <div className="flex items-end gap-1 rounded-[24px] border border-line bg-surface py-0.5 pl-4 pr-0.5 focus-within:border-ink-2/60">
+            <textarea
+              value={input}
+              rows={1}
+              aria-label="Viesti avustajalle"
+              placeholder="Kirjoita viesti…"
+              onChange={(event) => {
+                setInput(event.target.value);
+                const field = event.target;
+                field.style.height = "auto";
+                field.style.height = `${Math.min(field.scrollHeight, 120)}px`;
+              }}
+              maxLength={4000}
+              className="max-h-[120px] min-h-11 flex-1 resize-none bg-transparent py-2.5 text-[16px] leading-6 text-ink outline-none placeholder:text-ink-2"
+            />
+            {loading ? (
+              <button type="button" aria-label="Pysäytä" onClick={stop} className="active-press flex h-11 w-11 shrink-0 items-center justify-center">
+                <span className="flex h-9 w-9 items-center justify-center rounded-full border border-line bg-canvas text-ink">
+                  <Square aria-hidden width={14} height={14} fill="currentColor" strokeWidth={0} />
+                </span>
+              </button>
+            ) : (
+              <button
+                type="submit"
+                aria-label="Lähetä"
+                disabled={!input.trim()}
+                className="active-press flex h-11 w-11 shrink-0 items-center justify-center disabled:opacity-40"
+              >
+                <span className="flex h-9 w-9 items-center justify-center rounded-full bg-ink text-canvas">
+                  <Icon icon={ArrowUp} strokeWidth={2.25} />
+                </span>
+              </button>
+            )}
+          </div>
         </div>
       </form>
     </div>

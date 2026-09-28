@@ -94,7 +94,7 @@ export function Field({
       </label>
       {control}
       {hint && !error && (
-        <p id={hintId} className="mt-1.5 text-xs text-warm-gray">
+        <p id={hintId} className="mt-1.5 text-[13px] text-ink-2">
           {hint}
         </p>
       )}
@@ -125,7 +125,7 @@ export function SavePhaseNote({
 }) {
   if (phase === "saving") {
     return (
-      <p className="text-sm text-warm-gray" role="status">
+      <p className="text-sm text-ink-2" role="status">
         Tallennetaan…
       </p>
     );
@@ -142,7 +142,7 @@ export function SavePhaseNote({
   }
   if (phase === "dirty") {
     return (
-      <p className="text-sm text-warm-gray" role="status">
+      <p className="text-sm text-ink-2" role="status">
         Tallentamattomia muutoksia
       </p>
     );

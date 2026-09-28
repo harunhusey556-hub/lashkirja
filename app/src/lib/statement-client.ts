@@ -84,8 +84,11 @@ export const STATEMENT_TX_FILTERS: {
 // Re-exported so existing statement views keep their import path.
 export { formatEur };
 
+/** A statement's month as a stand-alone label ("Elokuu 2026"): it always starts a line here. */
 export function formatMonth(month: string | null): string {
-  return month ? formatMonthName(month) : "Ei kuukautta";
+  if (!month) return "Ei kuukautta";
+  const name = formatMonthName(month);
+  return name.charAt(0).toLocaleUpperCase("fi-FI") + name.slice(1);
 }
 
 export function receiptLabel(r: LinkedReceipt): string {

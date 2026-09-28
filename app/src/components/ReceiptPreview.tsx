@@ -106,7 +106,7 @@ export default function ReceiptPreview({
       {fullscreen && (
         <div
           ref={dialogRef}
-          className="fixed inset-0 z-[100] bg-charcoal/90 flex flex-col"
+          className="fixed inset-0 z-[100] bg-ink/90 flex flex-col"
           role="dialog"
           aria-modal="true"
           aria-labelledby="receipt-preview-title"
