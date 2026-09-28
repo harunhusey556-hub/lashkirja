@@ -6,6 +6,7 @@ import { appNavigate } from "@/lib/app-nav";
 import { expireSession, getAccessToken, retryPendingRevoke, signOutThisDevice } from "@/lib/auth-client";
 import { bootMobile } from "@/lib/mobile/boot";
 import { rememberGet, staleResponseFor } from "@/lib/offline/http-cache";
+import { assertCanWrite, reportRequestOutcome } from "@/lib/connectivity";
 
 export class ApiError extends Error {
   status: number;
@@ -76,7 +77,13 @@ export class ApiGatewayError extends Error {
   }
 }
 
-export type ApiFetchInit = RequestInit & { timeoutMs?: number };
+export type ApiFetchInit = RequestInit & {
+  timeoutMs?: number;
+  /** Skips the fail-fast `assertCanWrite()` check for a non-GET request --
+   * Task 10's offline receipt queue, which is meant to accept a write
+   * while offline and send it later. */
+  offlineQueue?: boolean;
+};
 
 /**
  * Pure: computes the URL and RequestInit actually sent for a possible
@@ -144,6 +151,12 @@ function requestUrl(input: RequestInfo | URL): string {
  */
 export async function apiFetch(input: RequestInfo | URL, init?: ApiFetchInit): Promise<Response> {
   const method = (init?.method || "GET").toUpperCase();
+  // Fail fast: no network attempt at all for a write with no path to the
+  // server -- a thrown OfflineError surfaces through the caller's existing
+  // catch/errorMessage() with no per-page change (Task 8).
+  if (!IDEMPOTENT_METHODS.has(method) && !init?.offlineQueue) {
+    assertCanWrite();
+  }
   const shareable = IDEMPOTENT_METHODS.has(method) && !init?.signal;
   const key = shareable ? `${method} ${requestUrl(input)}` : null;
   if (key) {
@@ -179,12 +192,21 @@ async function staleFallback(url: RequestInfo | URL, method: string): Promise<Re
   }
 }
 
+/** `proxy.ts` sets this on every response (`X-LashKirja-Api-Version`). */
+function apiVersionFromHeader(response: Response): number | null {
+  const raw = response.headers.get("X-LashKirja-Api-Version");
+  if (!raw) return null;
+  const version = Number(raw);
+  return Number.isFinite(version) ? version : null;
+}
+
 async function apiFetchAttempt(input: RequestInfo | URL, init?: ApiFetchInit): Promise<Response> {
   const method = (init?.method || "GET").toUpperCase();
   const maxRetries = IDEMPOTENT_METHODS.has(method) ? 3 : 1;
   const timeoutMs = init?.timeoutMs ?? REQUEST_TIMEOUT_MS;
   let rest: RequestInit = { ...(init ?? {}) };
   delete (rest as ApiFetchInit).timeoutMs;
+  delete (rest as ApiFetchInit).offlineQueue;
 
   // Mobile: every relative /api/* call actually goes to the configured API
   // origin, with no cookies and a Bearer header instead. Computed once, up
@@ -213,6 +235,10 @@ async function apiFetchAttempt(input: RequestInfo | URL, init?: ApiFetchInit): P
       if (response.status === 502 || response.status === 503 || response.status === 504) {
         throw new ApiGatewayError(response.status);
       }
+      // Connectivity (Task 8): any other HTTP response means the server
+      // was reached, whatever its status -- a 4xx business error is still
+      // "ok" here. The version header is on every proxy response.
+      reportRequestOutcome("ok", apiVersionFromHeader(response));
       if (response.ok && !IDEMPOTENT_METHODS.has(method)) {
         invalidateForMutation(requestUrl(input));
       }
@@ -229,6 +255,11 @@ async function apiFetchAttempt(input: RequestInfo | URL, init?: ApiFetchInit): P
       return response; // 2xx, 4xx, and 500 (logic errors) are returned normally
     } catch (error) {
       if (rest.signal?.aborted) throw error; // caller cancelled — not a timeout, not retryable
+      // Connectivity (Task 8): a gateway 502/503/504 (thrown above), our
+      // own timeout abort, or fetch() itself throwing (DNS/TLS/offline) --
+      // every path into this catch, except a caller cancelling, is a real
+      // network-error outcome.
+      reportRequestOutcome("network-error");
       if (
         error instanceof DOMException &&
         error.name === "AbortError"

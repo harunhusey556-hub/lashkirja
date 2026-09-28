@@ -6,6 +6,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { AlertCircle, Check, Info } from "lucide-react";
 import { controlClass } from "@/components/control-styles";
 import { AppMark } from "@/components/AppMark";
+import { ConnectivityBanner } from "@/components/ConnectivityBanner";
 import { Button, Field } from "@/components/ui";
 import { Icon } from "@/components/ds/Icon";
 import { hapticNotify } from "@/lib/haptics";
@@ -229,6 +230,7 @@ export default function LoginForm() {
     // iOS pans the visual viewport itself when the keyboard covers an input.
     <div className="fixed inset-0 flex touch-none items-center justify-center overflow-hidden bg-canvas px-4">
       <div className="w-full max-w-sm">
+        <ConnectivityBanner />
         <div className="mb-8 flex flex-col items-center text-center">
           <AppMark size={64} className="mb-4" />
           <h1 className="text-[32px] font-bold leading-tight tracking-[-0.02em] text-ink">LashKirja</h1>

@@ -116,6 +116,17 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
     return () => document.removeEventListener("visibilitychange", onVisibility);
   }, [refresh]);
 
+  // Reconnect (Task 8): connectivity.ts dispatches this once, on the
+  // transition back to "ok" after being offline/unreachable -- the
+  // session source is the one thing every screen already depends on, so
+  // it refreshes itself here rather than every page wiring its own
+  // listener for the same event.
+  useEffect(() => {
+    const onReconnected = () => void refresh();
+    document.addEventListener("lashkirja-reconnected", onReconnected);
+    return () => document.removeEventListener("lashkirja-reconnected", onReconnected);
+  }, [refresh]);
+
   const userId = state.user?.userId ?? null;
   useEffect(() => {
     setDraftOwner(userId);

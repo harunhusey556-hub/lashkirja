@@ -22,6 +22,7 @@ import {
 } from "lucide-react";
 import { Icon, IconTile } from "@/components/ds/Icon";
 import { AppMark } from "@/components/AppMark";
+import { ConnectivityBanner } from "@/components/ConnectivityBanner";
 import { OnboardingModal } from "@/components/OnboardingModal";
 import { AiChatDrawer } from "@/components/AiChatDrawer";
 import { leaveAfterSignOut, readJson } from "@/components/clientFetch";
@@ -570,6 +571,8 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
           )}
         </div>
       </header>
+
+      <ConnectivityBanner />
 
       <main
         // Keyed on the path so the enter animation replays on every navigation.

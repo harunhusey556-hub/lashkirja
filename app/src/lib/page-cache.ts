@@ -66,6 +66,14 @@ export function pageCacheSize(): number {
   return cache.size;
 }
 
+/** Whether a persistent store is currently wired in (mobile, and only
+ * once boot's own `openPersistentCache` succeeded) -- BuildInfo.tsx's
+ * "Välimuisti: salattu" / "vain muistissa" line reads this rather than
+ * re-probing IndexedDB itself. */
+export function isPageCachePersistent(): boolean {
+  return persistentStore !== null;
+}
+
 export function readPageCache<T>(key: string, now = Date.now()): T | null {
   const at = fetchedAt.get(key);
   if (at == null) return null;
