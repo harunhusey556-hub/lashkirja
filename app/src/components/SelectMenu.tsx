@@ -1,6 +1,8 @@
 "use client";
 
 import React, { useState, useRef, useEffect } from "react";
+import { Check, ChevronDown } from "lucide-react";
+import { Icon } from "@/components/ds/Icon";
 
 export interface SelectOption {
   value: string;
@@ -25,7 +27,7 @@ export function SelectMenu({
   value,
   onChange,
   options,
-  placeholder = "Valitse...",
+  placeholder = "Valitse…",
   disabled = false,
   className = "",
   id,
@@ -91,21 +93,11 @@ export function SelectMenu({
         <span className={`truncate ${selectedOption ? "text-ink" : "text-ink-2"}`}>
           {selectedOption ? selectedOption.label : placeholder}
         </span>
-        <svg
-          className={`w-4 h-4 text-ink-2 transition-transform duration-200 shrink-0 ml-2 ${
-            isOpen ? "rotate-180 text-accent" : ""
-          }`}
-          fill="none"
-          stroke="currentColor"
-          viewBox="0 0 24 24"
-        >
-          <path
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            strokeWidth={2}
-            d="M19 9l-7 7-7-7"
-          />
-        </svg>
+        <Icon
+          icon={ChevronDown}
+          size="inline"
+          className={`ml-2 transition-transform duration-200 ${isOpen ? "rotate-180 text-accent" : "text-ink-2"}`}
+        />
       </button>
 
       {isOpen && (
@@ -124,7 +116,7 @@ export function SelectMenu({
                   onChange(opt.value);
                   setIsOpen(false);
                 }}
-                className={`flex cursor-pointer items-center justify-between px-3.5 py-2.5 text-[15px] transition-colors ${
+                className={`flex min-h-11 cursor-pointer items-center justify-between px-3.5 py-2.5 text-[15px] transition-colors ${
                   isSelected ? "bg-accent-soft font-semibold text-accent" : "text-ink hover:bg-canvas"
                 }`}
               >
@@ -141,11 +133,7 @@ export function SelectMenu({
                     <span className="truncate text-xs font-normal text-ink-2">{opt.description}</span>
                   )}
                 </div>
-                {isSelected && (
-                  <svg className="ml-1 h-4 w-4 shrink-0 text-accent" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
-                  </svg>
-                )}
+                {isSelected && <Icon icon={Check} size="inline" strokeWidth={2.5} className="ml-1 text-accent" />}
               </div>
             );
           })}

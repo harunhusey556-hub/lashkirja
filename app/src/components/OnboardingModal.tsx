@@ -9,6 +9,8 @@ import {
 } from "@/lib/onboarding";
 import { apiFetch, errorMessage, readJson } from "@/components/clientFetch";
 import { useFocusTrap } from "@/components/useFocusTrap";
+import { ArrowRight, Check, Sparkles } from "lucide-react";
+import { Icon } from "@/components/ds/Icon";
 import { useOverlayLock } from "@/lib/overlay-lock";
 
 interface OnboardingModalProps {
@@ -103,7 +105,7 @@ export function OnboardingModal({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-charcoal/60 p-4 backdrop-blur-md animate-fade-in"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-ink/50 p-4 backdrop-blur-md animate-fade-in"
       role="dialog"
       aria-modal="true"
       aria-labelledby="onboarding-modal-title"
@@ -115,14 +117,14 @@ export function OnboardingModal({
         {/* Header */}
         <div className="flex items-center justify-between border-b border-line bg-canvas px-6 py-4">
           <div className="flex items-center gap-2.5">
-            <div className="flex h-8 w-8 items-center justify-center rounded-full bg-accent-soft text-sm font-bold text-accent">
-              ✨
+            <div className="flex h-9 w-9 items-center justify-center rounded-full bg-accent-soft text-accent">
+              <Icon icon={Sparkles} />
             </div>
             <div>
               <h2 id="onboarding-modal-title" className="text-[15px] font-semibold text-ink">
                 LashKirja AI: Perehdytys
               </h2>
-              <p className="text-[11px] text-ink-2">
+              <p className="text-[13px] text-ink-2">
                 Muokataan kirjanpitosi vastaamaan liiketoimintaasi
               </p>
             </div>
@@ -186,21 +188,7 @@ export function OnboardingModal({
                         }`}
                       >
                         <span>{chip.label}</span>
-                        {isSelected && (
-                          <svg
-                            className="h-5 w-5 shrink-0 text-accent"
-                            fill="none"
-                            stroke="currentColor"
-                            viewBox="0 0 24 24"
-                          >
-                            <path
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                              strokeWidth={2.5}
-                              d="M5 13l4 4L19 7"
-                            />
-                          </svg>
-                        )}
+                        {isSelected && <Icon icon={Check} className="text-accent" strokeWidth={2.5} />}
                       </button>
                     );
                   })}
@@ -211,9 +199,10 @@ export function OnboardingModal({
                 <button
                   type="button"
                   onClick={handleNextStep}
-                  className="active-press w-full rounded-card bg-ink py-3 text-[15px] font-semibold text-canvas"
+                  className="active-press flex min-h-12 w-full items-center justify-center gap-2 rounded-card bg-ink text-[15px] font-semibold text-canvas"
                 >
-                  Jatka eteenpäin →
+                  Jatka eteenpäin
+                  <Icon icon={ArrowRight} size="inline" />
                 </button>
               )}
             </div>
@@ -221,8 +210,8 @@ export function OnboardingModal({
             /* Final Summary & Mandatory Approval Card */
             <div className="space-y-6 animate-in">
               <div className="flex items-start gap-3">
-                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-card bg-success text-sm font-bold text-canvas">
-                  ✓
+                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-card bg-success text-canvas">
+                  <Icon icon={Check} strokeWidth={2.5} />
                 </div>
                 <div className="rounded-card rounded-tl-sm border border-success/30 bg-success/10 p-4 text-[15px] leading-relaxed text-ink">
                   Mahtavaa! Kiitos tiedoista. Tässä on yhteenveto sovellukseesi
@@ -276,26 +265,14 @@ export function OnboardingModal({
                   type="button"
                   disabled={saving}
                   onClick={handleApproveProfile}
-                  className="active-press flex w-full items-center justify-center gap-2 rounded-card bg-ink py-3.5 text-[15px] font-semibold text-canvas disabled:opacity-50"
+                  className="active-press flex min-h-12 w-full items-center justify-center gap-2 rounded-card bg-ink text-[15px] font-semibold text-canvas disabled:opacity-50"
                 >
                   {saving ? (
-                    "Tallennetaan..."
+                    "Tallennetaan…"
                   ) : (
                     <>
                       <span>Hyväksy asetukset ja aloita</span>
-                      <svg
-                        className="h-4 w-4"
-                        fill="none"
-                        stroke="currentColor"
-                        viewBox="0 0 24 24"
-                      >
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          strokeWidth={2}
-                          d="M14 5l7 7m0 0l-7 7m7-7H3"
-                        />
-                      </svg>
+                      <Icon icon={ArrowRight} size="inline" />
                     </>
                   )}
                 </button>

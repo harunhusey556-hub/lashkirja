@@ -1,7 +1,9 @@
 "use client";
 
 import { useId, useState } from "react";
+import { Ellipsis } from "lucide-react";
 import BottomSheet from "@/components/BottomSheet";
+import { Icon } from "./Icon";
 
 export function MoreMenu({ items, label = "Lisää toimintoja" }: {
   items: { label: string; onSelect: () => void; tone?: "danger"; disabled?: boolean }[]; label?: string;
@@ -21,12 +23,10 @@ export function MoreMenu({ items, label = "Lisää toimintoja" }: {
         // but never receives a click/tap.
         className="active-press pointer-events-auto flex h-11 w-11 items-center justify-center rounded-full border border-line bg-surface text-ink"
       >
-        <svg className="h-5 w-5" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
-          <circle cx="5" cy="12" r="1.6" /><circle cx="12" cy="12" r="1.6" /><circle cx="19" cy="12" r="1.6" />
-        </svg>
+        <Icon icon={Ellipsis} strokeWidth={2.25} />
       </button>
       <BottomSheet isOpen={open} onClose={() => setOpen(false)} title="Toiminnot" labelledBy={titleId} heightClass="max-h-[70dvh]">
-        <div className="px-3 py-2 sheet-safe-bottom">
+        <div className="px-4 py-2 sheet-safe-bottom">
           <div className="overflow-hidden rounded-card border border-line bg-surface divide-y divide-line">
             {items.map((item) => (
               <button

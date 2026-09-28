@@ -1,11 +1,21 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
+import { ChevronRight } from "lucide-react";
+import { Icon, IconTile } from "./Icon";
 
-const AMOUNT_TONE = { default: "text-ink", positive: "text-success", negative: "text-ink" } as const;
+// `muted` is for a non-money value in the amount slot ("1 avoin", a bank name), as in the mockups.
+const AMOUNT_TONE = { default: "text-ink", positive: "text-success", negative: "text-ink", muted: "text-ink-2" } as const;
 
-export function ListRow({ title, amount, amountTone = "default", secondary, trailing, leading, href, onClick, ariaLabel }: {
+/**
+ * `leading` is the bare glyph (`<Icon icon={Landmark} />`); the row wraps it in the shared 36px
+ * `IconTile`. Within one `Section`, give either every row a leading icon or none.
+ * `chevron` marks a row that navigates to another screen (hub and settings-style rows), as in the
+ * mockups; record rows (a transaction, an invoice) leave it off. A chevron row's secondary line may wrap
+ * to two lines.
+ */
+export function ListRow({ title, amount, amountTone = "default", secondary, trailing, leading, chevron = false, href, onClick, ariaLabel }: {
   title: string; amount?: ReactNode; amountTone?: keyof typeof AMOUNT_TONE; secondary?: ReactNode;
-  trailing?: ReactNode; leading?: ReactNode; href?: string; onClick?: () => void; ariaLabel?: string;
+  trailing?: ReactNode; leading?: ReactNode; chevron?: boolean; href?: string; onClick?: () => void; ariaLabel?: string;
 }) {
   const interactive = Boolean(href || onClick);
   // The overlay link/button below needs one accessible name that actually distinguishes financial rows —
@@ -21,11 +31,7 @@ export function ListRow({ title, amount, amountTone = "default", secondary, trai
 
   const body = (
     <>
-      {leading ? (
-        <span aria-hidden className="pointer-events-none flex h-[34px] w-[34px] shrink-0 items-center justify-center rounded-[10px] bg-canvas text-ink-2">
-          {leading}
-        </span>
-      ) : null}
+      {leading ? <IconTile>{leading}</IconTile> : null}
       <span className="pointer-events-none min-w-0 flex-1">
         {/* Hidden from screen readers while the row is interactive: this text is already the overlay
             link/button's accessible name above, and linear reading would otherwise announce it twice. */}
@@ -35,7 +41,14 @@ export function ListRow({ title, amount, amountTone = "default", secondary, trai
         </span>
         {secondary || trailing ? (
           <span className="mt-0.5 flex items-center justify-between gap-3">
-            <span aria-hidden={interactive || undefined} className="min-w-0 truncate text-[13px] text-ink-2">{secondary}</span>
+            {/* A navigation row's secondary line is a description, never data, so it wraps to a second
+                line instead of being cut off; record rows keep their one-line ellipsis. */}
+            <span
+              aria-hidden={interactive || undefined}
+              className={`min-w-0 text-[13px] text-ink-2 ${chevron ? "line-clamp-2" : "truncate"}`}
+            >
+              {secondary}
+            </span>
             {/* trailing (e.g. an ActionPill) stays outside the aria-hidden text above: it is its own
                 interactive control and must remain reachable and named for assistive tech. The wrapper
                 itself is pointer-events-none: a non-interactive trailing element (a plain StatusTag) must
@@ -47,6 +60,11 @@ export function ListRow({ title, amount, amountTone = "default", secondary, trai
           </span>
         ) : null}
       </span>
+      {chevron ? (
+        <span aria-hidden className="pointer-events-none -mr-1 flex text-ink-2/60">
+          <Icon icon={ChevronRight} />
+        </span>
+      ) : null}
     </>
   );
   const row = "relative flex min-h-16 w-full items-center gap-3 px-4 py-3 text-left";

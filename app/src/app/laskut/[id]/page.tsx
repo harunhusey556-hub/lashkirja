@@ -21,7 +21,8 @@ import { shareContent } from "@/lib/share";
 import { daysOverdue } from "@/lib/invoices";
 import { SALES_STATUS } from "@/lib/status-labels";
 import { Button, buttonClass, controlClass } from "@/components/ui";
-import { BottomActions, DetailHero, KeyValueList, MoreMenu, Section, StatusTag, Timeline } from "@/components/ds";
+import { Bell } from "lucide-react";
+import { BottomActions, DetailHero, Icon, KeyValueList, MoreMenu, Section, StatusTag, Timeline } from "@/components/ds";
 
 interface ReminderPreview {
   level: number;
@@ -153,19 +154,6 @@ function historyItems(invoice: Invoice): HistoryItem[] {
   return dated
     .sort((a, b) => b.at - a.at)
     .map(({ title, meta, tone }) => ({ title, meta, tone }));
-}
-
-function BellIcon() {
-  return (
-    <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} aria-hidden>
-      <path
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        d="M6 9a6 6 0 1 1 12 0c0 3.2 1 5 1.5 5.8H4.5C5 14 6 12.2 6 9Z"
-      />
-      <path strokeLinecap="round" strokeLinejoin="round" d="M10 18a2 2 0 0 0 4 0" />
-    </svg>
-  );
 }
 
 export default function InvoiceDetailPage({ params }: { params: Promise<{ id: string }> }) {
@@ -794,7 +782,7 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
                       : () => openPaymentSheet()
             }
           >
-            {primary.icon ? <BellIcon /> : null}
+            {primary.icon ? <Icon icon={Bell} size="inline" /> : null}
             {primary.label}
           </Button>
           {invoice.displayStatus === "overdue" && invoice.open > 0 && (

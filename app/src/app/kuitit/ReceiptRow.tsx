@@ -1,6 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
+import { Check } from "lucide-react";
 import ReceiptMatchPanel from "@/components/ReceiptMatchPanel";
 import { ListRow, MoreMenu, StatusTag } from "@/components/ds";
 import { formatDate, formatEur } from "@/lib/format";
@@ -62,17 +63,14 @@ export function ReceiptRow({
             onChange={onToggleSelect}
             aria-label={`Valitse ${receipt.vendor || "kuitti"}`}
           />
-          <span className="flex h-[18px] w-[18px] items-center justify-center rounded-full border border-line bg-surface transition-colors peer-checked:border-ink peer-checked:bg-ink">
-            <svg
-              className={`h-2.5 w-2.5 text-canvas transition-opacity ${selected ? "opacity-100" : "opacity-0"}`}
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-              strokeWidth={3}
+          <span className="flex h-5 w-5 items-center justify-center rounded-full border-[1.5px] border-ink-2/50 bg-surface transition-colors peer-checked:border-ink peer-checked:bg-ink peer-focus-visible:ring-2 peer-focus-visible:ring-accent/40">
+            <Check
               aria-hidden
-            >
-              <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
-            </svg>
+              width={12}
+              height={12}
+              strokeWidth={3.5}
+              className={`text-canvas transition-opacity ${selected ? "opacity-100" : "opacity-0"}`}
+            />
           </span>
         </label>
         <div className="min-w-0 flex-1">

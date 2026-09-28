@@ -34,7 +34,8 @@ import {
   type ReceiptTabCounts,
 } from "@/lib/receipt-tabs";
 import { Button, buttonClass } from "@/components/ui";
-import { PageTitle, Section } from "@/components/ds";
+import { Check, Minus, Plus } from "lucide-react";
+import { Icon, PageTitle, Section } from "@/components/ds";
 import { batchOutcomeMessage } from "@/lib/upload-queue";
 import { ReceiptFilters, type ReceiptAdvancedFilters } from "./ReceiptFilters";
 import { ReceiptRow } from "./ReceiptRow";
@@ -645,9 +646,7 @@ export default function KuititPage() {
               href="/kuitit/uusi"
               className="active-press relative inline-flex min-h-9 items-center gap-1 rounded-full bg-ink px-3.5 text-[13px] font-semibold text-canvas before:absolute before:inset-x-0 before:-inset-y-1 before:content-['']"
             >
-              <svg className="h-3.5 w-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} aria-hidden>
-                <path strokeLinecap="round" d="M12 5v14M5 12h14" />
-              </svg>
+              <Icon icon={Plus} size="inline" strokeWidth={2.5} />
               Lisää
             </Link>
           }
@@ -754,7 +753,9 @@ export default function KuititPage() {
         <div className="space-y-3">
           <div className="flex items-center gap-3 px-1">
             {receipts.length > 0 && (
-              <label className="relative -ml-2.5 flex h-11 w-11 cursor-pointer items-center justify-center">
+              // -ml-1 cancels the row's px-1 so this circle sits on the same vertical line as the
+              // per-receipt circles below (both 44px boxes starting at the card's left edge).
+              <label className="relative -ml-1 flex h-11 w-11 cursor-pointer items-center justify-center">
                 <input
                   type="checkbox"
                   className="peer sr-only"
@@ -763,19 +764,15 @@ export default function KuititPage() {
                   aria-label="Valitse kaikki"
                 />
                 <span
-                  className={`flex h-[18px] w-[18px] items-center justify-center rounded-full border transition-colors ${
-                    selectedIds.size > 0 ? "border-ink bg-ink" : "border-line bg-surface"
+                  className={`flex h-5 w-5 items-center justify-center rounded-full border-[1.5px] transition-colors peer-focus-visible:ring-2 peer-focus-visible:ring-accent/40 ${
+                    selectedIds.size > 0 ? "border-ink bg-ink" : "border-ink-2/50 bg-surface"
                   }`}
                 >
                   {selectedIds.size > 0 && selectedIds.size === receipts.length && (
-                    <svg className="h-2.5 w-2.5 text-canvas" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3} aria-hidden>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
-                    </svg>
+                    <Check aria-hidden width={12} height={12} strokeWidth={3.5} className="text-canvas" />
                   )}
                   {selectedIds.size > 0 && selectedIds.size < receipts.length && (
-                    <svg className="h-2.5 w-2.5 text-canvas" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3} aria-hidden>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 12h-15" />
-                    </svg>
+                    <Minus aria-hidden width={12} height={12} strokeWidth={3.5} className="text-canvas" />
                   )}
                 </span>
               </label>

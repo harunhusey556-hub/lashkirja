@@ -5,7 +5,8 @@ import ConfirmModal from "@/components/ConfirmModal";
 import { ErrorState, LoadingState } from "@/components/AsyncState";
 import { apiFetch, errorMessage } from "@/components/clientFetch";
 import { useProfile } from "../useProfile";
-import { Card, PageTitle } from "@/components/ds";
+import { Plus } from "lucide-react";
+import { Card, Icon, PageTitle } from "@/components/ds";
 import { controlClass } from "@/components/control-styles";
 
 type ProviderType = "gmail" | "outlook" | "icloud" | "other" | null;
@@ -196,9 +197,7 @@ export default function SahkopostiPage() {
               onClick={() => setIsAddingEmail(true)}
               className="active-press touch-target flex w-full items-center justify-center gap-2 rounded-card border border-dashed border-line py-3 text-[13px] font-medium text-ink"
             >
-              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="h-4 w-4">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
-              </svg>
+              <Icon icon={Plus} size="inline" />
               Lisää toinen sähköpostitili
             </button>
           ) : (

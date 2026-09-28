@@ -1,3 +1,4 @@
+export * from "./Icon";
 export * from "./PageTitle";
 export * from "./Section";
 export * from "./Card";

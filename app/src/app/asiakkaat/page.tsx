@@ -16,7 +16,8 @@ import {
   redirectToLogin,
 } from "@/components/clientFetch";
 import { formatEur } from "@/lib/format";
-import { Card, ListRow, PageTitle, Section, StatusTag, SummaryCard } from "@/components/ds";
+import { Plus } from "lucide-react";
+import { Card, Icon, ListRow, PageTitle, Section, StatusTag, SummaryCard } from "@/components/ds";
 
 import { Button, controlClass } from "@/components/ui";
 import { newIdempotencyKey } from "@/lib/idempotency-key";
@@ -51,14 +52,6 @@ interface Customer {
  * (see asiakkaat/[id]/page.tsx).
  */
 const FLASH_KEY = "asiakkaat:flash";
-
-function PlusIcon() {
-  return (
-    <svg className="h-3.5 w-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} aria-hidden>
-      <path strokeLinecap="round" d="M12 5v14M5 12h14" />
-    </svg>
-  );
-}
 
 /** "Y-tunnus · Maksuaika N pv" (private customers have no Y-tunnus). */
 function rowSecondary(customer: Customer): string {
@@ -218,7 +211,7 @@ export default function CustomersPage() {
             onClick={() => setCreateOpen(true)}
             className="active-press relative inline-flex min-h-9 items-center gap-1 rounded-full bg-ink px-3.5 text-[13px] font-semibold text-canvas before:absolute before:inset-x-0 before:-inset-y-1 before:content-['']"
           >
-            <PlusIcon />
+            <Icon icon={Plus} size="inline" strokeWidth={2.5} />
             Lisää
           </button>
         }

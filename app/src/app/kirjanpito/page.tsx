@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { PageTitle, Section, ListRow } from "@/components/ds";
+import { ArrowLeftRight, Inbox, Landmark, Link2, ListChecks, Lock, Percent, ReceiptEuro } from "lucide-react";
+import { Icon, PageTitle, Section, ListRow } from "@/components/ds";
 import { apiFetch, readJson } from "@/components/clientFetch";
 import { formatDayMonth, formatEur } from "@/lib/format";
 import { MONTHS } from "@/lib/finnish-months";
@@ -17,42 +18,6 @@ import { useProfile } from "@/app/asetukset/useProfile";
  * page already calls (no new API): best-effort, and a failed fetch simply
  * leaves that one row without a value instead of blocking the others.
  */
-
-function PercentIcon() {
-  return (
-    <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.75} aria-hidden>
-      <path strokeLinecap="round" d="M6 18 18 6" />
-      <circle cx="7.5" cy="7.5" r="1.75" />
-      <circle cx="16.5" cy="16.5" r="1.75" />
-    </svg>
-  );
-}
-
-function InboxIcon() {
-  return (
-    <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.75} aria-hidden>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M4 13h4l1.5 3h5L16 13h4" />
-      <path strokeLinecap="round" strokeLinejoin="round" d="M5 13 6.2 6.2A2 2 0 0 1 8.16 4.5h7.68a2 2 0 0 1 1.96 1.7L19 13v5a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-5Z" />
-    </svg>
-  );
-}
-
-function BankIcon() {
-  return (
-    <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.75} aria-hidden>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M4 10 12 4l8 6M5 10v9M9.5 10v9M14.5 10v9M19 10v9M3.5 19h17" />
-    </svg>
-  );
-}
-
-function LockIcon() {
-  return (
-    <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.75} aria-hidden>
-      <rect x="5" y="11" width="14" height="9" rx="2" />
-      <path strokeLinecap="round" d="M8 11V7a4 4 0 1 1 8 0v4" />
-    </svg>
-  );
-}
 
 interface AlvInfo {
   period: VatPeriod;
@@ -182,41 +147,68 @@ export default function KirjanpitoPage() {
       <PageTitle title="Kirjanpito" />
 
       <Section title="Tapahtumat ja kuitit">
-        <ListRow href="/kuitit" title="Kuitit" secondary="Kaikki kuitit ja niiden tila" />
+        <ListRow
+          href="/kuitit"
+          leading={<Icon icon={ReceiptEuro} />}
+          chevron
+          title="Kuitit"
+          secondary="Kaikki kuitit ja niiden tila"
+        />
         <ListRow
           href="/pankki/tapahtumat"
+          leading={<Icon icon={ArrowLeftRight} />}
+          chevron
           title="Tapahtumat"
           secondary="Tiliotteet ja yhdistetyn pankin tapahtumat"
         />
-        <ListRow href="/pankki/taydennys" title="Täsmäytys" secondary="Kuitit ja tapahtumat ilman linkkiä" />
-        <ListRow href="/tyot" title="Työt ja poikkeukset" secondary="Taustatyöt ja avoimet poikkeukset" />
+        <ListRow
+          href="/pankki/taydennys"
+          leading={<Icon icon={Link2} />}
+          chevron
+          title="Täsmäytys"
+          secondary="Kuitit ja tapahtumat ilman linkkiä"
+        />
+        <ListRow
+          href="/tyot"
+          leading={<Icon icon={ListChecks} />}
+          chevron
+          title="Työt ja poikkeukset"
+          secondary="Taustatyöt ja avoimet poikkeukset"
+        />
       </Section>
 
       <Section title="Ilmoitukset ja kaudet">
         <ListRow
           href={alvHref}
-          leading={<PercentIcon />}
+          leading={<Icon icon={Percent} />}
+          chevron
           title="ALV-ilmoitus"
           amount={alv?.amount != null ? formatEur(alv.amount) : undefined}
           secondary={alv ? alvRowSecondary(alv) : undefined}
         />
         <ListRow
           href="/kirjanpito/ostolaskut"
-          leading={<InboxIcon />}
+          leading={<Icon icon={Inbox} />}
+          chevron
           title="Ostolaskut"
           amount={purchasesValue}
+          amountTone="muted"
         />
         <ListRow
           href="/kirjanpito/pankkitilit"
-          leading={<BankIcon />}
+          leading={<Icon icon={Landmark} />}
+          chevron
           title="Pankkitilit"
           amount={bankValue}
+          amountTone="muted"
         />
         <ListRow
           href="/kirjanpito/kaudet"
-          leading={<LockIcon />}
+          leading={<Icon icon={Lock} />}
+          chevron
           title="Suljetut kaudet"
           amount={lockValue}
+          amountTone="muted"
         />
       </Section>
     </div>

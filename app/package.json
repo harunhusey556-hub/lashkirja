@@ -43,6 +43,7 @@
     "heic-convert": "^2.1.0",
     "imapflow": "^1.6.5",
     "iron-session": "^8.0.4",
+    "lucide-react": "^1.48.0",
     "mailparser": "^3.9.14",
     "next": "16.2.12",
     "nodemailer": "^9.0.5",

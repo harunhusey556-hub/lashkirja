@@ -3,7 +3,8 @@
 import { useState } from "react";
 import { formatEur } from "@/lib/statement-client";
 import { Button } from "@/components/ui";
-import { ActionPill, Card, ListRow, MoreMenu } from "@/components/ds";
+import { ChevronDown } from "lucide-react";
+import { ActionPill, Card, Icon, ListRow, MoreMenu } from "@/components/ds";
 
 interface ReviewQueueReceipt {
   id: string;
@@ -75,18 +76,7 @@ export default function ReviewQueue({
           <p className="mt-1 text-[13px] leading-relaxed text-ink-2">{description}</p>
           <p className="mt-1 text-[13px] tabular-nums text-ink-2">Yhteensä {formatEur(total)}</p>
         </div>
-        <svg
-          viewBox="0 0 20 20"
-          fill="currentColor"
-          aria-hidden
-          className={`h-5 w-5 shrink-0 text-ink-2 transition-transform ${open ? "rotate-180" : ""}`}
-        >
-          <path
-            fillRule="evenodd"
-            d="M5.22 8.22a.75.75 0 0 1 1.06 0L10 11.94l3.72-3.72a.75.75 0 1 1 1.06 1.06l-4.25 4.25a.75.75 0 0 1-1.06 0L5.22 9.28a.75.75 0 0 1 0-1.06Z"
-            clipRule="evenodd"
-          />
-        </svg>
+        <Icon icon={ChevronDown} className={`text-ink-2 transition-transform ${open ? "rotate-180" : ""}`} />
       </button>
 
       {onApproveAll && (

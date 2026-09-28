@@ -11,7 +11,8 @@ import {
   readJson,
   redirectToLogin,
 } from "@/components/clientFetch";
-import { PageTitle, Section, ListRow, StatusTag, SummaryCard } from "@/components/ds";
+import { BookOpen, Camera, ChevronLeft, ChevronRight, Link2, ReceiptEuro } from "lucide-react";
+import { Icon, PageTitle, Section, ListRow, StatusTag, SummaryCard } from "@/components/ds";
 
 import { formatEur } from "@/lib/format";
 import { alvDrillHref, receiptDrillHref, statementDrillHref } from "@/lib/report-drill";
@@ -65,22 +66,6 @@ function shiftMonth(month: string, delta: number): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
 }
 
-function ChevronLeftIcon() {
-  return (
-    <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-    </svg>
-  );
-}
-
-function ChevronRightIcon() {
-  return (
-    <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-    </svg>
-  );
-}
-
 /** The small chevron control under the page title (spec §10). */
 function MonthSwitcher({ month, onChange }: { month: string; onChange: (next: string) => void }) {
   const atCurrent = month >= currentMonth();
@@ -92,7 +77,7 @@ function MonthSwitcher({ month, onChange }: { month: string; onChange: (next: st
         onClick={() => onChange(shiftMonth(month, -1))}
         className="active-press relative flex h-8 w-8 items-center justify-center rounded-full text-ink-2 before:absolute before:-inset-2 before:content-['']"
       >
-        <ChevronLeftIcon />
+        <Icon icon={ChevronLeft} size="inline" />
       </button>
       <span className="min-w-[11ch] text-center text-[13px] text-ink-2">
         {MONTHS[Number(month.split("-")[1]) - 1]} {month.split("-")[0]}
@@ -104,26 +89,9 @@ function MonthSwitcher({ month, onChange }: { month: string; onChange: (next: st
         disabled={atCurrent}
         className="active-press relative flex h-8 w-8 items-center justify-center rounded-full text-ink-2 disabled:opacity-30 before:absolute before:-inset-2 before:content-['']"
       >
-        <ChevronRightIcon />
+        <Icon icon={ChevronRight} size="inline" />
       </button>
     </div>
-  );
-}
-
-function ReceiptIcon() {
-  return (
-    <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.75} aria-hidden>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
-    </svg>
-  );
-}
-
-function BookIcon() {
-  return (
-    <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.75} aria-hidden>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M7 3.5h8.5L19 7v13.5H7A2.5 2.5 0 0 1 4.5 18V6A2.5 2.5 0 0 1 7 3.5Z" />
-      <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6M9 16h4" />
-    </svg>
   );
 }
 
@@ -296,11 +264,19 @@ export default function DashboardClient({
             />
           )}
 
-          <p className="px-1 text-[13px] text-ink-2">
-            {data.source === "tiliote"
-              ? `Tiliotteen perusteella (${data.txCount} tapahtumaa)`
-              : "Kuitteihin perustuva näkymä · lataa tiliote"}
-            {data.hasImap && " · Automaattinen tuonti aktiivinen"}
+          <p className="px-1 text-[13px] leading-relaxed text-ink-2">
+            {data.source === "tiliote" ? (
+              `Luvut perustuvat tiliotteeseen (${data.txCount} tapahtumaa).`
+            ) : (
+              <>
+                Luvut perustuvat kuitteihin.{" "}
+                <Link href="/pankki/tapahtumat" className="font-medium text-accent">
+                  Tuo tiliote
+                </Link>
+                , niin ne täsmäävät pankkiin.
+              </>
+            )}
+            {data.hasImap && " Sähköpostituonti on päällä."}
           </p>
 
           {data.sectionErrors?.position && (
@@ -352,7 +328,8 @@ export default function DashboardClient({
         {data && !data.sectionErrors?.pending && data.pendingReceiptsCount !== undefined && data.pendingReceiptsCount > 0 && (
           <ListRow
             href="/kuitit"
-            leading={<ReceiptIcon />}
+            leading={<Icon icon={ReceiptEuro} />}
+            chevron
             title="Tarkastusta odottavia kuitteja"
             secondary={
               data.isSingleVatProfile
@@ -364,6 +341,8 @@ export default function DashboardClient({
         {data && !data.sectionErrors?.matching && data.matching.matchable > 0 && (
           <ListRow
             href="/pankki/taydennys"
+            leading={<Icon icon={Link2} />}
+            chevron
             title="Kuittien linkitys"
             secondary={`${data.matching.matched} / ${data.matching.matchable} tapahtumaa linkitetty`}
             trailing={
@@ -375,8 +354,8 @@ export default function DashboardClient({
             }
           />
         )}
-        <ListRow href="/kuitit/uusi" leading={<ReceiptIcon />} title="Uusi kuitti" />
-        <ListRow href="/kirjanpito" leading={<BookIcon />} title="Kirjanpito" />
+        <ListRow href="/kuitit/uusi" leading={<Icon icon={Camera} />} chevron title="Uusi kuitti" />
+        <ListRow href="/kirjanpito" leading={<Icon icon={BookOpen} />} chevron title="Kirjanpito" />
       </Section>
     </div>
   );

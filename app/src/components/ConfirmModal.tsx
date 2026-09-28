@@ -6,6 +6,8 @@ import { settleConfirm } from "@/lib/confirm-action";
 import { useOverlayLock } from "@/lib/overlay-lock";
 import { subscribeOverlayClose } from "@/lib/screen-state";
 import { Button } from "@/components/ui";
+import { CircleHelp, TriangleAlert } from "lucide-react";
+import { Icon } from "@/components/ds/Icon";
 
 interface ConfirmModalProps {
   isOpen: boolean;
@@ -118,7 +120,7 @@ export default function ConfirmModal({
       {/* Backdrop */}
       <div
         ref={overlayRef}
-        className={`absolute inset-0 bg-charcoal/60 ${
+        className={`absolute inset-0 bg-ink/50 ${
           closing ? "animate-backdrop-out" : "animate-fade-in"
         }`}
         onClick={(e) => {
@@ -140,20 +142,16 @@ export default function ConfirmModal({
       >
         <div className="flex flex-col items-center text-center">
           {isDestructive ? (
-            <div className="w-12 h-12 rounded-full bg-danger/10 flex items-center justify-center text-danger mb-4">
-              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-6 h-6">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-              </svg>
+            <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-danger/10 text-danger">
+              <Icon icon={TriangleAlert} size="hero" />
             </div>
           ) : (
-            <div className="w-12 h-12 rounded-full bg-warning/10 flex items-center justify-center text-warning mb-4">
-              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-6 h-6">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M9.879 7.519c1.171-1.025 3.071-1.025 4.242 0 1.172 1.025 1.172 2.687 0 3.712-.203.179-.43.326-.67.442-.745.361-1.45.999-1.45 1.827v.75M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9 5.25h.008v.008H12v-.008z" />
-              </svg>
+            <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-accent-soft text-accent">
+              <Icon icon={CircleHelp} size="hero" />
             </div>
           )}
-          
-          <h3 id={titleId} className="text-lg font-medium text-ink">{title}</h3>
+
+          <h3 id={titleId} className="text-[17px] font-semibold text-ink">{title}</h3>
 
           {description && (
             <p id={descriptionId} className="mt-2 text-sm text-ink-2">{description}</p>
@@ -175,7 +173,7 @@ export default function ConfirmModal({
               className="flex-1"
               onClick={confirm}
               busy={busy}
-              busyLabel="Odota..."
+              busyLabel="Odota…"
             >
               {confirmLabel}
             </Button>

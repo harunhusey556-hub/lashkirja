@@ -13,9 +13,11 @@ import {
   redirectToLogin,
 } from "@/components/clientFetch";
 import { formatDayMonth, formatEur } from "@/lib/format";
+import { Plus, Repeat, Users } from "lucide-react";
 import {
   ActionPill,
   FilterChips,
+  Icon,
   ListRow,
   PageTitle,
   Section,
@@ -60,25 +62,6 @@ interface Aging {
 const AGING_BUCKETS = ["1-30", "31-60", "61-90", "90+"] as const;
 
 const ZERO_COUNTS: SalesStatusCounts = { draft: 0, sent: 0, overdue: 0, paid: 0, credited: 0 };
-
-/** Leading icon for the "Asiakkaat" registry row. */
-function CustomersIcon() {
-  return (
-    <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.75} aria-hidden>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8Zm-7 8a7 7 0 0 1 14 0" />
-    </svg>
-  );
-}
-
-/** Leading icon for the "Toistuvat laskut" registry row. */
-function RecurringIcon() {
-  return (
-    <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.75} aria-hidden>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M4 7h11a4 4 0 0 1 4 4v1M20 17H9a4 4 0 0 1-4-4v-1" />
-      <path strokeLinecap="round" strokeLinejoin="round" d="m15 4 3 3-3 3M9 20l-3-3 3-3" />
-    </svg>
-  );
-}
 
 /** "Lasku N, eräpäivä d.m." - "erääntyi" once overdue, no date at all while still a draft. */
 function rowSecondary(invoice: InvoiceSummary): string {
@@ -282,9 +265,7 @@ function InvoicesPageContent() {
             href={customerFilter ? `/laskut/uusi?customerId=${encodeURIComponent(customerFilter)}` : "/laskut/uusi"}
             className="active-press relative inline-flex min-h-9 items-center gap-1 rounded-full bg-ink px-3.5 text-[13px] font-semibold text-canvas before:absolute before:inset-x-0 before:-inset-y-1 before:content-['']"
           >
-            <svg className="h-3.5 w-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} aria-hidden>
-              <path strokeLinecap="round" d="M12 5v14M5 12h14" />
-            </svg>
+            <Icon icon={Plus} size="inline" strokeWidth={2.5} />
             Uusi lasku
           </Link>
         }
@@ -381,15 +362,19 @@ function InvoicesPageContent() {
 
       <Section>
         <ListRow
-          leading={<CustomersIcon />}
+          leading={<Icon icon={Users} />}
+          chevron
           title="Asiakkaat"
           amount={registryCounts.customers !== undefined ? String(registryCounts.customers) : undefined}
+          amountTone="muted"
           href="/asiakkaat"
         />
         <ListRow
-          leading={<RecurringIcon />}
+          leading={<Icon icon={Repeat} />}
+          chevron
           title="Toistuvat laskut"
           amount={registryCounts.recurring !== undefined ? String(registryCounts.recurring) : undefined}
+          amountTone="muted"
           href="/toistuvat"
         />
       </Section>

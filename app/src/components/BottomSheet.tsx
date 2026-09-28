@@ -1,7 +1,9 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { X } from "lucide-react";
 import { useFocusTrap } from "@/components/useFocusTrap";
+import { Icon } from "@/components/ds/Icon";
 import { useOverlayLock } from "@/lib/overlay-lock";
 import { subscribeOverlayClose } from "@/lib/screen-state";
 
@@ -224,7 +226,7 @@ export default function BottomSheet({
     <div className={`overlay-root sheet-overlay fixed inset-0 z-[60] ${closing ? "pointer-events-none" : ""}`}>
       <div
         ref={backdropRef}
-        className={`absolute inset-0 bg-charcoal/40 backdrop-blur-[2px] ${
+        className={`absolute inset-0 bg-ink/40 backdrop-blur-[2px] ${
           exitingViaDrag ? "" : closing ? "animate-backdrop-out" : "animate-backdrop"
         }`}
         onClick={onClose}
@@ -244,33 +246,27 @@ export default function BottomSheet({
           <div className="sheet-handle" aria-hidden />
 
           {(title || headerAction) && (
-            <div className="flex items-start justify-between gap-3 px-5 pt-2 pb-3 border-b border-warm-gray-light/30">
+            <div className="flex items-center justify-between gap-3 pb-2 pl-5 pr-3 pt-1">
               <div className="min-w-0">
                 {title && (
-                  <p id={labelledBy} className="text-[20px] font-bold text-ink truncate">
+                  <p id={labelledBy} className="truncate text-[20px] font-bold tracking-[-0.01em] text-ink">
                     {title}
                   </p>
                 )}
-                {subtitle && <p className="text-xs text-warm-gray mt-0.5">{subtitle}</p>}
+                {subtitle && <p className="mt-0.5 truncate text-[13px] text-ink-2">{subtitle}</p>}
               </div>
-              <div className="flex items-center gap-1 shrink-0">
+              <div className="flex shrink-0 items-center gap-1">
                 {headerAction}
+                {/* 32px visual circle inside a 44px hit box. */}
                 <button
                   type="button"
                   onClick={onClose}
                   aria-label="Sulje"
-                  className="w-11 h-11 rounded-full flex items-center justify-center text-warm-gray hover:bg-warm-gray-light/30 transition-colors"
+                  className="active-press flex h-11 w-11 items-center justify-center"
                 >
-                  <svg
-                    className="w-5 h-5"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth={1.75}
-                    aria-hidden
-                  >
-                    <path strokeLinecap="round" d="M6 6l12 12M18 6L6 18" />
-                  </svg>
+                  <span className="flex h-8 w-8 items-center justify-center rounded-full bg-line/70 text-ink-2">
+                    <Icon icon={X} size="inline" strokeWidth={2.25} />
+                  </span>
                 </button>
               </div>
             </div>

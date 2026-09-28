@@ -2,7 +2,8 @@
 
 import type { RefObject } from "react";
 import Link from "next/link";
-import { Section } from "@/components/ds";
+import { FileUp } from "lucide-react";
+import { Icon, Section } from "@/components/ds";
 import { filePickDecision } from "@/lib/native-file-flow";
 import type { useReceiptUploadQueue } from "@/components/useReceiptUploadQueue";
 
@@ -95,9 +96,7 @@ export default function ReceiptUploadArea({
 
       <div className="space-y-4 rounded-card border border-line bg-surface p-6 text-center">
         <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-canvas text-ink-2">
-          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="h-6 w-6">
-            <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 0 0-3.375-3.375h-1.5A1.125 1.125 0 0 1 13.5 7.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H8.25m3.75 9v6m3-3H9m1.5-12H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 0 0-9-9Z" />
-          </svg>
+          <Icon icon={FileUp} size="tab" />
         </div>
         <p className="text-[15px] font-medium text-ink">Lisää kuitti tai lasku kuvana tai PDF-tiedostona</p>
 

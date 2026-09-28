@@ -16,7 +16,8 @@ import { maskIban } from "@/lib/iban";
 import BankConnectCard from "@/components/BankConnectCard";
 import { useProfile } from "@/app/asetukset/useProfile";
 import { Button } from "@/components/ui";
-import { Card, ListRow, PageTitle, Section } from "@/components/ds";
+import { Plus } from "lucide-react";
+import { Card, Icon, ListRow, PageTitle, Section } from "@/components/ds";
 
 import { pageCacheFetchedAt, readPageCache, writePageCache } from "@/lib/page-cache";
 import { usePersistedState } from "@/lib/list-ui-state";
@@ -305,9 +306,7 @@ export default function BankAccountsPage() {
                 }}
                 className="active-press relative inline-flex min-h-9 items-center gap-1 rounded-full bg-ink px-3.5 text-[13px] font-semibold text-canvas before:absolute before:inset-x-0 before:-inset-y-1 before:content-['']"
               >
-                <svg className="h-3.5 w-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} aria-hidden>
-                  <path strokeLinecap="round" d="M12 5v14M5 12h14" />
-                </svg>
+                <Icon icon={Plus} size="inline" strokeWidth={2.5} />
                 Lisää pankkitili
               </button>
             ) : undefined

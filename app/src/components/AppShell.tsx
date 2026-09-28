@@ -2,6 +2,25 @@
 
 import { useEffect, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
+import {
+  BookOpen,
+  Camera,
+  ChartColumn,
+  ChevronLeft,
+  FilePlus,
+  FileText,
+  FileUp,
+  House,
+  LogOut,
+  Mail,
+  MessageSquareText,
+  Plus,
+  Settings,
+  User,
+  type LucideIcon,
+} from "lucide-react";
+import { Icon, IconTile } from "@/components/ds/Icon";
+import { AppMark } from "@/components/AppMark";
 import { LoadingState } from "@/components/AsyncState";
 import { ConnectionNotice } from "@/components/ScreenState";
 import { OnboardingModal } from "@/components/OnboardingModal";
@@ -44,77 +63,17 @@ import {
   type NavEntry,
 } from "@/lib/navigation";
 
-function RootIcon({ id, active, className }: { id: string; active: boolean; className?: string }) {
-  const tone = className ?? `h-6 w-6 ${active ? "text-accent" : "text-ink-2"}`;
-  if (id === "etusivu") {
-    return (
-      <svg className={tone} fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.75} d="M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1v-9.5Z" />
-      </svg>
-    );
-  }
-  if (id === "myynti") {
-    return (
-      <svg className={tone} fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.75} d="M3 6h18M3 12h18M3 18h10" />
-      </svg>
-    );
-  }
-  if (id === "kirjanpito") {
-    return (
-      <svg className={tone} fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.75} d="M7 3.5h8.5L19 7v13.5H7A2.5 2.5 0 0 1 4.5 18V6A2.5 2.5 0 0 1 7 3.5Z" />
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.75} d="M9 12h6M9 16h4" />
-      </svg>
-    );
-  }
-  if (id === "raportit") {
-    return (
-      <svg className={tone} fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.75} d="M4 19V5m0 14h16M8 16v-5m4 5V8m4 8v-3" />
-      </svg>
-    );
-  }
-  return (
-    <svg className={tone} fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.75} d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z" />
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.75} d="M19.4 15a7.8 7.8 0 0 0 .1-2l2-1.2-2-3.4-2.2.6a8 8 0 0 0-1.7-1L15.2 6h-4.4L10.4 8a8 8 0 0 0-1.7 1L6.5 8.4 4.5 11.8 6.5 13a7.8 7.8 0 0 0 .1 2l-2 1.2 2 3.4 2.2-.6a8 8 0 0 0 1.7 1l.4 2h4.4l.4-2a8 8 0 0 0 1.7-1l2.2.6 2-3.4-2-1.2Z" />
-    </svg>
-  );
-}
+/** Tab bar / sidebar glyph per root (see `ds/Icon.tsx` for the set and sizes). */
+const ROOT_ICONS: Record<string, LucideIcon> = {
+  etusivu: House,
+  myynti: FileText,
+  kirjanpito: BookOpen,
+  raportit: ChartColumn,
+  asetukset: Settings,
+};
 
-/** Leading icons for the Lisää sheet's rows. */
-function AddSheetIcon({ id, className = "h-5 w-5" }: { id: "camera" | "file" | "invoice" | "mail"; className?: string }) {
-  if (id === "camera") {
-    return (
-      <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.75} d="M4 8.5A1.5 1.5 0 0 1 5.5 7h2l1-2h7l1 2h2A1.5 1.5 0 0 1 20 8.5v9A1.5 1.5 0 0 1 18.5 19h-13A1.5 1.5 0 0 1 4 17.5v-9Z" />
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.75} d="M12 16a3.25 3.25 0 1 0 0-6.5 3.25 3.25 0 0 0 0 6.5Z" />
-      </svg>
-    );
-  }
-  if (id === "file") {
-    return (
-      <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.75} d="M7 3.5h6.5L18 8v11.5a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V4.5a1 1 0 0 1 1-1Z" />
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.75} d="M13.5 3.5V8H18M9 12.5h6M9 15.5h4" />
-      </svg>
-    );
-  }
-  if (id === "invoice") {
-    return (
-      <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.75} d="M7 3h10v18l-2-1.4-2 1.4-2-1.4-2 1.4-2-1.4V3Z" />
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.75} d="M9.5 8h5M9.5 11.5h5M9.5 15h3" />
-      </svg>
-    );
-  }
-  return (
-    <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.75} d="M4.5 6h15a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1h-15a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1Z" />
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.75} d="m4 7 8 6 8-6" />
-    </svg>
-  );
+function rootIcon(id: string): LucideIcon {
+  return ROOT_ICONS[id] ?? Settings;
 }
 
 type ShellUser = { userId?: string; email?: string; firstName?: string };
@@ -503,12 +462,12 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         key={item.id}
         type="button"
         onClick={() => goToRoot(item.path)}
-        className={`flex min-w-0 flex-1 flex-col items-center justify-center gap-0.5 touch-target active:bg-blush/30 transition-colors active-press ${
-          active ? "text-accent-dark" : "text-ink-2"
+        className={`flex min-w-0 flex-1 flex-col items-center justify-center gap-1 touch-target transition-colors active-press ${
+          active ? "text-accent" : "text-ink-2"
         }`}
         aria-current={active ? "page" : undefined}
       >
-        <RootIcon id={item.id} active={active} />
+        <Icon icon={rootIcon(item.id)} size="tab" />
         <span
           className={`max-w-full truncate text-[11px] leading-tight ${active ? "font-semibold" : "font-medium"}`}
         >
@@ -522,22 +481,23 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     <AppLock>
     {authState.status === "ready" && (
       <aside className="app-sidebar" aria-hidden={false}>
-        <p className="px-4 pb-3 pt-5 text-[17px] font-bold tracking-[-0.01em] text-ink">LashKirja</p>
-        <div className="px-2 pb-3">
+        <p className="flex items-center gap-2.5 px-5 pb-4 pt-5 text-[17px] font-bold tracking-[-0.01em] text-ink">
+          <AppMark />
+          LashKirja
+        </p>
+        <div className="px-3 pb-3">
           <button
             type="button"
             onClick={() => setAddOpenOn(pathname)}
             aria-haspopup="dialog"
             aria-expanded={addOpen}
-            className="flex min-h-11 w-full items-center justify-center gap-2 rounded-xl bg-charcoal text-sm font-semibold text-white active-press"
+            className="flex min-h-12 w-full items-center justify-center gap-2 rounded-card bg-ink text-[15px] font-semibold text-canvas active-press"
           >
-            <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} aria-hidden>
-              <path strokeLinecap="round" d="M12 5v14M5 12h14" />
-            </svg>
+            <Icon icon={Plus} strokeWidth={2} />
             Lisää
           </button>
         </div>
-        <nav aria-label="Päävalikko" className="flex flex-1 flex-col gap-1 px-2">
+        <nav aria-label="Päävalikko" className="flex flex-1 flex-col gap-0.5 px-3">
           {tabRoots().map((item) => {
             const active = rootIsActive(pathname, item.id);
             return (
@@ -546,33 +506,28 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                 type="button"
                 onClick={() => goToRoot(item.path)}
                 aria-current={active ? "page" : undefined}
-                className={`flex min-h-12 items-center gap-3 rounded-xl px-3 text-left text-sm active-press ${
-                  active ? "bg-blush font-semibold text-accent-dark" : "font-medium text-charcoal"
+                className={`flex min-h-12 items-center gap-3 rounded-card px-3 text-left text-[15px] active-press ${
+                  active ? "bg-accent-soft font-semibold text-accent" : "font-medium text-ink"
                 }`}
               >
-                <RootIcon
-                  id={item.id}
-                  active={active}
-                  className={`h-5 w-5 ${active ? "text-accent" : "text-ink-2"}`}
-                />
+                <Icon icon={rootIcon(item.id)} className={active ? "text-accent" : "text-ink-2"} />
                 <span className="truncate">{item.label}</span>
               </button>
             );
           })}
         </nav>
-        <div className="mt-auto px-2 pb-4">
+        <div className="mt-auto px-3 pb-4">
           <button
             type="button"
             onClick={() => goToRoot(avatarRoot().path)}
             aria-current={rootIsActive(pathname, "asetukset") ? "page" : undefined}
-            className={`flex min-h-12 w-full items-center gap-3 rounded-xl px-3 text-left text-sm active-press ${
-              rootIsActive(pathname, "asetukset") ? "bg-blush font-semibold text-accent-dark" : "font-medium text-charcoal"
+            className={`flex min-h-12 w-full items-center gap-3 rounded-card px-3 text-left text-[15px] active-press ${
+              rootIsActive(pathname, "asetukset") ? "bg-accent-soft font-semibold text-accent" : "font-medium text-ink"
             }`}
           >
-            <RootIcon
-              id="asetukset"
-              active={rootIsActive(pathname, "asetukset")}
-              className={`h-5 w-5 ${rootIsActive(pathname, "asetukset") ? "text-accent" : "text-ink-2"}`}
+            <Icon
+              icon={Settings}
+              className={rootIsActive(pathname, "asetukset") ? "text-accent" : "text-ink-2"}
             />
             Asetukset
           </button>
@@ -582,57 +537,52 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     <div className="app-frame" data-tabs={isDetail ? "hidden" : undefined}>
       <UnsavedChangesHost />
       <header
-        className="app-header z-40 bg-surface/90 backdrop-blur-md border-b border-line"
+        className="app-header z-40 bg-canvas"
         onContextMenu={(event) => event.preventDefault()}
       >
-        <div className="app-header-row mx-auto min-h-14 max-w-lg px-1 md:max-w-3xl">
+        {/* px-2 + the 4px inset of each 36px circle inside its 44px hit box puts both circles'
+            outer edges on the same 16px line as the page content below. */}
+        <div className="app-header-row mx-auto min-h-14 w-full max-w-lg px-2 md:max-w-3xl">
           <div className="flex h-11 min-w-11 items-center justify-self-start">
             {canGoBack && (
               <button
                 type="button"
                 onClick={goBack}
                 aria-label={back ? `Takaisin: ${back.label}` : "Takaisin"}
-                className="flex h-11 max-w-full items-center gap-0.5 pl-1 pr-2 text-accent-dark active-press"
+                className="flex h-11 max-w-full items-center gap-0.5 pr-2 text-accent active-press"
               >
-                <svg className="h-6 w-6 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} aria-hidden>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
-                </svg>
-                {back && <span className="truncate text-sm font-medium">{back.label}</span>}
+                <Icon icon={ChevronLeft} size="tab" strokeWidth={2} />
+                {back && <span className="truncate text-[15px] font-medium">{back.label}</span>}
               </button>
             )}
           </div>
 
           {authState.status === "ready" ? (
-            <div className="flex items-center justify-self-end">
-            <button
-              type="button"
-              onClick={() => {
-                void hapticSelection();
-                setChatOpenOn(pathname);
-              }}
-              aria-label="Avustaja"
-              className="assistant-button active-press flex h-11 items-center justify-center gap-1 rounded-full bg-accent px-2.5 text-sm font-medium text-white"
-            >
-              <svg className="h-5 w-5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.75} aria-hidden>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M8 10h8M8 14h5M6 5h12a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H11l-4 3v-3H6a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Z" />
-              </svg>
-              <span className="assistant-word">Avustaja</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => setProfileOpenOn((open) => (open === pathname ? null : pathname))}
-              aria-label="Profiili, asetukset ja uloskirjautuminen"
-              aria-haspopup="dialog"
-              className="flex h-11 w-11 items-center justify-center active-press"
-            >
-              <span className="w-8 h-8 rounded-full bg-blush text-accent-dark text-xs font-semibold flex items-center justify-center border border-blush-dark/40">
-                {initials || (
-                  <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.75} aria-hidden>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8Zm-7 8a7 7 0 0 1 14 0" />
-                  </svg>
-                )}
-              </span>
-            </button>
+            <div className="flex items-center gap-1 justify-self-end">
+              <button
+                type="button"
+                onClick={() => {
+                  void hapticSelection();
+                  setChatOpenOn(pathname);
+                }}
+                aria-label="Avustaja"
+                className="header-circle active-press flex h-11 w-11 items-center justify-center"
+              >
+                <span className="flex h-9 w-9 items-center justify-center rounded-full border border-line bg-surface text-ink">
+                  <Icon icon={MessageSquareText} />
+                </span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setProfileOpenOn((open) => (open === pathname ? null : pathname))}
+                aria-label="Profiili, asetukset ja uloskirjautuminen"
+                aria-haspopup="dialog"
+                className="header-circle active-press flex h-11 w-11 items-center justify-center"
+              >
+                <span className="flex h-9 w-9 items-center justify-center rounded-full border border-accent-soft bg-accent-soft text-[15px] font-semibold text-accent">
+                  {initials || <Icon icon={User} />}
+                </span>
+              </button>
             </div>
           ) : (
             <div className="w-11" aria-hidden />
@@ -679,7 +629,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
           {!isDetail && (
             <nav
-              className="app-tab-bar z-50 bg-surface/95 backdrop-blur-md border-t border-line"
+              className="app-tab-bar z-50 border-t border-line bg-surface"
               aria-label="Päävalikko"
               onContextMenu={(event) => event.preventDefault()}
             >
@@ -695,11 +645,9 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                     aria-label="Lisää"
                     aria-haspopup="dialog"
                     aria-expanded={addOpen}
-                    className="flex h-12 w-12 items-center justify-center rounded-full bg-charcoal text-white active-press"
+                    className="flex h-12 w-12 items-center justify-center rounded-full bg-ink text-canvas active-press"
                   >
-                    <svg className="h-6 w-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} aria-hidden>
-                      <path strokeLinecap="round" d="M12 5v14M5 12h14" />
-                    </svg>
+                    <Icon icon={Plus} size="tab" strokeWidth={2} />
                   </button>
                 </div>
                 {tabRoots().slice(2).map((item) => renderTab(item))}
@@ -714,7 +662,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
             labelledBy="add-sheet-title"
             heightClass="max-h-[70dvh]"
           >
-            <div className="space-y-3 px-3 py-2 sheet-safe-bottom">
+            <div className="space-y-3 px-4 py-2 sheet-safe-bottom">
               <button
                 type="button"
                 onClick={() => {
@@ -726,7 +674,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                 }}
                 className="flex w-full items-center gap-3 rounded-card bg-ink px-4 py-4 text-left text-canvas active-press"
               >
-                <AddSheetIcon id="camera" className="h-6 w-6 shrink-0" />
+                <Icon icon={Camera} size="tab" />
                 <span className="min-w-0">
                   <span className="block text-base font-semibold">Kuvaa kuitti</span>
                   <span className="block text-[13px] text-canvas/70">
@@ -737,10 +685,10 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
               <div className="overflow-hidden rounded-card border border-line bg-surface divide-y divide-line">
                 {(
                   [
-                    { href: "/pankki/tapahtumat", label: "Tuo tiliote", hint: "CSV, XLSX, camt tai PDF", icon: "file" },
-                    { href: "/laskut/uusi", label: "Uusi myyntilasku", hint: undefined, icon: "invoice" },
-                    { href: "/asetukset/sahkoposti", label: "Hae sähköpostista", hint: undefined, icon: "mail" },
-                  ] as const satisfies readonly { href: string; label: string; hint?: string; icon: "file" | "invoice" | "mail" }[]
+                    { href: "/pankki/tapahtumat", label: "Tuo tiliote", hint: "CSV, XLSX, camt tai PDF", icon: FileUp },
+                    { href: "/laskut/uusi", label: "Uusi myyntilasku", hint: undefined, icon: FilePlus },
+                    { href: "/asetukset/sahkoposti", label: "Hae sähköpostista", hint: undefined, icon: Mail },
+                  ] as const satisfies readonly { href: string; label: string; hint?: string; icon: LucideIcon }[]
                 ).map((row) => (
                   <button
                     key={row.href}
@@ -754,9 +702,9 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                     }}
                     className="flex w-full items-center gap-3 px-4 py-3.5 text-left active-press touch-target"
                   >
-                    <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-canvas text-ink-2">
-                      <AddSheetIcon id={row.icon} />
-                    </span>
+                    <IconTile>
+                      <Icon icon={row.icon} />
+                    </IconTile>
                     <span className="min-w-0 flex-1">
                       <span className="block text-[15px] font-medium text-ink">{row.label}</span>
                       {row.hint && <span className="mt-0.5 block truncate text-[13px] text-ink-2">{row.hint}</span>}
@@ -775,7 +723,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
             labelledBy="profile-sheet-title"
             heightClass="max-h-[60dvh]"
           >
-            <div className="px-3 py-2 sheet-safe-bottom">
+            <div className="px-4 py-2 sheet-safe-bottom">
               {signOutError && (
                 <p className="mb-2 px-1 text-sm text-danger" role="alert">
                   {signOutError}
@@ -788,9 +736,9 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                   aria-current={rootIsActive(pathname, "asetukset") ? "page" : undefined}
                   className="w-full flex items-center gap-3 px-4 py-3.5 text-left active-press touch-target"
                 >
-                  <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-canvas text-ink-2">
-                    <RootIcon id="asetukset" active={false} className="h-4 w-4" />
-                  </span>
+                  <IconTile>
+                    <Icon icon={Settings} />
+                  </IconTile>
                   <span className="text-[15px] font-medium text-ink">Asetukset</span>
                 </button>
                 <button
@@ -799,29 +747,16 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                   disabled={signingOut}
                   className="w-full flex items-center gap-3 px-4 py-3.5 text-left active-press disabled:opacity-60 touch-target"
                 >
-                  <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-canvas text-danger">
+                  <IconTile tone="danger">
                     {signingOut ? (
                       <span
-                        className="w-4 h-4 border-2 border-danger/40 border-t-danger rounded-full animate-spin motion-reduce:animate-none"
+                        className="h-4 w-4 animate-spin rounded-full border-2 border-danger/40 border-t-danger motion-reduce:animate-none"
                         aria-hidden
                       />
                     ) : (
-                      <svg
-                        className="w-4 h-4 shrink-0"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth={1.75}
-                        aria-hidden
-                      >
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          d="M15.75 9V5.25A2.25 2.25 0 0 0 13.5 3h-6a2.25 2.25 0 0 0-2.25 2.25v13.5A2.25 2.25 0 0 0 7.5 21h6a2.25 2.25 0 0 0 2.25-2.25V15m3 0 3-3m0 0-3-3m3 3H9"
-                        />
-                      </svg>
+                      <Icon icon={LogOut} />
                     )}
-                  </span>
+                  </IconTile>
                   <span className="text-[15px] font-medium text-danger">
                     {signingOut ? "Kirjaudutaan ulos…" : "Kirjaudu ulos"}
                   </span>

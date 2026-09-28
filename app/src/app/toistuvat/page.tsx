@@ -14,7 +14,8 @@ import {
   redirectToLogin,
 } from "@/components/clientFetch";
 import { Button, controlClass } from "@/components/ui";
-import { Card, ListRow, MoreMenu, PageTitle, Section, StatusTag } from "@/components/ds";
+import { Plus } from "lucide-react";
+import { Card, Icon, ListRow, MoreMenu, PageTitle, Section, StatusTag } from "@/components/ds";
 import { formatDate, formatDayMonth, formatEur, parseFinnishNumber } from "@/lib/format";
 import { invalidFieldProps } from "@/lib/focus-field";
 import { VAT_RATES_PERMILLE } from "@/lib/invoices";
@@ -348,9 +349,7 @@ export default function RecurringInvoicesPage() {
               aria-label="Uusi toistuva lasku"
               className="active-press relative inline-flex min-h-9 items-center gap-1 rounded-full bg-ink px-3.5 text-[13px] font-semibold text-canvas before:absolute before:inset-x-0 before:-inset-y-1 before:content-['']"
             >
-              <svg className="h-3.5 w-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} aria-hidden>
-                <path strokeLinecap="round" d="M12 5v14M5 12h14" />
-              </svg>
+              <Icon icon={Plus} size="inline" strokeWidth={2.5} />
               Uusi
             </button>
           }
@@ -359,7 +358,9 @@ export default function RecurringInvoicesPage() {
         {dueNow > 0 && (
           <Card className="space-y-3">
             <p className="text-[15px] text-ink">
-              {dueNow} toistuvaa laskua on erääntynyt luotavaksi.
+              {dueNow === 1
+                ? "1 toistuva lasku on erääntynyt luotavaksi."
+                : `${dueNow} toistuvaa laskua on erääntynyt luotavaksi.`}
             </p>
             <Button type="button" className="w-full" busy={busy} busyLabel="Luodaan…" onClick={() => void runDue()}>
               Luo erääntyneet laskut

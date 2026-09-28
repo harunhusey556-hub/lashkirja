@@ -1,7 +1,8 @@
 "use client";
 
 import { Button, controlClass } from "@/components/ui";
-import { FilterChips } from "@/components/ds";
+import { ChevronDown, Search } from "lucide-react";
+import { FilterChips, Icon } from "@/components/ds";
 import { RECEIPT_CATEGORIES } from "@/lib/receipt-categories";
 import { receiptTabChips, type ReceiptTabCounts, type ReceiptTabId } from "@/lib/receipt-tabs";
 
@@ -75,19 +76,14 @@ export function ReceiptFilters({
           className="active-press flex w-full min-h-11 items-center justify-between gap-2 text-left"
         >
           <span className="flex items-center gap-2 text-[13px] font-medium text-ink-2">
-            <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-4.35-4.35M11 18a7 7 0 100-14 7 7 0 000 14z" />
-            </svg>
+            <Icon icon={Search} size="inline" />
             Hae ja suodata kuitteja
           </span>
-          <svg
-            viewBox="0 0 20 20"
-            fill="currentColor"
-            aria-hidden
-            className={`h-4 w-4 text-ink-2 transition-transform ${isSearchOpen ? "rotate-180" : ""}`}
-          >
-            <path fillRule="evenodd" d="M5.22 8.22a.75.75 0 0 1 1.06 0L10 11.94l3.72-3.72a.75.75 0 1 1 1.06 1.06l-4.25 4.25a.75.75 0 0 1-1.06 0L5.22 9.28a.75.75 0 0 1 0-1.06Z" clipRule="evenodd" />
-          </svg>
+          <Icon
+            icon={ChevronDown}
+            size="inline"
+            className={`text-ink-2 transition-transform ${isSearchOpen ? "rotate-180" : ""}`}
+          />
         </button>
 
         {isSearchOpen && (

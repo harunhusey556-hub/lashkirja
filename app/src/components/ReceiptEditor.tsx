@@ -22,6 +22,8 @@ import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { useEditorSession } from "@/components/form-session";
 import { Button, FormError, SavePhaseNote, buttonClass, chipClass, controlClass } from "@/components/ui";
 import { SelectMenu } from "@/components/SelectMenu";
+import { Check, X } from "lucide-react";
+import { Icon } from "@/components/ds/Icon";
 import { formatDate, formatEur, parseMoneyInput } from "@/lib/format";
 import { focusFirstInvalid } from "@/lib/focus-field";
 import {
@@ -681,14 +683,12 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
     <div className="space-y-6 pb-6">
       {isNewStep2 && (
         <div className="flex items-center gap-3 rounded-card border border-success/20 bg-success/10 p-4">
-          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-success/20 text-success">
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="h-5 w-5">
-              <path fillRule="evenodd" d="M19.916 4.626a.75.75 0 0 1 .208 1.04l-9 13.5a.75.75 0 0 1-1.154.114l-6-6a.75.75 0 0 1 1.06-1.06l5.353 5.353 8.493-12.74a.75.75 0 0 1 1.04-.207Z" clipRule="evenodd" />
-            </svg>
+          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-success/20 text-success">
+            <Icon icon={Check} strokeWidth={2.5} />
           </div>
           <div>
-            <h3 className="text-[15px] font-semibold text-success">Kuitti tallennettu onnistuneesti!</h3>
-            <p className="mt-0.5 text-[13px] text-ink">Vaihe 2: Yhdistä kuitti oikeaan pankkitapahtumaan tiliotteelta.</p>
+            <h3 className="text-[15px] font-semibold text-success">Kuitti tallennettu</h3>
+            <p className="mt-0.5 text-[13px] text-ink">Seuraavaksi yhdistä kuitti oikeaan pankkitapahtumaan tiliotteelta.</p>
           </div>
         </div>
       )}
@@ -1018,7 +1018,7 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
                             detail.rate === "25.5"
                           }
                         >
-                          ×
+                          <Icon icon={X} />
                         </button>
                       </div>
                     );

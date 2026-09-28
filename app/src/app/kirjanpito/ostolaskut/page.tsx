@@ -26,6 +26,7 @@ import {
 import { Button, controlClass } from "@/components/ui";
 import {
   FilterChips,
+  Icon,
   KeyValueList,
   ListRow,
   MoreMenu,
@@ -34,6 +35,7 @@ import {
   StatusTag,
   SummaryCard,
 } from "@/components/ds";
+import { Plus } from "lucide-react";
 import { pageCacheFetchedAt, readPageCache, writePageCache } from "@/lib/page-cache";
 import { isForbidden } from "@/lib/screen-state";
 import { usePersistedState, useScrollRestoration } from "@/lib/list-ui-state";
@@ -79,7 +81,10 @@ const today = () => new Date().toISOString().slice(0, 10);
 function rowSecondary(invoice: PurchaseInvoice): string {
   const datePhrase = invoice.displayStatus === "overdue" ? "erääntyi" : "eräpäivä";
   const dateText = `${datePhrase} ${formatDayMonth(invoice.dueDate)}`;
-  const base = invoice.invoiceNumber ? `${invoice.invoiceNumber} · ${dateText}` : dateText;
+  // Without an invoice number the date phrase starts the line, so it starts with a capital.
+  const base = invoice.invoiceNumber
+    ? `${invoice.invoiceNumber} · ${dateText}`
+    : dateText.charAt(0).toUpperCase() + dateText.slice(1);
   const partiallyPaid = invoice.paid > 0 && invoice.open > 0;
   return partiallyPaid ? `${base} · avoinna ${formatEur(invoice.open)}` : base;
 }
@@ -360,9 +365,7 @@ export default function PurchaseInvoicesPage() {
               onClick={() => setCreateOpen(true)}
               className="active-press relative inline-flex min-h-9 items-center gap-1 rounded-full bg-ink px-3.5 text-[13px] font-semibold text-canvas before:absolute before:inset-x-0 before:-inset-y-1 before:content-['']"
             >
-              <svg className="h-3.5 w-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} aria-hidden>
-                <path strokeLinecap="round" d="M12 5v14M5 12h14" />
-              </svg>
+              <Icon icon={Plus} size="inline" strokeWidth={2.5} />
               Uusi ostolasku
             </button>
           }

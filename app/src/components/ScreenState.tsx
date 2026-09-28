@@ -1,6 +1,8 @@
 "use client";
 
+import { CloudOff, Inbox, Lock, SearchX, type LucideIcon } from "lucide-react";
 import { Button } from "@/components/ui";
+import { Icon } from "@/components/ds/Icon";
 import { redirectToLogin } from "@/components/clientFetch";
 import {
   CONNECTION_COPY,
@@ -110,6 +112,13 @@ const EMPTY_COPY: Record<
   },
 };
 
+const EMPTY_ICON: Record<EmptyKind, LucideIcon> = {
+  records: Inbox,
+  filtered: SearchX,
+  failed: CloudOff,
+  forbidden: Lock,
+};
+
 export function EmptyState({
   kind,
   title,
@@ -133,9 +142,19 @@ export function EmptyState({
 }) {
   const copy = EMPTY_COPY[kind];
   return (
-    <div className="text-center py-8 space-y-3" data-empty={kind}>
-      <p className="text-sm font-medium text-charcoal">{title ?? copy.title}</p>
-      <p className="text-sm text-warm-gray">{body ?? copy.body}</p>
+    <div className="flex flex-col items-center space-y-3 px-4 py-10 text-center" data-empty={kind}>
+      <span
+        aria-hidden
+        className={`flex h-14 w-14 items-center justify-center rounded-full ${
+          kind === "failed" ? "bg-danger/10 text-danger" : "border border-line bg-surface text-ink-2"
+        }`}
+      >
+        <Icon icon={EMPTY_ICON[kind]} size="hero" />
+      </span>
+      <div className="space-y-1">
+        <p className="text-[15px] font-semibold text-ink">{title ?? copy.title}</p>
+        <p className="mx-auto max-w-xs text-[13px] leading-relaxed text-ink-2">{body ?? copy.body}</p>
+      </div>
       {kind === "records" && action}
       {kind === "records" && onCreate && (
         <Button type="button" onClick={onCreate}>

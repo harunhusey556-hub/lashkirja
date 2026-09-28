@@ -12,7 +12,8 @@ import {
   redirectToLogin,
 } from "@/components/clientFetch";
 import { buttonClass, controlClass } from "@/components/control-styles";
-import { Card, KeyValueList, ListRow, PageTitle, Section } from "@/components/ds";
+import { ChevronLeft, ChevronRight, Download } from "lucide-react";
+import { Card, Icon, IconTile, KeyValueList, ListRow, PageTitle, Section } from "@/components/ds";
 import { formatEur, formatMonthShort } from "@/lib/format";
 import { receiptDrillHref } from "@/lib/report-drill";
 import { pageCacheFetchedAt, readPageCache, writePageCache } from "@/lib/page-cache";
@@ -63,22 +64,6 @@ const EXPORTS = [
   { type: "customers", label: "Asiakkaat" },
 ] as const;
 
-function ChevronLeftIcon() {
-  return (
-    <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-    </svg>
-  );
-}
-
-function ChevronRightIcon() {
-  return (
-    <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-    </svg>
-  );
-}
-
 /** The small chevron control under the page title (spec §10), same shape as Koti's month switcher. */
 function YearSwitcher({ year, currentYear, onChange }: { year: number; currentYear: number; onChange: (next: number) => void }) {
   return (
@@ -89,7 +74,7 @@ function YearSwitcher({ year, currentYear, onChange }: { year: number; currentYe
         onClick={() => onChange(year - 1)}
         className="active-press relative flex h-8 w-8 items-center justify-center rounded-full text-ink-2 before:absolute before:-inset-2 before:content-['']"
       >
-        <ChevronLeftIcon />
+        <Icon icon={ChevronLeft} size="inline" />
       </button>
       <span className="min-w-[4ch] text-center text-[13px] tabular-nums text-ink-2">{year}</span>
       <button
@@ -99,18 +84,15 @@ function YearSwitcher({ year, currentYear, onChange }: { year: number; currentYe
         disabled={year >= currentYear}
         className="active-press relative flex h-8 w-8 items-center justify-center rounded-full text-ink-2 disabled:opacity-30 before:absolute before:-inset-2 before:content-['']"
       >
-        <ChevronRightIcon />
+        <Icon icon={ChevronRight} size="inline" />
       </button>
     </div>
   );
 }
 
-function DownloadIcon() {
-  return (
-    <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.75} aria-hidden>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M12 3v12m0 0 4-4m-4 4-4-4M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2" />
-    </svg>
-  );
+/** Category keys are stored lower-case ("tarvikkeet"); a list title starts with a capital. */
+function sentenceCase(text: string): string {
+  return text ? text.charAt(0).toLocaleUpperCase("fi-FI") + text.slice(1) : text;
 }
 
 /**
@@ -123,9 +105,9 @@ function DownloadRow({ href, title }: { href: string; title: string }) {
   return (
     <div className="relative flex min-h-16 w-full items-center gap-3 px-4 py-3 text-left">
       <a href={href} aria-label={title} className="row-link active-press absolute inset-0" />
-      <span aria-hidden className="pointer-events-none flex h-[34px] w-[34px] shrink-0 items-center justify-center rounded-[10px] bg-canvas text-ink-2">
-        <DownloadIcon />
-      </span>
+      <IconTile>
+        <Icon icon={Download} />
+      </IconTile>
       <span className="pointer-events-none min-w-0 flex-1 text-[15px] font-medium text-ink">{title}</span>
     </div>
   );
@@ -286,8 +268,8 @@ export default function ReportsPage() {
                     key={row.category}
                     href={receiptDrillHref({ type: "meno", category: row.category })}
                     ariaLabel={`Avaa kuitit: ${row.category}`}
-                    title={row.category}
-                    secondary={`${row.count} kuittia · brutto ${formatEur(row.gross)}`}
+                    title={sentenceCase(row.category)}
+                    secondary={`${row.count} ${row.count === 1 ? "kuitti" : "kuittia"} · brutto ${formatEur(row.gross)}`}
                     amount={formatEur(row.net)}
                   />
                 ))
@@ -301,7 +283,7 @@ export default function ReportsPage() {
                     key={row.category}
                     href={receiptDrillHref({ type: "tulo", category: row.category })}
                     ariaLabel={`Avaa kuitit: ${row.category}`}
-                    title={row.category}
+                    title={sentenceCase(row.category)}
                     amount={formatEur(row.net)}
                   />
                 ))}
