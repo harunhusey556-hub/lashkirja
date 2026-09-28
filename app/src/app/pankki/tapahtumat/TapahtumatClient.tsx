@@ -1,10 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { ErrorState, SkeletonList } from "@/components/AsyncState";
-import StatementSummaryCards from "@/components/StatementSummaryCards";
+import { EmptyState } from "@/components/ScreenState";
 import {
   apiFetch,
   errorMessage,
@@ -16,9 +15,12 @@ import {
   formatMonth,
   type StatementData,
 } from "@/lib/statement-client";
+import { formatEurSigned } from "@/lib/format";
 import { readPageCache, writePageCache } from "@/lib/page-cache";
 import { usePersistedState, useScrollRestoration } from "@/lib/list-ui-state";
 import { chooseDocuments, isNativeShell } from "@/lib/native-pick";
+import { Button, controlClass } from "@/components/ui";
+import { ListRow, PageTitle, Section, StatusTag } from "@/components/ds";
 
 const RECENT_LIMIT = 5;
 
@@ -200,16 +202,15 @@ export default function TapahtumatClient() {
   const visibleStatements = showAllStatements
     ? filteredStatements
     : filteredStatements.slice(0, RECENT_LIMIT);
+  const hasFilters = Boolean(monthFilter || accountFilter || query);
 
   return (
-    <>
-      <div className="space-y-8 pb-6">
-        <p className="text-sm text-warm-gray leading-relaxed">
-          Tapahtumat tulevat yhdistetystä pankista. Tiedoston tuonti on alla, jos tarvitset sen.
-        </p>
+    <div className="space-y-6 pb-6">
+      <PageTitle title="Tapahtumat" subtitle="Tapahtumat tulevat yhdistetystä pankista." />
 
-        <div className="flex flex-col gap-2">
-          <label htmlFor="statement-search" className="text-sm font-medium text-charcoal">
+      <div className="space-y-3">
+        <div>
+          <label htmlFor="statement-search" className="mb-1.5 block text-[13px] font-normal text-ink-2">
             Haku
           </label>
           <input
@@ -220,71 +221,71 @@ export default function TapahtumatClient() {
               setShowAllStatements(false);
             }}
             placeholder="Tiedosto tai tili"
-            className="min-h-12 rounded-xl border border-warm-gray-light/60 bg-white px-4 text-sm"
+            className={controlClass}
           />
-          <div className="flex flex-col gap-2 sm:flex-row">
-            <label className="flex min-w-0 flex-1 flex-col gap-1 text-sm font-medium text-charcoal">
+        </div>
+        <div className="flex flex-col gap-3 sm:flex-row">
+          <div className="min-w-0 flex-1">
+            <label htmlFor="statement-month-filter" className="mb-1.5 block text-[13px] font-normal text-ink-2">
               Kuukausi
+            </label>
+            <select
+              id="statement-month-filter"
+              value={monthFilter}
+              onChange={(event) => {
+                replaceQuery({ month: event.target.value });
+                setShowAllStatements(false);
+              }}
+              className={controlClass}
+            >
+              <option value="">Kaikki</option>
+              {months.map((month) => (
+                <option key={month} value={month}>
+                  {formatMonth(month)}
+                </option>
+              ))}
+            </select>
+          </div>
+          {accounts.length > 0 && (
+            <div className="min-w-0 flex-1">
+              <label htmlFor="statement-account-filter" className="mb-1.5 block text-[13px] font-normal text-ink-2">
+                Tili
+              </label>
               <select
-                id="statement-month-filter"
-                value={monthFilter}
+                id="statement-account-filter"
+                value={accountFilter}
                 onChange={(event) => {
-                  replaceQuery({ month: event.target.value });
+                  replaceQuery({ account: event.target.value });
                   setShowAllStatements(false);
                 }}
-                className="min-h-12 rounded-xl border border-warm-gray-light/60 bg-white px-4 text-sm font-normal"
+                className={controlClass}
               >
                 <option value="">Kaikki</option>
-                {months.map((month) => (
-                  <option key={month} value={month}>
-                    {formatMonth(month)}
+                {accounts.map((account) => (
+                  <option key={account.id} value={account.id}>
+                    {account.name}
                   </option>
                 ))}
               </select>
-            </label>
-            {accounts.length > 0 && (
-              <label className="flex min-w-0 flex-1 flex-col gap-1 text-sm font-medium text-charcoal">
-                Tili
-                <select
-                  id="statement-account-filter"
-                  value={accountFilter}
-                  onChange={(event) => {
-                    replaceQuery({ account: event.target.value });
-                    setShowAllStatements(false);
-                  }}
-                  className="min-h-12 rounded-xl border border-warm-gray-light/60 bg-white px-4 text-sm font-normal"
-                >
-                  <option value="">Kaikki</option>
-                  {accounts.map((account) => (
-                    <option key={account.id} value={account.id}>
-                      {account.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            )}
-          </div>
+            </div>
+          )}
         </div>
+      </div>
 
-        <details className="bg-white rounded-3xl border border-warm-gray-light/20 shadow-sm p-6 space-y-5">
-          <summary className="text-sm font-medium text-charcoal cursor-pointer min-h-11">
-            Tuo tiliote tiedostona
-          </summary>
-          <p className="text-sm text-warm-gray leading-relaxed pt-3">PDF, XML, XLSX tai CSV</p>
+      <Section title="Tuo tiliote tiedostona">
+        <div className="space-y-4 px-4 py-4">
+          <p className="text-[13px] text-ink-2">PDF, XML, XLSX tai CSV</p>
 
           {accounts.length > 0 && (
-            <div className="space-y-1.5">
-              <label
-                htmlFor="statement-target-account"
-                className="text-sm font-medium text-charcoal"
-              >
+            <div>
+              <label htmlFor="statement-target-account" className="mb-1.5 block text-[13px] font-normal text-ink-2">
                 Pankkitili
               </label>
               <select
                 id="statement-target-account"
                 value={targetAccountId}
                 onChange={(e) => setTargetAccountId(e.target.value)}
-                className="w-full min-h-12 min-w-0 text-sm px-4 rounded-xl border border-warm-gray-light/60 bg-white"
+                className={controlClass}
               >
                 <option value="">Tunnista automaattisesti</option>
                 {accounts.map((account) => (
@@ -297,14 +298,16 @@ export default function TapahtumatClient() {
             </div>
           )}
 
-          <button
+          <Button
             type="button"
+            variant="secondary"
+            className="w-full"
+            busy={uploading}
+            busyLabel="Käsitellään…"
             onClick={() => void pickStatementFile()}
-            disabled={uploading}
-            className="touch-target w-full min-h-12 rounded-2xl border border-warm-gray-light text-sm font-medium text-charcoal transition-colors hover:bg-cream disabled:opacity-50 active-press"
           >
-            {uploading ? "Käsitellään..." : "Tuo tiedosto"}
-          </button>
+            Tuo tiedosto
+          </Button>
 
           <input
             ref={fileInputRef}
@@ -321,9 +324,9 @@ export default function TapahtumatClient() {
 
           {uploadMsg && (
             <p
-              className={`text-sm leading-relaxed ${
+              className={`text-[13px] ${
                 uploading
-                  ? "text-warm-gray"
+                  ? "text-ink-2"
                   : uploadMsg.startsWith("Virhe")
                     ? "text-danger"
                     : "text-success"
@@ -331,38 +334,33 @@ export default function TapahtumatClient() {
               role={uploadMsg.startsWith("Virhe") ? "alert" : "status"}
               aria-live="polite"
             >
-              {uploading && (
-                <span
-                  className="inline-block w-4 h-4 border-2 border-accent border-t-transparent rounded-full animate-spin motion-reduce:animate-none mr-2 align-middle"
-                  aria-hidden="true"
-                />
-              )}
               {uploadMsg}
             </p>
           )}
-        </details>
+        </div>
+      </Section>
 
-        {loadError ? (
-          <ErrorState
-            message={loadError}
-            onRetry={() => {
-              setLoadError("");
-              setLoading(true);
-              void loadStatements();
-            }}
-            compact
-          />
-        ) : loading ? (
-          <SkeletonList rows={4} />
-        ) : visibleStatements.length === 0 ? (
-          <div className="text-center py-10 space-y-2">
-            <p className="text-sm font-medium text-charcoal">Ei tiliotteita vielä</p>
-            <p className="text-sm text-warm-gray leading-relaxed">
-              Tuo tiedosto tai hae tapahtumat pankista yllä.
-            </p>
-          </div>
-        ) : (
-          <div className="space-y-4 list-stagger">
+      {loadError ? (
+        <ErrorState
+          message={loadError}
+          onRetry={() => {
+            setLoadError("");
+            setLoading(true);
+            void loadStatements();
+          }}
+          compact
+        />
+      ) : loading ? (
+        <SkeletonList rows={4} />
+      ) : visibleStatements.length === 0 ? (
+        <EmptyState
+          kind={hasFilters ? "filtered" : "records"}
+          title={hasFilters ? "Ei tiliotteita näillä suodattimilla" : "Ei tiliotteita vielä"}
+          body={hasFilters ? "Kokeile väljempää hakua." : "Tuo tiedosto tai hae tapahtumat pankista yllä."}
+        />
+      ) : (
+        <div className="space-y-3">
+          <Section>
             {visibleStatements.map((s) => {
               const relevant = s.transactions.filter(
                 (t) => t.type !== "oma_siirto" && t.type !== "palkka"
@@ -377,87 +375,52 @@ export default function TapahtumatClient() {
                   t.matchStatus !== "confirmed" &&
                   t.matchStatus !== "ignored"
               ).length;
+              const secondary = [
+                formatMonth(s.periodMonth),
+                s.bankAccount ? s.bankAccount.name : "Ei pankkitiliä",
+                `${s.totals.txCount} tapahtumaa`,
+                relevant > 0 ? `${linked}/${relevant} linkitetty` : null,
+              ]
+                .filter(Boolean)
+                .join(" · ");
 
               return (
-                <Link
+                <ListRow
                   key={s.id}
-                  href={searchParams.toString() ? `/pankki/tapahtumat/${s.id}?${searchParams.toString()}` : `/pankki/tapahtumat/${s.id}`}
-                  className="block bg-white rounded-3xl border border-warm-gray-light/20 shadow-sm overflow-hidden hover:border-accent/20 hover:shadow-md transition-all"
-                >
-                  <div className="p-6 space-y-5">
-                    <div className="flex items-start justify-between gap-4">
-                      <div className="min-w-0 space-y-2">
-                        <p className="text-base font-semibold text-charcoal leading-snug break-words">
-                          {s.fileName}
-                        </p>
-                        {s.fileType === "enablebanking" && (
-                          <p className="text-xs font-medium text-accent">Pankkiyhteys</p>
-                        )}
-                        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-warm-gray">
-                          <span>{formatMonth(s.periodMonth)}</span>
-                          <span aria-hidden>·</span>
-                          <span
-                            className={s.bankAccount ? "" : "text-warning"}
-                            title={s.bankAccount ? undefined : "Tiliotetta ei ole kohdistettu pankkitilille"}
-                          >
-                            {s.bankAccount ? s.bankAccount.name : "Ei pankkitiliä"}
-                          </span>
-                          <span aria-hidden>·</span>
-                          <span>{s.totals.txCount} tapahtumaa</span>
-                          {relevant > 0 && (
-                            <>
-                              <span aria-hidden>·</span>
-                              <span>
-                                {linked}/{relevant} linkitetty
-                              </span>
-                            </>
-                          )}
-                          {missing > 0 && (
-                            <>
-                              <span aria-hidden>·</span>
-                              <span className="text-accent">
-                                {missing} puuttuu
-                              </span>
-                            </>
-                          )}
-                        </div>
+                  href={
+                    searchParams.toString()
+                      ? `/pankki/tapahtumat/${s.id}?${searchParams.toString()}`
+                      : `/pankki/tapahtumat/${s.id}`
+                  }
+                  title={s.fileName}
+                  secondary={secondary}
+                  amount={formatEurSigned(s.totals.net)}
+                  amountTone={s.totals.net >= 0 ? "positive" : "default"}
+                  ariaLabel={`${s.fileName}, ${secondary}, ${formatEurSigned(s.totals.net)}${missing > 0 ? `, ${missing} puuttuu` : ""}`}
+                  trailing={
+                    (s.fileType === "enablebanking" || missing > 0) && (
+                      <div className="flex items-center gap-1.5">
+                        {s.fileType === "enablebanking" && <StatusTag tone="accent">Pankkiyhteys</StatusTag>}
+                        {missing > 0 && <StatusTag tone="warning">{missing} puuttuu</StatusTag>}
                       </div>
-                      <svg
-                        className="w-5 h-5 shrink-0 text-warm-gray mt-0.5"
-                        fill="none"
-                        stroke="currentColor"
-                        viewBox="0 0 24 24"
-                        aria-hidden
-                      >
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          strokeWidth={2}
-                          d="M9 5l7 7-7 7"
-                        />
-                      </svg>
-                    </div>
-
-                    <StatementSummaryCards totals={s.totals} compact />
-                  </div>
-                </Link>
+                    )
+                  }
+                />
               );
             })}
-
-            {filteredStatements.length > RECENT_LIMIT && (
-              <button
-                type="button"
-                onClick={() => setShowAllStatements((v) => !v)}
-                className="w-full py-3 text-sm font-medium text-accent hover:text-accent-dark transition-colors"
-              >
-                {showAllStatements
-                  ? "Näytä vähemmän"
-                  : `Katso kaikki (${filteredStatements.length})`}
-              </button>
-            )}
-          </div>
-        )}
-      </div>
-    </>
+          </Section>
+          {filteredStatements.length > RECENT_LIMIT && (
+            <Button
+              type="button"
+              variant="secondary"
+              className="w-full"
+              onClick={() => setShowAllStatements((v) => !v)}
+            >
+              {showAllStatements ? "Näytä vähemmän" : `Katso kaikki (${filteredStatements.length})`}
+            </Button>
+          )}
+        </div>
+      )}
+    </div>
   );
 }

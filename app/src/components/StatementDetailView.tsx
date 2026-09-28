@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState, type ReactNode } from "react";
+import { useCallback, useState } from "react";
 import {
   apiFetch,
   errorMessage,
@@ -14,7 +14,6 @@ import {
   filterStatementTransactions,
   formatEur,
   formatMonth,
-  needsReceipt,
   receiptLabel,
   recomputeTotals,
   type MatchCandidate,
@@ -22,48 +21,19 @@ import {
   type StatementTransaction,
   type StatementTxFilter,
 } from "@/lib/statement-client";
-import { parseFinnishNumber } from "@/lib/format";
+import { formatDate, formatEurSigned, parseFinnishNumber } from "@/lib/format";
+import { STATEMENT_TX_STATUS, statementTxStatusKey } from "@/lib/status-labels";
 import StatementSummaryCards from "@/components/StatementSummaryCards";
 import ConfirmModal from "@/components/ConfirmModal";
+import { Button, controlClass } from "@/components/ui";
+import { ActionPill, DetailHero, FilterChips, ListRow, MoreMenu, Section, StatusTag } from "@/components/ds";
+
+const LABEL_CLASS = "mb-1.5 block text-[13px] font-normal text-ink-2";
 
 interface Props {
   statement: StatementData;
   onStatementUpdated: (statement: StatementData) => void;
   onDeleted: () => void;
-}
-
-function MatchBadge({ t }: { t: StatementTransaction }) {
-  if (t.type === "palkka") {
-    return (
-      <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-warm-gray-light/30 text-charcoal">
-        Palkka
-      </span>
-    );
-  }
-  if (t.type === "oma_siirto") return null;
-  const base =
-    "inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium";
-  if (t.matchStatus === "confirmed")
-    return (
-      <span className={`${base} bg-success/10 text-success`}>
-        Linkitetty
-      </span>
-    );
-  if (t.matchStatus === "suggested")
-    return (
-      <span className={`${base} bg-accent/10 text-accent`}>Ehdotus</span>
-    );
-  if (t.matchStatus === "ignored")
-    return (
-      <span className={`${base} bg-warm-gray-light/30 text-warm-gray`}>
-        Ei tarvita
-      </span>
-    );
-  return (
-    <span className={`${base} bg-warm-gray-light/20 text-warm-gray`}>
-      Puuttuu
-    </span>
-  );
 }
 
 function typeLabel(type: string): string {
@@ -73,31 +43,10 @@ function typeLabel(type: string): string {
   return "Meno";
 }
 
-function ActionLink({
-  children,
-  onClick,
-  disabled,
-  tone = "neutral",
-}: {
-  children: ReactNode;
-  onClick: () => void;
-  disabled?: boolean;
-  tone?: "neutral" | "danger";
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={disabled}
-      className={`min-h-11 inline-flex items-center px-2 -mx-2 text-sm font-medium transition-colors disabled:opacity-40 ${
-        tone === "danger"
-          ? "text-danger hover:text-danger/80"
-          : "text-warm-gray hover:text-charcoal"
-      }`}
-    >
-      {children}
-    </button>
-  );
+function txSecondary(t: StatementTransaction): string {
+  return [formatDate(t.date), typeLabel(t.type), t.reference || null]
+    .filter((part): part is string => Boolean(part))
+    .join(" · ");
 }
 
 export default function StatementDetailView({
@@ -106,6 +55,7 @@ export default function StatementDetailView({
   onDeleted,
 }: Props) {
   const [activeFilter, setActiveFilter] = useState<StatementTxFilter>("all");
+  const [expandedId, setExpandedId] = useState<string | null>(null);
   const [editingTx, setEditingTx] = useState<StatementTransaction | null>(
     null
   );
@@ -133,7 +83,6 @@ export default function StatementDetailView({
   // both delete actions. Everything else in the app already uses ConfirmModal.
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [confirmingTxDelete, setConfirmingTxDelete] = useState<string | null>(null);
-  const [toolsOpen, setToolsOpen] = useState(false);
 
   const reloadStatement = useCallback(async () => {
     try {
@@ -184,6 +133,7 @@ export default function StatementDetailView({
 
   function startEditTx(t: StatementTransaction) {
     setEditingTx(t);
+    setExpandedId(t.id);
     setTxForm({
       counterparty: t.counterparty || "",
       date: t.date ? t.date.slice(0, 10) : "",
@@ -510,8 +460,6 @@ export default function StatementDetailView({
     (t) => t.matchStatus === "confirmed"
   ).length;
 
-  // Only the genuinely actionable bulk step stays on screen.
-  
   const incomeDrafts = statement.transactions.filter(
     (t) => t.matchStatus === "suggested" && t.suggestedReceipt?.source === "auto_income"
   );
@@ -550,629 +498,492 @@ export default function StatementDetailView({
     }
   };
 
+  const filterChipItems = STATEMENT_TX_FILTERS.filter(
+    (f) => f.id === "all" || filterCounts[f.id] > 0
+  ).map((f) => ({ id: f.id, label: f.shortLabel ?? f.label, count: filterCounts[f.id] }));
+
   return (
     <div className="space-y-6 pb-4">
-      {/* Header */}
-      <section className="bg-white rounded-3xl shadow-sm border border-warm-gray-light/20 p-6 space-y-5">
-        <div className="space-y-1">
-          <h2 className="text-xl font-semibold text-charcoal leading-snug break-words">
-            {statement.fileName}
-          </h2>
-          <p className="text-sm text-warm-gray leading-relaxed">
-            {formatMonth(periodValue() || statement.periodMonth)}
-            {relevantCount > 0 &&
-              ` · ${linkedCount}/${relevantCount} kuittia linkitetty`}
-            {periodDirty() && " · tallentamaton"}
-          </p>
-        </div>
+      <DetailHero
+        amount={formatEurSigned(statement.totals.net)}
+        amountTone={statement.totals.net >= 0 ? "positive" : "default"}
+        title={statement.fileName}
+        meta={
+          <>
+            <span className="block">{formatMonth(periodValue() || statement.periodMonth)}</span>
+            <span className="block">{statement.bankAccount ? statement.bankAccount.name : "Ei pankkitiliä"}</span>
+            {relevantCount > 0 && (
+              <span className="block">
+                {linkedCount}/{relevantCount} kuittia linkitetty
+                {periodDirty() && " · tallentamaton"}
+              </span>
+            )}
+          </>
+        }
+        menu={
+          <MoreMenu
+            items={[
+              {
+                label: "Etsi kuitteja uudelleen",
+                onSelect: () => void rerunMatching(),
+                disabled: bulkBusy,
+              },
+              {
+                label: "Tunnista palkat uudelleen",
+                onSelect: () => void reinferTransferTypes(),
+                disabled: bulkBusy,
+              },
+              {
+                label: "Poista tiliote",
+                onSelect: () => setConfirmingDelete(true),
+                tone: "danger",
+                disabled: deleting,
+              },
+            ]}
+          />
+        }
+      />
 
-        <StatementSummaryCards totals={statement.totals} />
+      <StatementSummaryCards totals={statement.totals} />
 
-        {statement.totals.transfers !== 0 && (
-          <p className="text-sm text-warm-gray">
-            Omat siirrot {formatEur(statement.totals.transfers)} — eivät sisälly
-            nettoon
-          </p>
-        )}
+      {statement.totals.transfers !== 0 && (
+        <p className="text-[13px] text-ink-2">
+          Omat siirrot {formatEur(statement.totals.transfers)} — eivät sisälly
+          nettoon
+        </p>
+      )}
 
-        <div className="pt-4 border-t border-warm-gray-light/25 space-y-4">
-          <div className="flex flex-col sm:flex-row sm:items-end gap-4">
-            <div className="flex-1 min-w-0">
-              <label
-                htmlFor={`statement-${statement.id}-period`}
-                className="block text-sm text-charcoal mb-2"
-              >
-                Kohdekuukausi
-              </label>
-              <input
-                id={`statement-${statement.id}-period`}
-                type="month"
-                value={periodValue()}
-                onChange={(e) => setDraftPeriod(e.target.value)}
-                className="w-full sm:max-w-xs min-h-12 min-w-0 px-3 rounded-xl border border-warm-gray-light/60 bg-white text-sm"
-              />
-              <p className="text-xs text-warm-gray mt-2 leading-relaxed">
-                Määrittää millä kuukaudella etusivu näyttää tämän tiliotteen.
-              </p>
-            </div>
-            <button
-              type="button"
-              onClick={() => setConfirmingDelete(true)}
-              disabled={deleting}
-              className="shrink-0 self-start sm:self-auto px-4 py-2.5 rounded-xl text-sm font-medium text-danger border border-danger/20 hover:bg-danger/5 transition-colors disabled:opacity-50"
-            >
-              {deleting ? "Poistetaan..." : "Poista tiliote"}
-            </button>
+      <Section title="Kohdekuukausi">
+        <div className="space-y-3 px-4 py-4">
+          <div>
+            <label htmlFor={`statement-${statement.id}-period`} className={LABEL_CLASS}>
+              Kohdekuukausi
+            </label>
+            <input
+              id={`statement-${statement.id}-period`}
+              type="month"
+              value={periodValue()}
+              onChange={(e) => setDraftPeriod(e.target.value)}
+              className={controlClass}
+            />
+            <p className="mt-1.5 text-[13px] text-ink-2">
+              Määrittää millä kuukaudella etusivu näyttää tämän tiliotteen.
+            </p>
           </div>
 
           {periodDirty() && (
-            <div className="flex gap-3">
-              <button
-                type="button"
-                onClick={cancelPeriodMonth}
-                className="flex-1 py-2.5 text-sm rounded-xl border border-warm-gray-light text-warm-gray hover:bg-cream transition-colors"
-              >
+            <div className="flex gap-2">
+              <Button type="button" variant="secondary" className="flex-1" onClick={cancelPeriodMonth}>
                 Peruuta
-              </button>
-              <button
+              </Button>
+              <Button
                 type="button"
+                className="flex-1"
+                busy={savingPeriod}
+                busyLabel="Tallennetaan…"
+                disabled={!periodValue()}
                 onClick={() => void savePeriodMonth()}
-                disabled={savingPeriod || !periodValue()}
-                className="flex-1 py-2.5 text-sm rounded-xl bg-accent text-white hover:bg-accent-dark disabled:opacity-50"
               >
-                {savingPeriod ? "Tallennetaan..." : "Tallenna kuukausi"}
-              </button>
+                Tallenna kuukausi
+              </Button>
             </div>
           )}
         </div>
-      </section>
+      </Section>
 
       {actionError && (
-        <div
-          className="text-sm text-danger bg-danger/10 rounded-2xl px-5 py-4 border border-danger/10"
-          role="alert"
-        >
+        <p className="rounded-card bg-danger/10 px-4 py-3 text-sm text-danger" role="alert">
           {actionError}
-        </div>
+        </p>
       )}
 
       {statusMsg && (
-        <p className="text-sm text-success px-1" role="status" aria-live="polite">
+        <p className="px-1 text-[13px] text-success" role="status" aria-live="polite">
           {statusMsg}
         </p>
       )}
 
-      {/* Filters */}
-      <section className="sticky top-12 z-10 -mx-1 px-1">
-        <div className="bg-white/95 backdrop-blur-md rounded-2xl border border-warm-gray-light/25 shadow-sm p-2">
-          <div
-            className="flex gap-2 overflow-x-auto pb-0.5 scrollbar-none"
-            role="tablist"
-            aria-label="Suodata tapahtumia"
-          >
-            {STATEMENT_TX_FILTERS.map((f) => {
-              const active = activeFilter === f.id;
-              const count = filterCounts[f.id];
-              if (f.id !== "all" && count === 0) return null;
-              return (
-                <button
-                  key={f.id}
-                  type="button"
-                  role="tab"
-                  aria-selected={active}
-                  onClick={() => setActiveFilter(f.id)}
-                  className={`shrink-0 flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium transition-all ${
-                    active
-                      ? "bg-charcoal text-white shadow-sm"
-                      : "bg-cream/80 text-charcoal hover:bg-cream"
-                  }`}
-                >
-                  <span>{f.shortLabel ?? f.label}</span>
-                  <span
-                    className={`tabular-nums text-xs px-2 py-0.5 rounded-full ${
-                      active
-                        ? "bg-white/15 text-white"
-                        : "bg-white text-warm-gray"
-                    }`}
-                  >
-                    {count}
-                  </span>
-                </button>
-              );
-            })}
-          </div>
-        </div>
-      </section>
+      {filterChipItems.length > 1 && (
+        <FilterChips label="Suodata tapahtumia" items={filterChipItems} value={activeFilter} onChange={setActiveFilter} />
+      )}
 
       {incomeDraftCount > 0 && (
-        <section className="rounded-3xl p-5 space-y-4 border border-success/30 bg-success/5 shadow-sm">
+        <div className="space-y-3 rounded-card border border-success/20 bg-success/10 p-4">
           <div>
-            <div className="flex items-center gap-2">
-              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-5 h-5 text-success">
-                <path fillRule="evenodd" d="M10 18a8 8 0 1 0 0-16 8 8 0 0 0 0 16Zm3.857-9.809a.75.75 0 0 0-1.214-.882l-3.483 4.79-1.88-1.88a.75.75 0 1 0-1.06 1.061l2.5 2.5a.75.75 0 0 0 1.137-.089l4-5.5Z" clipRule="evenodd" />
-              </svg>
-              <h3 className="text-base font-medium text-success-dark">Tunnistetut myynnit</h3>
-            </div>
-            <p className="text-sm text-charcoal/80 mt-2 leading-relaxed">
+            <h3 className="text-[15px] font-semibold text-success">Tunnistetut myynnit</h3>
+            <p className="mt-1 text-[13px] text-ink">
               Tunnistimme tiliotteelta {incomeDraftCount} myyntitapahtumaa (esim. MobilePay-tilitystä).
               Hyväksymällä lisäät ne automaattisesti kirjanpitoon tuloina, alv mukaan lukien.
             </p>
           </div>
-          <button
+          <Button
             type="button"
-            onClick={handleApproveAllIncomes}
-            disabled={bulkBusy}
-            className="w-full py-3 px-4 rounded-2xl bg-success text-white text-sm font-medium hover:bg-success-dark disabled:opacity-50 transition-colors"
+            className="w-full"
+            busy={bulkBusy}
+            busyLabel="Hyväksytään…"
+            onClick={() => void handleApproveAllIncomes()}
           >
-            {bulkBusy ? "Hyväksytään..." : `Hyväksy kaikki ${incomeDraftCount} kpl`}
-          </button>
-        </section>
+            Hyväksy kaikki {incomeDraftCount} kpl
+          </Button>
+        </div>
       )}
 
       {regularSuggestedCount > 0 && (
-        <section className="rounded-3xl p-5 space-y-4 border border-accent/10 bg-white shadow-sm">
+        <div className="space-y-3 rounded-card border border-line bg-surface p-4">
           <div>
-            <p className="text-base font-medium text-charcoal">Kuittien linkitys</p>
-            <p className="text-sm text-warm-gray mt-1 leading-relaxed">
+            <p className="text-[15px] font-medium text-ink">Kuittien linkitys</p>
+            <p className="mt-1 text-[13px] text-ink-2">
               {regularSuggestedCount} valmista ehdotusta
               {missingCount > 0 && ` · ${missingCount} tapahtumaa odottaa kuittia`}
             </p>
           </div>
-          <button
+          <Button
             type="button"
+            className="w-full"
+            busy={bulkBusy}
+            busyLabel="Linkitetään…"
             onClick={() => void confirmAllSuggested()}
-            disabled={bulkBusy}
-            className="w-full py-3 px-4 rounded-2xl bg-accent text-white text-sm font-medium hover:bg-accent-dark disabled:opacity-50 transition-colors"
           >
-            {bulkBusy ? "Linkitetään..." : `Linkitä kaikki (${regularSuggestedCount})`}
-          </button>
-        </section>
+            Linkitä kaikki ({regularSuggestedCount})
+          </Button>
+        </div>
       )}
 
-      <section className="rounded-3xl border border-warm-gray-light/20 bg-white/60">
-        <button
-          type="button"
-          onClick={() => setToolsOpen((prev) => !prev)}
-          className="w-full flex items-center justify-between gap-3 p-4 text-left"
-          aria-expanded={toolsOpen}
-        >
-          <span className="text-sm font-medium text-charcoal">Työkalut</span>
-          <svg
-            xmlns="http://www.w3.org/2000/svg"
-            viewBox="0 0 20 20"
-            fill="currentColor"
-            aria-hidden
-            className={`w-5 h-5 shrink-0 text-warm-gray transition-transform duration-300 ${
-              toolsOpen ? "rotate-180" : ""
-            }`}
-          >
-            <path
-              fillRule="evenodd"
-              d="M5.22 8.22a.75.75 0 0 1 1.06 0L10 11.94l3.72-3.72a.75.75 0 1 1 1.06 1.06l-4.25 4.25a.75.75 0 0 1-1.06 0L5.22 9.28a.75.75 0 0 1 0-1.06Z"
-              clipRule="evenodd"
-            />
-          </svg>
-        </button>
-
-        {toolsOpen && (
-          <div className="px-4 pb-4 space-y-3">
-            <div>
-              <button
-                type="button"
-                onClick={() => void rerunMatching()}
-                disabled={bulkBusy}
-                className="w-full py-2.5 px-4 rounded-2xl border border-warm-gray-light/60 bg-cream/50 text-charcoal text-sm font-medium hover:bg-cream disabled:opacity-50 transition-colors"
-              >
-                {bulkBusy ? "Haetaan..." : "Etsi kuitteja uudelleen"}
-              </button>
-              <p className="text-xs text-warm-gray mt-2 leading-relaxed">
-                Etsii kuiteille vastaavat tapahtumat uudelleen.
-              </p>
-            </div>
-
-            <div>
-              <button
-                type="button"
-                onClick={() => void reinferTransferTypes()}
-                disabled={bulkBusy}
-                className="w-full py-2.5 px-4 rounded-2xl border border-warm-gray-light/60 bg-cream/50 text-charcoal text-sm font-medium hover:bg-cream disabled:opacity-50 transition-colors"
-              >
-                {bulkBusy ? "Päivitetään..." : "Tunnista palkat uudelleen"}
-              </button>
-              <p className="text-xs text-warm-gray mt-2 leading-relaxed">
-                Tunnistaa uudelleen &quot;Palkka&quot;-viestillä maksetut siirrot
-                (näytetään Palkka-kategoriana, ei vaadi kuittia).
-              </p>
-            </div>
-          </div>
-        )}
-      </section>
-
-      {/* Transactions */}
-      <section className="space-y-3">
-        <div className="flex items-baseline justify-between px-1">
-          <h3 className="text-sm font-medium text-warm-gray uppercase tracking-wide">
-            Tapahtumat
-          </h3>
-          <span className="text-sm text-warm-gray tabular-nums">
+      <Section
+        title="Tapahtumat"
+        action={
+          <span className="tabular-nums">
             {filteredTransactions.length} / {statement.transactions.length}
           </span>
-        </div>
-
+        }
+      >
         {statement.transactions.length === 0 ? (
-          <p className="text-center py-12 text-sm text-warm-gray">
-            Ei tapahtumia
-          </p>
+          <p className="px-4 py-8 text-center text-[15px] text-ink-2">Ei tapahtumia</p>
         ) : filteredTransactions.length === 0 ? (
-          <p className="text-center py-12 text-sm text-warm-gray leading-relaxed">
+          <p className="px-4 py-8 text-center text-[15px] text-ink-2">
             {activeFilter === "missing"
               ? "Kaikilla tapahtumilla on kuitti tai merkintä"
               : "Ei tapahtumia tässä suodattimessa"}
           </p>
         ) : (
-          <div className="space-y-3">
-            {filteredTransactions.map((t) => (
-              <article
-                key={t.id}
-                className="bg-white rounded-3xl border border-warm-gray-light/25 shadow-sm p-5 space-y-4"
-              >
-                {editingTx?.id === t.id ? (
-                  <div className="space-y-4 bg-cream/40 rounded-2xl p-4">
-                    <label
-                      htmlFor={`transaction-${t.id}-counterparty`}
-                      className="block text-xs font-medium text-warm-gray mb-1.5"
-                    >
-                      Vastapuoli
-                    </label>
-                    <input
-                      id={`transaction-${t.id}-counterparty`}
-                      type="text"
-                      value={txForm.counterparty}
-                      onChange={(e) =>
-                        setTxForm({
-                          ...txForm,
-                          counterparty: e.target.value,
-                        })
-                      }
-                      className="w-full min-h-12 min-w-0 px-3 rounded-xl border border-warm-gray-light/60 bg-white text-sm"
-                    />
-                    <div className="field-dates">
-                      <div>
-                        <label
-                          htmlFor={`transaction-${t.id}-date`}
-                          className="block text-xs font-medium text-warm-gray mb-1.5"
-                        >
-                          Päivämäärä
-                        </label>
-                        <input
-                          id={`transaction-${t.id}-date`}
-                          type="date"
-                          value={txForm.date}
-                          onChange={(e) =>
-                            setTxForm({
-                              ...txForm,
-                              date: e.target.value,
-                            })
-                          }
-                          className="w-full min-h-12 min-w-0 px-3 rounded-xl border border-warm-gray-light/60 bg-white text-sm"
-                        />
-                      </div>
-                      <div>
-                        <label
-                          htmlFor={`transaction-${t.id}-amount`}
-                          className="block text-xs font-medium text-warm-gray mb-1.5"
-                        >
-                          Summa
-                        </label>
-                        <input
-                          id={`transaction-${t.id}-amount`}
-                          type="text"
-                          inputMode="decimal"
-                          value={txForm.amount}
-                          onChange={(e) =>
-                            setTxForm({
-                              ...txForm,
-                              amount: e.target.value,
-                            })
-                          }
-                          className="w-full min-h-12 min-w-0 px-3 rounded-xl border border-warm-gray-light/60 bg-white text-sm tabular-nums"
-                        />
-                      </div>
-                    </div>
-                    <div>
-                      <label
-                        htmlFor={`transaction-${t.id}-type`}
-                        className="block text-xs font-medium text-warm-gray mb-1.5"
-                      >
-                        Tyyppi
-                      </label>
-                      <select
-                        id={`transaction-${t.id}-type`}
-                        value={txForm.type}
-                        onChange={(e) =>
-                          setTxForm({
-                            ...txForm,
-                            type: e.target.value,
-                          })
-                        }
-                        className="w-full min-h-12 min-w-0 px-3 rounded-xl border border-warm-gray-light/60 bg-white text-sm"
-                      >
-                        <option value="meno">Meno</option>
-                        <option value="tulo">Tulo</option>
-                        <option value="palkka">Palkka</option>
-                        <option value="oma_siirto">Oma siirto</option>
-                      </select>
-                    </div>
-                    <div className="flex gap-3 pt-1">
-                      <button
-                        type="button"
-                        onClick={() => setEditingTx(null)}
-                        className="flex-1 py-2.5 text-sm rounded-xl border border-warm-gray-light text-warm-gray hover:bg-white transition-colors"
-                      >
-                        Peruuta
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => void saveTxEdit()}
-                        disabled={savingTx}
-                        className="flex-1 py-2.5 text-sm rounded-xl bg-accent text-white disabled:opacity-50"
-                      >
-                        {savingTx ? "Tallennetaan..." : "Tallenna"}
-                      </button>
-                    </div>
-                  </div>
-                ) : (
-                  <>
-                    <div className="flex items-start justify-between gap-4">
-                      <div className="min-w-0 space-y-2 flex-1">
-                        <p className="text-base font-medium text-charcoal leading-snug break-words">
-                          {t.counterparty || t.message || "–"}
-                        </p>
-                        <div className="flex flex-wrap items-center gap-2 text-sm text-warm-gray">
-                          <span>
-                            {t.date
-                              ? new Date(t.date).toLocaleDateString("fi-FI")
-                              : "–"}
-                          </span>
-                          <span aria-hidden>·</span>
-                          <span>{typeLabel(t.type)}</span>
-                          {t.reference && (
-                            <>
-                              <span aria-hidden>·</span>
-                              <span className="truncate">{t.reference}</span>
-                            </>
-                          )}
-                        </div>
-                        <MatchBadge t={t} />
-                      </div>
-                      <p
-                        className={`text-lg font-semibold tabular-nums whitespace-nowrap shrink-0 ${
-                          t.amount >= 0 ? "text-success" : "text-accent"
-                        }`}
-                      >
-                        {t.amount >= 0 ? "+" : ""}
-                        {formatEur(t.amount)}
-                      </p>
-                    </div>
+          filteredTransactions.map((t) => {
+            const statusKey = statementTxStatusKey(t);
+            const status = statusKey ? STATEMENT_TX_STATUS[statusKey] : null;
+            const canQuickLink = t.matchStatus === "suggested" && t.suggestedReceipt?.source !== "auto_income";
+            const canQuickIgnore = t.type !== "oma_siirto" && t.type !== "palkka" && t.matchStatus === "unmatched";
+            const canSearchMore =
+              t.type !== "oma_siirto" &&
+              t.type !== "palkka" &&
+              t.matchStatus === "unmatched" &&
+              (t.matchCandidates?.length ?? 0) === 0;
+            const rowLabel = `${t.counterparty || t.message || "Tapahtuma"}, ${txSecondary(t)}, ${formatEurSigned(t.amount)}`;
 
-                    {t.matchStatus === "suggested" && t.suggestedReceipt && (
-                      t.suggestedReceipt.source === "auto_income" ? (
-                        <div className="bg-success/5 border border-success/20 rounded-2xl p-4 space-y-3">
-                          <div>
-                            <p className="text-sm font-medium text-success-dark">
-                              Tunnistettu myyntitilitys
-                            </p>
-                            <p className="text-sm text-charcoal/80 mt-1 leading-relaxed">
-                              {t.suggestedReceipt.vendor || "Myyjä"} · {t.suggestedReceipt.totalAmount != null ? formatEur(t.suggestedReceipt.totalAmount) : ""}
-                            </p>
-                          </div>
-                          <div className="flex gap-2">
-                            <button
-                              type="button"
-                              disabled={matchBusyTxId === t.id}
-                              onClick={() =>
-                                matchAction(t.id, "/api/matching/reject", {
-                                  transactionId: t.id,
-                                  receiptId: t.suggestedReceiptId,
-                                })
-                              }
-                              className="flex-1 min-h-11 py-2 px-3 text-xs font-medium text-danger border border-danger/20 rounded-xl hover:bg-danger/5 transition-colors disabled:opacity-50"
-                            >
-                              Ei myyntiä
-                            </button>
-                            <button
-                              type="button"
-                              disabled={matchBusyTxId === t.id}
-                              onClick={() =>
-                                matchAction(t.id, "/api/receipts/batch-approve", {
-                                  receiptIds: [t.suggestedReceiptId],
-                                })
-                              }
-                              className="flex-1 min-h-11 py-2 px-3 text-xs font-medium text-white bg-success hover:bg-success-dark rounded-xl transition-colors disabled:opacity-50"
-                            >
-                              Hyväksy
-                            </button>
-                          </div>
-                        </div>
-                      ) : (
-                        <button
-                          type="button"
+            return (
+              <div key={t.id}>
+                <ListRow
+                  onClick={() => setExpandedId((id) => (id === t.id ? null : t.id))}
+                  title={t.counterparty || t.message || "–"}
+                  secondary={txSecondary(t)}
+                  amount={formatEurSigned(t.amount)}
+                  amountTone={t.amount >= 0 ? "positive" : "default"}
+                  ariaLabel={rowLabel}
+                  trailing={
+                    <div className="flex items-center gap-1.5">
+                      {status && <StatusTag tone={status.tone}>{status.label}</StatusTag>}
+                      {canQuickLink && (
+                        <ActionPill
+                          ariaLabel={`Linkitä: ${rowLabel}`}
+                          disabled={matchBusyTxId === t.id}
                           onClick={() =>
                             matchAction(t.id, "/api/matching/confirm", {
                               transactionId: t.id,
                               receiptId: t.suggestedReceiptId,
                             })
                           }
-                          disabled={matchBusyTxId === t.id}
-                          className="w-full text-left bg-success/8 border border-success/20 rounded-2xl p-4 hover:bg-success/12 transition-colors disabled:opacity-50"
                         >
-                          <p className="text-sm font-medium text-success">
-                            Linkitä ehdotettu kuitti
-                          </p>
-                          <p className="text-sm text-charcoal mt-1.5 leading-relaxed">
-                            {receiptLabel(t.suggestedReceipt)}
-                          </p>
-                        </button>
-                      )
-                    )}
-
-                    {t.matchStatus === "confirmed" && t.receipt && (
-                      <div className="bg-success/5 border border-success/15 rounded-2xl p-4 flex items-start justify-between gap-3">
-                        <div className="min-w-0">
-                          <p className="text-xs font-medium uppercase tracking-wide text-success/80">
-                            Linkitetty kuitti
-                          </p>
-                          <p className="text-sm text-charcoal mt-1 leading-relaxed">
-                            {receiptLabel(t.receipt)}
-                          </p>
-                        </div>
-                        <ActionLink
-                          tone="danger"
-                          disabled={matchBusyTxId === t.id}
-                          onClick={() =>
-                            matchAction(t.id, "/api/matching/unlink", {
-                              transactionId: t.id,
-                            })
-                          }
-                        >
-                          Poista
-                        </ActionLink>
-                      </div>
-                    )}
-
-                    {t.matchStatus === "unmatched" &&
-                      (t.matchCandidates?.length ?? 0) > 0 && (
-                        <div className="space-y-2">
-                          <p className="text-xs font-medium text-warm-gray uppercase tracking-wide">
-                            Ehdotetut kuitit
-                          </p>
-                          {t.matchCandidates!.map((c) => (
-                            <button
-                              key={c.receipt.id}
-                              type="button"
-                              onClick={() =>
-                                matchAction(t.id, "/api/matching/confirm", {
-                                  transactionId: t.id,
-                                  receiptId: c.receipt.id,
-                                })
-                              }
-                              disabled={matchBusyTxId === t.id}
-                              className="w-full text-left text-sm px-4 py-3 rounded-2xl bg-cream/60 border border-warm-gray-light/40 hover:border-accent/40 transition-colors disabled:opacity-50"
-                            >
-                              {receiptLabel(c.receipt)}
-                              <span className="text-warm-gray">
-                                {" "}
-                                · {Math.round(c.score * 100)} %
-                              </span>
-                            </button>
-                          ))}
-                        </div>
+                          Linkitä
+                        </ActionPill>
                       )}
-
-                    <div className="flex flex-wrap items-center gap-x-4 gap-y-2 pt-1 border-t border-warm-gray-light/20">
-                      <ActionLink onClick={() => startEditTx(t)}>
-                        Muokkaa
-                      </ActionLink>
-                      <ActionLink
-                        tone="danger"
-                        disabled={deletingTxId === t.id}
-                        onClick={() => setConfirmingTxDelete(t.id)}
-                      >
-                        {deletingTxId === t.id ? "Poistetaan..." : "Poista"}
-                      </ActionLink>
-                      {t.matchStatus === "suggested" && t.suggestedReceiptId && (
-                        <ActionLink
-                          disabled={matchBusyTxId === t.id}
-                          onClick={() =>
-                            matchAction(t.id, "/api/matching/reject", {
-                              transactionId: t.id,
-                              receiptId: t.suggestedReceiptId,
-                            })
-                          }
-                        >
-                          Väärä ehdotus
-                        </ActionLink>
-                      )}
-                      {t.type !== "oma_siirto" &&
-                        t.type !== "palkka" &&
-                        t.matchStatus === "unmatched" &&
-                        (t.matchCandidates?.length ?? 0) === 0 && (
-                          <ActionLink onClick={() => void openCandidates(t.id)}>
-                            {candidatesFor === t.id ? "Sulje haku" : "Etsi lisää"}
-                          </ActionLink>
-                        )}
-                      {t.type !== "oma_siirto" &&
-                        t.type !== "palkka" &&
-                        t.matchStatus === "unmatched" && (
-                          <ActionLink
-                            disabled={matchBusyTxId === t.id}
-                            onClick={() =>
-                              matchAction(t.id, "/api/matching/ignore", {
-                                transactionId: t.id,
-                                ignored: true,
-                              })
-                            }
-                          >
-                            Ei kuittia tarvita
-                          </ActionLink>
-                        )}
-                      {t.matchStatus === "ignored" && (
-                        <ActionLink
+                      {canQuickIgnore && (
+                        <ActionPill
+                          ariaLabel={`Ei kuittia: ${rowLabel}`}
                           disabled={matchBusyTxId === t.id}
                           onClick={() =>
                             matchAction(t.id, "/api/matching/ignore", {
                               transactionId: t.id,
-                              ignored: false,
+                              ignored: true,
                             })
                           }
                         >
-                          Palauta
-                        </ActionLink>
+                          Ei kuittia
+                        </ActionPill>
                       )}
+                      <MoreMenu
+                        label={`Lisää toimintoja: ${rowLabel}`}
+                        items={[
+                          { label: "Muokkaa", onSelect: () => startEditTx(t) },
+                          {
+                            label: deletingTxId === t.id ? "Poistetaan…" : "Poista",
+                            onSelect: () => setConfirmingTxDelete(t.id),
+                            tone: "danger",
+                            disabled: deletingTxId === t.id,
+                          },
+                          ...(t.matchStatus === "suggested" && t.suggestedReceiptId
+                            ? [
+                                {
+                                  label: "Väärä ehdotus",
+                                  onSelect: () =>
+                                    matchAction(t.id, "/api/matching/reject", {
+                                      transactionId: t.id,
+                                      receiptId: t.suggestedReceiptId,
+                                    }),
+                                  disabled: matchBusyTxId === t.id,
+                                },
+                              ]
+                            : []),
+                          ...(canSearchMore
+                            ? [
+                                {
+                                  label: candidatesFor === t.id ? "Sulje haku" : "Etsi lisää",
+                                  onSelect: () => {
+                                    setExpandedId(t.id);
+                                    void openCandidates(t.id);
+                                  },
+                                },
+                              ]
+                            : []),
+                          ...(t.matchStatus === "ignored"
+                            ? [
+                                {
+                                  label: "Palauta",
+                                  onSelect: () =>
+                                    matchAction(t.id, "/api/matching/ignore", {
+                                      transactionId: t.id,
+                                      ignored: false,
+                                    }),
+                                  disabled: matchBusyTxId === t.id,
+                                },
+                              ]
+                            : []),
+                        ]}
+                      />
                     </div>
+                  }
+                />
 
-                    {candidatesFor === t.id && (
-                      <div className="bg-cream/50 border border-warm-gray-light/30 rounded-2xl p-4 space-y-2">
-                        {loadingCandidates ? (
-                          <p className="text-sm text-warm-gray">
-                            Haetaan kuitteja...
-                          </p>
-                        ) : candidates.length === 0 ? (
-                          <p className="text-sm text-warm-gray leading-relaxed">
-                            Ei sopivia kuitteja. Lisää kuitti ensin
-                            Kuitit-sivulla.
-                          </p>
-                        ) : (
-                          candidates.map((c) => (
-                            <button
-                              key={c.receipt.id}
-                              type="button"
-                              onClick={() =>
-                                matchAction(t.id, "/api/matching/confirm", {
-                                  transactionId: t.id,
-                                  receiptId: c.receipt.id,
-                                })
-                              }
-                              disabled={matchBusyTxId === t.id}
-                              className="w-full text-left text-sm px-4 py-3 rounded-xl bg-white border border-warm-gray-light/40 hover:border-accent/40 transition-colors disabled:opacity-50"
-                            >
-                              {receiptLabel(c.receipt)}
-                              <span className="text-warm-gray">
-                                {" "}
-                                · {Math.round(c.score * 100)} %
-                              </span>
-                            </button>
-                          ))
-                        )}
+                {expandedId === t.id && (
+                  <div className="space-y-3 border-t border-line px-4 pb-4 pt-3">
+                    {editingTx?.id === t.id ? (
+                      <div className="space-y-3">
+                        <div>
+                          <label htmlFor={`transaction-${t.id}-counterparty`} className={LABEL_CLASS}>
+                            Vastapuoli
+                          </label>
+                          <input
+                            id={`transaction-${t.id}-counterparty`}
+                            type="text"
+                            value={txForm.counterparty}
+                            onChange={(e) =>
+                              setTxForm({ ...txForm, counterparty: e.target.value })
+                            }
+                            className={controlClass}
+                          />
+                        </div>
+                        <div className="field-dates">
+                          <div>
+                            <label htmlFor={`transaction-${t.id}-date`} className={LABEL_CLASS}>
+                              Päivämäärä
+                            </label>
+                            <input
+                              id={`transaction-${t.id}-date`}
+                              type="date"
+                              value={txForm.date}
+                              onChange={(e) => setTxForm({ ...txForm, date: e.target.value })}
+                              className={controlClass}
+                            />
+                          </div>
+                          <div>
+                            <label htmlFor={`transaction-${t.id}-amount`} className={LABEL_CLASS}>
+                              Summa
+                            </label>
+                            <input
+                              id={`transaction-${t.id}-amount`}
+                              type="text"
+                              inputMode="decimal"
+                              value={txForm.amount}
+                              onChange={(e) => setTxForm({ ...txForm, amount: e.target.value })}
+                              className={`${controlClass} tabular-nums`}
+                            />
+                          </div>
+                        </div>
+                        <div>
+                          <label htmlFor={`transaction-${t.id}-type`} className={LABEL_CLASS}>
+                            Tyyppi
+                          </label>
+                          <select
+                            id={`transaction-${t.id}-type`}
+                            value={txForm.type}
+                            onChange={(e) => setTxForm({ ...txForm, type: e.target.value })}
+                            className={controlClass}
+                          >
+                            <option value="meno">Meno</option>
+                            <option value="tulo">Tulo</option>
+                            <option value="palkka">Palkka</option>
+                            <option value="oma_siirto">Oma siirto</option>
+                          </select>
+                        </div>
+                        <div className="flex gap-2">
+                          <Button
+                            type="button"
+                            variant="secondary"
+                            className="flex-1"
+                            onClick={() => setEditingTx(null)}
+                          >
+                            Peruuta
+                          </Button>
+                          <Button
+                            type="button"
+                            className="flex-1"
+                            busy={savingTx}
+                            busyLabel="Tallennetaan…"
+                            onClick={() => void saveTxEdit()}
+                          >
+                            Tallenna
+                          </Button>
+                        </div>
                       </div>
+                    ) : (
+                      <>
+                        {t.matchStatus === "suggested" &&
+                          t.suggestedReceipt &&
+                          (t.suggestedReceipt.source === "auto_income" ? (
+                            <div className="space-y-3">
+                              <div>
+                                <p className="text-[13px] font-semibold text-success">
+                                  Tunnistettu myyntitilitys
+                                </p>
+                                <p className="mt-1 text-[13px] text-ink">
+                                  {t.suggestedReceipt.vendor || "Myyjä"}
+                                  {t.suggestedReceipt.totalAmount != null
+                                    ? ` · ${formatEur(t.suggestedReceipt.totalAmount)}`
+                                    : ""}
+                                </p>
+                              </div>
+                              <div className="flex gap-2">
+                                <Button
+                                  type="button"
+                                  variant="secondary"
+                                  className="flex-1"
+                                  disabled={matchBusyTxId === t.id}
+                                  onClick={() =>
+                                    matchAction(t.id, "/api/matching/reject", {
+                                      transactionId: t.id,
+                                      receiptId: t.suggestedReceiptId,
+                                    })
+                                  }
+                                >
+                                  Ei myyntiä
+                                </Button>
+                                <Button
+                                  type="button"
+                                  className="flex-1"
+                                  disabled={matchBusyTxId === t.id}
+                                  onClick={() =>
+                                    matchAction(t.id, "/api/receipts/batch-approve", {
+                                      receiptIds: [t.suggestedReceiptId],
+                                    })
+                                  }
+                                >
+                                  Hyväksy
+                                </Button>
+                              </div>
+                            </div>
+                          ) : (
+                            <p className="text-[13px] text-ink-2">
+                              Ehdotettu kuitti: {receiptLabel(t.suggestedReceipt)}
+                            </p>
+                          ))}
+
+                        {t.matchStatus === "confirmed" && t.receipt && (
+                          <p className="text-[13px] text-ink-2">
+                            Linkitetty kuitti: {receiptLabel(t.receipt)}
+                          </p>
+                        )}
+
+                        {t.matchStatus === "unmatched" &&
+                          (t.matchCandidates?.length ?? 0) > 0 && (
+                            <div>
+                              <p className="pb-1.5 text-[13px] text-ink-2">Ehdotetut kuitit</p>
+                              <div className="divide-y divide-line">
+                                {t.matchCandidates!.map((c) => (
+                                  <button
+                                    key={c.receipt.id}
+                                    type="button"
+                                    onClick={() =>
+                                      matchAction(t.id, "/api/matching/confirm", {
+                                        transactionId: t.id,
+                                        receiptId: c.receipt.id,
+                                      })
+                                    }
+                                    disabled={matchBusyTxId === t.id}
+                                    className="active-press flex min-h-11 w-full items-center justify-between gap-3 py-2.5 text-left disabled:opacity-50"
+                                  >
+                                    <span className="min-w-0 truncate text-[13px] text-ink">
+                                      {receiptLabel(c.receipt)}
+                                    </span>
+                                    <span className="shrink-0 text-[13px] text-ink-2">
+                                      {Math.round(c.score * 100)} %
+                                    </span>
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+
+                        {candidatesFor === t.id && (
+                          <div>
+                            {loadingCandidates ? (
+                              <p className="text-[13px] text-ink-2">Haetaan kuitteja...</p>
+                            ) : candidates.length === 0 ? (
+                              <p className="text-[13px] text-ink-2">
+                                Ei sopivia kuitteja. Lisää kuitti ensin Kuitit-sivulla.
+                              </p>
+                            ) : (
+                              <div className="divide-y divide-line">
+                                {candidates.map((c) => (
+                                  <button
+                                    key={c.receipt.id}
+                                    type="button"
+                                    onClick={() =>
+                                      matchAction(t.id, "/api/matching/confirm", {
+                                        transactionId: t.id,
+                                        receiptId: c.receipt.id,
+                                      })
+                                    }
+                                    disabled={matchBusyTxId === t.id}
+                                    className="active-press flex min-h-11 w-full items-center justify-between gap-3 py-2.5 text-left disabled:opacity-50"
+                                  >
+                                    <span className="min-w-0 truncate text-[13px] text-ink">
+                                      {receiptLabel(c.receipt)}
+                                    </span>
+                                    <span className="shrink-0 text-[13px] text-ink-2">
+                                      {Math.round(c.score * 100)} %
+                                    </span>
+                                  </button>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </>
                     )}
-                  </>
+                  </div>
                 )}
-              </article>
-            ))}
-          </div>
+              </div>
+            );
+          })
         )}
-      </section>
+      </Section>
 
       <ConfirmModal
         isOpen={confirmingDelete}

@@ -67,7 +67,7 @@ export default function StatementDetailPage() {
         ) : loading ? (
           <LoadingState label="Ladataan tiliotetta..." compact />
         ) : !statement ? (
-          <div className="text-center py-8 text-sm text-warm-gray">
+          <div className="text-center py-8 text-[15px] text-ink-2">
             Tiliotetta ei löytynyt
           </div>
         ) : (

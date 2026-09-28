@@ -89,13 +89,7 @@ export default function ReceiptPreview({
 
   return (
     <>
-      <div
-        className={
-          compact
-            ? "relative rounded-xl overflow-hidden bg-cream border border-warm-gray-light/40"
-            : "relative rounded-xl overflow-hidden bg-cream border border-warm-gray-light/40"
-        }
-      >
+      <div className="relative overflow-hidden rounded-card border border-line bg-surface">
         <div className={compact ? "h-28" : "h-48 sm:h-56"}>
           {renderViewer(false)}
         </div>
@@ -103,7 +97,7 @@ export default function ReceiptPreview({
           ref={openButtonRef}
           type="button"
           onClick={() => setFullscreen(true)}
-          className="absolute bottom-2 right-2 min-h-11 px-3 rounded-lg bg-charcoal/80 text-white text-xs font-medium hover:bg-charcoal transition-colors backdrop-blur-sm"
+          className="active-press absolute bottom-2 right-2 min-h-11 rounded-card bg-ink/80 px-3 text-[13px] font-medium text-canvas backdrop-blur-sm"
         >
           Koko näyttö
         </button>
@@ -216,9 +210,9 @@ function PreviewBody({
   }
 
   return (
-    <div className={`relative w-full h-full bg-white ${fill ? "rounded-xl" : ""}`}>
+    <div className={`relative w-full h-full bg-surface ${fill ? "rounded-xl" : ""}`}>
       {loading && (
-        <div className="absolute inset-0 flex items-center justify-center bg-cream/80 z-10">
+        <div className="absolute inset-0 flex items-center justify-center bg-canvas/80 z-10">
           <div
             className="w-6 h-6 border-2 border-accent border-t-transparent rounded-full animate-spin motion-reduce:animate-none"
             aria-hidden="true"
@@ -244,7 +238,7 @@ function PreviewBody({
           href={src}
           target="_blank"
           rel="noopener noreferrer"
-          className="absolute bottom-2 left-2 right-2 min-h-11 flex items-center justify-center rounded-xl bg-charcoal/75 text-white text-xs font-medium backdrop-blur-sm"
+          className="absolute bottom-2 left-2 right-2 min-h-11 flex items-center justify-center rounded-card bg-ink/75 text-canvas text-[13px] font-medium backdrop-blur-sm"
         >
           Avaa alkuperäinen tiedosto
         </a>
@@ -261,7 +255,7 @@ function UnsupportedPreview({
   message?: string;
 }) {
   return (
-    <div className="w-full h-full flex flex-col items-center justify-center gap-2 text-sm text-warm-gray p-4">
+    <div className="w-full h-full flex flex-col items-center justify-center gap-2 text-sm text-ink-2 p-4">
       <p className="text-center">{message}</p>
       <a
         href={src}

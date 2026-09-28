@@ -44,3 +44,30 @@ export function receiptMatchStatusKey(match: {
   if (match.matchCandidates && match.matchCandidates.length > 0) return "candidates";
   return "unlinked";
 }
+
+/** A bank statement transaction's document-state, for the tiliote detail's `StatusTag`. */
+export type StatementTxStatusKey = "linked" | "suggested" | "ignored" | "palkka" | "missing";
+export const STATEMENT_TX_STATUS: Record<StatementTxStatusKey, Label> = {
+  linked: { label: "Linkitetty", tone: "success" },
+  suggested: { label: "Ehdotus", tone: "warning" },
+  ignored: { label: "Ei tarvita", tone: "neutral" },
+  palkka: { label: "Palkka", tone: "neutral" },
+  missing: { label: "Puuttuu", tone: "danger" },
+};
+
+/**
+ * Which key of `STATEMENT_TX_STATUS` a transaction resolves to - `null` for an
+ * "oma_siirto" (own transfer), which shows no tag at all, matching the words
+ * the tiliote detail already showed before this moved into a shared `StatusTag`.
+ */
+export function statementTxStatusKey(t: {
+  type: string;
+  matchStatus: string;
+}): StatementTxStatusKey | null {
+  if (t.type === "palkka") return "palkka";
+  if (t.type === "oma_siirto") return null;
+  if (t.matchStatus === "confirmed") return "linked";
+  if (t.matchStatus === "suggested") return "suggested";
+  if (t.matchStatus === "ignored") return "ignored";
+  return "missing";
+}

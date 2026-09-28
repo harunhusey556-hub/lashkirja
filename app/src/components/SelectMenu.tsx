@@ -72,10 +72,7 @@ export function SelectMenu({
   return (
     <div className={`relative w-full ${className}`} ref={containerRef}>
       {label && (
-        <label
-          htmlFor={id}
-          className="block text-xs font-semibold text-charcoal-light uppercase tracking-wider mb-1.5"
-        >
+        <label htmlFor={id} className="mb-1.5 block text-[13px] font-normal text-ink-2">
           {label}
         </label>
       )}

@@ -62,6 +62,13 @@ describe("design system components", () => {
     expect(out.slice(pillOpen, out.indexOf("Muistuta"))).toContain("pointer-events-auto");
   });
 
+  it("ActionPill's button variant can be disabled (e.g. while a request is in flight)", () => {
+    // eslint-disable-next-line react/no-children-prop -- see ActionPill test above.
+    const out = html(createElement(ActionPill, { onClick: () => {}, disabled: true, children: "Linkitä" }));
+    expect(out).toContain("disabled");
+    expect(out).not.toContain("<a");
+  });
+
   it("MoreMenu's trigger opts back into pointer events (it sits inside a pointer-events-none trailing slot)", () => {
     const out = html(createElement(MoreMenu, { items: [{ label: "Avaa PDF", onSelect: () => {} }] }));
     const triggerEnd = out.indexOf("</button>");

@@ -9,7 +9,11 @@ import type { ReactNode } from "react";
 // is genuinely interactive and must opt back in, or it stops receiving clicks/taps entirely.
 const PILL = "active-press relative pointer-events-auto inline-flex min-h-9 items-center rounded-full bg-accent-soft px-3 text-[13px] font-semibold text-accent before:absolute before:inset-x-0 before:-inset-y-1 before:content-['']";
 
-export function ActionPill({ children, href, onClick, ariaLabel }: { children: ReactNode; href?: string; onClick?: () => void; ariaLabel?: string }) {
+export function ActionPill({ children, href, onClick, ariaLabel, disabled }: { children: ReactNode; href?: string; onClick?: () => void; ariaLabel?: string; disabled?: boolean }) {
   if (href) return <Link href={href} aria-label={ariaLabel} className={PILL}>{children}</Link>;
-  return <button type="button" onClick={onClick} aria-label={ariaLabel} className={PILL}>{children}</button>;
+  return (
+    <button type="button" onClick={onClick} disabled={disabled} aria-label={ariaLabel} className={`${PILL} disabled:opacity-50`}>
+      {children}
+    </button>
+  );
 }

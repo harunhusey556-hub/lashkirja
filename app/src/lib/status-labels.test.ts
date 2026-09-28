@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { PURCHASE_STATUS, RECEIPT_MATCH_STATUS, SALES_STATUS, receiptMatchStatusKey } from "./status-labels";
+import {
+  PURCHASE_STATUS,
+  RECEIPT_MATCH_STATUS,
+  SALES_STATUS,
+  STATEMENT_TX_STATUS,
+  receiptMatchStatusKey,
+  statementTxStatusKey,
+} from "./status-labels";
 
 describe("status labels", () => {
   it("keeps the Finnish sales invoice words the app already shows", () => {
@@ -30,5 +37,24 @@ describe("status labels", () => {
     expect(receiptMatchStatusKey({ status: "unlinked", matchCandidates: [{}] })).toBe("candidates");
     expect(receiptMatchStatusKey({ status: "unlinked", matchCandidates: [] })).toBe("unlinked");
     expect(receiptMatchStatusKey({ status: "unlinked" })).toBe("unlinked");
+  });
+  it("keeps the statement transaction document-state words the tiliote detail already showed", () => {
+    expect(Object.fromEntries(Object.entries(STATEMENT_TX_STATUS).map(([k, v]) => [k, v.label]))).toEqual({
+      linked: "Linkitetty",
+      suggested: "Ehdotus",
+      ignored: "Ei tarvita",
+      palkka: "Palkka",
+      missing: "Puuttuu",
+    });
+    expect(STATEMENT_TX_STATUS.linked.tone).toBe("success");
+    expect(STATEMENT_TX_STATUS.missing.tone).toBe("danger");
+  });
+  it("resolves a statement transaction's status key the same way the old MatchBadge did", () => {
+    expect(statementTxStatusKey({ type: "palkka", matchStatus: "unmatched" })).toBe("palkka");
+    expect(statementTxStatusKey({ type: "oma_siirto", matchStatus: "unmatched" })).toBeNull();
+    expect(statementTxStatusKey({ type: "meno", matchStatus: "confirmed" })).toBe("linked");
+    expect(statementTxStatusKey({ type: "meno", matchStatus: "suggested" })).toBe("suggested");
+    expect(statementTxStatusKey({ type: "meno", matchStatus: "ignored" })).toBe("ignored");
+    expect(statementTxStatusKey({ type: "meno", matchStatus: "unmatched" })).toBe("missing");
   });
 });
