@@ -28,10 +28,23 @@ export function focusFirstInvalid(
   return key;
 }
 
+/**
+ * `Field` merges this onto its child with `cloneElement`, which overwrites
+ * matching props even when the new value is `undefined` (a key that exists
+ * always wins, regardless of its value). So when there is no error and no
+ * hint, `aria-invalid`/`aria-describedby` are left out of the returned
+ * object entirely, not set to `undefined` - otherwise a caller that manages
+ * its own `aria-invalid` directly on the child (e.g. a combined alert shared
+ * by several fields, rather than Field's own per-field `error` text) would
+ * have it silently clobbered back to unset on every render.
+ */
 export function invalidFieldProps(id: string, error?: string, hintId?: string) {
-  return {
-    id,
-    "aria-invalid": error ? true : undefined,
-    "aria-describedby": error ? `${id}-error` : hintId,
-  };
+  const props: { id: string; "aria-invalid"?: true; "aria-describedby"?: string } = { id };
+  if (error) {
+    props["aria-invalid"] = true;
+    props["aria-describedby"] = `${id}-error`;
+  } else if (hintId) {
+    props["aria-describedby"] = hintId;
+  }
+  return props;
 }

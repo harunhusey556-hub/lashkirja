@@ -110,7 +110,7 @@ export async function POST(req: NextRequest) {
     if (!user) {
       if (wantsJson) {
         return NextResponse.json(
-          { error: "Väärä sähköposti tai salasana" },
+          { error: "Sähköposti tai salasana on väärin. Tarkista ja yritä uudelleen." },
           { status: 401 }
         );
       }

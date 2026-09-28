@@ -1,41 +1,199 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
+import { AlertCircle, Check, Info } from "lucide-react";
 import { controlClass } from "@/components/control-styles";
 import { AppMark } from "@/components/AppMark";
-import { Button, Field, FormError } from "@/components/ui";
+import { Button, Field } from "@/components/ui";
+import { Icon } from "@/components/ds/Icon";
+import { hapticNotify } from "@/lib/haptics";
 
-const ERROR_MESSAGES: Record<string, string> = {
-  auth: "Väärä sähköposti tai salasana",
-  missing: "Sähköposti ja salasana vaaditaan",
-  server: "Kirjautuminen epäonnistui",
-  rate: "Liian monta kirjautumisyritystä. Yritä muutaman minuutin kuluttua uudelleen.",
-  expired: "Istuntosi vanhentui. Kirjaudu sisään uudelleen.",
-  closed: "Tilin käyttö on suljettu. Kirjanpitoaineisto säilyy säilytysajan.",
+type Tone = "danger" | "info";
+type Notice = { tone: Tone; message: string } | null;
+
+// Shown on load from `?error=<code>` - a redirect from the server (the no-JS
+// form-POST fallback, or a link that bounced here, e.g. an expired session).
+// `tone` carries severity explicitly rather than it being guessed from the
+// text: an expired session is informational, everything else is a hard stop.
+const INITIAL_NOTICES: Record<string, { message: string; tone: Tone }> = {
+  auth: {
+    message: "Sähköposti tai salasana on väärin. Tarkista ja yritä uudelleen.",
+    tone: "danger",
+  },
+  missing: { message: "Sähköposti ja salasana vaaditaan", tone: "danger" },
+  server: { message: "Kirjautuminen epäonnistui", tone: "danger" },
+  rate: {
+    message: "Liian monta kirjautumisyritystä. Yritä muutaman minuutin kuluttua uudelleen.",
+    tone: "danger",
+  },
+  expired: { message: "Istuntosi vanhentui. Kirjaudu sisään uudelleen.", tone: "info" },
+  closed: {
+    message: "Tilin käyttö on suljettu. Kirjanpitoaineisto säilyy säilytysajan.",
+    tone: "danger",
+  },
 };
 
+function formatRetryAfter(seconds: number): string {
+  if (seconds >= 60) {
+    const minutes = Math.ceil(seconds / 60);
+    return `${minutes} minuutin`;
+  }
+  return `${Math.max(1, seconds)} sekunnin`;
+}
+
+function LoginNotice({ id, tone, message }: { id: string; tone: Tone; message: string }) {
+  return (
+    <div
+      id={id}
+      role={tone === "danger" ? "alert" : "status"}
+      className={`flex items-start gap-2 rounded-card border p-3 text-left text-sm ${
+        tone === "danger" ? "border-danger/30 bg-danger/10 text-danger" : "border-warning/40 bg-warning/10 text-ink"
+      }`}
+    >
+      <Icon
+        icon={tone === "danger" ? AlertCircle : Info}
+        size="row"
+        className={`mt-0.5 shrink-0 ${tone === "danger" ? "text-danger" : "text-warning"}`}
+      />
+      <p>{message}</p>
+    </div>
+  );
+}
+
 export default function LoginForm() {
-  const [submitting, setSubmitting] = useState(false);
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const emailRef = useRef<HTMLInputElement>(null);
+  const passwordRef = useRef<HTMLInputElement>(null);
+  // A ref, not state: must be readable synchronously inside handleSubmit to
+  // block a second submit fired before the next render (Enter key repeat,
+  // a second click landing before React re-renders the disabled button).
+  const submittingRef = useRef(false);
+
+  // Lazy initializers, not a mount effect: `?error=` is already present in
+  // the very first render (a server redirect landed here), so deriving the
+  // initial notice belongs in useState's initializer, not in a setState call
+  // inside a useEffect body (which would just be an avoidable second render).
+  const [phase, setPhase] = useState<"idle" | "submitting" | "success">("idle");
+  const [notice, setNotice] = useState<Notice>(() => {
+    const errorCode = searchParams.get("error");
+    if (!errorCode) return null;
+    return INITIAL_NOTICES[errorCode] ?? { tone: "danger", message: "Kirjautuminen epäonnistui" };
+  });
+  // Only the "auth" redirect code corresponds to actually-wrong credentials;
+  // the others (missing/server/rate/expired/closed) do not mark the fields.
+  const [invalid, setInvalid] = useState(() => searchParams.get("error") === "auth");
+  const [shake, setShake] = useState(false);
+
+  // Deep-link continue-after-login: the server already validated this is an
+  // internal path when it built the /login?next= redirect; carried through
+  // so the login POST can send it straight back.
+  const next = searchParams.get("next") || "";
 
   // iOS bfcache: swiping back to the login page restores the old React state,
-  // which would leave the button stuck on the spinner — reset it on pageshow.
+  // which would leave the button stuck on the spinner - reset it on pageshow.
   useEffect(() => {
-    const reset = () => setSubmitting(false);
+    const reset = () => {
+      submittingRef.current = false;
+      setPhase("idle");
+    };
     window.addEventListener("pageshow", reset);
     return () => window.removeEventListener("pageshow", reset);
   }, []);
 
-  const searchParams = useSearchParams();
-  const errorCode = searchParams.get("error");
-  const error =
-    (errorCode && ERROR_MESSAGES[errorCode]) ||
-    (errorCode ? "Kirjautuminen epäonnistui" : "");
-  // Deep-link continue-after-login: the server already validated this is an
-  // internal path when it built the /login?next= redirect; carried through
-  // as a hidden field so the login POST can send it straight back.
-  const next = searchParams.get("next") || "";
+  function clearNoticeOnEdit() {
+    if (!notice && !invalid) return;
+    setNotice(null);
+    setInvalid(false);
+  }
+
+  function triggerShake() {
+    // Force the animation to restart even if a previous shake is still
+    // playing (rapid repeated wrong attempts): drop the class, then re-add
+    // it on the next frame rather than relying on a same-value state set.
+    setShake(false);
+    requestAnimationFrame(() => setShake(true));
+  }
+
+  async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (submittingRef.current) return;
+    submittingRef.current = true;
+    setPhase("submitting");
+    setNotice(null);
+    setInvalid(false);
+
+    const email = emailRef.current?.value.trim() ?? "";
+    const password = passwordRef.current?.value ?? "";
+
+    try {
+      const response = await fetch("/api/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        body: JSON.stringify({ email, password, next }),
+      });
+
+      let body: { error?: string } = {};
+      try {
+        body = await response.json();
+      } catch {
+        // No/invalid JSON body - fall through to the status-based messages.
+      }
+
+      if (response.ok) {
+        void hapticNotify("success");
+        setPhase("success");
+        router.push(next || "/dashboard");
+        return;
+      }
+
+      submittingRef.current = false;
+      setPhase("idle");
+
+      // Severity and behaviour are decided by the status code, never by the
+      // message text - an unrecognised server string must not silently
+      // become the wrong tone or skip the field-invalid treatment.
+      if (response.status === 401) {
+        void hapticNotify("error");
+        setInvalid(true);
+        setNotice({
+          tone: "danger",
+          message: "Sähköposti tai salasana on väärin. Tarkista ja yritä uudelleen.",
+        });
+        triggerShake();
+        if (passwordRef.current) passwordRef.current.value = "";
+        passwordRef.current?.focus();
+        return;
+      }
+
+      if (response.status === 429) {
+        const retryAfter = Number(response.headers.get("Retry-After"));
+        const wait =
+          Number.isFinite(retryAfter) && retryAfter > 0
+            ? ` Yritä uudelleen ${formatRetryAfter(retryAfter)} kuluttua.`
+            : " Yritä myöhemmin uudelleen.";
+        setNotice({ tone: "danger", message: `Liian monta kirjautumisyritystä.${wait}` });
+        return;
+      }
+
+      setNotice({
+        tone: "danger",
+        message: body.error || "Kirjautuminen epäonnistui",
+      });
+    } catch {
+      // fetch() itself threw: offline, DNS failure, TLS/tunnel down - the
+      // request never reached the server at all.
+      submittingRef.current = false;
+      setPhase("idle");
+      setNotice({ tone: "danger", message: "Ei yhteyttä palvelimeen. Tarkista verkkoyhteys." });
+    }
+  }
+
+  const noticeId = "login-notice";
+  const fieldClass = (extra = "") => `${controlClass}${invalid ? " !border-danger" : ""} ${extra}`.trim();
 
   return (
     // fixed + overflow-hidden + touch-none: login never scrolls or rubber-bands;
@@ -48,57 +206,69 @@ export default function LoginForm() {
           <p className="mt-2 text-[15px] text-ink-2">Kirjanpito yksinkertaisesti</p>
         </div>
 
-        {/* Native form POST — mobile browsers reliably store Set-Cookie on
-            navigation responses; fetch()+redirect often drops the cookie. */}
+        {/* action/method kept as a no-JS fallback: with JS disabled (or if
+            fetch throws before it can run), the browser still POSTs here
+            natively and the route's existing 303-redirect branch handles it. */}
         <form
           action="/api/auth/login"
           method="POST"
-          // Native submit still runs; the state change only drives the
-          // "Kirjaudutaan…" feedback while the browser navigates.
-          onSubmit={() => setSubmitting(true)}
-          className={`space-y-5 rounded-card border border-line bg-surface p-8 transition-all duration-300 ${
-            submitting ? "pointer-events-none scale-[0.98] opacity-60" : ""
+          onSubmit={handleSubmit}
+          onAnimationEnd={() => setShake(false)}
+          className={`space-y-5 rounded-card border border-line bg-surface p-8 transition-colors duration-300 ${
+            shake ? "animate-shake" : ""
           }`}
         >
           {next && <input type="hidden" name="next" value={next} />}
 
           <Field label="Sähköposti" htmlFor="email">
             <input
+              ref={emailRef}
               id="email"
               name="email"
               type="email"
+              inputMode="email"
               autoComplete="username"
               autoCapitalize="none"
               autoCorrect="off"
               spellCheck={false}
-              className={controlClass}
+              className={fieldClass()}
               placeholder="demo@lashkirja.fi"
+              aria-invalid={invalid || undefined}
+              aria-describedby={invalid ? noticeId : undefined}
+              onChange={clearNoticeOnEdit}
               required
             />
           </Field>
 
           <Field label="Salasana" htmlFor="password">
             <input
+              ref={passwordRef}
               id="password"
               name="password"
               type="password"
               autoComplete="current-password"
-              className={controlClass}
+              autoCapitalize="none"
+              autoCorrect="off"
+              className={fieldClass()}
               placeholder="••••••"
+              aria-invalid={invalid || undefined}
+              aria-describedby={invalid ? noticeId : undefined}
+              onChange={clearNoticeOnEdit}
               required
             />
           </Field>
 
-          <FormError message={error} className="text-center" />
+          {notice && <LoginNotice id={noticeId} tone={notice.tone} message={notice.message} />}
 
-          <Button
-            type="submit"
-            busy={submitting}
-            busyLabel="Kirjaudutaan…"
-            allowBusySubmit
-            className="w-full"
-          >
-            Kirjaudu sisään
+          <Button type="submit" busy={phase === "submitting"} busyLabel="Kirjaudutaan…" className="w-full">
+            {phase === "success" ? (
+              <span className="inline-flex items-center gap-2">
+                <Icon icon={Check} size="inline" />
+                Kirjaudu sisään
+              </span>
+            ) : (
+              "Kirjaudu sisään"
+            )}
           </Button>
           <Link href="/unohtunut-salasana" className="block text-center text-sm text-accent">
             Unohditko salasanan?

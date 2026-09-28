@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { Inter } from "next/font/google";
 import ClientErrorReporter from "@/components/ClientErrorReporter";
 import ShellGate from "@/components/ShellGate";
+import { SplashReady } from "@/components/SplashReady";
 import { UsableArea } from "@/components/UsableArea";
 import "./globals.css";
 
@@ -144,7 +145,15 @@ export default function RootLayout({
 }) {
   return (
     <html lang="fi">
+      {/* Painted before globals.css finishes loading (a cold load over
+          Tailscale Funnel can take seconds), so the document is never a dark
+          frame behind the native splash. Not covered by the Metadata API,
+          which only manages title/meta/icon tags. */}
+      <head>
+        <style>{"html,body{background:#f6f3ef}"}</style>
+      </head>
       <body className={`${inter.className} bg-canvas`}>
+        <SplashReady />
         <UsableArea />
         <ClientErrorReporter />
         <TouchActiveShim />

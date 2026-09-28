@@ -72,6 +72,26 @@
     <script>
       (function () {
         "use strict";
+        // The splash stays up (launchAutoHide: false) until the web app calls
+        // hide() itself. If the remote page never loaded, that call never
+        // happens from there, so this page -- the native errorPath shown on a
+        // genuine load failure -- must call it too, or the splash would sit
+        // on top of this self-healing screen forever. Capacitor injects its
+        // JS bridge into every page this WKWebView loads, including a local
+        // errorPath document, so the same window.Capacitor global used by
+        // src/lib/splash.ts is available here without a bundler.
+        try {
+          if (
+            window.Capacitor &&
+            window.Capacitor.Plugins &&
+            window.Capacitor.Plugins.SplashScreen
+          ) {
+            window.Capacitor.Plugins.SplashScreen.hide({ fadeOutDuration: 200 });
+          }
+        } catch (e) {
+          // No bridge (opened outside a real build) - nothing to hide.
+        }
+
         var STORAGE_KEY = "lashkirja-offline-retry-attempt";
         // If the last recorded attempt is older than this, treat it as a
         // new outage rather than a continuation of a previous one. Without

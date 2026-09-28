@@ -102,5 +102,29 @@ class MainViewController: CAPBridgeViewController {
         let proxy = CancelledNavigationIgnoringDelegate(wrapping: original)
         cancelledNavigationDelegate = proxy
         webView.navigationDelegate = proxy
+
+        scheduleSplashSafetyNet()
+    }
+
+    /// `capacitor.config.ts` sets `SplashScreen.launchAutoHide: false` so the
+    /// splash stays up until the web app (src/lib/splash.ts) calls
+    /// `SplashScreen.hide()` once the login page or app shell has actually
+    /// painted -- rather than the previous fixed ~0.5s auto-hide, which
+    /// exposed the bare WebView (black in dark mode) for the rest of a slow
+    /// cold load over Tailscale Funnel (the owner's reported 10-12s black
+    /// screen). If the JS call is ever missed -- a bundle that fails before
+    /// mounting, a thrown error, a very slow first script evaluation -- this
+    /// is the last resort so the splash can never hide the app forever.
+    /// `evaluateJavaScript` (not a direct plugin call) because it exercises
+    /// the exact same path a normal page load would use and needs no
+    /// Capacitor-internal plugin lookup API.
+    private func scheduleSplashSafetyNet() {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 8) { [weak self] in
+            self?.webView?.evaluateJavaScript(
+                "window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.SplashScreen && " +
+                "window.Capacitor.Plugins.SplashScreen.hide({ fadeOutDuration: 200 });",
+                completionHandler: nil
+            )
+        }
     }
 }

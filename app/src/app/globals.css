@@ -624,6 +624,19 @@ button.ds-chip[aria-pressed="true"] { box-shadow: none; }
   animation: scaleOut 0.15s ease-in forwards;
 }
 
+/* Login: wrong-credentials feedback. transform only, so it is cheap and safe
+   to disable wholesale under reduced motion (see the media query below). */
+@keyframes shake {
+  10%, 90% { transform: translateX(-1px); }
+  20%, 80% { transform: translateX(2px); }
+  30%, 50%, 70% { transform: translateX(-4px); }
+  40%, 60% { transform: translateX(4px); }
+}
+
+.animate-shake {
+  animation: shake 250ms ease-in-out;
+}
+
 /* Sheets own the bottom inset themselves; the tab bar is hidden behind them. */
 .sheet-safe-bottom {
   padding-bottom: calc(var(--safe-bottom) + 0.75rem);
@@ -725,6 +738,7 @@ body.signing-out {
   .animate-in-delay-1,
   .animate-in-delay-2,
   .animate-spin,
+  .animate-shake,
   .list-stagger > * {
     animation: none !important;
     opacity: 1 !important;

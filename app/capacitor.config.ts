@@ -35,10 +35,23 @@ const config: CapacitorConfig = {
     // from rubber-banding the header and tab. A new IPA is required before
     // an installed app picks this up.
     scrollEnabled: false,
+    // WKWebView's own background before the first paint of the remote page.
+    // Without this it defaults to black under dark mode, which is the black
+    // screen the owner saw during the 10-12s cold load over Tailscale
+    // Funnel (first-run fix). The canvas token keeps it visually continuous
+    // with the splash and the app itself, which is light-only.
+    backgroundColor: "#f6f3ef",
   },
   plugins: {
     SplashScreen: {
-      launchAutoHide: true,
+      // Kept visible until the web app calls SplashScreen.hide() once the
+      // login page or app shell has actually painted (src/lib/splash.ts).
+      // With this true, Capacitor auto-hid the splash after ~0.5s
+      // regardless of whether the remote page had loaded, exposing the bare
+      // WebView (black in dark mode) for the rest of a slow cold load.
+      // MainViewController.swift has an 8s native timer as a last resort so
+      // the splash can never hide the app forever if the JS call is missed.
+      launchAutoHide: false,
       // The app's canvas token, so the splash (icon tile centred on canvas) hands over to the
       // first page without a colour jump.
       backgroundColor: "#f6f3ef",
