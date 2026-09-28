@@ -47,7 +47,7 @@ export function ListRow({ title, amount, amountTone = "default", secondary, trai
   const row = "relative flex min-h-16 w-full items-center gap-3 px-4 py-3 text-left";
   if (href) {
     return (
-      <div className={row}>
+      <div data-testid="list-row" className={row}>
         <Link href={href} aria-label={composedLabel} className="row-link active-press absolute inset-0" />
         {body}
       </div>
@@ -55,11 +55,15 @@ export function ListRow({ title, amount, amountTone = "default", secondary, trai
   }
   if (onClick) {
     return (
-      <div className={row}>
+      <div data-testid="list-row" className={row}>
         <button type="button" onClick={onClick} aria-label={composedLabel} className="row-link active-press absolute inset-0" />
         {body}
       </div>
     );
   }
-  return <div className={row}>{body}</div>;
+  return (
+    <div data-testid="list-row" className={row}>
+      {body}
+    </div>
+  );
 }

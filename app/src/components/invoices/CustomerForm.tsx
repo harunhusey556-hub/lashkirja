@@ -119,7 +119,7 @@ export function CustomerForm({
   }
 
   const field = `${controlClass} min-h-12`;
-  const label = "text-sm font-medium text-charcoal";
+  const label = "mb-1.5 block text-[13px] font-normal text-ink-2";
 
   return (
     <form
@@ -161,7 +161,7 @@ export function CustomerForm({
           {...invalidFieldProps("cf-name", errors.name)}
         />
         {errors.name && (
-          <p id="cf-name-error" className="text-xs text-danger" role="alert">
+          <p id="cf-name-error" className="text-sm text-danger" role="alert">
             {errors.name}
           </p>
         )}
@@ -179,7 +179,7 @@ export function CustomerForm({
             {...invalidFieldProps("cf-business", errors.businessId)}
           />
           {errors.businessId && (
-            <p id="cf-business-error" className="text-xs text-danger" role="alert">
+            <p id="cf-business-error" className="text-sm text-danger" role="alert">
               {errors.businessId}
             </p>
           )}
@@ -194,7 +194,7 @@ export function CustomerForm({
             {...invalidFieldProps("cf-term", errors.defaultPaymentTermDays)}
           />
           {errors.defaultPaymentTermDays && (
-            <p id="cf-term-error" className="text-xs text-danger" role="alert">
+            <p id="cf-term-error" className="text-sm text-danger" role="alert">
               {errors.defaultPaymentTermDays}
             </p>
           )}
@@ -216,7 +216,7 @@ export function CustomerForm({
             {...invalidFieldProps("cf-email", errors.email)}
           />
           {errors.email && (
-            <p id="cf-email-error" className="text-xs text-danger" role="alert">
+            <p id="cf-email-error" className="text-sm text-danger" role="alert">
               {errors.email}
             </p>
           )}
@@ -275,18 +275,18 @@ export function CustomerForm({
       </div>
 
       {session.notice && (
-        <p className="text-sm text-charcoal" role="status">
+        <p className="text-sm text-ink" role="status">
           {session.notice}{" "}
           <button
             type="button"
-            className="font-medium text-accent-dark underline"
+            className="font-medium text-accent underline"
             onClick={() => session.setNotice("")}
           >
             Sulje
           </button>{" "}
           <button
             type="button"
-            className="font-medium text-accent-dark underline"
+            className="font-medium text-accent underline"
             onClick={() => {
               session.clearSavedDraft();
               setValues(baseline);

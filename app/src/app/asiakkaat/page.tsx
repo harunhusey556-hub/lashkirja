@@ -1,10 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import Link from "next/link";
-import { LoadingState } from "@/components/AsyncState";
+import { SkeletonList } from "@/components/AsyncState";
 import { ConnectionNotice, EmptyState, StaleBanner } from "@/components/ScreenState";
-import ConfirmModal from "@/components/ConfirmModal";
+import BottomSheet from "@/components/BottomSheet";
 import {
   CustomerForm,
   type CustomerFormPayload,
@@ -16,15 +15,15 @@ import {
   readJson,
   redirectToLogin,
 } from "@/components/clientFetch";
-import { formatDate, formatEur } from "@/lib/format";
-import { amountClass, longNameClass } from "@/lib/text-layout";
+import { formatEur } from "@/lib/format";
+import { Card, ListRow, PageTitle, Section, StatusTag, SummaryCard } from "@/components/ds";
 
-import { Button } from "@/components/ui";
+import { Button, controlClass } from "@/components/ui";
 import { newIdempotencyKey } from "@/lib/idempotency-key";
-import { clearDraft } from "@/lib/draft-store";
 import { pageCacheFetchedAt, readPageCache, writePageCache } from "@/lib/page-cache";
 import { usePersistedState, useScrollRestoration } from "@/lib/list-ui-state";
 import { isForbidden } from "@/lib/screen-state";
+
 interface Customer {
   id: string;
   name: string;
@@ -45,6 +44,27 @@ interface Customer {
   lastInvoiceDate: string | null;
 }
 
+/**
+ * Read once by this page after a redirect from the customer detail page (an
+ * archive or a hard delete there, which both leave this page - see
+ * asiakkaat/[id]/page.tsx).
+ */
+const FLASH_KEY = "asiakkaat:flash";
+
+function PlusIcon() {
+  return (
+    <svg className="h-3.5 w-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} aria-hidden>
+      <path strokeLinecap="round" d="M12 5v14M5 12h14" />
+    </svg>
+  );
+}
+
+/** "Y-tunnus · Maksuaika N pv" (private customers have no Y-tunnus). */
+function rowSecondary(customer: Customer): string {
+  const term = `Maksuaika ${customer.defaultPaymentTermDays} pv`;
+  return customer.businessId ? `${customer.businessId} · ${term}` : `Yksityisasiakas · ${term}`;
+}
+
 export default function CustomersPage() {
   const cached = readPageCache<Customer[]>("customers");
   const [customers, setCustomers] = useState<Customer[]>(cached ?? []);
@@ -55,11 +75,10 @@ export default function CustomersPage() {
   const [loadFailure, setLoadFailure] = useState<unknown>(null);
   const [search, setSearch] = usePersistedState("asiakkaat.search", "");
   const [showArchived, setShowArchived] = usePersistedState("asiakkaat.showArchived", false);
-  const [formMode, setFormMode] = useState<"hidden" | "create" | { edit: Customer }>("hidden");
+  // Editing an existing customer happens on its own detail page (MoreMenu ->
+  // "Muokkaa"); this sheet only ever creates a new one.
+  const [createOpen, setCreateOpen] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [confirmRemove, setConfirmRemove] = useState<Customer | null>(null);
-  const [formKey, setFormKey] = useState(0);
-  const [undo, setUndo] = useState<{ id: string; name: string } | null>(null);
   const [importOpen, setImportOpen] = useState(false);
   const [csv, setCsv] = useState("nimi,sähköposti,puhelin,y-tunnus\n");
   const [csvRows, setCsvRows] = useState<
@@ -67,11 +86,21 @@ export default function CustomersPage() {
   >(null);
   const createKey = useRef(newIdempotencyKey());
 
+  // A message left behind by the customer detail page (e.g. "Asiakas
+  // poistettiin.") after it navigated back here - shown once, then forgotten.
   useEffect(() => {
-    if (!undo) return;
-    const timer = window.setTimeout(() => setUndo(null), 8000);
-    return () => window.clearTimeout(timer);
-  }, [undo]);
+    try {
+      const flash = window.sessionStorage.getItem(FLASH_KEY);
+      if (flash) {
+        window.sessionStorage.removeItem(FLASH_KEY);
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional one-shot read of a value left by another page/navigation, not state derived from props/state here
+        setMessage(flash);
+      }
+    } catch {
+      // Session storage can throw in a locked-down browser context; the
+      // flash message is a courtesy, not something the page depends on.
+    }
+  }, []);
 
   const load = useCallback(async () => {
     try {
@@ -111,25 +140,18 @@ export default function CustomersPage() {
     setBusy(true);
     setMessage(null);
     try {
-      const editing = typeof formMode === "object" ? formMode.edit : null;
-      const response = await apiFetch(
-        editing ? `/api/customers/${editing.id}` : "/api/customers",
-        {
-          method: editing ? "PATCH" : "POST",
-          credentials: "include",
-          headers: {
-            "Content-Type": "application/json",
-            ...(editing ? {} : { "Idempotency-Key": createKey.current }),
-          },
-          body: JSON.stringify({
-            ...payload,
-            ...(editing?.updatedAt ? { expectedUpdatedAt: editing.updatedAt } : {}),
-          }),
-        }
-      );
+      const response = await apiFetch("/api/customers", {
+        method: "POST",
+        credentials: "include",
+        headers: {
+          "Content-Type": "application/json",
+          "Idempotency-Key": createKey.current,
+        },
+        body: JSON.stringify(payload),
+      });
       await readJson(response, "Tallennus epäonnistui");
-      if (!editing) createKey.current = newIdempotencyKey();
-      setFormMode("hidden");
+      createKey.current = newIdempotencyKey();
+      setCreateOpen(false);
       await load();
     } catch (error) {
       if (isUnauthorized(error)) redirectToLogin();
@@ -137,16 +159,6 @@ export default function CustomersPage() {
     } finally {
       setBusy(false);
     }
-  }
-
-  async function reloadEditing() {
-    const editing = typeof formMode === "object" ? formMode.edit : null;
-    if (!editing) return;
-    clearDraft(`customer:${editing.id}`);
-    const response = await apiFetch(`/api/customers/${editing.id}`, { credentials: "include" });
-    const data = await readJson<{ customer: Customer }>(response, "Asiakkaan haku epäonnistui");
-    setFormMode({ edit: { ...editing, ...data.customer } });
-    setFormKey((key) => key + 1);
   }
 
   async function previewCsv() {
@@ -192,326 +204,175 @@ export default function CustomersPage() {
     }
   }
 
-  async function undoArchive() {
-    if (!undo) return;
-    const target = undo;
-    setUndo(null);
-    setBusy(true);
-    try {
-      const response = await apiFetch(`/api/customers/${target.id}`, {
-        method: "PATCH",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ archived: false }),
-      });
-      await readJson(response, "Kumoaminen epäonnistui");
-      setMessage(`${target.name} palautettiin.`);
-      await load();
-    } catch (error) {
-      setMessage(errorMessage(error, "Kumoaminen epäonnistui"));
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function remove(customer: Customer) {
-    setBusy(true);
-    try {
-      const response = await apiFetch(`/api/customers/${customer.id}`, {
-        method: "DELETE",
-        credentials: "include",
-      });
-      const result = await readJson<{ archived: boolean; invoiceCount: number }>(
-        response,
-        "Poisto epäonnistui"
-      );
-      if (result.archived) {
-        setUndo({ id: customer.id, name: customer.name });
-        setMessage(null);
-      } else {
-        setUndo(null);
-        setMessage("Asiakas poistettiin.");
-      }
-      setConfirmRemove(null);
-      await load();
-    } catch (error) {
-      const message = errorMessage(error, "Poisto epäonnistui");
-      setMessage(message);
-      throw new Error(message);
-    } finally {
-      setBusy(false);
-    }
-  }
-
   const totalOpen = customers.reduce((sum, customer) => sum + customer.openBalance, 0);
+  const filtered = Boolean(search) || showArchived;
 
   return (
-    <>
-      <div className="space-y-6 pb-6">
-        <header className="space-y-2">
-          <p className="text-sm text-warm-gray leading-relaxed">
-            Asiakasrekisteri ja avoimet saatavat.
-          </p>
-        </header>
-
-        {status === "ready" && customers.length > 0 && (
-          <section className="bg-white rounded-3xl border border-warm-gray-light/20 shadow-sm p-6 space-y-2">
-            <p className="text-sm text-warm-gray">Avoimet saatavat</p>
-            <p className="text-3xl font-semibold text-charcoal tracking-tight">
-              {formatEur(totalOpen)}
-            </p>
-            <p className="text-xs text-warm-gray">{customers.length} asiakasta</p>
-          </section>
-        )}
-
-        {undo && (
-          <div
-            className="flex items-center justify-between gap-3 rounded-2xl bg-blush/40 px-4 py-3"
-            role="status"
+    <div className="space-y-6 pb-6">
+      <PageTitle
+        title="Asiakkaat"
+        action={
+          <button
+            type="button"
+            onClick={() => setCreateOpen(true)}
+            className="active-press relative inline-flex min-h-9 items-center gap-1 rounded-full bg-ink px-3.5 text-[13px] font-semibold text-canvas before:absolute before:inset-x-0 before:-inset-y-1 before:content-['']"
           >
-            <p className="text-sm text-charcoal">{undo.name} arkistoitiin.</p>
-            <button
-              type="button"
-              className="text-sm font-medium text-accent-dark underline"
-              onClick={() => void undoArchive()}
-            >
-              Kumoa
-            </button>
-          </div>
-        )}
+            <PlusIcon />
+            Lisää
+          </button>
+        }
+      />
 
-        {message && (
-          <p className="text-sm text-charcoal bg-blush/40 rounded-2xl px-4 py-3" role="status">
-            {message}
-          </p>
-        )}
+      {status === "ready" && customers.length > 0 && (
+        <SummaryCard
+          label="Avoinna"
+          value={formatEur(totalOpen)}
+          note={`${customers.length} asiakasta`}
+          noteTone="muted"
+        />
+      )}
 
-        {formMode === "hidden" ? (
-          <div className="flex flex-wrap gap-3">
-            <input
-              aria-label="Hae asiakasta"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Hae nimellä"
-              className="min-w-0 flex-1 min-h-12 px-4 rounded-2xl border border-warm-gray-light/60 bg-white text-sm"
-            />
-            <Button type="button" onClick={() => setFormMode("create")}>
-              Lisää
-            </Button>
-            <Button type="button" variant="secondary" onClick={() => setImportOpen((open) => !open)}>
-              Tuo CSV
-            </Button>
-          </div>
-        ) : (
-          <section className="bg-white rounded-3xl border border-warm-gray-light/20 shadow-sm p-6 space-y-4">
-            <p className="text-base font-medium text-charcoal">
-              {formMode === "create" ? "Uusi asiakas" : "Muokkaa asiakasta"}
-            </p>
-            <CustomerForm
-              key={formMode === "create" ? `new-${formKey}` : formMode.edit.id + formKey}
-              draftKey={formMode === "create" ? "customer:new" : `customer:${formMode.edit.id}`}
-              submitLabel={formMode === "create" ? "Lisää asiakas" : "Tallenna"}
-              busy={busy}
-              onReload={() => void reloadEditing()}
-              initial={
-                typeof formMode === "object"
-                  ? {
-                      name: formMode.edit.name,
-                      businessId: formMode.edit.businessId ?? "",
-                      email: formMode.edit.email ?? "",
-                      phone: formMode.edit.phone ?? "",
-                      addressStreet: formMode.edit.addressStreet ?? "",
-                      addressPostalCode: formMode.edit.addressPostalCode ?? "",
-                      addressCity: formMode.edit.addressCity ?? "",
-                      defaultPaymentTermDays: String(formMode.edit.defaultPaymentTermDays),
-                      notes: formMode.edit.notes ?? "",
-                    }
-                  : undefined
-              }
-              onSubmit={submit}
-              onCancel={() => setFormMode("hidden")}
-            />
-          </section>
-        )}
+      {message && (
+        <p className="rounded-card bg-accent-soft px-4 py-3 text-sm text-ink" role="status">
+          {message}
+        </p>
+      )}
 
-        {importOpen && formMode === "hidden" && (
-          <section className="bg-white rounded-3xl border border-warm-gray-light/20 shadow-sm p-6 space-y-3">
-            <p className="text-base font-medium text-charcoal">Tuo asiakkaita</p>
-            <textarea
-              aria-label="CSV-tiedosto"
-              className="min-h-28 w-full rounded-2xl border border-warm-gray-light/60 bg-white p-3 text-sm"
-              value={csv}
-              onChange={(event) => {
-                setCsv(event.target.value);
-                setCsvRows(null);
-              }}
-            />
-            <div className="flex flex-wrap gap-2">
-              <Button type="button" variant="secondary" disabled={busy} onClick={() => void previewCsv()}>
-                Tarkista
-              </Button>
-              <Button
-                type="button"
-                disabled={busy || !csvRows || csvRows.every((row) => row.errors.length > 0)}
-                onClick={() => void commitCsv()}
-              >
-                Tuo kelvolliset
-              </Button>
-            </div>
-            {csvRows && (
-              <ul className="space-y-1 text-sm">
-                {csvRows.map((row) => (
-                  <li key={row.line} className={row.errors.length ? "text-danger" : "text-charcoal"}>
-                    Rivi {row.line}: {row.name ?? "–"}
-                    {row.errors.length > 0 ? ` — ${row.errors.join(" ")}` : " — kelvollinen"}
-                  </li>
-                ))}
-              </ul>
-            )}
-          </section>
-        )}
-
-        {status === "loading" && <LoadingState label="Haetaan asiakkaita…" />}
-        {loadFailure != null && customers.length > 0 && (
-          <StaleBanner fetchedAt={pageCacheFetchedAt("customers")} onRetry={() => void load()} />
-        )}
-        {status === "error" && customers.length === 0 && (
-          isForbidden(loadFailure) ? (
-            <EmptyState kind="forbidden" />
-          ) : (
-            <ConnectionNotice
-              error={loadFailure}
-              fallback={message || "Asiakkaiden haku epäonnistui"}
-              onRetry={() => void load()}
-            />
-          )
-        )}
-
-        {(status === "ready" || customers.length > 0) && (
-          <ul className="space-y-3">
-            {customers.map((customer) => (
-              <li
-                key={customer.id}
-                className={`bg-white rounded-3xl border border-warm-gray-light/20 shadow-sm p-5 space-y-3 ${
-                  customer.archivedAt ? "opacity-60" : ""
-                }`}
-              >
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <Link
-                      href={`/asiakkaat/${customer.id}`}
-                      className={`block text-base font-medium text-charcoal ${longNameClass}`}
-                    >
-                      {customer.name}
-                    </Link>
-                    <p className="text-xs text-warm-gray truncate">
-                      {[customer.businessId, customer.email].filter(Boolean).join(" · ") ||
-                        "Yksityisasiakas"}
-                    </p>
-                  </div>
-                  <div className="text-right shrink-0">
-                    <p className={`text-base font-semibold text-charcoal ${amountClass}`}>
-                      {formatEur(customer.openBalance)}
-                    </p>
-                    <p className="text-[11px] text-warm-gray">avoinna</p>
-                  </div>
-                </div>
-
-                <div className="flex flex-wrap gap-1.5 text-[11px]">
-                  <span className="px-2 py-0.5 rounded-full bg-warm-gray-light/25 text-warm-gray">
-                    {customer.invoiceCount} laskua
-                  </span>
-                  {customer.openInvoiceCount > 0 && (
-                    <span className="px-2 py-0.5 rounded-full bg-danger/10 text-danger">
-                      {customer.openInvoiceCount} avoinna
-                    </span>
-                  )}
-                  <span className="px-2 py-0.5 rounded-full bg-warm-gray-light/25 text-warm-gray">
-                    Maksuaika {customer.defaultPaymentTermDays} pv
-                  </span>
-                  {customer.lastInvoiceDate && (
-                    <span className="px-2 py-0.5 rounded-full bg-warm-gray-light/25 text-warm-gray">
-                      Viimeksi {formatDate(customer.lastInvoiceDate)}
-                    </span>
-                  )}
-                  {customer.archivedAt && (
-                    <span className="px-2 py-0.5 rounded-full bg-warm-gray-light/40 text-warm-gray">
-                      Arkistoitu
-                    </span>
-                  )}
-                </div>
-
-                <div className="flex flex-wrap gap-2 pt-1">
-                  <Link
-                    href={`/laskut?customerId=${customer.id}`}
-                    className="min-h-11 text-xs font-medium px-3 py-2 rounded-xl border border-warm-gray-light/60"
-                  >
-                    Laskut
-                  </Link>
-                  <button
-                    type="button"
-                    onClick={() => setFormMode({ edit: customer })}
-                    className="min-h-11 text-xs font-medium px-3 py-2 rounded-xl border border-warm-gray-light/60"
-                  >
-                    Muokkaa
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setConfirmRemove(customer)}
-                    className="min-h-11 text-xs font-medium px-3 py-2 rounded-xl border border-danger/40 text-danger"
-                  >
-                    Poista
-                  </button>
-                </div>
-              </li>
-            ))}
-
-            {customers.length === 0 && (
-              <EmptyState
-                kind={search || showArchived ? "filtered" : "records"}
-                title={search || showArchived ? "Ei osumia" : "Ei asiakkaita vielä"}
-                body={
-                  search || showArchived
-                    ? "Yksikään asiakas ei vastaa hakua."
-                    : "Lisää ensimmäinen asiakas, niin laskutus löytää sen."
-                }
-                onCreate={formMode === "hidden" ? () => setFormMode("create") : undefined}
-                createLabel="Lisää asiakas"
-                onClear={() => {
-                  setSearch("");
-                  setShowArchived(false);
-                }}
-              />
-            )}
-          </ul>
-        )}
-
-        <Button
-          type="button"
-          variant="ghost"
-          className="w-full"
-          onClick={() => setShowArchived((value) => !value)}
-        >
-          {showArchived ? "Piilota arkistoidut" : "Näytä arkistoidut"}
+      <div className="flex flex-wrap gap-2">
+        <input
+          aria-label="Hae asiakasta"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Hae nimellä"
+          className={`${controlClass} min-w-0 flex-1`}
+        />
+        <Button type="button" variant="secondary" onClick={() => setImportOpen((open) => !open)}>
+          Tuo CSV
         </Button>
       </div>
 
-      <ConfirmModal
-        isOpen={confirmRemove !== null}
-        title="Poistetaanko asiakas?"
-        description={
-          confirmRemove
-            ? `${confirmRemove.name}${
-                confirmRemove.invoiceCount > 0
-                  ? ` – asiakkaalla on ${confirmRemove.invoiceCount} laskua, joten se arkistoidaan poiston sijaan.`
-                  : ""
-              }`
-            : ""
-        }
-        confirmLabel="Poista"
-        onConfirm={() => (confirmRemove ? remove(confirmRemove) : Promise.resolve())}
-        onCancel={() => setConfirmRemove(null)}
-      />
-    </>
+      {importOpen && (
+        <Card className="space-y-3">
+          <p className="text-[15px] font-medium text-ink">Tuo asiakkaita</p>
+          <textarea
+            aria-label="CSV-tiedosto"
+            className={`${controlClass} min-h-28 p-3`}
+            value={csv}
+            onChange={(event) => {
+              setCsv(event.target.value);
+              setCsvRows(null);
+            }}
+          />
+          <div className="flex flex-wrap gap-2">
+            <Button type="button" variant="secondary" disabled={busy} onClick={() => void previewCsv()}>
+              Tarkista
+            </Button>
+            <Button
+              type="button"
+              disabled={busy || !csvRows || csvRows.every((row) => row.errors.length > 0)}
+              onClick={() => void commitCsv()}
+            >
+              Tuo kelvolliset
+            </Button>
+          </div>
+          {csvRows && (
+            <ul className="space-y-1 text-sm">
+              {csvRows.map((row) => (
+                <li key={row.line} className={row.errors.length ? "text-danger" : "text-ink"}>
+                  Rivi {row.line}: {row.name ?? "–"}
+                  {row.errors.length > 0 ? `. ${row.errors.join(" ")}` : ". Kelvollinen"}
+                </li>
+              ))}
+            </ul>
+          )}
+        </Card>
+      )}
+
+      {status === "loading" && <SkeletonList rows={4} />}
+      {loadFailure != null && status === "ready" && (
+        <StaleBanner fetchedAt={pageCacheFetchedAt("customers")} onRetry={() => void load()} />
+      )}
+      {status === "error" &&
+        (isForbidden(loadFailure) ? (
+          <EmptyState kind="forbidden" />
+        ) : (
+          <ConnectionNotice
+            error={loadFailure}
+            fallback={message || "Asiakkaiden haku epäonnistui"}
+            onRetry={() => void load()}
+          />
+        ))}
+
+      {(status === "ready" || customers.length > 0) && (
+        <>
+          {customers.length > 0 && (
+            <Section>
+              {customers.map((customer) => (
+                <ListRow
+                  key={customer.id}
+                  href={`/asiakkaat/${customer.id}`}
+                  title={customer.name}
+                  amount={formatEur(customer.openBalance)}
+                  secondary={rowSecondary(customer)}
+                  trailing={
+                    customer.archivedAt ? <StatusTag tone="neutral">Arkistoitu</StatusTag> : undefined
+                  }
+                />
+              ))}
+            </Section>
+          )}
+
+          {customers.length === 0 && (
+            <EmptyState
+              kind={filtered ? "filtered" : "records"}
+              title={filtered ? "Ei osumia" : "Ei asiakkaita vielä"}
+              body={
+                filtered
+                  ? "Yksikään asiakas ei vastaa hakua."
+                  : "Lisää ensimmäinen asiakas, niin laskutus löytää sen."
+              }
+              onCreate={!createOpen ? () => setCreateOpen(true) : undefined}
+              createLabel="Lisää asiakas"
+              onClear={
+                filtered
+                  ? () => {
+                      setSearch("");
+                      setShowArchived(false);
+                    }
+                  : undefined
+              }
+            />
+          )}
+        </>
+      )}
+
+      <Button
+        type="button"
+        variant="ghost"
+        className="w-full"
+        onClick={() => setShowArchived((value) => !value)}
+      >
+        {showArchived ? "Piilota arkistoidut" : "Näytä arkistoidut"}
+      </Button>
+
+      <BottomSheet
+        isOpen={createOpen}
+        onClose={() => setCreateOpen(false)}
+        title="Uusi asiakas"
+        labelledBy="customer-sheet-title"
+        heightClass="max-h-[92dvh]"
+      >
+        <div className="flex min-h-0 flex-1 flex-col overflow-y-auto px-5 py-4 sheet-safe-bottom">
+          <CustomerForm
+            key={createOpen ? "new-open" : "new-closed"}
+            draftKey="customer:new"
+            submitLabel="Lisää asiakas"
+            busy={busy}
+            onSubmit={submit}
+            onCancel={() => setCreateOpen(false)}
+          />
+        </div>
+      </BottomSheet>
+    </div>
   );
 }

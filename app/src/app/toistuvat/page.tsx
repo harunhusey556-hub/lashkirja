@@ -2,8 +2,10 @@
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import { ErrorState, LoadingState } from "@/components/AsyncState";
+import { SkeletonList } from "@/components/AsyncState";
+import { ConnectionNotice, EmptyState, StaleBanner } from "@/components/ScreenState";
 import ConfirmModal from "@/components/ConfirmModal";
+import BottomSheet from "@/components/BottomSheet";
 import {
   apiFetch,
   errorMessage,
@@ -12,12 +14,15 @@ import {
   redirectToLogin,
 } from "@/components/clientFetch";
 import { Button, controlClass } from "@/components/ui";
-import { formatDate, formatEur, parseFinnishNumber } from "@/lib/format";
+import { Card, ListRow, MoreMenu, PageTitle, Section, StatusTag } from "@/components/ds";
+import { formatDayMonth, formatEur, parseFinnishNumber } from "@/lib/format";
 import { VAT_RATES_PERMILLE } from "@/lib/invoices";
 import { RECURRENCE_INTERVALS, type RecurrenceInterval } from "@/lib/recurrence";
 
-import { readPageCache, writePageCache } from "@/lib/page-cache";
+import { pageCacheFetchedAt, readPageCache, writePageCache } from "@/lib/page-cache";
 import { usePersistedState, useScrollRestoration } from "@/lib/list-ui-state";
+import { isForbidden } from "@/lib/screen-state";
+
 interface RecurringInvoice {
   id: string;
   name: string | null;
@@ -60,6 +65,24 @@ const EMPTY_LINE: FormLine = {
 
 const today = () => new Date().toISOString().slice(0, 10);
 
+const EMPTY_FORM = {
+  customerId: "",
+  name: "",
+  interval: "monthly" as RecurrenceInterval,
+  anchorDay: "1",
+  startDate: today(),
+  endDate: "",
+  paymentTermDays: "14",
+  autoSend: false,
+  lines: [{ ...EMPTY_LINE }] as FormLine[],
+};
+
+/** "Kuukausittain · seuraava 1.2." (or "päättynyt" once the schedule has no more runs). */
+function rowSecondary(entry: RecurringInvoice): string {
+  const next = entry.nextRunAt ? `seuraava ${formatDayMonth(entry.nextRunAt)}` : "päättynyt";
+  return `${INTERVAL_LABEL[entry.interval]} · ${next}`;
+}
+
 export default function RecurringInvoicesPage() {
   const cached = readPageCache<{ recurring: RecurringInvoice[]; dueNow: number }>("recurring");
   const [recurring, setRecurring] = useState<RecurringInvoice[]>(cached?.recurring ?? []);
@@ -68,25 +91,17 @@ export default function RecurringInvoicesPage() {
   const [status, setStatus] = useState<"loading" | "ready" | "error">(
     cached ? "ready" : "loading"
   );
+  const [loadFailure, setLoadFailure] = useState<unknown>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [creating, setCreating] = useState(false);
+  const [createOpen, setCreateOpen] = useState(false);
   // Persisted so back-navigation restores whether inactive entries were shown.
   const [showInactive, setShowInactive] = usePersistedState("toistuvat.showInactive", false);
   const [confirmRemove, setConfirmRemove] = useState<RecurringInvoice | null>(null);
 
-  const [form, setForm] = useState({
-    customerId: "",
-    name: "",
-    interval: "monthly" as RecurrenceInterval,
-    anchorDay: "1",
-    startDate: today(),
-    endDate: "",
-    paymentTermDays: "14",
-    autoSend: false,
-    lines: [{ ...EMPTY_LINE }] as FormLine[],
-  });
+  const [form, setForm] = useState(EMPTY_FORM);
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const [createError, setCreateError] = useState("");
 
   const load = useCallback(async () => {
     try {
@@ -101,14 +116,16 @@ export default function RecurringInvoicesPage() {
       writePageCache("recurring", data);
       setRecurring(data.recurring);
       setDueNow(data.dueNow);
+      setLoadFailure(null);
       setStatus("ready");
     } catch (error) {
       if (isUnauthorized(error)) {
         redirectToLogin();
         return;
       }
+      setLoadFailure(error);
       setMessage(errorMessage(error, "Toistuvien laskujen haku epäonnistui"));
-      setStatus("error");
+      setStatus(readPageCache("recurring") ? "ready" : "error");
     }
   }, [showInactive]);
 
@@ -131,6 +148,13 @@ export default function RecurringInvoicesPage() {
       ...current,
       lines: current.lines.map((line, i) => (i === index ? { ...line, ...patch } : line)),
     }));
+  }
+
+  function openCreate() {
+    setForm(EMPTY_FORM);
+    setErrors({});
+    setCreateError("");
+    setCreateOpen(true);
   }
 
   async function submit(event: React.FormEvent) {
@@ -166,8 +190,8 @@ export default function RecurringInvoicesPage() {
       return;
     }
     setErrors({});
+    setCreateError("");
     setBusy(true);
-    setMessage(null);
 
     try {
       const response = await apiFetch("/api/recurring-invoices", {
@@ -187,11 +211,13 @@ export default function RecurringInvoicesPage() {
         }),
       });
       await readJson(response, "Tallennus epäonnistui");
-      setCreating(false);
-      setForm({ ...form, name: "", lines: [{ ...EMPTY_LINE }] });
+      setCreateOpen(false);
+      setForm(EMPTY_FORM);
       await load();
     } catch (error) {
-      setMessage(errorMessage(error, "Tallennus epäonnistui"));
+      // Renders inside the "Uusi toistuva lasku" sheet, which stays open, not
+      // the page-level message behind it.
+      setCreateError(errorMessage(error, "Tallennus epäonnistui"));
     } finally {
       setBusy(false);
     }
@@ -216,7 +242,7 @@ export default function RecurringInvoicesPage() {
       setMessage(
         `Luotiin ${result.generated.length} laskua.` +
           (result.skipped.length ? ` ${result.skipped.length} ohitettiin.` : "") +
-          (failedSends ? ` ${failedSends} laskun lähetys epäonnistui — lasku on silti tallessa.` : "")
+          (failedSends ? ` ${failedSends} laskun lähetys epäonnistui. Lasku on silti tallessa.` : "")
       );
       await load();
     } catch (error) {
@@ -256,352 +282,121 @@ export default function RecurringInvoicesPage() {
       setConfirmRemove(null);
       await load();
     } catch (error) {
-      const message = errorMessage(error, "Poisto epäonnistui");
-      setMessage(message);
-      throw new Error(message);
+      const failureMessage = errorMessage(error, "Poisto epäonnistui");
+      setMessage(failureMessage);
+      throw new Error(failureMessage);
     } finally {
       setBusy(false);
     }
   }
 
   const field = `${controlClass} min-h-12`;
-  const label = "text-sm font-medium text-charcoal";
-  const lineLabel = "block text-xs font-medium text-warm-gray mb-1";
+  const label = "mb-1.5 block text-[13px] font-normal text-ink-2";
+  const lineLabel = "mb-1 block text-xs font-normal text-ink-2";
 
   return (
     <>
       <div className="space-y-6 pb-6">
-        <header className="space-y-2">
-          <p className="text-sm text-warm-gray leading-relaxed">
-            Sama lasku samalle asiakkaalle aikataulun mukaan. Rivit ovat pohja: jo luotu lasku ei
-            muutu, vaikka pohjaa muokkaisi.
-          </p>
-        </header>
+        <PageTitle
+          title="Toistuvat laskut"
+          action={
+            <button
+              type="button"
+              onClick={openCreate}
+              aria-label="Uusi toistuva lasku"
+              className="active-press relative inline-flex min-h-9 items-center gap-1 rounded-full bg-ink px-3.5 text-[13px] font-semibold text-canvas before:absolute before:inset-x-0 before:-inset-y-1 before:content-['']"
+            >
+              <svg className="h-3.5 w-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} aria-hidden>
+                <path strokeLinecap="round" d="M12 5v14M5 12h14" />
+              </svg>
+              Uusi
+            </button>
+          }
+        />
 
         {dueNow > 0 && (
-          <section className="bg-white rounded-3xl border border-accent/30 shadow-sm p-6 space-y-3">
-            <p className="text-sm text-charcoal">
+          <Card className="space-y-3">
+            <p className="text-[15px] text-ink">
               {dueNow} toistuvaa laskua on erääntynyt luotavaksi.
             </p>
             <Button type="button" className="w-full" busy={busy} busyLabel="Luodaan…" onClick={() => void runDue()}>
               Luo erääntyneet laskut
             </Button>
-          </section>
+          </Card>
         )}
 
         {message && (
-          <p className="text-sm text-charcoal bg-blush/40 rounded-2xl px-4 py-3" role="status">
+          <p className="rounded-card bg-accent-soft px-4 py-3 text-sm text-ink" role="status">
             {message}
           </p>
         )}
 
-        {creating ? (
-          <section className="bg-white rounded-3xl border border-warm-gray-light/20 shadow-sm p-6 space-y-4">
-            <p className="text-base font-medium text-charcoal">Uusi toistuva lasku</p>
-            {customers.length === 0 ? (
-              <p className="text-sm text-warm-gray">
-                Lisää ensin asiakas <Link className="text-accent" href="/asiakkaat">Asiakkaat</Link>-sivulla.
-              </p>
-            ) : (
-              <form onSubmit={submit} className="space-y-4" noValidate>
-                <div className="space-y-1.5">
-                  <label className={label} htmlFor="ri-customer">Asiakas</label>
-                  <select
-                    id="ri-customer"
-                    className={field}
-                    value={form.customerId}
-                    onChange={(e) => setForm({ ...form, customerId: e.target.value })}
-                  >
-                    <option value="">Valitse asiakas</option>
-                    {customers.map((customer) => (
-                      <option key={customer.id} value={customer.id}>
-                        {customer.name}
-                      </option>
-                    ))}
-                  </select>
-                  {errors.customerId && <p className="text-xs text-danger">{errors.customerId}</p>}
-                </div>
-
-                <div className="field-grid">
-                  <div className="space-y-1.5">
-                    <label className={label} htmlFor="ri-interval">Toistoväli</label>
-                    <select
-                      id="ri-interval"
-                      className={field}
-                      value={form.interval}
-                      onChange={(e) =>
-                        setForm({ ...form, interval: e.target.value as RecurrenceInterval })
-                      }
-                    >
-                      {RECURRENCE_INTERVALS.map((interval) => (
-                        <option key={interval} value={interval}>
-                          {INTERVAL_LABEL[interval]}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <div className="space-y-1.5">
-                    <label className={label} htmlFor="ri-anchor">Laskutuspäivä</label>
-                    <input
-                      id="ri-anchor"
-                      className={field}
-                      value={form.anchorDay}
-                      onChange={(e) => setForm({ ...form, anchorDay: e.target.value })}
-                      inputMode="numeric"
-                    />
-                    {errors.anchorDay ? (
-                      <p className="text-xs text-danger">{errors.anchorDay}</p>
-                    ) : (
-                      <p className="text-xs text-warm-gray">
-                        31 tarkoittaa kuun viimeistä päivää lyhyissä kuukausissa.
-                      </p>
-                    )}
-                  </div>
-                </div>
-
-                <div className="field-dates">
-                  <div className="space-y-1.5">
-                    <label className={label} htmlFor="ri-start">Alkaa</label>
-                    <input
-                      id="ri-start"
-                      type="date"
-                      className={field}
-                      value={form.startDate}
-                      onChange={(e) => setForm({ ...form, startDate: e.target.value })}
-                    />
-                  </div>
-                  <div className="space-y-1.5">
-                    <label className={label} htmlFor="ri-end">Päättyy (valinnainen)</label>
-                    <input
-                      id="ri-end"
-                      type="date"
-                      className={field}
-                      value={form.endDate}
-                      onChange={(e) => setForm({ ...form, endDate: e.target.value })}
-                    />
-                    {errors.endDate && <p className="text-xs text-danger">{errors.endDate}</p>}
-                  </div>
-                </div>
-
-                <div className="space-y-3">
-                  <p className={label}>Rivit</p>
-                  {form.lines.map((line, index) => (
-                    <div
-                      key={index}
-                      className="rounded-2xl border border-warm-gray-light/40 p-3 space-y-2 bg-cream/40"
-                    >
-                      <label className={lineLabel} htmlFor={`ri-line-${index}-desc`}>Kuvaus</label>
-                      <input
-                        id={`ri-line-${index}-desc`}
-                        className={field}
-                        value={line.description}
-                        onChange={(e) => setLine(index, { description: e.target.value })}
-                        placeholder="Kuvaus"
-                      />
-                      <div className="field-grid field-grid-3">
-                        <div>
-                          <label className={lineLabel} htmlFor={`ri-line-${index}-qty`}>Määrä</label>
-                          <input
-                            id={`ri-line-${index}-qty`}
-                            className={field}
-                            value={line.quantity}
-                            onChange={(e) => setLine(index, { quantity: e.target.value })}
-                            inputMode="decimal"
-                          />
-                        </div>
-                        <div>
-                          <label className={lineLabel} htmlFor={`ri-line-${index}-unit`}>Yksikkö</label>
-                          <input
-                            id={`ri-line-${index}-unit`}
-                            className={field}
-                            value={line.unit}
-                            onChange={(e) => setLine(index, { unit: e.target.value })}
-                          />
-                        </div>
-                        <div>
-                          <label className={lineLabel} htmlFor={`ri-line-${index}-price`}>Hinta €</label>
-                          <input
-                            id={`ri-line-${index}-price`}
-                            className={field}
-                            value={line.unitPrice}
-                            onChange={(e) => setLine(index, { unitPrice: e.target.value })}
-                            inputMode="decimal"
-                            placeholder="0,00"
-                          />
-                        </div>
-                      </div>
-                      <div className="flex items-end gap-2">
-                        <div className="min-w-0 flex-1">
-                          <label className={lineLabel} htmlFor={`ri-line-${index}-vat`}>ALV</label>
-                          <select
-                            id={`ri-line-${index}-vat`}
-                            className={field}
-                            value={line.vatRate}
-                            onChange={(e) => setLine(index, { vatRate: Number(e.target.value) })}
-                          >
-                            {VAT_RATES_PERMILLE.map((permille) => (
-                              <option key={permille} value={permille / 10}>
-                                ALV {permille / 10} %
-                              </option>
-                            ))}
-                          </select>
-                        </div>
-                        {form.lines.length > 1 && (
-                          <Button
-                            type="button"
-                            variant="danger"
-                            className="shrink-0"
-                            onClick={() =>
-                              setForm({
-                                ...form,
-                                lines: form.lines.filter((_, i) => i !== index),
-                              })
-                            }
-                          >
-                            Poista
-                          </Button>
-                        )}
-                      </div>
-                    </div>
-                  ))}
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    className="w-full"
-                    onClick={() => setForm({ ...form, lines: [...form.lines, { ...EMPTY_LINE }] })}
-                  >
-                    Lisää rivi
-                  </Button>
-                  {errors.lines && <p className="text-xs text-danger">{errors.lines}</p>}
-                </div>
-
-                <label className="flex items-center gap-3 text-sm text-charcoal">
-                  <input
-                    type="checkbox"
-                    checked={form.autoSend}
-                    onChange={(e) => setForm({ ...form, autoSend: e.target.checked })}
-                    className="w-4 h-4"
-                  />
-                  Lähetä lasku asiakkaalle sähköpostilla heti kun se luodaan
-                </label>
-
-                <div className="flex gap-3">
-                  <Button type="button" variant="secondary" className="flex-1" onClick={() => setCreating(false)}>
-                    Peruuta
-                  </Button>
-                  <Button type="submit" className="flex-1" busy={busy} busyLabel="Tallennetaan…">
-                    Luo toistuva lasku
-                  </Button>
-                </div>
-              </form>
-            )}
-          </section>
-        ) : (
-          <Button type="button" className="w-full" onClick={() => setCreating(true)}>
-            Uusi toistuva lasku
-          </Button>
+        {status === "loading" && <SkeletonList rows={4} />}
+        {loadFailure != null && status === "ready" && (
+          <StaleBanner fetchedAt={pageCacheFetchedAt("recurring")} onRetry={() => void load()} />
         )}
+        {status === "error" &&
+          (isForbidden(loadFailure) ? (
+            <EmptyState kind="forbidden" />
+          ) : (
+            <ConnectionNotice
+              error={loadFailure}
+              fallback={message || "Toistuvien laskujen haku epäonnistui"}
+              onRetry={() => void load()}
+            />
+          ))}
 
-        {status === "loading" && <LoadingState label="Haetaan toistuvia laskuja…" />}
-        {status === "error" && (
-          <ErrorState message={message || "Haku epäonnistui"} onRetry={() => void load()} />
-        )}
-
-        {status === "ready" && (
-          <ul className="space-y-3">
+        {status === "ready" && recurring.length > 0 && (
+          <Section>
             {recurring.map((entry) => (
-              <li
+              <ListRow
                 key={entry.id}
-                className={`bg-white rounded-3xl border border-warm-gray-light/20 shadow-sm p-5 space-y-3 ${
-                  entry.active ? "" : "opacity-60"
-                }`}
-              >
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <p className="text-base font-medium text-charcoal truncate">
-                      {entry.name || entry.customer.name}
-                    </p>
-                    <p className="text-xs text-warm-gray truncate">
-                      {entry.customer.name} · {INTERVAL_LABEL[entry.interval]} ·{" "}
-                      {entry.anchorDay}. päivä
-                    </p>
+                title={entry.name || entry.customer.name}
+                amount={formatEur(entry.total)}
+                secondary={rowSecondary(entry)}
+                trailing={
+                  <div className="flex items-center gap-1.5">
+                    <StatusTag tone={entry.active ? "success" : "neutral"}>
+                      {entry.active ? "Aktiivinen" : "Pysäytetty"}
+                    </StatusTag>
+                    <MoreMenu
+                      label={`Lisää toimintoja: ${entry.name || entry.customer.name}`}
+                      items={[
+                        ...(entry.active && entry.nextRunAt
+                          ? [{ label: "Luo nyt", onSelect: () => void runDue(entry.id), disabled: busy }]
+                          : []),
+                        {
+                          label: entry.active ? "Pysäytä" : "Jatka",
+                          onSelect: () => void toggleActive(entry),
+                          disabled: busy,
+                        },
+                        {
+                          label: "Poista",
+                          onSelect: () => setConfirmRemove(entry),
+                          tone: "danger" as const,
+                          disabled: busy,
+                        },
+                      ]}
+                    />
                   </div>
-                  <div className="text-right shrink-0">
-                    <p className="text-base font-semibold text-charcoal">
-                      {formatEur(entry.total)}
-                    </p>
-                    <p className="text-[11px] text-warm-gray">veroton</p>
-                  </div>
-                </div>
-
-                <div className="flex flex-wrap gap-1.5 text-[11px]">
-                  {entry.nextRunAt ? (
-                    <span className="px-2 py-0.5 rounded-full bg-blush text-accent-dark">
-                      Seuraava {formatDate(entry.nextRunAt)}
-                    </span>
-                  ) : (
-                    <span className="px-2 py-0.5 rounded-full bg-warm-gray-light/30 text-warm-gray">
-                      Päättynyt
-                    </span>
-                  )}
-                  {entry.autoSend && (
-                    <span className="px-2 py-0.5 rounded-full bg-success/10 text-success">
-                      Lähetetään automaattisesti
-                    </span>
-                  )}
-                  {!entry.active && (
-                    <span className="px-2 py-0.5 rounded-full bg-warm-gray-light/30 text-warm-gray">
-                      Pysäytetty
-                    </span>
-                  )}
-                  <span className="px-2 py-0.5 rounded-full bg-warm-gray-light/25 text-warm-gray">
-                    {entry.generatedCount} laskua luotu
-                  </span>
-                </div>
-
-                <div className="flex flex-wrap gap-2">
-                  {entry.active && entry.nextRunAt && (
-                    <button
-                      type="button"
-                      onClick={() => void runDue(entry.id)}
-                      disabled={busy}
-                      className="min-h-11 text-xs font-medium px-3 py-2 rounded-xl border border-warm-gray-light/60 disabled:opacity-50"
-                    >
-                      Luo nyt
-                    </button>
-                  )}
-                  <button
-                    type="button"
-                    onClick={() => void toggleActive(entry)}
-                    disabled={busy}
-                    className="min-h-11 text-xs font-medium px-3 py-2 rounded-xl border border-warm-gray-light/60 disabled:opacity-50"
-                  >
-                    {entry.active ? "Pysäytä" : "Jatka"}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setConfirmRemove(entry)}
-                    className="min-h-11 text-xs font-medium px-3 py-2 rounded-xl border border-danger/40 text-danger"
-                  >
-                    Poista
-                  </button>
-                </div>
-              </li>
+                }
+              />
             ))}
+          </Section>
+        )}
 
-            {recurring.length === 0 && (
-              <div className="text-center py-8 space-y-3">
-                <p className="text-sm text-warm-gray">
-                  {showInactive ? "Ei toistuvia laskuja." : "Ei aktiivisia toistuvia laskuja."}
-                </p>
-                {!showInactive && (
-                  <Button type="button" variant="secondary" onClick={() => setShowInactive(true)}>
-                    Näytä myös pysäytetyt
-                  </Button>
-                )}
-              </div>
-            )}
-          </ul>
+        {status === "ready" && recurring.length === 0 && (
+          <EmptyState
+            kind={showInactive ? "records" : "filtered"}
+            title={showInactive ? "Ei toistuvia laskuja" : "Ei aktiivisia toistuvia laskuja"}
+            body={
+              showInactive
+                ? "Luo ensimmäinen toistuva lasku, kun asiakkaalla on säännöllinen veloitus."
+                : "Kaikki toistuvat laskut on pysäytetty tai niitä ei ole vielä luotu."
+            }
+            onClear={showInactive ? undefined : () => setShowInactive(true)}
+            clearLabel="Näytä myös pysäytetyt"
+          />
         )}
 
         <Button
@@ -614,12 +409,228 @@ export default function RecurringInvoicesPage() {
         </Button>
       </div>
 
+      <BottomSheet
+        isOpen={createOpen}
+        onClose={() => setCreateOpen(false)}
+        title="Uusi toistuva lasku"
+        labelledBy="recurring-sheet-title"
+        heightClass="max-h-[94dvh]"
+      >
+        <div className="flex min-h-0 flex-1 flex-col overflow-y-auto px-5 py-4 sheet-safe-bottom">
+          {customers.length === 0 ? (
+            <p className="text-[15px] text-ink-2">
+              Lisää ensin asiakas <Link className="text-accent" href="/asiakkaat">Asiakkaat</Link>-sivulla.
+            </p>
+          ) : (
+            <form onSubmit={submit} className="space-y-4" noValidate>
+              <div>
+                <label className={label} htmlFor="ri-customer">Asiakas</label>
+                <select
+                  id="ri-customer"
+                  className={field}
+                  value={form.customerId}
+                  onChange={(e) => setForm({ ...form, customerId: e.target.value })}
+                >
+                  <option value="">Valitse asiakas</option>
+                  {customers.map((customer) => (
+                    <option key={customer.id} value={customer.id}>
+                      {customer.name}
+                    </option>
+                  ))}
+                </select>
+                {errors.customerId && <p className="mt-1.5 text-sm text-danger" role="alert">{errors.customerId}</p>}
+              </div>
+
+              <div className="field-grid">
+                <div>
+                  <label className={label} htmlFor="ri-interval">Toistoväli</label>
+                  <select
+                    id="ri-interval"
+                    className={field}
+                    value={form.interval}
+                    onChange={(e) =>
+                      setForm({ ...form, interval: e.target.value as RecurrenceInterval })
+                    }
+                  >
+                    {RECURRENCE_INTERVALS.map((interval) => (
+                      <option key={interval} value={interval}>
+                        {INTERVAL_LABEL[interval]}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className={label} htmlFor="ri-anchor">Laskutuspäivä</label>
+                  <input
+                    id="ri-anchor"
+                    className={field}
+                    value={form.anchorDay}
+                    onChange={(e) => setForm({ ...form, anchorDay: e.target.value })}
+                    inputMode="numeric"
+                  />
+                  {errors.anchorDay ? (
+                    <p className="mt-1.5 text-sm text-danger" role="alert">{errors.anchorDay}</p>
+                  ) : (
+                    <p className="mt-1.5 text-xs text-ink-2">
+                      31 tarkoittaa kuun viimeistä päivää lyhyissä kuukausissa.
+                    </p>
+                  )}
+                </div>
+              </div>
+
+              <div className="field-dates">
+                <div>
+                  <label className={label} htmlFor="ri-start">Alkaa</label>
+                  <input
+                    id="ri-start"
+                    type="date"
+                    className={field}
+                    value={form.startDate}
+                    onChange={(e) => setForm({ ...form, startDate: e.target.value })}
+                  />
+                </div>
+                <div>
+                  <label className={label} htmlFor="ri-end">Päättyy (valinnainen)</label>
+                  <input
+                    id="ri-end"
+                    type="date"
+                    className={field}
+                    value={form.endDate}
+                    onChange={(e) => setForm({ ...form, endDate: e.target.value })}
+                  />
+                  {errors.endDate && <p className="mt-1.5 text-sm text-danger" role="alert">{errors.endDate}</p>}
+                </div>
+              </div>
+
+              <div className="space-y-3">
+                <p className="text-[13px] text-ink-2">Rivit</p>
+                {form.lines.map((line, index) => (
+                  <Card key={index} className="space-y-2">
+                    <label className={lineLabel} htmlFor={`ri-line-${index}-desc`}>Kuvaus</label>
+                    <input
+                      id={`ri-line-${index}-desc`}
+                      aria-label={`Rivin ${index + 1} kuvaus`}
+                      className={field}
+                      value={line.description}
+                      onChange={(e) => setLine(index, { description: e.target.value })}
+                      placeholder="Kuvaus"
+                    />
+                    <div className="field-grid field-grid-3">
+                      <div>
+                        <label className={lineLabel} htmlFor={`ri-line-${index}-qty`}>Määrä</label>
+                        <input
+                          id={`ri-line-${index}-qty`}
+                          aria-label={`Rivin ${index + 1} määrä`}
+                          className={field}
+                          value={line.quantity}
+                          onChange={(e) => setLine(index, { quantity: e.target.value })}
+                          inputMode="decimal"
+                        />
+                      </div>
+                      <div>
+                        <label className={lineLabel} htmlFor={`ri-line-${index}-unit`}>Yksikkö</label>
+                        <input
+                          id={`ri-line-${index}-unit`}
+                          aria-label={`Rivin ${index + 1} yksikkö`}
+                          className={field}
+                          value={line.unit}
+                          onChange={(e) => setLine(index, { unit: e.target.value })}
+                        />
+                      </div>
+                      <div>
+                        <label className={lineLabel} htmlFor={`ri-line-${index}-price`}>Hinta €</label>
+                        <input
+                          id={`ri-line-${index}-price`}
+                          aria-label={`Rivin ${index + 1} hinta`}
+                          className={field}
+                          value={line.unitPrice}
+                          onChange={(e) => setLine(index, { unitPrice: e.target.value })}
+                          inputMode="decimal"
+                          placeholder="0,00"
+                        />
+                      </div>
+                    </div>
+                    <div className="flex items-end gap-2">
+                      <div className="min-w-0 flex-1">
+                        <label className={lineLabel} htmlFor={`ri-line-${index}-vat`}>ALV</label>
+                        <select
+                          id={`ri-line-${index}-vat`}
+                          aria-label={`Rivin ${index + 1} ALV`}
+                          className={field}
+                          value={line.vatRate}
+                          onChange={(e) => setLine(index, { vatRate: Number(e.target.value) })}
+                        >
+                          {VAT_RATES_PERMILLE.map((permille) => (
+                            <option key={permille} value={permille / 10}>
+                              ALV {permille / 10} %
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      {form.lines.length > 1 && (
+                        <Button
+                          type="button"
+                          variant="danger"
+                          className="shrink-0"
+                          onClick={() =>
+                            setForm({
+                              ...form,
+                              lines: form.lines.filter((_, i) => i !== index),
+                            })
+                          }
+                        >
+                          Poista
+                        </Button>
+                      )}
+                    </div>
+                  </Card>
+                ))}
+                <Button
+                  type="button"
+                  variant="secondary"
+                  className="w-full"
+                  onClick={() => setForm({ ...form, lines: [...form.lines, { ...EMPTY_LINE }] })}
+                >
+                  Lisää rivi
+                </Button>
+                {errors.lines && <p className="text-sm text-danger" role="alert">{errors.lines}</p>}
+              </div>
+
+              <label className="flex items-center gap-3 text-[15px] text-ink">
+                <input
+                  type="checkbox"
+                  checked={form.autoSend}
+                  onChange={(e) => setForm({ ...form, autoSend: e.target.checked })}
+                  className="h-4 w-4"
+                />
+                Lähetä lasku asiakkaalle sähköpostilla heti kun se luodaan
+              </label>
+
+              {createError && (
+                <p className="text-sm text-danger" role="alert">
+                  {createError}
+                </p>
+              )}
+
+              <div className="flex gap-3">
+                <Button type="button" variant="secondary" className="flex-1" onClick={() => setCreateOpen(false)}>
+                  Peruuta
+                </Button>
+                <Button type="submit" className="flex-1" busy={busy} busyLabel="Tallennetaan…">
+                  Luo toistuva lasku
+                </Button>
+              </div>
+            </form>
+          )}
+        </div>
+      </BottomSheet>
+
       <ConfirmModal
         isOpen={confirmRemove !== null}
         title="Poistetaanko toistuva lasku?"
         description={
           confirmRemove
-            ? `${confirmRemove.name || confirmRemove.customer.name} — jo luodut laskut säilyvät.`
+            ? `${confirmRemove.name || confirmRemove.customer.name}. Jo luodut laskut säilyvät.`
             : ""
         }
         confirmLabel="Poista"
