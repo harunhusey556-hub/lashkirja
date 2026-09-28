@@ -2,8 +2,11 @@ import { createHash, randomUUID } from "crypto";
 import { constants as fsConstants, existsSync } from "fs";
 import * as fs from "fs/promises";
 import * as path from "path";
+// Plain JSON, not TS: next.config.ts reads the same limits, and the config
+// loaded by `next start` can require a .json file but not an app .ts module.
+import uploadLimits from "./upload-limits.json";
 
-export const MAX_RECEIPT_BYTES = 15 * 1024 * 1024;
+export const MAX_RECEIPT_BYTES = uploadLimits.maxReceiptBytes;
 export const MAX_STATEMENT_BYTES = 20 * 1024 * 1024;
 
 /**
@@ -22,7 +25,7 @@ export const MAX_STATEMENT_BYTES = 20 * 1024 * 1024;
  * between 10 and 15 MB, which then failed to parse as multipart and
  * produced a 500 instead of the intended 413/415/400.
  */
-export const RECEIPT_MULTIPART_HEADROOM_BYTES = 2 * 1024 * 1024;
+export const RECEIPT_MULTIPART_HEADROOM_BYTES = uploadLimits.receiptMultipartHeadroomBytes;
 export const MAX_RECEIPT_REQUEST_BYTES = MAX_RECEIPT_BYTES + RECEIPT_MULTIPART_HEADROOM_BYTES;
 
 export type UploadPurpose = "receipt" | "statement";

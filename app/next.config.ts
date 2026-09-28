@@ -2,7 +2,12 @@ import type { NextConfig } from "next";
 import { execSync } from "node:child_process";
 import os from "node:os";
 import path from "node:path";
-import { MAX_RECEIPT_REQUEST_BYTES } from "./src/lib/storage";
+// JSON only: `next start` loads a transpiled copy of this config that cannot
+// require app .ts modules (importing ./src/lib/storage crashed production).
+import uploadLimits from "./src/lib/upload-limits.json";
+
+const MAX_RECEIPT_REQUEST_BYTES =
+  uploadLimits.maxReceiptBytes + uploadLimits.receiptMultipartHeadroomBytes;
 
 function gitCommit(): string {
   const fromEnv = process.env.GIT_COMMIT?.trim();
