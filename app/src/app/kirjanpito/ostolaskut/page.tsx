@@ -69,11 +69,25 @@ const AGING_BUCKETS = ["1-30", "31-60", "61-90", "90+"] as const;
 
 const today = () => new Date().toISOString().slice(0, 10);
 
-/** "<number> · eräpäivä d.m." - "erääntyi" once overdue, no invoice number when there is none. */
+/**
+ * "<number> · eräpäivä d.m. · avoinna X" - "erääntyi" once overdue, no invoice
+ * number when there is none, and the trailing "avoinna" clause only when the
+ * invoice is partially paid (paid something, but not the full amount yet) -
+ * otherwise the open amount already equals the row's own gross figure and
+ * repeating it here would be redundant.
+ */
 function rowSecondary(invoice: PurchaseInvoice): string {
   const datePhrase = invoice.displayStatus === "overdue" ? "erääntyi" : "eräpäivä";
   const dateText = `${datePhrase} ${formatDayMonth(invoice.dueDate)}`;
-  return invoice.invoiceNumber ? `${invoice.invoiceNumber} · ${dateText}` : dateText;
+  const base = invoice.invoiceNumber ? `${invoice.invoiceNumber} · ${dateText}` : dateText;
+  const partiallyPaid = invoice.paid > 0 && invoice.open > 0;
+  return partiallyPaid ? `${base} · avoinna ${formatEur(invoice.open)}` : base;
+}
+
+/** A unique accessible name per row's "..." menu: two rows can share a supplier name. */
+function rowMenuLabel(invoice: PurchaseInvoice): string {
+  const suffix = invoice.invoiceNumber ? invoice.invoiceNumber : formatDayMonth(invoice.dueDate);
+  return `Lisää toimintoja: ${invoice.supplierName} ${suffix}`;
 }
 
 export default function PurchaseInvoicesPage() {
@@ -84,8 +98,10 @@ export default function PurchaseInvoicesPage() {
     cached ? "ready" : "loading"
   );
   // Persisted so back-navigation restores the active tab instead of resetting
-  // the list to "Avoimet".
-  const [filter, setFilter] = usePersistedState<PurchaseFilterId>("ostolaskut.filter", "open");
+  // the list to "Kaikki" - default "all" (not "open") so a purely overdue
+  // book (no invoice merely "open" yet) doesn't open on an empty tab, same
+  // default as /laskut.
+  const [filter, setFilter] = usePersistedState<PurchaseFilterId>("ostolaskut.filter", "all");
   const [statusCounts, setStatusCounts] = useState<PurchaseStatusCounts>(ZERO_COUNTS);
   const [message, setMessage] = useState<string | null>(null);
   const [loadFailure, setLoadFailure] = useState<unknown>(null);
@@ -150,20 +166,33 @@ export default function PurchaseInvoicesPage() {
   }, [load]);
 
   // Filter-chip counts: fetched separately from the (capped) list above, so
-  // every chip stays correct regardless of which tab is active.
+  // every chip stays correct regardless of which tab is active. Re-run after
+  // every mutation below (create/pay/remove/match) - a bare [] effect only
+  // ever counted once, at mount, and every chip went stale the moment the
+  // first invoice was created, paid or removed.
+  const loadCounts = useCallback(async (signal?: AbortSignal) => {
+    try {
+      const response = await apiFetch("/api/purchase-invoices/counts", {
+        credentials: "include",
+        signal,
+      });
+      const data = await readJson<{ counts: PurchaseStatusCounts }>(response, "Määrien haku epäonnistui");
+      if (signal?.aborted) return;
+      setStatusCounts(data.counts);
+    } catch (error) {
+      if (signal?.aborted) return;
+      if (isUnauthorized(error)) redirectToLogin();
+      // Otherwise leave the last-known (or zero) counts - the invoice list
+      // itself still loads independently of this fetch.
+    }
+  }, []);
+
   useEffect(() => {
     const controller = new AbortController();
-    apiFetch("/api/purchase-invoices/counts", { credentials: "include", signal: controller.signal })
-      .then((res) => readJson<{ counts: PurchaseStatusCounts }>(res, "Määrien haku epäonnistui"))
-      .then((data) => setStatusCounts(data.counts))
-      .catch((error) => {
-        if (controller.signal.aborted) return;
-        if (isUnauthorized(error)) redirectToLogin();
-        // Otherwise leave the last-known (or zero) counts - the invoice list
-        // itself still loads independently of this fetch.
-      });
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional fetch-on-mount/refetch: storing the fetched counts is exactly the external-system sync this effect exists for
+    void loadCounts(controller.signal);
     return () => controller.abort();
-  }, []);
+  }, [loadCounts]);
 
   useScrollRestoration("ostolaskut", status === "ready");
 
@@ -223,7 +252,7 @@ export default function PurchaseInvoicesPage() {
         category: "",
       });
       setFormErrors({});
-      await load();
+      await Promise.all([load(), loadCounts()]);
     } catch (error) {
       // Renders inside the "Uusi ostolasku" sheet, which stays open, not the
       // page-level message behind it.
@@ -258,7 +287,7 @@ export default function PurchaseInvoicesPage() {
       });
       await readJson(response, "Maksun kirjaus epäonnistui");
       setDetailInvoice(null);
-      await load();
+      await Promise.all([load(), loadCounts()]);
     } catch (error) {
       // Renders inside the detail sheet, which stays open.
       setPayError(errorMessage(error, "Maksun kirjaus epäonnistui"));
@@ -276,7 +305,7 @@ export default function PurchaseInvoicesPage() {
       });
       await readJson(response, "Poisto epäonnistui");
       setConfirmRemove(null);
-      await load();
+      await Promise.all([load(), loadCounts()]);
     } catch (error) {
       const failureMessage = errorMessage(error, "Poisto epäonnistui");
       setMessage(failureMessage);
@@ -302,7 +331,7 @@ export default function PurchaseInvoicesPage() {
         `Kohdistettiin ${result.applied.length} maksua viitenumerolla. ` +
           `${result.suggestions.length} mahdollista osumaa vaatii tarkistuksen.`
       );
-      await load();
+      await Promise.all([load(), loadCounts()]);
     } catch (error) {
       setMessage(errorMessage(error, "Kohdistus epäonnistui"));
     } finally {
@@ -410,6 +439,7 @@ export default function PurchaseInvoicesPage() {
                           {PURCHASE_STATUS[invoice.displayStatus].label}
                         </StatusTag>
                         <MoreMenu
+                          label={rowMenuLabel(invoice)}
                           items={[
                             {
                               label: "Poista",
@@ -615,6 +645,9 @@ export default function PurchaseInvoicesPage() {
                 ...(detailInvoice.reference ? [{ label: "Viite", value: detailInvoice.reference }] : []),
                 ...(detailInvoice.payments.length > 0
                   ? [{ label: "Maksettu", value: formatEur(detailInvoice.paid) }]
+                  : []),
+                ...(detailInvoice.status === "open"
+                  ? [{ label: "Avoinna", value: formatEur(detailInvoice.open) }]
                   : []),
               ]}
             />

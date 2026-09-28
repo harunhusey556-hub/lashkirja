@@ -143,7 +143,10 @@ test("a purchase invoice can be added and marked paid", async ({ page }) => {
   await page.getByLabel("ALV (€)").fill("24,00");
   await page.getByRole("button", { name: "Lisää ostolasku" }).click();
 
-  const card = page.getByRole("button", { name: /E2E Tukku/ });
+  // .first(): the row's own button and its "..." menu (labelled "Lisää
+  // toimintoja: E2E Tukku ...") both now match this name - the row itself
+  // is first in DOM order.
+  const card = page.getByRole("button", { name: /E2E Tukku/ }).first();
   await expect(card).toBeVisible();
   await card.click();
 
