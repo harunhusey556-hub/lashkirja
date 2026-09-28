@@ -1,9 +1,11 @@
 "use client";
 
 import { use, useCallback, useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ErrorState, LoadingState } from "@/components/AsyncState";
 import ConfirmModal from "@/components/ConfirmModal";
+import BottomSheet from "@/components/BottomSheet";
 import {
   apiFetch,
   errorMessage,
@@ -11,12 +13,15 @@ import {
   readJson,
   redirectToLogin,
 } from "@/components/clientFetch";
-import { formatDate, formatEur, parseMoneyInput } from "@/lib/format";
+import { formatDate, formatDayMonth, formatEur, parseMoneyInput } from "@/lib/format";
 import { newIdempotencyKey } from "@/lib/idempotency-key";
 import { helsinkiCalendarDate } from "@/lib/validation";
 import { formatReference } from "@/lib/finnish-reference";
 import { shareContent } from "@/lib/share";
+import { daysOverdue } from "@/lib/invoices";
+import { SALES_STATUS } from "@/lib/status-labels";
 import { Button, buttonClass, controlClass } from "@/components/ui";
+import { BottomActions, DetailHero, KeyValueList, MoreMenu, Section, StatusTag, Timeline } from "@/components/ds";
 
 interface ReminderPreview {
   level: number;
@@ -88,13 +93,73 @@ interface Invoice {
   activity?: Array<{ id: string; kind: string; summary: string; createdAt: string }>;
 }
 
-const STATUS_LABEL: Record<Invoice["displayStatus"], string> = {
-  draft: "Luonnos",
-  sent: "Lähetetty",
-  overdue: "Myöhässä",
-  paid: "Maksettu",
-  credited: "Hyvitetty",
-};
+/** One row per distinct VAT rate present on the invoice's lines. */
+function vatBreakdown(lines: Invoice["lines"]): Array<{ rate: number; net: number; vat: number }> {
+  const byRate = new Map<number, number>();
+  for (const line of lines) {
+    byRate.set(line.vatRate, (byRate.get(line.vatRate) ?? 0) + line.net);
+  }
+  return [...byRate.entries()]
+    .sort((a, b) => b[0] - a[0])
+    .map(([rate, net]) => ({ rate, net, vat: (net * rate) / 100 }));
+}
+
+type HistoryItem = { title: string; meta?: string; tone?: "accent" | "muted" };
+
+/** "Historia": the invoice's activity log and send attempts merged into one feed, newest first. */
+function historyItems(invoice: Invoice): HistoryItem[] {
+  const dated: Array<HistoryItem & { at: number }> = [];
+
+  if (invoice.displayStatus === "overdue") {
+    dated.push({
+      title: "Erääntyi",
+      meta: formatDayMonth(invoice.dueDate),
+      tone: "accent",
+      at: new Date(invoice.dueDate).getTime(),
+    });
+  }
+
+  for (const send of invoice.sends ?? []) {
+    const title =
+      send.status === "sent"
+        ? "Lähetetty sähköpostilla"
+        : send.status === "failed"
+          ? "Lähetys epäonnistui"
+          : "Lähetys kesken";
+    dated.push({
+      title,
+      meta: [formatDate(send.createdAt), send.toAddress].filter(Boolean).join(", "),
+      tone: send.status === "failed" ? "accent" : "muted",
+      at: new Date(send.createdAt).getTime(),
+    });
+  }
+
+  for (const entry of invoice.activity ?? []) {
+    dated.push({
+      title: entry.summary,
+      meta: formatDate(entry.createdAt),
+      tone: "muted",
+      at: new Date(entry.createdAt).getTime(),
+    });
+  }
+
+  return dated
+    .sort((a, b) => b.at - a.at)
+    .map(({ title, meta, tone }) => ({ title, meta, tone }));
+}
+
+function BellIcon() {
+  return (
+    <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} aria-hidden>
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        d="M6 9a6 6 0 1 1 12 0c0 3.2 1 5 1.5 5.8H4.5C5 14 6 12.2 6 9Z"
+      />
+      <path strokeLinecap="round" strokeLinejoin="round" d="M10 18a2 2 0 0 0 4 0" />
+    </svg>
+  );
+}
 
 export default function InvoiceDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
@@ -116,6 +181,7 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
   const [reminder, setReminder] = useState<ReminderPreview | null>(null);
   const [remindingBusy, setRemindingBusy] = useState(false);
   const [closeReason, setCloseReason] = useState("");
+  const [closeReasonOpen, setCloseReasonOpen] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -181,6 +247,7 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
       setMessage("Kirjoita perustelu, vähintään kolme merkkiä.");
       return;
     }
+    setCloseReasonOpen(false);
     void changeStatus("paid", reason);
   }
 
@@ -392,6 +459,66 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
     }
   }
 
+  // Exactly one primary action per status; the rarer actions live in the "..." menu instead.
+  // Plain data only (no closures): the onClick a given kind maps to is wired up
+  // directly at the JSX call site below, one handler per kind, so the actual
+  // function value (and whatever ref it touches, e.g. addPayment's idempotency
+  // key) is created inline at render time exactly like every other button on
+  // this page, rather than stored on this object and read back out of it.
+  type PrimaryKind = "send" | "remind" | "markPaid" | "pay";
+  type PrimaryAction = { kind: PrimaryKind; label: string; busy: boolean; busyLabel?: string; icon?: boolean };
+  const primary: PrimaryAction | null = (() => {
+    if (!invoice) return null;
+    if (invoice.status === "draft") {
+      return { kind: "send", label: "Lähetä", busy: sending, busyLabel: "Tarkistetaan…" };
+    }
+    if (invoice.displayStatus === "overdue") {
+      return { kind: "remind", label: "Lähetä muistutus", busy: remindingBusy, busyLabel: "Lähetetään…", icon: true };
+    }
+    if (invoice.status === "sent" && invoice.open <= 0) {
+      return { kind: "markPaid", label: "Merkitse maksetuksi", busy: false };
+    }
+    if (invoice.status === "sent") {
+      return { kind: "pay", label: "Kirjaa maksu", busy: false };
+    }
+    return null;
+  })();
+
+  const menuItems = invoice
+    ? [
+        {
+          label: "Avaa PDF",
+          onSelect: () => window.open(`/api/invoices/${invoice.id}/pdf`, "_blank", "noopener,noreferrer"),
+        },
+        { label: "Jaa", onSelect: () => void shareInvoice() },
+        ...(invoice.status !== "credited"
+          ? [{ label: "Lähetä sähköpostilla", onSelect: () => void openReview(), disabled: sending }]
+          : []),
+        { label: "Kopioi luonnokseksi", onSelect: () => void duplicateInvoice(), disabled: busy },
+        ...(invoice.documentKind !== "credit_note" &&
+        invoice.status !== "credited" &&
+        invoice.status !== "draft"
+          ? [{ label: "Hyvitä", onSelect: () => void createCreditNote(), disabled: busy }]
+          : []),
+        ...(invoice.status === "draft"
+          ? [{ label: "Merkitse lähetetyksi", onSelect: () => void changeStatus("sent"), disabled: busy }]
+          : []),
+        ...(invoice.status === "sent" && invoice.open > 0
+          ? [{ label: "Sulje perustelulla", onSelect: () => setCloseReasonOpen(true) }]
+          : []),
+        ...(invoice.status === "draft"
+          ? [
+              {
+                label: "Poista luonnos",
+                onSelect: () => setConfirmDelete(true),
+                tone: "danger" as const,
+                disabled: busy,
+              },
+            ]
+          : []),
+      ]
+    : [];
+
   return (
     <>
       <div className="space-y-6 pb-6">
@@ -402,181 +529,81 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
 
         {state === "ready" && invoice && (
           <>
-            <header className="select-text space-y-2">
-              <h2 className="text-2xl font-semibold text-charcoal tracking-tight">
-                {invoice.documentKind === "credit_note" ? "Hyvityslasku" : "Lasku"} {invoice.number}
-              </h2>
-              {invoice.creditsInvoice && (
-                <p className="text-sm text-warm-gray">
-                  Hyvittää laskun {invoice.creditsInvoice.number}
-                </p>
-              )}
-              {invoice.creditNotes && invoice.creditNotes.length > 0 && (
-                <p className="text-sm text-warm-gray">
-                  Hyvityslasku {invoice.creditNotes.map((note) => note.number).join(", ")}
-                </p>
-              )}
-              <p className="text-sm text-warm-gray">
-                {invoice.customer.name}
-                {invoice.customer.businessId ? ` · ${invoice.customer.businessId}` : ""}
-              </p>
-            </header>
+            <DetailHero
+              amount={formatEur(invoice.gross)}
+              title={invoice.customer.name}
+              meta={
+                <>
+                  <span className="block">
+                    {invoice.documentKind === "credit_note"
+                      ? `Hyvityslasku ${invoice.number}`
+                      : `Lasku ${invoice.number}, viite ${formatReference(invoice.reference)}`}
+                  </span>
+                  {invoice.creditsInvoice && (
+                    <span className="block">Hyvittää laskun {invoice.creditsInvoice.number}</span>
+                  )}
+                  {invoice.creditNotes && invoice.creditNotes.length > 0 && (
+                    <span className="block">
+                      Hyvityslasku {invoice.creditNotes.map((note) => note.number).join(", ")}
+                    </span>
+                  )}
+                  <span className="block">
+                    <Link href={`/asiakkaat/${invoice.customer.id}`} className="text-accent">
+                      Asiakas
+                    </Link>
+                    {invoice.customer.businessId ? ` · ${invoice.customer.businessId}` : ""}
+                  </span>
+                </>
+              }
+              status={
+                <StatusTag tone={SALES_STATUS[invoice.displayStatus].tone}>
+                  {invoice.displayStatus === "overdue"
+                    ? `Myöhässä ${daysOverdue(invoice.dueDate)} päivää`
+                    : SALES_STATUS[invoice.displayStatus].label}
+                </StatusTag>
+              }
+              menu={<MoreMenu items={menuItems} />}
+            />
 
             {message && (
-              <p className="text-sm text-charcoal bg-blush/40 rounded-2xl px-4 py-3" role="status">
+              <p className="rounded-card bg-accent-soft px-4 py-3 text-sm text-ink" role="status">
                 {message}
               </p>
             )}
 
-            <section className="select-text bg-white rounded-3xl border border-warm-gray-light/20 shadow-sm p-6 space-y-3">
-              <div className="flex items-center justify-between">
-                <span className="text-sm text-warm-gray">Tila</span>
-                <span className="text-sm font-medium text-charcoal">
-                  {STATUS_LABEL[invoice.displayStatus]}
-                </span>
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="text-sm text-warm-gray">Laskun päivä</span>
-                <span className="text-sm text-charcoal">{formatDate(invoice.issueDate)}</span>
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="text-sm text-warm-gray">Eräpäivä</span>
-                <span className="text-sm text-charcoal">{formatDate(invoice.dueDate)}</span>
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="text-sm text-warm-gray">Viitenumero</span>
-                <span className="text-sm font-mono text-charcoal">
-                  {formatReference(invoice.reference)}
-                </span>
-              </div>
-            </section>
+            <KeyValueList
+              rows={[
+                { label: "Päivätty", value: formatDate(invoice.issueDate) },
+                { label: "Eräpäivä", value: formatDate(invoice.dueDate) },
+                { label: "Viite", value: formatReference(invoice.reference) },
+                {
+                  label: "Rivit",
+                  value:
+                    invoice.lines.length > 0
+                      ? `${invoice.lines[0].description}, ${invoice.lines.length} kpl`
+                      : "Ei rivejä",
+                },
+                ...vatBreakdown(invoice.lines).map((row) => ({
+                  label: `ALV ${String(row.rate).replace(".", ",")} %`,
+                  value: formatEur(row.vat),
+                })),
+                { label: "Yhteensä", value: formatEur(invoice.gross) },
+                ...(invoice.closedReason
+                  ? [{ label: "Suljettu", value: invoice.closedReason }]
+                  : []),
+              ]}
+            />
 
-            <section className="select-text bg-white rounded-3xl border border-warm-gray-light/20 shadow-sm p-6 space-y-3">
-              <p className="text-base font-medium text-charcoal">Rivit</p>
-              <ul className="space-y-2">
-                {invoice.lines.map((line) => (
-                  <li key={line.id} className="flex justify-between gap-3 text-sm">
-                    <div className="min-w-0">
-                      <p className="text-charcoal truncate">{line.description}</p>
-                      <p className="text-xs text-warm-gray">
-                        {line.quantity} {line.unit} × {formatEur(line.unitPrice)} · ALV {line.vatRate} %
-                      </p>
-                    </div>
-                    <span className="text-charcoal shrink-0">{formatEur(line.net)}</span>
-                  </li>
-                ))}
-              </ul>
-              <div className="border-t border-warm-gray-light/30 pt-3 space-y-1 text-sm">
-                <div className="flex justify-between text-warm-gray">
-                  <span>Veroton</span>
-                  <span>{formatEur(invoice.net)}</span>
-                </div>
-                <div className="flex justify-between text-warm-gray">
-                  <span>ALV</span>
-                  <span>{formatEur(invoice.vat)}</span>
-                </div>
-                <div className="flex justify-between font-semibold text-charcoal">
-                  <span>Yhteensä</span>
-                  <span>{formatEur(invoice.gross)}</span>
-                </div>
-                {invoice.paid !== 0 && (
-                  <div className="flex justify-between text-success">
-                    <span>Maksettu</span>
-                    <span>{formatEur(invoice.paid)}</span>
-                  </div>
-                )}
-                {invoice.open !== 0 && (
-                  <div className="flex justify-between font-medium text-charcoal">
-                    <span>Avoinna</span>
-                    <span>{formatEur(invoice.open)}</span>
-                  </div>
-                )}
-                {invoice.closedReason && (
-                  <p className="text-xs text-warm-gray pt-1">Suljettu: {invoice.closedReason}</p>
-                )}
-              </div>
-              {invoice.notes && (
-                <p className="text-sm text-warm-gray border-t border-warm-gray-light/30 pt-3">
-                  {invoice.notes}
-                </p>
-              )}
-            </section>
-
-            <section className="bg-white rounded-3xl border border-warm-gray-light/20 shadow-sm p-6 space-y-4">
-              <p className="text-base font-medium text-charcoal">Toiminnot</p>
-              <div className="flex flex-wrap gap-2">
-                <a
-                  href={`/api/invoices/${invoice.id}/pdf`}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="active-press inline-flex min-h-12 items-center px-4 rounded-xl border border-warm-gray-light/60 text-sm font-medium text-charcoal"
-                >
-                  Avaa PDF
-                </a>
-                <Button
-                  variant="secondary"
-                  busy={sharing}
-                  busyLabel="Jaetaan…"
-                  disabled={busy}
-                  onClick={() => void shareInvoice()}
-                >
-                  Jaa
-                </Button>
-                {invoice.status !== "credited" && (
-                  <Button
-                    variant="secondary"
-                    busy={sending}
-                    busyLabel="Tarkistetaan…"
-                    disabled={busy}
-                    onClick={() => void openReview()}
-                  >
-                    Lähetä sähköpostilla
-                  </Button>
-                )}
-                <Button variant="secondary" disabled={busy} onClick={() => void duplicateInvoice()}>
-                  Kopioi luonnokseksi
-                </Button>
-                {invoice.status === "draft" && (
-                  <Button disabled={busy} onClick={() => void changeStatus("sent")}>
-                    Merkitse lähetetyksi
-                  </Button>
-                )}
-                {invoice.status === "sent" && invoice.open <= 0 && (
-                  <Button disabled={busy} onClick={() => void changeStatus("paid")}>
-                    Merkitse maksetuksi
-                  </Button>
-                )}
-                {invoice.status === "sent" && invoice.open > 0 && (
-                  <div className="flex min-w-full flex-col gap-2">
-                    <input
-                      aria-label="Sulkemisen perustelu"
-                      className={`${controlClass} min-h-12`}
-                      value={closeReason}
-                      onChange={(event) => setCloseReason(event.target.value)}
-                      placeholder="Perustelu, esim. käteinen tai luottotappio"
-                    />
-                    <Button disabled={busy} onClick={closeWithReason}>
-                      Sulje perustelulla
-                    </Button>
-                  </div>
-                )}
-                {invoice.documentKind !== "credit_note" &&
-                  invoice.status !== "credited" &&
-                  invoice.status !== "draft" && (
-                    <Button variant="secondary" disabled={busy} onClick={() => void createCreditNote()}>
-                      Hyvitä
-                    </Button>
-                  )}
-                {invoice.status === "draft" && (
-                  <Button variant="danger" disabled={busy} onClick={() => setConfirmDelete(true)}>
-                    Poista luonnos
-                  </Button>
-                )}
-              </div>
-
-              {(invoice.status === "sent" || invoice.status === "paid") && (
-                <div className="space-y-2 border-t border-warm-gray-light/30 pt-4">
-                  <p className="text-sm font-medium text-charcoal">Kirjaa maksu</p>
+            {(invoice.status === "sent" || invoice.status === "paid") && (
+              <Section
+                title="Maksut"
+                action={
+                  invoice.open > 0 ? (
+                    <span className="tabular-nums">{formatEur(invoice.open)} avoinna</span>
+                  ) : undefined
+                }
+              >
+                <div className="space-y-3 px-4 py-4">
                   <div className="field-dates">
                     <input
                       id="payment-amount"
@@ -612,62 +639,67 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
                     Lisää
                   </Button>
                 </div>
-              )}
-
-              {reminder && (
-                <div className="space-y-3 border-t border-warm-gray-light/30 pt-4">
-                  <div>
-                    <p className="text-sm font-medium text-charcoal">Maksumuistutus</p>
-                    <p className="text-xs text-warm-gray">
-                      Myöhässä {reminder.daysLate} päivää · muistutus {reminder.level}
-                    </p>
+                {invoice.payments.map((payment) => (
+                  <div key={payment.id} className="flex items-center justify-between gap-3 px-4 py-3">
+                    <div>
+                      <p className="text-[15px] text-ink">{formatEur(payment.amount)}</p>
+                      <p className="text-[13px] text-ink-2">
+                        {formatDate(payment.paidDate)}
+                        {payment.source === "bank" ? " · pankista" : ""}
+                        {payment.note ? ` · ${payment.note}` : ""}
+                      </p>
+                    </div>
+                    <Button
+                      type="button"
+                      variant="danger"
+                      onClick={() => setConfirmRemovePayment(payment.id)}
+                      disabled={busy}
+                    >
+                      Poista
+                    </Button>
                   </div>
+                ))}
+              </Section>
+            )}
 
-                  <div className="space-y-1 text-sm">
-                    <div className="flex justify-between text-warm-gray">
+            {reminder && (
+              <Section title="Muistutukset">
+                <div className="space-y-3 px-4 py-4">
+                  <p className="text-[13px] text-ink-2">
+                    Myöhässä {reminder.daysLate} päivää · muistutus {reminder.level}
+                  </p>
+                  <div className="space-y-1 text-[15px]">
+                    <div className="flex justify-between text-ink-2">
                       <span>Avoin pääoma</span>
                       <span>{formatEur(reminder.open)}</span>
                     </div>
                     {reminder.interest > 0 && (
-                      <div className="flex justify-between text-warm-gray">
+                      <div className="flex justify-between text-ink-2">
                         <span>Viivästyskorko</span>
                         <span>{formatEur(reminder.interest)}</span>
                       </div>
                     )}
                     {reminder.fee > 0 && (
-                      <div className="flex justify-between text-warm-gray">
+                      <div className="flex justify-between text-ink-2">
                         <span>Muistutusmaksu</span>
                         <span>{formatEur(reminder.fee)}</span>
                       </div>
                     )}
-                    <div className="flex justify-between font-semibold text-charcoal">
+                    <div className="flex justify-between font-semibold text-ink">
                       <span>Maksettava yhteensä</span>
                       <span>{formatEur(reminder.total)}</span>
                     </div>
                   </div>
-
-                  <div className="flex flex-wrap gap-2">
-                    <a
-                      href={`/api/invoices/${invoice.id}/reminders/pdf`}
-                      target="_blank"
-                      rel="noreferrer"
-                      className={buttonClass("secondary")}
-                    >
-                      Avaa muistutus
-                    </a>
-                    <Button
-                      type="button"
-                      onClick={() => void sendReminder()}
-                      disabled={busy}
-                      busy={remindingBusy}
-                      busyLabel="Lähetetään…"
-                    >
-                      Lähetä maksumuistutus
-                    </Button>
-                  </div>
-
+                  <a
+                    href={`/api/invoices/${invoice.id}/reminders/pdf`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className={buttonClass("secondary")}
+                  >
+                    Avaa muistutus
+                  </a>
                   {reminder.previousReminders.length > 0 && (
-                    <ul className="space-y-1 text-xs text-warm-gray">
+                    <ul className="space-y-1 text-[13px] text-ink-2">
                       {reminder.previousReminders.map((previous) => (
                         <li key={`${previous.level}-${previous.sentAt}`}>
                           Muistutus {previous.level} · {formatDate(previous.sentAt.slice(0, 10))} ·{" "}
@@ -677,128 +709,115 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
                     </ul>
                   )}
                 </div>
-              )}
-
-              {invoice.payments.length > 0 && (
-                <ul className="space-y-2 border-t border-warm-gray-light/30 pt-4">
-                  {invoice.payments.map((payment) => (
-                    <li key={payment.id} className="flex items-center justify-between gap-3 text-sm">
-                      <div>
-                        <p className="text-charcoal">{formatEur(payment.amount)}</p>
-                        <p className="text-xs text-warm-gray">
-                          {formatDate(payment.paidDate)}
-                          {payment.source === "bank" ? " · pankista" : ""}
-                          {payment.note ? ` · ${payment.note}` : ""}
-                        </p>
-                      </div>
-                      <Button
-                        type="button"
-                        variant="danger"
-                        onClick={() => setConfirmRemovePayment(payment.id)}
-                        disabled={busy}
-                      >
-                        Poista
-                      </Button>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </section>
-
-            {review && (
-              <section className="bg-white rounded-3xl border border-warm-gray-light/20 shadow-sm p-6 space-y-3">
-                <p className="text-base font-medium text-charcoal">Tarkista ennen lähetystä</p>
-                <div className="space-y-1 text-sm">
-                  <div className="flex justify-between gap-3">
-                    <span className="shrink-0 text-warm-gray">Vastaanottaja</span>
-                    <span className="min-w-0 break-all text-right text-charcoal">{review.recipient ?? "–"}</span>
-                  </div>
-                  <div className="flex justify-between gap-3">
-                    <span className="text-warm-gray">Summa</span>
-                    <span className="shrink-0 whitespace-nowrap tabular-nums text-charcoal">{formatEur(review.gross)}</span>
-                  </div>
-                  <div className="flex justify-between gap-3">
-                    <span className="text-warm-gray">Eräpäivä</span>
-                    <span className="text-charcoal">{formatDate(review.dueDate)}</span>
-                  </div>
-                  <div className="flex justify-between gap-3">
-                    <span className="shrink-0 text-warm-gray">Tilinumero</span>
-                    <span className="min-w-0 break-all text-right text-charcoal">{review.iban ?? "–"}</span>
-                  </div>
-                  <div className="flex justify-between gap-3">
-                    <span className="text-warm-gray">Liite</span>
-                    <span className="text-charcoal">{review.attachment}</span>
-                  </div>
-                </div>
-                {review.blockedReason && (
-                  <p className="text-sm text-danger" role="alert">
-                    {review.blockedReason}
-                  </p>
-                )}
-                <div className="flex flex-wrap gap-2">
-                  <Button
-                    type="button"
-                    disabled={Boolean(review.blockedReason) || busy}
-                    disabledReason={review.blockedReason ?? undefined}
-                    busy={sending}
-                    busyLabel="Lähetetään…"
-                    onClick={() => void sendByEmail()}
-                  >
-                    Lähetä
-                  </Button>
-                  <Button type="button" variant="secondary" onClick={() => setReview(null)}>
-                    Peruuta
-                  </Button>
-                </div>
-              </section>
+              </Section>
             )}
 
-            <section className="select-text bg-white rounded-3xl border border-warm-gray-light/20 shadow-sm p-6 space-y-3">
-              <p className="text-base font-medium text-charcoal">Lähetykset</p>
-              {(invoice.sends ?? []).length === 0 ? (
-                <p className="text-sm text-warm-gray">Ei lähetysyrityksiä.</p>
-              ) : (
-                <ul className="space-y-2">
-                  {(invoice.sends ?? []).map((send) => (
-                    <li key={send.id} className="text-sm">
-                      <p className="text-charcoal">
-                        {send.toAddress} ·{" "}
-                        {send.status === "sent"
-                          ? "lähetetty"
-                          : send.status === "failed"
-                            ? "epäonnistui"
-                            : "kesken"}
-                      </p>
-                      <p className="text-xs text-warm-gray">
-                        {formatDate(send.createdAt)}
-                        {send.attachmentName ? ` · ${send.attachmentName}` : ""}
-                        {send.gross != null ? ` · ${formatEur(send.gross)}` : ""}
-                        {send.error ? ` · ${send.error}` : ""}
-                      </p>
-                    </li>
-                  ))}
-                </ul>
-              )}
+            {review && (
+              <Section title="Tarkista ennen lähetystä">
+                <div className="space-y-3 px-4 py-4">
+                  <div className="space-y-1 text-[15px]">
+                    <div className="flex justify-between gap-3">
+                      <span className="shrink-0 text-ink-2">Vastaanottaja</span>
+                      <span className="min-w-0 break-all text-right text-ink">{review.recipient ?? "–"}</span>
+                    </div>
+                    <div className="flex justify-between gap-3">
+                      <span className="text-ink-2">Summa</span>
+                      <span className="shrink-0 whitespace-nowrap tabular-nums text-ink">
+                        {formatEur(review.gross)}
+                      </span>
+                    </div>
+                    <div className="flex justify-between gap-3">
+                      <span className="text-ink-2">Eräpäivä</span>
+                      <span className="text-ink">{formatDate(review.dueDate)}</span>
+                    </div>
+                    <div className="flex justify-between gap-3">
+                      <span className="shrink-0 text-ink-2">Tilinumero</span>
+                      <span className="min-w-0 break-all text-right text-ink">{review.iban ?? "–"}</span>
+                    </div>
+                    <div className="flex justify-between gap-3">
+                      <span className="text-ink-2">Liite</span>
+                      <span className="text-ink">{review.attachment}</span>
+                    </div>
+                  </div>
+                  {review.blockedReason && (
+                    <p className="text-sm text-danger" role="alert">
+                      {review.blockedReason}
+                    </p>
+                  )}
+                  <div className="flex gap-2">
+                    <Button
+                      type="button"
+                      className="flex-1"
+                      disabled={Boolean(review.blockedReason) || busy}
+                      disabledReason={review.blockedReason ?? undefined}
+                      busy={sending}
+                      busyLabel="Lähetetään…"
+                      onClick={() => void sendByEmail()}
+                    >
+                      Lähetä
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      className="flex-1"
+                      onClick={() => setReview(null)}
+                    >
+                      Peruuta
+                    </Button>
+                  </div>
+                </div>
+              </Section>
+            )}
+
+            <section className="mt-6">
+              <h2 className="mb-2 px-1 text-[13px] font-normal text-ink-2">Historia</h2>
+              <Timeline items={historyItems(invoice)} />
             </section>
 
-            <section className="select-text bg-white rounded-3xl border border-warm-gray-light/20 shadow-sm p-6 space-y-3">
-              <p className="text-base font-medium text-charcoal">Tapahtumat</p>
-              {(invoice.activity ?? []).length === 0 ? (
-                <p className="text-sm text-warm-gray">Ei tapahtumia.</p>
-              ) : (
-                <ul className="space-y-2">
-                  {(invoice.activity ?? []).map((entry) => (
-                    <li key={entry.id} className="text-sm">
-                      <p className="text-charcoal">{entry.summary}</p>
-                      <p className="text-xs text-warm-gray">{formatDate(entry.createdAt)}</p>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </section>
+            {invoice.notes && (
+              <Section title="Viesti laskulla">
+                <p className="whitespace-pre-wrap px-4 py-4 text-[15px] text-ink">{invoice.notes}</p>
+              </Section>
+            )}
           </>
         )}
       </div>
+
+      {state === "ready" && invoice && primary && (
+        <BottomActions>
+          <Button
+            type="button"
+            className="w-full"
+            busy={primary.busy}
+            busyLabel={primary.busyLabel}
+            disabled={busy}
+            onClick={
+              primary.kind === "send"
+                ? () => void openReview()
+                : primary.kind === "remind"
+                  ? () => void sendReminder()
+                  : primary.kind === "markPaid"
+                    ? () => void changeStatus("paid")
+                    : () => void addPayment()
+            }
+          >
+            {primary.icon ? <BellIcon /> : null}
+            {primary.label}
+          </Button>
+          {invoice.displayStatus === "overdue" && (
+            <button
+              type="button"
+              className="active-press flex min-h-12 w-full items-center justify-center text-[15px] font-semibold text-accent"
+              onClick={() => {
+                document.getElementById("payment-amount")?.scrollIntoView({ behavior: "smooth", block: "center" });
+                document.getElementById("payment-amount")?.focus();
+              }}
+            >
+              Kirjaa maksu käsin
+            </button>
+          )}
+        </BottomActions>
+      )}
 
       <ConfirmModal
         isOpen={confirmDelete}
@@ -819,6 +838,26 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
         }
         onCancel={() => setConfirmRemovePayment(null)}
       />
+
+      <BottomSheet
+        isOpen={closeReasonOpen}
+        onClose={() => setCloseReasonOpen(false)}
+        title="Sulje ilman täyttä maksua"
+        labelledBy="close-reason-title"
+      >
+        <div className="space-y-3 px-5 py-4 sheet-safe-bottom">
+          <input
+            aria-label="Sulkemisen perustelu"
+            className={`${controlClass} min-h-12`}
+            value={closeReason}
+            onChange={(event) => setCloseReason(event.target.value)}
+            placeholder="Perustelu, esim. käteinen tai luottotappio"
+          />
+          <Button type="button" className="w-full" disabled={busy} onClick={closeWithReason}>
+            Sulje perustelulla
+          </Button>
+        </div>
+      </BottomSheet>
     </>
   );
 }

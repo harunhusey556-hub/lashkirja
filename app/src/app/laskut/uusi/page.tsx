@@ -13,6 +13,7 @@ import {
 } from "@/components/clientFetch";
 import { newIdempotencyKey } from "@/lib/idempotency-key";
 import { armNavigation } from "@/lib/nav-direction";
+import { PageTitle } from "@/components/ds";
 
 interface CustomerOption {
   id: string;
@@ -88,13 +89,10 @@ function NewInvoicePage() {
   if (!customers) return <LoadingState label="Haetaan asiakkaita…" />;
 
   return (
-    <section className="bg-white rounded-3xl border border-warm-gray-light/20 shadow-sm p-6 space-y-4">
-      <div className="space-y-1">
-        <h2 className="text-base font-medium text-charcoal">Uusi lasku</h2>
-        <p className="text-sm text-warm-gray">Luonnos tallentuu tälle laitteelle, kunnes lähetät laskun.</p>
-      </div>
+    <div className="space-y-6 pb-6">
+      <PageTitle title="Uusi lasku" subtitle="Luonnos tallentuu tälle laitteelle, kunnes lähetät laskun." />
       {customers.length === 0 ? (
-        <p className="text-sm text-warm-gray">
+        <p className="px-1 text-[15px] text-ink-2">
           Lisää ensin asiakas{" "}
           <Link className="text-accent" href="/asiakkaat">
             Asiakkaat
@@ -112,6 +110,6 @@ function NewInvoicePage() {
           onCancel={leave}
         />
       )}
-    </section>
+    </div>
   );
 }

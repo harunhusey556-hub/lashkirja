@@ -117,6 +117,9 @@ test("invoice goes from draft to paid", async ({ page }) => {
   await expect(page).toHaveURL(/\/laskut\/[^/]+$/);
   await expect(page.getByText("Luonnos", { exact: true })).toBeVisible();
 
+  // "Merkitse lähetetyksi" now lives in the "..." menu: the bottom bar's
+  // primary action for a draft is "Lähetä" (the send-review flow) instead.
+  await page.getByRole("button", { name: "Lisää toimintoja" }).click();
   await page.getByRole("button", { name: "Merkitse lähetetyksi" }).click();
   await expect(page.getByText("Lähetetty", { exact: true })).toBeVisible();
 
@@ -163,7 +166,11 @@ test("an invoice can be downloaded as a PDF", async ({ page, context }) => {
   await page.getByRole("button", { name: "Luo lasku" }).click();
 
   await page.getByRole("link", { name: /PDF Asiakas/ }).first().click();
-  await expect(page.getByRole("link", { name: "Avaa PDF" })).toBeVisible();
+  // "Avaa PDF" moved into the "..." menu (it opens the PDF via window.open
+  // instead of an <a href> link, so it is a button once the sheet is open).
+  await page.getByRole("button", { name: "Lisää toimintoja" }).click();
+  await expect(page.getByRole("button", { name: "Avaa PDF" })).toBeVisible();
+  await page.keyboard.press("Escape");
 
   const url = new URL(page.url());
   const id = url.pathname.split("/").pop();

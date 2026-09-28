@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useEditorSession } from "@/components/form-session";
 import { Button, controlClass, SavePhaseNote } from "@/components/ui";
+import { BottomActions, Card, Section } from "@/components/ds";
 import { apiFetch, errorMessage, readJson } from "@/components/clientFetch";
 import { focusFirstInvalid, invalidFieldProps } from "@/lib/focus-field";
 import { formatEur, parseFinnishNumber, parseMoneyInput } from "@/lib/format";
@@ -268,14 +269,14 @@ export function InvoiceForm({
     }));
   }
 
-  const field = `${controlClass} min-h-12`;
-  const label = "text-sm font-medium text-charcoal";
-  const lineLabel = "block text-xs font-medium text-warm-gray mb-1";
+  const field = controlClass;
+  const label = "mb-1.5 block text-[13px] text-ink-2";
+  const lineLabel = "mb-1 block text-[13px] text-ink-2";
 
   return (
     <form
       noValidate
-      className="space-y-4"
+      className="space-y-6 pb-6"
       onSubmit={(event) => {
         event.preventDefault();
         const result = validateInvoiceForm(values);
@@ -299,249 +300,255 @@ export function InvoiceForm({
           });
       }}
     >
-      <div className="space-y-1.5">
-        <label className={label} htmlFor="if-customer">
-          Asiakas <span className="text-danger" aria-hidden="true">*</span>
-        </label>
-        <select
-          className={field}
-          value={values.customerId}
-          onChange={(e) => pickCustomer(e.target.value)}
-          aria-required="true"
-          {...invalidFieldProps("if-customer", errors.customerId)}
-        >
-          <option value="">Valitse asiakas</option>
-          {customers.map((customer) => (
-            <option key={customer.id} value={customer.id}>
-              {customer.name}
-            </option>
-          ))}
-        </select>
-        {errors.customerId && (
-          <p id="if-customer-error" className="text-xs text-danger" role="alert">
-            {errors.customerId}
-          </p>
-        )}
-      </div>
-
-      <div className="field-dates">
-        <div className="space-y-1.5">
-          <label className={label} htmlFor="if-issue">
-            Laskun päivä <span className="text-danger" aria-hidden="true">*</span>
+      <Section>
+        <div className="space-y-1.5 px-4 py-3">
+          <label className={label} htmlFor="if-customer">
+            Asiakas <span className="text-danger" aria-hidden="true">*</span>
           </label>
-          <input
-            type="date"
+          <select
             className={field}
-            value={values.issueDate}
-            onChange={(e) =>
-              setValues((current) => ({ ...current, issueDate: e.target.value }))
-            }
+            value={values.customerId}
+            onChange={(e) => pickCustomer(e.target.value)}
             aria-required="true"
-            {...invalidFieldProps("if-issue", errors.issueDate)}
-          />
-          {errors.issueDate && (
-            <p id="if-issue-error" className="text-xs text-danger" role="alert">
-              {errors.issueDate}
-            </p>
-          )}
-        </div>
-        <div className="space-y-1.5">
-          <label className={label} htmlFor="if-due">
-            Eräpäivä <span className="text-danger" aria-hidden="true">*</span>
-          </label>
-          <input
-            type="date"
-            className={field}
-            value={values.dueDate}
-            onChange={(e) => setValues((current) => ({ ...current, dueDate: e.target.value }))}
-            aria-required="true"
-            {...invalidFieldProps("if-due", errors.dueDate)}
-          />
-          {errors.dueDate && (
-            <p id="if-due-error" className="text-xs text-danger" role="alert">
-              {errors.dueDate}
-            </p>
-          )}
-        </div>
-      </div>
-
-      <div className="space-y-3">
-        <p className={label}>Rivit</p>
-        {values.lines.map((line, index) => (
-          <div
-            key={index}
-            className="rounded-2xl border border-warm-gray-light/40 p-3 space-y-2 bg-cream/40"
+            {...invalidFieldProps("if-customer", errors.customerId)}
           >
-            {catalog.length > 0 && (
-              <div>
-                <label className={lineLabel} htmlFor={`if-line-${index}-product`}>
-                  Tuote
-                </label>
-                <select
-                  id={`if-line-${index}-product`}
-                  className={field}
-                  value=""
-                  onChange={(event) => {
-                    const item = catalog.find((entry) => entry.id === event.target.value);
-                    if (!item) return;
-                    setLine(index, {
-                      description: item.name,
-                      unit: item.unit,
-                      unitPrice: String(item.unitPrice).replace(".", ","),
-                      vatRate: item.vatRate,
-                    });
-                  }}
-                >
-                  <option value="">Valitse tuote</option>
-                  {catalog.map((item) => (
-                    <option key={item.id} value={item.id}>
-                      {item.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            )}
-            <label className={lineLabel} htmlFor={`if-line-${index}-desc`}>
-              Kuvaus <span className="text-danger" aria-hidden="true">*</span>
+            <option value="">Valitse asiakas</option>
+            {customers.map((customer) => (
+              <option key={customer.id} value={customer.id}>
+                {customer.name}
+              </option>
+            ))}
+          </select>
+          {errors.customerId && (
+            <p id="if-customer-error" className="text-xs text-danger" role="alert">
+              {errors.customerId}
+            </p>
+          )}
+        </div>
+
+        <div className="field-dates px-4 py-3">
+          <div className="space-y-1.5">
+            <label className={label} htmlFor="if-issue">
+              Laskun päivä <span className="text-danger" aria-hidden="true">*</span>
             </label>
             <input
-              aria-required="true"
+              type="date"
               className={field}
-              value={line.description}
-              onChange={(e) => setLine(index, { description: e.target.value })}
-              placeholder="Kuvaus"
-              maxLength={200}
-              {...invalidFieldProps(`if-line-${index}-desc`, errors[`line-${index}-description`])}
+              value={values.issueDate}
+              onChange={(e) =>
+                setValues((current) => ({ ...current, issueDate: e.target.value }))
+              }
+              aria-required="true"
+              {...invalidFieldProps("if-issue", errors.issueDate)}
             />
-            {errors[`line-${index}-description`] && (
-              <p id={`if-line-${index}-desc-error`} className="text-xs text-danger" role="alert">
-                {errors[`line-${index}-description`]}
+            {errors.issueDate && (
+              <p id="if-issue-error" className="text-xs text-danger" role="alert">
+                {errors.issueDate}
               </p>
             )}
-            <div className="field-grid field-grid-3">
-              <div>
-                <label className={lineLabel} htmlFor={`if-line-${index}-qty`}>
-                  Määrä <span className="text-danger" aria-hidden="true">*</span>
-                </label>
-                <input
-                  aria-required="true"
-                  className={field}
-                  value={line.quantity}
-                  onChange={(e) => setLine(index, { quantity: e.target.value })}
-                  inputMode="decimal"
-                  {...invalidFieldProps(`if-line-${index}-qty`, errors[`line-${index}-quantity`])}
-                />
-                {errors[`line-${index}-quantity`] && (
-                  <p id={`if-line-${index}-qty-error`} className="text-xs text-danger" role="alert">
-                    {errors[`line-${index}-quantity`]}
-                  </p>
-                )}
+          </div>
+          <div className="space-y-1.5">
+            <label className={label} htmlFor="if-due">
+              Eräpäivä <span className="text-danger" aria-hidden="true">*</span>
+            </label>
+            <input
+              type="date"
+              className={field}
+              value={values.dueDate}
+              onChange={(e) => setValues((current) => ({ ...current, dueDate: e.target.value }))}
+              aria-required="true"
+              {...invalidFieldProps("if-due", errors.dueDate)}
+            />
+            {errors.dueDate && (
+              <p id="if-due-error" className="text-xs text-danger" role="alert">
+                {errors.dueDate}
+              </p>
+            )}
+          </div>
+        </div>
+      </Section>
+
+      <div>
+        <p className="mb-2 px-1 text-[13px] text-ink-2">Rivit</p>
+        <div className="space-y-3">
+          {values.lines.map((line, index) => (
+            <Card key={index} className="space-y-2">
+              {catalog.length > 0 && (
+                <div>
+                  <label className={lineLabel} htmlFor={`if-line-${index}-product`}>
+                    Tuote
+                  </label>
+                  <select
+                    id={`if-line-${index}-product`}
+                    className={field}
+                    value=""
+                    onChange={(event) => {
+                      const item = catalog.find((entry) => entry.id === event.target.value);
+                      if (!item) return;
+                      setLine(index, {
+                        description: item.name,
+                        unit: item.unit,
+                        unitPrice: String(item.unitPrice).replace(".", ","),
+                        vatRate: item.vatRate,
+                      });
+                    }}
+                  >
+                    <option value="">Valitse tuote</option>
+                    {catalog.map((item) => (
+                      <option key={item.id} value={item.id}>
+                        {item.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+              <label className={lineLabel} htmlFor={`if-line-${index}-desc`}>
+                Kuvaus <span className="text-danger" aria-hidden="true">*</span>
+              </label>
+              <input
+                aria-required="true"
+                aria-label={`Rivin ${index + 1} kuvaus (pakollinen)`}
+                className={field}
+                value={line.description}
+                onChange={(e) => setLine(index, { description: e.target.value })}
+                placeholder="Kuvaus"
+                maxLength={200}
+                {...invalidFieldProps(`if-line-${index}-desc`, errors[`line-${index}-description`])}
+              />
+              {errors[`line-${index}-description`] && (
+                <p id={`if-line-${index}-desc-error`} className="text-xs text-danger" role="alert">
+                  {errors[`line-${index}-description`]}
+                </p>
+              )}
+              <div className="field-grid field-grid-3">
+                <div>
+                  <label className={lineLabel} htmlFor={`if-line-${index}-qty`}>
+                    Määrä <span className="text-danger" aria-hidden="true">*</span>
+                  </label>
+                  <input
+                    aria-required="true"
+                    aria-label={`Rivin ${index + 1} määrä (pakollinen)`}
+                    className={field}
+                    value={line.quantity}
+                    onChange={(e) => setLine(index, { quantity: e.target.value })}
+                    inputMode="decimal"
+                    {...invalidFieldProps(`if-line-${index}-qty`, errors[`line-${index}-quantity`])}
+                  />
+                  {errors[`line-${index}-quantity`] && (
+                    <p id={`if-line-${index}-qty-error`} className="text-xs text-danger" role="alert">
+                      {errors[`line-${index}-quantity`]}
+                    </p>
+                  )}
+                </div>
+                <div>
+                  <label className={lineLabel} htmlFor={`if-line-${index}-unit`}>Yksikkö</label>
+                  <input
+                    id={`if-line-${index}-unit`}
+                    aria-label={`Rivin ${index + 1} yksikkö`}
+                    className={field}
+                    value={line.unit}
+                    onChange={(e) => setLine(index, { unit: e.target.value })}
+                    maxLength={16}
+                  />
+                </div>
+                <div>
+                  <label className={lineLabel} htmlFor={`if-line-${index}-price`}>
+                    Hinta € <span className="text-danger" aria-hidden="true">*</span>
+                  </label>
+                  <input
+                    aria-required="true"
+                    aria-label={`Rivin ${index + 1} hinta (pakollinen)`}
+                    className={field}
+                    value={line.unitPrice}
+                    onChange={(e) => setLine(index, { unitPrice: e.target.value })}
+                    inputMode="decimal"
+                    placeholder="0,00"
+                    {...invalidFieldProps(`if-line-${index}-price`, errors[`line-${index}-unitPrice`])}
+                  />
+                  {errors[`line-${index}-unitPrice`] && (
+                    <p id={`if-line-${index}-price-error`} className="text-xs text-danger" role="alert">
+                      {errors[`line-${index}-unitPrice`]}
+                    </p>
+                  )}
+                </div>
               </div>
-              <div>
-                <label className={lineLabel} htmlFor={`if-line-${index}-unit`}>Yksikkö</label>
-                <input
-                  id={`if-line-${index}-unit`}
-                  className={field}
-                  value={line.unit}
-                  onChange={(e) => setLine(index, { unit: e.target.value })}
-                  maxLength={16}
-                />
-              </div>
-              <div>
-                <label className={lineLabel} htmlFor={`if-line-${index}-price`}>
-                  Hinta € <span className="text-danger" aria-hidden="true">*</span>
-                </label>
-                <input
-                  aria-required="true"
-                  className={field}
-                  value={line.unitPrice}
-                  onChange={(e) => setLine(index, { unitPrice: e.target.value })}
-                  inputMode="decimal"
-                  placeholder="0,00"
-                  {...invalidFieldProps(`if-line-${index}-price`, errors[`line-${index}-unitPrice`])}
-                />
-                {errors[`line-${index}-unitPrice`] && (
-                  <p id={`if-line-${index}-price-error`} className="text-xs text-danger" role="alert">
-                    {errors[`line-${index}-unitPrice`]}
-                  </p>
-                )}
-              </div>
-            </div>
-            <div className="flex items-end gap-2">
-              <div className="min-w-0 flex-1">
-                <label className={lineLabel} htmlFor={`if-line-${index}-vat`}>ALV</label>
-                <select
-                  id={`if-line-${index}-vat`}
-                  className={field}
-                  value={line.vatRate}
-                  onChange={(e) => setLine(index, { vatRate: Number(e.target.value) })}
-                >
-                  {VAT_RATES_PERMILLE.map((permille) => (
-                    <option key={permille} value={permille / 10}>
-                      ALV {permille / 10} %
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <Button
-                type="button"
-                variant="secondary"
-                className="shrink-0"
-                onClick={() => void saveLineAsProduct(index)}
-              >
-                Tallenna tuotteeksi
-              </Button>
-              {values.lines.length > 1 && (
+              <div className="flex items-end gap-2">
+                <div className="min-w-0 flex-1">
+                  <label className={lineLabel} htmlFor={`if-line-${index}-vat`}>ALV</label>
+                  <select
+                    id={`if-line-${index}-vat`}
+                    aria-label={`Rivin ${index + 1} ALV`}
+                    className={field}
+                    value={line.vatRate}
+                    onChange={(e) => setLine(index, { vatRate: Number(e.target.value) })}
+                  >
+                    {VAT_RATES_PERMILLE.map((permille) => (
+                      <option key={permille} value={permille / 10}>
+                        ALV {permille / 10} %
+                      </option>
+                    ))}
+                  </select>
+                </div>
                 <Button
                   type="button"
-                  variant="danger"
+                  variant="secondary"
                   className="shrink-0"
-                  onClick={() =>
-                    setValues((current) => ({
-                      ...current,
-                      lines: current.lines.filter((_, i) => i !== index),
-                    }))
-                  }
+                  onClick={() => void saveLineAsProduct(index)}
                 >
-                  Poista
+                  Tallenna tuotteeksi
                 </Button>
-              )}
-            </div>
-          </div>
-        ))}
+                {values.lines.length > 1 && (
+                  <Button
+                    type="button"
+                    variant="danger"
+                    className="shrink-0"
+                    onClick={() =>
+                      setValues((current) => ({
+                        ...current,
+                        lines: current.lines.filter((_, i) => i !== index),
+                      }))
+                    }
+                  >
+                    Poista
+                  </Button>
+                )}
+              </div>
+            </Card>
+          ))}
 
-        <Button
-          type="button"
-          variant="secondary"
-          className="w-full"
-          onClick={() =>
-            setValues((current) => ({ ...current, lines: [...current.lines, { ...EMPTY_LINE }] }))
-          }
-        >
-          Lisää rivi
-        </Button>
-        {errors.lines && <p className="text-xs text-danger">{errors.lines}</p>}
+          <Button
+            type="button"
+            variant="secondary"
+            className="w-full"
+            onClick={() =>
+              setValues((current) => ({ ...current, lines: [...current.lines, { ...EMPTY_LINE }] }))
+            }
+          >
+            Lisää rivi
+          </Button>
+          {errors.lines && <p className="text-xs text-danger">{errors.lines}</p>}
+        </div>
       </div>
 
-      <div className="rounded-2xl bg-white border border-warm-gray-light/30 p-4 space-y-1 text-sm">
-        <div className="flex justify-between text-warm-gray">
+      <Card className="space-y-1 text-[15px]">
+        <div className="flex justify-between text-ink-2">
           <span>Veroton</span>
           <span>{formatEur(totals.netCents / 100)}</span>
         </div>
-        <div className="flex justify-between text-warm-gray">
+        <div className="flex justify-between text-ink-2">
           <span>ALV</span>
           <span>{formatEur(totals.vatCents / 100)}</span>
         </div>
-        <div className="flex justify-between font-semibold text-charcoal pt-1">
+        <div className="flex justify-between pt-1 font-semibold text-ink">
           <span>Yhteensä</span>
           <span>{formatEur(totals.grossCents / 100)}</span>
         </div>
         {totals.grossCents === 0 && values.lines.some((line) => line.unitPrice.trim() === "") && (
-          <p className="text-xs text-warm-gray pt-2">
+          <p className="pt-2 text-xs text-ink-2">
             Summa päivittyy, kun rivillä on hinta. Tyhjä kenttä ei ole nolla euroa.
           </p>
         )}
-      </div>
+      </Card>
 
       <div className="space-y-1.5">
         <label className={label} htmlFor="if-notes">Viesti laskulla</label>
@@ -555,18 +562,18 @@ export function InvoiceForm({
       </div>
 
       {session.notice && (
-        <p className="text-sm text-charcoal" role="status">
+        <p className="text-sm text-ink" role="status">
           {session.notice}{" "}
           <button
             type="button"
-            className="font-medium text-accent-dark underline"
+            className="font-medium text-accent underline"
             onClick={() => session.setNotice("")}
           >
             Sulje
           </button>{" "}
           <button
             type="button"
-            className="font-medium text-accent-dark underline"
+            className="font-medium text-accent underline"
             onClick={() => {
               session.clearSavedDraft();
               setValues(baseline);
@@ -577,18 +584,11 @@ export function InvoiceForm({
         </p>
       )}
       <SavePhaseNote phase={session.phase} error={saveError} />
-      <div className="flex gap-3">
-        <Button
-          type="button"
-          variant="secondary"
-          className="flex-1"
-          onClick={() => session.requestCancel(onCancel)}
-        >
-          Peruuta
-        </Button>
+
+      <BottomActions>
         <Button
           type="submit"
-          className="flex-1"
+          className="w-full"
           busy={busy || session.phase === "saving"}
           busyLabel="Tallennetaan…"
           disabled={customers.length === 0}
@@ -596,7 +596,14 @@ export function InvoiceForm({
         >
           {submitLabel}
         </Button>
-      </div>
+        <button
+          type="button"
+          className="active-press flex min-h-12 w-full items-center justify-center text-[15px] font-semibold text-accent"
+          onClick={() => session.requestCancel(onCancel)}
+        >
+          Peruuta
+        </button>
+      </BottomActions>
     </form>
   );
 }
