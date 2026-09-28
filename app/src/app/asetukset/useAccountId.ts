@@ -1,23 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { apiFetch, readJson } from "@/components/clientFetch";
+import { useSession } from "@/components/SessionProvider";
 
+/** The signed-in user's id, from the shared session source (Task 6) --
+ * no longer its own `/api/auth/me` call. */
 export function useAccountId(): string | null {
-  const [userId, setUserId] = useState<string | null>(null);
-  useEffect(() => {
-    let cancelled = false;
-    void apiFetch("/api/auth/me")
-      .then((response) => readJson<{ user: { userId?: string } | null }>(response, ""))
-      .then((data) => {
-        if (!cancelled) setUserId(data.user?.userId ?? null);
-      })
-      .catch(() => {
-        if (!cancelled) setUserId(null);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-  return userId;
+  const { user } = useSession();
+  return user?.userId ?? null;
 }

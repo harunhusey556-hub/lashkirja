@@ -3,6 +3,7 @@
 import { useEffect } from "react";
 import { usePathname } from "next/navigation";
 import AppShell from "@/components/AppShell";
+import { SessionProvider } from "@/components/SessionProvider";
 import { appNavigate } from "@/lib/app-nav";
 import { clearBankAuth, watchBankDeepLink } from "@/lib/open-bank-auth";
 
@@ -46,5 +47,9 @@ export default function ShellGate({ children }: { children: React.ReactNode }) {
     pathname.startsWith("/palauta-salasana") ||
     pathname.startsWith("/vahvista-sahkoposti");
   if (bare) return children;
-  return <AppShell>{children}</AppShell>;
+  return (
+    <SessionProvider>
+      <AppShell>{children}</AppShell>
+    </SessionProvider>
+  );
 }

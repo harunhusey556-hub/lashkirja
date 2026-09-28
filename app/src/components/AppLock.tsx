@@ -20,7 +20,8 @@ import {
 import { nextLockView, type LockView } from "@/lib/session-policy";
 import { Button, controlClass } from "@/components/ui";
 import { AppMark } from "@/components/AppMark";
-import { apiFetch, leaveAfterSignOut, readJson } from "@/components/clientFetch";
+import { leaveAfterSignOut } from "@/components/clientFetch";
+import { useSession } from "@/components/SessionProvider";
 
 let lockView: LockView = "open";
 let lockUserId: string | null = null;
@@ -80,8 +81,12 @@ function clientLockView(): LockView {
  */
 export function AppLock({ children }: { children: React.ReactNode }) {
   const view = useSyncExternalStore(subscribeView, clientLockView, () => "open" as LockView);
-  const [userId, setUserId] = useState<string | null>(null);
-  const [ready, setReady] = useState(false);
+  const { status: sessionStatus, user } = useSession();
+  const userId = user?.userId ?? null;
+  // "unknown" is the only status still waiting on the session source (the
+  // web target never sees it; mobile does, briefly, until bootMobile()/`/me`
+  // resolve). Both "signed-in" and "signed-out" are a real verdict.
+  const ready = sessionStatus !== "unknown";
   const [pin, setPin] = useState("");
   const [error, setError] = useState("");
   const [checking, setChecking] = useState(false);
@@ -91,28 +96,11 @@ export function AppLock({ children }: { children: React.ReactNode }) {
   const [bioNote, setBioNote] = useState("");
 
   useEffect(() => {
-    let cancelled = false;
-    void apiFetch("/api/auth/me")
-      .then((response) => readJson<{ user: { userId?: string } | null }>(response, ""))
-      .then((data) => {
-        if (cancelled) return;
-        const nextId = data.user?.userId ?? null;
-        lockUserId = nextId;
-        setUserId(nextId);
-        setReady(true);
-        if (!readAppLock(nextId)) publishView("open");
-        else if (lockView !== "covered") publishView("locked");
-      })
-      .catch(() => {
-        if (cancelled) return;
-        lockUserId = null;
-        setReady(true);
-        publishView("open");
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+    if (!ready) return;
+    lockUserId = userId;
+    if (!readAppLock(userId)) publishView("open");
+    else if (lockView !== "covered") publishView("locked");
+  }, [ready, userId]);
 
   const attempts = userId ? readPinAttempts(userId) : null;
   const waitMs = attempts && attempts.lockedUntil > now ? attempts.lockedUntil - now : 0;

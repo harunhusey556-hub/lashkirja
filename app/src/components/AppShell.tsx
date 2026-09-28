@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
   BookOpen,
@@ -21,25 +22,17 @@ import {
 } from "lucide-react";
 import { Icon, IconTile } from "@/components/ds/Icon";
 import { AppMark } from "@/components/AppMark";
-import { LoadingState } from "@/components/AsyncState";
-import { ConnectionNotice } from "@/components/ScreenState";
 import { OnboardingModal } from "@/components/OnboardingModal";
 import { AiChatDrawer } from "@/components/AiChatDrawer";
-import {
-  errorMessage,
-  isUnauthorized,
-  readJson,
-  redirectToLogin,
-  leaveAfterSignOut,
-} from "@/components/clientFetch";
+import { leaveAfterSignOut, readJson } from "@/components/clientFetch";
 
 import type { BusinessProfile } from "@/lib/onboarding";
 import BottomSheet from "@/components/BottomSheet";
 import { AppLock } from "@/components/AppLock";
 import { apiFetch } from "@/components/clientFetch";
-import { setDraftOwner } from "@/lib/draft-store";
+import { useSession } from "@/components/SessionProvider";
+import { IS_MOBILE_BUILD } from "@/lib/build-target";
 import { readPageCache, writePageCache } from "@/lib/page-cache";
-import { syncPageHiddenFlag } from "@/lib/page-activity";
 import { helsinkiMonthKey } from "@/lib/validation";
 import { bumpNavEpoch } from "@/lib/screen-state";
 import {
@@ -76,15 +69,6 @@ function rootIcon(id: string): LucideIcon {
   return ROOT_ICONS[id] ?? Settings;
 }
 
-type ShellUser = { userId?: string; email?: string; firstName?: string };
-
-/**
- * The session check lives in the page cache so the first paint after a full
- * load can skip the "checking session" state. The shell itself stays mounted
- * across navigations (see ShellGate), so this revalidation does not remount
- * the header, tab bar, or chat.
- */
-const AUTH_CACHE_KEY = "shell-auth";
 /** Set once the onboarding endpoint has confirmed the user is onboarded. */
 const ONBOARDED_CACHE_KEY = "shell-onboarded";
 
@@ -95,10 +79,13 @@ function currentMonthKey(): string {
 }
 
 /**
- * Fire-and-forget warm-up of the main tab payloads right after the first
- * successful session check, so even the first tap on each tab paints with
- * data instead of a skeleton. Keys and shapes mirror what each page caches
- * for itself; existing entries are never overwritten.
+ * Fire-and-forget warm-up of the main tab payloads, so even the first tap
+ * on each tab paints with data instead of a skeleton. Keys and shapes
+ * mirror what each page caches for itself; existing entries are never
+ * overwritten. Web only, scheduled in idle time after the first page's own
+ * data (see the effect below) -- mobile skips this entirely (A3): its
+ * screens already repaint from the persistent cache (Task 7) and a warm-up
+ * burst would only compete with the page's own request on a slower link.
  */
 function warmTabCaches() {
   if (warmedTabs) return;
@@ -133,25 +120,33 @@ function warmTabCaches() {
   );
 }
 
-function openRoot(
+/**
+ * Shared by every tab-bar / sidebar root `<Link>`. Always arms the
+ * direction before the click finishes, so a clean form's default
+ * navigation (Link's own client-side push) already lands with the right
+ * one. A dirty form intercepts instead: prevent Link's default and go
+ * through the unsaved-changes prompt, pushing manually once confirmed.
+ */
+function handleRootLinkClick(
+  event: { preventDefault: () => void },
   href: string,
   pathname: string,
   router: { push: (href: string) => void }
 ) {
   if (href === pathname) return;
-  requestLeave(() => {
-    armNavigation(href, "tab");
-    router.push(href);
-  });
+  if (anyFormDirty()) {
+    event.preventDefault();
+    requestLeave(() => {
+      armNavigation(href, "tab");
+      router.push(href);
+    });
+    return;
+  }
+  armNavigation(href, "tab");
 }
 
 export default function AppShell({ children }: { children: React.ReactNode }) {
-  const [authAttempt, setAuthAttempt] = useState(0);
-  const [authState, setAuthState] = useState<
-    { status: "checking" | "ready" | "error"; message?: string; error?: unknown }
-  >(() =>
-    readPageCache<ShellUser>(AUTH_CACHE_KEY) ? { status: "ready" } : { status: "checking" }
-  );
+  const { status: sessionStatus, user } = useSession();
   const [showOnboarding, setShowOnboarding] = useState(false);
   // Stored with the path it was opened on, so a route change closes it without
   // an effect that would re-render twice.
@@ -160,12 +155,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const [chatOpenOn, setChatOpenOn] = useState<string | null>(null);
   const [signingOut, setSigningOut] = useState(false);
   const [signOutError, setSignOutError] = useState("");
-  const [user, setUser] = useState<ShellUser | null>(() => readPageCache<ShellUser>(AUTH_CACHE_KEY));
   const [onboardingProfile, setOnboardingProfile] = useState<BusinessProfile | null>(null);
-
-  useEffect(() => {
-    setDraftOwner(user?.userId ?? null);
-  }, [user?.userId]);
 
   const pathname = usePathname();
   const router = useRouter();
@@ -352,84 +342,52 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     };
   }, []);
 
+  // Onboarding state, once per signed-in user. The session source
+  // (SessionProvider) already fetches and revalidates `/me`; this only
+  // waits for a real `user` to exist before asking a second endpoint.
+  const onboardingCheckedFor = useRef<string | null>(null);
   useEffect(() => {
+    if (!user) return;
+    const uid = user.userId ?? "";
+    if (onboardingCheckedFor.current === uid) return;
+    onboardingCheckedFor.current = uid;
+    if (readPageCache<boolean>(ONBOARDED_CACHE_KEY)) return;
+
     const controller = new AbortController();
-
-    apiFetch("/api/auth/me", {
-      credentials: "include",
-      signal: controller.signal,
-    })
-      .then((response) =>
-        readJson<{ user: { userId: string; email?: string; firstName?: string } }>(
-          response,
-          "Istunnon tarkistus epäonnistui"
-        )
-      )
-      .then((me) => {
-        const nextUser: ShellUser = me.user ?? {};
-        writePageCache(AUTH_CACHE_KEY, nextUser);
-        setDraftOwner(nextUser.userId ?? null);
-        setUser(nextUser);
-        setAuthState({ status: "ready" });
-        warmTabCaches();
-        // Check onboarding state; skip once it has been confirmed done.
-        if (readPageCache<boolean>(ONBOARDED_CACHE_KEY)) return;
-        return apiFetch("/api/onboarding", { signal: controller.signal })
-          .then((res) => readJson<{ onboarded: boolean; profile: BusinessProfile | null }>(res, ""))
-          .then((data) => {
-            if (!data) return;
-            if (data.onboarded) {
-              writePageCache(ONBOARDED_CACHE_KEY, true);
-            } else {
-              setOnboardingProfile(data.profile || null);
-              setShowOnboarding(true);
-            }
-          })
-          .catch(() => {});
-      })
-      .catch((error: unknown) => {
-        if (controller.signal.aborted) return;
-        if (isUnauthorized(error)) {
-          redirectToLogin();
-          return;
+    apiFetch("/api/onboarding", { signal: controller.signal })
+      .then((res) => readJson<{ onboarded: boolean; profile: BusinessProfile | null }>(res, ""))
+      .then((data) => {
+        if (!data) return;
+        if (data.onboarded) {
+          writePageCache(ONBOARDED_CACHE_KEY, true);
+        } else {
+          setOnboardingProfile(data.profile || null);
+          setShowOnboarding(true);
         }
-        // With a cached session the revalidation failing (flaky network) must
-        // not blank an already-rendered page; the page's own fetches will
-        // surface anything real.
-        if (readPageCache<ShellUser>(AUTH_CACHE_KEY)) return;
-        setAuthState({
-          status: "error",
-          message: errorMessage(error, "Istunnon tarkistus epäonnistui"),
-          error,
-        });
-      });
-
+      })
+      .catch(() => {});
     return () => controller.abort();
-  }, [authAttempt]);
+  }, [user]);
 
-  // Foreground resume: the JS context normally survives backgrounding, so
-  // this is a quiet best-effort check, not a full re-render of the auth
-  // state — only an explicit 401 (cookie expired/wiped while backgrounded)
-  // does anything.
+  // Web only (A3): once per document, in idle time, after the page itself
+  // has had first go at the network and SQLite. Safari has no
+  // requestIdleCallback, hence the setTimeout fallback.
   useEffect(() => {
-    const onVisibility = () => {
-      const hidden = document.visibilityState === "hidden";
-      syncPageHiddenFlag(hidden);
-      if (hidden) return;
-      apiFetch("/api/auth/me", { credentials: "include" })
-        .then((res) => {
-          if (res.status === 401) redirectToLogin();
-        })
-        .catch(() => {});
+    if (IS_MOBILE_BUILD) return;
+    let idleHandle: number | null = null;
+    let timeoutHandle: number | null = null;
+    if (typeof window.requestIdleCallback === "function") {
+      idleHandle = window.requestIdleCallback(() => warmTabCaches());
+    } else {
+      timeoutHandle = window.setTimeout(() => warmTabCaches(), 1500);
+    }
+    return () => {
+      if (idleHandle !== null && typeof window.cancelIdleCallback === "function") {
+        window.cancelIdleCallback(idleHandle);
+      }
+      if (timeoutHandle !== null) window.clearTimeout(timeoutHandle);
     };
-    document.addEventListener("visibilitychange", onVisibility);
-    return () => document.removeEventListener("visibilitychange", onVisibility);
   }, []);
-
-  function retryAuth() {
-    setAuthState({ status: "checking" });
-    setAuthAttempt((attempt) => attempt + 1);
-  }
 
   const showProfile = profileOpenOn === pathname;
   const chatOpen = chatOpenOn === pathname;
@@ -448,20 +406,21 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
   const addOpen = addOpenOn === pathname;
 
-  function goToRoot(href: string) {
+  function goToRoot(event: { preventDefault: () => void }, href: string) {
     void hapticSelection();
     setAddOpenOn(null);
     setProfileOpenOn(null);
-    openRoot(href, pathname, router);
+    handleRootLinkClick(event, href, pathname, router);
   }
 
   function renderTab(item: NavEntry) {
     const active = rootIsActive(pathname, item.id);
     return (
-      <button
+      <Link
         key={item.id}
-        type="button"
-        onClick={() => goToRoot(item.path)}
+        href={item.path}
+        prefetch
+        onClick={(event) => goToRoot(event, item.path)}
         className={`flex min-w-0 flex-1 flex-col items-center justify-center gap-1 touch-target transition-colors active-press ${
           active ? "text-accent" : "text-ink-2"
         }`}
@@ -473,13 +432,13 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         >
           {item.label}
         </span>
-      </button>
+      </Link>
     );
   }
 
   return (
     <AppLock>
-    {authState.status === "ready" && (
+    {sessionStatus !== "signed-out" && (
       <aside className="app-sidebar" aria-hidden={false}>
         <p className="flex items-center gap-2.5 px-5 pb-4 pt-5 text-[17px] font-bold tracking-[-0.01em] text-ink">
           <AppMark />
@@ -501,10 +460,11 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
           {tabRoots().map((item) => {
             const active = rootIsActive(pathname, item.id);
             return (
-              <button
+              <Link
                 key={item.id}
-                type="button"
-                onClick={() => goToRoot(item.path)}
+                href={item.path}
+                prefetch
+                onClick={(event) => goToRoot(event, item.path)}
                 aria-current={active ? "page" : undefined}
                 className={`flex min-h-12 items-center gap-3 rounded-card px-3 text-left text-[15px] active-press ${
                   active ? "bg-accent-soft font-semibold text-accent" : "font-medium text-ink"
@@ -512,14 +472,15 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
               >
                 <Icon icon={rootIcon(item.id)} className={active ? "text-accent" : "text-ink-2"} />
                 <span className="truncate">{item.label}</span>
-              </button>
+              </Link>
             );
           })}
         </nav>
         <div className="mt-auto px-3 pb-4">
-          <button
-            type="button"
-            onClick={() => goToRoot(avatarRoot().path)}
+          <Link
+            href={avatarRoot().path}
+            prefetch
+            onClick={(event) => goToRoot(event, avatarRoot().path)}
             aria-current={rootIsActive(pathname, "asetukset") ? "page" : undefined}
             className={`flex min-h-12 w-full items-center gap-3 rounded-card px-3 text-left text-[15px] active-press ${
               rootIsActive(pathname, "asetukset") ? "bg-accent-soft font-semibold text-accent" : "font-medium text-ink"
@@ -530,7 +491,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
               className={rootIsActive(pathname, "asetukset") ? "text-accent" : "text-ink-2"}
             />
             Asetukset
-          </button>
+          </Link>
         </div>
       </aside>
     )}
@@ -558,7 +519,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
             )}
           </div>
 
-          {authState.status === "ready" ? (
+          {sessionStatus !== "signed-out" ? (
             <div className="flex items-center gap-1 justify-self-end">
               <button
                 type="button"
@@ -603,20 +564,14 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
               : "animate-page"
         }`}
       >
-        {authState.status === "checking" ? (
-          <LoadingState label="Tarkistetaan istuntoa..." />
-        ) : authState.status === "error" ? (
-          <ConnectionNotice
-            error={authState.error}
-            fallback={authState.message || "Istunnon tarkistus epäonnistui"}
-            onRetry={retryAuth}
-          />
-        ) : (
-          children
-        )}
+        {/* Page fetches start in parallel with the session check now -- there
+            is no "checking session" gate. Only an actual sign-out (a
+            confirmed 401, or mobile finding no stored token) blanks this;
+            SessionProvider is already navigating away by then. */}
+        {sessionStatus === "signed-out" ? null : children}
       </main>
 
-      {authState.status === "ready" && (
+      {sessionStatus !== "signed-out" && (
         <>
           <AiChatDrawer open={chatOpen} onClose={() => setChatOpenOn(null)} />
           <OnboardingModal
@@ -733,7 +688,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
               <div className="overflow-hidden rounded-card border border-line bg-surface divide-y divide-line">
                 <button
                   type="button"
-                  onClick={() => goToRoot(avatarRoot().path)}
+                  onClick={(event) => goToRoot(event, avatarRoot().path)}
                   aria-current={rootIsActive(pathname, "asetukset") ? "page" : undefined}
                   className="w-full flex items-center gap-3 px-4 py-3.5 text-left active-press touch-target"
                 >
