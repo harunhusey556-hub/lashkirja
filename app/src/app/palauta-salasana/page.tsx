@@ -55,7 +55,16 @@ function ResetForm() {
         onChange={(event) => setPassword(event.target.value)}
         className={controlClass}
       />
-      {message && <p className="text-sm text-ink" role="status">{message}</p>}
+      {message && (
+        <>
+          <p className="text-sm text-ink" role="status">{message}</p>
+          {typeof navigator !== "undefined" && /iPhone|iPad/.test(navigator.userAgent) && (
+            <a href="lashkirja://open" className="block text-center text-sm text-accent">
+              Avaa LashKirja-sovellus
+            </a>
+          )}
+        </>
+      )}
       {error && <p className="text-sm text-danger" role="alert">{error}</p>}
       <Button type="submit" busy={busy} busyLabel="Tallennetaan…" className="w-full" disabled={!token}>
         Tallenna salasana

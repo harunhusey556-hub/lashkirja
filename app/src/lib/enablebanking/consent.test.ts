@@ -23,6 +23,20 @@ describe("auth state", () => {
     expect(authStateMatches(null, state)).toBe(false);
   });
 
+  it("defaults to a bare 64-hex-char state with no prefix", () => {
+    const state = createAuthState();
+    expect(state).toMatch(/^[0-9a-f]{64}$/);
+    expect(createAuthState("web")).toMatch(/^[0-9a-f]{64}$/);
+  });
+
+  it("tags an app-started state with app1. plus 64 hex chars, still hashable", () => {
+    const state = createAuthState("app");
+    expect(state).toMatch(/^app1\.[0-9a-f]{64}$/);
+    expect(state.length).toBe("app1.".length + 64);
+    const hash = hashAuthState(state);
+    expect(authStateMatches(hash, state)).toBe(true);
+  });
+
   it("expires a pending consent after one hour", () => {
     const created = new Date("2026-09-26T08:00:00.000Z");
     expect(isPendingStateFresh(created, new Date(created.getTime() + AUTH_STATE_TTL_MS))).toBe(

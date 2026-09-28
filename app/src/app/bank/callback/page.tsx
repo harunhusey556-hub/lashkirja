@@ -6,7 +6,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { apiFetch, errorMessage, isUnauthorized, readJson, redirectToLogin } from "@/components/clientFetch";
 import { buttonClass } from "@/components/control-styles";
 import { Card, DetailHero } from "@/components/ds";
-import { classifyBankReturn } from "@/lib/bank-return";
+import { appReturnUrl, classifyBankReturn, isAppBankState } from "@/lib/bank-return";
 import { clearBankAuth } from "@/lib/open-bank-auth";
 
 interface CallbackResult {
@@ -41,17 +41,33 @@ function BankCallback() {
   const code = params.get("code") || "";
   const state = params.get("state") || "";
   const bankError = params.get("error");
+  const isAppReturn = isAppBankState(state);
   const initial = classifyBankReturn({ code, state, error: bankError });
   const [phase, setPhase] = useState<"working" | "done" | "error">(
     initial.kind === "success" ? "working" : "error"
   );
   const [message, setMessage] = useState(initial.message);
+  // Derived straight from the URL's own search params, so it renders
+  // identically on the server and on the client - no state or effect needed
+  // just to have a value for the fallback button.
+  const rawQuery = params.toString();
+  const appUrl = appReturnUrl(rawQuery ? `?${rawQuery}` : "");
+
+  // App-started consent: this page's only job is to bounce back into the
+  // app. The bundled callback page (inside the app) does the actual
+  // POST /api/bank/connections/callback with the bearer token.
+  useEffect(() => {
+    if (!isAppReturn) return;
+    window.location.replace(appUrl);
+  }, [appUrl, isAppReturn]);
 
   useEffect(() => {
+    if (isAppReturn) return;
     if (initial.kind !== "success") clearBankAuth();
-  }, [initial.kind]);
+  }, [initial.kind, isAppReturn]);
 
   useEffect(() => {
+    if (isAppReturn) return;
     if (initial.kind !== "success") return;
     let cancelled = false;
     const key = `${code}:${state}`;
@@ -76,7 +92,20 @@ function BankCallback() {
     return () => {
       cancelled = true;
     };
-  }, [code, initial.kind, router, state]);
+  }, [code, initial.kind, isAppReturn, router, state]);
+
+  if (isAppReturn) {
+    return (
+      <main className="flex min-h-dvh items-center justify-center bg-canvas px-4 py-10">
+        <Card className="w-full max-w-md">
+          <DetailHero title="Pankkiyhteys" meta={<span role="status">Palataan LashKirjaan...</span>} />
+          <a href={appUrl} className={buttonClass("primary", "w-full")}>
+            Palaa LashKirjaan
+          </a>
+        </Card>
+      </main>
+    );
+  }
 
   return (
     <main className="flex min-h-dvh items-center justify-center bg-canvas px-4 py-10">

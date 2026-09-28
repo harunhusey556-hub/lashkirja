@@ -43,10 +43,15 @@ export async function listBankConnections(userId: string): Promise<PublicBankCon
 
 export async function startBankConsent(
   userId: string,
-  input: { aspspName: string; aspspCountry: string; psuType: "personal" | "business" },
-  client = new EnableBankingClient()
+  input: {
+    aspspName: string;
+    aspspCountry: string;
+    psuType: "personal" | "business";
+    client?: "web" | "app";
+  },
+  ebClient = new EnableBankingClient()
 ): Promise<{ url: string; connectionId: string }> {
-  const aspsps = await client.listAspsps(input.aspspCountry, input.psuType);
+  const aspsps = await ebClient.listAspsps(input.aspspCountry, input.psuType);
   const aspsp = findAspsp(aspsps, input.aspspName, input.aspspCountry);
   if (!aspsp) {
     throw new EnableBankingError("Pankkia ei löytynyt. Valitse pankki uudelleen.", 400, "WRONG_ASPSP_PROVIDED");
@@ -70,7 +75,7 @@ export async function startBankConsent(
     data: { status: "error", lastError: "Yhdistäminen korvattiin uudella yrityksellä." },
   });
 
-  const state = createAuthState();
+  const state = createAuthState(input.client);
   const connection = await prisma.bankConnection.create({
     data: {
       userId,
@@ -85,7 +90,7 @@ export async function startBankConsent(
   });
 
   try {
-    const started = await client.startAuthorization({
+    const started = await ebClient.startAuthorization({
       aspspName: aspsp.name,
       aspspCountry: aspsp.country,
       psuType: input.psuType,

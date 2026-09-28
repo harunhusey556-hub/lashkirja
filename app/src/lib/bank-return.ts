@@ -72,6 +72,26 @@ export function readPendingBankAuth(raw: string | null, now = Date.now()): Pendi
 
 export const APP_URL_SCHEME = "lashkirja";
 
+/** Prefix on an auth `state` created for an app-started bank consent (see
+ * enablebanking/consent.ts createAuthState). Lets a callback URL be routed
+ * back into the app without a DB lookup. */
+export const APP_BANK_STATE_PREFIX = "app1.";
+
+export function isAppBankState(state: string | null | undefined): boolean {
+  return typeof state === "string" && state.startsWith(APP_BANK_STATE_PREFIX);
+}
+
+/**
+ * Turns the web callback's query string into the app's custom-scheme
+ * callback URL: "?code=..&state=app1.." -> "lashkirja://bank/callback?code=..&state=app1..".
+ * String concatenation only: whatever encoding the query already carries is
+ * preserved byte-for-byte.
+ */
+export function appReturnUrl(search: string): string {
+  const query = !search ? "" : search.startsWith("?") ? search : `?${search}`;
+  return `${APP_URL_SCHEME}://bank/callback${query}`;
+}
+
 /**
  * In-app path for a callback URL, or null when the URL is not our return.
  * Accepts https://host/bank/callback and the custom scheme a later IPA registers:

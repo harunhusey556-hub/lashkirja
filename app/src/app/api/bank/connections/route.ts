@@ -18,6 +18,7 @@ const startSchema = z.object({
     .regex(/^[A-Z]{2}$/)
     .default("FI"),
   psuType: z.enum(["personal", "business"]),
+  client: z.enum(["web", "app"]).optional().default("web"),
 });
 
 export async function GET(req: NextRequest) {

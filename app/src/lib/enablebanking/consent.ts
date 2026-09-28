@@ -1,12 +1,17 @@
 import { createHash, randomBytes, timingSafeEqual } from "crypto";
+import { APP_BANK_STATE_PREFIX } from "../bank-return";
 
 export const AUTH_STATE_TTL_MS = 60 * 60 * 1000;
 export const BANK_SYNC_INTERVAL_MS = 6 * 60 * 60 * 1000;
 export const BANK_SYNC_OVERLAP_DAYS = 5;
 const NINETY_DAYS_SECONDS = 90 * 24 * 60 * 60;
 
-export function createAuthState(): string {
-  return randomBytes(32).toString("hex");
+/** "app" tags the state so the callback page (server) and the app's deep
+ * link handler (client) know this consent was started from the app,
+ * without a DB lookup. The bank returns the state unchanged. */
+export function createAuthState(client: "web" | "app" = "web"): string {
+  const random = randomBytes(32).toString("hex");
+  return client === "app" ? `${APP_BANK_STATE_PREFIX}${random}` : random;
 }
 
 export function hashAuthState(state: string): string {

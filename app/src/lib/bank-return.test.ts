@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
+  appReturnUrl,
   bankCallbackPath,
   classifyBankReturn,
+  isAppBankState,
   pendingBankAuthPayload,
   readPendingBankAuth,
 } from "./bank-return";
@@ -45,5 +47,32 @@ describe("bankCallbackPath", () => {
     );
     expect(bankCallbackPath("lashkirja:///bank/callback?code=9")).toBe("/bank/callback?code=9");
     expect(bankCallbackPath("lashkirja://asetukset")).toBeNull();
+  });
+});
+
+describe("isAppBankState", () => {
+  it("recognises only a state carrying the app prefix", () => {
+    expect(isAppBankState("app1.abcdef")).toBe(true);
+    expect(isAppBankState("abcdef")).toBe(false);
+    expect(isAppBankState(null)).toBe(false);
+    expect(isAppBankState(undefined)).toBe(false);
+    expect(isAppBankState("")).toBe(false);
+  });
+});
+
+describe("appReturnUrl", () => {
+  it("turns the web callback query into the app scheme URL, encoding preserved", () => {
+    expect(appReturnUrl("?code=abc&state=app1.def")).toBe(
+      "lashkirja://bank/callback?code=abc&state=app1.def"
+    );
+    // A query string without the leading "?" still gets one.
+    expect(appReturnUrl("code=abc&state=app1.def")).toBe(
+      "lashkirja://bank/callback?code=abc&state=app1.def"
+    );
+    // Percent-encoding in the source query is passed through untouched.
+    expect(appReturnUrl("?code=a%2Bb&state=app1.%20x")).toBe(
+      "lashkirja://bank/callback?code=a%2Bb&state=app1.%20x"
+    );
+    expect(appReturnUrl("")).toBe("lashkirja://bank/callback");
   });
 });

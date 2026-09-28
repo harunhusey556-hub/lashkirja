@@ -43,7 +43,16 @@ function ConfirmForm() {
       <p className="text-[15px] text-ink-2">
         Vahvistus vaihtaa kirjautumissähköpostin. Vanha osoite toimii, kunnes painat nappia.
       </p>
-      {message && <p className="text-sm text-ink" role="status">{message}</p>}
+      {message && (
+        <>
+          <p className="text-sm text-ink" role="status">{message}</p>
+          {typeof navigator !== "undefined" && /iPhone|iPad/.test(navigator.userAgent) && (
+            <a href="lashkirja://open" className="block text-center text-sm text-accent">
+              Avaa LashKirja-sovellus
+            </a>
+          )}
+        </>
+      )}
       {error && <p className="text-sm text-danger" role="alert">{error}</p>}
       <Button type="submit" busy={busy} busyLabel="Vahvistetaan…" className="w-full" disabled={!token}>
         Vahvista
