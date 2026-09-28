@@ -19,6 +19,8 @@ export interface SessionData {
   firstName?: string;
   /** Server row for this browser. Absent on cookies sealed before session tracking. */
   sessionId?: string;
+  /** "bearer" only inside a token. A cookie never carries it; a token always does. */
+  kind?: "bearer";
 }
 
 export const sessionOptions: SessionOptions = {

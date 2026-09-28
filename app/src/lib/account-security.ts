@@ -32,9 +32,13 @@ function hashesEqual(left: string, right: string): boolean {
   return timingSafeEqual(a, b);
 }
 
-export async function openAuthSession(userId: string, userAgent: string | null) {
+export async function openAuthSession(
+  userId: string,
+  userAgent: string | null,
+  device?: "ios-app"
+) {
   return prisma.authSession.create({
-    data: { userId, label: deviceLabel(userAgent) },
+    data: { userId, label: deviceLabel(userAgent, device) },
   });
 }
 

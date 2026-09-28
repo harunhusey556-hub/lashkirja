@@ -15,7 +15,8 @@ export function passwordProblem(password: string): string | null {
 }
 
 /** A short device name stored on the session row. The raw user agent is not kept. */
-export function deviceLabel(userAgent: string | null | undefined): string {
+export function deviceLabel(userAgent: string | null | undefined, appDevice?: "ios-app"): string {
+  if (appDevice === "ios-app") return "iPhone · LashKirja-sovellus";
   const ua = userAgent || "";
   const device = /iPhone/i.test(ua)
     ? "iPhone"

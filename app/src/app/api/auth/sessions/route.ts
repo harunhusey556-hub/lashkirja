@@ -48,7 +48,7 @@ export async function POST(req: NextRequest) {
   }
 
   const res = NextResponse.json({ ok: true, signedOut });
-  if (signedOut) {
+  if (signedOut && session.kind !== "bearer") {
     const iron = await getIronSession<SessionData>(req, res, sessionOptions);
     iron.destroy();
   }

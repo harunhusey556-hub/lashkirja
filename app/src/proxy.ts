@@ -2,6 +2,10 @@ import { unsealData } from "iron-session";
 import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 import { SessionData, sessionOptions } from "@/lib/session-options";
+import { readCredential } from "@/lib/auth-credential";
+
+// TODO(Task 2): wire the real isAppClientOrigin predicate here.
+const isAppOrigin = () => false;
 
 /**
  * Next.js 16 proxy — the replacement for middleware.ts.
@@ -132,10 +136,15 @@ export async function proxy(request: NextRequest) {
       return NextResponse.next();
     }
     // Protected API routes (everything under /api/ except auth, cron, health).
-    const { authenticated: isAuthenticated } = await checkAuth(request, false);
-    if (!isAuthenticated) {
+    // Format-only check (no DB): a bearer token or a well-formed cookie
+    // passes here, and each route handler's own requireSession() call does
+    // the authoritative, DB-backed check (revocation, disabled account).
+    const cookieValue = request.cookies.get(sessionOptions.cookieName)?.value;
+    const credential = await readCredential(request.headers, cookieValue, isAppOrigin);
+    if (!credential) {
       // An invalid or missing cookie is signed-out already; clearing it here
       // stops the browser from resending garbage on every later request.
+      // (Harmless no-op for a bearer-only caller, which never sent one.)
       return clearSessionCookie(
         NextResponse.json(
           { error: { code: "UNAUTHORIZED", message: "Kirjautuminen vaaditaan" } },
