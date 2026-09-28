@@ -24,6 +24,17 @@ export const PUBLIC_PAGES: readonly string[] = [
   "/unohtunut-salasana",
   "/palauta-salasana",
   "/vahvista-sahkoposti",
+  // Task 11: an app-started bank consent redirects back here from
+  // Capacitor's in-app Browser (SFSafariViewController on iOS), a
+  // completely separate browsing context with no session cookie -- the
+  // web-started flow's own cookie only ever existed because that flow
+  // never leaves the same browser tab. Gating this page on a cookie would
+  // bounce every app-started return straight to /login before the page
+  // ever got to run its own bounce back into lashkirja:// (bank-return.ts,
+  // bank/callback/page.tsx). The actual API call the page makes
+  // (POST /api/bank/connections/callback) still requires its own bearer or
+  // cookie via requireSession(), independent of this page-level check.
+  "/bank/callback",
 ];
 
 export function isPublicPage(pathname: string): boolean {
@@ -206,11 +217,13 @@ export async function proxy(request: NextRequest) {
   }
 
   const response = NextResponse.next();
-  if (isProtected) {
+  if (isProtected || pathname === "/bank/callback") {
     // Belt-and-suspenders alongside signOut()'s location.replace() +
     // clearPageCache(): without this, a bfcache/back-forward restore of a
     // fully-loaded protected page's *document* response is theoretically
     // possible even after logout. API/file routes already set this.
+    // /bank/callback is public (see PUBLIC_PAGES above) but still carries a
+    // one-time code/state in its own URL, so it keeps the same header.
     response.headers.set("Cache-Control", "private, no-store, max-age=0");
   }
   return revoked ? clearSessionCookie(response) : response;

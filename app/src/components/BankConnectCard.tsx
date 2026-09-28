@@ -14,6 +14,7 @@ import { consentReconnectCopy } from "@/lib/bank-consent-copy";
 import { consumeInterruptedBankAuth, leaveForBank } from "@/lib/open-bank-auth";
 import { syncOutcomeMessage, type AccountSyncRow } from "@/lib/bank-sync-summary";
 import { detailHref } from "@/lib/routes";
+import { IS_MOBILE_BUILD } from "@/lib/build-target";
 
 interface BankAccount {
   id: string;
@@ -196,6 +197,10 @@ export default function BankConnectCard({ entityType }: { entityType: string }) 
           aspspName: bank.name,
           aspspCountry: bank.country,
           psuType,
+          // Tells the server to prefix the auth state with "app1." so the
+          // bank's redirect can be routed back into the app instead of the
+          // web callback flow (bank-return.ts, enablebanking/consent.ts).
+          ...(IS_MOBILE_BUILD ? { client: "app" as const } : {}),
         }),
       });
       const data = await readJson<{ url: string }>(response, "Yhdistäminen epäonnistui");

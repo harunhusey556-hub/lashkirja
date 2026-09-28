@@ -25,11 +25,22 @@ function pagesIn(dir: string, prefix: string): string[] {
   return routes;
 }
 
+// Signed-out screens, plus /bank/callback (Task 11): an app-started bank
+// consent lands there from Capacitor's in-app Browser, a separate browsing
+// context with no session cookie, so this page must render (and do its own
+// bounce back into lashkirja://) before any login gate could apply. See the
+// comment on PUBLIC_PAGES in proxy.ts.
+const EXPECTED_PUBLIC_PAGES = [
+  "/login",
+  "/palauta-salasana",
+  "/unohtunut-salasana",
+  "/vahvista-sahkoposti",
+  "/bank/callback",
+];
+
 describe("page protection", () => {
-  it("lists only signed-out screens as public", () => {
-    expect([...PUBLIC_PAGES].sort()).toEqual(
-      ["/login", "/palauta-salasana", "/unohtunut-salasana", "/vahvista-sahkoposti"].sort()
-    );
+  it("lists only signed-out screens (plus the app-started bank return) as public", () => {
+    expect([...PUBLIC_PAGES].sort()).toEqual([...EXPECTED_PUBLIC_PAGES].sort());
   });
 
   it("protects every other page, including ones added later", () => {
@@ -38,9 +49,7 @@ describe("page protection", () => {
     // Independent of PUBLIC_PAGES/isPublicPage: an inline literal, so a page
     // made public by accident (or a bug in isPublicPage itself) is caught.
     const acceptedAsPublic = pages.filter((route) => isPublicPage(route)).sort();
-    expect(acceptedAsPublic).toEqual(
-      ["/login", "/palauta-salasana", "/unohtunut-salasana", "/vahvista-sahkoposti"].sort()
-    );
+    expect(acceptedAsPublic).toEqual([...EXPECTED_PUBLIC_PAGES].sort());
 
     // Every declared public page must actually exist as a walked route (catches
     // a stale or typo'd PUBLIC_PAGES entry).
@@ -50,8 +59,13 @@ describe("page protection", () => {
 
     expect(isPublicPage("/tyot")).toBe(false);
     expect(isPublicPage("/kirjanpito/alv")).toBe(false);
-    expect(isPublicPage("/bank/callback")).toBe(false);
     expect(isPublicPage("/")).toBe(false);
+  });
+
+  it("still requires a session for /bank (everything except the callback page itself)", () => {
+    expect(isPublicPage("/bank/callback")).toBe(true);
+    expect(isPublicPage("/bank")).toBe(false);
+    expect(isPublicPage("/bank/callback/extra")).toBe(false);
   });
 
   it("does not treat a prefix lookalike as public", () => {

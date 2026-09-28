@@ -8,6 +8,7 @@ import { buttonClass } from "@/components/control-styles";
 import { Card, DetailHero } from "@/components/ds";
 import { appReturnUrl, classifyBankReturn, isAppBankState } from "@/lib/bank-return";
 import { clearBankAuth } from "@/lib/open-bank-auth";
+import { IS_MOBILE_BUILD } from "@/lib/build-target";
 
 interface CallbackResult {
   ok: true;
@@ -41,7 +42,14 @@ function BankCallback() {
   const code = params.get("code") || "";
   const state = params.get("state") || "";
   const bankError = params.get("error");
-  const isAppReturn = isAppBankState(state);
+  // An "app1."-prefixed state means an app-started consent. On the WEB
+  // build (the server's own copy of this page, which the bank actually
+  // redirects to) that means bouncing straight into the app via
+  // lashkirja://. Inside the MOBILE bundle, ShellGate's deep-link handler
+  // has already done that bounce and routed here itself (Task 11) -- this
+  // is now just the app's own callback screen, so it proceeds exactly like
+  // a web-started flow: POST the code/state with the bearer token.
+  const isAppReturn = !IS_MOBILE_BUILD && isAppBankState(state);
   const initial = classifyBankReturn({ code, state, error: bankError });
   const [phase, setPhase] = useState<"working" | "done" | "error">(
     initial.kind === "success" ? "working" : "error"
