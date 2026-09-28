@@ -132,11 +132,11 @@ body {
   }
 }
 
-/* Three non-overlapping slots: back, title, assistant + profile.
+/* Two slots: back (left), assistant + profile (right).
    The word "Avustaja" only fits once the row is wide enough. */
 .app-header-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   container-type: inline-size;
 }

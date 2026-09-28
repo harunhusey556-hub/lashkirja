@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { easterSunday, finnishHolidays, vatDeadline, vatDeadlineIso } from "./vat-deadline";
+import { easterSunday, finnishHolidays, nextDueVatPeriod, vatDeadline, vatDeadlineIso } from "./vat-deadline";
 
 function iso(date: Date): string {
   return date.toISOString().slice(0, 10);
@@ -88,5 +88,40 @@ describe("vatDeadline", () => {
   it("throws on a malformed period rather than silently computing a wrong date", () => {
     expect(() => vatDeadline({ kind: "month", year: 2026 })).toThrow();
     expect(() => vatDeadline({ kind: "quarter", year: 2026 })).toThrow();
+  });
+});
+
+describe("nextDueVatPeriod", () => {
+  it("monthly: late September shows August, still not due until 12 October", () => {
+    // July's return (due 12 Sept) has already passed; September itself hasn't
+    // ended yet. August (due 12 Oct) is the earliest period not yet due.
+    const today = new Date(Date.UTC(2026, 8, 28)); // 28 Sept 2026
+    const period = nextDueVatPeriod(today, "month");
+    expect(period).toEqual({ kind: "month", year: 2026, month: 8 });
+    expect(vatDeadlineIso(period)).toBe("2026-10-12");
+  });
+
+  it("monthly: once August's due date (12 Oct) has passed, shows September", () => {
+    const today = new Date(Date.UTC(2026, 9, 13)); // 13 Oct 2026
+    const period = nextDueVatPeriod(today, "month");
+    expect(period).toEqual({ kind: "month", year: 2026, month: 9 });
+    expect(vatDeadlineIso(period)).toBe("2026-11-12");
+  });
+
+  it("quarterly: late September - Q2's due date (12 Aug) has already passed, so Q3 (due 12 Nov) is next", () => {
+    // Same rule as the monthly cases: Q2 (Apr-Jun) was due 12 Aug, already
+    // past; Q3 (Jul-Sep) hasn't ended yet but is the earliest period whose
+    // due date has not passed.
+    const today = new Date(Date.UTC(2026, 8, 28)); // 28 Sept 2026
+    const period = nextDueVatPeriod(today, "quarter");
+    expect(period).toEqual({ kind: "quarter", year: 2026, quarter: 3 });
+    expect(vatDeadlineIso(period)).toBe(vatDeadlineIso({ kind: "quarter", year: 2026, quarter: 3 }));
+  });
+
+  it("yearly: mid-January shows the previous year, due 1 March (28 Feb rolled off a Sunday)", () => {
+    const today = new Date(Date.UTC(2027, 0, 15)); // 15 Jan 2027
+    const period = nextDueVatPeriod(today, "year");
+    expect(period).toEqual({ kind: "year", year: 2026 });
+    expect(vatDeadlineIso(period)).toBe("2027-03-01");
   });
 });

@@ -811,7 +811,7 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
                   <div className="space-y-4 px-4 py-4">
                     {!isEdit && meta?.confidence != null && meta.confidence < 0.6 && (
                       <p className="text-[13px] text-warning">
-                        Automaattinen tunnistus epävarma — tarkista kaikki kentät ennen
+                        Automaattinen tunnistus epävarma, tarkista kaikki kentät ennen
                         tallennusta.
                       </p>
                     )}

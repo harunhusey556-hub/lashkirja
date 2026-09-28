@@ -137,3 +137,51 @@ export function vatDeadline(period: VatPeriod): Date {
 export function vatDeadlineIso(period: VatPeriod): string {
   return vatDeadline(period).toISOString().slice(0, 10);
 }
+
+/**
+ * The next VAT return actually due for a filer with the given period kind,
+ * as of `today`: the earliest period (chronologically) whose statutory due
+ * date (`vatDeadline`) falls on or after `today`.
+ *
+ * `vatDeadline` is monotonic in period order (a later period always has a
+ * later or equal due date), so there is exactly one boundary between
+ * "already due" and "not yet due" periods. This walks forward from a
+ * period safely before that boundary until it crosses it, and returns the
+ * first period on or after the crossing - e.g. in September, a monthly
+ * filer sees August (due 12 October), not September itself (not yet
+ * ended) and not July (due 12 September, already passed).
+ */
+export function nextDueVatPeriod(today: Date, vatPeriod: VatPeriodKind): VatPeriod {
+  const asOf = utcDate(today.getUTCFullYear(), today.getUTCMonth() + 1, today.getUTCDate());
+
+  if (vatPeriod === "year") {
+    let year = today.getUTCFullYear() - 3;
+    while (vatDeadline({ kind: "year", year }).getTime() < asOf.getTime()) {
+      year += 1;
+    }
+    return { kind: "year", year };
+  }
+
+  if (vatPeriod === "quarter") {
+    let year = today.getUTCFullYear() - 2;
+    let quarter = 1;
+    while (vatDeadline({ kind: "quarter", year, quarter }).getTime() < asOf.getTime()) {
+      if (quarter === 4) {
+        quarter = 1;
+        year += 1;
+      } else {
+        quarter += 1;
+      }
+    }
+    return { kind: "quarter", year, quarter };
+  }
+
+  let year = today.getUTCFullYear() - 1;
+  let month = 1;
+  while (vatDeadline({ kind: "month", year, month }).getTime() < asOf.getTime()) {
+    const next = addMonths(year, month, 1);
+    year = next.year;
+    month = next.month;
+  }
+  return { kind: "month", year, month };
+}

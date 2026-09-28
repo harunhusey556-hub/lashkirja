@@ -32,6 +32,7 @@ export async function GET(req: NextRequest) {
         amountCents: true,
         type: true,
         matchStatus: true,
+        statementId: true,
       },
       orderBy: { date: "asc" },
     }),

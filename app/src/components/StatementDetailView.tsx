@@ -548,7 +548,7 @@ export default function StatementDetailView({
 
       {statement.totals.transfers !== 0 && (
         <p className="text-[13px] text-ink-2">
-          Omat siirrot {formatEur(statement.totals.transfers)} — eivät sisälly
+          Omat siirrot {formatEur(statement.totals.transfers)}, eivät sisälly
           nettoon
         </p>
       )}
@@ -728,6 +728,19 @@ export default function StatementDetailView({
                             tone: "danger",
                             disabled: deletingTxId === t.id,
                           },
+                          ...(t.matchStatus === "confirmed"
+                            ? [
+                                {
+                                  label: "Poista linkitys",
+                                  onSelect: () =>
+                                    matchAction(t.id, "/api/matching/unlink", {
+                                      transactionId: t.id,
+                                    }),
+                                  tone: "danger" as const,
+                                  disabled: matchBusyTxId === t.id,
+                                },
+                              ]
+                            : []),
                           ...(t.matchStatus === "suggested" && t.suggestedReceiptId
                             ? [
                                 {

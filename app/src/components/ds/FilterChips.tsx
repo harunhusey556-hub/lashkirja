@@ -1,7 +1,7 @@
 "use client";
 
 export function FilterChips<T extends string>({ label, items, value, onChange }: {
-  label: string; items: { id: T; label: string; count?: number }[]; value: T; onChange: (id: T) => void;
+  label: string; items: { id: T; label: string; count?: number | string }[]; value: T; onChange: (id: T) => void;
 }) {
   return (
     <div role="group" aria-label={label} className="-mx-4 flex gap-2 overflow-x-auto px-4 pb-1">

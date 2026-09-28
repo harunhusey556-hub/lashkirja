@@ -4,9 +4,8 @@ import { useEffect, useState } from "react";
 import { PageTitle, Section, ListRow } from "@/components/ds";
 import { apiFetch, readJson } from "@/components/clientFetch";
 import { formatDayMonth, formatEur } from "@/lib/format";
-import { helsinkiMonthKey, helsinkiQuarterKey } from "@/lib/validation";
 import { MONTHS } from "@/lib/finnish-months";
-import { vatDeadline, type VatPeriod } from "@/lib/vat-deadline";
+import { nextDueVatPeriod, vatDeadline, type VatPeriod } from "@/lib/vat-deadline";
 import { useProfile } from "@/app/asetukset/useProfile";
 
 /**
@@ -73,6 +72,14 @@ function periodLabel(period: VatPeriod): string {
   return String(period.year);
 }
 
+/** The `?period=` value the ALV page's own query parser understands
+ * (`YYYY-MM` or `YYYY-Qn`); a yearly period has no such format there. */
+function periodQueryKey(period: VatPeriod): string | null {
+  if (period.kind === "month") return `${period.year}-${String(period.month).padStart(2, "0")}`;
+  if (period.kind === "quarter") return `${period.year}-Q${period.quarter}`;
+  return null;
+}
+
 function alvRowSecondary(info: AlvInfo): string {
   const due = formatDayMonth(vatDeadline(info.period).toISOString());
   const label = periodLabel(info.period);
@@ -96,24 +103,27 @@ export default function KirjanpitoPage() {
     if (!profile.vatRegistered) {
       // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional sync-to-profile: clearing the ALV row the moment the profile itself says "not registered" is exactly the external-system sync this effect exists for
       setAlv(null);
-    } else if (profile.vatPeriod === "quarter") {
-      const key = helsinkiQuarterKey(now);
-      const [year, quarterPart] = key.split("-Q");
-      const period: VatPeriod = { kind: "quarter", year: Number(year), quarter: Number(quarterPart) };
-      apiFetch(`/api/alv?period=${key}`, { signal: controller.signal })
-        .then((response) => readJson<{ field308: { amount: number; isRefund: boolean } }>(response, ""))
-        .then((data) => setAlv({ period, amount: data.field308.amount, isRefund: data.field308.isRefund }))
-        .catch(() => {});
-    } else if (profile.vatPeriod === "year") {
-      setAlv({ period: { kind: "year", year: now.getUTCFullYear() }, amount: null, isRefund: false });
-    } else {
-      const key = helsinkiMonthKey(now);
-      const period: VatPeriod = { kind: "month", year: Number(key.slice(0, 4)), month: Number(key.slice(5, 7)) };
-      apiFetch(`/api/alv?period=${key}`, { signal: controller.signal })
-        .then((response) => readJson<{ field308: { amount: number; isRefund: boolean } }>(response, ""))
-        .then((data) => setAlv({ period, amount: data.field308.amount, isRefund: data.field308.isRefund }))
-        .catch(() => {});
+      return () => controller.abort();
     }
+
+    // The next return actually due, not the currently-open period: see
+    // nextDueVatPeriod's own doc comment for why (spec §3.1). Any
+    // unrecognised value (profile.vatPeriod is a free-form string) falls
+    // back to monthly, same as the rest of the app already does.
+    const kind = profile.vatPeriod === "quarter" || profile.vatPeriod === "year" ? profile.vatPeriod : "month";
+    const period = nextDueVatPeriod(now, kind);
+    const key = periodQueryKey(period);
+
+    if (!key) {
+      // Yearly: no /api/alv period format for a whole year (see AlvInfo).
+      setAlv({ period, amount: null, isRefund: false });
+      return () => controller.abort();
+    }
+
+    apiFetch(`/api/alv?period=${key}`, { signal: controller.signal })
+      .then((response) => readJson<{ field308: { amount: number; isRefund: boolean } }>(response, ""))
+      .then((data) => setAlv({ period, amount: data.field308.amount, isRefund: data.field308.isRefund }))
+      .catch(() => {});
 
     return () => controller.abort();
   }, [profile]);
@@ -164,6 +174,9 @@ export default function KirjanpitoPage() {
         ? "Ei lukittu"
         : `${MONTHS[Number(lockedThrough.slice(5, 7)) - 1]} asti`;
 
+  const alvKey = alv ? periodQueryKey(alv.period) : null;
+  const alvHref = alvKey ? `/kirjanpito/alv?period=${alvKey}` : "/kirjanpito/alv";
+
   return (
     <div className="space-y-6 pb-6">
       <PageTitle title="Kirjanpito" />
@@ -181,7 +194,7 @@ export default function KirjanpitoPage() {
 
       <Section title="Ilmoitukset ja kaudet">
         <ListRow
-          href="/kirjanpito/alv"
+          href={alvHref}
           leading={<PercentIcon />}
           title="ALV-ilmoitus"
           amount={alv?.amount != null ? formatEur(alv.amount) : undefined}

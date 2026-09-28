@@ -109,7 +109,7 @@ export default function ReceiptMatchPanel({
     return (
       <div className={`space-y-2 ${pad}`}>
         <StatusTag tone="accent">
-          {strong ? "Täsmää — ehdotettu tapahtuma" : "Ehdotettu pankkitapahtuma"}
+          {strong ? "Täsmää, ehdotettu tapahtuma" : "Ehdotettu pankkitapahtuma"}
         </StatusTag>
         {onConfirm ? (
           <button
@@ -141,7 +141,7 @@ export default function ReceiptMatchPanel({
   if (candidates.length === 0) {
     return (
       <p className={`text-[13px] text-ink-2 ${pad}`}>
-        Ei löytynyt pankkitapahtumaa — linkitä Tiliotteet-sivulla tai lisää
+        Ei löytynyt pankkitapahtumaa, linkitä Tiliotteet-sivulla tai lisää
         tiliote.
       </p>
     );

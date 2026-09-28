@@ -18,6 +18,12 @@ import { receiptDrillHref } from "@/lib/report-drill";
 import { pageCacheFetchedAt, readPageCache, writePageCache } from "@/lib/page-cache";
 import { usePersistedState, useScrollRestoration } from "@/lib/list-ui-state";
 
+// Extends a small inline text link's touch target to >=44px tall without
+// growing what's actually drawn (same trick as kirjanpito/alv/page.tsx's
+// own HIT44, with a slightly bigger inset: these rows' ~19px text line
+// needs +13px each side, not +12px, to actually clear 44px).
+const HIT44 = "relative before:absolute before:inset-x-0 before:-inset-y-[13px] before:content-['']";
+
 interface CategoryRow {
   category: string;
   gross: number;
@@ -216,7 +222,7 @@ export default function ReportsPage() {
                   {
                     label: "Tulot",
                     value: (
-                      <Link href={receiptDrillHref({ type: "tulo" })} aria-label="Avaa tulokuitit" className="text-accent">
+                      <Link href={receiptDrillHref({ type: "tulo" })} aria-label="Avaa tulokuitit" className={`text-accent ${HIT44}`}>
                         {formatEur(report.total.incomeNet)}
                       </Link>
                     ),
@@ -224,7 +230,7 @@ export default function ReportsPage() {
                   {
                     label: "Menot",
                     value: (
-                      <Link href={receiptDrillHref({ type: "meno" })} aria-label="Avaa menokuitit" className="text-accent">
+                      <Link href={receiptDrillHref({ type: "meno" })} aria-label="Avaa menokuitit" className={`text-accent ${HIT44}`}>
                         {formatEur(report.total.expenseNet)}
                       </Link>
                     ),
@@ -261,7 +267,7 @@ export default function ReportsPage() {
                       <Link
                         href={receiptDrillHref({ month: month.month })}
                         aria-label={`Avaa kuitit ${formatMonthShort(month.month!)}`}
-                        className={month.profitNet < 0 ? "text-danger" : "text-accent"}
+                        className={`${month.profitNet < 0 ? "text-danger" : "text-accent"} ${HIT44}`}
                       >
                         {formatEur(month.profitNet)}
                       </Link>

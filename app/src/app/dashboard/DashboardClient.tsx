@@ -94,8 +94,8 @@ function MonthSwitcher({ month, onChange }: { month: string; onChange: (next: st
       >
         <ChevronLeftIcon />
       </button>
-      <span className="min-w-[3ch] text-center text-[13px] tabular-nums text-ink-2">
-        {month.split("-")[0]}
+      <span className="min-w-[11ch] text-center text-[13px] text-ink-2">
+        {MONTHS[Number(month.split("-")[1]) - 1]} {month.split("-")[0]}
       </span>
       <button
         type="button"

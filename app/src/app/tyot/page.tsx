@@ -38,6 +38,11 @@ const WORK_FILTERS = [
 
 type WorkFilter = (typeof WORK_FILTERS)[number];
 
+// Must match TAKE in lib/work-queue.ts: each kind's query there is capped at
+// this many rows, so a chip count sitting exactly on it may be an
+// undercount, not the true total.
+const WORK_QUEUE_TAKE = 40;
+
 const JOB_STATUS_TONE: Record<string, "neutral" | "accent" | "danger" | "success" | "warning"> = {
   pending: "neutral",
   running: "accent",
@@ -121,18 +126,23 @@ export default function TyotPage() {
     }
   }
 
-  // The work queue is never paginated or capped (see /api/work-queue), so
-  // counting the already-fetched rows for each chip is safe here - unlike a
-  // capped list, nothing past a page limit would be silently undercounted.
-  const workChips = useMemo(
-    () =>
-      WORK_FILTERS.map((kind) => ({
-        id: kind,
-        label: kind === "all" ? "Kaikki" : workKindLabel(kind),
-        count: kind === "all" ? items.length : items.filter((item) => item.kind === kind).length,
-      })),
-    [items]
-  );
+  // Each kind is capped at WORK_QUEUE_TAKE rows server-side (/api/work-queue
+  // -> lib/work-queue.ts), so a kind whose fetched count hits that cap may
+  // have more rows than shown; its chip (and "Kaikki", which sums the
+  // kinds) gets a "+" so the count is never presented as exact when it
+  // might not be.
+  const workChips = useMemo(() => {
+    const chips = WORK_FILTERS.filter((kind) => kind !== "all").map((kind) => {
+      const count = items.filter((item) => item.kind === kind).length;
+      const capped = count >= WORK_QUEUE_TAKE;
+      return { id: kind, label: workKindLabel(kind), count: capped ? `${count}+` : count, capped };
+    });
+    const anyCapped = chips.some((chip) => chip.capped);
+    return [
+      { id: "all" as const, label: "Kaikki", count: anyCapped ? `${items.length}+` : items.length },
+      ...chips,
+    ];
+  }, [items]);
   const visible = filter === "all" ? items : items.filter((item) => item.kind === filter);
 
   return (

@@ -238,13 +238,17 @@ export function ReceiptFilters({
               type="button"
               onClick={chip.clear}
               aria-label={`Poista suodatin ${chip.label}`}
-              className="active-press inline-flex min-h-9 items-center gap-1.5 rounded-full border border-line bg-surface px-2.5 text-[13px] text-ink-2"
+              className="active-press inline-flex min-h-11 items-center gap-1.5 rounded-full border border-line bg-surface px-2.5 text-[13px] text-ink-2"
             >
               {chip.label}
               <span aria-hidden>&times;</span>
             </button>
           ))}
-          <button type="button" onClick={onClearAll} className="active-press min-h-9 text-[13px] font-medium text-accent">
+          <button
+            type="button"
+            onClick={onClearAll}
+            className="active-press inline-flex min-h-11 items-center text-[13px] font-medium text-accent"
+          >
             Tyhjennä kaikki
           </button>
         </div>

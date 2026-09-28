@@ -13,6 +13,7 @@ interface UnmatchedTx {
   amount: number;
   type: string;
   matchStatus: string;
+  statementId: string;
 }
 
 interface UnlinkedReceipt {
@@ -92,14 +93,15 @@ export default function TaydennysPage() {
               rows.map((row) => (
                 <ListRow
                   key={row.id}
+                  href={`/pankki/tapahtumat/${row.statementId}`}
                   title={row.counterparty || "Tapahtuma"}
                   amount={formatEur(row.amount)}
                   secondary={formatDate(row.date)}
                   ariaLabel={`${row.counterparty || "Tapahtuma"}, ${formatEur(row.amount)}, ${formatDate(row.date)}`}
                   trailing={
-                    <StatusTag tone={row.matchStatus === "suggested" ? "warning" : "neutral"}>
-                      {row.matchStatus === "suggested" ? "Ehdotus" : "Avaa"}
-                    </StatusTag>
+                    row.matchStatus === "suggested" ? (
+                      <StatusTag tone="warning">Ehdotus</StatusTag>
+                    ) : undefined
                   }
                 />
               ))

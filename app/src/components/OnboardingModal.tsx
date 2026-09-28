@@ -120,7 +120,7 @@ export function OnboardingModal({
             </div>
             <div>
               <h2 id="onboarding-modal-title" className="text-[15px] font-semibold text-ink">
-                LashKirja AI — Perehdytys
+                LashKirja AI: Perehdytys
               </h2>
               <p className="text-[11px] text-ink-2">
                 Muokataan kirjanpitosi vastaamaan liiketoimintaasi

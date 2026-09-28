@@ -8,6 +8,12 @@ import { Button, Field } from "@/components/ui";
 import { controlClass } from "@/components/control-styles";
 import { ACCOUNTING_RETENTION_YEARS } from "@/lib/session-policy";
 
+// Extends a small inline text link's touch target to >=44px tall without
+// growing what's actually drawn (same trick as kirjanpito/alv/page.tsx's
+// own HIT44, with a slightly bigger inset: this row's ~19px text line
+// needs +13px each side, not +12px, to actually clear 44px).
+const HIT44 = "relative before:absolute before:inset-x-0 before:-inset-y-[13px] before:content-['']";
+
 interface AccountRequestRow {
   id: string;
   kindLabel: string;
@@ -89,7 +95,7 @@ export default function TietosuojaPage() {
         </p>
         <p>
           Kuukauden viennin zip löytyy{" "}
-          <Link href="/raportit" className="text-accent">
+          <Link href="/raportit" className={`text-accent ${HIT44}`}>
             Raporteista
           </Link>
           .
