@@ -190,7 +190,9 @@ export default function BottomSheet({
   useOverlayLock(isOpen);
 
   const closeRef = useRef(onClose);
-  closeRef.current = onClose;
+  useEffect(() => {
+    closeRef.current = onClose;
+  });
   useEffect(() => {
     if (!isOpen) return;
     return subscribeOverlayClose(() => closeRef.current());
@@ -206,8 +208,20 @@ export default function BottomSheet({
   // Above the tab bar (z-50): a sheet that the navigation paints over hides
   // its own bottom row - which is exactly where a composer or a save button
   // lives.
+  //
+  // `overlay-root`: whenever this sheet is mounted inside `.app-main` (any
+  // page-level sheet, as opposed to the shell-level ones AppShell renders as
+  // siblings of `.app-main`), useOverlayLock above sets `data-overlay="open"`
+  // on `.app-frame`, which sets `pointer-events: none` on all of `.app-main`
+  // to keep the page behind an overlay from receiving clicks. Only elements
+  // carrying `overlay-root` opt back into `pointer-events: auto` (see
+  // globals.css and ConfirmModal, which already carries this class). Without
+  // it, every control inside a page-level BottomSheet - a MoreMenu item, the
+  // "Sulje perustelulla" button, anything - is visually present but silently
+  // unclickable: `elementFromPoint` at its centre resolves to `.app-frame`,
+  // not the control.
   return (
-    <div className={`fixed inset-0 z-[60] ${closing ? "pointer-events-none" : ""}`}>
+    <div className={`overlay-root fixed inset-0 z-[60] ${closing ? "pointer-events-none" : ""}`}>
       <div
         ref={backdropRef}
         className={`absolute inset-0 bg-charcoal/40 backdrop-blur-[2px] ${

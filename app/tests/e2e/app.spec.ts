@@ -123,8 +123,11 @@ test("invoice goes from draft to paid", async ({ page }) => {
   await page.getByRole("button", { name: "Merkitse lähetetyksi" }).click();
   await expect(page.getByText("Lähetetty", { exact: true })).toBeVisible();
 
+  // The payment form now opens in a "Kirjaa maksu" sheet (BottomActions'
+  // primary for a sent, still-open invoice) instead of sitting inline.
+  await page.getByRole("button", { name: "Kirjaa maksu" }).click();
   await page.getByLabel("Maksun summa").fill("125,50");
-  await page.getByRole("main").getByRole("button", { name: "Lisää", exact: true }).click();
+  await page.getByRole("dialog").getByRole("button", { name: "Lisää", exact: true }).click();
   // "Maksettu" appears both as the status and as the paid-amount row label.
   await expect(page.getByText("Maksettu", { exact: true }).first()).toBeVisible();
   await expect(page.getByText("Avoinna")).toHaveCount(0);

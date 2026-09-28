@@ -126,9 +126,16 @@ function historyItems(invoice: Invoice): HistoryItem[] {
         : send.status === "failed"
           ? "Lähetys epäonnistui"
           : "Lähetys kesken";
+    const metaParts = [
+      formatDate(send.createdAt),
+      send.toAddress,
+      send.attachmentName,
+      send.gross != null ? formatEur(send.gross) : null,
+      send.error,
+    ].filter((part): part is string => Boolean(part));
     dated.push({
       title,
-      meta: [formatDate(send.createdAt), send.toAddress].filter(Boolean).join(", "),
+      meta: metaParts.join(", "),
       tone: send.status === "failed" ? "accent" : "muted",
       at: new Date(send.createdAt).getTime(),
     });
@@ -182,6 +189,8 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
   const [remindingBusy, setRemindingBusy] = useState(false);
   const [closeReason, setCloseReason] = useState("");
   const [closeReasonOpen, setCloseReasonOpen] = useState(false);
+  const [closeReasonError, setCloseReasonError] = useState("");
+  const [paymentSheetOpen, setPaymentSheetOpen] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -244,9 +253,10 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
   function closeWithReason() {
     const reason = closeReason.trim();
     if (reason.length < 3) {
-      setMessage("Kirjoita perustelu, vähintään kolme merkkiä.");
+      setCloseReasonError("Kirjoita perustelu, vähintään kolme merkkiä.");
       return;
     }
+    setCloseReasonError("");
     setCloseReasonOpen(false);
     void changeStatus("paid", reason);
   }
@@ -281,6 +291,7 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
       await readJson(response, "Maksun kirjaus epäonnistui");
       paymentKey.current = newIdempotencyKey();
       setPaymentAmount("");
+      setPaymentSheetOpen(false);
       await load();
     } catch (error) {
       setMessage(errorMessage(error, "Maksun kirjaus epäonnistui"));
@@ -472,11 +483,23 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
     if (invoice.status === "draft") {
       return { kind: "send", label: "Lähetä", busy: sending, busyLabel: "Tarkistetaan…" };
     }
-    if (invoice.displayStatus === "overdue") {
-      return { kind: "remind", label: "Lähetä muistutus", busy: remindingBusy, busyLabel: "Lähetetään…", icon: true };
-    }
+    // Nothing left to collect takes priority over the overdue reminder flow,
+    // even on an invoice that is technically still "overdue" by date.
     if (invoice.status === "sent" && invoice.open <= 0) {
       return { kind: "markPaid", label: "Merkitse maksetuksi", busy: false };
+    }
+    if (invoice.displayStatus === "overdue") {
+      // The reminder preview (fee/total) loads after the invoice itself; the
+      // button stays disabled with a loading label until it's here, rather
+      // than letting a tap fire the actual send before the numbers are known.
+      const loading = !reminder;
+      return {
+        kind: "remind",
+        label: "Lähetä muistutus",
+        busy: loading || remindingBusy,
+        busyLabel: loading ? "Ladataan…" : "Lähetetään…",
+        icon: true,
+      };
     }
     if (invoice.status === "sent") {
       return { kind: "pay", label: "Kirjaa maksu", busy: false };
@@ -490,9 +513,9 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
           label: "Avaa PDF",
           onSelect: () => window.open(`/api/invoices/${invoice.id}/pdf`, "_blank", "noopener,noreferrer"),
         },
-        { label: "Jaa", onSelect: () => void shareInvoice() },
+        { label: "Jaa", onSelect: () => void shareInvoice(), disabled: busy || sharing },
         ...(invoice.status !== "credited"
-          ? [{ label: "Lähetä sähköpostilla", onSelect: () => void openReview(), disabled: sending }]
+          ? [{ label: "Lähetä sähköpostilla", onSelect: () => void openReview(), disabled: busy || sending }]
           : []),
         { label: "Kopioi luonnokseksi", onSelect: () => void duplicateInvoice(), disabled: busy },
         ...(invoice.documentKind !== "credit_note" &&
@@ -504,7 +527,15 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
           ? [{ label: "Merkitse lähetetyksi", onSelect: () => void changeStatus("sent"), disabled: busy }]
           : []),
         ...(invoice.status === "sent" && invoice.open > 0
-          ? [{ label: "Sulje perustelulla", onSelect: () => setCloseReasonOpen(true) }]
+          ? [
+              {
+                label: "Sulje perustelulla",
+                onSelect: () => {
+                  setCloseReasonError("");
+                  setCloseReasonOpen(true);
+                },
+              },
+            ]
           : []),
         ...(invoice.status === "draft"
           ? [
@@ -583,18 +614,24 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
                       ? `${invoice.lines[0].description}, ${invoice.lines.length} kpl`
                       : "Ei rivejä",
                 },
+                { label: "Veroton", value: formatEur(invoice.net) },
                 ...vatBreakdown(invoice.lines).map((row) => ({
                   label: `ALV ${String(row.rate).replace(".", ",")} %`,
                   value: formatEur(row.vat),
                 })),
                 { label: "Yhteensä", value: formatEur(invoice.gross) },
+                ...(invoice.payments.length > 0
+                  ? [{ label: "Maksettu", value: formatEur(invoice.paid) }]
+                  : []),
                 ...(invoice.closedReason
                   ? [{ label: "Suljettu", value: invoice.closedReason }]
                   : []),
               ]}
             />
 
-            {(invoice.status === "sent" || invoice.status === "paid") && (
+            {(invoice.payments.length > 0 ||
+              invoice.status === "sent" ||
+              invoice.status === "paid") && (
               <Section
                 title="Maksut"
                 action={
@@ -603,62 +640,30 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
                   ) : undefined
                 }
               >
-                <div className="space-y-3 px-4 py-4">
-                  <div className="field-dates">
-                    <input
-                      id="payment-amount"
-                      aria-label="Maksun summa"
-                      aria-invalid={Boolean(paymentError) || undefined}
-                      aria-describedby={paymentError ? "payment-amount-error" : undefined}
-                      className={`${controlClass} min-h-12`}
-                      value={paymentAmount}
-                      onChange={(e) => setPaymentAmount(e.target.value)}
-                      inputMode="decimal"
-                      placeholder="125,50"
-                    />
-                    <input
-                      aria-label="Maksun päivä"
-                      type="date"
-                      className={`${controlClass} min-h-12`}
-                      value={paymentDate}
-                      onChange={(e) => setPaymentDate(e.target.value)}
-                    />
-                  </div>
-                  {paymentError && (
-                    <p id="payment-amount-error" className="text-sm text-danger" role="alert">
-                      {paymentError}
-                    </p>
-                  )}
-                  <Button
-                    type="button"
-                    className="w-full"
-                    disabled={busy}
-                    disabledReason={busy ? "Tallennus on kesken." : undefined}
-                    onClick={() => void addPayment()}
-                  >
-                    Lisää
-                  </Button>
-                </div>
-                {invoice.payments.map((payment) => (
-                  <div key={payment.id} className="flex items-center justify-between gap-3 px-4 py-3">
-                    <div>
-                      <p className="text-[15px] text-ink">{formatEur(payment.amount)}</p>
-                      <p className="text-[13px] text-ink-2">
-                        {formatDate(payment.paidDate)}
-                        {payment.source === "bank" ? " · pankista" : ""}
-                        {payment.note ? ` · ${payment.note}` : ""}
-                      </p>
+                {invoice.payments.length === 0 ? (
+                  <p className="px-4 py-4 text-[15px] text-ink-2">Ei maksuja vielä.</p>
+                ) : (
+                  invoice.payments.map((payment) => (
+                    <div key={payment.id} className="flex items-center justify-between gap-3 px-4 py-3">
+                      <div>
+                        <p className="text-[15px] text-ink">{formatEur(payment.amount)}</p>
+                        <p className="text-[13px] text-ink-2">
+                          {formatDate(payment.paidDate)}
+                          {payment.source === "bank" ? " · pankista" : ""}
+                          {payment.note ? ` · ${payment.note}` : ""}
+                        </p>
+                      </div>
+                      <Button
+                        type="button"
+                        variant="danger"
+                        onClick={() => setConfirmRemovePayment(payment.id)}
+                        disabled={busy}
+                      >
+                        Poista
+                      </Button>
                     </div>
-                    <Button
-                      type="button"
-                      variant="danger"
-                      onClick={() => setConfirmRemovePayment(payment.id)}
-                      disabled={busy}
-                    >
-                      Poista
-                    </Button>
-                  </div>
-                ))}
+                  ))
+                )}
               </Section>
             )}
 
@@ -712,63 +717,6 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
               </Section>
             )}
 
-            {review && (
-              <Section title="Tarkista ennen lähetystä">
-                <div className="space-y-3 px-4 py-4">
-                  <div className="space-y-1 text-[15px]">
-                    <div className="flex justify-between gap-3">
-                      <span className="shrink-0 text-ink-2">Vastaanottaja</span>
-                      <span className="min-w-0 break-all text-right text-ink">{review.recipient ?? "–"}</span>
-                    </div>
-                    <div className="flex justify-between gap-3">
-                      <span className="text-ink-2">Summa</span>
-                      <span className="shrink-0 whitespace-nowrap tabular-nums text-ink">
-                        {formatEur(review.gross)}
-                      </span>
-                    </div>
-                    <div className="flex justify-between gap-3">
-                      <span className="text-ink-2">Eräpäivä</span>
-                      <span className="text-ink">{formatDate(review.dueDate)}</span>
-                    </div>
-                    <div className="flex justify-between gap-3">
-                      <span className="shrink-0 text-ink-2">Tilinumero</span>
-                      <span className="min-w-0 break-all text-right text-ink">{review.iban ?? "–"}</span>
-                    </div>
-                    <div className="flex justify-between gap-3">
-                      <span className="text-ink-2">Liite</span>
-                      <span className="text-ink">{review.attachment}</span>
-                    </div>
-                  </div>
-                  {review.blockedReason && (
-                    <p className="text-sm text-danger" role="alert">
-                      {review.blockedReason}
-                    </p>
-                  )}
-                  <div className="flex gap-2">
-                    <Button
-                      type="button"
-                      className="flex-1"
-                      disabled={Boolean(review.blockedReason) || busy}
-                      disabledReason={review.blockedReason ?? undefined}
-                      busy={sending}
-                      busyLabel="Lähetetään…"
-                      onClick={() => void sendByEmail()}
-                    >
-                      Lähetä
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="secondary"
-                      className="flex-1"
-                      onClick={() => setReview(null)}
-                    >
-                      Peruuta
-                    </Button>
-                  </div>
-                </div>
-              </Section>
-            )}
-
             <section className="mt-6">
               <h2 className="mb-2 px-1 text-[13px] font-normal text-ink-2">Historia</h2>
               <Timeline items={historyItems(invoice)} />
@@ -798,22 +746,19 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
                   ? () => void sendReminder()
                   : primary.kind === "markPaid"
                     ? () => void changeStatus("paid")
-                    : () => void addPayment()
+                    : () => setPaymentSheetOpen(true)
             }
           >
             {primary.icon ? <BellIcon /> : null}
             {primary.label}
           </Button>
-          {invoice.displayStatus === "overdue" && (
+          {invoice.displayStatus === "overdue" && invoice.open > 0 && (
             <button
               type="button"
               className="active-press flex min-h-12 w-full items-center justify-center text-[15px] font-semibold text-accent"
-              onClick={() => {
-                document.getElementById("payment-amount")?.scrollIntoView({ behavior: "smooth", block: "center" });
-                document.getElementById("payment-amount")?.focus();
-              }}
+              onClick={() => setPaymentSheetOpen(true)}
             >
-              Kirjaa maksu käsin
+              Kirjaa maksu
             </button>
           )}
         </BottomActions>
@@ -841,22 +786,138 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
 
       <BottomSheet
         isOpen={closeReasonOpen}
-        onClose={() => setCloseReasonOpen(false)}
+        onClose={() => {
+          setCloseReasonOpen(false);
+          setCloseReasonError("");
+        }}
         title="Sulje ilman täyttä maksua"
         labelledBy="close-reason-title"
       >
         <div className="space-y-3 px-5 py-4 sheet-safe-bottom">
           <input
             aria-label="Sulkemisen perustelu"
+            aria-invalid={Boolean(closeReasonError) || undefined}
+            aria-describedby={closeReasonError ? "close-reason-error" : undefined}
             className={`${controlClass} min-h-12`}
             value={closeReason}
             onChange={(event) => setCloseReason(event.target.value)}
             placeholder="Perustelu, esim. käteinen tai luottotappio"
           />
+          {closeReasonError && (
+            <p id="close-reason-error" className="text-sm text-danger" role="alert">
+              {closeReasonError}
+            </p>
+          )}
           <Button type="button" className="w-full" disabled={busy} onClick={closeWithReason}>
             Sulje perustelulla
           </Button>
         </div>
+      </BottomSheet>
+
+      <BottomSheet
+        isOpen={paymentSheetOpen}
+        onClose={() => setPaymentSheetOpen(false)}
+        title="Kirjaa maksu"
+        labelledBy="payment-sheet-title"
+      >
+        <div className="space-y-3 px-5 py-4 sheet-safe-bottom">
+          <div className="field-dates">
+            <input
+              id="payment-amount"
+              aria-label="Maksun summa"
+              aria-invalid={Boolean(paymentError) || undefined}
+              aria-describedby={paymentError ? "payment-amount-error" : undefined}
+              className={`${controlClass} min-h-12`}
+              value={paymentAmount}
+              onChange={(e) => setPaymentAmount(e.target.value)}
+              inputMode="decimal"
+              placeholder="125,50"
+            />
+            <input
+              aria-label="Maksun päivä"
+              type="date"
+              className={`${controlClass} min-h-12`}
+              value={paymentDate}
+              onChange={(e) => setPaymentDate(e.target.value)}
+            />
+          </div>
+          {paymentError && (
+            <p id="payment-amount-error" className="text-sm text-danger" role="alert">
+              {paymentError}
+            </p>
+          )}
+          <Button
+            type="button"
+            className="w-full"
+            disabled={busy}
+            disabledReason={busy ? "Tallennus on kesken." : undefined}
+            onClick={() => void addPayment()}
+          >
+            Lisää
+          </Button>
+        </div>
+      </BottomSheet>
+
+      <BottomSheet
+        isOpen={review !== null}
+        onClose={() => setReview(null)}
+        title="Lähetä lasku"
+        labelledBy="send-sheet-title"
+      >
+        {review && (
+          <div className="space-y-3 px-5 py-4 sheet-safe-bottom">
+            <div className="space-y-1 text-[15px]">
+              <div className="flex justify-between gap-3">
+                <span className="shrink-0 text-ink-2">Vastaanottaja</span>
+                <span className="min-w-0 break-all text-right text-ink">{review.recipient ?? "–"}</span>
+              </div>
+              <div className="flex justify-between gap-3">
+                <span className="text-ink-2">Summa</span>
+                <span className="shrink-0 whitespace-nowrap tabular-nums text-ink">
+                  {formatEur(review.gross)}
+                </span>
+              </div>
+              <div className="flex justify-between gap-3">
+                <span className="text-ink-2">Eräpäivä</span>
+                <span className="text-ink">{formatDate(review.dueDate)}</span>
+              </div>
+              <div className="flex justify-between gap-3">
+                <span className="shrink-0 text-ink-2">Tilinumero</span>
+                <span className="min-w-0 break-all text-right text-ink">{review.iban ?? "–"}</span>
+              </div>
+              <div className="flex justify-between gap-3">
+                <span className="text-ink-2">Liite</span>
+                <span className="text-ink">{review.attachment}</span>
+              </div>
+            </div>
+            {review.blockedReason && (
+              <p className="text-sm text-danger" role="alert">
+                {review.blockedReason}
+              </p>
+            )}
+            <div className="flex gap-2">
+              <Button
+                type="button"
+                className="flex-1"
+                disabled={Boolean(review.blockedReason) || busy}
+                disabledReason={review.blockedReason ?? undefined}
+                busy={sending}
+                busyLabel="Lähetetään…"
+                onClick={() => void sendByEmail()}
+              >
+                Lähetä
+              </Button>
+              <Button
+                type="button"
+                variant="secondary"
+                className="flex-1"
+                onClick={() => setReview(null)}
+              >
+                Peruuta
+              </Button>
+            </div>
+          </div>
+        )}
       </BottomSheet>
     </>
   );
