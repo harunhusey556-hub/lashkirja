@@ -33,20 +33,20 @@ export function ConnectionNotice({
 
   return (
     <div
-      className={`rounded-2xl border text-sm ${
+      className={`rounded-card border text-sm ${
         kind === "expired"
-          ? "border-warning/40 bg-warning/10 text-charcoal"
+          ? "border-warning/40 bg-warning/10 text-ink"
           : kind === "offline"
             ? "border-line bg-surface text-ink"
             : kind === "unreachable"
-              ? "border-accent/30 bg-blush/40 text-charcoal"
+              ? "border-accent/30 bg-accent-soft text-ink"
               : "border-danger/30 bg-danger/10 text-danger"
       } ${compact ? "p-4" : "p-6"}`}
       role="alert"
       data-connection={kind}
     >
       <p className="font-medium">{copy.title}</p>
-      <p className={`mt-1 leading-relaxed ${kind === "generic" ? "" : "text-charcoal/80"}`}>
+      <p className={`mt-1 leading-relaxed ${kind === "generic" ? "" : "text-ink-2"}`}>
         {copy.body}
       </p>
       {kind === "expired" ? (
@@ -74,19 +74,15 @@ export function StaleBanner({
   const label = fetchedAt == null ? "Viimeksi päivitetty aiemmin" : formatUpdatedAt(fetchedAt);
   return (
     <div
-      className="flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-warning/40 bg-warning/10 px-4 py-3 text-sm text-charcoal"
+      className="flex flex-wrap items-center justify-between gap-2 rounded-card border border-warning/40 bg-warning/10 px-4 py-3 text-sm text-ink"
       role="status"
       data-stale="true"
     >
       <p>{label}. Näytetään tallennettu versio.</p>
       {onRetry && (
-        <button
-          type="button"
-          onClick={onRetry}
-          className="min-h-11 px-3 rounded-xl bg-surface border border-warning/40 font-medium"
-        >
+        <Button type="button" variant="secondary" onClick={onRetry}>
           Yritä uudelleen
-        </button>
+        </Button>
       )}
     </div>
   );

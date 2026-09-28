@@ -81,7 +81,7 @@ function YearSwitcher({ year, currentYear, onChange }: { year: number; currentYe
         type="button"
         aria-label="Edellinen vuosi"
         onClick={() => onChange(year - 1)}
-        className="active-press relative flex h-8 w-8 items-center justify-center rounded-full text-ink-2 before:absolute before:inset-x-0 before:-inset-y-2 before:content-['']"
+        className="active-press relative flex h-8 w-8 items-center justify-center rounded-full text-ink-2 before:absolute before:-inset-2 before:content-['']"
       >
         <ChevronLeftIcon />
       </button>
@@ -91,7 +91,7 @@ function YearSwitcher({ year, currentYear, onChange }: { year: number; currentYe
         aria-label="Seuraava vuosi"
         onClick={() => onChange(year + 1)}
         disabled={year >= currentYear}
-        className="active-press relative flex h-8 w-8 items-center justify-center rounded-full text-ink-2 disabled:opacity-30 before:absolute before:inset-x-0 before:-inset-y-2 before:content-['']"
+        className="active-press relative flex h-8 w-8 items-center justify-center rounded-full text-ink-2 disabled:opacity-30 before:absolute before:-inset-2 before:content-['']"
       >
         <ChevronRightIcon />
       </button>

@@ -90,7 +90,7 @@ function MonthSwitcher({ month, onChange }: { month: string; onChange: (next: st
         type="button"
         aria-label="Edellinen kuukausi"
         onClick={() => onChange(shiftMonth(month, -1))}
-        className="active-press relative flex h-8 w-8 items-center justify-center rounded-full text-ink-2 before:absolute before:inset-x-0 before:-inset-y-2 before:content-['']"
+        className="active-press relative flex h-8 w-8 items-center justify-center rounded-full text-ink-2 before:absolute before:-inset-2 before:content-['']"
       >
         <ChevronLeftIcon />
       </button>
@@ -102,7 +102,7 @@ function MonthSwitcher({ month, onChange }: { month: string; onChange: (next: st
         aria-label="Seuraava kuukausi"
         onClick={() => onChange(shiftMonth(month, 1))}
         disabled={atCurrent}
-        className="active-press relative flex h-8 w-8 items-center justify-center rounded-full text-ink-2 disabled:opacity-30 before:absolute before:inset-x-0 before:-inset-y-2 before:content-['']"
+        className="active-press relative flex h-8 w-8 items-center justify-center rounded-full text-ink-2 disabled:opacity-30 before:absolute before:-inset-2 before:content-['']"
       >
         <ChevronRightIcon />
       </button>

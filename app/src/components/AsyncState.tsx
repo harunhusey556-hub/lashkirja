@@ -1,5 +1,7 @@
 "use client";
 
+import { Button } from "@/components/ui";
+
 export function LoadingState({
   label = "Ladataan...",
   compact = false,
@@ -57,18 +59,14 @@ export function ErrorState({
 }) {
   return (
     <div
-      className={`rounded-2xl bg-danger/10 text-danger text-sm text-center ${compact ? "p-4" : "p-6"}`}
+      className={`rounded-card bg-danger/10 text-danger text-sm text-center ${compact ? "p-4" : "p-6"}`}
       role="alert"
     >
       <p>{message}</p>
       {onRetry && (
-        <button
-          type="button"
-          onClick={onRetry}
-          className="mt-3 min-h-11 px-4 rounded-xl bg-surface border border-danger/30 font-medium hover:bg-danger/5 transition-colors"
-        >
+        <Button type="button" variant="secondary" className="mt-3" onClick={onRetry}>
           Yritä uudelleen
-        </button>
+        </Button>
       )}
     </div>
   );

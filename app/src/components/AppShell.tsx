@@ -45,7 +45,7 @@ import {
 } from "@/lib/navigation";
 
 function RootIcon({ id, active, className }: { id: string; active: boolean; className?: string }) {
-  const tone = className ?? `h-6 w-6 ${active ? "text-accent" : "text-warm-gray"}`;
+  const tone = className ?? `h-6 w-6 ${active ? "text-accent" : "text-ink-2"}`;
   if (id === "etusivu") {
     return (
       <svg className={tone} fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
@@ -211,7 +211,6 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
   const navEntry = matchNav(pathname);
-  const title = navEntry?.label ?? "Koti";
   const isDetail = navEntry?.kind === "detail";
   const mainRef = useRef<HTMLElement>(null);
   const swipeLock = useRef(false);
@@ -505,7 +504,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         type="button"
         onClick={() => goToRoot(item.path)}
         className={`flex min-w-0 flex-1 flex-col items-center justify-center gap-0.5 touch-target active:bg-blush/30 transition-colors active-press ${
-          active ? "text-accent-dark" : "text-warm-gray"
+          active ? "text-accent-dark" : "text-ink-2"
         }`}
         aria-current={active ? "page" : undefined}
       >
@@ -554,7 +553,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                 <RootIcon
                   id={item.id}
                   active={active}
-                  className={`h-5 w-5 ${active ? "text-accent" : "text-warm-gray"}`}
+                  className={`h-5 w-5 ${active ? "text-accent" : "text-ink-2"}`}
                 />
                 <span className="truncate">{item.label}</span>
               </button>
@@ -570,7 +569,11 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
               rootIsActive(pathname, "asetukset") ? "bg-blush font-semibold text-accent-dark" : "font-medium text-charcoal"
             }`}
           >
-            <RootIcon id="asetukset" active={rootIsActive(pathname, "asetukset")} className="h-5 w-5 text-warm-gray" />
+            <RootIcon
+              id="asetukset"
+              active={rootIsActive(pathname, "asetukset")}
+              className={`h-5 w-5 ${rootIsActive(pathname, "asetukset") ? "text-accent" : "text-ink-2"}`}
+            />
             Asetukset
           </button>
         </div>
@@ -598,7 +601,6 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
               </button>
             )}
           </div>
-          <p className="min-w-0 max-w-[11rem] truncate text-center text-base font-medium text-charcoal md:max-w-sm">{title}</p>
 
           {authState.status === "ready" ? (
             <div className="flex items-center justify-self-end">

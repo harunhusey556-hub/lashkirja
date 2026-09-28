@@ -221,7 +221,7 @@ export default function BottomSheet({
   // unclickable: `elementFromPoint` at its centre resolves to `.app-frame`,
   // not the control.
   return (
-    <div className={`overlay-root fixed inset-0 z-[60] ${closing ? "pointer-events-none" : ""}`}>
+    <div className={`overlay-root sheet-overlay fixed inset-0 z-[60] ${closing ? "pointer-events-none" : ""}`}>
       <div
         ref={backdropRef}
         className={`absolute inset-0 bg-charcoal/40 backdrop-blur-[2px] ${

@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { ErrorState, LoadingState } from "@/components/AsyncState";
 import { apiFetch, errorMessage, isUnauthorized, readJson, redirectToLogin } from "@/components/clientFetch";
 import { formatDate, formatEur } from "@/lib/format";
-import { ListRow, Section, StatusTag } from "@/components/ds";
+import { ListRow, PageTitle, Section, StatusTag } from "@/components/ds";
 
 interface UnmatchedTx {
   id: string;
@@ -61,6 +61,7 @@ export default function TaydennysPage() {
 
   return (
     <div className="space-y-6 pb-6">
+      <PageTitle title="Täsmäytys" />
       <p className="px-1 text-[13px] leading-relaxed text-ink-2">
         Avoimet pankkitapahtumat ja kuitit{month ? ` kuukaudelta ${month}` : ""}.
       </p>

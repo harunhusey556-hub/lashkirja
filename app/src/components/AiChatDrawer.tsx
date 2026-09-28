@@ -836,10 +836,10 @@ export function AiChatDrawer({
               </div>
             )}
             {message.proposal?.transactionId && message.proposal.status !== "accepted" && message.proposal.status !== "rejected" && (
-              <div className="mt-2 max-w-[90%] space-y-2 rounded-2xl border border-accent/30 bg-white p-3">
+              <div className="mt-2 max-w-[90%] space-y-2 rounded-card border border-accent/30 bg-surface p-3">
                 <p className="text-xs font-medium text-accent-dark">Ehdotus täsmäytykseksi</p>
-                <p className="text-xs text-charcoal">{message.proposal.txSummary}</p>
-                <p className="text-xs text-charcoal">{message.proposal.receiptSummary}</p>
+                <p className="text-xs text-ink">{message.proposal.txSummary}</p>
+                <p className="text-xs text-ink">{message.proposal.receiptSummary}</p>
                 <div className="flex gap-2">
                   <Button
                     busy={matchBusyId === message.id}

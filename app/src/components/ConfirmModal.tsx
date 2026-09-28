@@ -5,6 +5,7 @@ import { useFocusTrap } from "@/components/useFocusTrap";
 import { settleConfirm } from "@/lib/confirm-action";
 import { useOverlayLock } from "@/lib/overlay-lock";
 import { subscribeOverlayClose } from "@/lib/screen-state";
+import { Button } from "@/components/ui";
 
 interface ConfirmModalProps {
   isOpen: boolean;
@@ -128,7 +129,7 @@ export default function ConfirmModal({
 
       <div
         ref={dialogRef}
-        className={`relative bg-white rounded-3xl p-6 w-full max-w-sm shadow-2xl ${
+        className={`relative bg-surface rounded-3xl p-6 w-full max-w-sm shadow-2xl ${
           closing ? "animate-scale-out" : "animate-scale-in"
         }`}
         role="dialog"
@@ -152,10 +153,10 @@ export default function ConfirmModal({
             </div>
           )}
           
-          <h3 id={titleId} className="text-lg font-medium text-charcoal">{title}</h3>
-          
+          <h3 id={titleId} className="text-lg font-medium text-ink">{title}</h3>
+
           {description && (
-            <p id={descriptionId} className="mt-2 text-sm text-warm-gray">{description}</p>
+            <p id={descriptionId} className="mt-2 text-sm text-ink-2">{description}</p>
           )}
 
           {error && (
@@ -165,24 +166,19 @@ export default function ConfirmModal({
           )}
           
           <div className="mt-6 flex w-full gap-3">
-            <button
-              type="button"
-              onClick={dismiss}
-              className="flex-1 py-3 rounded-xl border border-warm-gray-light text-sm font-medium text-charcoal hover:bg-cream transition-colors"
-            >
+            <Button type="button" variant="secondary" className="flex-1" onClick={dismiss}>
               {cancelLabel}
-            </button>
-            <button
+            </Button>
+            <Button
               type="button"
+              variant={isDestructive ? "danger" : "primary"}
+              className="flex-1"
               onClick={confirm}
-              disabled={busy}
-              aria-busy={busy}
-              className={`flex-1 py-3 rounded-xl text-sm font-medium text-white transition-colors disabled:opacity-60 ${
-                isDestructive ? "bg-danger hover:bg-danger/90" : "bg-charcoal hover:bg-black"
-              }`}
+              busy={busy}
+              busyLabel="Odota..."
             >
-              {busy ? "Odota..." : confirmLabel}
-            </button>
+              {confirmLabel}
+            </Button>
           </div>
         </div>
       </div>

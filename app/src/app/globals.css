@@ -121,6 +121,15 @@ body {
   .app-tab-bar {
     display: none;
   }
+
+  /* The sheet's own fixed box otherwise spans the whole viewport (inset-0),
+     so its inset-x-0/mx-auto centring splits the sidebar's width evenly
+     between both sides instead of centring within the visible content area
+     to its right. Starting the box after the sidebar fixes that without
+     touching the panel's own centring rules. */
+  .sheet-overlay {
+    left: var(--app-sidebar-width);
+  }
 }
 
 /* Three non-overlapping slots: back, title, assistant + profile.
@@ -385,14 +394,6 @@ html[data-keyboard="open"] .app-tab-bar {
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.05);
 }
 
-.glass-dark {
-  background: rgba(45, 45, 45, 0.65);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
-}
-
 /* Micro-animations */
 @keyframes slideUpFade {
   0% {
@@ -530,19 +531,6 @@ button.ds-chip[aria-pressed="true"] { box-shadow: none; }
 
 .animate-popover {
   animation: popoverIn 0.2s cubic-bezier(0.16, 1, 0.3, 1) forwards;
-}
-
-@keyframes pulseGlow {
-  0%, 100% {
-    box-shadow: 0 0 0 0 rgba(201, 144, 138, 0.4);
-  }
-  50% {
-    box-shadow: 0 0 0 8px rgba(201, 144, 138, 0);
-  }
-}
-
-.pulse-glow {
-  animation: pulseGlow 2.5s infinite;
 }
 
 .scrollbar-none {
