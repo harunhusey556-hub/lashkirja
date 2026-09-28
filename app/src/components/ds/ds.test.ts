@@ -50,6 +50,22 @@ describe("design system components", () => {
     const lastHiddenAttr = out.lastIndexOf('aria-hidden="true"');
     const hiddenBlockCloses = out.indexOf("</span>", lastHiddenAttr);
     expect(out.indexOf("Muistuta")).toBeGreaterThan(hiddenBlockCloses);
+
+    // Regression: the trailing wrapper must be pointer-events-none (a non-interactive trailing
+    // element, e.g. a bare StatusTag, must let clicks fall through to the row's own overlay link
+    // below it instead of swallowing them), while ActionPill opts back in with pointer-events-auto
+    // so it stays clickable itself.
+    expect(out).toContain("pointer-events-none relative z-10 shrink-0");
+    expect(out).not.toContain("pointer-events-auto relative z-10 shrink-0");
+    expect(out).toContain("pointer-events-auto");
+    const pillOpen = out.indexOf("Muistuta") >= 0 ? out.lastIndexOf("<a", out.indexOf("Muistuta")) : -1;
+    expect(out.slice(pillOpen, out.indexOf("Muistuta"))).toContain("pointer-events-auto");
+  });
+
+  it("MoreMenu's trigger opts back into pointer events (it sits inside a pointer-events-none trailing slot)", () => {
+    const out = html(createElement(MoreMenu, { items: [{ label: "Avaa PDF", onSelect: () => {} }] }));
+    const triggerEnd = out.indexOf("</button>");
+    expect(out.slice(0, triggerEnd)).toContain("pointer-events-auto");
   });
 
   it("ListRow without href or onClick is not interactive and is never aria-hidden", () => {

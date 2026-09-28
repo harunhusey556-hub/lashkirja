@@ -37,8 +37,13 @@ export function ListRow({ title, amount, amountTone = "default", secondary, trai
           <span className="mt-0.5 flex items-center justify-between gap-3">
             <span aria-hidden={interactive || undefined} className="min-w-0 truncate text-[13px] text-ink-2">{secondary}</span>
             {/* trailing (e.g. an ActionPill) stays outside the aria-hidden text above: it is its own
-                interactive control and must remain reachable and named for assistive tech. */}
-            {trailing ? <span className="pointer-events-auto relative z-10 shrink-0">{trailing}</span> : null}
+                interactive control and must remain reachable and named for assistive tech. The wrapper
+                itself is pointer-events-none: a non-interactive trailing element (a plain StatusTag) must
+                let taps fall through to the row's own stretched link/button underneath, or it silently
+                swallows the row's own click - the wrapper only exists to lift z-index above that overlay,
+                not to grab clicks. An interactive trailing element (ActionPill, MoreMenu's trigger) opts
+                back in with its own `pointer-events-auto`. */}
+            {trailing ? <span className="pointer-events-none relative z-10 shrink-0">{trailing}</span> : null}
           </span>
         ) : null}
       </span>

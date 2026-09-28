@@ -16,7 +16,10 @@ export function MoreMenu({ items, label = "Lisää toimintoja" }: {
         aria-haspopup="dialog"
         aria-expanded={open}
         onClick={() => setOpen(true)}
-        className="active-press flex h-11 w-11 items-center justify-center rounded-full border border-line bg-surface text-ink"
+        // pointer-events-auto: opts back in when this trigger sits inside a `ListRow`'s `trailing`
+        // slot (pointer-events-none by default - see ListRow.tsx) - without it the button is visible
+        // but never receives a click/tap.
+        className="active-press pointer-events-auto flex h-11 w-11 items-center justify-center rounded-full border border-line bg-surface text-ink"
       >
         <svg className="h-5 w-5" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
           <circle cx="5" cy="12" r="1.6" /><circle cx="12" cy="12" r="1.6" /><circle cx="19" cy="12" r="1.6" />
