@@ -3,6 +3,7 @@
 import { useEffect } from "react";
 import { usePathname } from "next/navigation";
 import AppShell from "@/components/AppShell";
+import { appNavigate } from "@/lib/app-nav";
 import { clearBankAuth, watchBankDeepLink } from "@/lib/open-bank-auth";
 
 /**
@@ -20,7 +21,7 @@ export default function ShellGate({ children }: { children: React.ReactNode }) {
       clearBankAuth();
       const here = `${window.location.pathname}${window.location.search}`;
       if (here === path) return;
-      window.location.assign(path);
+      appNavigate(path);
     }).then((unsub) => {
       if (cancelled) unsub();
       else stop = unsub;

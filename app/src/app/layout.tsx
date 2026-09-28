@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { Inter } from "next/font/google";
 import ClientErrorReporter from "@/components/ClientErrorReporter";
+import { NavBridge } from "@/components/NavBridge";
 import ShellGate from "@/components/ShellGate";
 import { SplashReady } from "@/components/SplashReady";
 import { UsableArea } from "@/components/UsableArea";
@@ -186,6 +187,7 @@ export default function RootLayout({
         <SplashReady />
         <UsableArea />
         <ClientErrorReporter />
+        <NavBridge />
         <TouchActiveShim />
         <ShellGate>{children}</ShellGate>
       </body>

@@ -1,6 +1,10 @@
 import { clearAllDrafts } from "@/lib/draft-store";
 import { clearPageCache, invalidateForMutation } from "@/lib/page-cache";
 import { logoutOutcome } from "@/lib/session-policy";
+import { apiUrl, IS_MOBILE_BUILD } from "@/lib/build-target";
+import { appNavigate } from "@/lib/app-nav";
+import { expireSession, getAccessToken, retryPendingRevoke, signOutThisDevice } from "@/lib/auth-client";
+import { bootMobile } from "@/lib/mobile/boot";
 
 export class ApiError extends Error {
   status: number;
@@ -73,6 +77,30 @@ export class ApiGatewayError extends Error {
 
 export type ApiFetchInit = RequestInit & { timeoutMs?: number };
 
+/**
+ * Pure: computes the URL and RequestInit actually sent for a possible
+ * mobile /api/* call. Exported so unit tests can exercise the header-merge
+ * and credentials rules directly, without needing to flip IS_MOBILE_BUILD
+ * (a build-time constant baked in at module load) at test time.
+ *
+ * `new Headers(init)` already accepts a plain object, a Headers instance,
+ * or an array of [key, value] pairs -- whatever shape the caller passed --
+ * so the merge itself needs no per-shape handling.
+ */
+export function mobileApiRequest(
+  path: string,
+  init: RequestInit,
+  token: string | null
+): { url: string; init: RequestInit } {
+  const headers = new Headers(init.headers);
+  if (token) headers.set("Authorization", `Bearer ${token}`);
+  return { url: apiUrl(path), init: { ...init, credentials: "omit", headers } };
+}
+
+function isMobileApiPath(input: RequestInfo | URL): input is string {
+  return typeof input === "string" && input.startsWith("/api/");
+}
+
 /** Aborts when either the caller's own signal or our timeout fires, whichever comes first. */
 function withTimeout(externalSignal: AbortSignal | null | undefined, timeoutMs = REQUEST_TIMEOUT_MS) {
   const controller = new AbortController();
@@ -138,8 +166,26 @@ async function apiFetchAttempt(input: RequestInfo | URL, init?: ApiFetchInit): P
   const method = (init?.method || "GET").toUpperCase();
   const maxRetries = IDEMPOTENT_METHODS.has(method) ? 3 : 1;
   const timeoutMs = init?.timeoutMs ?? REQUEST_TIMEOUT_MS;
-  const rest: RequestInit = { ...(init ?? {}) };
+  let rest: RequestInit = { ...(init ?? {}) };
   delete (rest as ApiFetchInit).timeoutMs;
+
+  // Mobile: every relative /api/* call actually goes to the configured API
+  // origin, with no cookies and a Bearer header instead. Computed once, up
+  // front, so every retry attempt below reuses the same rewritten request.
+  // Web behaviour is untouched -- IS_MOBILE_BUILD is false there, so this
+  // branch never runs and `input`/`rest` pass through exactly as given.
+  if (IS_MOBILE_BUILD && isMobileApiPath(input)) {
+    // Awaiting the (memoized) boot promise here -- not just from
+    // BootRedirect on "/" -- is what makes a reload on any other page
+    // (AppShell's own /api/auth/me check, e.g.) still find the token: a
+    // fresh page load starts with no auth in memory until this resolves,
+    // and this is the first place that would otherwise read it too early.
+    // A no-op await after the first call of the page's lifetime.
+    await bootMobile();
+    const rewritten = mobileApiRequest(input, rest, getAccessToken());
+    input = rewritten.url;
+    rest = rewritten.init;
+  }
   let attempt = 0;
 
   while (attempt < maxRetries) {
@@ -153,6 +199,10 @@ async function apiFetchAttempt(input: RequestInfo | URL, init?: ApiFetchInit): P
       if (response.ok && !IDEMPOTENT_METHODS.has(method)) {
         invalidateForMutation(requestUrl(input));
       }
+      // Retry point for a mobile logout whose server call failed earlier
+      // (auth-client.ts's pendingRevoke). Fire-and-forget: never delays or
+      // fails this response.
+      if (IS_MOBILE_BUILD && response.ok) void retryPendingRevoke();
       return response; // 2xx, 4xx, and 500 (logic errors) are returned normally
     } catch (error) {
       if (rest.signal?.aborted) throw error; // caller cancelled — not a timeout, not retryable
@@ -174,6 +224,21 @@ async function apiFetchAttempt(input: RequestInfo | URL, init?: ApiFetchInit): P
   }
 
   throw new Error("apiFetch failed unexpectedly");
+}
+
+/**
+ * Same URL rewrite and header rule as apiFetch, but with no retry and no
+ * absolute timeout -- for the AI chat's streamed response, where a retried
+ * POST could resubmit a half-finished chat turn and an abort timer would
+ * truncate a response that is simply still streaming.
+ */
+export async function authorizedFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+  if (IS_MOBILE_BUILD && isMobileApiPath(input)) {
+    await bootMobile(); // see apiFetchAttempt's comment: a no-op after the page's first call.
+    const rewritten = mobileApiRequest(input, init ?? {}, getAccessToken());
+    return fetch(rewritten.url, rewritten.init);
+  }
+  return fetch(input, init);
 }
 
 export function isUnauthorized(error: unknown): boolean {
@@ -206,9 +271,18 @@ export function errorMessage(error: unknown, fallback: string): string {
  * fetches all failing together), and without the guard each of them would
  * call `location.replace` — harmless individually, but it turns "navigate
  * once" into a redirect storm the browser has to unwind.
+ *
+ * Mobile has no page lifetime to guard on -- there is no document reload,
+ * ever, so this module's state outlives many logins and logouts. It
+ * delegates entirely to auth-client's expireSession(), whose own "once per
+ * signed-in period" guard resets on the next signIn().
  */
 let redirectingToLogin = false;
 export function redirectToLogin(): void {
+  if (IS_MOBILE_BUILD) {
+    expireSession();
+    return;
+  }
   if (redirectingToLogin) return;
   redirectingToLogin = true;
   window.location.replace("/login?error=expired");
@@ -267,8 +341,19 @@ export async function signOut(): Promise<boolean> {
  * only slow and completes on its own after the 3 s mark, the browser still
  * takes the page to /login by itself — this just stops the app waiting on
  * it.
+ *
+ * Mobile: none of the above applies -- there is no document to fade or
+ * reload. signOutThisDevice() (auth-client.ts) already clears every
+ * client-visible trace of the session regardless of whether the server
+ * call itself succeeded, so this always resolves true once it returns.
  */
 export async function leaveAfterSignOut(): Promise<boolean> {
+  if (IS_MOBILE_BUILD) {
+    await signOutThisDevice();
+    appNavigate("/login", { replace: true });
+    return true;
+  }
+
   const ok = await signOut();
   if (logoutOutcome(ok) !== "login") return false;
   document.body.classList.add("signing-out");

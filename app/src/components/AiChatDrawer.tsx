@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { ChatMatchProposal } from "@/lib/ai-assistant";
-import { apiFetch, errorMessage, readJson } from "@/components/clientFetch";
+import { apiFetch, authorizedFetch, errorMessage, readJson } from "@/components/clientFetch";
 import { STREAM_IDLE_MS, armIdleTimeout, subscribeOverlayClose } from "@/lib/screen-state";
 import { ChatMarkdown } from "@/components/ChatMarkdown";
 import { Button, FormError, chipClass, controlClass } from "@/components/ui";
@@ -317,7 +317,7 @@ export function AiChatDrawer({
     };
 
     try {
-      const response = await fetch("/api/ai/chat", {
+      const response = await authorizedFetch("/api/ai/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

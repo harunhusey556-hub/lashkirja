@@ -1,5 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { apiFetch, ApiGatewayError, ApiTimeoutError, leaveAfterSignOut, redirectToLogin } from "./clientFetch";
+import {
+  apiFetch,
+  ApiGatewayError,
+  ApiTimeoutError,
+  leaveAfterSignOut,
+  mobileApiRequest,
+  redirectToLogin,
+} from "./clientFetch";
 import { clearPageCache, readPageCache, writePageCache } from "@/lib/page-cache";
 
 /** Minimal in-memory localStorage: enough for draft-store's clearAllDrafts()
@@ -74,6 +81,16 @@ describe("apiFetch", () => {
     expect(response.status).toBe(200);
   });
 
+  it("on the web build, passes the URL and init through untouched (IS_MOBILE_BUILD is false here)", async () => {
+    const fetchMock = vi.fn(fetchThatRespectsAbort(jsonResponse(200)));
+    vi.stubGlobal("fetch", fetchMock);
+    await apiFetch("/api/x", { credentials: "include" });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/x",
+      expect.objectContaining({ credentials: "include" })
+    );
+  });
+
   it("retries a GET on a transient gateway error and succeeds", async () => {
     const fetchMock = vi
       .fn()
@@ -144,6 +161,50 @@ describe("apiFetch", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(await first.json()).toEqual({ ok: true });
     expect(await second.json()).toEqual({ ok: true });
+  });
+});
+
+describe("mobileApiRequest", () => {
+  it("merges a plain-object headers init and adds the Bearer header", () => {
+    const { init } = mobileApiRequest("/api/x", { headers: { "Content-Type": "application/json" } }, "tok-1");
+    const headers = init.headers as Headers;
+    expect(headers.get("Content-Type")).toBe("application/json");
+    expect(headers.get("Authorization")).toBe("Bearer tok-1");
+  });
+
+  it("merges a Headers instance and adds the Bearer header", () => {
+    const source = new Headers({ Accept: "application/json" });
+    const { init } = mobileApiRequest("/api/x", { headers: source }, "tok-1");
+    const headers = init.headers as Headers;
+    expect(headers.get("Accept")).toBe("application/json");
+    expect(headers.get("Authorization")).toBe("Bearer tok-1");
+  });
+
+  it("merges an array-of-pairs headers init and adds the Bearer header", () => {
+    const { init } = mobileApiRequest(
+      "/api/x",
+      { headers: [["X-Custom", "1"]] },
+      "tok-1"
+    );
+    const headers = init.headers as Headers;
+    expect(headers.get("X-Custom")).toBe("1");
+    expect(headers.get("Authorization")).toBe("Bearer tok-1");
+  });
+
+  it("adds no Authorization header when there is no token", () => {
+    const { init } = mobileApiRequest("/api/x", {}, null);
+    const headers = init.headers as Headers;
+    expect(headers.get("Authorization")).toBeNull();
+  });
+
+  it("always forces credentials to omit, even when the caller asked for include", () => {
+    const { init } = mobileApiRequest("/api/x", { credentials: "include" }, "tok-1");
+    expect(init.credentials).toBe("omit");
+  });
+
+  it("rewrites the path through apiUrl()", () => {
+    const { url } = mobileApiRequest("/api/x", {}, null);
+    expect(url).toBe("/api/x"); // apiUrl() is a no-op here: API_BASE_URL is "" on the web build.
   });
 });
 

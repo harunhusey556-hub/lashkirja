@@ -2,7 +2,8 @@
 
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { apiUrl, IS_MOBILE_BUILD } from "@/lib/build-target";
+import { IS_MOBILE_BUILD } from "@/lib/build-target";
+import { bootMobile } from "@/lib/mobile/boot";
 
 /**
  * Renders on "/" only, on both targets.
@@ -14,11 +15,10 @@ import { apiUrl, IS_MOBILE_BUILD } from "@/lib/build-target";
  * or a cached document served without going through the proxy again).
  *
  * Mobile: there is no proxy in the bundled app -- this is the only gate.
- * Task 5 adds the real boot sequence (the Keychain token plus the cached
- * "shell-auth" payload, so a relaunch can paint instantly). Until then,
- * this probes the API with no credential; that always comes back
- * unauthorized, which is also the correct outcome for a first launch with
- * no stored session.
+ * bootMobile() reads the Keychain token (if any) rather than probing the
+ * API with no credential (Task 4's placeholder): a stored token means an
+ * instant "/dashboard" decision with no network round trip, and the app
+ * shell (AppShell's own /api/auth/me check) still revalidates it for real.
  */
 export default function BootRedirect() {
   const router = useRouter();
@@ -30,14 +30,10 @@ export default function BootRedirect() {
     }
 
     let cancelled = false;
-    fetch(apiUrl("/api/auth/me"), { credentials: "omit" })
-      .then((response) => {
-        if (cancelled) return;
-        router.replace(response.ok ? "/dashboard" : "/login");
-      })
-      .catch(() => {
-        if (!cancelled) router.replace("/login");
-      });
+    void bootMobile().then((result) => {
+      if (cancelled) return;
+      router.replace(result.signedIn ? "/dashboard" : "/login");
+    });
 
     return () => {
       cancelled = true;

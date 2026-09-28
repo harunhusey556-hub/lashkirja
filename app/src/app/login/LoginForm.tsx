@@ -9,6 +9,12 @@ import { AppMark } from "@/components/AppMark";
 import { Button, Field } from "@/components/ui";
 import { Icon } from "@/components/ds/Icon";
 import { hapticNotify } from "@/lib/haptics";
+import { appNavigate } from "@/lib/app-nav";
+import { signIn } from "@/lib/auth-client";
+import { IS_MOBILE_BUILD } from "@/lib/build-target";
+import { bootMobile } from "@/lib/mobile/boot";
+
+const SHOW_DEMO_LOGIN = !IS_MOBILE_BUILD && process.env.NEXT_PUBLIC_SHOW_DEMO_LOGIN === "true";
 
 type Tone = "danger" | "info";
 type Notice = { tone: Tone; message: string } | null;
@@ -103,6 +109,23 @@ export default function LoginForm() {
     return () => window.removeEventListener("pageshow", reset);
   }, []);
 
+  // Mobile only: a signed-in user who lands on /login (navigating back in
+  // the SPA after signing in, or reloading directly on /login) is bounced
+  // straight to /dashboard instead of being shown the form again.
+  // bootMobile() is awaited (not a plain getAccessToken() read) so this
+  // also catches a fresh page load, where nothing has loaded the Keychain
+  // token into memory yet.
+  useEffect(() => {
+    if (!IS_MOBILE_BUILD) return;
+    let cancelled = false;
+    void bootMobile().then((result) => {
+      if (!cancelled && result.signedIn) appNavigate("/dashboard", { replace: true });
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   function clearNoticeOnEdit() {
     if (!notice && !invalid) return;
     setNotice(null);
@@ -129,21 +152,9 @@ export default function LoginForm() {
     const password = passwordRef.current?.value ?? "";
 
     try {
-      const response = await fetch("/api/auth/login", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "same-origin",
-        body: JSON.stringify({ email, password, next }),
-      });
+      const result = await signIn({ email, password, next });
 
-      let body: { error?: string } = {};
-      try {
-        body = await response.json();
-      } catch {
-        // No/invalid JSON body - fall through to the status-based messages.
-      }
-
-      if (response.ok) {
+      if (result.ok) {
         void hapticNotify("success");
         setPhase("success");
         router.push(next || "/dashboard");
@@ -156,7 +167,7 @@ export default function LoginForm() {
       // Severity and behaviour are decided by the status code, never by the
       // message text - an unrecognised server string must not silently
       // become the wrong tone or skip the field-invalid treatment.
-      if (response.status === 401) {
+      if (result.status === 401) {
         void hapticNotify("error");
         setInvalid(true);
         setNotice({
@@ -169,11 +180,10 @@ export default function LoginForm() {
         return;
       }
 
-      if (response.status === 429) {
-        const retryAfter = Number(response.headers.get("Retry-After"));
+      if (result.status === 429) {
         const wait =
-          Number.isFinite(retryAfter) && retryAfter > 0
-            ? ` Yritä uudelleen ${formatRetryAfter(retryAfter)} kuluttua.`
+          result.retryAfter && result.retryAfter > 0
+            ? ` Yritä uudelleen ${formatRetryAfter(result.retryAfter)} kuluttua.`
             : " Yritä myöhemmin uudelleen.";
         setNotice({ tone: "danger", message: `Liian monta kirjautumisyritystä.${wait}` });
         return;
@@ -181,7 +191,7 @@ export default function LoginForm() {
 
       setNotice({
         tone: "danger",
-        message: body.error || "Kirjautuminen epäonnistui",
+        message: result.error || "Kirjautuminen epäonnistui",
       });
     } catch {
       // fetch() itself threw: offline, DNS failure, TLS/tunnel down - the
@@ -275,9 +285,11 @@ export default function LoginForm() {
           </Link>
         </form>
 
-        <p className="mt-6 text-center text-xs text-ink-2">
-          Demo: demo@lashkirja.fi / demo123
-        </p>
+        {SHOW_DEMO_LOGIN && (
+          <p className="mt-6 text-center text-xs text-ink-2">
+            Demo: demo@lashkirja.fi / demo123
+          </p>
+        )}
       </div>
     </div>
   );
