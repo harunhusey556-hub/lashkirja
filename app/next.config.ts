@@ -64,7 +64,71 @@ const securityHeaders = [
     : []),
 ];
 
-const nextConfig: NextConfig = {
+/**
+ * Global Constraints, "Single config values": NEXT_PUBLIC_API_BASE_URL must
+ * be https://, or http:// on 127.0.0.1/localhost for local emulation.
+ * Throwing here (config load time) means a misconfigured mobile build fails
+ * loudly at `next build` instead of shipping an app that silently can't
+ * reach its server.
+ */
+function validatedMobileApiBaseUrl(): string {
+  const raw = process.env.NEXT_PUBLIC_API_BASE_URL;
+  if (!raw) {
+    throw new Error("NEXT_PUBLIC_API_BASE_URL is required when BUILD_TARGET=mobile");
+  }
+  let parsed: URL;
+  try {
+    parsed = new URL(raw);
+  } catch {
+    throw new Error(`NEXT_PUBLIC_API_BASE_URL is not a valid URL: ${raw}`);
+  }
+  const isLocalHttp =
+    parsed.protocol === "http:" && (parsed.hostname === "127.0.0.1" || parsed.hostname === "localhost");
+  if (parsed.protocol !== "https:" && !isLocalHttp) {
+    throw new Error(
+      `NEXT_PUBLIC_API_BASE_URL must be https://, or http:// on 127.0.0.1/localhost for local emulation: ${raw}`
+    );
+  }
+  return raw.replace(/\/+$/, "");
+}
+
+/**
+ * `BUILD_TARGET=mobile` (set by scripts/build-mobile.ts) produces the
+ * Capacitor static export. `pageExtensions: ["tsx"]` is what drops
+ * `proxy.ts` and every `route.ts` out of this build -- see
+ * pageExtensions.md:43 and next/dist/build/index.js:613-614 (Global
+ * Constraints, "Next.js docs first"). `distDir: ".next-mobile"` keeps this
+ * build's own export destination separate from the default `out/`, per
+ * export/utils.js's `hasCustomExportOutput`: with `output: "export"` and a
+ * non-default `distDir`, Next treats that `distDir` value as the export
+ * destination and forces its own intermediate manifests back onto the
+ * literal `.next` (shared with the dev server) regardless -- that sharing
+ * is safe because `next build`'s clean step only removes `.next` entries
+ * that do not start with cache/dev/lock, so `.next/dev` (what the running
+ * `next dev` on :3200 needs) survives. `scripts/build-mobile.ts` moves
+ * `.next-mobile/` to `out/` after the build, which is the interface Task 12
+ * depends on. Never add `headers()`/`redirects()` here: both are
+ * unsupported for `output: "export"` (static-exports.md).
+ */
+// A function, not a plain object: validatedMobileApiBaseUrl() must only run
+// -- and only throw -- when the mobile branch is actually selected. An eager
+// object literal would call it on every `next dev`/web build too, where
+// NEXT_PUBLIC_API_BASE_URL is never set.
+function buildMobileNextConfig(): NextConfig {
+  return {
+    output: "export",
+    pageExtensions: ["tsx"],
+    trailingSlash: false,
+    images: { unoptimized: true },
+    distDir: ".next-mobile",
+    env: {
+      NEXT_PUBLIC_BUILD_TARGET: "mobile",
+      NEXT_PUBLIC_API_BASE_URL: validatedMobileApiBaseUrl(),
+    },
+  };
+}
+
+const webNextConfig: NextConfig = {
   env: {
     NEXT_PUBLIC_GIT_COMMIT: gitCommit(),
     NEXT_PUBLIC_APP_ENV: process.env.NODE_ENV === "production" ? "production" : "development",
@@ -127,5 +191,7 @@ const nextConfig: NextConfig = {
     ];
   },
 };
+
+const nextConfig: NextConfig = process.env.BUILD_TARGET === "mobile" ? buildMobileNextConfig() : webNextConfig;
 
 export default nextConfig;

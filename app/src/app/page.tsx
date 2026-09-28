@@ -1,10 +1,10 @@
-import { redirect } from "next/navigation";
-import { getSession } from "@/lib/session";
+import BootRedirect from "@/components/BootRedirect";
 
-export default async function Home() {
-  const session = await getSession();
-  if (session.userId) {
-    redirect("/dashboard");
-  }
-  redirect("/login");
+// No `cookies()`/`getSession()` here on purpose: this page prerenders at
+// build time in the mobile static export, where dynamic server functions
+// are unsupported (see static-exports.md, "Unsupported Features"). All the
+// real routing decisions happen in BootRedirect (client-side) and, on the
+// web, already one step earlier in proxy.ts.
+export default function Home() {
+  return <BootRedirect />;
 }

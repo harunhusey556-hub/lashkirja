@@ -70,6 +70,14 @@ describe("revoked-session redirect loop", () => {
     expect(isPassThrough(again)).toBe(true);
   });
 
+  it("sanity: an active tracked session on / also redirects to /dashboard (Task 4)", async () => {
+    const row = await openAuthSession(user.id, "TestAgent");
+    const cookie = await seal({ userId: user.id, email: user.email, firstName: "Testi", sessionId: row.id });
+
+    const response = await proxy(buildRequest("GET", "/", undefined, { cookie }));
+    expect(isRedirectTo(response, "/dashboard")).toBe(true);
+  });
+
   it("sends a revoked cookie on / to /login instead of /dashboard, and clears the cookie", async () => {
     const row = await openAuthSession(user.id, "TestAgent");
     const cookie = await seal({ userId: user.id, email: user.email, firstName: "Testi", sessionId: row.id });

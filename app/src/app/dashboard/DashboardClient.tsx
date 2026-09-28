@@ -95,11 +95,19 @@ function MonthSwitcher({ month, onChange }: { month: string; onChange: (next: st
   );
 }
 
-export default function DashboardClient({
-  firstName,
-}: {
-  firstName: string;
-}) {
+/**
+ * Cache key AppShell writes the signed-in user under (see AppShell.tsx's
+ * AUTH_CACHE_KEY). AppShell's own session check only renders its children
+ * once that key is populated, so by the time DashboardClient mounts here
+ * the cache is always warm. Task 6 replaces this with a shared session
+ * source hook; until then this is the cheapest way to get firstName
+ * without dashboard/page.tsx calling cookies() (unsupported in the mobile
+ * static export).
+ */
+const SHELL_AUTH_CACHE_KEY = "shell-auth";
+
+export default function DashboardClient() {
+  const firstName = readPageCache<{ firstName?: string }>(SHELL_AUTH_CACHE_KEY)?.firstName || "";
   const { profile } = useProfile();
   const [result, setResult] = useState<{
     month: string;

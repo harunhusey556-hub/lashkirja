@@ -59,6 +59,11 @@ jobs:
       - name: Integration tests
         run: npm run test:integration
 
+      # Must precede "Production build": both write to .next, and the
+      # e2e step below needs the web build's .next to still be the web one.
+      - name: Mobile static export
+        run: npm run build:mobile -- --api-base-url https://api.example.invalid
+
       - name: Production build
         run: npm run build
 

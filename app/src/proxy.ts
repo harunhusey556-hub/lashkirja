@@ -195,7 +195,13 @@ export async function proxy(request: NextRequest) {
     const response = redirectForRequest(request, "/login", search);
     return revoked ? clearSessionCookie(response) : response;
   }
-  if (pathname === "/login" && isAuthenticated) {
+  // Authenticated "/" used to fall through to page.tsx, which did this
+  // redirect itself with a server-side getSession() call -- unsupported in
+  // the mobile static export (no cookies() there). Deciding it here keeps
+  // the web app's redirect one hop shorter and lets page.tsx stay
+  // cookie-free on both targets (Task 4; BootRedirect.tsx does the
+  // equivalent client-side for the mobile build, which has no proxy).
+  if ((pathname === "/login" || pathname === "/") && isAuthenticated) {
     return redirectForRequest(request, "/dashboard");
   }
 

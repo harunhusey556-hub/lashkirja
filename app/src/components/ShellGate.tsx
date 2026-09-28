@@ -32,6 +32,13 @@ export default function ShellGate({ children }: { children: React.ReactNode }) {
   }, []);
 
   const bare =
+    // "/" is the boot page (BootRedirect): it decides where to go before
+    // any shell chrome is relevant, and does its own auth probe. Routing it
+    // through AppShell too would run a second, redundant session check and
+    // -- on the mobile export, where AppShell's own check is not yet wired
+    // through apiUrl() (Task 5/6) -- shows AppShell's error screen instead
+    // of ever letting BootRedirect mount (Task 4).
+    pathname === "/" ||
     pathname === "/login" ||
     pathname.startsWith("/bank") ||
     pathname.startsWith("/unohtunut-salasana") ||

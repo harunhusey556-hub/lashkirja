@@ -20,6 +20,9 @@
 /.next.prev/
 /out/
 
+# mobile static export (Task 4): its own distDir, never the dev server's .next/
+/.next-mobile/
+
 # production
 /build
 

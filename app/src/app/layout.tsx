@@ -4,7 +4,34 @@ import ClientErrorReporter from "@/components/ClientErrorReporter";
 import ShellGate from "@/components/ShellGate";
 import { SplashReady } from "@/components/SplashReady";
 import { UsableArea } from "@/components/UsableArea";
+import { API_BASE_URL, IS_MOBILE_BUILD } from "@/lib/build-target";
 import "./globals.css";
+
+/**
+ * The web build gets its Content-Security-Policy from next.config.ts's
+ * `headers()` -- unsupported in a static export (static-exports.md,
+ * "Unsupported Features"). The bundled app has no server to send response
+ * headers at all, so this is the only way to ship one: a meta tag in the
+ * document `<head>`. `frame-ancestors` is not allowed in a meta CSP and is
+ * omitted; it protects against being framed, which does not apply to a
+ * `capacitor://localhost` document. Computed once at build time (the
+ * mobile build's API_BASE_URL is fixed for that build), so no nonce is
+ * needed here.
+ */
+function mobileContentSecurityPolicy(): string {
+  const apiOrigin = new URL(API_BASE_URL).origin;
+  return [
+    "default-src 'self'",
+    "script-src 'self' 'unsafe-inline'",
+    "style-src 'self' 'unsafe-inline'",
+    "img-src 'self' data: blob:",
+    "font-src 'self' data:",
+    `connect-src 'self' ${apiOrigin}`,
+    "object-src 'none'",
+    "base-uri 'self'",
+    "form-action 'none'",
+  ].join("; ");
+}
 
 const inter = Inter({ subsets: ["latin"] });
 
@@ -150,6 +177,9 @@ export default function RootLayout({
           frame behind the native splash. Not covered by the Metadata API,
           which only manages title/meta/icon tags. */}
       <head>
+        {IS_MOBILE_BUILD && (
+          <meta httpEquiv="Content-Security-Policy" content={mobileContentSecurityPolicy()} />
+        )}
         <style>{"html,body{background:#f6f3ef}"}</style>
       </head>
       <body className={`${inter.className} bg-canvas`}>
