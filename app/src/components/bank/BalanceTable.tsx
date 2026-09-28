@@ -26,7 +26,7 @@ const STATUS_LABEL: Record<MonthRow["status"], string> = {
 const STATUS_CLASS: Record<MonthRow["status"], string> = {
   reconciled: "bg-success/10 text-success",
   mismatch: "bg-danger/10 text-danger",
-  unreported: "bg-warm-gray-light/30 text-warm-gray",
+  unreported: "bg-canvas text-ink-2",
 };
 
 interface Props {
@@ -64,32 +64,29 @@ export function BalanceTable({ months, busyMonth, onSave, onClear }: Props) {
 
   if (months.length === 0) {
     return (
-      <p className="text-sm text-warm-gray">
+      <p className="text-[15px] text-ink-2">
         Ei vielä kuukausia. Lisää tiliote tai kirjaa kuukauden loppusaldo.
       </p>
     );
   }
 
   return (
-    <ul className="space-y-2">
+    <ul className="overflow-hidden rounded-card border border-line bg-surface divide-y divide-line">
       {months.map((row) => {
         const isEditing = editing === row.month;
         return (
-          <li
-            key={row.month}
-            className="rounded-2xl border border-warm-gray-light/30 bg-white p-4 space-y-2"
-          >
+          <li key={row.month} className="p-4 space-y-2">
             <div className="flex items-center justify-between gap-3">
               <div>
-                <p className="text-sm font-medium text-charcoal">
+                <p className="text-[15px] font-medium text-ink">
                   {formatMonthShort(row.month)}
                 </p>
-                <p className="text-xs text-warm-gray">
+                <p className="text-[13px] text-ink-2">
                   {row.txCount} tapahtumaa · alkusaldo {formatEur(row.opening)}
                 </p>
               </div>
               <span
-                className={`shrink-0 text-[11px] font-medium px-2.5 py-1 rounded-full ${STATUS_CLASS[row.status]}`}
+                className={`shrink-0 text-[13px] font-semibold px-2.5 py-1 rounded-full ${STATUS_CLASS[row.status]}`}
               >
                 {STATUS_LABEL[row.status]}
               </span>
@@ -97,28 +94,28 @@ export function BalanceTable({ months, busyMonth, onSave, onClear }: Props) {
 
             <div className="grid grid-cols-3 gap-2 text-xs">
               <div>
-                <p className="text-warm-gray">Tulot</p>
-                <p className="text-charcoal font-medium">{formatEur(row.income)}</p>
+                <p className="text-ink-2">Tulot</p>
+                <p className="text-ink font-medium">{formatEur(row.income)}</p>
               </div>
               <div>
-                <p className="text-warm-gray">Menot</p>
-                <p className="text-charcoal font-medium">{formatEur(row.expense)}</p>
+                <p className="text-ink-2">Menot</p>
+                <p className="text-ink font-medium">{formatEur(row.expense)}</p>
               </div>
               <div>
-                <p className="text-warm-gray">Laskettu loppusaldo</p>
-                <p className="text-charcoal font-medium">{formatEur(row.computedClosing)}</p>
+                <p className="text-ink-2">Laskettu loppusaldo</p>
+                <p className="text-ink font-medium">{formatEur(row.computedClosing)}</p>
               </div>
             </div>
 
             {isEditing ? (
               <div className="space-y-2">
-                <label className="text-xs text-warm-gray" htmlFor={`bal-${row.month}`}>
+                <label className="text-xs text-ink-2" htmlFor={`bal-${row.month}`}>
                   Pankin ilmoittama loppusaldo (€)
                 </label>
                 <div className="flex gap-2">
                   <input
                     id={`bal-${row.month}`}
-                    className="flex-1 px-3 py-2 rounded-xl border border-warm-gray-light/60 text-sm"
+                    className="flex-1 px-3 py-2 rounded-card border border-line bg-surface text-sm text-ink"
                     value={draft}
                     onChange={(e) => setDraft(e.target.value)}
                     inputMode="decimal"
@@ -128,7 +125,7 @@ export function BalanceTable({ months, busyMonth, onSave, onClear }: Props) {
                     type="button"
                     onClick={() => void commit(row.month)}
                     disabled={busyMonth === row.month}
-                    className="px-4 py-2 rounded-xl bg-accent text-white text-sm font-medium disabled:opacity-50"
+                    className="active-press px-4 py-2 rounded-card bg-ink text-canvas text-sm font-semibold disabled:opacity-50"
                   >
                     Tallenna
                   </button>
@@ -138,7 +135,7 @@ export function BalanceTable({ months, busyMonth, onSave, onClear }: Props) {
                       setEditing(null);
                       setError(null);
                     }}
-                    className="px-3 py-2 rounded-xl border border-warm-gray-light/60 text-sm"
+                    className="active-press px-3 py-2 rounded-card border border-line text-sm text-ink"
                   >
                     Peru
                   </button>
@@ -148,8 +145,8 @@ export function BalanceTable({ months, busyMonth, onSave, onClear }: Props) {
             ) : (
               <div className="flex items-center justify-between gap-3 pt-1">
                 <div className="text-xs">
-                  <span className="text-warm-gray">Pankin saldo: </span>
-                  <span className="text-charcoal font-medium">
+                  <span className="text-ink-2">Pankin saldo: </span>
+                  <span className="text-ink font-medium">
                     {row.reportedClosing === null ? "–" : formatEur(row.reportedClosing)}
                   </span>
                   {row.difference !== null && row.difference !== 0 && (
@@ -163,7 +160,7 @@ export function BalanceTable({ months, busyMonth, onSave, onClear }: Props) {
                   <button
                     type="button"
                     onClick={() => startEdit(row)}
-                    className="min-h-11 inline-flex items-center px-2 -mx-2 text-xs font-medium text-accent"
+                    className="active-press min-h-11 inline-flex items-center px-2 -mx-2 text-xs font-medium text-accent"
                   >
                     {row.reportedClosing === null ? "Kirjaa saldo" : "Muokkaa"}
                   </button>
@@ -172,7 +169,7 @@ export function BalanceTable({ months, busyMonth, onSave, onClear }: Props) {
                       type="button"
                       onClick={() => void onClear(row.month)}
                       disabled={busyMonth === row.month}
-                      className="min-h-11 inline-flex items-center px-2 -mx-2 text-xs font-medium text-warm-gray disabled:opacity-50"
+                      className="active-press min-h-11 inline-flex items-center px-2 -mx-2 text-xs font-medium text-ink-2 disabled:opacity-50"
                     >
                       Poista
                     </button>

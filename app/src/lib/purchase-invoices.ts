@@ -575,6 +575,38 @@ export async function listPurchaseInvoices(
   };
 }
 
+export interface PurchaseInvoiceStatusCounts {
+  open: number;
+  overdue: number;
+  paid: number;
+  cancelled: number;
+}
+
+/**
+ * DB-side counts per display status, for the purchase list's filter chips.
+ * `listPurchaseInvoices` caps its rows at 200 (see `take` above), so counting
+ * the fetched rows themselves would silently undercount past that cap - this
+ * counts the whole table instead, with the same overdue semantics
+ * (`overdueBefore`) `listPurchaseInvoices` uses.
+ */
+export async function countPurchaseInvoicesByDisplayStatus(
+  userId: string,
+  now: Date = new Date()
+): Promise<PurchaseInvoiceStatusCounts> {
+  const dueBefore = overdueBefore(now);
+  const [open, overdue, paid, cancelled] = await Promise.all([
+    prisma.purchaseInvoice.count({
+      where: { userId, status: "open", dueDate: { gte: dueBefore } },
+    }),
+    prisma.purchaseInvoice.count({
+      where: { userId, status: "open", dueDate: { lt: dueBefore } },
+    }),
+    prisma.purchaseInvoice.count({ where: { userId, status: "paid" } }),
+    prisma.purchaseInvoice.count({ where: { userId, status: "cancelled" } }),
+  ]);
+  return { open, overdue, paid, cancelled };
+}
+
 export interface PurchaseMatchResult {
   applied: Array<{ invoiceId: string; supplierName: string; transactionId: string; amount: number }>;
   /** Reference hits that fall inside a closed period and were left alone. */

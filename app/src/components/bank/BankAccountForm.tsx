@@ -114,12 +114,12 @@ export function BankAccountForm({ initial, submitLabel, busy, onSubmit, onCancel
   }
 
   const field = `${controlClass} min-h-12`;
-  const label = "text-sm font-medium text-charcoal";
-  const errorText = "text-xs text-danger";
+  const label = "mb-1.5 block text-[13px] font-normal text-ink-2";
+  const errorText = "mt-1.5 text-sm text-danger";
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4" noValidate>
-      <div className="space-y-1.5">
+      <div>
         <label className={label} htmlFor="ba-name">
           Tilin nimi <span className="text-danger" aria-hidden="true">*</span>
         </label>
@@ -134,10 +134,10 @@ export function BankAccountForm({ initial, submitLabel, busy, onSubmit, onCancel
           aria-required="true"
           maxLength={80}
         />
-        {errors.name && <p id="ba-name-error" className={errorText}>{errors.name}</p>}
+        {errors.name && <p id="ba-name-error" className={errorText} role="alert">{errors.name}</p>}
       </div>
 
-      <div className="space-y-1.5">
+      <div>
         <label className={label} htmlFor="ba-iban">IBAN</label>
         <input
           id="ba-iban"
@@ -153,14 +153,14 @@ export function BankAccountForm({ initial, submitLabel, busy, onSubmit, onCancel
           maxLength={42}
         />
         {errors.iban ? (
-          <p id="ba-iban-error" className={errorText}>{errors.iban}</p>
+          <p id="ba-iban-error" className={errorText} role="alert">{errors.iban}</p>
         ) : (
-          <p className="text-xs text-warm-gray">Vapaaehtoinen – käteiskassalla ei ole IBANia.</p>
+          <p className="text-xs text-ink-2">Vapaaehtoinen – käteiskassalla ei ole IBANia.</p>
         )}
       </div>
 
       <div className="field-grid">
-        <div className="space-y-1.5">
+        <div>
           <label className={label} htmlFor="ba-bank">Pankki</label>
           <input
             id="ba-bank"
@@ -171,7 +171,7 @@ export function BankAccountForm({ initial, submitLabel, busy, onSubmit, onCancel
             maxLength={80}
           />
         </div>
-        <div className="space-y-1.5">
+        <div>
           <label className={label} htmlFor="ba-currency">
             Valuutta <span className="text-danger" aria-hidden="true">*</span>
           </label>
@@ -186,7 +186,7 @@ export function BankAccountForm({ initial, submitLabel, busy, onSubmit, onCancel
             aria-required="true"
           />
           {errors.currency && (
-            <p id="ba-currency-error" className={errorText}>
+            <p id="ba-currency-error" className={errorText} role="alert">
               {errors.currency}
             </p>
           )}
@@ -194,7 +194,7 @@ export function BankAccountForm({ initial, submitLabel, busy, onSubmit, onCancel
       </div>
 
       <div className="field-dates">
-        <div className="space-y-1.5">
+        <div>
           <label className={label} htmlFor="ba-opening">
             Alkusaldo (€) <span className="text-danger" aria-hidden="true">*</span>
           </label>
@@ -209,10 +209,10 @@ export function BankAccountForm({ initial, submitLabel, busy, onSubmit, onCancel
             aria-required="true"
           />
           {errors.openingBalance && (
-            <p id="ba-opening-error" className={errorText}>{errors.openingBalance}</p>
+            <p id="ba-opening-error" className={errorText} role="alert">{errors.openingBalance}</p>
           )}
         </div>
-        <div className="space-y-1.5">
+        <div>
           <label className={label} htmlFor="ba-date">
             Avauspäivä <span className="text-danger" aria-hidden="true">*</span>
           </label>
@@ -227,14 +227,14 @@ export function BankAccountForm({ initial, submitLabel, busy, onSubmit, onCancel
             aria-required="true"
           />
           {errors.openingDate && (
-            <p id="ba-date-error" className={errorText}>
+            <p id="ba-date-error" className={errorText} role="alert">
               {errors.openingDate}
             </p>
           )}
         </div>
       </div>
 
-      <p className="text-xs text-warm-gray leading-relaxed">
+      <p className="text-xs text-ink-2 leading-relaxed">
         Alkusaldo on tilin saldo avauspäivän aamuna. Sitä aiemmat tapahtumat jäävät laskennan
         ulkopuolelle.
       </p>

@@ -3,8 +3,9 @@
 import { useCallback, useEffect, useState } from "react";
 import { apiFetch, errorMessage, readJson } from "@/components/clientFetch";
 import { currentMonthKey, formatMonth } from "@/lib/format";
-import Link from "next/link";
 import { ErrorState, LoadingState } from "@/components/AsyncState";
+import { Button, controlClass } from "@/components/ui";
+import { Card, ListRow, Section } from "@/components/ds";
 
 /**
  * Closing the books. Everything dated on or before the chosen month becomes
@@ -113,135 +114,112 @@ export default function BooksLockCard() {
   }
 
   return (
-    <div className="bg-white rounded-3xl border border-warm-gray-light/20 shadow-sm p-6 space-y-4">
-      <div>
-        <h3 className="text-base font-medium text-charcoal">Kirjanpidon lukitus</h3>
-        <p className="text-sm text-warm-gray mt-1">
-          Valittu kuukausi ja sitä vanhemmat lukitaan: kuitteja, tiliotteita, laskuja tai maksuja
-          ei voi enää lisätä, muuttaa eikä poistaa niiltä kausilta.
-        </p>
-      </div>
-
-      {status === "loading" ? (
-        <LoadingState label="Ladataan lukitustietoja…" compact />
-      ) : status === "error" ? (
-        <ErrorState
-          message={loadError || "Lukituksen haku epäonnistui"}
-          onRetry={() => {
-            setStatus("loading");
-            void load();
-          }}
-          compact
-        />
-      ) : (
-        <>
-          <p className="text-sm text-charcoal">
-            {lockedThrough ? (
-              <>
-                Lukittu <span className="font-medium">{formatMonth(lockedThrough)}</span> asti.
-              </>
-            ) : (
-              "Kirjanpito on auki kaikilta kausilta."
-            )}
+    <div className="space-y-6">
+      <Card className="space-y-4">
+        <div>
+          <h3 className="text-[15px] font-medium text-ink">Kirjanpidon lukitus</h3>
+          <p className="text-[13px] text-ink-2 mt-1">
+            Valittu kuukausi ja sitä vanhemmat lukitaan: kuitteja, tiliotteita, laskuja tai maksuja
+            ei voi enää lisätä, muuttaa eikä poistaa niiltä kausilta.
           </p>
+        </div>
 
-          <div className="flex gap-2">
-            <select
-              aria-label="Lukitse kaudet tähän kuukauteen asti"
-              className="flex-1 px-3 py-2.5 rounded-xl border border-warm-gray-light/60 bg-white text-sm"
-              value={choice ?? lockedThrough ?? ""}
-              onChange={(e) => {
-                setChoice(e.target.value);
-                setPrecheck(null);
-              }}
-            >
-              <option value="">Ei lukitusta</option>
-              {options.map((option) => (
-                <option key={option} value={option}>
-                  {formatMonth(option)}
-                </option>
-              ))}
-            </select>
-            <button
-              type="button"
-              onClick={() => {
-                const month = (choice ?? lockedThrough) || null;
-                const acknowledged =
-                  Boolean(month) && precheck?.month === month && precheckCount(precheck) > 0;
-                void save(month, acknowledged);
-              }}
-              disabled={busy}
-              className="min-h-11 px-4 py-2.5 rounded-xl bg-accent text-white text-sm font-medium disabled:opacity-50"
-            >
-              {busy ? "Tallennetaan…" : precheck && precheckCount(precheck) > 0 ? "Lukitse silti" : "Tallenna"}
-            </button>
-          </div>
-
-          {precheck && (
-            <div className="space-y-3 rounded-xl bg-cream/70 px-3 py-3" role="status">
-              <p className="text-sm font-medium text-charcoal">
-                Ennen lukitusta ({formatMonth(precheck.month)})
-              </p>
-              <PrecheckList title="Puuttuvat tositteet" items={precheck.missingDocuments} empty="Ei puuttuvia tositteita." />
-              <PrecheckList
-                title="Täsmäyttämättömät tapahtumat"
-                items={precheck.unmatchedTransactions}
-                empty="Ei avoimia täsmäytyksiä."
-              />
-              <PrecheckList title="Luonnoslaskut" items={precheck.draftInvoices} empty="Ei luonnoslaskuja." />
-            </div>
-          )}
-
-          {lockedThrough && (
-            <button
-              type="button"
-              onClick={() => void save(null)}
-              disabled={busy}
-              className="w-full min-h-11 py-2.5 rounded-xl border border-warm-gray-light/60 text-sm font-medium disabled:opacity-50"
-            >
-              Avaa kirjanpito uudelleen
-            </button>
-          )}
-
-          {message && (
-            <p className="text-sm text-warm-gray" role="status">
-              {message}
+        {status === "loading" ? (
+          <LoadingState label="Ladataan lukitustietoja…" compact />
+        ) : status === "error" ? (
+          <ErrorState
+            message={loadError || "Lukituksen haku epäonnistui"}
+            onRetry={() => {
+              setStatus("loading");
+              void load();
+            }}
+            compact
+          />
+        ) : (
+          <>
+            <p className="text-[15px] text-ink">
+              {lockedThrough ? (
+                <>
+                  Lukittu <span className="font-medium">{formatMonth(lockedThrough)}</span> asti.
+                </>
+              ) : (
+                "Kirjanpito on auki kaikilta kausilta."
+              )}
             </p>
-          )}
+
+            <div className="flex gap-2">
+              <select
+                aria-label="Lukitse kaudet tähän kuukauteen asti"
+                className={`flex-1 ${controlClass}`}
+                value={choice ?? lockedThrough ?? ""}
+                onChange={(e) => {
+                  setChoice(e.target.value);
+                  setPrecheck(null);
+                }}
+              >
+                <option value="">Ei lukitusta</option>
+                {options.map((option) => (
+                  <option key={option} value={option}>
+                    {formatMonth(option)}
+                  </option>
+                ))}
+              </select>
+              <Button
+                type="button"
+                onClick={() => {
+                  const month = (choice ?? lockedThrough) || null;
+                  const acknowledged =
+                    Boolean(month) && precheck?.month === month && precheckCount(precheck) > 0;
+                  void save(month, acknowledged);
+                }}
+                busy={busy}
+                busyLabel="Tallennetaan…"
+              >
+                {precheck && precheckCount(precheck) > 0 ? "Lukitse silti" : "Tallenna"}
+              </Button>
+            </div>
+
+            {lockedThrough && (
+              <Button type="button" variant="secondary" className="w-full" busy={busy} onClick={() => void save(null)}>
+                Avaa kirjanpito uudelleen
+              </Button>
+            )}
+
+            {message && (
+              <p className="text-[13px] text-ink-2" role="status">
+                {message}
+              </p>
+            )}
+          </>
+        )}
+      </Card>
+
+      {precheck && (
+        <>
+          <Section title="Puuttuvat tositteet" count={precheck.missingDocuments.length}>
+            <PrecheckRows items={precheck.missingDocuments} empty="Ei puuttuvia tositteita." />
+          </Section>
+          <Section title="Täsmäyttämättömät tapahtumat" count={precheck.unmatchedTransactions.length}>
+            <PrecheckRows items={precheck.unmatchedTransactions} empty="Ei avoimia täsmäytyksiä." />
+          </Section>
+          <Section title="Luonnoslaskut" count={precheck.draftInvoices.length}>
+            <PrecheckRows items={precheck.draftInvoices} empty="Ei luonnoslaskuja." />
+          </Section>
         </>
       )}
     </div>
   );
 }
 
-function PrecheckList({
-  title,
-  items,
-  empty,
-}: {
-  title: string;
-  items: PrecheckItem[];
-  empty: string;
-}) {
+function PrecheckRows({ items, empty }: { items: PrecheckItem[]; empty: string }) {
+  if (items.length === 0) {
+    return <p className="px-4 py-4 text-[15px] text-ink-2">{empty}</p>;
+  }
   return (
-    <div className="space-y-1">
-      <p className="text-xs font-medium text-warm-gray">
-        {title} ({items.length})
-      </p>
-      {items.length === 0 ? (
-        <p className="text-sm text-warm-gray">{empty}</p>
-      ) : (
-        <ul className="space-y-1">
-          {items.map((item) => (
-            <li key={item.id}>
-              <Link href={item.href} className="block text-sm text-charcoal leading-relaxed">
-                <span className="font-medium">{item.title}</span>
-                <span className="text-warm-gray"> · {item.detail}</span>
-              </Link>
-            </li>
-          ))}
-        </ul>
-      )}
-    </div>
+    <>
+      {items.map((item) => (
+        <ListRow key={item.id} href={item.href} title={item.title} secondary={item.detail} />
+      ))}
+    </>
   );
 }

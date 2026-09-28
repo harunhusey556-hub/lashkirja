@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { LoadingState } from "@/components/AsyncState";
 import { ConnectionNotice, StaleBanner } from "@/components/ScreenState";
@@ -16,6 +16,10 @@ import { receiptDrillHref } from "@/lib/report-drill";
 import { helsinkiMonthKey, helsinkiQuarterKey } from "@/lib/validation";
 import { pageCacheFetchedAt, readPageCache, writePageCache } from "@/lib/page-cache";
 import { usePersistedState, useScrollRestoration } from "@/lib/list-ui-state";
+import { MONTHS } from "@/lib/finnish-months";
+import { controlClass } from "@/components/ui";
+import { Card, FilterChips, PageTitle, Section, SummaryCard } from "@/components/ds";
+
 interface SalesField {
   label: string;
   netSales: number;
@@ -37,21 +41,25 @@ interface ALVData {
   creditedInvoiceCount?: number;
 }
 
+/** One row inside a field-group Section, styled like a KeyValueList row. */
+function FieldRow({ label, value }: { label: string; value: ReactNode }) {
+  return (
+    <div className="flex justify-between gap-3 px-4 py-3 text-[15px]">
+      <span className="text-ink-2">{label}</span>
+      <span className="min-w-0 text-right font-medium text-ink">{value}</span>
+    </div>
+  );
+}
 
-const MONTHS = [
-  "Tammikuu",
-  "Helmikuu",
-  "Maaliskuu",
-  "Huhtikuu",
-  "Toukokuu",
-  "Kesäkuu",
-  "Heinäkuu",
-  "Elokuu",
-  "Syyskuu",
-  "Lokakuu",
-  "Marraskuu",
-  "Joulukuu",
-];
+/** A field's amount, as a drill link when one is given, plain text otherwise. */
+function FieldAmount({ value, href, ariaLabel }: { value: number; href?: string; ariaLabel: string }) {
+  if (!href) return <>{formatEur(value)}</>;
+  return (
+    <Link href={href} aria-label={ariaLabel} className="text-accent">
+      {formatEur(value)}
+    </Link>
+  );
+}
 
 export default function ALVRaporttiPage() {
   const now = new Date();
@@ -140,297 +148,187 @@ export default function ALVRaporttiPage() {
   }
 
   return (
-    <>
-      <div className="space-y-6">
-        <header className="space-y-2">
-          <p className="text-sm text-warm-gray leading-relaxed">
-            Kuukauden tai neljänneksen arvonlisävero.
+    <div className="space-y-6 pb-6">
+      <PageTitle title="ALV-ilmoitus" subtitle="Kuukauden tai neljänneksen arvonlisävero." />
+
+      {data && !data.vatRegistered && (
+        <Card className="space-y-1 text-sm text-ink">
+          <p className="font-medium">OmaVero-luonnos</p>
+          <p>
+            Et ole merkinnyt olevasi ALV-rekisterissä (
+            <Link href="/asetukset/yritys" className="text-accent">
+              Asetukset
+            </Link>
+            ). Tämä raportti on vain arvio - ALV-ilmoitusta ei tarvitse antaa, jos et ole
+            ALV-rekisterissä.
           </p>
-        </header>
+        </Card>
+      )}
 
-        {data && !data.vatRegistered && (
-          <div className="bg-warning/10 rounded-2xl p-4 text-sm text-charcoal">
-            <p className="font-medium">OmaVero-luonnos</p>
-            <p className="mt-1">
-              Et ole merkinnyt olevasi ALV-rekisterissä (<Link href="/asetukset/yritys" className="underline">Asetukset</Link>). Tämä
-              raportti on vain arvio — ALV-ilmoitusta ei tarvitse antaa, jos
-              et ole ALV-rekisterissä.
-            </p>
-          </div>
-        )}
+      <FilterChips
+        label="Ilmoituskausi"
+        items={[
+          { id: "month", label: "Kuukausi" },
+          { id: "quarter", label: "Neljännes" },
+        ]}
+        value={periodType}
+        onChange={(value) => {
+          setLoadError(null);
+          setPeriodType(value);
+        }}
+      />
 
-        <div className="bg-white rounded-2xl p-5 shadow-sm space-y-4">
-          <div className="flex gap-2">
-            <button
-              type="button"
-              onClick={() => {
-                setLoadError(null);
-                setPeriodType("month");
-              }}
-              aria-pressed={periodType === "month"}
-              className={`active-press min-h-12 flex-1 rounded-xl text-sm font-medium transition-colors ${
-                periodType === "month"
-                  ? "bg-accent text-white"
-                  : "bg-white text-charcoal border border-warm-gray-light"
-              }`}
-            >
-              Kuukausi
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setLoadError(null);
-                setPeriodType("quarter");
-              }}
-              aria-pressed={periodType === "quarter"}
-              className={`active-press min-h-12 flex-1 rounded-xl text-sm font-medium transition-colors ${
-                periodType === "quarter"
-                  ? "bg-accent text-white"
-                  : "bg-white text-charcoal border border-warm-gray-light"
-              }`}
-            >
-              Neljännes
-            </button>
-          </div>
+      {periodType === "month" ? (
+        <select
+          aria-label="ALV-raportin kuukausi"
+          value={selectedMonth}
+          onChange={(e) => {
+            setLoadError(null);
+            setSelectedMonth(e.target.value);
+          }}
+          className={controlClass}
+        >
+          {buildMonthOptions().map((o) => (
+            <option key={o.value} value={o.value}>
+              {o.label}
+            </option>
+          ))}
+        </select>
+      ) : (
+        <select
+          aria-label="ALV-raportin neljännes"
+          value={selectedQuarter}
+          onChange={(e) => {
+            setLoadError(null);
+            setSelectedQuarter(e.target.value);
+          }}
+          className={controlClass}
+        >
+          {buildQuarterOptions().map((o) => (
+            <option key={o.value} value={o.value}>
+              {o.label}
+            </option>
+          ))}
+        </select>
+      )}
 
-          {periodType === "month" ? (
-            <select
-              aria-label="ALV-raportin kuukausi"
-              value={selectedMonth}
-              onChange={(e) => {
-                setLoadError(null);
-                setSelectedMonth(e.target.value);
-              }}
-              className="w-full min-h-12 min-w-0 px-3 rounded-xl border border-warm-gray-light bg-white text-sm"
-            >
-              {buildMonthOptions().map((o) => (
-                <option key={o.value} value={o.value}>
-                  {o.label}
-                </option>
-              ))}
-            </select>
-          ) : (
-            <select
-              aria-label="ALV-raportin neljännes"
-              value={selectedQuarter}
-              onChange={(e) => {
-                setLoadError(null);
-                setSelectedQuarter(e.target.value);
-              }}
-              className="w-full min-h-12 min-w-0 px-3 rounded-xl border border-warm-gray-light bg-white text-sm"
-            >
-              {buildQuarterOptions().map((o) => (
-                <option key={o.value} value={o.value}>
-                  {o.label}
-                </option>
-              ))}
-            </select>
-          )}
-        </div>
-
-        {loadError != null && data ? (
-          <StaleBanner
-            fetchedAt={pageCacheFetchedAt(`alv:${period}`)}
-            onRetry={() => setLoadAttempt((attempt) => attempt + 1)}
-          />
-        ) : null}
-        {loadError != null && !data ? (
-          <ConnectionNotice
-            error={loadError}
-            fallback="ALV-raportin lataus epäonnistui"
-            onRetry={() => {
-              setLoadError(null);
-              setLoadAttempt((attempt) => attempt + 1);
-            }}
-            compact
-          />
-        ) : loading ? (
-          <LoadingState label="Ladataan ALV-raporttia..." compact />
-        ) : data ? (
-          <div className="space-y-3">
-            <p className="text-xs text-warm-gray text-center">
-              OmaVero-ilmoituksen kentät · {data.receiptCount} kuittia
-              kaudella
-              {data.sources && data.sources.invoiceCount > 0 && (
-                <> · {data.sources.invoiceCount} myyntilaskua</>
-              )}
-            </p>
-
+      {loadError != null && data ? (
+        <StaleBanner
+          fetchedAt={pageCacheFetchedAt(`alv:${period}`)}
+          onRetry={() => setLoadAttempt((attempt) => attempt + 1)}
+        />
+      ) : null}
+      {loadError != null && !data ? (
+        <ConnectionNotice
+          error={loadError}
+          fallback="ALV-raportin lataus epäonnistui"
+          onRetry={() => {
+            setLoadError(null);
+            setLoadAttempt((attempt) => attempt + 1);
+          }}
+          compact
+        />
+      ) : loading ? (
+        <LoadingState label="Ladataan ALV-raporttia..." compact />
+      ) : data ? (
+        <>
+          <p className="text-[13px] text-ink-2 text-center">
+            OmaVero-ilmoituksen kentät · {data.receiptCount} kuittia kaudella
             {data.sources && data.sources.invoiceCount > 0 && (
-              <div className="bg-blush/40 rounded-2xl p-4 text-sm text-charcoal">
-                <p className="font-medium">Myynnin ALV kahdesta lähteestä</p>
-                <p className="mt-1 text-xs text-warm-gray">
-                  Kuiteista {formatEur(data.sources.receiptSalesVat)} · myyntilaskuista{" "}
-                  {formatEur(data.sources.invoiceSalesVat)}. Laskut lasketaan laskun päivän
-                  mukaan (suoriteperuste).
-                  {data.excludedReceiptCount ? (
-                    <>
-                      {" "}
-                      {data.excludedReceiptCount} kuittia jätettiin pois, koska sama
-                      tilitapahtuma on jo kohdistettu laskulle.
-                    </>
-                  ) : null}
-                  {data.creditedInvoiceCount ? (
-                    <> {data.creditedInvoiceCount} hyvitettyä laskua ei ole mukana.</>
-                  ) : null}
-                </p>
-              </div>
+              <> · {data.sources.invoiceCount} myyntilaskua</>
             )}
+          </p>
 
-            {data.review.count > 0 && (
-              <div className="bg-warning/10 rounded-2xl p-4 text-sm text-charcoal">
-                <p className="font-medium">
-                  {data.review.count} kuittia ilman ALV-erittelyä
-                </p>
-                <p className="mt-1 text-xs text-warm-gray">
-                  Myynnit {formatEur(data.review.salesGross)} · Ostot{" "}
-                  {formatEur(data.review.purchasesGross)} — lisää
-                  ALV-tiedot kuiteille, jotta ne lasketaan mukaan.
-                </p>
-              </div>
-            )}
+          {data.sources && data.sources.invoiceCount > 0 && (
+            <Card className="space-y-1 text-sm text-ink">
+              <p className="font-medium">Myynnin ALV kahdesta lähteestä</p>
+              <p className="text-[13px] text-ink-2">
+                Kuiteista {formatEur(data.sources.receiptSalesVat)} · myyntilaskuista{" "}
+                {formatEur(data.sources.invoiceSalesVat)}. Laskut lasketaan laskun päivän
+                mukaan (suoriteperuste).
+                {data.excludedReceiptCount ? (
+                  <>
+                    {" "}
+                    {data.excludedReceiptCount} kuittia jätettiin pois, koska sama
+                    tilitapahtuma on jo kohdistettu laskulle.
+                  </>
+                ) : null}
+                {data.creditedInvoiceCount ? (
+                  <> {data.creditedInvoiceCount} hyvitettyä laskua ei ole mukana.</>
+                ) : null}
+              </p>
+            </Card>
+          )}
 
-            <OmaVeroField
-              code="301"
-              label="Vero kotimaan myynnistä 25,5 %"
-              sales={data.field301.netSales}
-              vat={data.field301.vat}
-              href={receiptDrillHref({
-                month: periodType === "month" ? period : null,
-                type: "tulo",
-              })}
+          {data.review.count > 0 && (
+            <Card className="space-y-1 text-sm text-ink">
+              <p className="font-medium">{data.review.count} kuittia ilman ALV-erittelyä</p>
+              <p className="text-[13px] text-ink-2">
+                Myynnit {formatEur(data.review.salesGross)} · Ostot{" "}
+                {formatEur(data.review.purchasesGross)}. Lisää ALV-tiedot kuiteille, jotta ne
+                lasketaan mukaan.
+              </p>
+            </Card>
+          )}
+
+          <SummaryCard
+            label={data.field308.isRefund ? "Palautukseen oikeuttava vero" : "Maksettava vero"}
+            value={formatEur(data.field308.amount)}
+          />
+
+          <Section title="301 · Vero kotimaan myynnistä 25,5 %">
+            <FieldRow
+              label="Myynti (veroton)"
+              value={
+                <FieldAmount
+                  value={data.field301.netSales}
+                  href={receiptDrillHref({ month: periodType === "month" ? period : null, type: "tulo" })}
+                  ariaLabel="Avaa kuitit kentälle 301"
+                />
+              }
             />
-            <OmaVeroField
-              code="302"
-              label="Vero kotimaan myynnistä 13,5 %"
-              sales={data.field302.netSales}
-              vat={data.field302.vat}
+            <FieldRow
+              label="Vero"
+              value={
+                <FieldAmount
+                  value={data.field301.vat}
+                  href={receiptDrillHref({ month: periodType === "month" ? period : null, type: "tulo" })}
+                  ariaLabel="Avaa kuitit kentälle 301"
+                />
+              }
             />
-            <OmaVeroField
-              code="303"
-              label="Vero kotimaan myynnistä 10 %"
-              sales={data.field303.netSales}
-              vat={data.field303.vat}
+          </Section>
+
+          <Section title="302 · Vero kotimaan myynnistä 13,5 %">
+            <FieldRow label="Myynti (veroton)" value={formatEur(data.field302.netSales)} />
+            <FieldRow label="Vero" value={formatEur(data.field302.vat)} />
+          </Section>
+
+          <Section title="303 · Vero kotimaan myynnistä 10 %">
+            <FieldRow label="Myynti (veroton)" value={formatEur(data.field303.netSales)} />
+            <FieldRow label="Vero" value={formatEur(data.field303.vat)} />
+          </Section>
+
+          {data.field309.turnover > 0 && (
+            <Section title="309 · 0-verokannan alainen liikevaihto">
+              <FieldRow label="Liikevaihto" value={formatEur(data.field309.turnover)} />
+            </Section>
+          )}
+
+          <Section title="307 · Verokauden vähennettävä vero">
+            <FieldRow
+              label="Vero"
+              value={
+                <FieldAmount
+                  value={data.field307.amount}
+                  href={receiptDrillHref({ month: periodType === "month" ? period : null, type: "meno" })}
+                  ariaLabel="Avaa ostokuitit"
+                />
+              }
             />
-
-            {data.field309.turnover > 0 && (
-              <div className="bg-white rounded-2xl p-5 shadow-sm">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <span className="text-xs font-mono text-warm-gray">
-                      309
-                    </span>
-                    <p className="text-sm text-charcoal mt-0.5">
-                      0-verokannan alainen liikevaihto
-                    </p>
-                  </div>
-                  <p className="text-lg font-medium text-charcoal">
-                    {formatEur(data.field309.turnover)}
-                  </p>
-                </div>
-              </div>
-            )}
-
-            <div className="bg-white rounded-2xl p-5 shadow-sm border-l-4 border-warning">
-              <div className="flex items-center justify-between">
-                <div>
-                  <span className="text-xs font-mono text-warm-gray">
-                    307
-                  </span>
-                  <p className="text-sm text-charcoal mt-0.5">
-                    Verokauden vähennettävä vero
-                  </p>
-                </div>
-                <Link
-                  href={receiptDrillHref({
-                    month: periodType === "month" ? period : null,
-                    type: "meno",
-                  })}
-                  aria-label="Avaa ostokuitit"
-                  className="text-lg font-medium text-charcoal underline decoration-warm-gray-light underline-offset-2"
-                >
-                  {formatEur(data.field307.amount)}
-                </Link>
-              </div>
-            </div>
-
-            <div
-              className={`bg-white rounded-2xl p-5 shadow-sm border-l-4 ${
-                data.field308.isRefund
-                  ? "border-success"
-                  : "border-accent"
-              }`}
-            >
-              <div className="flex items-center justify-between">
-                <div>
-                  <span className="text-xs font-mono text-warm-gray">
-                    308
-                  </span>
-                  <p className="text-sm text-charcoal mt-0.5">
-                    {data.field308.isRefund
-                      ? "Palautukseen oikeuttava vero"
-                      : "Maksettava vero"}
-                  </p>
-                </div>
-                <p
-                  className={`text-xl font-semibold ${
-                    data.field308.isRefund
-                      ? "text-success"
-                      : "text-accent"
-                  }`}
-                >
-                  {formatEur(data.field308.amount)}
-                </p>
-              </div>
-            </div>
-          </div>
-        ) : null}
-      </div>
-    </>
-  );
-}
-
-function OmaVeroField({
-  code,
-  label,
-  sales,
-  vat,
-  href,
-}: {
-  code: string;
-  label: string;
-  sales: number;
-  vat: number;
-  href?: string;
-}) {
-  const amount = (value: number, labelText: string) =>
-    href ? (
-      <Link
-        href={href}
-        aria-label={labelText}
-        className="text-charcoal font-medium underline decoration-warm-gray-light underline-offset-2"
-      >
-        {formatEur(value)}
-      </Link>
-    ) : (
-      <span className="text-charcoal font-medium">{formatEur(value)}</span>
-    );
-  return (
-    <div className="bg-white rounded-2xl p-5 shadow-sm">
-      <div className="flex items-start justify-between">
-        <div>
-          <span className="text-xs font-mono text-warm-gray">{code}</span>
-          <p className="text-sm text-charcoal mt-0.5">{label}</p>
-        </div>
-      </div>
-      <div className="flex justify-between mt-3 text-sm">
-        <span className="text-warm-gray">Myynti (veroton)</span>
-        {amount(sales, `Avaa kuitit kentälle ${code}`)}
-      </div>
-      <div className="flex justify-between mt-1 text-sm">
-        <span className="text-warm-gray">Vero</span>
-        {amount(vat, `Avaa kuitit kentälle ${code}`)}
-      </div>
+          </Section>
+        </>
+      ) : null}
     </div>
   );
 }

@@ -326,24 +326,24 @@ export default function BankConnectCard({ entityType }: { entityType: string }) 
   return (
     <section
       id="pankkiyhteys"
-      className="bg-white rounded-2xl p-6 shadow-sm space-y-6 scroll-mt-20"
+      className="rounded-card border border-line bg-surface p-4 space-y-6 scroll-mt-20"
     >
       <div>
-        <h3 className="text-lg font-medium text-charcoal">Pankkiyhteys</h3>
-        <p className="text-sm text-warm-gray mt-1 leading-relaxed">
+        <h3 className="text-[15px] font-medium text-ink">Pankkiyhteys</h3>
+        <p className="text-[13px] text-ink-2 mt-1 leading-relaxed">
           Yhdistä suomalainen pankkitili. Tapahtumat haetaan tiliotteisiin, ja
           yhteys päivittyy noin kuuden tunnin välein. Tiedoston lataus säilyy.
         </p>
       </div>
 
       {loading ? (
-        <p className="text-sm text-warm-gray">Ladataan pankkiyhteyttä...</p>
+        <p className="text-[13px] text-ink-2">Ladataan pankkiyhteyttä...</p>
       ) : loadFailed ? (
         <p className="text-sm text-danger leading-relaxed" role="alert">
           {message}
         </p>
       ) : !enabled ? (
-        <p className="text-sm text-warm-gray leading-relaxed">
+        <p className="text-[13px] text-ink-2 leading-relaxed">
           Pankkiyhteys ei ole käytössä tällä palvelimella. Tiedostojen lataus
           toimii normaalisti.
         </p>
@@ -361,7 +361,7 @@ export default function BankConnectCard({ entityType }: { entityType: string }) 
             return (
               <div
                 key={connection.id}
-                className="rounded-xl border border-warm-gray-light p-4 space-y-4"
+                className="rounded-card border border-line p-4 space-y-4"
               >
                 <div className="flex items-start gap-3">
                   {connection.aspspLogo ? (
@@ -370,37 +370,37 @@ export default function BankConnectCard({ entityType }: { entityType: string }) 
                     <img
                       src={connection.aspspLogo}
                       alt=""
-                      className="h-10 w-10 rounded-lg object-contain bg-cream"
+                      className="h-10 w-10 rounded-card object-contain bg-canvas"
                     />
                   ) : null}
                   <div className="min-w-0 flex-1">
-                    <p className="text-sm font-medium text-charcoal">{connection.aspspName}</p>
-                    <p className="text-xs text-warm-gray mt-0.5">
+                    <p className="text-[15px] font-medium text-ink">{connection.aspspName}</p>
+                    <p className="text-[13px] text-ink-2 mt-0.5">
                       {STATUS_LABEL[connection.status] || connection.status}
                       {" · "}
                       {connection.psuType === "business" ? "Yritystili" : "Henkilötili"}
                     </p>
-                    <p className="text-xs text-warm-gray mt-1">
+                    <p className="text-[13px] text-ink-2 mt-1">
                       Viimeisin onnistunut haku {formatWhen(connection.lastSuccessAt)}
                     </p>
                   </div>
                 </div>
 
                 {reconnect && (
-                    <div className="rounded-xl bg-blush/40 px-3 py-3 space-y-1" role="status">
-                      <p className="text-sm font-medium text-charcoal">Yhteys pitää yhdistää uudelleen</p>
-                      <p className="text-sm text-charcoal leading-relaxed">Syy: {reconnect.reason}</p>
-                      <p className="text-sm text-charcoal leading-relaxed">
+                    <div className="rounded-card bg-accent-soft px-3 py-3 space-y-1" role="status">
+                      <p className="text-sm font-medium text-ink">Yhteys pitää yhdistää uudelleen</p>
+                      <p className="text-sm text-ink leading-relaxed">Syy: {reconnect.reason}</p>
+                      <p className="text-sm text-ink leading-relaxed">
                         Tilit: {reconnect.accounts.length > 0 ? reconnect.accounts.join(", ") : "ei tilejä"}
                       </p>
-                      <p className="text-xs text-warm-gray">
+                      <p className="text-[13px] text-ink-2">
                         Viimeisin onnistunut haku:{" "}
                         {reconnect.lastSuccessAt
                           ? formatWhen(reconnect.lastSuccessAt)
                           : "ei vielä onnistunutta hakua"}
                       </p>
                       {reconnect.lastAttemptAt && (
-                        <p className="text-xs text-warm-gray">
+                        <p className="text-[13px] text-ink-2">
                           Viimeisin yritys: {formatWhen(reconnect.lastAttemptAt)}
                         </p>
                       )}
@@ -415,15 +415,15 @@ export default function BankConnectCard({ entityType }: { entityType: string }) 
 
                 {connection.accounts.length > 0 && (
                   <div className="space-y-2">
-                    <p className="text-xs text-warm-gray leading-relaxed">
+                    <p className="text-[13px] text-ink-2 leading-relaxed">
                       Uudet tilit eivät ole mukana automaattisesti. Valitse oman
-                      yrityksesi tili — suostumus voi sisältää myös muita
+                      yrityksesi tili - suostumus voi sisältää myös muita
                       IBAN-numeroita.
                     </p>
                     {connection.accounts.map((account) => (
                       <label
                         key={account.id}
-                        className="flex items-start gap-3 rounded-xl bg-cream/60 px-3 py-3"
+                        className="flex items-start gap-3 rounded-card bg-canvas px-3 py-3"
                       >
                         <input
                           type="checkbox"
@@ -432,10 +432,10 @@ export default function BankConnectCard({ entityType }: { entityType: string }) 
                           onChange={() => void toggleAccount(connection.id, account)}
                         />
                         <span className="min-w-0">
-                          <span className="block text-sm font-medium text-charcoal break-all">
+                          <span className="block text-sm font-medium text-ink break-all">
                             {account.iban}
                           </span>
-                          <span className="block text-xs text-warm-gray mt-0.5">
+                          <span className="block text-[13px] text-ink-2 mt-0.5">
                             {account.label || "Tili"}
                             {account.balance != null ? ` · ${formatEur(account.balance)}` : ""}
                           </span>
@@ -451,7 +451,7 @@ export default function BankConnectCard({ entityType }: { entityType: string }) 
                       type="button"
                       onClick={() => void syncConnection(connection.id)}
                       disabled={busyId !== null || !hasScope}
-                      className="flex-1 px-4 py-2.5 rounded-xl bg-charcoal text-white text-sm font-medium hover:bg-black disabled:opacity-50"
+                      className="active-press flex-1 min-h-12 px-4 rounded-card bg-ink text-canvas text-[15px] font-semibold disabled:opacity-50"
                     >
                       {busyId === connection.id ? "Haetaan..." : "Synkronoi nyt"}
                     </button>
@@ -465,7 +465,7 @@ export default function BankConnectCard({ entityType }: { entityType: string }) 
                         setShowPicker(true);
                         void loadBanks(next);
                       }}
-                      className="flex-1 px-4 py-2.5 rounded-xl bg-accent text-white text-sm font-medium hover:bg-accent-dark"
+                      className="active-press flex-1 min-h-12 px-4 rounded-card bg-ink text-canvas text-[15px] font-semibold"
                     >
                       Yhdistä uudelleen
                     </button>
@@ -474,13 +474,13 @@ export default function BankConnectCard({ entityType }: { entityType: string }) 
                     type="button"
                     onClick={() => setDisconnectId(connection.id)}
                     disabled={busyId !== null}
-                    className="px-4 py-2.5 rounded-xl border border-warm-gray-light text-sm font-medium text-danger hover:bg-cream disabled:opacity-50"
+                    className="active-press min-h-12 px-4 rounded-card border border-danger/30 text-[15px] font-semibold text-danger disabled:opacity-50"
                   >
                     Katkaise
                   </button>
                 </div>
                 {canSync && !hasScope && (
-                  <p className="text-xs text-warm-gray">Valitse ainakin yksi tili ennen hakua.</p>
+                  <p className="text-[13px] text-ink-2">Valitse ainakin yksi tili ennen hakua.</p>
                 )}
               </div>
             );
@@ -493,7 +493,7 @@ export default function BankConnectCard({ entityType }: { entityType: string }) 
                 setShowPicker(true);
                 void loadBanks(psuType);
               }}
-              className="w-full py-3 rounded-xl border border-dashed border-warm-gray-light text-sm font-medium text-charcoal hover:bg-cream"
+              className="active-press w-full min-h-12 rounded-card border border-line text-[15px] font-semibold text-ink"
             >
               Yhdistä toinen pankki
             </button>
@@ -504,7 +504,7 @@ export default function BankConnectCard({ entityType }: { entityType: string }) 
                   <button
                     type="button"
                     onClick={() => setShowPicker(false)}
-                    className="text-xs font-medium text-warm-gray hover:text-charcoal"
+                    className="active-press text-[13px] font-medium text-accent"
                   >
                     Peruuta
                   </button>
@@ -518,10 +518,10 @@ export default function BankConnectCard({ entityType }: { entityType: string }) 
                       void loadBanks("business");
                     }}
                   aria-pressed={psuType === "business"}
-                  className={`py-2.5 rounded-xl text-sm font-medium ${
+                  className={`active-press min-h-11 rounded-card text-sm font-medium ${
                     psuType === "business"
-                      ? "bg-accent text-white"
-                      : "bg-cream text-charcoal border border-warm-gray-light"
+                      ? "bg-ink text-canvas"
+                      : "bg-surface text-ink border border-line"
                   }`}
                 >
                   Yritystili
@@ -533,10 +533,10 @@ export default function BankConnectCard({ entityType }: { entityType: string }) 
                       void loadBanks("personal");
                     }}
                   aria-pressed={psuType === "personal"}
-                  className={`py-2.5 rounded-xl text-sm font-medium ${
+                  className={`active-press min-h-11 rounded-card text-sm font-medium ${
                     psuType === "personal"
-                      ? "bg-accent text-white"
-                      : "bg-cream text-charcoal border border-warm-gray-light"
+                      ? "bg-ink text-canvas"
+                      : "bg-surface text-ink border border-line"
                   }`}
                 >
                   Henkilötili
@@ -548,12 +548,12 @@ export default function BankConnectCard({ entityType }: { entityType: string }) 
                 onChange={(event) => setQuery(event.target.value)}
                 placeholder="Hae pankkia"
                 aria-label="Hae pankkia"
-                className="w-full px-3 py-2.5 rounded-xl border border-warm-gray-light bg-cream/50 text-sm"
+                className="w-full min-h-12 px-3 rounded-card border border-line bg-surface text-[16px] text-ink"
               />
               {banksLoading ? (
-                <p className="text-sm text-warm-gray">Ladataan pankkeja...</p>
+                <p className="text-[13px] text-ink-2">Ladataan pankkeja...</p>
               ) : visibleBanks.length === 0 ? (
-                <p className="text-sm text-warm-gray">Pankkeja ei löytynyt.</p>
+                <p className="text-[13px] text-ink-2">Pankkeja ei löytynyt.</p>
               ) : (
                 <ul className="space-y-2 max-h-80 overflow-y-auto pr-1">
                   {visibleBanks.map((bank) => (
@@ -562,7 +562,7 @@ export default function BankConnectCard({ entityType }: { entityType: string }) 
                         type="button"
                         onClick={() => void connectBank(bank)}
                         disabled={busyId !== null}
-                        className="w-full flex items-center gap-3 rounded-xl border border-warm-gray-light px-3 py-3 text-left hover:border-accent hover:bg-cream disabled:opacity-50"
+                        className="active-press w-full flex items-center gap-3 rounded-card border border-line px-3 py-3 text-left disabled:opacity-50"
                       >
                         {bank.logo ? (
                           // Logos are hosted by Enable Banking, one URL per ASPSP.
@@ -570,17 +570,17 @@ export default function BankConnectCard({ entityType }: { entityType: string }) 
                           <img
                             src={bank.logo}
                             alt=""
-                            className="h-8 w-8 rounded-md object-contain bg-white"
+                            className="h-8 w-8 rounded-card object-contain bg-surface"
                           />
                         ) : (
-                          <span className="h-8 w-8 rounded-md bg-blush" aria-hidden />
+                          <span className="h-8 w-8 rounded-card bg-accent-soft" aria-hidden />
                         )}
                         <span className="min-w-0 flex-1">
-                          <span className="block text-sm font-medium text-charcoal truncate">
+                          <span className="block text-sm font-medium text-ink truncate">
                             {bank.name}
                           </span>
                           {bank.beta && (
-                            <span className="block text-[11px] text-warm-gray">Beta</span>
+                            <span className="block text-[11px] text-ink-2">Beta</span>
                           )}
                         </span>
                         <span className="text-xs font-medium text-accent">Yhdistä</span>
@@ -602,13 +602,13 @@ export default function BankConnectCard({ entityType }: { entityType: string }) 
           {syncAccounts && syncAccounts.length > 0 && (
             <ul className="space-y-1">
               {syncAccounts.map((account) => (
-                <li key={account.accountId} className="text-sm text-charcoal leading-relaxed">
+                <li key={account.accountId} className="text-sm text-ink leading-relaxed">
                   {account.name}:{" "}
                   {account.ok
                     ? account.imported > 0
                       ? `${account.imported} uutta tapahtumaa`
                       : "ei uusia tapahtumia"
-                    : `epäonnistui — ${account.error || "Tapahtumien haku epäonnistui."}`}
+                    : `epäonnistui - ${account.error || "Tapahtumien haku epäonnistui."}`}
                 </li>
               ))}
             </ul>
