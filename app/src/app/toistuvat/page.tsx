@@ -408,9 +408,18 @@ export default function RecurringInvoicesPage() {
                         // the details that don't fit on the row itself and
                         // have nowhere else to live (there is no recurring
                         // schedule detail page) - laskutuspäivä and how many
-                        // invoices it has generated so far.
+                        // invoices it has generated so far. Repeats the next
+                        // run date too (already in `secondary`, above the
+                        // fold on the row) since a long name/customer/interval
+                        // combination can truncate it away on a narrow phone;
+                        // this menu item doesn't truncate, so it's the
+                        // reliable place to actually read it.
                         {
-                          label: `Laskutuspäivä ${entry.anchorDay}. · ${entry.generatedCount} laskua luotu`,
+                          label: [
+                            entry.nextRunAt ? `Seuraava ${formatScheduleDate(entry.nextRunAt)}` : "Päättynyt",
+                            `Laskutuspäivä ${entry.anchorDay}.`,
+                            `${entry.generatedCount} laskua luotu`,
+                          ].join(" · "),
                           onSelect: () => {},
                           disabled: true,
                         },
