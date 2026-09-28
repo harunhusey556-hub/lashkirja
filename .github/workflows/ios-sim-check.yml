@@ -1,0 +1,196 @@
+name: iOS Simulator check
+
+# Runs the REAL LashKirja iOS app (the bundled static export inside the
+# Capacitor shell, real WKWebView) in the iOS Simulator on the macOS runner,
+# drives it with the CI-only autopilot (src/lib/ci-autopilot/run.ts) against a
+# throwaway API server with the demo seed, and uploads screenshots, a screen
+# recording, per-step layout metrics and logs. See docs/quality/LIMITS.md.
+#
+# Nothing here touches production: the API is `next start` on this runner's
+# 127.0.0.1 with a fresh SQLite file, and the simulator build is a Debug
+# build that is never exported or signed for a device.
+
+on:
+  workflow_dispatch:
+    inputs:
+      routes:
+        description: "Comma-separated routes the autopilot walks (each scrolled to the bottom and back)"
+        required: false
+        type: string
+        default: "/dashboard,/laskut,/kirjanpito,/raportit,/kuitit,/pankki/tapahtumat,/asiakkaat,/toistuvat,/asetukset,/laskut/uusi"
+      device:
+        description: "Simulator name, e.g. 'iPhone 16 Pro'. Empty = the newest iPhone on the runner"
+        required: false
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ios-sim-check-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Throwaway values. src/lib/session-options.ts refuses to load in
+  # production without a >=32 char SESSION_SECRET.
+  DATABASE_URL: "file:${{ github.workspace }}/app/sim-check.db"
+  SESSION_SECRET: "ci-only-secret-not-used-anywhere-real-32plus"
+  CLOUD_AI_ENABLED: "false"
+  ENABLEBANKING_ENABLED: "false"
+  MAIL_TRANSPORT: "json"
+  API_PORT: "3000"
+
+jobs:
+  simulator:
+    name: Real app in the iOS Simulator
+    runs-on: macos-15
+    timeout-minutes: 60
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate Prisma client
+        run: npx prisma generate
+
+      - name: Fresh database with the demo seed
+        run: |
+          rm -f sim-check.db
+          npx prisma migrate deploy
+          npx tsx scripts/demo-seed.ts
+
+      # Must precede the web build: both write .next, and `next start` below
+      # needs the web build's .next (same order as ci.yml).
+      - name: Build the mobile export with the CI autopilot
+        env:
+          NEXT_PUBLIC_CI_AUTOPILOT: "1"
+        run: |
+          npm run build:mobile -- --api-base-url "http://127.0.0.1:${API_PORT}"
+          # Positive control for build-ipa.yml's absence check: the marker
+          # must be findable when the autopilot IS compiled in.
+          grep -rlF "LASHKIRJA_CI_AUTOPILOT" out/_next/static
+          grep -F -q "http://127.0.0.1:3999" out/index.html || {
+            echo "::error::The step server origin is missing from the mobile CSP connect-src"; exit 1; }
+
+      - name: Sync Capacitor iOS project (simulator only)
+        run: |
+          npx cap sync ios
+          npx tsx scripts/patch-ios-url-scheme.ts
+          PLIST=ios/App/App/Info.plist
+          # ATS: WKWebView fetches http://127.0.0.1 (the API and the step
+          # server). The committed Info.plist already carries
+          # NSAllowsLocalNetworking; this checkout-local edit only guarantees
+          # it for this simulator build and is never committed.
+          if ! /usr/libexec/PlistBuddy -c "Print :NSAppTransportSecurity:NSAllowsLocalNetworking" "$PLIST" >/dev/null 2>&1; then
+            /usr/libexec/PlistBuddy -c "Add :NSAppTransportSecurity dict" "$PLIST" 2>/dev/null || true
+            /usr/libexec/PlistBuddy -c "Add :NSAppTransportSecurity:NSAllowsLocalNetworking bool true" "$PLIST"
+            echo "Added NSAllowsLocalNetworking for the simulator build"
+          fi
+          /usr/libexec/PlistBuddy -c "Print :NSAppTransportSecurity" "$PLIST"
+          cat ios/App/App/capacitor.config.json
+
+      - name: Build the API server (web build)
+        run: npm run build
+
+      - name: Start the API server on 127.0.0.1
+        run: |
+          nohup npx next start -H 127.0.0.1 -p "$API_PORT" > api-server.log 2>&1 &
+          for i in $(seq 1 60); do
+            if curl -s -o /dev/null "http://127.0.0.1:${API_PORT}/login"; then break; fi
+            sleep 1
+          done
+          curl -s -o /dev/null -w "GET /login -> %{http_code}\n" "http://127.0.0.1:${API_PORT}/login"
+          # CORS for the app's real origin (capacitor://localhost) against the
+          # local API: the preflight the WebView sends before POST /api/auth/token.
+          curl -s -i -X OPTIONS "http://127.0.0.1:${API_PORT}/api/auth/token" \
+            -H "Origin: capacitor://localhost" \
+            -H "Access-Control-Request-Method: POST" \
+            -H "Access-Control-Request-Headers: content-type" | tee cors-preflight.txt
+          grep -qi "access-control-allow-origin: capacitor://localhost" cors-preflight.txt || {
+            echo "::error::The API does not allow capacitor://localhost"; exit 1; }
+
+      - name: Build the app for the simulator
+        run: |
+          # Debug: Capacitor's console bridge prints the WebView console to
+          # stdout only in debug builds. Ad-hoc signed ("-") so the simulator
+          # Keychain (the auth token) works; no team, no profile.
+          mkdir -p build sim-artifacts
+          if ! xcodebuild \
+            -project ios/App/App.xcodeproj \
+            -scheme App \
+            -configuration Debug \
+            -sdk iphonesimulator \
+            -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath build/sim \
+            CODE_SIGN_STYLE=Manual \
+            CODE_SIGN_IDENTITY=- \
+            DEVELOPMENT_TEAM= \
+            PROVISIONING_PROFILE_SPECIFIER= \
+            build > sim-artifacts/xcodebuild.log 2>&1; then
+            grep -E "error:|\*\* BUILD FAILED" sim-artifacts/xcodebuild.log | head -n 60
+            tail -n 60 sim-artifacts/xcodebuild.log
+            exit 1
+          fi
+          tail -n 5 sim-artifacts/xcodebuild.log
+          test -d build/sim/Build/Products/Debug-iphonesimulator/App.app
+          codesign -dv build/sim/Build/Products/Debug-iphonesimulator/App.app 2>&1 | head -n 5 || true
+
+      - name: Run the app in the simulator (autopilot, screenshots, video)
+        env:
+          APP_PATH: build/sim/Build/Products/Debug-iphonesimulator/App.app
+          OUT: sim-artifacts
+          ROUTES: ${{ inputs.routes }}
+          DEVICE: ${{ inputs.device }}
+        run: bash scripts/ci/ios-sim-run.sh
+
+      - name: Summary
+        if: always()
+        run: |
+          OUT=sim-artifacts
+          {
+            echo "## iOS Simulator check"
+            cat "$OUT/device.txt" 2>/dev/null
+            echo
+            echo "Screenshots: $(ls "$OUT/screenshots" 2>/dev/null | wc -l | tr -d ' ')"
+            for phase in first relaunch; do
+              if [[ -f "$OUT/done-$phase.json" ]]; then
+                echo; echo "### $phase launch"; echo '```'; cat "$OUT/done-$phase.json"; echo '```'
+              fi
+            done
+            if [[ -f "$OUT/steps.jsonl" ]]; then
+              echo; echo "### Layout per step (measured in WKWebView)"
+              node -e '
+                const lines = require("fs").readFileSync(process.argv[1], "utf8").trim().split("\n");
+                console.log("| step | path | safe top/bottom | viewport | main scroll | header bottom | tab bar top | lowest content | clears tab bar |");
+                console.log("|---|---|---|---|---|---|---|---|---|");
+                for (const line of lines) {
+                  const s = JSON.parse(line); const m = s.metrics || {};
+                  const sa = m.safeArea || {}; const main = m.main || {};
+                  console.log(`| ${s.launch > 1 ? "r" : ""}${s.n} ${s.name} | ${m.path} | ${sa.top}/${sa.bottom} | ${m.viewport ? m.viewport.width + "x" + m.viewport.height : ""} | ${main.scrollTop ?? ""}/${main.scrollHeight ?? ""} (${main.clientHeight ?? ""}) | ${m.header ? m.header.bottom : ""} | ${m.tabBar ? m.tabBar.top : ""} | ${m.lowestContentBottom ?? ""} | ${m.contentClearsTabBar ?? ""} |`);
+                }
+              ' "$OUT/steps.jsonl"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+          cp api-server.log cors-preflight.txt "$OUT/" 2>/dev/null || true
+
+      - name: Upload simulator evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-sim-check-${{ github.run_id }}
+          path: app/sim-artifacts
+          retention-days: 14
+          if-no-files-found: warn

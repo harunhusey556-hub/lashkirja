@@ -100,6 +100,28 @@ function validatedMobileApiBaseUrl(): string {
 }
 
 /**
+ * The CI-only simulator autopilot (src/lib/ci-autopilot/, driven by
+ * .github/workflows/ios-sim-check.yml). Always a literal "0" or "1" in the
+ * bundle, so the `=== "1"` guards around it fold to `false` and the minifier
+ * drops the autopilot from every normal build (build-ipa.yml greps for its
+ * marker). It can only be switched on together with a local http API on
+ * 127.0.0.1/localhost -- an IPA pointed at a real https server, i.e. every
+ * build that could reach the owner, refuses to build with it.
+ */
+function ciAutopilotFlag(apiBaseUrl: string): "0" | "1" {
+  if (process.env.NEXT_PUBLIC_CI_AUTOPILOT !== "1") return "0";
+  const parsed = new URL(apiBaseUrl);
+  const isLocalHttp =
+    parsed.protocol === "http:" && (parsed.hostname === "127.0.0.1" || parsed.hostname === "localhost");
+  if (!isLocalHttp) {
+    throw new Error(
+      `NEXT_PUBLIC_CI_AUTOPILOT=1 is only allowed with a local http API base URL (simulator CI), not ${apiBaseUrl}`
+    );
+  }
+  return "1";
+}
+
+/**
  * `BUILD_TARGET=mobile` (set by scripts/build-mobile.ts) produces the
  * Capacitor static export. `pageExtensions: ["tsx"]` is what drops
  * `proxy.ts` and every `route.ts` out of this build -- see
@@ -122,6 +144,7 @@ function validatedMobileApiBaseUrl(): string {
 // object literal would call it on every `next dev`/web build too, where
 // NEXT_PUBLIC_API_BASE_URL is never set.
 function buildMobileNextConfig(): NextConfig {
+  const apiBaseUrl = validatedMobileApiBaseUrl();
   return {
     output: "export",
     pageExtensions: ["tsx"],
@@ -130,7 +153,8 @@ function buildMobileNextConfig(): NextConfig {
     distDir: ".next-mobile",
     env: {
       NEXT_PUBLIC_BUILD_TARGET: "mobile",
-      NEXT_PUBLIC_API_BASE_URL: validatedMobileApiBaseUrl(),
+      NEXT_PUBLIC_API_BASE_URL: apiBaseUrl,
+      NEXT_PUBLIC_CI_AUTOPILOT: ciAutopilotFlag(apiBaseUrl),
     },
   };
 }
@@ -139,6 +163,9 @@ const webNextConfig: NextConfig = {
   env: {
     NEXT_PUBLIC_GIT_COMMIT: gitCommit(),
     NEXT_PUBLIC_APP_ENV: process.env.NODE_ENV === "production" ? "production" : "development",
+    // The simulator autopilot is a mobile-export-only CI tool; the web
+    // build (what the server and production run) never contains it.
+    NEXT_PUBLIC_CI_AUTOPILOT: "0",
   },
   allowedDevOrigins: Array.from(
     new Set(["127.0.0.1", ...localInterfaceOrigins, ...configuredDevOrigins])

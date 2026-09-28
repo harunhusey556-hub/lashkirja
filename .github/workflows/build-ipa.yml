@@ -61,6 +61,21 @@ jobs:
           esac
           npm run build:mobile -- --api-base-url "$API_BASE_URL"
 
+      # The simulator autopilot (ios-sim-check.yml) is compiled in only with
+      # NEXT_PUBLIC_CI_AUTOPILOT=1; a device IPA must never contain it.
+      - name: Assert the CI autopilot is absent
+        working-directory: app
+        run: |
+          if grep -rlF "LASHKIRJA_CI_AUTOPILOT" out; then
+            echo "The CI simulator autopilot is compiled into the device export"
+            exit 1
+          fi
+          if grep -F -q "127.0.0.1:3999" out/index.html; then
+            echo "The CI step server origin is in the device CSP"
+            exit 1
+          fi
+          echo "CI autopilot absent from the device export"
+
       - name: Sync Capacitor iOS project
         working-directory: app
         env:

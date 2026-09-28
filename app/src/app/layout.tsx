@@ -6,6 +6,8 @@ import ShellGate from "@/components/ShellGate";
 import { SplashReady } from "@/components/SplashReady";
 import { UsableArea } from "@/components/UsableArea";
 import { API_BASE_URL, IS_MOBILE_BUILD } from "@/lib/build-target";
+import { CiAutopilot } from "@/components/CiAutopilot";
+import { CI_STEP_ORIGIN } from "@/lib/ci-autopilot/constants";
 import "./globals.css";
 
 /**
@@ -21,13 +23,16 @@ import "./globals.css";
  */
 function mobileContentSecurityPolicy(): string {
   const apiOrigin = new URL(API_BASE_URL).origin;
+  // The CI simulator autopilot's step server, in that CI-only build alone
+  // (next.config.ts allows the flag only with a local http API).
+  const ciStepOrigin = process.env.NEXT_PUBLIC_CI_AUTOPILOT === "1" ? ` ${CI_STEP_ORIGIN}` : "";
   return [
     "default-src 'self'",
     "script-src 'self' 'unsafe-inline'",
     "style-src 'self' 'unsafe-inline'",
     "img-src 'self' data: blob:",
     "font-src 'self' data:",
-    `connect-src 'self' ${apiOrigin}`,
+    `connect-src 'self' ${apiOrigin}${ciStepOrigin}`,
     "object-src 'none'",
     "base-uri 'self'",
     "form-action 'none'",
@@ -190,6 +195,7 @@ export default function RootLayout({
         <NavBridge />
         <TouchActiveShim />
         <ShellGate>{children}</ShellGate>
+        {IS_MOBILE_BUILD && process.env.NEXT_PUBLIC_CI_AUTOPILOT === "1" && <CiAutopilot />}
       </body>
     </html>
   );
