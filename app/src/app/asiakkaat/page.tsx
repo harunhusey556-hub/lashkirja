@@ -45,9 +45,10 @@ interface Customer {
 }
 
 /**
- * Read once by this page after a redirect from the customer detail page (an
- * archive or a hard delete there, which both leave this page - see
- * asiakkaat/[id]/page.tsx).
+ * Read once by this page after a redirect from the customer detail page. Only
+ * a hard delete (no invoices on the customer) navigates back here - an
+ * archive stays on the detail page and shows its own message there instead
+ * (see asiakkaat/[id]/page.tsx).
  */
 const FLASH_KEY = "asiakkaat:flash";
 

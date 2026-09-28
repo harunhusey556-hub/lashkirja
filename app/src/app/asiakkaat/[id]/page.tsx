@@ -175,9 +175,12 @@ export default function CustomerDetailPage({ params }: { params: Promise<{ id: s
         router.push("/asiakkaat");
       }
     } catch (error) {
-      const failureMessage = errorMessage(error, "Poisto epäonnistui");
-      setMessage(failureMessage);
-      throw new Error(failureMessage);
+      // Thrown, not also set as the page-level message: the ConfirmModal is
+      // still open and already renders this text itself (settleConfirm),
+      // right behind the buttons - setting the page message too would show
+      // the exact same sentence twice, once inside the dialog and once in
+      // the (backdrop-hidden, so pointless anyway) page banner behind it.
+      throw new Error(errorMessage(error, "Poisto epäonnistui"));
     } finally {
       setBusy(false);
     }
@@ -231,14 +234,9 @@ export default function CustomerDetailPage({ params }: { params: Promise<{ id: s
       ]
     : [];
 
-  // Extra bottom padding when BottomActions is present: a short customer (few
-  // invoices, no notes) can otherwise fit entirely above the fold, leaving its
-  // last row sitting exactly where the fixed action bar paints - unclickable
-  // even though nothing needs scrolling. BottomActions' own spacer only helps
-  // once the page is tall enough to scroll; this guarantees clearance either way.
   return (
     <>
-      <div className={`space-y-6 ${state === "ready" && customer && !archived ? "pb-36" : "pb-6"}`}>
+      <div className="space-y-6 pb-6">
         {state === "loading" && <LoadingState label="Haetaan asiakasta…" />}
         {state === "error" && (
           <ErrorState message={message || "Haku epäonnistui"} onRetry={() => void load()} />
@@ -281,7 +279,17 @@ export default function CustomerDetailPage({ params }: { params: Promise<{ id: s
               ]}
             />
 
-            <Section title="Laskut" count={detail.invoices.length}>
+            <Section
+              title="Laskut"
+              action={
+                <Link
+                  href={`/laskut?customerId=${customer.id}`}
+                  className="inline-flex min-h-11 items-center text-[13px] font-semibold text-accent"
+                >
+                  Näytä kaikki
+                </Link>
+              }
+            >
               {detail.invoices.length === 0 ? (
                 <p className="px-4 py-4 text-[15px] text-ink-2">Ei laskuja.</p>
               ) : (
@@ -335,6 +343,7 @@ export default function CustomerDetailPage({ params }: { params: Promise<{ id: s
               initial={{
                 name: customer.name,
                 businessId: customer.businessId ?? "",
+                contactPerson: customer.contactPerson ?? "",
                 email: customer.email ?? "",
                 phone: customer.phone ?? "",
                 addressStreet: customer.addressStreet ?? "",

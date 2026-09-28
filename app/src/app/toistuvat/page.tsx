@@ -15,7 +15,8 @@ import {
 } from "@/components/clientFetch";
 import { Button, controlClass } from "@/components/ui";
 import { Card, ListRow, MoreMenu, PageTitle, Section, StatusTag } from "@/components/ds";
-import { formatDayMonth, formatEur, parseFinnishNumber } from "@/lib/format";
+import { formatDate, formatDayMonth, formatEur, parseFinnishNumber } from "@/lib/format";
+import { invalidFieldProps } from "@/lib/focus-field";
 import { VAT_RATES_PERMILLE } from "@/lib/invoices";
 import { RECURRENCE_INTERVALS, type RecurrenceInterval } from "@/lib/recurrence";
 
@@ -65,22 +66,60 @@ const EMPTY_LINE: FormLine = {
 
 const today = () => new Date().toISOString().slice(0, 10);
 
-const EMPTY_FORM = {
-  customerId: "",
-  name: "",
-  interval: "monthly" as RecurrenceInterval,
-  anchorDay: "1",
-  startDate: today(),
-  endDate: "",
-  paymentTermDays: "14",
-  autoSend: false,
-  lines: [{ ...EMPTY_LINE }] as FormLine[],
-};
+/**
+ * A fresh blank form, computed at the moment it's needed (component mount, or
+ * right after a successful create) rather than once at module load - so
+ * `startDate` is always "today" even if the dev server has been running for
+ * a while, and so this can be called again after a submit without reusing a
+ * stale object reference.
+ */
+function makeEmptyForm() {
+  return {
+    customerId: "",
+    name: "",
+    interval: "monthly" as RecurrenceInterval,
+    anchorDay: "1",
+    startDate: today(),
+    endDate: "",
+    paymentTermDays: "14",
+    autoSend: false,
+    lines: [{ ...EMPTY_LINE }] as FormLine[],
+  };
+}
 
-/** "Kuukausittain · seuraava 1.2." (or "päättynyt" once the schedule has no more runs). */
+/**
+ * "d.m." for a date inside the current year that hasn't passed yet;
+ * "d.m.yyyy" otherwise (past or a different year), so a schedule that's
+ * fallen behind (or simply runs into next year) doesn't read as if it were
+ * due any day now.
+ */
+function formatScheduleDate(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "–";
+  const now = new Date();
+  const todayUtc = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+  const needsYear = date.getTime() < todayUtc || date.getUTCFullYear() !== now.getUTCFullYear();
+  return needsYear ? formatDate(value) : formatDayMonth(value);
+}
+
+/**
+ * "<customer> · <interval> · seuraava <date>" (or "· päättynyt"), with the
+ * customer name omitted only when it's already the row's title (i.e. the
+ * schedule has no name of its own), plus an auto-send cue when relevant.
+ * Kept to one short trailing note rather than a second trailing StatusTag,
+ * since the trailing slot on this row already holds an active/paused tag
+ * and a MoreMenu button - a second chip there would crowd a 390px row and
+ * leave little width for the text; the secondary line, being a single
+ * truncating line, degrades gracefully (ellipsis) if it ever runs long.
+ */
 function rowSecondary(entry: RecurringInvoice): string {
-  const next = entry.nextRunAt ? `seuraava ${formatDayMonth(entry.nextRunAt)}` : "päättynyt";
-  return `${INTERVAL_LABEL[entry.interval]} · ${next}`;
+  const title = entry.name || entry.customer.name;
+  const parts: string[] = [];
+  if (entry.customer.name !== title) parts.push(entry.customer.name);
+  parts.push(INTERVAL_LABEL[entry.interval]);
+  parts.push(entry.nextRunAt ? `seuraava ${formatScheduleDate(entry.nextRunAt)}` : "päättynyt");
+  if (entry.autoSend) parts.push("automaattinen lähetys");
+  return parts.join(" · ");
 }
 
 export default function RecurringInvoicesPage() {
@@ -99,7 +138,7 @@ export default function RecurringInvoicesPage() {
   const [showInactive, setShowInactive] = usePersistedState("toistuvat.showInactive", false);
   const [confirmRemove, setConfirmRemove] = useState<RecurringInvoice | null>(null);
 
-  const [form, setForm] = useState(EMPTY_FORM);
+  const [form, setForm] = useState(makeEmptyForm);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [createError, setCreateError] = useState("");
 
@@ -150,10 +189,12 @@ export default function RecurringInvoicesPage() {
     }));
   }
 
+  // Deliberately does not reset the form: closing the sheet (Peruuta, the
+  // backdrop, Escape) is not the same as having created the invoice, and an
+  // accidental close shouldn't lose everything already typed in - reopening
+  // picks the same draft back up. The form only resets after `submit`
+  // actually succeeds, below.
   function openCreate() {
-    setForm(EMPTY_FORM);
-    setErrors({});
-    setCreateError("");
     setCreateOpen(true);
   }
 
@@ -212,7 +253,8 @@ export default function RecurringInvoicesPage() {
       });
       await readJson(response, "Tallennus epäonnistui");
       setCreateOpen(false);
-      setForm(EMPTY_FORM);
+      setForm(makeEmptyForm());
+      setErrors({});
       await load();
     } catch (error) {
       // Renders inside the "Uusi toistuva lasku" sheet, which stays open, not
@@ -362,6 +404,16 @@ export default function RecurringInvoicesPage() {
                     <MoreMenu
                       label={`Lisää toimintoja: ${entry.name || entry.customer.name}`}
                       items={[
+                        // Not a real action (disabled, no-op): an info line for
+                        // the details that don't fit on the row itself and
+                        // have nowhere else to live (there is no recurring
+                        // schedule detail page) - laskutuspäivä and how many
+                        // invoices it has generated so far.
+                        {
+                          label: `Laskutuspäivä ${entry.anchorDay}. · ${entry.generatedCount} laskua luotu`,
+                          onSelect: () => {},
+                          disabled: true,
+                        },
                         ...(entry.active && entry.nextRunAt
                           ? [{ label: "Luo nyt", onSelect: () => void runDue(entry.id), disabled: busy }]
                           : []),
@@ -426,10 +478,10 @@ export default function RecurringInvoicesPage() {
               <div>
                 <label className={label} htmlFor="ri-customer">Asiakas</label>
                 <select
-                  id="ri-customer"
                   className={field}
                   value={form.customerId}
                   onChange={(e) => setForm({ ...form, customerId: e.target.value })}
+                  {...invalidFieldProps("ri-customer", errors.customerId)}
                 >
                   <option value="">Valitse asiakas</option>
                   {customers.map((customer) => (
@@ -438,7 +490,11 @@ export default function RecurringInvoicesPage() {
                     </option>
                   ))}
                 </select>
-                {errors.customerId && <p className="mt-1.5 text-sm text-danger" role="alert">{errors.customerId}</p>}
+                {errors.customerId && (
+                  <p id="ri-customer-error" className="mt-1.5 text-sm text-danger" role="alert">
+                    {errors.customerId}
+                  </p>
+                )}
               </div>
 
               <div className="field-grid">
@@ -462,16 +518,18 @@ export default function RecurringInvoicesPage() {
                 <div>
                   <label className={label} htmlFor="ri-anchor">Laskutuspäivä</label>
                   <input
-                    id="ri-anchor"
                     className={field}
                     value={form.anchorDay}
                     onChange={(e) => setForm({ ...form, anchorDay: e.target.value })}
                     inputMode="numeric"
+                    {...invalidFieldProps("ri-anchor", errors.anchorDay, "ri-anchor-hint")}
                   />
                   {errors.anchorDay ? (
-                    <p className="mt-1.5 text-sm text-danger" role="alert">{errors.anchorDay}</p>
+                    <p id="ri-anchor-error" className="mt-1.5 text-sm text-danger" role="alert">
+                      {errors.anchorDay}
+                    </p>
                   ) : (
-                    <p className="mt-1.5 text-xs text-ink-2">
+                    <p id="ri-anchor-hint" className="mt-1.5 text-xs text-ink-2">
                       31 tarkoittaa kuun viimeistä päivää lyhyissä kuukausissa.
                     </p>
                   )}
@@ -492,13 +550,17 @@ export default function RecurringInvoicesPage() {
                 <div>
                   <label className={label} htmlFor="ri-end">Päättyy (valinnainen)</label>
                   <input
-                    id="ri-end"
                     type="date"
                     className={field}
                     value={form.endDate}
                     onChange={(e) => setForm({ ...form, endDate: e.target.value })}
+                    {...invalidFieldProps("ri-end", errors.endDate)}
                   />
-                  {errors.endDate && <p className="mt-1.5 text-sm text-danger" role="alert">{errors.endDate}</p>}
+                  {errors.endDate && (
+                    <p id="ri-end-error" className="mt-1.5 text-sm text-danger" role="alert">
+                      {errors.endDate}
+                    </p>
+                  )}
                 </div>
               </div>
 
@@ -514,6 +576,12 @@ export default function RecurringInvoicesPage() {
                       value={line.description}
                       onChange={(e) => setLine(index, { description: e.target.value })}
                       placeholder="Kuvaus"
+                      // "Lisää vähintään yksi rivi" doesn't identify which
+                      // line is incomplete, so it's tied to the first line's
+                      // description field - the one that's empty in the
+                      // common single-line case this error actually fires for.
+                      aria-invalid={index === 0 && errors.lines ? true : undefined}
+                      aria-describedby={index === 0 && errors.lines ? "ri-lines-error" : undefined}
                     />
                     <div className="field-grid field-grid-3">
                       <div>
@@ -593,7 +661,11 @@ export default function RecurringInvoicesPage() {
                 >
                   Lisää rivi
                 </Button>
-                {errors.lines && <p className="text-sm text-danger" role="alert">{errors.lines}</p>}
+                {errors.lines && (
+                  <p id="ri-lines-error" className="text-sm text-danger" role="alert">
+                    {errors.lines}
+                  </p>
+                )}
               </div>
 
               <label className="flex items-center gap-3 text-[15px] text-ink">

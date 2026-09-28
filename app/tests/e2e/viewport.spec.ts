@@ -78,20 +78,36 @@ test.describe("long text at 390", () => {
     await page.getByRole("button", { name: "Lisää asiakas" }).click();
     const link = page.getByRole("link", { name });
     await expect(link).toBeVisible();
-    const linkBox = await link.boundingBox();
     const card = page.locator('[data-testid="list-row"]').filter({ has: link });
+    // The link itself is an absolute inset-0 overlay the size of the whole
+    // row, so its box is trivially equal to the row's - that proves nothing.
+    // Measure the actual visible title text instead: the row's ".truncate"
+    // title span, first in DOM order (the row's other truncating span is the
+    // secondary line, which comes after it).
+    const title = card.locator(".truncate").first();
+    await expect(title).toBeVisible();
+    const metrics = await title.evaluate((el) => ({
+      scrollWidth: el.scrollWidth,
+      clientWidth: el.clientWidth,
+    }));
+    // The full name is wider than the box it's rendered in - i.e. the
+    // ellipsis is doing real work here, not merely present in the CSS.
+    expect(metrics.scrollWidth).toBeGreaterThan(metrics.clientWidth);
     const cardBox = await card.boundingBox();
-    expect(linkBox && cardBox).toBeTruthy();
-    if (!linkBox || !cardBox) return;
-    expect(linkBox.x).toBeGreaterThanOrEqual(cardBox.x - 1);
-    expect(linkBox.x + linkBox.width).toBeLessThanOrEqual(cardBox.x + cardBox.width + 1);
+    const titleBox = await title.boundingBox();
+    expect(cardBox && titleBox).toBeTruthy();
+    if (!cardBox || !titleBox) return;
+    // And the (clipped) rendered box never escapes the card, however long
+    // the underlying text is.
+    expect(titleBox.x).toBeGreaterThanOrEqual(cardBox.x - 1);
+    expect(titleBox.x + titleBox.width).toBeLessThanOrEqual(cardBox.x + cardBox.width + 1);
   });
 });
 
 test.describe("confirm dialog", () => {
   test.use({ viewport: { width: 390, height: 844 } });
 
-  test("names the dialog, traps Tab, and closes on Escape", async ({ page }) => {
+  test("names the dialog, traps Tab, and returns focus on Escape", async ({ page }) => {
     await login(page);
     await page.goto("/asiakkaat");
     await page.getByRole("main").getByRole("button", { name: "Lisää", exact: true }).click();
@@ -121,13 +137,12 @@ test.describe("confirm dialog", () => {
     expect(stillInside).toBe(true);
     await page.keyboard.press("Escape");
     await expect(dialog).toBeHidden();
-    // Not asserting where focus lands here: "Poista" was itself inside a
-    // closing sheet (the "Lisää toimintoja" menu), which - by the time all
-    // the awaits above have run - has very likely already unmounted its own
-    // trigger button, so useFocusTrap's restore-to-previous-element cannot
-    // find a connected node to send focus back to. See the same
-    // MoreMenu -> ConfirmModal nesting on the invoice detail page
-    // (laskut/[id]/page.tsx "Poista luonnos") for the same latent gap;
-    // fixing it belongs to useFocusTrap/focus-trap.ts, not this page.
+    // "Poista" is inside the "Lisää toimintoja" menu's own sheet, which
+    // closes first (as part of the same click that opened the ConfirmModal)
+    // and restores focus to ITS OWN trigger - "Lisää toimintoja" - before the
+    // ConfirmModal's focus trap ever activates. So the ConfirmModal's own
+    // previously-focused element (captured when it opens) is already "Lisää
+    // toimintoja", not "Poista", and that's what Escape hands focus back to.
+    await expect(page.getByRole("button", { name: "Lisää toimintoja" })).toBeFocused();
   });
 });
