@@ -12,6 +12,11 @@ import { RECEIPT_PHASE } from "./screen-state";
 import { findActiveVendorRule } from "./vendor-rules";
 import { isStuckRunning, runAfterResponse } from "./job-tracker";
 import { noteJobFailure } from "./observe";
+import {
+  createPendingInboxReceipt,
+  receiptFieldsFromExtraction,
+  unreadableReceiptFields,
+} from "./receipt-staging";
 
 type Extractor = typeof extractReceipt;
 
@@ -31,6 +36,10 @@ interface DocumentJobPayload {
   vendorPriors: string;
   extracted?: ExtractedReceipt;
   appliedRule?: { vendor: string; category: string } | null;
+  /** Set for a job started from the offline receipt inbox: on completion or
+   * failure a pending "app_capture" receipt is created so the photo is never
+   * lost, with no editor session in between. */
+  inbox?: { capturedAt: string };
 }
 
 function parsePayload(raw: string | null): DocumentJobPayload | null {
@@ -82,6 +91,7 @@ export async function enqueueDocumentAnalysis(input: {
   originalName: string;
   profileContext: string;
   vendorPriors: string;
+  inbox?: { capturedAt: string };
 }): Promise<{ id: string; status: string }> {
   const existing = await prisma.backgroundJob.findFirst({
     where: {
@@ -102,6 +112,7 @@ export async function enqueueDocumentAnalysis(input: {
     originalName: input.originalName,
     profileContext: input.profileContext,
     vendorPriors: input.vendorPriors,
+    inbox: input.inbox,
   };
   const job = await prisma.backgroundJob.create({
     data: {
@@ -217,6 +228,15 @@ export async function processDocumentJob(jobId: string): Promise<void> {
           },
         });
       }
+      if (payload.inbox) {
+        await createPendingInboxReceipt(tx, {
+          userId: job.userId,
+          uploadId: payload.uploadId,
+          storageKey: payload.storageKey,
+          fileName: payload.originalName,
+          fields: receiptFieldsFromExtraction(extracted, new Date(payload.inbox.capturedAt)),
+        });
+      }
     });
   } catch (error) {
     const message =
@@ -224,14 +244,28 @@ export async function processDocumentJob(jobId: string): Promise<void> {
         ? error.message
         : "Tiedoston käsittely epäonnistui";
     noteJobFailure(job.kind, message);
-    await prisma.backgroundJob.updateMany({
-      where: { id: jobId, status: "running", attemptToken },
-      data: {
-        status: "failed",
-        finishedAt: new Date(),
-        error: message.slice(0, 300),
-        progressLabel: "Epäonnistui",
-      },
+    await prisma.$transaction(async (tx) => {
+      const failed = await tx.backgroundJob.updateMany({
+        where: { id: jobId, status: "running", attemptToken },
+        data: {
+          status: "failed",
+          finishedAt: new Date(),
+          error: message.slice(0, 300),
+          progressLabel: "Epäonnistui",
+        },
+      });
+      if (failed.count === 0) return;
+      // No photo is ever silently lost: even a failed extraction becomes a
+      // pending receipt the owner can fill in by hand.
+      if (payload.inbox) {
+        await createPendingInboxReceipt(tx, {
+          userId: job.userId,
+          uploadId: payload.uploadId,
+          storageKey: payload.storageKey,
+          fileName: payload.originalName,
+          fields: unreadableReceiptFields(new Date(payload.inbox.capturedAt)),
+        });
+      }
     });
   }
 }

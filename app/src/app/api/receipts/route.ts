@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from "next/server";
 import { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/db";
 import { requireSession } from "@/lib/session";
-import type { ExtractedReceipt } from "@/lib/ai";
 import { enqueueDocumentAnalysis } from "@/lib/document-jobs";
 import { centsToEuros } from "@/lib/money";
 import { consumeRateLimit } from "@/lib/rate-limit";
@@ -15,6 +14,15 @@ import {
   validateUploadBuffer,
   writePrivateUpload,
 } from "@/lib/storage";
+import {
+  STAGING_TTL_MS,
+  discardStagedUpload,
+  extractedFromStagedUpload,
+  findReceiptIdForUpload,
+  findReusableStagedUpload,
+  wantsAiUpgrade,
+  type StagedUploadRow,
+} from "@/lib/receipt-staging";
 import { buildReceiptMatchViews } from "@/lib/matching";
 import { buildReceiptWhere, ReceiptFilterError } from "@/lib/receipt-filters";
 import { noteRequest, timeDb } from "@/lib/observe";
@@ -34,60 +42,6 @@ function parseListOffset(raw: string | null): number | null {
   const offset = Number(raw);
   if (!Number.isSafeInteger(offset) || offset < 0 || offset > MAX_LIST_OFFSET) return null;
   return offset;
-}
-const STAGING_TTL_MS = 24 * 60 * 60 * 1000;
-
-type StagedUploadRow = {
-  id: string;
-  storageKey: string;
-  originalName: string;
-  mimeType: string;
-  extractedJson: string | null;
-  extractionSource: string | null;
-  confidence: number | null;
-  rawText: string | null;
-  claimedAt: Date | null;
-  expiresAt: Date;
-};
-
-function extractedFromStagedUpload(upload: StagedUploadRow): ExtractedReceipt {
-  const base = upload.extractedJson
-    ? (JSON.parse(upload.extractedJson) as Omit<
-        ExtractedReceipt,
-        "source" | "provenance" | "confidence" | "rawText"
-      >)
-    : {
-        vendor: null,
-        date: null,
-        totalAmount: null,
-        vatDetails: [],
-        category: null,
-        notes: null,
-        type: "meno" as const,
-        reference: null,
-        invoiceNumber: null,
-      };
-  return {
-    ...base,
-    type: base.type === "tulo" ? "tulo" : "meno",
-    source: upload.extractionSource === "ai" ? "ai" : "ocr",
-    provenance: upload.extractionSource === "ai" ? "openai-compatible" : "local-ocr",
-    confidence: upload.confidence ?? 0.25,
-    rawText: upload.rawText ?? undefined,
-  };
-}
-
-async function discardStagedUpload(userId: string, upload: { id: string; storageKey: string }) {
-  await removeUserUpload(userId, upload.storageKey).catch(() => {});
-  await prisma.upload.deleteMany({ where: { id: upload.id, userId, claimedAt: null } });
-}
-
-function wantsAiUpgrade(upload: StagedUploadRow): boolean {
-  return Boolean(
-    upload.extractedJson &&
-      upload.extractionSource !== "ai" &&
-      (process.env.LLM_API_KEY || process.env.COPILOT_GITHUB_TOKEN)
-  );
 }
 
 async function acceptStagedUpload(
@@ -131,24 +85,6 @@ async function acceptStagedUpload(
     uploadId: upload.id,
     filePath: upload.storageKey,
     originalName,
-  });
-}
-
-async function findReusableStagedUpload(userId: string, checksum: string) {
-  return prisma.upload.findFirst({
-    where: { userId, purpose: "receipt", sha256: checksum },
-    select: {
-      id: true,
-      storageKey: true,
-      originalName: true,
-      mimeType: true,
-      extractedJson: true,
-      extractionSource: true,
-      confidence: true,
-      rawText: true,
-      claimedAt: true,
-      expiresAt: true,
-    },
   });
 }
 
@@ -198,15 +134,12 @@ export async function POST(req: NextRequest) {
 
     const existing = await findReusableStagedUpload(session.userId!, checksum);
     if (existing?.claimedAt) {
-      const receipt = await prisma.receipt.findFirst({
-        where: { userId: session.userId!, uploadId: existing.id },
-        select: { id: true },
-      });
+      const receiptId = await findReceiptIdForUpload(session.userId!, existing.id);
       return noStoreJson(
         {
           error: "Tämä kuitti on jo tallennettu",
           code: "DUPLICATE_DOCUMENT",
-          receiptId: receipt?.id ?? null,
+          receiptId,
         },
         { status: 409 }
       );
