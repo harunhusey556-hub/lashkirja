@@ -4,6 +4,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { redirectResponse, sessionOptions, type SessionData } from "@/lib/session-options";
 import { readCredential } from "@/lib/auth-credential";
+import { isAppClientOrigin } from "@/lib/app-origins";
 
 export { redirectResponse, sessionOptions };
 export type { SessionData };
@@ -31,10 +32,6 @@ export type AuthenticatedSession = IronSession<SessionData> & {
 
 const SESSION_TOUCH_MS = 5 * 60 * 1000;
 
-// TODO(Task 2): wire the real isAppClientOrigin predicate here so a Cookie
-// header from the app's own origin is ignored for authentication.
-const isAppOrigin = () => false;
-
 /**
  * Returns the session if logged in, otherwise null. Accepts either an
  * Authorization: Bearer token or the iron-session cookie (see
@@ -52,7 +49,7 @@ export async function requireSession(req?: NextRequest): Promise<AuthenticatedSe
   const cookieValue = req
     ? req.cookies.get(sessionOptions.cookieName)?.value
     : (await cookies()).get(sessionOptions.cookieName)?.value;
-  const credential = await readCredential(requestHeaders, cookieValue, isAppOrigin);
+  const credential = await readCredential(requestHeaders, cookieValue, isAppClientOrigin);
   if (!credential) return null;
 
   const user = await prisma.user.findUnique({

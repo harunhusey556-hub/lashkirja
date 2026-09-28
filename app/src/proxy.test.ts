@@ -1,9 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { readdirSync, statSync } from "node:fs";
 import path from "node:path";
+import { sealData } from "iron-session";
 import { NextRequest } from "next/server";
 import { unstable_doesMiddlewareMatch } from "next/experimental/testing/server";
 import { PUBLIC_PAGES, config, isPublicPage, proxy } from "./proxy";
+import { sealBearerToken } from "@/lib/auth-credential";
+import { sessionOptions } from "@/lib/session-options";
+import { DEV_EMULATION_ORIGIN } from "@/lib/app-origins";
 
 const APP_DIR = path.resolve(__dirname, "app");
 
@@ -107,6 +111,112 @@ describe("proxy() request handling (signed out, no session cookie)", () => {
     const request = new NextRequest("http://127.0.0.1/login", { method: "GET" });
     const response = await proxy(request);
     expectPassThrough(response);
+  });
+});
+
+async function bearerHeader(): Promise<string> {
+  const { token } = await sealBearerToken({
+    userId: "user-1",
+    email: "demo@lashkirja.fi",
+    firstName: "Demo",
+    sessionId: "session-1",
+  });
+  return `Bearer ${token}`;
+}
+
+async function webCookie(): Promise<string> {
+  const sealed = await sealData(
+    { userId: "user-1", email: "demo@lashkirja.fi", firstName: "Demo" },
+    { password: sessionOptions.password as string, ttl: sessionOptions.ttl }
+  );
+  return `${sessionOptions.cookieName}=${sealed}`;
+}
+
+describe("proxy() CORS and app-origin gate (Task 2)", () => {
+  it("OPTIONS with an allowed app origin: 204 with the preflight headers", async () => {
+    const request = new NextRequest("http://127.0.0.1/api/dashboard", {
+      method: "OPTIONS",
+      headers: { origin: DEV_EMULATION_ORIGIN },
+    });
+    const response = await proxy(request);
+    expect(response.status).toBe(204);
+    expect(response.headers.get("access-control-allow-origin")).toBe(DEV_EMULATION_ORIGIN);
+    expect(response.headers.get("access-control-allow-methods")).toBe("GET, POST, PUT, PATCH, DELETE, OPTIONS");
+    expect(response.headers.get("access-control-allow-headers")).toBe(
+      "Authorization, Content-Type, Idempotency-Key, Accept"
+    );
+    expect(response.headers.get("access-control-max-age")).toBe("600");
+    expect(response.headers.get("vary")).toBe("Origin");
+    expect(response.headers.get("x-lashkirja-api-version")).toBe("1");
+    expect(response.headers.get("access-control-allow-credentials")).toBeNull();
+  });
+
+  it("OPTIONS with a foreign origin: 403, no Access-Control-* headers", async () => {
+    const request = new NextRequest("http://127.0.0.1/api/dashboard", {
+      method: "OPTIONS",
+      headers: { origin: "https://evil.test" },
+    });
+    const response = await proxy(request);
+    expect(response.status).toBe(403);
+    expect(response.headers.get("access-control-allow-origin")).toBeNull();
+    expect(response.headers.get("x-lashkirja-api-version")).toBe("1");
+  });
+
+  it("public API with an allowed origin: passes through with CORS + version headers", async () => {
+    const request = new NextRequest("http://127.0.0.1/api/auth/token", {
+      method: "POST",
+      headers: { origin: DEV_EMULATION_ORIGIN },
+    });
+    const response = await proxy(request);
+    expectPassThrough(response);
+    expect(response.headers.get("access-control-allow-origin")).toBe(DEV_EMULATION_ORIGIN);
+    expect(response.headers.get("access-control-expose-headers")).toBe(
+      "Retry-After, Content-Disposition, X-LashKirja-Api-Version"
+    );
+    expect(response.headers.get("x-lashkirja-api-version")).toBe("1");
+  });
+
+  it("protected API with a bearer: passes through with CORS + version headers", async () => {
+    const request = new NextRequest("http://127.0.0.1/api/dashboard", {
+      method: "GET",
+      headers: { origin: DEV_EMULATION_ORIGIN, authorization: await bearerHeader() },
+    });
+    const response = await proxy(request);
+    expectPassThrough(response);
+    expect(response.headers.get("access-control-allow-origin")).toBe(DEV_EMULATION_ORIGIN);
+    expect(response.headers.get("x-lashkirja-api-version")).toBe("1");
+  });
+
+  it("protected API with a cookie from the web (no Origin): passes through, no CORS headers", async () => {
+    const request = new NextRequest("http://127.0.0.1/api/dashboard", {
+      method: "GET",
+      headers: { cookie: await webCookie() },
+    });
+    const response = await proxy(request);
+    expectPassThrough(response);
+    expect(response.headers.get("access-control-allow-origin")).toBeNull();
+    expect(response.headers.get("x-lashkirja-api-version")).toBe("1");
+  });
+
+  it("protected API with a cookie plus an app Origin: 401 (the cookie is ignored for that origin)", async () => {
+    const request = new NextRequest("http://127.0.0.1/api/dashboard", {
+      method: "GET",
+      headers: { cookie: await webCookie(), origin: DEV_EMULATION_ORIGIN },
+    });
+    const response = await proxy(request);
+    expect(response.status).toBe(401);
+    expect(response.headers.get("access-control-allow-origin")).toBe(DEV_EMULATION_ORIGIN);
+  });
+
+  it("page route: unchanged, no CORS headers even with an app Origin present", async () => {
+    const request = new NextRequest("http://127.0.0.1/login", {
+      method: "GET",
+      headers: { origin: DEV_EMULATION_ORIGIN },
+    });
+    const response = await proxy(request);
+    expectPassThrough(response);
+    expect(response.headers.get("access-control-allow-origin")).toBeNull();
+    expect(response.headers.get("x-lashkirja-api-version")).toBeNull();
   });
 });
 

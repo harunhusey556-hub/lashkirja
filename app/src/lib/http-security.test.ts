@@ -79,6 +79,20 @@ describe("rejectCrossSite", () => {
     const response = rejectCrossSite(request({ origin: "not a url", host: "127.0.0.1:3791" }));
     expect(response?.status).toBe(403);
   });
+
+  it("passes an allowed app-client Origin even with sec-fetch-site: cross-site", () => {
+    const response = rejectCrossSite(
+      request({ origin: "capacitor://localhost", "sec-fetch-site": "cross-site" })
+    );
+    expect(response).toBeNull();
+  });
+
+  it("still blocks a foreign Origin declared cross-site", () => {
+    const response = rejectCrossSite(
+      request({ origin: "https://evil.test", "sec-fetch-site": "cross-site" })
+    );
+    expect(response?.status).toBe(403);
+  });
 });
 
 describe("rejectOversizedContentLength", () => {

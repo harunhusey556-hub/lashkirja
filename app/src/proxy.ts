@@ -3,9 +3,7 @@ import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 import { SessionData, sessionOptions } from "@/lib/session-options";
 import { readCredential } from "@/lib/auth-credential";
-
-// TODO(Task 2): wire the real isAppClientOrigin predicate here.
-const isAppOrigin = () => false;
+import { API_VERSION, corsPreflightHeaders, corsResponseHeaders, isAppClientOrigin } from "@/lib/app-origins";
 
 /**
  * Next.js 16 proxy — the replacement for middleware.ts.
@@ -127,32 +125,63 @@ function clearSessionCookie(response: NextResponse): NextResponse {
   return response;
 }
 
+/**
+ * Every /api/* response, whatever the Origin, carries the API version.
+ * When the Origin is an allowed app-client origin it also gets the CORS
+ * response headers (ACAO, expose-headers, Vary). This is the one place
+ * that sets these, so no /api/* return path in proxy() can miss it —
+ * including the proxy's own 401.
+ */
+function withApiHeaders(response: NextResponse, origin: string | null): NextResponse {
+  response.headers.set("X-LashKirja-Api-Version", String(API_VERSION));
+  if (origin && isAppClientOrigin(origin)) {
+    for (const [key, value] of Object.entries(corsResponseHeaders(origin))) {
+      response.headers.set(key, value);
+    }
+  }
+  return response;
+}
+
 export async function proxy(request: NextRequest) {
   const pathname = request.nextUrl.pathname;
 
   // --- API routes: decided once, and never fall through to the page gate ---
   if (pathname.startsWith("/api/")) {
+    const origin = request.headers.get("origin");
+
+    // Preflight is answered here, before any auth check, and for every
+    // /api/* path (public or protected) alike.
+    if (request.method === "OPTIONS") {
+      if (!origin || !isAppClientOrigin(origin)) {
+        return withApiHeaders(NextResponse.json({ error: "Pyyntö estettiin" }, { status: 403 }), null);
+      }
+      return withApiHeaders(new NextResponse(null, { status: 204, headers: corsPreflightHeaders(origin) }), origin);
+    }
+
     if (isPublicApi(pathname)) {
-      return NextResponse.next();
+      return withApiHeaders(NextResponse.next(), origin);
     }
     // Protected API routes (everything under /api/ except auth, cron, health).
     // Format-only check (no DB): a bearer token or a well-formed cookie
     // passes here, and each route handler's own requireSession() call does
     // the authoritative, DB-backed check (revocation, disabled account).
     const cookieValue = request.cookies.get(sessionOptions.cookieName)?.value;
-    const credential = await readCredential(request.headers, cookieValue, isAppOrigin);
+    const credential = await readCredential(request.headers, cookieValue, isAppClientOrigin);
     if (!credential) {
       // An invalid or missing cookie is signed-out already; clearing it here
       // stops the browser from resending garbage on every later request.
       // (Harmless no-op for a bearer-only caller, which never sent one.)
-      return clearSessionCookie(
-        NextResponse.json(
-          { error: { code: "UNAUTHORIZED", message: "Kirjautuminen vaaditaan" } },
-          { status: 401 }
-        )
+      return withApiHeaders(
+        clearSessionCookie(
+          NextResponse.json(
+            { error: { code: "UNAUTHORIZED", message: "Kirjautuminen vaaditaan" } },
+            { status: 401 }
+          )
+        ),
+        origin
       );
     }
-    return NextResponse.next();
+    return withApiHeaders(NextResponse.next(), origin);
   }
 
   // --- Page routes: protected unless explicitly public ---

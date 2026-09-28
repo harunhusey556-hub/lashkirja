@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { isAppClientOrigin } from "@/lib/app-origins";
 
 const JSON_BODY_LIMIT = 256 * 1024;
 
@@ -26,13 +27,20 @@ export function configuredOrigin(): string | null {
  * and rejected every same-origin form POST, login included.
  *
  * Behind a proxy that rewrites Host, set APP_ORIGIN.
+ *
+ * An allowed app-client Origin (the bundled iOS app, or its local
+ * emulation) always passes: those requests carry no ambient credentials —
+ * no cookie is ever read for them (see readCredential in auth-credential.ts)
+ * — so there is nothing here for a forged cross-site request to ride on.
  */
 export function rejectCrossSite(req: NextRequest): NextResponse | null {
+  const origin = req.headers.get("origin");
+  if (isAppClientOrigin(origin)) return null;
+
   if (req.headers.get("sec-fetch-site") === "cross-site") {
     return NextResponse.json({ error: "Pyyntö estettiin" }, { status: 403 });
   }
 
-  const origin = req.headers.get("origin");
   if (!origin) return null;
 
   const configured = configuredOrigin();

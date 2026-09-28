@@ -186,6 +186,10 @@ Funnel needs the Tailscale service running and the owner's tailnet to allow Funn
 
 Latency: a device **without** Tailscale reaches the app through a public Funnel relay (Frankfurt), which then reaches this PC. That hop is the slow part. Measured on 2026-09-28 while the PC was 90-100% busy: 1.5 to 2.7 s for the TLS handshake and 0.2 to 0.9 s per request. When the PC was less busy, a whole request took 0.7 to 1.0 s. A device **with** the Tailscale app switched on resolves the same URL straight to this PC over the tailnet: about 0.02 to 0.05 s to connect and a median 1.1 s throttled page load. Same URL, same cookie, no configuration change. A busy PC slows both paths, because the TLS for Funnel terminates in `tailscaled` on this machine.
 
+## App origin (bundled iOS app)
+
+The production API now also serves the bundled iOS app directly: it answers CORS preflight for `capacitor://localhost` (the app's Capacitor origin), accepts a bearer token instead of the session cookie, and stamps every `/api/*` response with `X-LashKirja-Api-Version: 1`. No `.env` change is needed for this — `MOBILE_APP_ORIGINS` only needs setting if the app is ever served from a different origin than the default `capacitor://localhost`.
+
 ## Enable Banking
 
 The redirect URL registered in the Enable Banking control panel must match `ENABLEBANKING_REDIRECT_URL` character for character:
