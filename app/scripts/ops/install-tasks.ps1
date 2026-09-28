@@ -78,7 +78,11 @@ Register-LkTask -Name 'LashKirja backup' -Script 'backup-local.ps1' `
 # off or asleep at any given run.
 $cronSettings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit (New-TimeSpan -Minutes 20) -MultipleInstances IgnoreNew `
   -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable
-$cronTrigger = New-ScheduledTaskTrigger -Once -At (Get-Date).Date -RepetitionInterval (New-TimeSpan -Hours 1) -RepetitionDuration ([TimeSpan]::MaxValue)
+# No -RepetitionDuration: Task Scheduler's XML duration field overflows on
+# [TimeSpan]::MaxValue ("P99999999DT23H59M59S" is rejected as out of
+# range). Omitting it is the documented way to repeat a -Once trigger
+# indefinitely.
+$cronTrigger = New-ScheduledTaskTrigger -Once -At (Get-Date).Date -RepetitionInterval (New-TimeSpan -Hours 1)
 Register-LkTask -Name 'LashKirja cron' -Script 'run-cron.ps1' `
   -Trigger $cronTrigger -Settings $cronSettings `
   -Description 'LashKirja hourly recurring-invoices + cleanup cron calls to 127.0.0.1:3300. CRON_SECRET is read from .env at run time, never stored in this task. See app/docs/ops-windows.md.'
