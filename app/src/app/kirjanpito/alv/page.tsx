@@ -41,6 +41,11 @@ interface ALVData {
   creditedInvoiceCount?: number;
 }
 
+// Extends a small inline text link's touch target to >=44px tall without
+// growing what's actually drawn (mirrors ActionPill's own before:-inset-y-1
+// trick, just with a bigger inset since this text is ~19px tall, not 36px).
+const HIT44 = "relative before:absolute before:inset-x-0 before:-inset-y-3 before:content-['']";
+
 /** One row inside a field-group Section, styled like a KeyValueList row. */
 function FieldRow({ label, value }: { label: string; value: ReactNode }) {
   return (
@@ -55,7 +60,7 @@ function FieldRow({ label, value }: { label: string; value: ReactNode }) {
 function FieldAmount({ value, href, ariaLabel }: { value: number; href?: string; ariaLabel: string }) {
   if (!href) return <>{formatEur(value)}</>;
   return (
-    <Link href={href} aria-label={ariaLabel} className="text-accent">
+    <Link href={href} aria-label={ariaLabel} className={`text-accent ${HIT44}`}>
       {formatEur(value)}
     </Link>
   );
@@ -156,7 +161,7 @@ export default function ALVRaporttiPage() {
           <p className="font-medium">OmaVero-luonnos</p>
           <p>
             Et ole merkinnyt olevasi ALV-rekisterissä (
-            <Link href="/asetukset/yritys" className="text-accent">
+            <Link href="/asetukset/yritys" className={`text-accent ${HIT44}`}>
               Asetukset
             </Link>
             ). Tämä raportti on vain arvio - ALV-ilmoitusta ei tarvitse antaa, jos et ole

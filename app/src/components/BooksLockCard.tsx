@@ -195,7 +195,13 @@ export default function BooksLockCard() {
       </Card>
 
       {precheck && (
-        <>
+        // role="status": a precheck result appears after a plain button
+        // press (no navigation, no dialog) - without a live region a screen
+        // reader user never learns it showed up at all.
+        <div role="status" className="space-y-6">
+          <p className="px-1 text-[15px] font-medium text-ink">
+            Ennen lukitusta ({formatMonth(precheck.month)})
+          </p>
           <Section title="Puuttuvat tositteet" count={precheck.missingDocuments.length}>
             <PrecheckRows items={precheck.missingDocuments} empty="Ei puuttuvia tositteita." />
           </Section>
@@ -205,7 +211,7 @@ export default function BooksLockCard() {
           <Section title="Luonnoslaskut" count={precheck.draftInvoices.length}>
             <PrecheckRows items={precheck.draftInvoices} empty="Ei luonnoslaskuja." />
           </Section>
-        </>
+        </div>
       )}
     </div>
   );

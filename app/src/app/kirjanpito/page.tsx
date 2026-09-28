@@ -4,8 +4,10 @@ import { useEffect, useState } from "react";
 import { PageTitle, Section, ListRow } from "@/components/ds";
 import { apiFetch, readJson } from "@/components/clientFetch";
 import { formatDayMonth, formatEur } from "@/lib/format";
-import { helsinkiMonthKey } from "@/lib/validation";
+import { helsinkiMonthKey, helsinkiQuarterKey } from "@/lib/validation";
 import { MONTHS } from "@/lib/finnish-months";
+import { vatDeadline, type VatPeriod } from "@/lib/vat-deadline";
+import { useProfile } from "@/app/asetukset/useProfile";
 
 /**
  * Phase 1 hub, restyled: one place for everything bookkeeping. Phase 3
@@ -53,41 +55,78 @@ function LockIcon() {
   );
 }
 
-/**
- * Kausiveroilmoitus (monthly VAT return) falls due on the 12th day of the
- * second calendar month after the tax period - e.g. a January period is due
- * 12 March.
- */
-function alvDueDate(period: string): Date {
-  const [year, month] = period.split("-").map(Number);
-  return new Date(Date.UTC(year, month - 1 + 2, 12));
+interface AlvInfo {
+  period: VatPeriod;
+  /** null for a yearly filer: /api/alv has no "whole year" period to query
+   * cheaply (its period schema only accepts "YYYY-MM" or "YYYY-Qn"), and
+   * showing a single month's figure mislabelled as the year's total would be
+   * actively misleading in a bookkeeping app - so the row shows the due date
+   * only, with neither an amount nor a maksettavaa/palautettavaa word. */
+  amount: number | null;
+  isRefund: boolean;
 }
 
-function alvRowSecondary(period: string): string {
-  const monthIndex = Number(period.slice(5, 7)) - 1;
-  const monthName = MONTHS[monthIndex] ?? period;
-  return `${monthName}, eräpäivä ${formatDayMonth(alvDueDate(period).toISOString())}`;
+/** "Syyskuu 2026" / "Q3/2026" / "2026", matching the label the ALV page itself uses for each kind. */
+function periodLabel(period: VatPeriod): string {
+  if (period.kind === "month") return `${MONTHS[period.month! - 1]} ${period.year}`;
+  if (period.kind === "quarter") return `Q${period.quarter}/${period.year}`;
+  return String(period.year);
+}
+
+function alvRowSecondary(info: AlvInfo): string {
+  const due = formatDayMonth(vatDeadline(info.period).toISOString());
+  const label = periodLabel(info.period);
+  if (info.amount === null) return `${label}, eräpäivä ${due}`;
+  return `${label}, ${info.isRefund ? "palautettavaa" : "maksettavaa"} ${due}`;
 }
 
 export default function KirjanpitoPage() {
-  const [alv, setAlv] = useState<{ amount: number; period: string } | null>(null);
+  const { profile } = useProfile();
+  const [alv, setAlv] = useState<AlvInfo | null>(null);
   const [openPurchases, setOpenPurchases] = useState<number | null>(null);
   const [bankName, setBankName] = useState<string | null>(null);
   const [hasBankAccounts, setHasBankAccounts] = useState<boolean | null>(null);
   const [lockedThrough, setLockedThrough] = useState<string | null | undefined>(undefined);
 
   useEffect(() => {
+    if (!profile) return;
     const controller = new AbortController();
-    const period = helsinkiMonthKey(new Date());
+    const now = new Date();
 
-    apiFetch(`/api/alv?period=${period}`, { signal: controller.signal })
-      .then((response) => readJson<{ field308: { amount: number; isRefund: boolean } }>(response, ""))
-      .then((data) => setAlv({ amount: data.field308.amount, period }))
-      .catch(() => {});
+    if (!profile.vatRegistered) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional sync-to-profile: clearing the ALV row the moment the profile itself says "not registered" is exactly the external-system sync this effect exists for
+      setAlv(null);
+    } else if (profile.vatPeriod === "quarter") {
+      const key = helsinkiQuarterKey(now);
+      const [year, quarterPart] = key.split("-Q");
+      const period: VatPeriod = { kind: "quarter", year: Number(year), quarter: Number(quarterPart) };
+      apiFetch(`/api/alv?period=${key}`, { signal: controller.signal })
+        .then((response) => readJson<{ field308: { amount: number; isRefund: boolean } }>(response, ""))
+        .then((data) => setAlv({ period, amount: data.field308.amount, isRefund: data.field308.isRefund }))
+        .catch(() => {});
+    } else if (profile.vatPeriod === "year") {
+      setAlv({ period: { kind: "year", year: now.getUTCFullYear() }, amount: null, isRefund: false });
+    } else {
+      const key = helsinkiMonthKey(now);
+      const period: VatPeriod = { kind: "month", year: Number(key.slice(0, 4)), month: Number(key.slice(5, 7)) };
+      apiFetch(`/api/alv?period=${key}`, { signal: controller.signal })
+        .then((response) => readJson<{ field308: { amount: number; isRefund: boolean } }>(response, ""))
+        .then((data) => setAlv({ period, amount: data.field308.amount, isRefund: data.field308.isRefund }))
+        .catch(() => {});
+    }
 
-    apiFetch("/api/purchase-invoices?status=open", { credentials: "include", signal: controller.signal })
-      .then((response) => readJson<{ invoices: unknown[] }>(response, ""))
-      .then((data) => setOpenPurchases(data.invoices.length))
+    return () => controller.abort();
+  }, [profile]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+
+    // The DB-side counts, not the (capped) invoice list: "open" here means
+    // "not yet paid or cancelled", which is `open` (not yet due) plus
+    // `overdue` (same raw status, just past its due date) together.
+    apiFetch("/api/purchase-invoices/counts", { credentials: "include", signal: controller.signal })
+      .then((response) => readJson<{ counts: { open: number; overdue: number } }>(response, ""))
+      .then((data) => setOpenPurchases(data.counts.open + data.counts.overdue))
       .catch(() => {});
 
     apiFetch("/api/bank-accounts", { credentials: "include", signal: controller.signal })
@@ -145,8 +184,8 @@ export default function KirjanpitoPage() {
           href="/kirjanpito/alv"
           leading={<PercentIcon />}
           title="ALV-ilmoitus"
-          amount={alv ? formatEur(alv.amount) : undefined}
-          secondary={alv ? alvRowSecondary(alv.period) : undefined}
+          amount={alv?.amount != null ? formatEur(alv.amount) : undefined}
+          secondary={alv ? alvRowSecondary(alv) : undefined}
         />
         <ListRow
           href="/kirjanpito/ostolaskut"
