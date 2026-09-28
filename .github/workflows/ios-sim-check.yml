@@ -11,13 +11,22 @@ name: iOS Simulator check
 # build that is never exported or signed for a device.
 
 on:
+  # GitHub only dispatches a workflow whose file is on the default branch.
+  # Until this file reaches main, a push that changes the harness itself runs
+  # it on the branch; afterwards `gh workflow run ios-sim-check.yml --ref <branch>`.
+  push:
+    branches: [feat/real-app-phase01]
+    paths:
+      - .github/workflows/ios-sim-check.yml
+      - app/scripts/ci/**
+      - app/src/lib/ci-autopilot/**
   workflow_dispatch:
     inputs:
       routes:
-        description: "Comma-separated routes the autopilot walks (each scrolled to the bottom and back)"
+        description: "Comma-separated routes the autopilot walks (each scrolled to the bottom and back). Empty = DEFAULT_ROUTES below"
         required: false
         type: string
-        default: "/dashboard,/laskut,/kirjanpito,/raportit,/kuitit,/pankki/tapahtumat,/asiakkaat,/toistuvat,/asetukset,/laskut/uusi"
+        default: ""
       device:
         description: "Simulator name, e.g. 'iPhone 16 Pro'. Empty = the newest iPhone on the runner"
         required: false
@@ -40,6 +49,7 @@ env:
   ENABLEBANKING_ENABLED: "false"
   MAIL_TRANSPORT: "json"
   API_PORT: "3000"
+  DEFAULT_ROUTES: "/dashboard,/laskut,/kirjanpito,/raportit,/kuitit,/pankki/tapahtumat,/asiakkaat,/toistuvat,/asetukset,/laskut/uusi"
 
 jobs:
   simulator:
@@ -152,8 +162,8 @@ jobs:
         env:
           APP_PATH: build/sim/Build/Products/Debug-iphonesimulator/App.app
           OUT: sim-artifacts
-          ROUTES: ${{ inputs.routes }}
-          DEVICE: ${{ inputs.device }}
+          ROUTES: ${{ inputs.routes || env.DEFAULT_ROUTES }}
+          DEVICE: ${{ inputs.device || '' }}
         run: bash scripts/ci/ios-sim-run.sh
 
       - name: Summary
