@@ -2,6 +2,8 @@
 
 import { useState } from "react";
 import { formatEur } from "@/lib/statement-client";
+import { Button } from "@/components/ui";
+import { ActionPill, Card, ListRow, MoreMenu } from "@/components/ds";
 
 interface ReviewQueueReceipt {
   id: string;
@@ -24,9 +26,19 @@ interface Props {
 
 const COLLAPSED_ROWS = 5;
 
+function rowSecondary(receipt: ReviewQueueReceipt): string {
+  const date = receipt.date ? new Date(receipt.date).toLocaleDateString("fi-FI") : "–";
+  return `${date} · ${receipt.fileName}`;
+}
+
+/** A unique accessible name per row's "..." menu: two receipts can share a vendor and a date. */
+function rowMenuLabel(receipt: ReviewQueueReceipt): string {
+  return `Lisää toimintoja: ${receipt.vendor || "Tuntematon myyjä"} ${receipt.fileName}`;
+}
+
 /**
  * A pending-review batch. Split by document origin, because a bank-drafted
- * sale and an emailed receipt need different wording and different actions —
+ * sale and an emailed receipt need different wording and different actions -
  * they were previously all shown as "sähköpostikuitit".
  *
  * Long batches stay collapsed to a handful of rows: 50 near-identical MobilePay
@@ -49,32 +61,25 @@ export default function ReviewQueue({
   const hidden = receipts.length - visible.length;
 
   return (
-    <div className="bg-warning/10 border border-warning/20 rounded-2xl p-4 shadow-sm">
+    <Card>
       <button
         type="button"
         onClick={() => setOpen((prev) => !prev)}
-        className="w-full flex items-center justify-between gap-3 text-left"
+        className="active-press flex w-full items-center justify-between gap-3 text-left"
         aria-expanded={open}
       >
         <div className="min-w-0">
-          <h3 className="text-sm font-medium text-warning-dark">
+          <h3 className="text-[15px] font-medium text-ink">
             {title} ({receipts.length})
           </h3>
-          <p className="text-xs text-charcoal/80 mt-1 leading-relaxed">
-            {description}
-          </p>
-          <p className="text-xs text-warm-gray mt-1 tabular-nums">
-            Yhteensä {formatEur(total)}
-          </p>
+          <p className="mt-1 text-[13px] leading-relaxed text-ink-2">{description}</p>
+          <p className="mt-1 text-[13px] tabular-nums text-ink-2">Yhteensä {formatEur(total)}</p>
         </div>
         <svg
-          xmlns="http://www.w3.org/2000/svg"
           viewBox="0 0 20 20"
           fill="currentColor"
           aria-hidden
-          className={`w-5 h-5 shrink-0 text-warning-dark transition-transform duration-300 ${
-            open ? "rotate-180" : ""
-          }`}
+          className={`h-5 w-5 shrink-0 text-ink-2 transition-transform ${open ? "rotate-180" : ""}`}
         >
           <path
             fillRule="evenodd"
@@ -85,64 +90,47 @@ export default function ReviewQueue({
       </button>
 
       {onApproveAll && (
-        <button
+        <Button
           type="button"
+          className="mt-3 w-full"
+          busy={bulkBusy}
+          busyLabel="Hyväksytään…"
           onClick={onApproveAll}
-          disabled={bulkBusy}
-          className="mt-3 w-full py-2.5 rounded-xl bg-success text-white text-sm font-medium hover:bg-success-dark transition-colors disabled:opacity-50"
         >
-          {bulkBusy
-            ? "Hyväksytään..."
-            : `Hyväksy kaikki ${receipts.length} kpl`}
-        </button>
+          Hyväksy kaikki {receipts.length} kpl
+        </Button>
       )}
 
       {open && (
-        <div className="space-y-2 mt-4">
-          {visible.map((r) => (
-            <div
-              key={r.id}
-              className="bg-white rounded-xl p-3 shadow-sm flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between"
-            >
-              <div className="min-w-0">
-                <p className="text-sm font-medium text-charcoal truncate">
-                  {r.vendor || "Tuntematon myyjä"}
-                </p>
-                <p className="text-xs text-warm-gray truncate">
-                  {r.date ? new Date(r.date).toLocaleDateString("fi-FI") : "–"} ·{" "}
-                  {r.totalAmount != null ? formatEur(r.totalAmount) : "–"}
-                </p>
-              </div>
-              <div className="flex gap-2 shrink-0">
-                <button
-                  type="button"
-                  onClick={() => onReview(r.id, "rejected")}
-                  className="flex-1 sm:flex-none min-h-11 px-3 py-2 text-xs font-medium text-danger hover:bg-danger/10 rounded-xl transition-colors border border-danger/30"
-                >
-                  {rejectLabel}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => onReview(r.id, "approved")}
-                  className="flex-1 sm:flex-none min-h-11 px-3 py-2 text-xs font-medium text-white bg-success hover:bg-success-dark rounded-xl transition-colors"
-                >
-                  Hyväksy
-                </button>
-              </div>
-            </div>
-          ))}
-
+        <div className="mt-3 -mx-4 border-t border-line">
+          <div className="divide-y divide-line">
+            {visible.map((r) => (
+              <ListRow
+                key={r.id}
+                title={r.vendor || "Tuntematon myyjä"}
+                amount={r.totalAmount != null ? formatEur(r.totalAmount) : "–"}
+                secondary={rowSecondary(r)}
+                trailing={
+                  <div className="flex items-center gap-1.5">
+                    <ActionPill onClick={() => onReview(r.id, "approved")}>Hyväksy</ActionPill>
+                    <MoreMenu
+                      label={rowMenuLabel(r)}
+                      items={[{ label: rejectLabel, onSelect: () => onReview(r.id, "rejected"), tone: "danger" as const }]}
+                    />
+                  </div>
+                }
+              />
+            ))}
+          </div>
           {hidden > 0 && (
-            <button
-              type="button"
-              onClick={() => setShowAll(true)}
-              className="w-full py-2.5 text-sm text-charcoal rounded-xl border border-warm-gray-light/60 hover:bg-white transition-colors"
-            >
-              Näytä loput {hidden} kpl
-            </button>
+            <div className="px-4 py-3">
+              <Button type="button" variant="secondary" className="w-full" onClick={() => setShowAll(true)}>
+                Näytä loput {hidden} kpl
+              </Button>
+            </div>
           )}
         </div>
       )}
-    </div>
+    </Card>
   );
 }

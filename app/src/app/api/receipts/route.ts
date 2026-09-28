@@ -4,7 +4,7 @@ import { prisma } from "@/lib/db";
 import { requireSession } from "@/lib/session";
 import type { ExtractedReceipt } from "@/lib/ai";
 import { enqueueDocumentAnalysis } from "@/lib/document-jobs";
-import { centsToEuros, eurosToCents } from "@/lib/money";
+import { centsToEuros } from "@/lib/money";
 import { consumeRateLimit } from "@/lib/rate-limit";
 import {
   MAX_RECEIPT_BYTES,
@@ -15,8 +15,8 @@ import {
   validateUploadBuffer,
   writePrivateUpload,
 } from "@/lib/storage";
-import { monthBoundsUtc, monthSchema } from "@/lib/validation";
 import { buildReceiptMatchViews } from "@/lib/matching";
+import { buildReceiptWhere, ReceiptFilterError } from "@/lib/receipt-filters";
 import { noteRequest, timeDb } from "@/lib/observe";
 import {
   noStoreJson,
@@ -308,45 +308,20 @@ export async function GET(req: NextRequest) {
   const maxAmount = url.searchParams.get("maxAmount");
   const sort = url.searchParams.get("sort") || "date_desc";
   const reviewStatus = url.searchParams.get("reviewStatus");
-  const where: Prisma.ReceiptWhereInput = { userId: session.userId };
 
-  if (reviewStatus === "pending") where.reviewStatus = "pending";
-  else if (reviewStatus === "rejected") where.reviewStatus = "rejected";
-  else if (reviewStatus === "all") {} // leave empty to fetch all
-  else where.reviewStatus = "approved"; // Default to approved only
-
-  if (month) {
-    const parsedMonth = monthSchema.safeParse(month);
-    if (!parsedMonth.success) return noStoreJson({ error: "Virheellinen kuukausi" }, { status: 400 });
-    const bounds = monthBoundsUtc(parsedMonth.data);
-    where.date = { gte: bounds.start, lt: bounds.end };
+  let where: Prisma.ReceiptWhereInput;
+  try {
+    where = buildReceiptWhere(session.userId!, { reviewStatus, month, q, category, source, minAmount, maxAmount });
+  } catch (error) {
+    if (error instanceof ReceiptFilterError) return noStoreJson({ error: error.message }, { status: 400 });
+    throw error;
   }
+
   if (type === "meno" || type === "tulo") where.type = type;
-  if (category) where.category = category;
-  if (source === "ai" || source === "ocr" || source === "manual") where.source = source;
 
   const linkedStatus = url.searchParams.get("linkedStatus");
   if (linkedStatus === "linked") where.linkedTransaction = { isNot: null };
   if (linkedStatus === "unlinked") where.linkedTransaction = null;
-
-  const amountFilter: { gte?: number; lte?: number } = {};
-  try {
-    if (minAmount != null && minAmount !== "") amountFilter.gte = eurosToCents(Number(minAmount));
-    if (maxAmount != null && maxAmount !== "") amountFilter.lte = eurosToCents(Number(maxAmount));
-  } catch {
-    return noStoreJson({ error: "Virheellinen summa" }, { status: 400 });
-  }
-  if (amountFilter.gte !== undefined && amountFilter.lte !== undefined && amountFilter.gte > amountFilter.lte) {
-    return noStoreJson({ error: "Summarajaus on virheellinen" }, { status: 400 });
-  }
-  if (Object.keys(amountFilter).length > 0) where.totalAmountCents = amountFilter;
-  if (q) {
-    where.OR = [
-      { vendor: { contains: q } },
-      { fileName: { contains: q } },
-      { category: { contains: q } },
-    ];
-  }
 
   let orderBy: Prisma.ReceiptOrderByWithRelationInput = { date: "desc" };
   if (sort === "date_asc") orderBy = { date: "asc" };

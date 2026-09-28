@@ -1,9 +1,9 @@
 "use client";
 
-import Link from "next/link";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { apiFetch, errorMessage, isUnauthorized, readJson, redirectToLogin } from "@/components/clientFetch";
 import { Button } from "@/components/ui";
+import { ActionPill, Card, FilterChips, ListRow, PageTitle, Section, StatusTag } from "@/components/ds";
 import { jobKindLabel, jobStatusLabel, workKindLabel } from "@/lib/job-labels";
 import { pollDelay, syncPageHiddenFlag } from "@/lib/page-activity";
 
@@ -36,10 +36,20 @@ const WORK_FILTERS = [
   "ambiguous_match",
 ] as const;
 
+type WorkFilter = (typeof WORK_FILTERS)[number];
+
+const JOB_STATUS_TONE: Record<string, "neutral" | "accent" | "danger" | "success" | "warning"> = {
+  pending: "neutral",
+  running: "accent",
+  failed: "danger",
+  done: "success",
+  cancelled: "neutral",
+};
+
 export default function TyotPage() {
   const [jobs, setJobs] = useState<JobRow[]>([]);
   const [items, setItems] = useState<WorkRow[]>([]);
-  const [filter, setFilter] = useState<(typeof WORK_FILTERS)[number]>("all");
+  const [filter, setFilter] = useState<WorkFilter>("all");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
   const [retryingId, setRetryingId] = useState<string | null>(null);
@@ -111,40 +121,52 @@ export default function TyotPage() {
     }
   }
 
+  // The work queue is never paginated or capped (see /api/work-queue), so
+  // counting the already-fetched rows for each chip is safe here - unlike a
+  // capped list, nothing past a page limit would be silently undercounted.
+  const workChips = useMemo(
+    () =>
+      WORK_FILTERS.map((kind) => ({
+        id: kind,
+        label: kind === "all" ? "Kaikki" : workKindLabel(kind),
+        count: kind === "all" ? items.length : items.filter((item) => item.kind === kind).length,
+      })),
+    [items]
+  );
   const visible = filter === "all" ? items : items.filter((item) => item.kind === filter);
 
   return (
-    <div className="space-y-6">
-      <div className="space-y-1">
-        <h2 className="text-xl font-medium text-charcoal">Työt ja poikkeukset</h2>
-        <p className="text-sm text-warm-gray">
-          Pankkihaun, sähköpostin ja kuitin analysoinnin tila sekä avoimet poikkeukset.
-        </p>
-      </div>
+    <div className="space-y-6 pb-6">
+      <PageTitle
+        title="Työt ja poikkeukset"
+        subtitle="Pankkihaun, sähköpostin ja kuitin analysoinnin tila sekä avoimet poikkeukset."
+      />
 
       {error && (
-        <p className="text-sm text-danger bg-danger/10 rounded-xl px-4 py-3" role="alert">
+        <p className="rounded-card bg-danger/10 px-4 py-3 text-sm text-danger" role="alert">
           {error}
         </p>
       )}
 
-      <section className="bg-white rounded-3xl border border-warm-gray-light/30 shadow-sm p-4 space-y-3">
-        <h3 className="text-sm font-semibold text-charcoal">Työt</h3>
+      <Card className="space-y-3">
+        <h2 className="text-[13px] text-ink-2">Työt</h2>
         {loading && jobs.length === 0 ? (
-          <p className="text-sm text-warm-gray">Ladataan…</p>
+          <p className="text-[13px] text-ink-2">Ladataan…</p>
         ) : jobs.length === 0 ? (
-          <p className="text-sm text-warm-gray">Ei taustatöitä.</p>
+          <p className="text-[13px] text-ink-2">Ei taustatöitä.</p>
         ) : (
-          <ul className="space-y-3">
-            {jobs.map((job) => (
-              <li key={job.id} className="rounded-2xl border border-warm-gray-light/40 px-3 py-3 space-y-1">
+          <ul>
+            {jobs.map((job, index) => (
+              <li key={job.id} className={`space-y-1.5 py-3 ${index === 0 ? "pt-0" : "border-t border-line"}`}>
                 <div className="flex items-start justify-between gap-3">
-                  <p className="text-sm font-medium text-charcoal break-words">{job.title}</p>
-                  <p className="text-xs text-warm-gray shrink-0">{jobStatusLabel(job.status)}</p>
+                  <p className="min-w-0 break-words text-[15px] font-medium text-ink">{job.title}</p>
+                  <StatusTag tone={JOB_STATUS_TONE[job.status] ?? "neutral"}>
+                    {jobStatusLabel(job.status)}
+                  </StatusTag>
                 </div>
-                <p className="text-xs text-warm-gray">{jobKindLabel(job.kind)}</p>
-                {job.progressLabel && <p className="text-xs text-warm-gray">{job.progressLabel}</p>}
-                {job.error && <p className="text-xs text-danger">{job.error}</p>}
+                <p className="text-[13px] text-ink-2">{jobKindLabel(job.kind)}</p>
+                {job.progressLabel && <p className="text-[13px] text-ink-2">{job.progressLabel}</p>}
+                {job.error && <p className="text-[13px] text-danger">{job.error}</p>}
                 {job.status === "failed" && job.kind === "document_analysis" && (
                   <Button
                     type="button"
@@ -159,46 +181,27 @@ export default function TyotPage() {
             ))}
           </ul>
         )}
-      </section>
+      </Card>
 
-      <section className="space-y-3">
-        <h3 className="text-sm font-semibold text-charcoal">Poikkeusjono</h3>
-        <div className="flex gap-2 overflow-x-auto pb-1">
-          {WORK_FILTERS.map((kind) => (
-            <button
-              key={kind}
-              type="button"
-              aria-pressed={filter === kind}
-              onClick={() => setFilter(kind)}
-              className={`shrink-0 min-h-11 px-3 rounded-full text-xs font-medium border ${
-                filter === kind
-                  ? "bg-charcoal text-white border-charcoal"
-                  : "bg-white text-charcoal border-warm-gray-light/50"
-              }`}
-            >
-              {kind === "all" ? "Kaikki" : workKindLabel(kind)}
-            </button>
-          ))}
-        </div>
+      <div className="space-y-3">
+        <h2 className="px-1 text-[13px] text-ink-2">Poikkeusjono</h2>
+        <FilterChips label="Suodata poikkeuksia" items={workChips} value={filter} onChange={setFilter} />
+
         {visible.length === 0 ? (
-          <p className="text-sm text-warm-gray">Ei avoimia poikkeuksia.</p>
+          <p className="px-1 text-[13px] text-ink-2">Ei avoimia poikkeuksia.</p>
         ) : (
-          <ul className="space-y-2">
+          <Section>
             {visible.map((item) => (
-              <li key={item.id} className="bg-white rounded-2xl border border-warm-gray-light/30 px-3 py-3">
-                <p className="text-xs text-warm-gray">{workKindLabel(item.kind)}</p>
-                <p className="text-sm font-medium text-charcoal">{item.title}</p>
-                <p className="text-xs text-warm-gray mt-1">{item.detail}</p>
-                {item.href && (
-                  <Link href={item.href} className="inline-flex min-h-11 items-center text-sm font-medium text-accent">
-                    Avaa
-                  </Link>
-                )}
-              </li>
+              <ListRow
+                key={item.id}
+                title={item.title}
+                secondary={`${workKindLabel(item.kind)} · ${item.detail}`}
+                trailing={item.href ? <ActionPill href={item.href}>Avaa</ActionPill> : undefined}
+              />
             ))}
-          </ul>
+          </Section>
         )}
-      </section>
+      </div>
     </div>
   );
 }
