@@ -200,42 +200,62 @@ export function errorMessage(error: unknown, fallback: string): string {
  * Used whenever an API call comes back 401 mid-session (cookie expired or was
  * cleared server-side). Carries a reason so the login screen can explain why
  * the user landed there instead of silently dropping them on a blank form.
+ *
+ * Guarded to one redirect per page lifetime: several widgets can each get a
+ * 401 back from the same dead session within one tick (a batch of parallel
+ * fetches all failing together), and without the guard each of them would
+ * call `location.replace` — harmless individually, but it turns "navigate
+ * once" into a redirect storm the browser has to unwind.
  */
+let redirectingToLogin = false;
 export function redirectToLogin(): void {
+  if (redirectingToLogin) return;
+  redirectingToLogin = true;
   window.location.replace("/login?error=expired");
 }
 
 /**
- * Ends the session server-side, fades the whole app out and lands on the
- * login screen. The fade lives on <body> (opacity only — a transform here
- * would re-anchor position:fixed bars mid-fade) so it works from any page.
- */
-/**
- * Ends the server session. Returns false when the call fails, without
- * navigating: the cookie may still be valid.
+ * Ends the server session. Returns false when the server call failed, but
+ * either way clears every client-visible trace of the session — cached
+ * pages and drafts — since a failed logout call is not evidence the session
+ * is still good; the safe assumption is that it is gone either way.
  */
 export async function signOut(): Promise<boolean> {
+  let ok: boolean;
   try {
     const response = await apiFetch("/api/auth/logout", {
       method: "POST",
       credentials: "include",
       headers: { Accept: "application/json" },
     });
-    if (!response.ok) return false;
+    ok = response.ok;
   } catch {
-    return false;
+    ok = false;
   }
   clearPageCache();
   clearAllDrafts();
-  return true;
+  return ok;
 }
 
-/** Navigates to login only after the server accepted the logout. */
+/**
+ * Ends the session server-side, fades the whole app out and lands on the
+ * login screen. The fade lives on <body> (opacity only — a transform here
+ * would re-anchor position:fixed bars mid-fade) so it works from any page.
+ *
+ * Navigates exactly once under normal conditions. A 3 s fallback guards the
+ * case where that navigation never commits — cancelled by the native shell,
+ * blocked, or otherwise dropped — so the page never sits faded and
+ * untappable (`pointer-events: none` from `signing-out`) forever.
+ */
 export async function leaveAfterSignOut(): Promise<boolean> {
   const ok = await signOut();
   if (logoutOutcome(ok) !== "login") return false;
   document.body.classList.add("signing-out");
   await new Promise((resolve) => setTimeout(resolve, 240));
   window.location.replace("/login");
+  setTimeout(() => {
+    document.body.classList.remove("signing-out");
+    window.location.assign("/login");
+  }, 3000);
   return true;
 }
