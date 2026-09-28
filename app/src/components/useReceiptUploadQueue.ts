@@ -56,7 +56,7 @@ interface InternalRow extends ReceiptQueueRow {
   ready?: ReadyUpload;
 }
 
-function validateUploadFile(file: File): string | null {
+export function validateUploadFile(file: File): string | null {
   if (file.size === 0) return "Tiedosto on tyhjä";
   if (file.size > MAX_UPLOAD_BYTES) return "Tiedosto on liian suuri (enintään 15 Mt)";
   const name = file.name.toLowerCase();
@@ -88,15 +88,26 @@ async function sleep(ms: number, signal: AbortSignal): Promise<void> {
   });
 }
 
-export function useReceiptUploadQueue(onReady: (upload: ReadyUpload) => void) {
+export function useReceiptUploadQueue(
+  onReady: (upload: ReadyUpload) => void,
+  /** Called instead of marking a row "failed" when an online attempt fails
+   * with a genuine network error (not a 4xx business rejection) -- Task 10's
+   * offline capture path. The caller (ReceiptEditor) enqueues the file into
+   * the offline receipt queue and leaves this screen; only ever passed on
+   * the mobile build. */
+  onNetworkFailure?: (file: File) => void
+) {
   const [rows, setRows] = useState<InternalRow[]>([]);
   const rowsRef = useRef<InternalRow[]>([]);
-  const onReadyRef = useRef(onReady);
+  // Both callbacks kept on one ref (one "always latest" assignment, not
+  // two) so this doesn't add a second react-hooks/refs lint error next to
+  // the pre-existing one this idiom already carries elsewhere in the file.
+  const callbacksRef = useRef({ onReady, onNetworkFailure });
   const draining = useRef(false);
   const cancelAll = useRef(false);
   const applied = useRef(false);
   const cancelListeners = useRef(new Map<string, () => void>());
-  onReadyRef.current = onReady;
+  callbacksRef.current = { onReady, onNetworkFailure };
 
   function commit(next: InternalRow[]) {
     rowsRef.current = next;
@@ -173,7 +184,7 @@ export function useReceiptUploadQueue(onReady: (upload: ReadyUpload) => void) {
     });
     if (!applied.current) {
       applied.current = true;
-      onReadyRef.current(ready);
+      callbacksRef.current.onReady(ready);
     }
   }
 
@@ -207,6 +218,16 @@ export function useReceiptUploadQueue(onReady: (upload: ReadyUpload) => void) {
               progress: "Käsittely jatkuu taustalla",
               error: "Näet tilanteen töistä. Muut tiedostot jatkuvat.",
             });
+            continue;
+          }
+          // A genuine network failure (timeout, gateway 502/503/504, or the
+          // connection simply dropped) never reaches readJson, so it is
+          // never an ApiError -- unlike a real 4xx business rejection, which
+          // always is. Task 10: on the mobile build this file is handed to
+          // the offline queue instead of being shown as "failed".
+          if (callbacksRef.current.onNetworkFailure && !(error instanceof ApiError)) {
+            callbacksRef.current.onNetworkFailure(next.file);
+            patch(next.localId, { status: "cancelled", progress: undefined, error: undefined });
             continue;
           }
           const existingId = duplicateReceiptId(error);
@@ -254,7 +275,7 @@ export function useReceiptUploadQueue(onReady: (upload: ReadyUpload) => void) {
 
   function useReady(localId: string) {
     const row = rowsRef.current.find((item) => item.localId === localId);
-    if (row?.ready) onReadyRef.current(row.ready);
+    if (row?.ready) callbacksRef.current.onReady(row.ready);
   }
 
   const visible: ReceiptQueueRow[] = rows.map(({ file: _file, ready: _ready, jobId: _jobId, ...row }) => row);

@@ -13,6 +13,7 @@ import {
 } from "@/components/clientFetch";
 import type { StatementData } from "@/lib/statement-client";
 import { statementListHref } from "@/lib/navigation";
+import { readPageCache, writePageCache } from "@/lib/page-cache";
 
 export default function StatementDetailPage() {
   const router = useRouter();
@@ -20,8 +21,11 @@ export default function StatementDetailPage() {
   const statementId = searchParams.get("id") ?? "";
   const listHref = statementListHref(searchParams.toString());
 
-  const [statement, setStatement] = useState<StatementData | null>(null);
-  const [loading, setLoading] = useState(true);
+  // Task 7-style instant paint: a cached copy renders immediately while
+  // `loadStatement()` (below) confirms or refreshes it in the background.
+  const cachedStatement = statementId ? readPageCache<StatementData>(`statement:${statementId}`) : null;
+  const [statement, setStatement] = useState<StatementData | null>(cachedStatement);
+  const [loading, setLoading] = useState(!cachedStatement);
   const [loadError, setLoadError] = useState("");
 
   const loadStatement = useCallback(async () => {
@@ -39,11 +43,16 @@ export default function StatementDetailPage() {
       );
       setStatement(data.statement ?? null);
       setLoadError("");
+      if (data.statement) writePageCache(`statement:${statementId}`, data.statement);
     } catch (error: unknown) {
       if (isUnauthorized(error)) {
         redirectToLogin();
         return;
       }
+      // A cached copy already on screen (readPageCache above) stays up
+      // rather than being replaced by the error screen -- only a
+      // statement never seen before goes to the error state.
+      if (readPageCache<StatementData>(`statement:${statementId}`)) return;
       setLoadError(errorMessage(error, "Tiliotteen lataus epäonnistui"));
       setStatement(null);
     } finally {

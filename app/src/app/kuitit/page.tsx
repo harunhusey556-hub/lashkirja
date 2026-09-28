@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import ConfirmModal from "@/components/ConfirmModal";
+import QueuedReceiptsCard from "@/components/QueuedReceiptsCard";
 import ReviewQueue from "@/components/ReviewQueue";
 import { SkeletonList } from "@/components/AsyncState";
 import { ConnectionNotice, EmptyState, StaleBanner } from "@/components/ScreenState";
@@ -85,6 +86,11 @@ export default function KuititPage() {
   const [actionError, setActionError] = useState("");
   const [loadAttempt, setLoadAttempt] = useState(0);
   const [tabCounts, setTabCounts] = useState<ReceiptTabCounts>(ZERO_RECEIPT_TAB_COUNTS);
+  // Task 10: set once, right after the offline capture path (ReceiptEditor)
+  // sends the user back here -- read from the URL rather than router state
+  // so it survives the redirect cleanly, then stripped so a later back
+  // navigation to this exact URL does not re-show it.
+  const [offlineCaptureNotice, setOfflineCaptureNotice] = useState(false);
 
   const [pendingReceipts, setPendingReceipts] = useState<SavedReceipt[]>(
     () => readPageCache<SavedReceipt[]>("receipts-pending") ?? []
@@ -126,6 +132,13 @@ export default function KuititPage() {
     }
     // A report link sets the filter once; later edits stay on this page.
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).get("offline") !== "1") return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional one-shot read of a value left by the offline-capture redirect, not state derived from props/state here
+    setOfflineCaptureNotice(true);
+    window.history.replaceState(null, "", "/kuitit");
   }, []);
 
   // Debounce search typing
@@ -655,6 +668,14 @@ export default function KuititPage() {
         <Link href="/tyot" className="active-press -mt-4 inline-flex min-h-11 items-center px-1 text-[13px] font-medium text-accent">
           Työt ja poikkeukset
         </Link>
+
+        {offlineCaptureNotice && (
+          <p className="rounded-card bg-accent-soft px-4 py-3 text-sm text-ink" role="status">
+            Ei yhteyttä. Kuva tallennettiin ja lähetetään automaattisesti, kun yhteys palaa.
+          </p>
+        )}
+
+        <QueuedReceiptsCard />
 
         {loadingPending && pendingReceipts.length === 0 && (
           <div className="h-24 animate-pulse rounded-card border border-line bg-surface" />

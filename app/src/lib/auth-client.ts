@@ -18,6 +18,7 @@ import { clearAllDrafts } from "@/lib/draft-store";
 import { wipePersistentCache } from "@/lib/offline/persistent-cache";
 import { configureHttpCachePersistence } from "@/lib/offline/http-cache";
 import { activatePersistentCache } from "@/lib/mobile/boot";
+import { resetOfflineReceiptQueueForLogout } from "@/components/useOfflineReceiptQueue";
 
 export interface StoredAuth {
   token: string;
@@ -203,6 +204,11 @@ async function clearClientAuthState(): Promise<void> {
   await wipePersistentCache();
   configurePageCachePersistence(null);
   configureHttpCachePersistence(null);
+  // Task 10: the offline receipt queue is cleared alongside the cache --
+  // any photo still waiting to send is lost with the rest of this device's
+  // signed-in state (the profile sheet's logout confirmation warns about
+  // this first when the queue is non-empty).
+  await resetOfflineReceiptQueueForLogout();
   notifyListeners(null);
 }
 

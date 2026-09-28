@@ -27,6 +27,7 @@ import { detailHref } from "@/lib/routes";
 import { Button, buttonClass, controlClass } from "@/components/ui";
 import { Bell } from "lucide-react";
 import { BottomActions, DetailHero, Icon, KeyValueList, MoreMenu, Section, StatusTag, Timeline } from "@/components/ds";
+import { readPageCache, writePageCache } from "@/lib/page-cache";
 
 interface ReminderPreview {
   level: number;
@@ -172,8 +173,11 @@ function InvoiceDetail() {
   const id = useSearchParams().get("id") ?? "";
   const router = useRouter();
 
-  const [invoice, setInvoice] = useState<Invoice | null>(null);
-  const [state, setState] = useState<"loading" | "ready" | "error">("loading");
+  // Task 7-style instant paint: a cached copy renders immediately while
+  // `load()` (below) confirms or refreshes it in the background.
+  const cachedInvoice = id ? readPageCache<Invoice>(`invoice:${id}`) : null;
+  const [invoice, setInvoice] = useState<Invoice | null>(cachedInvoice);
+  const [state, setState] = useState<"loading" | "ready" | "error">(cachedInvoice ? "ready" : "loading");
   const [message, setMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [paymentAmount, setPaymentAmount] = useState("");
@@ -230,6 +234,7 @@ function InvoiceDetail() {
       setInvoice(data.invoice);
       setPaymentAmount(String(data.invoice.open > 0 ? data.invoice.open : "").replace(".", ","));
       setState("ready");
+      writePageCache(`invoice:${id}`, data.invoice);
 
       if (data.invoice.displayStatus === "overdue") {
         await loadReminderPreview();
@@ -242,6 +247,10 @@ function InvoiceDetail() {
         redirectToLogin();
         return;
       }
+      // A cached copy already on screen stays up rather than being
+      // replaced by the error screen -- only an invoice never seen before
+      // goes to "error".
+      if (readPageCache<Invoice>(`invoice:${id}`)) return;
       setMessage(errorMessage(error, "Laskun haku epäonnistui"));
       setState("error");
     }

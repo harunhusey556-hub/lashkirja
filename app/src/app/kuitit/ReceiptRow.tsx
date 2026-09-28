@@ -10,7 +10,7 @@ import { RECEIPT_MATCH_STATUS, receiptMatchStatusKey } from "@/lib/status-labels
 import { detailHref } from "@/lib/routes";
 import type { SavedReceipt } from "./types";
 
-const SOURCE_LABEL: Record<string, string> = { ai: "AI", ocr: "OCR" };
+const SOURCE_LABEL: Record<string, string> = { ai: "AI", ocr: "OCR", app_capture: "Kuvattu sovelluksessa" };
 
 function sourceLabel(source: string): string {
   return SOURCE_LABEL[source] ?? "Manuaalinen";

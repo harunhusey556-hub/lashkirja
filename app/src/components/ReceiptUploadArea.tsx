@@ -48,6 +48,10 @@ interface ReceiptUploadAreaProps {
   uploading: boolean;
   uploadProgress: string;
   uploadQueue: ReturnType<typeof useReceiptUploadQueue>;
+  /** Every picked file funnels through here first -- ReceiptEditor decides
+   * whether it goes into the online upload queue or, offline in the mobile
+   * build, straight into the offline receipt queue (Task 10). */
+  onFilesPicked: (files: File[]) => void;
   onPickCamera: () => void;
   onPickPhoto: () => void;
   onPickFile: () => void;
@@ -61,6 +65,7 @@ export default function ReceiptUploadArea({
   uploading,
   uploadProgress,
   uploadQueue,
+  onFilesPicked,
   onPickCamera,
   onPickPhoto,
   onPickFile,
@@ -74,7 +79,7 @@ export default function ReceiptUploadArea({
         multiple
         aria-label="Valitse kuitti tai lasku tiedostona"
         className="hidden"
-        onChange={(e) => enqueueFromInput(e, uploadQueue.enqueue)}
+        onChange={(e) => enqueueFromInput(e, onFilesPicked)}
       />
       <input
         ref={cameraInputRef}
@@ -83,7 +88,7 @@ export default function ReceiptUploadArea({
         capture="environment"
         aria-label="Ota kuva kuitista tai laskusta"
         className="hidden"
-        onChange={(e) => enqueueFromInput(e, uploadQueue.enqueue)}
+        onChange={(e) => enqueueFromInput(e, onFilesPicked)}
       />
       <input
         ref={photoInputRef}
@@ -92,7 +97,7 @@ export default function ReceiptUploadArea({
         multiple
         aria-label="Valitse kuvia kuvakirjastosta"
         className="hidden"
-        onChange={(e) => enqueueFromInput(e, uploadQueue.enqueue)}
+        onChange={(e) => enqueueFromInput(e, onFilesPicked)}
       />
 
       <div className="space-y-4 rounded-card border border-line bg-surface p-6 text-center">

@@ -44,9 +44,13 @@ import {
   RECEIPT_CATEGORIES,
 } from "@/lib/receipt-categories";
 import { RECEIPT_MATCH_STATUS, receiptMatchStatusKey } from "@/lib/status-labels";
-import { useReceiptUploadQueue, type ReadyUpload } from "@/components/useReceiptUploadQueue";
+import { readPageCache, writePageCache } from "@/lib/page-cache";
+import { useReceiptUploadQueue, validateUploadFile, type ReadyUpload } from "@/components/useReceiptUploadQueue";
 import ReceiptUploadArea from "@/components/ReceiptUploadArea";
 import { BottomActions, DetailHero, MoreMenu, PageTitle, Section, StatusTag } from "@/components/ds";
+import { IS_MOBILE_BUILD } from "@/lib/build-target";
+import { useConnectivity } from "@/lib/connectivity";
+import { useOfflineReceiptQueue } from "@/components/useOfflineReceiptQueue";
 
 const LABEL_CLASS = "mb-1.5 block text-[13px] font-normal text-ink-2";
 /** Same recipe as controlClass (see components/ui.tsx) but with a swappable border
@@ -156,6 +160,13 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
     onRestore: setFormData,
   });
 
+  const connectivity = useConnectivity();
+  const offlineQueue = useOfflineReceiptQueue();
+  // Guards a batch pick (photo library allows several) so a network
+  // failure on the first file only sends this screen away once, not once
+  // per remaining file in the same drain pass.
+  const offlineNavigatedRef = useRef(false);
+
   function applyUpload(upload: ReadyUpload) {
     const knownCategory = isKnownCategory(upload.extracted.category);
     setUploadId(upload.uploadId);
@@ -191,7 +202,41 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
     setUploadProgress(RECEIPT_PHASE.review);
   }
 
-  const uploadQueue = useReceiptUploadQueue(applyUpload);
+  /** Task 10: the file goes to the offline queue instead of the online
+   * upload, and the screen returns to Kuitit -- called both when
+   * connectivity is already down at pick time and when an in-flight online
+   * upload fails with a genuine network error. Mobile only; on the web
+   * build a network failure still shows as a normal "failed" row. */
+  async function captureOffline(files: File[]) {
+    if (offlineNavigatedRef.current) return;
+    offlineNavigatedRef.current = true;
+    await offlineQueue.enqueueFiles(files);
+    router.push("/kuitit?offline=1");
+  }
+
+  function isConnectivityOk(): boolean {
+    return connectivity.device === "online" && connectivity.server === "ok";
+  }
+
+  function handleFilesPicked(files: File[]) {
+    const invalid = files.map((file) => validateUploadFile(file)).find((message) => message);
+    if (invalid) {
+      setError(invalid);
+      return;
+    }
+    if (IS_MOBILE_BUILD && !isConnectivityOk()) {
+      void captureOffline(files);
+      return;
+    }
+    setError("");
+    uploadQueue.enqueue(files);
+  }
+
+  function handleUploadNetworkFailure(file: File) {
+    void captureOffline([file]);
+  }
+
+  const uploadQueue = useReceiptUploadQueue(applyUpload, IS_MOBILE_BUILD ? handleUploadNetworkFailure : undefined);
 
   async function pickNativeOrInput(
     native: () => Promise<NativePick>,
@@ -211,8 +256,7 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
       return;
     }
     if (picked.kind === "files") {
-      setError("");
-      uploadQueue.enqueue(picked.files);
+      handleFilesPicked(picked.files);
     }
   }
   const uploading = uploadQueue.rows.some(
@@ -252,6 +296,77 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
     };
   }, [formReady, formData.vendor]);
 
+  /** Shared by the cache-seeded paint below and the live fetch's own
+   * success handler, so both apply a `ReceiptResponse["receipt"]` the same
+   * way (Task 7-style page-cache wiring for the detail pages). */
+  function applyReceiptResponse(r: NonNullable<ReceiptResponse["receipt"]>) {
+    let vatDetails = [{ rate: "25.5", amount: "" }];
+    if (r.vatDetails) {
+      try {
+        const details = JSON.parse(r.vatDetails) as {
+          rate: number;
+          amount: number;
+        }[];
+        if (details.length > 0) {
+          vatDetails = details.map((detail) => ({
+            rate: String(detail.rate),
+            amount: String(detail.amount),
+          }));
+        }
+      } catch {
+        /* ignore */
+      }
+    }
+    setFilePath(r.filePath || "");
+    setOriginalName(r.fileName || "");
+    setMeta({
+      source: r.source || "manual",
+      confidence: r.confidence ?? null,
+      rawText: r.rawText,
+    });
+    const knownCategory = isKnownCategory(r.category);
+    const loaded = {
+      vendor: r.vendor || "",
+      date: r.date ? String(r.date).slice(0, 10) : "",
+      totalAmount: r.totalAmount != null ? String(r.totalAmount) : "",
+      category: knownCategory ? r.category || "" : "",
+      customCategory: knownCategory ? "" : r.category || "",
+      notes: r.notes || "",
+      type: r.type === "tulo" ? "tulo" : "meno",
+      vatDetails,
+      reference: r.reference || "",
+      invoiceNumber: r.invoiceNumber || "",
+    };
+    setFormData(loaded);
+    setBaseline(loaded);
+    setUpdatedAt(r.updatedAt ? String(r.updatedAt) : "");
+    setConflict(false);
+    setUseCustomCategory(!knownCategory && Boolean(r.category));
+    setLinkedTx(r.linkedTransaction || null);
+    setMatchData(
+      r.match ?? {
+        status: r.linkedTransaction ? "linked" : "unlinked",
+        matchCandidates: [],
+      }
+    );
+    setError("");
+    setNotFound(false);
+    setFormReady(true);
+  }
+
+  // Instant paint from the last-seen copy (mobile: persisted across a
+  // relaunch, Task 7) -- applied once per id, before the network request
+  // below either confirms it or replaces it with a fresher one.
+  useEffect(() => {
+    if (!receiptId) return;
+    const cached = readPageCache<ReceiptResponse["receipt"]>(`receipt:${receiptId}`);
+    if (cached) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional one-shot read of a value left by an earlier visit (Task 7's persistent cache), not state derived from props/state here
+      applyReceiptResponse(cached);
+      setLoading(false);
+    }
+  }, [receiptId]);
+
   useEffect(() => {
     if (!receiptId) return;
     const controller = new AbortController();
@@ -261,59 +376,8 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
       )
       .then((d) => {
         if (!d.receipt || controller.signal.aborted) return;
-        const r = d.receipt;
-        let vatDetails = [{ rate: "25.5", amount: "" }];
-        if (r.vatDetails) {
-          try {
-            const details = JSON.parse(r.vatDetails) as {
-              rate: number;
-              amount: number;
-            }[];
-            if (details.length > 0) {
-              vatDetails = details.map((detail) => ({
-                rate: String(detail.rate),
-                amount: String(detail.amount),
-              }));
-            }
-          } catch {
-            /* ignore */
-          }
-        }
-        setFilePath(r.filePath || "");
-        setOriginalName(r.fileName || "");
-        setMeta({
-          source: r.source || "manual",
-          confidence: r.confidence ?? null,
-          rawText: r.rawText,
-        });
-        const knownCategory = isKnownCategory(r.category);
-        const loaded = {
-          vendor: r.vendor || "",
-          date: r.date ? String(r.date).slice(0, 10) : "",
-          totalAmount: r.totalAmount != null ? String(r.totalAmount) : "",
-          category: knownCategory ? r.category || "" : "",
-          customCategory: knownCategory ? "" : r.category || "",
-          notes: r.notes || "",
-          type: r.type === "tulo" ? "tulo" : "meno",
-          vatDetails,
-          reference: r.reference || "",
-          invoiceNumber: r.invoiceNumber || "",
-        };
-        setFormData(loaded);
-        setBaseline(loaded);
-        setUpdatedAt(r.updatedAt ? String(r.updatedAt) : "");
-        setConflict(false);
-        setUseCustomCategory(!knownCategory && Boolean(r.category));
-        setLinkedTx(r.linkedTransaction || null);
-        setMatchData(
-          r.match ?? {
-            status: r.linkedTransaction ? "linked" : "unlinked",
-            matchCandidates: [],
-          }
-        );
-        setError("");
-        setNotFound(false);
-        setFormReady(true);
+        applyReceiptResponse(d.receipt);
+        writePageCache(`receipt:${receiptId}`, d.receipt);
       })
       .catch((loadError: unknown) => {
         if (controller.signal.aborted) return;
@@ -326,6 +390,10 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
           setError("Kuittia ei löytynyt");
           return;
         }
+        // A cached copy (just applied above, or from an earlier mount) is
+        // left on screen rather than replaced by the error screen -- see
+        // the `isEdit && error && !formReady` render guard below, which
+        // only fires when nothing has ever been shown for this receipt.
         setError(errorMessage(loadError, "Kuitin lataus epäonnistui"));
       })
       .finally(() => {
@@ -735,6 +803,7 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
           uploading={uploading}
           uploadProgress={uploadProgress}
           uploadQueue={uploadQueue}
+          onFilesPicked={handleFilesPicked}
           onPickCamera={() => void pickNativeOrInput(() => captureWithCamera(), cameraInputRef.current)}
           onPickPhoto={() => void pickNativeOrInput(() => choosePhotoLibrary(), photoInputRef.current)}
           onPickFile={() => void pickDocument()}

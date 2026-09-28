@@ -23,6 +23,7 @@ import { BottomActions, DetailHero, KeyValueList, ListRow, MoreMenu, Section, St
 import { SALES_STATUS } from "@/lib/status-labels";
 import { clearDraft } from "@/lib/draft-store";
 import { detailHref } from "@/lib/routes";
+import { readPageCache, writePageCache } from "@/lib/page-cache";
 
 interface CustomerDetail {
   customer: {
@@ -69,10 +70,14 @@ function CustomerDetail() {
   const id = useSearchParams().get("id") ?? "";
   const router = useRouter();
 
-  const [detail, setDetail] = useState<CustomerDetail | null>(null);
+  const cacheKey = id ? `customer:${id}` : "";
+  const cachedDetail = id ? readPageCache<CustomerDetail>(cacheKey) : null;
+  const [detail, setDetail] = useState<CustomerDetail | null>(cachedDetail);
   const [others, setOthers] = useState<Array<{ id: string; name: string }>>([]);
   const [mergeId, setMergeId] = useState("");
-  const [state, setState] = useState<"loading" | "ready" | "error">("loading");
+  // Task 7-style instant paint: a cached copy renders immediately while
+  // `load()` (below) confirms or refreshes it in the background.
+  const [state, setState] = useState<"loading" | "ready" | "error">(cachedDetail ? "ready" : "loading");
   const [message, setMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
@@ -100,11 +105,16 @@ function CustomerDetail() {
       setDetail(data);
       setOthers(listed.customers.filter((customer) => customer.id !== id));
       setState("ready");
+      writePageCache(`customer:${id}`, data);
     } catch (error) {
       if (isUnauthorized(error)) {
         redirectToLogin();
         return;
       }
+      // A cached copy already on screen (readPageCache above, or an earlier
+      // successful load) stays up rather than being replaced by the error
+      // screen -- only a customer never seen before goes to "error".
+      if (readPageCache<CustomerDetail>(`customer:${id}`)) return;
       setMessage(errorMessage(error, "Asiakkaan haku epäonnistui"));
       setState("error");
     }

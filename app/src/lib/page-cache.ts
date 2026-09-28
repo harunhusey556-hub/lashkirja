@@ -148,7 +148,7 @@ export function clearPageCachePrefix(prefix: string): string[] {
 const MUTATION_PREFIXES: Array<{ match: (path: string) => boolean; prefixes: string[] }> = [
   {
     match: (path) => path.includes("/api/invoices") || path.includes("/api/recurring-invoices"),
-    prefixes: ["invoices", "dashboard:", "report:", "alv:", "customers", "recurring"],
+    prefixes: ["invoices", "invoice:", "dashboard:", "report:", "alv:", "customers", "recurring"],
   },
   {
     match: (path) => path.includes("/api/purchase-invoices"),
@@ -156,11 +156,11 @@ const MUTATION_PREFIXES: Array<{ match: (path: string) => boolean; prefixes: str
   },
   {
     match: (path) => path.includes("/api/receipts") || path.includes("/api/matching"),
-    prefixes: ["receipts", "jobs", "work-queue", "dashboard:", "report:", "alv:"],
+    prefixes: ["receipts", "receipt:", "jobs", "work-queue", "dashboard:", "report:", "alv:"],
   },
   {
     match: (path) => path.includes("/api/statements"),
-    prefixes: ["statements", "bank-overview", "dashboard:", "report:"],
+    prefixes: ["statements", "statement:", "bank-overview", "dashboard:", "report:"],
   },
   {
     match: (path) =>
@@ -169,7 +169,7 @@ const MUTATION_PREFIXES: Array<{ match: (path: string) => boolean; prefixes: str
   },
   {
     match: (path) => path.includes("/api/customers"),
-    prefixes: ["customers", "invoices"],
+    prefixes: ["customers", "customer:", "invoices"],
   },
   {
     match: (path) =>
