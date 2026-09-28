@@ -4,7 +4,7 @@ const serverUrl = process.env.CAPACITOR_SERVER_URL?.trim();
 
 const config: CapacitorConfig = {
   appId: "fi.tiyouba.lashkirja",
-  appName: "Tilikirja",
+  appName: "LashKirja",
   webDir: "public",
   server: serverUrl
     ? {

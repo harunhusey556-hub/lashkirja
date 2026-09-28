@@ -5,9 +5,9 @@
   <key>CAPACITOR_DEBUG</key>
 	<string>$(CAPACITOR_DEBUG)</string>
 	<key>CFBundleDevelopmentRegion</key>
-	<string>en</string>
+	<string>fi</string>
 	<key>CFBundleDisplayName</key>
-        <string>Tilikirja</string>
+        <string>LashKirja</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
@@ -49,7 +49,7 @@
 	<string>Main</string>
 	<key>UIRequiredDeviceCapabilities</key>
 	<array>
-		<string>armv7</string>
+		<string>arm64</string>
 	</array>
 	<key>UISupportedInterfaceOrientations</key>
 	<array>
@@ -67,17 +67,19 @@
 	<key>UIViewControllerBasedStatusBarAppearance</key>
 	<true/>
 	<key>NSCameraUsageDescription</key>
-	<string>Tilikirja käyttää kameraa, kun otat kuvan kuitista tai laskusta.</string>
+	<string>LashKirja käyttää kameraa kuittien kuvaamiseen.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
-	<string>Tilikirja tarvitsee kuvat, myös rajatun valinnan, jotta voit liittää kuitin kuvakirjastosta.</string>
+	<string>LashKirja lukee kuvia kuittien lisäämiseksi.</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
-	<string>Tilikirja voi tallentaa kuittikuvan kuvakirjastoon, jos tallennat sen sinne.</string>
+	<string>LashKirja voi tallentaa kuittikuvan kuvakirjastoon, jos tallennat sen sinne.</string>
 	<key>NSFaceIDUsageDescription</key>
-	<string>Tilikirja käyttää Face ID:tä näytön lukituksen avaamiseen tällä laitteella.</string>
+	<string>LashKirja käyttää Face ID:tä näytön lukituksen avaamiseen tällä laitteella.</string>
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<key>NSAllowsLocalNetworking</key>
 		<true/>
 	</dict>
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
 </dict>
 </plist>

@@ -28,6 +28,7 @@ echo "Native plugin or scroll changes need a new IPA. A web commit alone does no
 echo "Syncing Capacitor iOS project..."
 npx cap sync ios
 npx tsx scripts/patch-ios-url-scheme.ts
+npx tsx scripts/patch-ios-offline-server.ts
 
 # Capacitor SPM ships ios/App/App.xcodeproj. App.xcworkspace exists only after CocoaPods.
 echo "Archiving $SCHEME ($CONFIGURATION)..."

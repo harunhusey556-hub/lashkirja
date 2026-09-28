@@ -3,6 +3,22 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <!--
+      The real server URL, baked in at `cap sync` time by
+      scripts/patch-ios-offline-server.ts into the synced copy under
+      ios/App/App/public/offline.html. Left empty in the source copy under
+      app/public/ (there is no server URL to bake in outside a build).
+
+      A meta tag was chosen over reading window.Capacitor's own config: this
+      page is loaded by the native shell's errorPath, a plain
+      capacitor://localhost/offline.html document load that is NOT part of
+      the app's normal navigation, so relying on undocumented bridge
+      globals being initialised on an error page is not something to trust.
+      A meta tag baked in at sync time (the same mechanism already used for
+      the lashkirja:// URL scheme) is simple, inspectable in the shipped
+      bundle, and needs no bridge at all.
+    -->
+    <meta name="lashkirja-server" content="" />
     <title>LashKirja ei latautunut</title>
     <style>
       body {
@@ -45,12 +61,110 @@
   </head>
   <body>
     <main>
-      <h1>Sovellusta ei saatu ladattua</h1>
+      <h1>Yhteys palvelimeen ei onnistunut</h1>
       <p>
-        Yhteys LashKirjaan epäonnistui. Tarkista verkko ja yritä uudelleen.
-        Asennettu sovellus näyttää tämän sivun, kun etäosoite ei vastaa.
+        LashKirjaan ei juuri nyt saada yhteyttä. Sovellus yrittää
+        automaattisesti uudelleen. Voit myös yrittää itse tai tarkistaa
+        verkkoyhteytesi.
       </p>
-      <button type="button" onclick="location.reload()">Yritä uudelleen</button>
+      <button type="button" id="retry-button">Yritä uudelleen</button>
     </main>
+    <script>
+      (function () {
+        "use strict";
+        var STORAGE_KEY = "lashkirja-offline-retry-attempt";
+        var meta = document.querySelector('meta[name="lashkirja-server"]');
+        var serverUrl = meta && meta.content ? meta.content.replace(/\/+$/, "") : "";
+        var target = serverUrl ? serverUrl + "/dashboard" : null;
+
+        function clearAttemptCount() {
+          try {
+            sessionStorage.removeItem(STORAGE_KEY);
+          } catch (e) {
+            // No storage available - every load just looks like attempt 0.
+          }
+        }
+
+        var button = document.getElementById("retry-button");
+        if (button) {
+          button.addEventListener("click", function () {
+            if (!target) return;
+            // A manual retry is not part of the automatic backoff: it
+            // always fires now, and if it also fails the next automatic
+            // load starts the backoff over from "immediate" again.
+            clearAttemptCount();
+            location.replace(target);
+          });
+        }
+
+        // No server URL was baked in (e.g. this file was opened outside a
+        // real build). Nothing to auto-retry against; the button above is
+        // a no-op guard, not a crash.
+        if (!target) return;
+
+        // Capacitor 8.5 reloads this exact page fresh on ANY failed
+        // navigation, including one this script starts itself - so a
+        // failed automatic retry does not leave this script running to
+        // count its own next delay. The attempt number survives across
+        // that reload in sessionStorage (same WKWebView, same origin) so
+        // the delay before the Nth retry keeps climbing instead of every
+        // reload restarting at "immediate".
+        //
+        // Gaps before the 1st (immediate), 2nd, 3rd and 4th automatic
+        // retries; every one after that waits the steady 15s gap.
+        var GAPS = [0, 2000, 5000, 10000];
+        var STEADY_GAP_MS = 15000;
+
+        function readAttempt() {
+          try {
+            var raw = sessionStorage.getItem(STORAGE_KEY);
+            var parsed = raw === null ? 0 : parseInt(raw, 10);
+            return isNaN(parsed) || parsed < 0 ? 0 : parsed;
+          } catch (e) {
+            return 0;
+          }
+        }
+
+        function writeAttempt(attempt) {
+          try {
+            sessionStorage.setItem(STORAGE_KEY, String(attempt));
+          } catch (e) {
+            // A full or unavailable store just means every load retries
+            // without ever backing off past the first gap - still safe.
+          }
+        }
+
+        function gapForAttempt(attempt) {
+          return attempt < GAPS.length ? GAPS[attempt] : STEADY_GAP_MS;
+        }
+
+        var attempt = readAttempt();
+        var gap = gapForAttempt(attempt);
+        var timer = null;
+
+        function fire() {
+          writeAttempt(attempt + 1);
+          location.replace(target);
+        }
+
+        function schedule() {
+          clearTimeout(timer);
+          // A backgrounded page does not schedule; visibilitychange below
+          // fires immediately and resumes the schedule once visible again.
+          if (document.visibilityState !== "visible") return;
+          timer = setTimeout(fire, gap);
+        }
+
+        document.addEventListener("visibilitychange", function () {
+          if (document.visibilityState === "visible") {
+            schedule();
+          } else {
+            clearTimeout(timer);
+          }
+        });
+
+        schedule();
+      })();
+    </script>
   </body>
 </html>
