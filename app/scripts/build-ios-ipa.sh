@@ -24,6 +24,14 @@ EXPORT_OPTIONS="${EXPORT_OPTIONS:-$ROOT/ios/ExportOptions.plist}"
 
 echo "The UI ships inside the IPA now. API_BASE_URL is baked into the export at build time; it is not a WebView server URL."
 echo "Native plugin or scroll changes, and any UI change, need a new IPA. A web commit alone does not update an installed app."
+
+# The generated client is gitignored (src/generated/prisma). The mobile
+# export runs a real `next build`, which type-checks the whole project,
+# including route handlers that import the generated client (pageExtensions
+# hides them from the *bundle*, not from typecheck) - mirrors ci.yml/build-ipa.yml.
+echo "Generating Prisma client..."
+npx prisma generate
+
 echo "Building the mobile static export..."
 npm run build:mobile -- --api-base-url "$API_BASE_URL"
 echo "Syncing Capacitor iOS project..."

@@ -6,6 +6,25 @@ import * as path from "path";
 export const MAX_RECEIPT_BYTES = 15 * 1024 * 1024;
 export const MAX_STATEMENT_BYTES = 20 * 1024 * 1024;
 
+/**
+ * Headroom above MAX_RECEIPT_BYTES for multipart overhead: the boundary
+ * lines, the `file` part's own headers, and the other form fields
+ * (`capturedAt`; `Idempotency-Key` is a header, not a field). 2 MB is
+ * generous for that -- multipart overhead for a single file part is
+ * normally a few hundred bytes -- but cheap to allow.
+ *
+ * MAX_RECEIPT_REQUEST_BYTES is the single source of truth for "how big can
+ * the whole POST /api/receipts(/inbox) request be": both the proxy's
+ * `experimental.proxyClientMaxBodySize` (next.config.ts) and the route's own
+ * pre-parse `rejectOversizedContentLength` check use this constant, so a
+ * future change to MAX_RECEIPT_BYTES only has to happen once. Final review
+ * I2: the proxy's default 10 MB buffer silently truncated any receipt photo
+ * between 10 and 15 MB, which then failed to parse as multipart and
+ * produced a 500 instead of the intended 413/415/400.
+ */
+export const RECEIPT_MULTIPART_HEADROOM_BYTES = 2 * 1024 * 1024;
+export const MAX_RECEIPT_REQUEST_BYTES = MAX_RECEIPT_BYTES + RECEIPT_MULTIPART_HEADROOM_BYTES;
+
 export type UploadPurpose = "receipt" | "statement";
 
 export interface DetectedFile {

@@ -5,6 +5,7 @@ import { POST as inbox } from "@/app/api/receipts/inbox/route";
 import { prisma } from "@/lib/db";
 import { processDocumentJob, setDocumentExtractorForTests } from "@/lib/document-jobs";
 import { resetRateLimitsForTests } from "@/lib/rate-limit";
+import { MAX_RECEIPT_REQUEST_BYTES } from "@/lib/storage";
 import type { ExtractedReceipt } from "@/lib/ai";
 import { createUser, resetDatabase, type TestUser } from "./helpers/factories";
 import { buildFormRequest, buildRequest, readJson, sessionCookie } from "./helpers/http";
@@ -102,6 +103,38 @@ describe("POST /api/receipts/inbox", () => {
     expect(upload.claimedAt).not.toBeNull();
   });
 
+  it("marks the job failed even when the fallback receipt insert collides (final review M2)", async () => {
+    setDocumentExtractorForTests(async () => {
+      throw new Error("ei toiminut");
+    });
+    const body = await readJson<{ jobId: string; uploadId: string }>(
+      await postInbox(jpeg(30), "queue-item-m2")
+    );
+
+    // Simulate the same photo already having a Receipt row - e.g. already
+    // saved by the web editor, or a concurrent inbox retry that beat this
+    // job to it. createPendingInboxReceipt's fallback insert then collides
+    // on the unique Receipt.uploadId (P2002). Before the fix this rolled
+    // back the "failed" status update in the same transaction, leaving the
+    // job stuck "running" forever (until isStuckRunning() resets it and the
+    // extractor - possibly a paid AI call - runs again and fails again).
+    await prisma.receipt.create({
+      data: {
+        userId: user.id,
+        uploadId: body.uploadId,
+        filePath: "already-saved.jpg",
+        fileName: "already-saved.jpg",
+        source: "manual",
+      },
+    });
+
+    const job = await finish(body.jobId);
+    expect(job?.status).toBe("failed");
+
+    const receiptCount = await prisma.receipt.count({ where: { uploadId: body.uploadId } });
+    expect(receiptCount).toBe(1);
+  });
+
   it("returns the same staged upload and pending job for the same bytes, and only one receipt", async () => {
     const first = await readJson<{ jobId: string; uploadId: string }>(
       await postInbox(jpeg(2), "queue-item-a")
@@ -161,6 +194,67 @@ describe("POST /api/receipts/inbox", () => {
       buildFormRequest("/api/receipts/inbox", form, {
         cookie,
         headers: { "idempotency-key": "queue-item-bad-date" },
+      })
+    );
+    expect(response.status).toBe(400);
+  });
+
+  it("rejects an oversized body with 413, based on Content-Length (final review I2)", async () => {
+    // The multipart body's real byte count doesn't matter for this check -
+    // rejectOversizedContentLength runs before req.formData() is even
+    // called, purely off the Content-Length header, exactly like a request
+    // that genuinely exceeds MAX_RECEIPT_REQUEST_BYTES would report.
+    const response = await inbox(
+      buildFormRequest("/api/receipts/inbox", inboxForm(jpeg(20)), {
+        cookie,
+        headers: {
+          "idempotency-key": "queue-item-oversized",
+          "content-length": String(MAX_RECEIPT_REQUEST_BYTES + 1024 * 1024),
+        },
+      })
+    );
+    expect(response.status).toBe(413);
+  });
+
+  it("an 11 MB file with invalid content is rejected as 415/400, never 500 (final review I2)", async () => {
+    const bytes = new Uint8Array(11 * 1024 * 1024);
+    // Deterministic pseudo-random fill: no magic-byte signature this file
+    // format detector recognises, and near-certain to contain a 0x00 byte,
+    // which rules out the text/CSV/XML fallback path too - detectFile()
+    // returns null, so this is a genuinely unsupported file, not an
+    // accident of matching some other format.
+    for (let i = 0; i < bytes.length; i += 1) {
+      bytes[i] = (i * 2654435761) % 256;
+    }
+    const bigFile = new File([bytes], "kuitti.jpg", { type: "image/jpeg" });
+
+    const response = await inbox(
+      buildFormRequest("/api/receipts/inbox", inboxForm(bigFile), {
+        cookie,
+        headers: { "idempotency-key": "queue-item-11mb" },
+      })
+    );
+    expect(response.status).not.toBe(500);
+    expect([400, 415]).toContain(response.status);
+  });
+
+  it("rejects a capturedAt more than a small skew into the future (final review M4)", async () => {
+    const future = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+    const response = await inbox(
+      buildFormRequest("/api/receipts/inbox", inboxForm(jpeg(21), future), {
+        cookie,
+        headers: { "idempotency-key": "queue-item-future-date" },
+      })
+    );
+    expect(response.status).toBe(400);
+  });
+
+  it("rejects a capturedAt more than a year in the past (final review M4)", async () => {
+    const ancient = new Date(Date.now() - 400 * 24 * 60 * 60 * 1000).toISOString();
+    const response = await inbox(
+      buildFormRequest("/api/receipts/inbox", inboxForm(jpeg(22), ancient), {
+        cookie,
+        headers: { "idempotency-key": "queue-item-ancient-date" },
       })
     );
     expect(response.status).toBe(400);

@@ -62,6 +62,12 @@ git clone git@github.com:harunhusey556-hub/lashkirja.git
 cd lashkirja/app
 npm install
 
+# The generated client is gitignored (src/generated/prisma). The mobile
+# export runs a real `next build`, which type-checks the whole project,
+# including route handlers that import the generated client (pageExtensions
+# hides them from the *bundle*, not from typecheck) - see ci.yml/build-ipa.yml.
+npx prisma generate
+
 # The only server address the app calls at runtime (fetch, not a WebView load).
 export API_BASE_URL=https://your-api-url
 

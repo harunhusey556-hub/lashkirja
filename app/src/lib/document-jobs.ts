@@ -1,5 +1,5 @@
 import { randomUUID } from "crypto";
-import type { Prisma } from "@/generated/prisma/client";
+import { Prisma } from "@/generated/prisma/client";
 import { prisma } from "./db";
 import {
   extractReceipt,
@@ -244,29 +244,50 @@ export async function processDocumentJob(jobId: string): Promise<void> {
         ? error.message
         : "Tiedoston käsittely epäonnistui";
     noteJobFailure(job.kind, message);
-    await prisma.$transaction(async (tx) => {
-      const failed = await tx.backgroundJob.updateMany({
-        where: { id: jobId, status: "running", attemptToken },
-        data: {
-          status: "failed",
-          finishedAt: new Date(),
-          error: message.slice(0, 300),
-          progressLabel: "Epäonnistui",
-        },
-      });
-      if (failed.count === 0) return;
-      // No photo is ever silently lost: even a failed extraction becomes a
-      // pending receipt the owner can fill in by hand.
-      if (payload.inbox) {
-        await createPendingInboxReceipt(tx, {
-          userId: job.userId,
-          uploadId: payload.uploadId,
-          storageKey: payload.storageKey,
-          fileName: payload.originalName,
-          fields: unreadableReceiptFields(new Date(payload.inbox.capturedAt)),
-        });
-      }
+    // Final review M2: this used to be one transaction with the fallback
+    // receipt insert below. createPendingInboxReceipt can throw - P2002 on
+    // Receipt.uploadId when the same photo was already saved from the web
+    // editor or by a concurrent inbox retry (the success path hits the same
+    // race), or a missing-row/FK error once the staging cleanup has deleted
+    // the Upload row after 24 hours. When it did, the whole transaction
+    // rolled back, so the "failed" status update above was undone too, and
+    // the job stayed "running" until isStuckRunning() reset it - re-running
+    // (and re-paying for) the same extraction forever. Marking the job
+    // failed is its own statement first, unconditionally; the fallback
+    // receipt is then best-effort and never re-opens the job on failure.
+    const failed = await prisma.backgroundJob.updateMany({
+      where: { id: jobId, status: "running", attemptToken },
+      data: {
+        status: "failed",
+        finishedAt: new Date(),
+        error: message.slice(0, 300),
+        progressLabel: "Epäonnistui",
+      },
     });
+    if (failed.count === 0) return;
+    // No photo is ever silently lost: even a failed extraction becomes a
+    // pending receipt the owner can fill in by hand - but only best effort:
+    // the job's own "failed" status above already landed regardless.
+    if (payload.inbox) {
+      try {
+        await prisma.$transaction((tx) =>
+          createPendingInboxReceipt(tx, {
+            userId: job.userId,
+            uploadId: payload.uploadId,
+            storageKey: payload.storageKey,
+            fileName: payload.originalName,
+            fields: unreadableReceiptFields(new Date(payload.inbox!.capturedAt)),
+          })
+        );
+      } catch (fallbackError) {
+        const alreadyHandled =
+          fallbackError instanceof Prisma.PrismaClientKnownRequestError &&
+          (fallbackError.code === "P2002" || fallbackError.code === "P2025");
+        if (!alreadyHandled) {
+          console.error("Inbox fallback receipt failed:", fallbackError);
+        }
+      }
+    }
   }
 }
 

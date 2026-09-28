@@ -2,6 +2,7 @@ import type { NextConfig } from "next";
 import { execSync } from "node:child_process";
 import os from "node:os";
 import path from "node:path";
+import { MAX_RECEIPT_REQUEST_BYTES } from "./src/lib/storage";
 
 function gitCommit(): string {
   const fromEnv = process.env.GIT_COMMIT?.trim();
@@ -139,6 +140,15 @@ const webNextConfig: NextConfig = {
   poweredByHeader: false,
   turbopack: {
     root: path.resolve(__dirname),
+  },
+  experimental: {
+    // Default is 10 MB (proxyClientMaxBodySize.md): proxy.ts's matcher
+    // covers every /api/:path*, so Next buffers and truncates every API
+    // request body at that default, silently, with no error to the
+    // client. A receipt photo up to MAX_RECEIPT_BYTES (15 MB) must survive
+    // that buffering whole, or `req.formData()` in receipt-inbox.ts throws
+    // on the truncated multipart body. Final review I2.
+    proxyClientMaxBodySize: MAX_RECEIPT_REQUEST_BYTES,
   },
   // pdfkit reads its .afm metric files from node_modules at runtime and
   // nodemailer resolves transports dynamically; bundling either one turns

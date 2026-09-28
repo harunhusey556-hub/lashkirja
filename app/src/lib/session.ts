@@ -28,6 +28,10 @@ export type AuthenticatedSession = IronSession<SessionData> & {
   userId: string;
   email: string;
   firstName: string;
+  /** Only populated for a bearer credential: when the underlying AuthSession
+   * row was created. Lets /api/auth/token/refresh enforce an absolute age
+   * cap (final review I3) without a second DB round trip. */
+  authSessionCreatedAt?: Date;
 };
 
 const SESSION_TOUCH_MS = 5 * 60 * 1000;
@@ -62,7 +66,7 @@ export async function requireSession(req?: NextRequest): Promise<AuthenticatedSe
   if (credential.kind === "bearer") {
     const row = await prisma.authSession.findFirst({
       where: { id: credential.data.sessionId, userId: credential.data.userId, revokedAt: null },
-      select: { id: true, lastSeenAt: true },
+      select: { id: true, lastSeenAt: true, createdAt: true },
     });
     if (!row) return null;
     if (Date.now() - row.lastSeenAt.getTime() > SESSION_TOUCH_MS) {
@@ -76,6 +80,7 @@ export async function requireSession(req?: NextRequest): Promise<AuthenticatedSe
       email: user.email,
       firstName: user.firstName,
       kind: "bearer" as const,
+      authSessionCreatedAt: row.createdAt,
       save: async () => {},
       destroy: () => {},
       updateConfig: () => {},

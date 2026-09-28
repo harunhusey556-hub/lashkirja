@@ -13,7 +13,7 @@ import { requireSession } from "./session";
 import { enqueueDocumentAnalysis } from "./document-jobs";
 import { consumeRateLimit } from "./rate-limit";
 import {
-  MAX_RECEIPT_BYTES,
+  MAX_RECEIPT_REQUEST_BYTES,
   UploadValidationError,
   removeUserUpload,
   safeOriginalName,
@@ -35,10 +35,26 @@ import {
 import { noStoreJson, rejectCrossSite, rejectOversizedContentLength } from "./http-security";
 import { parseBusinessDetails, generateProfileSummary } from "./onboarding";
 
+/** A small allowance for the capturing device's clock running fast; anything
+ * further into the future than this is treated as invalid, not clamped, so
+ * a bogus date never silently becomes "now". */
+const CAPTURED_AT_MAX_FUTURE_SKEW_MS = 5 * 60 * 1000;
+/** The offline queue can hold an item for a long time, but not a year -
+ * final review M4: an unranged capturedAt (e.g. year 9999 or 1970, from a
+ * device with no clock set yet) becomes the receipt's date whenever
+ * extraction finds none. Reject rather than clamp: a caller sending a
+ * genuinely bad date should get the same "missing or invalid" 400 as a
+ * malformed string, not a silently substituted value. */
+const CAPTURED_AT_MAX_AGE_MS = 365 * 24 * 60 * 60 * 1000;
+
 function parseCapturedAt(raw: FormDataEntryValue | null): string | null {
   if (typeof raw !== "string" || !raw.trim()) return null;
   const date = new Date(raw);
-  if (Number.isNaN(date.getTime())) return null;
+  const time = date.getTime();
+  if (Number.isNaN(time)) return null;
+  const now = Date.now();
+  if (time > now + CAPTURED_AT_MAX_FUTURE_SKEW_MS) return null;
+  if (time < now - CAPTURED_AT_MAX_AGE_MS) return null;
   return date.toISOString();
 }
 
@@ -111,13 +127,37 @@ async function queueFromStagedUpload(
   return noStoreJson({ status: "queued", jobId: job.id, uploadId: upload.id }, { status: 201 });
 }
 
+/**
+ * Response status codes from this route, documented once here (final review
+ * I2 asked for this to be "clean and documented" because the client-side
+ * offline queue makes any 4xx terminal - a permanent `failed` item - and
+ * retries anything else):
+ *
+ * - 200/201: queued, duplicate, etc. - see the individual return points.
+ * - 400: Idempotency-Key missing; capturedAt missing, unparseable, or out
+ *   of range (see CAPTURED_AT_MAX_*); the multipart body itself could not
+ *   be parsed (a genuinely malformed request, not merely oversized - a
+ *   truncated-by-size body is caught by 413 below instead).
+ * - 401: not signed in.
+ * - 403: cross-site request (rejectCrossSite).
+ * - 413: Content-Length exceeds MAX_RECEIPT_REQUEST_BYTES, or the decoded
+ *   file itself exceeds MAX_RECEIPT_BYTES (UploadValidationError).
+ * - 415: file content does not match a supported receipt type, or its
+ *   extension does not match its content (UploadValidationError).
+ * - 429: rate limited.
+ * - 5xx is never a *terminal* client outcome, so it must never be returned
+ *   for a client mistake - only for a genuine server-side failure (a
+ *   database error, disk full). If this route starts returning 500 for a
+ *   large-but-legitimate photo, that's the truncation bug from I2, not a
+ *   legitimate need for a new case here.
+ */
 export async function handleReceiptInboxUpload(req: NextRequest) {
   const session = await requireSession(req);
   if (!session) return noStoreJson({ error: "Ei kirjautunut" }, { status: 401 });
 
   const crossSite = rejectCrossSite(req);
   if (crossSite) return crossSite;
-  const oversized = rejectOversizedContentLength(req, MAX_RECEIPT_BYTES + 1024 * 1024);
+  const oversized = rejectOversizedContentLength(req, MAX_RECEIPT_REQUEST_BYTES);
   if (oversized) return oversized;
 
   const idempotencyKey = req.headers.get("idempotency-key")?.trim();
@@ -155,8 +195,19 @@ export async function handleReceiptInboxUpload(req: NextRequest) {
     console.error("Failed to fetch vendor priors", e);
   }
 
+  // Parsing the multipart body is isolated from the rest of the work below:
+  // a malformed body (a bad boundary, a body cut off mid-part - the shape a
+  // truncated-by-size request used to take before I2's proxy fix) must
+  // answer 400, never the generic 500 the outer catch below falls back to.
+  let formData: FormData;
   try {
-    const formData = await req.formData();
+    formData = await req.formData();
+  } catch (error) {
+    console.error("Receipt inbox: could not parse multipart body:", error);
+    return noStoreJson({ error: "Pyyntöä ei voitu käsitellä" }, { status: 400 });
+  }
+
+  try {
     const candidate = formData.get("file");
     if (!(candidate instanceof File)) {
       return noStoreJson({ error: "Tiedosto puuttuu" }, { status: 400 });
