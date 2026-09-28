@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useSyncExternalStore } from "react";
+import { PageTitle } from "@/components/ds";
 import { BiometricUnlockCard } from "@/components/BiometricUnlockCard";
 import { readAppLock, readBiometricUnlock, subscribeAppLock, writeBiometricUnlock } from "@/lib/app-lock";
 import { readDeviceBiometry, unlockWithBiometry, type BiometryStatus } from "@/lib/biometry";
@@ -54,13 +55,16 @@ export default function BiometriaPage() {
   }
 
   return (
-    <BiometricUnlockCard
-      hasLock={hasLock}
-      bio={bio}
-      enabled={bioOn}
-      message={lockMsg}
-      onEnable={() => void enableBiometry()}
-      onDisable={disableBiometry}
-    />
+    <div className="space-y-6">
+      <PageTitle title="Face ID" />
+      <BiometricUnlockCard
+        hasLock={hasLock}
+        bio={bio}
+        enabled={bioOn}
+        message={lockMsg}
+        onEnable={() => void enableBiometry()}
+        onDisable={disableBiometry}
+      />
+    </div>
   );
 }

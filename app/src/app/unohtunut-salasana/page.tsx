@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import { controlClass } from "@/components/control-styles";
 import { Button } from "@/components/ui";
 
 export default function ForgotPasswordPage() {
@@ -35,14 +36,17 @@ export default function ForgotPasswordPage() {
   }
 
   return (
-    <div className="fixed inset-0 overflow-hidden flex items-center justify-center bg-cream px-4">
-      <form onSubmit={(event) => void submit(event)} className="w-full max-w-sm bg-white rounded-2xl shadow-sm p-8 space-y-5">
-        <h1 className="text-2xl font-light text-charcoal">Salasanan palautus</h1>
-        <p className="text-sm text-warm-gray">
+    <div className="fixed inset-0 flex items-center justify-center overflow-hidden bg-canvas px-4">
+      <form
+        onSubmit={(event) => void submit(event)}
+        className="w-full max-w-sm space-y-5 rounded-card border border-line bg-surface p-8"
+      >
+        <h1 className="text-[32px] font-bold leading-tight tracking-[-0.02em] text-ink">Salasanan palautus</h1>
+        <p className="text-[15px] text-ink-2">
           Linkki lähtee, jos tilille on yhdistetty lähetysposti. Muuten tuki voi lähettää linkin.
           Ohje: sovelluksen account-recovery-dokumentti.
         </p>
-        <label htmlFor="email" className="block text-sm font-medium text-charcoal">
+        <label htmlFor="email" className="mb-1.5 block text-[13px] text-ink-2">
           Sähköposti
         </label>
         <input
@@ -52,14 +56,14 @@ export default function ForgotPasswordPage() {
           required
           value={email}
           onChange={(event) => setEmail(event.target.value)}
-          className="w-full min-h-12 px-4 rounded-xl border border-warm-gray-light bg-cream/50 text-charcoal"
+          className={controlClass}
         />
-        {message && <p className="text-sm text-charcoal" role="status">{message}</p>}
+        {message && <p className="text-sm text-ink" role="status">{message}</p>}
         {error && <p className="text-sm text-danger" role="alert">{error}</p>}
         <Button type="submit" busy={busy} busyLabel="Lähetetään…" className="w-full">
           Lähetä linkki
         </Button>
-        <Link href="/login" className="block text-center text-sm text-accent-dark">
+        <Link href="/login" className="block text-center text-sm text-accent">
           Takaisin kirjautumiseen
         </Link>
       </form>

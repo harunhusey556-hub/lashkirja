@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
+import { controlClass } from "@/components/control-styles";
 import { Button, Field, FormError } from "@/components/ui";
 
 const ERROR_MESSAGES: Record<string, string> = {
@@ -38,15 +39,11 @@ export default function LoginForm() {
   return (
     // fixed + overflow-hidden + touch-none: login never scrolls or rubber-bands;
     // iOS pans the visual viewport itself when the keyboard covers an input.
-    <div className="fixed inset-0 overflow-hidden touch-none flex items-center justify-center bg-cream px-4">
+    <div className="fixed inset-0 flex touch-none items-center justify-center overflow-hidden bg-canvas px-4">
       <div className="w-full max-w-sm">
-        <div className="text-center mb-8">
-          <h1 className="text-3xl font-light text-charcoal tracking-wide">
-            LashKirja
-          </h1>
-          <p className="text-warm-gray mt-2 text-sm">
-            Kirjanpito yksinkertaisesti
-          </p>
+        <div className="mb-8 text-center">
+          <h1 className="text-[32px] font-bold leading-tight tracking-[-0.02em] text-ink">LashKirja</h1>
+          <p className="mt-2 text-[15px] text-ink-2">Kirjanpito yksinkertaisesti</p>
         </div>
 
         {/* Native form POST — mobile browsers reliably store Set-Cookie on
@@ -57,8 +54,8 @@ export default function LoginForm() {
           // Native submit still runs; the state change only drives the
           // "Kirjaudutaan…" feedback while the browser navigates.
           onSubmit={() => setSubmitting(true)}
-          className={`bg-white rounded-2xl shadow-sm p-8 space-y-5 transition-all duration-300 ${
-            submitting ? "opacity-60 scale-[0.98] pointer-events-none" : ""
+          className={`space-y-5 rounded-card border border-line bg-surface p-8 transition-all duration-300 ${
+            submitting ? "pointer-events-none scale-[0.98] opacity-60" : ""
           }`}
         >
           {next && <input type="hidden" name="next" value={next} />}
@@ -72,7 +69,7 @@ export default function LoginForm() {
               autoCapitalize="none"
               autoCorrect="off"
               spellCheck={false}
-              className="w-full px-4 py-3 rounded-xl border border-warm-gray-light bg-cream/50 text-charcoal placeholder:text-warm-gray text-sm"
+              className={controlClass}
               placeholder="demo@lashkirja.fi"
               required
             />
@@ -84,7 +81,7 @@ export default function LoginForm() {
               name="password"
               type="password"
               autoComplete="current-password"
-              className="w-full px-4 py-3 rounded-xl border border-warm-gray-light bg-cream/50 text-charcoal placeholder:text-warm-gray text-sm"
+              className={controlClass}
               placeholder="••••••"
               required
             />
@@ -101,12 +98,12 @@ export default function LoginForm() {
           >
             Kirjaudu sisään
           </Button>
-          <Link href="/unohtunut-salasana" className="block text-center text-sm text-accent-dark">
+          <Link href="/unohtunut-salasana" className="block text-center text-sm text-accent">
             Unohditko salasanan?
           </Link>
         </form>
 
-        <p className="text-center text-xs text-warm-gray mt-6">
+        <p className="mt-6 text-center text-xs text-ink-2">
           Demo: demo@lashkirja.fi / demo123
         </p>
       </div>

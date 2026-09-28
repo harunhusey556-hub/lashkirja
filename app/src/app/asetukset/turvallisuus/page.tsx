@@ -1,10 +1,12 @@
 "use client";
 
+import { PageTitle } from "@/components/ds";
 import { SettingsGroup, SettingsRow } from "@/components/SettingsList";
 
 export default function TurvallisuusPage() {
   return (
     <div className="space-y-6">
+      <PageTitle title="Turvallisuus" />
       <SettingsGroup label="Turvallisuus">
         <SettingsRow
           href="/asetukset/turvallisuus/lukitus"

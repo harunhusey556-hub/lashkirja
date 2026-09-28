@@ -3,6 +3,8 @@
 import { useState } from "react";
 import { errorReference } from "@/lib/screen-state";
 import { BuildInfo } from "@/components/BuildInfo";
+import { Card, PageTitle } from "@/components/ds";
+import { buttonClass } from "@/components/control-styles";
 
 export default function OhjePage() {
   const [supportNote, setSupportNote] = useState("");
@@ -22,31 +24,25 @@ export default function OhjePage() {
   }
 
   return (
-    <section className="bg-white rounded-2xl p-6 shadow-sm space-y-3">
-      <h2 className="text-sm font-medium text-charcoal">Ohje ja tuki</h2>
-      <p className="text-sm text-charcoal leading-relaxed">
-        Kuitit, laskut ja ALV löytyvät omista näkymistään. Jos jokin epäonnistuu, kopioi virheviite ja liitä se tukiviestiin.
-      </p>
-      <button
-        type="button"
-        className="w-full min-h-11 rounded-xl border border-warm-gray-light/70 text-sm font-medium text-charcoal active-press"
-        onClick={() => void copySupport("report")}
-      >
-        Ilmoita ongelmasta
-      </button>
-      <button
-        type="button"
-        className="w-full min-h-11 rounded-xl border border-warm-gray-light/70 text-sm font-medium text-charcoal active-press"
-        onClick={() => void copySupport("reference")}
-      >
-        Kopioi virheviite
-      </button>
-      {supportNote && (
-        <p className="text-xs text-warm-gray" role="status">
-          {supportNote}
+    <div className="space-y-6">
+      <PageTitle title="Ohje ja tuki" />
+      <Card className="space-y-3">
+        <p className="text-[15px] text-ink leading-relaxed">
+          Kuitit, laskut ja ALV löytyvät omista näkymistään. Jos jokin epäonnistuu, kopioi virheviite ja liitä se tukiviestiin.
         </p>
-      )}
-      <BuildInfo />
-    </section>
+        <button type="button" className={buttonClass("secondary", "w-full")} onClick={() => void copySupport("report")}>
+          Ilmoita ongelmasta
+        </button>
+        <button type="button" className={buttonClass("secondary", "w-full")} onClick={() => void copySupport("reference")}>
+          Kopioi virheviite
+        </button>
+        {supportNote && (
+          <p className="text-[13px] text-ink-2" role="status">
+            {supportNote}
+          </p>
+        )}
+        <BuildInfo />
+      </Card>
+    </div>
   );
 }

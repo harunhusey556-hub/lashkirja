@@ -4,7 +4,9 @@ import { useState } from "react";
 import { ErrorState, LoadingState } from "@/components/AsyncState";
 import { apiFetch, errorMessage, readJson } from "@/components/clientFetch";
 import { type Profile, SaveStatus, useProfile } from "../useProfile";
-import { Button, controlClass } from "@/components/ui";
+import { Card, PageTitle } from "@/components/ds";
+import { Button, Field } from "@/components/ui";
+import { controlClass } from "@/components/control-styles";
 
 export default function ProfiiliPage() {
   const { profile, saving, savedMsg, loadError, retry, save } = useProfile();
@@ -26,14 +28,10 @@ export default function ProfiiliPage() {
   }
 
   return (
-    <>
-      <ProfileForm
-        profile={profile}
-        saving={saving}
-        savedMsg={savedMsg}
-        save={save}
-      />
-    </>
+    <div className="space-y-6">
+      <PageTitle title="Profiili" />
+      <ProfileForm profile={profile} saving={saving} savedMsg={savedMsg} save={save} />
+    </div>
   );
 }
 
@@ -61,105 +59,87 @@ function ProfileForm({
 
   return (
     <div className="space-y-6">
-        <div className="flex items-center gap-4 animate-in">
-          <span className="w-14 h-14 rounded-full bg-blush text-accent-dark text-xl font-semibold flex items-center justify-center border border-blush-dark/40">
-            {(profile.firstName?.[0] || "?").toUpperCase()}
-          </span>
-          <div className="min-w-0">
-            <p className="text-lg font-medium text-charcoal truncate">
-              {profile.firstName} {profile.lastName}
-            </p>
-            <p className="text-sm text-warm-gray truncate">{profile.email}</p>
-          </div>
+      <Card className="flex items-center gap-4">
+        <span className="flex h-14 w-14 shrink-0 items-center justify-center rounded-full bg-accent-soft text-xl font-semibold text-accent">
+          {(profile.firstName?.[0] || "?").toUpperCase()}
+        </span>
+        <div className="min-w-0">
+          <p className="truncate text-[15px] font-medium text-ink">
+            {profile.firstName} {profile.lastName}
+          </p>
+          <p className="truncate text-[13px] text-ink-2">{profile.email}</p>
         </div>
+      </Card>
 
-        <form
-          className="bg-white rounded-2xl p-6 shadow-sm space-y-4 animate-in-delay-1"
-          onSubmit={(event) => {
-            event.preventDefault();
-            save({ firstName, lastName });
-          }}
-        >
+      <form
+        onSubmit={(event) => {
+          event.preventDefault();
+          save({ firstName, lastName });
+        }}
+      >
+        <Card className="space-y-4">
           <div className="field-grid">
-            <div>
-              <label
-                htmlFor="firstName"
-                className="block text-sm font-medium text-charcoal mb-1.5"
-              >
-                Etunimi
-              </label>
+            <Field label="Etunimi" htmlFor="firstName">
               <input
                 id="firstName"
                 type="text"
                 required
                 value={firstName}
                 onChange={(e) => setFirstName(e.target.value)}
-                className={`${controlClass} min-h-12`}
+                className={controlClass}
               />
-            </div>
-            <div>
-              <label
-                htmlFor="lastName"
-                className="block text-sm font-medium text-charcoal mb-1.5"
-              >
-                Sukunimi
-              </label>
+            </Field>
+            <Field label="Sukunimi" htmlFor="lastName">
               <input
                 id="lastName"
                 type="text"
                 required
                 value={lastName}
                 onChange={(e) => setLastName(e.target.value)}
-                className={`${controlClass} min-h-12`}
+                className={controlClass}
               />
-            </div>
+            </Field>
           </div>
-          <p className="text-sm text-warm-gray">
+          <p className="text-[13px] text-ink-2">
             Kirjautumissähköposti on {profile.email}. Uusi osoite otetaan käyttöön vasta vahvistuslinkin jälkeen.
           </p>
 
-          <div className="flex items-center justify-between gap-3 pt-1">
-            <SaveStatus saving={saving} savedMsg={savedMsg} />
-            <Button type="submit" busy={saving} busyLabel="Tallennetaan…" disabled={!dirty} className="ml-auto">
-              Tallenna
-            </Button>
-          </div>
-        </form>
+          <SaveStatus saving={saving} savedMsg={savedMsg} />
+          <Button type="submit" busy={saving} busyLabel="Tallennetaan…" disabled={!dirty} className="w-full">
+            Tallenna
+          </Button>
+        </Card>
+      </form>
 
-        <form
-          className="bg-white rounded-2xl p-6 shadow-sm space-y-4"
-          onSubmit={(event) => {
-            event.preventDefault();
-            setEmailBusy(true);
-            setEmailMsg("");
-            void apiFetch("/api/auth/email", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ email, currentPassword }),
+      <form
+        onSubmit={(event) => {
+          event.preventDefault();
+          setEmailBusy(true);
+          setEmailMsg("");
+          void apiFetch("/api/auth/email", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ email, currentPassword }),
+          })
+            .then((response) => readJson<{ message: string }>(response, "Sähköpostin vaihto epäonnistui"))
+            .then((data) => {
+              setEmailMsg(data.message);
+              setCurrentPassword("");
             })
-              .then((response) =>
-                readJson<{ message: string }>(response, "Sähköpostin vaihto epäonnistui")
-              )
-              .then((data) => {
-                setEmailMsg(data.message);
-                setCurrentPassword("");
-              })
-              .catch((error: unknown) => {
-                setEmailMsg(errorMessage(error, "Sähköpostin vaihto epäonnistui"));
-              })
-              .finally(() => setEmailBusy(false));
-          }}
-        >
-          <h2 className="text-sm font-medium text-charcoal">Vaihda sähköposti</h2>
+            .catch((error: unknown) => {
+              setEmailMsg(errorMessage(error, "Sähköpostin vaihto epäonnistui"));
+            })
+            .finally(() => setEmailBusy(false));
+        }}
+      >
+        <Card className="space-y-4">
+          <h2 className="text-[15px] font-medium text-ink">Vaihda sähköposti</h2>
           {profile.pendingEmail && (
-            <p className="text-sm text-warm-gray">
+            <p className="text-[13px] text-ink-2">
               Odottaa vahvistusta: {profile.pendingEmail}. Nykyinen osoite toimii siihen asti.
             </p>
           )}
-          <div>
-            <label htmlFor="newEmail" className="block text-sm font-medium text-charcoal mb-1.5">
-              Uusi sähköposti
-            </label>
+          <Field label="Uusi sähköposti" htmlFor="newEmail">
             <input
               id="newEmail"
               type="email"
@@ -169,13 +149,10 @@ function ProfileForm({
               required
               value={email}
               onChange={(event) => setEmail(event.target.value)}
-              className={`${controlClass} min-h-12`}
+              className={controlClass}
             />
-          </div>
-          <div>
-            <label htmlFor="emailPassword" className="block text-sm font-medium text-charcoal mb-1.5">
-              Nykyinen salasana
-            </label>
+          </Field>
+          <Field label="Nykyinen salasana" htmlFor="emailPassword">
             <input
               id="emailPassword"
               type="password"
@@ -183,18 +160,19 @@ function ProfileForm({
               required
               value={currentPassword}
               onChange={(event) => setCurrentPassword(event.target.value)}
-              className={`${controlClass} min-h-12`}
+              className={controlClass}
             />
-          </div>
+          </Field>
           {emailMsg && (
-            <p className="text-sm text-warm-gray" role="status">
+            <p className="text-sm text-ink-2" role="status">
               {emailMsg}
             </p>
           )}
-          <Button type="submit" busy={emailBusy} busyLabel="Lähetetään…" className="ml-auto">
+          <Button type="submit" busy={emailBusy} busyLabel="Lähetetään…" className="w-full">
             Lähetä vahvistus
           </Button>
-        </form>
+        </Card>
+      </form>
     </div>
   );
 }

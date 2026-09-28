@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { apiFetch, errorMessage, readJson } from "@/components/clientFetch";
+import { Card } from "@/components/ds";
 import { Button, controlClass } from "@/components/ui";
 import { isValidBusinessId, normalizeBusinessId } from "@/lib/finnish-reference";
 import { formatIban, isValidIban, normalizeIban } from "@/lib/iban";
@@ -146,20 +147,20 @@ export default function SellerProfileCard() {
     }
   }
 
-  const field = `${controlClass} min-h-12`;
-  const label = "text-sm font-medium text-charcoal";
+  const field = controlClass;
+  const label = "text-[13px] text-ink-2";
 
   return (
-    <div className="bg-white rounded-2xl p-6 shadow-sm space-y-4">
+    <Card className="space-y-4">
       <div>
-        <h3 className="text-lg font-medium text-charcoal">Laskuttajan tiedot</h3>
-        <p className="text-sm text-warm-gray mt-1">
+        <h3 className="text-[15px] font-medium text-ink">Laskuttajan tiedot</h3>
+        <p className="mt-1 text-[13px] text-ink-2">
           Nämä tulostuvat myyntilaskuille. IBAN tarvitaan myös viivakoodiin.
         </p>
       </div>
 
       {status === "loading" ? (
-        <p className="text-sm text-warm-gray">Haetaan…</p>
+        <p className="text-[13px] text-ink-2">Haetaan…</p>
       ) : (
         <form onSubmit={save} className="space-y-4" noValidate>
           <div className="space-y-1.5">
@@ -268,7 +269,7 @@ export default function SellerProfileCard() {
               {errors.lateInterestPercent ? (
                 <p className="text-xs text-danger">{errors.lateInterestPercent}</p>
               ) : (
-                <p className="text-xs text-warm-gray">
+                <p className="text-xs text-ink-2">
                   Suomen Pankin viitekorko + 7 (kuluttaja) tai + 8 (yritys) prosenttiyksikköä.
                   Tyhjä = korkoa ei peritä.
                 </p>
@@ -305,12 +306,12 @@ export default function SellerProfileCard() {
           </Button>
 
           {message && (
-            <p className="text-sm text-warm-gray" role="status">
+            <p className="text-sm text-ink-2" role="status">
               {message}
             </p>
           )}
         </form>
       )}
-    </div>
+    </Card>
   );
 }

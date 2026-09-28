@@ -103,26 +103,26 @@ export function OnboardingModal({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-charcoal/60 backdrop-blur-md animate-fade-in"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-charcoal/60 p-4 backdrop-blur-md animate-fade-in"
       role="dialog"
       aria-modal="true"
       aria-labelledby="onboarding-modal-title"
     >
       <div
         ref={dialogRef}
-        className="w-full max-w-lg bg-white rounded-3xl shadow-2xl border border-white/50 overflow-hidden animate-scale-in flex flex-col max-h-[90dvh]"
+        className="flex max-h-[90dvh] w-full max-w-lg flex-col overflow-hidden rounded-card border border-line bg-surface shadow-2xl animate-scale-in"
       >
         {/* Header */}
-        <div className="px-6 py-4 bg-cream/60 border-b border-warm-gray-light/30 flex items-center justify-between">
+        <div className="flex items-center justify-between border-b border-line bg-canvas px-6 py-4">
           <div className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-full bg-accent/15 flex items-center justify-center text-accent font-bold text-sm">
+            <div className="flex h-8 w-8 items-center justify-center rounded-full bg-accent-soft text-sm font-bold text-accent">
               ✨
             </div>
             <div>
-              <h2 id="onboarding-modal-title" className="text-sm font-semibold text-charcoal">
+              <h2 id="onboarding-modal-title" className="text-[15px] font-semibold text-ink">
                 LashKirja AI — Perehdytys
               </h2>
-              <p className="text-[11px] text-warm-gray">
+              <p className="text-[11px] text-ink-2">
                 Muokataan kirjanpitosi vastaamaan liiketoimintaasi
               </p>
             </div>
@@ -138,7 +138,7 @@ export function OnboardingModal({
                     ? "w-5 bg-accent"
                     : idx < currentStepIndex
                     ? "w-1.5 bg-accent/40"
-                    : "w-1.5 bg-warm-gray-light"
+                    : "w-1.5 bg-line"
                 }`}
               />
             ))}
@@ -146,22 +146,22 @@ export function OnboardingModal({
         </div>
 
         {/* Content Body */}
-        <div className="p-6 overflow-y-auto flex-1 space-y-6">
+        <div className="flex-1 space-y-6 overflow-y-auto p-6">
           {!isFinalReview && step ? (
             <div className="space-y-6 animate-in">
               {/* AI Chat Bubble */}
               <div className="flex items-start gap-3">
-                <div className="w-9 h-9 rounded-2xl bg-accent text-white flex items-center justify-center font-bold text-sm shrink-0 shadow-sm">
+                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-card bg-accent text-sm font-bold text-canvas">
                   AI
                 </div>
-                <div className="bg-cream/80 border border-warm-gray-light/40 rounded-2xl rounded-tl-sm p-4 text-sm text-charcoal leading-relaxed shadow-sm">
+                <div className="rounded-card rounded-tl-sm border border-line bg-canvas p-4 text-[15px] leading-relaxed text-ink">
                   {step.question}
                 </div>
               </div>
 
               {/* Interactive Chips */}
               <div className="space-y-2 pt-2">
-                <p className="text-xs font-semibold text-charcoal-light uppercase tracking-wider">
+                <p className="text-[13px] text-ink-2">
                   {step.multiSelect
                     ? "Valitse vaihtoehdot (napauta ja jatka):"
                     : "Valitse sopivin vaihtoehto:"}
@@ -179,16 +179,16 @@ export function OnboardingModal({
                         key={String(chip.value)}
                         type="button"
                         onClick={() => handleSelectChip(chip.value)}
-                        className={`w-full text-left px-4 py-3 rounded-2xl border text-sm font-medium transition-all duration-200 active-press flex items-center justify-between ${
+                        className={`active-press flex w-full items-center justify-between rounded-card border px-4 py-3 text-left text-[15px] font-medium ${
                           isSelected
-                            ? "bg-accent/10 border-accent text-accent-dark shadow-sm ring-1 ring-accent/30"
-                            : "bg-white border-warm-gray-light/60 text-charcoal hover:bg-cream hover:border-warm-gray"
+                            ? "border-accent bg-accent-soft text-accent"
+                            : "border-line bg-surface text-ink"
                         }`}
                       >
                         <span>{chip.label}</span>
                         {isSelected && (
                           <svg
-                            className="w-5 h-5 text-accent shrink-0"
+                            className="h-5 w-5 shrink-0 text-accent"
                             fill="none"
                             stroke="currentColor"
                             viewBox="0 0 24 24"
@@ -211,7 +211,7 @@ export function OnboardingModal({
                 <button
                   type="button"
                   onClick={handleNextStep}
-                  className="w-full py-3 rounded-2xl bg-accent text-white font-medium text-sm hover:bg-accent-dark transition-all duration-200 shadow-md active-press"
+                  className="active-press w-full rounded-card bg-ink py-3 text-[15px] font-semibold text-canvas"
                 >
                   Jatka eteenpäin →
                 </button>
@@ -221,45 +221,43 @@ export function OnboardingModal({
             /* Final Summary & Mandatory Approval Card */
             <div className="space-y-6 animate-in">
               <div className="flex items-start gap-3">
-                <div className="w-9 h-9 rounded-2xl bg-success text-white flex items-center justify-center font-bold text-sm shrink-0 shadow-sm">
+                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-card bg-success text-sm font-bold text-canvas">
                   ✓
                 </div>
-                <div className="bg-success/10 border border-success/30 rounded-2xl rounded-tl-sm p-4 text-sm text-charcoal leading-relaxed shadow-sm">
+                <div className="rounded-card rounded-tl-sm border border-success/30 bg-success/10 p-4 text-[15px] leading-relaxed text-ink">
                   Mahtavaa! Kiitos tiedoista. Tässä on yhteenveto sovellukseesi
                   määritettävistä asetuksista. Vahvista asetukset alta:
                 </div>
               </div>
 
-              <div className="bg-cream/60 border border-warm-gray-light/60 rounded-2xl p-5 space-y-3.5">
-                <h3 className="text-xs font-bold text-charcoal-light uppercase tracking-wider">
-                  Määritetty kirjanpitoprofiili
-                </h3>
-                <div className="space-y-2 text-sm text-charcoal">
-                  <div className="flex justify-between py-1 border-b border-warm-gray-light/30">
-                    <span className="text-warm-gray">Yritysmuoto:</span>
+              <div className="space-y-3.5 rounded-card border border-line bg-canvas p-5">
+                <h3 className="text-[13px] text-ink-2">Määritetty kirjanpitoprofiili</h3>
+                <div className="space-y-2 text-[15px] text-ink">
+                  <div className="flex justify-between border-b border-line py-1">
+                    <span className="text-ink-2">Yritysmuoto:</span>
                     <span className="font-semibold capitalize">
                       {profile.entityType}
                     </span>
                   </div>
-                  <div className="flex justify-between py-1 border-b border-warm-gray-light/30">
-                    <span className="text-warm-gray">ALV-rekisteri:</span>
+                  <div className="flex justify-between border-b border-line py-1">
+                    <span className="text-ink-2">ALV-rekisteri:</span>
                     <span className="font-semibold">
                       {profile.vatRegistered ? "Kyllä" : "Ei (0%)"}
                     </span>
                   </div>
                   {profile.vatRegistered && (
-                    <div className="flex justify-between py-1 border-b border-warm-gray-light/30">
-                      <span className="text-warm-gray">ALV-kausi:</span>
+                    <div className="flex justify-between border-b border-line py-1">
+                      <span className="text-ink-2">ALV-kausi:</span>
                       <span className="font-semibold capitalize">
                         {profile.vatPeriod}
                       </span>
                     </div>
                   )}
                   <div className="py-1">
-                    <span className="text-warm-gray block mb-1">
+                    <span className="mb-1 block text-ink-2">
                       Pääasialliset myynnit ja kulut:
                     </span>
-                    <span className="text-xs bg-white px-3 py-2 rounded-xl border border-warm-gray-light/40 block">
+                    <span className="block rounded-card border border-line bg-surface px-3 py-2 text-xs">
                       {generateProfileSummary(profile)}
                     </span>
                   </div>
@@ -267,7 +265,7 @@ export function OnboardingModal({
               </div>
 
               {error && (
-                <p className="text-xs text-danger bg-danger/10 p-3 rounded-xl">
+                <p className="rounded-card bg-danger/10 p-3 text-xs text-danger" role="alert">
                   {error}
                 </p>
               )}
@@ -278,7 +276,7 @@ export function OnboardingModal({
                   type="button"
                   disabled={saving}
                   onClick={handleApproveProfile}
-                  className="w-full py-3.5 rounded-2xl bg-accent text-white font-semibold text-sm hover:bg-accent-dark transition-all duration-200 shadow-lg shadow-accent/20 active-press disabled:opacity-50 flex items-center justify-center gap-2"
+                  className="active-press flex w-full items-center justify-center gap-2 rounded-card bg-ink py-3.5 text-[15px] font-semibold text-canvas disabled:opacity-50"
                 >
                   {saving ? (
                     "Tallennetaan..."
@@ -286,7 +284,7 @@ export function OnboardingModal({
                     <>
                       <span>Hyväksy asetukset ja aloita</span>
                       <svg
-                        className="w-4 h-4"
+                        className="h-4 w-4"
                         fill="none"
                         stroke="currentColor"
                         viewBox="0 0 24 24"

@@ -1,8 +1,11 @@
 "use client";
 
 import { Suspense, useEffect, useState } from "react";
+import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { apiFetch, errorMessage, isUnauthorized, readJson, redirectToLogin } from "@/components/clientFetch";
+import { buttonClass } from "@/components/control-styles";
+import { Card, DetailHero } from "@/components/ds";
 import { classifyBankReturn } from "@/lib/bank-return";
 import { clearBankAuth } from "@/lib/open-bank-auth";
 
@@ -76,24 +79,22 @@ function BankCallback() {
   }, [code, initial.kind, router, state]);
 
   return (
-    <main className="min-h-dvh bg-cream flex items-center justify-center px-4 py-10">
-      <section className="w-full max-w-md bg-white rounded-3xl shadow-sm p-6 space-y-4">
-        <h1 className="text-xl font-medium text-charcoal">Pankkiyhteys</h1>
-        <p
-          className={`text-sm leading-relaxed ${phase === "error" ? "text-danger" : "text-warm-gray"}`}
-          role={phase === "error" ? "alert" : "status"}
-        >
-          {message}
-        </p>
+    <main className="flex min-h-dvh items-center justify-center bg-canvas px-4 py-10">
+      <Card className="w-full max-w-md">
+        <DetailHero
+          title="Pankkiyhteys"
+          meta={
+            <span role={phase === "error" ? "alert" : "status"} className={phase === "error" ? "text-danger" : undefined}>
+              {message}
+            </span>
+          }
+        />
         {phase !== "working" && (
-          <a
-            href="/kirjanpito/pankkitilit#pankkiyhteys"
-            className="inline-flex w-full justify-center px-4 py-3 rounded-xl bg-accent text-white text-sm font-medium hover:bg-accent-dark"
-          >
-            {phase === "done" ? "Jatka pankkitileihin" : "Takaisin pankkitileihin"}
-          </a>
+          <Link href="/kirjanpito/pankkitilit#pankkiyhteys" className={buttonClass("primary", "w-full")}>
+            Takaisin pankkitileihin
+          </Link>
         )}
-      </section>
+      </Card>
     </main>
   );
 }
@@ -102,8 +103,8 @@ export default function BankCallbackPage() {
   return (
     <Suspense
       fallback={
-        <main className="min-h-dvh bg-cream flex items-center justify-center px-4">
-          <p className="text-sm text-warm-gray">Yhdistetään pankkiin...</p>
+        <main className="flex min-h-dvh items-center justify-center bg-canvas px-4">
+          <p className="text-sm text-ink-2">Yhdistetään pankkiin...</p>
         </main>
       }
     >

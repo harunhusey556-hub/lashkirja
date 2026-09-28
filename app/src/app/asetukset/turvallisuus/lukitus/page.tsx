@@ -1,7 +1,9 @@
 "use client";
 
 import { useEffect, useState, useSyncExternalStore } from "react";
-import { Button, controlClass } from "@/components/ui";
+import { Card, PageTitle } from "@/components/ds";
+import { Button, Field } from "@/components/ui";
+import { controlClass } from "@/components/control-styles";
 import {
   appLockMatches,
   clearAppLock,
@@ -74,35 +76,35 @@ export default function LukitusPage() {
   }
 
   return (
-    <form
-      onSubmit={(event) => void (hasLock ? removeLock(event) : saveLock(event))}
-      className="bg-white rounded-2xl p-6 shadow-sm space-y-4"
-    >
-      <h2 className="text-sm font-medium text-charcoal">Näytön lukitus</h2>
-      <p className="text-sm text-warm-gray">
-        Valinnainen koodi tällä laitteella peittää kirjanpidon, kun sovellus jää taustalle.
-        Lukitus ei korvaa uloskirjautumista.
-      </p>
-      <label htmlFor="lockPin" className="block text-sm font-medium text-charcoal">
-        {hasLock ? "Nykyinen koodi" : "Uusi koodi, 4–8 numeroa"}
-      </label>
-      <input
-        id="lockPin"
-        type="password"
-        inputMode="numeric"
-        autoComplete="off"
-        value={lockPin}
-        onChange={(event) => setLockPin(event.target.value)}
-        className={`${controlClass} min-h-12`}
-      />
-      {lockMsg && (
-        <p className="text-sm text-warm-gray" role="status">
-          {lockMsg}
-        </p>
-      )}
-      <Button type="submit" variant={hasLock ? "secondary" : "primary"}>
-        {hasLock ? "Poista lukitus" : "Ota lukitus käyttöön"}
-      </Button>
-    </form>
+    <div className="space-y-6">
+      <PageTitle title="Näytön lukitus" />
+      <form onSubmit={(event) => void (hasLock ? removeLock(event) : saveLock(event))}>
+        <Card className="space-y-4">
+          <p className="text-[13px] text-ink-2 leading-relaxed">
+            Valinnainen koodi tällä laitteella peittää kirjanpidon, kun sovellus jää taustalle.
+            Lukitus ei korvaa uloskirjautumista.
+          </p>
+          <Field label={hasLock ? "Nykyinen koodi" : "Uusi koodi, 4–8 numeroa"} htmlFor="lockPin">
+            <input
+              id="lockPin"
+              type="password"
+              inputMode="numeric"
+              autoComplete="off"
+              value={lockPin}
+              onChange={(event) => setLockPin(event.target.value)}
+              className={controlClass}
+            />
+          </Field>
+          {lockMsg && (
+            <p className="text-sm text-ink-2" role="status">
+              {lockMsg}
+            </p>
+          )}
+          <Button type="submit" variant={hasLock ? "secondary" : "primary"} className="w-full">
+            {hasLock ? "Poista lukitus" : "Ota lukitus käyttöön"}
+          </Button>
+        </Card>
+      </form>
+    </div>
   );
 }

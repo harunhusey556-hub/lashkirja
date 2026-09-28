@@ -1,5 +1,6 @@
 "use client";
 
+import { Card } from "@/components/ds";
 import {
   biometricEnableLabel,
   biometricUnavailableCopy,
@@ -26,11 +27,11 @@ export function BiometricUnlockCard({
   const ready = hasLock && bio.available;
 
   return (
-    <section className="bg-white rounded-2xl p-6 shadow-sm space-y-3">
+    <Card className="space-y-3">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0 space-y-1">
-          <h2 className="text-sm font-medium text-charcoal">{title}</h2>
-          <p className="text-sm text-warm-gray leading-relaxed">
+          <h2 className="text-[15px] font-medium text-ink">{title}</h2>
+          <p className="text-[13px] text-ink-2 leading-relaxed">
             {ready
               ? enabled
                 ? `${biometricUnlockLabel(bio.kind)} kysytään, kun palaat sovellukseen. Koodi jää varalle.`
@@ -47,12 +48,12 @@ export function BiometricUnlockCard({
             aria-checked={enabled}
             aria-label={enabled ? "Biometrinen avaus päällä" : biometricEnableLabel(bio.kind)}
             onClick={() => (enabled ? onDisable() : onEnable())}
-            className={`relative mt-0.5 h-8 w-14 shrink-0 rounded-full transition-colors active-press ${
-              enabled ? "bg-accent" : "bg-warm-gray-light/70"
+            className={`relative mt-0.5 h-8 w-14 shrink-0 rounded-full transition-colors active-press before:absolute before:inset-x-0 before:-inset-y-1.5 before:content-[''] ${
+              enabled ? "bg-accent" : "bg-line"
             }`}
           >
             <span
-              className={`absolute top-1 h-6 w-6 rounded-full bg-white shadow-sm transition-transform ${
+              className={`absolute top-1 h-6 w-6 rounded-full bg-surface shadow-sm transition-transform ${
                 enabled ? "translate-x-7" : "translate-x-1"
               }`}
             />
@@ -63,16 +64,16 @@ export function BiometricUnlockCard({
         <button
           type="button"
           onClick={onEnable}
-          className="w-full min-h-12 rounded-2xl bg-charcoal text-sm font-medium text-white active-press"
+          className="active-press min-h-12 w-full rounded-card bg-ink text-[15px] font-semibold text-canvas"
         >
           {biometricEnableLabel(bio.kind)}
         </button>
       )}
       {message && (
-        <p className="text-sm text-warm-gray" role="status">
+        <p className="text-sm text-ink-2" role="status">
           {message}
         </p>
       )}
-    </section>
+    </Card>
   );
 }

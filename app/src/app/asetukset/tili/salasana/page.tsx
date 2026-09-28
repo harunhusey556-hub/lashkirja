@@ -2,7 +2,9 @@
 
 import { useState } from "react";
 import { apiFetch, errorMessage, readJson } from "@/components/clientFetch";
-import { Button, controlClass } from "@/components/ui";
+import { Card, PageTitle } from "@/components/ds";
+import { Button, Field } from "@/components/ui";
+import { controlClass } from "@/components/control-styles";
 
 export default function SalasanaPage() {
   const [currentPassword, setCurrentPassword] = useState("");
@@ -32,44 +34,46 @@ export default function SalasanaPage() {
   }
 
   return (
-    <form onSubmit={(event) => void changePassword(event)} className="bg-white rounded-2xl p-6 shadow-sm space-y-4">
-      <h2 className="text-sm font-medium text-charcoal">Vaihda salasana</h2>
-      <p className="text-sm text-warm-gray">
-        Nykyinen salasana vaaditaan. Uudessa on vähintään 10 merkkiä. Muut kirjautuneet laitteet suljetaan.
-      </p>
-      <label htmlFor="currentPassword" className="block text-sm font-medium text-charcoal">
-        Nykyinen salasana
-      </label>
-      <input
-        id="currentPassword"
-        type="password"
-        autoComplete="current-password"
-        required
-        value={currentPassword}
-        onChange={(event) => setCurrentPassword(event.target.value)}
-        className={`${controlClass} min-h-12`}
-      />
-      <label htmlFor="newPassword" className="block text-sm font-medium text-charcoal">
-        Uusi salasana
-      </label>
-      <input
-        id="newPassword"
-        type="password"
-        autoComplete="new-password"
-        required
-        minLength={10}
-        value={newPassword}
-        onChange={(event) => setNewPassword(event.target.value)}
-        className={`${controlClass} min-h-12`}
-      />
-      {passwordMsg && (
-        <p className="text-sm text-warm-gray" role="status">
-          {passwordMsg}
-        </p>
-      )}
-      <Button type="submit" busy={passwordBusy} busyLabel="Vaihdetaan…" className="ml-auto">
-        Vaihda salasana
-      </Button>
-    </form>
+    <div className="space-y-6">
+      <PageTitle title="Vaihda salasana" />
+      <form onSubmit={(event) => void changePassword(event)}>
+        <Card className="space-y-4">
+          <p className="text-[13px] text-ink-2 leading-relaxed">
+            Nykyinen salasana vaaditaan. Uudessa on vähintään 10 merkkiä. Muut kirjautuneet laitteet suljetaan.
+          </p>
+          <Field label="Nykyinen salasana" htmlFor="currentPassword">
+            <input
+              id="currentPassword"
+              type="password"
+              autoComplete="current-password"
+              required
+              value={currentPassword}
+              onChange={(event) => setCurrentPassword(event.target.value)}
+              className={controlClass}
+            />
+          </Field>
+          <Field label="Uusi salasana" htmlFor="newPassword">
+            <input
+              id="newPassword"
+              type="password"
+              autoComplete="new-password"
+              required
+              minLength={10}
+              value={newPassword}
+              onChange={(event) => setNewPassword(event.target.value)}
+              className={controlClass}
+            />
+          </Field>
+          {passwordMsg && (
+            <p className="text-sm text-ink-2" role="status">
+              {passwordMsg}
+            </p>
+          )}
+          <Button type="submit" className="w-full" busy={passwordBusy} busyLabel="Vaihdetaan…">
+            Vaihda salasana
+          </Button>
+        </Card>
+      </form>
+    </div>
   );
 }
