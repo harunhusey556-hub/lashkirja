@@ -2,12 +2,13 @@ import type { NextConfig } from "next";
 import { execSync } from "node:child_process";
 import os from "node:os";
 import path from "node:path";
-// JSON only: `next start` loads a transpiled copy of this config that cannot
-// require app .ts modules (importing ./src/lib/storage crashed production).
-import uploadLimits from "./src/lib/upload-limits.json";
-
-const MAX_RECEIPT_REQUEST_BYTES =
-  uploadLimits.maxReceiptBytes + uploadLimits.receiptMultipartHeadroomBytes;
+// No relative imports in this file. `next start` evaluates a transpiled copy
+// whose relative requires resolve against the process cwd, and production
+// runs from C:\LashKirja, not app/. Importing ./src/lib/storage (and then a
+// JSON file) crashed the production start twice. This literal must equal
+// MAX_RECEIPT_REQUEST_BYTES in src/lib/storage.ts; next-config-body-cap.test.ts
+// enforces that.
+const MAX_RECEIPT_REQUEST_BYTES = 17 * 1024 * 1024;
 
 function gitCommit(): string {
   const fromEnv = process.env.GIT_COMMIT?.trim();
