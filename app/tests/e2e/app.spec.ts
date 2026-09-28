@@ -1,5 +1,10 @@
 import { expect, test, type Page } from "@playwright/test";
 
+// The Koti page title is the current month, capitalised (e.g. "Syyskuu") -
+// match any of the twelve rather than pin a specific month/date.
+const MONTH_HEADING =
+  /^(Tammikuu|Helmikuu|Maaliskuu|Huhtikuu|Toukokuu|Kesäkuu|Heinäkuu|Elokuu|Syyskuu|Lokakuu|Marraskuu|Joulukuu)$/;
+
 async function login(page: Page) {
   await page.goto("/login");
   await page.getByLabel("Sähköposti").fill("demo@lashkirja.fi");
@@ -30,7 +35,7 @@ test("protected pages redirect to login", async ({ page }) => {
 test("login lands on the dashboard and the tab bar navigates", async ({ page }) => {
   await login(page);
 
-  await expect(page.getByRole("heading", { name: /Liisa!/ })).toBeVisible();
+  await expect(page.getByRole("heading", { name: MONTH_HEADING })).toBeVisible();
   await expect(page.getByText("Tulot", { exact: true })).toBeVisible();
 
   const nav = page.getByRole("navigation", { name: "Päävalikko" });

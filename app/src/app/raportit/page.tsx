@@ -11,7 +11,8 @@ import {
   readJson,
   redirectToLogin,
 } from "@/components/clientFetch";
-import { buttonClass } from "@/components/control-styles";
+import { buttonClass, controlClass } from "@/components/control-styles";
+import { Card, KeyValueList, ListRow, PageTitle, Section } from "@/components/ds";
 import { formatEur, formatMonthShort } from "@/lib/format";
 import { receiptDrillHref } from "@/lib/report-drill";
 import { pageCacheFetchedAt, readPageCache, writePageCache } from "@/lib/page-cache";
@@ -55,6 +56,74 @@ const EXPORTS = [
   { type: "purchase-invoices", label: "Ostolaskut" },
   { type: "customers", label: "Asiakkaat" },
 ] as const;
+
+function ChevronLeftIcon() {
+  return (
+    <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+    </svg>
+  );
+}
+
+function ChevronRightIcon() {
+  return (
+    <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+    </svg>
+  );
+}
+
+/** The small chevron control under the page title (spec §10), same shape as Koti's month switcher. */
+function YearSwitcher({ year, currentYear, onChange }: { year: number; currentYear: number; onChange: (next: number) => void }) {
+  return (
+    <div className="-mt-3 mb-5 flex items-center gap-1 px-1">
+      <button
+        type="button"
+        aria-label="Edellinen vuosi"
+        onClick={() => onChange(year - 1)}
+        className="active-press relative flex h-8 w-8 items-center justify-center rounded-full text-ink-2 before:absolute before:inset-x-0 before:-inset-y-2 before:content-['']"
+      >
+        <ChevronLeftIcon />
+      </button>
+      <span className="min-w-[4ch] text-center text-[13px] tabular-nums text-ink-2">{year}</span>
+      <button
+        type="button"
+        aria-label="Seuraava vuosi"
+        onClick={() => onChange(year + 1)}
+        disabled={year >= currentYear}
+        className="active-press relative flex h-8 w-8 items-center justify-center rounded-full text-ink-2 disabled:opacity-30 before:absolute before:inset-x-0 before:-inset-y-2 before:content-['']"
+      >
+        <ChevronRightIcon />
+      </button>
+    </div>
+  );
+}
+
+function DownloadIcon() {
+  return (
+    <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.75} aria-hidden>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M12 3v12m0 0 4-4m-4 4-4-4M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2" />
+    </svg>
+  );
+}
+
+/**
+ * Same markup/classes as `ListRow`, but a real `<a>` instead of `next/link`'s
+ * `Link`: these hrefs are file downloads (Content-Disposition: attachment),
+ * and a client-side route transition would swallow that instead of letting
+ * the browser save the file.
+ */
+function DownloadRow({ href, title }: { href: string; title: string }) {
+  return (
+    <div className="relative flex min-h-16 w-full items-center gap-3 px-4 py-3 text-left">
+      <a href={href} aria-label={title} className="row-link active-press absolute inset-0" />
+      <span aria-hidden className="pointer-events-none flex h-[34px] w-[34px] shrink-0 items-center justify-center rounded-[10px] bg-canvas text-ink-2">
+        <DownloadIcon />
+      </span>
+      <span className="pointer-events-none min-w-0 flex-1 text-[15px] font-medium text-ink">{title}</span>
+    </div>
+  );
+}
 
 export default function ReportsPage() {
   const currentYear = new Date().getUTCFullYear();
@@ -107,42 +176,11 @@ export default function ReportsPage() {
 
   useScrollRestoration("raportit", status === "ready");
 
-  const maxMonthValue = report
-    ? Math.max(
-        1,
-        ...report.months.map((month) => Math.max(month.incomeGross, month.expenseGross))
-      )
-    : 1;
-
   return (
     <>
       <div className="space-y-6 pb-6">
-        <header className="space-y-2">
-          <p className="text-sm text-warm-gray leading-relaxed">
-            Tuloslaskelma kuukausittain ja tiedot ulos kirjanpitäjälle.
-          </p>
-        </header>
-
-        <div className="flex items-center gap-3">
-          <button
-            type="button"
-            onClick={() => setYear((value) => value - 1)}
-            className="min-h-12 min-w-12 px-4 rounded-xl border border-warm-gray-light/60 bg-white text-sm font-medium text-charcoal"
-            aria-label="Edellinen vuosi"
-          >
-            ←
-          </button>
-          <span className="text-base font-medium text-charcoal">{year}</span>
-          <button
-            type="button"
-            onClick={() => setYear((value) => value + 1)}
-            disabled={year >= currentYear}
-            className="min-h-12 min-w-12 px-4 rounded-xl border border-warm-gray-light/60 bg-white text-sm font-medium text-charcoal disabled:opacity-40"
-            aria-label="Seuraava vuosi"
-          >
-            →
-          </button>
-        </div>
+        <PageTitle title="Raportit" subtitle="Tuloslaskelma kuukausittain ja tiedot ulos kirjanpitäjälle." />
+        <YearSwitcher year={year} currentYear={currentYear} onChange={setYear} />
 
         {loadFailure != null && status === "ready" && (
           <StaleBanner
@@ -161,146 +199,120 @@ export default function ReportsPage() {
 
         {status === "ready" && report && (
           <>
-            <section className="bg-white rounded-3xl border border-warm-gray-light/20 shadow-sm p-6 space-y-3">
-              <p className="text-sm text-warm-gray">Tulos (veroton)</p>
-              <p
-                className={`text-3xl font-semibold tracking-tight ${
-                  report.total.profitNet < 0 ? "text-danger" : "text-charcoal"
-                }`}
-              >
-                {formatEur(report.total.profitNet)}
-              </p>
-              <div className="grid grid-cols-2 gap-3 pt-1 text-sm">
-                <div>
-                  <p className="text-warm-gray text-xs">Tulot</p>
-                  <Link
-                    href={receiptDrillHref({ type: "tulo" })}
-                    aria-label="Avaa tulokuitit"
-                    className="text-charcoal font-medium underline decoration-warm-gray-light underline-offset-2"
-                  >
-                    {formatEur(report.total.incomeNet)}
-                  </Link>
-                </div>
-                <div>
-                  <p className="text-warm-gray text-xs">Menot</p>
-                  <Link
-                    href={receiptDrillHref({ type: "meno" })}
-                    aria-label="Avaa menokuitit"
-                    className="text-charcoal font-medium underline decoration-warm-gray-light underline-offset-2"
-                  >
-                    {formatEur(report.total.expenseNet)}
-                  </Link>
-                </div>
+            <section className="mt-6 first:mt-0">
+              <div className="mb-2 flex items-baseline justify-between gap-3 px-1 text-[13px] text-ink-2">
+                <h2 className="font-normal">Tulos</h2>
               </div>
-              <p className="text-xs text-warm-gray">
-                {report.total.receiptCount} kuittia
-                {report.total.missingVatCount > 0 && (
-                  <span className="text-warning">
-                    {" "}
-                    · {report.total.missingVatCount} ilman ALV-erittelyä (mukana bruttona)
-                  </span>
-                )}
-                {report.undatedCount > 0 && (
-                  <span className="text-warning"> · {report.undatedCount} ilman päivää</span>
-                )}
-              </p>
+              <KeyValueList
+                rows={[
+                  {
+                    label: "Tulos (veroton)",
+                    value: (
+                      <span className={report.total.profitNet < 0 ? "text-danger" : undefined}>
+                        {formatEur(report.total.profitNet)}
+                      </span>
+                    ),
+                  },
+                  {
+                    label: "Tulot",
+                    value: (
+                      <Link href={receiptDrillHref({ type: "tulo" })} aria-label="Avaa tulokuitit" className="text-accent">
+                        {formatEur(report.total.incomeNet)}
+                      </Link>
+                    ),
+                  },
+                  {
+                    label: "Menot",
+                    value: (
+                      <Link href={receiptDrillHref({ type: "meno" })} aria-label="Avaa menokuitit" className="text-accent">
+                        {formatEur(report.total.expenseNet)}
+                      </Link>
+                    ),
+                  },
+                  { label: "Kuitteja", value: String(report.total.receiptCount) },
+                  ...(report.total.missingVatCount > 0
+                    ? [
+                        {
+                          label: "Ilman ALV-erittelyä",
+                          value: <span className="text-warning">{report.total.missingVatCount}</span>,
+                        },
+                      ]
+                    : []),
+                  ...(report.undatedCount > 0
+                    ? [{ label: "Ilman päivää", value: <span className="text-warning">{report.undatedCount}</span> }]
+                    : []),
+                ]}
+              />
             </section>
 
-            <section className="bg-white rounded-3xl border border-warm-gray-light/20 shadow-sm p-6 space-y-3">
-              <p className="text-base font-medium text-charcoal">Kuukaudet</p>
+            <section className="mt-6 first:mt-0">
+              <div className="mb-2 flex items-baseline justify-between gap-3 px-1 text-[13px] text-ink-2">
+                <h2 className="font-normal">Kuukaudet</h2>
+              </div>
               {report.months.length === 0 ? (
-                <p className="text-sm text-warm-gray">Ei kirjauksia tälle vuodelle.</p>
+                <p className="rounded-card border border-line bg-surface px-4 py-4 text-[15px] text-ink-2">
+                  Ei kirjauksia tälle vuodelle.
+                </p>
               ) : (
-                <ul className="space-y-2">
-                  {report.months.map((month) => (
-                    <li key={month.month} className="space-y-1">
-                      <div className="flex justify-between text-sm">
-                        <span className="text-charcoal">{formatMonthShort(month.month!)}</span>
-                        <Link
-                          href={receiptDrillHref({ month: month.month })}
-                          aria-label={`Avaa kuitit ${formatMonthShort(month.month!)}`}
-                          className={
-                            month.profitNet < 0
-                              ? "text-danger font-medium underline decoration-warm-gray-light underline-offset-2"
-                              : "text-charcoal font-medium underline decoration-warm-gray-light underline-offset-2"
-                          }
-                        >
-                          {formatEur(month.profitNet)}
-                        </Link>
-                      </div>
-                      <div className="flex gap-1 h-2" aria-hidden>
-                        <div
-                          className="bg-success/60 rounded-full"
-                          style={{ width: `${(month.incomeGross / maxMonthValue) * 50}%` }}
-                        />
-                        <div
-                          className="bg-accent/50 rounded-full"
-                          style={{ width: `${(month.expenseGross / maxMonthValue) * 50}%` }}
-                        />
-                      </div>
-                    </li>
-                  ))}
-                </ul>
+                <KeyValueList
+                  rows={report.months.map((month) => ({
+                    label: formatMonthShort(month.month!),
+                    value: (
+                      <Link
+                        href={receiptDrillHref({ month: month.month })}
+                        aria-label={`Avaa kuitit ${formatMonthShort(month.month!)}`}
+                        className={month.profitNet < 0 ? "text-danger" : "text-accent"}
+                      >
+                        {formatEur(month.profitNet)}
+                      </Link>
+                    ),
+                  }))}
+                />
               )}
             </section>
 
-            <section className="bg-white rounded-3xl border border-warm-gray-light/20 shadow-sm p-6 space-y-3">
-              <p className="text-base font-medium text-charcoal">Menot kategorioittain</p>
+            <Section title="Menot kategorioittain">
               {report.total.expenseByCategory.length === 0 ? (
-                <p className="text-sm text-warm-gray">Ei menoja tällä jaksolla.</p>
+                <p className="px-4 py-4 text-[15px] text-ink-2">Ei menoja tällä jaksolla.</p>
               ) : (
-                <ul className="space-y-2">
-                  {report.total.expenseByCategory.map((row) => (
-                    <li key={row.category} className="flex justify-between text-sm">
-                      <div className="min-w-0">
-                        <p className="text-charcoal truncate">{row.category}</p>
-                        <p className="text-xs text-warm-gray">{row.count} kuittia</p>
-                      </div>
-                      <div className="text-right shrink-0">
-                        <Link
-                          href={receiptDrillHref({ type: "meno", category: row.category })}
-                          aria-label={`Avaa kuitit: ${row.category}`}
-                          className="text-charcoal underline decoration-warm-gray-light underline-offset-2"
-                        >
-                          {formatEur(row.net)}
-                        </Link>
-                        <p className="text-xs text-warm-gray">brutto {formatEur(row.gross)}</p>
-                      </div>
-                    </li>
-                  ))}
-                </ul>
+                report.total.expenseByCategory.map((row) => (
+                  <ListRow
+                    key={row.category}
+                    href={receiptDrillHref({ type: "meno", category: row.category })}
+                    ariaLabel={`Avaa kuitit: ${row.category}`}
+                    title={row.category}
+                    secondary={`${row.count} kuittia · brutto ${formatEur(row.gross)}`}
+                    amount={formatEur(row.net)}
+                  />
+                ))
               )}
-            </section>
+            </Section>
 
             {report.total.incomeByCategory.length > 0 && (
-              <section className="bg-white rounded-3xl border border-warm-gray-light/20 shadow-sm p-6 space-y-3">
-                <p className="text-base font-medium text-charcoal">Tulot kategorioittain</p>
-                <ul className="space-y-2">
-                  {report.total.incomeByCategory.map((row) => (
-                    <li key={row.category} className="flex justify-between text-sm">
-                      <span className="text-charcoal truncate">{row.category}</span>
-                      <Link
-                        href={receiptDrillHref({ type: "tulo", category: row.category })}
-                        aria-label={`Avaa kuitit: ${row.category}`}
-                        className="text-charcoal shrink-0 underline decoration-warm-gray-light underline-offset-2"
-                      >
-                        {formatEur(row.net)}
-                      </Link>
-                    </li>
-                  ))}
-                </ul>
-              </section>
+              <Section title="Tulot kategorioittain">
+                {report.total.incomeByCategory.map((row) => (
+                  <ListRow
+                    key={row.category}
+                    href={receiptDrillHref({ type: "tulo", category: row.category })}
+                    ariaLabel={`Avaa kuitit: ${row.category}`}
+                    title={row.category}
+                    amount={formatEur(row.net)}
+                  />
+                ))}
+              </Section>
             )}
 
-            <section className="bg-white rounded-3xl border border-warm-gray-light/20 shadow-sm p-6 space-y-3">
-              <p className="text-base font-medium text-charcoal">Kirjanpitopaketti</p>
-              <p className="text-xs text-warm-gray">
-                Zip kaudelta: tuloslaskelma, ALV, CSV, kohdistukset ja tositteet.
-              </p>
+            <Card className="space-y-3">
+              <div>
+                <p className="text-[15px] font-medium text-ink">Kirjanpitopaketti</p>
+                <p className="text-[13px] text-ink-2">
+                  Zip kaudelta: tuloslaskelma, ALV, CSV, kohdistukset ja tositteet.
+                </p>
+              </div>
               <div className="flex gap-2">
                 <select
                   aria-label="Paketin kuukausi"
-                  className="flex-1 px-3 py-2.5 rounded-xl border border-warm-gray-light/60 bg-white text-sm"
+                  className={`${controlClass} flex-1`}
                   value={packageMonth.startsWith(`${year}-`) ? packageMonth : `${year}-01`}
                   onChange={(event) => setPackageMonth(event.target.value)}
                 >
@@ -320,25 +332,13 @@ export default function ReportsPage() {
                   Lataa zip
                 </a>
               </div>
-            </section>
+            </Card>
 
-            <section className="bg-white rounded-3xl border border-warm-gray-light/20 shadow-sm p-6 space-y-3">
-              <p className="text-base font-medium text-charcoal">Vie CSV-tiedostona</p>
-              <p className="text-xs text-warm-gray">
-                Puolipiste-eroteltu, avautuu suoraan Exceliin.
-              </p>
-              <div className="field-grid">
-                {EXPORTS.map((entry) => (
-                  <a
-                    key={entry.type}
-                    href={`/api/export?type=${entry.type}`}
-                    className={buttonClass("secondary", "w-full text-center")}
-                  >
-                    {entry.label}
-                  </a>
-                ))}
-              </div>
-            </section>
+            <Section title="Vie CSV-tiedostona">
+              {EXPORTS.map((entry) => (
+                <DownloadRow key={entry.type} href={`/api/export?type=${entry.type}`} title={entry.label} />
+              ))}
+            </Section>
           </>
         )}
       </div>

@@ -11,12 +11,16 @@ import {
   readJson,
   redirectToLogin,
 } from "@/components/clientFetch";
+import { PageTitle, Section, ListRow, StatusTag, SummaryCard } from "@/components/ds";
 
 import { formatEur } from "@/lib/format";
 import { alvDrillHref, receiptDrillHref, statementDrillHref } from "@/lib/report-drill";
 import { helsinkiMonthKey } from "@/lib/validation";
+import { MONTHS } from "@/lib/finnish-months";
 import { pageCacheFetchedAt, readPageCache, writePageCache } from "@/lib/page-cache";
 import { pollDelay, syncPageHiddenFlag } from "@/lib/page-activity";
+import { useProfile } from "@/app/asetukset/useProfile";
+
 interface DashboardData {
   firstName: string;
   month: string;
@@ -51,22 +55,6 @@ function getGreeting(firstName: string): string {
   return `Hyvää yötä, ${firstName}!`;
 }
 
-const MONTH_NAMES = [
-  "tammikuu",
-  "helmikuu",
-  "maaliskuu",
-  "huhtikuu",
-  "toukokuu",
-  "kesäkuu",
-  "heinäkuu",
-  "elokuu",
-  "syyskuu",
-  "lokakuu",
-  "marraskuu",
-  "joulukuu",
-];
-
-
 function currentMonth(): string {
   return helsinkiMonthKey();
 }
@@ -77,11 +65,74 @@ function shiftMonth(month: string, delta: number): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
 }
 
+function ChevronLeftIcon() {
+  return (
+    <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+    </svg>
+  );
+}
+
+function ChevronRightIcon() {
+  return (
+    <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+    </svg>
+  );
+}
+
+/** The small chevron control under the page title (spec §10). */
+function MonthSwitcher({ month, onChange }: { month: string; onChange: (next: string) => void }) {
+  const atCurrent = month >= currentMonth();
+  return (
+    <div className="-mt-3 mb-5 flex items-center gap-1 px-1">
+      <button
+        type="button"
+        aria-label="Edellinen kuukausi"
+        onClick={() => onChange(shiftMonth(month, -1))}
+        className="active-press relative flex h-8 w-8 items-center justify-center rounded-full text-ink-2 before:absolute before:inset-x-0 before:-inset-y-2 before:content-['']"
+      >
+        <ChevronLeftIcon />
+      </button>
+      <span className="min-w-[3ch] text-center text-[13px] tabular-nums text-ink-2">
+        {month.split("-")[0]}
+      </span>
+      <button
+        type="button"
+        aria-label="Seuraava kuukausi"
+        onClick={() => onChange(shiftMonth(month, 1))}
+        disabled={atCurrent}
+        className="active-press relative flex h-8 w-8 items-center justify-center rounded-full text-ink-2 disabled:opacity-30 before:absolute before:inset-x-0 before:-inset-y-2 before:content-['']"
+      >
+        <ChevronRightIcon />
+      </button>
+    </div>
+  );
+}
+
+function ReceiptIcon() {
+  return (
+    <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.75} aria-hidden>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+    </svg>
+  );
+}
+
+function BookIcon() {
+  return (
+    <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.75} aria-hidden>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M7 3.5h8.5L19 7v13.5H7A2.5 2.5 0 0 1 4.5 18V6A2.5 2.5 0 0 1 7 3.5Z" />
+      <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6M9 16h4" />
+    </svg>
+  );
+}
+
 export default function DashboardClient({
   firstName,
 }: {
   firstName: string;
 }) {
+  const { profile } = useProfile();
   const [result, setResult] = useState<{
     month: string;
     data: DashboardData;
@@ -153,270 +204,180 @@ export default function DashboardClient({
   const displayName = data?.firstName || firstName;
 
   const monthIdx = parseInt(month.split("-")[1]) - 1;
-  const monthName = MONTH_NAMES[monthIdx] || "";
+  const monthName = MONTHS[monthIdx] || "";
+  const subtitle = profile?.businessName || (displayName ? getGreeting(displayName) : undefined);
+
+  const tulotHref =
+    data?.source === "tiliote" ? statementDrillHref(month) : receiptDrillHref({ month, type: "tulo" });
+  const menotHref =
+    data?.source === "tiliote" ? statementDrillHref(month) : receiptDrillHref({ month, type: "meno" });
+
+  const matchingShortfall = data
+    ? data.matching.matchable - data.matching.matched - data.matching.suggested
+    : 0;
 
   return (
-    <>
-      <div className="space-y-6 pb-20">
-        
-        {/* Dynamic Action Banner for Pending Receipts */}
-        {data?.sectionErrors?.pending ? (
-          <ErrorState
-            compact
-            message={data.sectionErrors.pending}
-            onRetry={() => setLoadAttempt((a) => a + 1)}
-          />
-        ) : data && data.pendingReceiptsCount !== undefined && data.pendingReceiptsCount > 0 && (
-          <Link href="/kuitit" className="block relative overflow-hidden group animate-in">
-            <div className="absolute inset-0 bg-gradient-to-r from-warning/20 to-warning-dark/20 animate-pulse motion-reduce:animate-none rounded-2xl" />
-            <div className="relative bg-white/80 backdrop-blur-md border border-warning/40 rounded-2xl p-4 shadow-[0_4px_20px_-4px_rgba(138,105,30,0.3)] flex items-center justify-between transition-all group-hover:shadow-[0_4px_25px_-4px_rgba(138,105,30,0.5)] group-hover:bg-white">
-              <div className="flex items-center gap-4">
-                <div className="w-10 h-10 rounded-full bg-warning/20 flex items-center justify-center text-warning-dark">
-                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5">
-                    <path d="M5.85 3.5a.75.75 0 0 0-1.117-1 9.719 9.719 0 0 0-2.348 4.876.75.75 0 0 0 1.479.248A8.219 8.219 0 0 1 5.85 3.5ZM19.267 2.5a.75.75 0 1 0-1.118 1 8.22 8.22 0 0 1 1.987 4.124.75.75 0 0 0 1.48-.248A9.72 9.72 0 0 0 19.266 2.5Z" />
-                    <path fillRule="evenodd" d="M12 2.25A6.75 6.75 0 0 0 5.25 9v.75a8.217 8.217 0 0 1-2.119 5.52.75.75 0 0 0 .298 1.206c1.544.57 3.16.99 4.831 1.243a3.75 3.75 0 1 0 7.48 0 24.583 24.583 0 0 0 4.83-1.244.75.75 0 0 0 .298-1.205 8.217 8.217 0 0 1-2.118-5.52V9A6.75 6.75 0 0 0 12 2.25ZM9.75 18c0-.034 0-.067.002-.1a25.05 25.05 0 0 0 4.496 0l.002.1a2.25 2.25 0 1 1-4.5 0Z" clipRule="evenodd" />
-                  </svg>
-                </div>
-                <div>
-                  <h3 className="text-sm font-semibold text-charcoal">Tarkastusta odottavia kuitteja</h3>
-                  <p className="text-xs text-charcoal/70">
-                    {data.isSingleVatProfile 
-                      ? `Kaikki myyntisi ovat ALV ${data.singleVatRate}% — tarkista ja hyväksy yhdellä napautuksella.`
-                      : `Sinulla on ${data.pendingReceiptsCount} tarkastamatonta kuittia/luonnosta.`
-                    }
-                  </p>
-                </div>
-              </div>
-              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-5 h-5 text-warning-dark transform group-hover:translate-x-1 transition-transform">
-                <path fillRule="evenodd" d="M8.22 5.22a.75.75 0 0 1 1.06 0l4.25 4.25a.75.75 0 0 1 0 1.06l-4.25 4.25a.75.75 0 0 1-1.06-1.06L11.94 10 8.22 6.28a.75.75 0 0 1 0-1.06Z" clipRule="evenodd" />
-              </svg>
-            </div>
-          </Link>
-        )}
+    <div className="space-y-6 pb-20">
+      <PageTitle title={monthName} subtitle={subtitle} />
+      <MonthSwitcher
+        month={month}
+        onChange={(next) => {
+          setRefreshFailed(null);
+          setMonth(next);
+        }}
+      />
 
-        {/* Stacks on phones: the greeting and the month picker fought for room
-            and wrapped to three lines at 320px. Side by side from sm up. */}
-        <div className="flex flex-col gap-3 animate-in sm:flex-row sm:items-center sm:justify-between">
-          <div className="min-w-0">
-            <h2 className="text-2xl sm:text-3xl font-light text-charcoal tracking-tight">
-              {displayName ? getGreeting(displayName) : "\u00a0"}
-            </h2>
-            <p className="text-sm text-warm-gray mt-1">Tervetuloa Lashkirjaan</p>
-          </div>
+      {data?.sectionErrors?.pending ? (
+        <ErrorState
+          compact
+          message={data.sectionErrors.pending}
+          onRetry={() => setLoadAttempt((a) => a + 1)}
+        />
+      ) : null}
 
-          <div className="flex items-center gap-1 self-start shrink-0 sm:self-auto bg-white p-1 rounded-xl shadow-sm border border-warm-gray-light/20">
-            <button
-              type="button"
-              aria-label="Edellinen kuukausi"
-              onClick={() => { setRefreshFailed(null); setMonth(shiftMonth(month, -1)); }}
-              className="touch-target flex items-center justify-center rounded-lg text-charcoal hover:bg-blush/40 transition-colors"
-            >
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7"/></svg>
-            </button>
-            <p className="text-sm font-medium text-charcoal min-w-[100px] text-center capitalize whitespace-nowrap">
-              {monthName} {month.split("-")[0]}
-            </p>
-            <button
-              type="button"
-              aria-label="Seuraava kuukausi"
-              onClick={() => { setRefreshFailed(null); setMonth(shiftMonth(month, 1)); }}
-              disabled={month >= currentMonth()}
-              className="touch-target flex items-center justify-center rounded-lg text-charcoal hover:bg-blush/40 transition-colors disabled:opacity-30"
-            >
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7"/></svg>
-            </button>
+      {refreshFailed && data ? (
+        <StaleBanner
+          fetchedAt={pageCacheFetchedAt(`dashboard:${month}`)}
+          onRetry={() => setLoadAttempt((a) => a + 1)}
+        />
+      ) : null}
+      {refreshFailed && !data ? (
+        <ConnectionNotice
+          error={refreshFailed}
+          fallback={errorMessage(refreshFailed, "Etusivun tietojen lataus epäonnistui")}
+          onRetry={() => setLoadAttempt((a) => a + 1)}
+        />
+      ) : !data ? (
+        <div className="space-y-3">
+          <div className="grid grid-cols-2 gap-3">
+            <div className="h-24 animate-pulse rounded-card border border-line bg-surface" />
+            <div className="h-24 animate-pulse rounded-card border border-line bg-surface" />
           </div>
+          <div className="h-32 animate-pulse rounded-card border border-line bg-surface" />
         </div>
-
-        {refreshFailed && data ? (
-          <StaleBanner
-            fetchedAt={pageCacheFetchedAt(`dashboard:${month}`)}
-            onRetry={() => setLoadAttempt((a) => a + 1)}
-          />
-        ) : null}
-        {refreshFailed && !data ? (
-          <ConnectionNotice
-            error={refreshFailed}
-            fallback={errorMessage(refreshFailed, "Etusivun tietojen lataus epäonnistui")}
-            onRetry={() => setLoadAttempt((a) => a + 1)}
-          />
-        ) : !data ? (
-          <div className="space-y-4">
-            <div className="grid grid-cols-2 gap-4">
-              <div className="h-28 bg-warm-gray-light/20 rounded-3xl animate-pulse motion-reduce:animate-none" />
-              <div className="h-28 bg-warm-gray-light/20 rounded-3xl animate-pulse motion-reduce:animate-none" />
-            </div>
-            <div className="h-24 bg-warm-gray-light/20 rounded-3xl animate-pulse motion-reduce:animate-none" />
+      ) : (
+        <>
+          <div className="grid grid-cols-2 gap-3">
+            <Link href={tulotHref} aria-label="Avaa tulot" className="active-press block">
+              <SummaryCard label="Tulot" value={formatEur(data.income)} />
+            </Link>
+            <Link href={menotHref} aria-label="Avaa menot" className="active-press block">
+              <SummaryCard label="Menot" value={formatEur(data.expenses)} />
+            </Link>
+            {data.sectionErrors?.vat ? (
+              <div className="col-span-2">
+                <ErrorState
+                  compact
+                  message={data.sectionErrors.vat}
+                  onRetry={() => setLoadAttempt((a) => a + 1)}
+                />
+              </div>
+            ) : (
+              <Link
+                href={alvDrillHref(month)}
+                aria-label="Avaa ALV-raportti"
+                className="active-press col-span-2 block"
+              >
+                <SummaryCard
+                  label="ALV-arvio"
+                  value={`${data.isRefund ? "−" : ""}${formatEur(Math.abs(data.estimatedVat))}`}
+                  note={data.isRefund ? "palautettavaa" : "maksettavaa"}
+                  noteTone="muted"
+                />
+              </Link>
+            )}
           </div>
-        ) : (
-          <>
-            {/* Modern Metrics Grid */}
-            <div className="grid grid-cols-2 gap-4 animate-in-delay-1">
-              <Link
-                href={
-                  data.source === "tiliote"
-                    ? statementDrillHref(month)
-                    : receiptDrillHref({ month, type: "tulo" })
-                }
-                aria-label="Avaa tulot"
-                className="bg-gradient-to-br from-white to-slate-50 rounded-3xl p-5 shadow-[0_2px_10px_-4px_rgba(0,0,0,0.05)] border border-slate-100 relative overflow-hidden group hover-lift transition-all"
-              >
-                <div className="absolute top-0 right-0 w-24 h-24 bg-success/5 rounded-bl-full -mr-4 -mt-4 transition-transform group-hover:scale-110" />
-                <p className="text-xs text-warm-gray uppercase tracking-widest font-medium mb-1">Tulot</p>
-                <p className="text-2xl font-semibold text-success tracking-tight">{formatEur(data.income)}</p>
-              </Link>
 
-              <Link
-                href={
-                  data.source === "tiliote"
-                    ? statementDrillHref(month)
-                    : receiptDrillHref({ month, type: "meno" })
-                }
-                aria-label="Avaa menot"
-                className="bg-gradient-to-br from-white to-slate-50 rounded-3xl p-5 shadow-[0_2px_10px_-4px_rgba(0,0,0,0.05)] border border-slate-100 relative overflow-hidden group hover-lift transition-all"
-              >
-                <div className="absolute top-0 right-0 w-24 h-24 bg-accent/5 rounded-bl-full -mr-4 -mt-4 transition-transform group-hover:scale-110" />
-                <p className="text-xs text-warm-gray uppercase tracking-widest font-medium mb-1">Menot</p>
-                <p className="text-2xl font-semibold text-accent tracking-tight">{formatEur(data.expenses)}</p>
-              </Link>
-            </div>
+          {data.sectionErrors?.receipts && (
+            <ErrorState
+              compact
+              message={data.sectionErrors.receipts}
+              onRetry={() => setLoadAttempt((a) => a + 1)}
+            />
+          )}
 
-            <div className="grid grid-cols-2 gap-4 animate-in-delay-1">
-              <div className="bg-white rounded-3xl p-5 shadow-sm border border-slate-100 flex items-center justify-between hover-lift">
-                <div>
-                  <p className="text-xs text-warm-gray uppercase tracking-widest font-medium mb-1">Kuitteja</p>
-                  {data.sectionErrors?.receipts ? (
-                    <button type="button" className="text-left text-xs text-danger underline" onClick={() => setLoadAttempt((a) => a + 1)}>
-                      {data.sectionErrors.receipts} Yritä uudelleen
-                    </button>
-                  ) : (
-                    <p className="text-xl font-semibold text-charcoal">{data.receiptCount}</p>
-                  )}
-                </div>
-                <div className="w-10 h-10 rounded-full bg-slate-50 flex items-center justify-center text-slate-400">
-                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5"><path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 0 0-3.375-3.375h-1.5A1.125 1.125 0 0 1 13.5 7.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H8.25m6.75 12H9m1.5-12H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 0 0-9-9Z" /></svg>
-                </div>
-              </div>
+          <p className="px-1 text-[13px] text-ink-2">
+            {data.source === "tiliote"
+              ? `Tiliotteen perusteella (${data.txCount} tapahtumaa)`
+              : "Kuitteihin perustuva näkymä · lataa tiliote"}
+            {data.hasImap && " · Automaattinen tuonti aktiivinen"}
+          </p>
 
-              <div className="bg-white rounded-3xl p-5 shadow-sm border border-slate-100 flex items-center justify-between hover-lift">
-                <div>
-                  <p className="text-xs text-warm-gray uppercase tracking-widest font-medium mb-1">ALV-arvio</p>
-                  {data.sectionErrors?.vat ? (
-                    <button type="button" className="text-left text-xs text-danger underline" onClick={() => setLoadAttempt((a) => a + 1)}>
-                      {data.sectionErrors.vat} Yritä uudelleen
-                    </button>
-                  ) : (
-                    <Link
-                      href={alvDrillHref(month)}
-                      aria-label="Avaa ALV-raportti"
-                      className={`text-xl font-semibold ${data.isRefund ? "text-success" : "text-accent"}`}
-                    >
-                      {data.isRefund ? "−" : ""}{formatEur(Math.abs(data.estimatedVat))}
-                    </Link>
-                  )}
-                  <p className="text-[10px] text-warm-gray mt-0.5 uppercase tracking-wide">{data.isRefund ? "palautettava" : "maksettava"}</p>
-                </div>
-              </div>
-            </div>
+          {data.sectionErrors?.position && (
+            <ErrorState
+              compact
+              message={data.sectionErrors.position}
+              onRetry={() => setLoadAttempt((a) => a + 1)}
+            />
+          )}
 
-            <div className="flex items-center justify-center gap-2 mt-2 animate-in-delay-2">
-              <span className="relative flex h-2 w-2">
-                {data.hasImap && <span className="animate-ping motion-reduce:animate-none absolute inline-flex h-full w-full rounded-full bg-success opacity-40"></span>}
-                <span className={`relative inline-flex rounded-full h-2 w-2 ${data.hasImap ? 'bg-success' : 'bg-warm-gray'}`}></span>
-              </span>
-              <p className="text-xs text-warm-gray text-center">
-                {data.source === "tiliote"
-                  ? `Tiliotteen perusteella (${data.txCount} tapahtumaa)`
-                  : "Kuitteihin perustuva näkymä — lataa tiliote"}
-                {data.hasImap && " · Automaattinen tuonti aktiivinen"}
+          {data.sectionErrors?.threshold ? (
+            <ErrorState
+              compact
+              message={data.sectionErrors.threshold}
+              onRetry={() => setLoadAttempt((a) => a + 1)}
+            />
+          ) : !data.vat.registered && data.vat.ytdRevenue >= data.vat.threshold * 0.75 ? (
+            <div
+              className={`rounded-card border p-4 text-sm ${
+                data.vat.ytdRevenue >= data.vat.threshold
+                  ? "border-danger/30 bg-danger/10 text-danger"
+                  : "border-warning/30 bg-warning/10 text-ink"
+              }`}
+            >
+              <p className="font-semibold">
+                {data.vat.ytdRevenue >= data.vat.threshold ? "ALV-raja ylittynyt" : "ALV-raja lähestyy"}
+              </p>
+              <p className="mt-1 leading-relaxed">
+                Liikevaihtosi tänä vuonna on {formatEur(data.vat.ytdRevenue)}. Raja on{" "}
+                {formatEur(data.vat.threshold)}.
+                {data.vat.ytdRevenue >= data.vat.threshold
+                  ? " Rekisteröidy OmaVerossa heti."
+                  : " Rekisteröidy hyvissä ajoin."}
               </p>
             </div>
+          ) : null}
+        </>
+      )}
 
-            {data.sectionErrors?.matching ? (
-              <ErrorState
-                compact
-                message={data.sectionErrors.matching}
-                onRetry={() => setLoadAttempt((a) => a + 1)}
-              />
-            ) : data.matching && data.matching.matchable > 0 && (
-              <Link href="/pankki/taydennys" className="block mt-2 animate-in-delay-2">
-                <div className="bg-white rounded-2xl p-4 shadow-sm border border-slate-100 flex items-center justify-between hover:border-charcoal/20 transition-colors group">
-                  <div>
-                    <p className="text-sm font-semibold text-charcoal">Kuittien linkitys</p>
-                    <p className="text-xs text-warm-gray mt-1">
-                      {data.matching.matched} / {data.matching.matchable} tapahtumaa linkitetty
-                    </p>
-                  </div>
-                  <div className="flex items-center gap-3">
-                    {data.matching.matchable > data.matching.matched + data.matching.suggested ? (
-                      <span className="bg-accent/10 text-accent text-xs font-medium px-2.5 py-1 rounded-full">
-                        {data.matching.matchable - data.matching.matched - data.matching.suggested} puuttuu
-                      </span>
-                    ) : (
-                      <span className="bg-success/10 text-success text-xs font-medium px-2.5 py-1 rounded-full">
-                        Kaikki ok
-                      </span>
-                    )}
-                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4 text-warm-gray group-hover:text-charcoal transition-colors">
-                      <path fillRule="evenodd" d="M8.22 5.22a.75.75 0 0 1 1.06 0l4.25 4.25a.75.75 0 0 1 0 1.06l-4.25 4.25a.75.75 0 0 1-1.06-1.06L11.94 10 8.22 6.28a.75.75 0 0 1 0-1.06Z" clipRule="evenodd" />
-                    </svg>
-                  </div>
-                </div>
-              </Link>
-            )}
+      {data?.sectionErrors?.matching && (
+        <ErrorState
+          compact
+          message={data.sectionErrors.matching}
+          onRetry={() => setLoadAttempt((a) => a + 1)}
+        />
+      )}
 
-            {data.sectionErrors?.position && (
-              <ErrorState
-                compact
-                message={data.sectionErrors.position}
-                onRetry={() => setLoadAttempt((a) => a + 1)}
-              />
-            )}
-
-            {data.sectionErrors?.threshold ? (
-              <ErrorState
-                compact
-                message={data.sectionErrors.threshold}
-                onRetry={() => setLoadAttempt((a) => a + 1)}
-              />
-            ) : !data.vat.registered && data.vat.ytdRevenue >= data.vat.threshold * 0.75 && (
-              <div className={`rounded-2xl p-4 text-sm ${data.vat.ytdRevenue >= data.vat.threshold ? "bg-danger/10 text-danger border border-danger/20" : "bg-warning/10 text-charcoal border border-warning/20"}`}>
-                <p className="font-semibold">{data.vat.ytdRevenue >= data.vat.threshold ? "ALV-raja ylittynyt" : "ALV-raja lähestyy"}</p>
-                <p className="mt-1 leading-relaxed">
-                  Liikevaihtosi tänä vuonna on {formatEur(data.vat.ytdRevenue)}. Raja on {formatEur(data.vat.threshold)}.
-                  {data.vat.ytdRevenue >= data.vat.threshold ? " Rekisteröidy OmaVerossa heti." : " Rekisteröidy hyvissä ajoin."}
-                </p>
-              </div>
-            )}
-          </>
+      <Section>
+        {data && !data.sectionErrors?.pending && data.pendingReceiptsCount !== undefined && data.pendingReceiptsCount > 0 && (
+          <ListRow
+            href="/kuitit"
+            leading={<ReceiptIcon />}
+            title="Tarkastusta odottavia kuitteja"
+            secondary={
+              data.isSingleVatProfile
+                ? `Kaikki myyntisi ovat ALV ${data.singleVatRate}%. Tarkista ja hyväksy yhdellä napautuksella.`
+                : `${data.pendingReceiptsCount} tarkastamatonta kuittia tai luonnosta`
+            }
+          />
         )}
-
-        <div className="grid grid-cols-2 gap-3 mt-4 animate-in-delay-2">
-          <Link
-            href="/kuitit/uusi"
-            className="flex flex-col items-center justify-center gap-2 bg-charcoal text-white rounded-3xl p-5 hover:bg-black transition-all hover:-translate-y-1 hover:shadow-lg active-press"
-          >
-            <div className="w-10 h-10 rounded-full bg-white/10 flex items-center justify-center">
-              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-5 h-5"><path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" /></svg>
-            </div>
-            <span className="text-sm font-medium">Uusi kuitti</span>
-          </Link>
-          
-          <Link
-            href="/kirjanpito"
-            className="flex flex-col items-center justify-center gap-2 bg-white border-2 border-charcoal/5 text-charcoal rounded-3xl p-5 hover:bg-slate-50 transition-all hover:-translate-y-1 hover:shadow-lg active-press"
-          >
-            <div className="w-10 h-10 rounded-full bg-charcoal/5 flex items-center justify-center">
-              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.75} stroke="currentColor" className="w-5 h-5">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M7 3.5h8.5L19 7v13.5H7A2.5 2.5 0 0 1 4.5 18V6A2.5 2.5 0 0 1 7 3.5Z" />
-                <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6M9 16h4" />
-              </svg>
-            </div>
-            <span className="text-sm font-medium">Kirjanpito</span>
-          </Link>
-        </div>
-        
-      </div>
-    </>
+        {data && !data.sectionErrors?.matching && data.matching.matchable > 0 && (
+          <ListRow
+            href="/pankki/taydennys"
+            title="Kuittien linkitys"
+            secondary={`${data.matching.matched} / ${data.matching.matchable} tapahtumaa linkitetty`}
+            trailing={
+              matchingShortfall > 0 ? (
+                <StatusTag tone="accent">{`${matchingShortfall} puuttuu`}</StatusTag>
+              ) : (
+                <StatusTag tone="success">Kaikki ok</StatusTag>
+              )
+            }
+          />
+        )}
+        <ListRow href="/kuitit/uusi" leading={<ReceiptIcon />} title="Uusi kuitti" />
+        <ListRow href="/kirjanpito" leading={<BookIcon />} title="Kirjanpito" />
+      </Section>
+    </div>
   );
 }

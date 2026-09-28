@@ -20,6 +20,8 @@ export interface Profile {
   entityType: string;
   vatRegistered: boolean;
   vatPeriod: string;
+  /** Seller display name (also editable on /asetukset/laskutus); optional since not every account has set it. */
+  businessName?: string | null;
   imapAccounts: { id: string; email: string }[];
 }
 
