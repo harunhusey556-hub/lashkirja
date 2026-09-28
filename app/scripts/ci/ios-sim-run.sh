@@ -20,18 +20,26 @@ BUNDLE_ID="fi.tiyouba.lashkirja"
 FIRST_TIMEOUT="${FIRST_TIMEOUT:-600}"
 RELAUNCH_TIMEOUT="${RELAUNCH_TIMEOUT:-120}"
 mkdir -p "$OUT/screenshots"
+# Absolute: `simctl launch --stdout` resolves a relative path inside the
+# simulated device, not in this directory.
+OUT="$(cd "$OUT" && pwd)"
+SDK_VERSION="${SIM_SDK_VERSION:-}"
 
-# ---- Pick a simulator: the requested name, else the newest iOS runtime's
+# ---- Pick a simulator: the runtime that matches the Xcode SDK (else the
+# newest one not newer than it), then the requested name, else the
 # highest-numbered iPhone, preferring a plain "Pro" (Dynamic Island).
 xcrun simctl list devices available -j > "$OUT/simctl-devices.json"
-PICK=$(DEVICE="$DEVICE" node -e '
+PICK=$(DEVICE="$DEVICE" SDK_VERSION="$SDK_VERSION" node -e '
 const data = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).devices;
 const wanted = process.env.DEVICE || "";
+const sdk = (process.env.SDK_VERSION || "").split(".").map(Number);
+const sdkVersion = sdk.length >= 2 && !Number.isNaN(sdk[0]) ? sdk[0] * 100 + (sdk[1] || 0) : Infinity;
 let best = null;
 for (const [runtime, devices] of Object.entries(data)) {
   const m = runtime.match(/SimRuntime\.iOS-(\d+)-(\d+)/);
   if (!m) continue;
   const version = Number(m[1]) * 100 + Number(m[2]);
+  if (version > sdkVersion) continue;
   for (const d of devices) {
     if (!d.isAvailable || !/^iPhone/.test(d.name)) continue;
     if (wanted && d.name !== wanted) continue;
@@ -48,11 +56,13 @@ UDID="${PICK%%|*}"
 REST="${PICK#*|}"
 DEVICE_NAME="${REST%%|*}"
 RUNTIME="${REST#*|}"
-echo "Simulator: $DEVICE_NAME ($RUNTIME) $UDID" | tee "$OUT/device.txt"
+echo "Simulator: $DEVICE_NAME ($RUNTIME) $UDID; Xcode SDK iphonesimulator $SDK_VERSION" | tee "$OUT/device.txt"
 
 # ---- Boot, clean status bar, light appearance, install.
 xcrun simctl boot "$UDID" 2>/dev/null || true
 xcrun simctl bootstatus "$UDID" -b
+# SpringBoard can still be settling after bootstatus returns.
+sleep 10
 xcrun simctl ui "$UDID" appearance light || true
 xcrun simctl status_bar "$UDID" override --time "9:41" --batteryState charged --batteryLevel 100 \
   --cellularMode active --cellularBars 4 --wifiBars 3 || true
@@ -90,11 +100,26 @@ wait_for() {
   [[ -f "$file" ]]
 }
 
+launch_app() {
+  local suffix="$1" attempt
+  for attempt in 1 2 3; do
+    if xcrun simctl launch --terminate-running-process \
+      --stdout="$OUT/app-stdout$suffix.log" --stderr="$OUT/app-stderr$suffix.log" "$UDID" "$BUNDLE_ID"; then
+      return 0
+    fi
+    echo "launch attempt $attempt failed; retrying"
+    sleep 10
+  done
+  return 1
+}
+
 # ---- First launch: log in, walk the routes, open the sheets.
-xcrun simctl launch --terminate-running-process \
-  --stdout="$OUT/app-stdout.log" --stderr="$OUT/app-stderr.log" "$UDID" "$BUNDLE_ID"
 FIRST_OK=0
-if wait_for "$OUT/done-first.json" "$FIRST_TIMEOUT"; then FIRST_OK=1; fi
+if launch_app ""; then
+  if wait_for "$OUT/done-first.json" "$FIRST_TIMEOUT"; then FIRST_OK=1; fi
+else
+  echo "::error::simctl could not launch the app"
+fi
 xcrun simctl io "$UDID" screenshot --type=png "$OUT/screenshots/zz-final-first.png" || true
 
 # ---- Cold relaunch: the Keychain session must skip the login form.
@@ -102,9 +127,7 @@ RELAUNCH_OK=0
 if [[ "$FIRST_OK" == 1 ]]; then
   xcrun simctl terminate "$UDID" "$BUNDLE_ID" || true
   sleep 2
-  xcrun simctl launch \
-    --stdout="$OUT/app-stdout-relaunch.log" --stderr="$OUT/app-stderr-relaunch.log" "$UDID" "$BUNDLE_ID"
-  if wait_for "$OUT/done-relaunch.json" "$RELAUNCH_TIMEOUT"; then RELAUNCH_OK=1; fi
+  if launch_app "-relaunch" && wait_for "$OUT/done-relaunch.json" "$RELAUNCH_TIMEOUT"; then RELAUNCH_OK=1; fi
 fi
 
 # ---- Deep link: the registered lashkirja:// scheme must reopen the app.

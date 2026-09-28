@@ -28,7 +28,12 @@ on:
         type: string
         default: ""
       device:
-        description: "Simulator name, e.g. 'iPhone 16 Pro'. Empty = the newest iPhone on the runner"
+        description: "Simulator name, e.g. 'iPhone 16 Pro'. Empty = the newest iPhone on the runtime matching the Xcode SDK"
+        required: false
+        type: string
+        default: ""
+      xcode:
+        description: "Xcode.app path, e.g. /Applications/Xcode_16.4.app. Empty = the newest non-beta Xcode"
         required: false
         type: string
         default: ""
@@ -131,6 +136,20 @@ jobs:
             -H "Access-Control-Request-Headers: content-type" | tee cors-preflight.txt
           grep -qi "access-control-allow-origin: capacitor://localhost" cors-preflight.txt || {
             echo "::error::The API does not allow capacitor://localhost"; exit 1; }
+
+      # The runner's default Xcode (16.x, iOS 18 SDK) is older than its
+      # newest simulator runtime (iOS 26). An app launched on a runtime newer
+      # than its SDK was refused by SpringBoard in run 1, so build with the
+      # newest installed Xcode and run on the runtime that matches its SDK.
+      - name: Select the newest Xcode
+        env:
+          XCODE_OVERRIDE: ${{ inputs.xcode || '' }}
+        run: |
+          ls -d /Applications/Xcode*.app
+          XCODE="${XCODE_OVERRIDE:-$(ls -d /Applications/Xcode_*.app | grep -viE 'beta|_rc' | sort -V | tail -n 1)}"
+          sudo xcode-select -s "$XCODE/Contents/Developer"
+          xcodebuild -version
+          echo "SIM_SDK_VERSION=$(xcrun --sdk iphonesimulator --show-sdk-version)" >> "$GITHUB_ENV"
 
       - name: Build the app for the simulator
         run: |
