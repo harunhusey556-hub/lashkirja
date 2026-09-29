@@ -51,8 +51,8 @@ export default function YritysPage() {
 
             <div className="flex items-center justify-between gap-3">
               <div>
-                <p className="text-[15px] font-medium text-ink">ALV-rekisterissä</p>
-                <p className="mt-0.5 text-[13px] text-ink-2">Raja 20 000 € / kalenterivuosi</p>
+                <p className="text-body font-medium text-ink">ALV-rekisterissä</p>
+                <p className="mt-0.5 text-caption text-ink-2">Raja 20 000 € / kalenterivuosi</p>
               </div>
               <button
                 type="button"

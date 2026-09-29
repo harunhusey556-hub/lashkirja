@@ -152,7 +152,7 @@ export function AppLock({ children }: { children: React.ReactNode }) {
   if (!ready) {
     return (
       <div className="app-frame bg-canvas">
-        <p className="mx-auto mt-24 max-w-sm px-4 text-center text-[15px] text-ink-2">Tarkistetaan lukitusta…</p>
+        <p className="mx-auto mt-24 max-w-sm px-4 text-center text-body text-ink-2">Tarkistetaan lukitusta…</p>
       </div>
     );
   }
@@ -197,7 +197,7 @@ export function AppLock({ children }: { children: React.ReactNode }) {
         <div className="flex flex-col items-center gap-3 pb-2">
           <AppMark size={64} />
           <h1 className="text-2xl font-bold tracking-[-0.02em] text-ink">LashKirja</h1>
-          <p className="text-center text-[15px] leading-relaxed text-ink-2">
+          <p className="text-center text-body leading-relaxed text-ink-2">
             Näyttö on lukittu tällä laitteella. Kirjanpito ei näy, ennen kuin koodi tai biometria avaa sen.
             Palvelimen istunto pysyy.
           </p>
@@ -247,12 +247,12 @@ export function AppLock({ children }: { children: React.ReactNode }) {
             <Button type="button" variant="secondary" className="w-full" onClick={() => void forgetPin()}>
               Kirjaudu ulos
             </Button>
-            <button type="button" className="active-press block min-h-11 w-full text-[15px] text-ink-2" onClick={() => setConfirmForget(false)}>
+            <button type="button" className="active-press block min-h-11 w-full text-body text-ink-2" onClick={() => setConfirmForget(false)}>
               Peruuta
             </button>
           </div>
         ) : (
-          <button type="button" className="active-press block min-h-11 w-full text-[15px] font-medium text-accent" onClick={() => setConfirmForget(true)}>
+          <button type="button" className="active-press block min-h-11 w-full text-body font-medium text-accent" onClick={() => setConfirmForget(true)}>
             Unohdin koodin
           </button>
         )}

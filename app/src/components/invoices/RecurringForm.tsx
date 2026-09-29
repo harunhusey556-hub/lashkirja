@@ -223,7 +223,7 @@ export function RecurringForm({
   }
 
   const field = `${controlClass} min-h-12`;
-  const label = "mb-1.5 block text-[13px] font-normal text-ink-2";
+  const label = "mb-1.5 block text-caption font-normal text-ink-2";
   const lineLabel = "mb-1 block text-xs font-normal text-ink-2";
   const errorText = (key: string, id: string) =>
     errors[key] ? (
@@ -246,7 +246,7 @@ export function RecurringForm({
   if (customers !== null && customers.length === 0) {
     return (
       <div className="space-y-3">
-        <p className="text-[15px] text-ink-2">
+        <p className="text-body text-ink-2">
           Toistuva lasku tarvitsee asiakkaan. Lisää asiakas, niin se valitaan tähän.
         </p>
         {onAddCustomer ? (
@@ -283,7 +283,7 @@ export function RecurringForm({
             <button
               type="button"
               onClick={onAddCustomer}
-              className="relative text-[13px] font-medium text-accent before:absolute before:-inset-x-2 before:-inset-y-[14px] before:content-['']"
+              className="relative text-caption font-medium text-accent before:absolute before:-inset-x-2 before:-inset-y-[14px] before:content-['']"
             >
               Uusi asiakas
             </button>
@@ -400,7 +400,7 @@ export function RecurringForm({
       </div>
 
       <div className="space-y-3">
-        <p className="text-[13px] text-ink-2">Rivit</p>
+        <p className="text-caption text-ink-2">Rivit</p>
         {values.lines.map((line, index) => (
           <Card key={index} className="space-y-2">
             <label className={lineLabel} htmlFor={`ri-line-${index}-desc`}>Kuvaus</label>
@@ -512,7 +512,7 @@ export function RecurringForm({
         )}
       </div>
 
-      <label className="flex min-h-11 items-center gap-3 text-[15px] text-ink">
+      <label className="flex min-h-11 items-center gap-3 text-body text-ink">
         <input
           type="checkbox"
           checked={values.autoSend}

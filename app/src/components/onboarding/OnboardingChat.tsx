@@ -125,7 +125,7 @@ function AssistantBubble({
   return (
     <div className={`flex items-end gap-2 ${styles.theirs} ${className}`}>
       <AssistantAvatar visible={avatar} />
-      <div className="max-w-[85%] rounded-2xl rounded-bl-md border border-line bg-surface px-4 py-2.5 text-[15px] leading-relaxed text-ink">
+      <div className="max-w-[85%] rounded-2xl rounded-bl-md border border-line bg-surface px-4 py-2.5 text-body leading-relaxed text-ink">
         {children}
       </div>
     </div>
@@ -408,7 +408,7 @@ export function OnboardingChat({
         className={fresh(`q-${id}`) ? styles.bubbleIn : ""}
       >
         <p>{step.question}</p>
-        {step.hint && <p className="mt-0.5 text-[13px] text-ink-2">{step.hint}</p>}
+        {step.hint && <p className="mt-0.5 text-caption text-ink-2">{step.hint}</p>}
       </AssistantBubble>
     );
     const text = answerText(id, answers);
@@ -424,7 +424,7 @@ export function OnboardingChat({
           onClick={() => rewindTo(id)}
           disabled={removing !== null || saving}
           aria-label={`Muokkaa vastausta: ${text}`}
-          className="active-press flex min-h-11 max-w-[85%] items-center gap-2 rounded-2xl rounded-br-md bg-ink px-4 py-2.5 text-left text-[15px] leading-snug text-canvas"
+          className="active-press flex min-h-11 max-w-[85%] items-center gap-2 rounded-2xl rounded-br-md bg-ink px-4 py-2.5 text-left text-body leading-snug text-canvas"
         >
           <span>{text}</span>
           <Icon icon={Pencil} size="inline" className="opacity-60" />
@@ -474,8 +474,8 @@ export function OnboardingChat({
               >
                 {/* Label above value: long Finnish words never overflow at 320 px. */}
                 <span className="min-w-0 flex-1">
-                  <span className="block text-[13px] leading-snug text-ink-2">{row.label}</span>
-                  <span className="block text-[15px] font-medium leading-snug text-ink [overflow-wrap:anywhere]">
+                  <span className="block text-caption leading-snug text-ink-2">{row.label}</span>
+                  <span className="block text-body font-medium leading-snug text-ink [overflow-wrap:anywhere]">
                     {row.value}
                   </span>
                 </span>
@@ -494,7 +494,7 @@ export function OnboardingChat({
           className={motion}
         >
           <p>{step.question}</p>
-          {step.hint && <p className="mt-0.5 text-[13px] text-ink-2">{step.hint}</p>}
+          {step.hint && <p className="mt-0.5 text-caption text-ink-2">{step.hint}</p>}
         </AssistantBubble>
       );
     }
@@ -523,13 +523,13 @@ export function OnboardingChat({
             className={`${styles.back} active-press flex h-11 items-center gap-0.5 justify-self-start pr-2 text-accent`}
           >
             <Icon icon={ChevronLeft} size="tab" strokeWidth={2} />
-            <span className="text-[15px] font-medium">Takaisin</span>
+            <span className="text-body font-medium">Takaisin</span>
           </button>
           <h2
             id="onboarding-title"
             ref={titleRef}
             tabIndex={-1}
-            className="text-center text-[17px] font-semibold text-ink outline-none"
+            className="text-center text-headline font-semibold text-ink outline-none"
           >
             Perehdytys
           </h2>
@@ -537,7 +537,7 @@ export function OnboardingChat({
             type="button"
             onClick={snooze}
             disabled={saving}
-            className="active-press flex min-h-11 items-center justify-self-end px-2 text-[15px] font-medium text-accent disabled:opacity-40"
+            className="active-press flex min-h-11 items-center justify-self-end px-2 text-body font-medium text-accent disabled:opacity-40"
           >
             Ohita nyt
           </button>
@@ -549,7 +549,7 @@ export function OnboardingChat({
               style={{ transform: `scaleX(${progress})` }}
             />
           </div>
-          <span className="shrink-0 text-[13px] tabular-nums text-ink-2" aria-live="polite">
+          <span className="shrink-0 text-caption tabular-nums text-ink-2" aria-live="polite">
             {current === "summary" ? "Valmis" : `${questionNumber} / ${total}`}
           </span>
         </div>
@@ -594,9 +594,9 @@ export function OnboardingChat({
                         <Icon icon={CHOICE_ICONS[String(chip.value)] ?? Check} />
                       </IconTile>
                       <span className="min-w-0 flex-1">
-                        <span className="block text-[15px] font-medium leading-snug text-ink">{chip.label}</span>
+                        <span className="block text-body font-medium leading-snug text-ink">{chip.label}</span>
                         {chip.detail && (
-                          <span className="block text-[13px] leading-snug text-ink-2">{chip.detail}</span>
+                          <span className="block text-caption leading-snug text-ink-2">{chip.detail}</span>
                         )}
                       </span>
                       {selected && (
@@ -630,9 +630,9 @@ export function OnboardingChat({
                           <Icon icon={CHOICE_ICONS[value] ?? Check} />
                         </IconTile>
                         <span className="min-w-0 flex-1">
-                          <span className="block text-[15px] font-medium leading-snug text-ink">{chip.label}</span>
+                          <span className="block text-body font-medium leading-snug text-ink">{chip.label}</span>
                           {chip.detail && (
-                            <span className="block text-[13px] leading-snug text-ink-2">{chip.detail}</span>
+                            <span className="block text-caption leading-snug text-ink-2">{chip.detail}</span>
                           )}
                         </span>
                         <span
@@ -654,7 +654,7 @@ export function OnboardingChat({
                     commitAnswer(panelStep.id, [...multi]);
                   }}
                   disabled={stage !== "ready" || panelHidden}
-                  className={`${styles.chipIn} active-press mt-1 flex min-h-12 w-full items-center justify-center rounded-card bg-ink text-[15px] font-semibold text-canvas`}
+                  className={`${styles.chipIn} active-press mt-1 flex min-h-12 w-full items-center justify-center rounded-card bg-ink text-body font-semibold text-canvas`}
                 >
                   {multi.length === 0 ? NO_SELECTION_LABEL : "Jatka"}
                 </button>
@@ -664,7 +664,7 @@ export function OnboardingChat({
             {panel.current === "summary" && (
               <div className="space-y-2">
                 {error && (
-                  <p role="alert" className="text-[13px] leading-snug text-danger">
+                  <p role="alert" className="text-caption leading-snug text-danger">
                     {error}
                   </p>
                 )}

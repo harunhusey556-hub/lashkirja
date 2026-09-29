@@ -119,7 +119,7 @@ export function CustomerForm({
   }
 
   const field = `${controlClass} min-h-12`;
-  const label = "mb-1.5 block text-[13px] font-normal text-ink-2";
+  const label = "mb-1.5 block text-caption font-normal text-ink-2";
 
   return (
     <form

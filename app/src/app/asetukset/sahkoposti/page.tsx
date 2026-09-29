@@ -27,14 +27,14 @@ function ProviderSteps({
   steps: React.ReactNode[];
 }) {
   return (
-    <div className="space-y-2 rounded-card border border-line bg-canvas p-4 text-[13px] text-ink">
+    <div className="space-y-2 rounded-card border border-line bg-canvas p-4 text-caption text-ink">
       <p className="font-medium">{title}</p>
       <ol className="list-decimal space-y-1 pl-4 text-ink-2">
         {steps.map((step, index) => (
           <li key={index}>{step}</li>
         ))}
       </ol>
-      <ExternalLink href={link.href} className="text-[15px]">
+      <ExternalLink href={link.href} className="text-body">
         {link.label}
       </ExternalLink>
     </div>
@@ -145,7 +145,7 @@ function ImapCard({
         );
       default:
         return (
-          <p className="text-[13px] text-ink-2">
+          <p className="text-caption text-ink-2">
             Täytä IMAP-palvelimen tiedot ja sovellussalasana. Varmista sähköpostintarjoajaltasi IMAP-asetukset.
           </p>
         );
@@ -217,8 +217,8 @@ function ImapCard({
       <Card className="space-y-6">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div className="min-w-0">
-            <h2 className="text-[15px] font-medium text-ink">Sähköpostiautomaatio</h2>
-            <p className="mt-1 text-[13px] text-ink-2">
+            <h2 className="text-body font-medium text-ink">Sähköpostiautomaatio</h2>
+            <p className="mt-1 text-caption text-ink-2">
               Yhdistä sähköpostiosoitteesi, niin sovellus hakee ja analysoi automaattisesti siihen saapuneet kuitit.
             </p>
           </div>
@@ -249,7 +249,7 @@ function ImapCard({
 
         {profile.imapAccounts.length > 0 && (
           <div className="space-y-3">
-            <h3 className="text-[13px] text-ink-2">Yhdistetyt tilit</h3>
+            <h3 className="text-caption text-ink-2">Yhdistetyt tilit</h3>
             {profile.imapAccounts.map((account) => (
               <div
                 key={account.id}
@@ -257,12 +257,12 @@ function ImapCard({
               >
                 <div className="min-w-0">
                   <p className="text-sm font-medium text-success">Aktiivinen</p>
-                  <p className="mt-0.5 truncate text-[13px] text-ink">{account.email}</p>
+                  <p className="mt-0.5 truncate text-caption text-ink">{account.email}</p>
                 </div>
                 <button
                   type="button"
                   onClick={() => setAccountToDisconnect(account.id)}
-                  className="active-press flex min-h-11 shrink-0 items-center px-2 text-[15px] font-medium text-danger"
+                  className="active-press flex min-h-11 shrink-0 items-center px-2 text-body font-medium text-danger"
                 >
                   Katkaise yhteys
                 </button>
@@ -276,7 +276,7 @@ function ImapCard({
             <button
               type="button"
               onClick={() => setIsAddingEmail(true)}
-              className="active-press touch-target flex w-full items-center justify-center gap-2 rounded-card border border-dashed border-line py-3 text-[15px] font-medium text-ink"
+              className="active-press touch-target flex w-full items-center justify-center gap-2 rounded-card border border-dashed border-line py-3 text-body font-medium text-ink"
             >
               <Icon icon={Plus} size="inline" />
               Lisää toinen sähköpostitili
@@ -284,14 +284,14 @@ function ImapCard({
           ) : (
             <div className="space-y-6">
               <div className="flex items-center justify-between">
-                <h3 className="text-[13px] text-ink-2">
+                <h3 className="text-caption text-ink-2">
                   {profile.imapAccounts.length > 0 ? "Lisää uusi sähköpostitili" : "Yhdistä sähköpostitili"}
                 </h3>
                 {profile.imapAccounts.length > 0 && (
                   <button
                     type="button"
                     onClick={cancelAdding}
-                    className="active-press flex min-h-11 items-center px-2 text-[15px] font-medium text-ink-2"
+                    className="active-press flex min-h-11 items-center px-2 text-body font-medium text-ink-2"
                   >
                     Peruuta
                   </button>
@@ -314,7 +314,7 @@ function ImapCard({
                       onClick={() => handleProviderSelect(value)}
                       className="active-press touch-target flex flex-col items-center justify-center rounded-card border border-line p-4"
                     >
-                      <span className="text-[15px] font-medium text-ink">{label}</span>
+                      <span className="text-body font-medium text-ink">{label}</span>
                     </button>
                   ))}
                 </div>

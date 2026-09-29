@@ -24,7 +24,7 @@ export default function Error({
           <Icon icon={TriangleAlert} size="hero" />
         </div>
         <h1 className="text-xl font-semibold text-ink">Jokin meni pieleen</h1>
-        <p className="mt-2 text-[15px] text-ink-2">Sivua ei voitu näyttää. Yritä hetken kuluttua uudelleen.</p>
+        <p className="mt-2 text-body text-ink-2">Sivua ei voitu näyttää. Yritä hetken kuluttua uudelleen.</p>
         <button type="button" onClick={unstable_retry} className={`mt-5 w-full ${buttonClass("primary")}`}>
           Yritä uudelleen
         </button>

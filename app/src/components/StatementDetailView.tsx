@@ -30,7 +30,7 @@ import { showToast } from "@/lib/toast";
 import { hapticImpact } from "@/lib/haptics";
 import { ActionPill, DetailHero, FilterChips, ListRow, MoreMenu, Section, StatusTag } from "@/components/ds";
 
-const LABEL_CLASS = "mb-1.5 block text-[13px] font-normal text-ink-2";
+const LABEL_CLASS = "mb-1.5 block text-caption font-normal text-ink-2";
 
 interface Props {
   statement: StatementData;
@@ -566,7 +566,7 @@ export default function StatementDetailView({
       <StatementSummaryCards totals={statement.totals} />
 
       {statement.totals.transfers !== 0 && (
-        <p className="px-1 text-[13px] text-ink-2">
+        <p className="px-1 text-caption text-ink-2">
           Omat siirrot {formatEur(statement.totals.transfers)}, eivät sisälly
           nettoon
         </p>
@@ -585,7 +585,7 @@ export default function StatementDetailView({
               onChange={(e) => setDraftPeriod(e.target.value)}
               className={controlClass}
             />
-            <p className="mt-1.5 text-[13px] text-ink-2">
+            <p className="mt-1.5 text-caption text-ink-2">
               Määrittää millä kuukaudella etusivu näyttää tämän tiliotteen.
             </p>
           </div>
@@ -617,7 +617,7 @@ export default function StatementDetailView({
       )}
 
       {statusMsg && (
-        <p className="px-1 text-[13px] text-success" role="status" aria-live="polite">
+        <p className="px-1 text-caption text-success" role="status" aria-live="polite">
           {statusMsg}
         </p>
       )}
@@ -629,8 +629,8 @@ export default function StatementDetailView({
       {incomeDraftCount > 0 && (
         <div className="space-y-3 rounded-card border border-success/20 bg-success/10 p-4">
           <div>
-            <h3 className="text-[15px] font-semibold text-success">Tunnistetut myynnit</h3>
-            <p className="mt-1 text-[13px] text-ink">
+            <h3 className="text-body font-semibold text-success">Tunnistetut myynnit</h3>
+            <p className="mt-1 text-caption text-ink">
               Tunnistimme tiliotteelta {incomeDraftCount} myyntitapahtumaa (esim. MobilePay-tilitystä).
               Hyväksymällä lisäät ne automaattisesti kirjanpitoon tuloina, alv mukaan lukien.
             </p>
@@ -650,8 +650,8 @@ export default function StatementDetailView({
       {regularSuggestedCount > 0 && (
         <div className="space-y-3 rounded-card border border-line bg-surface p-4">
           <div>
-            <p className="text-[15px] font-medium text-ink">Kuittien linkitys</p>
-            <p className="mt-1 text-[13px] text-ink-2">
+            <p className="text-body font-medium text-ink">Kuittien linkitys</p>
+            <p className="mt-1 text-caption text-ink-2">
               {regularSuggestedCount} valmista ehdotusta
               {missingCount > 0 && ` · ${missingCount} tapahtumaa odottaa kuittia`}
             </p>
@@ -677,9 +677,9 @@ export default function StatementDetailView({
         }
       >
         {statement.transactions.length === 0 ? (
-          <p className="px-4 py-8 text-center text-[15px] text-ink-2">Ei tapahtumia</p>
+          <p className="px-4 py-8 text-center text-body text-ink-2">Ei tapahtumia</p>
         ) : filteredTransactions.length === 0 ? (
-          <p className="px-4 py-8 text-center text-[15px] text-ink-2">
+          <p className="px-4 py-8 text-center text-body text-ink-2">
             {activeFilter === "missing"
               ? "Kaikilla tapahtumilla on kuitti tai merkintä"
               : "Ei tapahtumia tässä suodattimessa"}
@@ -886,10 +886,10 @@ export default function StatementDetailView({
                           (t.suggestedReceipt.source === "auto_income" ? (
                             <div className="space-y-3">
                               <div>
-                                <p className="text-[13px] font-semibold text-success">
+                                <p className="text-caption font-semibold text-success">
                                   Tunnistettu myyntitilitys
                                 </p>
-                                <p className="mt-1 text-[13px] text-ink">
+                                <p className="mt-1 text-caption text-ink">
                                   {t.suggestedReceipt.vendor || "Myyjä"}
                                   {t.suggestedReceipt.totalAmount != null
                                     ? ` · ${formatEur(t.suggestedReceipt.totalAmount)}`
@@ -926,13 +926,13 @@ export default function StatementDetailView({
                               </div>
                             </div>
                           ) : (
-                            <p className="text-[13px] text-ink-2">
+                            <p className="text-caption text-ink-2">
                               Ehdotettu kuitti: {receiptLabel(t.suggestedReceipt)}
                             </p>
                           ))}
 
                         {t.matchStatus === "confirmed" && t.receipt && (
-                          <p className="text-[13px] text-ink-2">
+                          <p className="text-caption text-ink-2">
                             Linkitetty kuitti: {receiptLabel(t.receipt)}
                           </p>
                         )}
@@ -940,7 +940,7 @@ export default function StatementDetailView({
                         {t.matchStatus === "unmatched" &&
                           (t.matchCandidates?.length ?? 0) > 0 && (
                             <div>
-                              <p className="pb-1.5 text-[13px] text-ink-2">Ehdotetut kuitit</p>
+                              <p className="pb-1.5 text-caption text-ink-2">Ehdotetut kuitit</p>
                               <div className="divide-y divide-line">
                                 {t.matchCandidates!.map((c) => (
                                   <button
@@ -955,10 +955,10 @@ export default function StatementDetailView({
                                     disabled={matchBusyTxId === t.id}
                                     className="active-press flex min-h-11 w-full items-center justify-between gap-3 py-2.5 text-left disabled:opacity-50"
                                   >
-                                    <span className="min-w-0 truncate text-[13px] text-ink">
+                                    <span className="min-w-0 truncate text-caption text-ink">
                                       {receiptLabel(c.receipt)}
                                     </span>
-                                    <span className="shrink-0 text-[13px] text-ink-2">
+                                    <span className="shrink-0 text-caption text-ink-2">
                                       {Math.round(c.score * 100)} %
                                     </span>
                                   </button>
@@ -970,9 +970,9 @@ export default function StatementDetailView({
                         {candidatesFor === t.id && (
                           <div>
                             {loadingCandidates ? (
-                              <p className="text-[13px] text-ink-2">Haetaan kuitteja...</p>
+                              <p className="text-caption text-ink-2">Haetaan kuitteja...</p>
                             ) : candidates.length === 0 ? (
-                              <p className="text-[13px] text-ink-2">
+                              <p className="text-caption text-ink-2">
                                 Ei sopivia kuitteja. Lisää kuitti ensin Kuitit-sivulla.
                               </p>
                             ) : (
@@ -990,10 +990,10 @@ export default function StatementDetailView({
                                     disabled={matchBusyTxId === t.id}
                                     className="active-press flex min-h-11 w-full items-center justify-between gap-3 py-2.5 text-left disabled:opacity-50"
                                   >
-                                    <span className="min-w-0 truncate text-[13px] text-ink">
+                                    <span className="min-w-0 truncate text-caption text-ink">
                                       {receiptLabel(c.receipt)}
                                     </span>
-                                    <span className="shrink-0 text-[13px] text-ink-2">
+                                    <span className="shrink-0 text-caption text-ink-2">
                                       {Math.round(c.score * 100)} %
                                     </span>
                                   </button>

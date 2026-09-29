@@ -931,13 +931,13 @@ function InvoiceDetail() {
                 }
               >
                 {invoice.payments.length === 0 ? (
-                  <p className="px-4 py-4 text-[15px] text-ink-2">Ei maksuja vielä.</p>
+                  <p className="px-4 py-4 text-body text-ink-2">Ei maksuja vielä.</p>
                 ) : (
                   invoice.payments.map((payment) => (
                     <div key={payment.id} className="flex items-center justify-between gap-3 px-4 py-3">
                       <div>
-                        <p className="text-[15px] text-ink">{formatEur(payment.amount)}</p>
-                        <p className="text-[13px] text-ink-2">
+                        <p className="text-body text-ink">{formatEur(payment.amount)}</p>
+                        <p className="text-caption text-ink-2">
                           {formatDate(payment.paidDate)}
                           {payment.source === "bank" ? " · pankista" : ""}
                           {payment.note ? ` · ${payment.note}` : ""}
@@ -961,7 +961,7 @@ function InvoiceDetail() {
               <Section title="Tarkista maksu">
                 {paymentDuplicates.map((pair) => (
                   <div key={`${pair.receiptId}:${pair.paymentId}`} className="space-y-3 px-4 py-4">
-                    <p className="text-[15px] text-ink">
+                    <p className="text-body text-ink">
                       Tulokuitti{pair.receiptVendor ? ` ${pair.receiptVendor}` : ""}{" "}
                       {formatEur(pair.amountCents / 100)}
                       {pair.receiptDate ? ` (${formatDate(pair.receiptDate)})` : ""} on kirjattu
@@ -997,10 +997,10 @@ function InvoiceDetail() {
             {reminder && (
               <Section title="Muistutukset">
                 <div className="space-y-3 px-4 py-4">
-                  <p className="text-[13px] text-ink-2">
+                  <p className="text-caption text-ink-2">
                     Myöhässä {reminder.daysLate} päivää · muistutus {reminder.level}
                   </p>
-                  <div className="space-y-1 text-[15px]">
+                  <div className="space-y-1 text-body">
                     <div className="flex justify-between text-ink-2">
                       <span>Avoin pääoma</span>
                       <span>{formatEur(reminder.open)}</span>
@@ -1031,7 +1031,7 @@ function InvoiceDetail() {
                     Avaa muistutus
                   </AuthedFileLink>
                   {reminder.previousReminders.length > 0 && (
-                    <ul className="space-y-1 text-[13px] text-ink-2">
+                    <ul className="space-y-1 text-caption text-ink-2">
                       {reminder.previousReminders.map((previous) => (
                         <li key={`${previous.level}-${previous.sentAt}`}>
                           Muistutus {previous.level} · {formatDate(previous.sentAt.slice(0, 10))} ·{" "}
@@ -1045,13 +1045,13 @@ function InvoiceDetail() {
             )}
 
             <section className="mt-6">
-              <h2 className="mb-2 px-1 text-[13px] font-normal text-ink-2">Historia</h2>
+              <h2 className="mb-2 px-1 text-caption font-normal text-ink-2">Historia</h2>
               <Timeline items={historyItems(invoice)} />
             </section>
 
             {invoice.notes && (
               <Section title="Viesti laskulla">
-                <p className="whitespace-pre-wrap px-4 py-4 text-[15px] text-ink">{invoice.notes}</p>
+                <p className="whitespace-pre-wrap px-4 py-4 text-body text-ink">{invoice.notes}</p>
               </Section>
             )}
           </div>
@@ -1086,7 +1086,7 @@ function InvoiceDetail() {
             <button
               type="button"
               disabled={refreshFailed}
-              className="active-press flex min-h-12 w-full items-center justify-center text-[15px] font-semibold text-accent disabled:opacity-50"
+              className="active-press flex min-h-12 w-full items-center justify-center text-body font-semibold text-accent disabled:opacity-50"
               onClick={() => openPaymentSheet()}
             >
               Kirjaa maksu
@@ -1095,7 +1095,7 @@ function InvoiceDetail() {
           {invoice.status === "draft" && (
             <button
               type="button"
-              className="active-press flex min-h-12 w-full items-center justify-center text-[15px] font-semibold text-accent"
+              className="active-press flex min-h-12 w-full items-center justify-center text-body font-semibold text-accent"
               onClick={() => router.push(`/laskut/uusi?edit=${encodeURIComponent(invoice.id)}`)}
             >
               Muokkaa
@@ -1218,7 +1218,7 @@ function InvoiceDetail() {
             />
           </div>
           {bankRow && (
-            <label className="flex min-h-12 items-start gap-3 rounded-card border border-line bg-surface px-4 py-3 text-[15px]">
+            <label className="flex min-h-12 items-start gap-3 rounded-card border border-line bg-surface px-4 py-3 text-body">
               <input
                 type="checkbox"
                 className="mt-1 h-5 w-5 shrink-0 accent-accent"
@@ -1231,7 +1231,7 @@ function InvoiceDetail() {
               />
               <span className="min-w-0">
                 <span className="block text-ink">Yhdistä tiliotteen maksuun</span>
-                <span className="block text-[13px] text-ink-2">
+                <span className="block text-caption text-ink-2">
                   {[
                     bankRow.counterparty,
                     formatEur(bankRow.amount),
@@ -1274,7 +1274,7 @@ function InvoiceDetail() {
       >
         {review && (
           <div className="space-y-3 px-5 py-4 sheet-safe-bottom">
-            <div className="space-y-1 text-[15px]">
+            <div className="space-y-1 text-body">
               <div className="flex justify-between gap-3">
                 <span className="shrink-0 text-ink-2">Vastaanottaja</span>
                 <span className="min-w-0 break-all text-right text-ink">{review.recipient ?? "–"}</span>

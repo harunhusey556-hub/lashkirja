@@ -37,10 +37,10 @@ export default function AsetuksetPage() {
               {(profile.firstName?.[0] || "?").toUpperCase()}
             </span>
             <span className="min-w-0 flex-1">
-              <span className="block truncate text-[15px] font-medium text-ink">
+              <span className="block truncate text-body font-medium text-ink">
                 {profile.firstName} {profile.lastName}
               </span>
-              <span className="mt-0.5 block truncate text-[13px] text-ink-2">{profile.email}</span>
+              <span className="mt-0.5 block truncate text-caption text-ink-2">{profile.email}</span>
             </span>
             <SettingsChevron />
           </Card>

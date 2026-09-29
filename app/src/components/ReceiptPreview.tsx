@@ -132,7 +132,7 @@ export default function ReceiptPreview({
           ref={openButtonRef}
           type="button"
           onClick={() => setFullscreen(true)}
-          className="active-press absolute bottom-2 right-2 min-h-11 rounded-card bg-ink/80 px-3 text-[13px] font-medium text-canvas backdrop-blur-sm"
+          className="active-press absolute bottom-2 right-2 min-h-11 rounded-card bg-ink/80 px-3 text-caption font-medium text-canvas backdrop-blur-sm"
         >
           Koko näyttö
         </button>
@@ -279,7 +279,7 @@ function PreviewBody({
           href={src}
           fallbackName={fileName}
           title={fileName}
-          className="absolute bottom-2 left-2 right-2 min-h-11 flex items-center justify-center rounded-card bg-ink/75 text-canvas text-[13px] font-medium backdrop-blur-sm"
+          className="absolute bottom-2 left-2 right-2 min-h-11 flex items-center justify-center rounded-card bg-ink/75 text-canvas text-caption font-medium backdrop-blur-sm"
         >
           Avaa alkuperäinen tiedosto
         </AuthedFileLink>

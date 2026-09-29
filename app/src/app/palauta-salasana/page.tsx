@@ -33,8 +33,8 @@ function TokenMissing() {
       <span className="flex h-12 w-12 items-center justify-center rounded-full bg-warning/10 text-warning">
         <Icon icon={Link2Off} size="hero" />
       </span>
-      <h1 className="text-[28px] font-bold leading-tight tracking-[-0.02em] text-ink">Linkki ei kelpaa</h1>
-      <p className="text-[15px] leading-relaxed text-ink-2" role="alert">
+      <h1 className="text-title-2 font-bold leading-tight tracking-[-0.02em] text-ink">Linkki ei kelpaa</h1>
+      <p className="text-body leading-relaxed text-ink-2" role="alert">
         Linkki puuttuu tai on vanhentunut. Pyydä uusi palautuslinkki.
       </p>
       <Link href="/unohtunut-salasana" className={buttonClass("primary", "w-full")}>
@@ -95,8 +95,8 @@ function ResetForm({ token }: { token: string }) {
         <span className="flex h-12 w-12 items-center justify-center rounded-full bg-success/10 text-success">
           <Icon icon={CircleCheck} size="hero" />
         </span>
-        <h1 className="text-[28px] font-bold leading-tight tracking-[-0.02em] text-ink">Salasana vaihdettu</h1>
-        <p className="text-[15px] leading-relaxed text-ink-2" role="status">
+        <h1 className="text-title-2 font-bold leading-tight tracking-[-0.02em] text-ink">Salasana vaihdettu</h1>
+        <p className="text-body leading-relaxed text-ink-2" role="status">
           Voit nyt kirjautua sisään uudella salasanalla.
         </p>
         <Link href="/login" className={buttonClass("primary", "w-full")}>
@@ -113,7 +113,7 @@ function ResetForm({ token }: { token: string }) {
 
   return (
     <form onSubmit={(event) => void submit(event)} noValidate className={BARE_CARD_CLASS}>
-      <h1 className="text-[28px] font-bold leading-tight tracking-[-0.02em] text-ink">Uusi salasana</h1>
+      <h1 className="text-title-2 font-bold leading-tight tracking-[-0.02em] text-ink">Uusi salasana</h1>
       <PasswordField
         id="password"
         name="password"

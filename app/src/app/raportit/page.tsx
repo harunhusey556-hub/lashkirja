@@ -92,7 +92,7 @@ function YearSwitcher({ year, currentYear, onChange }: { year: number; currentYe
       >
         <Icon icon={ChevronLeft} size="inline" />
       </button>
-      <span className="min-w-[4ch] text-center text-[13px] tabular-nums text-ink-2">{year}</span>
+      <span className="min-w-[4ch] text-center text-caption tabular-nums text-ink-2">{year}</span>
       <button
         type="button"
         aria-label="Seuraava vuosi"
@@ -173,7 +173,7 @@ function DownloadRow({
       <IconTile>
         <Icon icon={Download} />
       </IconTile>
-      <span className="pointer-events-none min-w-0 flex-1 text-[15px] font-medium text-ink">{title}</span>
+      <span className="pointer-events-none min-w-0 flex-1 text-body font-medium text-ink">{title}</span>
       {/* Progress while the file is fetched for the share sheet (SALES-22). */}
       <span
         aria-hidden
@@ -270,7 +270,7 @@ export default function ReportsPage() {
         {status === "ready" && report && (
           <div className={`space-y-6 ${fade}`}>
             <section className="mt-6 first:mt-0">
-              <div className="mb-2 flex items-baseline justify-between gap-3 px-1 text-[13px] text-ink-2">
+              <div className="mb-2 flex items-baseline justify-between gap-3 px-1 text-caption text-ink-2">
                 <h2 className="font-normal">Tulos</h2>
               </div>
               <KeyValueList
@@ -315,7 +315,7 @@ export default function ReportsPage() {
             </section>
 
             {/* What the figures are built from, and on which basis (SALES-01, SALES-37). */}
-            <p className="-mt-3 px-1 text-[13px] leading-relaxed text-ink-2">
+            <p className="-mt-3 px-1 text-caption leading-relaxed text-ink-2">
               {report.total.receiptCount} {report.total.receiptCount === 1 ? "kuitti" : "kuittia"} ja{" "}
               {(report.total.invoiceCount ?? 0) + (report.total.creditNoteCount ?? 0)} myyntilaskua. Laskut
               lasketaan laskun päivän mukaan, hyvityslasku vähentää myyntiä omalla kuukaudellaan.
@@ -323,10 +323,10 @@ export default function ReportsPage() {
 
             {report.months.length === 0 ? (
               <section className="mt-6 first:mt-0">
-                <div className="mb-2 px-1 text-[13px] text-ink-2">
+                <div className="mb-2 px-1 text-caption text-ink-2">
                   <h2 className="font-normal">Kuukaudet</h2>
                 </div>
-                <p className="rounded-card border border-line bg-surface px-4 py-4 text-[15px] text-ink-2">
+                <p className="rounded-card border border-line bg-surface px-4 py-4 text-body text-ink-2">
                   Ei kirjauksia tälle vuodelle.
                 </p>
               </section>
@@ -347,7 +347,7 @@ export default function ReportsPage() {
 
             <Section title="Menot kategorioittain">
               {report.total.expenseByCategory.length === 0 ? (
-                <p className="px-4 py-4 text-[15px] text-ink-2">Ei menoja tällä jaksolla.</p>
+                <p className="px-4 py-4 text-body text-ink-2">Ei menoja tällä jaksolla.</p>
               ) : (
                 report.total.expenseByCategory.map((row) => (
                   <ListRow
@@ -384,8 +384,8 @@ export default function ReportsPage() {
 
             <Card className="space-y-3">
               <div>
-                <p className="text-[15px] font-medium text-ink">Kirjanpitopaketti</p>
-                <p className="text-[13px] text-ink-2">
+                <p className="text-body font-medium text-ink">Kirjanpitopaketti</p>
+                <p className="text-caption text-ink-2">
                   Zip kuukaudelta, neljännekseltä tai koko vuodelta: tuloslaskelma, ALV, CSV,
                   kohdistukset ja tositteet.
                 </p>

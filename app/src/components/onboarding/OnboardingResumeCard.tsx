@@ -21,8 +21,8 @@ export function OnboardingResumeCard({ onResume }: { onResume: () => void }) {
         <Icon icon={Sparkles} />
       </span>
       <span className="min-w-0 flex-1">
-        <span className="block text-[15px] font-semibold text-ink">Viimeistele yritysprofiili</span>
-        <span className="block text-[13px] text-ink-2">Noin minuutti. ALV lasketaan profiilin mukaan.</span>
+        <span className="block text-body font-semibold text-ink">Viimeistele yritysprofiili</span>
+        <span className="block text-caption text-ink-2">Noin minuutti. ALV lasketaan profiilin mukaan.</span>
       </span>
       <Icon icon={ChevronRight} className="text-ink-2" />
     </button>

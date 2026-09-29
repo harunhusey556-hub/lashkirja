@@ -721,7 +721,7 @@ export function AiChatDrawer({
   const showShortcutsAfterLast =
     aiAvailable === false && !loading && lastMessage?.role === "assistant" && Boolean(lastMessage.limited);
 
-  const smallAction = "active-press inline-flex min-h-11 items-center px-1 text-[13px] font-medium";
+  const smallAction = "active-press inline-flex min-h-11 items-center px-1 text-caption font-medium";
 
   return (
     <div
@@ -745,11 +745,11 @@ export function AiChatDrawer({
           </span>
         </button>
         <div className="min-w-0 text-center">
-          <h2 id="ai-chat-title" ref={titleRef} tabIndex={-1} className="truncate text-[17px] font-semibold text-ink outline-none">
+          <h2 id="ai-chat-title" ref={titleRef} tabIndex={-1} className="truncate text-headline font-semibold text-ink outline-none">
             {conversationTitle || "Avustaja"}
           </h2>
           {conversationTitle && conversationTitle !== "Avustaja" && (
-            <p className="truncate text-[12px] text-ink-2">Avustaja</p>
+            <p className="truncate text-caption text-ink-2">Avustaja</p>
           )}
         </div>
         <button
@@ -797,7 +797,7 @@ export function AiChatDrawer({
           <div className="overflow-hidden rounded-card border border-line bg-surface divide-y divide-line">
             <button
               type="button"
-              className="active-press flex min-h-12 w-full items-center gap-3 px-4 text-left text-[15px] font-medium text-ink"
+              className="active-press flex min-h-12 w-full items-center gap-3 px-4 text-left text-body font-medium text-ink"
               onClick={() => void runMenuAction(startNewConversation, "Keskustelun luonti epäonnistui")}
             >
               <Icon icon={Plus} className="text-ink-2" />
@@ -805,7 +805,7 @@ export function AiChatDrawer({
             </button>
             <button
               type="button"
-              className="active-press flex min-h-12 w-full items-center gap-3 px-4 text-left text-[15px] font-medium text-ink"
+              className="active-press flex min-h-12 w-full items-center gap-3 px-4 text-left text-body font-medium text-ink"
               onClick={() => {
                 const next = !showArchived;
                 setShowArchived(next);
@@ -822,7 +822,7 @@ export function AiChatDrawer({
             </p>
           )}
           {removedConversation && (
-            <div className="flex items-center justify-between gap-2 rounded-card border border-line bg-surface px-4 text-[15px] text-ink">
+            <div className="flex items-center justify-between gap-2 rounded-card border border-line bg-surface px-4 text-body text-ink">
               <span>Keskustelu poistettu</span>
               <button
                 type="button"
@@ -837,10 +837,10 @@ export function AiChatDrawer({
             </div>
           )}
           {conversations.length === 0 && !loadingConversations && (
-            <p className="px-1 text-[13px] text-ink-2">Ei keskusteluja</p>
+            <p className="px-1 text-caption text-ink-2">Ei keskusteluja</p>
           )}
           {loadingConversations && conversations.length === 0 && (
-            <p className="px-1 text-[13px] text-ink-2">Ladataan…</p>
+            <p className="px-1 text-caption text-ink-2">Ladataan…</p>
           )}
           {conversations.length > 0 && (
             <div className="overflow-hidden rounded-card border border-line bg-surface divide-y divide-line">
@@ -870,7 +870,7 @@ export function AiChatDrawer({
                   ) : (
                     <button
                       type="button"
-                      className="active-press block min-h-11 w-full truncate pt-2 text-left text-[15px] font-medium text-ink"
+                      className="active-press block min-h-11 w-full truncate pt-2 text-left text-body font-medium text-ink"
                       onClick={() => {
                         setConversationId(conversation.id);
                         setConversationTitle(conversation.title);
@@ -944,7 +944,7 @@ export function AiChatDrawer({
         {hasMore && (
           <button
             type="button"
-            className="active-press mx-auto block min-h-11 text-[13px] font-medium text-accent"
+            className="active-press mx-auto block min-h-11 text-caption font-medium text-accent"
             disabled={loadingHistory}
             onClick={() => {
               const oldest = messages[0];
@@ -975,8 +975,8 @@ export function AiChatDrawer({
             <span aria-hidden className="flex h-14 w-14 items-center justify-center rounded-full bg-accent-soft text-accent">
               <Icon icon={Sparkles} size="hero" />
             </span>
-            <p className="mt-4 text-[17px] font-semibold text-ink">Miten voin auttaa?</p>
-            <p className="mt-1 max-w-xs text-[13px] leading-relaxed text-ink-2">
+            <p className="mt-4 text-headline font-semibold text-ink">Miten voin auttaa?</p>
+            <p className="mt-1 max-w-xs text-caption leading-relaxed text-ink-2">
               {aiAvailable === false
                 ? "Avustaja osaa nyt täsmäyttää kuitit ja kertoa tämän kuun ALV:n. Laajemmat kysymykset tulevat käyttöön myöhemmin."
                 : "Kysy kuiteista, tapahtumista tai ALV:stä. Ehdotukset hyväksyt aina itse."}
@@ -1004,7 +1004,7 @@ export function AiChatDrawer({
               className={`flex flex-col ${mine ? "items-end" : "items-start"} ${newKeys.has(key) ? styles.messageIn : ""}`}
             >
               <div
-                className={`select-text max-w-[85%] rounded-2xl px-4 py-2.5 text-[15px] leading-relaxed ${
+                className={`select-text max-w-[85%] rounded-2xl px-4 py-2.5 text-body leading-relaxed ${
                   mine
                     ? "rounded-br-md bg-ink text-canvas"
                     : `rounded-bl-md border bg-surface text-ink ${message.incomplete ? "border-danger/30" : "border-line"}`
@@ -1017,7 +1017,7 @@ export function AiChatDrawer({
                 )}
               </div>
               {message.status === "cancelled" ? (
-                <p className="mt-1 px-1 text-[13px] text-ink-2">Keskeytetty</p>
+                <p className="mt-1 px-1 text-caption text-ink-2">Keskeytetty</p>
               ) : null}
               {/* Sources and the message actions share one quiet row under the bubble. */}
               {message.role === "assistant" && (message.content || (message.sources && message.sources.length > 0)) && (
@@ -1026,7 +1026,7 @@ export function AiChatDrawer({
                     <a
                       key={source.href}
                       href={source.href}
-                      className="active-press inline-flex min-h-11 items-center gap-1.5 text-[13px] font-medium text-accent"
+                      className="active-press inline-flex min-h-11 items-center gap-1.5 text-caption font-medium text-accent"
                     >
                       <Icon icon={Link2} size="inline" />
                       {source.label}
@@ -1035,7 +1035,7 @@ export function AiChatDrawer({
                   {message.content && (
                     <button
                       type="button"
-                      className="active-press inline-flex min-h-11 items-center gap-1.5 text-[13px] font-medium text-ink-2"
+                      className="active-press inline-flex min-h-11 items-center gap-1.5 text-caption font-medium text-ink-2"
                       onClick={() => void copyMessage(message)}
                     >
                       <Icon icon={copiedId === message.id ? Check : Copy} size="inline" />
@@ -1045,7 +1045,7 @@ export function AiChatDrawer({
                   {message.content && message.incomplete && failed && !loading && (
                     <button
                       type="button"
-                      className="active-press inline-flex min-h-11 items-center gap-1.5 text-[13px] font-medium text-accent"
+                      className="active-press inline-flex min-h-11 items-center gap-1.5 text-caption font-medium text-accent"
                       onClick={() => void handleSendMessage(failed.text, { clientId: failed.clientId })}
                     >
                       <Icon icon={RotateCcw} size="inline" />
@@ -1058,11 +1058,11 @@ export function AiChatDrawer({
                 message.proposal.status !== "accepted" &&
                 message.proposal.status !== "rejected" && (
                   <div className="mt-1 w-full max-w-[90%] space-y-3 rounded-card border border-line bg-surface p-4">
-                    <p className="flex items-center gap-2 text-[13px] font-semibold text-accent">
+                    <p className="flex items-center gap-2 text-caption font-semibold text-accent">
                       <Icon icon={Link2} size="inline" />
                       Ehdotus täsmäytykseksi
                     </p>
-                    <div className="space-y-1 text-[13px] leading-relaxed text-ink">
+                    <div className="space-y-1 text-caption leading-relaxed text-ink">
                       {/* A no-break space keeps "139,00 €" on one line. */}
                       <p>{message.proposal.txSummary.replace(/ €/g, " €")}</p>
                       <p>{message.proposal.receiptSummary.replace(/ €/g, " €")}</p>
@@ -1083,13 +1083,13 @@ export function AiChatDrawer({
                   </div>
                 )}
               {message.proposal?.status === "accepted" && (
-                <p className="mt-1 flex items-center gap-1.5 px-1 text-[13px] font-medium text-success">
+                <p className="mt-1 flex items-center gap-1.5 px-1 text-caption font-medium text-success">
                   <Icon icon={Check} size="inline" />
                   Täsmäytys hyväksytty
                 </p>
               )}
               {message.proposal?.status === "rejected" && (
-                <p className="mt-1 px-1 text-[13px] text-ink-2">Ehdotus hylätty</p>
+                <p className="mt-1 px-1 text-caption text-ink-2">Ehdotus hylätty</p>
               )}
               {message === lastMessage && showShortcutsAfterLast && (
                 // Without a model, a question it cannot answer ends with what does work.
@@ -1113,7 +1113,7 @@ export function AiChatDrawer({
           <button
             type="button"
             onClick={jumpToLatest}
-            className="active-press sticky bottom-2 ml-auto flex min-h-11 items-center gap-1.5 rounded-full bg-ink px-4 text-[13px] font-semibold text-canvas"
+            className="active-press sticky bottom-2 ml-auto flex min-h-11 items-center gap-1.5 rounded-full bg-ink px-4 text-caption font-semibold text-canvas"
           >
             Uusi viesti
             <Icon icon={ArrowDown} size="inline" />
@@ -1158,7 +1158,7 @@ export function AiChatDrawer({
                 field.style.height = `${Math.min(field.scrollHeight, 120)}px`;
               }}
               maxLength={4000}
-              className="max-h-[120px] min-h-11 flex-1 resize-none bg-transparent py-2.5 text-[16px] leading-6 text-ink outline-none placeholder:text-ink-2"
+              className="max-h-[120px] min-h-11 flex-1 resize-none bg-transparent py-2.5 text-input leading-6 text-ink outline-none placeholder:text-ink-2"
             />
             {loading ? (
               <button type="button" aria-label="Pysäytä" onClick={stop} className="active-press flex h-11 w-11 shrink-0 items-center justify-center">

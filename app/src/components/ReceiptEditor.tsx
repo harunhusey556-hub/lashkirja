@@ -62,11 +62,11 @@ import { IS_MOBILE_BUILD } from "@/lib/build-target";
 import { useConnectivity } from "@/lib/connectivity";
 import { useOfflineReceiptQueue } from "@/components/useOfflineReceiptQueue";
 
-const LABEL_CLASS = "mb-1.5 block text-[13px] font-normal text-ink-2";
+const LABEL_CLASS = "mb-1.5 block text-caption font-normal text-ink-2";
 /** Same recipe as controlClass (see components/ui.tsx) but with a swappable border
  * colour, so a low-confidence field can show `border-warning` instead of `border-line`
  * without stacking two competing border-color utilities on one element. */
-const FIELD_BASE = "box-border block w-full min-w-0 max-w-full px-3 min-h-12 rounded-card border bg-surface text-[16px] text-ink";
+const FIELD_BASE = "box-border block w-full min-w-0 max-w-full px-3 min-h-12 rounded-card border bg-surface text-input text-ink";
 const uncertainClass = "border-warning ring-2 ring-warning";
 
 function fieldClass(uncertain: boolean): string {
@@ -812,8 +812,8 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
             <Icon icon={Check} strokeWidth={2.5} />
           </div>
           <div>
-            <h3 className="text-[15px] font-semibold text-success">Kuitti tallennettu</h3>
-            <p className="mt-0.5 text-[13px] text-ink">Seuraavaksi yhdistä kuitti oikeaan pankkitapahtumaan tiliotteelta.</p>
+            <h3 className="text-body font-semibold text-success">Kuitti tallennettu</h3>
+            <p className="mt-0.5 text-caption text-ink">Seuraavaksi yhdistä kuitti oikeaan pankkitapahtumaan tiliotteelta.</p>
           </div>
         </div>
       )}
@@ -859,8 +859,8 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
               aria-hidden
             />
             <div className="min-w-0">
-              <p className="text-[15px] font-medium text-ink">Luetaan kuittia</p>
-              <p className="mt-0.5 text-[13px] text-ink-2">{handoffProgress}</p>
+              <p className="text-body font-medium text-ink">Luetaan kuittia</p>
+              <p className="mt-0.5 text-caption text-ink-2">{handoffProgress}</p>
             </div>
           </div>
           <Skeleton radius="card" className="h-48 w-full" />
@@ -886,7 +886,7 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
       <FormError message={error} className="rounded-card bg-danger/10 px-4 py-3" />
 
       {uploadProgress && !uploading && (
-        <p className="text-center text-[13px] text-ink-2" role="status" aria-live="polite">
+        <p className="text-center text-caption text-ink-2" role="status" aria-live="polite">
           {uploadProgress}
         </p>
       )}
@@ -938,7 +938,7 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
                           type="button"
                           onClick={() => void pickDocument()}
                           disabled={uploading}
-                          className="min-h-11 text-[13px] font-medium text-accent disabled:opacity-50"
+                          className="min-h-11 text-caption font-medium text-accent disabled:opacity-50"
                         >
                           Vaihda tiedosto
                         </button>
@@ -953,13 +953,13 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
                 >
                   <div className="space-y-4 px-4 py-4">
                     {!isEdit && meta?.confidence != null && meta.confidence < 0.6 && (
-                      <p className="text-[13px] text-warning">
+                      <p className="text-caption text-warning">
                         Automaattinen tunnistus epävarma, tarkista kaikki kentät ennen
                         tallennusta.
                       </p>
                     )}
 
-                    {originalName && <p className="text-[13px] text-ink-2">{originalName}</p>}
+                    {originalName && <p className="text-caption text-ink-2">{originalName}</p>}
 
                     <div>
                       <label htmlFor="receipt-vendor" className={LABEL_CLASS}>Myyjä</label>
@@ -976,7 +976,7 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
                         className={fieldClass(lowVendor)}
                       />
                       {lowVendor && !fieldErrors.vendor && (
-                        <p className="mt-1.5 text-[13px] text-warning">Epävarma tunnistus</p>
+                        <p className="mt-1.5 text-caption text-warning">Epävarma tunnistus</p>
                       )}
                       {fieldErrors.vendor && (
                         <p id="receipt-vendor-error" className="mt-1.5 text-sm text-danger" role="alert">
@@ -1003,7 +1003,7 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
                           className={fieldClass(lowDate)}
                         />
                         {lowDate && !fieldErrors.date && (
-                          <p className="mt-1.5 text-[13px] text-warning">Epävarma tunnistus</p>
+                          <p className="mt-1.5 text-caption text-warning">Epävarma tunnistus</p>
                         )}
                         {fieldErrors.date && (
                           <p id="receipt-date-error" className="mt-1.5 text-sm text-danger" role="alert">
@@ -1030,7 +1030,7 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
                           className={fieldClass(lowAmount)}
                         />
                         {lowAmount && !fieldErrors.totalAmount && (
-                          <p className="mt-1.5 text-[13px] text-warning">Epävarma tunnistus</p>
+                          <p className="mt-1.5 text-caption text-warning">Epävarma tunnistus</p>
                         )}
                         {fieldErrors.totalAmount && (
                           <p id="receipt-total-error" className="mt-1.5 text-sm text-danger" role="alert">
@@ -1051,7 +1051,7 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
                           type="button"
                           onClick={() => setFormData({ ...formData, type: "meno" })}
                           aria-pressed={formData.type === "meno"}
-                          className={`active-press min-h-11 rounded-full px-4 text-[13px] font-semibold ${
+                          className={`active-press min-h-11 rounded-full px-4 text-caption font-semibold ${
                             formData.type === "meno" ? "bg-ink text-canvas" : "text-ink-2"
                           }`}
                         >
@@ -1061,7 +1061,7 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
                           type="button"
                           onClick={() => setFormData({ ...formData, type: "tulo" })}
                           aria-pressed={formData.type === "tulo"}
-                          className={`active-press min-h-11 rounded-full px-4 text-[13px] font-semibold ${
+                          className={`active-press min-h-11 rounded-full px-4 text-caption font-semibold ${
                             formData.type === "tulo" ? "bg-ink text-canvas" : "text-ink-2"
                           }`}
                         >
@@ -1177,7 +1177,7 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
                         ],
                       })
                     }
-                    className="active-press min-h-12 w-full rounded-card border border-line bg-surface text-[15px] font-semibold text-ink"
+                    className="active-press min-h-12 w-full rounded-card border border-line bg-surface text-body font-semibold text-ink"
                   >
                     + Lisää ALV-rivi
                   </button>
@@ -1329,7 +1329,7 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
           )}
 
           {session.notice && (
-            <p className="text-[13px] text-ink" role="status">
+            <p className="text-caption text-ink" role="status">
               {session.notice}{" "}
               <button
                 type="button"
@@ -1372,7 +1372,7 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
           {isNewStep2 ? (
             <Link
               href="/kuitit"
-              className="active-press flex min-h-12 w-full items-center justify-center gap-2 rounded-card bg-success text-[15px] font-semibold text-canvas"
+              className="active-press flex min-h-12 w-full items-center justify-center gap-2 rounded-card bg-success text-body font-semibold text-canvas"
             >
               Kaikki valmista, palaa kuitteihin
             </Link>

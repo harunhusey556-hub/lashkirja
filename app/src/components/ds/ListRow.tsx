@@ -35,7 +35,7 @@ export function ListRow({ title, amount, amountTone = "default", secondary, trai
       <span className="pointer-events-none min-w-0 flex-1">
         {/* Hidden from screen readers while the row is interactive: this text is already the overlay
             link/button's accessible name above, and linear reading would otherwise announce it twice. */}
-        <span aria-hidden={interactive || undefined} className="flex items-baseline justify-between gap-3 text-[15px] font-medium text-ink">
+        <span aria-hidden={interactive || undefined} className="flex items-baseline justify-between gap-3 text-body font-medium text-ink">
           <span className="min-w-0 truncate">{title}</span>
           {amount !== undefined ? <span className={`shrink-0 tabular-nums ${AMOUNT_TONE[amountTone]}`}>{amount}</span> : null}
         </span>
@@ -45,7 +45,7 @@ export function ListRow({ title, amount, amountTone = "default", secondary, trai
                 line instead of being cut off; record rows keep their one-line ellipsis. */}
             <span
               aria-hidden={interactive || undefined}
-              className={`min-w-0 text-[13px] text-ink-2 ${chevron ? "line-clamp-2" : "truncate"}`}
+              className={`min-w-0 text-caption text-ink-2 ${chevron ? "line-clamp-2" : "truncate"}`}
             >
               {secondary}
             </span>

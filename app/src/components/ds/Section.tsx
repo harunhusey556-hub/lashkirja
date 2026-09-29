@@ -9,7 +9,7 @@ export function Section({ title, count, action, children, className = "" }: {
   return (
     <section className={`mt-6 first:mt-0 ${className}`}>
       {title || aside ? (
-        <div className="mb-2 flex items-baseline justify-between gap-3 px-1 text-[13px] text-ink-2">
+        <div className="mb-2 flex items-baseline justify-between gap-3 px-1 text-caption text-ink-2">
           {title ? <h2 className="font-normal">{title}</h2> : <span />}
           {aside}
         </div>

@@ -372,7 +372,7 @@ export default function RecurringInvoicesPage() {
                 setFormFor("new");
               }}
               aria-label="Uusi toistuva lasku"
-              className="active-press relative inline-flex min-h-9 items-center gap-1 rounded-full bg-ink px-3.5 text-[13px] font-semibold text-canvas before:absolute before:inset-x-0 before:-inset-y-1 before:content-['']"
+              className="active-press relative inline-flex min-h-9 items-center gap-1 rounded-full bg-ink px-3.5 text-caption font-semibold text-canvas before:absolute before:inset-x-0 before:-inset-y-1 before:content-['']"
             >
               <Icon icon={Plus} size="inline" strokeWidth={2.5} />
               Uusi
@@ -382,7 +382,7 @@ export default function RecurringInvoicesPage() {
 
         {dueNow > 0 && (
           <Card className="space-y-3">
-            <p className="text-[15px] text-ink">
+            <p className="text-body text-ink">
               {dueNow === 1
                 ? "1 toistuva lasku on erääntynyt luotavaksi."
                 : `${dueNow} toistuvaa laskua on erääntynyt luotavaksi.`}
@@ -510,7 +510,7 @@ export default function RecurringInvoicesPage() {
             {selected.lastRun?.invoiceId && (
               <Link
                 href={detailHref("invoice", selected.lastRun.invoiceId)}
-                className="active-press flex min-h-11 items-center text-[15px] font-medium text-accent"
+                className="active-press flex min-h-11 items-center text-body font-medium text-accent"
               >
                 Avaa viimeisin lasku ({formatDate(selected.lastRun.issueDate)})
               </Link>
@@ -629,23 +629,23 @@ export default function RecurringInvoicesPage() {
         {runPlan && (
           <div className="space-y-3 px-5 py-4 sheet-safe-bottom">
             {planCount === 0 ? (
-              <p className="text-[15px] text-ink">Yhtään laskua ei ole juuri nyt erääntynyt luotavaksi.</p>
+              <p className="text-body text-ink">Yhtään laskua ei ole juuri nyt erääntynyt luotavaksi.</p>
             ) : (
               <>
-                <p className="text-[15px] text-ink">
+                <p className="text-body text-ink">
                   {planCount === 1 ? "Luodaan 1 lasku:" : `Luodaan ${planCount} laskua:`}
                 </p>
                 <div className="overflow-hidden rounded-card border border-line bg-surface divide-y divide-line">
                   {runPlan.map((entry) => (
                     <div key={entry.recurringInvoiceId} className="px-4 py-3">
-                      <div className="flex items-baseline justify-between gap-3 text-[15px]">
+                      <div className="flex items-baseline justify-between gap-3 text-body">
                         <span className="min-w-0 truncate font-medium text-ink">{entry.name}</span>
                         <span className="shrink-0 tabular-nums text-ink">
                           {entry.issueDates.length > 1 ? `${entry.issueDates.length} × ` : ""}
                           {formatEur(entry.gross)}
                         </span>
                       </div>
-                      <p className="mt-0.5 text-[13px] text-ink-2">
+                      <p className="mt-0.5 text-caption text-ink-2">
                         {entry.autoSend
                           ? entry.customerEmail
                             ? `Lähetetään sähköpostilla: ${entry.customerEmail}`
@@ -656,7 +656,7 @@ export default function RecurringInvoicesPage() {
                   ))}
                 </div>
                 {planSends > 0 && (
-                  <p className="text-[13px] text-ink-2">
+                  <p className="text-caption text-ink-2">
                     Lähetettyä laskua ei voi perua, vain hyvittää.
                   </p>
                 )}

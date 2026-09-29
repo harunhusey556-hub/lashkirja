@@ -143,7 +143,7 @@ function ToastItem({ toast, leaving }: { toast: ToastRecord; leaving: boolean })
       aria-hidden={leaving || undefined}
     >
       <Icon icon={TONE_ICON[toast.tone]} className="shrink-0 text-canvas/80" />
-      <p className="min-w-0 flex-1 text-[15px] leading-snug">{toast.text}</p>
+      <p className="min-w-0 flex-1 text-body leading-snug">{toast.text}</p>
       {toast.action && (
         <button
           type="button"
@@ -151,7 +151,7 @@ function ToastItem({ toast, leaving }: { toast: ToastRecord; leaving: boolean })
             toast.action?.onAction();
             dismissToast(toast.id, "action");
           }}
-          className="-my-2 -mr-2 min-h-11 min-w-11 shrink-0 rounded-card px-3 text-[15px] font-semibold text-accent-soft"
+          className="-my-2 -mr-2 min-h-11 min-w-11 shrink-0 rounded-card px-3 text-body font-semibold text-accent-soft"
         >
           {toast.action.label}
         </button>

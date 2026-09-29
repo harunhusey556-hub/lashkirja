@@ -83,7 +83,7 @@ export default function StatementDetailPage() {
         ) : loading ? (
           <StatementDetailSkeleton />
         ) : !statement ? (
-          <div className="text-center py-8 text-[15px] text-ink-2">
+          <div className="text-center py-8 text-body text-ink-2">
             Tiliotetta ei löytynyt
           </div>
         ) : (

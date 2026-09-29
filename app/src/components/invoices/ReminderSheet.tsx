@@ -143,10 +143,10 @@ export function ReminderSheet({
           )
         ) : (
           <>
-            <p className="text-[13px] text-ink-2">
+            <p className="text-caption text-ink-2">
               Muistutus {reminder.level} · myöhässä {reminder.daysLate} päivää
             </p>
-            <div className="space-y-1 text-[15px]">
+            <div className="space-y-1 text-body">
               <div className="flex justify-between gap-3">
                 <span className="shrink-0 text-ink-2">Vastaanottaja</span>
                 <span className="min-w-0 break-all text-right text-ink">{reminder.recipient ?? "–"}</span>

@@ -34,6 +34,30 @@
   --radius-card: 14px;
 
   --app-tab-height: 4.5rem;
+
+  /* Type scale (findings-vs 2.2, AX R18). rem on a 16 px base, times
+     --text-scale, which boot.ts sets from the iOS text-size setting
+     (Dynamic Type, via @capacitor/text-zoom). These are the only sizes:
+     never write text-[Npx]. Line height stays inherited (1.5), exactly as
+     the px classes it replaces, so a leading-* class still wins. */
+  --text-micro: calc(0.6875rem * var(--text-scale, 1)); /* 11: aging headers, badges */
+  --text-caption: calc(0.8125rem * var(--text-scale, 1)); /* 13: secondary, help, tags */
+  --text-body: calc(0.9375rem * var(--text-scale, 1)); /* 15: row title, prose, buttons */
+  --text-input: max(1rem, calc(1rem * var(--text-scale, 1))); /* 16: never below 16 (iOS focus zoom) */
+  --text-headline: calc(1.0625rem * var(--text-scale, 1)); /* 17: card and dialog title */
+  --text-title-3: calc(1.25rem * var(--text-scale, 1)); /* 20: sheet title */
+  --text-title-2: calc(1.75rem * var(--text-scale, 1)); /* 28: summary amount */
+  --text-title: calc(2rem * var(--text-scale, 1)); /* 32: page large title */
+  --text-hero: calc(2.5rem * var(--text-scale, 1)); /* 40: detail hero amount */
+  /* Tab bar labels do not scale (iOS tab bars never do). */
+  --text-tab: 11px;
+  /* Tailwind's own sizes follow the same setting. */
+  --text-xs: calc(0.75rem * var(--text-scale, 1));
+  --text-sm: calc(0.875rem * var(--text-scale, 1));
+  --text-base: calc(1rem * var(--text-scale, 1));
+  --text-lg: calc(1.125rem * var(--text-scale, 1));
+  --text-xl: calc(1.25rem * var(--text-scale, 1));
+  --text-2xl: calc(1.5rem * var(--text-scale, 1));
 }
 
 /* Motion vocabulary: the only curves and durations in the app. `static` so

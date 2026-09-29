@@ -248,7 +248,7 @@ export default function CustomersPage() {
           <button
             type="button"
             onClick={() => setCreateOpen(true)}
-            className="active-press relative inline-flex min-h-9 items-center gap-1 rounded-full bg-ink px-3.5 text-[13px] font-semibold text-canvas before:absolute before:inset-x-0 before:-inset-y-1 before:content-['']"
+            className="active-press relative inline-flex min-h-9 items-center gap-1 rounded-full bg-ink px-3.5 text-caption font-semibold text-canvas before:absolute before:inset-x-0 before:-inset-y-1 before:content-['']"
           >
             <Icon icon={Plus} size="inline" strokeWidth={2.5} />
             Lisää
@@ -290,8 +290,8 @@ export default function CustomersPage() {
 
       {importOpen && (
         <Card className="space-y-3">
-          <p className="text-[15px] font-medium text-ink">Tuo asiakkaita</p>
-          <p className="text-[13px] text-ink-2">
+          <p className="text-body font-medium text-ink">Tuo asiakkaita</p>
+          <p className="text-caption text-ink-2">
             Valitse CSV-tiedosto tai liitä sen sisältö. Ensimmäinen rivi on otsikko.
           </p>
           <label className={buttonClass("secondary", "w-full cursor-pointer")}>

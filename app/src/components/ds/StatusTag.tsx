@@ -12,7 +12,7 @@ const TONE: Record<Tone, string> = {
 
 export function StatusTag({ tone, children, icon }: { tone: Tone; children: ReactNode; icon?: ReactNode }) {
   return (
-    <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[13px] font-semibold ${TONE[tone]}`}>
+    <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-caption font-semibold ${TONE[tone]}`}>
       {icon ? <span aria-hidden className="flex">{icon}</span> : null}
       {children}
     </span>

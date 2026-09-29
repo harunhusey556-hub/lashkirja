@@ -262,7 +262,7 @@ export default function TapahtumatClient() {
 
       <div className="space-y-3">
         <div>
-          <label htmlFor="statement-search" className="mb-1.5 block text-[13px] font-normal text-ink-2">
+          <label htmlFor="statement-search" className="mb-1.5 block text-caption font-normal text-ink-2">
             Haku
           </label>
           <input
@@ -281,7 +281,7 @@ export default function TapahtumatClient() {
         </div>
         <div className="flex flex-col gap-3 sm:flex-row">
           <div className="min-w-0 flex-1">
-            <label htmlFor="statement-month-filter" className="mb-1.5 block text-[13px] font-normal text-ink-2">
+            <label htmlFor="statement-month-filter" className="mb-1.5 block text-caption font-normal text-ink-2">
               Kuukausi
             </label>
             <select
@@ -303,7 +303,7 @@ export default function TapahtumatClient() {
           </div>
           {accounts.length > 0 && (
             <div className="min-w-0 flex-1">
-              <label htmlFor="statement-account-filter" className="mb-1.5 block text-[13px] font-normal text-ink-2">
+              <label htmlFor="statement-account-filter" className="mb-1.5 block text-caption font-normal text-ink-2">
                 Tili
               </label>
               <select
@@ -330,11 +330,11 @@ export default function TapahtumatClient() {
       <div ref={importSectionRef} className="scroll-mt-4">
       <Section title="Tuo tiliote tiedostona">
         <div className="space-y-4 px-4 py-4">
-          <p className="text-[13px] text-ink-2">PDF, XML, XLSX tai CSV</p>
+          <p className="text-caption text-ink-2">PDF, XML, XLSX tai CSV</p>
 
           {accounts.length > 0 && (
             <div>
-              <label htmlFor="statement-target-account" className="mb-1.5 block text-[13px] font-normal text-ink-2">
+              <label htmlFor="statement-target-account" className="mb-1.5 block text-caption font-normal text-ink-2">
                 Pankkitili
               </label>
               <select
@@ -380,7 +380,7 @@ export default function TapahtumatClient() {
 
           {uploadMsg && (
             <p
-              className={`text-[13px] ${
+              className={`text-caption ${
                 uploading
                   ? "text-ink-2"
                   : uploadMsg.startsWith("Virhe")

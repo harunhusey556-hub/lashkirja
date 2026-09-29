@@ -51,7 +51,7 @@ const HIT44 = "relative before:absolute before:inset-x-0 before:-inset-y-3 befor
 /** One row inside a field-group Section, styled like a KeyValueList row. */
 function FieldRow({ label, value }: { label: string; value: ReactNode }) {
   return (
-    <div className="flex justify-between gap-3 px-4 py-3 text-[15px]">
+    <div className="flex justify-between gap-3 px-4 py-3 text-body">
       <span className="text-ink-2">{label}</span>
       <span className="min-w-0 text-right font-medium text-ink">{value}</span>
     </div>
@@ -248,7 +248,7 @@ export default function ALVRaporttiPage() {
         </SkeletonGroup>
       ) : data ? (
         <>
-          <p className="px-1 text-[13px] leading-relaxed text-ink-2">
+          <p className="px-1 text-caption leading-relaxed text-ink-2">
             OmaVero-ilmoituksen kentät · {data.receiptCount} {data.receiptCount === 1 ? "kuitti" : "kuittia"} kaudella
             {data.sources && data.sources.invoiceCount > 0 && (
               <>
@@ -261,7 +261,7 @@ export default function ALVRaporttiPage() {
           {data.sources && data.sources.invoiceCount > 0 && (
             <Card className="space-y-1 text-sm text-ink">
               <p className="font-medium">Myynnin ALV kahdesta lähteestä</p>
-              <p className="text-[13px] text-ink-2">
+              <p className="text-caption text-ink-2">
                 Kuiteista {formatEur(data.sources.receiptSalesVat)} · myyntilaskuista{" "}
                 {formatEur(data.sources.invoiceSalesVat)}. Laskut lasketaan laskun päivän
                 mukaan (suoriteperuste).
@@ -287,7 +287,7 @@ export default function ALVRaporttiPage() {
           {data.review.count > 0 && (
             <Card className="space-y-1 text-sm text-ink">
               <p className="font-medium">{data.review.count} kuittia ilman ALV-erittelyä</p>
-              <p className="text-[13px] text-ink-2">
+              <p className="text-caption text-ink-2">
                 Myynnit {formatEur(data.review.salesGross)} · Ostot{" "}
                 {formatEur(data.review.purchasesGross)}. Lisää ALV-tiedot kuiteille, jotta ne
                 lasketaan mukaan.

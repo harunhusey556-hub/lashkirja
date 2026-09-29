@@ -405,14 +405,14 @@ function CustomerDetail() {
               action={
                 <Link
                   href={`/laskut?customerId=${customer.id}`}
-                  className="inline-flex min-h-11 items-center text-[13px] font-semibold text-accent"
+                  className="inline-flex min-h-11 items-center text-caption font-semibold text-accent"
                 >
                   Näytä kaikki
                 </Link>
               }
             >
               {detail.invoices.length === 0 ? (
-                <p className="px-4 py-4 text-[15px] text-ink-2">Ei laskuja.</p>
+                <p className="px-4 py-4 text-body text-ink-2">Ei laskuja.</p>
               ) : (
                 detail.invoices.map((invoice) => (
                   <ListRow
@@ -490,7 +490,7 @@ function CustomerDetail() {
         labelledBy="customer-merge-title"
       >
         <div className="space-y-3 px-5 py-4 sheet-safe-bottom">
-          <p className="text-[13px] text-ink-2">
+          <p className="text-caption text-ink-2">
             Laskut ja toistuvat laskut siirtyvät tälle asiakkaalle. Toinen asiakas arkistoidaan.
           </p>
           <select

@@ -66,9 +66,9 @@ export default function QueuedReceiptsCard({ offlineNotice = false }: { offlineN
         <Section title="Jonossa" count={waiting.length}>
           {waiting.map((row) => (
             <div key={row.id} className="px-4 py-3">
-              <p className="min-w-0 truncate text-[15px] font-medium text-ink">{row.fileName}</p>
+              <p className="min-w-0 truncate text-body font-medium text-ink">{row.fileName}</p>
               <p
-                className={`mt-1 text-[13px] ${row.status === "failed" ? "text-danger" : "text-ink-2"}`}
+                className={`mt-1 text-caption ${row.status === "failed" ? "text-danger" : "text-ink-2"}`}
                 role={row.status === "failed" ? "alert" : undefined}
               >
                 {statusText(row)}
@@ -79,14 +79,14 @@ export default function QueuedReceiptsCard({ offlineNotice = false }: { offlineN
                     type="button"
                     disabled={busyId === row.id}
                     onClick={() => void handleRetry(row.id)}
-                    className="active-press min-h-11 text-[13px] font-medium text-accent disabled:opacity-50"
+                    className="active-press min-h-11 text-caption font-medium text-accent disabled:opacity-50"
                   >
                     Yritä uudelleen
                   </button>
                   <button
                     type="button"
                     onClick={() => setConfirmDeleteId(row.id)}
-                    className="active-press min-h-11 text-[13px] font-medium text-danger"
+                    className="active-press min-h-11 text-caption font-medium text-danger"
                   >
                     Poista
                   </button>
@@ -100,7 +100,7 @@ export default function QueuedReceiptsCard({ offlineNotice = false }: { offlineN
       {sent.length > 0 && (
         <Section title="Lähetetty">
           <div className="flex items-center gap-3 px-4 py-2">
-            <p className="min-w-0 flex-1 text-[13px] leading-relaxed text-ink-2">
+            <p className="min-w-0 flex-1 text-caption leading-relaxed text-ink-2">
               {sent.length === 1 ? "1 kuva lähetetty." : `${sent.length} kuvaa lähetetty.`} Kuitit näkyvät
               tarkistettavissa, kun ne on luettu.
             </p>
@@ -108,7 +108,7 @@ export default function QueuedReceiptsCard({ offlineNotice = false }: { offlineN
               type="button"
               onClick={() => void clearSent()}
               disabled={clearingDone}
-              className="active-press min-h-11 shrink-0 text-[13px] font-medium text-accent disabled:opacity-50"
+              className="active-press min-h-11 shrink-0 text-caption font-medium text-accent disabled:opacity-50"
             >
               Poista listalta
             </button>

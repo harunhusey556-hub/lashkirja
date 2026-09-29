@@ -121,15 +121,15 @@ export default function LaitteetPage() {
     <div className={`space-y-6 ${fade}`.trim()}>
       <PageTitle title="Laitteet" />
       <Card className="space-y-3">
-        <p className="text-[13px] text-ink-2 leading-relaxed">
+        <p className="text-caption text-ink-2 leading-relaxed">
           Lista näyttää kirjautumiset, joissa istunto on tallennettu. Vanha selain ilman tunnistetta pysyy, kunnes kirjaudut ulos.
         </p>
 
         {current && (
           <div className="flex items-center gap-3 rounded-card bg-canvas px-3 py-3">
             <span className="min-w-0 flex-1">
-              <span className="block truncate text-[15px] font-medium text-ink">{current.label}</span>
-              <span className="block text-[13px] text-ink-2">Tämä laite</span>
+              <span className="block truncate text-body font-medium text-ink">{current.label}</span>
+              <span className="block text-caption text-ink-2">Tämä laite</span>
             </span>
           </div>
         )}
@@ -143,12 +143,12 @@ export default function LaitteetPage() {
               {visibleOthers.map((row) => (
                 <li key={row.id} className="flex items-center gap-3 py-3">
                   <span className="min-w-0 flex-1">
-                    <span className="block truncate text-[15px] text-ink">{row.label}</span>
-                    <span className="block text-[13px] text-ink-2">{formatLastSeen(row.lastSeenAt)}</span>
+                    <span className="block truncate text-body text-ink">{row.label}</span>
+                    <span className="block text-caption text-ink-2">{formatLastSeen(row.lastSeenAt)}</span>
                   </span>
                   <button
                     type="button"
-                    className="active-press flex min-h-11 shrink-0 items-center px-2 text-[15px] text-danger"
+                    className="active-press flex min-h-11 shrink-0 items-center px-2 text-body text-danger"
                     onClick={() => setPending({ kind: "one", id: row.id })}
                   >
                     Sulje
@@ -159,7 +159,7 @@ export default function LaitteetPage() {
             {others.length > VISIBLE_OTHERS && (
               <button
                 type="button"
-                className="active-press flex min-h-11 w-full items-center justify-center text-[15px] font-medium text-accent"
+                className="active-press flex min-h-11 w-full items-center justify-center text-body font-medium text-accent"
                 onClick={() => setShowAll((value) => !value)}
               >
                 {showAll ? "Näytä vähemmän" : `Näytä kaikki (${others.length})`}
@@ -167,7 +167,7 @@ export default function LaitteetPage() {
             )}
           </>
         ) : (
-          <p className="py-2 text-[15px] text-ink-2">Ei muita kirjautuneita laitteita.</p>
+          <p className="py-2 text-body text-ink-2">Ei muita kirjautuneita laitteita.</p>
         )}
       </Card>
 

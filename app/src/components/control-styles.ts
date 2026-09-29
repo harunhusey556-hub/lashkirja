@@ -1,7 +1,7 @@
 /** Shared control chrome. Selected and idle chips both read as pressable. */
 
 export const controlClass =
-  "box-border block w-full min-w-0 max-w-full px-3 min-h-12 rounded-card border border-line bg-surface text-[16px] text-ink";
+  "box-border block w-full min-w-0 max-w-full px-3 min-h-12 rounded-card border border-line bg-surface text-input text-ink";
 
 const CHIP_BASE =
   "ds-chip active-press inline-flex min-h-11 shrink-0 items-center gap-1.5 rounded-full border px-3.5 text-sm font-medium";
@@ -22,5 +22,5 @@ export const BUTTON_VARIANTS = {
 export type ButtonVariant = keyof typeof BUTTON_VARIANTS;
 
 export function buttonClass(variant: ButtonVariant = "primary", extra = ""): string {
-  return `active-press inline-flex min-h-12 items-center justify-center gap-2 rounded-card px-4 text-[15px] font-semibold disabled:opacity-60 ${BUTTON_VARIANTS[variant]} ${extra}`;
+  return `active-press inline-flex min-h-12 items-center justify-center gap-2 rounded-card px-4 text-body font-semibold disabled:opacity-60 ${BUTTON_VARIANTS[variant]} ${extra}`;
 }

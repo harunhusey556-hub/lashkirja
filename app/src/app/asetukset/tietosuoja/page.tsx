@@ -98,19 +98,19 @@ export default function TietosuojaPage() {
     <div className="space-y-6">
       <PageTitle title="Tietosuoja" />
 
-      <Card className="space-y-3 text-[15px] text-ink leading-relaxed">
-        <h2 className="text-[13px] text-ink-2">Mitä LashKirja säilyttää</h2>
+      <Card className="space-y-3 text-body text-ink leading-relaxed">
+        <h2 className="text-caption text-ink-2">Mitä LashKirja säilyttää</h2>
         <p>
           Tilillä ovat nimesi, sähköpostisi ja salasanan tiiviste, yrityksen laskutustiedot,
           kuitit ja niiden tiedostot, tiliotteet, pankkitilit, asiakkaat, laskut, maksut ja
           keskustelut avustajan kanssa.
         </p>
-        <h2 className="pt-2 text-[13px] text-ink-2">Avustaja</h2>
+        <h2 className="pt-2 text-caption text-ink-2">Avustaja</h2>
         <p>
           Kun kysyt avustajalta jotain, kysymys ja saman keskustelun aiemmat viestit lähetetään
           tekoälypalveluun vastauksen muodostamista varten. Pankkiyhteyden salaisuuksia ei lähetetä.
         </p>
-        <h2 className="pt-2 text-[13px] text-ink-2">Säilytys</h2>
+        <h2 className="pt-2 text-caption text-ink-2">Säilytys</h2>
         <p>
           Kirjanpitoaineistoa säilytetään {ACCOUNTING_RETENTION_YEARS} vuotta tilikauden päättymisestä.
           Tilin sulkeminen ei poista kuitteja tai laskuja heti.
@@ -133,8 +133,8 @@ export default function TietosuojaPage() {
       >
         <Card className="space-y-4">
           <div>
-            <h2 className="text-[15px] font-medium text-ink">Pyyntö tuelle</h2>
-            <p className="mt-1 text-[13px] text-ink-2 leading-relaxed">
+            <h2 className="text-body font-medium text-ink">Pyyntö tuelle</h2>
+            <p className="mt-1 text-caption text-ink-2 leading-relaxed">
               Nykyinen salasana vahvistaa, että pyyntö tulee sinulta. Tuki käsittelee sen. Aineistoa ei tuhota
               tästä näkymästä. Sulkeminen estää kirjautumisen, kun pyyntö on valmis. Kuitit ja laskut säilyvät.
             </p>
@@ -152,12 +152,12 @@ export default function TietosuojaPage() {
             </div>
           )}
           {requests.length > 0 && (
-            <ul className="divide-y divide-line text-[15px]">
+            <ul className="divide-y divide-line text-body">
               {requests.map((row) => (
                 <li key={row.id} className="flex items-center gap-3 py-2">
                   <span className="min-w-0 flex-1">
                     <span className="block text-ink">{row.kindLabel}</span>
-                    <span className="block text-[13px] text-ink-2">{row.statusLabel}</span>
+                    <span className="block text-caption text-ink-2">{row.statusLabel}</span>
                   </span>
                   {row.downloadable && (
                     <AuthedFileLink

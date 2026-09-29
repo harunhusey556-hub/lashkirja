@@ -345,12 +345,12 @@ export default function BottomSheet({
                       ref={titleRef}
                       id={labelledBy}
                       tabIndex={-1}
-                      className="truncate text-[20px] font-bold tracking-[-0.01em] text-ink outline-none"
+                      className="truncate text-title-3 font-bold tracking-[-0.01em] text-ink outline-none"
                     >
                       {title}
                     </p>
                   )}
-                  {subtitle && <p className="mt-0.5 truncate text-[13px] text-ink-2">{subtitle}</p>}
+                  {subtitle && <p className="mt-0.5 truncate text-caption text-ink-2">{subtitle}</p>}
                 </div>
                 <div className="flex shrink-0 items-center gap-1">
                   {headerAction}

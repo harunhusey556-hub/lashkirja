@@ -30,8 +30,8 @@ export function BiometricUnlockCard({
     <Card className="space-y-3">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0 space-y-1">
-          <h2 className="text-[15px] font-medium text-ink">{title}</h2>
-          <p className="text-[13px] text-ink-2 leading-relaxed">
+          <h2 className="text-body font-medium text-ink">{title}</h2>
+          <p className="text-caption text-ink-2 leading-relaxed">
             {ready
               ? enabled
                 ? `${biometricUnlockLabel(bio.kind)} kysytään, kun palaat sovellukseen. Koodi jää varalle.`
@@ -64,7 +64,7 @@ export function BiometricUnlockCard({
         <button
           type="button"
           onClick={onEnable}
-          className="active-press min-h-12 w-full rounded-card bg-ink text-[15px] font-semibold text-canvas"
+          className="active-press min-h-12 w-full rounded-card bg-ink text-body font-semibold text-canvas"
         >
           {biometricEnableLabel(bio.kind)}
         </button>

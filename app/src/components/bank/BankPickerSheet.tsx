@@ -154,7 +154,7 @@ export default function BankPickerSheet({
                 role="radio"
                 aria-checked={selected}
                 onClick={() => choosePsu(type)}
-                className={`active-press min-h-11 rounded-[10px] text-[15px] font-medium ${
+                className={`active-press min-h-11 rounded-[10px] text-body font-medium ${
                   selected ? "border border-line bg-surface text-ink" : "border border-transparent text-ink-2"
                 }`}
               >
@@ -175,7 +175,7 @@ export default function BankPickerSheet({
             placeholder="Hae pankkia"
             enterKeyHint="search"
             autoComplete="off"
-            className="box-border block min-h-12 w-full rounded-card border border-line bg-surface pl-9 pr-3 text-[16px] text-ink"
+            className="box-border block min-h-12 w-full rounded-card border border-line bg-surface pl-9 pr-3 text-input text-ink"
           />
         </label>
         {connectError && (
@@ -203,7 +203,7 @@ export default function BankPickerSheet({
             ))}
           </SkeletonGroup>
         ) : visible.length === 0 ? (
-          <p className="px-1 py-6 text-center text-[15px] text-ink-2">
+          <p className="px-1 py-6 text-center text-body text-ink-2">
             {query.trim() ? "Hakuasi vastaavaa pankkia ei löytynyt." : "Pankkeja ei löytynyt."}
           </p>
         ) : (
@@ -221,11 +221,11 @@ export default function BankPickerSheet({
                   >
                     <BankLogo name={bank.name} logo={bank.logo} />
                     <span className="min-w-0 flex-1">
-                      <span className="block truncate text-[15px] font-medium text-ink">{bank.name}</span>
-                      {bank.beta && <span className="block text-[13px] text-ink-2">Kokeiluvaiheessa</span>}
+                      <span className="block truncate text-body font-medium text-ink">{bank.name}</span>
+                      {bank.beta && <span className="block text-caption text-ink-2">Kokeiluvaiheessa</span>}
                     </span>
                     {busy ? (
-                      <span className="flex items-center gap-2 text-[13px] text-ink-2" role="status">
+                      <span className="flex items-center gap-2 text-caption text-ink-2" role="status">
                         <span
                           className="h-4 w-4 rounded-full border-2 border-accent border-t-transparent animate-spin motion-reduce:animate-none"
                           aria-hidden
@@ -267,7 +267,7 @@ export function BankLogo({ name, logo, size = "md" }: { name: string; logo: stri
   return (
     <span
       aria-hidden
-      className={`${box} flex shrink-0 items-center justify-center rounded-[10px] bg-canvas text-[15px] font-semibold text-ink-2`}
+      className={`${box} flex shrink-0 items-center justify-center rounded-[10px] bg-canvas text-body font-semibold text-ink-2`}
     >
       {name.trim().charAt(0).toLocaleUpperCase("fi") || "?"}
     </span>

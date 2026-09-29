@@ -88,7 +88,7 @@ export function SelectMenu({
   return (
     <div className={`relative w-full ${className}`} ref={containerRef}>
       {label && (
-        <label htmlFor={id} className="mb-1.5 block text-[13px] font-normal text-ink-2">
+        <label htmlFor={id} className="mb-1.5 block text-caption font-normal text-ink-2">
           {label}
         </label>
       )}
@@ -98,7 +98,7 @@ export function SelectMenu({
         disabled={disabled}
         onClick={() => setIsOpen(!isOpen)}
         onKeyDown={handleKeyDown}
-        className={`w-full min-h-12 flex items-center justify-between px-3 rounded-card border text-left text-[16px] transition-colors active-press ${
+        className={`w-full min-h-12 flex items-center justify-between px-3 rounded-card border text-left text-input transition-colors active-press ${
           isOpen ? "border-accent bg-surface" : "border-line bg-surface"
         } ${disabled ? "opacity-50 cursor-not-allowed" : "cursor-pointer"}`}
         aria-haspopup="listbox"
@@ -131,7 +131,7 @@ export function SelectMenu({
                   onChange(opt.value);
                   setIsOpen(false);
                 }}
-                className={`flex min-h-11 cursor-pointer items-center justify-between px-3.5 py-2.5 text-[15px] transition-colors ${
+                className={`flex min-h-11 cursor-pointer items-center justify-between px-3.5 py-2.5 text-body transition-colors ${
                   isSelected ? "bg-accent-soft font-semibold text-accent" : "text-ink hover:bg-canvas"
                 }`}
               >
@@ -139,7 +139,7 @@ export function SelectMenu({
                   <div className="flex items-center gap-2">
                     <span>{opt.label}</span>
                     {opt.badge && (
-                      <span className="rounded-full bg-accent-soft px-1.5 py-0.5 text-[10px] font-medium text-accent">
+                      <span className="rounded-full bg-accent-soft px-1.5 py-0.5 text-micro font-medium text-accent">
                         {opt.badge}
                       </span>
                     )}

@@ -56,8 +56,8 @@ function ConfirmForm({ token }: { token: string }) {
         <span className="flex h-12 w-12 items-center justify-center rounded-full bg-success/10 text-success">
           <Icon icon={CircleCheck} size="hero" />
         </span>
-        <h1 className="text-[28px] font-bold leading-tight tracking-[-0.02em] text-ink">Sähköposti vaihdettu</h1>
-        <p className="text-[15px] leading-relaxed text-ink-2" role="status">
+        <h1 className="text-title-2 font-bold leading-tight tracking-[-0.02em] text-ink">Sähköposti vaihdettu</h1>
+        <p className="text-body leading-relaxed text-ink-2" role="status">
           {confirmedEmail
             ? `Kirjaudu jatkossa osoitteella ${confirmedEmail}.`
             : "Kirjaudu jatkossa uudella osoitteella."}
@@ -76,8 +76,8 @@ function ConfirmForm({ token }: { token: string }) {
 
   return (
     <form onSubmit={(event) => void submit(event)} className={BARE_CARD_CLASS}>
-      <h1 className="text-[28px] font-bold leading-tight tracking-[-0.02em] text-ink">Vahvista sähköposti</h1>
-      <p className="text-[15px] leading-relaxed text-ink-2">
+      <h1 className="text-title-2 font-bold leading-tight tracking-[-0.02em] text-ink">Vahvista sähköposti</h1>
+      <p className="text-body leading-relaxed text-ink-2">
         Vahvistus vaihtaa kirjautumissähköpostin. Vanha osoite toimii, kunnes painat nappia.
       </p>
       {error && (
@@ -101,8 +101,8 @@ function TokenMissing() {
       <span className="flex h-12 w-12 items-center justify-center rounded-full bg-warning/10 text-warning">
         <Icon icon={Link2Off} size="hero" />
       </span>
-      <h1 className="text-[28px] font-bold leading-tight tracking-[-0.02em] text-ink">Linkki ei kelpaa</h1>
-      <p className="text-[15px] leading-relaxed text-ink-2" role="alert">
+      <h1 className="text-title-2 font-bold leading-tight tracking-[-0.02em] text-ink">Linkki ei kelpaa</h1>
+      <p className="text-body leading-relaxed text-ink-2" role="alert">
         Vahvistuslinkki puuttuu tai on vanhentunut. Pyydä uusi vahvistus profiilistasi.
       </p>
       <Link href="/asetukset/profiili" className={buttonClass("primary", "w-full")}>

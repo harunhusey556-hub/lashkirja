@@ -78,8 +78,8 @@ export function BankConnectRow() {
         <Icon icon={Landmark} />
       </IconTile>
       <span className="pointer-events-none min-w-0 flex-1">
-        <span className="block truncate text-[15px] font-medium text-ink">{title}</span>
-        <span className={`mt-0.5 block text-[13px] ${state?.kind === "attention" ? "text-warning" : "text-ink-2"}`}>
+        <span className="block truncate text-body font-medium text-ink">{title}</span>
+        <span className={`mt-0.5 block text-caption ${state?.kind === "attention" ? "text-warning" : "text-ink-2"}`}>
           {line}
         </span>
       </span>
@@ -87,7 +87,7 @@ export function BankConnectRow() {
   );
   const rowClass = "relative flex min-h-16 w-full items-center gap-3 px-4 py-3 text-left";
   const pill =
-    "active-press relative pointer-events-auto inline-flex min-h-9 shrink-0 items-center rounded-full bg-ink px-3.5 text-[13px] font-semibold text-canvas before:absolute before:inset-x-0 before:-inset-y-1 before:content-['']";
+    "active-press relative pointer-events-auto inline-flex min-h-9 shrink-0 items-center rounded-full bg-ink px-3.5 text-caption font-semibold text-canvas before:absolute before:inset-x-0 before:-inset-y-1 before:content-['']";
 
   let row;
   if (state?.kind === "none") {
@@ -304,13 +304,13 @@ export default function BankConnectCard({
         <div className="min-w-0 flex-1">
           {state ? (
             <>
-              <h2 className="text-[15px] font-semibold text-ink">{title}</h2>
-              <p className={`mt-0.5 text-[13px] leading-relaxed ${state.kind === "attention" ? "text-warning" : "text-ink-2"}`}>
+              <h2 className="text-body font-semibold text-ink">{title}</h2>
+              <p className={`mt-0.5 text-caption leading-relaxed ${state.kind === "attention" ? "text-warning" : "text-ink-2"}`}>
                 {lead}
               </p>
             </>
           ) : bank.error ? (
-            <h2 className="text-[15px] font-semibold text-ink">Pankkiyhteys</h2>
+            <h2 className="text-body font-semibold text-ink">Pankkiyhteys</h2>
           ) : (
             <div aria-hidden className="space-y-2 pt-0.5">
               <Skeleton className="h-3.5 w-2/5" />
@@ -332,11 +332,11 @@ export default function BankConnectCard({
               type="button"
               onClick={sheets.openSetup}
               aria-describedby="bank-unconfigured-note"
-              className="active-press flex min-h-12 w-full items-center justify-center rounded-card bg-ink/30 px-4 text-[15px] font-semibold text-canvas"
+              className="active-press flex min-h-12 w-full items-center justify-center rounded-card bg-ink/30 px-4 text-body font-semibold text-canvas"
             >
               Yhdistä pankki
             </button>
-            <p id="bank-unconfigured-note" className="text-center text-[13px] text-ink-2">
+            <p id="bank-unconfigured-note" className="text-center text-caption text-ink-2">
               <button type="button" onClick={sheets.openSetup} className="active-press min-h-11 font-medium text-accent">
                 Mitä tarvitaan?
               </button>
@@ -345,7 +345,7 @@ export default function BankConnectCard({
                 and quietly at the foot of Pankkitilit, never a second loud button here. */}
             {variant === "full" && (
               <div className="flex justify-center border-t border-line pt-1">
-                <Link href="/pankki/tapahtumat" className="active-press inline-flex min-h-11 items-center text-[13px] font-medium text-ink-2">
+                <Link href="/pankki/tapahtumat" className="active-press inline-flex min-h-11 items-center text-caption font-medium text-ink-2">
                   Tuo tiliote tiedostona
                 </Link>
               </div>
@@ -358,7 +358,7 @@ export default function BankConnectCard({
         ) : variant === "compact" ? (
           <Link
             href="/kirjanpito/pankkitilit#pankkiyhteys"
-            className="active-press flex min-h-12 w-full items-center justify-center rounded-card bg-ink px-4 text-[15px] font-semibold text-canvas"
+            className="active-press flex min-h-12 w-full items-center justify-center rounded-card bg-ink px-4 text-body font-semibold text-canvas"
           >
             Vahvista uudelleen
           </Link>
@@ -444,12 +444,12 @@ function ConnectionBlock({
       <div className="flex items-start gap-3">
         <BankLogo name={connection.aspspName} logo={connection.aspspLogo} size="lg" />
         <div className="min-w-0 flex-1">
-          <p className="text-[15px] font-medium text-ink">{connection.aspspName}</p>
-          <p className="mt-0.5 text-[13px] text-ink-2">
+          <p className="text-body font-medium text-ink">{connection.aspspName}</p>
+          <p className="mt-0.5 text-caption text-ink-2">
             {STATUS_LABEL[connection.status] || "Tuntematon tila"} ·{" "}
             {connection.psuType === "business" ? "Yritystili" : "Henkilötili"}
           </p>
-          <p className="mt-0.5 text-[13px] text-ink-2">Viimeisin onnistunut haku {formatWhen(connection.lastSuccessAt)}</p>
+          <p className="mt-0.5 text-caption text-ink-2">Viimeisin onnistunut haku {formatWhen(connection.lastSuccessAt)}</p>
         </div>
       </div>
 
@@ -471,7 +471,7 @@ function ConnectionBlock({
 
       {connection.accounts.length > 0 && (
         <div className="space-y-2">
-          <p className="text-[13px] leading-relaxed text-ink-2">
+          <p className="text-caption leading-relaxed text-ink-2">
             Valitse kirjanpitoon kuuluvat tilit. Uudet tilit eivät tule mukaan automaattisesti.
           </p>
           {connection.accounts.map((account) => (
@@ -484,7 +484,7 @@ function ConnectionBlock({
               />
               <span className="min-w-0">
                 <span className="block break-all text-sm font-medium text-ink">{account.iban}</span>
-                <span className="mt-0.5 block text-[13px] text-ink-2">
+                <span className="mt-0.5 block text-caption text-ink-2">
                   {account.label || "Tili"}
                   {account.balance != null ? ` · ${formatEur(account.balance)}` : ""}
                 </span>
@@ -509,7 +509,7 @@ function ConnectionBlock({
           Katkaise
         </Button>
       </div>
-      {canSync && !hasScope && <p className="text-[13px] text-ink-2">Valitse ainakin yksi tili ennen hakua.</p>}
+      {canSync && !hasScope && <p className="text-caption text-ink-2">Valitse ainakin yksi tili ennen hakua.</p>}
     </div>
   );
 }

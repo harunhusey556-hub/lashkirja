@@ -116,7 +116,7 @@ export function ConnectivityBanner() {
           role="status"
           data-connectivity={shown === "restored" ? "success" : shown === "version" ? "info" : "warning"}
           data-state={phase}
-          className="connectivity-banner flex min-h-10 items-center justify-center gap-3 border-b border-line px-4 py-1.5 text-center text-[13px] leading-snug text-ink"
+          className="connectivity-banner flex min-h-10 items-center justify-center gap-3 border-b border-line px-4 py-1.5 text-center text-caption leading-snug text-ink"
         >
           <span>{COPY[shown]}</span>
           {shown === "unreachable" && (
@@ -124,7 +124,7 @@ export function ConnectivityBanner() {
               type="button"
               onClick={() => void retry()}
               disabled={retrying}
-              className="-my-1 min-h-9 shrink-0 rounded-full border border-line bg-surface px-3 text-[13px] font-semibold text-ink disabled:opacity-60"
+              className="-my-1 min-h-9 shrink-0 rounded-full border border-line bg-surface px-3 text-caption font-semibold text-ink disabled:opacity-60"
             >
               {retrying ? "Yritetään…" : "Yritä uudelleen"}
             </button>

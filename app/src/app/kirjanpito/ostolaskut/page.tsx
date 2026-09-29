@@ -357,7 +357,7 @@ export default function PurchaseInvoicesPage() {
   }
 
   const field = `${controlClass} min-h-12`;
-  const label = "mb-1.5 block text-[13px] font-normal text-ink-2";
+  const label = "mb-1.5 block text-caption font-normal text-ink-2";
 
   // Counts not known yet (first ever visit): the chips are there at their final
   // size with a skeleton where the number goes, never a zero.
@@ -379,7 +379,7 @@ export default function PurchaseInvoicesPage() {
             <button
               type="button"
               onClick={() => setCreateOpen(true)}
-              className="active-press relative inline-flex min-h-9 items-center gap-1 rounded-full bg-ink px-3.5 text-[13px] font-semibold text-canvas before:absolute before:inset-x-0 before:-inset-y-1 before:content-['']"
+              className="active-press relative inline-flex min-h-9 items-center gap-1 rounded-full bg-ink px-3.5 text-caption font-semibold text-canvas before:absolute before:inset-x-0 before:-inset-y-1 before:content-['']"
             >
               <Icon icon={Plus} size="inline" strokeWidth={2.5} />
               Uusi ostolasku
@@ -397,8 +397,8 @@ export default function PurchaseInvoicesPage() {
             <div className="grid grid-cols-4 divide-x divide-line overflow-hidden rounded-card border border-line bg-surface text-center">
               {AGING_BUCKETS.map((bucket) => (
                 <div key={bucket} className="px-2 py-3">
-                  <p className="text-[11px] text-ink-2">{bucket} pv</p>
-                  <p className="mt-0.5 text-[13px] font-medium tabular-nums text-ink">
+                  <p className="text-micro text-ink-2">{bucket} pv</p>
+                  <p className="mt-0.5 text-caption font-medium tabular-nums text-ink">
                     {formatEur((aging.buckets[bucket]?.openCents ?? 0) / 100)}
                   </p>
                 </div>
@@ -486,7 +486,7 @@ export default function PurchaseInvoicesPage() {
             )}
 
             {reachedListLimit && (
-              <p className="text-[13px] text-ink-2">
+              <p className="text-caption text-ink-2">
                 Näytetään {PURCHASE_LIST_LIMIT} vanhinta erääntyvää laskua. Valitse suodatin nähdäksesi kaikki.
               </p>
             )}
@@ -677,7 +677,7 @@ export default function PurchaseInvoicesPage() {
             />
 
             {detailInvoice.payments.length > 0 && (
-              <ul className="space-y-1 text-[13px] text-ink-2">
+              <ul className="space-y-1 text-caption text-ink-2">
                 {detailInvoice.payments.map((payment) => (
                   <li key={payment.id}>
                     {formatDate(payment.paidDate)} · {formatEur(payment.amount)}

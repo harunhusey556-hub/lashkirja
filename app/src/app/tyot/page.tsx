@@ -200,7 +200,7 @@ export default function TyotPage() {
 
           <Section title="Työt">
             {jobs.length === 0 ? (
-              <p className="px-4 py-4 text-[13px] text-ink-2">Ei käynnissä olevia töitä.</p>
+              <p className="px-4 py-4 text-caption text-ink-2">Ei käynnissä olevia töitä.</p>
             ) : (
               jobs.map((job) => {
                 const status = jobStatusLabel(job.status);
@@ -219,11 +219,11 @@ export default function TyotPage() {
           </Section>
 
           <div className="space-y-3">
-            <h2 className="px-1 text-[13px] text-ink-2">Poikkeusjono</h2>
+            <h2 className="px-1 text-caption text-ink-2">Poikkeusjono</h2>
             <FilterChips label="Suodata poikkeuksia" items={workChips} value={filter} onChange={setFilter} />
 
             {visible.length === 0 ? (
-              <p className="px-1 text-[13px] text-ink-2">Ei avoimia poikkeuksia.</p>
+              <p className="px-1 text-caption text-ink-2">Ei avoimia poikkeuksia.</p>
             ) : (
               <Section>
                 {visible.map((item) => (

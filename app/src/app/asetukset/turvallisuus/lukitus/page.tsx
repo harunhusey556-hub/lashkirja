@@ -138,7 +138,7 @@ export default function LukitusPage() {
       <PageTitle title="Näytön lukitus" />
       <form onSubmit={(event) => void (hasLock ? askToRemove(event) : saveLock(event))} noValidate>
         <Card className="space-y-4">
-          <p className="text-[13px] text-ink-2 leading-relaxed">
+          <p className="text-caption text-ink-2 leading-relaxed">
             Valinnainen koodi tällä laitteella peittää kirjanpidon, kun sovellus jää taustalle.
             Lukitus ei korvaa uloskirjautumista.
           </p>

@@ -300,8 +300,8 @@ export function InvoiceForm({
   }
 
   const field = controlClass;
-  const label = "mb-1.5 block text-[13px] text-ink-2";
-  const lineLabel = "mb-1 block text-[13px] text-ink-2";
+  const label = "mb-1.5 block text-caption text-ink-2";
+  const lineLabel = "mb-1 block text-caption text-ink-2";
 
   return (
     <form
@@ -340,7 +340,7 @@ export function InvoiceForm({
               <button
                 type="button"
                 onClick={onAddCustomer}
-                className="relative text-[13px] font-medium text-accent before:absolute before:-inset-x-2 before:-inset-y-[14px] before:content-['']"
+                className="relative text-caption font-medium text-accent before:absolute before:-inset-x-2 before:-inset-y-[14px] before:content-['']"
               >
                 Uusi asiakas
               </button>
@@ -410,7 +410,7 @@ export function InvoiceForm({
       </Section>
 
       <div>
-        <p className="mb-2 px-1 text-[13px] text-ink-2">Rivit</p>
+        <p className="mb-2 px-1 text-caption text-ink-2">Rivit</p>
         <div className="space-y-3">
           {values.lines.map((line, index) => (
             <Card key={index} className="space-y-2">
@@ -581,7 +581,7 @@ export function InvoiceForm({
         </div>
       </div>
 
-      <Card className="space-y-1 text-[15px]">
+      <Card className="space-y-1 text-body">
         <div className="flex justify-between text-ink-2">
           <span>Veroton</span>
           <span>{formatEur(totals.netCents / 100)}</span>
@@ -650,7 +650,7 @@ export function InvoiceForm({
         </Button>
         <button
           type="button"
-          className="active-press flex min-h-12 w-full items-center justify-center text-[15px] font-semibold text-accent"
+          className="active-press flex min-h-12 w-full items-center justify-center text-body font-semibold text-accent"
           onClick={() => session.requestCancel(onCancel)}
         >
           Peruuta

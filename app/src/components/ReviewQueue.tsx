@@ -75,11 +75,11 @@ export default function ReviewQueue({
         aria-expanded={open}
       >
         <div className="min-w-0">
-          <h3 className="text-[15px] font-medium text-ink">
+          <h3 className="text-body font-medium text-ink">
             {title} ({receipts.length})
           </h3>
-          <p className="mt-1 text-[13px] leading-relaxed text-ink-2">{description}</p>
-          <p className="mt-1 text-[13px] tabular-nums text-ink-2">Yhteensä {formatEur(total)}</p>
+          <p className="mt-1 text-caption leading-relaxed text-ink-2">{description}</p>
+          <p className="mt-1 text-caption tabular-nums text-ink-2">Yhteensä {formatEur(total)}</p>
         </div>
         <Icon icon={ChevronDown} className={`text-ink-2 transition-transform ${open ? "rotate-180" : ""}`} />
       </button>
@@ -96,7 +96,7 @@ export default function ReviewQueue({
         </Button>
       )}
       {onApproveAll && withoutTotal > 0 && (
-        <p className="mt-2 text-[13px] text-warning" role="note">
+        <p className="mt-2 text-caption text-warning" role="note">
           {withoutTotal === 1 ? "1 kuitilta puuttuu summa." : `${withoutTotal} kuitilta puuttuu summa.`} Tarkista ennen
           hyväksyntää.
         </p>

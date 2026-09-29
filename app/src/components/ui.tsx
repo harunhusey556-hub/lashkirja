@@ -68,7 +68,7 @@ export function Button({
       ) : showReason ? (
         <span className="flex flex-col items-center leading-tight">
           <span>{children}</span>
-          <span id={reasonId} className="text-[11px] font-normal opacity-80">
+          <span id={reasonId} className="text-micro font-normal opacity-80">
             {disabledReason}
           </span>
         </span>
@@ -99,12 +99,12 @@ export function Field({
     : children;
   return (
     <div>
-      <label htmlFor={htmlFor} className="mb-1.5 block text-[13px] font-normal text-ink-2">
+      <label htmlFor={htmlFor} className="mb-1.5 block text-caption font-normal text-ink-2">
         {label}
       </label>
       {control}
       {hint && !error && (
-        <p id={hintId} className="mt-1.5 text-[13px] text-ink-2">
+        <p id={hintId} className="mt-1.5 text-caption text-ink-2">
           {hint}
         </p>
       )}

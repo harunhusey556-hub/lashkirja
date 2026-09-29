@@ -111,10 +111,10 @@ function ProfileForm({
           {(profile.firstName?.[0] || "?").toUpperCase()}
         </span>
         <div className="min-w-0">
-          <p className="truncate text-[15px] font-medium text-ink">
+          <p className="truncate text-body font-medium text-ink">
             {profile.firstName} {profile.lastName}
           </p>
-          <p className="truncate text-[13px] text-ink-2">{profile.email}</p>
+          <p className="truncate text-caption text-ink-2">{profile.email}</p>
         </div>
       </Card>
 
@@ -155,7 +155,7 @@ function ProfileForm({
               />
             </Field>
           </div>
-          <p className="text-[13px] text-ink-2">
+          <p className="text-caption text-ink-2">
             Kirjautumissähköposti on {profile.email}. Uusi osoite otetaan käyttöön vasta vahvistuslinkin jälkeen.
           </p>
 
@@ -169,9 +169,9 @@ function ProfileForm({
 
       <form onSubmit={(event) => void sendEmailChange(event)} noValidate>
         <Card className="space-y-4">
-          <h2 className="text-[15px] font-medium text-ink">Vaihda sähköposti</h2>
+          <h2 className="text-body font-medium text-ink">Vaihda sähköposti</h2>
           {profile.pendingEmail && (
-            <p className="text-[13px] text-ink-2">
+            <p className="text-caption text-ink-2">
               Odottaa vahvistusta: {profile.pendingEmail}. Nykyinen osoite toimii siihen asti.
             </p>
           )}

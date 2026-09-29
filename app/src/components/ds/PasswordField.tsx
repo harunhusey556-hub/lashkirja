@@ -101,7 +101,7 @@ export const PasswordField = forwardRef<HTMLInputElement, PasswordFieldProps>(fu
 
   return (
     <div className={className}>
-      <label htmlFor={id} className="mb-1.5 block text-[13px] font-normal text-ink-2">
+      <label htmlFor={id} className="mb-1.5 block text-caption font-normal text-ink-2">
         {label}
       </label>
       <div className="relative">
@@ -136,7 +136,7 @@ export const PasswordField = forwardRef<HTMLInputElement, PasswordFieldProps>(fu
         </button>
       </div>
       {hint && !error && (
-        <p id={hintId} className="mt-1.5 text-[13px] text-ink-2">
+        <p id={hintId} className="mt-1.5 text-caption text-ink-2">
           {hint}
         </p>
       )}

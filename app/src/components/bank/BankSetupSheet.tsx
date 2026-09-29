@@ -24,7 +24,7 @@ export default function BankSetupSheet({
   return (
     <BottomSheet isOpen={isOpen} onClose={onClose} title="Mitä tarvitaan" labelledBy={titleId} dirty={false}>
       <div className="min-h-0 flex-1 space-y-5 overflow-y-auto px-5 pb-2 pt-1 sheet-safe-bottom">
-        <div className="space-y-3 text-[15px] leading-relaxed text-ink">
+        <div className="space-y-3 text-body leading-relaxed text-ink">
           <p>
             Pankkiyhteys hakee tilitapahtumat suoraan pankista Enable Banking -palvelun kautta. Sitä
             varten palvelimelle tarvitaan kaksi asiaa:
@@ -33,7 +33,7 @@ export default function BankSetupSheet({
             <li>Enable Banking -sovelluksen tunnus</li>
             <li>Sovelluksen yksityinen avain</li>
           </ol>
-          <p className="text-[13px] text-ink-2">
+          <p className="text-caption text-ink-2">
             Lisäksi sovelluksen paluuosoite hyväksytään Enable Bankingin hallinnassa. Kun tunnukset on
             asetettu, &ldquo;Yhdistä pankki&rdquo; toimii tästä samasta kohdasta, eikä sovellusta
             tarvitse päivittää.
@@ -41,7 +41,7 @@ export default function BankSetupSheet({
         </div>
 
         <div>
-          <p className="mb-2 px-1 text-[13px] text-ink-2">Toimii jo nyt</p>
+          <p className="mb-2 px-1 text-caption text-ink-2">Toimii jo nyt</p>
           <div className="overflow-hidden rounded-card border border-line bg-surface divide-y divide-line">
             <Link
               href="/pankki/tapahtumat"
@@ -52,8 +52,8 @@ export default function BankSetupSheet({
                 <Icon icon={FileUp} />
               </IconTile>
               <span className="min-w-0 flex-1">
-                <span className="block text-[15px] font-medium text-ink">Tuo tiliote tiedostona</span>
-                <span className="block text-[13px] text-ink-2">PDF, XML, XLSX tai CSV verkkopankista</span>
+                <span className="block text-body font-medium text-ink">Tuo tiliote tiedostona</span>
+                <span className="block text-caption text-ink-2">PDF, XML, XLSX tai CSV verkkopankista</span>
               </span>
             </Link>
             {onAddManual ? (
@@ -90,8 +90,8 @@ function ManualRowBody() {
         <Icon icon={PenLine} />
       </IconTile>
       <span className="min-w-0 flex-1">
-        <span className="block text-[15px] font-medium text-ink">Lisää tili käsin</span>
-        <span className="block text-[13px] text-ink-2">Saldot kirjataan itse kuukausittain</span>
+        <span className="block text-body font-medium text-ink">Lisää tili käsin</span>
+        <span className="block text-caption text-ink-2">Saldot kirjataan itse kuukausittain</span>
       </span>
     </>
   );

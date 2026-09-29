@@ -22,7 +22,7 @@ export interface ReceiptAdvancedFilters {
 }
 
 const field = `${controlClass} min-h-12`;
-const selectLabel = "mb-1 block text-[13px] text-ink-2";
+const selectLabel = "mb-1 block text-caption text-ink-2";
 
 export function ReceiptFilters({
   monthFilter,
@@ -83,7 +83,7 @@ export function ReceiptFilters({
           aria-controls="kuitit-search-panel"
           className="active-press flex w-full min-h-11 items-center justify-between gap-2 text-left"
         >
-          <span className="flex items-center gap-2 text-[13px] font-medium text-ink-2">
+          <span className="flex items-center gap-2 text-caption font-medium text-ink-2">
             <Icon icon={Search} size="inline" />
             Hae ja suodata kuitteja
           </span>
@@ -123,7 +123,7 @@ export function ReceiptFilters({
                 }}
                 aria-expanded={advancedOpen}
                 aria-controls="advanced-receipt-filters"
-                className={`active-press min-h-12 shrink-0 whitespace-nowrap rounded-card border px-4 text-[15px] font-medium ${
+                className={`active-press min-h-12 shrink-0 whitespace-nowrap rounded-card border px-4 text-body font-medium ${
                   advancedOpen || advancedIsActive ? "border-ink bg-ink text-canvas" : "border-line bg-surface text-ink"
                 }`}
               >
@@ -244,7 +244,7 @@ export function ReceiptFilters({
               type="button"
               onClick={chip.clear}
               aria-label={`Poista suodatin ${chip.label}`}
-              className="active-press inline-flex min-h-11 items-center gap-1.5 rounded-full border border-line bg-surface px-2.5 text-[13px] text-ink-2"
+              className="active-press inline-flex min-h-11 items-center gap-1.5 rounded-full border border-line bg-surface px-2.5 text-caption text-ink-2"
             >
               {chip.label}
               <span aria-hidden>&times;</span>
@@ -253,7 +253,7 @@ export function ReceiptFilters({
           <button
             type="button"
             onClick={onClearAll}
-            className="active-press inline-flex min-h-11 items-center text-[13px] font-medium text-accent"
+            className="active-press inline-flex min-h-11 items-center text-caption font-medium text-accent"
           >
             Tyhjennä kaikki
           </button>

@@ -21,7 +21,7 @@ export function SettingsGroup({
   return (
     <section>
       {/* px-1: the same inset as ds `Section` headings, so every group heading in the app lines up. */}
-      <h3 className="mb-2 px-1 text-[13px] font-normal text-ink-2">{label}</h3>
+      <h3 className="mb-2 px-1 text-caption font-normal text-ink-2">{label}</h3>
       <div className="overflow-hidden rounded-card border border-line bg-surface divide-y divide-line">
         {children}
       </div>
@@ -49,8 +49,8 @@ export function SettingsRow({
         </IconTile>
       ) : null}
       <span className="min-w-0 flex-1">
-        <span className="block text-[15px] font-medium text-ink">{label}</span>
-        {hint && <span className="mt-0.5 line-clamp-2 block text-[13px] text-ink-2">{hint}</span>}
+        <span className="block text-body font-medium text-ink">{label}</span>
+        {hint && <span className="mt-0.5 line-clamp-2 block text-caption text-ink-2">{hint}</span>}
       </span>
       <SettingsChevron />
     </Link>

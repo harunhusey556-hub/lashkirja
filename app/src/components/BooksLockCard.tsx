@@ -145,10 +145,10 @@ export default function BooksLockCard() {
         ) : (
           <>
             <div>
-              <p className="text-[15px] font-medium text-ink">
+              <p className="text-body font-medium text-ink">
                 {lockedThrough ? `Lukittu ${formatMonth(lockedThrough)} asti` : "Kaikki kaudet ovat auki"}
               </p>
-              <p className="mt-0.5 text-[13px] text-ink-2">Valittu kuukausi ja sitä vanhemmat lukitaan.</p>
+              <p className="mt-0.5 text-caption text-ink-2">Valittu kuukausi ja sitä vanhemmat lukitaan.</p>
             </div>
 
             <div className="flex gap-2">
@@ -188,7 +188,7 @@ export default function BooksLockCard() {
             )}
 
             {actionError && (
-              <p className="text-[13px] text-danger" role="alert">
+              <p className="text-caption text-danger" role="alert">
                 {actionError}
               </p>
             )}
@@ -201,7 +201,7 @@ export default function BooksLockCard() {
         // press (no navigation, no dialog) - without a live region a screen
         // reader user never learns it showed up at all.
         <div role="status" className="space-y-6">
-          <p className="px-1 text-[15px] font-medium text-ink">
+          <p className="px-1 text-body font-medium text-ink">
             Avoinna ennen lukitusta ({formatMonth(precheck.month)})
           </p>
           <Section title="Puuttuvat tositteet" count={precheck.missingDocuments.length}>
@@ -237,7 +237,7 @@ export default function BooksLockCard() {
 
 function PrecheckRows({ items, empty }: { items: PrecheckItem[]; empty: string }) {
   if (items.length === 0) {
-    return <p className="px-4 py-4 text-[15px] text-ink-2">{empty}</p>;
+    return <p className="px-4 py-4 text-body text-ink-2">{empty}</p>;
   }
   return (
     <>

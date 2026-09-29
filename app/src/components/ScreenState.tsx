@@ -160,8 +160,8 @@ export function EmptyState({
         <Icon icon={EMPTY_ICON[kind]} size="hero" />
       </span>
       <div className="space-y-1">
-        <p className="text-[15px] font-semibold text-ink">{title ?? copy.title}</p>
-        <p className="mx-auto max-w-xs text-[13px] leading-relaxed text-ink-2">{body ?? copy.body}</p>
+        <p className="text-body font-semibold text-ink">{title ?? copy.title}</p>
+        <p className="mx-auto max-w-xs text-caption leading-relaxed text-ink-2">{body ?? copy.body}</p>
       </div>
       {kind === "records" && action}
       {kind === "records" && onCreate && (

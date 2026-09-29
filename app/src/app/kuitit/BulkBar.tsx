@@ -104,7 +104,7 @@ export function BulkBar({
         role="toolbar"
         aria-label="Valitut kuitit"
       >
-        <span className="text-[13px] font-medium" aria-live="polite">
+        <span className="text-caption font-medium" aria-live="polite">
           {shownCount} valittu
         </span>
         <div className="ml-auto flex gap-2">

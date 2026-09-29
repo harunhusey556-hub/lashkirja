@@ -645,7 +645,7 @@ export default function KuititPage() {
             <div className="flex items-center gap-2">
             <Link
               href="/kuitit/uusi"
-              className="active-press relative inline-flex min-h-9 items-center gap-1 rounded-full bg-ink px-3.5 text-[13px] font-semibold text-canvas before:absolute before:inset-x-0 before:-inset-y-1 before:content-['']"
+              className="active-press relative inline-flex min-h-9 items-center gap-1 rounded-full bg-ink px-3.5 text-caption font-semibold text-canvas before:absolute before:inset-x-0 before:-inset-y-1 before:content-['']"
             >
               <Icon icon={Plus} size="inline" strokeWidth={2.5} />
               Lisää
@@ -782,7 +782,7 @@ export default function KuititPage() {
                 </span>
               </label>
             )}
-            <h2 className="text-[13px] text-ink-2">
+            <h2 className="text-caption text-ink-2">
               {loadingList ? "Ladataan…" : receiptCountLabel(receiptCount, hasFilters)}
             </h2>
           </div>

@@ -154,7 +154,7 @@ export default function ConfirmModal({
             </div>
           )}
 
-          <h3 id={titleId} className="text-[17px] font-semibold text-ink">{title}</h3>
+          <h3 id={titleId} className="text-headline font-semibold text-ink">{title}</h3>
 
           {description && (
             <p id={descriptionId} className="mt-2 text-sm text-ink-2">{description}</p>

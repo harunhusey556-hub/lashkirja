@@ -104,14 +104,14 @@ export default function ReceiptUploadArea({
         <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-canvas text-ink-2">
           <Icon icon={FileUp} size="tab" />
         </div>
-        <p className="text-[15px] font-medium text-ink">Lisää kuitti tai lasku kuvana tai PDF-tiedostona</p>
+        <p className="text-body font-medium text-ink">Lisää kuitti tai lasku kuvana tai PDF-tiedostona</p>
 
         <div className="mx-auto flex max-w-sm flex-col gap-3">
           <button
             type="button"
             onClick={onPickCamera}
             disabled={uploading}
-            className="active-press min-h-12 w-full rounded-card bg-ink px-4 text-[15px] font-semibold text-canvas disabled:opacity-60"
+            className="active-press min-h-12 w-full rounded-card bg-ink px-4 text-body font-semibold text-canvas disabled:opacity-60"
           >
             Ota kuva
           </button>
@@ -119,7 +119,7 @@ export default function ReceiptUploadArea({
             type="button"
             onClick={onPickPhoto}
             disabled={uploading}
-            className="active-press min-h-12 w-full rounded-card border border-line bg-surface px-4 text-[15px] font-semibold text-ink disabled:opacity-60"
+            className="active-press min-h-12 w-full rounded-card border border-line bg-surface px-4 text-body font-semibold text-ink disabled:opacity-60"
           >
             Valitse kuvista
           </button>
@@ -127,14 +127,14 @@ export default function ReceiptUploadArea({
             type="button"
             onClick={onPickFile}
             disabled={uploading}
-            className="active-press min-h-12 w-full rounded-card border border-line bg-surface px-4 text-[15px] font-semibold text-ink disabled:opacity-60"
+            className="active-press min-h-12 w-full rounded-card border border-line bg-surface px-4 text-body font-semibold text-ink disabled:opacity-60"
           >
             Valitse tiedosto
           </button>
         </div>
 
         {uploading && (
-          <div className="flex items-center justify-center gap-3 pt-4 text-[13px] text-ink-2" role="status" aria-live="polite">
+          <div className="flex items-center justify-center gap-3 pt-4 text-caption text-ink-2" role="status" aria-live="polite">
             <div className="h-5 w-5 animate-spin rounded-full border-2 border-accent border-t-transparent motion-reduce:animate-none" aria-hidden="true" />
             {uploadQueue.rows.find((row) => row.status === "uploading" || row.status === "processing")?.progress || uploadProgress}
           </div>
@@ -149,14 +149,14 @@ export default function ReceiptUploadArea({
               <button
                 type="button"
                 onClick={() => uploadQueue.cancel()}
-                className="min-h-11 text-[13px] font-medium text-ink"
+                className="min-h-11 text-caption font-medium text-ink"
               >
                 Peruuta
               </button>
               <button
                 type="button"
                 onClick={() => uploadQueue.retryFailed()}
-                className="min-h-11 text-[13px] font-medium text-accent"
+                className="min-h-11 text-caption font-medium text-accent"
               >
                 Yritä epäonnistuneet
               </button>
@@ -166,19 +166,19 @@ export default function ReceiptUploadArea({
           {uploadQueue.rows.map((row) => (
             <div key={row.localId} className="px-4 py-3">
               <div className="flex items-start justify-between gap-3">
-                <p className="min-w-0 truncate text-[15px] font-medium text-ink">{row.name}</p>
-                <p className="shrink-0 text-[13px] text-ink-2">{queueStatusLabel(row.status)}</p>
+                <p className="min-w-0 truncate text-body font-medium text-ink">{row.name}</p>
+                <p className="shrink-0 text-caption text-ink-2">{queueStatusLabel(row.status)}</p>
               </div>
-              {row.progress && <p className="mt-1 text-[13px] text-ink-2">{row.progress}</p>}
+              {row.progress && <p className="mt-1 text-caption text-ink-2">{row.progress}</p>}
               {row.error && (
-                <p className="mt-1 text-[13px] text-danger" role="alert">
+                <p className="mt-1 text-caption text-danger" role="alert">
                   {row.error}
                 </p>
               )}
               {row.duplicateReceiptId && (
                 <Link
                   href={detailHref("receipt", row.duplicateReceiptId)}
-                  className="mt-1 inline-flex min-h-11 items-center text-[13px] font-medium text-accent"
+                  className="mt-1 inline-flex min-h-11 items-center text-caption font-medium text-accent"
                 >
                   Avaa olemassa oleva
                 </Link>
@@ -187,7 +187,7 @@ export default function ReceiptUploadArea({
                 <button
                   type="button"
                   onClick={() => uploadQueue.useReady(row.localId)}
-                  className="min-h-11 text-[13px] font-medium text-accent"
+                  className="min-h-11 text-caption font-medium text-accent"
                 >
                   Käytä lomakkeessa
                 </button>

@@ -822,7 +822,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       >
         <Icon icon={rootIcon(item.id)} size="tab" />
         <span
-          className={`max-w-full truncate text-[11px] leading-tight ${active ? "font-semibold" : "font-medium"}`}
+          className={`max-w-full truncate text-tab leading-tight ${active ? "font-semibold" : "font-medium"}`}
         >
           {item.label}
         </span>
@@ -836,7 +836,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     <AppLock>
     {sessionStatus !== "signed-out" && (
       <aside className="app-sidebar" aria-hidden={false}>
-        <p className="flex items-center gap-2.5 px-5 pb-4 pt-5 text-[17px] font-bold tracking-[-0.01em] text-ink">
+        <p className="flex items-center gap-2.5 px-5 pb-4 pt-5 text-headline font-bold tracking-[-0.01em] text-ink">
           <AppMark />
           LashKirja
         </p>
@@ -846,7 +846,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
             onClick={() => setAddOpenOn(pathname)}
             aria-haspopup="dialog"
             aria-expanded={addOpen}
-            className="flex min-h-12 w-full items-center justify-center gap-2 rounded-card bg-ink text-[15px] font-semibold text-canvas active-press"
+            className="flex min-h-12 w-full items-center justify-center gap-2 rounded-card bg-ink text-body font-semibold text-canvas active-press"
           >
             <Icon icon={Plus} strokeWidth={2} />
             Lisää
@@ -862,7 +862,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                 prefetch
                 onClick={(event) => goToRoot(event, item.path)}
                 aria-current={active ? "page" : undefined}
-                className={`flex min-h-12 items-center gap-3 rounded-card px-3 text-left text-[15px] active-press ${
+                className={`flex min-h-12 items-center gap-3 rounded-card px-3 text-left text-body active-press ${
                   active ? "bg-accent-soft font-semibold text-accent" : "font-medium text-ink"
                 }`}
               >
@@ -878,7 +878,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
             prefetch
             onClick={(event) => goToRoot(event, avatarRoot().path)}
             aria-current={rootIsActive(pathname, "asetukset") ? "page" : undefined}
-            className={`flex min-h-12 w-full items-center gap-3 rounded-card px-3 text-left text-[15px] active-press ${
+            className={`flex min-h-12 w-full items-center gap-3 rounded-card px-3 text-left text-body active-press ${
               rootIsActive(pathname, "asetukset") ? "bg-accent-soft font-semibold text-accent" : "font-medium text-ink"
             }`}
           >
@@ -910,7 +910,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                 className="flex h-11 max-w-full items-center gap-0.5 pr-2 text-accent active-press"
               >
                 <Icon icon={ChevronLeft} size="tab" strokeWidth={2} />
-                {backName && <span className="truncate text-[15px] font-medium">{backName}</span>}
+                {backName && <span className="truncate text-body font-medium">{backName}</span>}
               </button>
             )}
           </div>
@@ -937,7 +937,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                 aria-haspopup="dialog"
                 className="header-circle active-press flex h-11 w-11 items-center justify-center"
               >
-                <span className="flex h-9 w-9 items-center justify-center rounded-full border border-accent-soft bg-accent-soft text-[15px] font-semibold text-accent">
+                <span className="flex h-9 w-9 items-center justify-center rounded-full border border-accent-soft bg-accent-soft text-body font-semibold text-accent">
                   {initials || <Icon icon={User} />}
                 </span>
               </button>
@@ -1062,7 +1062,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                 <Icon icon={Camera} size="tab" />
                 <span className="min-w-0">
                   <span className="block text-base font-semibold">Ota kuva</span>
-                  <span className="block text-[13px] text-canvas/70">Kuitti luetaan automaattisesti</span>
+                  <span className="block text-caption text-canvas/70">Kuitti luetaan automaattisesti</span>
                 </span>
               </button>
               <div className="overflow-hidden rounded-card border border-line bg-surface divide-y divide-line">
@@ -1075,8 +1075,8 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                     <Icon icon={FileUp} />
                   </IconTile>
                   <span className="min-w-0 flex-1">
-                    <span className="block text-[15px] font-medium text-ink">Tuo tiliote</span>
-                    <span className="mt-0.5 block truncate text-[13px] text-ink-2">CSV, XLSX, camt tai PDF</span>
+                    <span className="block text-body font-medium text-ink">Tuo tiliote</span>
+                    <span className="mt-0.5 block truncate text-caption text-ink-2">CSV, XLSX, camt tai PDF</span>
                   </span>
                 </button>
                 {(
@@ -1098,7 +1098,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                       <Icon icon={row.icon} />
                     </IconTile>
                     <span className="min-w-0 flex-1">
-                      <span className="block text-[15px] font-medium text-ink">{row.label}</span>
+                      <span className="block text-body font-medium text-ink">{row.label}</span>
                     </span>
                   </button>
                 ))}
@@ -1131,7 +1131,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                   <IconTile>
                     <Icon icon={Settings} />
                   </IconTile>
-                  <span className="text-[15px] font-medium text-ink">Asetukset</span>
+                  <span className="text-body font-medium text-ink">Asetukset</span>
                 </button>
                 <button
                   type="button"
@@ -1149,7 +1149,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                       <Icon icon={LogOut} />
                     )}
                   </IconTile>
-                  <span className="text-[15px] font-medium text-danger">
+                  <span className="text-body font-medium text-danger">
                     {signingOut ? "Kirjaudutaan ulos…" : "Kirjaudu ulos"}
                   </span>
                 </button>

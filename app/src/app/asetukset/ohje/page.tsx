@@ -49,7 +49,7 @@ export default function OhjePage() {
     <div className="space-y-6">
       <PageTitle title="Ohje ja tuki" />
       <Card className="space-y-3">
-        <p className="text-[15px] text-ink leading-relaxed">
+        <p className="text-body text-ink leading-relaxed">
           Kuitit, laskut ja ALV löytyvät omista näkymistään. Jos jokin epäonnistuu, lähetä meille viesti: siihen tulee
           mukaan virheviite, jonka avulla vika löytyy.
         </p>
@@ -69,7 +69,7 @@ export default function OhjePage() {
           Kopioi virheviite
         </button>
         {SUPPORT_EMAIL && (
-          <p className="text-[15px] text-ink-2">
+          <p className="text-body text-ink-2">
             Tuki:{" "}
             <a
               href={`mailto:${SUPPORT_EMAIL}`}

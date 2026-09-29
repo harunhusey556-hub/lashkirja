@@ -59,8 +59,8 @@ export default function ForgotPasswordPage() {
           <span className="flex h-12 w-12 items-center justify-center rounded-full bg-accent-soft text-accent">
             <Icon icon={MailCheck} size="hero" />
           </span>
-          <h1 className="text-[28px] font-bold leading-tight tracking-[-0.02em] text-ink">Tarkista sähköpostisi</h1>
-          <p className="text-[15px] leading-relaxed text-ink-2" role="status">
+          <h1 className="text-title-2 font-bold leading-tight tracking-[-0.02em] text-ink">Tarkista sähköpostisi</h1>
+          <p className="text-body leading-relaxed text-ink-2" role="status">
             {sentMessage} Linkki lähetettiin osoitteeseen {sentTo}.
           </p>
           <Button
@@ -85,8 +85,8 @@ export default function ForgotPasswordPage() {
   return (
     <BareFrame>
       <form onSubmit={(event) => void submit(event)} noValidate className={BARE_CARD_CLASS}>
-        <h1 className="text-[28px] font-bold leading-tight tracking-[-0.02em] text-ink">Salasanan palautus</h1>
-        <p className="text-[15px] leading-relaxed text-ink-2">
+        <h1 className="text-title-2 font-bold leading-tight tracking-[-0.02em] text-ink">Salasanan palautus</h1>
+        <p className="text-body leading-relaxed text-ink-2">
           Kirjoita tilisi sähköpostiosoite. Jos tili löytyy, saat postiin linkin, jolla valitset uuden salasanan.
           Jos viestiä ei tule, ota yhteyttä tukeen.
         </p>

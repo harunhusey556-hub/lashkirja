@@ -89,7 +89,7 @@ export function BalanceTable({ months, busyMonth, onSave, onClear }: Props) {
 
   if (months.length === 0) {
     return (
-      <p className="text-[15px] text-ink-2">
+      <p className="text-body text-ink-2">
         Ei vielä kuukausia. Lisää tiliote tai kirjaa kuukauden loppusaldo.
       </p>
     );
@@ -103,15 +103,15 @@ export function BalanceTable({ months, busyMonth, onSave, onClear }: Props) {
           <li key={row.month} className="p-4 space-y-2">
             <div className="flex items-center justify-between gap-3">
               <div>
-                <p className="text-[15px] font-medium text-ink">
+                <p className="text-body font-medium text-ink">
                   {formatMonthShort(row.month)}
                 </p>
-                <p className="text-[13px] text-ink-2">
+                <p className="text-caption text-ink-2">
                   {row.txCount} tapahtumaa · alkusaldo {formatEur(row.opening)}
                 </p>
               </div>
               <span
-                className={`shrink-0 text-[13px] font-semibold px-2.5 py-1 rounded-full ${STATUS_CLASS[row.status]}`}
+                className={`shrink-0 text-caption font-semibold px-2.5 py-1 rounded-full ${STATUS_CLASS[row.status]}`}
               >
                 {STATUS_LABEL[row.status]}
               </span>

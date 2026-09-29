@@ -709,7 +709,7 @@ export default function DashboardClient() {
         <div className={`space-y-6 ${fade}`}>
           {/* Month status: what is still open, how much of the bank is in order, VAT. */}
           <div className="rounded-card border border-line bg-surface p-4">
-            <p className="text-[17px] font-semibold text-ink">
+            <p className="text-headline font-semibold text-ink">
               {openCount <= 0
                 ? "Kaikki kunnossa"
                 : atCurrent
@@ -718,13 +718,13 @@ export default function DashboardClient() {
             </p>
             {matching && matching.matchable > 0 && !data.sectionErrors?.matching ? (
               <>
-                <p className="mt-0.5 text-[15px] text-ink-2">
+                <p className="mt-0.5 text-body text-ink-2">
                   {matching.matched} / {matching.matchable} tapahtumaa on kunnossa
                 </p>
                 <ProgressSegments done={matching.matched} total={matching.matchable} />
               </>
             ) : data.source === "kuitit" ? (
-              <p className="mt-0.5 text-[15px] text-ink-2">
+              <p className="mt-0.5 text-body text-ink-2">
                 Tämän kuun tiliotetta ei ole vielä.{" "}
                 <Link
                   href="/pankki/tapahtumat?import=1"
@@ -742,13 +742,13 @@ export default function DashboardClient() {
               <Link
                 href={alvDrillHref(month)}
                 aria-label="Avaa ALV-raportti"
-                className="active-press -mx-4 -mb-4 mt-4 flex min-h-12 items-center justify-between gap-3 border-t border-line px-4 py-3 text-[15px]"
+                className="active-press -mx-4 -mb-4 mt-4 flex min-h-12 items-center justify-between gap-3 border-t border-line px-4 py-3 text-body"
               >
                 <span className="min-w-0">
                   <span className="block whitespace-nowrap text-ink">
                     {vatDue ? `ALV-ilmoitus ${vatDue}` : "ALV-arvio"}
                   </span>
-                  <span className="block text-[13px] text-ink-2">
+                  <span className="block text-caption text-ink-2">
                     {data.isRefund ? "palautettavaa" : "maksettavaa"}
                   </span>
                 </span>
@@ -814,7 +814,7 @@ export default function DashboardClient() {
 
           <section>
             {/* One heading line: the basis belongs to the section, not to the Menot card below it. */}
-            <h2 className="mb-2 px-1 text-[13px] font-normal text-ink-2">
+            <h2 className="mb-2 px-1 text-caption font-normal text-ink-2">
               Kuukauden tulos
               <span aria-hidden> · </span>
               <span>{documentsBasis ? "laskujen ja kuittien mukaan" : "tiliotteen mukaan"}</span>

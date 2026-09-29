@@ -356,7 +356,7 @@ function InvoicesPageContent() {
             />
             <Link
               href={customerFilter ? `/laskut/uusi?customerId=${encodeURIComponent(customerFilter)}` : "/laskut/uusi"}
-              className="active-press relative inline-flex min-h-9 items-center gap-1 rounded-full bg-ink px-3.5 text-[13px] font-semibold text-canvas before:absolute before:inset-x-0 before:-inset-y-1 before:content-['']"
+              className="active-press relative inline-flex min-h-9 items-center gap-1 rounded-full bg-ink px-3.5 text-caption font-semibold text-canvas before:absolute before:inset-x-0 before:-inset-y-1 before:content-['']"
             >
               <Icon icon={Plus} size="inline" strokeWidth={2.5} />
               Uusi lasku
@@ -375,15 +375,15 @@ function InvoicesPageContent() {
             className="active-press flex w-full items-start justify-between gap-3 p-4 text-left"
           >
             <span>
-              <span className="block text-[13px] text-ink-2">Avoinna</span>
-              <span className="mt-0.5 block text-[28px] font-bold tracking-[-0.02em] tabular-nums text-ink">
+              <span className="block text-caption text-ink-2">Avoinna</span>
+              <span className="mt-0.5 block text-title-2 font-bold tracking-[-0.02em] tabular-nums text-ink">
                 {formatEur(aging.totalOpen)}
               </span>
               {aging.overdueCount > 0 ? (
                 <span className="mt-0.5 block text-sm text-accent">{formatEur(aging.overdue)} myöhässä</span>
               ) : null}
             </span>
-            <span className="mt-1 flex items-center gap-1 text-[13px] text-ink-2">
+            <span className="mt-1 flex items-center gap-1 text-caption text-ink-2">
               Erittely
               <Icon
                 icon={ChevronDown}
@@ -399,8 +399,8 @@ function InvoicesPageContent() {
             >
               {AGING_BUCKETS.map((bucket) => (
                 <div key={bucket} className="px-2 py-3">
-                  <p className="text-[11px] text-ink-2">{bucket} pv myöhässä</p>
-                  <p className="mt-0.5 text-[13px] font-medium tabular-nums text-ink">
+                  <p className="text-micro text-ink-2">{bucket} pv myöhässä</p>
+                  <p className="mt-0.5 text-caption font-medium tabular-nums text-ink">
                     {formatEur((aging.buckets[bucket]?.openCents ?? 0) / 100)}
                   </p>
                 </div>
@@ -488,7 +488,7 @@ function InvoicesPageContent() {
             ))}
 
           {reachedListLimit && (
-            <p className="text-[13px] text-ink-2">
+            <p className="text-caption text-ink-2">
               Näytetään {INVOICE_LIST_LIMIT} uusinta laskua. Hae tai valitse suodatin nähdäksesi muut.
             </p>
           )}
@@ -526,14 +526,14 @@ function InvoicesPageContent() {
         {matchPreview && (
           <div className="space-y-3 px-5 py-4 sheet-safe-bottom">
             {matchCount === 0 ? (
-              <p className="text-[15px] text-ink">
+              <p className="text-body text-ink">
                 {(matchPreview.skippedLocked?.length ?? 0) > 0
                   ? "Avoimille kausille ei ole kirjattavia maksuja."
                   : "Tiliotteilla ei ole maksuja, joiden viitenumero vastaisi avointa laskua."}
               </p>
             ) : (
               <>
-                <p className="text-[15px] text-ink">
+                <p className="text-body text-ink">
                   {matchCount === 1
                     ? "Viitenumero täsmää yhteen maksuun. Se kirjataan laskulle:"
                     : `Viitenumero täsmää ${matchCount} maksuun. Ne kirjataan laskuille:`}
@@ -542,7 +542,7 @@ function InvoicesPageContent() {
                   {matchPreview.preview.map((row) => (
                     <div
                       key={`${row.invoiceNumber}-${row.amount}`}
-                      className="flex items-center justify-between gap-3 px-4 py-3 text-[15px]"
+                      className="flex items-center justify-between gap-3 px-4 py-3 text-body"
                     >
                       <span className="min-w-0 truncate text-ink">
                         Lasku {row.invoiceNumber}, {row.customerName}
@@ -554,13 +554,13 @@ function InvoicesPageContent() {
               </>
             )}
             {(matchPreview.skippedLocked?.length ?? 0) > 0 && (
-              <p className="text-[13px] text-ink-2">
+              <p className="text-caption text-ink-2">
                 {lockedNote(matchPreview.skippedLocked?.length ?? 0)} Avaa lukitus asetuksista, jos
                 maksu kuuluu kirjata.
               </p>
             )}
             {matchPreview.suggestions.length > 0 && (
-              <p className="text-[13px] text-ink-2">
+              <p className="text-caption text-ink-2">
                 {matchPreview.suggestions.length === 1
                   ? "Lisäksi 1 maksu täsmää summaltaan. Se ei kirjaudu automaattisesti, vaan tarkistat sen laskulla."
                   : `Lisäksi ${matchPreview.suggestions.length} maksua täsmää summaltaan. Ne eivät kirjaudu automaattisesti, vaan tarkistat ne laskuilla.`}

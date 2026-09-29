@@ -43,7 +43,7 @@ export function MoreMenu({ items, label = "Lisää toimintoja" }: {
                   triggerRef.current?.focus({ preventScroll: true });
                   item.onSelect();
                 }}
-                className={`active-press flex min-h-12 w-full items-center px-4 text-left text-[15px] disabled:opacity-50 ${
+                className={`active-press flex min-h-12 w-full items-center px-4 text-left text-body disabled:opacity-50 ${
                   item.tone === "danger" ? "text-danger" : "text-ink"
                 }`}
               >

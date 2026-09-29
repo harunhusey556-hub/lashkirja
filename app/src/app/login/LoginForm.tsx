@@ -242,8 +242,8 @@ export default function LoginForm() {
         <ConnectivityBanner />
         <div className="mb-8 flex flex-col items-center text-center">
           <AppMark size={64} className="mb-4" />
-          <h1 className="text-[32px] font-bold leading-tight tracking-[-0.02em] text-ink">LashKirja</h1>
-          <p className="mt-2 text-[15px] text-ink-2">Kirjanpito yksinkertaisesti</p>
+          <h1 className="text-title font-bold leading-tight tracking-[-0.02em] text-ink">LashKirja</h1>
+          <p className="mt-2 text-body text-ink-2">Kirjanpito yksinkertaisesti</p>
         </div>
 
         {/* action/method kept as a no-JS fallback: with JS disabled (or if

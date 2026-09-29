@@ -346,18 +346,18 @@ export default function BankAccountsPage() {
           <div className={`space-y-3 ${fade}`}>
             {overview.accounts.length > 0 && (
               <Card className="space-y-1">
-                <p className="text-[13px] text-ink-2">Yhteenlaskettu saldo</p>
-                <p className="text-[28px] font-bold tracking-[-0.02em] tabular-nums text-ink">
+                <p className="text-caption text-ink-2">Yhteenlaskettu saldo</p>
+                <p className="text-title-2 font-bold tracking-[-0.02em] tabular-nums text-ink">
                   {formatEur(overview.totalBalance)}
                 </p>
-                <p className="text-[13px] text-ink-2">
+                <p className="text-caption text-ink-2">
                   {overview.totalAccounts === 1 ? "1 tili" : `${overview.totalAccounts} tiliä`}
                   {overview.needsAttention > 0 && (
                     <span className="text-danger"> · {overview.needsAttention} vaatii täsmäytystä</span>
                   )}
                 </p>
                 {overview.excludedCurrencies.length > 0 && (
-                  <p className="text-[13px] text-warning">
+                  <p className="text-caption text-warning">
                     Summasta puuttuvat muut valuutat: {overview.excludedCurrencies.join(", ")}
                   </p>
                 )}
@@ -387,7 +387,7 @@ export default function BankAccountsPage() {
                   </div>
                 ))
               ) : (
-                <p className="px-4 py-4 text-[13px] leading-relaxed text-ink-2">
+                <p className="px-4 py-4 text-caption leading-relaxed text-ink-2">
                   {archivedCount > 0
                     ? `Ei käytössä olevia tilejä. Arkistoituja tilejä on ${archivedCount}.`
                     : "Ei vielä tilejä. Yhdistä pankki yllä tai tuo tiliote tiedostona."}
@@ -399,7 +399,7 @@ export default function BankAccountsPage() {
               <button
                 type="button"
                 onClick={openManualForm}
-                className="active-press inline-flex min-h-11 items-center text-[13px] font-medium text-accent"
+                className="active-press inline-flex min-h-11 items-center text-caption font-medium text-accent"
               >
                 Lisää tili käsin
               </button>
@@ -407,7 +407,7 @@ export default function BankAccountsPage() {
                 <button
                   type="button"
                   onClick={() => setShowArchived((value) => !value)}
-                  className="active-press inline-flex min-h-11 items-center text-[13px] text-ink-2"
+                  className="active-press inline-flex min-h-11 items-center text-caption text-ink-2"
                 >
                   {showArchived ? "Piilota arkistoidut" : `Näytä arkistoidut (${archivedCount})`}
                 </button>
@@ -463,7 +463,7 @@ export default function BankAccountsPage() {
       >
         {detailAccount && (
           <div className="flex min-h-0 flex-1 flex-col overflow-y-auto px-5 py-4 space-y-4 sheet-safe-bottom">
-            <p className="text-[13px] text-ink-2">{accountSecondary(detailAccount)}</p>
+            <p className="text-caption text-ink-2">{accountSecondary(detailAccount)}</p>
 
             <MessageBanner message={message} isError={messageIsError} />
 
@@ -503,7 +503,7 @@ export default function BankAccountsPage() {
               <>
                 {(rollforward.excluded.undatedTxCount > 0 ||
                   rollforward.excluded.preOpeningTxCount > 0) && (
-                  <p className="text-[13px] text-warning leading-relaxed">
+                  <p className="text-caption text-warning leading-relaxed">
                     {rollforward.excluded.preOpeningTxCount > 0 && (
                       <>
                         {rollforward.excluded.preOpeningTxCount} tapahtumaa on ennen avauspäivää (
@@ -516,7 +516,7 @@ export default function BankAccountsPage() {
                   </p>
                 )}
                 <div>
-                  <p className="mb-2 px-1 text-[13px] text-ink-2">Kuukausien saldot</p>
+                  <p className="mb-2 px-1 text-caption text-ink-2">Kuukausien saldot</p>
                   <BalanceTable
                     months={rollforward.months}
                     busyMonth={busyMonth}
