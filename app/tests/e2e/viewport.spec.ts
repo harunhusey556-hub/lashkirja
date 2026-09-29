@@ -99,18 +99,20 @@ test.describe("long text at 390", () => {
     const card = page.locator('[data-testid="list-row"]').filter({ has: link });
     // The link itself is an absolute inset-0 overlay the size of the whole
     // row, so its box is trivially equal to the row's - that proves nothing.
-    // Measure the actual visible title text instead: the row's ".truncate"
-    // title span, first in DOM order (the row's other truncating span is the
-    // secondary line, which comes after it).
-    const title = card.locator(".truncate").first();
+    // Measure the actual visible title text instead: the row's title span,
+    // first ".line-clamp-2" in DOM order (the secondary line comes after it).
+    // Titles wrap to two lines instead of an ellipsis (AX-26, R19).
+    const title = card.locator(".line-clamp-2").first();
     await expect(title).toBeVisible();
     const metrics = await title.evaluate((el) => ({
       scrollWidth: el.scrollWidth,
       clientWidth: el.clientWidth,
+      height: el.getBoundingClientRect().height,
+      lineHeight: parseFloat(getComputedStyle(el).lineHeight),
     }));
-    // The full name is wider than the box it's rendered in - i.e. the
-    // ellipsis is doing real work here, not merely present in the CSS.
-    expect(metrics.scrollWidth).toBeGreaterThan(metrics.clientWidth);
+    // The long name wraps onto a second line and never spills sideways.
+    expect(metrics.height).toBeGreaterThan(metrics.lineHeight * 1.5);
+    expect(metrics.scrollWidth).toBeLessThanOrEqual(metrics.clientWidth + 1);
     const cardBox = await card.boundingBox();
     const titleBox = await title.boundingBox();
     expect(cardBox && titleBox).toBeTruthy();

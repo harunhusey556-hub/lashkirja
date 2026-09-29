@@ -13,7 +13,11 @@ if (typeof document !== "undefined") {
       const target = event.target;
       if (!(target instanceof Element)) return;
       const control = target.closest("button, a, [role='button']");
-      if (control instanceof HTMLElement) lastTrigger = control;
+      // A control inside an open dialog is never the trigger to return to:
+      // tapping "Poista" in a menu sheet must not replace the "..." button
+      // that opened the menu (WebKit and iOS do not focus a tapped button,
+      // so this fallback is what restores focus there).
+      if (control instanceof HTMLElement && !control.closest('[aria-modal="true"]')) lastTrigger = control;
     },
     true
   );

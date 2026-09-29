@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useLayoutEffect } from "react";
 
 /**
  * While a sheet, chat panel, or dialog is open, the shell chrome and the
@@ -20,6 +20,22 @@ const OVERLAY_SELECTOR = ".overlay-root, [data-overlay-root]";
 const NEVER_INERT = new Set(["SCRIPT", "STYLE", "LINK", "META", "TEMPLATE"]);
 
 let inerted: HTMLElement[] = [];
+let openCount = 0;
+let pendingApply = 0;
+
+/**
+ * Inert is applied one frame late on purpose: a closing overlay's focus trap
+ * restores focus to its trigger in a passive effect, and a trigger that is
+ * already inert again (because another overlay opened in the same commit)
+ * silently refuses focus(). Releasing stays synchronous.
+ */
+function scheduleInert(): void {
+  if (pendingApply) cancelAnimationFrame(pendingApply);
+  pendingApply = requestAnimationFrame(() => {
+    pendingApply = 0;
+    if (openCount > 0) applyInert();
+  });
+}
 
 function releaseInert(): void {
   for (const element of inerted) element.inert = false;
@@ -49,13 +65,23 @@ function applyInert(): void {
   }
 }
 
+/**
+ * A layout effect on purpose: its cleanup (which lifts `inert`) runs before
+ * the passive-effect cleanup of useFocusTrap, which restores focus to the
+ * trigger; focus() on a still-inert trigger would silently fail.
+ */
 export function useOverlayLock(open: boolean): void {
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!open) return;
+    openCount += 1;
     const frame = document.querySelector(".app-frame");
     if (!(frame instanceof HTMLElement)) {
-      applyInert();
-      return () => applyInert();
+      scheduleInert();
+      return () => {
+        openCount -= 1;
+        releaseInert();
+        if (openCount > 0) scheduleInert();
+      };
     }
     const count = Number(frame.dataset.overlayCount || "0") + 1;
     frame.dataset.overlayCount = String(count);
@@ -63,14 +89,16 @@ export function useOverlayLock(open: boolean): void {
     const main = frame.querySelector(".app-main");
     if (main instanceof HTMLElement) main.dataset.scrollLock = "true";
     document.dispatchEvent(new Event("lashkirja-dismiss-press"));
-    applyInert();
+    scheduleInert();
     return () => {
+      openCount -= 1;
+      releaseInert();
       const next = Number(frame.dataset.overlayCount || "1") - 1;
       if (next > 0) {
         frame.dataset.overlayCount = String(next);
         // Another overlay is still open: recompute for it (this one is
         // leaving; its node may still be animating out).
-        applyInert();
+        scheduleInert();
         return;
       }
       delete frame.dataset.overlayCount;
