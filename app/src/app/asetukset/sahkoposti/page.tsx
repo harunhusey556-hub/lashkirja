@@ -239,7 +239,7 @@ function ImapCard({
         {syncNote && (
           <div
             role={syncNote.tone === "error" ? "alert" : "status"}
-            className={`rounded-card p-3 text-sm ${
+            className={`rounded-card p-3 text-caption ${
               syncNote.tone === "error" ? "bg-danger/10 text-danger" : "bg-success/10 text-success"
             }`}
           >

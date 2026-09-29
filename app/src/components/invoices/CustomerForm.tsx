@@ -3,8 +3,8 @@
 import { useState } from "react";
 import { errorMessage } from "@/components/clientFetch";
 import { useEditorSession } from "@/components/form-session";
-import { Button, controlClass, SavePhaseNote } from "@/components/ui";
-import { focusFirstInvalid, invalidFieldProps } from "@/lib/focus-field";
+import { Button, controlClass, Field, SavePhaseNote } from "@/components/ui";
+import { focusFirstInvalid } from "@/lib/focus-field";
 import { isValidBusinessId, normalizeBusinessId } from "@/lib/finnish-reference";
 
 export interface CustomerFormValues {
@@ -119,7 +119,6 @@ export function CustomerForm({
   }
 
   const field = `${controlClass} min-h-12`;
-  const label = "mb-1.5 block text-caption font-normal text-ink-2";
 
   return (
     <form
@@ -148,10 +147,7 @@ export function CustomerForm({
           });
       }}
     >
-      <div className="space-y-1.5">
-        <label className={label} htmlFor="cf-name">
-          Nimi <span className="text-danger" aria-hidden="true">*</span>
-        </label>
+      <Field label="Nimi" htmlFor="cf-name" error={errors.name}>
         <input
           className={field}
           value={values.name}
@@ -159,20 +155,13 @@ export function CustomerForm({
           aria-required="true"
           maxLength={120}
           autoCapitalize="words"
-          autoComplete="organization"
+          autoComplete="off"
           enterKeyHint="next"
-          {...invalidFieldProps("cf-name", errors.name)}
         />
-        {errors.name && (
-          <p id="cf-name-error" className="text-sm text-danger" role="alert">
-            {errors.name}
-          </p>
-        )}
-      </div>
+      </Field>
 
       <div className="field-grid">
-        <div className="space-y-1.5">
-          <label className={label} htmlFor="cf-business">Y-tunnus</label>
+        <Field label="Y-tunnus" htmlFor="cf-business" error={errors.businessId} optional>
           <input
             className={field}
             value={values.businessId}
@@ -181,17 +170,12 @@ export function CustomerForm({
             maxLength={20}
             autoCapitalize="characters"
             autoComplete="off"
+            autoCorrect="off"
+            spellCheck={false}
             enterKeyHint="next"
-            {...invalidFieldProps("cf-business", errors.businessId)}
           />
-          {errors.businessId && (
-            <p id="cf-business-error" className="text-sm text-danger" role="alert">
-              {errors.businessId}
-            </p>
-          )}
-        </div>
-        <div className="space-y-1.5">
-          <label className={label} htmlFor="cf-term">Maksuaika (pv)</label>
+        </Field>
+        <Field label="Maksuaika (pv)" htmlFor="cf-term" error={errors.defaultPaymentTermDays}>
           <input
             className={field}
             value={values.defaultPaymentTermDays}
@@ -199,107 +183,92 @@ export function CustomerForm({
             inputMode="numeric"
             autoComplete="off"
             enterKeyHint="next"
-            {...invalidFieldProps("cf-term", errors.defaultPaymentTermDays)}
           />
-          {errors.defaultPaymentTermDays && (
-            <p id="cf-term-error" className="text-sm text-danger" role="alert">
-              {errors.defaultPaymentTermDays}
-            </p>
-          )}
-        </div>
+        </Field>
       </div>
 
       <div className="field-grid">
-        <div className="space-y-1.5">
-          <label className={label} htmlFor="cf-email">Sähköposti</label>
+        <Field label="Sähköposti" htmlFor="cf-email" error={errors.email} optional>
           <input
             className={field}
             value={values.email}
             onChange={(e) => set("email", e.target.value)}
             type="email"
             inputMode="email"
-            autoComplete="email"
+            autoComplete="off"
             enterKeyHint="next"
             autoCapitalize="none"
             autoCorrect="off"
             spellCheck={false}
             maxLength={160}
-            {...invalidFieldProps("cf-email", errors.email)}
           />
-          {errors.email && (
-            <p id="cf-email-error" className="text-sm text-danger" role="alert">
-              {errors.email}
-            </p>
-          )}
-        </div>
-        <div className="space-y-1.5">
-          <label className={label} htmlFor="cf-phone">Puhelin</label>
+        </Field>
+        <Field label="Puhelin" htmlFor="cf-phone" optional>
           <input
-            id="cf-phone"
             className={field}
             value={values.phone}
             onChange={(e) => set("phone", e.target.value)}
             type="tel"
             inputMode="tel"
-            autoComplete="tel"
+            autoComplete="off"
             enterKeyHint="next"
             maxLength={40}
           />
-        </div>
+        </Field>
       </div>
 
-      <div className="space-y-1.5">
-        <label className={label} htmlFor="cf-street">Osoite</label>
+      <Field label="Katuosoite" htmlFor="cf-street" optional>
         <input
-          id="cf-street"
           className={field}
           value={values.addressStreet}
           onChange={(e) => set("addressStreet", e.target.value)}
           maxLength={120}
-          autoComplete="street-address"
+          autoComplete="off"
           autoCapitalize="words"
           enterKeyHint="next"
         />
-        <div className="field-grid field-grid-3 pt-1">
+      </Field>
+      <div className="field-grid field-grid-3">
+        <Field label="Postinumero" htmlFor="cf-postal" optional>
           <input
-            aria-label="Postinumero"
             className={field}
             value={values.addressPostalCode}
             onChange={(e) => set("addressPostalCode", e.target.value)}
             placeholder="00100"
             maxLength={20}
             inputMode="numeric"
-            autoComplete="postal-code"
+            autoComplete="off"
             enterKeyHint="next"
           />
-          <input
-            aria-label="Postitoimipaikka"
-            className={`${field} col-span-2`}
-            value={values.addressCity}
-            onChange={(e) => set("addressCity", e.target.value)}
-            placeholder="Helsinki"
-            maxLength={80}
-            autoComplete="address-level2"
-            autoCapitalize="words"
-            enterKeyHint="next"
-          />
+        </Field>
+        <div className="col-span-2">
+          <Field label="Postitoimipaikka" htmlFor="cf-city" optional>
+            <input
+              className={field}
+              value={values.addressCity}
+              onChange={(e) => set("addressCity", e.target.value)}
+              placeholder="Helsinki"
+              maxLength={80}
+              autoComplete="off"
+              autoCapitalize="words"
+              enterKeyHint="next"
+            />
+          </Field>
         </div>
       </div>
 
-      <div className="space-y-1.5">
-        <label className={label} htmlFor="cf-notes">Muistiinpanot</label>
+      <Field label="Muistiinpanot" htmlFor="cf-notes" optional>
         <textarea
-          id="cf-notes"
           className={`${controlClass} min-h-24`}
           value={values.notes}
           onChange={(e) => set("notes", e.target.value)}
           maxLength={2000}
           autoCapitalize="sentences"
         />
-      </div>
+      </Field>
 
       {session.notice && (
-        <p className="text-sm text-ink" role="status">
+        <p className="text-caption text-ink" role="status">
           {session.notice}{" "}
           <button
             type="button"

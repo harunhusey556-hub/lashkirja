@@ -121,7 +121,7 @@ export default function LaitteetPage() {
     <div className={`space-y-6 ${fade}`.trim()}>
       <PageTitle title="Laitteet" />
       <Card className="space-y-3">
-        <p className="text-caption text-ink-2 leading-relaxed">
+        <p className="text-caption text-ink-2">
           Lista näyttää kirjautumiset, joissa istunto on tallennettu. Vanha selain ilman tunnistetta pysyy, kunnes kirjaudut ulos.
         </p>
 

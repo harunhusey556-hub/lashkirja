@@ -15,13 +15,13 @@ export default function TiliPage() {
           href="/asetukset/tili/salasana"
           icon={KeyRound}
           label="Vaihda salasana"
-          hint="Nykyinen salasana ja uusi salasana"
+          hint="Nykyinen ja uusi salasana"
         />
         <SettingsRow
           href="/asetukset/tili/laitteet"
           icon={Smartphone}
           label="Laitteet"
-          hint="Kirjautuneet istunnot tällä tilillä"
+          hint="Missä olet kirjautuneena"
         />
       </SettingsGroup>
       <SettingsGroup label="Tämä laite">
@@ -35,7 +35,7 @@ export default function TiliPage() {
           href="/asetukset/turvallisuus/biometria"
           icon={ScanFace}
           label="Face ID / Touch ID"
-          hint="Avaa lukitus, kun palaat sovellukseen"
+          hint="Avaa lukitus tunnistautumalla"
         />
       </SettingsGroup>
     </div>

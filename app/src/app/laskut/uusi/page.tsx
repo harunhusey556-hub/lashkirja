@@ -211,14 +211,12 @@ function NewInvoicePage() {
   }
 
   const title = editId ? "Muokkaa laskua" : "Uusi lasku";
-  const subtitle = editId
-    ? "Luonnos päivittyy, kun tallennat."
-    : "Luonnos tallentuu tälle laitteelle, kunnes lähetät laskun.";
   const ready = customers !== null && (!editId || editing !== null);
 
   return (
     <div className="space-y-6">
-      <PageTitle title={title} subtitle={subtitle} />
+      {/* R4: no subtitle on a form page. */}
+      <PageTitle title={title} />
       {loadError != null && !ready ? (
         <ConnectionNotice
           error={loadError}

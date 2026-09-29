@@ -1,12 +1,18 @@
 "use client";
 
-import { SelectMenu } from "@/components/SelectMenu";
+import { Field, controlClass } from "@/components/ui";
 import { Switch } from "@/components/ds/Switch";
 import { Card, FilterChips, PageTitle } from "@/components/ds";
 import { ENTITY_TYPE_OPTIONS, type EntityType } from "@/lib/onboarding";
 import { showToast } from "@/lib/toast";
 import { ProfileGate } from "../ProfileGate";
 import { type Profile, SaveStatus, useProfile } from "../useProfile";
+
+const VAT_PERIOD_OPTIONS = [
+  { value: "month", label: "Kuukausi", description: "OmaVero-ilmoitus kuukausittain (oletus)." },
+  { value: "quarter", label: "Neljännesvuosi", description: "OmaVero-ilmoitus 3 kuukauden välein." },
+  { value: "year", label: "Kalenterivuosi", description: "OmaVero-ilmoitus kerran vuodessa." },
+] as const;
 
 export default function YritysPage() {
   const { profile, saving, savedMsg, loadError, retry, save } = useProfile();
@@ -70,18 +76,26 @@ export default function YritysPage() {
             </div>
 
             {loaded.vatRegistered && (
-              <SelectMenu
-                id="vat-period"
+              // VS-17: the one select pattern, the native <select> in `controlClass`.
+              <Field
                 label="ALV-verokausi"
-                value={loaded.vatPeriod}
-                disabled={saving}
-                options={[
-                  { value: "month", label: "Kuukausi", description: "OmaVero-ilmoitus kuukausittain (oletus)" },
-                  { value: "quarter", label: "Neljännesvuosi", description: "OmaVero-ilmoitus 3kk välein" },
-                  { value: "year", label: "Kalenterivuosi", description: "OmaVero-ilmoitus kerran vuodessa" },
-                ]}
-                onChange={(newVal) => void change(loaded, { vatPeriod: newVal }, "ALV-verokausi vaihdettu")}
-              />
+                htmlFor="vat-period"
+                hint={VAT_PERIOD_OPTIONS.find((option) => option.value === loaded.vatPeriod)?.description}
+              >
+                <select
+                  className={controlClass}
+                  value={loaded.vatPeriod}
+                  disabled={saving}
+                  autoComplete="off"
+                  onChange={(event) => void change(loaded, { vatPeriod: event.target.value }, "ALV-verokausi vaihdettu")}
+                >
+                  {VAT_PERIOD_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </Field>
             )}
 
             <SaveStatus saving={saving} savedMsg={savedMsg} />

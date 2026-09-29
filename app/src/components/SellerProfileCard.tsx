@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { apiFetch, errorMessage, readJson } from "@/components/clientFetch";
 import { ErrorState } from "@/components/AsyncState";
-import { Card, Skeleton, SkeletonCard, SkeletonGroup, useSkeletonFade } from "@/components/ds";
+import { BottomActions, Card, Skeleton, SkeletonCard, SkeletonGroup, useSkeletonFade } from "@/components/ds";
 import { useEditorSession } from "@/components/form-session";
 import { Button, Field, FormError, controlClass } from "@/components/ui";
 import { focusFirstInvalid } from "@/lib/focus-field";
@@ -216,8 +216,9 @@ export default function SellerProfileCard() {
   if (status === "loading") return <SellerSkeleton />;
 
   return (
-    <Card className={`space-y-4 ${fade}`.trim()}>
-      <form onSubmit={save} className="space-y-4" noValidate>
+    // VS-02, R18: a long form saves from the sticky bar, which sits at the same place on every screen.
+    <form onSubmit={save} className={`space-y-4 ${fade}`.trim()} noValidate>
+      <Card className="space-y-4">
         <Field label="Toiminimi tai yrityksen nimi" htmlFor="sp-name">
           <input
             id="sp-name"
@@ -255,7 +256,7 @@ export default function SellerProfileCard() {
               </div>
             ) : null}
           </Field>
-          <Field label="Puhelin" htmlFor="sp-phone">
+          <Field label="Puhelin" htmlFor="sp-phone" optional>
             <input
               id="sp-phone"
               name="phone"
@@ -339,7 +340,7 @@ export default function SellerProfileCard() {
             </div>
           ) : null}
         </Field>
-        <Field label="BIC" htmlFor="sp-bic">
+        <Field label="BIC" htmlFor="sp-bic" optional>
           <input
             id="sp-bic"
             name="invoiceBic"
@@ -359,6 +360,7 @@ export default function SellerProfileCard() {
           <Field
             label="Viivästyskorko (% / v)"
             htmlFor="sp-interest"
+            optional
             error={errors.lateInterestPercent}
             hint="Suomen Pankin viitekorko + 7 (kuluttaja) tai + 8 (yritys) prosenttiyksikköä. Tyhjä = korkoa ei peritä."
           >
@@ -388,7 +390,7 @@ export default function SellerProfileCard() {
           </Field>
         </div>
 
-        <Field label="Laskun ehdot" htmlFor="sp-terms">
+        <Field label="Laskun ehdot" htmlFor="sp-terms" optional>
           <textarea
             id="sp-terms"
             name="invoiceTerms"
@@ -399,11 +401,14 @@ export default function SellerProfileCard() {
           />
         </Field>
 
-        <FormError message={formError} />
+      </Card>
+
+      <FormError message={formError} />
+      <BottomActions>
         <Button type="submit" className="w-full" busy={saving} busyLabel="Tallennetaan…">
           Tallenna laskuttajan tiedot
         </Button>
-      </form>
-    </Card>
+      </BottomActions>
+    </form>
   );
 }

@@ -19,7 +19,7 @@ export default function TurvallisuusPage() {
           href="/asetukset/turvallisuus/biometria"
           icon={ScanFace}
           label="Face ID / Touch ID"
-          hint="Avaa lukitus, kun palaat sovellukseen"
+          hint="Avaa lukitus tunnistautumalla"
         />
       </SettingsGroup>
     </div>

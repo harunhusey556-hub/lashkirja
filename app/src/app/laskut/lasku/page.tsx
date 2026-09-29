@@ -26,7 +26,7 @@ import { IS_MOBILE_BUILD } from "@/lib/build-target";
 import { daysOverdue } from "@/lib/invoices";
 import { SALES_STATUS } from "@/lib/status-labels";
 import { detailHref } from "@/lib/routes";
-import { Button, buttonClass, controlClass } from "@/components/ui";
+import { Button, buttonClass, controlClass, Field } from "@/components/ui";
 import { Bell } from "lucide-react";
 import {
   BottomActions,
@@ -204,7 +204,7 @@ function amountText(value: number): string {
 /** The detail at its final layout: hero, the key facts, the lines (L1, SALES-19). */
 function InvoiceSkeleton() {
   return (
-    <SkeletonGroup label="Haetaan laskua" className="space-y-6">
+    <SkeletonGroup label="Ladataan laskua" className="space-y-6">
       <div className="flex flex-col items-center px-2 pb-5 pt-2">
         <Skeleton className="h-10 w-40" />
         <Skeleton className="mt-3 h-4 w-32" />
@@ -891,7 +891,7 @@ function InvoiceDetail() {
             />
 
             {message && (
-              <p className="rounded-card bg-accent-soft px-4 py-3 text-sm text-ink" role="status">
+              <p className="rounded-card bg-accent-soft px-4 py-3 text-caption text-ink" role="status">
                 {message}
               </p>
             )}
@@ -921,7 +921,7 @@ function InvoiceDetail() {
             />
 
             {invoice.lines.length > 0 && (
-              <Section title="Rivit" count={invoice.lines.length}>
+              <Section title="Rivit">
                 {invoice.lines.map((line) => (
                   <ListRow
                     key={line.id}
@@ -1075,6 +1075,25 @@ function InvoiceDetail() {
 
       {state === "ready" && invoice && primary && (
         <BottomActions>
+          {invoice.displayStatus === "overdue" && invoice.open > 0 && (
+            <button
+              type="button"
+              disabled={refreshFailed}
+              className="active-press flex min-h-12 w-full items-center justify-center text-body font-semibold text-accent disabled:opacity-50"
+              onClick={() => openPaymentSheet()}
+            >
+              Kirjaa maksu
+            </button>
+          )}
+          {invoice.status === "draft" && (
+            <button
+              type="button"
+              className="active-press flex min-h-12 w-full items-center justify-center text-body font-semibold text-accent"
+              onClick={() => router.push(`/laskut/uusi?edit=${encodeURIComponent(invoice.id)}`)}
+            >
+              Muokkaa
+            </button>
+          )}
           <Button
             type="button"
             className="w-full"
@@ -1097,25 +1116,6 @@ function InvoiceDetail() {
             {primary.icon ? <Icon icon={Bell} size="inline" /> : null}
             {primary.label}
           </Button>
-          {invoice.displayStatus === "overdue" && invoice.open > 0 && (
-            <button
-              type="button"
-              disabled={refreshFailed}
-              className="active-press flex min-h-12 w-full items-center justify-center text-body font-semibold text-accent disabled:opacity-50"
-              onClick={() => openPaymentSheet()}
-            >
-              Kirjaa maksu
-            </button>
-          )}
-          {invoice.status === "draft" && (
-            <button
-              type="button"
-              className="active-press flex min-h-12 w-full items-center justify-center text-body font-semibold text-accent"
-              onClick={() => router.push(`/laskut/uusi?edit=${encodeURIComponent(invoice.id)}`)}
-            >
-              Muokkaa
-            </button>
-          )}
         </BottomActions>
       )}
 
@@ -1176,17 +1176,21 @@ function InvoiceDetail() {
         labelledBy="close-reason-title"
       >
         <div className="space-y-3 px-5 py-4 sheet-safe-bottom">
-          <input
-            aria-label="Sulkemisen perustelu"
-            aria-invalid={Boolean(closeReasonError) || undefined}
-            aria-describedby={closeReasonError ? "close-reason-error" : undefined}
-            className={`${controlClass} min-h-12`}
-            value={closeReason}
-            onChange={(event) => setCloseReason(event.target.value)}
-            placeholder="Perustelu, esim. käteinen tai luottotappio"
-          />
+          <Field label="Perustelu" htmlFor="close-reason">
+            <input
+              aria-invalid={Boolean(closeReasonError) || undefined}
+              aria-describedby={closeReasonError ? "close-reason-error" : undefined}
+              className={`${controlClass} min-h-12`}
+              value={closeReason}
+              onChange={(event) => setCloseReason(event.target.value)}
+              placeholder="Esim. käteinen tai luottotappio"
+              autoCapitalize="sentences"
+              autoComplete="off"
+              enterKeyHint="done"
+            />
+          </Field>
           {closeReasonError && (
-            <p id="close-reason-error" className="text-sm text-danger" role="alert">
+            <p id="close-reason-error" className="text-caption text-danger" role="alert">
               {closeReasonError}
             </p>
           )}
@@ -1207,30 +1211,33 @@ function InvoiceDetail() {
       >
         <div className="space-y-3 px-5 py-4 sheet-safe-bottom">
           <div className="field-dates">
-            <input
-              id="payment-amount"
-              aria-label="Maksun summa"
-              aria-invalid={Boolean(paymentError) || undefined}
-              aria-describedby={paymentError ? "payment-amount-error" : undefined}
-              className={`${controlClass} min-h-12`}
-              value={paymentAmount}
-              onChange={(e) => {
-                setPaymentAmount(e.target.value);
-                setOverpayConfirmed(false);
-              }}
-              inputMode="decimal"
-              autoComplete="off"
-              enterKeyHint="done"
-              placeholder="125,50"
-            />
-            <input
-              aria-label="Maksun päivä"
-              type="date"
-              max={helsinkiCalendarDate()}
-              className={`${controlClass} min-h-12`}
-              value={paymentDate}
-              onChange={(e) => setPaymentDate(e.target.value)}
-            />
+            <Field label="Summa" htmlFor="payment-amount">
+              <input
+                aria-invalid={Boolean(paymentError) || undefined}
+                aria-describedby={paymentError ? "payment-amount-error" : undefined}
+                className={`${controlClass} min-h-12 tabular-nums`}
+                value={paymentAmount}
+                onChange={(e) => {
+                  setPaymentAmount(e.target.value);
+                  setOverpayConfirmed(false);
+                }}
+                inputMode="decimal"
+                autoComplete="off"
+                enterKeyHint="next"
+                placeholder="125,50"
+              />
+            </Field>
+            <Field label="Maksupäivä" htmlFor="payment-date">
+              <input
+                type="date"
+                lang="fi"
+                max={helsinkiCalendarDate()}
+                className={`${controlClass} min-h-12`}
+                value={paymentDate}
+                onChange={(e) => setPaymentDate(e.target.value)}
+                enterKeyHint="done"
+              />
+            </Field>
           </div>
           {bankRow && (
             <label className="flex min-h-12 items-start gap-3 rounded-card border border-line bg-surface px-4 py-3 text-body">
@@ -1262,7 +1269,7 @@ function InvoiceDetail() {
             </label>
           )}
           {paymentError && (
-            <p id="payment-amount-error" className="text-sm text-danger" role="alert">
+            <p id="payment-amount-error" className="text-caption text-danger" role="alert">
               {paymentError}
             </p>
           )}
@@ -1273,7 +1280,7 @@ function InvoiceDetail() {
             disabledReason={busy ? "Tallennus on kesken." : undefined}
             onClick={() => void addPayment()}
           >
-            {overpayConfirmed ? "Kirjaa silti" : "Lisää"}
+            {overpayConfirmed ? "Kirjaa silti" : "Kirjaa maksu"}
           </Button>
         </div>
       </BottomSheet>
@@ -1318,7 +1325,7 @@ function InvoiceDetail() {
             </div>
             {review.blockedReason && (
               <div className="space-y-2">
-                <p className="text-sm text-danger" role="alert">
+                <p className="text-caption text-danger" role="alert">
                   {review.blockedReason}
                 </p>
                 {/* Every block names its fix (SALES-15): no dead end. */}
@@ -1337,7 +1344,7 @@ function InvoiceDetail() {
               </div>
             )}
             {sendError && (
-              <p className="text-sm text-danger" role="alert">
+              <p className="text-caption text-danger" role="alert">
                 {sendError}
               </p>
             )}

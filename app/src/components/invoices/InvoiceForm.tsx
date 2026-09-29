@@ -2,10 +2,10 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useEditorSession } from "@/components/form-session";
-import { Button, controlClass, SavePhaseNote } from "@/components/ui";
+import { Button, controlClass, Field, SavePhaseNote } from "@/components/ui";
 import { BottomActions, Card, Section } from "@/components/ds";
 import { apiFetch, errorMessage, readJson } from "@/components/clientFetch";
-import { focusFirstInvalid, invalidFieldProps } from "@/lib/focus-field";
+import { focusFirstInvalid } from "@/lib/focus-field";
 import { formatEur, parseFinnishNumber, parseMoneyInput } from "@/lib/format";
 import {
   computeInvoiceTotals,
@@ -300,8 +300,6 @@ export function InvoiceForm({
   }
 
   const field = controlClass;
-  const label = "mb-1.5 block text-caption text-ink-2";
-  const lineLabel = "mb-1 block text-caption text-ink-2";
 
   return (
     <form
@@ -331,81 +329,65 @@ export function InvoiceForm({
       }}
     >
       <Section>
-        <div className="space-y-1.5 px-4 py-3">
-          <div className="flex items-baseline justify-between gap-3">
-            <label className={label} htmlFor="if-customer">
-              Asiakas <span className="text-danger" aria-hidden="true">*</span>
-            </label>
-            {onAddCustomer ? (
-              <button
-                type="button"
-                onClick={onAddCustomer}
-                className="relative text-caption font-medium text-accent before:absolute before:-inset-x-2 before:-inset-y-[14px] before:content-['']"
-              >
-                Uusi asiakas
-              </button>
-            ) : null}
-          </div>
-          <select
-            className={field}
-            value={values.customerId}
-            onChange={(e) => pickCustomer(e.target.value)}
-            aria-required="true"
-            {...invalidFieldProps("if-customer", errors.customerId)}
+        <div className="px-4 py-3">
+          <Field
+            label="Asiakas"
+            htmlFor="if-customer"
+            error={errors.customerId}
           >
-            <option value="">Valitse asiakas</option>
-            {customers.map((customer) => (
-              <option key={customer.id} value={customer.id}>
-                {customer.name}
-              </option>
-            ))}
-          </select>
-          {errors.customerId && (
-            <p id="if-customer-error" className="text-xs text-danger" role="alert">
-              {errors.customerId}
-            </p>
-          )}
+            <select
+              className={field}
+              value={values.customerId}
+              onChange={(e) => pickCustomer(e.target.value)}
+              aria-required="true"
+              autoComplete="off"
+            >
+              <option value="">Valitse asiakas</option>
+              {customers.map((customer) => (
+                <option key={customer.id} value={customer.id}>
+                  {customer.name}
+                </option>
+              ))}
+            </select>
+          </Field>
+          {onAddCustomer ? (
+            <button
+              type="button"
+              onClick={onAddCustomer}
+              className="active-press mt-1 inline-flex min-h-11 items-center text-body font-medium text-accent"
+            >
+              Uusi asiakas
+            </button>
+          ) : null}
         </div>
 
         <div className="field-dates px-4 py-3">
-          <div className="space-y-1.5">
-            <label className={label} htmlFor="if-issue">
-              Laskun päivä <span className="text-danger" aria-hidden="true">*</span>
-            </label>
+          <Field label="Laskun päivä" htmlFor="if-issue" error={errors.issueDate}>
             <input
               type="date"
+              lang="fi"
               className={field}
               value={values.issueDate}
               onChange={(e) =>
                 setValues((current) => ({ ...current, issueDate: e.target.value }))
               }
               aria-required="true"
-              {...invalidFieldProps("if-issue", errors.issueDate)}
+              autoComplete="off"
+              enterKeyHint="next"
             />
-            {errors.issueDate && (
-              <p id="if-issue-error" className="text-xs text-danger" role="alert">
-                {errors.issueDate}
-              </p>
-            )}
-          </div>
-          <div className="space-y-1.5">
-            <label className={label} htmlFor="if-due">
-              Eräpäivä <span className="text-danger" aria-hidden="true">*</span>
-            </label>
+          </Field>
+          <Field label="Eräpäivä" htmlFor="if-due" error={errors.dueDate}>
             <input
               type="date"
+              lang="fi"
               className={field}
               value={values.dueDate}
               onChange={(e) => setValues((current) => ({ ...current, dueDate: e.target.value }))}
               aria-required="true"
-              {...invalidFieldProps("if-due", errors.dueDate)}
+              autoComplete="off"
+              enterKeyHint="next"
             />
-            {errors.dueDate && (
-              <p id="if-due-error" className="text-xs text-danger" role="alert">
-                {errors.dueDate}
-              </p>
-            )}
-          </div>
+          </Field>
         </div>
       </Section>
 
@@ -413,16 +395,13 @@ export function InvoiceForm({
         <p className="mb-2 px-1 text-caption text-ink-2">Rivit</p>
         <div className="space-y-3">
           {values.lines.map((line, index) => (
-            <Card key={index} className="space-y-2">
+            <Card key={index} className="space-y-3">
               {catalog.length > 0 && (
-                <div>
-                  <label className={lineLabel} htmlFor={`if-line-${index}-product`}>
-                    Tuote
-                  </label>
+                <Field label="Tuote" htmlFor={`if-line-${index}-product`} optional>
                   <select
-                    id={`if-line-${index}-product`}
                     className={field}
                     value=""
+                    autoComplete="off"
                     onChange={(event) => {
                       const item = catalog.find((entry) => entry.id === event.target.value);
                       if (!item) return;
@@ -441,55 +420,45 @@ export function InvoiceForm({
                       </option>
                     ))}
                   </select>
-                </div>
+                </Field>
               )}
-              <label className={lineLabel} htmlFor={`if-line-${index}-desc`}>
-                Kuvaus <span className="text-danger" aria-hidden="true">*</span>
-              </label>
-              <input
-                aria-required="true"
-                aria-label={`Rivin ${index + 1} kuvaus (pakollinen)`}
-                className={field}
-                value={line.description}
-                onChange={(e) => setLine(index, { description: e.target.value })}
-                placeholder="Kuvaus"
-                autoCapitalize="sentences"
-                autoComplete="off"
-                enterKeyHint="next"
-                maxLength={200}
-                {...invalidFieldProps(`if-line-${index}-desc`, errors[`line-${index}-description`])}
-              />
-              {errors[`line-${index}-description`] && (
-                <p id={`if-line-${index}-desc-error`} className="text-xs text-danger" role="alert">
-                  {errors[`line-${index}-description`]}
-                </p>
-              )}
+              <Field
+                label="Kuvaus"
+                htmlFor={`if-line-${index}-desc`}
+                error={errors[`line-${index}-description`]}
+              >
+                <input
+                  aria-required="true"
+                  aria-label={`Rivin ${index + 1} kuvaus`}
+                  className={field}
+                  value={line.description}
+                  onChange={(e) => setLine(index, { description: e.target.value })}
+                  placeholder="Kuvaus"
+                  autoCapitalize="sentences"
+                  autoComplete="off"
+                  enterKeyHint="next"
+                  maxLength={200}
+                />
+              </Field>
               <div className="field-grid field-grid-3">
-                <div>
-                  <label className={lineLabel} htmlFor={`if-line-${index}-qty`}>
-                    Määrä <span className="text-danger" aria-hidden="true">*</span>
-                  </label>
+                <Field
+                  label="Määrä"
+                  htmlFor={`if-line-${index}-qty`}
+                  error={errors[`line-${index}-quantity`]}
+                >
                   <input
                     aria-required="true"
-                    aria-label={`Rivin ${index + 1} määrä (pakollinen)`}
+                    aria-label={`Rivin ${index + 1} määrä`}
                     className={field}
                     value={line.quantity}
                     onChange={(e) => setLine(index, { quantity: e.target.value })}
                     inputMode="decimal"
                     autoComplete="off"
                     enterKeyHint="next"
-                    {...invalidFieldProps(`if-line-${index}-qty`, errors[`line-${index}-quantity`])}
                   />
-                  {errors[`line-${index}-quantity`] && (
-                    <p id={`if-line-${index}-qty-error`} className="text-xs text-danger" role="alert">
-                      {errors[`line-${index}-quantity`]}
-                    </p>
-                  )}
-                </div>
-                <div>
-                  <label className={lineLabel} htmlFor={`if-line-${index}-unit`}>Yksikkö</label>
+                </Field>
+                <Field label="Yksikkö" htmlFor={`if-line-${index}-unit`}>
                   <input
-                    id={`if-line-${index}-unit`}
                     aria-label={`Rivin ${index + 1} yksikkö`}
                     className={field}
                     value={line.unit}
@@ -497,16 +466,19 @@ export function InvoiceForm({
                     maxLength={16}
                     autoCapitalize="none"
                     autoComplete="off"
+                    autoCorrect="off"
+                    spellCheck={false}
                     enterKeyHint="next"
                   />
-                </div>
-                <div>
-                  <label className={lineLabel} htmlFor={`if-line-${index}-price`}>
-                    Hinta € <span className="text-danger" aria-hidden="true">*</span>
-                  </label>
+                </Field>
+                <Field
+                  label="Hinta €"
+                  htmlFor={`if-line-${index}-price`}
+                  error={errors[`line-${index}-unitPrice`]}
+                >
                   <input
                     aria-required="true"
-                    aria-label={`Rivin ${index + 1} hinta (pakollinen)`}
+                    aria-label={`Rivin ${index + 1} hinta`}
                     className={field}
                     value={line.unitPrice}
                     onChange={(e) => setLine(index, { unitPrice: e.target.value })}
@@ -514,31 +486,26 @@ export function InvoiceForm({
                     placeholder="0,00"
                     autoComplete="off"
                     enterKeyHint="next"
-                    {...invalidFieldProps(`if-line-${index}-price`, errors[`line-${index}-unitPrice`])}
                   />
-                  {errors[`line-${index}-unitPrice`] && (
-                    <p id={`if-line-${index}-price-error`} className="text-xs text-danger" role="alert">
-                      {errors[`line-${index}-unitPrice`]}
-                    </p>
-                  )}
-                </div>
+                </Field>
               </div>
               <div className="flex items-end gap-2">
                 <div className="min-w-0 flex-1">
-                  <label className={lineLabel} htmlFor={`if-line-${index}-vat`}>ALV</label>
-                  <select
-                    id={`if-line-${index}-vat`}
-                    aria-label={`Rivin ${index + 1} ALV`}
-                    className={field}
-                    value={line.vatRate}
-                    onChange={(e) => setLine(index, { vatRate: Number(e.target.value) })}
-                  >
-                    {VAT_RATES_PERMILLE.map((permille) => (
-                      <option key={permille} value={permille / 10}>
-                        ALV {permille / 10} %
-                      </option>
-                    ))}
-                  </select>
+                  <Field label="ALV" htmlFor={`if-line-${index}-vat`}>
+                    <select
+                      aria-label={`Rivin ${index + 1} ALV`}
+                      className={field}
+                      value={line.vatRate}
+                      autoComplete="off"
+                      onChange={(e) => setLine(index, { vatRate: Number(e.target.value) })}
+                    >
+                      {VAT_RATES_PERMILLE.map((permille) => (
+                        <option key={permille} value={permille / 10}>
+                          ALV {permille / 10} %
+                        </option>
+                      ))}
+                    </select>
+                  </Field>
                 </div>
                 <Button
                   type="button"
@@ -577,44 +544,42 @@ export function InvoiceForm({
           >
             Lisää rivi
           </Button>
-          {errors.lines && <p className="text-xs text-danger">{errors.lines}</p>}
+          {errors.lines && <p className="text-caption text-danger">{errors.lines}</p>}
         </div>
       </div>
 
       <Card className="space-y-1 text-body">
         <div className="flex justify-between text-ink-2">
           <span>Veroton</span>
-          <span>{formatEur(totals.netCents / 100)}</span>
+          <span className="tabular-nums">{formatEur(totals.netCents / 100)}</span>
         </div>
         <div className="flex justify-between text-ink-2">
           <span>ALV</span>
-          <span>{formatEur(totals.vatCents / 100)}</span>
+          <span className="tabular-nums">{formatEur(totals.vatCents / 100)}</span>
         </div>
         <div className="flex justify-between pt-1 font-semibold text-ink">
           <span>Yhteensä</span>
-          <span>{formatEur(totals.grossCents / 100)}</span>
+          <span className="tabular-nums">{formatEur(totals.grossCents / 100)}</span>
         </div>
         {totals.grossCents === 0 && values.lines.some((line) => line.unitPrice.trim() === "") && (
-          <p className="pt-2 text-xs text-ink-2">
+          <p className="pt-2 text-caption text-ink-2">
             Summa päivittyy, kun rivillä on hinta. Tyhjä kenttä ei ole nolla euroa.
           </p>
         )}
       </Card>
 
-      <div className="space-y-1.5">
-        <label className={label} htmlFor="if-notes">Viesti laskulla</label>
+      <Field label="Viesti laskulla" htmlFor="if-notes" optional>
         <textarea
-          id="if-notes"
           className={`${controlClass} min-h-24`}
           value={values.notes}
           onChange={(e) => setValues((current) => ({ ...current, notes: e.target.value }))}
           maxLength={2000}
           autoCapitalize="sentences"
         />
-      </div>
+      </Field>
 
       {session.notice && (
-        <p className="text-sm text-ink" role="status">
+        <p className="text-caption text-ink" role="status">
           {session.notice}{" "}
           <button
             type="button"
@@ -638,6 +603,13 @@ export function InvoiceForm({
       <SavePhaseNote phase={session.phase} error={saveError} />
 
       <BottomActions>
+        <button
+          type="button"
+          className="active-press flex min-h-12 w-full items-center justify-center text-body font-semibold text-accent"
+          onClick={() => session.requestCancel(onCancel)}
+        >
+          Peruuta
+        </button>
         <Button
           type="submit"
           className="w-full"
@@ -648,13 +620,6 @@ export function InvoiceForm({
         >
           {submitLabel}
         </Button>
-        <button
-          type="button"
-          className="active-press flex min-h-12 w-full items-center justify-center text-body font-semibold text-accent"
-          onClick={() => session.requestCancel(onCancel)}
-        >
-          Peruuta
-        </button>
       </BottomActions>
     </form>
   );

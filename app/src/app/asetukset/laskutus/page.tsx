@@ -6,7 +6,8 @@ import SellerProfileCard from "@/components/SellerProfileCard";
 export default function LaskutusAsetuksetPage() {
   return (
     <div className="space-y-6">
-      <PageTitle title="Laskuttajan tiedot" subtitle="Nämä tiedot tulostuvat myyntilaskuillesi ja maksumuistutuksiin." />
+      {/* R4: no subtitle on a form page. */}
+      <PageTitle title="Laskuttajan tiedot" />
       <SellerProfileCard />
     </div>
   );

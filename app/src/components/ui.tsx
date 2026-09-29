@@ -84,12 +84,15 @@ export function Field({
   htmlFor,
   hint,
   error,
+  optional = false,
   children,
 }: {
   label: string;
   htmlFor: string;
   hint?: string;
   error?: string;
+  /** R23: an optional field says so ("(valinnainen)"); a required one carries no mark and no asterisk. */
+  optional?: boolean;
   children: ReactNode;
 }) {
   const hintId = hint && !error ? `${htmlFor}-hint` : undefined;
@@ -101,6 +104,7 @@ export function Field({
     <div>
       <label htmlFor={htmlFor} className="mb-1.5 block text-caption font-normal text-ink-2">
         {label}
+        {optional ? " (valinnainen)" : null}
       </label>
       {control}
       {hint && !error && (
@@ -109,7 +113,7 @@ export function Field({
         </p>
       )}
       {error && (
-        <p id={`${htmlFor}-error`} className="mt-1.5 text-sm text-danger" role="alert">
+        <p id={`${htmlFor}-error`} className="mt-1.5 text-caption text-danger" role="alert">
           {error}
         </p>
       )}
@@ -120,7 +124,7 @@ export function Field({
 export function FormError({ message, className = "" }: { message: string; className?: string }) {
   if (!message) return null;
   return (
-    <p className={`text-sm text-danger ${className}`} role="alert">
+    <p className={`text-caption text-danger ${className}`} role="alert">
       {message}
     </p>
   );
@@ -135,14 +139,14 @@ export function SavePhaseNote({
 }) {
   if (phase === "saving") {
     return (
-      <p className="text-sm text-ink-2" role="status">
+      <p className="text-caption text-ink-2" role="status">
         Tallennetaan…
       </p>
     );
   }
   if (phase === "saved") {
     return (
-      <p className="text-sm text-success" role="status">
+      <p className="text-caption text-success" role="status">
         Tallennettu
       </p>
     );
@@ -152,7 +156,7 @@ export function SavePhaseNote({
   }
   if (phase === "dirty") {
     return (
-      <p className="text-sm text-ink-2" role="status">
+      <p className="text-caption text-ink-2" role="status">
         Tallentamattomia muutoksia
       </p>
     );
@@ -163,7 +167,7 @@ export function SavePhaseNote({
 export function SavedNote({ message, className = "" }: { message: string; className?: string }) {
   if (!message) return null;
   return (
-    <p className={`text-sm text-success ${className}`} role="status">
+    <p className={`text-caption text-success ${className}`} role="status">
       {message}
     </p>
   );

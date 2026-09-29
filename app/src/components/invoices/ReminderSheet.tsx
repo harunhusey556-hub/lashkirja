@@ -126,7 +126,7 @@ export function ReminderSheet({
         {!reminder ? (
           loadError ? (
             <div className="space-y-3">
-              <p className="text-sm text-danger" role="alert">
+              <p className="text-caption text-danger" role="alert">
                 {errorMessage(loadError, "Muistutuksen tietoja ei saatu ladattua")}
               </p>
               <Button type="button" variant="secondary" className="w-full" onClick={() => setAttempt((a) => a + 1)}>
@@ -174,7 +174,7 @@ export function ReminderSheet({
             </div>
             {!reminder.recipient && (
               <div className="space-y-2">
-                <p className="text-sm text-danger" role="alert">
+                <p className="text-caption text-danger" role="alert">
                   Asiakkaalla ei ole sähköpostiosoitetta.
                 </p>
                 <Link href={detailHref("customer", customerId)} className={buttonClass("secondary", "w-full")}>
@@ -183,7 +183,7 @@ export function ReminderSheet({
               </div>
             )}
             {error && (
-              <p className="text-sm text-danger" role="alert">
+              <p className="text-caption text-danger" role="alert">
                 {error}
               </p>
             )}

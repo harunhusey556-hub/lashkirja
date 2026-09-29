@@ -60,13 +60,13 @@ export default function AsetuksetPage() {
           href="/asetukset/yritys"
           icon={BriefcaseBusiness}
           label="Yritysmuoto & ALV"
-          hint="Kevytyrittäjä tai toiminimi, ALV-rekisteri ja verokausi"
+          hint="Yritysmuoto, ALV ja verokausi"
         />
         <SettingsRow
           href="/asetukset/laskutus"
           icon={ReceiptText}
           label="Laskuttajan tiedot"
-          hint="Y-tunnus, tilinumero ja laskun tiedot"
+          hint="Y-tunnus ja tilinumero"
         />
       </SettingsGroup>
 
@@ -75,13 +75,13 @@ export default function AsetuksetPage() {
           href="/asetukset/tili"
           icon={ShieldCheck}
           label="Tili ja turvallisuus"
-          hint="Salasana, laitteet, näytön koodi ja Face ID"
+          hint="Salasana, laitteet ja Face ID"
         />
         <SettingsRow
           href="/asetukset/tietosuoja"
           icon={Database}
           label="Tietosuoja ja tiedot"
-          hint="Mihin tiedot menevät, säilytys ja tilin sulku"
+          hint="Säilytys ja tilin sulku"
         />
       </SettingsGroup>
 
@@ -94,7 +94,7 @@ export default function AsetuksetPage() {
       </SettingsGroup>
 
       {signOutError && (
-        <p className="px-1 text-sm text-danger" role="alert">
+        <p className="px-1 text-caption text-danger" role="alert">
           {signOutError}
         </p>
       )}

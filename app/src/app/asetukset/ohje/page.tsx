@@ -49,7 +49,7 @@ export default function OhjePage() {
     <div className="space-y-6">
       <PageTitle title="Ohje ja tuki" />
       <Card className="space-y-3">
-        <p className="text-body text-ink leading-relaxed">
+        <p className="text-body text-ink">
           Kuitit, laskut ja ALV löytyvät omista näkymistään. Jos jokin epäonnistuu, lähetä meille viesti: siihen tulee
           mukaan virheviite, jonka avulla vika löytyy.
         </p>

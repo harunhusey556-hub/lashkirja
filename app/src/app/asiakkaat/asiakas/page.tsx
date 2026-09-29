@@ -75,7 +75,7 @@ const FLASH_KEY = "asiakkaat:flash";
 /** Hero plus the contact card at their final sizes (L1, SALES-19). */
 function CustomerSkeleton() {
   return (
-    <SkeletonGroup label="Haetaan asiakasta" className="space-y-6">
+    <SkeletonGroup label="Ladataan asiakasta" className="space-y-6">
       <div className="flex flex-col items-center px-2 pb-5 pt-2">
         <Skeleton className="h-10 w-36" />
         <Skeleton className="mt-3 h-4 w-40" />
@@ -356,7 +356,7 @@ function CustomerDetail() {
             />
 
             {message && (
-              <p className="rounded-card bg-accent-soft px-4 py-3 text-sm text-ink" role="status">
+              <p className="rounded-card bg-accent-soft px-4 py-3 text-caption text-ink" role="status">
                 {message}
               </p>
             )}
@@ -515,7 +515,7 @@ function CustomerDetail() {
             ))}
           </select>
           {mergeError && (
-            <p className="text-sm text-danger" role="alert">
+            <p className="text-caption text-danger" role="alert">
               {mergeError}
             </p>
           )}

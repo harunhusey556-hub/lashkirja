@@ -224,10 +224,10 @@ export function RecurringForm({
 
   const field = `${controlClass} min-h-12`;
   const label = "mb-1.5 block text-caption font-normal text-ink-2";
-  const lineLabel = "mb-1 block text-xs font-normal text-ink-2";
+  const lineLabel = "mb-1.5 block text-caption font-normal text-ink-2";
   const errorText = (key: string, id: string) =>
     errors[key] ? (
-      <p id={`${id}-error`} className="mt-1.5 text-sm text-danger" role="alert">
+      <p id={`${id}-error`} className="mt-1.5 text-caption text-danger" role="alert">
         {errors[key]}
       </p>
     ) : null;
@@ -353,7 +353,7 @@ export function RecurringForm({
           {errors.anchorDay ? (
             errorText("anchorDay", "ri-anchor")
           ) : (
-            <p id="ri-anchor-hint" className="mt-1.5 text-xs text-ink-2">
+            <p id="ri-anchor-hint" className="mt-1.5 text-caption text-ink-2">
               31 tarkoittaa kuun viimeistä päivää lyhyissä kuukausissa.
             </p>
           )}
@@ -365,6 +365,7 @@ export function RecurringForm({
           <label className={label} htmlFor="ri-start">Alkaa</label>
           <input
             type="date"
+            lang="fi"
             className={field}
             value={values.startDate}
             onChange={(e) => setValues((current) => ({ ...current, startDate: e.target.value }))}
@@ -376,6 +377,7 @@ export function RecurringForm({
           <label className={label} htmlFor="ri-end">Päättyy (valinnainen)</label>
           <input
             type="date"
+            lang="fi"
             className={field}
             value={values.endDate}
             onChange={(e) => setValues((current) => ({ ...current, endDate: e.target.value }))}
@@ -440,6 +442,7 @@ export function RecurringForm({
                   value={line.unit}
                   onChange={(e) => setLine(index, { unit: e.target.value })}
                   autoCapitalize="none"
+                  autoCorrect="off"
                   autoComplete="off"
                   enterKeyHint="next"
                 />
@@ -506,7 +509,7 @@ export function RecurringForm({
           Lisää rivi
         </Button>
         {errors.lines && (
-          <p className="text-sm text-danger" role="alert">
+          <p className="text-caption text-danger" role="alert">
             {errors.lines}
           </p>
         )}
@@ -523,12 +526,12 @@ export function RecurringForm({
       </label>
 
       {session.notice && (
-        <p className="text-sm text-ink" role="status">
+        <p className="text-caption text-ink" role="status">
           {session.notice}
         </p>
       )}
       {error && (
-        <p className="text-sm text-danger" role="alert">
+        <p className="text-caption text-danger" role="alert">
           {error}
         </p>
       )}

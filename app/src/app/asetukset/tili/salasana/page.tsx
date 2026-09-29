@@ -70,7 +70,7 @@ export default function SalasanaPage() {
       <PageTitle title="Vaihda salasana" />
       <form onSubmit={(event) => void changePassword(event)} noValidate>
         <Card className="space-y-4">
-          <p className="text-caption text-ink-2 leading-relaxed">
+          <p className="text-caption text-ink-2">
             Nykyinen salasana vaaditaan. Uudessa on vähintään {MIN_PASSWORD_LENGTH} merkkiä. Muut kirjautuneet laitteet suljetaan.
           </p>
           {/* Lets iOS Password AutoFill pair the new password with this account (AUTH-10). */}

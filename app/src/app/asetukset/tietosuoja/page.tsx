@@ -98,7 +98,7 @@ export default function TietosuojaPage() {
     <div className="space-y-6">
       <PageTitle title="Tietosuoja" />
 
-      <Card className="space-y-3 text-body text-ink leading-relaxed">
+      <Card className="space-y-3 text-body text-ink">
         <h2 className="text-caption text-ink-2">Mitä LashKirja säilyttää</h2>
         <p>
           Tilillä ovat nimesi, sähköpostisi ja salasanan tiiviste, yrityksen laskutustiedot,
@@ -134,13 +134,13 @@ export default function TietosuojaPage() {
         <Card className="space-y-4">
           <div>
             <h2 className="text-body font-medium text-ink">Pyyntö tuelle</h2>
-            <p className="mt-1 text-caption text-ink-2 leading-relaxed">
+            <p className="mt-1 text-caption text-ink-2">
               Nykyinen salasana vahvistaa, että pyyntö tulee sinulta. Tuki käsittelee sen. Aineistoa ei tuhota
               tästä näkymästä. Sulkeminen estää kirjautumisen, kun pyyntö on valmis. Kuitit ja laskut säilyvät.
             </p>
           </div>
           {requestsFailed && (
-            <div className="flex items-center justify-between gap-3 rounded-card bg-danger/10 p-3 text-sm text-danger" role="alert">
+            <div className="flex items-center justify-between gap-3 rounded-card bg-danger/10 p-3 text-caption text-danger" role="alert">
               <span>Aiempia pyyntöjä ei saatu ladattua.</span>
               <button
                 type="button"

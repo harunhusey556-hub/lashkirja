@@ -152,12 +152,12 @@ export function SaveStatus({
 }) {
   if (saving) {
     return (
-      <p className="text-xs text-success" role="status" aria-live="polite">
+      <p className="text-caption text-success" role="status" aria-live="polite">
         Tallennetaan...
       </p>
     );
   }
   const isError = Boolean(savedMsg) && savedMsg !== "Tallennettu";
-  if (isError) return <FormError message={savedMsg} className="text-xs" />;
-  return <SavedNote message={savedMsg} className="text-xs" />;
+  if (isError) return <FormError message={savedMsg} className="text-caption" />;
+  return <SavedNote message={savedMsg} className="text-caption" />;
 }

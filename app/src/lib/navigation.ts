@@ -46,7 +46,8 @@ export const NAV: readonly NavEntry[] = [
 
   { id: "asetukset-profiili", kind: "settings", label: "Profiili", path: "/asetukset/profiili", parent: "asetukset" },
   { id: "asetukset-yritys", kind: "settings", label: "Yritysmuoto & ALV", path: "/asetukset/yritys", parent: "asetukset" },
-  { id: "asetukset-laskutus", kind: "settings", label: "Laskuttajan tiedot", path: "/asetukset/laskutus", parent: "asetukset" },
+  // A long form with a sticky save bar (VS-02): a detail, so the tab bar is hidden and the bar owns the bottom edge.
+  { id: "asetukset-laskutus", kind: "detail", label: "Laskuttajan tiedot", path: "/asetukset/laskutus", parent: "asetukset" },
   { id: "asetukset-tili", kind: "settings", label: "Tili ja turvallisuus", path: "/asetukset/tili", parent: "asetukset" },
   { id: "asetukset-salasana", kind: "settings", label: "Vaihda salasana", path: "/asetukset/tili/salasana", parent: "asetukset-tili" },
   { id: "asetukset-laitteet", kind: "settings", label: "Laitteet", path: "/asetukset/tili/laitteet", parent: "asetukset-tili" },
