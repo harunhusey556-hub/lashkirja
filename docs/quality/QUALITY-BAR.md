@@ -25,7 +25,7 @@ LashKirja must feel like a native iOS app: clean, calm, fast and predictable. Ea
 - N4: Every sheet, drawer, modal and menu opens and closes with motion (sheet: slide up with a spring-like curve; drawer: slide; fade the backdrop). Nothing pops in or out abruptly.
 - N5: Sheets can be dismissed by swiping down and by tapping the backdrop, unless there are unsaved changes.
 - N6: Back returns to exactly the previous scroll position and filter state.
-- N7: The back label always names the parent.
+- N7: The back label names the screen you came from (SHELL-31). It names the logical parent only when there is no previous screen (a cold start or a deep link) or that screen has no fixed name (a record detail page).
 
 ## T: Touch and feedback
 - T1: Every pressable element has a pressed state (`active-press`) and a ≥44×44 px hit area.
