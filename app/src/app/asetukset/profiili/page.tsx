@@ -111,10 +111,10 @@ function ProfileForm({
           {(profile.firstName?.[0] || "?").toUpperCase()}
         </span>
         <div className="min-w-0">
-          <p className="truncate text-body font-medium text-ink">
+          <p className="clamp-lines [overflow-wrap:anywhere] text-body font-medium text-ink">
             {profile.firstName} {profile.lastName}
           </p>
-          <p className="truncate text-caption text-ink-2">{profile.email}</p>
+          <p className="clamp-lines [overflow-wrap:anywhere] text-caption text-ink-2">{profile.email}</p>
         </div>
       </Card>
 

@@ -1267,3 +1267,13 @@ html[data-page-hidden] *::after {
 .thread-fill {
   min-height: calc(100% + 1px);
 }
+
+/* AX-26, R19: a title or secondary line that wraps to two lines and is then cut at the default text size.
+   From 130% up (lib/mobile/text-scale.ts adds the override to the head stylesheet) nothing is cut: the
+   row grows instead, so the reason a job failed can always be read in full. */
+.clamp-lines {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+}

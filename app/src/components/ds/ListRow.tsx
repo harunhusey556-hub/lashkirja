@@ -47,14 +47,14 @@ export function ListRow({ title, amount, amountTone = "default", secondary, trai
             text size); when the amount no longer fits beside it, the amount wraps under it,
             right-aligned. Titles and secondary lines wrap to two lines instead of being cut (AX-26). */}
         <span aria-hidden={interactive || undefined} className="flex flex-wrap items-baseline justify-between gap-x-3 text-body font-medium text-ink">
-          <span className="min-w-0 line-clamp-2 [flex:1_1_7em] [overflow-wrap:anywhere]">{title}</span>
+          <span className="min-w-0 clamp-lines [flex:1_1_7em] [overflow-wrap:anywhere]">{title}</span>
           {amount !== undefined ? <span className={`ml-auto shrink-0 tabular-nums ${AMOUNT_TONE[amountTone]}`}>{amount}</span> : null}
         </span>
         {secondary || trailingNode ? (
           <span className="mt-0.5 flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
             <span
               aria-hidden={interactive || undefined}
-              className="min-w-0 line-clamp-2 text-caption text-ink-2 [flex:1_1_9em]"
+              className="min-w-0 clamp-lines text-caption text-ink-2 [flex:1_1_9em]"
             >
               {secondary}
             </span>

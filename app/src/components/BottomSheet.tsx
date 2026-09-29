@@ -347,7 +347,7 @@ export default function BottomSheet({
                       {title}
                     </p>
                   )}
-                  {subtitle && <p className="mt-0.5 truncate text-caption text-ink-2">{subtitle}</p>}
+                  {subtitle && <p className="mt-0.5 clamp-lines [overflow-wrap:anywhere] text-caption text-ink-2">{subtitle}</p>}
                 </div>
                 <div className="flex shrink-0 items-center gap-1">
                   {headerAction}

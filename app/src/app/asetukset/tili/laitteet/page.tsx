@@ -128,7 +128,7 @@ export default function LaitteetPage() {
         {current && (
           <div className="flex items-center gap-3 rounded-card bg-canvas px-3 py-3">
             <span className="min-w-0 flex-1">
-              <span className="block truncate text-body font-medium text-ink">{current.label}</span>
+              <span className="block clamp-lines [overflow-wrap:anywhere] text-body font-medium text-ink">{current.label}</span>
               <span className="block text-caption text-ink-2">Tämä laite</span>
             </span>
           </div>
@@ -143,7 +143,7 @@ export default function LaitteetPage() {
               {visibleOthers.map((row) => (
                 <li key={row.id} className="flex items-center gap-3 py-3">
                   <span className="min-w-0 flex-1">
-                    <span className="block truncate text-body text-ink">{row.label}</span>
+                    <span className="block clamp-lines [overflow-wrap:anywhere] text-body text-ink">{row.label}</span>
                     <span className="block text-caption text-ink-2">{formatLastSeen(row.lastSeenAt)}</span>
                   </span>
                   <button

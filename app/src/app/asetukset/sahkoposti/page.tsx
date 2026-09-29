@@ -256,8 +256,8 @@ function ImapCard({
                 className="flex items-center justify-between gap-3 rounded-card border border-success/30 bg-success/5 p-4"
               >
                 <div className="min-w-0">
-                  <p className="text-sm font-medium text-success">Aktiivinen</p>
-                  <p className="mt-0.5 truncate text-caption text-ink">{account.email}</p>
+                  <p className="text-caption font-medium text-success">Aktiivinen</p>
+                  <p className="mt-0.5 clamp-lines [overflow-wrap:anywhere] text-caption text-ink">{account.email}</p>
                 </div>
                 <button
                   type="button"

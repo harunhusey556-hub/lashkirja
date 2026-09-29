@@ -23,12 +23,23 @@ export const TEXT_SCALE_MAX = 2;
 
 const STYLE_ID = "lashkirja-text-scale";
 
+/** From here up, two-line clamps (`.clamp-lines`) are lifted: text is wrapped, never cut (AX-26). */
+export const UNCLAMP_FROM = 1.3;
+
 /** Clamps the plugin's preferred zoom to the verified range; bad input is 1. */
 export function textScaleFromPreferred(value: unknown): number {
   const number = typeof value === "number" ? value : Number.NaN;
   if (!Number.isFinite(number) || number <= 0) return 1;
   const clamped = Math.min(TEXT_SCALE_MAX, Math.max(TEXT_SCALE_MIN, number));
   return Math.round(clamped * 100) / 100;
+}
+
+/** The head stylesheet for a scale: the variable, plus the lifted clamps from 130% up. */
+export function textScaleCss(scale: number): string {
+  return (
+    `:root{--text-scale:${scale}}` +
+    (scale >= UNCLAMP_FROM ? ":root .clamp-lines{display:block;-webkit-line-clamp:unset;overflow:visible}" : "")
+  );
 }
 
 /** Publishes `--text-scale` (1 removes the override). */
@@ -39,7 +50,7 @@ export function applyTextScale(scale: number): void {
     existing?.remove();
     return;
   }
-  const css = `:root{--text-scale:${scale}}`;
+  const css = textScaleCss(scale);
   const tag = existing ?? document.head.appendChild(Object.assign(document.createElement("style"), { id: STYLE_ID }));
   if (tag.textContent !== css) tag.textContent = css;
 }

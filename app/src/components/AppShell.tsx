@@ -1221,7 +1221,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                   </IconTile>
                   <span className="min-w-0 flex-1">
                     <span className="block text-body font-medium text-ink">Tuo tiliote</span>
-                    <span className="mt-0.5 block truncate text-caption text-ink-2">CSV, XLSX, camt tai PDF</span>
+                    <span className="mt-0.5 block clamp-lines text-caption text-ink-2">CSV, XLSX, camt tai PDF</span>
                   </span>
                 </button>
                 {(
