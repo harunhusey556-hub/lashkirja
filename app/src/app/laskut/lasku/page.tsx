@@ -17,6 +17,7 @@ import { formatDate, formatDayMonth, formatEur, parseMoneyInput } from "@/lib/fo
 import { newIdempotencyKey } from "@/lib/idempotency-key";
 import { helsinkiCalendarDate } from "@/lib/validation";
 import { formatReference } from "@/lib/finnish-reference";
+import { copyToClipboard } from "@/lib/clipboard";
 import { shareContent } from "@/lib/share";
 import { openAuthedFile } from "@/lib/authed-file";
 import { AuthedFileLink } from "@/components/AuthedFileLink";
@@ -771,6 +772,15 @@ function InvoiceDetail() {
           },
         },
         { label: "Jaa", onSelect: () => void shareInvoice(), disabled: busy || sharing },
+        // AX-07, R25: the reference the customer pays with can be copied.
+        ...(invoice.reference
+          ? [
+              {
+                label: "Kopioi viitenumero",
+                onSelect: () => void copyToClipboard(formatReference(invoice.reference), "Viitenumero"),
+              },
+            ]
+          : []),
         ...(invoice.status !== "credited"
           ? [{ label: "Lähetä sähköpostilla", onSelect: () => void openReview(), disabled: busy || sending }]
           : []),

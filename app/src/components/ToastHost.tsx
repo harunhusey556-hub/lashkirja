@@ -139,7 +139,8 @@ function ToastItem({ toast, leaving }: { toast: ToastRecord; leaving: boolean })
       className="toast"
       data-state={state}
       data-tone={toast.tone}
-      role={toast.tone === "error" ? "alert" : "status"}
+      // No role here: the viewport is the one polite live region (R7, AX-16);
+      // a nested alert inside it was announced twice or not at all.
       aria-hidden={leaving || undefined}
     >
       <Icon icon={TONE_ICON[toast.tone]} className="shrink-0 text-canvas/80" />

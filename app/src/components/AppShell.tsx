@@ -481,6 +481,45 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     bumpNavEpoch();
   }, [pathname, direction]);
 
+  // AX-04, R2: every screen has its own document title ("Kuitit · LashKirja"),
+  // which the route announcer reads. Kept against a later metadata write.
+  const screenLabel = navEntry?.label ?? null;
+  useEffect(() => {
+    const title = screenLabel ? `${screenLabel} · LashKirja` : "LashKirja";
+    document.title = title;
+    if (typeof MutationObserver === "undefined") return;
+    const observer = new MutationObserver(() => {
+      if (document.title !== title) document.title = title;
+    });
+    observer.observe(document.head, { subtree: true, childList: true, characterData: true });
+    return () => observer.disconnect();
+  }, [screenLabel]);
+
+  // AX-04, R2: after every navigation (push, pop, tab switch) focus moves to
+  // the new screen's h1, as UIKit's screenChanged does. Not on the first
+  // load, not when the page already focused a field, not under an overlay.
+  useEffect(() => {
+    if (direction === "none") return;
+    let tries = 0;
+    let raf = 0;
+    const focusHeading = () => {
+      const main = mainRef.current;
+      if (!main) return;
+      const active = document.activeElement;
+      if (active instanceof HTMLElement && active !== document.body && main.contains(active)) return;
+      if (document.querySelector('[aria-modal="true"]')) return;
+      const heading = main.querySelector<HTMLElement>(".app-page h1");
+      if (!heading) {
+        if (tries++ < 30) raf = requestAnimationFrame(focusHeading);
+        return;
+      }
+      if (!heading.hasAttribute("tabindex")) heading.setAttribute("tabindex", "-1");
+      heading.focus({ preventScroll: true });
+    };
+    raf = requestAnimationFrame(focusHeading);
+    return () => cancelAnimationFrame(raf);
+  }, [pathname, direction]);
+
   function goBack() {
     requestLeave(() => performInAppBack(pathname, router, back?.href));
   }
@@ -1100,7 +1139,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                   aria-label="Lisää"
                   aria-haspopup="dialog"
                   aria-expanded={addOpen}
-                  className="tab-plus flex h-[60px] w-[60px] -translate-y-3 items-center justify-center rounded-full bg-ink text-canvas"
+                  className="tab-plus flex h-[60px] w-[60px] -translate-y-2.5 items-center justify-center rounded-full bg-ink text-canvas"
                 >
                   <Icon icon={Plus} size="hero" strokeWidth={2} />
                 </button>

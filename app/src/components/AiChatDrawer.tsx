@@ -729,6 +729,7 @@ export function AiChatDrawer({
       className={`absolute inset-0 z-[70] flex flex-col bg-canvas shadow-2xl ${
         closing ? "animate-sheet-out pointer-events-none" : "animate-sheet"
       }`}
+      data-overlay-root={open ? "" : undefined}
       role="dialog"
       aria-modal="true"
       aria-labelledby="ai-chat-title"

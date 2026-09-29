@@ -33,7 +33,8 @@
   --color-accent-soft: #f3e6e3;
   --radius-card: 14px;
 
-  --app-tab-height: 4.5rem;
+  /* AX-21, R20: 56 px of bar plus the home-indicator inset (90 at 34). */
+  --app-tab-height: 3.5rem;
 
   /* Type scale (findings-vs 2.2, AX R18). rem on a 16 px base, times
      --text-scale, which boot.ts sets from the iOS text-size setting
@@ -631,6 +632,18 @@ html[data-keyboard="open"] .app-tab-bar {
 /* ------------------------------------------------------------------ */
 
 @layer base {
+  /* AX-14, R27: light only. */
+  :root {
+    color-scheme: light;
+  }
+
+  /* AX-08, R12: placeholders are examples in ink-2 (5.27:1), never 50% ink.
+     A placeholder: class on a field still wins. */
+  ::placeholder {
+    color: var(--color-ink-2);
+    opacity: 1;
+  }
+
   :where(button, a, [role="button"], .active-press, .press-row, [role="option"]) {
     transition-property: transform;
     transition-duration: var(--dur-press);
@@ -1042,7 +1055,8 @@ body.signing-out {
   }
 
   .animate-spin,
-  .animate-shake {
+  .animate-shake,
+  .animate-pulse {
     animation: none !important;
   }
 
@@ -1078,6 +1092,30 @@ body.signing-out {
   body.signing-out {
     transition: none !important;
   }
+}
+
+/* AX-15, R17: Increase Contrast swaps hairlines for ink-2 and placeholders
+   for ink; Reduce Transparency removes every backdrop blur. */
+@media (prefers-contrast: more) {
+  :root {
+    --color-line: #6a645f;
+  }
+
+  ::placeholder {
+    color: var(--color-ink);
+  }
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  [class*="backdrop-blur"] {
+    -webkit-backdrop-filter: none !important;
+    backdrop-filter: none !important;
+  }
+}
+
+/* The heading focused after a navigation (AX-04) shows no ring on touch. */
+main h1[tabindex="-1"]:focus:not(:focus-visible) {
+  outline: none;
 }
 
 /* A backgrounded document stops motion. Polling stops in page-activity.ts. */

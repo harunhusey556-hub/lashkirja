@@ -1,6 +1,8 @@
 # Appearance preferences
 
-Dark theme, a language switch, and a separate haptic toggle are deferred until after the production reliability work. The app stays in Finnish on the light theme. Reduced motion already turns haptics off and leaves pressed state and status text in place.
+Dark theme, a language switch, and a separate haptic toggle are deferred until after the production reliability work. The app stays in Finnish on the light theme, enforced (quality batch 2, AX-14): `color-scheme: light`, the `color-scheme` meta tag and `UIUserInterfaceStyle = Light`. Reduced motion replaces slides and scales with 120 ms fades; it does NOT turn haptics off (iOS "Reduce Motion" is unrelated to haptics, and the system "System Haptics" switch governs them natively, see `src/lib/haptics.ts`).
+
+Text size follows the iOS setting (AX-01): every text token in `@theme` is a rem size times `--text-scale`, which `src/lib/mobile/text-scale.ts` sets from `@capacitor/text-zoom` at boot and on resume (0.85 to 2). Tab bar labels (`text-tab`) stay at 11 px. Never write `text-[Npx]`; use `text-micro` (11), `text-caption` (13), `text-body` (15), `text-input` (16, floor 16), `text-headline` (17), `text-title-3` (20), `text-title-2` (28), `text-title` (32) or `text-hero` (40).
 
 ## Design system (phase 2, 2026-09-28)
 

@@ -7,7 +7,8 @@ const TONE: Record<Tone, string> = {
   accent: "bg-accent-soft text-accent",
   danger: "bg-danger/10 text-danger",
   success: "bg-success/10 text-success",
-  warning: "bg-warning/10 text-warning",
+  // warning-dark on the tint: 4.42:1 with plain warning (AX-09, R13).
+  warning: "bg-warning/10 text-warning-dark",
 };
 
 export function StatusTag({ tone, children, icon }: { tone: Tone; children: ReactNode; icon?: ReactNode }) {

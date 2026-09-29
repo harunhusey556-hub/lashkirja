@@ -74,6 +74,9 @@ export const viewport: Viewport = {
   // See app/docs/viewport-zoom.md.
   viewportFit: "cover",
   themeColor: "#f6f3ef",
+  // AX-14, R27: light only, on purpose. Native controls, the keyboard and
+  // system sheets follow this, not the OS dark mode.
+  colorScheme: "light",
 };
 
 /**

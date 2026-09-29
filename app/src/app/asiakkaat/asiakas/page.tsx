@@ -1,6 +1,7 @@
 "use client";
 
 import { Suspense, useCallback, useEffect, useState } from "react";
+import { copyToClipboard } from "@/lib/clipboard";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { ConnectionNotice, StaleBanner } from "@/components/ScreenState";
@@ -308,6 +309,10 @@ function CustomerDetail() {
   const menuItems = customer
     ? [
         { label: "Muokkaa", onSelect: () => setEditOpen(true) },
+        // AX-07, R25: the Y-tunnus can be copied.
+        ...(customer.businessId
+          ? [{ label: "Kopioi Y-tunnus", onSelect: () => void copyToClipboard(customer.businessId ?? "", "Y-tunnus") }]
+          : []),
         ...(others.length > 0
           ? [{ label: "Yhdistä kaksoiskappale", onSelect: () => setMergeOpen(true) }]
           : []),

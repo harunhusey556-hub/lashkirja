@@ -63,8 +63,10 @@ function emit() {
   for (const listener of listeners) listener();
 }
 
+/** R8 (AX-16): an action toast lasts 10 s, an error 8 s, a plain toast 4 s. */
 export function defaultToastDuration(tone: ToastTone, hasAction: boolean): number {
-  return tone === "error" || hasAction ? 6000 : 4000;
+  if (hasAction) return 10000;
+  return tone === "error" ? 8000 : 4000;
 }
 
 /** Shows a toast and returns a function that dismisses exactly this toast. */

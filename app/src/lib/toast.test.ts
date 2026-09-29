@@ -46,8 +46,9 @@ describe("toast store", () => {
 
   it("keeps errors and actionable toasts up longer", () => {
     expect(defaultToastDuration("success", false)).toBe(4000);
-    expect(defaultToastDuration("error", false)).toBe(6000);
-    expect(defaultToastDuration("info", true)).toBe(6000);
+    expect(defaultToastDuration("error", false)).toBe(8000);
+    expect(defaultToastDuration("info", true)).toBe(10000);
+    expect(defaultToastDuration("error", true)).toBe(10000);
     showToast({ text: "Pysyy", durationMs: 0 });
     expect(currentToast()?.durationMs).toBe(0);
   });
