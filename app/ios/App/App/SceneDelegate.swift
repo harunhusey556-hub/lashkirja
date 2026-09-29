@@ -8,7 +8,10 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         guard let windowScene = scene as? UIWindowScene else { return }
 
         window = UIWindow(windowScene: windowScene)
-        window?.rootViewController = CAPBridgeViewController()
+        // MainViewController, not a plain CAPBridgeViewController: it carries the
+        // static-export router, the cancelled-navigation guard and the splash
+        // safety timer. A plain bridge silently skips all three.
+        window?.rootViewController = MainViewController()
         window?.makeKeyAndVisible()
 
         SceneDelegateProxy.shared.scene(scene, willConnectTo: session, options: connectionOptions)
