@@ -90,15 +90,18 @@ test.beforeEach(async ({ page }) => {
 
 const isRead = (method: string) => method === "GET" || method === "HEAD";
 
-/** Every array in a JSON body emptied, and the counters zeroed: an account with nothing in it. */
-function emptied(value: unknown, key = ""): unknown {
-  if (Array.isArray(value)) return [];
-  if (value && typeof value === "object") {
-    return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, emptied(v, k)]));
-  }
-  if (typeof value === "number" && /count|total|open|overdue|paid|draft|sent|all|cancel|pending|matched|amount|gross|net|vat/i.test(key)) return 0;
-  return value;
-}
+const AGING = { totalOpen: 0, overdue: 0, overdueCount: 0, buckets: {} };
+/** An account with nothing in it, answered from fixed bodies so the test does not depend on the dev data. */
+const EMPTY_BODIES: [RegExp, unknown][] = [
+  [/\/api\/invoices\/counts/, { counts: {} }],
+  [/\/api\/invoices(\?|$)/, { invoices: [], aging: AGING }],
+  [/\/api\/customers/, { customers: [] }],
+  [/\/api\/recurring-invoices/, { recurring: [], dueNow: 0 }],
+  [/\/api\/purchase-invoices\/counts/, { counts: { open: 0, overdue: 0, paid: 0, cancelled: 0 } }],
+  [/\/api\/purchase-invoices/, { invoices: [], aging: AGING }],
+  [/\/api\/receipts\/counts/, { counts: {} }],
+  [/\/api\/receipts/, { receipts: [], count: 0, truncated: false }],
+];
 
 const LIST_ROUTES = [
   "/laskut",
@@ -160,18 +163,16 @@ test.describe("empty", () => {
   ];
   for (const { route, pill } of EMPTY_ROUTES) {
     test(`${route}: one empty pattern, the primary is "${pill}"`, async ({ page }) => {
-      await page.route(`${API_BASE}/api/**`, async (r) => {
-        if (!isRead(r.request().method()) || KEEP.test(r.request().url()) || /\/api\/(profile|dashboard|onboarding)/.test(r.request().url())) {
-          return r.fallback();
-        }
-        try {
-          const response = await r.fetch();
-          const body = await response.json().catch(() => null);
-          if (body === null) return await r.fulfill({ response });
-          return await r.fulfill({ response, body: JSON.stringify(emptied(body)) });
-        } catch {
-          return;
-        }
+      await page.route(`${API_BASE}/api/**`, (r) => {
+        const url = r.request().url();
+        const hit = isRead(r.request().method()) ? EMPTY_BODIES.find(([re]) => re.test(url)) : undefined;
+        if (!hit) return r.fallback();
+        return r.fulfill({
+          status: 200,
+          contentType: "application/json",
+          headers: { "access-control-allow-origin": "*" },
+          body: JSON.stringify(hit[1]),
+        });
       });
       await page.goto(route);
       const empty = page.locator('main.app-main [data-empty="records"]');
