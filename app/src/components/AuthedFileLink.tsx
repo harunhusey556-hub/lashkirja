@@ -1,5 +1,6 @@
 "use client";
 
+import { useRef, useState } from "react";
 import { IS_MOBILE_BUILD } from "@/lib/build-target";
 import { openAuthedFile } from "@/lib/authed-file";
 import { showToast } from "@/lib/toast";
@@ -26,6 +27,12 @@ export function AuthedFileLink({
   className?: string;
   children: React.ReactNode;
 }) {
+  // Mobile fetch in flight: a second tap is ignored (it would start a second
+  // download of the same zip), and `data-busy` lets the row show progress
+  // (SALES-22). Additive: the web branch is unchanged.
+  const [busy, setBusy] = useState(false);
+  const busyRef = useRef(false);
+
   if (!IS_MOBILE_BUILD) {
     // No target/rel here: today's per-site behaviour (a plain same-tab
     // link, letting Content-Disposition drive attachment vs. inline)
@@ -43,12 +50,28 @@ export function AuthedFileLink({
     <a
       href={href}
       aria-label={title}
+      aria-busy={busy || undefined}
+      data-busy={busy ? "true" : undefined}
       className={className}
       onClick={(event) => {
         event.preventDefault();
-        void openAuthedFile(href, fallbackName, title).catch(() => {
-          showToast({ tone: "error", text: "Tiedosto ei ole saatavilla ilman yhteyttä." });
-        });
+        if (busyRef.current) return;
+        busyRef.current = true;
+        setBusy(true);
+        void openAuthedFile(href, fallbackName, title)
+          .catch(() => {
+            const offline = typeof navigator !== "undefined" && navigator.onLine === false;
+            showToast({
+              tone: "error",
+              text: offline
+                ? "Tiedosto ei ole saatavilla ilman yhteyttä."
+                : "Tiedoston haku epäonnistui. Yritä hetken päästä uudelleen.",
+            });
+          })
+          .finally(() => {
+            busyRef.current = false;
+            setBusy(false);
+          });
       }}
     >
       {children}

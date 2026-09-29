@@ -3,7 +3,7 @@
 import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { ErrorState, LoadingState } from "@/components/AsyncState";
+import { ConnectionNotice, StaleBanner } from "@/components/ScreenState";
 import ConfirmModal from "@/components/ConfirmModal";
 import BottomSheet from "@/components/BottomSheet";
 import {
@@ -26,8 +26,24 @@ import { SALES_STATUS } from "@/lib/status-labels";
 import { detailHref } from "@/lib/routes";
 import { Button, buttonClass, controlClass } from "@/components/ui";
 import { Bell } from "lucide-react";
-import { BottomActions, DetailHero, Icon, KeyValueList, MoreMenu, Section, StatusTag, Timeline } from "@/components/ds";
-import { readPageCache, writePageCache } from "@/lib/page-cache";
+import {
+  BottomActions,
+  DetailHero,
+  Icon,
+  KeyValueList,
+  ListRow,
+  MoreMenu,
+  Section,
+  Skeleton,
+  SkeletonCard,
+  SkeletonGroup,
+  StatusTag,
+  Timeline,
+  useSkeletonFade,
+} from "@/components/ds";
+import { pageCacheFetchedAt, readPageCache, writePageCache } from "@/lib/page-cache";
+import { showToast } from "@/lib/toast";
+import { hapticNotify } from "@/lib/haptics";
 
 interface ReminderPreview {
   level: number;
@@ -137,7 +153,8 @@ function historyItems(invoice: Invoice): HistoryItem[] {
       send.toAddress,
       send.attachmentName,
       send.gross != null ? formatEur(send.gross) : null,
-      send.error,
+      // Never the raw SMTP text (L5): it is English and internal.
+      send.status === "failed" ? "vastaanottajan palvelin ei ottanut viestiä vastaan" : null,
     ].filter((part): part is string => Boolean(part));
     dated.push({
       title,
@@ -161,9 +178,46 @@ function historyItems(invoice: Invoice): HistoryItem[] {
     .map(({ title, meta, tone }) => ({ title, meta, tone }));
 }
 
+/** "2 h × 100,00 €", Finnish decimals. */
+function lineQuantity(line: Invoice["lines"][number]): string {
+  const quantity = String(line.quantity).replace(".", ",");
+  return `${quantity} ${line.unit} × ${formatEur(line.unitPrice)}`;
+}
+
+/** Open balance for the payment field: always two decimals ("125,50", not "125,5"). */
+function amountText(value: number): string {
+  return value > 0 ? value.toFixed(2).replace(".", ",") : "";
+}
+
+/** The detail at its final layout: hero, the key facts, the lines (L1, SALES-19). */
+function InvoiceSkeleton() {
+  return (
+    <SkeletonGroup label="Haetaan laskua" className="space-y-6">
+      <div className="flex flex-col items-center px-2 pb-5 pt-2">
+        <Skeleton className="h-10 w-40" />
+        <Skeleton className="mt-3 h-4 w-32" />
+        <Skeleton tone="soft" className="mt-2 h-3.5 w-48" />
+        <Skeleton radius="full" className="mt-4 h-7 w-24" />
+      </div>
+      <SkeletonCard className="space-y-4">
+        {[0, 1, 2, 3].map((row) => (
+          <div key={row} className="flex justify-between gap-6">
+            <Skeleton tone="soft" className="h-3.5 w-20" />
+            <Skeleton className="h-3.5 w-24" />
+          </div>
+        ))}
+      </SkeletonCard>
+      <SkeletonCard className="space-y-2">
+        <Skeleton className="h-4 w-1/2" />
+        <Skeleton tone="soft" className="h-3 w-1/3" />
+      </SkeletonCard>
+    </SkeletonGroup>
+  );
+}
+
 export default function Page() {
   return (
-    <Suspense fallback={<LoadingState label="Haetaan laskua…" />}>
+    <Suspense fallback={<InvoiceSkeleton />}>
       <InvoiceDetail />
     </Suspense>
   );
@@ -198,6 +252,14 @@ function InvoiceDetail() {
   const [closeReasonError, setCloseReasonError] = useState("");
   const [paymentSheetOpen, setPaymentSheetOpen] = useState(false);
   const [sendError, setSendError] = useState("");
+  const [loadFailure, setLoadFailure] = useState<unknown>(null);
+  const [refreshFailed, setRefreshFailed] = useState(false);
+  const [confirmCredit, setConfirmCredit] = useState(false);
+  const [confirmMarkSent, setConfirmMarkSent] = useState(false);
+  const [reminderSheetOpen, setReminderSheetOpen] = useState(false);
+  const [reminderError, setReminderError] = useState("");
+  const [overpayConfirmed, setOverpayConfirmed] = useState(false);
+  const [pdfBusy, setPdfBusy] = useState(false);
 
   // The reminder preview only exists for an invoice that is genuinely
   // overdue; a 409 here is the expected answer, not an error to show. A
@@ -232,8 +294,10 @@ function InvoiceDetail() {
       const response = await apiFetch(`/api/invoices/${id}`, { credentials: "include" });
       const data = await readJson<{ invoice: Invoice }>(response, "Laskun haku epäonnistui");
       setInvoice(data.invoice);
-      setPaymentAmount(String(data.invoice.open > 0 ? data.invoice.open : "").replace(".", ","));
+      setPaymentAmount(amountText(data.invoice.open));
       setState("ready");
+      setRefreshFailed(false);
+      setLoadFailure(null);
       writePageCache(`invoice:${id}`, data.invoice);
 
       if (data.invoice.displayStatus === "overdue") {
@@ -248,10 +312,13 @@ function InvoiceDetail() {
         return;
       }
       // A cached copy already on screen stays up rather than being
-      // replaced by the error screen -- only an invoice never seen before
-      // goes to "error".
-      if (readPageCache<Invoice>(`invoice:${id}`)) return;
-      setMessage(errorMessage(error, "Laskun haku epäonnistui"));
+      // replaced by the error screen, but it says so (SALES-28): money
+      // actions wait until the invoice is current again.
+      setLoadFailure(error);
+      if (readPageCache<Invoice>(`invoice:${id}`)) {
+        setRefreshFailed(true);
+        return;
+      }
       setState("error");
     }
   }, [id, loadReminderPreview]);
@@ -261,7 +328,7 @@ function InvoiceDetail() {
     void load();
   }, [load]);
 
-  async function changeStatus(status: Invoice["status"], reason?: string) {
+  async function changeStatus(status: Invoice["status"], reason?: string): Promise<boolean> {
     setBusy(true);
     setMessage(null);
     try {
@@ -274,11 +341,33 @@ function InvoiceDetail() {
       await readJson(response, "Tilan vaihto epäonnistui");
       setCloseReason("");
       await load();
+      return true;
     } catch (error) {
       setMessage(errorMessage(error, "Tilan vaihto epäonnistui"));
+      void hapticNotify("error");
+      return false;
     } finally {
       setBusy(false);
     }
+  }
+
+  /** Reversible, so no dialog: done at once, with "Kumoa" for a few seconds (T4). */
+  async function markPaid() {
+    const ok = await changeStatus("paid");
+    if (!ok) return;
+    void hapticNotify("success");
+    showToast({
+      tone: "success",
+      text: "Lasku merkittiin maksetuksi",
+      action: {
+        label: "Kumoa",
+        onAction: () => {
+          void changeStatus("sent").then((undone) => {
+            if (undone) showToast({ text: "Lasku on taas avoin" });
+          });
+        },
+      },
+    });
   }
 
   function closeWithReason() {
@@ -306,6 +395,18 @@ function InvoiceDetail() {
       document.getElementById("payment-amount")?.focus();
       return;
     }
+    if (paymentDate > helsinkiCalendarDate()) {
+      setPaymentError("Maksupäivä ei voi olla tulevaisuudessa.");
+      return;
+    }
+    // Overpayment is possible (a customer pays twice), but never silent (SALES-14).
+    if (invoice && amount > invoice.open + 0.004 && !overpayConfirmed) {
+      setPaymentError(
+        `Summa on suurempi kuin avoin saldo ${formatEur(invoice.open)}. Napauta uudelleen, jos kirjaat sen silti.`
+      );
+      setOverpayConfirmed(true);
+      return;
+    }
     setPaymentError("");
     setBusy(true);
     setMessage(null);
@@ -323,6 +424,9 @@ function InvoiceDetail() {
       paymentKey.current = newIdempotencyKey();
       setPaymentAmount("");
       setPaymentSheetOpen(false);
+      setOverpayConfirmed(false);
+      void hapticNotify("success");
+      showToast({ tone: "success", text: `Maksu ${formatEur(amount)} kirjattiin` });
       await load();
     } catch (error) {
       // Server errors surface inside the sheet the user is looking at, same
@@ -338,7 +442,9 @@ function InvoiceDetail() {
   function openPaymentSheet() {
     if (!invoice) return;
     setPaymentError("");
-    setPaymentAmount(String(invoice.open > 0 ? invoice.open : "").replace(".", ","));
+    setOverpayConfirmed(false);
+    setPaymentAmount(amountText(invoice.open));
+    setPaymentDate(helsinkiCalendarDate());
     setPaymentSheetOpen(true);
   }
 
@@ -415,10 +521,13 @@ function InvoiceDetail() {
         method: "POST",
         credentials: "include",
       });
-      const result = await readJson<{ invoice: { id: string } }>(response, "Hyvitys epäonnistui");
+      const result = await readJson<{ invoice: { id: string; number: number } }>(response, "Hyvitys epäonnistui");
+      void hapticNotify("success");
+      showToast({ tone: "success", text: `Hyvityslasku ${result.invoice.number} luotiin` });
       router.push(detailHref("invoice", result.invoice.id));
     } catch (error) {
-      setMessage(errorMessage(error, "Hyvitys epäonnistui"));
+      // ConfirmModal shows the failure inside the dialog.
+      throw new Error(errorMessage(error, "Hyvitys epäonnistui"));
     } finally {
       setBusy(false);
     }
@@ -432,7 +541,8 @@ function InvoiceDetail() {
         method: "POST",
         credentials: "include",
       });
-      const result = await readJson<{ invoice: { id: string } }>(response, "Kopiointi epäonnistui");
+      const result = await readJson<{ invoice: { id: string; number: number } }>(response, "Kopiointi epäonnistui");
+      showToast({ tone: "success", text: `Luonnos ${result.invoice.number} luotiin` });
       router.push(detailHref("invoice", result.invoice.id));
     } catch (error) {
       setMessage(errorMessage(error, "Kopiointi epäonnistui"));
@@ -488,12 +598,16 @@ function InvoiceDetail() {
         response,
         "Muistutuksen lähetys epäonnistui"
       );
-      setMessage(
-        `Maksumuistutus ${result.reminder.level} lähetettiin osoitteeseen ${result.sentTo}.`
-      );
+      setReminderSheetOpen(false);
+      void hapticNotify("success");
+      showToast({
+        tone: "success",
+        text: `Maksumuistutus ${result.reminder.level} lähetettiin osoitteeseen ${result.sentTo}`,
+      });
       await load();
     } catch (error) {
-      setMessage(errorMessage(error, "Muistutuksen lähetys epäonnistui"));
+      setReminderError(errorMessage(error, "Muistutuksen lähetys epäonnistui"));
+      void hapticNotify("error");
     } finally {
       setRemindingBusy(false);
     }
@@ -517,6 +631,8 @@ function InvoiceDetail() {
     }
   }
 
+  const fade = useSkeletonFade(state === "loading");
+
   // Exactly one primary action per status; the rarer actions live in the "..." menu instead.
   // Plain data only (no closures): the onClick a given kind maps to is wired up
   // directly at the JSX call site below, one handler per kind, so the actual
@@ -527,6 +643,8 @@ function InvoiceDetail() {
   type PrimaryAction = { kind: PrimaryKind; label: string; busy: boolean; busyLabel?: string; icon?: boolean };
   const primary: PrimaryAction | null = (() => {
     if (!invoice) return null;
+    // A credit note is settled by the credit itself: nothing to collect.
+    if (invoice.documentKind === "credit_note") return null;
     if (invoice.status === "draft") {
       return { kind: "send", label: "Lähetä", busy: sending, busyLabel: "Tarkistetaan…" };
     }
@@ -568,14 +686,31 @@ function InvoiceDetail() {
 
   const menuItems = invoice
     ? [
+        ...(invoice.status === "draft"
+          ? [
+              {
+                label: "Muokkaa",
+                onSelect: () => router.push(`/laskut/uusi?edit=${encodeURIComponent(invoice.id)}`),
+                disabled: busy,
+              },
+            ]
+          : []),
         {
-          label: "Avaa PDF",
-          onSelect: () =>
+          label: pdfBusy ? "Avataan PDF…" : "Avaa PDF",
+          disabled: pdfBusy,
+          onSelect: () => {
+            if (pdfBusy) return;
+            setPdfBusy(true);
             void openAuthedFile(
               `/api/invoices/${invoice.id}/pdf`,
               `lasku-${invoice.number}.pdf`,
               `Lasku ${invoice.number}`
-            ).catch((error: unknown) => setMessage(errorMessage(error, "Tiedoston avaus epäonnistui"))),
+            )
+              .catch((error: unknown) =>
+                showToast({ tone: "error", text: errorMessage(error, "Tiedoston avaus epäonnistui") })
+              )
+              .finally(() => setPdfBusy(false));
+          },
         },
         { label: "Jaa", onSelect: () => void shareInvoice(), disabled: busy || sharing },
         ...(invoice.status !== "credited"
@@ -585,10 +720,16 @@ function InvoiceDetail() {
         ...(invoice.documentKind !== "credit_note" &&
         invoice.status !== "credited" &&
         invoice.status !== "draft"
-          ? [{ label: "Hyvitä", onSelect: () => void createCreditNote(), disabled: busy }]
+          ? [{ label: "Hyvitä", onSelect: () => setConfirmCredit(true), disabled: busy || refreshFailed }]
           : []),
         ...(invoice.status === "draft"
-          ? [{ label: "Merkitse lähetetyksi", onSelect: () => void changeStatus("sent"), disabled: busy }]
+          ? [
+              {
+                label: "Merkitse lähetetyksi (ilman sähköpostia)",
+                onSelect: () => setConfirmMarkSent(true),
+                disabled: busy,
+              },
+            ]
           : []),
         ...(invoice.status === "sent" && invoice.open > 0
           ? [
@@ -617,13 +758,26 @@ function InvoiceDetail() {
   return (
     <>
       <div className="space-y-6">
-        {state === "loading" && <LoadingState label="Haetaan laskua…" />}
+        {state === "loading" && <InvoiceSkeleton />}
         {state === "error" && (
-          <ErrorState message={message || "Haku epäonnistui"} onRetry={() => void load()} />
+          <ConnectionNotice
+            error={loadFailure}
+            fallback={id ? "Laskun haku epäonnistui" : "Laskua ei löytynyt."}
+            onRetry={() => {
+              setState("loading");
+              void load();
+            }}
+          />
         )}
 
         {state === "ready" && invoice && (
-          <>
+          <div className={`space-y-6 ${fade}`}>
+            {refreshFailed && (
+              <StaleBanner
+                fetchedAt={pageCacheFetchedAt(`invoice:${id}`)}
+                onRetry={() => void load()}
+              />
+            )}
             <DetailHero
               amount={formatEur(invoice.gross)}
               title={invoice.customer.name}
@@ -643,7 +797,10 @@ function InvoiceDetail() {
                     </span>
                   )}
                   <span className="block">
-                    <Link href={detailHref("customer", invoice.customer.id)} className="text-accent">
+                    <Link
+                      href={detailHref("customer", invoice.customer.id)}
+                      className="relative text-accent before:absolute before:-inset-x-3 before:-inset-y-[14px] before:content-['']"
+                    >
                       Asiakas
                     </Link>
                     {invoice.customer.businessId ? ` · ${invoice.customer.businessId}` : ""}
@@ -651,11 +808,15 @@ function InvoiceDetail() {
                 </>
               }
               status={
+                invoice.documentKind === "credit_note" ? (
+                  <StatusTag tone="neutral">Hyvityslasku</StatusTag>
+                ) : (
                 <StatusTag tone={SALES_STATUS[invoice.displayStatus].tone}>
                   {invoice.displayStatus === "overdue"
                     ? `Myöhässä ${daysOverdue(invoice.dueDate)} päivää`
                     : SALES_STATUS[invoice.displayStatus].label}
                 </StatusTag>
+                )
               }
               menu={<MoreMenu items={menuItems} />}
             />
@@ -671,13 +832,6 @@ function InvoiceDetail() {
                 { label: "Päivätty", value: formatDate(invoice.issueDate) },
                 { label: "Eräpäivä", value: formatDate(invoice.dueDate) },
                 { label: "Viite", value: formatReference(invoice.reference) },
-                {
-                  label: "Rivit",
-                  value:
-                    invoice.lines.length > 0
-                      ? `${invoice.lines[0].description}, ${invoice.lines.length} kpl`
-                      : "Ei rivejä",
-                },
                 { label: "Veroton", value: formatEur(invoice.net) },
                 ...vatBreakdown(invoice.lines).map((row) => ({
                   label: `ALV ${String(row.rate).replace(".", ",")} %`,
@@ -693,7 +847,21 @@ function InvoiceDetail() {
               ]}
             />
 
-            {(invoice.payments.length > 0 ||
+            {invoice.lines.length > 0 && (
+              <Section title="Rivit" count={invoice.lines.length}>
+                {invoice.lines.map((line) => (
+                  <ListRow
+                    key={line.id}
+                    title={line.description}
+                    amount={formatEur(line.net)}
+                    secondary={`${lineQuantity(line)} · ALV ${String(line.vatRate).replace(".", ",")} %`}
+                  />
+                ))}
+              </Section>
+            )}
+
+            {invoice.documentKind !== "credit_note" &&
+              (invoice.payments.length > 0 ||
               invoice.status === "sent" ||
               invoice.status === "paid") && (
               <Section
@@ -791,7 +959,7 @@ function InvoiceDetail() {
                 <p className="whitespace-pre-wrap px-4 py-4 text-[15px] text-ink">{invoice.notes}</p>
               </Section>
             )}
-          </>
+          </div>
         )}
       </div>
 
@@ -802,16 +970,20 @@ function InvoiceDetail() {
             className="w-full"
             busy={primary.busy}
             busyLabel={primary.busyLabel}
-            disabled={busy}
+            disabled={busy || (refreshFailed && primary.kind !== "send")}
+            disabledReason={refreshFailed ? "Lasku ei ole ajan tasalla. Päivitä ensin." : undefined}
             onClick={
               primary.kind === "send"
                 ? () => void openReview()
                 : primary.kind === "remind"
-                  ? () => void sendReminder()
+                  ? () => {
+                      setReminderError("");
+                      setReminderSheetOpen(true);
+                    }
                   : primary.kind === "retryReminder"
                     ? () => void retryReminderPreview()
                     : primary.kind === "markPaid"
-                      ? () => void changeStatus("paid")
+                      ? () => void markPaid()
                       : () => openPaymentSheet()
             }
           >
@@ -821,10 +993,20 @@ function InvoiceDetail() {
           {invoice.displayStatus === "overdue" && invoice.open > 0 && (
             <button
               type="button"
-              className="active-press flex min-h-12 w-full items-center justify-center text-[15px] font-semibold text-accent"
+              disabled={refreshFailed}
+              className="active-press flex min-h-12 w-full items-center justify-center text-[15px] font-semibold text-accent disabled:opacity-50"
               onClick={() => openPaymentSheet()}
             >
               Kirjaa maksu
+            </button>
+          )}
+          {invoice.status === "draft" && (
+            <button
+              type="button"
+              className="active-press flex min-h-12 w-full items-center justify-center text-[15px] font-semibold text-accent"
+              onClick={() => router.push(`/laskut/uusi?edit=${encodeURIComponent(invoice.id)}`)}
+            >
+              Muokkaa
             </button>
           )}
         </BottomActions>
@@ -837,6 +1019,33 @@ function InvoiceDetail() {
         confirmLabel="Poista"
         onConfirm={() => deleteInvoice()}
         onCancel={() => setConfirmDelete(false)}
+      />
+
+      <ConfirmModal
+        isOpen={confirmCredit}
+        title="Luodaanko hyvityslasku?"
+        description={
+          invoice
+            ? `Laskulle ${invoice.number} luodaan numeroitu hyvityslasku koko summasta ${formatEur(invoice.gross)}. Hyvitystä ei voi perua.`
+            : undefined
+        }
+        confirmLabel="Hyvitä"
+        onConfirm={() => createCreditNote()}
+        onCancel={() => setConfirmCredit(false)}
+      />
+
+      <ConfirmModal
+        isOpen={confirmMarkSent}
+        title="Merkitäänkö lähetetyksi?"
+        description="Lasku kirjataan lähetetyksi, mutta sähköpostia ei lähetetä. Käytä tätä, jos toimitit laskun muuten, esimerkiksi paperilla."
+        confirmLabel="Merkitse"
+        isDestructive={false}
+        onConfirm={async () => {
+          const ok = await changeStatus("sent");
+          if (!ok) throw new Error("Tilan vaihto epäonnistui");
+          showToast({ tone: "success", text: "Lasku merkittiin lähetetyksi" });
+        }}
+        onCancel={() => setConfirmMarkSent(false)}
       />
 
       <ConfirmModal
@@ -898,13 +1107,19 @@ function InvoiceDetail() {
               aria-describedby={paymentError ? "payment-amount-error" : undefined}
               className={`${controlClass} min-h-12`}
               value={paymentAmount}
-              onChange={(e) => setPaymentAmount(e.target.value)}
+              onChange={(e) => {
+                setPaymentAmount(e.target.value);
+                setOverpayConfirmed(false);
+              }}
               inputMode="decimal"
+              autoComplete="off"
+              enterKeyHint="done"
               placeholder="125,50"
             />
             <input
               aria-label="Maksun päivä"
               type="date"
+              max={helsinkiCalendarDate()}
               className={`${controlClass} min-h-12`}
               value={paymentDate}
               onChange={(e) => setPaymentDate(e.target.value)}
@@ -922,7 +1137,7 @@ function InvoiceDetail() {
             disabledReason={busy ? "Tallennus on kesken." : undefined}
             onClick={() => void addPayment()}
           >
-            Lisää
+            {overpayConfirmed ? "Kirjaa silti" : "Lisää"}
           </Button>
         </div>
       </BottomSheet>
@@ -963,9 +1178,24 @@ function InvoiceDetail() {
               </div>
             </div>
             {review.blockedReason && (
-              <p className="text-sm text-danger" role="alert">
-                {review.blockedReason}
-              </p>
+              <div className="space-y-2">
+                <p className="text-sm text-danger" role="alert">
+                  {review.blockedReason}
+                </p>
+                {/* Every block names its fix (SALES-15): no dead end. */}
+                {review.missing.length > 0 ? (
+                  <Link href="/asetukset/laskutus" className={buttonClass("secondary", "w-full")}>
+                    Avaa yritystiedot
+                  </Link>
+                ) : !review.recipient && invoice ? (
+                  <Link
+                    href={detailHref("customer", invoice.customer.id)}
+                    className={buttonClass("secondary", "w-full")}
+                  >
+                    Lisää asiakkaalle sähköposti
+                  </Link>
+                ) : null}
+              </div>
             )}
             {sendError && (
               <p className="text-sm text-danger" role="alert">
@@ -991,6 +1221,92 @@ function InvoiceDetail() {
                 onClick={() => {
                   setReview(null);
                   setSendError("");
+                }}
+              >
+                Peruuta
+              </Button>
+            </div>
+          </div>
+        )}
+      </BottomSheet>
+
+      <BottomSheet
+        isOpen={reminderSheetOpen && reminder !== null}
+        onClose={() => {
+          setReminderSheetOpen(false);
+          setReminderError("");
+        }}
+        title="Lähetä maksumuistutus"
+        labelledBy="reminder-sheet-title"
+      >
+        {reminder && invoice && (
+          <div className="space-y-3 px-5 py-4 sheet-safe-bottom">
+            <p className="text-[13px] text-ink-2">
+              Muistutus {reminder.level} · myöhässä {reminder.daysLate} päivää
+            </p>
+            <div className="space-y-1 text-[15px]">
+              <div className="flex justify-between gap-3">
+                <span className="shrink-0 text-ink-2">Vastaanottaja</span>
+                <span className="min-w-0 break-all text-right text-ink">{reminder.recipient ?? "–"}</span>
+              </div>
+              <div className="flex justify-between gap-3">
+                <span className="text-ink-2">Avoin pääoma</span>
+                <span className="tabular-nums text-ink">{formatEur(reminder.open)}</span>
+              </div>
+              {reminder.interest > 0 && (
+                <div className="flex justify-between gap-3">
+                  <span className="text-ink-2">Viivästyskorko</span>
+                  <span className="tabular-nums text-ink">{formatEur(reminder.interest)}</span>
+                </div>
+              )}
+              {reminder.fee > 0 && (
+                <div className="flex justify-between gap-3">
+                  <span className="text-ink-2">Muistutusmaksu</span>
+                  <span className="tabular-nums text-ink">{formatEur(reminder.fee)}</span>
+                </div>
+              )}
+              <div className="flex justify-between gap-3 font-semibold text-ink">
+                <span>Maksettava yhteensä</span>
+                <span className="tabular-nums">{formatEur(reminder.total)}</span>
+              </div>
+            </div>
+            {!reminder.recipient && (
+              <div className="space-y-2">
+                <p className="text-sm text-danger" role="alert">
+                  Asiakkaalla ei ole sähköpostiosoitetta.
+                </p>
+                <Link
+                  href={detailHref("customer", invoice.customer.id)}
+                  className={buttonClass("secondary", "w-full")}
+                >
+                  Lisää asiakkaalle sähköposti
+                </Link>
+              </div>
+            )}
+            {reminderError && (
+              <p className="text-sm text-danger" role="alert">
+                {reminderError}
+              </p>
+            )}
+            <div className="flex gap-2">
+              <Button
+                type="button"
+                className="flex-1"
+                disabled={!reminder.recipient || busy}
+                disabledReason={!reminder.recipient ? "Sähköpostiosoite puuttuu." : undefined}
+                busy={remindingBusy}
+                busyLabel="Lähetetään…"
+                onClick={() => void sendReminder()}
+              >
+                Lähetä muistutus
+              </Button>
+              <Button
+                type="button"
+                variant="secondary"
+                className="flex-1"
+                onClick={() => {
+                  setReminderSheetOpen(false);
+                  setReminderError("");
                 }}
               >
                 Peruuta

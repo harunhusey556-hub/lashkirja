@@ -3,7 +3,7 @@
 import { Suspense, useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { ErrorState, LoadingState } from "@/components/AsyncState";
+import { ConnectionNotice, StaleBanner } from "@/components/ScreenState";
 import ConfirmModal from "@/components/ConfirmModal";
 import BottomSheet from "@/components/BottomSheet";
 import {
@@ -19,11 +19,23 @@ import {
 } from "@/components/clientFetch";
 import { formatDate, formatEur } from "@/lib/format";
 import { Button, buttonClass, controlClass } from "@/components/ui";
-import { BottomActions, DetailHero, KeyValueList, ListRow, MoreMenu, Section, StatusTag } from "@/components/ds";
+import {
+  BottomActions,
+  DetailHero,
+  KeyValueList,
+  ListRow,
+  MoreMenu,
+  Section,
+  Skeleton,
+  SkeletonCard,
+  SkeletonGroup,
+  StatusTag,
+  useSkeletonFade,
+} from "@/components/ds";
 import { SALES_STATUS } from "@/lib/status-labels";
 import { clearDraft } from "@/lib/draft-store";
 import { detailHref } from "@/lib/routes";
-import { readPageCache, writePageCache } from "@/lib/page-cache";
+import { pageCacheFetchedAt, readPageCache, writePageCache } from "@/lib/page-cache";
 
 interface CustomerDetail {
   customer: {
@@ -58,9 +70,42 @@ interface CustomerDetail {
 /** Left for /asiakkaat to show once, after a hard delete navigates away from here. */
 const FLASH_KEY = "asiakkaat:flash";
 
+/** Hero plus the contact card at their final sizes (L1, SALES-19). */
+function CustomerSkeleton() {
+  return (
+    <SkeletonGroup label="Haetaan asiakasta" className="space-y-6">
+      <div className="flex flex-col items-center px-2 pb-5 pt-2">
+        <Skeleton className="h-10 w-36" />
+        <Skeleton className="mt-3 h-4 w-40" />
+        <Skeleton tone="soft" className="mt-2 h-3.5 w-28" />
+      </div>
+      <SkeletonCard className="space-y-4">
+        {[0, 1, 2, 3, 4].map((row) => (
+          <div key={row} className="flex justify-between gap-6">
+            <Skeleton tone="soft" className="h-3.5 w-24" />
+            <Skeleton className="h-3.5 w-32" />
+          </div>
+        ))}
+      </SkeletonCard>
+    </SkeletonGroup>
+  );
+}
+
+/** A contact value the phone can act on: call, write, or open in Maps (SALES-30). */
+function ContactLink({ href, children }: { href: string; children: string }) {
+  return (
+    <a
+      href={href}
+      className="relative break-all text-accent before:absolute before:-inset-y-[12px] before:inset-x-0 before:content-['']"
+    >
+      {children}
+    </a>
+  );
+}
+
 export default function Page() {
   return (
-    <Suspense fallback={<LoadingState label="Haetaan asiakasta…" />}>
+    <Suspense fallback={<CustomerSkeleton />}>
       <CustomerDetail />
     </Suspense>
   );
@@ -85,6 +130,8 @@ function CustomerDetail() {
   const [mergeOpen, setMergeOpen] = useState(false);
   const [mergeError, setMergeError] = useState("");
   const [confirmRemove, setConfirmRemove] = useState(false);
+  const [loadFailure, setLoadFailure] = useState<unknown>(null);
+  const [refreshFailed, setRefreshFailed] = useState(false);
 
   const load = useCallback(async () => {
     if (!id) {
@@ -105,6 +152,8 @@ function CustomerDetail() {
       setDetail(data);
       setOthers(listed.customers.filter((customer) => customer.id !== id));
       setState("ready");
+      setRefreshFailed(false);
+      setLoadFailure(null);
       writePageCache(`customer:${id}`, data);
     } catch (error) {
       if (isUnauthorized(error)) {
@@ -114,8 +163,12 @@ function CustomerDetail() {
       // A cached copy already on screen (readPageCache above, or an earlier
       // successful load) stays up rather than being replaced by the error
       // screen -- only a customer never seen before goes to "error".
-      if (readPageCache<CustomerDetail>(`customer:${id}`)) return;
-      setMessage(errorMessage(error, "Asiakkaan haku epäonnistui"));
+      setLoadFailure(error);
+      if (readPageCache<CustomerDetail>(`customer:${id}`)) {
+        // Still shown, but marked as the saved copy with a retry (SALES-28).
+        setRefreshFailed(true);
+        return;
+      }
       setState("error");
     }
   }, [id]);
@@ -241,6 +294,7 @@ function CustomerDetail() {
     .join(", ");
   const archived = Boolean(customer?.archivedAt);
 
+  const fade = useSkeletonFade(state === "loading");
   const menuItems = customer
     ? [
         { label: "Muokkaa", onSelect: () => setEditOpen(true) },
@@ -261,17 +315,27 @@ function CustomerDetail() {
   return (
     <>
       <div className="space-y-6">
-        {state === "loading" && <LoadingState label="Haetaan asiakasta…" />}
+        {state === "loading" && <CustomerSkeleton />}
         {state === "error" && (
-          <ErrorState message={message || "Haku epäonnistui"} onRetry={() => void load()} />
+          <ConnectionNotice
+            error={loadFailure}
+            fallback={id ? "Asiakkaan haku epäonnistui" : "Asiakasta ei löytynyt."}
+            onRetry={() => {
+              setState("loading");
+              void load();
+            }}
+          />
         )}
 
         {state === "ready" && detail && customer && (
-          <>
+          <div className={`space-y-6 ${fade}`}>
+            {refreshFailed && (
+              <StaleBanner fetchedAt={pageCacheFetchedAt(`customer:${id}`)} onRetry={() => void load()} />
+            )}
             <DetailHero
               amount={formatEur(detail.openBalance)}
               title={customer.name}
-              meta={customer.businessId || "Yksityisasiakas"}
+              meta={`Avoinna · ${customer.businessId || "Yksityisasiakas"}`}
               status={archived ? <StatusTag tone="neutral">Arkistoitu</StatusTag> : undefined}
               menu={<MoreMenu items={menuItems} />}
             />
@@ -285,9 +349,32 @@ function CustomerDetail() {
             <KeyValueList
               rows={[
                 { label: "Yhteyshenkilö", value: customer.contactPerson || "Ei yhteyshenkilöä" },
-                { label: "Sähköposti", value: customer.email || "Ei sähköpostia" },
-                { label: "Puhelin", value: customer.phone || "Ei puhelinta" },
-                { label: "Osoite", value: address || "Ei osoitetta" },
+                {
+                  label: "Sähköposti",
+                  value: customer.email ? (
+                    <ContactLink href={`mailto:${customer.email}`}>{customer.email}</ContactLink>
+                  ) : (
+                    "Ei sähköpostia"
+                  ),
+                },
+                {
+                  label: "Puhelin",
+                  value: customer.phone ? (
+                    <ContactLink href={`tel:${customer.phone.replace(/[^\d+]/g, "")}`}>{customer.phone}</ContactLink>
+                  ) : (
+                    "Ei puhelinta"
+                  ),
+                },
+                {
+                  label: "Osoite",
+                  value: address ? (
+                    <ContactLink href={`https://maps.apple.com/?q=${encodeURIComponent(address)}`}>
+                      {address}
+                    </ContactLink>
+                  ) : (
+                    "Ei osoitetta"
+                  ),
+                },
                 ...(customer.notes ? [{ label: "Muistiinpanot", value: customer.notes }] : []),
                 { label: "Maksuaika", value: `${customer.defaultPaymentTermDays} pv` },
                 { label: "Avoimia laskuja", value: String(detail.openInvoiceCount) },
@@ -337,7 +424,7 @@ function CustomerDetail() {
                 ))
               )}
             </Section>
-          </>
+          </div>
         )}
       </div>
 

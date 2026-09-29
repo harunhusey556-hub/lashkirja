@@ -159,6 +159,10 @@ interface Props {
   submitLabel: string;
   busy?: boolean;
   draftKey?: string;
+  /** Opens an inline "Uusi asiakas" sheet; the page selects the new customer via `selectCustomerId`. */
+  onAddCustomer?: () => void;
+  /** A customer the page just created; selected (with its payment term) once it is in `customers`. */
+  selectCustomerId?: string;
   onSubmit: (payload: InvoicePayload) => void | Promise<void>;
   onCancel: () => void;
 }
@@ -176,18 +180,26 @@ export function InvoiceForm({
   submitLabel,
   busy,
   draftKey = "invoice:new",
+  onAddCustomer,
+  selectCustomerId,
   onSubmit,
   onCancel,
 }: Props) {
   const today = helsinkiCalendarDate();
-  const [baseline] = useState<InvoiceFormValues>(() => ({
-    customerId: customers[0]?.id ?? "",
-    issueDate: today,
-    dueDate: addDays(today, customers[0]?.defaultPaymentTermDays ?? 14),
-    notes: "",
-    lines: [{ ...EMPTY_LINE }],
-    ...initial,
-  }));
+  const [baseline] = useState<InvoiceFormValues>(() => {
+    // No silent default customer (SALES-08): a hurried "Luo lasku" must not
+    // bill the first name in the list. A preset customer brings its own term.
+    const preset = customers.find((customer) => customer.id === initial?.customerId);
+    const issueDate = initial?.issueDate ?? today;
+    return {
+      customerId: "",
+      issueDate,
+      dueDate: addDays(issueDate, preset?.defaultPaymentTermDays ?? 14),
+      notes: "",
+      lines: [{ ...EMPTY_LINE }],
+      ...initial,
+    };
+  });
   const [values, setValues] = useState<InvoiceFormValues>(baseline);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [saveError, setSaveError] = useState("");
@@ -267,6 +279,24 @@ export function InvoiceForm({
       // Following the customer's own term is the expected default.
       dueDate: customer ? addDays(current.issueDate, customer.defaultPaymentTermDays) : current.dueDate,
     }));
+    if (customerId) {
+      setErrors((current) => {
+        const next = { ...current };
+        delete next.customerId;
+        return next;
+      });
+    }
+  }
+
+  // A customer created in the inline sheet is selected as soon as it is in the list.
+  const [selectedExternal, setSelectedExternal] = useState<string | undefined>(undefined);
+  if (
+    selectCustomerId &&
+    selectCustomerId !== selectedExternal &&
+    customers.some((customer) => customer.id === selectCustomerId)
+  ) {
+    setSelectedExternal(selectCustomerId);
+    pickCustomer(selectCustomerId);
   }
 
   const field = controlClass;
@@ -302,9 +332,20 @@ export function InvoiceForm({
     >
       <Section>
         <div className="space-y-1.5 px-4 py-3">
-          <label className={label} htmlFor="if-customer">
-            Asiakas <span className="text-danger" aria-hidden="true">*</span>
-          </label>
+          <div className="flex items-baseline justify-between gap-3">
+            <label className={label} htmlFor="if-customer">
+              Asiakas <span className="text-danger" aria-hidden="true">*</span>
+            </label>
+            {onAddCustomer ? (
+              <button
+                type="button"
+                onClick={onAddCustomer}
+                className="relative text-[13px] font-medium text-accent before:absolute before:-inset-x-2 before:-inset-y-[14px] before:content-['']"
+              >
+                Uusi asiakas
+              </button>
+            ) : null}
+          </div>
           <select
             className={field}
             value={values.customerId}
@@ -412,6 +453,9 @@ export function InvoiceForm({
                 value={line.description}
                 onChange={(e) => setLine(index, { description: e.target.value })}
                 placeholder="Kuvaus"
+                autoCapitalize="sentences"
+                autoComplete="off"
+                enterKeyHint="next"
                 maxLength={200}
                 {...invalidFieldProps(`if-line-${index}-desc`, errors[`line-${index}-description`])}
               />
@@ -432,6 +476,8 @@ export function InvoiceForm({
                     value={line.quantity}
                     onChange={(e) => setLine(index, { quantity: e.target.value })}
                     inputMode="decimal"
+                    autoComplete="off"
+                    enterKeyHint="next"
                     {...invalidFieldProps(`if-line-${index}-qty`, errors[`line-${index}-quantity`])}
                   />
                   {errors[`line-${index}-quantity`] && (
@@ -449,6 +495,9 @@ export function InvoiceForm({
                     value={line.unit}
                     onChange={(e) => setLine(index, { unit: e.target.value })}
                     maxLength={16}
+                    autoCapitalize="none"
+                    autoComplete="off"
+                    enterKeyHint="next"
                   />
                 </div>
                 <div>
@@ -463,6 +512,8 @@ export function InvoiceForm({
                     onChange={(e) => setLine(index, { unitPrice: e.target.value })}
                     inputMode="decimal"
                     placeholder="0,00"
+                    autoComplete="off"
+                    enterKeyHint="next"
                     {...invalidFieldProps(`if-line-${index}-price`, errors[`line-${index}-unitPrice`])}
                   />
                   {errors[`line-${index}-unitPrice`] && (
@@ -558,6 +609,7 @@ export function InvoiceForm({
           value={values.notes}
           onChange={(e) => setValues((current) => ({ ...current, notes: e.target.value }))}
           maxLength={2000}
+          autoCapitalize="sentences"
         />
       </div>
 

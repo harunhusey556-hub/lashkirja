@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import { LoadingState } from "@/components/AsyncState";
 import { ConnectionNotice, StaleBanner } from "@/components/ScreenState";
 import {
   apiFetch,
@@ -14,7 +13,19 @@ import {
 import { buttonClass, controlClass } from "@/components/control-styles";
 import { AuthedFileLink } from "@/components/AuthedFileLink";
 import { ChevronLeft, ChevronRight, Download } from "lucide-react";
-import { Card, Icon, IconTile, KeyValueList, ListRow, PageTitle, Section } from "@/components/ds";
+import {
+  Card,
+  Icon,
+  IconTile,
+  KeyValueList,
+  ListRow,
+  PageTitle,
+  Section,
+  Skeleton,
+  SkeletonCard,
+  SkeletonGroup,
+  useSkeletonFade,
+} from "@/components/ds";
 import { formatEur, formatMonthShort } from "@/lib/format";
 import { receiptDrillHref } from "@/lib/report-drill";
 import { pageCacheFetchedAt, readPageCache, writePageCache } from "@/lib/page-cache";
@@ -45,6 +56,8 @@ interface Period {
   incomeByCategory: CategoryRow[];
   expenseByCategory: CategoryRow[];
   receiptCount: number;
+  invoiceCount?: number;
+  creditNoteCount?: number;
   missingVatCount: number;
   uncategorisedCount: number;
 }
@@ -58,6 +71,7 @@ interface Report {
 }
 
 const EXPORTS = [
+  { type: "profit-loss", label: "Tuloslaskelma" },
   { type: "receipts", label: "Kuitit" },
   { type: "transactions", label: "Tilitapahtumat" },
   { type: "invoices", label: "Myyntilaskut" },
@@ -91,6 +105,39 @@ function YearSwitcher({ year, currentYear, onChange }: { year: number; currentYe
   );
 }
 
+/** The report at its final layout while the year is computed (L1, SALES-19). */
+function ReportSkeleton() {
+  return (
+    <SkeletonGroup label="Lasketaan raporttia" className="space-y-6">
+      <div>
+        <Skeleton tone="soft" className="mx-1 mb-3 h-3 w-12" />
+        <SkeletonCard className="space-y-4">
+          {[0, 1, 2].map((row) => (
+            <div key={row} className="flex justify-between gap-6">
+              <Skeleton tone="soft" className="h-3.5 w-24" />
+              <Skeleton className="h-3.5 w-20" />
+            </div>
+          ))}
+        </SkeletonCard>
+      </div>
+      <div>
+        <Skeleton tone="soft" className="mx-1 mb-3 h-3 w-20" />
+        <SkeletonCard className="space-y-5">
+          {[0, 1, 2].map((row) => (
+            <div key={row} className="space-y-2">
+              <div className="flex justify-between gap-6">
+                <Skeleton className="h-4 w-16" />
+                <Skeleton className="h-4 w-20" />
+              </div>
+              <Skeleton tone="soft" className="h-3 w-2/3" />
+            </div>
+          ))}
+        </SkeletonCard>
+      </div>
+    </SkeletonGroup>
+  );
+}
+
 /** Category keys are stored lower-case ("tarvikkeet"); a list title starts with a capital. */
 function sentenceCase(text: string): string {
   return text ? text.charAt(0).toLocaleUpperCase("fi-FI") + text.slice(1) : text;
@@ -118,7 +165,7 @@ function DownloadRow({
         href={href}
         fallbackName={fallbackName}
         title={title}
-        className="row-link active-press absolute inset-0"
+        className="peer row-link active-press absolute inset-0"
       >
         {null}
       </AuthedFileLink>
@@ -126,6 +173,11 @@ function DownloadRow({
         <Icon icon={Download} />
       </IconTile>
       <span className="pointer-events-none min-w-0 flex-1 text-[15px] font-medium text-ink">{title}</span>
+      {/* Progress while the file is fetched for the share sheet (SALES-22). */}
+      <span
+        aria-hidden
+        className="pointer-events-none h-4 w-4 shrink-0 animate-spin rounded-full border-2 border-line border-t-ink-2 opacity-0 peer-data-[busy=true]:opacity-100"
+      />
     </div>
   );
 }
@@ -142,6 +194,7 @@ export default function ReportsPage() {
   );
   const [message, setMessage] = useState<string | null>(null);
   const [packageMonth, setPackageMonth] = useState(`${currentYear}-01`);
+  const fade = useSkeletonFade(status === "loading");
 
   const load = useCallback(async () => {
     // Show the cached year immediately and refresh it silently; a year that
@@ -181,6 +234,8 @@ export default function ReportsPage() {
 
   useScrollRestoration("raportit", status === "ready");
 
+  const packagePeriod = packageMonth.startsWith(`${year}`) ? packageMonth : `${year}-01`;
+
   return (
     <>
       <div className="space-y-6">
@@ -193,7 +248,7 @@ export default function ReportsPage() {
             onRetry={() => void load()}
           />
         )}
-        {status === "loading" && <LoadingState label="Lasketaan raporttia…" />}
+        {status === "loading" && <ReportSkeleton />}
         {status === "error" && (
           <ConnectionNotice
             error={loadFailure}
@@ -203,7 +258,7 @@ export default function ReportsPage() {
         )}
 
         {status === "ready" && report && (
-          <>
+          <div className={`space-y-6 ${fade}`}>
             <section className="mt-6 first:mt-0">
               <div className="mb-2 flex items-baseline justify-between gap-3 px-1 text-[13px] text-ink-2">
                 <h2 className="font-normal">Tulos</h2>
@@ -211,7 +266,7 @@ export default function ReportsPage() {
               <KeyValueList
                 rows={[
                   {
-                    label: "Tulos (veroton)",
+                    label: "Tulos ilman ALV:ta",
                     value: (
                       <span className={report.total.profitNet < 0 ? "text-danger" : undefined}>
                         {formatEur(report.total.profitNet)}
@@ -234,7 +289,6 @@ export default function ReportsPage() {
                       </Link>
                     ),
                   },
-                  { label: "Kuitteja", value: String(report.total.receiptCount) },
                   ...(report.total.missingVatCount > 0
                     ? [
                         {
@@ -250,31 +304,36 @@ export default function ReportsPage() {
               />
             </section>
 
-            <section className="mt-6 first:mt-0">
-              <div className="mb-2 flex items-baseline justify-between gap-3 px-1 text-[13px] text-ink-2">
-                <h2 className="font-normal">Kuukaudet</h2>
-              </div>
-              {report.months.length === 0 ? (
+            {/* What the figures are built from, and on which basis (SALES-01, SALES-37). */}
+            <p className="-mt-3 px-1 text-[13px] leading-relaxed text-ink-2">
+              {report.total.receiptCount} {report.total.receiptCount === 1 ? "kuitti" : "kuittia"} ja{" "}
+              {(report.total.invoiceCount ?? 0) + (report.total.creditNoteCount ?? 0)} myyntilaskua. Laskut
+              lasketaan laskun päivän mukaan, hyvityslasku vähentää myyntiä omalla kuukaudellaan.
+            </p>
+
+            {report.months.length === 0 ? (
+              <section className="mt-6 first:mt-0">
+                <div className="mb-2 px-1 text-[13px] text-ink-2">
+                  <h2 className="font-normal">Kuukaudet</h2>
+                </div>
                 <p className="rounded-card border border-line bg-surface px-4 py-4 text-[15px] text-ink-2">
                   Ei kirjauksia tälle vuodelle.
                 </p>
-              ) : (
-                <KeyValueList
-                  rows={report.months.map((month) => ({
-                    label: formatMonthShort(month.month!),
-                    value: (
-                      <Link
-                        href={receiptDrillHref({ month: month.month })}
-                        aria-label={`Avaa kuitit ${formatMonthShort(month.month!)}`}
-                        className={`${month.profitNet < 0 ? "text-danger" : "text-accent"} ${HIT44}`}
-                      >
-                        {formatEur(month.profitNet)}
-                      </Link>
-                    ),
-                  }))}
-                />
-              )}
-            </section>
+              </section>
+            ) : (
+              <Section title="Kuukaudet">
+                {report.months.map((month) => (
+                  <ListRow
+                    key={month.month}
+                    href={receiptDrillHref({ month: month.month })}
+                    title={formatMonthShort(month.month!)}
+                    amount={formatEur(month.profitNet)}
+                    secondary={`Tulot ${formatEur(month.incomeNet)} · Menot ${formatEur(month.expenseNet)}`}
+                    ariaLabel={`${formatMonthShort(month.month!)}, tulos ${formatEur(month.profitNet)}, tulot ${formatEur(month.incomeNet)}, menot ${formatEur(month.expenseNet)}`}
+                  />
+                ))}
+              </Section>
+            )}
 
             <Section title="Menot kategorioittain">
               {report.total.expenseByCategory.length === 0 ? (
@@ -298,8 +357,14 @@ export default function ReportsPage() {
                 {report.total.incomeByCategory.map((row) => (
                   <ListRow
                     key={row.category}
-                    href={receiptDrillHref({ type: "tulo", category: row.category })}
-                    ariaLabel={`Avaa kuitit: ${row.category}`}
+                    href={
+                      row.category === "Myyntilaskut"
+                        ? "/laskut"
+                        : row.category === "Hyvityslaskut"
+                          ? "/laskut?status=credited"
+                          : receiptDrillHref({ type: "tulo", category: row.category })
+                    }
+                    ariaLabel={`Avaa: ${row.category}`}
                     title={sentenceCase(row.category)}
                     amount={formatEur(row.net)}
                   />
@@ -311,47 +376,63 @@ export default function ReportsPage() {
               <div>
                 <p className="text-[15px] font-medium text-ink">Kirjanpitopaketti</p>
                 <p className="text-[13px] text-ink-2">
-                  Zip kaudelta: tuloslaskelma, ALV, CSV, kohdistukset ja tositteet.
+                  Zip kuukaudelta, neljännekseltä tai koko vuodelta: tuloslaskelma, ALV, CSV,
+                  kohdistukset ja tositteet.
                 </p>
               </div>
               <div className="flex gap-2">
                 <select
-                  aria-label="Paketin kuukausi"
-                  className={`${controlClass} flex-1`}
-                  value={packageMonth.startsWith(`${year}-`) ? packageMonth : `${year}-01`}
+                  aria-label="Paketin kausi"
+                  className={`${controlClass} min-w-0 flex-1`}
+                  value={packagePeriod}
                   onChange={(event) => setPackageMonth(event.target.value)}
                 >
-                  {Array.from({ length: 12 }, (_, index) => {
-                    const month = `${year}-${String(index + 1).padStart(2, "0")}`;
-                    return (
-                      <option key={month} value={month}>
-                        {formatMonthShort(month)}
+                  <optgroup label="Kuukausi">
+                    {Array.from({ length: 12 }, (_, index) => {
+                      const month = `${year}-${String(index + 1).padStart(2, "0")}`;
+                      return (
+                        <option key={month} value={month}>
+                          {formatMonthShort(month)}
+                        </option>
+                      );
+                    })}
+                  </optgroup>
+                  <optgroup label="Neljännes">
+                    {[1, 2, 3, 4].map((quarter) => (
+                      <option key={quarter} value={`${year}-Q${quarter}`}>
+                        {`Q${quarter}/${year}`}
                       </option>
-                    );
-                  })}
+                    ))}
+                  </optgroup>
+                  <option value={String(year)}>{`Koko vuosi ${year}`}</option>
                 </select>
                 <AuthedFileLink
-                  href={`/api/export/package?month=${packageMonth.startsWith(`${year}-`) ? packageMonth : `${year}-01`}`}
-                  fallbackName={`kirjanpitopaketti-${packageMonth.startsWith(`${year}-`) ? packageMonth : `${year}-01`}.zip`}
+                  href={`/api/export/package?month=${packagePeriod}`}
+                  fallbackName={`kirjanpito-${packagePeriod}.zip`}
                   title="Kirjanpitopaketti"
-                  className={buttonClass("primary", "shrink-0")}
+                  className={buttonClass("primary", "shrink-0 aria-busy:opacity-60")}
                 >
                   Lataa zip
                 </AuthedFileLink>
               </div>
             </Card>
 
-            <Section title="Vie CSV-tiedostona">
+            {/* The CSVs follow the year on screen (SALES-21); customers are not per period. */}
+            <Section title={`Vie CSV-tiedostona, ${year}`}>
               {EXPORTS.map((entry) => (
                 <DownloadRow
                   key={entry.type}
-                  href={`/api/export?type=${entry.type}`}
+                  href={
+                    entry.type === "customers"
+                      ? "/api/export?type=customers"
+                      : `/api/export?type=${entry.type}&year=${year}`
+                  }
                   title={entry.label}
-                  fallbackName={`${entry.type}.csv`}
+                  fallbackName={entry.type === "customers" ? "asiakkaat.csv" : `${entry.type}-${year}.csv`}
                 />
               ))}
             </Section>
-          </>
+          </div>
         )}
       </div>
     </>

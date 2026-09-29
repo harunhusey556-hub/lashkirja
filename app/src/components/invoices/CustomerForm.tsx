@@ -158,6 +158,9 @@ export function CustomerForm({
           onChange={(e) => set("name", e.target.value)}
           aria-required="true"
           maxLength={120}
+          autoCapitalize="words"
+          autoComplete="organization"
+          enterKeyHint="next"
           {...invalidFieldProps("cf-name", errors.name)}
         />
         {errors.name && (
@@ -176,6 +179,9 @@ export function CustomerForm({
             onChange={(e) => set("businessId", e.target.value)}
             placeholder="0201256-6"
             maxLength={20}
+            autoCapitalize="characters"
+            autoComplete="off"
+            enterKeyHint="next"
             {...invalidFieldProps("cf-business", errors.businessId)}
           />
           {errors.businessId && (
@@ -191,6 +197,8 @@ export function CustomerForm({
             value={values.defaultPaymentTermDays}
             onChange={(e) => set("defaultPaymentTermDays", e.target.value)}
             inputMode="numeric"
+            autoComplete="off"
+            enterKeyHint="next"
             {...invalidFieldProps("cf-term", errors.defaultPaymentTermDays)}
           />
           {errors.defaultPaymentTermDays && (
@@ -208,7 +216,10 @@ export function CustomerForm({
             className={field}
             value={values.email}
             onChange={(e) => set("email", e.target.value)}
+            type="email"
             inputMode="email"
+            autoComplete="email"
+            enterKeyHint="next"
             autoCapitalize="none"
             autoCorrect="off"
             spellCheck={false}
@@ -228,7 +239,10 @@ export function CustomerForm({
             className={field}
             value={values.phone}
             onChange={(e) => set("phone", e.target.value)}
+            type="tel"
             inputMode="tel"
+            autoComplete="tel"
+            enterKeyHint="next"
             maxLength={40}
           />
         </div>
@@ -242,6 +256,9 @@ export function CustomerForm({
           value={values.addressStreet}
           onChange={(e) => set("addressStreet", e.target.value)}
           maxLength={120}
+          autoComplete="street-address"
+          autoCapitalize="words"
+          enterKeyHint="next"
         />
         <div className="field-grid field-grid-3 pt-1">
           <input
@@ -251,6 +268,9 @@ export function CustomerForm({
             onChange={(e) => set("addressPostalCode", e.target.value)}
             placeholder="00100"
             maxLength={20}
+            inputMode="numeric"
+            autoComplete="postal-code"
+            enterKeyHint="next"
           />
           <input
             aria-label="Postitoimipaikka"
@@ -259,6 +279,9 @@ export function CustomerForm({
             onChange={(e) => set("addressCity", e.target.value)}
             placeholder="Helsinki"
             maxLength={80}
+            autoComplete="address-level2"
+            autoCapitalize="words"
+            enterKeyHint="next"
           />
         </div>
       </div>
@@ -271,6 +294,7 @@ export function CustomerForm({
           value={values.notes}
           onChange={(e) => set("notes", e.target.value)}
           maxLength={2000}
+          autoCapitalize="sentences"
         />
       </div>
 

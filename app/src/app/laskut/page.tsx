@@ -2,9 +2,10 @@
 
 import { Suspense, useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
-import { LoadingState, SkeletonList } from "@/components/AsyncState";
+import { useRouter, useSearchParams } from "next/navigation";
+import { SkeletonList } from "@/components/AsyncState";
 import { ConnectionNotice, EmptyState, StaleBanner } from "@/components/ScreenState";
+import BottomSheet from "@/components/BottomSheet";
 import {
   apiFetch,
   errorMessage,
@@ -13,16 +14,16 @@ import {
   redirectToLogin,
 } from "@/components/clientFetch";
 import { formatDayMonth, formatEur } from "@/lib/format";
-import { Plus, Repeat, Users } from "lucide-react";
+import { ChevronDown, Plus, Repeat, Search, Users } from "lucide-react";
 import {
   ActionPill,
   FilterChips,
   Icon,
   ListRow,
+  MoreMenu,
   PageTitle,
   Section,
   StatusTag,
-  SummaryCard,
 } from "@/components/ds";
 import { SALES_STATUS } from "@/lib/status-labels";
 import { detailHref } from "@/lib/routes";
@@ -35,10 +36,12 @@ import {
   type SalesStatusCounts,
 } from "@/lib/invoice-groups";
 
-import { Button } from "@/components/ui";
+import { Button, controlClass } from "@/components/ui";
 import { pageCacheFetchedAt, readPageCache, writePageCache } from "@/lib/page-cache";
 import { isForbidden } from "@/lib/screen-state";
 import { usePersistedState, useScrollRestoration } from "@/lib/list-ui-state";
+import { showToast } from "@/lib/toast";
+import { hapticNotify } from "@/lib/haptics";
 
 interface InvoiceSummary {
   id: string;
@@ -46,6 +49,7 @@ interface InvoiceSummary {
   reference: string;
   status: string;
   displayStatus: "draft" | "sent" | "paid" | "credited" | "overdue";
+  documentKind?: "invoice" | "credit_note";
   issueDate: string;
   dueDate: string;
   gross: number;
@@ -60,18 +64,25 @@ interface Aging {
   overdueCount: number;
 }
 
-const AGING_BUCKETS = ["1-30", "31-60", "61-90", "90+"] as const;
+interface MatchPreview {
+  preview: Array<{ invoiceNumber: number; customerName: string; amount: number }>;
+  suggestions: unknown[];
+}
 
-const ZERO_COUNTS: SalesStatusCounts = { draft: 0, sent: 0, overdue: 0, paid: 0, credited: 0 };
+const AGING_BUCKETS = ["1-30", "31-60", "61-90", "90+"] as const;
 
 /** "Lasku N, eräpäivä d.m." - "erääntyi" once overdue, no date at all while still a draft. */
 function rowSecondary(invoice: InvoiceSummary): string {
+  if (invoice.documentKind === "credit_note") return `Hyvityslasku ${invoice.number}`;
   if (invoice.displayStatus === "draft") return `Lasku ${invoice.number}`;
   const datePhrase = invoice.displayStatus === "overdue" ? "erääntyi" : "eräpäivä";
   return `Lasku ${invoice.number}, ${datePhrase} ${formatDayMonth(invoice.dueDate)}`;
 }
 
 function rowTrailing(invoice: InvoiceSummary) {
+  if (invoice.documentKind === "credit_note") {
+    return <StatusTag tone="neutral">Hyvityslasku</StatusTag>;
+  }
   if (invoice.displayStatus === "overdue") {
     return (
       <ActionPill href={detailHref("invoice", invoice.id)} ariaLabel={`Muistuta: ${invoice.customer.name}`}>
@@ -96,19 +107,14 @@ function rowTrailing(invoice: InvoiceSummary) {
  */
 export default function InvoicesPage() {
   return (
-    <Suspense
-      fallback={
-        <>
-          <LoadingState label="Haetaan laskuja…" />
-        </>
-      }
-    >
+    <Suspense fallback={<SkeletonList rows={4} />}>
       <InvoicesPageContent />
     </Suspense>
   );
 }
 
 function InvoicesPageContent() {
+  const router = useRouter();
   const searchParams = useSearchParams();
   const customerFilter = searchParams.get("customerId") ?? "";
   const monthFilter = /^\d{4}-(0[1-9]|1[0-2])$/.test(searchParams.get("month") || "")
@@ -116,10 +122,17 @@ function InvoicesPageContent() {
     : "";
   const statusFromUrl = searchParams.get("status");
 
+  const [search, setSearch] = usePersistedState("laskut.search", "");
+  const [query, setQuery] = useState(search.trim());
+  // Persisted (not just in-memory) so back-navigation restores the active
+  // tab instead of resetting the list to "Kaikki".
+  const [filter, setFilter] = usePersistedState<SalesFilterId>("laskut.filter", "all");
+  const [agingOpen, setAgingOpen] = usePersistedState("laskut.aging", false);
+
   // The cache only ever holds the unfiltered list, so a customer-scoped link
-  // must not paint it as if it were the filtered result.
+  // or a search must not paint it as if it were the filtered result.
   const cached =
-    customerFilter || monthFilter
+    customerFilter || monthFilter || query
       ? null
       : readPageCache<{ invoices: InvoiceSummary[]; aging: Aging }>("invoices");
   const [invoices, setInvoices] = useState<InvoiceSummary[]>(cached?.invoices ?? []);
@@ -127,20 +140,26 @@ function InvoicesPageContent() {
   const [status, setStatus] = useState<"loading" | "ready" | "error">(
     cached ? "ready" : "loading"
   );
-  // Persisted (not just in-memory) so back-navigation restores the active
-  // tab instead of resetting the list to "Kaikki".
-  const [filter, setFilter] = usePersistedState<SalesFilterId>("laskut.filter", "all");
   useEffect(() => {
     if (statusFromUrl && (SALES_FILTER_IDS as readonly string[]).includes(statusFromUrl)) {
       setFilter(statusFromUrl as SalesFilterId);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [statusFromUrl]);
-  const [message, setMessage] = useState<string | null>(null);
   const [loadFailure, setLoadFailure] = useState<unknown>(null);
-  const [busy, setBusy] = useState(false);
   const [registryCounts, setRegistryCounts] = useState<{ customers?: number; recurring?: number }>({});
-  const [statusCounts, setStatusCounts] = useState<SalesStatusCounts>(ZERO_COUNTS);
+  // null until the counts are known: a chip never shows a made-up "0" (SALES-18).
+  const [statusCounts, setStatusCounts] = useState<SalesStatusCounts | null>(null);
+  const [matchPreview, setMatchPreview] = useState<MatchPreview | null>(null);
+  const [matchLoading, setMatchLoading] = useState(false);
+  const [matchBusy, setMatchBusy] = useState(false);
+  const [matchError, setMatchError] = useState("");
+
+  // Debounced search: one request per pause in typing, not per keystroke.
+  useEffect(() => {
+    const timer = window.setTimeout(() => setQuery(search.trim()), 250);
+    return () => window.clearTimeout(timer);
+  }, [search]);
 
   // The active filter's status is sent to the server (as before): a fetch
   // capped at INVOICE_LIST_LIMIT rows and then filtered in JS would hide an
@@ -153,6 +172,7 @@ function InvoicesPageContent() {
       if (filter !== "all") params.set("status", filter);
       if (customerFilter) params.set("customerId", customerFilter);
       if (monthFilter) params.set("month", monthFilter);
+      if (query) params.set("search", query);
       const response = await apiFetch(`/api/invoices?${params.toString()}`, {
         credentials: "include",
         signal,
@@ -162,7 +182,7 @@ function InvoicesPageContent() {
         "Laskujen haku epäonnistui"
       );
       if (signal?.aborted) return;
-      if (filter === "all" && !customerFilter && !monthFilter) writePageCache("invoices", data);
+      if (filter === "all" && !customerFilter && !monthFilter && !query) writePageCache("invoices", data);
       setInvoices(data.invoices);
       setAging(data.aging);
       setLoadFailure(null);
@@ -174,10 +194,9 @@ function InvoicesPageContent() {
         return;
       }
       setLoadFailure(error);
-      setMessage(errorMessage(error, "Laskujen haku epäonnistui"));
       setStatus((current) => (current === "ready" ? "ready" : "error"));
     }
-  }, [filter, customerFilter, monthFilter]);
+  }, [filter, customerFilter, monthFilter, query]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -189,25 +208,32 @@ function InvoicesPageContent() {
   // Filter-chip counts: fetched separately from the (capped) list above, so
   // every chip stays correct regardless of which tab is active. Scoped the
   // same way as the list (customerId/month), but never by status/filter.
-  useEffect(() => {
-    const controller = new AbortController();
+  const loadCounts = useCallback((signal?: AbortSignal) => {
     const params = new URLSearchParams();
     if (customerFilter) params.set("customerId", customerFilter);
     if (monthFilter) params.set("month", monthFilter);
-    apiFetch(`/api/invoices/counts?${params.toString()}`, {
-      credentials: "include",
-      signal: controller.signal,
-    })
+    apiFetch(`/api/invoices/counts?${params.toString()}`, { credentials: "include", signal })
       .then((res) => readJson<{ counts: SalesStatusCounts }>(res, "Määrien haku epäonnistui"))
       .then((data) => setStatusCounts(data.counts))
       .catch((error) => {
-        if (controller.signal.aborted) return;
+        if (signal?.aborted) return;
         if (isUnauthorized(error)) redirectToLogin();
-        // Otherwise leave the last-known (or zero) counts - the invoice list
-        // itself still loads independently of this fetch.
+        // Otherwise the chips stay without numbers - the list still loads.
       });
-    return () => controller.abort();
   }, [customerFilter, monthFilter]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    loadCounts(controller.signal);
+    return () => controller.abort();
+  }, [loadCounts]);
+
+  // A remembered filter whose chip no longer exists (the last credited
+  // invoice is gone) falls back to "Kaikki" instead of an empty, unmarked list.
+  useEffect(() => {
+    if (statusCounts && filter === "credited" && statusCounts.credited === 0) setFilter("all");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [statusCounts, filter]);
 
   // Best-effort counts for the registry rows at the bottom of the page; a
   // failure here must not block the invoice list itself, so errors are
@@ -227,89 +253,164 @@ function InvoicesPageContent() {
 
   useScrollRestoration("laskut", status === "ready");
 
+  /** Step 1: show what a run would book, before anything is booked (SALES-06). */
+  async function previewBankMatch() {
+    if (matchLoading) return;
+    setMatchLoading(true);
+    setMatchError("");
+    try {
+      const response = await apiFetch("/api/invoices/match", { credentials: "include" });
+      setMatchPreview(await readJson<MatchPreview>(response, "Kohdistuksen tarkistus epäonnistui"));
+    } catch (error) {
+      if (isUnauthorized(error)) {
+        redirectToLogin();
+        return;
+      }
+      showToast({ tone: "error", text: errorMessage(error, "Kohdistuksen tarkistus epäonnistui") });
+    } finally {
+      setMatchLoading(false);
+    }
+  }
+
+  /** Step 2: book the previewed payments. */
   async function runBankMatch() {
-    setBusy(true);
-    setMessage(null);
+    setMatchBusy(true);
+    setMatchError("");
     try {
       const response = await apiFetch("/api/invoices/match", {
         method: "POST",
         credentials: "include",
       });
-      const result = await readJson<{
-        applied: unknown[];
-        suggestions: unknown[];
-      }>(response, "Kohdistus epäonnistui");
-      setMessage(
-        `Kohdistettiin ${result.applied.length} maksua viitenumerolla. ` +
-          `${result.suggestions.length} mahdollista osumaa vaatii tarkistuksen.`
+      const result = await readJson<{ applied: unknown[]; suggestions: unknown[] }>(
+        response,
+        "Kohdistus epäonnistui"
       );
+      setMatchPreview(null);
+      void hapticNotify("success");
+      showToast({
+        tone: "success",
+        text:
+          result.applied.length === 1
+            ? "1 maksu kohdistettiin laskulle"
+            : `${result.applied.length} maksua kohdistettiin laskuille`,
+      });
+      loadCounts();
       await load();
     } catch (error) {
-      setMessage(errorMessage(error, "Kohdistus epäonnistui"));
+      setMatchError(errorMessage(error, "Kohdistus epäonnistui"));
+      void hapticNotify("error");
     } finally {
-      setBusy(false);
+      setMatchBusy(false);
     }
   }
 
-  const filterChips = salesFilterChips(statusCounts);
+  const filterChips = salesFilterChips(
+    statusCounts ?? { draft: 0, sent: 0, overdue: 0, paid: 0, credited: 0 }
+  ).map((chip) => (statusCounts ? chip : { ...chip, count: undefined }));
   const groups = salesInvoiceGroups(invoices, filter);
   const visibleCount = groups.reduce((sum, group) => sum + group.items.length, 0);
-  const filtered = filter !== "all" || Boolean(customerFilter);
+  const filtered = filter !== "all" || Boolean(customerFilter) || Boolean(query);
   const reachedListLimit = invoices.length === INVOICE_LIST_LIMIT;
+  const noInvoicesAtAll =
+    status === "ready" && !filtered && !monthFilter && visibleCount === 0;
+  const matchCount = matchPreview?.preview.length ?? 0;
 
   return (
     <div className="space-y-6">
       <PageTitle
         title="Myynti"
         action={
-          <Link
-            href={customerFilter ? `/laskut/uusi?customerId=${encodeURIComponent(customerFilter)}` : "/laskut/uusi"}
-            className="active-press relative inline-flex min-h-9 items-center gap-1 rounded-full bg-ink px-3.5 text-[13px] font-semibold text-canvas before:absolute before:inset-x-0 before:-inset-y-1 before:content-['']"
-          >
-            <Icon icon={Plus} size="inline" strokeWidth={2.5} />
-            Uusi lasku
-          </Link>
+          <div className="flex items-center gap-2">
+            <MoreMenu
+              label="Myynnin toiminnot"
+              items={[
+                {
+                  label: matchLoading ? "Tarkistetaan maksuja…" : "Kohdista pankkimaksut laskuille",
+                  onSelect: () => void previewBankMatch(),
+                  disabled: matchLoading || status !== "ready",
+                },
+                { label: "Asiakkaat", onSelect: () => router.push("/asiakkaat") },
+                { label: "Toistuvat laskut", onSelect: () => router.push("/toistuvat") },
+              ]}
+            />
+            <Link
+              href={customerFilter ? `/laskut/uusi?customerId=${encodeURIComponent(customerFilter)}` : "/laskut/uusi"}
+              className="active-press relative inline-flex min-h-9 items-center gap-1 rounded-full bg-ink px-3.5 text-[13px] font-semibold text-canvas before:absolute before:inset-x-0 before:-inset-y-1 before:content-['']"
+            >
+              <Icon icon={Plus} size="inline" strokeWidth={2.5} />
+              Uusi lasku
+            </Link>
+          </div>
         }
       />
 
-      {aging && (
+      {aging && !noInvoicesAtAll && (
+        <div className="overflow-hidden rounded-card border border-line bg-surface">
+          <button
+            type="button"
+            aria-expanded={agingOpen}
+            aria-controls="laskut-aging"
+            onClick={() => setAgingOpen((open) => !open)}
+            className="active-press flex w-full items-start justify-between gap-3 p-4 text-left"
+          >
+            <span>
+              <span className="block text-[13px] text-ink-2">Avoinna</span>
+              <span className="mt-0.5 block text-[28px] font-bold tracking-[-0.02em] tabular-nums text-ink">
+                {formatEur(aging.totalOpen)}
+              </span>
+              {aging.overdueCount > 0 ? (
+                <span className="mt-0.5 block text-sm text-accent">{formatEur(aging.overdue)} myöhässä</span>
+              ) : null}
+            </span>
+            <span className="mt-1 flex items-center gap-1 text-[13px] text-ink-2">
+              Erittely
+              <Icon
+                icon={ChevronDown}
+                size="inline"
+                className={`transition-transform duration-[var(--dur-pop)] ${agingOpen ? "rotate-180" : ""}`}
+              />
+            </span>
+          </button>
+          {agingOpen && (
+            <div
+              id="laskut-aging"
+              className="grid grid-cols-4 divide-x divide-line border-t border-line text-center"
+            >
+              {AGING_BUCKETS.map((bucket) => (
+                <div key={bucket} className="px-2 py-3">
+                  <p className="text-[11px] text-ink-2">{bucket} pv myöhässä</p>
+                  <p className="mt-0.5 text-[13px] font-medium tabular-nums text-ink">
+                    {formatEur((aging.buckets[bucket]?.openCents ?? 0) / 100)}
+                  </p>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {!noInvoicesAtAll && (
         <>
-          <SummaryCard
-            label="Avoinna"
-            value={formatEur(aging.totalOpen)}
-            note={aging.overdueCount > 0 ? `${formatEur(aging.overdue)} myöhässä` : undefined}
-          />
-          <div className="grid grid-cols-4 divide-x divide-line overflow-hidden rounded-card border border-line bg-surface text-center">
-            {AGING_BUCKETS.map((bucket) => (
-              <div key={bucket} className="px-2 py-3">
-                <p className="text-[11px] text-ink-2">{bucket} pv</p>
-                <p className="mt-0.5 text-[13px] font-medium tabular-nums text-ink">
-                  {formatEur((aging.buckets[bucket]?.openCents ?? 0) / 100)}
-                </p>
-              </div>
-            ))}
+          <div className="relative">
+            <span aria-hidden className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-ink-2">
+              <Icon icon={Search} size="inline" />
+            </span>
+            <input
+              type="search"
+              aria-label="Hae laskuja"
+              placeholder="Hae nimellä tai numerolla"
+              className={`${controlClass} min-h-11 pl-10`}
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              enterKeyHint="search"
+              autoComplete="off"
+              autoCorrect="off"
+            />
           </div>
+
+          <FilterChips label="Suodata laskut" items={filterChips} value={filter} onChange={setFilter} />
         </>
       )}
-
-      <Button
-        type="button"
-        variant="secondary"
-        onClick={() => void runBankMatch()}
-        busy={busy}
-        busyLabel="Kohdistetaan…"
-        className="w-full"
-      >
-        Kohdista maksut
-      </Button>
-
-      {message && (
-        <p className="rounded-card bg-accent-soft px-4 py-3 text-sm text-ink" role="status">
-          {message}
-        </p>
-      )}
-
-      <FilterChips label="Suodata laskut" items={filterChips} value={filter} onChange={setFilter} />
 
       {loadFailure != null && status === "ready" && (
         <StaleBanner fetchedAt={pageCacheFetchedAt("invoices")} onRetry={() => void load()} />
@@ -321,7 +422,7 @@ function InvoicesPageContent() {
         ) : (
           <ConnectionNotice
             error={loadFailure}
-            fallback={message || "Laskujen haku epäonnistui"}
+            fallback="Laskujen haku epäonnistui"
             onRetry={() => void load()}
           />
         ))}
@@ -343,19 +444,31 @@ function InvoicesPageContent() {
             </Section>
           ))}
 
-          {visibleCount === 0 && (
-            <EmptyState
-              kind={filtered ? "filtered" : "records"}
-              title={filtered ? "Ei laskuja tällä suodattimella" : "Ei laskuja vielä"}
-              body={filtered ? "Kokeile toista suodatinta." : "Luo ensimmäinen myyntilasku."}
-              onClear={filtered ? () => setFilter("all") : undefined}
-              clearLabel="Tyhjennä suodatin"
-            />
-          )}
+          {visibleCount === 0 &&
+            (filtered ? (
+              <EmptyState
+                kind="filtered"
+                title={query ? "Hakua vastaavia laskuja ei löytynyt" : "Ei laskuja tällä suodattimella"}
+                body={query ? "Kokeile asiakkaan nimeä tai laskun numeroa." : "Kokeile toista suodatinta."}
+                onClear={() => {
+                  setFilter("all");
+                  setSearch("");
+                }}
+                clearLabel={query ? "Tyhjennä haku" : "Tyhjennä suodatin"}
+              />
+            ) : (
+              <EmptyState
+                kind="records"
+                title="Ei laskuja vielä"
+                body="Luo ensimmäinen myyntilasku. Se tallentuu luonnokseksi, kunnes lähetät sen."
+                onCreate={() => router.push("/laskut/uusi")}
+                createLabel="Luo lasku"
+              />
+            ))}
 
           {reachedListLimit && (
             <p className="text-[13px] text-ink-2">
-              Näytetään {INVOICE_LIST_LIMIT} uusinta laskua. Valitse suodatin nähdäksesi kaikki.
+              Näytetään {INVOICE_LIST_LIMIT} uusinta laskua. Hae tai valitse suodatin nähdäksesi muut.
             </p>
           )}
         </>
@@ -379,6 +492,83 @@ function InvoicesPageContent() {
           href="/toistuvat"
         />
       </Section>
+
+      <BottomSheet
+        isOpen={matchPreview !== null}
+        onClose={() => {
+          setMatchPreview(null);
+          setMatchError("");
+        }}
+        title="Kohdista pankkimaksut"
+        labelledBy="match-sheet-title"
+      >
+        {matchPreview && (
+          <div className="space-y-3 px-5 py-4 sheet-safe-bottom">
+            {matchCount === 0 ? (
+              <p className="text-[15px] text-ink">
+                Tiliotteilla ei ole maksuja, joiden viitenumero vastaisi avointa laskua.
+              </p>
+            ) : (
+              <>
+                <p className="text-[15px] text-ink">
+                  {matchCount === 1
+                    ? "Viitenumero täsmää yhteen maksuun. Se kirjataan laskulle:"
+                    : `Viitenumero täsmää ${matchCount} maksuun. Ne kirjataan laskuille:`}
+                </p>
+                <div className="overflow-hidden rounded-card border border-line bg-surface divide-y divide-line">
+                  {matchPreview.preview.map((row) => (
+                    <div
+                      key={`${row.invoiceNumber}-${row.amount}`}
+                      className="flex items-center justify-between gap-3 px-4 py-3 text-[15px]"
+                    >
+                      <span className="min-w-0 truncate text-ink">
+                        Lasku {row.invoiceNumber}, {row.customerName}
+                      </span>
+                      <span className="shrink-0 tabular-nums text-ink">{formatEur(row.amount)}</span>
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
+            {matchPreview.suggestions.length > 0 && (
+              <p className="text-[13px] text-ink-2">
+                {matchPreview.suggestions.length === 1
+                  ? "Lisäksi 1 maksu täsmää summaltaan. Se ei kirjaudu automaattisesti, vaan tarkistat sen laskulla."
+                  : `Lisäksi ${matchPreview.suggestions.length} maksua täsmää summaltaan. Ne eivät kirjaudu automaattisesti, vaan tarkistat ne laskuilla.`}
+              </p>
+            )}
+            {matchError && (
+              <p className="text-sm text-danger" role="alert">
+                {matchError}
+              </p>
+            )}
+            <div className="flex gap-2">
+              {matchCount > 0 && (
+                <Button
+                  type="button"
+                  className="flex-1"
+                  busy={matchBusy}
+                  busyLabel="Kohdistetaan…"
+                  onClick={() => void runBankMatch()}
+                >
+                  Kohdista
+                </Button>
+              )}
+              <Button
+                type="button"
+                variant="secondary"
+                className="flex-1"
+                onClick={() => {
+                  setMatchPreview(null);
+                  setMatchError("");
+                }}
+              >
+                {matchCount > 0 ? "Peruuta" : "Sulje"}
+              </Button>
+            </div>
+          </div>
+        )}
+      </BottomSheet>
     </div>
   );
 }

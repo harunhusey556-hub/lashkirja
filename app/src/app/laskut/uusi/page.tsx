@@ -1,20 +1,27 @@
 "use client";
 
-import { Suspense, useEffect, useRef, useState } from "react";
-import Link from "next/link";
+import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { LoadingState } from "@/components/AsyncState";
-import { InvoiceForm, type InvoicePayload } from "@/components/invoices/InvoiceForm";
+import {
+  InvoiceForm,
+  type InvoiceFormValues,
+  type InvoicePayload,
+} from "@/components/invoices/InvoiceForm";
+import { QuickCustomerSheet, type CreatedCustomer } from "@/components/invoices/QuickCustomerSheet";
 import {
   apiFetch,
   isUnauthorized,
   readJson,
   redirectToLogin,
 } from "@/components/clientFetch";
+import { ConnectionNotice, EmptyState } from "@/components/ScreenState";
 import { newIdempotencyKey } from "@/lib/idempotency-key";
 import { armNavigation } from "@/lib/nav-direction";
 import { DETAIL_ROUTES, detailHref } from "@/lib/routes";
-import { PageTitle } from "@/components/ds";
+import { writePageCache } from "@/lib/page-cache";
+import { showToast } from "@/lib/toast";
+import { hapticNotify } from "@/lib/haptics";
+import { PageTitle, Skeleton, SkeletonCard, SkeletonGroup } from "@/components/ds";
 
 interface CustomerOption {
   id: string;
@@ -22,9 +29,66 @@ interface CustomerOption {
   defaultPaymentTermDays: number;
 }
 
+/** The draft invoice being edited (the fields the form needs, plus the version). */
+interface EditableInvoice {
+  id: string;
+  status: string;
+  updatedAt: string;
+  customer: { id: string };
+  issueDate: string;
+  dueDate: string;
+  notes: string | null;
+  lines: Array<{ description: string; quantity: number; unit: string; unitPrice: number; vatRate: number }>;
+}
+
+function decimalText(value: number, fixed?: number): string {
+  return (fixed === undefined ? String(value) : value.toFixed(fixed)).replace(".", ",");
+}
+
+function toFormValues(invoice: EditableInvoice): Partial<InvoiceFormValues> {
+  return {
+    customerId: invoice.customer.id,
+    issueDate: invoice.issueDate.slice(0, 10),
+    dueDate: invoice.dueDate.slice(0, 10),
+    notes: invoice.notes ?? "",
+    lines: invoice.lines.map((line) => ({
+      description: line.description,
+      quantity: decimalText(line.quantity),
+      unit: line.unit,
+      unitPrice: decimalText(line.unitPrice, 2),
+      vatRate: line.vatRate,
+    })),
+  };
+}
+
+/** The form at its final layout while customers (and an edited invoice) load. */
+function FormSkeleton() {
+  return (
+    <SkeletonGroup label="Ladataan lomaketta" className="space-y-6">
+      <SkeletonCard className="space-y-4">
+        <Skeleton className="h-3 w-16" />
+        <Skeleton radius="card" className="h-11 w-full" />
+        <div className="grid grid-cols-2 gap-3">
+          <Skeleton radius="card" className="h-11" />
+          <Skeleton radius="card" className="h-11" />
+        </div>
+      </SkeletonCard>
+      <SkeletonCard className="space-y-3">
+        <Skeleton className="h-3 w-14" />
+        <Skeleton radius="card" className="h-11 w-full" />
+        <div className="grid grid-cols-3 gap-2">
+          <Skeleton radius="card" className="h-11" />
+          <Skeleton radius="card" className="h-11" />
+          <Skeleton radius="card" className="h-11" />
+        </div>
+      </SkeletonCard>
+    </SkeletonGroup>
+  );
+}
+
 export default function NewInvoiceRoute() {
   return (
-    <Suspense fallback={<LoadingState label="Haetaan asiakkaita…" />}>
+    <Suspense fallback={<FormSkeleton />}>
       <NewInvoicePage />
     </Suspense>
   );
@@ -34,16 +98,39 @@ function NewInvoicePage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const customerId = searchParams.get("customerId") ?? "";
+  const editId = searchParams.get("edit") ?? "";
   const [customers, setCustomers] = useState<CustomerOption[] | null>(null);
+  const [editing, setEditing] = useState<EditableInvoice | null>(null);
+  const [loadError, setLoadError] = useState<unknown>(null);
+  const [attempt, setAttempt] = useState(0);
   const [busy, setBusy] = useState(false);
+  const [addOpen, setAddOpen] = useState(false);
+  const [justCreated, setJustCreated] = useState<string | undefined>(undefined);
   const createKey = useRef(newIdempotencyKey());
 
   useEffect(() => {
     let cancelled = false;
-    void apiFetch("/api/customers", { credentials: "include" })
-      .then((response) => readJson<{ customers: CustomerOption[] }>(response, ""))
-      .then((data) => {
-        if (!cancelled) setCustomers(data.customers ?? []);
+    // A failed load is an error with a retry, never "add a customer first"
+    // (SALES-09): the customers may well exist.
+    const jobs: Promise<unknown>[] = [
+      apiFetch("/api/customers", { credentials: "include" })
+        .then((response) => readJson<{ customers: CustomerOption[] }>(response, "Asiakkaiden haku epäonnistui"))
+        .then((data) => {
+          if (!cancelled) setCustomers(data.customers ?? []);
+        }),
+    ];
+    if (editId) {
+      jobs.push(
+        apiFetch(`/api/invoices/${editId}`, { credentials: "include" })
+          .then((response) => readJson<{ invoice: EditableInvoice }>(response, "Laskun haku epäonnistui"))
+          .then((data) => {
+            if (!cancelled) setEditing(data.invoice);
+          })
+      );
+    }
+    Promise.all(jobs)
+      .then(() => {
+        if (!cancelled) setLoadError(null);
       })
       .catch((error: unknown) => {
         if (cancelled) return;
@@ -51,17 +138,18 @@ function NewInvoicePage() {
           redirectToLogin();
           return;
         }
-        setCustomers([]);
+        setLoadError(error);
       });
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [editId, attempt]);
 
-  function leave() {
-    armNavigation("/laskut", "back");
-    router.push("/laskut");
-  }
+  const leave = useCallback(() => {
+    const target = editId ? detailHref("invoice", editId) : "/laskut";
+    armNavigation(editId ? DETAIL_ROUTES.invoice : "/laskut", "back");
+    router.push(target);
+  }, [editId, router]);
 
   async function createInvoice(payload: InvoicePayload) {
     setBusy(true);
@@ -77,6 +165,7 @@ function NewInvoicePage() {
       });
       const data = await readJson<{ invoice: { id: string } }>(response, "Laskun luonti epäonnistui");
       createKey.current = newIdempotencyKey();
+      void hapticNotify("success");
       // armNavigation keys off the pathname the shell later reads with
       // usePathname(), which never includes the query string, so it arms
       // the bare detail path here while the actual navigation carries ?id=.
@@ -90,30 +179,96 @@ function NewInvoicePage() {
     }
   }
 
-  if (!customers) return <LoadingState label="Haetaan asiakkaita…" />;
+  async function saveEdit(payload: InvoicePayload) {
+    if (!editing) return;
+    setBusy(true);
+    try {
+      // expectedUpdatedAt: an edit made elsewhere in the meantime is a
+      // conflict with a clear message, never a silent overwrite.
+      const response = await apiFetch(`/api/invoices/${editing.id}`, {
+        method: "PATCH",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...payload, expectedUpdatedAt: editing.updatedAt }),
+      });
+      const data = await readJson<{ invoice: { id: string } }>(response, "Muutosten tallennus epäonnistui");
+      writePageCache(`invoice:${editing.id}`, data.invoice);
+      void hapticNotify("success");
+      showToast({ tone: "success", text: "Muutokset tallennettiin" });
+      armNavigation(DETAIL_ROUTES.invoice, "back");
+      router.replace(detailHref("invoice", editing.id));
+    } catch (error) {
+      if (isUnauthorized(error)) redirectToLogin();
+      throw error;
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function onCustomerCreated(customer: CreatedCustomer) {
+    setCustomers((current) => [...(current ?? []), customer].sort((a, b) => a.name.localeCompare(b.name, "fi")));
+    setJustCreated(customer.id);
+  }
+
+  const title = editId ? "Muokkaa laskua" : "Uusi lasku";
+  const subtitle = editId
+    ? "Luonnos päivittyy, kun tallennat."
+    : "Luonnos tallentuu tälle laitteelle, kunnes lähetät laskun.";
+  const ready = customers !== null && (!editId || editing !== null);
 
   return (
     <div className="space-y-6">
-      <PageTitle title="Uusi lasku" subtitle="Luonnos tallentuu tälle laitteelle, kunnes lähetät laskun." />
-      {customers.length === 0 ? (
-        <p className="px-1 text-[15px] text-ink-2">
-          Lisää ensin asiakas{" "}
-          <Link className="text-accent" href="/asiakkaat">
-            Asiakkaat
-          </Link>
-          -sivulla.
-        </p>
+      <PageTitle title={title} subtitle={subtitle} />
+      {loadError != null && !ready ? (
+        <ConnectionNotice
+          error={loadError}
+          fallback={editId ? "Laskun haku epäonnistui" : "Asiakkaiden haku epäonnistui"}
+          onRetry={() => setAttempt((value) => value + 1)}
+        />
+      ) : !ready ? (
+        <FormSkeleton />
+      ) : editing && editing.status !== "draft" ? (
+        <EmptyState
+          kind="records"
+          title="Laskua ei voi enää muokata"
+          body="Vain luonnosta voi muokata. Lähetetty lasku korjataan hyvityslaskulla."
+          onCreate={leave}
+          createLabel="Takaisin laskuun"
+        />
+      ) : customers.length === 0 ? (
+        <EmptyState
+          kind="records"
+          title="Lisää ensin asiakas"
+          body="Laskulle tarvitaan asiakas. Voit lisätä sen tästä, ja se valitaan laskulle."
+          onCreate={() => setAddOpen(true)}
+          createLabel="Lisää asiakas"
+        />
       ) : (
         <InvoiceForm
+          key={editing ? `edit-${editing.id}` : "new"}
           customers={customers}
-          submitLabel="Luo lasku"
+          submitLabel={editing ? "Tallenna muutokset" : "Luo lasku"}
           busy={busy}
-          draftKey="invoice:new"
-          initial={customerId ? { customerId } : undefined}
-          onSubmit={createInvoice}
+          draftKey={editing ? `invoice:edit:${editing.id}` : "invoice:new"}
+          initial={
+            editing
+              ? toFormValues(editing)
+              : customerId || justCreated
+                ? { customerId: customerId || justCreated }
+                : undefined
+          }
+          onAddCustomer={() => setAddOpen(true)}
+          selectCustomerId={justCreated}
+          onSubmit={editing ? saveEdit : createInvoice}
           onCancel={leave}
         />
       )}
+
+      <QuickCustomerSheet
+        isOpen={addOpen}
+        onClose={() => setAddOpen(false)}
+        onCreated={onCustomerCreated}
+      />
     </div>
   );
 }

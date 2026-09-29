@@ -19,7 +19,8 @@ import { formatEur } from "@/lib/format";
 import { Plus } from "lucide-react";
 import { Card, Icon, ListRow, PageTitle, Section, StatusTag, SummaryCard } from "@/components/ds";
 
-import { Button, controlClass } from "@/components/ui";
+import { Button, buttonClass, controlClass } from "@/components/ui";
+import { showToast } from "@/lib/toast";
 import { newIdempotencyKey } from "@/lib/idempotency-key";
 import { pageCacheFetchedAt, readPageCache, writePageCache } from "@/lib/page-cache";
 import { usePersistedState, useScrollRestoration } from "@/lib/list-ui-state";
@@ -109,7 +110,9 @@ export default function CustomersPage() {
         response,
         "Asiakkaiden haku epäonnistui"
       );
-      writePageCache("customers", data.customers);
+      // Only the full list is cached: a search or archive result must never
+      // paint later as if it were the whole customer list (SALES-34).
+      if (!showArchived && !search.trim()) writePageCache("customers", data.customers);
       setCustomers(data.customers);
       setLoadFailure(null);
       setStatus("ready");
@@ -118,8 +121,9 @@ export default function CustomersPage() {
         redirectToLogin();
         return;
       }
+      // One place for the failure (SALES-18): the notice or the stale banner,
+      // never a second raw-text banner above it.
       setLoadFailure(error);
-      setMessage(errorMessage(error, "Asiakkaiden haku epäonnistui"));
       setStatus(readPageCache("customers") ? "ready" : "error");
     }
   }, [search, showArchived]);
@@ -188,7 +192,10 @@ export default function CustomersPage() {
         body: JSON.stringify({ csv, commit: true }),
       });
       const data = await readJson<{ created: number }>(response, "Tuonti epäonnistui");
-      setMessage(`Tuotiin ${data.created} asiakasta.`);
+      showToast({
+        tone: "success",
+        text: data.created === 1 ? "1 asiakas tuotiin" : `${data.created} asiakasta tuotiin`,
+      });
       setImportOpen(false);
       setCsvRows(null);
       await load();
@@ -200,6 +207,25 @@ export default function CustomersPage() {
   }
 
   const totalOpen = customers.reduce((sum, customer) => sum + customer.openBalance, 0);
+  const csvValid = csvRows?.filter((row) => row.errors.length === 0).length ?? 0;
+  const csvInvalid = (csvRows?.length ?? 0) - csvValid;
+
+  /** A .csv from Files or iCloud, read on the device; same check as pasted text (SALES-23). */
+  async function pickCsvFile(file: File | undefined) {
+    if (!file) return;
+    if (file.size > 1_000_000) {
+      showToast({ tone: "error", text: "Tiedosto on liian suuri. Enintään 1 Mt." });
+      return;
+    }
+    try {
+      const text = await file.text();
+      setCsv(text);
+      setCsvRows(null);
+      showToast({ text: `${file.name} luettiin. Tarkista rivit ennen tuontia.` });
+    } catch {
+      showToast({ tone: "error", text: "Tiedostoa ei voitu lukea." });
+    }
+  }
   const filtered = Boolean(search) || showArchived;
 
   return (
@@ -220,7 +246,7 @@ export default function CustomersPage() {
 
       {status === "ready" && customers.length > 0 && (
         <SummaryCard
-          label="Avoinna"
+          label={filtered ? "Avoinna, näkyvät asiakkaat" : "Avoinna"}
           value={formatEur(totalOpen)}
           note={`${customers.length} asiakasta`}
           noteTone="muted"
@@ -235,10 +261,14 @@ export default function CustomersPage() {
 
       <div className="flex flex-wrap gap-2">
         <input
+          type="search"
           aria-label="Hae asiakasta"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           placeholder="Hae nimellä"
+          enterKeyHint="search"
+          autoComplete="off"
+          autoCorrect="off"
           className={`${controlClass} min-w-0 flex-1`}
         />
         <Button type="button" variant="secondary" onClick={() => setImportOpen((open) => !open)}>
@@ -249,6 +279,21 @@ export default function CustomersPage() {
       {importOpen && (
         <Card className="space-y-3">
           <p className="text-[15px] font-medium text-ink">Tuo asiakkaita</p>
+          <p className="text-[13px] text-ink-2">
+            Valitse CSV-tiedosto tai liitä sen sisältö. Ensimmäinen rivi on otsikko.
+          </p>
+          <label className={buttonClass("secondary", "w-full cursor-pointer")}>
+            Valitse tiedosto
+            <input
+              type="file"
+              accept=".csv,text/csv,text/plain"
+              className="sr-only"
+              onChange={(event) => {
+                void pickCsvFile(event.target.files?.[0]);
+                event.target.value = "";
+              }}
+            />
+          </label>
           <textarea
             aria-label="CSV-tiedosto"
             className={`${controlClass} min-h-28 p-3`}
@@ -267,9 +312,14 @@ export default function CustomersPage() {
               disabled={busy || !csvRows || csvRows.every((row) => row.errors.length > 0)}
               onClick={() => void commitCsv()}
             >
-              Tuo kelvolliset
+              {csvRows && csvValid > 0 ? `Tuo ${csvValid} kelvollista` : "Tuo kelvolliset"}
             </Button>
           </div>
+          {csvRows && (
+            <p className="text-sm font-medium text-ink" role="status">
+              {csvValid} kelvollista{csvInvalid > 0 ? `, ${csvInvalid} virheellistä (ei tuoda)` : ""}
+            </p>
+          )}
           {csvRows && (
             <ul className="space-y-1 text-sm">
               {csvRows.map((row) => (
