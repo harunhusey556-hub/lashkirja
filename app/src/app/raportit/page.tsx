@@ -286,7 +286,7 @@ export default function ReportsPage() {
                   {
                     label: "Tulot",
                     value: (
-                      <Link href={receiptDrillHref({ type: "tulo" })} aria-label="Avaa tulokuitit" className={`text-accent ${HIT44}`}>
+                      <Link href={receiptDrillHref({ type: "tulo" })} aria-label={`Avaa tulokuitit, ${formatEur(report.total.incomeNet)}`} className={`text-accent ${HIT44}`}>
                         {formatEur(report.total.incomeNet)}
                       </Link>
                     ),
@@ -294,7 +294,7 @@ export default function ReportsPage() {
                   {
                     label: "Menot",
                     value: (
-                      <Link href={receiptDrillHref({ type: "meno" })} aria-label="Avaa menokuitit" className={`text-accent ${HIT44}`}>
+                      <Link href={receiptDrillHref({ type: "meno" })} aria-label={`Avaa menokuitit, ${formatEur(report.total.expenseNet)}`} className={`text-accent ${HIT44}`}>
                         {formatEur(report.total.expenseNet)}
                       </Link>
                     ),

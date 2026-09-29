@@ -6,7 +6,8 @@ const TONE: Record<Tone, string> = {
   neutral: "bg-line/70 text-ink-2",
   accent: "bg-accent-soft text-accent",
   danger: "bg-danger/10 text-danger",
-  success: "bg-success/10 text-success",
+  // success-dark on the tint: plain success is 4.30:1 over the canvas (R13, AX-09).
+  success: "bg-success/10 text-success-dark",
   // warning-dark on the tint: 4.42:1 with plain warning (AX-09, R13).
   warning: "bg-warning/10 text-warning-dark",
 };
