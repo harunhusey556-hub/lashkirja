@@ -10,6 +10,7 @@ import { apiUrl } from "@/lib/build-target";
 import { configureHttpCachePersistence } from "@/lib/offline/http-cache";
 import { configurePageCachePersistence, hydratePageCache } from "@/lib/page-cache";
 import { openPersistentCache, peekCacheOwner, PERSISTENT_LIMITS } from "@/lib/offline/persistent-cache";
+import { syncTextScale } from "@/lib/mobile/text-scale";
 
 export interface BootResult {
   signedIn: boolean;
@@ -96,6 +97,9 @@ export async function activatePersistentCache(userId: string, token: string | nu
 }
 
 async function runBoot(): Promise<BootResult> {
+  // AX-01: the iOS text size becomes --text-scale. Fire-and-forget; the
+  // default scale (1) is correct until it answers.
+  void syncTextScale();
   const stored = await loadStoredAuth();
   // "app launch" retry point for a logout whose server call failed earlier.
   void retryPendingRevoke();

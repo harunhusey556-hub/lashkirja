@@ -35,17 +35,18 @@ export function ListRow({ title, amount, amountTone = "default", secondary, trai
       <span className="pointer-events-none min-w-0 flex-1">
         {/* Hidden from screen readers while the row is interactive: this text is already the overlay
             link/button's accessible name above, and linear reading would otherwise announce it twice. */}
-        <span aria-hidden={interactive || undefined} className="flex items-baseline justify-between gap-3 text-body font-medium text-ink">
-          <span className="min-w-0 truncate">{title}</span>
-          {amount !== undefined ? <span className={`shrink-0 tabular-nums ${AMOUNT_TONE[amountTone]}`}>{amount}</span> : null}
+        {/* R19 / AX-02: the title keeps at least ~7 characters' width (in em, so it grows with the
+            text size); when the amount no longer fits beside it, the amount wraps under it,
+            right-aligned. Titles and secondary lines wrap to two lines instead of being cut (AX-26). */}
+        <span aria-hidden={interactive || undefined} className="flex flex-wrap items-baseline justify-between gap-x-3 text-body font-medium text-ink">
+          <span className="min-w-0 line-clamp-2 [flex:1_1_7em] [overflow-wrap:anywhere]">{title}</span>
+          {amount !== undefined ? <span className={`ml-auto shrink-0 tabular-nums ${AMOUNT_TONE[amountTone]}`}>{amount}</span> : null}
         </span>
         {secondary || trailing ? (
-          <span className="mt-0.5 flex items-center justify-between gap-3">
-            {/* A navigation row's secondary line is a description, never data, so it wraps to a second
-                line instead of being cut off; record rows keep their one-line ellipsis. */}
+          <span className="mt-0.5 flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
             <span
               aria-hidden={interactive || undefined}
-              className={`min-w-0 text-caption text-ink-2 ${chevron ? "line-clamp-2" : "truncate"}`}
+              className="min-w-0 line-clamp-2 text-caption text-ink-2 [flex:1_1_9em]"
             >
               {secondary}
             </span>
@@ -56,12 +57,12 @@ export function ListRow({ title, amount, amountTone = "default", secondary, trai
                 swallows the row's own click - the wrapper only exists to lift z-index above that overlay,
                 not to grab clicks. An interactive trailing element (ActionPill, MoreMenu's trigger) opts
                 back in with its own `pointer-events-auto`. */}
-            {trailing ? <span className="pointer-events-none relative z-10 shrink-0">{trailing}</span> : null}
+            {trailing ? <span className="pointer-events-none relative z-10 ml-auto shrink-0">{trailing}</span> : null}
           </span>
         ) : null}
       </span>
       {chevron ? (
-        <span aria-hidden className="pointer-events-none -mr-1 flex text-ink-2/60">
+        <span aria-hidden className="pointer-events-none -mr-1 flex text-ink-2/80">
           <Icon icon={ChevronRight} />
         </span>
       ) : null}

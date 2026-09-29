@@ -234,7 +234,9 @@ select,
 input,
 select,
 textarea {
-  font-size: 16px !important;
+  /* 16 px floor at every text size (--text-input never drops below 1rem),
+     and it follows the iOS text size upwards (AX-01). */
+  font-size: var(--text-input) !important;
 }
 
 /* Text and date controls must shrink inside a phone-width grid. iOS date
@@ -264,11 +266,13 @@ input[type="time"]::-webkit-datetime-edit {
   padding: 0;
 }
 
-/* Two equal fields. Children may shrink; date rows stack on a phone. */
+/* Two equal fields. Children may shrink; date rows stack on a phone. A field
+   never gets narrower than 8.5rem times the text scale, so at a large iOS
+   text size the pair stacks instead of cutting its labels (AX-02, R19). */
 .field-grid,
 .field-dates {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, calc(8.5rem * var(--text-scale, 1))), 1fr));
   gap: 0.75rem;
 }
 
@@ -277,9 +281,20 @@ input[type="time"]::-webkit-datetime-edit {
   min-width: 0;
 }
 
+/* Three narrow fields (postal code, city...). Flex, so a `col-span-2` child
+   (the city) keeps its double share and the row still wraps at large text. */
 .field-grid-3 {
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  display: flex;
+  flex-wrap: wrap;
   gap: 0.5rem;
+}
+
+.field-grid-3 > * {
+  flex: 1 1 calc(5.5rem * var(--text-scale, 1));
+}
+
+.field-grid-3 > .col-span-2 {
+  flex: 2 1 calc(11rem * var(--text-scale, 1));
 }
 
 @media (max-width: 480px) {
