@@ -38,6 +38,10 @@ LashKirja must feel like a native iOS app: clean, calm, fast and predictable. Ea
 - L2: Every list has a designed empty state with one next action.
 - L3: Every failure shows a human Finnish message plus a retry, placed where the action happened.
 - L4: Offline and server-unreachable states are clear and never hang.
+- L6: One empty pattern: a 56 px tile, "Ei X vielä" (17/600), one 15 px sentence, at most one primary with the same label as the header pill. No search, filters or zero tables over an empty screen. An empty section inside a populated screen is one line in a card, "Ei X vielä." (`EmptyNote`).
+- L7: One error pattern: the `ConnectionNotice` card in the place of the content, titled "Jotain meni pieleen", with ONE "Yritä uudelleen". Never a card inside a card, never a second retry, never swallowed into a row subtitle. Outside the shell: `FullScreenNotice`.
+- L8: One offline pattern: an overlay banner "Ei verkkoyhteyttä. Näytetään viimeksi haetut tiedot." that never moves the content. While a page card (`ConnectionNotice`, `StaleBanner`) owns the message, the banner stays quiet. A banner that claims saved data is never shown over an empty error card.
+- L9: One loading pattern: a `ds/Skeleton` at the final layout; no blank card and no "Ladataan…" line. Spinners live only inside a button or an image. The avatar tile never swaps a glyph for the initial.
 - L5: No developer or internal text is visible to the user: no "Rajoitettu tila", debug labels, raw error codes, or English strings.
 
 ## A: App features (native)
