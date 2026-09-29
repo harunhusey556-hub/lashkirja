@@ -1,6 +1,7 @@
 import Link from "next/link";
-import type { ReactNode } from "react";
+import { cloneElement, isValidElement, type ReactElement, type ReactNode } from "react";
 import { ChevronRight } from "lucide-react";
+import { ActionPill } from "./ActionPill";
 import { Icon, IconTile } from "./Icon";
 
 // `muted` is for a non-money value in the amount slot ("1 avoin", a bank name), as in the mockups.
@@ -29,6 +30,13 @@ export function ListRow({ title, amount, amountTone = "default", secondary, trai
       .filter((part): part is string => Boolean(part))
       .join(", ");
 
+  // A row never carries a second link to its own href (AX-13, R4): an ActionPill that would navigate to
+  // the same place is drawn as a decorative pill, and the row's link carries the tap.
+  const trailingNode =
+    href && isValidElement(trailing) && trailing.type === ActionPill && (trailing.props as { href?: string }).href === href
+      ? cloneElement(trailing as ReactElement<{ decorative?: boolean }>, { decorative: true })
+      : trailing;
+
   const body = (
     <>
       {leading ? <IconTile>{leading}</IconTile> : null}
@@ -42,7 +50,7 @@ export function ListRow({ title, amount, amountTone = "default", secondary, trai
           <span className="min-w-0 line-clamp-2 [flex:1_1_7em] [overflow-wrap:anywhere]">{title}</span>
           {amount !== undefined ? <span className={`ml-auto shrink-0 tabular-nums ${AMOUNT_TONE[amountTone]}`}>{amount}</span> : null}
         </span>
-        {secondary || trailing ? (
+        {secondary || trailingNode ? (
           <span className="mt-0.5 flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
             <span
               aria-hidden={interactive || undefined}
@@ -57,7 +65,7 @@ export function ListRow({ title, amount, amountTone = "default", secondary, trai
                 swallows the row's own click - the wrapper only exists to lift z-index above that overlay,
                 not to grab clicks. An interactive trailing element (ActionPill, MoreMenu's trigger) opts
                 back in with its own `pointer-events-auto`. */}
-            {trailing ? <span className="pointer-events-none relative z-10 ml-auto shrink-0">{trailing}</span> : null}
+            {trailingNode ? <span className="pointer-events-none relative z-10 ml-auto shrink-0">{trailingNode}</span> : null}
           </span>
         ) : null}
       </span>

@@ -9,8 +9,23 @@ import type { ReactNode } from "react";
 // is genuinely interactive and must opt back in, or it stops receiving clicks/taps entirely.
 const PILL = "active-press relative pointer-events-auto inline-flex min-h-9 items-center rounded-full bg-accent-soft px-3 text-caption font-semibold text-accent before:absolute before:inset-x-0 before:-inset-y-1 before:content-['']";
 
-export function ActionPill({ children, href, onClick, ariaLabel, disabled }: { children: ReactNode; href?: string; onClick?: () => void; ariaLabel?: string; disabled?: boolean }) {
-  if (href) return <Link href={href} aria-label={ariaLabel} className={PILL}>{children}</Link>;
+/**
+ * One label, one role, one effect (AX-13, R4). A pill that acts in place is a `button`. A pill that
+ * navigates is a `link` whose name starts with "Avaa: " and still contains the visible word (WCAG 2.5.3).
+ * `decorative` draws the pill without a control of its own: `ListRow` sets it when the row already links
+ * to the same href, because a row never carries a second link to the same place (its taps fall through
+ * to the row's link).
+ */
+export function linkPillName(ariaLabel: string | undefined): string | undefined {
+  if (!ariaLabel) return undefined;
+  return /^Avaa\b/.test(ariaLabel) ? ariaLabel : `Avaa: ${ariaLabel}`;
+}
+
+export function ActionPill({ children, href, onClick, ariaLabel, disabled, decorative }: { children: ReactNode; href?: string; onClick?: () => void; ariaLabel?: string; disabled?: boolean; decorative?: boolean }) {
+  if (href && decorative) {
+    return <span aria-hidden="true" className={PILL.replace("pointer-events-auto", "pointer-events-none").replace("active-press ", "")}>{children}</span>;
+  }
+  if (href) return <Link href={href} aria-label={linkPillName(ariaLabel)} className={PILL}>{children}</Link>;
   return (
     <button type="button" onClick={onClick} disabled={disabled} aria-label={ariaLabel} className={`${PILL} disabled:opacity-50`}>
       {children}

@@ -121,4 +121,41 @@ describe("design system components", () => {
     expect(out).toContain('aria-label="Lisää toimintoja"');
     expect(out).toContain('aria-haspopup="dialog"');
   });
+
+  // AX-13, R4: one label, one role, one effect.
+  it("a navigating ActionPill is a link named 'Avaa: ...' that still contains its visible word", () => {
+    // eslint-disable-next-line react/no-children-prop -- see ActionPill test above.
+    const out = html(createElement(ActionPill, { href: "/laskut/lasku?id=1", ariaLabel: "Muistuta: Kauneus Oy", children: "Muistuta" }));
+    expect(out).toContain('aria-label="Avaa: Muistuta: Kauneus Oy"');
+    // eslint-disable-next-line react/no-children-prop -- see ActionPill test above.
+    const already = html(createElement(ActionPill, { href: "/x", ariaLabel: "Avaa: Ostolasku", children: "Avaa" }));
+    expect(already).toContain('aria-label="Avaa: Ostolasku"');
+    // An in-place pill stays a button with its own name.
+    // eslint-disable-next-line react/no-children-prop -- see ActionPill test above.
+    const button = html(createElement(ActionPill, { onClick: () => {}, ariaLabel: "Muistuta: Kauneus Oy", children: "Muistuta" }));
+    expect(button).toContain("<button");
+    expect(button).toContain('aria-label="Muistuta: Kauneus Oy"');
+  });
+
+  it("a row never carries a second link to its own href: the pill is drawn but is not a control", () => {
+    const out = html(createElement(ListRow, {
+      title: "Anna Asiakas",
+      amount: "602,40 €",
+      href: "/laskut/lasku?id=2",
+      // eslint-disable-next-line react/no-children-prop -- see ActionPill test above.
+      trailing: createElement(ActionPill, { href: "/laskut/lasku?id=2", ariaLabel: "Muistuta: Anna Asiakas", children: "Muistuta" }),
+    }));
+    expect(out.match(/<a /g)?.length).toBe(1);
+    expect(out).toContain("Muistuta");
+    expect(out).toContain('aria-hidden="true"');
+    expect(out).not.toContain("Avaa: Muistuta");
+  });
+
+  it("KeyValueList can offer Kopioi for an identifier, named for what it copies", () => {
+    const kv = html(createElement(KeyValueList, {
+      rows: [{ label: "Viite", value: "1 2345", copy: { text: "1 2345", what: "Viitenumero" } }],
+    }));
+    expect(kv).toContain(">Kopioi</button>");
+    expect(kv).toContain('aria-label="Kopioi Viitenumero"');
+  });
 });
