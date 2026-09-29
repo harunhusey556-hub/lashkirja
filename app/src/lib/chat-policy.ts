@@ -41,11 +41,24 @@ export function greetingReply(english: boolean): string {
   return "Hei. Voin täsmäyttää kuitteja tiliotteeseen, selittää ALV:n tai hakea summia kirjanpidostasi. Miten voin auttaa?";
 }
 
+/**
+ * The calm reply when a question needs the language model and none is
+ * configured on the server. It says what does work; it never names the
+ * provider, a setting or a "limited mode" (OWN-09).
+ */
 export function limitedModeNotice(english: boolean): string {
   if (english) {
-    return "Limited mode: the language provider is not connected, so this is not a model answer. I can still use your books for matching, VAT rules, and calculated amounts.";
+    return "I can't answer that yet. I can match receipts to bank rows and tell you this month's VAT.";
   }
-  return "Rajattu tila: kielimallia ei ole yhdistetty, joten tämä ei ole mallin vastaus. Voin silti käyttää kirjanpitoasi täsmäytykseen, ALV-sääntöihin ja laskettuihin summiin.";
+  return "Tähän en osaa vielä vastata. Voin täsmäyttää kuitit tiliotteeseen ja kertoa tämän kuun ALV:n.";
+}
+
+/** A transient failure: the model is configured but did not answer this time. */
+export function providerFailedNotice(english: boolean): string {
+  if (english) {
+    return "I couldn't get an answer just now. Try again in a moment.";
+  }
+  return "En saanut vastausta juuri nyt. Yritä hetken päästä uudelleen.";
 }
 
 export function matchStatusReply(input: {

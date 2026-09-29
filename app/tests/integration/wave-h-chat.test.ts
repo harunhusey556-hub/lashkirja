@@ -432,7 +432,7 @@ describe("chat limits and decisions", () => {
 });
 
 describe("honest book answers", () => {
-  it("explains limited mode and cites the calculated VAT figure with a link", async () => {
+  it("answers the VAT question from the books, with no limited-mode label", async () => {
     const now = new Date();
     const month = `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, "0")}`;
     await createReceipt(user.id, {
@@ -444,7 +444,9 @@ describe("honest book answers", () => {
     });
     const sent = await postMessage("Mikä on tämän kuun ALV?");
     expect(sent.response.status).toBe(200);
-    expect(explainsLimitedMode(sent.body.content)).toBe(true);
+    // A calculated answer is a real answer: no "Rajattu tila" preamble (OWN-09).
+    expect(sent.body.content).not.toMatch(/Rajattu tila|Rajoitettu tila|kielimalli/);
+    expect(sent.body.limited).toBe(false);
     expect(replyClaimsUnperformedAction(sent.body.content)).toBe(false);
     const start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
     const end = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1));

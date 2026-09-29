@@ -20,6 +20,7 @@ import {
   isMatchRequest,
   limitedModeNotice,
   matchStatusReply,
+  providerFailedNotice,
   prefersEnglish,
 } from "./chat-policy";
 
@@ -57,6 +58,11 @@ export type PreparedChat =
       sources?: ChatSource[];
       honesty: HonestyContext;
     };
+
+/** A language model is configured, so free-form questions can be answered. */
+export function assistantAvailable(): boolean {
+  return Boolean(process.env.COPILOT_GITHUB_TOKEN?.trim());
+}
 
 function monthKey(date: Date | null | undefined): string | null {
   if (!date) return null;
@@ -281,16 +287,18 @@ export async function prepareChat(
   const vatLine = vatAnswer?.text ?? null;
   const who = entityPhrase(user?.entityType, english);
 
-  if (!process.env.COPILOT_GITHUB_TOKEN) {
+  // No model configured: answer what the books and the rules can answer, as
+  // plain answers. Only a question nothing local can answer is `limited`, and
+  // its reply says calmly what does work (OWN-09).
+  if (!assistantAvailable()) {
     if (asksVat) {
-      const reply = `${limitedModeNotice(english)}\n\n${vatLine ?? ""}\n\n${
+      const reply = `${vatLine ?? ""}\n\n${
         english
           ? "Standard rate for lash services in 2026 is **25.5%**. See /kirjanpito/alv."
           : "Ripsipalveluiden yleinen ALV-kanta 2026 on **25,5 %**. Katso /kirjanpito/alv."
       }`.trim();
       return {
         kind: "local",
-        limited: true,
         reply,
         sources: mergeSources(vatAnswer?.sources, reply),
         honesty: {
@@ -304,8 +312,7 @@ export async function prepareChat(
     if (asksDeduction) {
       return {
         kind: "local",
-        limited: true,
-        reply: `${limitedModeNotice(english)}\n\n${who} ${
+        reply: `${who} ${
           english
             ? "you can deduct costs that belong to the business: materials, workspace, software, and training. Keep the receipt in Kuitit."
             : "voit vähentää yritystoimintaan kuuluvat kulut: tarvikkeet, työtila, ohjelmistot ja koulutus. Tallenna kuitti Kuitteihin."
@@ -315,8 +322,7 @@ export async function prepareChat(
     if (asksProfile) {
       return {
         kind: "local",
-        limited: true,
-        reply: `${limitedModeNotice(english)}\n\n${profileSummary}`,
+        reply: profileSummary,
       };
     }
     return { kind: "local", limited: true, reply: limitedModeNotice(english) };
@@ -373,7 +379,7 @@ export async function processAiChatMessage(
     const reply = await askCopilot(prepared.systemPrompt, prepared.userMessage, token, prior);
     if (!reply.trim()) {
       console.error("Copilot chat returned an empty reply");
-      return { reply: limitedModeNotice(prepared.english), limited: true, sources: prepared.sources };
+      return { reply: providerFailedNotice(prepared.english), limited: true, sources: prepared.sources };
     }
     const guarded = enforceAssistantReply(reply, prepared.honesty ?? EMPTY_HONESTY);
     if (guarded.rejected) {
@@ -382,6 +388,6 @@ export async function processAiChatMessage(
     return { reply, sources: mergeSources(prepared.sources, reply) };
   } catch (error) {
     console.error("Copilot chat failed:", error);
-    return { reply: limitedModeNotice(prepared.english), limited: true, sources: prepared.sources };
+    return { reply: providerFailedNotice(prepared.english), limited: true, sources: prepared.sources };
   }
 }

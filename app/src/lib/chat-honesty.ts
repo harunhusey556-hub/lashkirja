@@ -37,7 +37,8 @@ export function replyClaimsUnperformedAction(text: string): boolean {
 }
 
 export function explainsLimitedMode(text: string): boolean {
-  return /Rajattu tila|Limited mode/.test(text);
+  // The no-model reply says plainly that it cannot answer, and what it can do.
+  return /en osaa vielä vastata|can't answer that yet/i.test(text);
 }
 
 /** Euro amounts written like 12,50 € or 12.50 €. */

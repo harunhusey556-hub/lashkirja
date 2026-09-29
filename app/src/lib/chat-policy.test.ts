@@ -6,6 +6,7 @@ import {
   limitedModeNotice,
   matchStatusReply,
   prefersEnglish,
+  providerFailedNotice,
 } from "./chat-policy";
 
 describe("chat policy", () => {
@@ -32,8 +33,15 @@ describe("chat policy", () => {
     expect(reply).not.toMatch(/jo täsmäytetty/);
   });
 
-  it("states limited mode explicitly", () => {
-    expect(limitedModeNotice(false)).toMatch(/Rajattu tila/);
+  it("says calmly what works when no model answers, never a limited-mode label or internals", () => {
+    for (const english of [false, true]) {
+      for (const text of [limitedModeNotice(english), providerFailedNotice(english)]) {
+        expect(text).not.toMatch(/Rajattu|Rajoitettu|Limited mode|kielimalli|provider|Copilot|token/i);
+      }
+    }
+    expect(limitedModeNotice(false)).toMatch(/täsmäyttää kuitit/);
+    expect(limitedModeNotice(false)).toMatch(/ALV/);
+    expect(providerFailedNotice(false)).toMatch(/Yritä/);
     expect(prefersEnglish("Hello there")).toBe(true);
     expect(prefersEnglish("Mikä on ALV")).toBe(false);
   });

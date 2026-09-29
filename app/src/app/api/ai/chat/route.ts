@@ -5,7 +5,7 @@ import { prisma } from "@/lib/db";
 import { requireSession } from "@/lib/session";
 import { prepareChat, type ChatMatchProposal } from "@/lib/ai-assistant";
 import { askCopilotStream } from "@/lib/copilot";
-import { limitedModeNotice } from "@/lib/chat-policy";
+import { providerFailedNotice } from "@/lib/chat-policy";
 import { errorText } from "@/lib/api-errors";
 import { consumeRateLimit } from "@/lib/rate-limit";
 import {
@@ -280,7 +280,7 @@ export async function POST(req: NextRequest) {
             userMessageId: userRow.id,
             owner,
             signal: req.signal,
-            failureNotice: limitedModeNotice(prepared.english),
+            failureNotice: providerFailedNotice(prepared.english),
             honesty: prepared.honesty,
             onDelta: (delta) => controller.enqueue(sse({ delta })),
             stream: token
@@ -318,7 +318,7 @@ export async function POST(req: NextRequest) {
             sse({
               incomplete: true,
               status: "failed",
-              error: limitedModeNotice(prepared.english),
+              error: providerFailedNotice(prepared.english),
             })
           );
         } finally {
