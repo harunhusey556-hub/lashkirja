@@ -9,6 +9,7 @@ import { jobKindLabel, jobStatusLabel, workKindLabel } from "@/lib/job-labels";
 import { pollDelay, syncPageHiddenFlag } from "@/lib/page-activity";
 import { normalizeLegacyDetailPath } from "@/lib/routes";
 import { pageCacheFetchedAt, readPageCache, writePageCache } from "@/lib/page-cache";
+import { useCacheAfterBoot } from "@/components/invoices/useCacheAfterBoot";
 import { showToast } from "@/lib/toast";
 import { hapticNotify } from "@/lib/haptics";
 
@@ -83,7 +84,11 @@ function visibleJobs(jobs: JobRow[]): JobRow[] {
 }
 
 export default function TyotPage() {
-  const [data, setData] = useState<TyotData | null>(() => readPageCache<TyotData>(CACHE_KEY));
+  const [fetchedData, setData] = useState<TyotData | null>(() => readPageCache<TyotData>(CACHE_KEY));
+  // Cold launch: the cache is hydrated after this page mounted, so the copy
+  // from the last session paints once it is readable instead of the skeleton (N3).
+  const lateData = useCacheAfterBoot<TyotData>(CACHE_KEY);
+  const data = fetchedData ?? lateData;
   const [loadError, setLoadError] = useState<unknown>(null);
   const [filter, setFilter] = useState<WorkFilter>("all");
   const [retryingId, setRetryingId] = useState<string | null>(null);

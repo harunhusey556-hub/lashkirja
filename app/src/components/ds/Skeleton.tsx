@@ -55,6 +55,31 @@ export function Skeleton({
   );
 }
 
+/**
+ * A value slot at its final size (ListRow amount or secondary line, a chip
+ * count). It is an inline bar that sits on the text baseline, so the line box
+ * keeps the height and baseline the real text has (the strut of the enclosing
+ * font size) and the row does not move when the value lands. `width` is fixed
+ * in px; `height` is the bar, a little under the cap height of the text.
+ */
+export function SlotSkeleton({
+  width = 56,
+  height = 12,
+  tone = "strong",
+}: {
+  width?: number;
+  height?: number;
+  tone?: "strong" | "soft";
+}) {
+  return (
+    <span
+      aria-hidden
+      className={`skeleton inline-block rounded ${tone === "strong" ? "bg-line/70" : "bg-line/50"}`}
+      style={{ width, height, verticalAlign: -1 }}
+    />
+  );
+}
+
 /** A few text lines; the last one shorter, like real copy. */
 export function SkeletonText({ lines = 2, className = "" }: { lines?: number; className?: string }) {
   return (

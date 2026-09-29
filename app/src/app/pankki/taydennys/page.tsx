@@ -1,8 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import { apiFetch, isUnauthorized, readJson, redirectToLogin } from "@/components/clientFetch";
+import { apiFetch, readJson } from "@/components/clientFetch";
+import { useCachedResource } from "@/components/useCachedResource";
+import { UNMATCHED_KEY } from "@/lib/cached-resource";
 import { buttonClass } from "@/components/ui";
 import { SectionSkeleton } from "@/components/books/Skeletons";
 import { SkeletonGroup, useSkeletonFade } from "@/components/ds";
@@ -38,37 +39,24 @@ interface UnlinkedReceipt {
 }
 
 export default function TaydennysPage() {
-  const [rows, setRows] = useState<UnmatchedTx[] | null>(null);
-  const [receipts, setReceipts] = useState<UnlinkedReceipt[] | null>(null);
-  const [month, setMonth] = useState("");
-  const [error, setError] = useState<unknown>(null);
-
-  const load = useCallback(async () => {
-    try {
-      const response = await apiFetch("/api/matching/unmatched");
-      const data = await readJson<{
-        month?: string;
-        unmatchedTx?: UnmatchedTx[];
-        unlinkedReceipts?: UnlinkedReceipt[];
-      }>(response, "Täsmäytyksen lataus epäonnistui");
-      setRows(data.unmatchedTx ?? []);
-      setReceipts(data.unlinkedReceipts ?? []);
-      setMonth(data.month ?? "");
-      setError(null);
-    } catch (loadError: unknown) {
-      if (isUnauthorized(loadError)) {
-        redirectToLogin();
-        return;
-      }
-      // The error object: ConnectionNotice words it in Finnish (BOOKS-15).
-      setError(loadError);
-    }
-  }, []);
-
-  useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- fetch on mount
-    void load();
-  }, [load]);
+  // Painted from the cache and refreshed quietly, so a revisit or a cold launch
+  // shows the last list at once; the skeleton is only for a first ever visit (N3, L1).
+  const { value, error, reload } = useCachedResource<{
+    month: string;
+    rows: UnmatchedTx[];
+    receipts: UnlinkedReceipt[];
+  }>(UNMATCHED_KEY, async (signal) => {
+    const response = await apiFetch("/api/matching/unmatched", { signal });
+    const data = await readJson<{
+      month?: string;
+      unmatchedTx?: UnmatchedTx[];
+      unlinkedReceipts?: UnlinkedReceipt[];
+    }>(response, "Täsmäytyksen lataus epäonnistui");
+    return { month: data.month ?? "", rows: data.unmatchedTx ?? [], receipts: data.unlinkedReceipts ?? [] };
+  });
+  const rows = value?.rows ?? null;
+  const receipts = value?.receipts ?? null;
+  const month = value?.month ?? "";
 
   const loading = rows === null || receipts === null;
   const fade = useSkeletonFade(loading && error === null);
@@ -84,10 +72,7 @@ export default function TaydennysPage() {
         <ConnectionNotice
           error={error}
           fallback="Täsmäytyksen lataus epäonnistui"
-          onRetry={() => {
-            setError(null);
-            void load();
-          }}
+          onRetry={reload}
           compact
         />
       ) : loading ? (

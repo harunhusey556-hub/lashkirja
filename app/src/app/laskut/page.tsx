@@ -23,6 +23,7 @@ import {
   MoreMenu,
   PageTitle,
   Section,
+  SlotSkeleton,
   StatusTag,
 } from "@/components/ds";
 import { SALES_STATUS } from "@/lib/status-labels";
@@ -39,6 +40,8 @@ import {
 import { Button, controlClass } from "@/components/ui";
 import { pageCacheFetchedAt, readPageCache, writePageCache } from "@/lib/page-cache";
 import { useCacheAfterBoot } from "@/components/invoices/useCacheAfterBoot";
+import { useCachedResource } from "@/components/useCachedResource";
+import { CUSTOMER_COUNT_KEY, RECURRING_COUNT_KEY } from "@/lib/cached-resource";
 import { isForbidden } from "@/lib/screen-state";
 import { usePersistedState, useScrollRestoration } from "@/lib/list-ui-state";
 import { showToast } from "@/lib/toast";
@@ -169,9 +172,6 @@ function InvoicesPageContent() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [statusFromUrl]);
   const [loadFailure, setLoadFailure] = useState<unknown>(null);
-  const [registryCounts, setRegistryCounts] = useState<{ customers?: number; recurring?: number }>({});
-  // null until the counts are known: a chip never shows a made-up "0" (SALES-18).
-  const [statusCounts, setStatusCounts] = useState<SalesStatusCounts | null>(null);
   const [matchPreview, setMatchPreview] = useState<MatchPreview | null>(null);
   const [matchLoading, setMatchLoading] = useState(false);
   const [matchBusy, setMatchBusy] = useState(false);
@@ -230,25 +230,21 @@ function InvoicesPageContent() {
   // Filter-chip counts: fetched separately from the (capped) list above, so
   // every chip stays correct regardless of which tab is active. Scoped the
   // same way as the list (customerId/month), but never by status/filter.
-  const loadCounts = useCallback((signal?: AbortSignal) => {
-    const params = new URLSearchParams();
-    if (customerFilter) params.set("customerId", customerFilter);
-    if (monthFilter) params.set("month", monthFilter);
-    apiFetch(`/api/invoices/counts?${params.toString()}`, { credentials: "include", signal })
-      .then((res) => readJson<{ counts: SalesStatusCounts }>(res, "Määrien haku epäonnistui"))
-      .then((data) => setStatusCounts(data.counts))
-      .catch((error) => {
-        if (signal?.aborted) return;
-        if (isUnauthorized(error)) redirectToLogin();
-        // Otherwise the chips stay without numbers - the list still loads.
-      });
-  }, [customerFilter, monthFilter]);
-
-  useEffect(() => {
-    const controller = new AbortController();
-    loadCounts(controller.signal);
-    return () => controller.abort();
-  }, [loadCounts]);
+  // Painted from the cache and refreshed quietly, so a chip never starts from
+  // a made-up "0" (SALES-18) or pops its number in on every visit (N3); the
+  // first ever visit shows a skeleton where the number goes.
+  const countsParams = new URLSearchParams();
+  if (customerFilter) countsParams.set("customerId", customerFilter);
+  if (monthFilter) countsParams.set("month", monthFilter);
+  const countsQuery = countsParams.toString();
+  const {
+    value: statusCounts,
+    failed: countsFailed,
+    reload: reloadCounts,
+  } = useCachedResource<SalesStatusCounts>(`invoice-counts:${countsQuery}`, async (signal) => {
+    const res = await apiFetch(`/api/invoices/counts?${countsQuery}`, { credentials: "include", signal });
+    return (await readJson<{ counts: SalesStatusCounts }>(res, "Määrien haku epäonnistui")).counts;
+  });
 
   // A remembered filter whose chip no longer exists (the last credited
   // invoice is gone) falls back to "Kaikki" instead of an empty, unmarked list.
@@ -258,20 +254,18 @@ function InvoicesPageContent() {
   }, [statusCounts, filter]);
 
   // Best-effort counts for the registry rows at the bottom of the page; a
-  // failure here must not block the invoice list itself, so errors are
-  // swallowed and the row simply renders without a count.
-  useEffect(() => {
-    const controller = new AbortController();
-    apiFetch("/api/customers", { credentials: "include", signal: controller.signal })
-      .then((res) => readJson<{ customers: unknown[] }>(res, ""))
-      .then((data) => setRegistryCounts((prev) => ({ ...prev, customers: data.customers.length })))
-      .catch(() => {});
-    apiFetch("/api/recurring-invoices", { credentials: "include", signal: controller.signal })
-      .then((res) => readJson<{ recurring: unknown[] }>(res, ""))
-      .then((data) => setRegistryCounts((prev) => ({ ...prev, recurring: data.recurring.length })))
-      .catch(() => {});
-    return () => controller.abort();
-  }, []);
+  // failure here must not block the invoice list itself, so the row simply
+  // renders without a count. Cached like every other value (N3).
+  const customerCount = useCachedResource<{ count: number }>(CUSTOMER_COUNT_KEY, async (signal) => {
+    const res = await apiFetch("/api/customers", { credentials: "include", signal });
+    return { count: (await readJson<{ customers: unknown[] }>(res, "")).customers.length };
+  });
+  const recurringCount = useCachedResource<{ count: number }>(RECURRING_COUNT_KEY, async (signal) => {
+    const res = await apiFetch("/api/recurring-invoices", { credentials: "include", signal });
+    return { count: (await readJson<{ recurring: unknown[] }>(res, "")).recurring.length };
+  });
+  const registryAmount = (row: { value: { count: number } | null; failed: boolean }) =>
+    row.value ? String(row.value.count) : row.failed ? undefined : <SlotSkeleton width={20} />;
 
   useScrollRestoration("laskut", status === "ready");
 
@@ -319,7 +313,7 @@ function InvoicesPageContent() {
         tone: result.applied.length > 0 ? "success" : "info",
         text: skipped > 0 ? `${booked} ${lockedNote(skipped)}` : booked,
       });
-      loadCounts();
+      reloadCounts();
       await load();
     } catch (error) {
       setMatchError(errorMessage(error, "Kohdistus epäonnistui"));
@@ -331,7 +325,9 @@ function InvoicesPageContent() {
 
   const filterChips = salesFilterChips(
     statusCounts ?? { draft: 0, sent: 0, overdue: 0, paid: 0, credited: 0 }
-  ).map((chip) => (statusCounts ? chip : { ...chip, count: undefined }));
+  ).map((chip) =>
+    statusCounts ? chip : { ...chip, count: countsFailed ? undefined : <SlotSkeleton width={14} /> }
+  );
   const groups = salesInvoiceGroups(invoices, filter);
   const visibleCount = groups.reduce((sum, group) => sum + group.items.length, 0);
   const filtered = filter !== "all" || Boolean(customerFilter) || Boolean(query);
@@ -504,7 +500,7 @@ function InvoicesPageContent() {
           leading={<Icon icon={Users} />}
           chevron
           title="Asiakkaat"
-          amount={registryCounts.customers !== undefined ? String(registryCounts.customers) : undefined}
+          amount={registryAmount(customerCount)}
           amountTone="muted"
           href="/asiakkaat"
         />
@@ -512,7 +508,7 @@ function InvoicesPageContent() {
           leading={<Icon icon={Repeat} />}
           chevron
           title="Toistuvat laskut"
-          amount={registryCounts.recurring !== undefined ? String(registryCounts.recurring) : undefined}
+          amount={registryAmount(recurringCount)}
           amountTone="muted"
           href="/toistuvat"
         />

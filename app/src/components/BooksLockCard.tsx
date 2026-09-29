@@ -1,8 +1,10 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useState } from "react";
 import ConfirmModal from "@/components/ConfirmModal";
 import { apiFetch, errorMessage, isUnauthorized, readJson, redirectToLogin } from "@/components/clientFetch";
+import { useCachedResource } from "@/components/useCachedResource";
+import { PERIOD_LOCK_KEY } from "@/lib/cached-resource";
 import { currentMonthKey, formatMonth } from "@/lib/format";
 import { ConnectionNotice } from "@/components/ScreenState";
 import { Button, controlClass } from "@/components/ui";
@@ -53,38 +55,23 @@ function monthOptions(): string[] {
 }
 
 export default function BooksLockCard() {
-  const [lockedThrough, setLockedThrough] = useState<string | null>(null);
+  // The lock month paints from the cache on the first frame (shared with the
+  // Kirjanpito hub row) and refreshes quietly; the skeleton is only for a
+  // first ever visit (N3, L1).
+  const lock = useCachedResource<{ lockedThrough: string | null }>(PERIOD_LOCK_KEY, async (signal) => {
+    const response = await apiFetch("/api/period-lock", { credentials: "include", signal });
+    return readJson<{ lockedThrough: string | null }>(response, "Lukituksen haku epäonnistui");
+  });
+  const lockedThrough = lock.value?.lockedThrough ?? null;
   // null means "whatever the server says". A pending load must never overwrite
   // a choice the user has already made.
   const [choice, setChoice] = useState<string | null>(null);
   const [checking, setChecking] = useState(false);
-  const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
-  const [loadError, setLoadError] = useState<unknown>(null);
+  const status: "loading" | "ready" | "error" = lock.value ? "ready" : lock.failed ? "error" : "loading";
+  const loadError = lock.error;
   const [precheck, setPrecheck] = useState<PeriodPrecheck | null>(null);
   const [actionError, setActionError] = useState("");
   const [confirm, setConfirm] = useState<{ month: string | null } | null>(null);
-
-  const load = useCallback(async () => {
-    try {
-      const response = await apiFetch("/api/period-lock", { credentials: "include" });
-      const data = await readJson<{ lockedThrough: string | null }>(response, "Lukituksen haku epäonnistui");
-      setLockedThrough(data.lockedThrough);
-      setStatus("ready");
-    } catch (error) {
-      if (isUnauthorized(error)) {
-        redirectToLogin();
-        return;
-      }
-      // The error object: ConnectionNotice words it in Finnish (BOOKS-15).
-      setLoadError(error);
-      setStatus("error");
-    }
-  }, []);
-
-  useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional fetch-on-mount
-    void load();
-  }, [load]);
 
   const selected = (choice ?? lockedThrough) || null;
   const unchanged = selected === lockedThrough;
@@ -126,7 +113,7 @@ export default function BooksLockCard() {
       body: JSON.stringify({ month }),
     });
     const data = await readJson<{ lockedThrough: string | null }>(response, "Tallennus epäonnistui");
-    setLockedThrough(data.lockedThrough);
+    lock.set({ lockedThrough: data.lockedThrough });
     setChoice(null);
     setPrecheck(null);
     setConfirm(null);
@@ -152,10 +139,7 @@ export default function BooksLockCard() {
           <ConnectionNotice
             error={loadError}
             fallback="Lukituksen haku epäonnistui"
-            onRetry={() => {
-              setStatus("loading");
-              void load();
-            }}
+            onRetry={lock.reload}
             compact
           />
         ) : (

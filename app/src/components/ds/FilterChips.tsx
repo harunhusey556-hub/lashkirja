@@ -1,5 +1,6 @@
 "use client";
 
+import type { ReactNode } from "react";
 import { hapticSelection } from "@/lib/haptics";
 
 /**
@@ -8,7 +9,7 @@ import { hapticSelection } from "@/lib/haptics";
  * card's edge; the chips wrap onto a second line instead.
  */
 export function FilterChips<T extends string>({ label, items, value, onChange, wrap = false }: {
-  label: string; items: { id: T; label: string; count?: number | string }[]; value: T; onChange: (id: T) => void;
+  label: string; items: { id: T; label: string; count?: ReactNode }[]; value: T; onChange: (id: T) => void;
   wrap?: boolean;
 }) {
   return (

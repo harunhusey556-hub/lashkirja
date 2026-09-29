@@ -11,6 +11,7 @@ import {
 import { readPageCache, writePageCache } from "@/lib/page-cache";
 import { FormError, SavedNote } from "@/components/ui";
 import { hapticNotify } from "@/lib/haptics";
+import { useCacheAfterBoot } from "@/components/invoices/useCacheAfterBoot";
 
 export interface Profile {
   firstName: string;
@@ -35,9 +36,14 @@ export interface Profile {
  * the settings forms never pop in after the network round trip.
  */
 export function useProfile() {
-  const [profile, setProfile] = useState<Profile | null>(
+  const [fetchedProfile, setProfile] = useState<Profile | null>(
     () => readPageCache<Profile>("profile")
   );
+  // Cold launch: the persistent cache is hydrated after this hook first ran,
+  // so the copy from the last session paints once it is readable, not after
+  // the network round trip (N3).
+  const lateProfile = useCacheAfterBoot<Profile>("profile");
+  const profile = fetchedProfile ?? lateProfile;
   const [saving, setSaving] = useState(false);
   const [savedMsg, setSavedMsg] = useState("");
   const [loadError, setLoadError] = useState("");

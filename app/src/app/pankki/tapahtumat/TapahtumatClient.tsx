@@ -17,6 +17,7 @@ import {
 } from "@/lib/statement-client";
 import { formatEurSigned } from "@/lib/format";
 import { readPageCache, writePageCache } from "@/lib/page-cache";
+import { useCacheAfterBoot } from "@/components/invoices/useCacheAfterBoot";
 import { usePersistedState, useScrollRestoration } from "@/lib/list-ui-state";
 import { chooseDocuments, isNativeShell } from "@/lib/native-pick";
 import { Button, controlClass } from "@/components/ui";
@@ -55,6 +56,15 @@ export default function TapahtumatClient() {
   const [loading, setLoading] = useState(
     () => readPageCache<StatementData[]>("statements") === null
   );
+  // Cold launch: the cache is hydrated after this page mounted (bootMobile),
+  // so paint it once it is there instead of holding the skeleton (N3).
+  const lateStatements = useCacheAfterBoot<StatementData[]>("statements");
+  const [appliedLateStatements, setAppliedLateStatements] = useState<unknown>(null);
+  if (lateStatements && lateStatements !== appliedLateStatements && loading) {
+    setAppliedLateStatements(lateStatements);
+    setStatements(lateStatements);
+    setLoading(false);
+  }
   const [showAllStatements, setShowAllStatements] = usePersistedState(
     "tiliotteet.showAllStatements",
     false

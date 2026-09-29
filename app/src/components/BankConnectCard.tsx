@@ -7,7 +7,7 @@ import ConfirmModal from "@/components/ConfirmModal";
 import { apiFetch, errorMessage, isUnauthorized, readJson, redirectToLogin } from "@/components/clientFetch";
 import { ConnectionNotice } from "@/components/ScreenState";
 import { Button } from "@/components/ui";
-import { Icon, IconTile } from "@/components/ds";
+import { Icon, IconTile, SlotSkeleton } from "@/components/ds";
 import { Skeleton } from "@/components/ds/Skeleton";
 import BankPickerSheet, { BankLogo } from "@/components/bank/BankPickerSheet";
 import BankSetupSheet from "@/components/bank/BankSetupSheet";
@@ -122,7 +122,7 @@ export function BankConnectRow() {
       <div data-testid="bank-connect-row" className={rowClass}>
         <Link
           href="/kirjanpito/pankkitilit#pankkiyhteys"
-          aria-label={`${title}, ${line}`}
+          aria-label={typeof line === "string" ? `${title}, ${line}` : title}
           className="row-link active-press absolute inset-0"
         />
         {body}

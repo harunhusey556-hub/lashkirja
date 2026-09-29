@@ -15,6 +15,7 @@ import { formatEur } from "@/lib/format";
 import { receiptDrillHref } from "@/lib/report-drill";
 import { helsinkiMonthKey, helsinkiQuarterKey } from "@/lib/validation";
 import { pageCacheFetchedAt, readPageCache, writePageCache } from "@/lib/page-cache";
+import { useCacheAfterBoot } from "@/components/invoices/useCacheAfterBoot";
 import { usePersistedState, useScrollRestoration } from "@/lib/list-ui-state";
 import { MONTHS } from "@/lib/finnish-months";
 import { controlClass } from "@/components/ui";
@@ -126,10 +127,13 @@ export default function ALVRaporttiPage() {
 
   // A previously computed period paints instantly from the cache while the
   // fetch above recomputes it in the background.
+  // On a cold launch the cache is hydrated after this page mounted, so the
+  // copy from the last session is picked up once it is readable (N3).
+  const lateData = useCacheAfterBoot<ALVData>(`alv:${period}`);
   const data =
     result?.period === period
       ? result.data
-      : readPageCache<ALVData>(`alv:${period}`);
+      : readPageCache<ALVData>(`alv:${period}`) ?? lateData;
   const loading = !data && !loadError;
   useScrollRestoration("alv", Boolean(data));
 

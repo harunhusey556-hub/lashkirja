@@ -34,6 +34,7 @@ import {
   MoreMenu,
   PageTitle,
   Section,
+  SlotSkeleton,
   StatusTag,
   SummaryCard,
 } from "@/components/ds";
@@ -41,6 +42,9 @@ import { Plus } from "lucide-react";
 import { pageCacheFetchedAt, readPageCache, writePageCache } from "@/lib/page-cache";
 import { isForbidden } from "@/lib/screen-state";
 import { usePersistedState, useScrollRestoration } from "@/lib/list-ui-state";
+import { useCachedResource } from "@/components/useCachedResource";
+import { useCacheAfterBoot } from "@/components/invoices/useCacheAfterBoot";
+import { PURCHASE_COUNTS_KEY } from "@/lib/cached-resource";
 
 interface PurchaseInvoice {
   id: string;
@@ -68,7 +72,12 @@ interface Aging {
   overdueCount: number;
 }
 
-const ZERO_COUNTS: PurchaseStatusCounts = { overdue: 0, open: 0, paid: 0, cancelled: 0 };
+const PENDING_CHIP_LABELS: Array<{ id: PurchaseFilterId; label: string }> = [
+  { id: "all", label: "Kaikki" },
+  { id: "overdue", label: "Myöhässä" },
+  { id: "open", label: "Avoimet" },
+  { id: "paid", label: "Maksetut" },
+];
 const AGING_BUCKETS = ["1-30", "31-60", "61-90", "90+"] as const;
 
 const today = () => new Date().toISOString().slice(0, 10);
@@ -104,12 +113,21 @@ export default function PurchaseInvoicesPage() {
   const [status, setStatus] = useState<"loading" | "ready" | "error">(
     cached ? "ready" : "loading"
   );
+  // Cold launch: the cache is hydrated after this page mounted (bootMobile),
+  // so paint it once it is there instead of holding the skeleton (N3).
+  const lateCache = useCacheAfterBoot<{ invoices: PurchaseInvoice[]; aging: Aging }>("purchases");
+  const [appliedLateCache, setAppliedLateCache] = useState<unknown>(null);
+  if (lateCache && lateCache !== appliedLateCache && status === "loading") {
+    setAppliedLateCache(lateCache);
+    setInvoices(lateCache.invoices);
+    setAging(lateCache.aging);
+    setStatus("ready");
+  }
   // Persisted so back-navigation restores the active tab instead of resetting
   // the list to "Kaikki" - default "all" (not "open") so a purely overdue
   // book (no invoice merely "open" yet) doesn't open on an empty tab, same
   // default as /laskut.
   const [filter, setFilter] = usePersistedState<PurchaseFilterId>("ostolaskut.filter", "all");
-  const [statusCounts, setStatusCounts] = useState<PurchaseStatusCounts>(ZERO_COUNTS);
   const [message, setMessage] = useState<string | null>(null);
   const [loadFailure, setLoadFailure] = useState<unknown>(null);
   const [busy, setBusy] = useState(false);
@@ -174,32 +192,17 @@ export default function PurchaseInvoicesPage() {
 
   // Filter-chip counts: fetched separately from the (capped) list above, so
   // every chip stays correct regardless of which tab is active. Re-run after
-  // every mutation below (create/pay/remove/match) - a bare [] effect only
-  // ever counted once, at mount, and every chip went stale the moment the
-  // first invoice was created, paid or removed.
-  const loadCounts = useCallback(async (signal?: AbortSignal) => {
-    try {
-      const response = await apiFetch("/api/purchase-invoices/counts", {
-        credentials: "include",
-        signal,
-      });
-      const data = await readJson<{ counts: PurchaseStatusCounts }>(response, "Määrien haku epäonnistui");
-      if (signal?.aborted) return;
-      setStatusCounts(data.counts);
-    } catch (error) {
-      if (signal?.aborted) return;
-      if (isUnauthorized(error)) redirectToLogin();
-      // Otherwise leave the last-known (or zero) counts - the invoice list
-      // itself still loads independently of this fetch.
+  // every mutation below (create/pay/remove/match) - a bare mount fetch only
+  // ever counted once, and every chip went stale the moment the first invoice
+  // was created, paid or removed. Painted from the cache (shared with the
+  // Kirjanpito hub row) so the counts never start from a fake zero (N3).
+  const { value: statusCounts, failed: countsFailed, reload: reloadCounts } = useCachedResource<PurchaseStatusCounts>(
+    PURCHASE_COUNTS_KEY,
+    async (signal) => {
+      const response = await apiFetch("/api/purchase-invoices/counts", { credentials: "include", signal });
+      return (await readJson<{ counts: PurchaseStatusCounts }>(response, "Määrien haku epäonnistui")).counts;
     }
-  }, []);
-
-  useEffect(() => {
-    const controller = new AbortController();
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional fetch-on-mount/refetch: storing the fetched counts is exactly the external-system sync this effect exists for
-    void loadCounts(controller.signal);
-    return () => controller.abort();
-  }, [loadCounts]);
+  );
 
   useScrollRestoration("ostolaskut", status === "ready");
 
@@ -259,7 +262,7 @@ export default function PurchaseInvoicesPage() {
         category: "",
       });
       setFormErrors({});
-      await Promise.all([load(), loadCounts()]);
+      await Promise.all([load(), reloadCounts()]);
     } catch (error) {
       // Renders inside the "Uusi ostolasku" sheet, which stays open, not the
       // page-level message behind it.
@@ -294,7 +297,7 @@ export default function PurchaseInvoicesPage() {
       });
       await readJson(response, "Maksun kirjaus epäonnistui");
       setDetailInvoice(null);
-      await Promise.all([load(), loadCounts()]);
+      await Promise.all([load(), reloadCounts()]);
     } catch (error) {
       // Renders inside the detail sheet, which stays open.
       setPayError(errorMessage(error, "Maksun kirjaus epäonnistui"));
@@ -312,7 +315,7 @@ export default function PurchaseInvoicesPage() {
       });
       await readJson(response, "Poisto epäonnistui");
       setConfirmRemove(null);
-      await Promise.all([load(), loadCounts()]);
+      await Promise.all([load(), reloadCounts()]);
     } catch (error) {
       const failureMessage = errorMessage(error, "Poisto epäonnistui");
       setMessage(failureMessage);
@@ -344,7 +347,7 @@ export default function PurchaseInvoicesPage() {
             : `Kohdistettiin ${result.applied.length} maksua viitenumerolla. ` +
               `${result.suggestions.length} mahdollista osumaa vaatii tarkistuksen.`,
       });
-      await Promise.all([load(), loadCounts()]);
+      await Promise.all([load(), reloadCounts()]);
     } catch (error) {
       void hapticNotify("error");
       showToast({ tone: "error", text: errorMessage(error, "Kohdistus epäonnistui") });
@@ -356,7 +359,11 @@ export default function PurchaseInvoicesPage() {
   const field = `${controlClass} min-h-12`;
   const label = "mb-1.5 block text-[13px] font-normal text-ink-2";
 
-  const filterChips = purchaseFilterChips(statusCounts);
+  // Counts not known yet (first ever visit): the chips are there at their final
+  // size with a skeleton where the number goes, never a zero.
+  const filterChips = statusCounts
+    ? purchaseFilterChips(statusCounts)
+    : PENDING_CHIP_LABELS.map(({ id, label }) => ({ id, label, count: countsFailed ? undefined : <SlotSkeleton width={14} /> }));
   const groups = purchaseInvoiceGroups(invoices, filter);
   const visibleCount = groups.reduce((sum, group) => sum + group.items.length, 0);
   const filtered = filter !== "all";

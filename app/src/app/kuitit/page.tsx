@@ -16,6 +16,7 @@ import {
   redirectToLogin,
 } from "@/components/clientFetch";
 import { pageCacheFetchedAt, readPageCache, writePageCache } from "@/lib/page-cache";
+import { useCacheAfterBoot } from "@/components/invoices/useCacheAfterBoot";
 import { usePersistedState, useScrollRestoration } from "@/lib/list-ui-state";
 
 import { categoryLabel } from "@/lib/receipt-categories";
@@ -285,6 +286,11 @@ export default function KuititPage() {
 
   // A stale-but-cached copy paints immediately while the fetch above
   // revalidates; the skeleton is reserved for a genuinely never-seen query.
+  // Cold launch: the cache hydrates after this page mounted; these two hooks
+  // re-render it the moment the copies from the last session are readable, so
+  // the reads below find them (N3).
+  useCacheAfterBoot(`receipts:${query}`);
+  useCacheAfterBoot(`receipt-counts:${countsQuery}`);
   const cachedList =
     listResult?.query === query
       ? null

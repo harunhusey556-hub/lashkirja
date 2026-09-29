@@ -1,8 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { apiFetch, isUnauthorized, readJson, redirectToLogin } from "@/components/clientFetch";
 import { readPageCache, writePageCache } from "@/lib/page-cache";
+import { useCacheAfterBoot } from "@/components/invoices/useCacheAfterBoot";
 import type { BankConnectionSummary, BankConnectionsPayload } from "@/lib/bank-status";
 
 const CACHE_KEY = "bank-connections";
@@ -22,10 +23,15 @@ function normalize(raw: Partial<BankConnectionsPayload> & { message?: unknown })
  * failed fetch with nothing cached is `error`, never a fake "not connected".
  */
 export function useBankConnections() {
-  const [data, setData] = useState<BankConnectionsPayload | null>(() => {
+  const [fetched, setData] = useState<BankConnectionsPayload | null>(() => {
     const cached = readPageCache<BankConnectionsPayload>(CACHE_KEY);
     return cached ? normalize(cached) : null;
   });
+  // Cold launch: the cache hydrates after this hook first ran, so the copy from
+  // the last session paints once it is readable, not after the round trip (N3).
+  const late = useCacheAfterBoot<BankConnectionsPayload>(CACHE_KEY);
+  const lateNormalized = useMemo(() => (late ? normalize(late) : null), [late]);
+  const data = fetched ?? lateNormalized;
   const [error, setError] = useState<unknown>(null);
   const [attempt, setAttempt] = useState(0);
 
@@ -59,14 +65,15 @@ export function useBankConnections() {
   /** Local update after a mutation (scope toggle, disconnect), cached too. */
   const updateConnections = useCallback(
     (update: (connections: BankConnectionSummary[]) => BankConnectionSummary[]) => {
-      setData((current) => {
-        if (!current) return current;
+      setData((fetchedNow) => {
+        const current = fetchedNow ?? lateNormalized;
+        if (!current) return fetchedNow;
         const next = { ...current, connections: update(current.connections) };
         writePageCache(CACHE_KEY, next);
         return next;
       });
     },
-    []
+    [lateNormalized]
   );
 
   return { data, error, loading: data === null && error === null, reload, updateConnections };

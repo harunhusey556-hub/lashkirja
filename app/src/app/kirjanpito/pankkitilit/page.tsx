@@ -18,6 +18,7 @@ import { Button } from "@/components/ui";
 import { Card, ListRow, PageTitle, Section, Skeleton, SkeletonGroup, useSkeletonFade } from "@/components/ds";
 
 import { pageCacheFetchedAt, readPageCache, writePageCache } from "@/lib/page-cache";
+import { useCacheAfterBoot } from "@/components/invoices/useCacheAfterBoot";
 import { usePersistedState } from "@/lib/list-ui-state";
 
 interface AccountSummary {
@@ -122,10 +123,15 @@ function accountSecondary(account: AccountSummary): string {
 
 export default function BankAccountsPage() {
   const cached = readPageCache<Overview>("bank-overview");
-  const [overview, setOverview] = useState<Overview | null>(cached);
-  const [status, setStatus] = useState<"loading" | "ready" | "error">(
+  const [fetchedOverview, setOverview] = useState<Overview | null>(cached);
+  // Cold launch: the cache is hydrated after this page mounted, so the copy
+  // from the last session paints once it is readable instead of the skeleton (N3).
+  const lateOverview = useCacheAfterBoot<Overview>("bank-overview");
+  const overview = fetchedOverview ?? lateOverview;
+  const [loadStatus, setStatus] = useState<"loading" | "ready" | "error">(
     cached ? "ready" : "loading"
   );
+  const status = overview ? "ready" : loadStatus;
   const [message, setMessage] = useState<string | null>(null);
   const [messageIsError, setMessageIsError] = useState(false);
   function showError(text: string) {

@@ -60,6 +60,20 @@ export function hydratePageCache(records: CacheRecord[]): void {
     fetchedAt.set(key, record.fetchedAt);
   }
   evictToLimit();
+  for (const listener of [...hydrationListeners]) listener();
+}
+
+const hydrationListeners = new Set<() => void>();
+
+/**
+ * Called after every `hydratePageCache`. Boot only waits 250 ms for the
+ * persistent cache, so on a slow IndexedDB open a screen that re-reads the
+ * cache "after boot" can still be too early; it subscribes here to read again
+ * the moment the records really land (N3). Returns the unsubscribe.
+ */
+export function onPageCacheHydrated(listener: () => void): () => void {
+  hydrationListeners.add(listener);
+  return () => hydrationListeners.delete(listener);
 }
 
 export function pageCacheSize(): number {
@@ -156,11 +170,11 @@ const MUTATION_PREFIXES: Array<{ match: (path: string) => boolean; prefixes: str
   },
   {
     match: (path) => path.includes("/api/receipts") || path.includes("/api/matching"),
-    prefixes: ["receipts", "receipt:", "jobs", "work-queue", "dashboard:", "report:", "alv:"],
+    prefixes: ["receipts", "receipt:", "jobs", "work-queue", "unmatched", "dashboard:", "report:", "alv:"],
   },
   {
     match: (path) => path.includes("/api/statements"),
-    prefixes: ["statements", "statement:", "bank-overview", "dashboard:", "report:"],
+    prefixes: ["statements", "statement:", "bank-overview", "unmatched", "dashboard:", "report:"],
   },
   {
     match: (path) =>
