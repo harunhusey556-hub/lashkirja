@@ -45,6 +45,7 @@ const WORK_FILTERS = [
   "corrupt_file",
   "link_error",
   "ambiguous_match",
+  "payment_duplicate",
 ] as const;
 
 type WorkFilter = (typeof WORK_FILTERS)[number];

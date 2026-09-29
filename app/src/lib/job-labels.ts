@@ -19,6 +19,7 @@ export const WORK_KIND_LABEL: Record<string, string> = {
   corrupt_file: "Tiedosto rikki",
   link_error: "Linkitysvirhe",
   ambiguous_match: "Epäselvä täsmäytys",
+  payment_duplicate: "Mahdollinen tuplamaksu",
 };
 
 export function jobKindLabel(kind: string): string {
