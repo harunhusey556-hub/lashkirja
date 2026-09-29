@@ -4,6 +4,8 @@ import { prisma } from "@/lib/db";
 import { requireSession } from "@/lib/session";
 import { z } from "zod";
 import { withErrorHandler, AppError } from "@/lib/api-errors";
+import { serverApprovalBlock } from "@/lib/receipt-approval";
+import { assertPeriodOpen } from "@/lib/period-lock";
 
 const reviewSchema = z.object({
   reviewStatus: z.enum(["approved", "rejected"]),
@@ -34,7 +36,16 @@ export const PATCH = withErrorHandler(
       throw new AppError("Kuittia ei löydy", "NOT_FOUND", 404);
     }
 
-    // A receipt that is linked to a transaction is part of bookkeeping. 
+    // TF-02 / FP-6: a receipt with no amount would be booked as 0,00 € and
+    // silently drop out of the VAT return. The one-tap path used to allow it.
+    if (parsed.reviewStatus === "approved") {
+      const incomplete = serverApprovalBlock(receipt);
+      if (incomplete) throw new AppError(incomplete, "RECEIPT_INCOMPLETE", 422);
+      // Approving books the receipt into its month: a closed month must not move.
+      await assertPeriodOpen(session.userId, [receipt.date]);
+    }
+
+    // A receipt that is linked to a transaction is part of bookkeeping.
     // It shouldn't be markable as "rejected" unless it's unlinked first.
     if (parsed.reviewStatus === "rejected") {
       const isLinked = await prisma.transaction.findFirst({

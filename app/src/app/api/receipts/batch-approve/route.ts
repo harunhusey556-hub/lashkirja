@@ -4,6 +4,8 @@ import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { requireSession } from "@/lib/session";
 import { runMatching } from "@/lib/matching";
+import { serverApprovalBlock } from "@/lib/receipt-approval";
+import { getLockedThrough, isDateLocked } from "@/lib/period-lock";
 
 const batchApproveSchema = z.object({
   receiptIds: z.array(z.string().uuid()).min(1).max(200),
@@ -22,11 +24,12 @@ export async function POST(req: NextRequest) {
     const succeeded: string[] = [];
     const failed: { id: string; error: string }[] = [];
     let autoLinkedCount = 0;
+    const lockedThrough = await getLockedThrough(session.userId);
 
     for (const id of body.receiptIds) {
       const receipt = await prisma.receipt.findFirst({
         where: { id, userId: session.userId },
-        select: { id: true, reviewStatus: true, sourceTransactionId: true },
+        select: { id: true, reviewStatus: true, sourceTransactionId: true, totalAmountCents: true, date: true },
       });
       if (!receipt) {
         failed.push({ id, error: "Kuittia ei löytynyt" });
@@ -34,6 +37,16 @@ export async function POST(req: NextRequest) {
       }
       if (receipt.reviewStatus !== "pending") {
         failed.push({ id, error: "Kuitti ei ole tarkastettavana" });
+        continue;
+      }
+      // TF-02: the same guard as the single approve; the rest of the batch goes through.
+      const incomplete = serverApprovalBlock(receipt);
+      if (incomplete) {
+        failed.push({ id, error: incomplete });
+        continue;
+      }
+      if (isDateLocked(lockedThrough, receipt.date)) {
+        failed.push({ id, error: "Kuitin kuukausi on suljettu." });
         continue;
       }
 
