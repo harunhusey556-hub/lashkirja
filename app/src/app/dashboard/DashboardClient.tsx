@@ -3,6 +3,7 @@
 import { PullToRefresh } from "@/components/ds/PullToRefresh";
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import { ConnectionNotice, PartialFailureNotice, StaleBanner } from "@/components/ScreenState";
 import {
   apiFetch,
@@ -15,10 +16,13 @@ import {
   ArrowLeftRight,
   BellRing,
   Camera,
+  CalendarCheck,
   ChevronLeft,
   ChevronRight,
+  Circle,
   CircleCheck,
   Copy,
+  FilePen,
   FileText,
   Landmark,
   Tag,
@@ -44,12 +48,23 @@ import { detailHref } from "@/lib/routes";
 import { showToast } from "@/lib/toast";
 import { newIdempotencyKey } from "@/lib/idempotency-key";
 import { ReminderSheet } from "@/components/invoices/ReminderSheet";
-import { alvDrillHref, receiptDrillHref, statementDrillHref } from "@/lib/report-drill";
+import { receiptDrillHref, statementDrillHref } from "@/lib/report-drill";
 import { helsinkiMonthKey } from "@/lib/validation";
 import { MONTHS } from "@/lib/finnish-months";
 import { pageCacheFetchedAt, readPageCache, writePageCache } from "@/lib/page-cache";
 import { pollDelay, syncPageHiddenFlag } from "@/lib/page-activity";
-import { vatDeadline } from "@/lib/vat-deadline";
+import { vatPeriodEndingIn, vatPeriodKindOf } from "@/lib/vat-deadline";
+import { VAT_ROW_TITLE, vatDueAmount, vatDueSecondary, vatPendingNote } from "@/lib/vat-due";
+import { useVatDue } from "@/components/useVatDue";
+import { approvalGapText } from "@/lib/receipt-approval";
+import { requestReceiptCapture } from "@/lib/capture-request";
+import { armNavigation } from "@/lib/nav-direction";
+import { ReceiptApprovalSheet, type ApprovalSheetReceipt } from "@/components/ReceiptApprovalSheet";
+import {
+  isBlockingKind,
+  type DashboardItem as ServerDashboardItem,
+  type DashboardItemKind,
+} from "@/app/api/dashboard/items";
 import { useProfile } from "@/app/asetukset/useProfile";
 import { useSession } from "@/components/SessionProvider";
 
@@ -87,78 +102,26 @@ interface DashboardData {
   singleVatRate?: number;
   items?: DashboardItem[];
   itemTotals?: Record<ItemKind, number> | null;
+  /** FP-2: the blocking items only; the headline counts these. */
+  blockingTotal?: number | null;
+  /** FP-3: last month, until it is closed. */
+  previousMonth?: { month: string; open: number } | null;
+  /** TF-06: the start checklist of a new account. */
+  setup?: { receipts: boolean; bank: boolean; seller: boolean; empty: boolean } | null;
   sectionErrors?: Partial<
     Record<"matching" | "vat" | "pending" | "threshold" | "position" | "receipts" | "items", string>
   >;
 }
 
-type ItemKind =
-  | "overdue_invoice"
-  | "pending_receipt"
-  | "missing_receipt"
-  | "invoice_match"
-  | "receipt_match"
-  | "payment_duplicate";
+type ItemKind = DashboardItemKind;
 
 /** One concrete thing to do, as /api/dashboard returns it (see api/dashboard/items.ts). */
-type DashboardItem =
-  | {
-      id: string;
-      kind: "overdue_invoice";
-      action: "remind";
-      invoiceId: string;
-      customerId: string;
-      number: number;
-      party: string;
-      amount: number;
-      dueDate: string;
-      daysLate: number;
-    }
-  | {
-      id: string;
-      kind: "pending_receipt";
-      action: "approve";
-      receiptId: string;
-      party: string;
-      amount: number | null;
-      type: string;
-      date: string | null;
-      category: string | null;
-      vatRate: number | null;
-    }
-  | {
-      id: string;
-      kind: "invoice_match";
-      action: "confirm_match";
-      invoiceId: string;
-      number: number;
-      transactionId: string;
-      party: string;
-      amount: number;
-      paidDate: string;
-    }
-  | {
-      id: string;
-      kind: "missing_receipt" | "receipt_match";
-      action: "add_photo" | "review_match";
-      transactionId: string;
-      party: string;
-      amount: number;
-      date: string | null;
-    }
-  | {
-      id: string;
-      kind: "payment_duplicate";
-      action: "open_invoice";
-      invoiceId: string;
-      number: number;
-      party: string;
-      amount: number;
-      paidDate: string;
-    };
+type DashboardItem = ServerDashboardItem;
 
 interface Task {
   key: string;
+  /** FP-2: counts in "ennen kuun loppua"; the rest sit under "Muut". */
+  blocking: boolean;
   icon: LucideIcon;
   title: string;
   amount?: string;
@@ -169,16 +132,19 @@ interface Task {
   href: string;
   /** The pill's one-step action in place; without it the pill follows `href`. */
   onAction?: () => void;
+  /** The row body's action in place (TF-03); without it the row follows `href`. */
+  onRowClick?: () => void;
 }
 
 /** Where each kind's full list lives ("Näytä kaikki"). */
 const KIND_LIST: Record<ItemKind, { href: string; label: string }> = {
   overdue_invoice: { href: "/laskut?status=overdue", label: "Myöhässä olevat laskut" },
   pending_receipt: { href: "/kuitit", label: "Hyväksyntää odottavat kuitit" },
-  missing_receipt: { href: "/pankki/taydennys", label: "Tapahtumat ilman kuittia" },
+  missing_receipt: { href: "/pankki/taydennys", label: "Pankkitapahtumat ilman kuittia" },
   invoice_match: { href: "/laskut", label: "Laskujen maksut tiliotteella" },
-  receipt_match: { href: "/pankki/taydennys", label: "Tositeehdotukset" },
+  receipt_match: { href: "/pankki/taydennys", label: "Kohdistusehdotukset" },
   payment_duplicate: { href: "/tyot", label: "Mahdolliset kaksoiskirjaukset" },
+  draft_invoice: { href: "/laskut?status=draft", label: "Lähettämättömät laskut" },
 };
 
 function vatRateText(rate: number): string {
@@ -205,11 +171,6 @@ function shiftMonth(month: string, delta: number): string {
 
 function plural(count: number, one: string, many: string): string {
   return `${count} ${count === 1 ? one : many}`;
-}
-
-/** "12.11." - the statutory due day of a monthly VAT return. */
-function dayMonth(date: Date): string {
-  return `${date.getUTCDate()}.${date.getUTCMonth() + 1}.`;
 }
 
 /**
@@ -322,6 +283,7 @@ function buildAccountTasks(data: DashboardData): Task[] {
           : `${payables.overdueCount} ostolaskua myöhässä`,
       amount: formatEur(payables.overdue),
       secondary: "Maksa tai merkitse maksetuksi",
+      blocking: false,
       pill: "Avaa",
       href: "/kirjanpito/ostolaskut",
     });
@@ -335,6 +297,7 @@ function buildAccountTasks(data: DashboardData): Task[] {
           ? "Pankkitilin saldo ei täsmää"
           : `${data.bank.needsAttention} pankkitilin saldo ei täsmää`,
       secondary: "Tarkista tiliotteet",
+      blocking: false,
       pill: "Tarkista",
       href: "/kirjanpito/pankkitilit",
     });
@@ -342,13 +305,18 @@ function buildAccountTasks(data: DashboardData): Task[] {
   return tasks;
 }
 
-/** How many account-level things a task row stands for, for the headline. */
-function accountTaskCount(data: DashboardData): number {
-  const payables = !data.sectionErrors?.position ? (data.payables?.overdueCount ?? 0) : 0;
-  return payables + (data.bank?.needsAttention ?? 0);
+/** The month's name in a sentence start: "Elokuu". */
+function monthNameOf(month: string): string {
+  return MONTHS[Number(month.slice(5, 7)) - 1] || month;
+}
+
+/** Where a month's close lives (FP-13). */
+function monthCloseHref(month: string): string {
+  return `/kirjanpito/kuukausi?month=${month}`;
 }
 
 export default function DashboardClient() {
+  const router = useRouter();
   const { user } = useSession();
   const firstName = user?.firstName || "";
   const { profile } = useProfile();
@@ -363,6 +331,10 @@ export default function DashboardClient() {
   const [hiddenItems, setHiddenItems] = useState<ReadonlySet<string>>(() => new Set());
   const [busyItem, setBusyItem] = useState<string | null>(null);
   const [remindTarget, setRemindTarget] = useState<{ invoiceId: string; customerId: string } | null>(null);
+  // TF-03: the row body of a pending receipt opens the approval sheet in place.
+  const [approvalTarget, setApprovalTarget] = useState<
+    (ApprovalSheetReceipt & { id: string }) | null
+  >(null);
   const mounted = useRef(true);
   useEffect(() => {
     mounted.current = true;
@@ -387,7 +359,7 @@ export default function DashboardClient() {
    * when the "Kumoa" toast closes without an undo (the infra undo pattern).
    * Closing the app meanwhile leaves the receipt pending, never half-done.
    */
-  function approveReceipt(item: Extract<DashboardItem, { kind: "pending_receipt" }>) {
+  function approveReceipt(item: { id: string; receiptId: string; party: string }) {
     hideItem(item.id, true);
     showToast({
       tone: "success",
@@ -485,23 +457,32 @@ export default function DashboardClient() {
           amount: formatEur(item.amount),
           secondary: `Lasku ${item.number} · myöhässä ${plural(item.daysLate, "päivä", "päivää")}`,
           pill: "Muistuta",
+          blocking: false,
           href: detailHref("invoice", item.invoiceId),
           onAction: () => setRemindTarget({ invoiceId: item.invoiceId, customerId: item.customerId }),
         };
-      case "pending_receipt":
+      case "pending_receipt": {
+        // FP-6: a receipt without an amount or a vendor is never one-tap approved.
+        const gaps = item.gaps ?? [];
+        const openSheet = () => setApprovalTarget({ ...item, gaps });
         return {
           key: item.id,
           icon: Tag,
           title: item.party,
           amount: item.amount == null ? undefined : formatEur(item.amount),
           secondary:
-            item.category && item.vatRate != null
-              ? `${item.category}, ${vatRateText(item.vatRate)}`
-              : item.category || (item.vatRate != null ? vatRateText(item.vatRate) : "Tarkista luokka ja ALV"),
-          pill: "Hyväksy",
+            gaps.length > 0
+              ? approvalGapText(gaps)
+              : item.category && item.vatRate != null
+                ? `${item.category} · ${vatRateText(item.vatRate)}`
+                : item.category || (item.vatRate != null ? vatRateText(item.vatRate) : "Tarkista luokka ja ALV"),
+          pill: gaps.length > 0 ? "Täydennä" : "Hyväksy",
+          blocking: true,
           href: detailHref("receipt", item.receiptId),
-          onAction: () => approveReceipt(item),
+          onAction: gaps.length > 0 ? openSheet : () => approveReceipt(item),
+          onRowClick: openSheet,
         };
+      }
       case "missing_receipt":
         return {
           key: item.id,
@@ -509,9 +490,12 @@ export default function DashboardClient() {
           title: item.party,
           amount: formatEur(Math.abs(item.amount)),
           amountTone: item.amount > 0 ? "positive" : "default",
-          secondary: item.date ? `Kuitti puuttuu, ${formatDayMonth(item.date)}` : "Kuitti puuttuu",
+          secondary: item.date ? `Kuitti puuttuu · ${formatDayMonth(item.date)}` : "Kuitti puuttuu",
           pill: "Lisää kuva",
+          blocking: true,
           href: "/pankki/taydennys",
+          // FP-10: the verb is the effect. The camera opens and the photo is linked to this row.
+          onAction: () => requestReceiptCapture({ transactionId: item.transactionId, label: item.party }),
         };
       case "receipt_match":
         return {
@@ -519,8 +503,9 @@ export default function DashboardClient() {
           icon: ArrowLeftRight,
           title: item.party,
           amount: formatEur(Math.abs(item.amount)),
-          secondary: "Tositeehdotus, tarkista",
+          secondary: "Kohdistusehdotus · tarkista",
           pill: "Tarkista",
+          blocking: true,
           href: "/pankki/taydennys",
         };
       case "invoice_match":
@@ -532,6 +517,7 @@ export default function DashboardClient() {
           amountTone: "positive",
           secondary: `Maksu laskulle ${item.number}?`,
           pill: "Kohdista",
+          blocking: true,
           href: detailHref("invoice", item.invoiceId),
           onAction: () => void confirmMatch(item),
         };
@@ -543,6 +529,18 @@ export default function DashboardClient() {
           amount: formatEur(item.amount),
           secondary: `Sama tulo kahdesti? Lasku ${item.number}`,
           pill: "Tarkista",
+          blocking: true,
+          href: detailHref("invoice", item.invoiceId),
+        };
+      case "draft_invoice":
+        return {
+          key: item.id,
+          icon: FilePen,
+          title: item.party,
+          amount: formatEur(item.amount),
+          secondary: `Lasku ${item.number} · lähettämättä`,
+          pill: "Avaa",
+          blocking: true,
           href: detailHref("invoice", item.invoiceId),
         };
     }
@@ -648,18 +646,42 @@ export default function DashboardClient() {
           ).length;
           const total = (data.itemTotals?.[kind] ?? 0) - hidden;
           const shown = visibleItems.filter((item) => item.kind === kind).length;
-          return { kind, total, shown };
+          return { kind, total, shown, blocking: isBlockingKind(kind) };
         })
         .filter((row) => row.total > row.shown)
     : [];
-  // The headline counts things to do, not kinds of things.
-  const hiddenCount = (data?.items ?? []).filter((item) => hiddenItems.has(item.id)).length;
-  const openCount = data
-    ? (data.itemTotals
-        ? Object.values(data.itemTotals).reduce((sum, count) => sum + count, 0) - hiddenCount
-        : visibleItems.length) + (atCurrent ? accountTaskCount(data) : 0)
+  // FP-2: the headline counts the blocking things to do, and equals the rows
+  // under it (shown rows plus each "Näytä kaikki (N)").
+  const hiddenBlocking = (data?.items ?? []).filter(
+    (item) => hiddenItems.has(item.id) && isBlockingKind(item.kind)
+  ).length;
+  const blockingCount = data
+    ? (data.blockingTotal ??
+        (data.itemTotals
+          ? (Object.entries(data.itemTotals) as Array<[ItemKind, number]>)
+              .filter(([kind]) => isBlockingKind(kind))
+              .reduce((sum, [, count]) => sum + count, 0)
+          : visibleItems.filter((item) => isBlockingKind(item.kind)).length)) - hiddenBlocking
     : 0;
-  const hasTasks = itemTasks.length > 0 || accountTasks.length > 0 || moreRows.length > 0;
+  const blockingTasks = itemTasks.filter((task) => task.blocking);
+  const otherTasks = [...itemTasks.filter((task) => !task.blocking), ...accountTasks];
+  const blockingMore = moreRows.filter((row) => row.blocking);
+  const otherMore = moreRows.filter((row) => !row.blocking);
+  const setup = atCurrent ? data?.setup : null;
+  // TF-06: a new account starts from a checklist, never from "Kaikki kunnossa".
+  const showSetup = Boolean(setup && (setup.empty || !setup.receipts || !setup.bank));
+  const headline =
+    blockingCount > 0
+      ? atCurrent
+        ? `${plural(blockingCount, "asia", "asiaa")} ennen kuun loppua`
+        : `${plural(blockingCount, "asia", "asiaa")} kesken`
+      : setup?.empty
+        ? "Aloitetaan"
+        : atCurrent
+          ? otherTasks.length > 0 || otherMore.length > 0
+            ? "Kirjanpito on ajan tasalla"
+            : "Kaikki kunnossa"
+          : "Kaikki kirjattu";
   const matching = data?.matching;
   const documentsBasis = data?.source !== "tiliote";
   const tulotHref = !data
@@ -671,12 +693,61 @@ export default function DashboardClient() {
         : receiptDrillHref({ month, type: "tulo" });
   const menotHref =
     data?.source === "tiliote" ? statementDrillHref(month) : receiptDrillHref({ month, type: "meno" });
-  const vatDue =
-    profile?.vatRegistered && (profile.vatPeriod === "month" || !profile.vatPeriod)
-      ? dayMonth(
-          vatDeadline({ kind: "month", year: Number(yearText), month: Number(monthText) })
-        )
-      : null;
+  // FP-4 / TF-01: the current month shows the next return actually due (the
+  // same row as Kirjanpito); a past month shows the return that month closes.
+  const vatPastPeriod = atCurrent ? null : vatPeriodEndingIn(month, vatPeriodKindOf(profile?.vatPeriod));
+  const vat = useVatDue(atCurrent || vatPastPeriod ? profile : null, vatPastPeriod);
+  const vatHref = vat.due?.queryKey ? `/kirjanpito/alv?period=${vat.due.queryKey}` : "/kirjanpito/alv";
+  const vatNote = vatPendingNote(vat.figures);
+
+  function openReceipt(receiptId: string) {
+    const href = detailHref("receipt", receiptId);
+    armNavigation(href.split("?")[0], "forward");
+    router.push(href);
+  }
+
+  function renderTask(task: Task) {
+    return (
+      <ListRow
+        key={task.key}
+        href={task.onRowClick ? undefined : task.href}
+        onClick={task.onRowClick}
+        leading={<Icon icon={task.icon} />}
+        title={task.title}
+        amount={task.amount}
+        amountTone={task.amountTone}
+        secondary={task.secondary}
+        ariaLabel={[task.title, task.amount, task.secondary].filter(Boolean).join(", ")}
+        trailing={
+          task.onAction ? (
+            <ActionPill
+              onClick={task.onAction}
+              disabled={busyItem === task.key}
+              ariaLabel={`${task.pill}: ${task.title}`}
+            >
+              {task.pill}
+            </ActionPill>
+          ) : (
+            <ActionPill href={task.href} ariaLabel={`${task.pill}: ${task.title}`}>
+              {task.pill}
+            </ActionPill>
+          )
+        }
+      />
+    );
+  }
+
+  function renderMore(row: { kind: ItemKind; total: number }) {
+    return (
+      <ListRow
+        key={`more:${row.kind}`}
+        href={KIND_LIST[row.kind].href}
+        chevron
+        title={`Näytä kaikki (${row.total})`}
+        secondary={KIND_LIST[row.kind].label}
+      />
+    );
+  }
 
   return (
     <div className="space-y-6">
@@ -711,21 +782,15 @@ export default function DashboardClient() {
         <div className={`space-y-6 ${fade}`}>
           {/* Month status: what is still open, how much of the bank is in order, VAT. */}
           <div className="rounded-card border border-line bg-surface p-4">
-            <p className="text-headline font-semibold text-ink">
-              {openCount <= 0
-                ? "Kaikki kunnossa"
-                : atCurrent
-                  ? `${plural(openCount, "asia", "asiaa")} ennen kuun loppua`
-                  : `${plural(openCount, "avoin asia", "avointa asiaa")}`}
-            </p>
+            <p className="text-headline font-semibold text-ink">{headline}</p>
             {matching && matching.matchable > 0 && !data.sectionErrors?.matching ? (
               <>
                 <p className="mt-0.5 text-body text-ink-2">
-                  {matching.matched} / {matching.matchable} tapahtumaa on kunnossa
+                  {matching.matched} / {matching.matchable} pankkitapahtumaa kunnossa
                 </p>
                 <ProgressSegments done={matching.matched} total={matching.matchable} />
               </>
-            ) : data.source === "kuitit" ? (
+            ) : data.source === "kuitit" && !setup?.empty ? (
               <p className="mt-0.5 text-body text-ink-2">
                 Tämän kuun tiliotetta ei ole vielä.{" "}
                 <Link
@@ -736,68 +801,109 @@ export default function DashboardClient() {
                 </Link>
               </p>
             ) : null}
-            {data.sectionErrors?.vat ? null : (
+            {/* FP-3: last month stays on Koti until it is closed. */}
+            {atCurrent && data.previousMonth ? (
               <Link
-                href={alvDrillHref(month)}
-                aria-label="Avaa ALV-raportti"
+                href={monthCloseHref(data.previousMonth.month)}
+                className="active-press -mx-4 mt-4 flex min-h-12 items-center gap-3 border-t border-line px-4 py-3 text-body"
+              >
+                <Icon icon={CalendarCheck} className="shrink-0 text-ink-2" />
+                <span className="min-w-0 flex-1">
+                  <span className="block text-ink">
+                    {data.previousMonth.open > 0
+                      ? `${monthNameOf(data.previousMonth.month)}: ${plural(data.previousMonth.open, "asia", "asiaa")} kesken`
+                      : `${monthNameOf(data.previousMonth.month)} on valmis suljettavaksi`}
+                  </span>
+                  <span className="block text-caption text-ink-2">Kuukauden sulkeminen</span>
+                </span>
+                <Icon icon={ChevronRight} className="shrink-0 text-ink-2" />
+              </Link>
+            ) : null}
+            {!atCurrent ? (
+              <Link
+                href={monthCloseHref(month)}
+                className="active-press -mx-4 mt-4 flex min-h-12 items-center gap-3 border-t border-line px-4 py-3 text-body"
+              >
+                <Icon icon={CalendarCheck} className="shrink-0 text-ink-2" />
+                <span className="min-w-0 flex-1 text-ink">Kuukauden sulkeminen</span>
+                <Icon icon={ChevronRight} className="shrink-0 text-ink-2" />
+              </Link>
+            ) : null}
+            {vat.due ? (
+              <Link
+                href={vatHref}
+                aria-label={`${VAT_ROW_TITLE}, ${vatDueSecondary(vat.due, vat.figures)}${vat.figures ? `, ${vatDueAmount(vat.figures)}` : ""}`}
                 className="active-press -mx-4 -mb-4 mt-4 flex min-h-12 items-center justify-between gap-3 border-t border-line px-4 py-3 text-body"
               >
                 <span className="min-w-0">
-                  <span className="block whitespace-nowrap text-ink">
-                    {vatDue ? `ALV-ilmoitus ${vatDue}` : "ALV-arvio"}
-                  </span>
+                  <span className="block text-ink">{VAT_ROW_TITLE}</span>
                   <span className="block text-caption text-ink-2">
-                    {data.isRefund ? "palautettavaa" : "maksettavaa"}
+                    {vat.waiting ? <Skeleton tone="soft" className="mt-1 h-3 w-40" /> : vatDueSecondary(vat.due, vat.figures)}
                   </span>
+                  {vatNote ? <span className="mt-0.5 block text-caption text-warning">{vatNote}</span> : null}
                 </span>
                 <span className="shrink-0 whitespace-nowrap font-semibold tabular-nums text-ink">
-                  {formatEur(Math.abs(data.estimatedVat))}
+                  {vat.waiting ? <Skeleton className="h-4 w-16" /> : vatDueAmount(vat.figures)}
                 </span>
               </Link>
-            )}
+            ) : null}
           </div>
+
+          {/* TF-06: the first steps of a new account. */}
+          {showSetup && setup ? (
+            <Section title="Aloitetaan">
+              {[
+                {
+                  key: "receipt",
+                  done: setup.receipts,
+                  title: "Ota ensimmäinen kuva",
+                  secondary: "Kuitti luetaan automaattisesti",
+                  onClick: () => requestReceiptCapture(),
+                },
+                {
+                  key: "bank",
+                  done: setup.bank,
+                  title: "Yhdistä pankki tai tuo tiliote",
+                  secondary: "Tapahtumat kohdistetaan kuitteihin",
+                  href: "/kirjanpito/pankkitilit",
+                },
+                {
+                  key: "seller",
+                  done: setup.seller,
+                  title: "Täydennä laskuttajan tiedot",
+                  secondary: "Nimi, Y-tunnus ja IBAN laskuille",
+                  href: "/asetukset/laskutus",
+                },
+              ].map((step) => (
+                <ListRow
+                  key={step.key}
+                  href={step.done ? undefined : step.href}
+                  onClick={step.done ? undefined : step.onClick}
+                  leading={<Icon icon={step.done ? CircleCheck : Circle} className={step.done ? "text-success" : "text-ink-2"} />}
+                  title={step.title}
+                  secondary={step.done ? "Valmis" : step.secondary}
+                  chevron={!step.done}
+                  ariaLabel={`${step.title}, ${step.done ? "valmis" : "tekemättä"}`}
+                />
+              ))}
+            </Section>
+          ) : null}
 
           {/* One card for every part that did not load, one retry (VS-31); the parts themselves are left out. */}
           <PartialFailureNotice messages={Object.values(data.sectionErrors ?? {})} onRetry={retry} />
 
-          {hasTasks ? (
-            <Section title="Tarvitaan sinulta">
-              {[...itemTasks, ...accountTasks].map((task) => (
-                <ListRow
-                  key={task.key}
-                  href={task.href}
-                  leading={<Icon icon={task.icon} />}
-                  title={task.title}
-                  amount={task.amount}
-                  amountTone={task.amountTone}
-                  secondary={task.secondary}
-                  ariaLabel={[task.title, task.amount, task.secondary].filter(Boolean).join(", ")}
-                  trailing={
-                    task.onAction ? (
-                      <ActionPill
-                        onClick={task.onAction}
-                        disabled={busyItem === task.key}
-                        ariaLabel={`${task.pill}: ${task.title}`}
-                      >
-                        {task.pill}
-                      </ActionPill>
-                    ) : (
-                      <ActionPill href={task.href} ariaLabel={`${task.pill}: ${task.title}`}>
-                        {task.pill}
-                      </ActionPill>
-                    )
-                  }
-                />
-              ))}
-              {moreRows.map((row) => (
-                <ListRow
-                  key={`more:${row.kind}`}
-                  href={KIND_LIST[row.kind].href}
-                  chevron
-                  title={`Näytä kaikki (${row.total})`}
-                  secondary={KIND_LIST[row.kind].label}
-                />
-              ))}
+          {blockingTasks.length > 0 || blockingMore.length > 0 ? (
+            <Section title={atCurrent ? "Ennen kuun loppua" : "Kesken"}>
+              {blockingTasks.map(renderTask)}
+              {blockingMore.map(renderMore)}
+            </Section>
+          ) : null}
+
+          {/* Not bookkeeping left undone: money to chase and account checks (FP-2). */}
+          {otherTasks.length > 0 || otherMore.length > 0 ? (
+            <Section title="Muut">
+              {otherTasks.map(renderTask)}
+              {otherMore.map(renderMore)}
             </Section>
           ) : null}
 
@@ -917,6 +1023,19 @@ export default function DashboardClient() {
           ) : null}
         </div>
       )}
+      <ReceiptApprovalSheet
+        receipt={approvalTarget}
+        onClose={() => setApprovalTarget(null)}
+        onApprove={() => {
+          const target = approvalTarget;
+          setApprovalTarget(null);
+          if (target) approveReceipt(target);
+        }}
+        onEdit={(receipt) => {
+          setApprovalTarget(null);
+          openReceipt(receipt.receiptId);
+        }}
+      />
       {remindTarget ? (
         <ReminderSheet
           invoiceId={remindTarget.invoiceId}

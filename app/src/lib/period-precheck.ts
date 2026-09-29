@@ -37,6 +37,9 @@ export async function listPeriodPrecheck(userId: string, month: string): Promise
         type: { in: ["tulo", "meno"] },
         matchStatus: "unmatched",
         receiptId: null,
+        // A row that settled an invoice is documented by it (lib/month-rows.ts).
+        invoicePayment: null,
+        purchasePayment: null,
       },
       orderBy: { date: "asc" },
       take: TAKE,
@@ -53,6 +56,9 @@ export async function listPeriodPrecheck(userId: string, month: string): Promise
         statement: { userId, periodMonth: month },
         type: { in: ["tulo", "meno"] },
         matchStatus: "suggested",
+        receiptId: null,
+        invoicePayment: null,
+        purchasePayment: null,
       },
       orderBy: { date: "asc" },
       take: TAKE,
@@ -98,7 +104,7 @@ export async function listPeriodPrecheck(userId: string, month: string): Promise
       ...unmatched.map((tx) => ({
         id: tx.id,
         title: tx.counterparty || tx.message || "Pankkitapahtuma",
-        detail: `${money(tx.amountCents)} · ei tositetta`,
+        detail: `${money(tx.amountCents)} · kuitti puuttuu`,
         href: detailHref("statement", tx.statementId),
       })),
       ...pending.map((receipt) => ({
@@ -106,15 +112,15 @@ export async function listPeriodPrecheck(userId: string, month: string): Promise
         title: receipt.vendor || receipt.fileName || "Kuitti",
         detail:
           receipt.totalAmountCents == null
-            ? "Odottaa tarkistusta"
-            : `${money(receipt.totalAmountCents)} · odottaa tarkistusta`,
+            ? "Odottaa hyväksyntää"
+            : `${money(receipt.totalAmountCents)} · odottaa hyväksyntää`,
         href: detailHref("receipt", receipt.id),
       })),
     ],
     unmatchedTransactions: suggested.map((tx) => ({
       id: tx.id,
       title: tx.counterparty || tx.message || "Pankkitapahtuma",
-      detail: `${money(tx.amountCents)} · ehdotettu täsmäytys`,
+      detail: `${money(tx.amountCents)} · kohdistusehdotus`,
       href: detailHref("statement", tx.statementId),
     })),
     draftInvoices: drafts.map((invoice) => ({

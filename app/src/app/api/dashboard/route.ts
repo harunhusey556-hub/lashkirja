@@ -11,7 +11,15 @@ import { loadAlvPeriodSources, type AlvPeriodSources } from "@/lib/alv-period";
 import { computeYearTurnover } from "@/lib/alv-threshold";
 import { buildProfitLoss } from "@/lib/reports";
 import { helsinkiMonthKey } from "@/lib/validation";
-import { buildDashboardItems, type DashboardItems } from "./items";
+import { buildDashboardItems, loadSharedMatchData, type DashboardItems } from "./items";
+import { MONTH_ROW_FACTS, monthProgress } from "@/lib/month-rows";
+import { getLockedThrough, isMonthLocked } from "@/lib/period-lock";
+
+function previousMonthKey(month: string): string {
+  const [y, m] = month.split("-").map(Number);
+  const d = new Date(Date.UTC(y, m - 2, 1));
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
+}
 
 function round2(n: number): number {
   return Math.round(n * 100) / 100;
@@ -38,7 +46,14 @@ export async function GET(req: NextRequest) {
   // Cash view follows the tiliote's assigned kohdekuukausi (periodMonth),
   // not each bank row's booking date — so reassigning a statement moves it.
   // A failure here must not blank the receipt-based income below.
-  let transactions: Array<{ amountCents: number; type: string; matchStatus: string }> = [];
+  let transactions: Array<{
+    amountCents: number;
+    type: string;
+    matchStatus: string;
+    receiptId: string | null;
+    invoicePayment: { id: string } | null;
+    purchasePayment: { id: string } | null;
+  }> = [];
   try {
     transactions = await prisma.transaction.findMany({
       where: {
@@ -46,8 +61,7 @@ export async function GET(req: NextRequest) {
       },
       select: {
         amountCents: true,
-        type: true,
-        matchStatus: true,
+        ...MONTH_ROW_FACTS,
       },
     });
   } catch {
@@ -56,20 +70,15 @@ export async function GET(req: NextRequest) {
 
   let bankIncome = 0;
   let bankExpenses = 0;
-  let matchable = 0;
-  let matched = 0;
-  let suggested = 0;
   for (const t of transactions) {
     const amount = centsToEuros(t.amountCents);
     if (t.type === "tulo") bankIncome += amount;
     else if (t.type === "meno") bankExpenses += Math.abs(amount);
     // oma_siirto excluded on purpose
-    if (t.type === "tulo" || t.type === "meno") {
-      if (t.matchStatus !== "ignored") matchable += 1;
-      if (t.matchStatus === "confirmed") matched += 1;
-      if (t.matchStatus === "suggested") suggested += 1;
-    }
   }
+  // FP-2: the bar and the task rows use one rule for "in order" (lib/month-rows.ts):
+  // a row that settled an invoice is done, and every row that is not has a task.
+  const { matchable, matched, suggested } = monthProgress(transactions);
 
   // The document view (no tiliote for the month yet) is the profit and loss
   // of the month: approved receipts plus sales invoices by invoice date, with
@@ -106,6 +115,9 @@ export async function GET(req: NextRequest) {
       entityType: true,
       vatRegistered: true,
       businessDetails: true,
+      businessName: true,
+      businessId: true,
+      invoiceIban: true,
       imapAccounts: { select: { id: true }, take: 1 },
     },
   });
@@ -204,10 +216,50 @@ export async function GET(req: NextRequest) {
   // "Tarvitaan sinulta": concrete items with the other party and the data
   // each one-tap action needs, scoped to the month (see items.ts).
   let koti: DashboardItems | null = null;
+  // FP-3: until last month is closed, the current month names what is left in it.
+  let previousMonth: { month: string; open: number } | null = null;
   try {
-    koti = await buildDashboardItems(session.userId, month, month >= currentMonth, now);
+    const shared = await loadSharedMatchData(session.userId, now);
+    koti = await buildDashboardItems(session.userId, month, month >= currentMonth, now, shared);
+    if (month >= currentMonth) {
+      const prev = previousMonthKey(currentMonth);
+      const lockedThrough = await getLockedThrough(session.userId);
+      if (!isMonthLocked(lockedThrough, prev)) {
+        const prevItems = await buildDashboardItems(session.userId, prev, false, now, shared);
+        const prevBounds = { gte: new Date(`${prev}-01T00:00:00.000Z`), lt: new Date(`${currentMonth}-01T00:00:00.000Z`) };
+        const [prevReceipts, prevStatements, prevInvoices] = await Promise.all([
+          prisma.receipt.count({ where: { userId: session.userId, date: prevBounds } }),
+          prisma.statement.count({ where: { userId: session.userId, periodMonth: prev } }),
+          prisma.salesInvoice.count({ where: { userId: session.userId, issueDate: prevBounds } }),
+        ]);
+        // A month with nothing in it has nothing to close.
+        if (prevItems.blockingTotal > 0 || prevReceipts + prevStatements + prevInvoices > 0) {
+          previousMonth = { month: prev, open: prevItems.blockingTotal };
+        }
+      }
+    }
   } catch {
     sectionErrors.items = "Tehtäviä ei saatu ladattua.";
+  }
+
+  // TF-06: a brand-new account gets a start checklist instead of "Kaikki kunnossa".
+  let setup: { receipts: boolean; bank: boolean; seller: boolean; empty: boolean } | null = null;
+  try {
+    const [anyReceipt, anyStatement, anyAccount, anyInvoice] = await Promise.all([
+      prisma.receipt.count({ where: { userId: session.userId }, take: 1 }),
+      prisma.statement.count({ where: { userId: session.userId }, take: 1 }),
+      prisma.bankAccount.count({ where: { userId: session.userId }, take: 1 }),
+      prisma.salesInvoice.count({ where: { userId: session.userId }, take: 1 }),
+    ]);
+    const seller = Boolean(user?.businessName && user?.businessId && user?.invoiceIban);
+    setup = {
+      receipts: anyReceipt > 0,
+      bank: anyStatement + anyAccount > 0,
+      seller,
+      empty: anyReceipt + anyStatement + anyInvoice === 0,
+    };
+  } catch {
+    setup = null;
   }
 
   return NextResponse.json({
@@ -246,6 +298,9 @@ export async function GET(req: NextRequest) {
     payables,
     items: koti?.items ?? [],
     itemTotals: koti?.totals ?? null,
+    blockingTotal: koti?.blockingTotal ?? null,
+    previousMonth,
+    setup,
     isSingleVatProfile: vatProfile.isSingleRate && vatProfile.isVatRegistered,
     singleVatRate: vatProfile.defaultSalesRate,
     ...(Object.keys(sectionErrors).length > 0 ? { sectionErrors } : {}),

@@ -65,6 +65,7 @@ import {
   stashPendingCapture,
   type PendingCaptureKind,
 } from "@/lib/pending-capture";
+import { CAPTURE_REQUEST_EVENT } from "@/lib/capture-request";
 import { showToast } from "@/lib/toast";
 import {
   forgetScroll,
@@ -950,6 +951,19 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     }
     void pickFromSheet(kind, true);
   }
+
+  // TF-06 / FP-10: "Ota ensimmäinen kuva" and "Lisää kuva" on a task open the
+  // same camera as the Lisää sheet (lib/capture-request.ts). Synchronous, so
+  // the web file input still runs inside the tap's user gesture.
+  const startPickRef = useRef(startPick);
+  useEffect(() => {
+    startPickRef.current = startPick;
+  });
+  useEffect(() => {
+    const onRequest = () => startPickRef.current("receipt");
+    window.addEventListener(CAPTURE_REQUEST_EVENT, onRequest);
+    return () => window.removeEventListener(CAPTURE_REQUEST_EVENT, onRequest);
+  }, []);
 
   function renderTab(item: NavEntry) {
     const active = activeTabId === item.id;

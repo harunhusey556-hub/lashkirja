@@ -37,6 +37,8 @@ export const NAV: readonly NavEntry[] = [
   { id: "ostolaskut", kind: "workspace", label: "Ostolaskut", path: "/kirjanpito/ostolaskut", parent: "kirjanpito" },
   { id: "pankkitilit", kind: "workspace", label: "Pankkitilit", path: "/kirjanpito/pankkitilit", parent: "kirjanpito" },
   { id: "kaudet", kind: "workspace", label: "Suljetut kaudet", path: "/kirjanpito/kaudet", parent: "kirjanpito" },
+  // FP-13 (TF-07): one month's finish line; a sticky primary owns the bottom edge.
+  { id: "kuukausi", kind: "detail", label: "Kuukauden sulkeminen", path: "/kirjanpito/kuukausi", parent: "kirjanpito" },
 
   { id: "asiakkaat", kind: "workspace", label: "Asiakkaat", path: "/asiakkaat", parent: "myynti" },
   { id: "asiakas", kind: "detail", label: "Asiakas", path: "/asiakkaat/asiakas", parent: "asiakkaat" },
