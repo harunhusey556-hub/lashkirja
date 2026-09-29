@@ -222,3 +222,54 @@ test("the tab bar and the action bar hide while the keyboard is open (C5, IA-08,
     .poll(() => page.evaluate(() => getComputedStyle(document.querySelector(".bottom-actions")!).visibility))
     .toBe("hidden");
 });
+
+async function watchEnterClass(page: Page) {
+  await page.evaluate(() => {
+    const w = window as unknown as { __enter: string[] };
+    w.__enter = [];
+    const main = document.querySelector("main.app-main")!;
+    new MutationObserver(() => {
+      const match = main.className.match(/page-(push|pop)-in/);
+      if (match) w.__enter.push(match[0]);
+    }).observe(main, { attributes: true, attributeFilter: ["class"] });
+  });
+}
+
+const enterClasses = (page: Page) => page.evaluate(() => (window as unknown as { __enter: string[] }).__enter.join(","));
+
+test("direction comes from the gesture: a cross-tab link pushes and keeps its tab, back pops to it (C2, IA-05..07)", async ({
+  page,
+}) => {
+  await page.goto("/raportit");
+  await settled(page);
+  await watchEnterClass(page);
+  await page.locator('main a[href^="/kuitit"]').first().click();
+  await page.waitForURL("**/kuitit**");
+  await expect.poll(() => enterClasses(page)).toContain("page-push-in");
+  await expect(page.locator(".app-tab-bar a[aria-current=page]")).toHaveText("Raportit");
+  const back = page.locator(".app-header button[aria-label^='Takaisin']");
+  await expect(back).toHaveAttribute("aria-label", "Takaisin: Raportit");
+  await watchEnterClass(page);
+  await back.click();
+  await page.waitForURL("**/raportit");
+  await expect.poll(() => enterClasses(page)).toContain("page-pop-in");
+});
+
+test("tabs remember their screen; the active tab scrolls to the top, then pops to its root (C1.5, IA-25)", async ({ page }) => {
+  await page.goto("/kirjanpito");
+  await settled(page);
+  await page.locator('main a[href^="/kuitit"]').first().click();
+  await page.waitForURL("**/kuitit**");
+  await settled(page);
+  await page.locator(".app-tab-bar a", { hasText: "Koti" }).click();
+  await page.waitForURL("**/dashboard");
+  await page.locator(".app-tab-bar a", { hasText: "Kirjanpito" }).click();
+  await page.waitForURL("**/kuitit**");
+  await settled(page);
+  await page.evaluate(() => (document.querySelector("main.app-main")!.scrollTop = 200));
+  await page.locator(".app-tab-bar a", { hasText: "Kirjanpito" }).click();
+  await expect.poll(() => page.evaluate(() => document.querySelector("main.app-main")!.scrollTop)).toBeLessThanOrEqual(1);
+  await expect(page).toHaveURL(/\/kuitit/);
+  await page.locator(".app-tab-bar a", { hasText: "Kirjanpito" }).click();
+  await page.waitForURL("**/kirjanpito");
+});

@@ -121,6 +121,15 @@ export function rootIsActive(pathname: string, rootId: string, entries: readonly
   return ancestorChain(match, byId).some((entry) => entry.id === rootId);
 }
 
+/** The root (tab) a route belongs to in the registry, or null when unknown. */
+export function rootIdOf(pathname: string, entries: readonly NavEntry[] = NAV): string | null {
+  const match = matchNav(pathname, entries);
+  if (!match) return null;
+  const byId = new Map(entries.map((entry) => [entry.id, entry]));
+  const chain = ancestorChain(match, byId);
+  return chain.find((entry) => entry.kind === "root")?.id ?? null;
+}
+
 /**
  * How two routes relate in the registry: "forward" when `to` sits below
  * `from` (hub -> workspace), "back" when above, null when unrelated.

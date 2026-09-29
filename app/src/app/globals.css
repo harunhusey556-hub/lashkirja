@@ -811,9 +811,10 @@ button.ds-chip[aria-pressed="true"] { box-shadow: none; }
 /* leaves the flow at once so <main> takes the space under it.         */
 /* ------------------------------------------------------------------ */
 
+/* IA-28: the bar moves with the push (--dur-push, 300 ms). */
 .app-tab-bar {
   transition:
-    transform 260ms var(--ease-drawer),
+    transform var(--dur-push) var(--ease-drawer),
     visibility 0s linear 0s;
 }
 
@@ -825,8 +826,8 @@ button.ds-chip[aria-pressed="true"] { box-shadow: none; }
   transform: translateY(100%);
   visibility: hidden;
   transition:
-    transform 260ms var(--ease-drawer),
-    visibility 0s linear 260ms;
+    transform var(--dur-push) var(--ease-drawer),
+    visibility 0s linear var(--dur-push);
 }
 
 /* ------------------------------------------------------------------ */

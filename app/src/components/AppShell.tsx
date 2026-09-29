@@ -40,16 +40,21 @@ import { readPageCache, writePageCache } from "@/lib/page-cache";
 import { helsinkiMonthKey } from "@/lib/validation";
 import { bumpNavEpoch } from "@/lib/screen-state";
 import {
+  adoptTab,
   armNavigation,
   consumeDirection,
   inAppPrevious,
+  landingPath,
   markHistoryBack,
   performInAppBack,
   previousAfterLanding,
   recordRoute,
+  tabAfterLanding,
+  tabTarget,
+  updateCurrentHref,
   type NavDirection,
 } from "@/lib/nav-direction";
-import { hapticSelection } from "@/lib/haptics";
+import { hapticImpact } from "@/lib/haptics";
 import { anyFormDirty, requestLeave } from "@/lib/form-guard";
 import { UnsavedChangesHost } from "@/components/UnsavedChangesHost";
 import { captureWithCamera, chooseDocuments, isNativeShell } from "@/lib/native-pick";
@@ -76,7 +81,7 @@ import {
   backTarget,
   matchNav,
   navRelation,
-  rootIsActive,
+  rootIdOf,
   shellShowsBack,
   tabRoots,
   type NavEntry,
@@ -188,31 +193,74 @@ async function warmTabCaches(sequential: boolean) {
 
 /**
  * Shared by every tab-bar / sidebar root `<Link>` and the profile sheet's
- * "Asetukset" row. Always arms the direction first. A `<Link>` navigates by
- * its own default click; a `<button>` has no default navigation, so this
- * pushes for it (SHELL-01: the row used to close the sheet and go nowhere).
- * A dirty form intercepts instead: prevent the default and go through the
- * unsaved-changes prompt, pushing manually once confirmed.
+ * "Asetukset" row (C1.5, IA-25). Tab taps are silent (no haptic, as on iOS).
+ * - Another tab: go to that tab's last screen (its root the first time),
+ *   armed as "tab" (no animation) and owned by the tapped tab.
+ * - The active tab: scroll to the top first; tapped again at the top, pop to
+ *   the tab root.
+ * A `<Link>` navigates by its own default click when the target is its own
+ * href; otherwise (a remembered screen, a `<button>`) this pushes. A dirty
+ * form intercepts and goes through the unsaved-changes prompt first.
  */
-function handleRootLinkClick(
+function handleTabClick(
   event: { preventDefault: () => void; currentTarget?: EventTarget | null },
-  href: string,
-  pathname: string,
-  router: { push: (href: string) => void }
+  tab: { id: string; path: string },
+  context: {
+    pathname: string;
+    activeTab: string | null;
+    main: HTMLElement | null;
+    router: { push: (href: string) => void };
+    /** Re-render after the current screen moved into the tapped tab. */
+    refresh: () => void;
+  }
 ) {
-  if (href === pathname) return;
+  const { pathname, activeTab, main, router, refresh } = context;
   const isLink = typeof HTMLAnchorElement !== "undefined" && event.currentTarget instanceof HTMLAnchorElement;
-  if (anyFormDirty()) {
+
+  if (activeTab === tab.id) {
     event.preventDefault();
-    requestLeave(() => {
-      armNavigation(href, "tab");
-      router.push(href);
-    });
+    if (main && main.scrollTop > 1) {
+      const reduce = typeof window.matchMedia === "function" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+      main.scrollTo({ top: 0, behavior: reduce ? "auto" : "smooth" });
+      return;
+    }
+    if (pathname === tab.path) return;
+    const popToRoot = () => {
+      armNavigation(tab.path, "back");
+      router.push(tab.path);
+    };
+    if (anyFormDirty()) requestLeave(popToRoot);
+    else popToRoot();
     return;
   }
-  armNavigation(href, "tab");
-  // One frame later, so the sheet's exit and the page change overlap.
-  if (!isLink) requestAnimationFrame(() => router.push(href));
+
+  const target = tabTarget(tab.id) ?? tab.path;
+  const targetPath = target.split("?")[0];
+  if (targetPath === pathname) {
+    // Already on that tab's screen (reached by a push from another tab):
+    // it becomes that tab's root screen, with no navigation at all.
+    event.preventDefault();
+    adoptTab(tab.id, pathname);
+    refresh();
+    return;
+  }
+  const go = () => {
+    armNavigation(targetPath, "tab", tab.id);
+    router.push(target);
+  };
+  if (anyFormDirty()) {
+    event.preventDefault();
+    requestLeave(go);
+    return;
+  }
+  if (isLink && target === tab.path) {
+    armNavigation(targetPath, "tab", tab.id);
+    return;
+  }
+  event.preventDefault();
+  // One frame later, so a closing sheet's exit and the page change overlap.
+  if (isLink) go();
+  else requestAnimationFrame(go);
 }
 
 export default function AppShell({ children }: { children: React.ReactNode }) {
@@ -241,6 +289,8 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   // Adjusting state during render is how a new pathname picks its enter
   // direction before paint. The server skips this so the first HTML matches
   // the client's first visit (direction "none" until a real navigation).
+  // Bumped when the current screen is adopted by another tab (no navigation).
+  const [, setTabEpoch] = useState(0);
   const [navFrame, setNavFrame] = useState<{ path: string; direction: NavDirection }>({
     path: "",
     direction: "none",
@@ -249,11 +299,16 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     setNavFrame({ path: pathname, direction: consumeDirection(pathname, navRelation) });
   }
   const direction = navFrame.path === pathname ? navFrame.direction : "none";
-  const canGoBack = shellShowsBack(pathname);
-  const back = backTarget(pathname);
+  // The highlighted tab is the tab the current stack belongs to, not the
+  // path's own root: a cross-tab push keeps its origin tab lit (IA-07).
+  const activeTabId = typeof window === "undefined" ? rootIdOf(pathname) : tabAfterLanding(pathname, direction);
   // SHELL-31: the back button returns to the real previous screen when there
   // is one, so the label names that screen, not the logical parent.
   const previousScreen = typeof window === "undefined" ? null : previousAfterLanding(pathname, direction);
+  // C4: every screen reached by a push has a back, a root included (Koti ->
+  // Myynti link is a push that shows "< Koti", IA-07).
+  const canGoBack = shellShowsBack(pathname) || (navEntry?.kind === "root" && previousScreen !== null);
+  const back = backTarget(pathname);
   const previousEntry = previousScreen ? matchNav(previousScreen) : null;
   const backLabel =
     previousScreen && previousEntry && previousScreen !== back?.href && !previousEntry.path.includes(":")
@@ -439,6 +494,32 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     return () => window.removeEventListener("popstate", markPop);
   }, []);
 
+  // The current stack entry keeps its full href (query included), so a tab
+  // restore or a back to it lands on the same record and filters.
+  useEffect(() => {
+    updateCurrentHref(pathname, `${window.location.pathname}${window.location.search}`);
+  });
+
+  // C2 (IA-05..07): every in-content link is a push, whatever its URL depth
+  // and whichever tab it lands in. The tab bar, the sidebar and the back
+  // button arm their own direction; they are skipped here. Capture phase, so
+  // this runs before the Link's own navigation.
+  useEffect(() => {
+    const onClick = (event: MouseEvent) => {
+      if (event.defaultPrevented || event.button !== 0) return;
+      if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+      const target = event.target instanceof Element ? event.target : null;
+      const anchor = target?.closest<HTMLAnchorElement>("a[href]");
+      if (!anchor || anchor.closest(".app-tab-bar, .app-sidebar")) return;
+      if ((anchor.target && anchor.target !== "_self") || anchor.hasAttribute("download")) return;
+      const path = landingPath(anchor.getAttribute("href") ?? "", window.location.href);
+      if (!path || path === pathnameRef.current) return;
+      armNavigation(path, "forward");
+    };
+    document.addEventListener("click", onClick, true);
+    return () => document.removeEventListener("click", onClick, true);
+  }, []);
+
   // iOS-style edge swipe back on drill-in pages. Starts only within 24px of
   // the left edge so horizontally scrollable content keeps working, tracks the
   // finger interruptibly with the previous screen waiting underneath, and
@@ -448,6 +529,12 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     if (!canGoBack) return;
     const main = mainRef.current;
     if (!main) return;
+    const header = main.parentElement?.querySelector<HTMLElement>(".app-header") ?? null;
+    const tabBar = main.parentElement?.querySelector<HTMLElement>(".app-tab-bar") ?? null;
+    // IA-28: leaving a detail for a screen that shows the tab bar, the bar
+    // tracks the finger instead of appearing only after release.
+    const parentPath = inAppPrevious(pathname) ?? back?.href ?? null;
+    const barFollows = Boolean(isDetail && tabBar && parentPath && matchNav(parentPath)?.kind !== "detail");
 
     const EDGE = 24;
     let startX = 0;
@@ -464,6 +551,20 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       main.style.opacity = "";
     };
 
+    const clearBar = () => {
+      if (!tabBar) return;
+      tabBar.style.transform = "";
+      tabBar.style.transition = "";
+      tabBar.style.visibility = "";
+    };
+
+    const moveBar = (progress: number, transition = "none") => {
+      if (!barFollows || !tabBar || prefersReducedMotion()) return;
+      tabBar.style.transition = transition;
+      tabBar.style.visibility = "visible";
+      tabBar.style.transform = `translateY(${Math.round((1 - progress) * 100)}%)`;
+    };
+
     const dropUnder = () => {
       under?.remove();
       under = null;
@@ -474,16 +575,11 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       if (event.touches.length !== 1) return;
       const touch = event.touches[0];
       if (touch.clientX > EDGE) return;
-      // Filter chip rows (laskut/ostolaskut/kuitit) sit close enough to the
-      // left edge that a touch starting on them can land inside the 24px
-      // zone; letting the edge-swipe win there would break their horizontal
-      // scroll. Anything the page marks as horizontally scrollable is exempt.
-      if (
-        event.target instanceof Element &&
-        event.target.closest(".overflow-x-auto")
-      ) {
-        return;
-      }
+      // IA-27: a chip row that bleeds to the screen edge keeps its own
+      // horizontal scroll only while it is scrolled away from its start. At
+      // its start a rightward drag cannot scroll it, so the back swipe wins.
+      const row = event.target instanceof Element ? event.target.closest<HTMLElement>(".overflow-x-auto") : null;
+      if (row && row.scrollLeft > 0) return;
       tracking = true;
       decided = false;
       dx = 0;
@@ -516,10 +612,9 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       event.preventDefault();
       dx = Math.max(0, moveX);
       main.style.transform = `translateX(${dx}px)`;
-      if (under) {
-        const progress = Math.min(1, dx / Math.max(main.offsetWidth, 1));
-        under.style.transform = `translateX(${-28 * (1 - progress)}%)`;
-      }
+      const progress = Math.min(1, dx / Math.max(main.offsetWidth, 1));
+      if (under) under.style.transform = `translateX(${-28 * (1 - progress)}%)`;
+      moveBar(progress);
     };
 
     const onTouchEnd = () => {
@@ -541,6 +636,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
           // swap the live page in and drop the preview underneath.
           swipeHandoffRef.current = () => {
             clearInline();
+            clearBar();
             main.style.position = "";
             main.style.zIndex = "";
             landedUnder?.remove();
@@ -556,6 +652,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
           const curve = "var(--ease-drawer)";
           main.style.transition = `transform 200ms ${curve}`;
           main.style.transform = "translateX(100%)";
+          moveBar(1, `transform 200ms ${curve}`);
           if (landedUnder) {
             landedUnder.style.transition = `transform 200ms ${curve}`;
             landedUnder.style.transform = "translateX(0)";
@@ -567,6 +664,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         };
         if (anyFormDirty()) {
           clearInline();
+          clearBar();
           dropUnder();
           // The swipe set position/z-index on <main> for the page underneath.
           // Left in place, a cancelled prompt keeps <main> a stacking context,
@@ -585,10 +683,12 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
           under.style.transition = `transform 200ms ${curve}`;
           under.style.transform = "translateX(-28%)";
         }
+        moveBar(0, `transform 200ms ${curve}`);
         const leaving = under;
         under = null;
         window.setTimeout(() => {
           clearInline();
+          clearBar();
           main.style.position = "";
           main.style.zIndex = "";
           leaving?.remove();
@@ -596,24 +696,31 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       }
     };
 
-    main.addEventListener("touchstart", onTouchStart, { passive: true });
-    main.addEventListener("touchmove", onTouchMove, { passive: false });
-    main.addEventListener("touchend", onTouchEnd);
-    main.addEventListener("touchcancel", onTouchEnd);
+    // The swipe may start anywhere at the left edge, the header strip included.
+    const surfaces = [main, header].filter((node): node is HTMLElement => node !== null);
+    for (const surface of surfaces) {
+      surface.addEventListener("touchstart", onTouchStart, { passive: true });
+      surface.addEventListener("touchmove", onTouchMove, { passive: false });
+      surface.addEventListener("touchend", onTouchEnd);
+      surface.addEventListener("touchcancel", onTouchEnd);
+    }
     return () => {
-      main.removeEventListener("touchstart", onTouchStart);
-      main.removeEventListener("touchmove", onTouchMove);
-      main.removeEventListener("touchend", onTouchEnd);
-      main.removeEventListener("touchcancel", onTouchEnd);
+      for (const surface of surfaces) {
+        surface.removeEventListener("touchstart", onTouchStart);
+        surface.removeEventListener("touchmove", onTouchMove);
+        surface.removeEventListener("touchend", onTouchEnd);
+        surface.removeEventListener("touchcancel", onTouchEnd);
+      }
       dropUnder();
       if (!swipeHandoffRef.current) {
+        clearBar();
         clearInline();
         main.style.position = "";
         main.style.zIndex = "";
       }
       swipeLock.current = false;
     };
-  }, [canGoBack, pathname, router, back?.href]);
+  }, [canGoBack, pathname, router, back?.href, isDetail]);
 
   // UsableArea owns frame size. This only keeps a focused field inside the
   // content scroller when the keyboard changes the visual viewport.
@@ -741,11 +848,16 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
   const addOpen = addOpenOn === pathname;
 
-  function goToRoot(event: { preventDefault: () => void; currentTarget?: EventTarget | null }, href: string) {
-    void hapticSelection();
+  function goToRoot(event: { preventDefault: () => void; currentTarget?: EventTarget | null }, tab: NavEntry) {
     setAddOpenOn(null);
     setProfileOpenOn(null);
-    handleRootLinkClick(event, href, pathname, router);
+    handleTabClick(event, tab, {
+      pathname,
+      activeTab: activeTabId,
+      main: mainRef.current,
+      router,
+      refresh: () => setTabEpoch((value) => value + 1),
+    });
   }
 
   /** Push a screen with the forward (push) transition. */
@@ -795,13 +907,13 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   }
 
   function renderTab(item: NavEntry) {
-    const active = rootIsActive(pathname, item.id);
+    const active = activeTabId === item.id;
     return (
       <Link
         key={item.id}
         href={item.path}
         prefetch
-        onClick={(event) => goToRoot(event, item.path)}
+        onClick={(event) => goToRoot(event, item)}
         className={`flex min-w-0 flex-1 flex-col items-center justify-center gap-1 touch-target transition-colors active-press ${
           active ? "text-accent" : "text-ink-2"
         }`}
@@ -841,13 +953,13 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         </div>
         <nav aria-label="Päävalikko" className="flex flex-1 flex-col gap-0.5 px-3">
           {tabRoots().map((item) => {
-            const active = rootIsActive(pathname, item.id);
+            const active = activeTabId === item.id;
             return (
               <Link
                 key={item.id}
                 href={item.path}
                 prefetch
-                onClick={(event) => goToRoot(event, item.path)}
+                onClick={(event) => goToRoot(event, item)}
                 aria-current={active ? "page" : undefined}
                 className={`flex min-h-12 items-center gap-3 rounded-card px-3 text-left text-body active-press ${
                   active ? "bg-accent-soft font-semibold text-accent" : "font-medium text-ink"
@@ -863,15 +975,15 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
           <Link
             href={avatarRoot().path}
             prefetch
-            onClick={(event) => goToRoot(event, avatarRoot().path)}
-            aria-current={rootIsActive(pathname, "asetukset") ? "page" : undefined}
+            onClick={(event) => goToRoot(event, avatarRoot())}
+            aria-current={activeTabId === "asetukset" ? "page" : undefined}
             className={`flex min-h-12 w-full items-center gap-3 rounded-card px-3 text-left text-body active-press ${
-              rootIsActive(pathname, "asetukset") ? "bg-accent-soft font-semibold text-accent" : "font-medium text-ink"
+              activeTabId === "asetukset" ? "bg-accent-soft font-semibold text-accent" : "font-medium text-ink"
             }`}
           >
             <Icon
               icon={Settings}
-              className={rootIsActive(pathname, "asetukset") ? "text-accent" : "text-ink-2"}
+              className={activeTabId === "asetukset" ? "text-accent" : "text-ink-2"}
             />
             Asetukset
           </Link>
@@ -906,10 +1018,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
             <div className="flex items-center gap-1 justify-self-end">
               <button
                 type="button"
-                onClick={() => {
-                  void hapticSelection();
-                  setChatOpenOn(pathname);
-                }}
+                onClick={() => setChatOpenOn(pathname)}
                 aria-label="Avustaja"
                 className="header-circle active-press flex h-11 w-11 items-center justify-center"
               >
@@ -987,7 +1096,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                 <button
                   type="button"
                   onClick={() => {
-                    void hapticSelection();
+                    void hapticImpact("light");
                     setAddOpenOn(pathname);
                   }}
                   aria-label="Lisää"
@@ -1111,8 +1220,8 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
               <div className="overflow-hidden rounded-card border border-line bg-surface divide-y divide-line">
                 <button
                   type="button"
-                  onClick={(event) => goToRoot(event, avatarRoot().path)}
-                  aria-current={rootIsActive(pathname, "asetukset") ? "page" : undefined}
+                  onClick={(event) => goToRoot(event, avatarRoot())}
+                  aria-current={activeTabId === "asetukset" ? "page" : undefined}
                   className="w-full flex items-center gap-3 px-4 py-3.5 text-left active-press touch-target"
                 >
                   <IconTile>
