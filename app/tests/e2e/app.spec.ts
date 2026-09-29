@@ -105,7 +105,7 @@ test("invoice goes from draft to paid", async ({ page }) => {
 
   await page.goto("/asiakkaat");
   const main = page.getByRole("main");
-  await main.getByRole("button", { name: "Lisää", exact: true }).click();
+  await main.getByRole("button", { name: "Uusi asiakas", exact: true }).click();
   await page.getByLabel("Nimi").fill("E2E Asiakas");
   await page.getByRole("button", { name: "Lisää asiakas" }).click();
   await expect(page.getByText("E2E Asiakas")).toBeVisible();
@@ -135,8 +135,8 @@ test("invoice goes from draft to paid", async ({ page }) => {
   // The payment form now opens in a "Kirjaa maksu" sheet (BottomActions'
   // primary for a sent, still-open invoice) instead of sitting inline.
   await page.getByRole("button", { name: "Kirjaa maksu" }).click();
-  await page.getByLabel("Maksun summa").fill("125,50");
-  await page.getByRole("dialog").getByRole("button", { name: "Lisää", exact: true }).click();
+  await page.getByLabel("Summa", { exact: true }).fill("125,50");
+  await page.getByRole("dialog").getByRole("button", { name: "Uusi asiakas", exact: true }).click();
   // "Maksettu" appears both as the status and as the paid-amount row label.
   await expect(page.getByText("Maksettu", { exact: true }).first()).toBeVisible();
   await expect(page.getByText("Avoinna")).toHaveCount(0);
@@ -169,7 +169,7 @@ test("an invoice can be downloaded as a PDF", async ({ page, context }) => {
   await login(page);
 
   await page.goto("/asiakkaat");
-  await page.getByRole("main").getByRole("button", { name: "Lisää", exact: true }).click();
+  await page.getByRole("main").getByRole("button", { name: "Uusi asiakas", exact: true }).click();
   await page.getByLabel("Nimi").fill("PDF Asiakas");
   await page.getByRole("button", { name: "Lisää asiakas" }).click();
 
@@ -238,7 +238,7 @@ test("closing the books makes an earlier period read-only", async ({ page }) => 
   await expect(page.getByText(/Kirjanpito lukittu/)).toBeVisible();
 
   await page.goto("/asiakkaat");
-  await page.getByRole("main").getByRole("button", { name: "Lisää", exact: true }).click();
+  await page.getByRole("main").getByRole("button", { name: "Uusi asiakas", exact: true }).click();
   await page.getByLabel("Nimi").fill("Lukko Asiakas");
   await page.getByRole("button", { name: "Lisää asiakas" }).click();
 
@@ -263,7 +263,7 @@ test("a recurring invoice generates a real invoice", async ({ page }) => {
   await login(page);
 
   await page.goto("/asiakkaat");
-  await page.getByRole("main").getByRole("button", { name: "Lisää", exact: true }).click();
+  await page.getByRole("main").getByRole("button", { name: "Uusi asiakas", exact: true }).click();
   await page.getByLabel("Nimi").fill("Toisto Asiakas");
   await page.getByRole("button", { name: "Lisää asiakas" }).click();
 
@@ -302,7 +302,7 @@ test("privacy request status is visible and the lock PIN is masked", async ({ pa
   await expect(page.locator("#lockPin")).toHaveAttribute("type", "password");
 
   await page.goto("/asiakkaat");
-  await page.getByRole("main").getByRole("button", { name: "Lisää", exact: true }).click();
+  await page.getByRole("main").getByRole("button", { name: "Uusi asiakas", exact: true }).click();
   await page.getByLabel("Nimi").fill("Luonnos Asiakas");
   await expect(page.getByText("Luonnos tallennettu.")).toBeVisible();
   // The notice's own "Sulje" (the sheet's close button carries the same name).

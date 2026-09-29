@@ -2,11 +2,14 @@
 
 import { Disclosure } from "@/components/ds/Disclosure";
 import { useState } from "react";
+import Link from "next/link";
 import { formatEur } from "@/lib/statement-client";
-import { Button } from "@/components/ui";
+import { Button, buttonClass } from "@/components/ui";
 import ConfirmModal from "@/components/ConfirmModal";
+import BottomSheet from "@/components/BottomSheet";
 import { ChevronDown } from "lucide-react";
-import { ActionPill, Card, Icon, ListRow, MoreMenu } from "@/components/ds";
+import { ActionPill, Card, Icon, ListRow } from "@/components/ds";
+import { detailHref } from "@/lib/routes";
 
 interface ReviewQueueReceipt {
   id: string;
@@ -34,11 +37,6 @@ function rowSecondary(receipt: ReviewQueueReceipt): string {
   return `${date} · ${receipt.fileName}`;
 }
 
-/** A unique accessible name per row's "..." menu: two receipts can share a vendor and a date. */
-function rowMenuLabel(receipt: ReviewQueueReceipt): string {
-  return `Lisää toimintoja: ${receipt.vendor || "Tuntematon myyjä"} ${receipt.fileName}`;
-}
-
 /**
  * A pending-review batch. Split by document origin, because a bank-drafted
  * sale and an emailed receipt need different wording and different actions -
@@ -59,6 +57,8 @@ export default function ReviewQueue({
   const [open, setOpen] = useState(false);
   const [showAll, setShowAll] = useState(false);
   const [confirmBulk, setConfirmBulk] = useState(false);
+  // VS-23: a row carries one action pill; "Hylkää" and the details live in the row's own sheet.
+  const [sheetFor, setSheetFor] = useState<ReviewQueueReceipt | null>(null);
   // A zero or missing total is almost always an unread receipt: approving it
   // in bulk books nothing, so it is named before the tap (BOOKS-28).
   const withoutTotal = receipts.filter((r) => !r.totalAmount).length;
@@ -79,7 +79,7 @@ export default function ReviewQueue({
           <h2 className="text-body font-medium text-ink">
             {title} ({receipts.length})
           </h2>
-          <p className="mt-1 text-caption leading-relaxed text-ink-2">{description}</p>
+          <p className="mt-1 text-caption text-ink-2">{description}</p>
           <p className="mt-1 text-caption tabular-nums text-ink-2">Yhteensä {formatEur(total)}</p>
         </div>
         <Icon icon={ChevronDown} className={`text-ink-2 transition-transform ${open ? "rotate-180" : ""}`} />
@@ -126,15 +126,9 @@ export default function ReviewQueue({
                 title={r.vendor || "Tuntematon myyjä"}
                 amount={r.totalAmount != null ? formatEur(r.totalAmount) : "–"}
                 secondary={rowSecondary(r)}
-                trailing={
-                  <div className="flex items-center gap-1.5">
-                    <ActionPill onClick={() => onReview(r.id, "approved")}>Hyväksy</ActionPill>
-                    <MoreMenu
-                      label={rowMenuLabel(r)}
-                      items={[{ label: rejectLabel, onSelect: () => onReview(r.id, "rejected"), tone: "danger" as const }]}
-                    />
-                  </div>
-                }
+                onClick={() => setSheetFor(r)}
+                ariaLabel={`${r.vendor || "Tuntematon myyjä"}, ${r.totalAmount != null ? formatEur(r.totalAmount) : "ei summaa"}, ${rowSecondary(r)}`}
+                trailing={<ActionPill onClick={() => onReview(r.id, "approved")}>Hyväksy</ActionPill>}
               />
             ))}
           </div>
@@ -147,6 +141,47 @@ export default function ReviewQueue({
           )}
         </div>
       </Disclosure>
+
+      <BottomSheet
+        isOpen={sheetFor !== null}
+        onClose={() => setSheetFor(null)}
+        title={sheetFor?.vendor || "Tuntematon myyjä"}
+        subtitle={sheetFor ? rowSecondary(sheetFor) : undefined}
+        labelledBy="review-sheet-title"
+        heightClass="max-h-[60dvh]"
+      >
+        {sheetFor && (
+          <div className="space-y-3 px-5 py-4 sheet-safe-bottom">
+            <p className="text-title-2 font-bold tabular-nums tracking-[-0.02em] text-ink">
+              {sheetFor.totalAmount != null ? formatEur(sheetFor.totalAmount) : "–"}
+            </p>
+            <Button
+              type="button"
+              className="w-full"
+              onClick={() => {
+                onReview(sheetFor.id, "approved");
+                setSheetFor(null);
+              }}
+            >
+              Hyväksy
+            </Button>
+            <Link href={detailHref("receipt", sheetFor.id)} className={buttonClass("secondary", "w-full")}>
+              Avaa kuitti
+            </Link>
+            <Button
+              type="button"
+              variant="danger"
+              className="w-full"
+              onClick={() => {
+                onReview(sheetFor.id, "rejected");
+                setSheetFor(null);
+              }}
+            >
+              {rejectLabel}
+            </Button>
+          </div>
+        )}
+      </BottomSheet>
     </Card>
   );
 }

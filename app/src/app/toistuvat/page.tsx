@@ -14,8 +14,8 @@ import {
   redirectToLogin,
 } from "@/components/clientFetch";
 import { Button } from "@/components/ui";
-import { Plus } from "lucide-react";
-import { Card, Icon, KeyValueList, ListRow, PageTitle, Section, StatusTag } from "@/components/ds";
+import { Repeat } from "lucide-react";
+import { Card, FilterChips, HeaderAddPill, KeyValueList, ListRow, PageTitle, Section, StatusTag } from "@/components/ds";
 import { formatDate, formatDayMonth, formatEur } from "@/lib/format";
 import { type RecurrenceInterval } from "@/lib/recurrence";
 import { detailHref } from "@/lib/routes";
@@ -119,6 +119,24 @@ function toFormValues(entry: RecurringInvoice): RecurringFormValues {
   };
 }
 
+/** "Uusi vuosilasku 100,00 € ja Kuukausilasku 50,00 €. 1 lähetetään sähköpostilla. Lähetettyä laskua ei voi perua, vain hyvittää." */
+function runPlanSummary(plan: RunPlan["plan"] | null): string {
+  if (!plan) return "";
+  const sends = plan.filter((entry) => entry.autoSend && entry.customerEmail).length;
+  const parts = plan.map(
+    (entry) =>
+      `${entry.name} ${entry.issueDates.length > 1 ? `${entry.issueDates.length} × ` : ""}${formatEur(entry.gross)}`
+  );
+  const drafts = plan.length - sends;
+  const sentence = [
+    `${parts.join(", ")}.`,
+    sends > 0 ? `${sends === 1 ? "1 lähetetään" : `${sends} lähetetään`} sähköpostilla.` : "",
+    drafts > 0 ? `${drafts === 1 ? "1 jää" : `${drafts} jää`} luonnokseksi.` : "",
+    sends > 0 ? "Lähetettyä laskua ei voi perua, vain hyvittää." : "",
+  ];
+  return sentence.filter(Boolean).join(" ");
+}
+
 export default function RecurringInvoicesPage() {
   const cached = readPageCache<{ recurring: RecurringInvoice[]; dueNow: number }>("recurring");
   const [recurring, setRecurring] = useState<RecurringInvoice[]>(cached?.recurring ?? []);
@@ -153,7 +171,6 @@ export default function RecurringInvoicesPage() {
   const [confirmRemove, setConfirmRemove] = useState<RecurringInvoice | null>(null);
   const [runPlan, setRunPlan] = useState<RunPlan["plan"] | null>(null);
   const [runScope, setRunScope] = useState<string | undefined>(undefined);
-  const [runError, setRunError] = useState("");
   const [planLoading, setPlanLoading] = useState(false);
 
   const load = useCallback(async () => {
@@ -251,11 +268,14 @@ export default function RecurringInvoicesPage() {
   async function previewRun(recurringInvoiceId?: string) {
     if (planLoading) return;
     setPlanLoading(true);
-    setRunError("");
     try {
       const query = recurringInvoiceId ? `?recurringInvoiceId=${encodeURIComponent(recurringInvoiceId)}` : "";
       const response = await apiFetch(`/api/recurring-invoices/run${query}`, { credentials: "include" });
       const data = await readJson<RunPlan>(response, "Tarkistus epäonnistui");
+      if (data.plan.length === 0) {
+        showToast({ text: "Yhtään laskua ei ole juuri nyt erääntynyt luotavaksi." });
+        return;
+      }
       setRunScope(recurringInvoiceId);
       setRunPlan(data.plan);
     } catch (error) {
@@ -268,7 +288,6 @@ export default function RecurringInvoicesPage() {
   /** Step 2: create them. */
   async function runDue() {
     setBusy(true);
-    setRunError("");
     try {
       const response = await apiFetch("/api/recurring-invoices/run", {
         method: "POST",
@@ -293,8 +312,9 @@ export default function RecurringInvoicesPage() {
       });
       await load();
     } catch (error) {
-      setRunError(errorMessage(error, "Laskujen luonti epäonnistui"));
       void hapticNotify("error");
+      // The confirmation stays open and shows the message (IA-12: one confirmation pattern).
+      throw new Error(errorMessage(error, "Laskujen luonti epäonnistui"));
     } finally {
       setBusy(false);
     }
@@ -357,7 +377,6 @@ export default function RecurringInvoicesPage() {
 
   const editing = formFor && formFor !== "new" ? formFor : null;
   const planCount = runPlan?.reduce((sum, entry) => sum + entry.issueDates.length, 0) ?? 0;
-  const planSends = runPlan?.filter((entry) => entry.autoSend).length ?? 0;
 
   return (
     <>
@@ -365,18 +384,13 @@ export default function RecurringInvoicesPage() {
         <PageTitle
           title="Toistuvat"
           action={
-            <button
-              type="button"
+            <HeaderAddPill
+              label="Uusi toistuva lasku"
               onClick={() => {
                 setFormError("");
                 setFormFor("new");
               }}
-              aria-label="Uusi toistuva lasku"
-              className="active-press relative inline-flex min-h-9 items-center gap-1 rounded-full bg-ink px-3.5 text-caption font-semibold text-canvas before:absolute before:inset-x-0 before:-inset-y-1 before:content-['']"
-            >
-              <Icon icon={Plus} size="inline" strokeWidth={2.5} />
-              Uusi
-            </button>
+            />
           }
         />
 
@@ -414,6 +428,18 @@ export default function RecurringInvoicesPage() {
             />
           ))}
 
+        {status !== "error" && (recurring.length > 0 || showInactive || hasAny) && (
+          <FilterChips
+            label="Suodata toistuvat laskut"
+            items={[
+              { id: "active", label: "Aktiiviset" },
+              { id: "all", label: "Myös pysäytetyt" },
+            ]}
+            value={showInactive ? "all" : "active"}
+            onChange={(id) => setShowInactive(id === "all")}
+          />
+        )}
+
         {status === "ready" && recurring.length > 0 && (
           <Section>
             {recurring.map((entry) => (
@@ -437,13 +463,14 @@ export default function RecurringInvoicesPage() {
           (hasAny === false || showInactive ? (
             <EmptyState
               kind="records"
-              title="Ei toistuvia laskuja"
+              icon={Repeat}
+              title="Ei toistuvia laskuja vielä"
               body="Kun asiakkaalla on säännöllinen veloitus, lasku luodaan tästä automaattisesti joka kerta."
               onCreate={() => {
                 setFormError("");
                 setFormFor("new");
               }}
-              createLabel="Luo toistuva lasku"
+              createLabel="Uusi toistuva lasku"
             />
           ) : (
             <EmptyState
@@ -455,16 +482,6 @@ export default function RecurringInvoicesPage() {
             />
           ))}
 
-        {(recurring.length > 0 || showInactive || hasAny) && (
-          <Button
-            type="button"
-            variant="ghost"
-            className="w-full"
-            onClick={() => setShowInactive((value) => !value)}
-          >
-            {showInactive ? "Piilota pysäytetyt" : "Näytä pysäytetyt"}
-          </Button>
-        )}
       </div>
 
       {/* Schedule detail: every fact in one place, with its actions (SALES-12). */}
@@ -616,84 +633,17 @@ export default function RecurringInvoicesPage() {
         }}
       />
 
-      {/* Confirmation before invoices are created or e-mailed (SALES-05). */}
-      <BottomSheet
+      {/* Confirmation before invoices are created or e-mailed (SALES-05). A ConfirmModal like every other
+          confirmation (IA-12): the plan is summarised in its description. */}
+      <ConfirmModal
         isOpen={runPlan !== null}
-        onClose={() => {
-          setRunPlan(null);
-          setRunError("");
-        }}
-        title="Luodaanko laskut?"
-        labelledBy="recurring-run-title"
-      >
-        {runPlan && (
-          <div className="space-y-3 px-5 py-4 sheet-safe-bottom">
-            {planCount === 0 ? (
-              <p className="text-body text-ink">Yhtään laskua ei ole juuri nyt erääntynyt luotavaksi.</p>
-            ) : (
-              <>
-                <p className="text-body text-ink">
-                  {planCount === 1 ? "Luodaan 1 lasku:" : `Luodaan ${planCount} laskua:`}
-                </p>
-                <div className="overflow-hidden rounded-card border border-line bg-surface divide-y divide-line">
-                  {runPlan.map((entry) => (
-                    <div key={entry.recurringInvoiceId} className="px-4 py-3">
-                      <div className="flex items-baseline justify-between gap-3 text-body">
-                        <span className="min-w-0 truncate font-medium text-ink">{entry.name}</span>
-                        <span className="shrink-0 tabular-nums text-ink">
-                          {entry.issueDates.length > 1 ? `${entry.issueDates.length} × ` : ""}
-                          {formatEur(entry.gross)}
-                        </span>
-                      </div>
-                      <p className="mt-0.5 text-caption text-ink-2">
-                        {entry.autoSend
-                          ? entry.customerEmail
-                            ? `Lähetetään sähköpostilla: ${entry.customerEmail}`
-                            : "Sähköpostiosoite puuttuu, jää luonnokseksi"
-                          : "Jää luonnokseksi, ei lähetetä"}
-                      </p>
-                    </div>
-                  ))}
-                </div>
-                {planSends > 0 && (
-                  <p className="text-caption text-ink-2">
-                    Lähetettyä laskua ei voi perua, vain hyvittää.
-                  </p>
-                )}
-              </>
-            )}
-            {runError && (
-              <p className="text-sm text-danger" role="alert">
-                {runError}
-              </p>
-            )}
-            <div className="flex gap-2">
-              {planCount > 0 && (
-                <Button
-                  type="button"
-                  className="flex-1"
-                  busy={busy}
-                  busyLabel="Luodaan…"
-                  onClick={() => void runDue()}
-                >
-                  {planCount === 1 ? "Luo lasku" : `Luo ${planCount} laskua`}
-                </Button>
-              )}
-              <Button
-                type="button"
-                variant="secondary"
-                className="flex-1"
-                onClick={() => {
-                  setRunPlan(null);
-                  setRunError("");
-                }}
-              >
-                {planCount > 0 ? "Peruuta" : "Sulje"}
-              </Button>
-            </div>
-          </div>
-        )}
-      </BottomSheet>
+        title={planCount === 1 ? "Luodaanko 1 lasku?" : `Luodaanko ${planCount} laskua?`}
+        description={runPlanSummary(runPlan)}
+        confirmLabel={planCount === 1 ? "Luo lasku" : `Luo ${planCount} laskua`}
+        isDestructive={false}
+        onConfirm={() => runDue()}
+        onCancel={() => setRunPlan(null)}
+      />
 
       <ConfirmModal
         isOpen={confirmRemove !== null}

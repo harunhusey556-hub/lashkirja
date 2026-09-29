@@ -25,6 +25,7 @@ import { formatDate, formatEurSigned, parseFinnishNumber } from "@/lib/format";
 import { STATEMENT_TX_STATUS, statementTxStatusKey } from "@/lib/status-labels";
 import StatementSummaryCards from "@/components/StatementSummaryCards";
 import ConfirmModal from "@/components/ConfirmModal";
+import { Skeleton, SkeletonGroup } from "@/components/ds/Skeleton";
 import { Button, controlClass } from "@/components/ui";
 import { showToast } from "@/lib/toast";
 import { hapticImpact } from "@/lib/haptics";
@@ -49,6 +50,29 @@ function txSecondary(t: StatementTransaction): string {
   return [formatDate(t.date), typeLabel(t.type), t.reference || null]
     .filter((part): part is string => Boolean(part))
     .join(" · ");
+}
+
+/** The actions of one bank line, listed in its own panel (VS-23): never a per-row "···". */
+function RowActionList({ items }: {
+  items: { label: string; onSelect: () => void; tone?: "danger"; disabled?: boolean }[];
+}) {
+  return (
+    <div className="overflow-hidden rounded-card border border-line bg-surface divide-y divide-line">
+      {items.map((item) => (
+        <button
+          key={item.label}
+          type="button"
+          disabled={item.disabled}
+          onClick={item.onSelect}
+          className={`active-press flex min-h-12 w-full items-center px-4 text-left text-body disabled:opacity-50 ${
+            item.tone === "danger" ? "text-danger" : "text-ink"
+          }`}
+        >
+          {item.label}
+        </button>
+      ))}
+    </div>
+  );
 }
 
 export default function StatementDetailView({
@@ -581,6 +605,7 @@ export default function StatementDetailView({
             <input
               id={`statement-${statement.id}-period`}
               type="month"
+              lang="fi"
               value={periodValue()}
               onChange={(e) => setDraftPeriod(e.target.value)}
               className={controlClass}
@@ -611,7 +636,7 @@ export default function StatementDetailView({
       </Section>
 
       {actionError && (
-        <p className="rounded-card bg-danger/10 px-4 py-3 text-sm text-danger" role="alert">
+        <p className="rounded-card bg-danger/10 px-4 py-3 text-caption text-danger" role="alert">
           {actionError}
         </p>
       )}
@@ -706,95 +731,25 @@ export default function StatementDetailView({
                   amount={formatEurSigned(t.amount)}
                   amountTone={t.amount >= 0 ? "positive" : "default"}
                   ariaLabel={rowLabel}
+                  // Record row (type B, VS-22/23): the trailing affordance is exactly one of an action pill or
+                  // a status tag. Every other action lives in the row's own panel below.
                   trailing={
-                    <div className="flex items-center gap-1.5">
-                      {status && <StatusTag tone={status.tone}>{status.label}</StatusTag>}
-                      {canQuickLink && (
-                        <ActionPill
-                          ariaLabel={`Linkitä: ${rowLabel}`}
-                          disabled={matchBusyTxId === t.id}
-                          onClick={() =>
-                            matchAction(t.id, "/api/matching/confirm", {
-                              transactionId: t.id,
-                              receiptId: t.suggestedReceiptId,
-                            })
-                          }
-                        >
-                          Linkitä
-                        </ActionPill>
-                      )}
-                      {canQuickIgnore && (
-                        <ActionPill
-                          ariaLabel={`Ei tositetta tarvita: ${rowLabel}`}
-                          disabled={matchBusyTxId === t.id}
-                          onClick={() => void ignoreWithUndo(t.id)}
-                        >
-                          Ei tositetta
-                        </ActionPill>
-                      )}
-                      <MoreMenu
-                        label={`Lisää toimintoja: ${rowLabel}`}
-                        items={[
-                          { label: "Muokkaa", onSelect: () => startEditTx(t) },
-                          {
-                            label: deletingTxId === t.id ? "Poistetaan…" : "Poista",
-                            onSelect: () => setConfirmingTxDelete(t.id),
-                            tone: "danger",
-                            disabled: deletingTxId === t.id,
-                          },
-                          ...(t.matchStatus === "confirmed"
-                            ? [
-                                {
-                                  label: "Poista linkitys",
-                                  onSelect: () =>
-                                    matchAction(t.id, "/api/matching/unlink", {
-                                      transactionId: t.id,
-                                    }),
-                                  tone: "danger" as const,
-                                  disabled: matchBusyTxId === t.id,
-                                },
-                              ]
-                            : []),
-                          ...(t.matchStatus === "suggested" && t.suggestedReceiptId
-                            ? [
-                                {
-                                  label: "Väärä ehdotus",
-                                  onSelect: () =>
-                                    matchAction(t.id, "/api/matching/reject", {
-                                      transactionId: t.id,
-                                      receiptId: t.suggestedReceiptId,
-                                    }),
-                                  disabled: matchBusyTxId === t.id,
-                                },
-                              ]
-                            : []),
-                          ...(canSearchMore
-                            ? [
-                                {
-                                  label: candidatesFor === t.id ? "Sulje haku" : "Etsi lisää",
-                                  onSelect: () => {
-                                    setExpandedId(t.id);
-                                    void openCandidates(t.id);
-                                  },
-                                },
-                              ]
-                            : []),
-                          ...(t.matchStatus === "ignored"
-                            ? [
-                                {
-                                  label: "Palauta",
-                                  onSelect: () =>
-                                    matchAction(t.id, "/api/matching/ignore", {
-                                      transactionId: t.id,
-                                      ignored: false,
-                                    }),
-                                  disabled: matchBusyTxId === t.id,
-                                },
-                              ]
-                            : []),
-                        ]}
-                      />
-                    </div>
+                    canQuickLink ? (
+                      <ActionPill
+                        ariaLabel={`Linkitä: ${rowLabel}`}
+                        disabled={matchBusyTxId === t.id}
+                        onClick={() =>
+                          matchAction(t.id, "/api/matching/confirm", {
+                            transactionId: t.id,
+                            receiptId: t.suggestedReceiptId,
+                          })
+                        }
+                      >
+                        Linkitä
+                      </ActionPill>
+                    ) : status ? (
+                      <StatusTag tone={status.tone}>{status.label}</StatusTag>
+                    ) : undefined
                   }
                 />
 
@@ -809,6 +764,9 @@ export default function StatementDetailView({
                           <input
                             id={`transaction-${t.id}-counterparty`}
                             type="text"
+                            autoCapitalize="words"
+                            autoComplete="off"
+                            enterKeyHint="next"
                             value={txForm.counterparty}
                             onChange={(e) =>
                               setTxForm({ ...txForm, counterparty: e.target.value })
@@ -824,6 +782,7 @@ export default function StatementDetailView({
                             <input
                               id={`transaction-${t.id}-date`}
                               type="date"
+                              lang="fi"
                               value={txForm.date}
                               onChange={(e) => setTxForm({ ...txForm, date: e.target.value })}
                               className={controlClass}
@@ -837,6 +796,8 @@ export default function StatementDetailView({
                               id={`transaction-${t.id}-amount`}
                               type="text"
                               inputMode="decimal"
+                              autoComplete="off"
+                              enterKeyHint="done"
                               value={txForm.amount}
                               onChange={(e) => setTxForm({ ...txForm, amount: e.target.value })}
                               className={`${controlClass} tabular-nums`}
@@ -955,7 +916,7 @@ export default function StatementDetailView({
                                     disabled={matchBusyTxId === t.id}
                                     className="active-press flex min-h-11 w-full items-center justify-between gap-3 py-2.5 text-left disabled:opacity-50"
                                   >
-                                    <span className="min-w-0 truncate text-caption text-ink">
+                                    <span className="min-w-0 line-clamp-2 text-caption text-ink [overflow-wrap:anywhere]">
                                       {receiptLabel(c.receipt)}
                                     </span>
                                     <span className="shrink-0 text-caption text-ink-2">
@@ -970,7 +931,10 @@ export default function StatementDetailView({
                         {candidatesFor === t.id && (
                           <div>
                             {loadingCandidates ? (
-                              <p className="text-caption text-ink-2">Haetaan kuitteja...</p>
+                              <SkeletonGroup label="Ladataan kuitteja" className="space-y-2">
+                                <Skeleton className="h-3.5 w-3/5" />
+                                <Skeleton tone="soft" className="h-3 w-2/5" />
+                              </SkeletonGroup>
                             ) : candidates.length === 0 ? (
                               <p className="text-caption text-ink-2">
                                 Ei sopivia kuitteja. Lisää kuitti ensin Kuitit-sivulla.
@@ -990,7 +954,7 @@ export default function StatementDetailView({
                                     disabled={matchBusyTxId === t.id}
                                     className="active-press flex min-h-11 w-full items-center justify-between gap-3 py-2.5 text-left disabled:opacity-50"
                                   >
-                                    <span className="min-w-0 truncate text-caption text-ink">
+                                    <span className="min-w-0 line-clamp-2 text-caption text-ink [overflow-wrap:anywhere]">
                                       {receiptLabel(c.receipt)}
                                     </span>
                                     <span className="shrink-0 text-caption text-ink-2">
@@ -1002,6 +966,73 @@ export default function StatementDetailView({
                             )}
                           </div>
                         )}
+                        <RowActionList
+                          items={[
+                            { label: "Muokkaa", onSelect: () => startEditTx(t) },
+                            ...(canQuickIgnore
+                              ? [
+                                  {
+                                    label: "Ei kuittia tarvita",
+                                    onSelect: () => void ignoreWithUndo(t.id),
+                                    disabled: matchBusyTxId === t.id,
+                                  },
+                                ]
+                              : []),
+                            ...(t.matchStatus === "suggested" && t.suggestedReceiptId
+                              ? [
+                                  {
+                                    label: "Väärä ehdotus",
+                                    onSelect: () =>
+                                      matchAction(t.id, "/api/matching/reject", {
+                                        transactionId: t.id,
+                                        receiptId: t.suggestedReceiptId,
+                                      }),
+                                    disabled: matchBusyTxId === t.id,
+                                  },
+                                ]
+                              : []),
+                            ...(canSearchMore
+                              ? [
+                                  {
+                                    label: candidatesFor === t.id ? "Sulje haku" : "Etsi lisää",
+                                    onSelect: () => void openCandidates(t.id),
+                                  },
+                                ]
+                              : []),
+                            ...(t.matchStatus === "confirmed"
+                              ? [
+                                  {
+                                    label: "Poista linkitys",
+                                    onSelect: () =>
+                                      matchAction(t.id, "/api/matching/unlink", {
+                                        transactionId: t.id,
+                                      }),
+                                    tone: "danger" as const,
+                                    disabled: matchBusyTxId === t.id,
+                                  },
+                                ]
+                              : []),
+                            ...(t.matchStatus === "ignored"
+                              ? [
+                                  {
+                                    label: "Palauta",
+                                    onSelect: () =>
+                                      matchAction(t.id, "/api/matching/ignore", {
+                                        transactionId: t.id,
+                                        ignored: false,
+                                      }),
+                                    disabled: matchBusyTxId === t.id,
+                                  },
+                                ]
+                              : []),
+                            {
+                              label: deletingTxId === t.id ? "Poistetaan…" : "Poista",
+                              onSelect: () => setConfirmingTxDelete(t.id),
+                              tone: "danger" as const,
+                              disabled: deletingTxId === t.id,
+                            },
+                          ]}
+                        />
                       </>
                     )}
                   </div>

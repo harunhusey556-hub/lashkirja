@@ -1226,7 +1226,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                 </button>
                 {(
                   [
-                    { href: "/laskut/uusi", label: "Uusi myyntilasku", icon: FilePlus },
+                    { href: "/laskut/uusi", label: "Uusi lasku", icon: FilePlus },
                     { href: "/asetukset/sahkoposti", label: "Hae sähköpostista", icon: Mail },
                   ] as const satisfies readonly { href: string; label: string; icon: LucideIcon }[]
                 ).map((row) => (

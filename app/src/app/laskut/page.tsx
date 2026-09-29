@@ -3,7 +3,6 @@
 import { Disclosure } from "@/components/ds/Disclosure";
 import { PullToRefresh } from "@/components/ds/PullToRefresh";
 import { Suspense, useCallback, useEffect, useState } from "react";
-import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { SkeletonList } from "@/components/AsyncState";
 import { ConnectionNotice, EmptyState, StaleBanner } from "@/components/ScreenState";
@@ -16,14 +15,15 @@ import {
   redirectToLogin,
 } from "@/components/clientFetch";
 import { formatDayMonth, formatEur } from "@/lib/format";
-import { ChevronDown, Plus, Repeat, Search, Users } from "lucide-react";
+import { ChevronDown, FileText, Landmark, Repeat, Users } from "lucide-react";
 import {
   ActionPill,
   FilterChips,
+  HeaderAddPill,
   Icon,
   ListRow,
-  MoreMenu,
   PageTitle,
+  SearchField,
   Section,
   SlotSkeleton,
   StatusTag,
@@ -39,7 +39,7 @@ import {
   type SalesStatusCounts,
 } from "@/lib/invoice-groups";
 
-import { Button, controlClass } from "@/components/ui";
+import { Button } from "@/components/ui";
 import { pageCacheFetchedAt, readPageCache, writePageCache } from "@/lib/page-cache";
 import { useCacheAfterBoot } from "@/components/invoices/useCacheAfterBoot";
 import { useCachedResource } from "@/components/useCachedResource";
@@ -273,7 +273,7 @@ function InvoicesPageContent() {
 
   /** Step 1: show what a run would book, before anything is booked (SALES-06). */
   async function previewBankMatch() {
-    if (matchLoading) return;
+    if (matchLoading || status !== "ready") return;
     setMatchLoading(true);
     setMatchError("");
     try {
@@ -345,31 +345,14 @@ function InvoicesPageContent() {
       <PageTitle
         title="Myynti"
         action={
-          <div className="flex items-center gap-2">
-            <MoreMenu
-              label="Myynnin toiminnot"
-              items={[
-                {
-                  label: matchLoading ? "Tarkistetaan maksuja…" : "Kohdista pankkimaksut laskuille",
-                  onSelect: () => void previewBankMatch(),
-                  disabled: matchLoading || status !== "ready",
-                },
-                { label: "Asiakkaat", onSelect: () => router.push("/asiakkaat") },
-                { label: "Toistuvat laskut", onSelect: () => router.push("/toistuvat") },
-              ]}
-            />
-            <Link
-              href={customerFilter ? `/laskut/uusi?customerId=${encodeURIComponent(customerFilter)}` : "/laskut/uusi"}
-              className="active-press relative inline-flex min-h-9 items-center gap-1 rounded-full bg-ink px-3.5 text-caption font-semibold text-canvas before:absolute before:inset-x-0 before:-inset-y-1 before:content-['']"
-            >
-              <Icon icon={Plus} size="inline" strokeWidth={2.5} />
-              Uusi lasku
-            </Link>
-          </div>
+          <HeaderAddPill
+            label="Uusi lasku"
+            href={customerFilter ? `/laskut/uusi?customerId=${encodeURIComponent(customerFilter)}` : "/laskut/uusi"}
+          />
         }
       />
 
-      {aging && !noInvoicesAtAll && (
+      {aging && !noInvoicesAtAll && status !== "error" && (
         <div className="overflow-hidden rounded-card border border-line bg-surface">
           <button
             type="button"
@@ -384,7 +367,7 @@ function InvoicesPageContent() {
                 {formatEur(aging.totalOpen)}
               </span>
               {aging.overdueCount > 0 ? (
-                <span className="mt-0.5 block text-sm text-accent">{formatEur(aging.overdue)} myöhässä</span>
+                <span className="mt-0.5 block text-caption text-accent">{formatEur(aging.overdue)} myöhässä</span>
               ) : null}
             </span>
             <span className="mt-1 flex items-center gap-1 text-caption text-ink-2">
@@ -403,7 +386,7 @@ function InvoicesPageContent() {
             >
               {AGING_BUCKETS.map((bucket) => (
                 <div key={bucket} className="px-2 py-3">
-                  <p className="text-micro text-ink-2">{bucket} pv myöhässä</p>
+                  <p className="text-caption text-ink-2">{bucket} pv myöhässä</p>
                   <p className="mt-0.5 text-caption font-medium tabular-nums text-ink">
                     {formatEur((aging.buckets[bucket]?.openCents ?? 0) / 100)}
                   </p>
@@ -414,24 +397,9 @@ function InvoicesPageContent() {
         </div>
       )}
 
-      {!noInvoicesAtAll && (
+      {!noInvoicesAtAll && status !== "error" && (
         <>
-          <div className="relative">
-            <span aria-hidden className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-ink-2">
-              <Icon icon={Search} size="inline" />
-            </span>
-            <input
-              type="search"
-              aria-label="Hae laskuja"
-              placeholder="Hae nimellä tai numerolla"
-              className={`${controlClass} min-h-11 pl-10`}
-              value={search}
-              onChange={(event) => setSearch(event.target.value)}
-              enterKeyHint="search"
-              autoComplete="off"
-              autoCorrect="off"
-            />
-          </div>
+          <SearchField label="Hae laskuja" value={search} onChange={setSearch} />
 
           <FilterChips label="Suodata laskut" items={filterChips} value={filter} onChange={setFilter} />
         </>
@@ -455,7 +423,7 @@ function InvoicesPageContent() {
       {status === "ready" && (
         <>
           {groups.map((group) => (
-            <Section key={group.id} title={group.label} count={group.items.length}>
+            <Section key={group.id} title={group.label}>
               {group.items.map((invoice) => (
                 <ListRow
                   key={invoice.id}
@@ -486,8 +454,9 @@ function InvoicesPageContent() {
                 kind="records"
                 title="Ei laskuja vielä"
                 body="Luo ensimmäinen myyntilasku. Se tallentuu luonnokseksi, kunnes lähetät sen."
+                icon={FileText}
                 onCreate={() => router.push("/laskut/uusi")}
-                createLabel="Luo lasku"
+                createLabel="Uusi lasku"
               />
             ))}
 
@@ -500,6 +469,13 @@ function InvoicesPageContent() {
       )}
 
       <Section>
+        <ListRow
+          leading={<Icon icon={Landmark} />}
+          chevron
+          title="Kohdista pankkimaksut"
+          secondary={matchLoading ? "Tarkistetaan maksuja…" : "Kirjaa maksut viitenumeron mukaan"}
+          onClick={() => void previewBankMatch()}
+        />
         <ListRow
           leading={<Icon icon={Users} />}
           chevron
@@ -548,7 +524,7 @@ function InvoicesPageContent() {
                       key={`${row.invoiceNumber}-${row.amount}`}
                       className="flex items-center justify-between gap-3 px-4 py-3 text-body"
                     >
-                      <span className="min-w-0 truncate text-ink">
+                      <span className="min-w-0 line-clamp-2 text-ink [overflow-wrap:anywhere]">
                         Lasku {row.invoiceNumber}, {row.customerName}
                       </span>
                       <span className="shrink-0 tabular-nums text-ink">{formatEur(row.amount)}</span>
@@ -571,7 +547,7 @@ function InvoicesPageContent() {
               </p>
             )}
             {matchError && (
-              <p className="text-sm text-danger" role="alert">
+              <p className="text-caption text-danger" role="alert">
                 {matchError}
               </p>
             )}

@@ -1,7 +1,7 @@
 "use client";
 
 import { Check } from "lucide-react";
-import { ListRow, MoreMenu, StatusTag } from "@/components/ds";
+import { ListRow, StatusTag } from "@/components/ds";
 import { formatDate, formatEur } from "@/lib/format";
 import { categoryLabel } from "@/lib/receipt-categories";
 import { RECEIPT_MATCH_STATUS, receiptMatchStatusKey } from "@/lib/status-labels";
@@ -13,28 +13,20 @@ function rowSecondary(receipt: SavedReceipt): string {
   return `${formatDate(receipt.date)} · ${category}`;
 }
 
-/** A unique accessible name per row's "..." menu: two receipts can share a vendor and a date. */
-function rowMenuLabel(receipt: SavedReceipt): string {
-  return `Lisää toimintoja: ${receipt.vendor || "Tuntematon"} ${receipt.fileName}`;
-}
-
 /**
  * One receipt in the Kuitit list. A tap pushes the receipt's own screen
  * (BOOKS-13, N2): the file, the details and the bank match live there, so the
- * list never expands in place.
+ * list never expands in place. A record row (type B): the trailing affordance is the
+ * status tag only; "Poista" is on the receipt's own screen and in the bulk bar (VS-23).
  */
 export function ReceiptRow({
   receipt,
   selected,
   onToggleSelect,
-  onDeleteRequest,
-  deleting,
 }: {
   receipt: SavedReceipt;
   selected: boolean;
   onToggleSelect: () => void;
-  onDeleteRequest: () => void;
-  deleting: boolean;
 }) {
   const matchKey = receiptMatchStatusKey(receipt.match);
   const matchStatus = RECEIPT_MATCH_STATUS[matchKey];
@@ -69,22 +61,7 @@ export function ReceiptRow({
           amountTone={receipt.type === "tulo" ? "positive" : "default"}
           secondary={secondaryText}
           ariaLabel={`${receipt.vendor || "Tuntematon"}, ${amountText}, ${secondaryText}, ${matchStatus.label}`}
-          trailing={
-            <div className="flex items-center gap-1.5">
-              <StatusTag tone={matchStatus.tone}>{matchStatus.label}</StatusTag>
-              <MoreMenu
-                label={rowMenuLabel(receipt)}
-                items={[
-                  {
-                    label: "Poista",
-                    onSelect: onDeleteRequest,
-                    tone: "danger" as const,
-                    disabled: deleting,
-                  },
-                ]}
-              />
-            </div>
-          }
+          trailing={<StatusTag tone={matchStatus.tone}>{matchStatus.label}</StatusTag>}
         />
       </div>
     </div>

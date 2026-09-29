@@ -91,7 +91,7 @@ test.describe("long text at 390", () => {
     await login(page);
     const name = `Ääkkönen Ripsistudio ja Kauneushoitola Oy ${test.info().project.name}`;
     await page.goto("/asiakkaat");
-    await page.getByRole("main").getByRole("button", { name: "Lisää", exact: true }).click();
+    await page.getByRole("main").getByRole("button", { name: "Uusi asiakas", exact: true }).click();
     await page.getByLabel("Nimi").fill(name);
     await page.getByRole("button", { name: "Lisää asiakas" }).click();
     const link = page.getByRole("link", { name });
@@ -130,7 +130,7 @@ test.describe("confirm dialog", () => {
   test("names the dialog, traps Tab, and returns focus on Escape", async ({ page }) => {
     await login(page);
     await page.goto("/asiakkaat");
-    await page.getByRole("main").getByRole("button", { name: "Lisää", exact: true }).click();
+    await page.getByRole("main").getByRole("button", { name: "Uusi asiakas", exact: true }).click();
     const name = `Fokus Asiakas ${test.info().project.name}`;
     await page.getByLabel("Nimi").fill(name);
     await page.getByRole("button", { name: "Lisää asiakas" }).click();

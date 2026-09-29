@@ -2,8 +2,8 @@
 
 import { Disclosure } from "@/components/ds/Disclosure";
 import { Button, controlClass } from "@/components/ui";
-import { ChevronDown, Search } from "lucide-react";
-import { FilterChips, Icon } from "@/components/ds";
+import { ChevronDown, SlidersHorizontal } from "lucide-react";
+import { FilterChips, Icon, SearchField } from "@/components/ds";
 import { RECEIPT_CATEGORIES } from "@/lib/receipt-categories";
 import {
   receiptTabChips,
@@ -23,17 +23,15 @@ export interface ReceiptAdvancedFilters {
 }
 
 const field = `${controlClass} min-h-12`;
-const selectLabel = "mb-1 block text-caption text-ink-2";
+const selectLabel = "mb-1.5 block text-caption font-normal text-ink-2";
 
 export function ReceiptFilters({
   monthFilter,
   onMonthChange,
   searchInput,
   onSearchChange,
-  isSearchOpen,
-  onToggleSearchOpen,
-  advancedOpen,
-  onToggleAdvancedOpen,
+  filtersOpen,
+  onToggleFiltersOpen,
   advanced,
   onAdvancedChange,
   advancedIsActive,
@@ -49,10 +47,8 @@ export function ReceiptFilters({
   onMonthChange: (value: string) => void;
   searchInput: string;
   onSearchChange: (value: string) => void;
-  isSearchOpen: boolean;
-  onToggleSearchOpen: () => void;
-  advancedOpen: boolean;
-  onToggleAdvancedOpen: () => void;
+  filtersOpen: boolean;
+  onToggleFiltersOpen: () => void;
   advanced: ReceiptAdvancedFilters;
   onAdvancedChange: (next: ReceiptAdvancedFilters) => void;
   advancedIsActive: boolean;
@@ -67,6 +63,9 @@ export function ReceiptFilters({
 }) {
   return (
     <div className="space-y-3">
+      {/* VS-21, R25: one search field, the filters as a chip row directly below it. */}
+      <SearchField label="Hae kuitteja" value={searchInput} onChange={onSearchChange} />
+
       <FilterChips
         label="Suodata kuitteja"
         items={receiptTabChips(tabCounts ?? ZERO_RECEIPT_TAB_COUNTS).map((chip) =>
@@ -79,160 +78,138 @@ export function ReceiptFilters({
       <div>
         <button
           type="button"
-          onClick={onToggleSearchOpen}
-          aria-expanded={isSearchOpen}
-          aria-controls="kuitit-search-panel"
-          className="active-press flex w-full min-h-11 items-center justify-between gap-2 text-left"
+          onClick={onToggleFiltersOpen}
+          aria-expanded={filtersOpen}
+          aria-controls="receipt-filter-panel"
+          className={`active-press flex w-full min-h-11 items-center justify-between gap-2 text-left text-caption font-medium ${
+            advancedIsActive || monthFilter ? "text-ink" : "text-ink-2"
+          }`}
         >
-          <span className="flex items-center gap-2 text-caption font-medium text-ink-2">
-            <Icon icon={Search} size="inline" />
-            Hae ja suodata kuitteja
+          <span className="flex items-center gap-2">
+            <Icon icon={SlidersHorizontal} size="inline" />
+            Kuukausi ja tarkemmat suodattimet
           </span>
           <Icon
             icon={ChevronDown}
             size="inline"
-            className={`text-ink-2 transition-transform ${isSearchOpen ? "rotate-180" : ""}`}
+            className={`text-ink-2 transition-transform ${filtersOpen ? "rotate-180" : ""}`}
           />
         </button>
 
-        <Disclosure open={isSearchOpen}>
-          <div id="kuitit-search-panel" className="space-y-3 pt-3">
-            <input
-              aria-label="Hae kuitteja"
-              type="search"
-              enterKeyHint="search"
-              autoComplete="off"
-              value={searchInput}
-              onChange={(e) => onSearchChange(e.target.value)}
-              placeholder="Hae myyjää, tiedostoa tai kategoriaa"
-              className={field}
-            />
-
-            <div className="flex items-center gap-2">
+        <Disclosure open={filtersOpen}>
+          <div id="receipt-filter-panel" className="space-y-3 pt-3">
+            <div>
+              <label htmlFor="receipt-month-filter" className={selectLabel}>Kuukausi</label>
+              {/* lang="fi": the picker names the month in Finnish, whatever the page locale (VS-18). */}
               <input
+                id="receipt-month-filter"
                 type="month"
+                lang="fi"
                 value={monthFilter}
                 onChange={(e) => onMonthChange(e.target.value)}
-                className={`min-w-0 flex-1 ${field}`}
-                aria-label="Kuukausi"
+                className={field}
               />
-              <button
-                type="button"
-                onClick={() => {
-                  onAdvancedChange({ ...advanced });
-                  onToggleAdvancedOpen();
-                }}
-                aria-expanded={advancedOpen}
-                aria-controls="advanced-receipt-filters"
-                className={`active-press min-h-12 shrink-0 whitespace-nowrap rounded-card border px-4 text-body font-medium ${
-                  advancedOpen || advancedIsActive ? "border-ink bg-ink text-canvas" : "border-line bg-surface text-ink"
-                }`}
-              >
-                Edistyneet
-              </button>
             </div>
 
-            <Disclosure open={advancedOpen}>
-              <div id="advanced-receipt-filters" className="space-y-3 border-t border-line pt-3">
-                <div className="field-grid">
-                  <div>
-                    <label htmlFor="receipt-type-filter" className={selectLabel}>Tyyppi</label>
-                    <select
-                      id="receipt-type-filter"
-                      value={advanced.type}
-                      onChange={(e) => onAdvancedChange({ ...advanced, type: e.target.value })}
-                      className={field}
-                    >
-                      <option value="">Kaikki</option>
-                      <option value="meno">Meno</option>
-                      <option value="tulo">Tulo</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label htmlFor="receipt-category-filter" className={selectLabel}>Kategoria</label>
-                    <select
-                      id="receipt-category-filter"
-                      value={advanced.category}
-                      onChange={(e) => onAdvancedChange({ ...advanced, category: e.target.value })}
-                      className={field}
-                    >
-                      <option value="">Kaikki</option>
-                      {RECEIPT_CATEGORIES.map((c) => (
-                        <option key={c.id} value={c.id}>{c.label}</option>
-                      ))}
-                    </select>
-                  </div>
+            <div className="space-y-3 border-t border-line pt-3">
+              <div className="field-grid">
+                <div>
+                  <label htmlFor="receipt-type-filter" className={selectLabel}>Tyyppi</label>
+                  <select
+                    id="receipt-type-filter"
+                    value={advanced.type}
+                    onChange={(e) => onAdvancedChange({ ...advanced, type: e.target.value })}
+                    className={field}
+                  >
+                    <option value="">Kaikki</option>
+                    <option value="meno">Meno</option>
+                    <option value="tulo">Tulo</option>
+                  </select>
                 </div>
-
-                <div className="field-grid">
-                  <div>
-                    <label htmlFor="receipt-source-filter" className={selectLabel}>Lähde</label>
-                    <select
-                      id="receipt-source-filter"
-                      value={advanced.source}
-                      onChange={(e) => onAdvancedChange({ ...advanced, source: e.target.value })}
-                      className={field}
-                    >
-                      <option value="">Kaikki</option>
-                      <option value="ai">AI</option>
-                      <option value="ocr">OCR</option>
-                      <option value="manual">Manuaalinen</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label htmlFor="receipt-sort-filter" className={selectLabel}>Järjestys</label>
-                    <select
-                      id="receipt-sort-filter"
-                      value={advanced.sort}
-                      onChange={(e) => onAdvancedChange({ ...advanced, sort: e.target.value })}
-                      className={field}
-                    >
-                      <option value="date_desc">Päivä (uusin)</option>
-                      <option value="date_asc">Päivä (vanhin)</option>
-                      <option value="amount_desc">Summa (suurin)</option>
-                      <option value="amount_asc">Summa (pienin)</option>
-                      <option value="created_desc">Lisätty (uusin)</option>
-                    </select>
-                  </div>
-                </div>
-
-                <div className="field-grid">
-                  <div>
-                    <label htmlFor="receipt-min-amount" className={selectLabel}>Summa alkaen (€)</label>
-                    <input
-                      id="receipt-min-amount"
-                      type="text"
-                      inputMode="decimal"
-                      value={advanced.minAmount}
-                      onChange={(e) => onAdvancedChange({ ...advanced, minAmount: e.target.value })}
-                      placeholder="0"
-                      className={field}
-                    />
-                  </div>
-                  <div>
-                    <label htmlFor="receipt-max-amount" className={selectLabel}>Summa asti (€)</label>
-                    <input
-                      id="receipt-max-amount"
-                      type="text"
-                      inputMode="decimal"
-                      value={advanced.maxAmount}
-                      onChange={(e) => onAdvancedChange({ ...advanced, maxAmount: e.target.value })}
-                      placeholder="Ei ylärajaa"
-                      className={field}
-                    />
-                  </div>
-                </div>
-
-                <div className="flex gap-3">
-                  <Button type="button" variant="secondary" className="flex-1" onClick={onClearAdvanced}>
-                    Tyhjennä
-                  </Button>
-                  <Button type="button" className="flex-1" onClick={onApplyAdvanced}>
-                    Käytä suodattimia
-                  </Button>
+                <div>
+                  <label htmlFor="receipt-category-filter" className={selectLabel}>Kategoria</label>
+                  <select
+                    id="receipt-category-filter"
+                    value={advanced.category}
+                    onChange={(e) => onAdvancedChange({ ...advanced, category: e.target.value })}
+                    className={field}
+                  >
+                    <option value="">Kaikki</option>
+                    {RECEIPT_CATEGORIES.map((c) => (
+                      <option key={c.id} value={c.id}>{c.label}</option>
+                    ))}
+                  </select>
                 </div>
               </div>
-            </Disclosure>
+
+              <div className="field-grid">
+                <div>
+                  <label htmlFor="receipt-source-filter" className={selectLabel}>Lähde</label>
+                  <select
+                    id="receipt-source-filter"
+                    value={advanced.source}
+                    onChange={(e) => onAdvancedChange({ ...advanced, source: e.target.value })}
+                    className={field}
+                  >
+                    <option value="">Kaikki</option>
+                    <option value="ai">AI</option>
+                    <option value="ocr">OCR</option>
+                    <option value="manual">Manuaalinen</option>
+                  </select>
+                </div>
+                <div>
+                  <label htmlFor="receipt-sort-filter" className={selectLabel}>Järjestys</label>
+                  <select
+                    id="receipt-sort-filter"
+                    value={advanced.sort}
+                    onChange={(e) => onAdvancedChange({ ...advanced, sort: e.target.value })}
+                    className={field}
+                  >
+                    <option value="date_desc">Päivä (uusin)</option>
+                    <option value="date_asc">Päivä (vanhin)</option>
+                    <option value="amount_desc">Summa (suurin)</option>
+                    <option value="amount_asc">Summa (pienin)</option>
+                    <option value="created_desc">Lisätty (uusin)</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="field-grid">
+                <div>
+                  <label htmlFor="receipt-min-amount" className={selectLabel}>Summa alkaen (€)</label>
+                  <input
+                    id="receipt-min-amount"
+                    type="text"
+                    inputMode="decimal"
+                    value={advanced.minAmount}
+                    onChange={(e) => onAdvancedChange({ ...advanced, minAmount: e.target.value })}
+                    placeholder="0"
+                    className={field}
+                  />
+                </div>
+                <div>
+                  <label htmlFor="receipt-max-amount" className={selectLabel}>Summa asti (€)</label>
+                  <input
+                    id="receipt-max-amount"
+                    type="text"
+                    inputMode="decimal"
+                    value={advanced.maxAmount}
+                    onChange={(e) => onAdvancedChange({ ...advanced, maxAmount: e.target.value })}
+                    placeholder="Ei ylärajaa"
+                    className={field}
+                  />
+                </div>
+              </div>
+
+              <div className="flex gap-3">
+                <Button type="button" variant="secondary" className="flex-1" onClick={onClearAdvanced}>
+                  Tyhjennä
+                </Button>
+                <Button type="button" className="flex-1" onClick={onApplyAdvanced}>
+                  Käytä suodattimia
+                </Button>
+              </div>
+              </div>
           </div>
         </Disclosure>
       </div>

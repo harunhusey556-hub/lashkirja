@@ -15,9 +15,9 @@ import {
   readJson,
   redirectToLogin,
 } from "@/components/clientFetch";
+import { Users } from "lucide-react";
 import { formatEur } from "@/lib/format";
-import { Plus } from "lucide-react";
-import { Card, Icon, ListRow, PageTitle, Section, StatusTag, SummaryCard } from "@/components/ds";
+import { Card, FilterChips, HeaderAddPill, ListRow, PageTitle, SearchField, Section, StatusTag, SummaryCard } from "@/components/ds";
 
 import { Button, buttonClass, controlClass } from "@/components/ui";
 import { showToast } from "@/lib/toast";
@@ -239,21 +239,14 @@ export default function CustomersPage() {
     }
   }
   const filtered = Boolean(search) || showArchived;
+  // No customers at all, or the load failed: nothing to search or filter (VS-30).
+  const hideTools = status === "error" || (status === "ready" && customers.length === 0 && !filtered);
 
   return (
     <div className="space-y-6">
       <PageTitle
         title="Asiakkaat"
-        action={
-          <button
-            type="button"
-            onClick={() => setCreateOpen(true)}
-            className="active-press relative inline-flex min-h-9 items-center gap-1 rounded-full bg-ink px-3.5 text-caption font-semibold text-canvas before:absolute before:inset-x-0 before:-inset-y-1 before:content-['']"
-          >
-            <Icon icon={Plus} size="inline" strokeWidth={2.5} />
-            Lisää
-          </button>
-        }
+        action={<HeaderAddPill label="Uusi asiakas" onClick={() => setCreateOpen(true)} />}
       />
 
       {status === "ready" && customers.length > 0 && (
@@ -266,27 +259,88 @@ export default function CustomersPage() {
       )}
 
       {message && (
-        <p className="rounded-card bg-accent-soft px-4 py-3 text-sm text-ink" role="status">
+        <p className="rounded-card bg-accent-soft px-4 py-3 text-caption text-ink" role="status">
           {message}
         </p>
       )}
 
-      <div className="flex flex-wrap gap-2">
-        <input
-          type="search"
-          aria-label="Hae asiakasta"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          placeholder="Hae nimellä"
-          enterKeyHint="search"
-          autoComplete="off"
-          autoCorrect="off"
-          className={`${controlClass} min-w-0 flex-1`}
-        />
-        <Button type="button" variant="secondary" onClick={() => setImportOpen((open) => !open)}>
-          Tuo CSV
-        </Button>
-      </div>
+      {!hideTools && (
+        <>
+          <SearchField label="Hae asiakasta" value={search} onChange={setSearch} />
+          <FilterChips
+            label="Suodata asiakkaat"
+            items={[
+              { id: "active", label: "Aktiiviset" },
+              { id: "all", label: "Myös arkistoidut" },
+            ]}
+            value={showArchived ? "all" : "active"}
+            onChange={(id) => setShowArchived(id === "all")}
+          />
+        </>
+      )}
+
+      {status === "loading" && <SkeletonList rows={4} />}
+      {loadFailure != null && status === "ready" && (
+        <StaleBanner fetchedAt={pageCacheFetchedAt("customers")} onRetry={() => void load()} />
+      )}
+      {status === "error" &&
+        (isForbidden(loadFailure) ? (
+          <EmptyState kind="forbidden" />
+        ) : (
+          <ConnectionNotice
+            error={loadFailure}
+            fallback={message || "Asiakkaiden haku epäonnistui"}
+            onRetry={() => void load()}
+          />
+        ))}
+
+      {(status === "ready" || customers.length > 0) && (
+        <>
+          {customers.length > 0 && (
+            <Section>
+              {customers.map((customer) => (
+                <ListRow
+                  key={customer.id}
+                  href={detailHref("customer", customer.id)}
+                  title={customer.name}
+                  amount={formatEur(customer.openBalance)}
+                  secondary={rowSecondary(customer)}
+                  trailing={
+                    customer.archivedAt ? <StatusTag tone="neutral">Arkistoitu</StatusTag> : undefined
+                  }
+                />
+              ))}
+            </Section>
+          )}
+
+          {customers.length === 0 && (
+            <EmptyState
+              kind={filtered ? "filtered" : "records"}
+              icon={Users}
+              title={filtered ? "Ei osumia" : "Ei asiakkaita vielä"}
+              body={
+                filtered
+                  ? "Yksikään asiakas ei vastaa hakua."
+                  : "Lisää ensimmäinen asiakas, niin laskutus löytää sen."
+              }
+              onCreate={!createOpen ? () => setCreateOpen(true) : undefined}
+              createLabel="Uusi asiakas"
+              onClear={
+                filtered
+                  ? () => {
+                      setSearch("");
+                      setShowArchived(false);
+                    }
+                  : undefined
+              }
+            />
+          )}
+        </>
+      )}
+
+      <Button type="button" variant="ghost" className="w-full" onClick={() => setImportOpen((open) => !open)}>
+        Tuo CSV
+      </Button>
 
       {importOpen && (
         <Card className="space-y-3">
@@ -328,12 +382,12 @@ export default function CustomersPage() {
             </Button>
           </div>
           {csvRows && (
-            <p className="text-sm font-medium text-ink" role="status">
+            <p className="text-caption font-medium text-ink" role="status">
               {csvValid} kelvollista{csvInvalid > 0 ? `, ${csvInvalid} virheellistä (ei tuoda)` : ""}
             </p>
           )}
           {csvRows && (
-            <ul className="space-y-1 text-sm">
+            <ul className="space-y-1 text-caption">
               {csvRows.map((row) => (
                 <li key={row.line} className={row.errors.length ? "text-danger" : "text-ink"}>
                   Rivi {row.line}: {row.name ?? "–"}
@@ -345,72 +399,6 @@ export default function CustomersPage() {
         </Card>
       )}
 
-      {status === "loading" && <SkeletonList rows={4} />}
-      {loadFailure != null && status === "ready" && (
-        <StaleBanner fetchedAt={pageCacheFetchedAt("customers")} onRetry={() => void load()} />
-      )}
-      {status === "error" &&
-        (isForbidden(loadFailure) ? (
-          <EmptyState kind="forbidden" />
-        ) : (
-          <ConnectionNotice
-            error={loadFailure}
-            fallback={message || "Asiakkaiden haku epäonnistui"}
-            onRetry={() => void load()}
-          />
-        ))}
-
-      {(status === "ready" || customers.length > 0) && (
-        <>
-          {customers.length > 0 && (
-            <Section>
-              {customers.map((customer) => (
-                <ListRow
-                  key={customer.id}
-                  href={detailHref("customer", customer.id)}
-                  title={customer.name}
-                  amount={formatEur(customer.openBalance)}
-                  secondary={rowSecondary(customer)}
-                  trailing={
-                    customer.archivedAt ? <StatusTag tone="neutral">Arkistoitu</StatusTag> : undefined
-                  }
-                />
-              ))}
-            </Section>
-          )}
-
-          {customers.length === 0 && (
-            <EmptyState
-              kind={filtered ? "filtered" : "records"}
-              title={filtered ? "Ei osumia" : "Ei asiakkaita vielä"}
-              body={
-                filtered
-                  ? "Yksikään asiakas ei vastaa hakua."
-                  : "Lisää ensimmäinen asiakas, niin laskutus löytää sen."
-              }
-              onCreate={!createOpen ? () => setCreateOpen(true) : undefined}
-              createLabel="Lisää asiakas"
-              onClear={
-                filtered
-                  ? () => {
-                      setSearch("");
-                      setShowArchived(false);
-                    }
-                  : undefined
-              }
-            />
-          )}
-        </>
-      )}
-
-      <Button
-        type="button"
-        variant="ghost"
-        className="w-full"
-        onClick={() => setShowArchived((value) => !value)}
-      >
-        {showArchived ? "Piilota arkistoidut" : "Näytä arkistoidut"}
-      </Button>
 
       <BottomSheet
         isOpen={createOpen}

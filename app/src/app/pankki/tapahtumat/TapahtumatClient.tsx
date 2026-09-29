@@ -22,7 +22,8 @@ import { useCacheAfterBoot } from "@/components/invoices/useCacheAfterBoot";
 import { usePersistedState, useScrollRestoration } from "@/lib/list-ui-state";
 import { chooseDocuments, isNativeShell } from "@/lib/native-pick";
 import { Button, controlClass } from "@/components/ui";
-import { ListRow, PageTitle, Section, StatusTag } from "@/components/ds";
+import { FileText } from "lucide-react";
+import { FilterChips, ListRow, PageTitle, SearchField, Section, StatusTag } from "@/components/ds";
 import { detailHref } from "@/lib/routes";
 import BankConnectCard from "@/components/BankConnectCard";
 import {
@@ -261,77 +262,54 @@ export default function TapahtumatClient() {
           setLoadError(null);
           return loadStatements();
         }} />
-      <PageTitle title="Tapahtumat" subtitle="Tiliotteet ja pankin tapahtumat." />
+      {/* R4: a root-level list carries no subtitle. */}
+      <PageTitle title="Tapahtumat" />
 
       {/* No bank connected yet: the shared connect card leads (BOOKS-04). */}
       <BankConnectCard variant="compact" />
 
-      <div className="space-y-3">
-        <div>
-          <label htmlFor="statement-search" className="mb-1.5 block text-caption font-normal text-ink-2">
-            Haku
-          </label>
-          <input
+      {/* VS-21, R25: one search field with the filters as chip rows directly below it. Nothing to filter, nothing shown. */}
+      {statements.length > 0 && (
+        <div className="space-y-3">
+          <SearchField
             id="statement-search"
-            type="search"
-            enterKeyHint="search"
-            autoComplete="off"
+            label="Hae tiliotteita"
             value={query}
-            onChange={(event) => {
-              replaceQuery({ q: event.target.value });
+            onChange={(value) => {
+              replaceQuery({ q: value });
               setShowAllStatements(false);
             }}
-            placeholder="Tiedosto tai tili"
-            className={controlClass}
           />
-        </div>
-        <div className="flex flex-col gap-3 sm:flex-row">
-          <div className="min-w-0 flex-1">
-            <label htmlFor="statement-month-filter" className="mb-1.5 block text-caption font-normal text-ink-2">
-              Kuukausi
-            </label>
-            <select
-              id="statement-month-filter"
+          {months.length > 0 && (
+            <FilterChips
+              label="Suodata kuukauden mukaan"
+              items={[
+                { id: "", label: "Kaikki kuukaudet" },
+                ...months.map((month) => ({ id: month, label: formatMonth(month) })),
+              ]}
               value={monthFilter}
-              onChange={(event) => {
-                replaceQuery({ month: event.target.value });
+              onChange={(value) => {
+                replaceQuery({ month: value });
                 setShowAllStatements(false);
               }}
-              className={controlClass}
-            >
-              <option value="">Kaikki</option>
-              {months.map((month) => (
-                <option key={month} value={month}>
-                  {formatMonth(month)}
-                </option>
-              ))}
-            </select>
-          </div>
-          {accounts.length > 0 && (
-            <div className="min-w-0 flex-1">
-              <label htmlFor="statement-account-filter" className="mb-1.5 block text-caption font-normal text-ink-2">
-                Tili
-              </label>
-              <select
-                id="statement-account-filter"
-                value={accountFilter}
-                onChange={(event) => {
-                  replaceQuery({ account: event.target.value });
-                  setShowAllStatements(false);
-                }}
-                className={controlClass}
-              >
-                <option value="">Kaikki</option>
-                {accounts.map((account) => (
-                  <option key={account.id} value={account.id}>
-                    {account.name}
-                  </option>
-                ))}
-              </select>
-            </div>
+            />
+          )}
+          {accounts.length > 1 && (
+            <FilterChips
+              label="Suodata tilin mukaan"
+              items={[
+                { id: "", label: "Kaikki tilit" },
+                ...accounts.map((account) => ({ id: account.id, label: account.name })),
+              ]}
+              value={accountFilter}
+              onChange={(value) => {
+                replaceQuery({ account: value });
+                setShowAllStatements(false);
+              }}
+            />
           )}
         </div>
-      </div>
+      )}
 
       <div ref={importSectionRef} className="scroll-mt-4">
       <Section title="Tuo tiliote tiedostona">
@@ -419,6 +397,7 @@ export default function TapahtumatClient() {
       ) : visibleStatements.length === 0 ? (
         <EmptyState
           kind={hasFilters ? "filtered" : "records"}
+          icon={FileText}
           title={hasFilters ? "Ei tiliotteita näillä suodattimilla" : "Ei tiliotteita vielä"}
           body={hasFilters ? "Kokeile väljempää hakua." : "Tuo ensimmäinen tiliote tiedostona yllä."}
         />

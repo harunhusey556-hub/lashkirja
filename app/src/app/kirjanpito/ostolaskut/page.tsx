@@ -29,17 +29,16 @@ import {
 import { Button, controlClass } from "@/components/ui";
 import {
   FilterChips,
-  Icon,
+  HeaderAddPill,
   KeyValueList,
   ListRow,
-  MoreMenu,
   PageTitle,
   Section,
   SlotSkeleton,
   StatusTag,
   SummaryCard,
 } from "@/components/ds";
-import { Plus } from "lucide-react";
+import { ReceiptText } from "lucide-react";
 import { pageCacheFetchedAt, readPageCache, writePageCache } from "@/lib/page-cache";
 import { isForbidden } from "@/lib/screen-state";
 import { usePersistedState, useScrollRestoration } from "@/lib/list-ui-state";
@@ -99,12 +98,6 @@ function rowSecondary(invoice: PurchaseInvoice): string {
     : dateText.charAt(0).toUpperCase() + dateText.slice(1);
   const partiallyPaid = invoice.paid > 0 && invoice.open > 0;
   return partiallyPaid ? `${base} · avoinna ${formatEur(invoice.open)}` : base;
-}
-
-/** A unique accessible name per row's "..." menu: two rows can share a supplier name. */
-function rowMenuLabel(invoice: PurchaseInvoice): string {
-  const suffix = invoice.invoiceNumber ? invoice.invoiceNumber : formatDayMonth(invoice.dueDate);
-  return `Lisää toimintoja: ${invoice.supplierName} ${suffix}`;
 }
 
 export default function PurchaseInvoicesPage() {
@@ -368,6 +361,8 @@ export default function PurchaseInvoicesPage() {
   const groups = purchaseInvoiceGroups(invoices, filter);
   const visibleCount = groups.reduce((sum, group) => sum + group.items.length, 0);
   const filtered = filter !== "all";
+  // Nothing to show yet, or the load failed: no aging table, no match button, no chips (VS-30).
+  const noPurchases = status === "error" || (status === "ready" && visibleCount === 0 && !filtered);
   const reachedListLimit = invoices.length === PURCHASE_LIST_LIMIT;
 
   return (
@@ -381,19 +376,10 @@ export default function PurchaseInvoicesPage() {
         <PageTitle
           title="Ostolaskut"
           subtitle="Mitä olet velkaa ja milloin."
-          action={
-            <button
-              type="button"
-              onClick={() => setCreateOpen(true)}
-              className="active-press relative inline-flex min-h-9 items-center gap-1 rounded-full bg-ink px-3.5 text-caption font-semibold text-canvas before:absolute before:inset-x-0 before:-inset-y-1 before:content-['']"
-            >
-              <Icon icon={Plus} size="inline" strokeWidth={2.5} />
-              Uusi ostolasku
-            </button>
-          }
+          action={<HeaderAddPill label="Uusi ostolasku" onClick={() => setCreateOpen(true)} />}
         />
 
-        {aging && (
+        {aging && !noPurchases && (
           <>
             <SummaryCard
               label="Avoinna"
@@ -413,16 +399,18 @@ export default function PurchaseInvoicesPage() {
           </>
         )}
 
-        <Button
-          type="button"
-          variant="secondary"
-          onClick={() => void runBankMatch()}
-          busy={busy}
-          busyLabel="Kohdistetaan…"
-          className="w-full"
-        >
-          Kohdista maksut
-        </Button>
+        {!noPurchases && (
+          <Button
+            type="button"
+            variant="secondary"
+            onClick={() => void runBankMatch()}
+            busy={busy}
+            busyLabel="Kohdistetaan…"
+            className="w-full"
+          >
+            Kohdista maksut
+          </Button>
+        )}
 
         {message && (
           <p className="rounded-card bg-accent-soft px-4 py-3 text-sm text-ink" role="status">
@@ -430,7 +418,9 @@ export default function PurchaseInvoicesPage() {
           </p>
         )}
 
-        <FilterChips label="Suodata ostolaskut" items={filterChips} value={filter} onChange={setFilter} />
+        {!noPurchases && (
+          <FilterChips label="Suodata ostolaskut" items={filterChips} value={filter} onChange={setFilter} />
+        )}
 
         {loadFailure != null && status === "ready" && (
           <StaleBanner fetchedAt={pageCacheFetchedAt("purchases")} onRetry={() => void load()} />
@@ -450,7 +440,7 @@ export default function PurchaseInvoicesPage() {
         {status === "ready" && (
           <>
             {groups.map((group) => (
-              <Section key={group.id} title={group.label} count={group.items.length}>
+              <Section key={group.id} title={group.label}>
                 {group.items.map((invoice) => (
                   <ListRow
                     key={invoice.id}
@@ -459,22 +449,9 @@ export default function PurchaseInvoicesPage() {
                     amount={formatEur(invoice.gross)}
                     secondary={rowSecondary(invoice)}
                     trailing={
-                      <div className="flex items-center gap-1.5">
-                        <StatusTag tone={PURCHASE_STATUS[invoice.displayStatus].tone}>
-                          {PURCHASE_STATUS[invoice.displayStatus].label}
-                        </StatusTag>
-                        <MoreMenu
-                          label={rowMenuLabel(invoice)}
-                          items={[
-                            {
-                              label: "Poista",
-                              onSelect: () => setConfirmRemove(invoice),
-                              tone: "danger" as const,
-                              disabled: busy || invoice.payments.length > 0,
-                            },
-                          ]}
-                        />
-                      </div>
+                      <StatusTag tone={PURCHASE_STATUS[invoice.displayStatus].tone}>
+                        {PURCHASE_STATUS[invoice.displayStatus].label}
+                      </StatusTag>
                     }
                   />
                 ))}
@@ -484,8 +461,11 @@ export default function PurchaseInvoicesPage() {
             {visibleCount === 0 && (
               <EmptyState
                 kind={filtered ? "filtered" : "records"}
+                icon={ReceiptText}
                 title={filtered ? "Ei ostolaskuja tällä suodattimella" : "Ei ostolaskuja vielä"}
                 body={filtered ? "Kokeile toista suodatinta." : "Lisää ensimmäinen ostolasku."}
+                onCreate={filtered ? undefined : () => setCreateOpen(true)}
+                createLabel="Uusi ostolasku"
                 onClear={filtered ? () => setFilter("all") : undefined}
                 clearLabel="Tyhjennä suodatin"
               />
@@ -721,6 +701,21 @@ export default function PurchaseInvoicesPage() {
                   Merkitse maksetuksi
                 </Button>
               </div>
+            )}
+
+            {detailInvoice.payments.length === 0 && (
+              <Button
+                type="button"
+                variant="danger"
+                className="w-full"
+                disabled={busy}
+                onClick={() => {
+                  setConfirmRemove(detailInvoice);
+                  setDetailInvoice(null);
+                }}
+              >
+                Poista ostolasku
+              </Button>
             )}
           </div>
         )}

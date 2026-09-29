@@ -2,7 +2,6 @@
 
 import { PullToRefresh } from "@/components/ds/PullToRefresh";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import ConfirmModal from "@/components/ConfirmModal";
 import QueuedReceiptsCard from "@/components/QueuedReceiptsCard";
@@ -25,7 +24,6 @@ import { formatMonth, parseFinnishNumber } from "@/lib/format";
 import { drillFromSearch } from "@/lib/report-drill";
 import {
   coerceReceiptListCache,
-  dropReceipt,
   dropReceipts,
   mergeReceiptPage,
   receiptCountLabel,
@@ -37,8 +35,8 @@ import {
   type ReceiptTabCounts,
 } from "@/lib/receipt-tabs";
 import { Button, buttonClass } from "@/components/ui";
-import { Check, Minus, Plus } from "lucide-react";
-import { Icon, MoreMenu, PageTitle, Section } from "@/components/ds";
+import { Check, ClipboardList, Minus, Receipt } from "lucide-react";
+import { HeaderAddPill, Icon, ListRow, PageTitle, Section, SlotSkeleton } from "@/components/ds";
 import { batchOutcomeMessage } from "@/lib/upload-queue";
 import { ReceiptFilters, type ReceiptAdvancedFilters } from "./ReceiptFilters";
 import { ReceiptRow } from "./ReceiptRow";
@@ -81,7 +79,6 @@ const emptyAdvanced: ReceiptAdvancedFilters = {
 };
 
 export default function KuititPage() {
-  const router = useRouter();
   const [listResult, setListResult] = useState<{
     query: string;
     receipts: SavedReceipt[];
@@ -94,14 +91,11 @@ export default function KuititPage() {
   const [monthFilter, setMonthFilter] = usePersistedState("kuitit.monthFilter", "");
   const [searchInput, setSearchInput] = usePersistedState("kuitit.searchInput", "");
   const [searchQuery, setSearchQuery] = useState("");
-  const [advancedOpen, setAdvancedOpen] = useState(false);
   const [advanced, setAdvanced] = usePersistedState("kuitit.advanced", emptyAdvanced);
   const [appliedAdvanced, setAppliedAdvanced] = usePersistedState(
     "kuitit.appliedAdvanced",
     emptyAdvanced
   );
-  const [receiptToDelete, setReceiptToDelete] = useState<string | null>(null);
-  const [deletingId, setDeletingId] = useState<string | null>(null);
   const [showAllReceipts, setShowAllReceipts] = usePersistedState(
     "kuitit.showAllReceipts",
     false
@@ -124,10 +118,10 @@ export default function KuititPage() {
   const [loadingMorePending, setLoadingMorePending] = useState(false);
   const [bulkReviewing, setBulkReviewing] = useState(false);
   const [retryApproveIds, setRetryApproveIds] = useState<string[]>([]);
-  const [loadingPending, setLoadingPending] = useState(
+  const [, setLoadingPending] = useState(
     () => readPageCache<SavedReceipt[]>("receipts-pending") === null
   );
-  const [isSearchOpen, setIsSearchOpen] = useState(false);
+  const [filtersOpen, setFiltersOpen] = useState(false);
 
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [bulkDeleting, setBulkDeleting] = useState(false);
@@ -389,7 +383,7 @@ export default function KuititPage() {
       minAmount: minAmount !== null ? String(minAmount) : "",
       maxAmount: maxAmount !== null ? String(maxAmount) : "",
     });
-    setAdvancedOpen(false);
+    setFiltersOpen(false);
   }
 
   function clearAllFilters() {
@@ -398,41 +392,6 @@ export default function KuititPage() {
     setSearchQuery("");
     setAdvanced(emptyAdvanced);
     setAppliedAdvanced(emptyAdvanced);
-  }
-
-  async function executeDeleteReceipt() {
-    if (!receiptToDelete) return;
-    const id = receiptToDelete;
-    setDeletingId(id);
-    setActionError("");
-    try {
-      const res = await apiFetch(`/api/receipts/${id}`, { method: "DELETE" });
-      if (!res.ok) {
-        await readJson(res, "Kuitin poistaminen epäonnistui");
-      }
-      setListResult((previous) => {
-        const cached = coerceReceiptListCache<SavedReceipt>(readPageCache(`receipts:${query}`));
-        const base: ReceiptListPayload<SavedReceipt> | null =
-          previous?.query === query
-            ? { receipts: previous.receipts, count: previous.count, truncated: previous.truncated }
-            : cached;
-        if (!base) return previous;
-        const next = dropReceipt(base, id);
-        writePageCache(`receipts:${query}`, next);
-        return { query, ...next };
-      });
-      void loadCounts();
-    } catch (error: unknown) {
-      if (isUnauthorized(error)) {
-        redirectToLogin();
-        return;
-      }
-      const message = errorMessage(error, "Kuitin poistaminen epäonnistui");
-      setActionError(message);
-      throw new Error(message);
-    } finally {
-      setDeletingId(null);
-    }
   }
 
   async function handleReview(id: string, status: "approved" | "rejected") {
@@ -647,29 +606,10 @@ export default function KuititPage() {
           }} />
         <PageTitle
           title="Kuitit"
-          action={
-            <div className="flex items-center gap-2">
-            <Link
-              href="/kuitit/uusi"
-              className="active-press relative inline-flex min-h-9 items-center gap-1 rounded-full bg-ink px-3.5 text-caption font-semibold text-canvas before:absolute before:inset-x-0 before:-inset-y-1 before:content-['']"
-            >
-              <Icon icon={Plus} size="inline" strokeWidth={2.5} />
-              Lisää
-            </Link>
-            {/* BOOKS-28: the jobs link lives in the header menu, not floating under the title. */}
-            <MoreMenu
-              label="Kuittien toiminnot"
-              items={[{ label: "Työt ja poikkeukset", onSelect: () => router.push("/tyot") }]}
-            />
-            </div>
-          }
+          action={<HeaderAddPill label="Uusi kuitti" href="/kuitit/uusi" />}
         />
 
         <QueuedReceiptsCard offlineNotice={offlineCaptureNotice} />
-
-        {loadingPending && pendingReceipts.length === 0 && (
-          <div className="h-24 animate-pulse rounded-card border border-line bg-surface" />
-        )}
 
         {emailPending.length > 0 && (
           <ReviewQueue
@@ -707,17 +647,17 @@ export default function KuititPage() {
           </Button>
         )}
 
+        {/* Nothing to filter yet (or the load failed): no chips, no search, no "0" counts (VS-30). */}
+        {!(receipts.length === 0 && !hasFilters && !loadingList) && (
         <ReceiptFilters
           monthFilter={monthFilter}
           onMonthChange={setMonthFilter}
           searchInput={searchInput}
           onSearchChange={setSearchInput}
-          isSearchOpen={isSearchOpen}
-          onToggleSearchOpen={() => setIsSearchOpen((v) => !v)}
-          advancedOpen={advancedOpen}
-          onToggleAdvancedOpen={() => {
+          filtersOpen={filtersOpen}
+          onToggleFiltersOpen={() => {
             setAdvanced({ ...appliedAdvanced });
-            setAdvancedOpen((v) => !v);
+            setFiltersOpen((v) => !v);
           }}
           advanced={advanced}
           onAdvancedChange={setAdvanced}
@@ -732,7 +672,7 @@ export default function KuititPage() {
           onClearAdvanced={() => {
             setAdvanced(emptyAdvanced);
             setAppliedAdvanced(emptyAdvanced);
-            setAdvancedOpen(false);
+            setFiltersOpen(false);
           }}
           activeTab={activeTab}
           tabCounts={tabCounts}
@@ -740,10 +680,11 @@ export default function KuititPage() {
           activeChips={activeChips}
           onClearAll={clearAllFilters}
         />
+        )}
 
         {actionError && (
           <div
-            className={`space-y-2 rounded-card px-4 py-3 text-sm ${
+            className={`space-y-2 rounded-card px-4 py-3 text-caption ${
               actionError.includes("epäonnistui 0") ? "bg-canvas text-ink" : "bg-danger/10 text-danger"
             }`}
             role="status"
@@ -752,7 +693,7 @@ export default function KuititPage() {
             {retryApproveIds.length > 0 && (
               <button
                 type="button"
-                className="min-h-11 text-sm font-medium text-accent"
+                className="min-h-11 text-body font-medium text-accent"
                 onClick={() => void handleReviewMany(retryApproveIds)}
               >
                 Yritä epäonnistuneet uudelleen
@@ -762,6 +703,7 @@ export default function KuititPage() {
         )}
 
         <div className="space-y-3">
+          {(receipts.length > 0 || loadingList || hasFilters) && (
           <div className="flex items-center gap-3 px-1">
             {receipts.length > 0 && (
               // -ml-1 cancels the row's px-1 so this circle sits on the same vertical line as the
@@ -789,9 +731,10 @@ export default function KuititPage() {
               </label>
             )}
             <h2 className="text-caption text-ink-2">
-              {loadingList ? "Ladataan…" : receiptCountLabel(receiptCount, hasFilters)}
+              {loadingList ? <SlotSkeleton width={72} tone="soft" /> : receiptCountLabel(receiptCount, hasFilters)}
             </h2>
           </div>
+          )}
 
           {currentLoadError != null && receipts.length > 0 ? (
             <StaleBanner
@@ -817,6 +760,7 @@ export default function KuititPage() {
           ) : receipts.length === 0 ? (
             <EmptyState
               kind={hasFilters ? "filtered" : "records"}
+              icon={Receipt}
               title={hasFilters ? "Ei kuitteja näillä suodattimilla" : "Ei kuitteja vielä"}
               body={
                 hasFilters
@@ -827,7 +771,7 @@ export default function KuititPage() {
               action={
                 hasFilters ? undefined : (
                   <Link href="/kuitit/uusi" className={buttonClass("primary")}>
-                    Lisää ensimmäinen kuitti
+                    Uusi kuitti
                   </Link>
                 )
               }
@@ -841,8 +785,6 @@ export default function KuititPage() {
                     receipt={r}
                     selected={selectedIds.has(r.id)}
                     onToggleSelect={() => toggleSelection(r.id)}
-                    onDeleteRequest={() => setReceiptToDelete(r.id)}
-                    deleting={deletingId === r.id}
                   />
                 ))}
               </Section>
@@ -870,15 +812,18 @@ export default function KuititPage() {
             </div>
           )}
         </div>
-      </div>
 
-      <ConfirmModal
-        isOpen={receiptToDelete !== null}
-        title="Poista kuitti?"
-        description="Oletko varma, että haluat poistaa tämän kuitin? Tätä toimintoa ei voi perua."
-        onConfirm={executeDeleteReceipt}
-        onCancel={() => setReceiptToDelete(null)}
-      />
+        {/* BOOKS-28, VS-23: the jobs link is a row here, not a one-item menu in the header. */}
+        <Section>
+          <ListRow
+            leading={<Icon icon={ClipboardList} />}
+            chevron
+            title="Työt ja poikkeukset"
+            secondary="Tila ja avoimet poikkeukset"
+            href="/tyot"
+          />
+        </Section>
+      </div>
 
       <ConfirmModal
         isOpen={showBulkConfirm}
