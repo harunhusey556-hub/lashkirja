@@ -1,0 +1,65 @@
+/*
+ * Assistant drawer motion (SHELL-09, SHELL-10, motion plan row 3). The drawer
+ * itself uses the global .animate-sheet / .animate-sheet-out (320 ms in,
+ * 240 ms out, --ease-drawer), which already carry the reduced-motion fallback.
+ */
+
+/* Conversation menu: height from 0 via grid rows, so no max-height guess. */
+.menu {
+  display: grid;
+  grid-template-rows: 0fr;
+  opacity: 0;
+  transition:
+    grid-template-rows 180ms var(--ease-out),
+    opacity 180ms var(--ease-out);
+}
+
+.menu[data-open="true"] {
+  grid-template-rows: 1fr;
+  opacity: 1;
+  transition-duration: 240ms;
+}
+
+.menuInner {
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* A new message rises into place; streamed text itself is not animated. */
+.messageIn {
+  animation: chatMessageIn 200ms var(--ease-out) backwards;
+}
+
+@keyframes chatMessageIn {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes chatFadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/* History skeleton cross-fades to the real thread. */
+.fadeIn {
+  animation: chatFadeIn var(--dur-pop) var(--ease-out);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .menu,
+  .menu[data-open="true"] {
+    transition: opacity 120ms linear !important;
+  }
+
+  .messageIn,
+  .fadeIn {
+    animation: chatFadeIn 120ms linear backwards !important;
+    transform: none !important;
+  }
+}

@@ -1,11 +1,16 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import styles from "./AiChatDrawer.module.css";
 import { ChatMatchProposal } from "@/lib/ai-assistant";
 import { apiFetch, authorizedFetch, errorMessage, readJson } from "@/components/clientFetch";
 import { STREAM_IDLE_MS, armIdleTimeout, subscribeOverlayClose } from "@/lib/screen-state";
 import { ChatMarkdown } from "@/components/ChatMarkdown";
-import { Button, FormError, chipClass, controlClass } from "@/components/ui";
+import { Button, chipClass, controlClass } from "@/components/ui";
+import { ConnectionNotice } from "@/components/ScreenState";
+import { Skeleton } from "@/components/ds/Skeleton";
+import { useFocusTrap } from "@/components/useFocusTrap";
+import { useSheetDrag } from "@/components/useSheetDrag";
 import {
   Archive,
   ArrowDown,
@@ -38,6 +43,8 @@ interface ConversationItem {
 
 interface ChatMessageItem {
   id: string;
+  /** Stable React key: a streamed reply keeps its placeholder key when the server id arrives. */
+  renderKey?: string;
   role: "user" | "assistant";
   content: string;
   clientId?: string | null;
@@ -66,6 +73,21 @@ interface DoneEvent {
   limited?: boolean;
 }
 
+/** Exit animation (CSS --dur-exit, 240 ms) plus a frame. */
+const EXIT_MS = 250;
+
+/**
+ * Whether the server can answer free-form questions (GET /api/ai/status).
+ * Asked once per app session; null = not known yet (behave as available).
+ */
+let cachedAvailability: boolean | null = null;
+
+/** The two shortcuts that always work, model or not. */
+const SHORTCUTS = [
+  { label: "Täsmäytä kuitit", message: "Täsmäytä kuitit" },
+  { label: "Tämän kuun ALV", message: "Mikä on tämän kuun ALV?" },
+];
+
 export function AiChatDrawer({
   open,
   onClose,
@@ -77,7 +99,7 @@ export function AiChatDrawer({
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [loadingHistory, setLoadingHistory] = useState(false);
-  const [historyError, setHistoryError] = useState("");
+  const [historyError, setHistoryError] = useState<unknown>(null);
   const [hasMore, setHasMore] = useState(false);
   const [historyLoaded, setHistoryLoaded] = useState(false);
   const [matchBusyId, setMatchBusyId] = useState<string | null>(null);
@@ -99,6 +121,13 @@ export function AiChatDrawer({
   // Failures of the conversation menu's own actions (list, new, rename, archive, delete, undo)
   // show inside the menu panel instead of vanishing as an unhandled rejection.
   const [menuError, setMenuError] = useState("");
+  const [aiAvailable, setAiAvailable] = useState<boolean | null>(cachedAvailability);
+  /** Messages added in this session rise in; history loads without motion. */
+  const [newKeys, setNewKeys] = useState<ReadonlySet<string>>(() => new Set());
+  const markNew = (key: string) => setNewKeys((keys) => new Set([...keys, key]));
+  const panelRef = useRef<HTMLDivElement>(null);
+  const headerRef = useRef<HTMLElement>(null);
+  const titleRef = useRef<HTMLHeadingElement>(null);
   const scrollerRef = useRef<HTMLDivElement>(null);
   const stickRef = useRef(true);
   const abortRef = useRef<AbortController | null>(null);
@@ -106,6 +135,50 @@ export function AiChatDrawer({
   useOverlayLock(open);
   const closeRef = useRef(onClose);
   closeRef.current = onClose;
+
+  // Exit animation (SHELL-09): closing keeps the drawer mounted for one
+  // slide-down. Render-phase derived state, like BottomSheet.
+  const [prevOpen, setPrevOpen] = useState(open);
+  const [closing, setClosing] = useState(false);
+  if (open !== prevOpen) {
+    setPrevOpen(open);
+    setClosing(!open);
+    if (!open) setMenuOpen(false);
+  }
+  useEffect(() => {
+    if (!closing) return;
+    const timer = window.setTimeout(() => setClosing(false), EXIT_MS);
+    return () => window.clearTimeout(timer);
+  }, [closing]);
+
+  // A real modal dialog (SHELL-10): focus moves in (to the title, so the
+  // keyboard does not jump up on open), Tab stays inside, Escape closes.
+  useFocusTrap(panelRef, open, { onEscape: () => closeRef.current(), initialFocusRef: titleRef });
+  // Swipe down on the header closes it, with the sheet's thresholds.
+  const { dragDismissed } = useSheetDrag({
+    active: open,
+    panelRef,
+    handleRef: headerRef,
+    onDismiss: () => closeRef.current(),
+  });
+
+  useEffect(() => {
+    if (!open || cachedAvailability !== null) return;
+    let cancelled = false;
+    apiFetch("/api/ai/status")
+      .then((response) => readJson<{ available: boolean }>(response, ""))
+      .then((data) => {
+        if (typeof data?.available !== "boolean") return;
+        cachedAvailability = data.available;
+        if (!cancelled) setAiAvailable(data.available);
+      })
+      .catch(() => {
+        // Unknown: behave as available; a failed question still explains itself.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [open]);
   useEffect(() => {
     if (!open) return;
     return subscribeOverlayClose(() => closeRef.current());
@@ -131,7 +204,7 @@ export function AiChatDrawer({
   async function loadHistory(before?: { createdAt: string; id: string }, replace = false) {
     if (loadingRef.current && !before) return;
     setLoadingHistory(true);
-    setHistoryError("");
+    setHistoryError(null);
     try {
       const params = new URLSearchParams();
       if (conversationId) params.set("conversationId", conversationId);
@@ -162,7 +235,7 @@ export function AiChatDrawer({
       setHasMore(Boolean(data.hasMore));
       setHistoryLoaded(true);
     } catch (error) {
-      setHistoryError(errorMessage(error, "Keskusteluhistorian lataus epäonnistui"));
+      setHistoryError(error);
     } finally {
       setLoadingHistory(false);
     }
@@ -266,6 +339,7 @@ export function AiChatDrawer({
     }
     const clientId = retry?.clientId || crypto.randomUUID();
     if (!retry) {
+      markNew(`user-${clientId}`);
       setMessages((prev) => [
         ...prev,
         {
@@ -300,10 +374,12 @@ export function AiChatDrawer({
     const paint = (next: string) => {
       if (!placeholderAdded) {
         placeholderAdded = true;
+        markNew(placeholderId);
         setMessages((prev) => [
           ...prev,
           {
             id: placeholderId,
+            renderKey: placeholderId,
             role: "assistant",
             content: next,
             createdAt: new Date().toISOString(),
@@ -337,6 +413,7 @@ export function AiChatDrawer({
           createdAt?: string;
           limited?: boolean;
         }>(response, "Virhe viestin lähetyksessä");
+        markNew(data.id || `assistant-${clientId}`);
         setMessages((prev) => [
           ...prev.filter((message) => message.id !== placeholderId),
           {
@@ -373,7 +450,9 @@ export function AiChatDrawer({
           }
           if (event.incomplete) {
             sawDone = false;
-            setFailed({ text: query, clientId });
+            // A retry is offered only when it can succeed.
+            if (cachedAvailability !== false || event.status === "busy") setFailed({ text: query, clientId });
+            markNew(`error-${clientId}`);
             setMessages((prev) => {
               const rest = prev.filter((message) => message.id !== placeholderId);
               return [
@@ -384,7 +463,6 @@ export function AiChatDrawer({
                   content: event.error || "Vastaus jäi kesken.",
                   createdAt: new Date().toISOString(),
                   incomplete: true,
-                  limited: true,
                 },
               ];
             });
@@ -454,6 +532,7 @@ export function AiChatDrawer({
         return;
       }
       setFailed({ text: query, clientId });
+      markNew(`error-${clientId}`);
       setMessages((prev) => [
         ...prev.filter((message) => message.id !== placeholderId),
         {
@@ -628,15 +707,28 @@ export function AiChatDrawer({
     await loadConversations();
   }
 
-  if (!open) return null;
+  // A drag already moved the drawer off-screen: no second (CSS) exit.
+  if (!open && (!closing || dragDismissed)) return null;
+
+  const lastMessage = messages[messages.length - 1];
+  const showShortcutsAfterLast =
+    aiAvailable === false && !loading && lastMessage?.role === "assistant" && Boolean(lastMessage.limited);
 
   const smallAction = "active-press inline-flex min-h-11 items-center px-1 text-[13px] font-medium";
 
   return (
-    <div className="absolute inset-0 z-[70] flex flex-col bg-canvas" role="dialog" aria-labelledby="ai-chat-title">
+    <div
+      ref={panelRef}
+      className={`absolute inset-0 z-[70] flex flex-col bg-canvas shadow-2xl ${
+        closing ? "animate-sheet-out pointer-events-none" : "animate-sheet"
+      }`}
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="ai-chat-title"
+    >
       {/* Header: close (left), title (centre), conversation menu (right). Both controls are 36px
           circles in 44px hit boxes, the same pair the app header uses. */}
-      <header className="app-header border-b border-line bg-canvas">
+      <header ref={headerRef} className="app-header border-b border-line bg-canvas">
         {/* Same max width as the thread and the composer, so on desktop the controls frame the
             conversation instead of sitting at the far edges of the window. */}
         <div className="mx-auto grid w-full max-w-2xl grid-cols-[44px_minmax(0,1fr)_44px] items-center gap-2 px-3 pb-1.5">
@@ -646,7 +738,7 @@ export function AiChatDrawer({
           </span>
         </button>
         <div className="min-w-0 text-center">
-          <h2 id="ai-chat-title" className="truncate text-[17px] font-semibold text-ink">
+          <h2 id="ai-chat-title" ref={titleRef} tabIndex={-1} className="truncate text-[17px] font-semibold text-ink outline-none">
             {conversationTitle || "Avustaja"}
           </h2>
           {conversationTitle && conversationTitle !== "Avustaja" && (
@@ -673,8 +765,10 @@ export function AiChatDrawer({
         </button>
         </div>
       </header>
-      {menuOpen && (
-        <div className="max-h-[55%] space-y-3 overflow-y-auto border-b border-line bg-canvas px-4 py-3 *:mx-auto *:max-w-[40rem]">
+      {/* Conversation menu: stays mounted and opens by height (SHELL-10). */}
+      <div className={styles.menu} data-open={menuOpen ? "true" : undefined} inert={!menuOpen}>
+        <div className={styles.menuInner}>
+        <div className="max-h-[50dvh] space-y-3 overflow-y-auto overscroll-contain border-b border-line bg-canvas px-4 py-3 *:mx-auto *:max-w-[40rem]">
           <form
             className="flex gap-2"
             onSubmit={(event) => {
@@ -776,7 +870,7 @@ export function AiChatDrawer({
                         setMessages([]);
                         setHasMore(false);
                         setHistoryLoaded(false);
-                        setHistoryError("");
+                        setHistoryError(null);
                         setMenuOpen(false);
                       }}
                     >
@@ -832,7 +926,8 @@ export function AiChatDrawer({
             </button>
           )}
         </div>
-      )}
+        </div>
+      </div>
 
       <div
         ref={scrollerRef}
@@ -852,44 +947,55 @@ export function AiChatDrawer({
             {loadingHistory ? "Ladataan…" : "Vanhemmat viestit"}
           </button>
         )}
-        {historyError && (
-          <div className="space-y-3 rounded-card border border-danger/30 bg-danger/10 p-4">
-            <FormError message={historyError} />
-            <Button variant="secondary" onClick={() => void loadHistory()}>
-              Yritä ladata historia uudelleen
-            </Button>
-          </div>
+        {Boolean(historyError) && (
+          <ConnectionNotice
+            compact
+            error={historyError}
+            fallback="Keskusteluhistorian lataus epäonnistui"
+            onRetry={() => void loadHistory()}
+          />
         )}
         {loadingHistory && messages.length === 0 && (
-          <p className="pt-8 text-center text-[13px] text-ink-2">Ladataan keskustelua…</p>
+          // Bubble placeholders at their final sizes instead of a "Ladataan" line.
+          <div className="space-y-4" role="status" aria-label="Ladataan keskustelua">
+            <Skeleton radius="card" height={56} className="w-3/5" />
+            <Skeleton radius="card" height={40} className="ml-auto w-2/5" />
+            <Skeleton radius="card" height={72} className="w-4/5" />
+          </div>
         )}
         {!loadingHistory && !historyError && messages.length === 0 && (
-          <div className="flex flex-col items-center px-2 pt-10 text-center">
+          <div className={`flex flex-col items-center px-2 pt-10 text-center ${historyLoaded ? styles.fadeIn : ""}`}>
             <span aria-hidden className="flex h-14 w-14 items-center justify-center rounded-full bg-accent-soft text-accent">
               <Icon icon={Sparkles} size="hero" />
             </span>
             <p className="mt-4 text-[17px] font-semibold text-ink">Miten voin auttaa?</p>
             <p className="mt-1 max-w-xs text-[13px] leading-relaxed text-ink-2">
-              Kysy kuiteista, tapahtumista tai ALV:stä. Ehdotukset hyväksyt aina itse.
+              {aiAvailable === false
+                ? "Avustaja osaa nyt täsmäyttää kuitit ja kertoa tämän kuun ALV:n. Laajemmat kysymykset tulevat käyttöön myöhemmin."
+                : "Kysy kuiteista, tapahtumista tai ALV:stä. Ehdotukset hyväksyt aina itse."}
             </p>
             <div className="mt-5 flex flex-wrap justify-center gap-2">
-              <button type="button" className={chipClass(false)} onClick={() => void handleSendMessage("Täsmäytä kuitit")}>
-                Täsmäytä kuitit
-              </button>
-              <button
-                type="button"
-                className={chipClass(false)}
-                onClick={() => void handleSendMessage("Mikä on tämän kuun ALV?")}
-              >
-                Tämän kuun ALV
-              </button>
+              {SHORTCUTS.map((shortcut) => (
+                <button
+                  key={shortcut.label}
+                  type="button"
+                  className={chipClass(false)}
+                  onClick={() => void handleSendMessage(shortcut.message)}
+                >
+                  {shortcut.label}
+                </button>
+              ))}
             </div>
           </div>
         )}
         {messages.map((message) => {
           const mine = message.role === "user";
+          const key = message.renderKey ?? message.id;
           return (
-            <div key={message.id} className={`flex flex-col ${mine ? "items-end" : "items-start"}`}>
+            <div
+              key={key}
+              className={`flex flex-col ${mine ? "items-end" : "items-start"} ${newKeys.has(key) ? styles.messageIn : ""}`}
+            >
               <div
                 className={`select-text max-w-[85%] rounded-2xl px-4 py-2.5 text-[15px] leading-relaxed ${
                   mine
@@ -899,12 +1005,8 @@ export function AiChatDrawer({
               >
                 {message.role === "assistant" ? <ChatMarkdown text={message.content} /> : message.content}
               </div>
-              {(message.limited && message.role === "assistant") || message.status === "cancelled" ? (
-                <p className="mt-1 px-1 text-[13px] text-ink-2">
-                  {message.limited && message.role === "assistant" ? "Rajattu tila" : null}
-                  {message.limited && message.role === "assistant" && message.status === "cancelled" ? ", " : null}
-                  {message.status === "cancelled" ? "Keskeytetty" : null}
-                </p>
+              {message.status === "cancelled" ? (
+                <p className="mt-1 px-1 text-[13px] text-ink-2">Keskeytetty</p>
               ) : null}
               {/* Sources and the message actions share one quiet row under the bubble. */}
               {message.role === "assistant" && (message.content || (message.sources && message.sources.length > 0)) && (
@@ -929,7 +1031,7 @@ export function AiChatDrawer({
                       {copiedId === message.id ? "Kopioitu" : "Kopioi"}
                     </button>
                   )}
-                  {message.content && message.incomplete && failed && (
+                  {message.content && message.incomplete && failed && !loading && (
                     <button
                       type="button"
                       className="active-press inline-flex min-h-11 items-center gap-1.5 text-[13px] font-medium text-accent"
@@ -978,6 +1080,21 @@ export function AiChatDrawer({
               {message.proposal?.status === "rejected" && (
                 <p className="mt-1 px-1 text-[13px] text-ink-2">Ehdotus hylätty</p>
               )}
+              {message === lastMessage && showShortcutsAfterLast && (
+                // Without a model, a question it cannot answer ends with what does work.
+                <div className="mt-1 flex flex-wrap gap-2">
+                  {SHORTCUTS.map((shortcut) => (
+                    <button
+                      key={shortcut.label}
+                      type="button"
+                      className={chipClass(false)}
+                      onClick={() => void handleSendMessage(shortcut.message)}
+                    >
+                      {shortcut.label}
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
           );
         })}
@@ -1006,7 +1123,7 @@ export function AiChatDrawer({
               {actionError}
             </p>
           )}
-          {failed && !loading && (
+          {failed && !loading && !messages.some((message) => message.incomplete && message.content) && (
             <Button
               variant="secondary"
               className="w-full"

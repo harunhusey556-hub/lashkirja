@@ -3,6 +3,7 @@
 import React, { useState, useRef, useEffect } from "react";
 import { Check, ChevronDown } from "lucide-react";
 import { Icon } from "@/components/ds/Icon";
+import styles from "./SelectMenu.module.css";
 
 export interface SelectOption {
   value: string;
@@ -33,6 +34,19 @@ export function SelectMenu({
   id,
 }: SelectMenuProps) {
   const [isOpen, setIsOpen] = useState(false);
+  // The list stays mounted for its 100 ms exit (SHELL-13). Render-phase
+  // derived state, so an open never renders a stale frame.
+  const [prevOpen, setPrevOpen] = useState(isOpen);
+  const [closing, setClosing] = useState(false);
+  if (isOpen !== prevOpen) {
+    setPrevOpen(isOpen);
+    setClosing(!isOpen);
+  }
+  useEffect(() => {
+    if (!closing) return;
+    const timer = window.setTimeout(() => setClosing(false), 110);
+    return () => window.clearTimeout(timer);
+  }, [closing]);
   const containerRef = useRef<HTMLDivElement>(null);
 
   const selectedOption = options.find((opt) => opt.value === value);
@@ -96,13 +110,14 @@ export function SelectMenu({
         <Icon
           icon={ChevronDown}
           size="inline"
-          className={`ml-2 transition-transform duration-200 ${isOpen ? "rotate-180 text-accent" : "text-ink-2"}`}
+          className={`ml-2 ${styles.chevron} ${isOpen ? "rotate-180 text-accent" : "text-ink-2"}`}
         />
       </button>
 
-      {isOpen && (
+      {(isOpen || closing) && (
         <div
-          className="absolute z-50 mt-1.5 w-full overflow-hidden overflow-y-auto rounded-card border border-line bg-surface py-1 max-h-60 shadow-xl scrollbar-none"
+          aria-hidden={!isOpen || undefined}
+          className={`${isOpen ? "animate-popover" : styles.listOut} absolute z-50 mt-1.5 w-full overflow-hidden overflow-y-auto rounded-card border border-line bg-surface py-1 max-h-60 shadow-xl scrollbar-none`}
           role="listbox"
         >
           {options.map((opt) => {
