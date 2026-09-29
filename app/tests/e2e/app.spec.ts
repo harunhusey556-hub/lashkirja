@@ -67,7 +67,7 @@ test("a bank account can be added and a month reconciled", async ({ page }) => {
   await login(page);
   await page.goto("/kirjanpito/pankkitilit");
 
-  await page.getByRole("button", { name: /Lisää (ensimmäinen )?pankkitili/ }).click();
+  await page.getByRole("button", { name: "Lisää tili käsin" }).click();
   await page.getByLabel("Tilin nimi").fill("E2E Käyttötili");
   await page.getByLabel("IBAN").fill("FI21 1234 5600 0007 85");
   await page.getByLabel("Alkusaldo (€)").fill("1000");
@@ -91,7 +91,7 @@ test("a rejected IBAN never reaches the server", async ({ page }) => {
   await login(page);
   await page.goto("/kirjanpito/pankkitilit");
 
-  await page.getByRole("button", { name: /Lisää (ensimmäinen )?pankkitili/ }).click();
+  await page.getByRole("button", { name: "Lisää tili käsin" }).click();
   await page.getByLabel("Tilin nimi").fill("Virheellinen");
   await page.getByLabel("IBAN").fill("FI2112345600000786");
   await page.getByRole("button", { name: "Lisää tili" }).click();
@@ -218,12 +218,18 @@ test("responses include the launch security baseline", async ({ request }) => {
 // would break every earlier test's assumptions.
 test("closing the books makes an earlier period read-only", async ({ page }) => {
   await login(page);
-  await page.goto("/asetukset");
+  await page.goto("/kirjanpito/kaudet");
 
   const lockSelect = page.getByLabel("Lukitse kaudet tähän kuukauteen asti");
   const currentMonth = await lockSelect.locator("option").nth(1).getAttribute("value");
   await lockSelect.selectOption(currentMonth!);
-  await page.getByRole("button", { name: "Tallenna", exact: true }).click();
+  await page.getByRole("button", { name: "Lukitse", exact: true }).click();
+  // Open items are listed first ("Lukitse silti"); a clean month goes straight to the confirm.
+  const lockAnyway = page.getByRole("button", { name: "Lukitse silti" });
+  const dialog = page.getByRole("dialog");
+  await expect(dialog.or(lockAnyway)).toBeVisible();
+  if (await lockAnyway.isVisible()) await lockAnyway.click();
+  await dialog.getByRole("button", { name: "Lukitse", exact: true }).click();
   await expect(page.getByText(/Kirjanpito lukittu/)).toBeVisible();
 
   await page.goto("/asiakkaat");
@@ -242,9 +248,10 @@ test("closing the books makes an earlier period read-only", async ({ page }) => 
 
   await expect(page.getByText(/lukittu/i)).toBeVisible();
 
-  await page.goto("/asetukset");
+  await page.goto("/kirjanpito/kaudet");
   await page.getByRole("button", { name: "Avaa kirjanpito uudelleen" }).click();
-  await expect(page.getByText("Lukitus poistettu.")).toBeVisible();
+  await page.getByRole("dialog").getByRole("button", { name: "Avaa kirjanpito" }).click();
+  await expect(page.getByText("Kirjanpito avattiin.")).toBeVisible();
 });
 
 test("a recurring invoice generates a real invoice", async ({ page }) => {

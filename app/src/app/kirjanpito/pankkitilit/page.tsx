@@ -14,10 +14,8 @@ import { apiFetch, errorMessage, isUnauthorized, readJson, redirectToLogin } fro
 import { formatEur, formatMonth } from "@/lib/format";
 import { maskIban } from "@/lib/iban";
 import BankConnectCard from "@/components/BankConnectCard";
-import { useProfile } from "@/app/asetukset/useProfile";
 import { Button } from "@/components/ui";
-import { Plus } from "lucide-react";
-import { Card, Icon, ListRow, PageTitle, Section } from "@/components/ds";
+import { Card, ListRow, PageTitle, Section, Skeleton, SkeletonGroup, useSkeletonFade } from "@/components/ds";
 
 import { pageCacheFetchedAt, readPageCache, writePageCache } from "@/lib/page-cache";
 import { usePersistedState } from "@/lib/list-ui-state";
@@ -58,6 +56,26 @@ interface Rollforward {
     preOpeningTxCount: number;
     preOpeningAmount: number;
   };
+}
+
+/** Final-size placeholder for the account list (L1): the section heading and two rows. */
+function AccountsSkeleton() {
+  return (
+    <SkeletonGroup label="Ladataan pankkitilejä" className="space-y-3">
+      <Skeleton className="mx-1 h-3 w-28" />
+      <div className="overflow-hidden rounded-card border border-line bg-surface divide-y divide-line">
+        {[0, 1].map((row) => (
+          <div key={row} className="flex min-h-16 items-center gap-3 px-4 py-3">
+            <div className="min-w-0 flex-1 space-y-2">
+              <Skeleton className="h-3.5 w-2/5" />
+              <Skeleton tone="soft" className="h-3 w-3/5" />
+            </div>
+            <Skeleton className="h-4 w-16" />
+          </div>
+        ))}
+      </div>
+    </SkeletonGroup>
+  );
 }
 
 function MessageBanner({ message, isError }: { message: string | null; isError: boolean }) {
@@ -288,53 +306,46 @@ export default function BankAccountsPage() {
     }
   }
 
-  const { profile, loadError: profileLoadError, retry: retryProfile } = useProfile();
+  function openManualForm() {
+    setMessage(null);
+    setFormMode("create");
+  }
+
+  const archivedCount = overview?.archivedCount ?? 0;
+  const fade = useSkeletonFade(status === "loading");
 
   return (
     <>
       <div className="space-y-6">
-        <PageTitle
-          title="Pankkitilit"
-          subtitle="Kirjanpidon tilit, kuukausien loppusaldot ja pankkiyhteys."
-          action={
-            formMode === "hidden" && status === "ready" ? (
-              <button
-                type="button"
-                onClick={() => {
-                  setMessage(null);
-                  setFormMode("create");
-                }}
-                className="active-press relative inline-flex min-h-9 items-center gap-1 rounded-full bg-ink px-3.5 text-[13px] font-semibold text-canvas before:absolute before:inset-x-0 before:-inset-y-1 before:content-['']"
-              >
-                <Icon icon={Plus} size="inline" strokeWidth={2.5} />
-                Lisää pankkitili
-              </button>
-            ) : undefined
-          }
-        />
+        <PageTitle title="Pankkitilit" subtitle="Pankkiyhteys, tilit ja kuukausien loppusaldot." />
+
+        {/* Connect first (OWN-06, BOOKS-01): the bank connection leads the page and
+            never waits for the profile (BOOKS-07). Manual entry is the quiet link below. */}
+        <BankConnectCard onAddManual={openManualForm} />
 
         {loadFailure != null && status === "ready" && (
           <StaleBanner fetchedAt={pageCacheFetchedAt("bank-overview")} onRetry={() => void load()} />
         )}
-        {status === "loading" && <LoadingState label="Haetaan pankkitilejä…" />}
+        {status === "loading" && <AccountsSkeleton />}
         {status === "error" && (
           <ConnectionNotice
             error={loadFailure}
             fallback="Pankkitilien haku epäonnistui"
             onRetry={() => void load()}
+            compact
           />
         )}
 
         {status === "ready" && overview && (
-          <>
-            {overview.accounts.length > 0 ? (
+          <div className={`space-y-3 ${fade}`}>
+            {overview.accounts.length > 0 && (
               <Card className="space-y-1">
                 <p className="text-[13px] text-ink-2">Yhteenlaskettu saldo</p>
                 <p className="text-[28px] font-bold tracking-[-0.02em] tabular-nums text-ink">
                   {formatEur(overview.totalBalance)}
                 </p>
                 <p className="text-[13px] text-ink-2">
-                  {overview.totalAccounts} tiliä
+                  {overview.totalAccounts === 1 ? "1 tili" : `${overview.totalAccounts} tiliä`}
                   {overview.needsAttention > 0 && (
                     <span className="text-danger"> · {overview.needsAttention} vaatii täsmäytystä</span>
                   )}
@@ -345,14 +356,6 @@ export default function BankAccountsPage() {
                   </p>
                 )}
               </Card>
-            ) : (
-              <Card className="space-y-1 text-center">
-                <p className="text-[15px] font-medium text-ink">Ei vielä kirjanpidon tilejä</p>
-                <p className="text-[13px] text-ink-2 leading-relaxed">
-                  Yhdistä pankki, jos tapahtumat haetaan suoraan. Käsin seurattava tili lisätään
-                  yllä olevasta &ldquo;Lisää pankkitili&rdquo; -painikkeesta.
-                </p>
-              </Card>
             )}
 
             {/* Only shown here while neither sheet is open - an action moved into the
@@ -362,9 +365,9 @@ export default function BankAccountsPage() {
               <MessageBanner message={message} isError={messageIsError} />
             )}
 
-            {overview.accounts.length > 0 && (
-              <Section>
-                {overview.accounts.map((account) => (
+            <Section title="Kirjanpidon tilit">
+              {overview.accounts.length > 0 ? (
+                overview.accounts.map((account) => (
                   // The dimming wrapper is a plain div, not a ListRow prop (ListRow has no
                   // className escape hatch) - it still works as a Section child for the
                   // divide-y styling, which only cares about direct children, not their tag.
@@ -376,31 +379,35 @@ export default function BankAccountsPage() {
                       secondary={accountSecondary(account)}
                     />
                   </div>
-                ))}
-              </Section>
-            )}
+                ))
+              ) : (
+                <p className="px-4 py-4 text-[13px] leading-relaxed text-ink-2">
+                  {archivedCount > 0
+                    ? `Ei käytössä olevia tilejä. Arkistoituja tilejä on ${archivedCount}.`
+                    : "Ei vielä tilejä. Yhdistä pankki yllä tai tuo tiliote tiedostona."}
+                </p>
+              )}
+            </Section>
 
-            {(showArchived || (overview.archivedCount ?? 0) > 0) && (
+            <div className="flex flex-wrap items-center justify-between gap-x-4 px-1">
               <button
                 type="button"
-                onClick={() => setShowArchived((value) => !value)}
-                className="active-press w-full min-h-11 text-[13px] text-ink-2 py-2"
+                onClick={openManualForm}
+                className="active-press inline-flex min-h-11 items-center text-[13px] font-medium text-accent"
               >
-                {showArchived ? "Piilota arkistoidut" : "Näytä arkistoidut"}
+                Lisää tili käsin
               </button>
-            )}
-          </>
-        )}
-        {profileLoadError ? (
-          <ConnectionNotice
-            error={new Error(profileLoadError)}
-            fallback={profileLoadError}
-            onRetry={retryProfile}
-          />
-        ) : profile ? (
-          <BankConnectCard entityType={profile.entityType} />
-        ) : (
-          <div className="h-40 animate-pulse rounded-card bg-canvas" aria-hidden />
+              {(showArchived || archivedCount > 0) && (
+                <button
+                  type="button"
+                  onClick={() => setShowArchived((value) => !value)}
+                  className="active-press inline-flex min-h-11 items-center text-[13px] text-ink-2"
+                >
+                  {showArchived ? "Piilota arkistoidut" : `Näytä arkistoidut (${archivedCount})`}
+                </button>
+              )}
+            </div>
+          </div>
         )}
       </div>
 

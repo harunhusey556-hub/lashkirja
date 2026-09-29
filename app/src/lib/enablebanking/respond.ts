@@ -2,13 +2,16 @@ import { ZodError } from "zod";
 import { noStoreJson } from "@/lib/http-security";
 import { EnableBankingError, publicBankError } from "./client";
 import { EnableBankingNotConfiguredError } from "./signing";
+import { BANK_NOT_CONFIGURED_MESSAGE } from "./public-status";
 
 export function respondToBankError(error: unknown) {
   if (error instanceof ZodError) {
     return noStoreJson({ error: "Tarkista pankin tiedot." }, { status: 400 });
   }
   if (error instanceof EnableBankingNotConfiguredError) {
-    return noStoreJson({ error: error.message }, { status: 503 });
+    // The error text can name settings; the client gets plain Finnish (L5).
+    console.warn("Enable Banking not configured:", error.message);
+    return noStoreJson({ error: BANK_NOT_CONFIGURED_MESSAGE }, { status: 503 });
   }
   if (error instanceof EnableBankingError) {
     if (error.code === "NOT_FOUND") {

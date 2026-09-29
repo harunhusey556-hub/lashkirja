@@ -3,6 +3,7 @@ import { z } from "zod";
 import { listBankConnections, startBankConsent } from "@/lib/enablebanking/connect";
 import { respondToBankError } from "@/lib/enablebanking/respond";
 import { enableBankingStatus, loadEnableBankingConfig } from "@/lib/enablebanking/signing";
+import { BANK_NOT_CONFIGURED_MESSAGE, logBankSetupGap } from "@/lib/enablebanking/public-status";
 import { noStoreJson, rejectCrossSite, rejectOversizedContentLength } from "@/lib/http-security";
 import { consumeRateLimit } from "@/lib/rate-limit";
 import { requireSession } from "@/lib/session";
@@ -27,12 +28,15 @@ export async function GET(req: NextRequest) {
     return noStoreJson({ error: "Ei kirjautunut" }, { status: 401 });
   }
   const status = enableBankingStatus();
+  logBankSetupGap(status);
   try {
     const connections = await listBankConnections(session.userId);
     return noStoreJson({
       enabled: status.enabled,
       ready: status.ready,
-      message: status.message,
+      // Plain Finnish only: the detailed reason can name settings (L5) and
+      // stays in the server log (logBankSetupGap).
+      ...(status.ready ? {} : { message: BANK_NOT_CONFIGURED_MESSAGE }),
       connections,
     });
   } catch (error) {
@@ -50,10 +54,8 @@ export async function POST(req: NextRequest) {
   }
   const status = enableBankingStatus();
   if (!status.ready) {
-    return noStoreJson(
-      { error: status.message || "Pankkiyhteys ei ole käytössä." },
-      { status: 503 }
-    );
+    logBankSetupGap(status);
+    return noStoreJson({ error: BANK_NOT_CONFIGURED_MESSAGE }, { status: 503 });
   }
 
   const limit = consumeRateLimit(`bank-start:${session.userId}`, 8, 60 * 60 * 1000);

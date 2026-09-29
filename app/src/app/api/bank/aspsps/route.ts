@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { EnableBankingClient } from "@/lib/enablebanking/client";
 import { respondToBankError } from "@/lib/enablebanking/respond";
 import { enableBankingStatus, loadEnableBankingConfig } from "@/lib/enablebanking/signing";
+import { BANK_NOT_CONFIGURED_MESSAGE, logBankSetupGap } from "@/lib/enablebanking/public-status";
 import { noStoreJson } from "@/lib/http-security";
 import { requireSession } from "@/lib/session";
 
@@ -18,10 +19,8 @@ export async function GET(req: NextRequest) {
     return noStoreJson({ aspsps: [], enabled: false });
   }
   if (!status.ready) {
-    return noStoreJson(
-      { error: status.message || "Pankkiyhteys ei ole käytössä.", aspsps: [] },
-      { status: 503 }
-    );
+    logBankSetupGap(status);
+    return noStoreJson({ error: BANK_NOT_CONFIGURED_MESSAGE, aspsps: [] }, { status: 503 });
   }
 
   const country = req.nextUrl.searchParams.get("country")?.trim().toUpperCase() || "FI";

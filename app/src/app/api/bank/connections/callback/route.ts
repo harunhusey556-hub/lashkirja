@@ -3,6 +3,7 @@ import { z } from "zod";
 import { completeBankConsent } from "@/lib/enablebanking/connect";
 import { respondToBankError } from "@/lib/enablebanking/respond";
 import { enableBankingStatus, loadEnableBankingConfig } from "@/lib/enablebanking/signing";
+import { BANK_NOT_CONFIGURED_MESSAGE, logBankSetupGap } from "@/lib/enablebanking/public-status";
 import { noStoreJson, rejectCrossSite, rejectOversizedContentLength } from "@/lib/http-security";
 import { requireSession } from "@/lib/session";
 
@@ -23,10 +24,8 @@ export async function POST(req: NextRequest) {
   }
   const status = enableBankingStatus();
   if (!status.ready) {
-    return noStoreJson(
-      { error: status.message || "Pankkiyhteys ei ole käytössä." },
-      { status: 503 }
-    );
+    logBankSetupGap(status);
+    return noStoreJson({ error: BANK_NOT_CONFIGURED_MESSAGE }, { status: 503 });
   }
 
   try {

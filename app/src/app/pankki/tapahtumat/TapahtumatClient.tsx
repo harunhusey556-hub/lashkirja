@@ -22,6 +22,8 @@ import { chooseDocuments, isNativeShell } from "@/lib/native-pick";
 import { Button, controlClass } from "@/components/ui";
 import { ListRow, PageTitle, Section, StatusTag } from "@/components/ds";
 import { detailHref } from "@/lib/routes";
+import BankConnectCard from "@/components/BankConnectCard";
+import { PENDING_CAPTURE_PARAMS, STATEMENT_FILE_TYPES, takePendingCapture } from "@/lib/pending-capture";
 
 const RECENT_LIMIT = 5;
 
@@ -50,7 +52,7 @@ export default function TapahtumatClient() {
     "tiliotteet.showAllStatements",
     false
   );
-  const [loadError, setLoadError] = useState("");
+  const [loadError, setLoadError] = useState<unknown>(null);
   const [accounts, setAccounts] = useState<BankAccountOption[]>(
     () => readPageCache<{ accounts?: BankAccountOption[] }>("bank-overview")?.accounts ?? []
   );
@@ -61,6 +63,13 @@ export default function TapahtumatClient() {
       )?.id || ""
   );
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  /** The list state carried into a detail link; the one-shot import flag stays behind. */
+  function listParams(): Record<string, string> {
+    const params = Object.fromEntries(searchParams.entries());
+    delete params[PENDING_CAPTURE_PARAMS.statement.name];
+    return params;
+  }
 
   function replaceQuery(patch: Record<string, string>) {
     const next = new URLSearchParams(searchParams.toString());
@@ -81,13 +90,14 @@ export default function TapahtumatClient() {
       );
       writePageCache("statements", data.statements || []);
       setStatements(data.statements || []);
-      setLoadError("");
+      setLoadError(null);
     } catch (error: unknown) {
       if (isUnauthorized(error)) {
         redirectToLogin();
         return;
       }
-      setLoadError(errorMessage(error, "Tiliotteiden lataus epäonnistui"));
+      // The error object, not its text: ConnectionNotice words it (BOOKS-15).
+      setLoadError(error);
     } finally {
       setLoading(false);
     }
@@ -142,7 +152,7 @@ export default function TapahtumatClient() {
       }>(res, "Tiliotteen käsittely epäonnistui");
       setUploadMsg(`${data.count} tapahtumaa löydetty`);
       if (data.statement?.id) {
-        router.push(detailHref("statement", data.statement.id, Object.fromEntries(searchParams.entries())));
+        router.push(detailHref("statement", data.statement.id, listParams()));
       } else {
         await loadStatements();
       }
@@ -162,14 +172,7 @@ export default function TapahtumatClient() {
       fileInputRef.current?.click();
       return;
     }
-    const picked = await chooseDocuments([
-      "application/pdf",
-      "text/xml",
-      "application/xml",
-      "text/csv",
-      "application/vnd.ms-excel",
-      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    ]);
+    const picked = await chooseDocuments(STATEMENT_FILE_TYPES);
     if (picked.kind === "unavailable") {
       fileInputRef.current?.click();
       return;
@@ -181,6 +184,23 @@ export default function TapahtumatClient() {
     const file = picked.kind === "files" ? picked.files[0] : null;
     if (file) void handleUpload(file);
   }
+
+  // "Tuo tiliote" in the Lisää sheet already picked the file (SHELL-30):
+  // drain it once and go straight to processing, never ask again.
+  const importParam = searchParams.get(PENDING_CAPTURE_PARAMS.statement.name) === PENDING_CAPTURE_PARAMS.statement.value;
+  const drainedRef = useRef(false);
+  const importSectionRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!importParam || drainedRef.current) return;
+    drainedRef.current = true;
+    const files = takePendingCapture("statement");
+    if (!files || files.length === 0) return;
+    importSectionRef.current?.scrollIntoView({ block: "nearest" });
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- one-shot hand-off from the Lisää sheet: the upload it starts is the external work this effect exists for
+    void handleUpload(files[0]);
+    // handleUpload reads only state that is final at mount; one shot by design.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [importParam]);
 
   const months = [
     ...new Set(
@@ -207,7 +227,10 @@ export default function TapahtumatClient() {
 
   return (
     <div className="space-y-6">
-      <PageTitle title="Tapahtumat" subtitle="Tapahtumat tulevat yhdistetystä pankista." />
+      <PageTitle title="Tapahtumat" subtitle="Tiliotteet ja pankin tapahtumat." />
+
+      {/* No bank connected yet: the shared connect card leads (BOOKS-04). */}
+      <BankConnectCard variant="compact" />
 
       <div className="space-y-3">
         <div>
@@ -216,6 +239,9 @@ export default function TapahtumatClient() {
           </label>
           <input
             id="statement-search"
+            type="search"
+            enterKeyHint="search"
+            autoComplete="off"
             value={query}
             onChange={(event) => {
               replaceQuery({ q: event.target.value });
@@ -273,6 +299,7 @@ export default function TapahtumatClient() {
         </div>
       </div>
 
+      <div ref={importSectionRef} className="scroll-mt-4">
       <Section title="Tuo tiliote tiedostona">
         <div className="space-y-4 px-4 py-4">
           <p className="text-[13px] text-ink-2">PDF, XML, XLSX tai CSV</p>
@@ -340,12 +367,14 @@ export default function TapahtumatClient() {
           )}
         </div>
       </Section>
+      </div>
 
-      {loadError ? (
+      {loadError != null ? (
         <ErrorState
-          message={loadError}
+          error={loadError}
+          message="Tiliotteiden lataus epäonnistui"
           onRetry={() => {
-            setLoadError("");
+            setLoadError(null);
             setLoading(true);
             void loadStatements();
           }}
@@ -357,7 +386,7 @@ export default function TapahtumatClient() {
         <EmptyState
           kind={hasFilters ? "filtered" : "records"}
           title={hasFilters ? "Ei tiliotteita näillä suodattimilla" : "Ei tiliotteita vielä"}
-          body={hasFilters ? "Kokeile väljempää hakua." : "Tuo tiedosto tai hae tapahtumat pankista yllä."}
+          body={hasFilters ? "Kokeile väljempää hakua." : "Tuo ensimmäinen tiliote tiedostona yllä."}
         />
       ) : (
         <div className="space-y-3">
@@ -388,7 +417,7 @@ export default function TapahtumatClient() {
               return (
                 <ListRow
                   key={s.id}
-                  href={detailHref("statement", s.id, Object.fromEntries(searchParams.entries()))}
+                  href={detailHref("statement", s.id, listParams())}
                   title={s.fileName}
                   secondary={secondary}
                   amount={formatEurSigned(s.totals.net)}

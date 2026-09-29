@@ -1,13 +1,14 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { ArrowLeftRight, Inbox, Landmark, Link2, ListChecks, Lock, Percent, ReceiptEuro } from "lucide-react";
+import { ArrowLeftRight, Inbox, Link2, ListChecks, Lock, Percent, ReceiptEuro, Wallet } from "lucide-react";
 import { Icon, PageTitle, Section, ListRow } from "@/components/ds";
 import { apiFetch, readJson } from "@/components/clientFetch";
 import { formatDayMonth, formatEur } from "@/lib/format";
 import { MONTHS } from "@/lib/finnish-months";
 import { nextDueVatPeriod, vatDeadline, type VatPeriod } from "@/lib/vat-deadline";
 import { useProfile } from "@/app/asetukset/useProfile";
+import { BankConnectRow } from "@/components/BankConnectCard";
 
 /**
  * Phase 1 hub, restyled: one place for everything bookkeeping. Phase 3
@@ -48,16 +49,16 @@ function periodQueryKey(period: VatPeriod): string | null {
 function alvRowSecondary(info: AlvInfo): string {
   const due = formatDayMonth(vatDeadline(info.period).toISOString());
   const label = periodLabel(info.period);
-  if (info.amount === null) return `${label}, eräpäivä ${due}`;
-  return `${label}, ${info.isRefund ? "palautettavaa" : "maksettavaa"} ${due}`;
+  // The amount sits in the row's amount slot; the date is always named as the due date (BOOKS-05).
+  if (info.amount !== null && info.isRefund) return `${label}, palautus, eräpäivä ${due}`;
+  return `${label}, eräpäivä ${due}`;
 }
 
 export default function KirjanpitoPage() {
   const { profile } = useProfile();
   const [alv, setAlv] = useState<AlvInfo | null>(null);
   const [openPurchases, setOpenPurchases] = useState<number | null>(null);
-  const [bankName, setBankName] = useState<string | null>(null);
-  const [hasBankAccounts, setHasBankAccounts] = useState<boolean | null>(null);
+  const [accountCount, setAccountCount] = useState<number | null>(null);
   const [lockedThrough, setLockedThrough] = useState<string | null | undefined>(undefined);
 
   useEffect(() => {
@@ -106,12 +107,9 @@ export default function KirjanpitoPage() {
 
     apiFetch("/api/bank-accounts", { credentials: "include", signal: controller.signal })
       .then((response) =>
-        readJson<{ accounts: Array<{ name: string; bankName: string | null }> }>(response, "")
+        readJson<{ accounts: Array<{ id: string }> }>(response, "")
       )
-      .then((data) => {
-        setHasBankAccounts(data.accounts.length > 0);
-        setBankName(data.accounts[0]?.bankName ?? data.accounts[0]?.name ?? null);
-      })
+      .then((data) => setAccountCount(data.accounts.length))
       .catch(() => {});
 
     apiFetch("/api/period-lock", { credentials: "include", signal: controller.signal })
@@ -129,8 +127,14 @@ export default function KirjanpitoPage() {
         ? "1 avoin"
         : `${openPurchases} avointa`;
 
+  // A count, never "Ei tilejä": an archived account still exists, and the
+  // connect row above already carries the call to action (BOOKS-05).
   const bankValue =
-    hasBankAccounts === null ? undefined : hasBankAccounts ? bankName ?? undefined : "Ei tilejä";
+    accountCount === null || accountCount === 0
+      ? undefined
+      : accountCount === 1
+        ? "1 tili"
+        : `${accountCount} tiliä`;
 
   const lockValue =
     lockedThrough === undefined
@@ -177,6 +181,20 @@ export default function KirjanpitoPage() {
         />
       </Section>
 
+      {/* Connect first (OWN-06): "Yhdistä pankki" one tap from the tab. */}
+      <Section title="Pankki">
+        <BankConnectRow />
+        <ListRow
+          href="/kirjanpito/pankkitilit"
+          leading={<Icon icon={Wallet} />}
+          chevron
+          title="Pankkitilit"
+          secondary="Tilit ja kuukausien saldot"
+          amount={bankValue}
+          amountTone="muted"
+        />
+      </Section>
+
       <Section title="Ilmoitukset ja kaudet">
         <ListRow
           href={alvHref}
@@ -192,14 +210,6 @@ export default function KirjanpitoPage() {
           chevron
           title="Ostolaskut"
           amount={purchasesValue}
-          amountTone="muted"
-        />
-        <ListRow
-          href="/kirjanpito/pankkitilit"
-          leading={<Icon icon={Landmark} />}
-          chevron
-          title="Pankkitilit"
-          amount={bankValue}
           amountTone="muted"
         />
         <ListRow

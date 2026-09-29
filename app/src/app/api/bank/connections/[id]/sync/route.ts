@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { psuContextFromHeaders } from "@/lib/enablebanking/client";
 import { respondToBankError } from "@/lib/enablebanking/respond";
 import { enableBankingStatus, loadEnableBankingConfig } from "@/lib/enablebanking/signing";
+import { BANK_NOT_CONFIGURED_MESSAGE, logBankSetupGap } from "@/lib/enablebanking/public-status";
 import { syncBankConnection } from "@/lib/enablebanking/sync";
 import { noStoreJson, rejectCrossSite, rejectOversizedContentLength } from "@/lib/http-security";
 import { consumeRateLimit } from "@/lib/rate-limit";
@@ -23,10 +24,8 @@ export async function POST(
   }
   const status = enableBankingStatus();
   if (!status.ready) {
-    return noStoreJson(
-      { error: status.message || "Pankkiyhteys ei ole käytössä." },
-      { status: 503 }
-    );
+    logBankSetupGap(status);
+    return noStoreJson({ error: BANK_NOT_CONFIGURED_MESSAGE }, { status: 503 });
   }
 
   const { id } = await params;

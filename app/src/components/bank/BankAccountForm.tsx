@@ -125,6 +125,7 @@ export function BankAccountForm({ initial, submitLabel, busy, onSubmit, onCancel
         </label>
         <input
           id="ba-name"
+          enterKeyHint="next"
           className={field}
           value={values.name}
           onChange={(e) => set("name", e.target.value)}
@@ -141,6 +142,7 @@ export function BankAccountForm({ initial, submitLabel, busy, onSubmit, onCancel
         <label className={label} htmlFor="ba-iban">IBAN</label>
         <input
           id="ba-iban"
+          enterKeyHint="next"
           className={field}
           value={values.iban}
           onChange={(e) => set("iban", e.target.value)}
@@ -164,6 +166,7 @@ export function BankAccountForm({ initial, submitLabel, busy, onSubmit, onCancel
           <label className={label} htmlFor="ba-bank">Pankki</label>
           <input
             id="ba-bank"
+            enterKeyHint="next"
             className={field}
             value={values.bankName}
             onChange={(e) => set("bankName", e.target.value)}
@@ -177,6 +180,7 @@ export function BankAccountForm({ initial, submitLabel, busy, onSubmit, onCancel
           </label>
           <input
             id="ba-currency"
+            enterKeyHint="next"
             className={field}
             value={values.currency}
             onChange={(e) => set("currency", e.target.value.toUpperCase())}
@@ -200,6 +204,7 @@ export function BankAccountForm({ initial, submitLabel, busy, onSubmit, onCancel
           </label>
           <input
             id="ba-opening"
+            enterKeyHint="next"
             className={field}
             value={values.openingBalance}
             onChange={(e) => set("openingBalance", e.target.value)}
