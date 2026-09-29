@@ -1,17 +1,16 @@
 "use client";
 
 import { PullToRefresh } from "@/components/ds/PullToRefresh";
-import { useMemo } from "react";
 import { ArrowLeftRight, Inbox, Link2, ListChecks, Lock, Percent, ReceiptEuro, Wallet } from "lucide-react";
 import { Icon, PageTitle, Section, ListRow, SlotSkeleton } from "@/components/ds";
 import { apiFetch, readJson } from "@/components/clientFetch";
-import { formatDayMonth, formatEur } from "@/lib/format";
 import { MONTHS } from "@/lib/finnish-months";
-import { nextDueVatPeriod, vatDeadline, type VatPeriod } from "@/lib/vat-deadline";
+import { VAT_ROW_TITLE, vatDueAmount, vatDueSecondary } from "@/lib/vat-due";
+import { useVatDue } from "@/components/useVatDue";
 import { useProfile } from "@/app/asetukset/useProfile";
-import { BankConnectRow } from "@/components/BankConnectCard";
+import { BankConnectSection } from "@/components/BankConnectCard";
 import { useCachedResource } from "@/components/useCachedResource";
-import { BANK_ACCOUNT_COUNT_KEY, PERIOD_LOCK_KEY, PURCHASE_COUNTS_KEY, alvSummaryKey } from "@/lib/cached-resource";
+import { BANK_ACCOUNT_COUNT_KEY, PERIOD_LOCK_KEY, PURCHASE_COUNTS_KEY } from "@/lib/cached-resource";
 
 /**
  * Phase 1 hub, restyled: one place for everything bookkeeping. Phase 3
@@ -23,67 +22,17 @@ import { BANK_ACCOUNT_COUNT_KEY, PERIOD_LOCK_KEY, PURCHASE_COUNTS_KEY, alvSummar
  * leaves that one row without a value instead of blocking the others.
  */
 
-interface AlvInfo {
-  period: VatPeriod;
-  /** null for a yearly filer: /api/alv has no "whole year" period to query
-   * cheaply (its period schema only accepts "YYYY-MM" or "YYYY-Qn"), and
-   * showing a single month's figure mislabelled as the year's total would be
-   * actively misleading in a bookkeeping app - so the row shows the due date
-   * only, with neither an amount nor a maksettavaa/palautettavaa word. */
-  amount: number | null;
-  isRefund: boolean;
-}
-
-/** "Syyskuu 2026" / "Q3/2026" / "2026", matching the label the ALV page itself uses for each kind. */
-function periodLabel(period: VatPeriod): string {
-  if (period.kind === "month") return `${MONTHS[period.month! - 1]} ${period.year}`;
-  if (period.kind === "quarter") return `Q${period.quarter}/${period.year}`;
-  return String(period.year);
-}
-
-/** The `?period=` value the ALV page's own query parser understands
- * (`YYYY-MM` or `YYYY-Qn`); a yearly period has no such format there. */
-function periodQueryKey(period: VatPeriod): string | null {
-  if (period.kind === "month") return `${period.year}-${String(period.month).padStart(2, "0")}`;
-  if (period.kind === "quarter") return `${period.year}-Q${period.quarter}`;
-  return null;
-}
-
-function alvRowSecondary(info: AlvInfo): string {
-  const due = formatDayMonth(vatDeadline(info.period).toISOString());
-  const label = periodLabel(info.period);
-  // The amount sits in the row's amount slot; the date is always named as the due date (BOOKS-05).
-  if (info.amount !== null && info.isRefund) return `${label}, palautus, eräpäivä ${due}`;
-  return `${label}, eräpäivä ${due}`;
-}
-
 export default function KirjanpitoPage() {
   const { profile, loadError } = useProfile();
 
-  // The next return actually due, not the currently-open period: see
-  // nextDueVatPeriod's own doc comment for why (spec §3.1). Any unrecognised
-  // value (profile.vatPeriod is a free-form string) falls back to monthly,
-  // same as the rest of the app already does. Worked out from the profile
-  // alone, so the row's label and due date never wait for the network.
-  const alvPeriod = useMemo<VatPeriod | null>(() => {
-    if (!profile?.vatRegistered) return null;
-    const kind = profile.vatPeriod === "quarter" || profile.vatPeriod === "year" ? profile.vatPeriod : "month";
-    return nextDueVatPeriod(new Date(), kind);
-  }, [profile?.vatRegistered, profile?.vatPeriod]);
-  // Yearly: no /api/alv period format for a whole year (see AlvInfo), so nothing to fetch.
-  const alvQuery = alvPeriod ? periodQueryKey(alvPeriod) : null;
+  // FP-4 / TF-01: the next return actually due (nextDueVatPeriod), with the
+  // same figures, words and state as Koti, from the same cache entry. A yearly
+  // filer has no /api/alv period, so that row shows the due date only.
+  const vat = useVatDue(profile);
 
   // Every value below paints from the page cache on the first frame and
   // refreshes quietly (N3); a slot with nothing cached yet shows a skeleton,
   // never a zero. A failed refresh keeps the cached value.
-  const alvFetch = useCachedResource<{ amount: number; isRefund: boolean }>(
-    alvQuery ? alvSummaryKey(alvQuery) : null,
-    async (signal) => {
-      const response = await apiFetch(`/api/alv?period=${alvQuery}`, { signal });
-      const data = await readJson<{ field308: { amount: number; isRefund: boolean } }>(response, "");
-      return { amount: data.field308.amount, isRefund: data.field308.isRefund };
-    }
-  );
   // The DB-side counts, not the (capped) invoice list: "open" here means
   // "not yet paid or cancelled", which is `open` (not yet due) plus
   // `overdue` (same raw status, just past its due date) together.
@@ -128,25 +77,19 @@ export default function KirjanpitoPage() {
     lockedThrough === undefined
       ? undefined
       : lockedThrough === null
-        ? "Ei lukittu"
+        ? "Ei suljettu"
         : `${MONTHS[Number(lockedThrough.slice(5, 7)) - 1]} asti`;
 
   // ALV row. The profile decides whether the row has a figure at all, so until
   // it is known both the amount and the line under the title are skeletons.
-  const alvWaiting = (profile === null && !loadError) || (alvQuery !== null && pending(alvFetch));
-  const alv: AlvInfo | null =
-    alvPeriod && !alvWaiting
-      ? { period: alvPeriod, amount: alvFetch.value?.amount ?? null, isRefund: alvFetch.value?.isRefund ?? false }
-      : null;
-
-  const alvKey = alvQuery;
-  const alvHref = alvKey ? `/kirjanpito/alv?period=${alvKey}` : "/kirjanpito/alv";
+  const alvWaiting = (profile === null && !loadError) || vat.waiting;
+  const alvHref = vat.due?.queryKey ? `/kirjanpito/alv?period=${vat.due.queryKey}` : "/kirjanpito/alv";
 
   return (
     <div className="space-y-6">
       {/* C1.6 (IA-24): pull to refresh runs the same reload as Yritä uudelleen. */}
       <PullToRefresh onRefresh={() => {
-          alvFetch.reload();
+          vat.reload();
           purchases.reload();
           accounts.reload();
           lock.reload();
@@ -185,8 +128,7 @@ export default function KirjanpitoPage() {
       </Section>
 
       {/* Connect first (OWN-06): "Yhdistä pankki" one tap from the tab. */}
-      <Section title="Pankki">
-        <BankConnectRow />
+      <BankConnectSection>
         <ListRow
           href="/kirjanpito/pankkitilit"
           leading={<Icon icon={Wallet} />}
@@ -196,16 +138,16 @@ export default function KirjanpitoPage() {
           amount={pending(accounts) ? <SlotSkeleton width={44} /> : bankValue}
           amountTone="muted"
         />
-      </Section>
+      </BankConnectSection>
 
       <Section title="Ilmoitukset ja kaudet">
         <ListRow
           href={alvHref}
           leading={<Icon icon={Percent} />}
           chevron
-          title="ALV-ilmoitus"
-          amount={alvWaiting ? <SlotSkeleton width={56} /> : alv?.amount != null ? formatEur(alv.amount) : undefined}
-          secondary={alvWaiting ? <SlotSkeleton width={176} height={11} tone="soft" /> : alv ? alvRowSecondary(alv) : undefined}
+          title={VAT_ROW_TITLE}
+          amount={alvWaiting ? <SlotSkeleton width={56} /> : (vatDueAmount(vat.figures) ?? undefined)}
+          secondary={alvWaiting ? <SlotSkeleton width={176} height={11} tone="soft" /> : vat.due ? vatDueSecondary(vat.due, vat.figures) : undefined}
         />
         <ListRow
           href="/kirjanpito/ostolaskut"
@@ -215,11 +157,12 @@ export default function KirjanpitoPage() {
           amount={pending(purchases) ? <SlotSkeleton width={64} /> : purchasesValue}
           amountTone="muted"
         />
+        {/* TF-07 / FP-13: the month has a finish line; locking and reopening live behind it. */}
         <ListRow
-          href="/kirjanpito/kaudet"
+          href="/kirjanpito/kuukausi"
           leading={<Icon icon={Lock} />}
           chevron
-          title="Suljetut kaudet"
+          title="Kuukauden sulkeminen"
           amount={pending(lock) ? <SlotSkeleton width={72} /> : lockValue}
           amountTone="muted"
         />

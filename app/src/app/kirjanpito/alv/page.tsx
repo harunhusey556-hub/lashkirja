@@ -13,7 +13,11 @@ import {
 
 import { formatEur } from "@/lib/format";
 import { receiptDrillHref } from "@/lib/report-drill";
-import { helsinkiMonthKey, helsinkiQuarterKey } from "@/lib/validation";
+import { alvPeriodBoundsUtc, helsinkiCalendarDate, helsinkiMonthKey, helsinkiQuarterKey } from "@/lib/validation";
+import { VatFilingCard } from "@/components/VatFilingCard";
+import { nextVatDue, vatDueFor, vatPeriodKindOf, type VatPeriod } from "@/lib/vat-deadline";
+import { vatPendingNote, type VatFilingRecord } from "@/lib/vat-due";
+import { useProfile } from "@/app/asetukset/useProfile";
 import { pageCacheFetchedAt, readPageCache, writePageCache } from "@/lib/page-cache";
 import { useCacheAfterBoot } from "@/components/invoices/useCacheAfterBoot";
 import { usePersistedState, useScrollRestoration } from "@/lib/list-ui-state";
@@ -41,6 +45,17 @@ interface ALVData {
   excludedReceiptCount?: number;
   creditedInvoiceCount?: number;
   creditNoteCount?: number;
+  /** FP-13: the owner's filed / paid record for the period. */
+  filing?: VatFilingRecord | null;
+  /** TF-11: pending receipts dated in the period, not in the figures yet. */
+  pendingReceiptCount?: number;
+}
+
+/** "2026-08" / "2026-Q3" as the shared VatPeriod. */
+function periodOfKey(key: string): VatPeriod {
+  const year = Number(key.slice(0, 4));
+  const quarter = /-Q([1-4])$/.exec(key);
+  return quarter ? { kind: "quarter", year, quarter: Number(quarter[1]) } : { kind: "month", year, month: Number(key.slice(5, 7)) };
 }
 
 // Extends a small inline text link's touch target to >=44px tall without
@@ -68,14 +83,18 @@ function DrillRow({ label, value, href, ariaLabel }: { label: string; value: num
 
 export default function ALVRaporttiPage() {
   const now = new Date();
-  const defaultPeriod = helsinkiMonthKey(now);
+  const { profile } = useProfile();
+  const dueKind = vatPeriodKindOf(profile?.vatPeriod);
+  const nextDue = nextVatDue(now, dueKind === "year" ? "month" : dueKind);
+  const defaultPeriod = nextDue.period.kind === "month" ? nextDue.key : helsinkiMonthKey(now);
 
   const [periodType, setPeriodType] = usePersistedState<"month" | "quarter">("alv.periodType", "month");
   const [selectedMonth, setSelectedMonth] = usePersistedState("alv.month", defaultPeriod);
   const [selectedQuarter, setSelectedQuarter] = usePersistedState(
     "alv.quarter",
-    helsinkiQuarterKey(now)
+    nextDue.period.kind === "quarter" ? nextDue.key : helsinkiQuarterKey(now)
   );
+  const [filingOverride, setFilingOverride] = useState<{ period: string; filing: VatFilingRecord | null } | null>(null);
   const [result, setResult] = useState<{
     period: string;
     data: ALVData;
@@ -135,6 +154,15 @@ export default function ALVRaporttiPage() {
       ? result.data
       : readPageCache<ALVData>(`alv:${period}`) ?? lateData;
   const loading = !data && !loadError;
+  // FP-12: the drill opens the documents the figure is made of.
+  const invoiceSales = (data?.sources?.invoiceCount ?? 0) > 0;
+  const salesFromBoth = invoiceSales && (data?.sources?.receiptSalesVat ?? 0) !== 0;
+  const salesHref = invoiceSales
+    ? periodType === "month"
+      ? `/laskut?month=${period}`
+      : "/laskut"
+    : receiptDrillHref({ month: periodType === "month" ? period : null, type: "tulo" });
+  const salesDrillLabel = invoiceSales ? "Avaa myyntilaskut kentälle 301" : "Avaa kuitit kentälle 301";
   useScrollRestoration("alv", Boolean(data));
 
   function buildMonthOptions() {
@@ -300,19 +328,47 @@ export default function ALVRaporttiPage() {
             value={formatEur(data.field308.amount)}
           />
 
+          {vatPendingNote({ amount: data.field308.amount, isRefund: data.field308.isRefund, filing: null, pendingReceiptCount: data.pendingReceiptCount ?? 0 }) ? (
+            <p className="-mt-3 px-1 text-caption text-warning" role="note">
+              {vatPendingNote({ amount: data.field308.amount, isRefund: data.field308.isRefund, filing: null, pendingReceiptCount: data.pendingReceiptCount ?? 0 })}
+            </p>
+          ) : null}
+
+          {data.vatRegistered ? (
+            <VatFilingCard
+              periodKey={period}
+              periodLabel={vatDueFor(periodOfKey(period)).label}
+              dueIso={vatDueFor(periodOfKey(period)).dueIso}
+              amount={data.field308.amount}
+              isRefund={data.field308.isRefund}
+              filing={filingOverride?.period === period ? filingOverride.filing : (data.filing ?? null)}
+              periodEnded={alvPeriodBoundsUtc(period).end.toISOString().slice(0, 10) <= helsinkiCalendarDate(now)}
+              pendingReceiptCount={data.pendingReceiptCount ?? 0}
+              onChanged={(filing) => setFilingOverride({ period, filing })}
+            />
+          ) : null}
+
           <Section title="301 · Vero kotimaan myynnistä 25,5 %">
             <DrillRow
               label="Myynti (veroton)"
               value={data.field301.netSales}
-              href={receiptDrillHref({ month: periodType === "month" ? period : null, type: "tulo" })}
-              ariaLabel="Avaa kuitit kentälle 301"
+              href={salesHref}
+              ariaLabel={salesDrillLabel}
             />
             <DrillRow
               label="Vero"
               value={data.field301.vat}
-              href={receiptDrillHref({ month: periodType === "month" ? period : null, type: "tulo" })}
-              ariaLabel="Avaa kuitit kentälle 301"
+              href={salesHref}
+              ariaLabel={salesDrillLabel}
             />
+            {salesFromBoth ? (
+              <DrillRow
+                label="Myyntikuiteista"
+                value={data.sources?.receiptSalesVat ?? 0}
+                href={receiptDrillHref({ month: periodType === "month" ? period : null, type: "tulo" })}
+                ariaLabel="Avaa myyntikuitit kentälle 301"
+              />
+            ) : null}
           </Section>
 
           <Section title="302 · Vero kotimaan myynnistä 13,5 %">

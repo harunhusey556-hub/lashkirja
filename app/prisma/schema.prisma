@@ -69,6 +69,7 @@ model User {
   authSessions    AuthSession[]
   accountTokens   AccountToken[]
   accountRequests AccountRequest[]
+  vatFilings      VatFiling[]
 }
 
 /// A browser or device that logged in. The iron-session cookie stores this id.
@@ -821,4 +822,23 @@ model CatalogItem {
   createdAt       DateTime  @default(now())
 
   @@index([userId, archivedAt])
+}
+
+/// The owner's own record that a VAT return was filed in OmaVero and paid
+/// (FP-13). LashKirja does not file anything itself; this is the finish line
+/// the month close and Koti read. `period` is "YYYY-MM", "YYYY-Qn" or "YYYY".
+model VatFiling {
+  id               String    @id @default(uuid())
+  userId           String
+  user             User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  period           String
+  filedAt          DateTime?
+  /// Field 308 at the moment of filing, signed (negative = refund). A later
+  /// difference means the books changed after the return was filed.
+  filedAmountCents Int?
+  paidAt           DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  @@unique([userId, period])
 }

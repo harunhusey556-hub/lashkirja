@@ -185,3 +185,80 @@ export function nextDueVatPeriod(today: Date, vatPeriod: VatPeriodKind): VatPeri
   }
   return { kind: "month", year, month };
 }
+
+/**
+ * FP-4, one deadline rule: every screen that names a VAT deadline goes
+ * through `vatDueFor` / `nextVatDue` below. `vatDeadline` itself is called
+ * nowhere else in the app (vat-due-rule.test.ts enforces it), so Koti,
+ * Kirjanpito, the ALV page and the month close cannot disagree again (TF-01).
+ */
+export interface VatDue {
+  period: VatPeriod;
+  /** "2026-08", "2026-Q3" or "2026": the /api/alv `period` and the filing key. */
+  key: string;
+  /** The ALV page understands month and quarter keys only; a year has none. */
+  queryKey: string | null;
+  /** "Elokuu 2026", "Q3/2026", "2026". */
+  label: string;
+  /** Statutory due date, already moved off a weekend or holiday (YYYY-MM-DD). */
+  dueIso: string;
+}
+
+const MONTH_NAMES = [
+  "Tammikuu",
+  "Helmikuu",
+  "Maaliskuu",
+  "Huhtikuu",
+  "Toukokuu",
+  "Kesäkuu",
+  "Heinäkuu",
+  "Elokuu",
+  "Syyskuu",
+  "Lokakuu",
+  "Marraskuu",
+  "Joulukuu",
+];
+
+export function vatPeriodKey(period: VatPeriod): string {
+  if (period.kind === "month") return `${period.year}-${String(period.month).padStart(2, "0")}`;
+  if (period.kind === "quarter") return `${period.year}-Q${period.quarter}`;
+  return String(period.year);
+}
+
+export function vatDueFor(period: VatPeriod): VatDue {
+  const key = vatPeriodKey(period);
+  return {
+    period,
+    key,
+    queryKey: period.kind === "year" ? null : key,
+    label:
+      period.kind === "month"
+        ? `${MONTH_NAMES[period.month! - 1]} ${period.year}`
+        : period.kind === "quarter"
+          ? `Q${period.quarter}/${period.year}`
+          : String(period.year),
+    dueIso: vatDeadlineIso(period),
+  };
+}
+
+/** Any stored profile value; unknown strings are monthly, like the rest of the app. */
+export function vatPeriodKindOf(value: string | null | undefined): VatPeriodKind {
+  return value === "quarter" || value === "year" ? value : "month";
+}
+
+/** The next return actually due as of `today` (see nextDueVatPeriod). */
+export function nextVatDue(today: Date, kind: VatPeriodKind): VatDue {
+  return vatDueFor(nextDueVatPeriod(today, kind));
+}
+
+/**
+ * The VAT period a calendar month ("YYYY-MM") closes, or null when the month
+ * is not the last month of its period (a quarterly filer's July or August).
+ */
+export function vatPeriodEndingIn(month: string, kind: VatPeriodKind): VatPeriod | null {
+  const year = Number(month.slice(0, 4));
+  const monthNum = Number(month.slice(5, 7));
+  if (kind === "month") return { kind, year, month: monthNum };
+  if (kind === "quarter") return monthNum % 3 === 0 ? { kind, year, quarter: monthNum / 3 } : null;
+  return monthNum === 12 ? { kind, year } : null;
+}

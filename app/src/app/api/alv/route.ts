@@ -7,6 +7,7 @@ import { OMAVERO_FIELDS } from "@/lib/vero/omavero-fields";
 import { noStoreJson } from "@/lib/http-security";
 import { UnauthorizedError, withErrorHandler } from "@/lib/api-errors";
 import { alvPeriodBoundsUtc, alvPeriodSchema, helsinkiMonthKey } from "@/lib/validation";
+import { countPendingReceipts, getVatFiling } from "@/lib/vat-filing";
 
 export const GET = withErrorHandler(async (req: NextRequest) => {
   const session = await requireSession(req);
@@ -22,9 +23,11 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
   // window in server-local time would move rows across period boundaries.
   const { start, end } = alvPeriodBoundsUtc(period);
 
-  const [user, sources] = await Promise.all([
+  const [user, sources, filing, pendingReceiptCount] = await Promise.all([
     prisma.user.findUnique({ where: { id: userId }, select: { vatRegistered: true } }),
     loadAlvPeriodSources(userId, start, end),
+    getVatFiling(userId, period),
+    countPendingReceipts(userId, start, end),
   ]);
 
   const report = computeAlvReport(sources.receipts, sources.invoices);
@@ -45,6 +48,9 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
     suspectedDuplicateCount: sources.suspectedDuplicateCount,
     creditedInvoiceCount: sources.creditedInvoiceCount,
     creditNoteCount: sources.creditNoteCount,
+    // FP-13 / TF-11: the filed and paid state, and what is not in the figure yet.
+    filing,
+    pendingReceiptCount,
     basis: "laskutusperuste",
   });
 });
