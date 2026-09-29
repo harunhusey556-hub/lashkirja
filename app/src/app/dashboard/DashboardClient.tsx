@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ErrorState } from "@/components/AsyncState";
 import { ConnectionNotice, StaleBanner } from "@/components/ScreenState";
 import {
@@ -18,6 +18,7 @@ import {
   ChevronLeft,
   ChevronRight,
   CircleCheck,
+  Copy,
   FileText,
   Landmark,
   Tag,
@@ -38,7 +39,11 @@ import {
   useSkeletonFade,
 } from "@/components/ds";
 
-import { formatEur } from "@/lib/format";
+import { formatDayMonth, formatEur } from "@/lib/format";
+import { detailHref } from "@/lib/routes";
+import { showToast } from "@/lib/toast";
+import { newIdempotencyKey } from "@/lib/idempotency-key";
+import { ReminderSheet } from "@/components/invoices/ReminderSheet";
 import { alvDrillHref, receiptDrillHref, statementDrillHref } from "@/lib/report-drill";
 import { helsinkiMonthKey } from "@/lib/validation";
 import { MONTHS } from "@/lib/finnish-months";
@@ -80,10 +85,77 @@ interface DashboardData {
   payables?: Position;
   isSingleVatProfile?: boolean;
   singleVatRate?: number;
+  items?: DashboardItem[];
+  itemTotals?: Record<ItemKind, number> | null;
   sectionErrors?: Partial<
-    Record<"matching" | "vat" | "pending" | "threshold" | "position" | "receipts", string>
+    Record<"matching" | "vat" | "pending" | "threshold" | "position" | "receipts" | "items", string>
   >;
 }
+
+type ItemKind =
+  | "overdue_invoice"
+  | "pending_receipt"
+  | "missing_receipt"
+  | "invoice_match"
+  | "receipt_match"
+  | "payment_duplicate";
+
+/** One concrete thing to do, as /api/dashboard returns it (see api/dashboard/items.ts). */
+type DashboardItem =
+  | {
+      id: string;
+      kind: "overdue_invoice";
+      action: "remind";
+      invoiceId: string;
+      customerId: string;
+      number: number;
+      party: string;
+      amount: number;
+      dueDate: string;
+      daysLate: number;
+    }
+  | {
+      id: string;
+      kind: "pending_receipt";
+      action: "approve";
+      receiptId: string;
+      party: string;
+      amount: number | null;
+      type: string;
+      date: string | null;
+      category: string | null;
+      vatRate: number | null;
+    }
+  | {
+      id: string;
+      kind: "invoice_match";
+      action: "confirm_match";
+      invoiceId: string;
+      number: number;
+      transactionId: string;
+      party: string;
+      amount: number;
+      paidDate: string;
+    }
+  | {
+      id: string;
+      kind: "missing_receipt" | "receipt_match";
+      action: "add_photo" | "review_match";
+      transactionId: string;
+      party: string;
+      amount: number;
+      date: string | null;
+    }
+  | {
+      id: string;
+      kind: "payment_duplicate";
+      action: "open_invoice";
+      invoiceId: string;
+      number: number;
+      party: string;
+      amount: number;
+      paidDate: string;
+    };
 
 interface Task {
   key: string;
@@ -93,7 +165,24 @@ interface Task {
   amountTone?: "default" | "positive";
   secondary: string;
   pill: string;
+  /** Where the row itself leads (the item's own screen). */
   href: string;
+  /** The pill's one-step action in place; without it the pill follows `href`. */
+  onAction?: () => void;
+}
+
+/** Where each kind's full list lives ("Näytä kaikki"). */
+const KIND_LIST: Record<ItemKind, { href: string; label: string }> = {
+  overdue_invoice: { href: "/laskut?status=overdue", label: "Myöhässä olevat laskut" },
+  pending_receipt: { href: "/kuitit", label: "Hyväksyntää odottavat kuitit" },
+  missing_receipt: { href: "/pankki/taydennys", label: "Tapahtumat ilman kuittia" },
+  invoice_match: { href: "/laskut", label: "Laskujen maksut tiliotteella" },
+  receipt_match: { href: "/pankki/taydennys", label: "Tositeehdotukset" },
+  payment_duplicate: { href: "/tyot", label: "Mahdolliset kaksoiskirjaukset" },
+};
+
+function vatRateText(rate: number): string {
+  return `ALV ${String(rate).replace(".", ",")} %`;
 }
 
 function getGreeting(firstName: string): string {
@@ -216,60 +305,12 @@ function ProgressSegments({ done, total }: { done: number; total: number }) {
   );
 }
 
-function buildTasks(data: DashboardData): Task[] {
+/**
+ * Rows not tied to one month (overdue purchase invoices, a bank balance that
+ * does not reconcile): shown in the current month only.
+ */
+function buildAccountTasks(data: DashboardData): Task[] {
   const tasks: Task[] = [];
-  const receivables = data.receivables;
-  if (!data.sectionErrors?.position && receivables && receivables.overdueCount > 0) {
-    tasks.push({
-      key: "overdue",
-      icon: BellRing,
-      title:
-        receivables.overdueCount === 1
-          ? "Lasku myöhässä"
-          : `${receivables.overdueCount} laskua myöhässä`,
-      amount: formatEur(receivables.overdue),
-      secondary: "Eräpäivä on mennyt",
-      pill: "Muistuta",
-      href: "/laskut?status=overdue",
-    });
-  }
-  const pending = data.pendingReceiptsCount ?? 0;
-  if (!data.sectionErrors?.pending && pending > 0) {
-    tasks.push({
-      key: "pending",
-      icon: Tag,
-      title: pending === 1 ? "Kuitti odottaa hyväksyntää" : `${pending} kuittia odottaa hyväksyntää`,
-      secondary: data.isSingleVatProfile
-        ? `Kaikki myyntisi ovat ALV ${data.singleVatRate} %`
-        : "Tarkista luokka ja ALV",
-      pill: "Hyväksy",
-      href: "/kuitit",
-    });
-  }
-  if (!data.sectionErrors?.matching) {
-    const { matchable, matched, suggested } = data.matching;
-    const missing = matchable - matched - suggested;
-    if (suggested > 0) {
-      tasks.push({
-        key: "suggested",
-        icon: ArrowLeftRight,
-        title: suggested === 1 ? "Ehdotettu kohdistus" : `${suggested} ehdotettua kohdistusta`,
-        secondary: "Tarkista, että tosite kuuluu tapahtumalle",
-        pill: "Kohdista",
-        href: "/pankki/taydennys",
-      });
-    }
-    if (missing > 0) {
-      tasks.push({
-        key: "missing",
-        icon: Camera,
-        title: missing === 1 ? "Tapahtuma ilman kuittia" : `${missing} tapahtumaa ilman kuittia`,
-        secondary: "Lisää kuitti tai merkitse, ettei sitä tarvita",
-        pill: "Lisää kuva",
-        href: "/pankki/taydennys",
-      });
-    }
-  }
   const payables = data.payables;
   if (!data.sectionErrors?.position && payables && payables.overdueCount > 0) {
     tasks.push({
@@ -301,6 +342,12 @@ function buildTasks(data: DashboardData): Task[] {
   return tasks;
 }
 
+/** How many account-level things a task row stands for, for the headline. */
+function accountTaskCount(data: DashboardData): number {
+  const payables = !data.sectionErrors?.position ? (data.payables?.overdueCount ?? 0) : 0;
+  return payables + (data.bank?.needsAttention ?? 0);
+}
+
 export default function DashboardClient() {
   const { user } = useSession();
   const firstName = user?.firstName || "";
@@ -312,6 +359,194 @@ export default function DashboardClient() {
   const [month, setMonth] = useState(currentMonth());
   const [refreshFailed, setRefreshFailed] = useState<unknown>(null);
   const [loadAttempt, setLoadAttempt] = useState(0);
+  // Items acted on in place: hidden at once, back if the action is undone or fails.
+  const [hiddenItems, setHiddenItems] = useState<ReadonlySet<string>>(() => new Set());
+  const [busyItem, setBusyItem] = useState<string | null>(null);
+  const [remindTarget, setRemindTarget] = useState<{ invoiceId: string; customerId: string } | null>(null);
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
+
+  const hideItem = (id: string, hidden: boolean) =>
+    setHiddenItems((current) => {
+      const next = new Set(current);
+      if (hidden) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+  const reload = () => {
+    if (mounted.current) setLoadAttempt((a) => a + 1);
+  };
+
+  /**
+   * Hyväksy: the receipt leaves the list at once and the approval is sent
+   * when the "Kumoa" toast closes without an undo (the infra undo pattern).
+   * Closing the app meanwhile leaves the receipt pending, never half-done.
+   */
+  function approveReceipt(item: Extract<DashboardItem, { kind: "pending_receipt" }>) {
+    hideItem(item.id, true);
+    showToast({
+      tone: "success",
+      text: `${item.party} hyväksyttiin`,
+      action: { label: "Kumoa", onAction: () => hideItem(item.id, false) },
+      onDismiss: (reason) => {
+        if (reason === "action") return;
+        void apiFetch(`/api/receipts/${item.receiptId}/review`, {
+          method: "PATCH",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ reviewStatus: "approved" }),
+        })
+          .then((response) => readJson(response, "Kuitin hyväksyntä epäonnistui"))
+          .then(reload)
+          .catch((error: unknown) => {
+            if (isUnauthorized(error)) {
+              redirectToLogin();
+              return;
+            }
+            if (mounted.current) hideItem(item.id, false);
+            showToast({ tone: "error", text: errorMessage(error, "Kuitin hyväksyntä epäonnistui") });
+          });
+      },
+    });
+  }
+
+  /** Kohdista: books the bank row as the invoice's payment; "Kumoa" removes it again. */
+  async function confirmMatch(item: Extract<DashboardItem, { kind: "invoice_match" }>) {
+    setBusyItem(item.id);
+    try {
+      const response = await apiFetch(`/api/invoices/${item.invoiceId}/payments`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json", "Idempotency-Key": newIdempotencyKey() },
+        body: JSON.stringify({
+          amount: item.amount,
+          paidDate: item.paidDate,
+          transactionId: item.transactionId,
+        }),
+      });
+      const result = await readJson<{
+        invoice: { payments: Array<{ id: string; transactionId: string | null }> };
+      }>(response, "Maksun kohdistus epäonnistui");
+      const paymentId = result.invoice.payments.find(
+        (payment) => payment.transactionId === item.transactionId
+      )?.id;
+      hideItem(item.id, true);
+      showToast({
+        tone: "success",
+        text: `Maksu kirjattiin laskulle ${item.number}`,
+        action: paymentId
+          ? {
+              label: "Kumoa",
+              onAction: () => {
+                void apiFetch(
+                  `/api/invoices/${item.invoiceId}/payments?paymentId=${encodeURIComponent(paymentId)}`,
+                  { method: "DELETE", credentials: "include" }
+                )
+                  .then((undo) => readJson(undo, "Kohdistuksen peruminen epäonnistui"))
+                  .then(() => {
+                    if (mounted.current) hideItem(item.id, false);
+                    showToast({ text: "Kohdistus peruttiin" });
+                    reload();
+                  })
+                  .catch((error: unknown) =>
+                    showToast({
+                      tone: "error",
+                      text: errorMessage(error, "Kohdistuksen peruminen epäonnistui"),
+                    })
+                  );
+              },
+            }
+          : undefined,
+      });
+      reload();
+    } catch (error) {
+      if (isUnauthorized(error)) {
+        redirectToLogin();
+        return;
+      }
+      showToast({ tone: "error", text: errorMessage(error, "Maksun kohdistus epäonnistui") });
+    } finally {
+      if (mounted.current) setBusyItem(null);
+    }
+  }
+
+  function itemTask(item: DashboardItem): Task {
+    switch (item.kind) {
+      case "overdue_invoice":
+        return {
+          key: item.id,
+          icon: BellRing,
+          title: item.party,
+          amount: formatEur(item.amount),
+          secondary: `Lasku ${item.number} · myöhässä ${plural(item.daysLate, "päivä", "päivää")}`,
+          pill: "Muistuta",
+          href: detailHref("invoice", item.invoiceId),
+          onAction: () => setRemindTarget({ invoiceId: item.invoiceId, customerId: item.customerId }),
+        };
+      case "pending_receipt":
+        return {
+          key: item.id,
+          icon: Tag,
+          title: item.party,
+          amount: item.amount == null ? undefined : formatEur(item.amount),
+          secondary:
+            item.category && item.vatRate != null
+              ? `${item.category}, ${vatRateText(item.vatRate)}`
+              : item.category || (item.vatRate != null ? vatRateText(item.vatRate) : "Tarkista luokka ja ALV"),
+          pill: "Hyväksy",
+          href: detailHref("receipt", item.receiptId),
+          onAction: () => approveReceipt(item),
+        };
+      case "missing_receipt":
+        return {
+          key: item.id,
+          icon: Camera,
+          title: item.party,
+          amount: formatEur(Math.abs(item.amount)),
+          amountTone: item.amount > 0 ? "positive" : "default",
+          secondary: item.date ? `Kuitti puuttuu, ${formatDayMonth(item.date)}` : "Kuitti puuttuu",
+          pill: "Lisää kuva",
+          href: "/pankki/taydennys",
+        };
+      case "receipt_match":
+        return {
+          key: item.id,
+          icon: ArrowLeftRight,
+          title: item.party,
+          amount: formatEur(Math.abs(item.amount)),
+          secondary: "Tositeehdotus, tarkista",
+          pill: "Tarkista",
+          href: "/pankki/taydennys",
+        };
+      case "invoice_match":
+        return {
+          key: item.id,
+          icon: ArrowLeftRight,
+          title: item.party,
+          amount: `+${formatEur(item.amount)}`,
+          amountTone: "positive",
+          secondary: `Maksu laskulle ${item.number}?`,
+          pill: "Kohdista",
+          href: detailHref("invoice", item.invoiceId),
+          onAction: () => void confirmMatch(item),
+        };
+      case "payment_duplicate":
+        return {
+          key: item.id,
+          icon: Copy,
+          title: item.party,
+          amount: formatEur(item.amount),
+          secondary: `Sama tulo kahdesti? Lasku ${item.number}`,
+          pill: "Tarkista",
+          href: detailHref("invoice", item.invoiceId),
+        };
+    }
+  }
 
   // Poll while the page is visible. A hidden document does not keep asking.
   useEffect(() => {
@@ -401,7 +636,30 @@ export default function DashboardClient() {
     </button>
   );
 
-  const tasks = data ? buildTasks(data) : [];
+  const visibleItems = (data?.items ?? []).filter((item) => !hiddenItems.has(item.id));
+  const itemTasks = visibleItems.map(itemTask);
+  const accountTasks = data && atCurrent ? buildAccountTasks(data) : [];
+  // "Näytä kaikki" for each kind that has more than the rows shown.
+  const moreRows = data?.itemTotals
+    ? (Object.keys(KIND_LIST) as ItemKind[])
+        .map((kind) => {
+          const hidden = (data.items ?? []).filter(
+            (item) => item.kind === kind && hiddenItems.has(item.id)
+          ).length;
+          const total = (data.itemTotals?.[kind] ?? 0) - hidden;
+          const shown = visibleItems.filter((item) => item.kind === kind).length;
+          return { kind, total, shown };
+        })
+        .filter((row) => row.total > row.shown)
+    : [];
+  // The headline counts things to do, not kinds of things.
+  const hiddenCount = (data?.items ?? []).filter((item) => hiddenItems.has(item.id)).length;
+  const openCount = data
+    ? (data.itemTotals
+        ? Object.values(data.itemTotals).reduce((sum, count) => sum + count, 0) - hiddenCount
+        : visibleItems.length) + (atCurrent ? accountTaskCount(data) : 0)
+    : 0;
+  const hasTasks = itemTasks.length > 0 || accountTasks.length > 0 || moreRows.length > 0;
   const matching = data?.matching;
   const documentsBasis = data?.source !== "tiliote";
   const tulotHref = !data
@@ -452,11 +710,11 @@ export default function DashboardClient() {
           {/* Month status: what is still open, how much of the bank is in order, VAT. */}
           <div className="rounded-card border border-line bg-surface p-4">
             <p className="text-[17px] font-semibold text-ink">
-              {tasks.length === 0
+              {openCount <= 0
                 ? "Kaikki kunnossa"
                 : atCurrent
-                  ? `${plural(tasks.length, "asia", "asiaa")} ennen kuun loppua`
-                  : `${plural(tasks.length, "avoin asia", "avointa asiaa")}`}
+                  ? `${plural(openCount, "asia", "asiaa")} ennen kuun loppua`
+                  : `${plural(openCount, "avoin asia", "avointa asiaa")}`}
             </p>
             {matching && matching.matchable > 0 && !data.sectionErrors?.matching ? (
               <>
@@ -509,32 +767,58 @@ export default function DashboardClient() {
             />
           ) : null}
 
-          {tasks.length > 0 ? (
+          {data.sectionErrors?.items ? (
+            <ErrorState compact message={data.sectionErrors.items} onRetry={retry} />
+          ) : null}
+
+          {hasTasks ? (
             <Section title="Tarvitaan sinulta">
-              {tasks.map((task) => (
+              {[...itemTasks, ...accountTasks].map((task) => (
                 <ListRow
                   key={task.key}
                   href={task.href}
                   leading={<Icon icon={task.icon} />}
                   title={task.title}
                   amount={task.amount}
+                  amountTone={task.amountTone}
                   secondary={task.secondary}
                   ariaLabel={[task.title, task.amount, task.secondary].filter(Boolean).join(", ")}
                   trailing={
-                    <ActionPill href={task.href} ariaLabel={`${task.pill}: ${task.title}`}>
-                      {task.pill}
-                    </ActionPill>
+                    task.onAction ? (
+                      <ActionPill
+                        onClick={task.onAction}
+                        disabled={busyItem === task.key}
+                        ariaLabel={`${task.pill}: ${task.title}`}
+                      >
+                        {task.pill}
+                      </ActionPill>
+                    ) : (
+                      <ActionPill href={task.href} ariaLabel={`${task.pill}: ${task.title}`}>
+                        {task.pill}
+                      </ActionPill>
+                    )
                   }
+                />
+              ))}
+              {moreRows.map((row) => (
+                <ListRow
+                  key={`more:${row.kind}`}
+                  href={KIND_LIST[row.kind].href}
+                  chevron
+                  title={`Näytä kaikki (${row.total})`}
+                  secondary={KIND_LIST[row.kind].label}
                 />
               ))}
             </Section>
           ) : null}
 
           <section>
-            <div className="mb-2 flex items-baseline justify-between gap-3 px-1 text-[13px] text-ink-2">
-              <h2 className="font-normal">Kuukauden tulos</h2>
-              <span>{documentsBasis ? "Laskujen ja kuittien mukaan" : "Tiliotteen mukaan"}</span>
-            </div>
+            {/* One heading line: the basis belongs to the section, not to the Menot card below it. */}
+            <h2 className="mb-2 px-1 text-[13px] font-normal text-ink-2">
+              Kuukauden tulos
+              <span aria-hidden> · </span>
+              <span>{documentsBasis ? "laskujen ja kuittien mukaan" : "tiliotteen mukaan"}</span>
+            </h2>
             <div className="grid grid-cols-2 gap-3">
               <Link href={tulotHref} aria-label="Avaa tulot" className="active-press block">
                 <SummaryCard label="Tulot" value={formatEur(data.income)} />
@@ -651,6 +935,18 @@ export default function DashboardClient() {
           ) : null}
         </div>
       )}
+      {remindTarget ? (
+        <ReminderSheet
+          invoiceId={remindTarget.invoiceId}
+          customerId={remindTarget.customerId}
+          isOpen
+          onClose={() => setRemindTarget(null)}
+          onSent={() => {
+            setRemindTarget(null);
+            reload();
+          }}
+        />
+      ) : null}
     </div>
   );
 }

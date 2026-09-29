@@ -29,6 +29,7 @@ import {
 import { formatEur, formatMonthShort } from "@/lib/format";
 import { receiptDrillHref } from "@/lib/report-drill";
 import { pageCacheFetchedAt, readPageCache, writePageCache } from "@/lib/page-cache";
+import { useCacheAfterBoot } from "@/components/invoices/useCacheAfterBoot";
 import { usePersistedState, useScrollRestoration } from "@/lib/list-ui-state";
 
 // Extends a small inline text link's touch target to >=44px tall without
@@ -194,6 +195,15 @@ export default function ReportsPage() {
   );
   const [message, setMessage] = useState<string | null>(null);
   const [packageMonth, setPackageMonth] = useState(`${currentYear}-01`);
+  // Cold launch: the cache is hydrated after this page mounted (bootMobile),
+  // so paint it once it is there instead of holding the skeleton.
+  const lateReport = useCacheAfterBoot<Report>(`report:${year}`);
+  const [appliedLateReport, setAppliedLateReport] = useState<Report | null>(null);
+  if (lateReport && lateReport !== appliedLateReport && status === "loading") {
+    setAppliedLateReport(lateReport);
+    setReport(lateReport);
+    setStatus("ready");
+  }
   const fade = useSkeletonFade(status === "loading");
 
   const load = useCallback(async () => {

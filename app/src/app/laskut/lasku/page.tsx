@@ -42,19 +42,29 @@ import {
   useSkeletonFade,
 } from "@/components/ds";
 import { pageCacheFetchedAt, readPageCache, writePageCache } from "@/lib/page-cache";
+import { useCacheAfterBoot } from "@/components/invoices/useCacheAfterBoot";
 import { showToast } from "@/lib/toast";
 import { hapticNotify } from "@/lib/haptics";
+import { ReminderSheet, type ReminderPreview } from "@/components/invoices/ReminderSheet";
 
-interface ReminderPreview {
-  level: number;
-  daysLate: number;
-  open: number;
-  interest: number;
-  fee: number;
-  total: number;
-  dueDate: string;
-  recipient: string | null;
-  previousReminders: Array<{ level: number; sentAt: string; total: number }>;
+/** A hand-recorded payment that an income receipt from a bank row seems to count again. */
+interface PaymentDuplicate {
+  receiptId: string;
+  receiptVendor: string | null;
+  receiptDate: string | null;
+  amountCents: number;
+  transactionId: string;
+  paymentId: string;
+  paidDate: string;
+}
+
+/** An incoming bank row the payment being recorded most likely is. */
+interface BankRowCandidate {
+  transactionId: string;
+  date: string | null;
+  counterparty: string | null;
+  amount: number;
+  hasReceipt: boolean;
 }
 
 interface SendPreview {
@@ -232,6 +242,15 @@ function InvoiceDetail() {
   const cachedInvoice = id ? readPageCache<Invoice>(`invoice:${id}`) : null;
   const [invoice, setInvoice] = useState<Invoice | null>(cachedInvoice);
   const [state, setState] = useState<"loading" | "ready" | "error">(cachedInvoice ? "ready" : "loading");
+  // Cold launch: the cache is hydrated after this page mounted (bootMobile),
+  // so paint it once it is there instead of holding the skeleton.
+  const lateInvoice = useCacheAfterBoot<Invoice>(id ? `invoice:${id}` : null);
+  const [appliedLateInvoice, setAppliedLateInvoice] = useState<Invoice | null>(null);
+  if (lateInvoice && lateInvoice !== appliedLateInvoice && state === "loading") {
+    setAppliedLateInvoice(lateInvoice);
+    setInvoice(lateInvoice);
+    setState("ready");
+  }
   const [message, setMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [paymentAmount, setPaymentAmount] = useState("");
@@ -246,7 +265,6 @@ function InvoiceDetail() {
   const [reminder, setReminder] = useState<ReminderPreview | null>(null);
   const [reminderLoadFailed, setReminderLoadFailed] = useState(false);
   const [reminderRetrying, setReminderRetrying] = useState(false);
-  const [remindingBusy, setRemindingBusy] = useState(false);
   const [closeReason, setCloseReason] = useState("");
   const [closeReasonOpen, setCloseReasonOpen] = useState(false);
   const [closeReasonError, setCloseReasonError] = useState("");
@@ -257,9 +275,12 @@ function InvoiceDetail() {
   const [confirmCredit, setConfirmCredit] = useState(false);
   const [confirmMarkSent, setConfirmMarkSent] = useState(false);
   const [reminderSheetOpen, setReminderSheetOpen] = useState(false);
-  const [reminderError, setReminderError] = useState("");
   const [overpayConfirmed, setOverpayConfirmed] = useState(false);
   const [pdfBusy, setPdfBusy] = useState(false);
+  const [paymentDuplicates, setPaymentDuplicates] = useState<PaymentDuplicate[]>([]);
+  const [duplicateBusy, setDuplicateBusy] = useState<string | null>(null);
+  const [bankRow, setBankRow] = useState<BankRowCandidate | null>(null);
+  const [useBankRow, setUseBankRow] = useState(true);
 
   // The reminder preview only exists for an invoice that is genuinely
   // overdue; a 409 here is the expected answer, not an error to show. A
@@ -292,8 +313,12 @@ function InvoiceDetail() {
     }
     try {
       const response = await apiFetch(`/api/invoices/${id}`, { credentials: "include" });
-      const data = await readJson<{ invoice: Invoice }>(response, "Laskun haku epäonnistui");
+      const data = await readJson<{ invoice: Invoice; paymentDuplicates?: PaymentDuplicate[] }>(
+        response,
+        "Laskun haku epäonnistui"
+      );
       setInvoice(data.invoice);
+      setPaymentDuplicates(data.paymentDuplicates ?? []);
       setPaymentAmount(amountText(data.invoice.open));
       setState("ready");
       setRefreshFailed(false);
@@ -328,6 +353,32 @@ function InvoiceDetail() {
     void load();
   }, [load]);
 
+  // Recording a payment by hand: offer the incoming bank row with the same
+  // amount and a nearby date, so the money is not counted a second time
+  // through an income receipt drafted from that row.
+  useEffect(() => {
+    if (!paymentSheetOpen || !id) return;
+    const amount = parseMoneyInput(paymentAmount);
+    if (amount === null || amount <= 0 || !paymentDate) return;
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      const query = new URLSearchParams({ amount: String(amount), paidDate: paymentDate });
+      apiFetch(`/api/invoices/${id}/payments/candidates?${query}`, { credentials: "include" })
+        .then((response) => readJson<{ candidates: BankRowCandidate[] }>(response, ""))
+        .then((data) => {
+          if (!cancelled) setBankRow(data.candidates[0] ?? null);
+        })
+        // The offer is a convenience; without it the payment is still recorded.
+        .catch(() => {
+          if (!cancelled) setBankRow(null);
+        });
+    }, 300);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [paymentSheetOpen, id, paymentAmount, paymentDate]);
+
   async function changeStatus(status: Invoice["status"], reason?: string): Promise<boolean> {
     setBusy(true);
     setMessage(null);
@@ -355,7 +406,7 @@ function InvoiceDetail() {
   async function markPaid() {
     const ok = await changeStatus("paid");
     if (!ok) return;
-    void hapticNotify("success");
+    // ToastHost buzzes for a success toast; a second haptic here doubled it.
     showToast({
       tone: "success",
       text: "Lasku merkittiin maksetuksi",
@@ -418,14 +469,19 @@ function InvoiceDetail() {
           "Content-Type": "application/json",
           "Idempotency-Key": paymentKey.current,
         },
-        body: JSON.stringify({ amount, paidDate: paymentDate }),
+        body: JSON.stringify({
+          amount,
+          paidDate: paymentDate,
+          // The user kept the offered bank row: the payment carries it, so an
+          // income receipt from that row is never counted on top.
+          ...(bankRow && useBankRow ? { transactionId: bankRow.transactionId } : {}),
+        }),
       });
       await readJson(response, "Maksun kirjaus epäonnistui");
       paymentKey.current = newIdempotencyKey();
       setPaymentAmount("");
       setPaymentSheetOpen(false);
       setOverpayConfirmed(false);
-      void hapticNotify("success");
       showToast({ tone: "success", text: `Maksu ${formatEur(amount)} kirjattiin` });
       await load();
     } catch (error) {
@@ -441,11 +497,43 @@ function InvoiceDetail() {
   /** Opens the payment sheet with a clean slate: no stale error, amount reset to the current open balance. */
   function openPaymentSheet() {
     if (!invoice) return;
+    setBankRow(null);
+    setUseBankRow(true);
     setPaymentError("");
     setOverpayConfirmed(false);
     setPaymentAmount(amountText(invoice.open));
     setPaymentDate(helsinkiCalendarDate());
     setPaymentSheetOpen(true);
+  }
+
+  async function settleDuplicate(pair: PaymentDuplicate, action: "link" | "dismiss") {
+    setDuplicateBusy(pair.paymentId);
+    try {
+      const response = await apiFetch(`/api/invoices/${id}/payments/link`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(
+          action === "link"
+            ? { action, paymentId: pair.paymentId, transactionId: pair.transactionId }
+            : { action, paymentId: pair.paymentId, receiptId: pair.receiptId }
+        ),
+      });
+      await readJson(response, "Tallennus epäonnistui");
+      showToast({
+        tone: "success",
+        text: action === "link" ? "Maksu yhdistettiin tilitapahtumaan" : "Merkitty erillisiksi tuloiksi",
+      });
+      await load();
+    } catch (error) {
+      if (isUnauthorized(error)) {
+        redirectToLogin();
+        return;
+      }
+      showToast({ tone: "error", text: errorMessage(error, "Tallennus epäonnistui") });
+    } finally {
+      setDuplicateBusy(null);
+    }
   }
 
   async function removePayment(paymentId: string) {
@@ -522,7 +610,6 @@ function InvoiceDetail() {
         credentials: "include",
       });
       const result = await readJson<{ invoice: { id: string; number: number } }>(response, "Hyvitys epäonnistui");
-      void hapticNotify("success");
       showToast({ tone: "success", text: `Hyvityslasku ${result.invoice.number} luotiin` });
       router.push(detailHref("invoice", result.invoice.id));
     } catch (error) {
@@ -581,35 +668,6 @@ function InvoiceDetail() {
       setSendError(errorMessage(error, "Lähetys epäonnistui"));
     } finally {
       setSending(false);
-    }
-  }
-
-  async function sendReminder() {
-    setRemindingBusy(true);
-    setMessage(null);
-    try {
-      const response = await apiFetch(`/api/invoices/${id}/reminders`, {
-        method: "POST",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({}),
-      });
-      const result = await readJson<{ sentTo: string; reminder: { level: number } }>(
-        response,
-        "Muistutuksen lähetys epäonnistui"
-      );
-      setReminderSheetOpen(false);
-      void hapticNotify("success");
-      showToast({
-        tone: "success",
-        text: `Maksumuistutus ${result.reminder.level} lähetettiin osoitteeseen ${result.sentTo}`,
-      });
-      await load();
-    } catch (error) {
-      setReminderError(errorMessage(error, "Muistutuksen lähetys epäonnistui"));
-      void hapticNotify("error");
-    } finally {
-      setRemindingBusy(false);
     }
   }
 
@@ -673,8 +731,8 @@ function InvoiceDetail() {
       return {
         kind: "remind",
         label: "Lähetä muistutus",
-        busy: loading || remindingBusy,
-        busyLabel: loading ? "Ladataan…" : "Lähetetään…",
+        busy: loading,
+        busyLabel: "Ladataan…",
         icon: true,
       };
     }
@@ -899,6 +957,43 @@ function InvoiceDetail() {
               </Section>
             )}
 
+            {paymentDuplicates.length > 0 && (
+              <Section title="Tarkista maksu">
+                {paymentDuplicates.map((pair) => (
+                  <div key={`${pair.receiptId}:${pair.paymentId}`} className="space-y-3 px-4 py-4">
+                    <p className="text-[15px] text-ink">
+                      Tulokuitti{pair.receiptVendor ? ` ${pair.receiptVendor}` : ""}{" "}
+                      {formatEur(pair.amountCents / 100)}
+                      {pair.receiptDate ? ` (${formatDate(pair.receiptDate)})` : ""} on kirjattu
+                      tiliotteen maksusta, joka näyttää samalta kuin tämä maksu{" "}
+                      {formatDate(pair.paidDate)}. Molemmat lasketaan nyt tuloiksi.
+                    </p>
+                    <div className="flex gap-2">
+                      <Button
+                        type="button"
+                        className="flex-1"
+                        busy={duplicateBusy === pair.paymentId}
+                        busyLabel="Yhdistetään…"
+                        disabled={duplicateBusy !== null || refreshFailed}
+                        onClick={() => void settleDuplicate(pair, "link")}
+                      >
+                        Sama maksu, yhdistä
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        className="flex-1"
+                        disabled={duplicateBusy !== null || refreshFailed}
+                        onClick={() => void settleDuplicate(pair, "dismiss")}
+                      >
+                        Eri tuloja
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+              </Section>
+            )}
+
             {reminder && (
               <Section title="Muistutukset">
                 <div className="space-y-3 px-4 py-4">
@@ -976,10 +1071,7 @@ function InvoiceDetail() {
               primary.kind === "send"
                 ? () => void openReview()
                 : primary.kind === "remind"
-                  ? () => {
-                      setReminderError("");
-                      setReminderSheetOpen(true);
-                    }
+                  ? () => setReminderSheetOpen(true)
                   : primary.kind === "retryReminder"
                     ? () => void retryReminderPreview()
                     : primary.kind === "markPaid"
@@ -1125,6 +1217,35 @@ function InvoiceDetail() {
               onChange={(e) => setPaymentDate(e.target.value)}
             />
           </div>
+          {bankRow && (
+            <label className="flex min-h-12 items-start gap-3 rounded-card border border-line bg-surface px-4 py-3 text-[15px]">
+              <input
+                type="checkbox"
+                className="mt-1 h-5 w-5 shrink-0 accent-accent"
+                checked={useBankRow}
+                onChange={(event) => {
+                  setUseBankRow(event.target.checked);
+                  // A different payload needs its own idempotency key.
+                  paymentKey.current = newIdempotencyKey();
+                }}
+              />
+              <span className="min-w-0">
+                <span className="block text-ink">Yhdistä tiliotteen maksuun</span>
+                <span className="block text-[13px] text-ink-2">
+                  {[
+                    bankRow.counterparty,
+                    formatEur(bankRow.amount),
+                    bankRow.date ? formatDate(bankRow.date) : null,
+                  ]
+                    .filter(Boolean)
+                    .join(" · ")}
+                  {bankRow.hasReceipt
+                    ? ". Tapahtumasta on jo tulokuitti; yhdistäminen estää tulon laskemisen kahdesti."
+                    : ""}
+                </span>
+              </span>
+            </label>
+          )}
           {paymentError && (
             <p id="payment-amount-error" className="text-sm text-danger" role="alert">
               {paymentError}
@@ -1230,91 +1351,19 @@ function InvoiceDetail() {
         )}
       </BottomSheet>
 
-      <BottomSheet
-        isOpen={reminderSheetOpen && reminder !== null}
-        onClose={() => {
-          setReminderSheetOpen(false);
-          setReminderError("");
-        }}
-        title="Lähetä maksumuistutus"
-        labelledBy="reminder-sheet-title"
-      >
-        {reminder && invoice && (
-          <div className="space-y-3 px-5 py-4 sheet-safe-bottom">
-            <p className="text-[13px] text-ink-2">
-              Muistutus {reminder.level} · myöhässä {reminder.daysLate} päivää
-            </p>
-            <div className="space-y-1 text-[15px]">
-              <div className="flex justify-between gap-3">
-                <span className="shrink-0 text-ink-2">Vastaanottaja</span>
-                <span className="min-w-0 break-all text-right text-ink">{reminder.recipient ?? "–"}</span>
-              </div>
-              <div className="flex justify-between gap-3">
-                <span className="text-ink-2">Avoin pääoma</span>
-                <span className="tabular-nums text-ink">{formatEur(reminder.open)}</span>
-              </div>
-              {reminder.interest > 0 && (
-                <div className="flex justify-between gap-3">
-                  <span className="text-ink-2">Viivästyskorko</span>
-                  <span className="tabular-nums text-ink">{formatEur(reminder.interest)}</span>
-                </div>
-              )}
-              {reminder.fee > 0 && (
-                <div className="flex justify-between gap-3">
-                  <span className="text-ink-2">Muistutusmaksu</span>
-                  <span className="tabular-nums text-ink">{formatEur(reminder.fee)}</span>
-                </div>
-              )}
-              <div className="flex justify-between gap-3 font-semibold text-ink">
-                <span>Maksettava yhteensä</span>
-                <span className="tabular-nums">{formatEur(reminder.total)}</span>
-              </div>
-            </div>
-            {!reminder.recipient && (
-              <div className="space-y-2">
-                <p className="text-sm text-danger" role="alert">
-                  Asiakkaalla ei ole sähköpostiosoitetta.
-                </p>
-                <Link
-                  href={detailHref("customer", invoice.customer.id)}
-                  className={buttonClass("secondary", "w-full")}
-                >
-                  Lisää asiakkaalle sähköposti
-                </Link>
-              </div>
-            )}
-            {reminderError && (
-              <p className="text-sm text-danger" role="alert">
-                {reminderError}
-              </p>
-            )}
-            <div className="flex gap-2">
-              <Button
-                type="button"
-                className="flex-1"
-                disabled={!reminder.recipient || busy}
-                disabledReason={!reminder.recipient ? "Sähköpostiosoite puuttuu." : undefined}
-                busy={remindingBusy}
-                busyLabel="Lähetetään…"
-                onClick={() => void sendReminder()}
-              >
-                Lähetä muistutus
-              </Button>
-              <Button
-                type="button"
-                variant="secondary"
-                className="flex-1"
-                onClick={() => {
-                  setReminderSheetOpen(false);
-                  setReminderError("");
-                }}
-              >
-                Peruuta
-              </Button>
-            </div>
-          </div>
-        )}
-      </BottomSheet>
+      {invoice && (
+        <ReminderSheet
+          invoiceId={invoice.id}
+          customerId={invoice.customer.id}
+          isOpen={reminderSheetOpen}
+          preview={reminder}
+          onClose={() => setReminderSheetOpen(false)}
+          onSent={() => {
+            setReminderSheetOpen(false);
+            void load();
+          }}
+        />
+      )}
     </>
   );
 }

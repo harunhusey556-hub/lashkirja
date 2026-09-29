@@ -31,6 +31,7 @@ import {
 import { QuickCustomerSheet, type CreatedCustomer } from "@/components/invoices/QuickCustomerSheet";
 
 import { pageCacheFetchedAt, readPageCache, writePageCache } from "@/lib/page-cache";
+import { useCacheAfterBoot } from "@/components/invoices/useCacheAfterBoot";
 import { usePersistedState, useScrollRestoration } from "@/lib/list-ui-state";
 import { isForbidden } from "@/lib/screen-state";
 import { showToast } from "@/lib/toast";
@@ -128,6 +129,16 @@ export default function RecurringInvoicesPage() {
   const [status, setStatus] = useState<"loading" | "ready" | "error">(
     cached ? "ready" : "loading"
   );
+  // Cold launch: the cache is hydrated after this page mounted (bootMobile),
+  // so paint it once it is there instead of holding the skeleton.
+  const lateCache = useCacheAfterBoot<{ recurring: RecurringInvoice[]; dueNow: number }>("recurring");
+  const [appliedLateCache, setAppliedLateCache] = useState<unknown>(null);
+  if (lateCache && lateCache !== appliedLateCache && status === "loading") {
+    setAppliedLateCache(lateCache);
+    setRecurring(lateCache.recurring);
+    setDueNow(lateCache.dueNow);
+    setStatus("ready");
+  }
   const [loadFailure, setLoadFailure] = useState<unknown>(null);
   const [busy, setBusy] = useState(false);
   // Which sheet is open: a new schedule, an edit, or none.
@@ -221,7 +232,6 @@ export default function RecurringInvoicesPage() {
       await readJson(response, "Tallennus epäonnistui");
       setFormFor(null);
       setPendingCustomer(null);
-      void hapticNotify("success");
       showToast({
         tone: "success",
         text: editing ? "Muutokset tallennettiin" : "Toistuva lasku luotiin",

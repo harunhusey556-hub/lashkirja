@@ -36,6 +36,7 @@ import { SALES_STATUS } from "@/lib/status-labels";
 import { clearDraft } from "@/lib/draft-store";
 import { detailHref } from "@/lib/routes";
 import { pageCacheFetchedAt, readPageCache, writePageCache } from "@/lib/page-cache";
+import { useCacheAfterBoot } from "@/components/invoices/useCacheAfterBoot";
 
 interface CustomerDetail {
   customer: {
@@ -123,6 +124,15 @@ function CustomerDetail() {
   // Task 7-style instant paint: a cached copy renders immediately while
   // `load()` (below) confirms or refreshes it in the background.
   const [state, setState] = useState<"loading" | "ready" | "error">(cachedDetail ? "ready" : "loading");
+  // Cold launch: the cache is hydrated after this page mounted (bootMobile),
+  // so paint it once it is there instead of holding the skeleton.
+  const lateDetail = useCacheAfterBoot<CustomerDetail>(cacheKey || null);
+  const [appliedLateDetail, setAppliedLateDetail] = useState<CustomerDetail | null>(null);
+  if (lateDetail && lateDetail !== appliedLateDetail && state === "loading") {
+    setAppliedLateDetail(lateDetail);
+    setDetail(lateDetail);
+    setState("ready");
+  }
   const [message, setMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [editOpen, setEditOpen] = useState(false);

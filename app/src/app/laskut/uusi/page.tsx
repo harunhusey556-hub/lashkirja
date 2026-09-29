@@ -193,7 +193,7 @@ function NewInvoicePage() {
       });
       const data = await readJson<{ invoice: { id: string } }>(response, "Muutosten tallennus epäonnistui");
       writePageCache(`invoice:${editing.id}`, data.invoice);
-      void hapticNotify("success");
+      // The success toast gives the haptic (ToastHost); no second one here.
       showToast({ tone: "success", text: "Muutokset tallennettiin" });
       armNavigation(DETAIL_ROUTES.invoice, "back");
       router.replace(detailHref("invoice", editing.id));

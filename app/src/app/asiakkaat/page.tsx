@@ -23,6 +23,8 @@ import { Button, buttonClass, controlClass } from "@/components/ui";
 import { showToast } from "@/lib/toast";
 import { newIdempotencyKey } from "@/lib/idempotency-key";
 import { pageCacheFetchedAt, readPageCache, writePageCache } from "@/lib/page-cache";
+import { useCacheAfterBoot } from "@/components/invoices/useCacheAfterBoot";
+import { readTextFile } from "@/components/invoices/decodeText";
 import { usePersistedState, useScrollRestoration } from "@/lib/list-ui-state";
 import { isForbidden } from "@/lib/screen-state";
 import { detailHref } from "@/lib/routes";
@@ -67,6 +69,15 @@ export default function CustomersPage() {
   const [status, setStatus] = useState<"loading" | "ready" | "error">(
     cached ? "ready" : "loading"
   );
+  // Cold launch: the cache is hydrated after this page mounted (bootMobile),
+  // so paint it once it is there instead of holding the skeleton.
+  const lateCache = useCacheAfterBoot<Customer[]>("customers");
+  const [appliedLateCache, setAppliedLateCache] = useState<Customer[] | null>(null);
+  if (lateCache && lateCache !== appliedLateCache && status === "loading") {
+    setAppliedLateCache(lateCache);
+    setCustomers(lateCache);
+    setStatus("ready");
+  }
   const [message, setMessage] = useState<string | null>(null);
   const [loadFailure, setLoadFailure] = useState<unknown>(null);
   const [search, setSearch] = usePersistedState("asiakkaat.search", "");
@@ -218,7 +229,8 @@ export default function CustomersPage() {
       return;
     }
     try {
-      const text = await file.text();
+      // Excel on Windows saves ANSI (Windows-1252); plain file.text() garbled ä/ö.
+      const text = await readTextFile(file);
       setCsv(text);
       setCsvRows(null);
       showToast({ text: `${file.name} luettiin. Tarkista rivit ennen tuontia.` });

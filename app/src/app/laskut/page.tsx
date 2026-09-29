@@ -38,6 +38,7 @@ import {
 
 import { Button, controlClass } from "@/components/ui";
 import { pageCacheFetchedAt, readPageCache, writePageCache } from "@/lib/page-cache";
+import { useCacheAfterBoot } from "@/components/invoices/useCacheAfterBoot";
 import { isForbidden } from "@/lib/screen-state";
 import { usePersistedState, useScrollRestoration } from "@/lib/list-ui-state";
 import { showToast } from "@/lib/toast";
@@ -67,6 +68,15 @@ interface Aging {
 interface MatchPreview {
   preview: Array<{ invoiceNumber: number; customerName: string; amount: number }>;
   suggestions: unknown[];
+  /** Reference hits in a locked period: the run leaves them alone. */
+  skippedLocked?: unknown[];
+}
+
+/** "1 maksu on lukitulla kaudella…" - what a run leaves alone and why. */
+function lockedNote(count: number): string {
+  return count === 1
+    ? "1 maksu on lukitulla kaudella, joten sitä ei kirjata."
+    : `${count} maksua on lukitulla kaudella, joten niitä ei kirjata.`;
 }
 
 const AGING_BUCKETS = ["1-30", "31-60", "61-90", "90+"] as const;
@@ -140,6 +150,18 @@ function InvoicesPageContent() {
   const [status, setStatus] = useState<"loading" | "ready" | "error">(
     cached ? "ready" : "loading"
   );
+  // Cold launch: the cache is hydrated after this page mounted (bootMobile),
+  // so paint it once it is there instead of holding the skeleton.
+  const lateCache = useCacheAfterBoot<{ invoices: InvoiceSummary[]; aging: Aging }>(
+    customerFilter || monthFilter || query ? null : "invoices"
+  );
+  const [appliedLateCache, setAppliedLateCache] = useState<unknown>(null);
+  if (lateCache && lateCache !== appliedLateCache && status === "loading") {
+    setAppliedLateCache(lateCache);
+    setInvoices(lateCache.invoices);
+    setAging(lateCache.aging);
+    setStatus("ready");
+  }
   useEffect(() => {
     if (statusFromUrl && (SALES_FILTER_IDS as readonly string[]).includes(statusFromUrl)) {
       setFilter(statusFromUrl as SalesFilterId);
@@ -281,18 +303,21 @@ function InvoicesPageContent() {
         method: "POST",
         credentials: "include",
       });
-      const result = await readJson<{ applied: unknown[]; suggestions: unknown[] }>(
-        response,
-        "Kohdistus epäonnistui"
-      );
+      const result = await readJson<{
+        applied: unknown[];
+        suggestions: unknown[];
+        skippedLocked?: unknown[];
+      }>(response, "Kohdistus epäonnistui");
       setMatchPreview(null);
-      void hapticNotify("success");
+      const skipped = result.skippedLocked?.length ?? 0;
+      const booked =
+        result.applied.length === 1
+          ? "1 maksu kohdistettiin laskulle."
+          : `${result.applied.length} maksua kohdistettiin laskuille.`;
+      // The success toast gives the haptic (ToastHost); no second one here.
       showToast({
-        tone: "success",
-        text:
-          result.applied.length === 1
-            ? "1 maksu kohdistettiin laskulle"
-            : `${result.applied.length} maksua kohdistettiin laskuille`,
+        tone: result.applied.length > 0 ? "success" : "info",
+        text: skipped > 0 ? `${booked} ${lockedNote(skipped)}` : booked,
       });
       loadCounts();
       await load();
@@ -506,7 +531,9 @@ function InvoicesPageContent() {
           <div className="space-y-3 px-5 py-4 sheet-safe-bottom">
             {matchCount === 0 ? (
               <p className="text-[15px] text-ink">
-                Tiliotteilla ei ole maksuja, joiden viitenumero vastaisi avointa laskua.
+                {(matchPreview.skippedLocked?.length ?? 0) > 0
+                  ? "Avoimille kausille ei ole kirjattavia maksuja."
+                  : "Tiliotteilla ei ole maksuja, joiden viitenumero vastaisi avointa laskua."}
               </p>
             ) : (
               <>
@@ -529,6 +556,12 @@ function InvoicesPageContent() {
                   ))}
                 </div>
               </>
+            )}
+            {(matchPreview.skippedLocked?.length ?? 0) > 0 && (
+              <p className="text-[13px] text-ink-2">
+                {lockedNote(matchPreview.skippedLocked?.length ?? 0)} Avaa lukitus asetuksista, jos
+                maksu kuuluu kirjata.
+              </p>
             )}
             {matchPreview.suggestions.length > 0 && (
               <p className="text-[13px] text-ink-2">
