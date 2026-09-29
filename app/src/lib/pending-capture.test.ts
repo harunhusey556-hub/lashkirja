@@ -32,6 +32,14 @@ describe("pending capture hand-off", () => {
     expect(takePendingCapture("receipt", 1_000 + 2 * 60 * 1000 + 1)).toBeNull();
   });
 
+  it("lets a consumer demand a fresher stash than the two-minute default", () => {
+    stashPendingCapture("statement", [photo()], 1_000);
+    expect(hasPendingCapture("statement", 1_000 + 20_000, 15_000)).toBe(false);
+    expect(takePendingCapture("statement", 1_000 + 20_000, 15_000)).toBeNull();
+    stashPendingCapture("statement", [photo()], 1_000);
+    expect(takePendingCapture("statement", 1_000 + 5_000, 15_000)).toHaveLength(1);
+  });
+
   it("routes the camera to the receipt editor with from=camera", () => {
     expect(PENDING_CAPTURE_ROUTES.receipt).toBe("/kuitit/uusi?from=camera");
     expect(PENDING_CAPTURE_ROUTES.statement).toBe("/pankki/tapahtumat?import=1");

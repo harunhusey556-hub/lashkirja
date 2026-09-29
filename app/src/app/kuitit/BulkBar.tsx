@@ -1,9 +1,19 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui";
 
 const EXIT_MS = 170;
+
+/** The gap the bar floats above the tab bar (bottom offset, 0.75rem) plus breathing room. */
+const CLEARANCE_PX = 12 + 8;
+
+/**
+ * The room the list needs at its end so the last row and "Katso kaikki" can
+ * scroll clear of the bar. Published as a CSS variable on the root; the Kuitit
+ * page reads it as bottom padding, so nothing changes while no bar is shown.
+ */
+export const BULK_BAR_SPACE_VAR = "--bulk-bar-space";
 
 /**
  * The floating bar shown once one or more receipts are checkbox-selected.
@@ -47,6 +57,23 @@ export function BulkBar({
   }
   if (visible && count > 0 && count !== shownCount) setShownCount(count);
 
+  const barRef = useRef<HTMLDivElement>(null);
+  const shown = mounted && !leaving;
+  useEffect(() => {
+    if (!shown) return;
+    const root = document.documentElement;
+    const bar = barRef.current;
+    if (!bar) return;
+    const publish = () => root.style.setProperty(BULK_BAR_SPACE_VAR, `${Math.ceil(bar.offsetHeight) + CLEARANCE_PX}px`);
+    publish();
+    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(publish);
+    observer?.observe(bar);
+    return () => {
+      observer?.disconnect();
+      root.style.removeProperty(BULK_BAR_SPACE_VAR);
+    };
+  }, [shown]);
+
   useEffect(() => {
     if (!leaving) return;
     const timer = window.setTimeout(() => {
@@ -67,6 +94,7 @@ export function BulkBar({
       data-testid="bulk-bar"
     >
       <div
+        ref={barRef}
         className="bottom-actions flex w-full max-w-sm items-center gap-3 rounded-card bg-ink px-4 py-2.5 text-canvas"
         style={{
           transition: "transform 160ms var(--ease-drawer), opacity 160ms var(--ease-out)",

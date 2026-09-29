@@ -11,7 +11,14 @@ import ReceiptMatchPanel, {
 import { ErrorState } from "@/components/AsyncState";
 import { FieldsSkeleton, ReceiptDetailSkeleton } from "@/components/books/Skeletons";
 import { Skeleton, SkeletonGroup } from "@/components/ds";
-import { hasPendingCapture, PENDING_CAPTURE_PARAMS, takePendingCapture } from "@/lib/pending-capture";
+import {
+  clearPendingCapture,
+  HANDOFF_MAX_AGE_MS,
+  hasPendingCapture,
+  PENDING_CAPTURE_PARAMS,
+  stripPendingCaptureFlag,
+  takePendingCapture,
+} from "@/lib/pending-capture";
 import ConfirmModal from "@/components/ConfirmModal";
 import {
   ApiError,
@@ -276,21 +283,33 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
   const fromCamera =
     !isEdit &&
     searchParams.get(PENDING_CAPTURE_PARAMS.receipt.name) === PENDING_CAPTURE_PARAMS.receipt.value;
-  const [cameraHandoff, setCameraHandoff] = useState(() => fromCamera && hasPendingCapture("receipt"));
+  const [cameraHandoff, setCameraHandoff] = useState(
+    () => fromCamera && hasPendingCapture("receipt", Date.now(), HANDOFF_MAX_AGE_MS)
+  );
   const handoffDrainedRef = useRef(false);
+  // One-shot per flag: after draining, the flag is stripped from the URL so a
+  // second hand-off changes the URL again and drains again. Without the flag a
+  // leftover stash is cleared, so it can never attach itself to a later visit.
   useEffect(() => {
-    if (!cameraHandoff || handoffDrainedRef.current) return;
+    if (!fromCamera) {
+      handoffDrainedRef.current = false;
+      clearPendingCapture("receipt");
+      return;
+    }
+    if (handoffDrainedRef.current) return;
     handoffDrainedRef.current = true;
-    const files = takePendingCapture("receipt");
+    const files = takePendingCapture("receipt", Date.now(), HANDOFF_MAX_AGE_MS);
+    stripPendingCaptureFlag("receipt");
     if (!files || files.length === 0) {
       // eslint-disable-next-line react-hooks/set-state-in-effect -- one-shot read of the Lisää sheet's hand-off; nothing was waiting, so the picker shows
       setCameraHandoff(false);
       return;
     }
+    setCameraHandoff(true);
     handleFilesPicked(files);
-    // handleFilesPicked is recreated every render; the drain is one-shot by design.
+    // handleFilesPicked is recreated every render; the drain is one-shot per flag by design.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cameraHandoff]);
+  }, [fromCamera]);
   const handoffFailed = uploadQueue.rows.some((row) => row.status === "failed" || row.status === "cancelled");
   const showHandoff = cameraHandoff && !formReady && !error && !handoffFailed;
   const handoffProgress =

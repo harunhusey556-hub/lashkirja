@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { authorizationMatches, enableBankingStatus } from "@/lib/enablebanking/signing";
 import { syncDueBankConnections } from "@/lib/enablebanking/sync";
 import { noStoreJson } from "@/lib/http-security";
+import { BANK_NOT_CONFIGURED_MESSAGE, logBankSetupGap } from "@/lib/enablebanking/public-status";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -14,10 +15,12 @@ export async function GET(req: NextRequest) {
 
   const status = enableBankingStatus();
   if (!status.ready) {
+    // The detailed reason can name settings; it stays in the server log.
+    logBankSetupGap(status);
     return noStoreJson({
       ok: true,
       skipped: true,
-      message: status.message || "Pankkiyhteys ei ole käytössä.",
+      message: BANK_NOT_CONFIGURED_MESSAGE,
     });
   }
 

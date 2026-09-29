@@ -2,7 +2,7 @@ import { ZodError } from "zod";
 import { noStoreJson } from "@/lib/http-security";
 import { EnableBankingError, publicBankError } from "./client";
 import { EnableBankingNotConfiguredError } from "./signing";
-import { BANK_NOT_CONFIGURED_MESSAGE } from "./public-status";
+import { BANK_NOT_CONFIGURED_MESSAGE, logBankSetupGap } from "./public-status";
 
 export function respondToBankError(error: unknown) {
   if (error instanceof ZodError) {
@@ -10,7 +10,8 @@ export function respondToBankError(error: unknown) {
   }
   if (error instanceof EnableBankingNotConfiguredError) {
     // The error text can name settings; the client gets plain Finnish (L5).
-    console.warn("Enable Banking not configured:", error.message);
+    // Logged once per distinct reason, not on every request.
+    logBankSetupGap({ enabled: true, ready: false, message: error.message });
     return noStoreJson({ error: BANK_NOT_CONFIGURED_MESSAGE }, { status: 503 });
   }
   if (error instanceof EnableBankingError) {

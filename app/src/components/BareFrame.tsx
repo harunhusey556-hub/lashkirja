@@ -22,7 +22,8 @@ export function BareFrame({ children }: { children: React.ReactNode }) {
       const active = document.activeElement;
       if (!(active instanceof HTMLElement) || !frame.contains(active)) return;
       if (!active.matches("input, textarea, select")) return;
-      active.scrollIntoView({ block: "center", behavior: "smooth" });
+      const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+      active.scrollIntoView({ block: "center", behavior: reduceMotion ? "auto" : "smooth" });
     };
     const schedule = () => {
       window.clearTimeout(timer);

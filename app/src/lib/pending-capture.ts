@@ -55,6 +55,14 @@ export const STATEMENT_ACCEPT = ".csv,.xlsx,.xls,.xml,.pdf,.camt,.053," + STATEM
 
 const MAX_AGE_MS = 2 * 60 * 1000;
 
+/**
+ * How long a consumer accepts a stash it did not see being made. The producer
+ * pushes the route in the same tick it stashes, so a healthy hand-off is drained
+ * within a second or two; anything older is a leftover (a push that never
+ * landed) and must never upload unasked.
+ */
+export const HANDOFF_MAX_AGE_MS = 15 * 1000;
+
 type Entry = { files: File[]; at: number };
 
 const stash = new Map<PendingCaptureKind, Entry>();
@@ -68,20 +76,46 @@ export function stashPendingCapture(kind: PendingCaptureKind, files: File[], now
 }
 
 /** Drains the stash for `kind`: returns the files once, then null. */
-export function takePendingCapture(kind: PendingCaptureKind, now = Date.now()): File[] | null {
+export function takePendingCapture(
+  kind: PendingCaptureKind,
+  now = Date.now(),
+  maxAgeMs = MAX_AGE_MS
+): File[] | null {
   const entry = stash.get(kind);
   stash.delete(kind);
-  if (!entry || now - entry.at > MAX_AGE_MS) return null;
+  if (!entry || now - entry.at > maxAgeMs) return null;
   return entry.files;
 }
 
 /** True while fresh files wait for `kind` (does not drain). */
-export function hasPendingCapture(kind: PendingCaptureKind, now = Date.now()): boolean {
+export function hasPendingCapture(
+  kind: PendingCaptureKind,
+  now = Date.now(),
+  maxAgeMs = MAX_AGE_MS
+): boolean {
   const entry = stash.get(kind);
-  return Boolean(entry && now - entry.at <= MAX_AGE_MS);
+  return Boolean(entry && now - entry.at <= maxAgeMs);
 }
 
 export function clearPendingCapture(kind?: PendingCaptureKind): void {
   if (kind) stash.delete(kind);
   else stash.clear();
+}
+
+/**
+ * Removes the one-shot hand-off flag (`?import=1`, `?from=camera`) from the
+ * address bar once the consumer drained it, so the next hand-off changes the
+ * URL again and is drained again instead of being dropped as "already seen".
+ *
+ * `history.replaceState` (synced into `useSearchParams` by Next) rather than
+ * `router.replace`: it is synchronous and needs no route payload fetch, so it
+ * also works on a cold load of the flagged URL.
+ */
+export function stripPendingCaptureFlag(kind: PendingCaptureKind): void {
+  if (typeof window === "undefined") return;
+  const { name } = PENDING_CAPTURE_PARAMS[kind];
+  const url = new URL(window.location.href);
+  if (!url.searchParams.has(name)) return;
+  url.searchParams.delete(name);
+  window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
 }

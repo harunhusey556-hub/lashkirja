@@ -40,7 +40,7 @@ import { Icon, MoreMenu, PageTitle, Section } from "@/components/ds";
 import { batchOutcomeMessage } from "@/lib/upload-queue";
 import { ReceiptFilters, type ReceiptAdvancedFilters } from "./ReceiptFilters";
 import { ReceiptRow } from "./ReceiptRow";
-import { BulkBar } from "./BulkBar";
+import { BULK_BAR_SPACE_VAR, BulkBar } from "./BulkBar";
 import type { SavedReceipt } from "./types";
 
 const RECENT_LIMIT = 5;
@@ -622,11 +622,17 @@ export default function KuititPage() {
   // filter change drops out of the selection instead of being deleted unseen.
   const selectedVisible = visibleReceipts.filter((receipt) => selectedIds.has(receipt.id));
   const selectedCount = selectedVisible.length;
+  // Drop the hidden ids for real (adjust-state-during-render): a row hidden by
+  // "Näytä vähemmän" or a filter must not come back still selected when shown again.
+  if (selectedVisible.length !== selectedIds.size) {
+    setSelectedIds(new Set(selectedVisible.map((receipt) => receipt.id)));
+  }
   const allSelected = visibleReceipts.length > 0 && selectedCount === visibleReceipts.length;
 
   return (
     <>
-      <div className="space-y-6">
+      {/* BulkBar publishes its height while shown, so the last row and "Katso kaikki" scroll clear of it. */}
+      <div className="space-y-6" style={{ paddingBottom: `var(${BULK_BAR_SPACE_VAR}, 0px)` }}>
         <PageTitle
           title="Kuitit"
           action={

@@ -39,12 +39,13 @@ test("login lands on the dashboard and the tab bar navigates", async ({ page }) 
   await expect(page.getByText("Tulot", { exact: true })).toBeVisible();
 
   const nav = page.getByRole("navigation", { name: "Päävalikko" });
-  await expect(nav.getByRole("button", { name: "Muut" })).toHaveCount(0);
+  await expect(nav.getByRole("link", { name: "Muut" })).toHaveCount(0);
 
-  await nav.getByRole("button", { name: "Myynti" }).click();
+  // The tab bar's items are links (real hrefs); only the raised plus is a button.
+  await nav.getByRole("link", { name: "Myynti" }).click();
   await expect(page).toHaveURL(/\/laskut$/);
 
-  await nav.getByRole("button", { name: "Kirjanpito" }).click();
+  await nav.getByRole("link", { name: "Kirjanpito" }).click();
   await expect(page).toHaveURL(/\/kirjanpito$/);
   await page.getByRole("link", { name: /ALV-ilmoitus/ }).click();
   await expect(page).toHaveURL(/\/kirjanpito\/alv$/);
@@ -52,10 +53,10 @@ test("login lands on the dashboard and the tab bar navigates", async ({ page }) 
   await expect(page).toHaveURL(/\/kirjanpito$/);
 
   await nav.getByRole("button", { name: "Lisää" }).click();
-  await expect(page.getByRole("button", { name: "Kuvaa kuitti" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Ota kuva" })).toBeVisible();
   await page.keyboard.press("Escape");
 
-  await nav.getByRole("button", { name: "Raportit" }).click();
+  await nav.getByRole("link", { name: "Raportit" }).click();
   await expect(page).toHaveURL(/\/raportit$/);
 
   await page.getByRole("button", { name: /Profiili, asetukset/ }).click();
@@ -72,7 +73,7 @@ test("a bank account can be added and a month reconciled", async ({ page }) => {
   await page.getByLabel("IBAN").fill("FI21 1234 5600 0007 85");
   await page.getByLabel("Alkusaldo (€)").fill("1000");
   await page.getByLabel("Avauspäivä").fill("2026-01-01");
-  await page.getByRole("button", { name: "Lisää tili" }).click();
+  await page.getByRole("button", { name: "Lisää tili", exact: true }).click();
 
   const card = page.getByRole("button", { name: /E2E Käyttötili/ });
   await expect(card).toBeVisible();
@@ -94,7 +95,7 @@ test("a rejected IBAN never reaches the server", async ({ page }) => {
   await page.getByRole("button", { name: "Lisää tili käsin" }).click();
   await page.getByLabel("Tilin nimi").fill("Virheellinen");
   await page.getByLabel("IBAN").fill("FI2112345600000786");
-  await page.getByRole("button", { name: "Lisää tili" }).click();
+  await page.getByRole("button", { name: "Lisää tili", exact: true }).click();
 
   await expect(page.getByText("IBAN ei ole kelvollinen.")).toBeVisible();
 });
@@ -111,21 +112,24 @@ test("invoice goes from draft to paid", async ({ page }) => {
 
   await page.goto("/laskut");
   await page.getByRole("link", { name: "Uusi lasku" }).click();
-  await page.getByLabel("Asiakas").selectOption({ label: "E2E Asiakas" });
+  await page.getByRole("combobox", { name: "Asiakas" }).selectOption({ label: "E2E Asiakas" });
   await page.getByLabel("Rivin 1 kuvaus").fill("Ripsienpidennys");
   await page.getByLabel("Rivin 1 määrä").fill("1");
   await page.getByLabel("Rivin 1 hinta").fill("100");
   await expect(page.getByText("125,50 €").first()).toBeVisible(); // live total
   await page.getByRole("button", { name: "Luo lasku" }).click();
 
-  await page.getByRole("link", { name: /E2E Asiakas/ }).first().click();
+  // Creating the invoice opens it straight away (no trip back through the list).
   await expect(page).toHaveURL(/\/laskut\/lasku\?id=/);
   await expect(page.getByText("Luonnos", { exact: true })).toBeVisible();
 
-  // "Merkitse lähetetyksi" now lives in the "..." menu: the bottom bar's
-  // primary action for a draft is "Lähetä" (the send-review flow) instead.
+  // "Merkitse lähetetyksi (ilman sähköpostia)" lives in the "..." menu (the
+  // bottom bar's primary action for a draft is "Lähetä", the send-review
+  // flow) and asks for a confirmation before booking.
   await page.getByRole("button", { name: "Lisää toimintoja" }).click();
-  await page.getByRole("button", { name: "Merkitse lähetetyksi" }).click();
+  await page.getByRole("button", { name: /^Merkitse lähetetyksi/ }).click();
+  await expect(page.getByRole("dialog").getByText("Merkitäänkö lähetetyksi?")).toBeVisible();
+  await page.getByRole("dialog").getByRole("button", { name: "Merkitse", exact: true }).click();
   await expect(page.getByText("Lähetetty", { exact: true })).toBeVisible();
 
   // The payment form now opens in a "Kirjaa maksu" sheet (BottomActions'
@@ -171,12 +175,13 @@ test("an invoice can be downloaded as a PDF", async ({ page, context }) => {
 
   await page.goto("/laskut");
   await page.getByRole("link", { name: "Uusi lasku" }).click();
-  await page.getByLabel("Asiakas").selectOption({ label: "PDF Asiakas" });
+  await page.getByRole("combobox", { name: "Asiakas" }).selectOption({ label: "PDF Asiakas" });
   await page.getByLabel("Rivin 1 kuvaus").fill("Ripsienpidennys");
   await page.getByLabel("Rivin 1 hinta").fill("100");
   await page.getByRole("button", { name: "Luo lasku" }).click();
 
-  await page.getByRole("link", { name: /PDF Asiakas/ }).first().click();
+  // The new invoice opens straight away.
+  await expect(page).toHaveURL(/\/laskut\/lasku\?id=/);
   // "Avaa PDF" moved into the "..." menu (it opens the PDF via window.open
   // instead of an <a href> link, so it is a button once the sheet is open).
   await page.getByRole("button", { name: "Lisää toimintoja" }).click();
@@ -239,7 +244,7 @@ test("closing the books makes an earlier period read-only", async ({ page }) => 
 
   await page.goto("/laskut");
   await page.getByRole("link", { name: "Uusi lasku" }).click();
-  await page.getByLabel("Asiakas").selectOption({ label: "Lukko Asiakas" });
+  await page.getByRole("combobox", { name: "Asiakas" }).selectOption({ label: "Lukko Asiakas" });
   await page.getByLabel("Rivin 1 kuvaus").fill("Lukittu kausi");
   await page.getByLabel("Rivin 1 hinta").fill("50");
   // Date the invoice inside the closed month.
@@ -264,16 +269,19 @@ test("a recurring invoice generates a real invoice", async ({ page }) => {
 
   await page.goto("/toistuvat");
   await page.getByRole("button", { name: "Uusi toistuva lasku" }).click();
-  await page.getByLabel("Asiakas").selectOption({ label: "Toisto Asiakas" });
+  await page.getByRole("combobox", { name: "Asiakas" }).selectOption({ label: "Toisto Asiakas" });
   await page.getByLabel("Rivin 1 kuvaus").fill("Kuukausiylläpito");
   await page.getByLabel("Rivin 1 hinta").fill("50");
   // Start in the past so the first occurrence is immediately due.
   await page.getByLabel("Alkaa").fill("2026-01-01");
-  await page.getByRole("button", { name: "Luo toistuva lasku" }).click();
+  // The empty state behind the sheet has a button of the same name; the submit is in the dialog.
+  await page.getByRole("dialog").getByRole("button", { name: "Luo toistuva lasku" }).click();
 
   await expect(page.getByText("Toisto Asiakas").first()).toBeVisible();
+  // Two steps: the preview sheet lists what would be created, then the confirm books it.
   await page.getByRole("button", { name: "Luo erääntyneet laskut" }).click();
-  await expect(page.getByText(/Luotiin \d+ laskua/)).toBeVisible();
+  await page.getByRole("dialog").getByRole("button", { name: /^Luo (lasku|\d+ laskua)$/ }).click();
+  await expect(page.getByText(/(1 lasku|\d+ laskua) luotiin\./)).toBeVisible();
 
   await page.goto("/laskut");
   await expect(page.getByText("Toisto Asiakas").first()).toBeVisible();
@@ -297,6 +305,7 @@ test("privacy request status is visible and the lock PIN is masked", async ({ pa
   await page.getByRole("main").getByRole("button", { name: "Lisää", exact: true }).click();
   await page.getByLabel("Nimi").fill("Luonnos Asiakas");
   await expect(page.getByText("Luonnos tallennettu.")).toBeVisible();
-  await page.getByRole("button", { name: "Sulje" }).click();
+  // The notice's own "Sulje" (the sheet's close button carries the same name).
+  await page.getByRole("status").getByRole("button", { name: "Sulje" }).click();
   await expect(page.getByText("Luonnos tallennettu.")).toBeHidden();
 });

@@ -196,11 +196,14 @@ test("downloading a report CSV keeps the server's file name", async ({ page, req
   await seedAuth(page, auth);
   await page.goto("/raportit");
 
-  const [download] = await Promise.all([
-    page.waitForEvent("download"),
-    page.getByRole("link", { name: "Kuitit", exact: true }).click(),
-  ]);
-  expect(download.suggestedFilename()).toBe("kuitit.csv");
+  // The period exports name the file after the year they cover
+  // (`kuitit-<year>.csv`); the link itself says which year that is.
+  const link = page.getByRole("link", { name: "Kuitit", exact: true });
+  const year = new URL((await link.getAttribute("href")) ?? "", "http://x").searchParams.get("year");
+  expect(year).toMatch(/^[0-9]{4}$/);
+
+  const [download] = await Promise.all([page.waitForEvent("download"), link.click()]);
+  expect(download.suggestedFilename()).toBe(`kuitit-${year}.csv`);
 
   const exportCalls = calls.filter((call) => call.url.includes("/api/export"));
   expect(exportCalls.length).toBeGreaterThan(0);

@@ -23,7 +23,14 @@ import { Button, controlClass } from "@/components/ui";
 import { ListRow, PageTitle, Section, StatusTag } from "@/components/ds";
 import { detailHref } from "@/lib/routes";
 import BankConnectCard from "@/components/BankConnectCard";
-import { PENDING_CAPTURE_PARAMS, STATEMENT_FILE_TYPES, takePendingCapture } from "@/lib/pending-capture";
+import {
+  clearPendingCapture,
+  HANDOFF_MAX_AGE_MS,
+  PENDING_CAPTURE_PARAMS,
+  STATEMENT_FILE_TYPES,
+  stripPendingCaptureFlag,
+  takePendingCapture,
+} from "@/lib/pending-capture";
 
 const RECENT_LIMIT = 5;
 
@@ -190,10 +197,21 @@ export default function TapahtumatClient() {
   const importParam = searchParams.get(PENDING_CAPTURE_PARAMS.statement.name) === PENDING_CAPTURE_PARAMS.statement.value;
   const drainedRef = useRef(false);
   const importSectionRef = useRef<HTMLDivElement>(null);
+  // The flag is one-shot: once drained it is stripped from the URL, so the next
+  // "Tuo tiliote" from the Lisää sheet changes the URL again and drains again
+  // (a repeated push of the same URL used to be dropped silently). Without the
+  // flag any leftover stash is cleared, so the dashboard's plain
+  // `?import=1` link can never upload a stale file unasked.
   useEffect(() => {
-    if (!importParam || drainedRef.current) return;
+    if (!importParam) {
+      drainedRef.current = false;
+      clearPendingCapture("statement");
+      return;
+    }
+    if (drainedRef.current) return;
     drainedRef.current = true;
-    const files = takePendingCapture("statement");
+    const files = takePendingCapture("statement", Date.now(), HANDOFF_MAX_AGE_MS);
+    stripPendingCaptureFlag("statement");
     if (!files || files.length === 0) return;
     importSectionRef.current?.scrollIntoView({ block: "nearest" });
     // eslint-disable-next-line react-hooks/set-state-in-effect -- one-shot hand-off from the Lisää sheet: the upload it starts is the external work this effect exists for
