@@ -76,9 +76,9 @@ export default function ReviewQueue({
         aria-expanded={open}
       >
         <div className="min-w-0">
-          <h3 className="text-body font-medium text-ink">
+          <h2 className="text-body font-medium text-ink">
             {title} ({receipts.length})
-          </h3>
+          </h2>
           <p className="mt-1 text-caption leading-relaxed text-ink-2">{description}</p>
           <p className="mt-1 text-caption tabular-nums text-ink-2">Yhteensä {formatEur(total)}</p>
         </div>

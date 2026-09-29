@@ -819,7 +819,9 @@ export default function DashboardClient() {
             {/* One heading line: the basis belongs to the section, not to the Menot card below it. */}
             <h2 className="mb-2 px-1 text-caption font-normal text-ink-2">
               Kuukauden tulos
+              {/* AX-11: VoiceOver joined the two parts ("tuloslaskujen") when the separator was its only gap. */}
               <span aria-hidden> · </span>
+              <span className="sr-only">, </span>
               <span>{documentsBasis ? "laskujen ja kuittien mukaan" : "tiliotteen mukaan"}</span>
             </h2>
             <div className="grid grid-cols-2 gap-3">

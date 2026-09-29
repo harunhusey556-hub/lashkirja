@@ -61,7 +61,9 @@ describe("ReviewQueue", () => {
     expect(withoutAll).not.toContain("Hyväksy kaikki");
   });
 
-  it("starts collapsed, with the batch's rows and their per-row actions not yet in the DOM", () => {
+  // IA-23: the rows stay mounted inside an animated Disclosure, but while
+  // collapsed that region is inert (not focusable, not read by VoiceOver).
+  it("starts collapsed, with the batch's rows and their per-row actions inside an inert region", () => {
     const out = html(
       createElement(ReviewQueue, {
         title: "t",
@@ -71,7 +73,9 @@ describe("ReviewQueue", () => {
         onReview: () => {},
       })
     );
-    expect(out).not.toContain("Kahvila Oy");
     expect(out).toContain('aria-expanded="false"');
+    const inertStart = out.indexOf('data-open="false" inert=""');
+    expect(inertStart).toBeGreaterThan(-1);
+    expect(out.indexOf("Kahvila Oy")).toBeGreaterThan(inertStart);
   });
 });

@@ -55,7 +55,7 @@ describe("design system components", () => {
     // element, e.g. a bare StatusTag, must let clicks fall through to the row's own overlay link
     // below it instead of swallowing them), while ActionPill opts back in with pointer-events-auto
     // so it stays clickable itself.
-    expect(out).toContain("pointer-events-none relative z-10 shrink-0");
+    expect(out).toContain("pointer-events-none relative z-10 ml-auto shrink-0");
     expect(out).not.toContain("pointer-events-auto relative z-10 shrink-0");
     expect(out).toContain("pointer-events-auto");
     const pillOpen = out.indexOf("Muistuta") >= 0 ? out.lastIndexOf("<a", out.indexOf("Muistuta")) : -1;
