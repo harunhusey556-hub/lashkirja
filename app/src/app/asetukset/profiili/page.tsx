@@ -1,37 +1,36 @@
 "use client";
 
 import { useState } from "react";
-import { ErrorState, LoadingState } from "@/components/AsyncState";
-import { apiFetch, errorMessage, readJson } from "@/components/clientFetch";
+import { ApiError, apiFetch, errorMessage, isUserFacingMessage, readJson } from "@/components/clientFetch";
 import { type Profile, SaveStatus, useProfile } from "../useProfile";
+import { ProfileGate } from "../ProfileGate";
 import { Card, PageTitle } from "@/components/ds";
-import { Button, Field } from "@/components/ui";
+import { PasswordField } from "@/components/ds/PasswordField";
+import { Button, Field, FormError, SavePhaseNote } from "@/components/ui";
 import { controlClass } from "@/components/control-styles";
+import { useEditorSession } from "@/components/form-session";
+import { hapticNotify } from "@/lib/haptics";
+import { showToast } from "@/lib/toast";
 
 export default function ProfiiliPage() {
   const { profile, saving, savedMsg, loadError, retry, save } = useProfile();
 
-  if (loadError) {
-    return (
-      <>
-        <ErrorState message={loadError} onRetry={retry} />
-      </>
-    );
-  }
-
-  if (!profile) {
-    return (
-      <>
-        <LoadingState label="Ladataan profiilia..." />
-      </>
-    );
-  }
-
   return (
-    <div className="space-y-6">
-      <PageTitle title="Profiili" />
-      <ProfileForm profile={profile} saving={saving} savedMsg={savedMsg} save={save} />
-    </div>
+    <ProfileGate
+      profile={profile}
+      loadError={loadError}
+      retry={retry}
+      title="Profiili"
+      skeletonLabel="Ladataan profiilia"
+      fields={2}
+    >
+      {(loaded) => (
+        <>
+          <PageTitle title="Profiili" />
+          <ProfileForm profile={loaded} saving={saving} savedMsg={savedMsg} save={save} />
+        </>
+      )}
+    </ProfileGate>
   );
 }
 
@@ -52,10 +51,58 @@ function ProfileForm({
   const [lastName, setLastName] = useState(profile.lastName);
   const [email, setEmail] = useState(profile.pendingEmail || "");
   const [currentPassword, setCurrentPassword] = useState("");
-  const [emailMsg, setEmailMsg] = useState("");
+  const [emailError, setEmailError] = useState<{ email?: string; password?: string; form?: string }>({});
   const [emailBusy, setEmailBusy] = useState(false);
 
-  const dirty = firstName !== profile.firstName || lastName !== profile.lastName;
+  // AUTH-13: leaving with unsaved name edits asks first (Back, tabs).
+  const { dirty } = useEditorSession({
+    sourceId: "settings-profile",
+    draftKey: null,
+    baseline: { firstName: profile.firstName, lastName: profile.lastName },
+    value: { firstName, lastName },
+    onRestore: () => {},
+  });
+
+  async function sendEmailChange(event: React.FormEvent) {
+    event.preventDefault();
+    if (emailBusy) return;
+    const next: typeof emailError = {};
+    if (!email.trim()) next.email = "Kirjoita uusi sähköpostiosoite.";
+    if (!currentPassword) next.password = "Kirjoita nykyinen salasana.";
+    setEmailError(next);
+    if (next.email || next.password) {
+      void hapticNotify("error");
+      document.getElementById(next.email ? "newEmail" : "emailPassword")?.focus();
+      return;
+    }
+    setEmailBusy(true);
+    try {
+      const response = await apiFetch("/api/auth/email", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: email.trim(), currentPassword }),
+      });
+      const data = await readJson<{ message: string }>(response, "Sähköpostin vaihto epäonnistui");
+      setCurrentPassword("");
+      showToast({
+        tone: "success",
+        text:
+          data.message && isUserFacingMessage(data.message)
+            ? data.message
+            : "Vahvistuslinkki lähetettiin uuteen osoitteeseen.",
+        durationMs: 6000,
+      });
+    } catch (error: unknown) {
+      void hapticNotify("error");
+      const message = errorMessage(error, "Sähköpostin vaihto epäonnistui");
+      // A wrong current password answers 401 with its own message.
+      const wrongPassword = error instanceof ApiError && error.status === 401;
+      setEmailError(wrongPassword ? { password: message } : { form: message });
+      if (wrongPassword) document.getElementById("emailPassword")?.focus();
+    } finally {
+      setEmailBusy(false);
+    }
+  }
 
   return (
     <div className="space-y-6">
@@ -74,7 +121,7 @@ function ProfileForm({
       <form
         onSubmit={(event) => {
           event.preventDefault();
-          save({ firstName, lastName });
+          void save({ firstName: firstName.trim(), lastName: lastName.trim() });
         }}
       >
         <Card className="space-y-4">
@@ -82,7 +129,11 @@ function ProfileForm({
             <Field label="Etunimi" htmlFor="firstName">
               <input
                 id="firstName"
+                name="firstName"
                 type="text"
+                autoComplete="given-name"
+                autoCapitalize="words"
+                enterKeyHint="next"
                 required
                 value={firstName}
                 onChange={(e) => setFirstName(e.target.value)}
@@ -92,7 +143,11 @@ function ProfileForm({
             <Field label="Sukunimi" htmlFor="lastName">
               <input
                 id="lastName"
+                name="lastName"
                 type="text"
+                autoComplete="family-name"
+                autoCapitalize="words"
+                enterKeyHint="done"
                 required
                 value={lastName}
                 onChange={(e) => setLastName(e.target.value)}
@@ -105,33 +160,14 @@ function ProfileForm({
           </p>
 
           <SaveStatus saving={saving} savedMsg={savedMsg} />
+          {dirty && !saving && !savedMsg && <SavePhaseNote phase="dirty" />}
           <Button type="submit" busy={saving} busyLabel="Tallennetaan…" disabled={!dirty} className="w-full">
             Tallenna
           </Button>
         </Card>
       </form>
 
-      <form
-        onSubmit={(event) => {
-          event.preventDefault();
-          setEmailBusy(true);
-          setEmailMsg("");
-          void apiFetch("/api/auth/email", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ email, currentPassword }),
-          })
-            .then((response) => readJson<{ message: string }>(response, "Sähköpostin vaihto epäonnistui"))
-            .then((data) => {
-              setEmailMsg(data.message);
-              setCurrentPassword("");
-            })
-            .catch((error: unknown) => {
-              setEmailMsg(errorMessage(error, "Sähköpostin vaihto epäonnistui"));
-            })
-            .finally(() => setEmailBusy(false));
-        }}
-      >
+      <form onSubmit={(event) => void sendEmailChange(event)} noValidate>
         <Card className="space-y-4">
           <h2 className="text-[15px] font-medium text-ink">Vaihda sähköposti</h2>
           {profile.pendingEmail && (
@@ -139,35 +175,46 @@ function ProfileForm({
               Odottaa vahvistusta: {profile.pendingEmail}. Nykyinen osoite toimii siihen asti.
             </p>
           )}
-          <Field label="Uusi sähköposti" htmlFor="newEmail">
+          {/* Lets iOS Password AutoFill pair the password below with this account (AUTH-10). */}
+          <input
+            type="text"
+            name="username"
+            autoComplete="username"
+            value={profile.email}
+            readOnly
+            tabIndex={-1}
+            aria-hidden
+            className="sr-only"
+          />
+          <Field label="Uusi sähköposti" htmlFor="newEmail" error={emailError.email}>
             <input
               id="newEmail"
+              name="newEmail"
               type="email"
+              inputMode="email"
+              autoComplete="email"
               autoCapitalize="none"
               autoCorrect="off"
               spellCheck={false}
+              enterKeyHint="next"
               required
               value={email}
               onChange={(event) => setEmail(event.target.value)}
-              className={controlClass}
+              className={`${controlClass}${emailError.email ? " !border-danger" : ""}`}
             />
           </Field>
-          <Field label="Nykyinen salasana" htmlFor="emailPassword">
-            <input
-              id="emailPassword"
-              type="password"
-              autoComplete="current-password"
-              required
-              value={currentPassword}
-              onChange={(event) => setCurrentPassword(event.target.value)}
-              className={controlClass}
-            />
-          </Field>
-          {emailMsg && (
-            <p className="text-sm text-ink-2" role="status">
-              {emailMsg}
-            </p>
-          )}
+          <PasswordField
+            id="emailPassword"
+            name="emailPassword"
+            label="Nykyinen salasana"
+            autoComplete="current-password"
+            enterKeyHint="go"
+            required
+            value={currentPassword}
+            error={emailError.password}
+            onChange={(event) => setCurrentPassword(event.target.value)}
+          />
+          <FormError message={emailError.form ?? ""} />
           <Button type="submit" busy={emailBusy} busyLabel="Lähetetään…" className="w-full">
             Lähetä vahvistus
           </Button>

@@ -19,6 +19,15 @@ import { bootMobile } from "@/lib/mobile/boot";
  * API with no credential (Task 4's placeholder): a stored token means an
  * instant "/dashboard" decision with no network round trip, and the app
  * shell (AppShell's own /api/auth/me check) still revalidates it for real.
+ *
+ * SHELL-25 (deliberately not an inline redirect): auth-client keeps a
+ * synchronous sign-in flag (signed-in-flag.ts), but this page does not act
+ * on it. (1) A location.replace('/dashboard') from an inline script in the
+ * static index.html would loop: Capacitor's router (CapacitorRouter) answers
+ * every path without a file extension with index.html. (2) Skipping the
+ * bootMobile() wait client-side would also skip the page-cache hydration it
+ * contains, and the dashboard would paint a skeleton instead of the cached
+ * copy (N3, P1). Revisit with a Simulator run that can measure both.
  */
 export default function BootRedirect() {
   const router = useRouter();

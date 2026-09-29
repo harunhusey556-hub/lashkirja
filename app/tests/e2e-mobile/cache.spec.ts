@@ -46,7 +46,7 @@ const EMULATED_CACHE_KEY_STORAGE_KEY = "lashkirja.emu.lashkirja.cachekey.v1";
 async function login(page: Page) {
   await page.goto("/login");
   await page.getByLabel("Sähköposti").fill(DEMO_EMAIL);
-  await page.getByLabel("Salasana").fill(DEMO_PASSWORD);
+  await page.getByLabel("Salasana", { exact: true }).fill(DEMO_PASSWORD);
   await Promise.all([
     page.waitForURL("**/dashboard"),
     page.getByRole("button", { name: "Kirjaudu sisään" }).click(),

@@ -2,18 +2,78 @@
 
 import { useState } from "react";
 import ConfirmModal from "@/components/ConfirmModal";
-import { ErrorState, LoadingState } from "@/components/AsyncState";
-import { apiFetch, errorMessage } from "@/components/clientFetch";
-import { useProfile } from "../useProfile";
+import { ExternalLink } from "@/components/ExternalLink";
+import { apiFetch, errorMessage, readJson } from "@/components/clientFetch";
+import { type Profile, useProfile } from "../useProfile";
+import { ProfileGate } from "../ProfileGate";
 import { Plus } from "lucide-react";
 import { Card, Icon, PageTitle } from "@/components/ds";
+import { PasswordField } from "@/components/ds/PasswordField";
 import { controlClass } from "@/components/control-styles";
+import { Button, Field, FormError } from "@/components/ui";
+import { hapticNotify } from "@/lib/haptics";
+import { showToast } from "@/lib/toast";
 
 type ProviderType = "gmail" | "outlook" | "icloud" | "other" | null;
 
-export default function SahkopostiPage() {
-  const { profile, setProfile, loadError, retry } = useProfile();
+/** A numbered "how to make an app password" card with a real link to the provider's page. */
+function ProviderSteps({
+  title,
+  link,
+  steps,
+}: {
+  title: string;
+  link: { href: string; label: string };
+  steps: React.ReactNode[];
+}) {
+  return (
+    <div className="space-y-2 rounded-card border border-line bg-canvas p-4 text-[13px] text-ink">
+      <p className="font-medium">{title}</p>
+      <ol className="list-decimal space-y-1 pl-4 text-ink-2">
+        {steps.map((step, index) => (
+          <li key={index}>{step}</li>
+        ))}
+      </ol>
+      <ExternalLink href={link.href} className="text-[15px]">
+        {link.label}
+      </ExternalLink>
+    </div>
+  );
+}
 
+export default function SahkopostiPage() {
+  const { profile, setProfile, loadError, retry, reload } = useProfile();
+
+  return (
+    <ProfileGate
+      profile={profile}
+      loadError={loadError}
+      retry={retry}
+      title="Sähköpostien tuonti"
+      skeletonLabel="Ladataan asetuksia"
+      fields={3}
+    >
+      {(loaded) => (
+        <>
+          <PageTitle title="Sähköpostien tuonti" />
+          <ImapCard profile={loaded} setProfile={setProfile} reload={reload} retry={retry} />
+        </>
+      )}
+    </ProfileGate>
+  );
+}
+
+function ImapCard({
+  profile,
+  setProfile,
+  reload,
+  retry,
+}: {
+  profile: Profile;
+  setProfile: (profile: Profile) => void;
+  reload: () => Promise<boolean>;
+  retry: () => void;
+}) {
   const [isAddingEmail, setIsAddingEmail] = useState(false);
   const [selectedProvider, setSelectedProvider] = useState<ProviderType>(null);
   const [imapEmail, setImapEmail] = useState("");
@@ -21,26 +81,27 @@ export default function SahkopostiPage() {
   const [imapHost, setImapHost] = useState("");
   const [imapPort, setImapPort] = useState("993");
   const [imapSaving, setImapSaving] = useState(false);
-  const [imapMsg, setImapMsg] = useState("");
+  const [imapError, setImapError] = useState("");
   const [accountToDisconnect, setAccountToDisconnect] = useState<string | null>(null);
 
   const [syncing, setSyncing] = useState(false);
-  const [syncMsg, setSyncMsg] = useState("");
+  const [syncNote, setSyncNote] = useState<{ tone: "success" | "error"; text: string } | null>(null);
 
-  async function handleEmergencySync() {
+  async function handleSync() {
     if (syncing) return;
     setSyncing(true);
-    setSyncMsg("Etsitään kuitteja...");
+    setSyncNote({ tone: "success", text: "Etsitään kuitteja…" });
     try {
       const res = await apiFetch("/api/integrations/imap/sync", { method: "POST" });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Synkronointi epäonnistui");
-      setSyncMsg(`Synkronoitu onnistuneesti! Löydettiin ${data.count} uutta kuittia.`);
+      const data = await readJson<{ count: number }>(res, "Synkronointi epäonnistui");
+      setSyncNote({ tone: "success", text: `Synkronointi valmis. Löytyi ${data.count} uutta kuittia.` });
+      void hapticNotify("success");
     } catch (err: unknown) {
-      setSyncMsg(errorMessage(err, "Synkronointi epäonnistui"));
+      setSyncNote({ tone: "error", text: errorMessage(err, "Synkronointi epäonnistui") });
+      void hapticNotify("error");
     } finally {
       setSyncing(false);
-      setTimeout(() => setSyncMsg(""), 6000);
+      setTimeout(() => setSyncNote(null), 6000);
     }
   }
 
@@ -48,39 +109,39 @@ export default function SahkopostiPage() {
     switch (selectedProvider) {
       case "gmail":
         return (
-          <div className="space-y-2 rounded-card border border-line bg-canvas p-4 text-[13px] text-ink">
-            <p className="font-medium">Näin luot Google-sovellussalasanan:</p>
-            <ol className="list-decimal space-y-1 pl-4 text-ink-2">
-              <li>Mene <b>Google-tilin asetuksiin</b> (myaccount.google.com).</li>
-              <li>Valitse <b>Tietoturva</b> (Security). Varmista, että 2-vaiheinen vahvistus on päällä.</li>
-              <li>Hae asetuksista <b>Sovellussalasanat</b> (App Passwords) ja luo uusi.</li>
-              <li>Kopioi 16-kirjaiminen koodi alle.</li>
-            </ol>
-          </div>
+          <ProviderSteps
+            title="Näin luot Google-sovellussalasanan:"
+            link={{ href: "https://myaccount.google.com/apppasswords", label: "Avaa Google-tilin sovellussalasanat" }}
+            steps={[
+              <>Avaa <b>Google-tilin asetukset</b>. Varmista, että 2-vaiheinen vahvistus on päällä.</>,
+              <>Hae asetuksista <b>Sovellussalasanat</b> ja luo uusi.</>,
+              <>Kopioi 16-kirjaiminen koodi alle.</>,
+            ]}
+          />
         );
       case "outlook":
         return (
-          <div className="space-y-2 rounded-card border border-line bg-canvas p-4 text-[13px] text-ink">
-            <p className="font-medium">Näin luot Microsoft-sovellussalasanan:</p>
-            <ol className="list-decimal space-y-1 pl-4 text-ink-2">
-              <li>Mene <b>Microsoft-tilin turva-asetuksiin</b>.</li>
-              <li>Valitse <b>Lisäsuojausasetukset</b> (Advanced security options).</li>
-              <li>Varmista, että kaksivaiheinen todennus on käytössä.</li>
-              <li>Valitse &quot;Luo uusi sovellussalasana&quot; (Create a new app password).</li>
-            </ol>
-          </div>
+          <ProviderSteps
+            title="Näin luot Microsoft-sovellussalasanan:"
+            link={{ href: "https://account.microsoft.com/security", label: "Avaa Microsoft-tilin turva-asetukset" }}
+            steps={[
+              <>Valitse <b>Lisäsuojausasetukset</b>.</>,
+              <>Varmista, että kaksivaiheinen todennus on käytössä.</>,
+              <>Valitse &quot;Luo uusi sovellussalasana&quot; ja kopioi se alle.</>,
+            ]}
+          />
         );
       case "icloud":
         return (
-          <div className="space-y-2 rounded-card border border-line bg-canvas p-4 text-[13px] text-ink">
-            <p className="font-medium">Näin luot Apple-sovellussalasanan:</p>
-            <ol className="list-decimal space-y-1 pl-4 text-ink-2">
-              <li>Kirjaudu sisään osoitteessa <b>appleid.apple.com</b>.</li>
-              <li>Mene <b>Sisäänkirjautuminen ja suojaus</b> -osioon.</li>
-              <li>Valitse <b>Appikohtaiset salasanat</b>.</li>
-              <li>Luo uusi salasana sovellukselle ja kopioi se alle.</li>
-            </ol>
-          </div>
+          <ProviderSteps
+            title="Näin luot Apple-sovellussalasanan:"
+            link={{ href: "https://appleid.apple.com", label: "Avaa Apple-tilin sivu" }}
+            steps={[
+              <>Kirjaudu sisään ja avaa <b>Sisäänkirjautuminen ja suojaus</b>.</>,
+              <>Valitse <b>Appikohtaiset salasanat</b>.</>,
+              <>Luo uusi salasana sovellukselle ja kopioi se alle.</>,
+            ]}
+          />
         );
       default:
         return (
@@ -93,7 +154,7 @@ export default function SahkopostiPage() {
 
   const handleProviderSelect = (provider: ProviderType) => {
     setSelectedProvider(provider);
-    setImapMsg("");
+    setImapError("");
     if (provider === "gmail") {
       setImapHost("imap.gmail.com");
       setImapPort("993");
@@ -112,76 +173,96 @@ export default function SahkopostiPage() {
   const cancelAdding = () => {
     setIsAddingEmail(false);
     setSelectedProvider(null);
-    setImapMsg("");
+    setImapError("");
     setImapEmail("");
     setImapPass("");
   };
 
-  if (loadError) {
-    return (
-      <>
-        <ErrorState message={loadError} onRetry={retry} />
-      </>
-    );
+  async function connect(event: React.FormEvent) {
+    event.preventDefault();
+    if (imapSaving) return;
+    setImapSaving(true);
+    setImapError("");
+    try {
+      const res = await apiFetch("/api/integrations/imap", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          email: imapEmail,
+          password: imapPass,
+          host: imapHost,
+          port: parseInt(imapPort, 10),
+        }),
+      });
+      const json = await readJson<{ email: string }>(res, "Yhdistäminen epäonnistui");
+      // AUTH-15: the server answers with the address only, so the new row's id
+      // comes from the profile itself. A made-up id would make "Katkaise
+      // yhteys" delete something that does not exist.
+      const refreshed = await reload();
+      if (!refreshed) retry();
+      showToast({ tone: "success", text: `Sähköposti ${json.email} yhdistetty.` });
+      cancelAdding();
+    } catch (err: unknown) {
+      void hapticNotify("error");
+      setImapError(errorMessage(err, "Yhdistäminen epäonnistui"));
+    } finally {
+      setImapSaving(false);
+    }
   }
 
-  if (!profile) {
-    return (
-      <>
-        <LoadingState label="Ladataan asetuksia..." />
-      </>
-    );
-  }
+  const canConnect = Boolean(imapEmail && imapPass && imapHost);
 
   return (
-    <div className="space-y-6">
-      <PageTitle title="Sähköpostien tuonti" />
+    <>
       <Card className="space-y-6">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div className="min-w-0">
-            <h3 className="text-[15px] font-medium text-ink">Sähköpostiautomaatio</h3>
+            <h2 className="text-[15px] font-medium text-ink">Sähköpostiautomaatio</h2>
             <p className="mt-1 text-[13px] text-ink-2">
               Yhdistä sähköpostiosoitteesi, niin sovellus hakee ja analysoi automaattisesti siihen saapuneet kuitit.
             </p>
           </div>
           {profile.imapAccounts.length > 0 && (
-            <button
+            <Button
               type="button"
-              onClick={handleEmergencySync}
-              disabled={syncing}
-              className="active-press touch-target shrink-0 self-start rounded-card bg-ink px-4 py-2 text-xs font-medium text-canvas disabled:opacity-50"
+              variant="secondary"
+              className="shrink-0 self-start"
+              onClick={() => void handleSync()}
+              busy={syncing}
+              busyLabel="Synkronoidaan…"
             >
-              {syncing ? "Synkronoidaan..." : "Synkronoi kuitit nyt"}
-            </button>
+              Synkronoi kuitit nyt
+            </Button>
           )}
         </div>
 
-        {syncMsg && (
+        {syncNote && (
           <div
+            role={syncNote.tone === "error" ? "alert" : "status"}
             className={`rounded-card p-3 text-sm ${
-              syncMsg.includes("epäonnistui") ? "bg-danger/10 text-danger" : "bg-success/10 text-success"
+              syncNote.tone === "error" ? "bg-danger/10 text-danger" : "bg-success/10 text-success"
             }`}
           >
-            {syncMsg}
+            {syncNote.text}
           </div>
         )}
 
         {profile.imapAccounts.length > 0 && (
           <div className="space-y-3">
-            <h4 className="text-[13px] text-ink-2">Yhdistetyt tilit</h4>
+            <h3 className="text-[13px] text-ink-2">Yhdistetyt tilit</h3>
             {profile.imapAccounts.map((account) => (
               <div
                 key={account.id}
-                className="flex items-center justify-between rounded-card border border-success/30 bg-success/5 p-4"
+                className="flex items-center justify-between gap-3 rounded-card border border-success/30 bg-success/5 p-4"
               >
-                <div>
+                <div className="min-w-0">
                   <p className="text-sm font-medium text-success">Aktiivinen</p>
-                  <p className="mt-0.5 text-xs text-ink">{account.email}</p>
+                  <p className="mt-0.5 truncate text-[13px] text-ink">{account.email}</p>
                 </div>
                 <button
                   type="button"
                   onClick={() => setAccountToDisconnect(account.id)}
-                  className="active-press touch-target text-xs font-medium text-danger"
+                  className="active-press flex min-h-11 shrink-0 items-center px-2 text-[15px] font-medium text-danger"
                 >
                   Katkaise yhteys
                 </button>
@@ -195,7 +276,7 @@ export default function SahkopostiPage() {
             <button
               type="button"
               onClick={() => setIsAddingEmail(true)}
-              className="active-press touch-target flex w-full items-center justify-center gap-2 rounded-card border border-dashed border-line py-3 text-[13px] font-medium text-ink"
+              className="active-press touch-target flex w-full items-center justify-center gap-2 rounded-card border border-dashed border-line py-3 text-[15px] font-medium text-ink"
             >
               <Icon icon={Plus} size="inline" />
               Lisää toinen sähköpostitili
@@ -203,11 +284,15 @@ export default function SahkopostiPage() {
           ) : (
             <div className="space-y-6">
               <div className="flex items-center justify-between">
-                <h4 className="text-[13px] text-ink-2">
+                <h3 className="text-[13px] text-ink-2">
                   {profile.imapAccounts.length > 0 ? "Lisää uusi sähköpostitili" : "Yhdistä sähköpostitili"}
-                </h4>
+                </h3>
                 {profile.imapAccounts.length > 0 && (
-                  <button type="button" onClick={cancelAdding} className="active-press touch-target text-xs font-medium text-ink-2">
+                  <button
+                    type="button"
+                    onClick={cancelAdding}
+                    className="active-press flex min-h-11 items-center px-2 text-[15px] font-medium text-ink-2"
+                  >
                     Peruuta
                   </button>
                 )}
@@ -229,7 +314,7 @@ export default function SahkopostiPage() {
                       onClick={() => handleProviderSelect(value)}
                       className="active-press touch-target flex flex-col items-center justify-center rounded-card border border-line p-4"
                     >
-                      <span className="text-[13px] font-medium text-ink">{label}</span>
+                      <span className="text-[15px] font-medium text-ink">{label}</span>
                     </button>
                   ))}
                 </div>
@@ -237,120 +322,88 @@ export default function SahkopostiPage() {
                 <div className="space-y-5">
                   {renderProviderInstructions()}
 
-                  <form
-                    onSubmit={async (e) => {
-                      e.preventDefault();
-                      if (imapSaving) return;
-                      setImapSaving(true);
-                      setImapMsg("Yhdistetään ja testataan...");
-                      try {
-                        const res = await apiFetch("/api/integrations/imap", {
-                          method: "POST",
-                          headers: { "Content-Type": "application/json" },
-                          body: JSON.stringify({
-                            email: imapEmail,
-                            password: imapPass,
-                            host: imapHost,
-                            port: parseInt(imapPort, 10),
-                          }),
-                        });
-                        const json = await res.json();
-                        if (!res.ok) throw new Error(json.error || "Yhdistäminen epäonnistui");
-                        setProfile({
-                          ...profile,
-                          imapAccounts: [
-                            ...profile.imapAccounts,
-                            { id: Math.random().toString(), email: json.email },
-                          ],
-                        });
-                        cancelAdding();
-                      } catch (err: unknown) {
-                        setImapMsg(errorMessage(err, "Tallennus epäonnistui"));
-                      } finally {
-                        setImapSaving(false);
-                      }
-                    }}
-                    className="space-y-4"
-                  >
+                  <form onSubmit={(event) => void connect(event)} className="space-y-4">
                     {selectedProvider === "other" && (
                       <div className="grid grid-cols-[1fr_100px] gap-3">
-                        <div>
-                          <label className="mb-1.5 block text-[13px] text-ink-2">IMAP Palvelin</label>
+                        <Field label="IMAP-palvelin" htmlFor="imapHost">
                           <input
+                            id="imapHost"
+                            name="imapHost"
                             type="text"
+                            inputMode="url"
+                            autoCapitalize="none"
+                            autoCorrect="off"
+                            spellCheck={false}
+                            enterKeyHint="next"
                             placeholder="esim. imap.omaverkko.fi"
                             value={imapHost}
                             onChange={(e) => setImapHost(e.target.value)}
                             className={controlClass}
                             required
                           />
-                        </div>
-                        <div>
-                          <label className="mb-1.5 block text-[13px] text-ink-2">Portti</label>
+                        </Field>
+                        <Field label="Portti" htmlFor="imapPort">
                           <input
-                            type="number"
+                            id="imapPort"
+                            name="imapPort"
+                            type="text"
+                            inputMode="numeric"
+                            pattern="[0-9]*"
+                            maxLength={5}
+                            enterKeyHint="next"
                             value={imapPort}
-                            onChange={(e) => setImapPort(e.target.value)}
+                            onChange={(e) => setImapPort(e.target.value.replace(/\D/g, ""))}
                             className={controlClass}
                             required
                           />
-                        </div>
+                        </Field>
                       </div>
                     )}
 
-                    <div>
-                      <label className="mb-1.5 block text-[13px] text-ink-2">Sähköpostiosoite</label>
+                    <Field label="Sähköpostiosoite" htmlFor="imapEmail">
                       <input
+                        id="imapEmail"
+                        name="imapEmail"
                         type="email"
-                        value={imapEmail}
-                        onChange={(e) => setImapEmail(e.target.value)}
-                        className={controlClass}
+                        inputMode="email"
+                        autoComplete="email"
                         autoCapitalize="none"
                         autoCorrect="off"
                         spellCheck={false}
-                        required
-                      />
-                    </div>
-                    <div>
-                      <label className="mb-1.5 block text-[13px] text-ink-2">Sovellussalasana</label>
-                      <input
-                        type="password"
-                        value={imapPass}
-                        onChange={(e) => setImapPass(e.target.value)}
+                        enterKeyHint="next"
+                        value={imapEmail}
+                        onChange={(e) => setImapEmail(e.target.value)}
                         className={controlClass}
                         required
                       />
-                    </div>
+                    </Field>
+                    <PasswordField
+                      id="imapPass"
+                      name="imapPass"
+                      label="Sovellussalasana"
+                      autoComplete="off"
+                      enterKeyHint="go"
+                      value={imapPass}
+                      onChange={(e) => setImapPass(e.target.value)}
+                      required
+                    />
 
                     <div className="flex gap-3">
-                      <button
-                        type="button"
-                        onClick={() => setSelectedProvider(null)}
-                        className="active-press touch-target rounded-card border border-line px-4 py-2.5 text-[13px] font-medium text-ink"
-                      >
+                      <Button type="button" variant="secondary" onClick={() => setSelectedProvider(null)}>
                         Takaisin
-                      </button>
-                      <button
+                      </Button>
+                      <Button
                         type="submit"
-                        disabled={imapSaving || !imapEmail || !imapPass || !imapHost}
-                        aria-describedby={!imapEmail || !imapPass || !imapHost ? "imap-connect-reason" : undefined}
-                        className="active-press touch-target flex-1 rounded-card bg-ink py-2.5 text-[13px] font-medium text-canvas disabled:opacity-50"
+                        className="flex-1"
+                        disabled={!canConnect}
+                        disabledReason={!canConnect ? "Täytä sähköposti, salasana ja palvelin." : undefined}
+                        busy={imapSaving}
+                        busyLabel="Yhdistetään ja testataan…"
                       >
-                        {imapSaving ? "Yhdistetään..." : "Yhdistä"}
-                      </button>
+                        Yhdistä
+                      </Button>
                     </div>
-                    {(!imapEmail || !imapPass || !imapHost) && (
-                      <p id="imap-connect-reason" className="text-xs text-ink-2">
-                        Täytä sähköposti, salasana ja palvelin.
-                      </p>
-                    )}
-                    {imapSaving && (
-                      <p className="text-xs text-ink-2" role="status">
-                        Yhdistäminen on kesken.
-                      </p>
-                    )}
-
-                    {imapMsg && <p className="text-xs text-danger">{imapMsg}</p>}
+                    <FormError message={imapError} />
                   </form>
                 </div>
               )}
@@ -367,27 +420,16 @@ export default function SahkopostiPage() {
         onConfirm={async () => {
           if (!accountToDisconnect) return;
           const id = accountToDisconnect;
-          try {
-            const res = await apiFetch(`/api/integrations/imap?id=${id}`, { method: "DELETE" });
-            if (!res.ok) {
-              const message = "Yhteyden katkaisu epäonnistui. Yritä uudelleen.";
-              setSyncMsg(message);
-              throw new Error(message);
-            }
-            setProfile({
-              ...profile,
-              imapAccounts: profile.imapAccounts.filter((a) => a.id !== id),
-            });
-            setAccountToDisconnect(null);
-          } catch (error) {
-            if (error instanceof Error && error.message) throw error;
-            const message = "Yhteyden katkaisu epäonnistui. Tarkista verkkoyhteys ja yritä uudelleen.";
-            setSyncMsg(message);
-            throw new Error(message);
-          }
+          const res = await apiFetch(`/api/integrations/imap?id=${encodeURIComponent(id)}`, { method: "DELETE" });
+          if (!res.ok) throw new Error("Yhteyden katkaisu epäonnistui. Yritä uudelleen.");
+          setProfile({
+            ...profile,
+            imapAccounts: profile.imapAccounts.filter((a) => a.id !== id),
+          });
+          setAccountToDisconnect(null);
         }}
         onCancel={() => setAccountToDisconnect(null)}
       />
-    </div>
+    </>
   );
 }

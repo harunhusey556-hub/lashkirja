@@ -28,6 +28,11 @@ export interface Profile {
 /**
  * The one profile load/save used by every settings page. Saves are
  * optimistic: the UI flips immediately and rolls back on failure.
+ *
+ * The first render already holds the last profile (SHELL-08): the initial
+ * state reads the page cache synchronously, which the app boot has hydrated
+ * from the encrypted store before any screen mounts, so Koti's subtitle and
+ * the settings forms never pop in after the network round trip.
  */
 export function useProfile() {
   const [profile, setProfile] = useState<Profile | null>(
@@ -63,6 +68,21 @@ export function useProfile() {
       });
     return () => controller.abort();
   }, [loadAttempt]);
+
+  /** Fetch the profile again now and swap it in (e.g. after a connect that changed ids). */
+  const reload = useCallback(async (): Promise<boolean> => {
+    try {
+      const response = await apiFetch("/api/profile");
+      const data = await readJson<{ profile: Profile }>(response, "Asetusten lataus epäonnistui");
+      if (!data.profile) return false;
+      writePageCache("profile", data.profile);
+      setProfile(data.profile);
+      setLoadError("");
+      return true;
+    } catch {
+      return false;
+    }
+  }, []);
 
   const retry = useCallback(() => {
     setLoadError("");
@@ -113,7 +133,7 @@ export function useProfile() {
     [profile, saving]
   );
 
-  return { profile, setProfile, saving, savedMsg, loadError, retry, save };
+  return { profile, setProfile, saving, savedMsg, loadError, retry, reload, save };
 }
 
 /** Shared save/error status line under settings forms. */

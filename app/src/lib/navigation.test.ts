@@ -120,7 +120,7 @@ describe("navigation registry", () => {
     });
     expect(backTarget("/asiakkaat/asiakas?id=42")).toEqual({ label: "Asiakkaat", href: "/asiakkaat" });
     expect(backTarget("/asiakkaat")).toEqual({ label: "Myynti", href: "/laskut" });
-    expect(backTarget("/asetukset/tili/salasana")).toEqual({ label: "Tili", href: "/asetukset/tili" });
+    expect(backTarget("/asetukset/tili/salasana")).toEqual({ label: "Tili ja turvallisuus", href: "/asetukset/tili" });
     expect(backTarget("/dashboard")).toBeNull();
   });
 

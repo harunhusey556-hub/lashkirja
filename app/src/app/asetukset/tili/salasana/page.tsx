@@ -1,21 +1,44 @@
 "use client";
 
 import { useState } from "react";
-import { apiFetch, errorMessage, readJson } from "@/components/clientFetch";
+import { ApiError, apiFetch, errorMessage, readJson } from "@/components/clientFetch";
 import { Card, PageTitle } from "@/components/ds";
-import { Button, Field } from "@/components/ui";
-import { controlClass } from "@/components/control-styles";
+import { PasswordField } from "@/components/ds/PasswordField";
+import { useSession } from "@/components/SessionProvider";
+import { Button, FormError } from "@/components/ui";
+import { hapticNotify } from "@/lib/haptics";
+import { showToast } from "@/lib/toast";
+
+const MIN_PASSWORD_LENGTH = 10;
+
+type Errors = { current?: string; next?: string; repeat?: string; form?: string };
 
 export default function SalasanaPage() {
+  const { user } = useSession();
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
-  const [passwordMsg, setPasswordMsg] = useState("");
-  const [passwordBusy, setPasswordBusy] = useState(false);
+  const [repeatPassword, setRepeatPassword] = useState("");
+  const [errors, setErrors] = useState<Errors>({});
+  const [busy, setBusy] = useState(false);
 
   async function changePassword(event: React.FormEvent) {
     event.preventDefault();
-    setPasswordBusy(true);
-    setPasswordMsg("");
+    if (busy) return;
+    const next: Errors = {};
+    if (!currentPassword) next.current = "Kirjoita nykyinen salasana.";
+    if (newPassword.length < MIN_PASSWORD_LENGTH) {
+      next.next = `Uudessa salasanassa on oltava vähintään ${MIN_PASSWORD_LENGTH} merkkiä.`;
+    }
+    if (repeatPassword !== newPassword) next.repeat = "Salasanat eivät täsmää.";
+    setErrors(next);
+    const firstInvalid = next.current ? "currentPassword" : next.next ? "newPassword" : next.repeat ? "repeatPassword" : null;
+    if (firstInvalid) {
+      void hapticNotify("error");
+      document.getElementById(firstInvalid)?.focus();
+      return;
+    }
+
+    setBusy(true);
     try {
       const response = await apiFetch("/api/auth/password", {
         method: "POST",
@@ -25,51 +48,77 @@ export default function SalasanaPage() {
       await readJson(response, "Salasanan vaihto epäonnistui");
       setCurrentPassword("");
       setNewPassword("");
-      setPasswordMsg("Salasana vaihdettu. Muut laitteet kirjattiin ulos.");
+      setRepeatPassword("");
+      showToast({ tone: "success", text: "Salasana vaihdettu. Muut laitteet kirjattiin ulos." });
     } catch (error: unknown) {
-      setPasswordMsg(errorMessage(error, "Salasanan vaihto epäonnistui"));
+      void hapticNotify("error");
+      // A wrong current password comes back as 401 with its own message: it
+      // belongs under that field, not in an "expired session" banner.
+      if (error instanceof ApiError && error.status === 401) {
+        setErrors({ current: errorMessage(error, "Nykyinen salasana on väärä.") });
+        document.getElementById("currentPassword")?.focus();
+      } else {
+        setErrors({ form: errorMessage(error, "Salasanan vaihto epäonnistui") });
+      }
     } finally {
-      setPasswordBusy(false);
+      setBusy(false);
     }
   }
 
   return (
     <div className="space-y-6">
       <PageTitle title="Vaihda salasana" />
-      <form onSubmit={(event) => void changePassword(event)}>
+      <form onSubmit={(event) => void changePassword(event)} noValidate>
         <Card className="space-y-4">
           <p className="text-[13px] text-ink-2 leading-relaxed">
-            Nykyinen salasana vaaditaan. Uudessa on vähintään 10 merkkiä. Muut kirjautuneet laitteet suljetaan.
+            Nykyinen salasana vaaditaan. Uudessa on vähintään {MIN_PASSWORD_LENGTH} merkkiä. Muut kirjautuneet laitteet suljetaan.
           </p>
-          <Field label="Nykyinen salasana" htmlFor="currentPassword">
-            <input
-              id="currentPassword"
-              type="password"
-              autoComplete="current-password"
-              required
-              value={currentPassword}
-              onChange={(event) => setCurrentPassword(event.target.value)}
-              className={controlClass}
-            />
-          </Field>
-          <Field label="Uusi salasana" htmlFor="newPassword">
-            <input
-              id="newPassword"
-              type="password"
-              autoComplete="new-password"
-              required
-              minLength={10}
-              value={newPassword}
-              onChange={(event) => setNewPassword(event.target.value)}
-              className={controlClass}
-            />
-          </Field>
-          {passwordMsg && (
-            <p className="text-sm text-ink-2" role="status">
-              {passwordMsg}
-            </p>
-          )}
-          <Button type="submit" className="w-full" busy={passwordBusy} busyLabel="Vaihdetaan…">
+          {/* Lets iOS Password AutoFill pair the new password with this account (AUTH-10). */}
+          <input
+            type="text"
+            name="username"
+            autoComplete="username"
+            value={user?.email ?? ""}
+            readOnly
+            tabIndex={-1}
+            aria-hidden
+            className="sr-only"
+          />
+          <PasswordField
+            id="currentPassword"
+            name="currentPassword"
+            label="Nykyinen salasana"
+            autoComplete="current-password"
+            enterKeyHint="next"
+            required
+            value={currentPassword}
+            error={errors.current}
+            onChange={(event) => setCurrentPassword(event.target.value)}
+          />
+          <PasswordField
+            id="newPassword"
+            name="newPassword"
+            label="Uusi salasana"
+            autoComplete="new-password"
+            enterKeyHint="next"
+            required
+            value={newPassword}
+            error={errors.next}
+            onChange={(event) => setNewPassword(event.target.value)}
+          />
+          <PasswordField
+            id="repeatPassword"
+            name="repeatPassword"
+            label="Toista uusi salasana"
+            autoComplete="new-password"
+            enterKeyHint="go"
+            required
+            value={repeatPassword}
+            error={errors.repeat}
+            onChange={(event) => setRepeatPassword(event.target.value)}
+          />
+          <FormError message={errors.form ?? ""} />
+          <Button type="submit" className="w-full" busy={busy} busyLabel="Vaihdetaan…">
             Vaihda salasana
           </Button>
         </Card>

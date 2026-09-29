@@ -19,6 +19,7 @@ import { wipePersistentCache } from "@/lib/offline/persistent-cache";
 import { configureHttpCachePersistence } from "@/lib/offline/http-cache";
 import { activatePersistentCache } from "@/lib/mobile/boot";
 import { resetOfflineReceiptQueueForLogout } from "@/components/useOfflineReceiptQueue";
+import { setSignedInFlag } from "@/lib/signed-in-flag";
 
 export interface StoredAuth {
   token: string;
@@ -60,24 +61,29 @@ export function getAccessToken(): string | null {
 async function persistAuth(auth: StoredAuth): Promise<void> {
   memoryAuth = auth;
   await secureStore().set(SECURE_KEYS.auth, JSON.stringify(auth));
+  setSignedInFlag(true);
 }
 
 export async function loadStoredAuth(): Promise<StoredAuth | null> {
   const raw = await secureStore().get(SECURE_KEYS.auth);
   if (!raw) {
     memoryAuth = null;
+    setSignedInFlag(false);
     return null;
   }
   try {
     const parsed = JSON.parse(raw) as Partial<StoredAuth>;
     if (!parsed || typeof parsed.token !== "string" || typeof parsed.userId !== "string") {
       memoryAuth = null;
+      setSignedInFlag(false);
       return null;
     }
     memoryAuth = parsed as StoredAuth;
+    setSignedInFlag(true);
     return memoryAuth;
   } catch {
     memoryAuth = null;
+    setSignedInFlag(false);
     return null;
   }
 }
@@ -200,6 +206,9 @@ async function postLogout(token: string): Promise<boolean> {
 
 async function clearClientAuthState(): Promise<void> {
   memoryAuth = null;
+  // Cleared first and synchronously: the boot page must never send a signed-
+  // out user to the shell because the wipe below is still in flight.
+  setSignedInFlag(false);
   await secureStore().remove(SECURE_KEYS.auth);
   clearPageCache();
   clearAllDrafts();
@@ -261,8 +270,12 @@ export async function retryPendingRevoke(): Promise<void> {
 export async function expireSession(): Promise<void> {
   if (expiredThisPeriod) return;
   expiredThisPeriod = true;
+  // AUTH-06: "Istuntosi vanhentui" only makes sense for a person who had a
+  // session. A first launch has no token, its unauthenticated calls answer
+  // 401, and that must land on a plain login page.
+  const hadSession = memoryAuth !== null;
   await clearClientAuthState();
-  appNavigate("/login?error=expired", { replace: true });
+  appNavigate(hadSession ? "/login?error=expired" : "/login", { replace: true });
 }
 
 /**

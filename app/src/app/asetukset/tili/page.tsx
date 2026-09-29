@@ -1,20 +1,16 @@
 "use client";
 
-import { KeyRound, Smartphone, UserRound } from "lucide-react";
+import { KeyRound, Lock, ScanFace, Smartphone } from "lucide-react";
 import { PageTitle } from "@/components/ds";
 import { SettingsGroup, SettingsRow } from "@/components/SettingsList";
 
+/** AUTH-29: the one home for sign-in and device security (it used to be split
+ * over "Tili" and "Turvallisuus", with "Profiili" repeated from the parent). */
 export default function TiliPage() {
   return (
     <div className="space-y-6">
-      <PageTitle title="Tili" />
-      <SettingsGroup label="Tili">
-        <SettingsRow
-          href="/asetukset/profiili"
-          icon={UserRound}
-          label="Profiili"
-          hint="Nimi ja sähköpostiosoite"
-        />
+      <PageTitle title="Tili ja turvallisuus" />
+      <SettingsGroup label="Kirjautuminen">
         <SettingsRow
           href="/asetukset/tili/salasana"
           icon={KeyRound}
@@ -26,6 +22,20 @@ export default function TiliPage() {
           icon={Smartphone}
           label="Laitteet"
           hint="Kirjautuneet istunnot tällä tilillä"
+        />
+      </SettingsGroup>
+      <SettingsGroup label="Tämä laite">
+        <SettingsRow
+          href="/asetukset/turvallisuus/lukitus"
+          icon={Lock}
+          label="Näytön lukitus"
+          hint="4–8 numeron koodi tällä laitteella"
+        />
+        <SettingsRow
+          href="/asetukset/turvallisuus/biometria"
+          icon={ScanFace}
+          label="Face ID / Touch ID"
+          hint="Avaa lukitus, kun palaat sovellukseen"
         />
       </SettingsGroup>
     </div>

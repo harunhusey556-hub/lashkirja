@@ -18,7 +18,8 @@ import {
   type BiometryStatus,
 } from "@/lib/biometry";
 import { nextLockView, type LockView } from "@/lib/session-policy";
-import { Button, controlClass } from "@/components/ui";
+import { Button } from "@/components/ui";
+import { PasswordField } from "@/components/ds/PasswordField";
 import { AppMark } from "@/components/AppMark";
 import { leaveAfterSignOut } from "@/components/clientFetch";
 import { useSession } from "@/components/SessionProvider";
@@ -211,17 +212,21 @@ export function AppLock({ children }: { children: React.ReactNode }) {
             {bioNote}
           </p>
         )}
-        <label htmlFor="app-lock-pin" className="mb-1.5 block text-[13px] text-ink-2">
-          Lukituskoodi
-        </label>
-        <input
+        <PasswordField
           id="app-lock-pin"
-          type="password"
+          label="Lukituskoodi"
           inputMode="numeric"
+          pattern="[0-9]*"
+          maxLength={8}
           autoComplete="off"
+          enterKeyHint="go"
+          showLabel="Näytä koodi"
+          hideLabel="Piilota koodi"
           value={pin}
-          onChange={(event) => setPin(event.target.value)}
-          className={`${controlClass} text-center tracking-[0.3em]`}
+          onChange={(event) => setPin(event.target.value.replace(/\D/g, "").slice(0, 8))}
+          // Symmetric side padding keeps the centred dots centred beside the eye.
+          style={{ paddingLeft: 48 }}
+          inputClassName="text-center tracking-[0.3em]"
         />
         {waitMs > 0 && (
           <p className="text-sm text-ink-2" role="status">

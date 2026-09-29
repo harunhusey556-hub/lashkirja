@@ -1,39 +1,17 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
 import { ConnectionNotice } from "@/components/ScreenState";
-import { leaveAfterSignOut } from "@/components/clientFetch";
-import { BriefcaseBusiness, CircleHelp, Database, Mail, ReceiptText, ShieldCheck, UserRound } from "lucide-react";
-import { Card, PageTitle } from "@/components/ds";
+import { BriefcaseBusiness, CircleHelp, Database, Mail, ReceiptText, ShieldCheck } from "lucide-react";
+import { Card, PageTitle, Skeleton } from "@/components/ds";
 import { SettingsChevron, SettingsGroup, SettingsRow } from "@/components/SettingsList";
 import { Button } from "@/components/ui";
+import { useSignOut } from "@/components/useSignOut";
 import { useProfile } from "./useProfile";
 
 export default function AsetuksetPage() {
   const { profile, loadError, retry } = useProfile();
-  const [signingOut, setSigningOut] = useState(false);
-  const [signOutError, setSignOutError] = useState("");
-
-  async function handleSignOut() {
-    if (signingOut) return;
-    setSigningOut(true);
-    setSignOutError("");
-    const left = await leaveAfterSignOut();
-    if (!left) {
-      setSigningOut(false);
-      setSignOutError("Uloskirjautuminen epäonnistui. Istunto voi olla yhä voimassa.");
-    }
-  }
-
-  if (loadError) {
-    return (
-      <div className="space-y-6">
-        <PageTitle title="Asetukset" />
-        <ConnectionNotice error={new Error(loadError)} fallback={loadError} onRetry={retry} />
-      </div>
-    );
-  }
+  const { requestSignOut, signingOut, signOutError, confirmDialog } = useSignOut();
 
   const emailHint = profile
     ? profile.imapAccounts.length > 0
@@ -44,6 +22,12 @@ export default function AsetuksetPage() {
   return (
     <div className="space-y-6">
       <PageTitle title="Asetukset" />
+
+      {/* A failed profile load never hides the rest: the rows do not need it,
+          and "Kirjaudu ulos" must stay reachable. */}
+      {loadError && !profile && (
+        <ConnectionNotice error={new Error(loadError)} fallback={loadError} onRetry={retry} compact />
+      )}
 
       {/* Profile summary: tap through to the editable profile page. */}
       {profile ? (
@@ -61,12 +45,12 @@ export default function AsetuksetPage() {
             <SettingsChevron />
           </Card>
         </Link>
-      ) : (
+      ) : loadError ? null : (
         <Card className="flex items-center gap-4">
-          <div className="h-12 w-12 shrink-0 animate-pulse rounded-full bg-line/60" />
+          <Skeleton className="h-12 w-12 shrink-0" radius="full" />
           <div className="flex-1 space-y-2">
-            <div className="h-4 w-32 animate-pulse rounded bg-line/60" />
-            <div className="h-3 w-44 animate-pulse rounded bg-line/40" />
+            <Skeleton className="h-4 w-32" />
+            <Skeleton className="h-3 w-44" tone="soft" />
           </div>
         </Card>
       )}
@@ -87,12 +71,11 @@ export default function AsetuksetPage() {
       </SettingsGroup>
 
       <SettingsGroup label="Tili">
-        <SettingsRow href="/asetukset/tili" icon={UserRound} label="Tili" hint="Salasana ja kirjautuneet laitteet" />
         <SettingsRow
-          href="/asetukset/turvallisuus"
+          href="/asetukset/tili"
           icon={ShieldCheck}
-          label="Turvallisuus"
-          hint="Näytön koodi ja Face ID"
+          label="Tili ja turvallisuus"
+          hint="Salasana, laitteet, näytön koodi ja Face ID"
         />
         <SettingsRow
           href="/asetukset/tietosuoja"
@@ -107,7 +90,7 @@ export default function AsetuksetPage() {
       </SettingsGroup>
 
       <SettingsGroup label="Ohje">
-        <SettingsRow href="/asetukset/ohje" icon={CircleHelp} label="Ohje ja tuki" hint="Virheviite ja tukiviesti" />
+        <SettingsRow href="/asetukset/ohje" icon={CircleHelp} label="Ohje ja tuki" hint="Ilmoita ongelmasta ja yhteystiedot" />
       </SettingsGroup>
 
       {signOutError && (
@@ -119,12 +102,13 @@ export default function AsetuksetPage() {
         type="button"
         variant="danger"
         className="w-full"
-        onClick={handleSignOut}
+        onClick={requestSignOut}
         busy={signingOut}
         busyLabel="Kirjaudutaan ulos…"
       >
         Kirjaudu ulos
       </Button>
+      {confirmDialog}
     </div>
   );
 }

@@ -79,7 +79,7 @@ html[data-keyboard="open"] {
 }
 
 /* Lock the document: the page itself never scrolls or rubber-bands on iOS.
-   Scrolling happens only inside .app-main (app) or .login-scroll (login). */
+   Scrolling happens only inside .app-main (app) or .bare-frame (login and recovery pages). */
 html,
 body {
   position: fixed;
@@ -998,4 +998,31 @@ html[data-page-hidden] *,
 html[data-page-hidden] *::before,
 html[data-page-hidden] *::after {
   animation-play-state: paused !important;
+}
+
+/* SHELL-22 / AUTH-07: the bare pages (login, password recovery, e-mail
+   confirmation) sit outside .app-frame. This frame follows the usable area,
+   so a keyboard lifts its bottom edge, and it is the ONE scroll container: a
+   short card is centred by the auto margins on .bare-content, a tall one (or
+   a keyboard-sized viewport) scrolls instead of being clipped at the top. */
+.bare-frame {
+  position: fixed;
+  left: 0;
+  right: 0;
+  top: var(--usable-top);
+  bottom: var(--usable-bottom);
+  display: flex;
+  flex-direction: column;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+  -webkit-overflow-scrolling: touch;
+  padding: max(1rem, var(--safe-top)) 1rem max(1rem, var(--safe-bottom));
+  background: var(--color-canvas);
+}
+
+.bare-content {
+  width: 100%;
+  max-width: 24rem;
+  margin: auto;
 }

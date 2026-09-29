@@ -25,10 +25,9 @@ import { AppMark } from "@/components/AppMark";
 import { ConnectivityBanner } from "@/components/ConnectivityBanner";
 import { OnboardingModal } from "@/components/OnboardingModal";
 import { AiChatDrawer } from "@/components/AiChatDrawer";
-import ConfirmModal from "@/components/ConfirmModal";
 import { ToastHost } from "@/components/ToastHost";
-import { useOfflineReceiptQueue } from "@/components/useOfflineReceiptQueue";
-import { leaveAfterSignOut, readJson } from "@/components/clientFetch";
+import { useSignOut } from "@/components/useSignOut";
+import { readJson } from "@/components/clientFetch";
 
 import type { BusinessProfile } from "@/lib/onboarding";
 import BottomSheet from "@/components/BottomSheet";
@@ -228,18 +227,13 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const [profileOpenOn, setProfileOpenOn] = useState<string | null>(null);
   const [addOpenOn, setAddOpenOn] = useState<string | null>(null);
   const [chatOpenOn, setChatOpenOn] = useState<string | null>(null);
-  const [signingOut, setSigningOut] = useState(false);
-  const [signOutError, setSignOutError] = useState("");
   const [onboardingProfile, setOnboardingProfile] = useState<BusinessProfile | null>(null);
-  // Task 10: mounted here (not just in QueuedReceiptsCard) so the drain
-  // driver keeps running app-wide while signed in, and so the logout
-  // confirmation below always knows the current queue size.
-  const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
-  const { rows: allQueuedReceipts } = useOfflineReceiptQueue();
-  // "done" rows are kept for 24h purely for the card's own "Lähetetty" note
-  // -- they are already delivered, so they never belong in a "would be
-  // lost on logout" count.
-  const queuedReceipts = allQueuedReceipts.filter((row) => row.status !== "done");
+  // AUTH-03: the one sign-out flow (queued-receipts confirm included). It also
+  // mounts the offline queue's drain driver here, so the driver keeps running
+  // app-wide while signed in (Task 10).
+  const { requestSignOut, signingOut, signOutError, confirmDialog } = useSignOut({
+    onBeforeSignOut: () => writeStoredInitial(null),
+  });
 
   const pathname = usePathname();
   const router = useRouter();
@@ -723,35 +717,6 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     else if (sessionStatus === "signed-out") writeStoredInitial(null);
   }, [liveInitial, sessionStatus]);
 
-  async function handleSignOut() {
-    if (signingOut) return;
-    setSigningOut(true);
-    setSignOutError("");
-    setShowLogoutConfirm(false);
-    writeStoredInitial(null);
-    const left = await leaveAfterSignOut();
-    if (!left) {
-      setSigningOut(false);
-      setSignOutError("Uloskirjautuminen epäonnistui. Istunto voi olla yhä voimassa.");
-    }
-  }
-
-  /** Task 10: with queued photos, the profile sheet's sign-out asks first --
-   * logout wipes the offline queue along with the persistent cache
-   * (auth-client.ts's clearClientAuthState), so anything still waiting to
-   * send is lost. */
-  function requestSignOut() {
-    if (queuedReceipts.length > 0) {
-      setShowLogoutConfirm(true);
-      return;
-    }
-    void handleSignOut();
-  }
-
-  function queuedReceiptsCountLabel(count: number): string {
-    return count === 1 ? "1 kuitti odottaa lähetystä." : `${count} kuittia odottaa lähetystä.`;
-  }
-
   const addOpen = addOpenOn === pathname;
 
   function goToRoot(event: { preventDefault: () => void; currentTarget?: EventTarget | null }, href: string) {
@@ -1150,15 +1115,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
             </div>
           </BottomSheet>
 
-          <ConfirmModal
-            isOpen={showLogoutConfirm}
-            title="Kirjaudutaanko ulos?"
-            description={`${queuedReceiptsCountLabel(queuedReceipts.length)} Jos kirjaudut ulos, ne poistetaan tästä laitteesta.`}
-            confirmLabel="Kirjaudu ulos"
-            cancelLabel="Peruuta"
-            onConfirm={handleSignOut}
-            onCancel={() => setShowLogoutConfirm(false)}
-          />
+          {confirmDialog}
         </>
       )}
     </div>

@@ -1,87 +1,171 @@
 "use client";
 
-import { Suspense, useState } from "react";
+import { Suspense, useState, useSyncExternalStore } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { controlClass } from "@/components/control-styles";
+import { CircleCheck, Link2Off } from "lucide-react";
+import { BARE_CARD_CLASS, BARE_LINK_CLASS, BareFrame } from "@/components/BareFrame";
+import { apiFetch, errorMessage, readJson } from "@/components/clientFetch";
+import { Icon } from "@/components/ds/Icon";
+import { PasswordField } from "@/components/ds/PasswordField";
+import { buttonClass } from "@/components/control-styles";
 import { Button } from "@/components/ui";
+import { IS_MOBILE_BUILD } from "@/lib/build-target";
+import { hapticNotify } from "@/lib/haptics";
 
-function ResetForm() {
-  const token = useSearchParams().get("token") || "";
+const MIN_PASSWORD_LENGTH = 10;
+
+const noSubscribe = () => () => {};
+/** True in an iPhone/iPad browser outside the bundled app, where the reset
+ * link was opened from a mail. Read through useSyncExternalStore so the
+ * server render and hydration agree (AUTH-23). */
+function useMailBrowserOnIos(): boolean {
+  return useSyncExternalStore(
+    noSubscribe,
+    () => !IS_MOBILE_BUILD && /iPhone|iPad/.test(navigator.userAgent),
+    () => false
+  );
+}
+
+function TokenMissing() {
+  return (
+    <div className={BARE_CARD_CLASS}>
+      <span className="flex h-12 w-12 items-center justify-center rounded-full bg-warning/10 text-warning">
+        <Icon icon={Link2Off} size="hero" />
+      </span>
+      <h1 className="text-[28px] font-bold leading-tight tracking-[-0.02em] text-ink">Linkki ei kelpaa</h1>
+      <p className="text-[15px] leading-relaxed text-ink-2" role="alert">
+        Linkki puuttuu tai on vanhentunut. Pyydä uusi palautuslinkki.
+      </p>
+      <Link href="/unohtunut-salasana" className={buttonClass("primary", "w-full")}>
+        Pyydä uusi linkki
+      </Link>
+      <Link href="/login" className={BARE_LINK_CLASS}>
+        Kirjaudu sisään
+      </Link>
+    </div>
+  );
+}
+
+function ResetForm({ token }: { token: string }) {
+  const openApp = useMailBrowserOnIos();
   const [password, setPassword] = useState("");
-  const [message, setMessage] = useState("");
-  const [error, setError] = useState("");
+  const [repeat, setRepeat] = useState("");
+  const [errors, setErrors] = useState<{ password?: string; repeat?: string; form?: string }>({});
+  const [done, setDone] = useState(false);
   const [busy, setBusy] = useState(false);
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();
+    if (busy) return;
+    const next: typeof errors = {};
+    if (password.length < MIN_PASSWORD_LENGTH) {
+      next.password = `Salasanassa on oltava vähintään ${MIN_PASSWORD_LENGTH} merkkiä.`;
+    }
+    if (repeat !== password) next.repeat = "Salasanat eivät täsmää.";
+    setErrors(next);
+    if (next.password || next.repeat) {
+      void hapticNotify("error");
+      document.getElementById(next.password ? "password" : "repeatPassword")?.focus();
+      return;
+    }
     setBusy(true);
-    setError("");
     try {
-      const response = await fetch("/api/auth/password/reset", {
+      const response = await apiFetch("/api/auth/password/reset", {
         method: "POST",
         headers: { "Content-Type": "application/json", Accept: "application/json" },
         body: JSON.stringify({ token, password }),
       });
-      const body = (await response.json().catch(() => null)) as { error?: string } | null;
-      if (!response.ok) {
-        setError(body?.error || "Salasanan vaihto epäonnistui");
-        return;
-      }
-      setMessage("Salasana vaihdettu. Voit kirjautua sisään.");
-    } catch {
-      setError("Salasanan vaihto epäonnistui");
+      await readJson(response, "Salasanan vaihto epäonnistui");
+      void hapticNotify("success");
+      setPassword("");
+      setRepeat("");
+      setDone(true);
+    } catch (caught: unknown) {
+      void hapticNotify("error");
+      setErrors({ form: errorMessage(caught, "Salasanan vaihto epäonnistui") });
     } finally {
       setBusy(false);
     }
   }
 
+  if (done) {
+    return (
+      <div className={BARE_CARD_CLASS}>
+        <span className="flex h-12 w-12 items-center justify-center rounded-full bg-success/10 text-success">
+          <Icon icon={CircleCheck} size="hero" />
+        </span>
+        <h1 className="text-[28px] font-bold leading-tight tracking-[-0.02em] text-ink">Salasana vaihdettu</h1>
+        <p className="text-[15px] leading-relaxed text-ink-2" role="status">
+          Voit nyt kirjautua sisään uudella salasanalla.
+        </p>
+        <Link href="/login" className={buttonClass("primary", "w-full")}>
+          Kirjaudu sisään
+        </Link>
+        {openApp && (
+          <a href="lashkirja://open" className={BARE_LINK_CLASS}>
+            Avaa LashKirja-sovellus
+          </a>
+        )}
+      </div>
+    );
+  }
+
   return (
-    <form
-      onSubmit={(event) => void submit(event)}
-      className="w-full max-w-sm space-y-5 rounded-card border border-line bg-surface p-8"
-    >
-      <h1 className="text-[32px] font-bold leading-tight tracking-[-0.02em] text-ink">Uusi salasana</h1>
-      <label htmlFor="password" className="mb-1.5 block text-[13px] text-ink-2">
-        Uusi salasana
-      </label>
-      <input
+    <form onSubmit={(event) => void submit(event)} noValidate className={BARE_CARD_CLASS}>
+      <h1 className="text-[28px] font-bold leading-tight tracking-[-0.02em] text-ink">Uusi salasana</h1>
+      <PasswordField
         id="password"
-        type="password"
+        name="password"
+        label="Uusi salasana"
         autoComplete="new-password"
+        enterKeyHint="next"
+        hint={`Vähintään ${MIN_PASSWORD_LENGTH} merkkiä.`}
+        error={errors.password}
         required
-        minLength={10}
         value={password}
         onChange={(event) => setPassword(event.target.value)}
-        className={controlClass}
       />
-      {message && (
-        <>
-          <p className="text-sm text-ink" role="status">{message}</p>
-          {typeof navigator !== "undefined" && /iPhone|iPad/.test(navigator.userAgent) && (
-            <a href="lashkirja://open" className="block text-center text-sm text-accent">
-              Avaa LashKirja-sovellus
-            </a>
-          )}
-        </>
+      <PasswordField
+        id="repeatPassword"
+        name="repeatPassword"
+        label="Toista uusi salasana"
+        autoComplete="new-password"
+        enterKeyHint="go"
+        error={errors.repeat}
+        required
+        value={repeat}
+        onChange={(event) => setRepeat(event.target.value)}
+      />
+      {errors.form && (
+        <p className="text-sm text-danger" role="alert">
+          {errors.form}{" "}
+          <Link href="/unohtunut-salasana" className="font-medium underline">
+            Pyydä uusi linkki
+          </Link>
+        </p>
       )}
-      {error && <p className="text-sm text-danger" role="alert">{error}</p>}
-      <Button type="submit" busy={busy} busyLabel="Tallennetaan…" className="w-full" disabled={!token}>
+      <Button type="submit" busy={busy} busyLabel="Tallennetaan…" className="w-full">
         Tallenna salasana
       </Button>
-      <Link href="/login" className="block text-center text-sm text-accent">
+      <Link href="/login" className={BARE_LINK_CLASS}>
         Kirjaudu sisään
       </Link>
     </form>
   );
 }
 
+function ResetGate() {
+  const token = useSearchParams().get("token") || "";
+  return token ? <ResetForm token={token} /> : <TokenMissing />;
+}
+
 export default function ResetPasswordPage() {
   return (
-    <div className="fixed inset-0 flex items-center justify-center overflow-hidden bg-canvas px-4">
-      <Suspense fallback={<p className="text-sm text-ink-2">Ladataan…</p>}>
-        <ResetForm />
+    <BareFrame>
+      <Suspense fallback={<p className="text-center text-sm text-ink-2">Ladataan…</p>}>
+        <ResetGate />
       </Suspense>
-    </div>
+    </BareFrame>
   );
 }

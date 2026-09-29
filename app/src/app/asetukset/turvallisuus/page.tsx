@@ -8,7 +8,7 @@ export default function TurvallisuusPage() {
   return (
     <div className="space-y-6">
       <PageTitle title="Turvallisuus" />
-      <SettingsGroup label="Turvallisuus">
+      <SettingsGroup label="Tämä laite">
         <SettingsRow
           href="/asetukset/turvallisuus/lukitus"
           icon={Lock}

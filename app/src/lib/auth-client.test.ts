@@ -361,3 +361,47 @@ describe("retryPendingRevoke", () => {
     expect(store.get("lashkirja.pending-revoke.v1")).toBe("stale-tok");
   });
 });
+
+describe("sign-in flag and first-launch expiry", () => {
+  function stubLocalStorage() {
+    const data = new Map<string, string>();
+    vi.stubGlobal("localStorage", {
+      getItem: (key: string) => data.get(key) ?? null,
+      setItem: (key: string, value: string) => void data.set(key, value),
+      removeItem: (key: string) => void data.delete(key),
+    });
+    return data;
+  }
+
+  it("writes the flag on sign-in and boot read, and clears it on sign-out", async () => {
+    const flags = stubLocalStorage();
+    await signInAsDemo();
+    expect(flags.get("lashkirja.signedin.v1")).toBe("1");
+
+    await signOutThisDevice();
+    expect(flags.has("lashkirja.signedin.v1")).toBe(false);
+
+    store.set("lashkirja.auth.v1", JSON.stringify({ token: "t", userId: "u", expiresAt: "", issuedAt: "" }));
+    await loadStoredAuth();
+    expect(flags.get("lashkirja.signedin.v1")).toBe("1");
+
+    store.clear();
+    await loadStoredAuth();
+    expect(flags.has("lashkirja.signedin.v1")).toBe(false);
+  });
+
+  it("AUTH-06: a launch with no stored session lands on a plain /login, not the expired notice", async () => {
+    stubLocalStorage();
+    store.clear();
+    await loadStoredAuth();
+    await expireSession();
+    expect(navigated).toEqual([{ path: "/login", replace: true }]);
+  });
+
+  it("AUTH-06: a rejected stored session still says it expired", async () => {
+    stubLocalStorage();
+    await signInAsDemo();
+    await expireSession();
+    expect(navigated).toEqual([{ path: "/login?error=expired", replace: true }]);
+  });
+});

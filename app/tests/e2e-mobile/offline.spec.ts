@@ -15,7 +15,7 @@ const DEMO_PASSWORD = "demo123";
 async function loginMobile(page: Page) {
   await page.goto("/login");
   await page.getByLabel("Sähköposti").fill(DEMO_EMAIL);
-  await page.getByLabel("Salasana").fill(DEMO_PASSWORD);
+  await page.getByLabel("Salasana", { exact: true }).fill(DEMO_PASSWORD);
   await Promise.all([
     page.waitForURL("**/dashboard"),
     page.getByRole("button", { name: "Kirjaudu sisään" }).click(),
@@ -111,7 +111,7 @@ test.describe("web (:3200)", () => {
   test("the same offline check shows the banner", async ({ page, context }) => {
     await page.goto(`${API_BASE}/login`);
     await page.getByLabel("Sähköposti").fill(DEMO_EMAIL);
-    await page.getByLabel("Salasana").fill(DEMO_PASSWORD);
+    await page.getByLabel("Salasana", { exact: true }).fill(DEMO_PASSWORD);
     await Promise.all([
       page.waitForURL("**/dashboard"),
       page.getByRole("button", { name: "Kirjaudu sisään" }).click(),

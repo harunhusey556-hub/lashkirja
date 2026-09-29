@@ -8,7 +8,7 @@ const MONTH_HEADING =
 async function login(page: Page) {
   await page.goto("/login");
   await page.getByLabel("Sähköposti").fill("demo@lashkirja.fi");
-  await page.getByLabel("Salasana").fill("demo123");
+  await page.getByLabel("Salasana", { exact: true }).fill("demo123");
   await Promise.all([
     page.waitForURL("**/dashboard"),
     page.getByRole("button", { name: "Kirjaudu sisään" }).click(),

@@ -6,12 +6,15 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { AlertCircle, Check, Info } from "lucide-react";
 import { controlClass } from "@/components/control-styles";
 import { AppMark } from "@/components/AppMark";
+import { BareFrame } from "@/components/BareFrame";
 import { ConnectivityBanner } from "@/components/ConnectivityBanner";
+import { ApiError, errorMessage } from "@/components/clientFetch";
 import { Button, Field } from "@/components/ui";
 import { Icon } from "@/components/ds/Icon";
+import { PasswordField } from "@/components/ds/PasswordField";
 import { hapticNotify } from "@/lib/haptics";
 import { appNavigate } from "@/lib/app-nav";
-import { signIn } from "@/lib/auth-client";
+import { getAccessToken, signIn } from "@/lib/auth-client";
 import { IS_MOBILE_BUILD } from "@/lib/build-target";
 import { bootMobile } from "@/lib/mobile/boot";
 import { markFirstScreen } from "@/lib/splash";
@@ -138,8 +141,12 @@ export default function LoginForm() {
   useEffect(() => {
     if (!IS_MOBILE_BUILD) return;
     let cancelled = false;
-    void bootMobile().then((result) => {
-      if (!cancelled && result.signedIn) appNavigate("/dashboard", { replace: true });
+    // bootMobile() is only a barrier here. Its resolved verdict is memoized for
+    // the whole launch, so after a sign-out it still says "signed in" and
+    // would bounce the person straight back into the app: the live token is
+    // read after the barrier instead (same rule as SessionProvider).
+    void bootMobile().then(() => {
+      if (!cancelled && getAccessToken()) appNavigate("/dashboard", { replace: true });
     });
     return () => {
       cancelled = true;
@@ -209,9 +216,11 @@ export default function LoginForm() {
         return;
       }
 
+      // AUTH-09: only a message written for the user is shown; a raw
+      // server string ("PrismaClient...", "fail") goes to the console.
       setNotice({
         tone: "danger",
-        message: result.error || "Kirjautuminen epäonnistui",
+        message: errorMessage(new ApiError(result.error, result.status), "Kirjautuminen epäonnistui"),
       });
     } catch {
       // fetch() itself threw: offline, DNS failure, TLS/tunnel down - the
@@ -226,10 +235,10 @@ export default function LoginForm() {
   const fieldClass = (extra = "") => `${controlClass}${invalid ? " !border-danger" : ""} ${extra}`.trim();
 
   return (
-    // fixed + overflow-hidden + touch-none: login never scrolls or rubber-bands;
-    // iOS pans the visual viewport itself when the keyboard covers an input.
-    <div className="fixed inset-0 flex touch-none items-center justify-center overflow-hidden bg-canvas px-4">
-      <div className="w-full max-w-sm">
+    // SHELL-22 / AUTH-07: one scroll frame that follows the usable area, so a
+    // keyboard lifts it and a short viewport scrolls instead of clipping.
+    <BareFrame>
+      <div>
         <ConnectivityBanner />
         <div className="mb-8 flex flex-col items-center text-center">
           <AppMark size={64} className="mb-4" />
@@ -262,8 +271,8 @@ export default function LoginForm() {
               autoCapitalize="none"
               autoCorrect="off"
               spellCheck={false}
+              enterKeyHint="next"
               className={fieldClass()}
-              placeholder="demo@lashkirja.fi"
               aria-invalid={invalid || undefined}
               aria-describedby={invalid ? noticeId : undefined}
               onChange={clearNoticeOnEdit}
@@ -271,23 +280,19 @@ export default function LoginForm() {
             />
           </Field>
 
-          <Field label="Salasana" htmlFor="password">
-            <input
-              ref={passwordRef}
-              id="password"
-              name="password"
-              type="password"
-              autoComplete="current-password"
-              autoCapitalize="none"
-              autoCorrect="off"
-              className={fieldClass()}
-              placeholder="••••••"
-              aria-invalid={invalid || undefined}
-              aria-describedby={invalid ? noticeId : undefined}
-              onChange={clearNoticeOnEdit}
-              required
-            />
-          </Field>
+          <PasswordField
+            ref={passwordRef}
+            id="password"
+            name="password"
+            label="Salasana"
+            autoComplete="current-password"
+            enterKeyHint="go"
+            inputClassName={invalid ? "!border-danger" : ""}
+            aria-invalid={invalid || undefined}
+            aria-describedby={invalid ? noticeId : undefined}
+            onChange={clearNoticeOnEdit}
+            required
+          />
 
           {notice && <LoginNotice id={noticeId} tone={notice.tone} message={notice.message} />}
 
@@ -301,7 +306,10 @@ export default function LoginForm() {
               "Kirjaudu sisään"
             )}
           </Button>
-          <Link href="/unohtunut-salasana" className="block text-center text-sm text-accent">
+          <Link
+            href="/unohtunut-salasana"
+            className="active-press flex min-h-11 items-center justify-center text-sm text-accent"
+          >
             Unohditko salasanan?
           </Link>
         </form>
@@ -312,6 +320,6 @@ export default function LoginForm() {
           </p>
         )}
       </div>
-    </div>
+    </BareFrame>
   );
 }
