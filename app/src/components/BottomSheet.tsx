@@ -311,7 +311,7 @@ export default function BottomSheet({
   // inside `.app-main`, which useOverlayLock makes pointer-events:none;
   // this class opts the sheet back in (see globals.css).
   return (
-    <div className={`overlay-root sheet-overlay fixed inset-0 z-[60] ${closing ? "pointer-events-none" : ""}`}>
+    <div className={`overlay-root sheet-overlay fixed inset-x-0 z-[60] ${closing ? "pointer-events-none" : ""}`}>
       <div
         ref={backdropRef}
         className={`absolute inset-0 bg-ink/40 backdrop-blur-[2px] ${
@@ -328,12 +328,12 @@ export default function BottomSheet({
         aria-labelledby={labelledBy}
         // The shadow lives on this wrapper (not the panel) so the bleed, a
         // child painted above it, hides the shadow's lower edge during a lift.
-        className={`absolute inset-x-0 bottom-0 mx-auto w-full max-w-lg rounded-t-3xl shadow-2xl ${
+        className={`sheet-wrap absolute inset-x-0 bottom-0 mx-auto w-full max-w-lg rounded-t-3xl shadow-2xl ${
           exitingViaDrag ? "" : closing ? "animate-sheet-out" : "animate-sheet"
         }`}
       >
         <div className="sheet-bleed" aria-hidden />
-        <div className={`relative flex flex-col overflow-hidden rounded-t-3xl bg-canvas ${heightClass}`}>
+        <div className={`sheet-panel relative flex flex-col overflow-hidden rounded-t-3xl bg-canvas ${heightClass}`}>
           <div ref={dragRegionRef} className="shrink-0">
             <div className="sheet-handle" aria-hidden />
 
@@ -370,7 +370,9 @@ export default function BottomSheet({
             )}
           </div>
 
-          {children}
+          {/* AX-03: the body always scrolls when it overflows (large text,
+              keyboard); a sheet with its own scroll area keeps it. */}
+          <div className="sheet-body">{children}</div>
         </div>
       </div>
     </div>

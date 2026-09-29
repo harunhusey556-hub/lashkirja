@@ -471,9 +471,10 @@ button:disabled {
   height: calc(var(--app-tab-height) + var(--safe-bottom));
 }
 
+/* C5/C6 (IA-08): the tab bar never rides on the keyboard. It leaves the flow
+   while a field is being edited, so <main> gets the whole usable height. */
 html[data-keyboard="open"] .app-tab-bar {
-  height: var(--app-tab-height);
-  padding-bottom: 0;
+  display: none;
 }
 
 .touch-target {
@@ -761,6 +762,36 @@ button.ds-chip[aria-pressed="true"] { box-shadow: none; }
   animation: shake 250ms ease-in-out;
 }
 
+/* C6 (IA-10): a sheet's overlay ends at the top of the keyboard, so a form
+   sheet lifts above it; the sheet itself is capped to the overlay (below the
+   notch) and its body scrolls (.sheet-body). */
+.sheet-overlay {
+  bottom: var(--usable-bottom);
+  top: var(--usable-top);
+}
+
+.sheet-wrap {
+  display: flex;
+  flex-direction: column;
+  max-height: calc(100% - var(--safe-top) - 10px);
+}
+
+.sheet-wrap > .sheet-panel {
+  min-height: 0;
+  flex: 0 1 auto;
+}
+
+/* AX-03, R19: every sheet body scrolls, so no row is ever clipped, whatever
+   the text size. The sheet's own layout inside it is unchanged (flex column). */
+.sheet-body {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+}
+
 /* Sheets own the bottom inset themselves; the tab bar is hidden behind them. */
 .sheet-safe-bottom {
   padding-bottom: calc(var(--safe-bottom) + 0.75rem);
@@ -811,6 +842,14 @@ button.ds-chip[aria-pressed="true"] { box-shadow: none; }
   animation: barUp 220ms var(--ease-drawer);
 }
 
+/* C5 (IA-09): the action bar hides while the keyboard is open. It keeps its
+   box (visibility, not display), so its in-flow spacer and the published
+   --app-bottom-bar do not change under the user's finger. */
+html[data-keyboard="open"] .bottom-actions {
+  visibility: hidden;
+  transform: translateY(100%) !important;
+}
+
 /* ------------------------------------------------------------------ */
 /* Toasts (ToastHost). Transitions, not keyframes: interruptible.      */
 /* ------------------------------------------------------------------ */
@@ -827,9 +866,14 @@ button.ds-chip[aria-pressed="true"] { box-shadow: none; }
   pointer-events: none;
 }
 
-.app-frame[data-tabs="hidden"] > .toast-viewport,
-html[data-keyboard="open"] .toast-viewport {
+.app-frame[data-tabs="hidden"] > .toast-viewport {
   bottom: calc(max(var(--safe-bottom), var(--app-bottom-bar, 0px)) + 12px);
+}
+
+/* Keyboard open: no tab bar and no action bar, so the toast sits just above
+   the keyboard. */
+html[data-keyboard="open"] .toast-viewport {
+  bottom: 12px;
 }
 
 /* Tablet: no tab bar (sidebar layout). */

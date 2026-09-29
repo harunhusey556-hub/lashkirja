@@ -1,6 +1,7 @@
 "use client";
 
-import { useLayoutEffect } from "react";
+import { useEffect, useLayoutEffect } from "react";
+import { installEnterNext } from "@/lib/enter-next";
 import { usableArea } from "@/lib/usable-area";
 
 const STYLE_ID = "lashkirja-usable";
@@ -16,8 +17,15 @@ function editableFocused(): boolean {
  * Publishes frame anchors and safe-area fallbacks from a head stylesheet.
  * It does not write style attributes onto <html>, so hydration stays stable,
  * and it does not replace env(safe-area-inset-*) with a pixel guess.
+ *
+ * `html[data-keyboard="open"]` is the keyboard signal the CSS contract keys
+ * off (C5/C6): the tab bar and BottomActions hide, sheets end at the top of
+ * the keyboard, toasts sit just above it.
  */
 export function UsableArea() {
+  // C6: the return key contract (a "next" field moves focus, never submits).
+  useEffect(() => installEnterNext(), []);
+
   useLayoutEffect(() => {
     const apply = () => {
       const vv = window.visualViewport;

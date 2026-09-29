@@ -182,3 +182,43 @@ test("every screen always rubber-bands: one scroller, overflow-y auto, range >= 
   expect(offenders).toEqual([]);
   expect(measured).toBe(routes.length * SIZES.length);
 });
+
+test("Enter on a 'next' field moves focus and never submits (C6, IA-11)", async ({ page }) => {
+  const writes: string[] = [];
+  page.on("request", (request) => {
+    if (!["GET", "HEAD", "OPTIONS"].includes(request.method()) && request.url().startsWith(API_BASE)) {
+      writes.push(`${request.method()} ${request.url()}`);
+    }
+  });
+  for (const route of ["/asetukset/laskutus", "/asetukset/profiili"]) {
+    await page.goto(route);
+    await settled(page);
+    const first = page.locator('main input[enterkeyhint="next"]').first();
+    await first.focus();
+    const before = await first.evaluate((el) => (el as HTMLInputElement).name || el.id);
+    await page.keyboard.press("Enter");
+    await expect
+      .poll(() => page.evaluate(() => (document.activeElement as HTMLInputElement | null)?.name || document.activeElement?.id))
+      .not.toBe(before);
+    expect(await page.evaluate(() => document.activeElement?.tagName)).toMatch(/INPUT|SELECT|TEXTAREA/);
+    await expect(page).toHaveURL(new RegExp(`${route}$`));
+  }
+  expect(writes).toEqual([]);
+});
+
+test("the tab bar and the action bar hide while the keyboard is open (C5, IA-08, IA-09)", async ({ page }) => {
+  await page.goto("/laskut/uusi");
+  await settled(page);
+  await page.locator("main input").first().focus();
+  // Playwright has no on-screen keyboard: publish what UsableArea would.
+  await page.evaluate(() => {
+    const style = document.createElement("style");
+    style.textContent = ":root{--usable-bottom:300px !important}";
+    document.head.appendChild(style);
+    document.documentElement.dataset.keyboard = "open";
+  });
+  await expect.poll(() => page.evaluate(() => getComputedStyle(document.querySelector(".app-tab-bar")!).display)).toBe("none");
+  await expect
+    .poll(() => page.evaluate(() => getComputedStyle(document.querySelector(".bottom-actions")!).visibility))
+    .toBe("hidden");
+});
