@@ -1,6 +1,6 @@
 /** Shared account rules with no database and no Node-only imports. */
 
-export const PASSWORD_MIN = 10;
+export const PASSWORD_MIN = 8;
 export const PASSWORD_MAX = 1024;
 
 /** Finnish accounting material is kept six years after the financial year ends. */

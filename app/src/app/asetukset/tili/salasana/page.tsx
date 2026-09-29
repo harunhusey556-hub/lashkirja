@@ -7,9 +7,9 @@ import { PasswordField } from "@/components/ds/PasswordField";
 import { useSession } from "@/components/SessionProvider";
 import { Button, FormError } from "@/components/ui";
 import { hapticNotify } from "@/lib/haptics";
+import { PASSWORD_MIN as MIN_PASSWORD_LENGTH } from "@/lib/session-policy";
 import { showToast } from "@/lib/toast";
 
-const MIN_PASSWORD_LENGTH = 10;
 
 type Errors = { current?: string; next?: string; repeat?: string; form?: string };
 
@@ -70,7 +70,7 @@ export default function SalasanaPage() {
       <PageTitle title="Vaihda salasana" />
       <form onSubmit={(event) => void changePassword(event)} noValidate>
         <Card className="space-y-4">
-          <p className="text-caption text-ink-2 leading-relaxed">
+          <p className="text-[13px] text-ink-2 leading-relaxed">
             Nykyinen salasana vaaditaan. Uudessa on vähintään {MIN_PASSWORD_LENGTH} merkkiä. Muut kirjautuneet laitteet suljetaan.
           </p>
           {/* Lets iOS Password AutoFill pair the new password with this account (AUTH-10). */}
