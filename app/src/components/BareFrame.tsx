@@ -43,7 +43,9 @@ export function BareFrame({ children }: { children: React.ReactNode }) {
 
   return (
     <div ref={frameRef} className="bare-frame">
-      <div className="bare-content">{children}</div>
+      <div className="bare-fill">
+        <div className="bare-content">{children}</div>
+      </div>
     </div>
   );
 }

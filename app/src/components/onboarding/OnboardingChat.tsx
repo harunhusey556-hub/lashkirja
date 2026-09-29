@@ -556,7 +556,7 @@ export function OnboardingChat({
       </header>
 
       <div ref={threadRef} className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pb-6 pt-4">
-        <div ref={threadContentRef} className="mx-auto flex min-h-full w-full max-w-lg flex-col justify-end gap-3">
+        <div ref={threadContentRef} className="thread-fill mx-auto flex w-full max-w-lg flex-col justify-end gap-3">
           {thread}
         </div>
       </div>

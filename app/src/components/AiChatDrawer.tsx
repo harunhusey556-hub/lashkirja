@@ -939,8 +939,10 @@ export function AiChatDrawer({
       <div
         ref={scrollerRef}
         onScroll={onScroll}
-        className="relative mx-auto min-h-0 w-full max-w-2xl flex-1 space-y-4 overflow-y-auto overscroll-contain px-4 py-4"
+        className="relative mx-auto min-h-0 w-full max-w-2xl flex-1 overflow-y-auto overscroll-contain px-4 py-4"
       >
+        {/* C1.1: the thread always has a 1 px scroll range, so it rubber-bands. */}
+        <div className="thread-fill space-y-4">
         {hasMore && (
           <button
             type="button"
@@ -1119,6 +1121,7 @@ export function AiChatDrawer({
             <Icon icon={ArrowDown} size="inline" />
           </button>
         )}
+        </div>
       </div>
 
       <form

@@ -329,11 +329,13 @@ button:disabled {
   cursor: not-allowed;
 }
 
-/* The one scroll container. It owns the page's top and bottom inset: page
-   wrappers carry no bottom padding of their own (S1: a double inset turns
-   "nearly fits" into a 10-20 px jitter scroll).
-   overscroll-behavior-y: contain keeps the iOS rubber band (none removes it)
-   and only stops scroll chaining; the document itself stays locked above. */
+/* The one scroll container (C1.1, B2-R1: every screen always rubber-bands).
+   It owns the page's top and bottom inset: page wrappers carry no bottom
+   padding of their own. Its scroll range is ALWAYS at least 1 px (the page
+   wrapper below is 1 px taller than the content box), so iOS gives it a
+   scroll layer and the same drag bounces on every page, whether the content
+   fits or not. overscroll-behavior-y: contain keeps the rubber band (none
+   removes it) and only stops scroll chaining; the document stays locked. */
 .app-main {
   position: relative;
   flex: 1 1 auto;
@@ -348,27 +350,11 @@ button:disabled {
   overscroll-behavior-y: contain;
 }
 
-/* Content that is only slightly taller than the frame (AppShell measures it):
-   drop the slack padding so the page fits instead of scrolling a few px. */
-.app-main[data-fit="snug"] {
-  padding-top: 0.5rem;
-  padding-bottom: 0;
-  overflow-y: hidden;
-}
-
-/* ...and tightens the page's own section rhythm (24 px -> 16 px). AppShell
-   keeps the snug layout only when the page then fits completely. */
-.app-main[data-fit="snug"] > .app-page > .space-y-6 > :not(:last-child) {
-  margin-block-end: 1rem;
-}
-
-.app-main[data-fit="snug"] > .app-page > .space-y-6 > header:first-child {
-  margin-block-end: 0.75rem;
-}
-
-/* ds/Section's own 24 px top margin collapses with the gap above it. */
-.app-main[data-fit="snug"] > .app-page section.mt-6:not(:first-child) {
-  margin-block-start: 1rem;
+/* The guaranteed 1 px range. `100%` resolves against .app-main's content box
+   (a flex item in a fixed-height column), so the padding stays outside it and
+   a 1 px scrollTop is invisible. */
+.app-main > .app-page {
+  min-height: calc(100% + 1px);
 }
 
 .app-main[data-scroll-lock="true"] {
@@ -380,10 +366,6 @@ button:disabled {
    carries the home-indicator inset itself instead of losing it. */
 .app-frame[data-tabs="hidden"] > .app-main {
   padding-bottom: max(1.25rem, calc(var(--safe-bottom) + 1.25rem));
-}
-
-.app-frame[data-tabs="hidden"] > .app-main[data-fit="snug"] {
-  padding-bottom: var(--safe-bottom);
 }
 
 /* Push/pop: the outgoing page is a snapshot that slides under the incoming
@@ -924,10 +906,6 @@ html[data-keyboard="open"] .toast-viewport {
   padding-top: calc(var(--banner-h, 0px) + 1.25rem);
 }
 
-.app-frame[data-banner="shown"] > .app-main[data-fit="snug"] {
-  padding-top: calc(var(--banner-h, 0px) + 0.5rem);
-}
-
 .connectivity-banner[data-state="enter"],
 .connectivity-banner[data-state="exit"] {
   transform: translateY(-100%);
@@ -1036,8 +1014,9 @@ html[data-page-hidden] *::after {
 /* SHELL-22 / AUTH-07: the bare pages (login, password recovery, e-mail
    confirmation) sit outside .app-frame. This frame follows the usable area,
    so a keyboard lifts its bottom edge, and it is the ONE scroll container: a
-   short card is centred by the auto margins on .bare-content, a tall one (or
-   a keyboard-sized viewport) scrolls instead of being clipped at the top. */
+   short card is centred by the auto margins on .bare-content (inside
+   .bare-fill), a tall one (or a keyboard-sized viewport) scrolls instead of
+   being clipped at the top. */
 .bare-frame {
   position: fixed;
   left: 0;
@@ -1054,8 +1033,23 @@ html[data-page-hidden] *::after {
   background: var(--color-canvas);
 }
 
+/* C1.1 on the bare pages: the fill wrapper is 1 px taller than the frame's
+   content box, so a card that fits still rubber-bands; the card is centred
+   inside the wrapper, not in the scroller. */
+.bare-fill {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  min-height: calc(100% + 1px);
+}
+
 .bare-content {
   width: 100%;
   max-width: 24rem;
   margin: auto;
+}
+
+/* C1.1 in the full-screen threads (assistant, onboarding): same 1 px range. */
+.thread-fill {
+  min-height: calc(100% + 1px);
 }

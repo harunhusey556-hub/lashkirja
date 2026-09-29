@@ -107,20 +107,78 @@ test("avatar sheet > Asetukset lands on /asetukset (SHELL-01, AUTH-01)", async (
   }
 });
 
-test("root routes either fit or clearly scroll: no 1-64 px jitter scroll (S1)", async ({ page }) => {
+/** Every static route in the registry, plus the bare pages. Detail routes
+ * that need an id are discovered from their list pages below. */
+const STATIC_ROUTES = [
+  "/dashboard", "/laskut", "/kirjanpito", "/raportit", "/asetukset",
+  "/kuitit", "/kuitit/uusi", "/pankki/tapahtumat", "/pankki/taydennys", "/tyot",
+  "/kirjanpito/alv", "/kirjanpito/ostolaskut", "/kirjanpito/pankkitilit", "/kirjanpito/kaudet",
+  "/asiakkaat", "/toistuvat", "/laskut/uusi",
+  "/asetukset/profiili", "/asetukset/yritys", "/asetukset/laskutus", "/asetukset/tili",
+  "/asetukset/tili/salasana", "/asetukset/tili/laitteet", "/asetukset/turvallisuus",
+  "/asetukset/turvallisuus/lukitus", "/asetukset/turvallisuus/biometria",
+  "/asetukset/tietosuoja", "/asetukset/sahkoposti", "/asetukset/ohje",
+  "/unohtunut-salasana",
+];
+const DETAIL_SOURCES: [list: string, hrefPart: string][] = [
+  ["/laskut", "/laskut/lasku?id="],
+  ["/kuitit", "/kuitit/kuitti?id="],
+  ["/asiakkaat", "/asiakkaat/asiakas?id="],
+  ["/pankki/tapahtumat", "/pankki/tapahtumat/tiliote?id="],
+];
+const SIZES = [
+  { width: 320, height: 568 },
+  { width: 390, height: 844 },
+  { width: 430, height: 932 },
+];
+
+test("every screen always rubber-bands: one scroller, overflow-y auto, range >= 1 px, no fit mode (C1.1, IA-01..04)", async ({
+  page,
+}) => {
+  test.setTimeout(15 * 60_000);
+  const routes = [...STATIC_ROUTES];
+  for (const [list, hrefPart] of DETAIL_SOURCES) {
+    await page.goto(list);
+    await settled(page);
+    const href = await page.evaluate(
+      (part) => document.querySelector<HTMLAnchorElement>(`a[href*="${part}"]`)?.getAttribute("href") ?? null,
+      hrefPart
+    );
+    if (href) routes.push(href);
+  }
+  expect(routes.length).toBeGreaterThanOrEqual(STATIC_ROUTES.length + 2);
+
   const offenders: string[] = [];
   let measured = 0;
-  for (const route of ["/dashboard", "/laskut", "/kirjanpito", "/raportit", "/asetukset"]) {
-    await page.goto(route);
-    await settled(page);
-    const overflow = await page.evaluate(() => {
-      const main = document.querySelector<HTMLElement>("main.app-main");
-      return main ? main.scrollHeight - main.clientHeight : null;
-    });
-    expect(overflow, `${route} has no <main>`).not.toBeNull();
-    measured += 1;
-    if (overflow !== null && overflow > 0 && overflow <= 64) offenders.push(`${route}: ${overflow}px`);
+  for (const size of SIZES) {
+    await page.setViewportSize(size);
+    for (const route of routes) {
+      await page.goto(route);
+      await page.waitForLoadState("networkidle").catch(() => {});
+      await page
+        .waitForFunction(() => !document.querySelector(".skeleton, [aria-busy='true']"), null, { timeout: 12_000 })
+        .catch(() => {});
+      await page.waitForTimeout(250);
+      const result = await page.evaluate(() => {
+        const scroller = document.querySelector<HTMLElement>("main.app-main, .bare-frame");
+        if (!scroller) return null;
+        return {
+          overflowY: getComputedStyle(scroller).overflowY,
+          range: scroller.scrollHeight - scroller.clientHeight,
+          fit: document.querySelector("[data-fit]") !== null,
+        };
+      });
+      const where = `${size.width}px ${route}`;
+      if (!result) {
+        offenders.push(`${where}: no scroller`);
+        continue;
+      }
+      measured += 1;
+      if (result.overflowY !== "auto") offenders.push(`${where}: overflow-y ${result.overflowY}`);
+      if (result.range < 1) offenders.push(`${where}: range ${result.range}px`);
+      if (result.fit) offenders.push(`${where}: data-fit present`);
+    }
   }
-  expect(measured).toBe(5);
   expect(offenders).toEqual([]);
+  expect(measured).toBe(routes.length * SIZES.length);
 });

@@ -125,10 +125,6 @@ function writeStoredInitial(value: string | null): void {
 
 const noSubscribe = () => () => {};
 
-/** Content up to this much taller than the frame is fitted instead of
- * scrolling a few px (S1): the snug layout drops the slack padding and
- * tightens the page's section gaps. Beyond it the page is a real scroll. */
-const SNUG_MAX_SLACK = 64;
 /** Push/pop duration (--dur-push) plus a margin for the snapshot fallback timer. */
 const PUSH_FALLBACK_MS = 360;
 /** Longest the native splash waits for the first page to have real content. */
@@ -325,26 +321,19 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     return () => observer.disconnect();
   }, []);
 
-  // S1: a page whose content is only slightly taller than the frame drops
-  // the slack padding (data-fit="snug") instead of scrolling a few px.
-  const evaluateFit = useCallback(() => {
+  // A back or tab landing restores the remembered scroll position, but the
+  // page may still be loading (too short to scroll that far). Re-apply it as
+  // the page grows, until it sticks or 2 s pass. (C1.1: there is no fitting
+  // or "snug" mode any more; every page keeps the same insets and always has
+  // at least a 1 px scroll range, see .app-main > .app-page in globals.css.)
+  const applyPendingScroll = useCallback(() => {
     const main = mainRef.current;
-    if (!main) return;
-    // Measure with the normal insets, then try the snug layout, and keep it
-    // only when the page then fits completely: nothing is ever clipped.
-    if (main.dataset.fit) delete main.dataset.fit;
-    const slack = main.scrollHeight - main.clientHeight;
-    if (slack > 0 && slack <= SNUG_MAX_SLACK) {
-      main.dataset.fit = "snug";
-      if (main.scrollHeight - main.clientHeight > 0) delete main.dataset.fit;
-    }
     const pending = pendingScrollRef.current;
-    if (pending) {
-      if (performance.now() > pending.until) pendingScrollRef.current = null;
-      else {
-        main.scrollTop = pending.top;
-        if (main.scrollTop >= pending.top - 1) pendingScrollRef.current = null;
-      }
+    if (!main || !pending) return;
+    if (performance.now() > pending.until) pendingScrollRef.current = null;
+    else {
+      main.scrollTop = pending.top;
+      if (main.scrollTop >= pending.top - 1) pendingScrollRef.current = null;
     }
   }, []);
 
@@ -352,14 +341,12 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     const main = mainRef.current;
     const page = pageNodeRef.current;
     if (!main) return;
-    evaluateFit();
+    applyPendingScroll();
     if (typeof ResizeObserver === "undefined") return;
-    // Deferred a frame: toggling the snug layout resizes the page, and doing
-    // that inside the observer callback is a ResizeObserver loop.
     let raf = 0;
     const observer = new ResizeObserver(() => {
       cancelAnimationFrame(raf);
-      raf = requestAnimationFrame(evaluateFit);
+      raf = requestAnimationFrame(applyPendingScroll);
     });
     observer.observe(main, { box: "border-box" });
     if (page) observer.observe(page);
@@ -367,7 +354,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       cancelAnimationFrame(raf);
       observer.disconnect();
     };
-  }, [pathname, evaluateFit]);
+  }, [pathname, applyPendingScroll]);
 
   // Navigation: route memory, back label, scroll restore and the push/pop.
   useLayoutEffect(() => {
