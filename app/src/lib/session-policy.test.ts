@@ -3,8 +3,10 @@ import { appLockMatches, createAppLockRecord } from "./app-lock";
 import { deviceLabel, logoutOutcome, nextLockView, passwordProblem } from "./session-policy";
 
 describe("account policy", () => {
-  it("requires a password of at least 10 characters", () => {
-    expect(passwordProblem("lyhyt")).toMatch(/10/);
+  it("requires a password of at least 8 characters", () => {
+    expect(passwordProblem("lyhyt")).toMatch(/8/);
+    expect(passwordProblem("1234567")).toMatch(/8/);
+    expect(passwordProblem("12345678")).toBeNull();
     expect(passwordProblem("tarpeeksi-pitka")).toBeNull();
   });
 
