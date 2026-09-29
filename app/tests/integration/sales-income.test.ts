@@ -264,7 +264,8 @@ describe("GET /api/dashboard - income includes sales invoices", () => {
     const invoice = await makeInvoice("2025-02-10", 1000);
     await send(invoice.id);
     const body = await front("2025-03");
-    expect(body.vat.ytdRevenue).toBe(1255);
+    // AVL 3 §: the threshold is turnover without VAT (1 000, not 1 255).
+    expect(body.vat.ytdRevenue).toBe(1000);
   });
 });
 

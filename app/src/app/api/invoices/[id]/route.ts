@@ -2,9 +2,10 @@ import { NextRequest } from "next/server";
 import { z } from "zod";
 import { requireSession } from "@/lib/session";
 import { noStoreJson, rejectCrossSite, rejectOversizedContentLength } from "@/lib/http-security";
-import { UnauthorizedError, withErrorHandler } from "@/lib/api-errors";
+import { AppError, UnauthorizedError, withErrorHandler } from "@/lib/api-errors";
 import { deleteInvoice, getInvoice, updateInvoice } from "@/lib/sales-invoices";
 import { isoDateSchema, moneySchema } from "@/lib/validation";
+import { findPaymentReceiptDuplicates } from "@/lib/alv-period";
 
 const lineSchema = z.object({
   description: z.string().trim().min(1).max(200),
@@ -34,7 +35,10 @@ export const GET = withErrorHandler(async (req: NextRequest, context: RouteConte
   const session = await requireSession(req);
   if (!session) throw new UnauthorizedError();
   const { id } = await context.params;
-  return noStoreJson({ invoice: await getInvoice(session.userId, id) });
+  const invoice = await getInvoice(session.userId, id);
+  // Hand-recorded payments that an income receipt seems to count again.
+  const paymentDuplicates = await findPaymentReceiptDuplicates(session.userId, { invoiceId: id });
+  return noStoreJson({ invoice, paymentDuplicates });
 });
 
 export const PATCH = withErrorHandler(async (req: NextRequest, context: RouteContext) => {
@@ -47,7 +51,17 @@ export const PATCH = withErrorHandler(async (req: NextRequest, context: RouteCon
   if (oversized) return oversized;
 
   const { id } = await context.params;
-  const invoice = await updateInvoice(session.userId, id, patchSchema.parse(await req.json()));
+  const input = patchSchema.parse(await req.json());
+  // An edit must name the version it was made on; without it a stale screen
+  // would silently overwrite a newer change (428 Precondition Required).
+  if (!input.expectedUpdatedAt) {
+    throw new AppError(
+      "Muokkaus vaatii laskun version. Lataa lasku uudelleen ja yritä sitten.",
+      "PRECONDITION_REQUIRED",
+      428
+    );
+  }
+  const invoice = await updateInvoice(session.userId, id, input);
   return noStoreJson({ invoice });
 });
 

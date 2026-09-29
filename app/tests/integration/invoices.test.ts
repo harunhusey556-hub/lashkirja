@@ -172,7 +172,10 @@ describe("PATCH / DELETE /api/invoices/[id]", () => {
       buildRequest(
         "PATCH",
         `/api/invoices/${invoice.id}`,
-        { lines: [{ description: "Uusi rivi", quantity: 3, unitPrice: 10, vatRate: 25.5 }] },
+        {
+          lines: [{ description: "Uusi rivi", quantity: 3, unitPrice: 10, vatRate: 25.5 }],
+          expectedUpdatedAt: invoice.updatedAt,
+        },
         { cookie }
       ),
       routeContext({ id: invoice.id })
@@ -190,7 +193,12 @@ describe("PATCH / DELETE /api/invoices/[id]", () => {
     await send(invoice.id);
 
     const locked = await patchInvoice(
-      buildRequest("PATCH", `/api/invoices/${invoice.id}`, { lines: [LINE] }, { cookie }),
+      buildRequest(
+        "PATCH",
+        `/api/invoices/${invoice.id}`,
+        { lines: [LINE], expectedUpdatedAt: invoice.updatedAt },
+        { cookie }
+      ),
       routeContext({ id: invoice.id })
     );
     expect(locked.status).toBe(409);
@@ -200,7 +208,13 @@ describe("PATCH / DELETE /api/invoices/[id]", () => {
       buildRequest(
         "PATCH",
         `/api/invoices/${invoice.id}`,
-        { notes: "Maksuaikaa jatkettu", dueDate: "2026-02-28" },
+        {
+          notes: "Maksuaikaa jatkettu",
+          dueDate: "2026-02-28",
+          expectedUpdatedAt: (
+            await prisma.salesInvoice.findUniqueOrThrow({ where: { id: invoice.id } })
+          ).updatedAt.toISOString(),
+        },
         { cookie }
       ),
       routeContext({ id: invoice.id })

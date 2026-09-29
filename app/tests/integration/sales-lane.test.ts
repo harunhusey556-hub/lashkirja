@@ -106,7 +106,13 @@ describe("GET /api/invoices/match (preview)", () => {
       await previewMatch(buildRequest("GET", "/api/invoices/match", undefined, { cookie }))
     );
     expect(preview.preview).toEqual([
-      { invoiceNumber: invoice.number, customerName: "Anna Asiakas", amount: 125.5 },
+      expect.objectContaining({
+        invoiceId: invoice.id,
+        invoiceNumber: invoice.number,
+        customerName: "Anna Asiakas",
+        amount: 125.5,
+        paidDate: "2025-03-20",
+      }),
     ]);
     expect(preview.applied).toEqual([]);
     expect(await prisma.invoicePayment.count()).toBe(0);

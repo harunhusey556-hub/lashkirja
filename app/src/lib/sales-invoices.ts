@@ -36,8 +36,9 @@ import {
   serializePartySnapshot,
 } from "./invoice-snapshot";
 import { requireActiveCustomer } from "./customers";
-import { assertPeriodOpen, PeriodLockedError } from "./period-lock";
+import { assertPeriodOpen, getLockedThrough, isDateLocked, PeriodLockedError } from "./period-lock";
 import { INVOICE_LIST_LIMIT } from "./invoice-groups";
+import { DUPLICATE_DATE_WINDOW_DAYS, DUPLICATE_DISMISSED_KIND } from "./alv-period";
 import type { InvoicePdfData } from "./invoice-pdf";
 
 export interface InvoiceLinePayload {
@@ -585,12 +586,28 @@ async function applyInvoiceUpdate(
   throw versionConflict();
 }
 
+/**
+ * A credit note is a numbered document the customer already holds, counted in
+ * the VAT month it was issued. It never goes back to draft, never changes
+ * status and is never deleted; a mistake is corrected with a new invoice.
+ */
+function assertNotCreditNote(documentKind: string): void {
+  if (documentKind === "credit_note") {
+    throw new AppError(
+      "Hyvityslaskua ei voi muuttaa eikä poistaa. Korjaa tarvittaessa uudella laskulla.",
+      "CREDIT_NOTE_IMMUTABLE",
+      409
+    );
+  }
+}
+
 export async function deleteInvoice(userId: string, id: string): Promise<void> {
   const existing = await prisma.salesInvoice.findFirst({
     where: { id, userId },
-    select: { id: true, status: true, issueDate: true },
+    select: { id: true, status: true, issueDate: true, documentKind: true },
   });
   if (!existing) throw new NotFoundError("Laskua ei löytynyt.");
+  assertNotCreditNote(existing.documentKind);
   await assertPeriodOpen(userId, [existing.issueDate]);
   if (existing.status !== "draft") {
     throw new AppError(
@@ -633,7 +650,10 @@ export async function createCreditNote(userId: string, invoiceId: string): Promi
   }
 
   const issueDate = isoDateToUtc(helsinkiCalendarDate());
-  await assertPeriodOpen(userId, [issueDate, original.issueDate]);
+  // Only the credit note's own month changes (AVL 136 §): the original stays
+  // counted where it was, and its status flag moves no report. So a filed,
+  // locked month can still be corrected by crediting in an open one.
+  await assertPeriodOpen(userId, [issueDate]);
   const dueDate = issueDate;
   const lineInputs = toLineInputs(
     original.lines.map((line) => ({
@@ -772,6 +792,7 @@ export async function setInvoiceStatus(
     include: { payments: { select: { amountCents: true } }, lines: { select: { id: true } } },
   });
   if (!existing) throw new NotFoundError("Laskua ei löytynyt.");
+  assertNotCreditNote(existing.documentKind);
 
   await assertPeriodOpen(userId, [existing.issueDate]);
 
@@ -947,6 +968,162 @@ export async function recordPayment(
   else await prisma.$transaction(writePayment);
 
   return getInvoice(userId, invoiceId, conn);
+}
+
+export interface BankRowCandidate {
+  transactionId: string;
+  date: string | null;
+  counterparty: string | null;
+  amount: number;
+  /** An income receipt was already drafted from this row. */
+  hasReceipt: boolean;
+}
+
+/**
+ * Incoming bank rows a hand-recorded payment most likely is: same amount, a
+ * date within a few days, and not yet settling any invoice. Offered when the
+ * payment is recorded, so the payment carries the row and the income receipt
+ * drafted from the same row is never counted on top of the invoice.
+ */
+export async function findBankRowsForPayment(
+  userId: string,
+  amountCents: number,
+  paidDate: string
+): Promise<BankRowCandidate[]> {
+  if (amountCents <= 0) return [];
+  const day = isoDateToUtc(paidDate).getTime();
+  const windowMs = DUPLICATE_DATE_WINDOW_DAYS * 24 * 60 * 60 * 1000;
+  const rows = await prisma.transaction.findMany({
+    where: {
+      statement: { userId },
+      type: "tulo",
+      amountCents,
+      invoicePayment: null,
+      purchasePayment: null,
+      date: { gte: new Date(day - windowMs), lte: new Date(day + windowMs) },
+    },
+    select: { id: true, date: true, counterparty: true, amountCents: true, receiptId: true },
+    orderBy: { date: "asc" },
+    take: 5,
+  });
+  const drafted = await prisma.receipt.findMany({
+    where: { userId, sourceTransactionId: { in: rows.map((row) => row.id) } },
+    select: { sourceTransactionId: true },
+  });
+  const draftedIds = new Set(drafted.map((receipt) => receipt.sourceTransactionId));
+  return rows
+    .map((row) => ({
+      transactionId: row.id,
+      date: row.date ? row.date.toISOString().slice(0, 10) : null,
+      counterparty: row.counterparty,
+      amount: centsToEuros(row.amountCents),
+      hasReceipt: row.receiptId !== null || draftedIds.has(row.id),
+    }))
+    .sort((a, b) => {
+      const gap = (value: string | null) =>
+        value ? Math.abs(isoDateToUtc(value).getTime() - day) : Number.MAX_SAFE_INTEGER;
+      return gap(a.date) - gap(b.date);
+    });
+}
+
+/**
+ * Attaches a bank row to a payment that was recorded by hand. The row then
+ * proves the payment, and an income receipt from the same row stops counting
+ * as separate income. Refused when the amounts differ or the row is taken.
+ */
+export async function linkPaymentToTransaction(
+  userId: string,
+  invoiceId: string,
+  paymentId: string,
+  transactionId: string
+): Promise<PublicInvoice> {
+  const payment = await prisma.invoicePayment.findFirst({
+    where: { id: paymentId, invoiceId, invoice: { userId } },
+    select: { id: true, transactionId: true, amountCents: true, paidDate: true },
+  });
+  if (!payment) throw new NotFoundError("Maksua ei löytynyt.");
+  if (payment.transactionId) {
+    throw new AppError("Maksu on jo yhdistetty tilitapahtumaan.", "PAYMENT_ALREADY_LINKED", 409);
+  }
+  const row = await prisma.transaction.findFirst({
+    where: { id: transactionId, statement: { userId } },
+    select: {
+      id: true,
+      date: true,
+      type: true,
+      amountCents: true,
+      invoicePayment: { select: { id: true } },
+      receipt: { select: { date: true } },
+    },
+  });
+  if (!row) throw new NotFoundError("Tapahtumaa ei löytynyt.");
+  if (row.invoicePayment) {
+    throw new AppError(
+      "Tämä tilitapahtuma on jo kohdistettu laskulle.",
+      "TRANSACTION_ALREADY_USED",
+      409
+    );
+  }
+  if (row.type !== "tulo" || row.amountCents !== payment.amountCents) {
+    throw new ValidationError("Tilitapahtuman summa ei vastaa maksua.");
+  }
+  // Linking drops the income receipt of this row from its month, so that
+  // month must still be open, like the payment's own.
+  const drafted = await prisma.receipt.findMany({
+    where: { userId, sourceTransactionId: row.id },
+    select: { date: true },
+  });
+  await assertPeriodOpen(userId, [
+    payment.paidDate,
+    row.date,
+    row.receipt?.date,
+    ...drafted.map((receipt) => receipt.date),
+  ]);
+
+  await prisma.$transaction(async (tx) => {
+    const updated = await tx.invoicePayment.updateMany({
+      where: { id: payment.id, transactionId: null },
+      data: { transactionId: row.id, source: "bank" },
+    });
+    if (updated.count === 0) {
+      throw new AppError("Maksu on jo yhdistetty tilitapahtumaan.", "PAYMENT_ALREADY_LINKED", 409);
+    }
+    await recordActivity(tx, invoiceId, "payment_linked", "Maksu yhdistettiin tilitapahtumaan.");
+  });
+  return getInvoice(userId, invoiceId);
+}
+
+/** The user says a flagged receipt and payment are two separate incomes. */
+export async function dismissPaymentDuplicate(
+  userId: string,
+  invoiceId: string,
+  paymentId: string,
+  receiptId: string
+): Promise<void> {
+  const [payment, receipt] = await Promise.all([
+    prisma.invoicePayment.findFirst({
+      where: { id: paymentId, invoiceId, invoice: { userId } },
+      select: { id: true },
+    }),
+    prisma.receipt.findFirst({ where: { id: receiptId, userId }, select: { id: true } }),
+  ]);
+  if (!payment || !receipt) throw new NotFoundError("Maksua tai kuittia ei löytynyt.");
+  await prisma.automationEvent.create({
+    data: {
+      userId,
+      kind: DUPLICATE_DISMISSED_KIND,
+      resourceType: "receipt",
+      resourceId: receipt.id,
+      newValue: payment.id,
+      reason: "Käyttäjä vahvisti kuitin ja laskun maksun erillisiksi tuloiksi.",
+    },
+  });
+  await recordActivity(
+    prisma,
+    invoiceId,
+    "payment_duplicate_dismissed",
+    "Maksu ja tulokuitti merkittiin erillisiksi tuloiksi."
+  );
 }
 
 export async function removePayment(
@@ -1169,10 +1346,23 @@ export interface BankMatchResult {
   suggestions: Array<{
     invoiceId: string;
     invoiceNumber: number;
+    customerName: string;
     transactionId: string;
     amount: number;
+    /** The bank row's booking date, the payment date a confirm would book. */
+    paidDate: string;
     reason: "amount_and_date";
   }>;
+}
+
+/** A reference hit the run would book, as the confirmation sheet lists it. */
+export interface BankMatchPreviewEntry {
+  invoiceId: string;
+  invoiceNumber: number;
+  customerName: string;
+  transactionId: string;
+  amount: number;
+  paidDate: string;
 }
 
 /**
@@ -1186,7 +1376,7 @@ export async function matchInvoicePaymentsFromBank(
   userId: string,
   now: Date = new Date(),
   options: { dryRun?: boolean } = {}
-): Promise<BankMatchResult & { preview?: Array<{ invoiceNumber: number; customerName: string; amount: number }> }> {
+): Promise<BankMatchResult & { preview?: BankMatchPreviewEntry[] }> {
   const openInvoices = await prisma.salesInvoice.findMany({
     where: { userId, status: "sent", documentKind: "invoice" },
     include: {
@@ -1198,7 +1388,7 @@ export async function matchInvoicePaymentsFromBank(
     return { applied: [], suggestions: [], skippedLocked: [], ...(options.dryRun ? { preview: [] } : {}) };
   }
   // What a run would book, for the confirmation sheet (SALES-06).
-  const preview: Array<{ invoiceNumber: number; customerName: string; amount: number }> = [];
+  const preview: BankMatchPreviewEntry[] = [];
 
   const incoming = await prisma.transaction.findMany({
     where: {
@@ -1208,6 +1398,11 @@ export async function matchInvoicePaymentsFromBank(
     },
     select: { id: true, amountCents: true, date: true, reference: true, message: true },
   });
+  // A closed period is left alone by the run, so the preview must say the same
+  // thing the run will do, and a suggestion there could never be confirmed.
+  const lockedThrough = await getLockedThrough(userId);
+  const paidDateOf = (transaction: { date: Date | null }) =>
+    (transaction.date ?? now).toISOString().slice(0, 10);
 
   const byReference = new Map(openInvoices.map((invoice) => [invoice.reference, invoice]));
   const applied: BankMatchResult["applied"] = [];
@@ -1223,11 +1418,24 @@ export async function matchInvoicePaymentsFromBank(
     const invoice = candidates.map((value) => byReference.get(value)).find(Boolean);
     if (!invoice) continue;
 
+    if (options.dryRun && isDateLocked(lockedThrough, paidDateOf(transaction))) {
+      skippedLocked.push({
+        invoiceId: invoice.id,
+        invoiceNumber: invoice.number,
+        transactionId: transaction.id,
+      });
+      consumed.add(transaction.id);
+      continue;
+    }
+
     if (options.dryRun) {
       preview.push({
+        invoiceId: invoice.id,
         invoiceNumber: invoice.number,
         customerName: invoice.customer.name,
+        transactionId: transaction.id,
         amount: centsToEuros(transaction.amountCents),
+        paidDate: paidDateOf(transaction),
       });
       applied.push({
         invoiceId: invoice.id,
@@ -1243,7 +1451,7 @@ export async function matchInvoicePaymentsFromBank(
     try {
       await recordPayment(userId, invoice.id, {
         amount: centsToEuros(transaction.amountCents),
-        paidDate: (transaction.date ?? now).toISOString().slice(0, 10),
+        paidDate: paidDateOf(transaction),
         transactionId: transaction.id,
         source: "bank",
         note: "Kohdistettu viitenumerolla",
@@ -1274,6 +1482,7 @@ export async function matchInvoicePaymentsFromBank(
   // Weaker signal: exact open amount, paid on or after the invoice was issued.
   for (const transaction of incoming) {
     if (consumed.has(transaction.id)) continue;
+    if (isDateLocked(lockedThrough, paidDateOf(transaction))) continue;
     for (const invoice of openInvoices) {
       if (applied.some((entry) => entry.invoiceId === invoice.id)) continue;
       const paid = invoice.payments.reduce((sum, payment) => sum + payment.amountCents, 0);
@@ -1283,8 +1492,10 @@ export async function matchInvoicePaymentsFromBank(
       suggestions.push({
         invoiceId: invoice.id,
         invoiceNumber: invoice.number,
+        customerName: invoice.customer.name,
         transactionId: transaction.id,
         amount: centsToEuros(transaction.amountCents),
+        paidDate: paidDateOf(transaction),
         reason: "amount_and_date",
       });
       break;

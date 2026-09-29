@@ -8,8 +8,10 @@ import { getBankOverview } from "@/lib/bank-accounts";
 import { buildAging, buildAgingReport, openPosition, type InvoiceStatus } from "@/lib/invoices";
 import { computeAlvReport } from "@/lib/alv";
 import { loadAlvPeriodSources, type AlvPeriodSources } from "@/lib/alv-period";
+import { computeYearTurnover } from "@/lib/alv-threshold";
 import { buildProfitLoss } from "@/lib/reports";
 import { helsinkiMonthKey } from "@/lib/validation";
+import { buildDashboardItems, type DashboardItems } from "./items";
 
 function round2(n: number): number {
   return Math.round(n * 100) / 100;
@@ -98,36 +100,6 @@ export async function GET(req: NextRequest) {
   }
   const hasBankData = transactions.length > 0;
 
-  // Calendar-year liikevaihto vs the 20 000 € ALV registration threshold.
-  // Same rule as the month: bank rows when the year has any, else documents
-  // (receipts plus sales invoices). Never both, so nothing counts twice.
-  const startOfYear = new Date(Date.UTC(year, 0, 1));
-  const endOfYear = new Date(Date.UTC(year + 1, 0, 1));
-  const yearPrefix = `${year}-`;
-  let ytdRevenue = 0;
-  try {
-    const yearTx = await prisma.transaction.findMany({
-      where: {
-        type: "tulo",
-        statement: {
-          userId: session.userId,
-          periodMonth: { startsWith: yearPrefix },
-        },
-      },
-      select: { amountCents: true },
-    });
-    if (yearTx.length > 0) {
-      ytdRevenue = yearTx.reduce((a, t) => a + centsToEuros(t.amountCents), 0);
-    } else {
-      const yearBooks = await loadAlvPeriodSources(session.userId, startOfYear, endOfYear);
-      ytdRevenue = centsToEuros(
-        buildProfitLoss(yearBooks.reportReceipts, yearBooks.reportInvoices).total.incomeGrossCents
-      );
-    }
-  } catch {
-    sectionErrors.threshold = "ALV-rajaa ei saatu ladattua.";
-  }
-
   const user = await prisma.user.findUnique({
     where: { id: session.userId },
     select: {
@@ -140,6 +112,18 @@ export async function GET(req: NextRequest) {
 
   const businessProfile = parseBusinessDetails(user?.businessDetails);
   const vatProfile = deriveVatProfile(businessProfile);
+
+  // Calendar-year liikevaihto vs the 20 000 € VAT threshold (AVL 3 §), without
+  // VAT. The basis is chosen per month: bank rows for a month with a tiliote,
+  // documents for the rest, so a single statement cannot hide the invoices of
+  // the other months and nothing counts twice.
+  let ytdRevenue = 0;
+  try {
+    const turnover = await computeYearTurnover(session.userId, year, vatProfile.defaultSalesRate);
+    ytdRevenue = centsToEuros(turnover.netCents);
+  } catch {
+    sectionErrors.threshold = "ALV-rajaa ei saatu ladattua.";
+  }
 
   let pendingReceiptsCount = 0;
   try {
@@ -217,6 +201,15 @@ export async function GET(req: NextRequest) {
     sectionErrors.position = "Saamisia ja velkoja ei saatu ladattua.";
   }
 
+  // "Tarvitaan sinulta": concrete items with the other party and the data
+  // each one-tap action needs, scoped to the month (see items.ts).
+  let koti: DashboardItems | null = null;
+  try {
+    koti = await buildDashboardItems(session.userId, month, month >= currentMonth, now);
+  } catch {
+    sectionErrors.items = "Tehtäviä ei saatu ladattua.";
+  }
+
   return NextResponse.json({
     firstName: session.firstName,
     month,
@@ -251,6 +244,8 @@ export async function GET(req: NextRequest) {
       : null,
     receivables,
     payables,
+    items: koti?.items ?? [],
+    itemTotals: koti?.totals ?? null,
     isSingleVatProfile: vatProfile.isSingleRate && vatProfile.isVatRegistered,
     singleVatRate: vatProfile.defaultSalesRate,
     ...(Object.keys(sectionErrors).length > 0 ? { sectionErrors } : {}),

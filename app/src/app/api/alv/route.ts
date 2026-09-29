@@ -42,6 +42,7 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
     receiptCount: sources.receiptCount,
     sources: report.sources,
     excludedReceiptCount: sources.excludedReceiptCount,
+    suspectedDuplicateCount: sources.suspectedDuplicateCount,
     creditedInvoiceCount: sources.creditedInvoiceCount,
     creditNoteCount: sources.creditNoteCount,
     basis: "laskutusperuste",

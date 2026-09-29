@@ -42,6 +42,7 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
     months: report.months.map(periodToEuros),
     undatedCount: report.undatedCount,
     excludedReceiptCount: sources.excludedReceiptCount,
+    suspectedDuplicateCount: sources.suspectedDuplicateCount,
     basis: "laskutusperuste",
   });
 });

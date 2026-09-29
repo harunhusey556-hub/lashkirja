@@ -123,7 +123,17 @@ describe("a closed period refuses changes", () => {
     await lockThrough("2026-05");
 
     const patched = await patchInvoice(
-      buildRequest("PATCH", `/api/invoices/${invoiceId}`, { notes: "muutos" }, { cookie }),
+      buildRequest(
+        "PATCH",
+        `/api/invoices/${invoiceId}`,
+        {
+          notes: "muutos",
+          expectedUpdatedAt: (
+            await prisma.salesInvoice.findUniqueOrThrow({ where: { id: invoiceId } })
+          ).updatedAt.toISOString(),
+        },
+        { cookie }
+      ),
       routeContext({ id: invoiceId })
     );
     expect(patched.status).toBe(409);

@@ -1,5 +1,8 @@
 import { prisma } from "./db";
 import { detailHref } from "./routes";
+import { findPaymentReceiptDuplicates } from "./alv-period";
+import { formatEur } from "./format";
+import { centsToEuros } from "./money";
 
 export const AMOUNT_MISMATCH_CENTS = 50;
 export const AMBIGUOUS_SCORE = 0.8;
@@ -12,7 +15,8 @@ export interface WorkQueueItem {
     | "amount_mismatch"
     | "corrupt_file"
     | "link_error"
-    | "ambiguous_match";
+    | "ambiguous_match"
+    | "payment_duplicate";
   title: string;
   detail: string;
   href: string | null;
@@ -160,6 +164,19 @@ export async function listWorkQueue(userId: string): Promise<WorkQueueItem[]> {
           ? "Useita tai epävarmoja osumia."
           : "Osuma on epävarma.",
       href: detailHref("statement", tx.statementId),
+    });
+  }
+
+  // Same money twice: a hand-recorded invoice payment and an income receipt
+  // from the bank row. Both still count until the user links or separates them.
+  const duplicates = await findPaymentReceiptDuplicates(userId);
+  for (const pair of duplicates.slice(0, TAKE)) {
+    items.push({
+      id: `payment_duplicate:${pair.receiptId}:${pair.paymentId}`,
+      kind: "payment_duplicate",
+      title: pair.receiptVendor || pair.customerName,
+      detail: `Tulokuitti ${formatEur(centsToEuros(pair.amountCents))} voi olla laskun ${pair.invoiceNumber} maksu. Tarkista, ettei tuloa lasketa kahdesti.`,
+      href: detailHref("invoice", pair.invoiceId),
     });
   }
 
