@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
@@ -26,6 +26,7 @@ import { ConnectivityBanner } from "@/components/ConnectivityBanner";
 import { OnboardingModal } from "@/components/OnboardingModal";
 import { AiChatDrawer } from "@/components/AiChatDrawer";
 import ConfirmModal from "@/components/ConfirmModal";
+import { ToastHost } from "@/components/ToastHost";
 import { useOfflineReceiptQueue } from "@/components/useOfflineReceiptQueue";
 import { leaveAfterSignOut, readJson } from "@/components/clientFetch";
 
@@ -35,25 +36,47 @@ import { AppLock } from "@/components/AppLock";
 import { apiFetch } from "@/components/clientFetch";
 import { useSession } from "@/components/SessionProvider";
 import { IS_MOBILE_BUILD } from "@/lib/build-target";
-import { markFirstScreen } from "@/lib/splash";
+import { markFirstScreen, onFirstScreen } from "@/lib/splash";
 import { readPageCache, writePageCache } from "@/lib/page-cache";
 import { helsinkiMonthKey } from "@/lib/validation";
 import { bumpNavEpoch } from "@/lib/screen-state";
 import {
   armNavigation,
   consumeDirection,
+  inAppPrevious,
   markHistoryBack,
   performInAppBack,
+  previousAfterLanding,
   recordRoute,
   type NavDirection,
 } from "@/lib/nav-direction";
 import { hapticSelection } from "@/lib/haptics";
 import { anyFormDirty, requestLeave } from "@/lib/form-guard";
 import { UnsavedChangesHost } from "@/components/UnsavedChangesHost";
+import { captureWithCamera, chooseDocuments, isNativeShell } from "@/lib/native-pick";
+import {
+  PENDING_CAPTURE_ROUTES,
+  STATEMENT_ACCEPT,
+  STATEMENT_FILE_TYPES,
+  stashPendingCapture,
+  type PendingCaptureKind,
+} from "@/lib/pending-capture";
+import { showToast } from "@/lib/toast";
+import {
+  forgetScroll,
+  keepPageNode,
+  mountSnapshot,
+  pageNodeFor,
+  prefersReducedMotion,
+  recalledScroll,
+  rememberScroll,
+  removeSnapshotAfter,
+} from "@/lib/page-transition";
 import {
   avatarRoot,
   backTarget,
   matchNav,
+  navRelation,
   rootIsActive,
   shellShowsBack,
   tabRoots,
@@ -76,6 +99,42 @@ function rootIcon(id: string): LucideIcon {
 /** Set once the onboarding endpoint has confirmed the user is onboarded. */
 const ONBOARDED_CACHE_KEY = "shell-onboarded";
 
+/**
+ * The avatar's initial, readable synchronously on the very first paint
+ * (AUTH-28): the session cache is async on a cold start, so without this
+ * the header shows a generic icon and then flips to the letter. One
+ * character, not sensitive; removed on sign-out.
+ */
+const AVATAR_INITIAL_KEY = "lashkirja.shell.initial.v1";
+
+function readStoredInitial(): string {
+  try {
+    return window.localStorage.getItem(AVATAR_INITIAL_KEY) ?? "";
+  } catch {
+    return "";
+  }
+}
+
+function writeStoredInitial(value: string | null): void {
+  try {
+    if (value) window.localStorage.setItem(AVATAR_INITIAL_KEY, value);
+    else window.localStorage.removeItem(AVATAR_INITIAL_KEY);
+  } catch {
+    // Private mode or storage blocked: the icon fallback stays.
+  }
+}
+
+const noSubscribe = () => () => {};
+
+/** Content up to this much taller than the frame is fitted instead of
+ * scrolling a few px (S1): the snug layout drops the slack padding and
+ * tightens the page's section gaps. Beyond it the page is a real scroll. */
+const SNUG_MAX_SLACK = 64;
+/** Push/pop duration (--dur-push) plus a margin for the snapshot fallback timer. */
+const PUSH_FALLBACK_MS = 360;
+/** Longest the native splash waits for the first page to have real content. */
+const SPLASH_MAX_WAIT_MS = 350;
+
 let warmedTabs = false;
 
 function currentMonthKey(): string {
@@ -83,21 +142,21 @@ function currentMonthKey(): string {
 }
 
 /**
- * Fire-and-forget warm-up of the main tab payloads, so even the first tap
- * on each tab paints with data instead of a skeleton. Keys and shapes
- * mirror what each page caches for itself; existing entries are never
- * overwritten. Web only, scheduled in idle time after the first page's own
- * data (see the effect below) -- mobile skips this entirely (A3): its
- * screens already repaint from the persistent cache (Task 7) and a warm-up
- * burst would only compete with the page's own request on a slower link.
+ * Warm-up of the main tab payloads, so even the first tap on each tab paints
+ * with data instead of a skeleton. Keys and shapes mirror what each page
+ * caches for itself; existing entries are never overwritten.
+ *
+ * Web: in idle time, in parallel. Mobile (SHELL-08): once, 1.5 s after the
+ * first screen, one request at a time, so it never competes with the
+ * page's own request on a slow link.
  */
-function warmTabCaches() {
+async function warmTabCaches(sequential: boolean) {
   if (warmedTabs) return;
   warmedTabs = true;
 
   const warm = (url: string, key: string, pick: (data: Record<string, unknown>) => unknown) => {
-    if (readPageCache(key) !== null) return;
-    apiFetch(url, { credentials: "include" })
+    if (readPageCache(key) !== null) return Promise.resolve();
+    return apiFetch(url, { credentials: "include" })
       .then((res) => (res.ok ? (res.json() as Promise<Record<string, unknown>>) : null))
       .then((data) => {
         if (!data) return;
@@ -111,33 +170,43 @@ function warmTabCaches() {
       });
   };
 
+  const month = currentMonthKey();
   // Key must match the kuitit page's default query (its default sort is
   // part of the query string).
-  warm("/api/receipts?sort=date_desc", "receipts:sort=date_desc", (d) => d.receipts ?? []);
-  warm("/api/receipts?reviewStatus=pending", "receipts-pending", (d) => d.receipts ?? []);
-  warm("/api/statements", "statements", (d) => d.statements ?? []);
-  warm("/api/bank-accounts", "bank-overview", (d) => (d.accounts ? d : undefined));
-  warm("/api/invoices?", "invoices", (d) => (d.invoices && d.aging ? d : undefined));
-  const month = currentMonthKey();
-  warm(`/api/dashboard?month=${month}`, `dashboard:${month}`, (d) =>
-    Number.isFinite(d.income) && Number.isFinite(d.expenses) && d.vat ? d : undefined
-  );
+  const jobs: Array<() => Promise<void>> = [
+    () =>
+      warm(`/api/dashboard?month=${month}`, `dashboard:${month}`, (d) =>
+        Number.isFinite(d.income) && Number.isFinite(d.expenses) && d.vat ? d : undefined
+      ),
+    () => warm("/api/invoices?", "invoices", (d) => (d.invoices && d.aging ? d : undefined)),
+    () => warm("/api/receipts?sort=date_desc", "receipts:sort=date_desc", (d) => d.receipts ?? []),
+    () => warm("/api/receipts?reviewStatus=pending", "receipts-pending", (d) => d.receipts ?? []),
+    () => warm("/api/statements", "statements", (d) => d.statements ?? []),
+    () => warm("/api/bank-accounts", "bank-overview", (d) => (d.accounts ? d : undefined)),
+  ];
+  if (sequential) {
+    for (const job of jobs) await job();
+  } else {
+    await Promise.all(jobs.map((job) => job()));
+  }
 }
 
 /**
- * Shared by every tab-bar / sidebar root `<Link>`. Always arms the
- * direction before the click finishes, so a clean form's default
- * navigation (Link's own client-side push) already lands with the right
- * one. A dirty form intercepts instead: prevent Link's default and go
- * through the unsaved-changes prompt, pushing manually once confirmed.
+ * Shared by every tab-bar / sidebar root `<Link>` and the profile sheet's
+ * "Asetukset" row. Always arms the direction first. A `<Link>` navigates by
+ * its own default click; a `<button>` has no default navigation, so this
+ * pushes for it (SHELL-01: the row used to close the sheet and go nowhere).
+ * A dirty form intercepts instead: prevent the default and go through the
+ * unsaved-changes prompt, pushing manually once confirmed.
  */
 function handleRootLinkClick(
-  event: { preventDefault: () => void },
+  event: { preventDefault: () => void; currentTarget?: EventTarget | null },
   href: string,
   pathname: string,
   router: { push: (href: string) => void }
 ) {
   if (href === pathname) return;
+  const isLink = typeof HTMLAnchorElement !== "undefined" && event.currentTarget instanceof HTMLAnchorElement;
   if (anyFormDirty()) {
     event.preventDefault();
     requestLeave(() => {
@@ -147,6 +216,8 @@ function handleRootLinkClick(
     return;
   }
   armNavigation(href, "tab");
+  // One frame later, so the sheet's exit and the page change overlap.
+  if (!isLink) requestAnimationFrame(() => router.push(href));
 }
 
 export default function AppShell({ children }: { children: React.ReactNode }) {
@@ -184,14 +255,162 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     direction: "none",
   });
   if (typeof window !== "undefined" && navFrame.path !== pathname) {
-    setNavFrame({ path: pathname, direction: consumeDirection(pathname) });
+    setNavFrame({ path: pathname, direction: consumeDirection(pathname, navRelation) });
   }
   const direction = navFrame.path === pathname ? navFrame.direction : "none";
   const canGoBack = shellShowsBack(pathname);
   const back = backTarget(pathname);
+  // SHELL-31: the back button returns to the real previous screen when there
+  // is one, so the label names that screen, not the logical parent.
+  const previousScreen = typeof window === "undefined" ? null : previousAfterLanding(pathname, direction);
+  const previousEntry = previousScreen ? matchNav(previousScreen) : null;
+  const backLabel =
+    previousScreen && previousEntry && previousScreen !== back?.href && !previousEntry.path.includes(":")
+      ? previousEntry.label
+      : null;
+
+  // The current page wrapper and the one it replaced (React detaches the old
+  // keyed wrapper but leaves its subtree intact: that node is the snapshot).
+  const pageNodeRef = useRef<HTMLDivElement | null>(null);
+  const replacedPageRef = useRef<HTMLDivElement | null>(null);
+  const setPageNode = useCallback((node: HTMLDivElement | null) => {
+    if (!node || pageNodeRef.current === node) return;
+    if (pageNodeRef.current) replacedPageRef.current = pageNodeRef.current;
+    pageNodeRef.current = node;
+  }, []);
+  const pathnameRef = useRef(pathname);
+  const previousPathRef = useRef<string | null>(null);
+  // Set when an edge swipe already moved the pages into place.
+  const swipeHandoffRef = useRef<(() => void) | null>(null);
+  const pendingScrollRef = useRef<{ top: number; until: number } | null>(null);
+
+  // Scroll memory per route (SHELL-07). <main> persists across navigations.
+  useEffect(() => {
+    const main = mainRef.current;
+    if (!main) return;
+    const onScroll = () => rememberScroll(pathnameRef.current, main.scrollTop);
+    const cancelPending = () => {
+      pendingScrollRef.current = null;
+    };
+    main.addEventListener("scroll", onScroll, { passive: true });
+    main.addEventListener("touchstart", cancelPending, { passive: true });
+    main.addEventListener("wheel", cancelPending, { passive: true });
+    return () => {
+      main.removeEventListener("scroll", onScroll);
+      main.removeEventListener("touchstart", cancelPending);
+      main.removeEventListener("wheel", cancelPending);
+    };
+  }, []);
+
+  // S1: a page whose content is only slightly taller than the frame drops
+  // the slack padding (data-fit="snug") instead of scrolling a few px.
+  const evaluateFit = useCallback(() => {
+    const main = mainRef.current;
+    if (!main) return;
+    // Measure with the normal insets, then try the snug layout, and keep it
+    // only when the page then fits completely: nothing is ever clipped.
+    if (main.dataset.fit) delete main.dataset.fit;
+    const slack = main.scrollHeight - main.clientHeight;
+    if (slack > 0 && slack <= SNUG_MAX_SLACK) {
+      main.dataset.fit = "snug";
+      if (main.scrollHeight - main.clientHeight > 0) delete main.dataset.fit;
+    }
+    const pending = pendingScrollRef.current;
+    if (pending) {
+      if (performance.now() > pending.until) pendingScrollRef.current = null;
+      else {
+        main.scrollTop = pending.top;
+        if (main.scrollTop >= pending.top - 1) pendingScrollRef.current = null;
+      }
+    }
+  }, []);
+
+  useLayoutEffect(() => {
+    const main = mainRef.current;
+    const page = pageNodeRef.current;
+    if (!main) return;
+    evaluateFit();
+    if (typeof ResizeObserver === "undefined") return;
+    // Deferred a frame: toggling the snug layout resizes the page, and doing
+    // that inside the observer callback is a ResizeObserver loop.
+    let raf = 0;
+    const observer = new ResizeObserver(() => {
+      cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(evaluateFit);
+    });
+    observer.observe(main, { box: "border-box" });
+    if (page) observer.observe(page);
+    return () => {
+      cancelAnimationFrame(raf);
+      observer.disconnect();
+    };
+  }, [pathname, evaluateFit]);
+
+  // Navigation: route memory, back label, scroll restore and the push/pop.
+  useLayoutEffect(() => {
+    const main = mainRef.current;
+    const from = previousPathRef.current;
+    previousPathRef.current = pathname;
+    pathnameRef.current = pathname;
+    recordRoute(pathname, direction);
+
+    if (!main || from === null || from === pathname) return;
+
+    const oldPage = replacedPageRef.current;
+    replacedPageRef.current = null;
+    const oldPaddingTop = getComputedStyle(main).paddingTop;
+    const oldScroll = recalledScroll(from);
+    if (oldPage) keepPageNode(from, oldPage);
+
+    // Forward lands at the top; back and tab switches return to where the
+    // user left that screen (iOS keeps a tab's scroll position).
+    const target = direction === "forward" ? 0 : recalledScroll(pathname);
+    if (direction === "forward") forgetScroll(pathname);
+    main.scrollTop = target;
+    pendingScrollRef.current =
+      main.scrollTop < target - 1 ? { top: target, until: performance.now() + 2000 } : null;
+
+    const handoff = swipeHandoffRef.current;
+    swipeHandoffRef.current = null;
+    if (handoff) {
+      handoff();
+      return;
+    }
+
+    // Tab switches (100+/day) and the first render do not animate (SHELL-06).
+    if (direction !== "forward" && direction !== "back") return;
+
+    const enterClass = direction === "forward" ? "page-push-in" : "page-pop-in";
+    main.classList.remove("page-push-in", "page-pop-in");
+    void main.offsetWidth;
+    main.classList.add(enterClass);
+    const clearEnter = () => main.classList.remove(enterClass);
+    const onEnd = (event: AnimationEvent) => {
+      if (event.target === main) clearEnter();
+    };
+    main.addEventListener("animationend", onEnd, { once: true });
+    const enterTimer = window.setTimeout(clearEnter, PUSH_FALLBACK_MS);
+
+    let removeSnapshot: (() => void) | null = null;
+    if (oldPage && !prefersReducedMotion()) {
+      const snap = mountSnapshot(
+        main,
+        oldPage,
+        oldScroll,
+        direction === "forward" ? "push-out" : "pop-out",
+        oldPaddingTop
+      );
+      if (snap) removeSnapshot = removeSnapshotAfter(snap, PUSH_FALLBACK_MS);
+    }
+    return () => {
+      window.clearTimeout(enterTimer);
+      main.removeEventListener("animationend", onEnd);
+      clearEnter();
+      removeSnapshot?.();
+    };
+  }, [pathname, direction]);
 
   useEffect(() => {
-    recordRoute(pathname, direction);
     document.dispatchEvent(new Event("lashkirja-dismiss-press"));
     bumpNavEpoch();
   }, [pathname, direction]);
@@ -212,8 +431,9 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
   // iOS-style edge swipe back on drill-in pages. Starts only within 24px of
   // the left edge so horizontally scrollable content keeps working, tracks the
-  // finger interruptibly, and never leaves a resting transform on <main>
-  // (a retained transform re-anchors position:fixed descendants).
+  // finger interruptibly with the previous screen waiting underneath, and
+  // never leaves a resting transform on <main> (a retained transform
+  // re-anchors position:fixed descendants).
   useEffect(() => {
     if (!canGoBack) return;
     const main = mainRef.current;
@@ -226,11 +446,17 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     let dx = 0;
     let tracking = false;
     let decided = false;
+    let under: HTMLElement | null = null;
 
     const clearInline = () => {
       main.style.transform = "";
       main.style.transition = "";
       main.style.opacity = "";
+    };
+
+    const dropUnder = () => {
+      under?.remove();
+      under = null;
     };
 
     const onTouchStart = (event: TouchEvent) => {
@@ -269,10 +495,21 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         }
         decided = true;
         main.style.transition = "none";
+        main.style.position = "relative";
+        main.style.zIndex = "1";
+        const parentPage = pageNodeFor(inAppPrevious(pathname));
+        if (parentPage && !prefersReducedMotion()) {
+          under = mountSnapshot(main, parentPage, recalledScroll(inAppPrevious(pathname) ?? ""), "swipe-under");
+          if (under) under.style.transition = "none";
+        }
       }
       event.preventDefault();
       dx = Math.max(0, moveX);
       main.style.transform = `translateX(${dx}px)`;
+      if (under) {
+        const progress = Math.min(1, dx / Math.max(main.offsetWidth, 1));
+        under.style.transform = `translateX(${-28 * (1 - progress)}%)`;
+      }
     };
 
     const onTouchEnd = () => {
@@ -283,13 +520,21 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       const velocity = dx / elapsed;
       const commit =
         dx > window.innerWidth * 0.32 || (dx > 56 && velocity > 0.45);
-      const reduceMotion = window.matchMedia(
-        "(prefers-reduced-motion: reduce)"
-      ).matches;
+      const reduceMotion = prefersReducedMotion();
 
       if (commit) {
         const go = () => {
           swipeLock.current = true;
+          const landedUnder = under;
+          under = null;
+          // The next landing is already in place: no pop animation, just
+          // swap the live page in and drop the preview underneath.
+          swipeHandoffRef.current = () => {
+            clearInline();
+            main.style.position = "";
+            main.style.zIndex = "";
+            landedUnder?.remove();
+          };
           const navigate = () => {
             performInAppBack(pathname, router, back?.href);
           };
@@ -298,22 +543,41 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
             navigate();
             return;
           }
-          main.style.transition = "transform 0.18s ease-out, opacity 0.18s ease-out";
+          const curve = "var(--ease-drawer)";
+          main.style.transition = `transform 200ms ${curve}`;
           main.style.transform = "translateX(100%)";
-          main.style.opacity = "0.4";
-          window.setTimeout(navigate, 170);
+          if (landedUnder) {
+            landedUnder.style.transition = `transform 200ms ${curve}`;
+            landedUnder.style.transform = "translateX(0)";
+          } else {
+            main.style.transition = `transform 200ms ${curve}, opacity 200ms ${curve}`;
+            main.style.opacity = "0.4";
+          }
+          window.setTimeout(navigate, 190);
         };
         if (anyFormDirty()) {
           clearInline();
+          dropUnder();
           requestLeave(go);
           return;
         }
         go();
       } else {
-        main.style.transition =
-          "transform 0.2s cubic-bezier(0.32, 0.72, 0, 1)";
+        const curve = "var(--ease-drawer)";
+        main.style.transition = `transform 200ms ${curve}`;
         main.style.transform = "translateX(0)";
-        window.setTimeout(clearInline, 220);
+        if (under) {
+          under.style.transition = `transform 200ms ${curve}`;
+          under.style.transform = "translateX(-28%)";
+        }
+        const leaving = under;
+        under = null;
+        window.setTimeout(() => {
+          clearInline();
+          main.style.position = "";
+          main.style.zIndex = "";
+          leaving?.remove();
+        }, 220);
       }
     };
 
@@ -326,7 +590,12 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       main.removeEventListener("touchmove", onTouchMove);
       main.removeEventListener("touchend", onTouchEnd);
       main.removeEventListener("touchcancel", onTouchEnd);
-      clearInline();
+      dropUnder();
+      if (!swipeHandoffRef.current) {
+        clearInline();
+        main.style.position = "";
+        main.style.zIndex = "";
+      }
       swipeLock.current = false;
     };
   }, [canGoBack, pathname, router, back?.href]);
@@ -382,17 +651,25 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     return () => controller.abort();
   }, [user]);
 
-  // Web only (A3): once per document, in idle time, after the page itself
-  // has had first go at the network and SQLite. Safari has no
-  // requestIdleCallback, hence the setTimeout fallback.
+  // Tab cache warm-up: web in idle time; mobile once, sequentially, 1.5 s
+  // after the first screen (see warmTabCaches).
   useEffect(() => {
-    if (IS_MOBILE_BUILD) return;
+    if (IS_MOBILE_BUILD) {
+      let timer: number | null = null;
+      const unsubscribe = onFirstScreen(() => {
+        timer = window.setTimeout(() => void warmTabCaches(true), 1500);
+      });
+      return () => {
+        unsubscribe();
+        if (timer !== null) window.clearTimeout(timer);
+      };
+    }
     let idleHandle: number | null = null;
     let timeoutHandle: number | null = null;
     if (typeof window.requestIdleCallback === "function") {
-      idleHandle = window.requestIdleCallback(() => warmTabCaches());
+      idleHandle = window.requestIdleCallback(() => void warmTabCaches(false));
     } else {
-      timeoutHandle = window.setTimeout(() => warmTabCaches(), 1500);
+      timeoutHandle = window.setTimeout(() => void warmTabCaches(false), 1500);
     }
     return () => {
       if (idleHandle !== null && typeof window.cancelIdleCallback === "function") {
@@ -402,33 +679,56 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     };
   }, []);
 
-  // Mobile only (Task 7): the shell is one of the two possible "first real
-  // screen"s (the other is LoginForm) -- hides the native splash once
-  // `children` has actually rendered, not merely once this component
-  // mounted (see A1: "unknown" already renders `children`, so this fires
-  // then, not only once a fully confirmed "signed-in" arrives).
+  // Mobile only: the shell is one of the two possible "first real screen"s
+  // (the other is LoginForm). The native splash hides once the page shows
+  // real content (no skeleton left) or after 350 ms at most (SHELL-08), so
+  // the splash fade never overlaps an empty frame.
+  const splashWaitStart = useRef<number | null>(null);
   useEffect(() => {
     if (!IS_MOBILE_BUILD || sessionStatus === "signed-out") return;
-    let raf1 = 0;
-    let raf2 = 0;
-    raf1 = requestAnimationFrame(() => {
-      raf2 = requestAnimationFrame(() => markFirstScreen());
-    });
+    if (splashWaitStart.current === null) splashWaitStart.current = performance.now();
+    const started = splashWaitStart.current;
+    let raf = 0;
+    let stopped = false;
+    const contentReady = () => {
+      const main = mainRef.current;
+      if (!main || !main.firstElementChild || main.firstElementChild.childElementCount === 0) return false;
+      return !main.querySelector('.skeleton, .animate-pulse, [aria-busy="true"]');
+    };
+    const tick = () => {
+      if (stopped) return;
+      if (contentReady() || performance.now() - started >= SPLASH_MAX_WAIT_MS) {
+        raf = requestAnimationFrame(() => {
+          raf = requestAnimationFrame(() => markFirstScreen());
+        });
+        return;
+      }
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
     return () => {
-      cancelAnimationFrame(raf1);
-      cancelAnimationFrame(raf2);
+      stopped = true;
+      cancelAnimationFrame(raf);
     };
   }, [sessionStatus]);
 
   const showProfile = profileOpenOn === pathname;
   const chatOpen = chatOpenOn === pathname;
-  const initials = (user?.firstName?.trim()?.[0] || user?.email?.trim()?.[0] || "").toUpperCase();
+  const liveInitial = (user?.firstName?.trim()?.[0] || user?.email?.trim()?.[0] || "").toUpperCase();
+  const storedInitial = useSyncExternalStore(noSubscribe, readStoredInitial, () => "");
+  const initials = liveInitial || (sessionStatus === "signed-out" ? "" : storedInitial);
+
+  useEffect(() => {
+    if (liveInitial) writeStoredInitial(liveInitial);
+    else if (sessionStatus === "signed-out") writeStoredInitial(null);
+  }, [liveInitial, sessionStatus]);
 
   async function handleSignOut() {
     if (signingOut) return;
     setSigningOut(true);
     setSignOutError("");
     setShowLogoutConfirm(false);
+    writeStoredInitial(null);
     const left = await leaveAfterSignOut();
     if (!left) {
       setSigningOut(false);
@@ -454,11 +754,57 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
   const addOpen = addOpenOn === pathname;
 
-  function goToRoot(event: { preventDefault: () => void }, href: string) {
+  function goToRoot(event: { preventDefault: () => void; currentTarget?: EventTarget | null }, href: string) {
     void hapticSelection();
     setAddOpenOn(null);
     setProfileOpenOn(null);
     handleRootLinkClick(event, href, pathname, router);
+  }
+
+  /** Push a screen with the forward (push) transition. */
+  function goForward(href: string) {
+    armNavigation(href.split("?")[0], "forward");
+    router.push(href);
+  }
+
+  // Lisää sheet: "Ota kuva" opens the camera and "Tuo tiliote" the document
+  // picker straight from the tap (SHELL-02 / OWN-04, SHELL-30). The picked
+  // files wait in lib/pending-capture for the receiving screen. Web: the tap
+  // is the user gesture a hidden file input needs.
+  const cameraInputRef = useRef<HTMLInputElement>(null);
+  const statementInputRef = useRef<HTMLInputElement>(null);
+
+  function handOver(kind: PendingCaptureKind, files: File[]) {
+    if (files.length === 0) return;
+    stashPendingCapture(kind, files);
+    goForward(PENDING_CAPTURE_ROUTES[kind]);
+  }
+
+  async function pickFromSheet(kind: PendingCaptureKind, fromGesture: boolean) {
+    const fallbackRoute = kind === "receipt" ? "/kuitit/uusi" : "/pankki/tapahtumat";
+    if (isNativeShell()) {
+      const picked = kind === "receipt" ? await captureWithCamera() : await chooseDocuments(STATEMENT_FILE_TYPES);
+      if (picked.kind === "files") handOver(kind, picked.files);
+      else if (picked.kind === "denied") showToast({ tone: "error", text: picked.message });
+      else if (picked.kind === "unavailable") goForward(fallbackRoute);
+      // "cancel": stay where the user was.
+      return;
+    }
+    const input = kind === "receipt" ? cameraInputRef.current : statementInputRef.current;
+    if (fromGesture && input) {
+      input.click();
+      return;
+    }
+    goForward(fallbackRoute);
+  }
+
+  function startPick(kind: PendingCaptureKind) {
+    setAddOpenOn(null);
+    if (anyFormDirty()) {
+      requestLeave(() => void pickFromSheet(kind, false));
+      return;
+    }
+    void pickFromSheet(kind, true);
   }
 
   function renderTab(item: NavEntry) {
@@ -483,6 +829,8 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       </Link>
     );
   }
+
+  const backName = backLabel ?? back?.label ?? null;
 
   return (
     <AppLock>
@@ -558,11 +906,11 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
               <button
                 type="button"
                 onClick={goBack}
-                aria-label={back ? `Takaisin: ${back.label}` : "Takaisin"}
+                aria-label={backName ? `Takaisin: ${backName}` : "Takaisin"}
                 className="flex h-11 max-w-full items-center gap-0.5 pr-2 text-accent active-press"
               >
                 <Icon icon={ChevronLeft} size="tab" strokeWidth={2} />
-                {back && <span className="truncate text-[15px] font-medium">{back.label}</span>}
+                {backName && <span className="truncate text-[15px] font-medium">{backName}</span>}
               </button>
             )}
           </div>
@@ -602,23 +950,20 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
       <ConnectivityBanner />
 
+      {/* One persistent scroll container (SHELL-06/07): only the inner page
+          wrapper is keyed, so the scroll position and the element survive a
+          navigation and nothing fades on a tab switch. */}
       <main
-        // Keyed on the path so the enter animation replays on every navigation.
-        key={pathname}
         ref={mainRef}
-        className={`app-main mx-auto w-full max-w-lg flex-1 pt-5 md:max-w-3xl ${
-          direction === "forward"
-            ? "animate-page-fwd"
-            : direction === "back"
-              ? "animate-page-back"
-              : "animate-page"
-        }`}
+        className="app-main mx-auto w-full max-w-lg flex-1 md:max-w-3xl"
       >
-        {/* Page fetches start in parallel with the session check now -- there
-            is no "checking session" gate. Only an actual sign-out (a
-            confirmed 401, or mobile finding no stored token) blanks this;
-            SessionProvider is already navigating away by then. */}
-        {sessionStatus === "signed-out" ? null : children}
+        <div key={pathname} ref={setPageNode} className="app-page">
+          {/* Page fetches start in parallel with the session check -- there
+              is no "checking session" gate. Only an actual sign-out (a
+              confirmed 401, or mobile finding no stored token) blanks this;
+              SessionProvider is already navigating away by then. */}
+          {sessionStatus === "signed-out" ? null : children}
+        </div>
       </main>
 
       {sessionStatus !== "signed-out" && (
@@ -633,33 +978,65 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
             }}
           />
 
-          {!isDetail && (
-            <nav
-              className="app-tab-bar z-50 border-t border-line bg-surface"
-              aria-label="Päävalikko"
-              onContextMenu={(event) => event.preventDefault()}
-            >
-              <div className="mx-auto flex h-[var(--app-tab-height)] max-w-lg items-stretch">
-                {tabRoots().slice(0, 2).map((item) => renderTab(item))}
-                <div className="flex min-w-0 flex-1 items-center justify-center">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      void hapticSelection();
-                      setAddOpenOn(pathname);
-                    }}
-                    aria-label="Lisää"
-                    aria-haspopup="dialog"
-                    aria-expanded={addOpen}
-                    className="flex h-12 w-12 items-center justify-center rounded-full bg-ink text-canvas active-press"
-                  >
-                    <Icon icon={Plus} size="tab" strokeWidth={2} />
-                  </button>
-                </div>
-                {tabRoots().slice(2).map((item) => renderTab(item))}
+          {/* Stays mounted on detail routes and slides away (SHELL-13). */}
+          <nav
+            className="app-tab-bar z-50 border-t border-line bg-surface"
+            aria-label="Päävalikko"
+            aria-hidden={isDetail || undefined}
+            inert={isDetail}
+            onContextMenu={(event) => event.preventDefault()}
+          >
+            <div className="mx-auto flex h-[var(--app-tab-height)] max-w-lg items-stretch">
+              {tabRoots().slice(0, 2).map((item) => renderTab(item))}
+              {/* The primary control (OWN-03): 60 px, raised above the bar. */}
+              <div className="flex w-[76px] flex-none items-center justify-center">
+                <button
+                  type="button"
+                  onClick={() => {
+                    void hapticSelection();
+                    setAddOpenOn(pathname);
+                  }}
+                  aria-label="Lisää"
+                  aria-haspopup="dialog"
+                  aria-expanded={addOpen}
+                  className="tab-plus flex h-[60px] w-[60px] -translate-y-3 items-center justify-center rounded-full bg-ink text-canvas"
+                >
+                  <Icon icon={Plus} size="hero" strokeWidth={2} />
+                </button>
               </div>
-            </nav>
-          )}
+              {tabRoots().slice(2).map((item) => renderTab(item))}
+            </div>
+          </nav>
+
+          <ToastHost />
+
+          <input
+            ref={cameraInputRef}
+            type="file"
+            accept="image/*"
+            capture="environment"
+            className="hidden"
+            tabIndex={-1}
+            aria-hidden
+            onChange={(event) => {
+              const files = Array.from(event.target.files ?? []);
+              event.target.value = "";
+              handOver("receipt", files);
+            }}
+          />
+          <input
+            ref={statementInputRef}
+            type="file"
+            accept={STATEMENT_ACCEPT}
+            className="hidden"
+            tabIndex={-1}
+            aria-hidden
+            onChange={(event) => {
+              const files = Array.from(event.target.files ?? []);
+              event.target.value = "";
+              handOver("statement", files);
+            }}
+          />
 
           <BottomSheet
             isOpen={addOpen}
@@ -667,44 +1044,46 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
             title="Lisää"
             labelledBy="add-sheet-title"
             heightClass="max-h-[70dvh]"
+            dirty={false}
           >
             <div className="space-y-3 px-4 py-2 sheet-safe-bottom">
               <button
                 type="button"
-                onClick={() => {
-                  setAddOpenOn(null);
-                  requestLeave(() => {
-                    armNavigation("/kuitit/uusi", "forward");
-                    router.push("/kuitit/uusi");
-                  });
-                }}
+                onClick={() => startPick("receipt")}
                 className="flex w-full items-center gap-3 rounded-card bg-ink px-4 py-4 text-left text-canvas active-press"
               >
                 <Icon icon={Camera} size="tab" />
                 <span className="min-w-0">
-                  <span className="block text-base font-semibold">Kuvaa kuitti</span>
-                  <span className="block text-[13px] text-canvas/70">
-                    Luetaan automaattisesti ja liitetään tapahtumaan
-                  </span>
+                  <span className="block text-base font-semibold">Ota kuva</span>
+                  <span className="block text-[13px] text-canvas/70">Kuitti luetaan automaattisesti</span>
                 </span>
               </button>
               <div className="overflow-hidden rounded-card border border-line bg-surface divide-y divide-line">
+                <button
+                  type="button"
+                  onClick={() => startPick("statement")}
+                  className="flex w-full items-center gap-3 px-4 py-3.5 text-left active-press touch-target"
+                >
+                  <IconTile>
+                    <Icon icon={FileUp} />
+                  </IconTile>
+                  <span className="min-w-0 flex-1">
+                    <span className="block text-[15px] font-medium text-ink">Tuo tiliote</span>
+                    <span className="mt-0.5 block truncate text-[13px] text-ink-2">CSV, XLSX, camt tai PDF</span>
+                  </span>
+                </button>
                 {(
                   [
-                    { href: "/pankki/tapahtumat", label: "Tuo tiliote", hint: "CSV, XLSX, camt tai PDF", icon: FileUp },
-                    { href: "/laskut/uusi", label: "Uusi myyntilasku", hint: undefined, icon: FilePlus },
-                    { href: "/asetukset/sahkoposti", label: "Hae sähköpostista", hint: undefined, icon: Mail },
-                  ] as const satisfies readonly { href: string; label: string; hint?: string; icon: LucideIcon }[]
+                    { href: "/laskut/uusi", label: "Uusi myyntilasku", icon: FilePlus },
+                    { href: "/asetukset/sahkoposti", label: "Hae sähköpostista", icon: Mail },
+                  ] as const satisfies readonly { href: string; label: string; icon: LucideIcon }[]
                 ).map((row) => (
                   <button
                     key={row.href}
                     type="button"
                     onClick={() => {
                       setAddOpenOn(null);
-                      requestLeave(() => {
-                        armNavigation(row.href, "forward");
-                        router.push(row.href);
-                      });
+                      requestLeave(() => goForward(row.href));
                     }}
                     className="flex w-full items-center gap-3 px-4 py-3.5 text-left active-press touch-target"
                   >
@@ -713,7 +1092,6 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                     </IconTile>
                     <span className="min-w-0 flex-1">
                       <span className="block text-[15px] font-medium text-ink">{row.label}</span>
-                      {row.hint && <span className="mt-0.5 block truncate text-[13px] text-ink-2">{row.hint}</span>}
                     </span>
                   </button>
                 ))}
@@ -728,6 +1106,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
             subtitle={user?.email}
             labelledBy="profile-sheet-title"
             heightClass="max-h-[60dvh]"
+            dirty={false}
           >
             <div className="px-4 py-2 sheet-safe-bottom">
               {signOutError && (
@@ -786,4 +1165,3 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     </AppLock>
   );
 }
-

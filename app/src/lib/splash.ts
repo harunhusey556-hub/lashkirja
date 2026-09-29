@@ -13,7 +13,9 @@ export async function hideSplashScreen(): Promise<void> {
     const { Capacitor } = await import("@capacitor/core");
     if (!Capacitor.isNativePlatform()) return;
     const { SplashScreen } = await import("@capacitor/splash-screen");
-    await SplashScreen.hide({ fadeOutDuration: 200 });
+    // 250 ms: the shell no longer fades its first page in, so this is the
+    // only fade at launch (SHELL-25).
+    await SplashScreen.hide({ fadeOutDuration: 250 });
   } catch {
     // Web preview, or an IPA built before the plugin was added.
   }

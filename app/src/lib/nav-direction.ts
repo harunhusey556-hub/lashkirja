@@ -66,6 +66,22 @@ export function inAppPrevious(pathname: string): string | null {
   return null;
 }
 
+/**
+ * The screen the back button will return to once `pathname` has landed with
+ * `direction`, computed without recording anything (safe during render).
+ * Mirrors recordRoute; null when the entry was opened directly.
+ */
+export function previousAfterLanding(pathname: string, direction: NavDirection): string | null {
+  const stack = readStack();
+  let next: string[];
+  if (stack[stack.length - 1] === pathname) next = stack;
+  else if (direction === "back") {
+    const at = stack.lastIndexOf(pathname);
+    next = at >= 0 ? stack.slice(0, at + 1) : [pathname];
+  } else next = [...stack, pathname];
+  return next.length >= 2 ? next[next.length - 2] : null;
+}
+
 export function performInAppBack(
   pathname: string,
   router: { back: () => void; replace: (href: string) => void },
@@ -97,7 +113,15 @@ function routeDepth(pathname: string): number {
   return pathname.split("/").filter(Boolean).length;
 }
 
-export function consumeDirection(pathname: string): NavDirection {
+/**
+ * `relate` settles an unarmed, same-depth landing from the route registry
+ * (e.g. /kirjanpito -> /kuitit is a push into a workspace, not a tab
+ * switch). It is never consulted for an armed intent or a history pop.
+ */
+export function consumeDirection(
+  pathname: string,
+  relate?: (from: string, to: string) => NavDirection | null
+): NavDirection {
   if (shownFor?.pathname === pathname && lastPathname === pathname) {
     return shownFor.direction;
   }
@@ -118,6 +142,7 @@ export function consumeDirection(pathname: string): NavDirection {
     const to = routeDepth(pathname);
     if (to > from) direction = "forward";
     else if (to < from) direction = "back";
+    else direction = relate?.(previous, pathname) ?? "tab";
   }
   shownFor = { pathname, direction };
   return direction;

@@ -6,6 +6,7 @@ import {
   inAppPrevious,
   markHistoryBack,
   performInAppBack,
+  previousAfterLanding,
   recordRoute,
   resetNavigationForTests,
 } from "./nav-direction";
@@ -83,5 +84,25 @@ describe("performInAppBack fallback", () => {
     const calls: string[] = [];
     performInAppBack("/asiakkaat", { back: () => calls.push("back"), replace: (href) => calls.push(href) }, "/laskut");
     expect(calls).toEqual(["back"]);
+  });
+});
+
+describe("registry-aware direction and the back label source", () => {
+  beforeEach(() => resetNavigationForTests());
+
+  it("asks the registry only for an unarmed same-depth landing", () => {
+    const relate = (from: string, to: string) => (from === "/kirjanpito" && to === "/kuitit" ? ("forward" as const) : null);
+    consumeDirection("/kirjanpito", relate);
+    expect(consumeDirection("/kuitit", relate)).toBe("forward");
+    armNavigation("/kirjanpito", "tab");
+    expect(consumeDirection("/kirjanpito", () => "back")).toBe("tab");
+  });
+
+  it("previousAfterLanding mirrors recordRoute without recording", () => {
+    recordRoute("/dashboard", "none");
+    expect(previousAfterLanding("/asetukset/sahkoposti", "forward")).toBe("/dashboard");
+    recordRoute("/asetukset/sahkoposti", "forward");
+    expect(previousAfterLanding("/asetukset/sahkoposti", "forward")).toBe("/dashboard");
+    expect(previousAfterLanding("/dashboard", "back")).toBeNull();
   });
 });

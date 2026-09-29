@@ -47,29 +47,49 @@ export function BuildInfo() {
     };
   }, []);
 
+  const [showDetails, setShowDetails] = useState(false);
+
+  // SHELL-27 / AUTH-19: the user sees the version only. Host, cache mode and
+  // build notes are for support, behind "Tekniset tiedot".
   return (
     <div className="space-y-1 pb-2 text-center text-xs text-ink-2">
-      <p>LashKirja {appVersion}</p>
-      {IS_MOBILE_BUILD ? (
-        <>
-          <p>Sovellus: paketoitu</p>
-          <p>Palvelin: {apiHost()}</p>
-          <p>Välimuisti: {isPageCachePersistent() ? "salattu" : "vain muistissa"}</p>
-        </>
-      ) : (
-        <>
-          <p>
-            Verkko {commit} · {envName}
-          </p>
-          <p>{native ? `Sovellus ${native}` : "Selain"}</p>
-        </>
-      )}
-      {!IS_MOBILE_BUILD && envName === "kehitys" && (
-        <p className="mx-auto max-w-sm leading-relaxed">
-          Yhteys on kehityspalvelimeen. Nextin punainen Issue-merkki kuuluu next dev
-          -tilaan, eikä sitä piiloteta. Asennettu IPA ei vaihda osoitetta itse:
-          tuotantoon tarvitaan uusi build, jonka osoitteessa ajetaan next start.
-        </p>
+      <p>
+        LashKirja {appVersion}
+        {native ? ` (${native})` : ""}
+      </p>
+      <button
+        type="button"
+        aria-expanded={showDetails}
+        aria-controls="build-info-details"
+        onClick={() => setShowDetails((value) => !value)}
+        className="mx-auto flex min-h-11 items-center px-3 text-xs font-medium text-ink-2"
+      >
+        {showDetails ? "Piilota tekniset tiedot" : "Tekniset tiedot"}
+      </button>
+      {showDetails && (
+        <div id="build-info-details" className="space-y-1">
+          {IS_MOBILE_BUILD ? (
+            <>
+              <p>Sovellus: paketoitu</p>
+              <p>Palvelin: {apiHost()}</p>
+              <p>Välimuisti: {isPageCachePersistent() ? "salattu" : "vain muistissa"}</p>
+            </>
+          ) : (
+            <>
+              <p>
+                Verkko {commit} · {envName}
+              </p>
+              <p>{native ? `Sovellus ${native}` : "Selain"}</p>
+            </>
+          )}
+          {!IS_MOBILE_BUILD && envName === "kehitys" && (
+            <p className="mx-auto max-w-sm leading-relaxed">
+              Yhteys on kehityspalvelimeen. Nextin punainen Issue-merkki kuuluu next dev
+              -tilaan, eikä sitä piiloteta. Asennettu IPA ei vaihda osoitetta itse:
+              tuotantoon tarvitaan uusi build, jonka osoitteessa ajetaan next start.
+            </p>
+          )}
+        </div>
       )}
     </div>
   );

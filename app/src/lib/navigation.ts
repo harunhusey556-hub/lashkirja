@@ -121,6 +121,24 @@ export function rootIsActive(pathname: string, rootId: string, entries: readonly
   return ancestorChain(match, byId).some((entry) => entry.id === rootId);
 }
 
+/**
+ * How two routes relate in the registry: "forward" when `to` sits below
+ * `from` (hub -> workspace), "back" when above, null when unrelated.
+ */
+export function navRelation(
+  from: string,
+  to: string,
+  entries: readonly NavEntry[] = NAV
+): "forward" | "back" | null {
+  const a = matchNav(from, entries);
+  const b = matchNav(to, entries);
+  if (!a || !b || a.id === b.id) return null;
+  const byId = new Map(entries.map((entry) => [entry.id, entry]));
+  if (ancestorChain(b, byId).some((entry) => entry.id === a.id)) return "forward";
+  if (ancestorChain(a, byId).some((entry) => entry.id === b.id)) return "back";
+  return null;
+}
+
 /** Every page below a root has exactly one back: the shell's. */
 export function shellShowsBack(pathname: string, entries: readonly NavEntry[] = NAV): boolean {
   const match = matchNav(pathname, entries);

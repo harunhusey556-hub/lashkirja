@@ -6,6 +6,7 @@ import {
   avatarRoot,
   backTarget,
   matchNav,
+  navRelation,
   navigationViolations,
   shellShowsBack,
   statementListHref,
@@ -140,5 +141,15 @@ describe("navigation registry", () => {
     // x-parent's own path still has a `:param` and it has no parent to climb
     // to, so there is no registry-derivable back target left.
     expect(backTarget("/x/5/9", [...NAV, ...planted])).toBeNull();
+  });
+});
+
+describe("navRelation", () => {
+  it("is forward into a workspace or detail and back out of it", () => {
+    expect(navRelation("/kirjanpito", "/kuitit")).toBe("forward");
+    expect(navRelation("/kuitit", "/kuitit/kuitti")).toBe("forward");
+    expect(navRelation("/kuitit", "/kirjanpito")).toBe("back");
+    expect(navRelation("/laskut", "/kirjanpito")).toBeNull();
+    expect(navRelation("/dashboard", "/dashboard")).toBeNull();
   });
 });

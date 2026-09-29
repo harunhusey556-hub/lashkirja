@@ -36,6 +36,23 @@
   --app-tab-height: 4.5rem;
 }
 
+/* Motion vocabulary: the only curves and durations in the app. `static` so
+   every token exists at runtime even when only inline JS styles use it.
+   Tailwind also turns the --ease-* tokens into `ease-out`, `ease-in-out`
+   and `ease-drawer` utilities. Every animation below has a reduced-motion
+   branch (opacity only, 120 ms); haptics are never gated on reduced motion. */
+@theme static {
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
+  --ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);
+  --dur-press: 160ms;
+  --dur-pop: 150ms;
+  --dur-sheet: 320ms;
+  --dur-exit: 240ms;
+  /* Page push/pop (QUALITY-BAR N2 caps it at 300 ms). */
+  --dur-push: 300ms;
+}
+
 /* The frame fills the WKWebView. Notch and home indicator are padding inside
    the header and tab bar, once: the larger of env() and a small visual-viewport
    fallback. A keyboard lifts --usable-bottom; it is not stored as a safe area.
@@ -288,17 +305,46 @@ button:disabled {
   cursor: not-allowed;
 }
 
+/* The one scroll container. It owns the page's top and bottom inset: page
+   wrappers carry no bottom padding of their own (S1: a double inset turns
+   "nearly fits" into a 10-20 px jitter scroll).
+   overscroll-behavior-y: contain keeps the iOS rubber band (none removes it)
+   and only stops scroll chaining; the document itself stays locked above. */
 .app-main {
+  position: relative;
   flex: 1 1 auto;
   min-height: 0;
   background: var(--color-canvas);
+  padding-top: 1.25rem;
   padding-right: max(1rem, env(safe-area-inset-right, 0px));
   padding-bottom: 1.25rem;
   scroll-padding-bottom: 1.5rem;
   padding-left: max(1rem, env(safe-area-inset-left, 0px));
   overflow-y: auto;
-  overscroll-behavior: none;
-  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-y: contain;
+}
+
+/* Content that is only slightly taller than the frame (AppShell measures it):
+   drop the slack padding so the page fits instead of scrolling a few px. */
+.app-main[data-fit="snug"] {
+  padding-top: 0.5rem;
+  padding-bottom: 0;
+  overflow-y: hidden;
+}
+
+/* ...and tightens the page's own section rhythm (24 px -> 16 px). AppShell
+   keeps the snug layout only when the page then fits completely. */
+.app-main[data-fit="snug"] > .app-page > .space-y-6 > :not(:last-child) {
+  margin-block-end: 1rem;
+}
+
+.app-main[data-fit="snug"] > .app-page > .space-y-6 > header:first-child {
+  margin-block-end: 0.75rem;
+}
+
+/* ds/Section's own 24 px top margin collapses with the gap above it. */
+.app-main[data-fit="snug"] > .app-page section.mt-6:not(:first-child) {
+  margin-block-start: 1rem;
 }
 
 .app-main[data-scroll-lock="true"] {
@@ -306,12 +352,101 @@ button:disabled {
   touch-action: none;
 }
 
-/* The tab bar normally carries the home-indicator inset itself
-   (padding-bottom: var(--safe-bottom) below). On a detail page the tab bar
-   is not rendered at all (AppShell sets data-tabs="hidden"), so .app-main
-   picks up that inset directly instead of losing it. */
+/* On a detail page the tab bar slides away (data-tabs="hidden"), so .app-main
+   carries the home-indicator inset itself instead of losing it. */
 .app-frame[data-tabs="hidden"] > .app-main {
   padding-bottom: max(1.25rem, calc(var(--safe-bottom) + 1.25rem));
+}
+
+.app-frame[data-tabs="hidden"] > .app-main[data-fit="snug"] {
+  padding-bottom: var(--safe-bottom);
+}
+
+/* Push/pop: the outgoing page is a snapshot that slides under the incoming
+   one. The page itself lives in .app-page (the keyed wrapper), so <main> and
+   its scroll position persist across navigations. */
+.app-page {
+  position: relative;
+}
+
+.page-snapshot {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+  pointer-events: none;
+  background: var(--color-canvas);
+}
+
+.page-snapshot::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: rgb(0 0 0 / 0.08);
+  opacity: 0;
+}
+
+@keyframes pushIn {
+  from { transform: translateX(100%); }
+  to { transform: translateX(0); }
+}
+
+@keyframes pushOut {
+  from { transform: translateX(0); }
+  to { transform: translateX(-28%); }
+}
+
+@keyframes popIn {
+  from { transform: translateX(-28%); }
+  to { transform: translateX(0); }
+}
+
+@keyframes popOut {
+  from { transform: translateX(0); }
+  to { transform: translateX(100%); }
+}
+
+@keyframes scrimIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/* No fill mode on the incoming page: a retained transform would turn it into
+   the containing block for position:fixed descendants (bulk bars). */
+.page-push-in {
+  z-index: 1;
+  animation: pushIn var(--dur-push) var(--ease-drawer);
+}
+
+.page-pop-in {
+  z-index: 0;
+  animation: popIn var(--dur-push) var(--ease-drawer);
+}
+
+.page-snapshot.page-push-out {
+  animation: pushOut var(--dur-push) var(--ease-drawer) forwards;
+}
+
+.page-snapshot.page-push-out::after {
+  animation: scrimIn var(--dur-push) var(--ease-drawer) forwards;
+}
+
+/* Back: the leaving page slides off to the right above the returning one,
+   its left edge lifted by a soft shadow (the iOS pop). */
+.page-snapshot.page-pop-out {
+  z-index: 2;
+  box-shadow: -6px 0 20px rgb(38 34 31 / 0.08);
+  animation: popOut var(--dur-push) var(--ease-drawer) forwards;
+}
+
+/* Interactive edge swipe: the parent page waits under the current one. */
+.page-snapshot.page-swipe-under {
+  z-index: 0;
+  transform: translateX(-28%);
+}
+
+.page-snapshot.page-swipe-under::after {
+  opacity: 1;
 }
 
 .app-header {
@@ -340,6 +475,23 @@ html[data-keyboard="open"] .app-tab-bar {
   min-width: 48px;
 }
 
+/* ------------------------------------------------------------------ */
+/* Motion. Curves and durations come from the @theme tokens only.      */
+/* Frequency rule: tab switches and taps (100+/day) get no animation;  */
+/* push/pop and sheets move; decoration is reserved for rare moments. */
+/* ------------------------------------------------------------------ */
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes fadeOut {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+
+/* Skeleton shimmer: one sweep every 1.6 s, linear (a loading bar, not UI). */
 @keyframes shimmer {
   0% { transform: translateX(-100%); }
   100% { transform: translateX(100%); }
@@ -353,10 +505,7 @@ html[data-keyboard="open"] .app-tab-bar {
 .skeleton::after {
   content: "";
   position: absolute;
-  top: 0;
-  right: 0;
-  bottom: 0;
-  left: 0;
+  inset: 0;
   transform: translateX(-100%);
   background-image: linear-gradient(
     90deg,
@@ -365,56 +514,46 @@ html[data-keyboard="open"] .app-tab-bar {
     rgba(255, 255, 255, 0.6) 60%,
     rgba(255, 255, 255, 0)
   );
-  animation: shimmer 2s infinite;
+  animation: shimmer 1.6s linear infinite;
 }
 
-/* Premium Aesthetic Classes */
-.glass {
-  background: rgba(255, 255, 255, 0.65);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
-  border: 1px solid rgba(255, 255, 255, 0.4);
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.05);
+/* Content that replaces a skeleton cross-fades in (never on a cache hit). */
+.fade-in-content {
+  animation: fadeIn var(--dur-pop) var(--ease-out);
 }
 
-/* Micro-animations */
 @keyframes slideUpFade {
-  0% {
+  from {
     opacity: 0;
-    transform: translateY(16px);
+    transform: translateY(12px);
   }
-  100% {
+  to {
     opacity: 1;
     transform: translateY(0);
   }
 }
 
 .animate-in {
-  animation: slideUpFade 0.6s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  animation: slideUpFade 280ms var(--ease-out) backwards;
 }
 
-.animate-in-delay-1 {
-  animation: slideUpFade 0.6s cubic-bezier(0.16, 1, 0.3, 1) forwards;
-  animation-delay: 0.1s;
-  opacity: 0;
+/* Staggered list entrance: `backwards` fill only, never `forwards`, so no
+   transform survives the animation (retained transforms re-anchor fixed
+   descendants). 30 ms steps, capped at the 6th item. */
+.list-stagger > * {
+  animation: slideUpFade 220ms var(--ease-out) backwards;
 }
+.list-stagger > *:nth-child(2) { animation-delay: 30ms; }
+.list-stagger > *:nth-child(3) { animation-delay: 60ms; }
+.list-stagger > *:nth-child(4) { animation-delay: 90ms; }
+.list-stagger > *:nth-child(5) { animation-delay: 120ms; }
+.list-stagger > *:nth-child(n+6) { animation-delay: 150ms; }
 
-.animate-in-delay-2 {
-  animation: slideUpFade 0.6s cubic-bezier(0.16, 1, 0.3, 1) forwards;
-  animation-delay: 0.2s;
-  opacity: 0;
-}
-
-/* Modal Animations */
-@keyframes fadeIn {
-  from { opacity: 0; }
-  to { opacity: 1; }
-}
-
+/* Dialogs (ConfirmModal): centred, so they scale from the centre. */
 @keyframes scaleIn {
   from {
     opacity: 0;
-    transform: scale(0.95);
+    transform: scale(0.96);
   }
   to {
     opacity: 1;
@@ -422,42 +561,103 @@ html[data-keyboard="open"] .app-tab-bar {
   }
 }
 
+@keyframes scaleOut {
+  from {
+    opacity: 1;
+    transform: scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: scale(0.97);
+  }
+}
+
 .animate-fade-in {
-  animation: fadeIn 0.2s ease-out forwards;
+  animation: fadeIn 200ms var(--ease-out) forwards;
 }
 
 .animate-scale-in {
-  animation: scaleIn 0.2s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  animation: scaleIn 200ms var(--ease-out) forwards;
 }
 
-/* Hover and Press effects */
-.hover-lift {
-  transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.25s cubic-bezier(0.16, 1, 0.3, 1);
-}
-.hover-lift:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.08);
+.animate-scale-out {
+  animation: scaleOut var(--dur-pop) var(--ease-out) forwards;
 }
 
-/* One press paint: data-pressed. :active is not a second darken, so a
-   lingering :active and a held data-pressed cannot light two controls. */
+/* Popovers and menus (SelectMenu etc.): scale from the trigger edge. */
+@keyframes popoverIn {
+  from {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.animate-popover {
+  transform-origin: top center;
+  animation: popoverIn var(--dur-pop) var(--ease-out);
+}
+
+/* ------------------------------------------------------------------ */
+/* Press feedback (T1). The head shim (layout.tsx) sets data-pressed on  */
+/* pointerdown and holds it at least 140 ms. Press is quick (100 ms),    */
+/* release eases out over --dur-press. `active-press` is the opt-in for  */
+/* pressables that are not a button, link or role=button.                */
+/* ------------------------------------------------------------------ */
+
+@layer base {
+  :where(button, a, [role="button"], .active-press) {
+    transition-property: transform;
+    transition-duration: var(--dur-press);
+    transition-timing-function: var(--ease-out);
+  }
+}
+
 button:not(:disabled):active,
 a:active,
 [role="button"]:not([aria-disabled="true"]):active {
   filter: none;
   opacity: 1;
+}
+
+:is(button, a, [role="button"], .active-press)[data-pressed="true"] {
+  transform: scale(0.97);
+  transition-duration: 100ms;
+}
+
+/* Full-width rows and cards: a smaller scale, or the edges visibly jump. */
+:is(button, a, [role="button"]).w-full[data-pressed="true"] {
+  transform: scale(0.985);
+}
+
+/* ListRow's stretched link: the press paints the row, not the invisible overlay. */
+.row-link[data-pressed="true"] {
+  transform: none;
+  background: rgb(38 34 31 / 0.05);
+}
+
+/* Tab items: only the glyph gives, the label stays put. */
+.app-tab-bar a[data-pressed="true"] {
   transform: none;
 }
 
-button[data-pressed="true"],
-a[data-pressed="true"],
-[role="button"][data-pressed="true"] {
-  filter: brightness(0.82);
-  opacity: 1;
-  transition: none;
+.app-tab-bar a > svg {
+  transition: transform var(--dur-press) var(--ease-out);
 }
 
-/* Focus is a ring. Selected is a persistent mark. Pressed is the brightness
+.app-tab-bar a[data-pressed="true"] > svg {
+  transform: scale(0.92);
+  transition-duration: 100ms;
+}
+
+.app-tab-bar .tab-plus[data-pressed="true"] {
+  transform: scale(0.94);
+}
+
+/* Focus is a ring. Selected is a persistent mark. Pressed is the scale
    above. They are not the same paint. */
 button:focus-visible,
 a:focus-visible,
@@ -483,33 +683,11 @@ button[role="switch"][aria-checked="true"] {
   box-shadow: inset 0 0 0 2px var(--color-accent-dark);
 }
 
-button[role="switch"][data-pressed="true"] {
-  filter: brightness(0.82);
-}
-
-/* ListRow's stretched link: the press paints the row, not the invisible overlay. */
-.row-link[data-pressed="true"] { background: rgb(38 34 31 / 0.05); }
 /* FilterChips use aria-pressed for state; the generic inset shadow is not their
    look. `button[aria-pressed="true"]:not([data-pressed="true"])` above has the
    same (element, class/attr) specificity tie once qualified with the element,
    so this must repeat the `button` type selector to win by source order. */
 button.ds-chip[aria-pressed="true"] { box-shadow: none; }
-
-/* Custom Dropdown & Popover Animations */
-@keyframes popoverIn {
-  from {
-    opacity: 0;
-    transform: translateY(-8px) scale(0.98);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0) scale(1);
-  }
-}
-
-.animate-popover {
-  animation: popoverIn 0.2s cubic-bezier(0.16, 1, 0.3, 1) forwards;
-}
 
 .scrollbar-none {
   -ms-overflow-style: none;
@@ -520,108 +698,48 @@ button.ds-chip[aria-pressed="true"] { box-shadow: none; }
   display: none;
 }
 
-/* Smooth Accordion using CSS Grid */
-.accordion-wrapper {
-  display: grid;
-  grid-template-rows: 0fr;
-  transition: grid-template-rows 300ms cubic-bezier(0.4, 0, 0.2, 1);
-}
-
-.accordion-wrapper.expanded {
-  grid-template-rows: 1fr;
-}
-
-.accordion-content {
-  overflow: hidden;
-}
-
-/* Staggered list entrance: direct children arrive one after another.
-   `backwards` fill only — never `forwards`, so no transform survives the
-   animation (retained transforms re-anchor fixed descendants). */
-.list-stagger > * {
-  animation: slideUpFade 0.3s cubic-bezier(0.16, 1, 0.3, 1) backwards;
-}
-.list-stagger > *:nth-child(1) { animation-delay: 0ms; }
-.list-stagger > *:nth-child(2) { animation-delay: 40ms; }
-.list-stagger > *:nth-child(3) { animation-delay: 80ms; }
-.list-stagger > *:nth-child(4) { animation-delay: 120ms; }
-.list-stagger > *:nth-child(5) { animation-delay: 160ms; }
-.list-stagger > *:nth-child(6) { animation-delay: 200ms; }
-.list-stagger > *:nth-child(7) { animation-delay: 240ms; }
-.list-stagger > *:nth-child(n+8) { animation-delay: 280ms; }
-
-/* Stagger delay classes for lists */
-.stagger-1 { animation-delay: 50ms; }
-.stagger-2 { animation-delay: 100ms; }
-.stagger-3 { animation-delay: 150ms; }
-.stagger-4 { animation-delay: 200ms; }
-.stagger-5 { animation-delay: 250ms; }
-
-
-
 /* ------------------------------------------------------------------ */
-/* Bottom sheets, page transitions                                     */
+/* Bottom sheets                                                        */
 /* ------------------------------------------------------------------ */
 
-/*
- * A sheet slides up from the edge it is attached to, and the backdrop fades.
- * Both are short: a transition that has to be waited for reads as lag.
- */
 @keyframes sheetUp {
-  from {
-    transform: translateY(100%);
-  }
-  to {
-    transform: translateY(0);
-  }
+  from { transform: translateY(100%); }
+  to { transform: translateY(0); }
 }
 
 @keyframes sheetDown {
-  from {
-    transform: translateY(0);
-  }
-  to {
-    transform: translateY(100%);
-  }
+  from { transform: translateY(0); }
+  to { transform: translateY(100%); }
 }
 
-/* iOS sheet spring: fast start, soft settle, no bounce. */
+/* iOS sheet curve both ways: fast start, soft settle, no bounce. The exit
+   must not start slowly (ease-in): that is the moment the user watches. */
 .animate-sheet {
-  animation: sheetUp 0.32s cubic-bezier(0.32, 0.72, 0, 1);
-  will-change: transform;
+  animation: sheetUp var(--dur-sheet) var(--ease-drawer);
 }
 
 .animate-sheet-out {
-  animation: sheetDown 0.22s cubic-bezier(0.4, 0, 1, 1) forwards;
-  will-change: transform;
+  animation: sheetDown var(--dur-exit) var(--ease-drawer) forwards;
 }
 
 .animate-backdrop {
-  animation: fadeIn 0.25s ease-out forwards;
-}
-
-@keyframes fadeOut {
-  from { opacity: 1; }
-  to { opacity: 0; }
+  animation: fadeIn var(--dur-exit) var(--ease-out) forwards;
 }
 
 .animate-backdrop-out {
-  animation: fadeOut 0.2s ease-in forwards;
+  animation: fadeOut 200ms var(--ease-out) forwards;
 }
 
-@keyframes scaleOut {
-  from {
-    opacity: 1;
-    transform: scale(1);
-  }
-  to {
-    opacity: 0;
-    transform: scale(0.95);
-  }
-}
-
-.animate-scale-out {
-  animation: scaleOut 0.15s ease-in forwards;
+/* Canvas below the panel, so a lift of up to 60 px (BottomSheet's rubber
+   band) shows the sheet's own material, never the tab bar behind it. */
+.sheet-bleed {
+  position: absolute;
+  top: calc(100% - 1px);
+  left: 0;
+  right: 0;
+  height: 120px;
+  background: var(--color-canvas);
+  pointer-events: none;
 }
 
 /* Login: wrong-credentials feedback. transform only, so it is cheap and safe
@@ -651,103 +769,223 @@ button.ds-chip[aria-pressed="true"] { box-shadow: none; }
   margin: 0.5rem auto 0.25rem;
 }
 
-/*
- * Route transition. Keyed on the pathname so it replays per navigation; the
- * movement is small on purpose, enough to signal "new page" without delaying
- * the content that is already rendered.
- */
-@keyframes pageEnter {
-  from {
-    opacity: 0;
-    transform: translateY(6px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
+/* ------------------------------------------------------------------ */
+/* Tab bar on detail routes: it slides away instead of unmounting, and */
+/* leaves the flow at once so <main> takes the space under it.         */
+/* ------------------------------------------------------------------ */
+
+.app-tab-bar {
+  transition:
+    transform 260ms var(--ease-drawer),
+    visibility 0s linear 0s;
+}
+
+.app-frame[data-tabs="hidden"] > .app-tab-bar {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  transform: translateY(100%);
+  visibility: hidden;
+  transition:
+    transform 260ms var(--ease-drawer),
+    visibility 0s linear 260ms;
+}
+
+/* ------------------------------------------------------------------ */
+/* Bottom action bar (ds/BottomActions)                                 */
+/* ------------------------------------------------------------------ */
+
+@keyframes barUp {
+  from { transform: translateY(100%); }
+  to { transform: translateY(0); }
+}
+
+.bottom-actions {
+  animation: barUp 220ms var(--ease-drawer);
+}
+
+/* ------------------------------------------------------------------ */
+/* Toasts (ToastHost). Transitions, not keyframes: interruptible.      */
+/* ------------------------------------------------------------------ */
+
+.toast-viewport {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: calc(var(--app-tab-height) + var(--safe-bottom) + 12px);
+  z-index: 85;
+  display: flex;
+  justify-content: center;
+  padding: 0 1rem;
+  pointer-events: none;
+}
+
+.app-frame[data-tabs="hidden"] > .toast-viewport,
+html[data-keyboard="open"] .toast-viewport {
+  bottom: calc(max(var(--safe-bottom), var(--app-bottom-bar, 0px)) + 12px);
+}
+
+/* Tablet: no tab bar (sidebar layout). */
+@media (min-width: 768px) {
+  .toast-viewport {
+    bottom: calc(max(var(--safe-bottom), var(--app-bottom-bar, 0px)) + 16px);
   }
 }
 
-.animate-page {
-  /* No `forwards`: a retained transform (even translateY(0)) turns <main> into
-     the containing block for position:fixed descendants, un-pinning bars like
-     the bulk-select toolbar from the viewport. */
-  animation: pageEnter 0.18s ease-out;
+.toast {
+  position: absolute;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  width: calc(100% - 2rem);
+  max-width: 24rem;
+  min-height: 3rem;
+  padding: 0.75rem 1rem;
+  border-radius: var(--radius-card);
+  background: var(--color-ink);
+  color: var(--color-canvas);
+  pointer-events: auto;
+  touch-action: none;
+  transition:
+    transform 220ms var(--ease-out),
+    opacity 220ms var(--ease-out);
 }
 
-/*
- * Directional route transitions (iOS push/pop). Drilling deeper slides the new
- * page in from the right; going back slides it in from the left. Same rule as
- * .animate-page: never a fill mode, the transform must not survive the
- * animation or fixed descendants re-anchor to <main>.
- */
-@keyframes pageForward {
-  from {
-    opacity: 0.35;
-    transform: translateX(28px);
-  }
-  to {
-    opacity: 1;
-    transform: translateX(0);
-  }
+.toast[data-state="enter"] {
+  transform: translateY(16px);
+  opacity: 0;
 }
 
-@keyframes pageBack {
-  from {
-    opacity: 0.35;
-    transform: translateX(-28px);
-  }
-  to {
-    opacity: 1;
-    transform: translateX(0);
-  }
+.toast[data-state="exit"] {
+  transform: translateY(16px);
+  opacity: 0;
+  pointer-events: none;
+  transition-duration: 160ms;
 }
 
-.animate-page-fwd {
-  animation: pageForward 0.26s cubic-bezier(0.32, 0.72, 0, 1);
+/* ------------------------------------------------------------------ */
+/* Connectivity banner: overlays the top of <main>, never pushes it.   */
+/* ------------------------------------------------------------------ */
+
+.connectivity-banner {
+  position: absolute;
+  left: 0;
+  right: 0;
+  z-index: 35;
+  transition:
+    transform 220ms var(--ease-out),
+    opacity 220ms var(--ease-out);
 }
 
-.animate-page-back {
-  animation: pageBack 0.26s cubic-bezier(0.32, 0.72, 0, 1);
+/* Opaque tints (it overlays content): tone over canvas. */
+.connectivity-banner[data-connectivity="warning"] {
+  background: linear-gradient(color-mix(in srgb, var(--color-warning) 12%, transparent), color-mix(in srgb, var(--color-warning) 12%, transparent)), var(--color-canvas);
+}
+
+.connectivity-banner[data-connectivity="success"] {
+  background: linear-gradient(color-mix(in srgb, var(--color-success) 14%, transparent), color-mix(in srgb, var(--color-success) 14%, transparent)), var(--color-canvas);
+}
+
+.connectivity-banner[data-connectivity="info"] {
+  background: var(--color-accent-soft);
+}
+
+/* <main> makes room while a lasting banner is up, in step with its slide. */
+.app-frame[data-banner] > .app-main {
+  transition: padding-top 220ms var(--ease-out);
+}
+
+.app-frame[data-banner="shown"] > .app-main {
+  padding-top: calc(var(--banner-h, 0px) + 1.25rem);
+}
+
+.app-frame[data-banner="shown"] > .app-main[data-fit="snug"] {
+  padding-top: calc(var(--banner-h, 0px) + 0.5rem);
+}
+
+.connectivity-banner[data-state="enter"],
+.connectivity-banner[data-state="exit"] {
+  transform: translateY(-100%);
+  opacity: 0;
+}
+
+.connectivity-banner[data-state="exit"] {
+  transition-duration: 180ms;
 }
 
 /* Sign-out: the whole app fades before the hard navigation to /login.
-   Opacity only — a transform here would re-anchor fixed bars mid-fade. */
+   Opacity only: a transform here would re-anchor fixed bars mid-fade. */
 body.signing-out {
   opacity: 0;
-  transition: opacity 0.22s ease-out;
+  transition: opacity 220ms var(--ease-out);
   pointer-events: none;
 }
 
 /*
- * Motion is decoration here: every animation above is optional, and a user who
- * asked the system to stop moving things gets the final state immediately.
+ * Reduced motion: nothing slides or scales. Enter and exit become a 120 ms
+ * opacity change; press feedback becomes an opacity dip; haptics stay.
  */
 @media (prefers-reduced-motion: reduce) {
   .animate-sheet,
-  .animate-sheet-out,
   .animate-backdrop,
-  .animate-backdrop-out,
-  .animate-scale-out,
-  .animate-page,
-  .animate-page-fwd,
-  .animate-page-back,
   .animate-fade-in,
   .animate-scale-in,
   .animate-popover,
   .animate-in,
-  .animate-in-delay-1,
-  .animate-in-delay-2,
-  .animate-spin,
-  .animate-shake,
-  .list-stagger > * {
-    animation: none !important;
-    opacity: 1 !important;
+  .fade-in-content,
+  .list-stagger > *,
+  .page-push-in,
+  .page-pop-in,
+  .bottom-actions {
+    animation: fadeIn 120ms linear !important;
     transform: none !important;
+  }
+
+  .animate-sheet-out,
+  .animate-backdrop-out,
+  .animate-scale-out {
+    animation: fadeOut 120ms linear forwards !important;
+    transform: none !important;
+  }
+
+  .page-snapshot {
+    display: none !important;
+  }
+
+  .animate-spin,
+  .animate-shake {
+    animation: none !important;
   }
 
   .skeleton::after {
     animation: none !important;
     opacity: 0 !important;
+  }
+
+  :is(button, a, [role="button"], .active-press)[data-pressed="true"],
+  .app-tab-bar a[data-pressed="true"] > svg {
+    transform: none !important;
+    opacity: 0.7;
+  }
+
+  .app-tab-bar,
+  .app-frame[data-tabs="hidden"] > .app-tab-bar {
+    transition: opacity 120ms linear, visibility 0s linear 120ms !important;
+    transform: none !important;
+  }
+
+  .app-frame[data-tabs="hidden"] > .app-tab-bar {
+    opacity: 0;
+  }
+
+  .toast,
+  .toast[data-state],
+  .connectivity-banner,
+  .connectivity-banner[data-state] {
+    transform: none !important;
+    transition: opacity 120ms linear !important;
   }
 
   body.signing-out {

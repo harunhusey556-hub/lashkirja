@@ -113,6 +113,11 @@ async function probeHealth(): Promise<void> {
   }
 }
 
+/** "Yritä uudelleen" on the connectivity banner: probe the server now. */
+export function retryConnection(): Promise<void> {
+  return probeHealth();
+}
+
 function startHealthProbe(): void {
   if (healthProbeTimer !== null) return;
   healthProbeTimer = setInterval(() => void probeHealth(), HEALTH_PROBE_INTERVAL_MS);
