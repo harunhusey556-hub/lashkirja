@@ -16,6 +16,8 @@ export default function setup() {
     cwd: path.resolve(__dirname, "../.."),
     env: { ...process.env, DATABASE_URL: `file:${templatePath}` },
     stdio: "pipe",
+    // Windows resolves `npx` only through the shell (npx.cmd).
+    shell: process.platform === "win32",
   });
 
   if (!fs.existsSync(templatePath)) {
