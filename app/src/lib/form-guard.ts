@@ -28,6 +28,20 @@ export function anyFormDirty(): boolean {
   return false;
 }
 
+/** Ids of every registered dirty source (dirty or not), for scoping a guard. */
+export function registeredSourceIds(): Set<string> {
+  return new Set(sources.keys());
+}
+
+/** True when a source registered after `before` was taken is dirty: the
+ * forms that mounted inside a sheet since it opened. */
+export function anyDirtySince(before: ReadonlySet<string>): boolean {
+  for (const [id, isDirty] of sources) {
+    if (!before.has(id) && isDirty()) return true;
+  }
+  return false;
+}
+
 export function setLeaveHandler(handler: ((proceed: () => void) => void) | null): void {
   leaveHandler = handler;
 }

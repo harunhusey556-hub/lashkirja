@@ -53,7 +53,9 @@ export function useFocusTrap<T extends HTMLElement>(
         : [];
 
     const toFocus = initialFocusRefRef.current?.current || focusables()[0] || container;
-    toFocus?.focus();
+    // preventScroll: a sheet is still translated off-screen while it opens;
+    // a plain focus() lets iOS scroll ancestors to reveal the target.
+    toFocus?.focus({ preventScroll: true });
     const registration = pushTrap();
 
     const onKeyDown = (e: KeyboardEvent) => {
