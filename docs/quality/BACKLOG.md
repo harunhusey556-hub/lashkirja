@@ -25,6 +25,8 @@ The Bar column cites the QUALITY-BAR item.
 | OWN-10 | P1 | N2, T2, L1 | "The user experience needs to be smoother." (Covered by roadmap phase 2b, "Apple feel".) | batch 1 motion plan done; continues in batch 2 |
 | OWN-11 | P1 | N4, N5, V1, A5 | The AI onboarding ("LashKirja AI: Perehdytys") needs a professional UI/UX audit. "There is not even a back button, the whole process should be like a chat, and it must be fluid." Today it is a centred modal card: no back, no earlier answers visible, emoji on every option, and steps swap abruptly. Evidence: `.superpowers/quality/batch-1/owner-screens/onboarding-*.png`. | done (eb41a06; iOS Simulator walk 36510719139) |
 | OWN-12 | P0 | N4, N5, S3 | The profile sheet (avatar menu) did not open fully: "I pulled the profile menu up myself, but it still needs fixing." The sheet is not anchored to the bottom edge: a dimmed tab-bar strip shows below it. Probably the same root cause as OWN-05. Evidence: `.superpowers/quality/batch-1/owner-screens/profile-sheet-dragged-up.png`. | done (4bc5594, 4d35743) |
+| OWN-13 | P1 | N3, L1 | "In the kirjanpito part the numbers come and go when changing page": the hub row values (ALV amount, Ostolaskut count, Pankkitilit, Suljetut kaudet) are fetched on every visit with no cache, so they appear blank and pop in. Evidence: `.superpowers/quality/batch-1/owner-screens/kirjanpito-hub-values-missing.png`. | done (240afe6; also swept 14 screens) |
+| OWN-14 | P0 | A2 | "Bank connection doesn't work." The production server has no Enable Banking credentials: `ENABLEBANKING_APP_ID` is empty, there is no key file, and `ENABLED=false`. The UI states this honestly. It needs the owner's credentials. | blocked: owner |
 
 ## Audit findings
 
