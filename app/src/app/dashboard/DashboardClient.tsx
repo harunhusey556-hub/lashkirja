@@ -811,10 +811,10 @@ export default function DashboardClient() {
               <span>{documentsBasis ? "laskujen ja kuittien mukaan" : "tiliotteen mukaan"}</span>
             </h2>
             <div className="grid grid-cols-2 gap-3">
-              <Link href={tulotHref} aria-label="Avaa tulot" className="active-press block">
+              <Link href={tulotHref} aria-label={`Tulot ${formatEur(data.income)}, avaa`} className="active-press block">
                 <SummaryCard label="Tulot" value={formatEur(data.income)} />
               </Link>
-              <Link href={menotHref} aria-label="Avaa menot" className="active-press block">
+              <Link href={menotHref} aria-label={`Menot ${formatEur(data.expenses)}, avaa`} className="active-press block">
                 <SummaryCard label="Menot" value={formatEur(data.expenses)} />
               </Link>
             </div>
