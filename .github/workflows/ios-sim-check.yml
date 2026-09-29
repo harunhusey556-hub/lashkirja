@@ -20,6 +20,7 @@ on:
       - .github/workflows/ios-sim-check.yml
       - app/scripts/ci/**
       - app/src/lib/ci-autopilot/**
+      - app/ios/**
   workflow_dispatch:
     inputs:
       routes:
