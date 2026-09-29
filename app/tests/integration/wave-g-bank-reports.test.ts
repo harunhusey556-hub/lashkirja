@@ -237,20 +237,25 @@ describe("cross-report reconciliation", () => {
         buildRequest("GET", "/api/reports/profit-loss?from=2026-03&to=2026-03", undefined, { cookie })
       )
     );
-    // P&L is approved receipts only. The sent invoice is not income here.
-    expect(pl.total.incomeGross).toBe(125.5);
-    expect(pl.total.incomeNet).toBe(100);
+    // P&L is approved receipts plus booked invoices by invoice date (SALES-01).
+    // The draft stays out. The credited invoice stays in March; its credit
+    // note is dated today and reduces income in its own month.
+    expect(pl.total.incomeGross).toBe(351.4);
+    expect(pl.total.incomeNet).toBe(280);
     expect(pl.total.expenseNet).toBe(100);
     expect(pl.total.receiptCount).toBe(2);
+    expect(pl.total.invoiceCount).toBe(2);
 
     const alv = await readJson(
       await alvReport(buildRequest("GET", "/api/alv?period=2026-03", undefined, { cookie }))
     );
-    // Receipt VAT 25.50 + sent invoice VAT 25.50. Draft and the credited invoice stay out.
-    expect(alv.field301.vat).toBe(51);
+    // Receipt VAT 25.50 + sent invoice 25.50 + credited invoice 20.40. The draft
+    // stays out; the credit note reduces the month it is issued in.
+    expect(alv.field301.vat).toBe(71.4);
+    expect(alv.field301.vat).toBe(pl.total.incomeVat);
     expect(alv.field307.amount).toBe(25.5);
     expect(alv.creditedInvoiceCount).toBe(1);
-    expect(alv.sources.invoiceCount).toBe(1);
+    expect(alv.sources.invoiceCount).toBe(2);
 
     const front = await readJson(
       await dashboard(buildRequest("GET", "/api/dashboard?month=2026-03", undefined, { cookie }))

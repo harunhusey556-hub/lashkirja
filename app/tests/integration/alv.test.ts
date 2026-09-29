@@ -115,7 +115,7 @@ describe("GET /api/alv - sales invoices", () => {
     expect(body.field308).toMatchObject({ amount: 25.5, isRefund: false });
   });
 
-  it("leaves drafts and credit notes out", async () => {
+  it("leaves drafts out and keeps a credited invoice in its own period", async () => {
     await makeInvoice(); // stays a draft
     const credited = await makeInvoice();
     await send(credited.id);
@@ -125,11 +125,16 @@ describe("GET /api/alv - sales invoices", () => {
       routeContext({ id: credited.id })
     );
     expect(credit.status).toBe(201);
+    const note = (await readJson(credit)).invoice as { issueDate: string };
 
+    // AVL 136 §: the credit reduces the month it is given, not January.
     const body = await report();
-    expect(body.sources.invoiceCount).toBe(0);
-    expect(body.field301.vat).toBe(0);
+    expect(body.sources.invoiceCount).toBe(1);
+    expect(body.field301.vat).toBe(25.5);
     expect(body.creditedInvoiceCount).toBe(1);
+    const creditPeriod = await report(note.issueDate.slice(0, 7));
+    expect(creditPeriod.field301.vat).toBe(-25.5);
+    expect(creditPeriod.creditNoteCount).toBe(1);
   });
 
   it("reports an invoice by its issue date, not by when it was paid", async () => {

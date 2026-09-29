@@ -69,17 +69,8 @@ export async function buildPeriodPackage(
     loadAlvPeriodSources(userId, start, end),
   ]);
 
-  const profit = buildProfitLoss(
-    receipts
-      .filter((receipt) => receipt.reviewStatus === "approved")
-      .map((receipt) => ({
-        type: receipt.type,
-        date: receipt.date,
-        totalAmountCents: receipt.totalAmountCents,
-        category: receipt.category,
-        vatDetails: receipt.vatDetails,
-      }))
-  );
+  // The same sources as the VAT return and /api/reports/profit-loss.
+  const profit = buildProfitLoss(sources.reportReceipts, sources.reportInvoices);
   const alv = computeAlvReport(sources.receipts, sources.invoices);
 
   const receiptCsv = toCsv(
@@ -149,8 +140,9 @@ export async function buildPeriodPackage(
         [
           `Kirjanpitopaketti ${month}`,
           "",
-          "Tuloslaskelma perustuu hyväksyttyihin kuitteihin.",
-          "ALV perustuu hyväksyttyihin kuitteihin ja lähetettyihin tai maksettuihin myyntilaskuihin. Luonnokset ja hyvityslaskut eivät ole ALV-luvussa.",
+          "Tuloslaskelma ja ALV perustuvat hyväksyttyihin kuitteihin ja myyntilaskuihin laskun päivän mukaan (laskutusperuste). Luonnokset eivät ole mukana.",
+          "Hyvityslasku vähentää myyntiä sillä kaudella, jolla se on annettu. Hyvitetty lasku pysyy omalla kaudellaan.",
+          "Tuloa ei lasketa kahteen kertaan: kuitti, joka on tehty laskun maksaneesta tilitapahtumasta, jätetään pois.",
           "Käteisnäkymä (kohdistukset.json) käyttää tiliotteen kohdekuukautta, ei kuitin päivää.",
           "Pankin istuntotietoja ei ole tässä paketissa.",
           "",
@@ -171,6 +163,7 @@ export async function buildPeriodPackage(
             ...alv,
             excludedReceiptCount: sources.excludedReceiptCount,
             creditedInvoiceCount: sources.creditedInvoiceCount,
+            creditNoteCount: sources.creditNoteCount,
           },
           null,
           2

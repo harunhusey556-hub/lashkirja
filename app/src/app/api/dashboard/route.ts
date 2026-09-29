@@ -7,7 +7,8 @@ import { parseBusinessDetails, deriveVatProfile } from "@/lib/onboarding";
 import { getBankOverview } from "@/lib/bank-accounts";
 import { buildAging, buildAgingReport, openPosition, type InvoiceStatus } from "@/lib/invoices";
 import { computeAlvReport } from "@/lib/alv";
-import { loadAlvPeriodSources } from "@/lib/alv-period";
+import { loadAlvPeriodSources, type AlvPeriodSources } from "@/lib/alv-period";
+import { buildProfitLoss } from "@/lib/reports";
 import { helsinkiMonthKey } from "@/lib/validation";
 
 function round2(n: number): number {
@@ -68,79 +69,61 @@ export async function GET(req: NextRequest) {
     }
   }
 
-  // Receipts remain the VAT source (bank rows carry no VAT info)
-  let receipts: Array<{ totalAmountCents: number | null; vatDetails: unknown; type: string }> = [];
+  // The document view (no tiliote for the month yet) is the profit and loss
+  // of the month: approved receipts plus sales invoices by invoice date, with
+  // credit notes negative and bank-settled income receipts left out. The VAT
+  // estimate is computed from exactly the same sources as the VAT return, so
+  // the front page, /raportit and /kirjanpito/alv cannot drift apart again.
+  let books: AlvPeriodSources | null = null;
   try {
-    receipts = await prisma.receipt.findMany({
-      where: {
-        userId: session.userId,
-        date: { gte: startOfMonth, lt: endOfMonth },
-        reviewStatus: "approved",
-      },
-      select: {
-        totalAmountCents: true,
-        vatDetails: true,
-        type: true,
-      },
-    });
+    books = await loadAlvPeriodSources(session.userId, startOfMonth, endOfMonth);
   } catch (error) {
     if (transactions.length === 0) throw error;
     sectionErrors.receipts = "Kuittimäärää ei saatu ladattua.";
+    sectionErrors.vat = "ALV-arviota ei saatu ladattua.";
   }
 
-  let receiptIncome = 0;
-  let receiptExpenses = 0;
+  const monthBooks = books
+    ? buildProfitLoss(books.reportReceipts, books.reportInvoices).total
+    : null;
+  const documentIncome = monthBooks ? centsToEuros(monthBooks.incomeGrossCents) : 0;
+  const documentExpenses = monthBooks ? centsToEuros(monthBooks.expenseGrossCents) : 0;
 
-  for (const r of receipts) {
-    if (r.totalAmountCents == null) continue;
-    const totalAmount = centsToEuros(r.totalAmountCents);
-    if (r.type === "tulo") receiptIncome += totalAmount;
-    else if (r.type === "meno") receiptExpenses += totalAmount;
-  }
-
-  // The estimate is computed from exactly the same sources as the VAT return,
-  // including sales invoices and the double-counting exclusion. Computing it
-  // separately here is how the front page and /kirjanpito/alv drifted apart.
   let estimatedVat = 0;
-  try {
-    const vatSources = await loadAlvPeriodSources(session.userId, startOfMonth, endOfMonth);
-    const alvReport = computeAlvReport(vatSources.receipts, vatSources.invoices);
+  if (books) {
+    const alvReport = computeAlvReport(books.receipts, books.invoices);
     estimatedVat = alvReport.field308.isRefund
       ? -alvReport.field308.amount
       : alvReport.field308.amount;
-  } catch {
-    sectionErrors.vat = "ALV-arviota ei saatu ladattua.";
   }
   const hasBankData = transactions.length > 0;
 
-  // Calendar-year liikevaihto vs the 20 000 € ALV registration threshold
+  // Calendar-year liikevaihto vs the 20 000 € ALV registration threshold.
+  // Same rule as the month: bank rows when the year has any, else documents
+  // (receipts plus sales invoices). Never both, so nothing counts twice.
   const startOfYear = new Date(Date.UTC(year, 0, 1));
   const endOfYear = new Date(Date.UTC(year + 1, 0, 1));
   const yearPrefix = `${year}-`;
-  let yearTx: Array<{ amountCents: number }> = [];
-  let yearReceipts: Array<{ totalAmountCents: number | null }> = [];
+  let ytdRevenue = 0;
   try {
-    [yearTx, yearReceipts] = await Promise.all([
-      prisma.transaction.findMany({
-        where: {
-          type: "tulo",
-          statement: {
-            userId: session.userId,
-            periodMonth: { startsWith: yearPrefix },
-          },
-        },
-        select: { amountCents: true },
-      }),
-      prisma.receipt.findMany({
-        where: {
+    const yearTx = await prisma.transaction.findMany({
+      where: {
+        type: "tulo",
+        statement: {
           userId: session.userId,
-          type: "tulo",
-          date: { gte: startOfYear, lt: endOfYear },
-          reviewStatus: "approved",
+          periodMonth: { startsWith: yearPrefix },
         },
-        select: { totalAmountCents: true },
-      }),
-    ]);
+      },
+      select: { amountCents: true },
+    });
+    if (yearTx.length > 0) {
+      ytdRevenue = yearTx.reduce((a, t) => a + centsToEuros(t.amountCents), 0);
+    } else {
+      const yearBooks = await loadAlvPeriodSources(session.userId, startOfYear, endOfYear);
+      ytdRevenue = centsToEuros(
+        buildProfitLoss(yearBooks.reportReceipts, yearBooks.reportInvoices).total.incomeGrossCents
+      );
+    }
   } catch {
     sectionErrors.threshold = "ALV-rajaa ei saatu ladattua.";
   }
@@ -157,10 +140,6 @@ export async function GET(req: NextRequest) {
 
   const businessProfile = parseBusinessDetails(user?.businessDetails);
   const vatProfile = deriveVatProfile(businessProfile);
-
-  const bankYtd = yearTx.reduce((a, t) => a + centsToEuros(t.amountCents), 0);
-  const receiptYtd = yearReceipts.reduce((a, r) => a + centsToEuros(r.totalAmountCents || 0), 0);
-  const ytdRevenue = yearTx.length > 0 ? bankYtd : receiptYtd;
 
   let pendingReceiptsCount = 0;
   try {
@@ -241,12 +220,17 @@ export async function GET(req: NextRequest) {
   return NextResponse.json({
     firstName: session.firstName,
     month,
-    // Bank data is the primary cash view; receipts only when no tiliote yet
-    income: round2(hasBankData ? bankIncome : receiptIncome),
-    expenses: round2(hasBankData ? bankExpenses : receiptExpenses),
+    // Bank data is the primary cash view (kassaperuste): an invoice paid into
+    // the account is already one of the bank rows, so invoices are never added
+    // on top. Without a tiliote the month is shown from the documents
+    // (laskutusperuste): receipts plus sales invoices.
+    income: round2(hasBankData ? bankIncome : documentIncome),
+    expenses: round2(hasBankData ? bankExpenses : documentExpenses),
     source: hasBankData ? "tiliote" : "kuitit",
+    basis: hasBankData ? "kassaperuste" : "laskutusperuste",
     txCount: transactions.length,
-    receiptCount: receipts.length,
+    receiptCount: books?.receiptCount ?? 0,
+    invoiceCount: monthBooks ? monthBooks.invoiceCount + monthBooks.creditNoteCount : 0,
     matching: { matchable, matched, suggested },
     estimatedVat: round2(estimatedVat),
     isRefund: estimatedVat < 0,

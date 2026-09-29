@@ -39,6 +39,7 @@ interface ALVData {
   sources?: { receiptSalesVat: number; invoiceSalesVat: number; invoiceCount: number };
   excludedReceiptCount?: number;
   creditedInvoiceCount?: number;
+  creditNoteCount?: number;
 }
 
 // Extends a small inline text link's touch target to >=44px tall without
@@ -261,8 +262,13 @@ export default function ALVRaporttiPage() {
                     tilitapahtuma on jo kohdistettu laskulle.
                   </>
                 ) : null}
-                {data.creditedInvoiceCount ? (
-                  <> {data.creditedInvoiceCount} hyvitettyä laskua ei ole mukana.</>
+                {data.creditNoteCount ? (
+                  <>
+                    {" "}
+                    {data.creditNoteCount === 1
+                      ? "1 hyvityslasku vähentää myyntiä tällä kaudella."
+                      : `${data.creditNoteCount} hyvityslaskua vähentävät myyntiä tällä kaudella.`}
+                  </>
                 ) : null}
               </p>
             </Card>

@@ -43,5 +43,7 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
     sources: report.sources,
     excludedReceiptCount: sources.excludedReceiptCount,
     creditedInvoiceCount: sources.creditedInvoiceCount,
+    creditNoteCount: sources.creditNoteCount,
+    basis: "laskutusperuste",
   });
 });

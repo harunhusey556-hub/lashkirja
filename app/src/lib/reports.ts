@@ -1,10 +1,13 @@
 /**
- * Profit and loss (tuloslaskelma) built from receipts.
+ * Profit and loss (tuloslaskelma) built from receipts and sales invoices.
  *
- * Receipts, not bank rows, are the source: only a receipt carries the VAT
- * breakdown and the category. A receipt whose VAT is unknown is counted at its
+ * Documents, not bank rows, are the source: only a receipt or an invoice
+ * carries the VAT breakdown. A receipt whose VAT is unknown is counted at its
  * gross amount and reported in `missingVat`, never silently assumed to be
  * 25,5 % - a guessed VAT figure in a P&L is worse than a visible gap.
+ *
+ * Sales invoices count by invoice date, the same basis as the VAT return
+ * (see ./alv-period). A credit note is negative income in its own month.
  */
 import { parseVatDetails } from "./alv";
 import { monthKey } from "./bank-balances";
@@ -17,6 +20,19 @@ export interface ReportReceipt {
   category: string | null;
   vatDetails: string | null;
 }
+
+/** A booked sales invoice or credit note; totals are signed (credit note < 0). */
+export interface ReportInvoice {
+  issueDate: Date | string;
+  documentKind: "invoice" | "credit_note";
+  netCents: number;
+  vatCents: number;
+  grossCents: number;
+}
+
+/** Category rows the invoices land in, so the drill-down can tell them apart. */
+export const INVOICE_CATEGORY = "Myyntilaskut";
+export const CREDIT_NOTE_CATEGORY = "Hyvityslaskut";
 
 export interface CategoryRow {
   category: string;
@@ -41,6 +57,10 @@ export interface ProfitLossPeriod {
   incomeByCategory: CategoryRow[];
   expenseByCategory: CategoryRow[];
   receiptCount: number;
+  /** Ordinary sales invoices counted in the period. */
+  invoiceCount: number;
+  /** Credit notes counted (negative) in the period. */
+  creditNoteCount: number;
   missingVatCount: number;
   uncategorisedCount: number;
 }
@@ -65,6 +85,8 @@ function emptyPeriod(month: string | null): ProfitLossPeriod {
     incomeByCategory: [],
     expenseByCategory: [],
     receiptCount: 0,
+    invoiceCount: 0,
+    creditNoteCount: 0,
     missingVatCount: 0,
     uncategorisedCount: 0,
   };
@@ -119,10 +141,33 @@ export interface ProfitLossResult {
   undatedCount: number;
 }
 
-export function buildProfitLoss(receipts: ReportReceipt[]): ProfitLossResult {
+export function buildProfitLoss(
+  receipts: ReportReceipt[],
+  invoices: ReportInvoice[] = []
+): ProfitLossResult {
   const total = newAccumulator(null);
   const byMonth = new Map<string, Accumulator>();
   let undatedCount = 0;
+
+  const monthAccumulator = (value: Date | string): Accumulator => {
+    const month = monthOf(value);
+    const existing = byMonth.get(month) ?? newAccumulator(month);
+    byMonth.set(month, existing);
+    return existing;
+  };
+
+  for (const invoice of invoices) {
+    const isCredit = invoice.documentKind === "credit_note";
+    const category = isCredit ? CREDIT_NOTE_CATEGORY : INVOICE_CATEGORY;
+    for (const target of [total, monthAccumulator(invoice.issueDate)]) {
+      if (isCredit) target.period.creditNoteCount += 1;
+      else target.period.invoiceCount += 1;
+      // Signed: a credit note reduces income, it is never an expense.
+      target.period.incomeGrossCents += invoice.grossCents;
+      target.period.incomeVatCents += invoice.vatCents;
+      addToCategory(target.income, category, invoice.grossCents, invoice.vatCents);
+    }
+  }
 
   for (const receipt of receipts) {
     const grossCents = receipt.totalAmountCents;
@@ -138,10 +183,7 @@ export function buildProfitLoss(receipts: ReportReceipt[]): ProfitLossResult {
 
     const targets: Accumulator[] = [total];
     if (receipt.date) {
-      const month = monthOf(receipt.date);
-      const existing = byMonth.get(month) ?? newAccumulator(month);
-      byMonth.set(month, existing);
-      targets.push(existing);
+      targets.push(monthAccumulator(receipt.date));
     } else {
       undatedCount += 1;
     }
@@ -195,6 +237,8 @@ export function periodToEuros(period: ProfitLossPeriod) {
     incomeByCategory: rows(period.incomeByCategory),
     expenseByCategory: rows(period.expenseByCategory),
     receiptCount: period.receiptCount,
+    invoiceCount: period.invoiceCount,
+    creditNoteCount: period.creditNoteCount,
     missingVatCount: period.missingVatCount,
     uncategorisedCount: period.uncategorisedCount,
   };

@@ -1,10 +1,10 @@
 import { NextRequest } from "next/server";
-import { prisma } from "@/lib/db";
 import { requireSession } from "@/lib/session";
 import { noStoreJson } from "@/lib/http-security";
 import { UnauthorizedError, ValidationError, withErrorHandler } from "@/lib/api-errors";
 import { monthSchema } from "@/lib/validation";
 import { buildProfitLoss, periodToEuros } from "@/lib/reports";
+import { loadAlvPeriodSources } from "@/lib/alv-period";
 
 /** Inclusive month range; defaults to the current calendar year. */
 function resolveRange(from: string | null, to: string | null) {
@@ -31,28 +31,17 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
   const params = req.nextUrl.searchParams;
   const range = resolveRange(params.get("from"), params.get("to"));
 
-  const receipts = await prisma.receipt.findMany({
-    where: {
-      userId: session.userId,
-      // Drafts awaiting review are not part of the books yet.
-      reviewStatus: "approved",
-      date: { gte: range.gte, lt: range.lt },
-    },
-    select: {
-      type: true,
-      date: true,
-      totalAmountCents: true,
-      category: true,
-      vatDetails: true,
-    },
-  });
-
-  const report = buildProfitLoss(receipts);
+  // Same sources as the VAT return: approved receipts plus booked sales
+  // invoices and credit notes, with bank-settled income receipts deduplicated.
+  const sources = await loadAlvPeriodSources(session.userId, range.gte, range.lt);
+  const report = buildProfitLoss(sources.reportReceipts, sources.reportInvoices);
   return noStoreJson({
     from: range.start,
     to: range.end,
     total: periodToEuros(report.total),
     months: report.months.map(periodToEuros),
     undatedCount: report.undatedCount,
+    excludedReceiptCount: sources.excludedReceiptCount,
+    basis: "laskutusperuste",
   });
 });
