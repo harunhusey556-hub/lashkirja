@@ -1,6 +1,6 @@
 "use client";
 
-import { useId, useState } from "react";
+import { useId, useRef, useState } from "react";
 import { Ellipsis } from "lucide-react";
 import BottomSheet from "@/components/BottomSheet";
 import { Icon } from "./Icon";
@@ -10,9 +10,11 @@ export function MoreMenu({ items, label = "Lisää toimintoja" }: {
 }) {
   const [open, setOpen] = useState(false);
   const titleId = useId();
+  const triggerRef = useRef<HTMLButtonElement>(null);
   return (
     <>
       <button
+        ref={triggerRef}
         type="button"
         aria-label={label}
         aria-haspopup="dialog"
@@ -35,6 +37,10 @@ export function MoreMenu({ items, label = "Lisää toimintoja" }: {
                 disabled={item.disabled}
                 onClick={() => {
                   setOpen(false);
+                  // The sheet stays mounted for its exit animation, so a dialog opened by
+                  // onSelect would remember THIS row as the control to return focus to,
+                  // and the row is gone by then. Hand focus back to the trigger first.
+                  triggerRef.current?.focus({ preventScroll: true });
                   item.onSelect();
                 }}
                 className={`active-press flex min-h-12 w-full items-center px-4 text-left text-[15px] disabled:opacity-50 ${

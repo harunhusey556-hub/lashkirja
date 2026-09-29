@@ -60,9 +60,27 @@ for (const [width, height] of [
 test.describe("landscape compact", () => {
   test.use({ viewport: { width: 844, height: 390 } });
 
-  test("the shell still stacks", async ({ page }) => {
+  // From 768 px the shell switches to the sidebar layout (globals.css): the
+  // tab bar is gone and the sidebar carries the same seven roots. iPhone is
+  // locked to portrait (SHELL-26), so this is the wide layout at a short height.
+  test("the shell keeps a sidebar layout without overlap", async ({ page }) => {
     await login(page);
-    await shellDoesNotOverlap(page);
+    const header = page.locator(".app-header");
+    const main = page.locator(".app-main");
+    const sidebar = page.locator(".app-sidebar");
+    await expect(header).toBeVisible();
+    await expect(main).toBeVisible();
+    await expect(sidebar).toBeVisible();
+    await expect(page.locator(".app-tab-bar")).toBeHidden();
+    const h = await header.boundingBox();
+    const m = await main.boundingBox();
+    const sb = await sidebar.boundingBox();
+    expect(h && m && sb).toBeTruthy();
+    if (!h || !m || !sb) return;
+    expect(h.y + h.height).toBeLessThanOrEqual(m.y + 2);
+    expect(m.x).toBeGreaterThanOrEqual(sb.x + sb.width - 2);
+    expect(m.x + m.width).toBeLessThanOrEqual((page.viewportSize()?.width ?? m.width) + 1);
+    expect(m.y + m.height).toBeLessThanOrEqual((page.viewportSize()?.height ?? m.height) + 1);
   });
 });
 
@@ -130,10 +148,9 @@ test.describe("confirm dialog", () => {
     await expect(dialog).toHaveAttribute("aria-labelledby", titleId!);
     await expect(dialog).toHaveAttribute("aria-describedby", descriptionId!);
     await page.keyboard.press("Tab");
-    const stillInside = await page.evaluate(() => {
-      const dialog = document.querySelector("[role=dialog]");
-      return Boolean(dialog && dialog.contains(document.activeElement));
-    });
+    // Measured on THIS dialog: the always-mounted assistant drawer and other
+    // sheets are also role=dialog, and a bare querySelector finds those first.
+    const stillInside = await dialog.evaluate((el) => el.contains(document.activeElement));
     expect(stillInside).toBe(true);
     await page.keyboard.press("Escape");
     await expect(dialog).toBeHidden();
