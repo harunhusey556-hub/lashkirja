@@ -27,7 +27,7 @@ The Bar column cites the QUALITY-BAR item.
 | OWN-12 | P0 | N4, N5, S3 | The profile sheet (avatar menu) did not open fully: "I pulled the profile menu up myself, but it still needs fixing." The sheet is not anchored to the bottom edge: a dimmed tab-bar strip shows below it. Probably the same root cause as OWN-05. Evidence: `.superpowers/quality/batch-1/owner-screens/profile-sheet-dragged-up.png`. | done (4bc5594, 4d35743) |
 | OWN-13 | P1 | N3, L1 | "In the kirjanpito part the numbers come and go when changing page": the hub row values (ALV amount, Ostolaskut count, Pankkitilit, Suljetut kaudet) are fetched on every visit with no cache, so they appear blank and pop in. Evidence: `.superpowers/quality/batch-1/owner-screens/kirjanpito-hub-values-missing.png`. | done (240afe6; also swept 14 screens) |
 | OWN-14 | P0 | A2 | "Bank connection doesn't work." The production server has no Enable Banking credentials: `ENABLEBANKING_APP_ID` is empty, there is no key file, and `ENABLED=false`. The UI states this honestly. It needs the owner's credentials. | done 2026-09-29: production Enable Banking app "Lashkirja v2" (401e705c), server enabled, 42 Finnish banks listed; next: the owner taps Yhdistä pankki on the phone and links S-Pankki |
-| OWN-15 | P1 | S1, S2, N1 | "Interaction rules must be the same on every page: in the main menu you cannot push the page up and down, but on some pages you can. It is a small detail, but you feel restricted." Cause candidates: the `data-fit="snug"` mode makes some pages `overflow:hidden` (no bounce) while others scroll and bounce. Needs one rule for all pages, and a professional UI/UX review of consistency. | in progress (batch 2) |
+| OWN-15 | P1 | S1, S2, N1 | "Interaction rules must be the same on every page: in the main menu you cannot push the page up and down, but on some pages you can. It is a small detail, but you feel restricted." Cause candidates: the `data-fit="snug"` mode makes some pages `overflow:hidden` (no bounce) while others scroll and bounce. Needs one rule for all pages, and a professional UI/UX review of consistency. | done in code (batch 2, commit 535ddf7: every screen always rubber-bands); needs the owner's device check |
 
 ## Audit findings
 
@@ -57,3 +57,20 @@ The Bar column cites the QUALITY-BAR item.
   - AUTH-31
   - the 309 VAT-reason field
   - review minors
+
+## Batch 2 status (2026-09-30), pushed, NOT yet deployed or built as an IPA
+- Audit: 128 findings (IA 30, VS 43, TF 29, AX 26) in `.superpowers/quality/batch-2/findings-*.md`.
+- Wave A (core, done): scroll contract, rem type tokens and iOS text size, keyboard, navigation direction, gestures, pressed states, pull to refresh, a11y infrastructure.
+- Wave B (stopped at a clean point on request):
+  - forms: done (VS-01..07, 10, 17..23, AX-17/18/25).
+  - states: done (VS-24, 30..33, TF-21 banner part).
+  - a11y: done (AX-05/06/07/09/12/13/26).
+  - flows: partial. Done: TF-01, 02, 03, 04, 06, 07, 11, 16.
+- Not done (batch 3 / next):
+  - TF-08 link the photo to the transaction, TF-09/10 capture without a form, TF-12 bank copy, TF-13 Muistuta on Myynti, TF-15 seller preflight, TF-17 (owner decision), TF-18..21, TF-24, TF-28.
+  - Wave C: the Finnish glossary sweep (VS-27..29, 34..40, 12/13/25/26).
+  - The ReviewQueue confirm copy is now wrong: the server refuses to approve a receipt with no amount.
+  - The Kirjanpito hub subtitle is 42 characters (limit 34).
+  - The money "€" suffix (R24).
+  - Deferred by ruling B2-R4: TF-27, IA-12, sheet detents.
+- Verification at the push: typecheck clean; unit tests 903 pass (5 known Windows failures); integration 416/416; the mobile export builds (5.84 MB). No iOS Simulator run, no IPA and no review of the batch-2 lanes yet.
