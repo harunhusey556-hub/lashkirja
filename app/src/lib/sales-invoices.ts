@@ -1003,7 +1003,22 @@ export interface ListInvoicesOptions {
   status?: InvoiceDisplayStatus | "all";
   customerId?: string;
   month?: string;
+  /** Customer name, invoice number or reference (SALES-10). */
+  search?: string;
   limit?: number;
+}
+
+/** Search across customer name, invoice number and reference. */
+function invoiceSearchWhere(search: string): Record<string, unknown> | null {
+  const text = search.trim().slice(0, 80);
+  if (!text) return null;
+  const or: Array<Record<string, unknown>> = [{ customer: { name: { contains: text } } }];
+  const digits = text.replace(/\s+/g, "");
+  if (/^\d{1,9}$/.test(digits)) {
+    or.push({ number: Number(digits) });
+    or.push({ reference: { contains: digits } });
+  }
+  return { OR: or };
 }
 
 /** Shared customerId/month scoping for the list, count, and aging queries. */
@@ -1040,13 +1055,24 @@ export async function listInvoices(
   now: Date = new Date()
 ): Promise<{ invoices: PublicInvoice[]; aging: AgingReport & { totalOpen: number; overdue: number } }> {
   const where = invoiceScopeWhere(userId, options);
+  const and: Array<Record<string, unknown>> = [];
   if (options.status === "overdue") {
     // Filter in the database before `take`. A post-query filter would hide an
     // old overdue invoice behind INVOICE_LIST_LIMIT newer ones that are not overdue.
     Object.assign(where, overdueStatusWhere(now));
+  } else if (options.status === "credited") {
+    // A credit note belongs with the invoices it corrects, never under
+    // "Avoimet" with a negative amount (SALES-13, SALES-24).
+    and.push({ OR: [{ status: "credited" }, { documentKind: "credit_note" }] });
+  } else if (options.status === "sent") {
+    where.status = "sent";
+    where.documentKind = "invoice";
   } else if (options.status && options.status !== "all") {
     where.status = options.status;
   }
+  const search = options.search ? invoiceSearchWhere(options.search) : null;
+  if (search) and.push(search);
+  if (and.length > 0) where.AND = and;
 
   const rows = await prisma.salesInvoice.findMany({
     where,
@@ -1120,15 +1146,17 @@ export async function countInvoicesByDisplayStatus(
       where: {
         ...where,
         status: "sent",
-        // Not overdue: a credit note is exempt regardless of its due date;
-        // an ordinary invoice counts here only while its due date has not
-        // yet fully passed (the mirror image of overdueStatusWhere below).
-        OR: [{ documentKind: "credit_note" }, { dueDate: { gte: overdueBefore(now) } }],
+        // Not overdue, and not a credit note: a credit note is counted with
+        // the credited invoices it belongs to (SALES-24), never as open.
+        documentKind: "invoice",
+        dueDate: { gte: overdueBefore(now) },
       },
     }),
     prisma.salesInvoice.count({ where: { ...where, ...overdueWhere } }),
-    prisma.salesInvoice.count({ where: { ...where, status: "paid" } }),
-    prisma.salesInvoice.count({ where: { ...where, status: "credited" } }),
+    prisma.salesInvoice.count({ where: { ...where, status: "paid", documentKind: "invoice" } }),
+    prisma.salesInvoice.count({
+      where: { ...where, OR: [{ status: "credited" }, { documentKind: "credit_note" }] },
+    }),
   ]);
 
   return { draft, sent, overdue, paid, credited };
@@ -1156,13 +1184,21 @@ export interface BankMatchResult {
  */
 export async function matchInvoicePaymentsFromBank(
   userId: string,
-  now: Date = new Date()
-): Promise<BankMatchResult> {
+  now: Date = new Date(),
+  options: { dryRun?: boolean } = {}
+): Promise<BankMatchResult & { preview?: Array<{ invoiceNumber: number; customerName: string; amount: number }> }> {
   const openInvoices = await prisma.salesInvoice.findMany({
     where: { userId, status: "sent", documentKind: "invoice" },
-    include: { payments: { select: { amountCents: true } } },
+    include: {
+      payments: { select: { amountCents: true } },
+      customer: { select: { name: true } },
+    },
   });
-  if (openInvoices.length === 0) return { applied: [], suggestions: [], skippedLocked: [] };
+  if (openInvoices.length === 0) {
+    return { applied: [], suggestions: [], skippedLocked: [], ...(options.dryRun ? { preview: [] } : {}) };
+  }
+  // What a run would book, for the confirmation sheet (SALES-06).
+  const preview: Array<{ invoiceNumber: number; customerName: string; amount: number }> = [];
 
   const incoming = await prisma.transaction.findMany({
     where: {
@@ -1186,6 +1222,23 @@ export async function matchInvoicePaymentsFromBank(
 
     const invoice = candidates.map((value) => byReference.get(value)).find(Boolean);
     if (!invoice) continue;
+
+    if (options.dryRun) {
+      preview.push({
+        invoiceNumber: invoice.number,
+        customerName: invoice.customer.name,
+        amount: centsToEuros(transaction.amountCents),
+      });
+      applied.push({
+        invoiceId: invoice.id,
+        invoiceNumber: invoice.number,
+        transactionId: transaction.id,
+        amount: centsToEuros(transaction.amountCents),
+      });
+      consumed.add(transaction.id);
+      byReference.delete(invoice.reference);
+      continue;
+    }
 
     try {
       await recordPayment(userId, invoice.id, {
@@ -1238,6 +1291,7 @@ export async function matchInvoicePaymentsFromBank(
     }
   }
 
+  if (options.dryRun) return { applied: [], suggestions, skippedLocked, preview };
   return { applied, suggestions, skippedLocked };
 }
 

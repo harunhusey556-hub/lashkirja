@@ -19,11 +19,45 @@ function isoDate(value: Date | null): string {
   return value ? value.toISOString().slice(0, 10) : "";
 }
 
+/**
+ * A package period: one month ("2026-03"), a quarter ("2026-Q1") or a whole
+ * year ("2026"), so the accountant gets a quarter or a year in one zip
+ * (SALES-21). Returns the UTC bounds and the tiliote target months inside.
+ */
+export function packagePeriod(period: string): { start: Date; end: Date; months: string[] } {
+  const year = /^(\d{4})$/.exec(period);
+  const quarter = /^(\d{4})-Q([1-4])$/.exec(period);
+  let firstMonth: number;
+  let count: number;
+  let startYear: number;
+  if (year) {
+    startYear = Number(year[1]);
+    firstMonth = 1;
+    count = 12;
+  } else if (quarter) {
+    startYear = Number(quarter[1]);
+    firstMonth = (Number(quarter[2]) - 1) * 3 + 1;
+    count = 3;
+  } else {
+    const { start, end } = monthBoundsUtc(period);
+    return { start, end, months: [period] };
+  }
+  const months = Array.from(
+    { length: count },
+    (_, index) => `${startYear}-${String(firstMonth + index).padStart(2, "0")}`
+  );
+  return {
+    start: new Date(Date.UTC(startYear, firstMonth - 1, 1)),
+    end: new Date(Date.UTC(startYear, firstMonth - 1 + count, 1)),
+    months,
+  };
+}
+
 export async function buildPeriodPackage(
   userId: string,
   month: string
 ): Promise<{ fileName: string; bytes: Buffer }> {
-  const { start, end } = monthBoundsUtc(month);
+  const { start, end, months } = packagePeriod(month);
   const [receipts, transactions, invoices, sources] = await Promise.all([
     prisma.receipt.findMany({
       where: { userId, date: { gte: start, lt: end } },
@@ -44,7 +78,7 @@ export async function buildPeriodPackage(
       },
     }),
     prisma.transaction.findMany({
-      where: { statement: { userId, periodMonth: month } },
+      where: { statement: { userId, periodMonth: { in: months } } },
       orderBy: [{ date: "asc" }],
       select: {
         id: true,

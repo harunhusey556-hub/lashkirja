@@ -7,6 +7,13 @@ import type { InvoiceDisplayStatus } from "./invoices";
 /** Minimal invoice shape this module needs. */
 export interface StatusedInvoice {
   displayStatus: InvoiceDisplayStatus;
+  /** A credit note is grouped with the credited invoices, never as an open one. */
+  documentKind?: "invoice" | "credit_note";
+}
+
+/** The list group (and filter) an invoice belongs to. */
+export function invoiceGroupId(invoice: StatusedInvoice): StatusFilterId {
+  return invoice.documentKind === "credit_note" ? "credited" : invoice.displayStatus;
 }
 
 /** Every filter id the sales list supports: "all" plus one per display status. */
@@ -99,9 +106,9 @@ export function salesInvoiceGroups<T extends StatusedInvoice>(
     return STATUS_ORDER.map((id) => ({
       id,
       label: GROUP_LABEL[id],
-      items: invoices.filter((invoice) => invoice.displayStatus === id),
+      items: invoices.filter((invoice) => invoiceGroupId(invoice) === id),
     })).filter((group) => group.items.length > 0);
   }
-  const items = invoices.filter((invoice) => invoice.displayStatus === filter);
+  const items = invoices.filter((invoice) => invoiceGroupId(invoice) === filter);
   return items.length > 0 ? [{ id: filter, label: GROUP_LABEL[filter], items }] : [];
 }

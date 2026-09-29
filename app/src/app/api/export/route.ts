@@ -7,6 +7,8 @@ import { csvAttachmentHeaders, csvMoney, toCsv, type CsvValue } from "@/lib/csv"
 import { centsToEuros } from "@/lib/money";
 import { monthSchema } from "@/lib/validation";
 import { displayStatus, openPosition, type InvoiceStatus } from "@/lib/invoices";
+import { loadAlvPeriodSources } from "@/lib/alv-period";
+import { buildProfitLoss } from "@/lib/reports";
 
 const typeSchema = z.enum([
   "receipts",
@@ -14,7 +16,17 @@ const typeSchema = z.enum([
   "invoices",
   "purchase-invoices",
   "customers",
+  "profit-loss",
 ]);
+
+const yearSchema = z.string().regex(/^\d{4}$/, "Vuosi on muotoa VVVV.");
+
+/** A whole calendar year, for the exports the Raportit year switcher asks for (SALES-21). */
+function yearWindow(year: string | null) {
+  if (!year) return undefined;
+  const value = Number(yearSchema.parse(year));
+  return { gte: new Date(Date.UTC(value, 0, 1)), lt: new Date(Date.UTC(value + 1, 0, 1)) };
+}
 
 function monthWindow(month: string | null) {
   if (!month) return undefined;
@@ -37,14 +49,43 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
   const userId = session.userId;
   const params = req.nextUrl.searchParams;
   const type = typeSchema.parse(params.get("type") ?? "receipts");
-  const window = monthWindow(params.get("month"));
-  const suffix = params.get("month") ? `-${params.get("month")}` : "";
+  const window = monthWindow(params.get("month")) ?? yearWindow(params.get("year"));
+  const suffix = params.get("month")
+    ? `-${params.get("month")}`
+    : params.get("year")
+      ? `-${params.get("year")}`
+      : "";
 
   let headers: string[] = [];
   let rows: CsvValue[][] = [];
   let fileName = "";
 
-  if (type === "receipts") {
+  if (type === "profit-loss") {
+    // Tuloslaskelma by month on the same basis as /api/reports/profit-loss.
+    const now = new Date();
+    const range = window ?? {
+      gte: new Date(Date.UTC(now.getUTCFullYear(), 0, 1)),
+      lt: new Date(Date.UTC(now.getUTCFullYear() + 1, 0, 1)),
+    };
+    const sources = await loadAlvPeriodSources(userId, range.gte, range.lt);
+    const report = buildProfitLoss(sources.reportReceipts, sources.reportInvoices);
+    headers = [
+      "Kuukausi", "Tulot veroton", "Tulojen ALV", "Menot veroton", "Menojen ALV", "Tulos veroton",
+      "Myyntilaskuja", "Hyvityslaskuja", "Kuitteja",
+    ];
+    rows = [...report.months, { ...report.total, month: "Yhteensä" }].map((period) => [
+      period.month,
+      csvMoney(centsToEuros(period.incomeNetCents)),
+      csvMoney(centsToEuros(period.incomeVatCents)),
+      csvMoney(centsToEuros(period.expenseNetCents)),
+      csvMoney(centsToEuros(period.expenseVatCents)),
+      csvMoney(centsToEuros(period.profitNetCents)),
+      period.invoiceCount,
+      period.creditNoteCount,
+      period.receiptCount,
+    ]);
+    fileName = `tuloslaskelma${suffix}.csv`;
+  } else if (type === "receipts") {
     const receipts = await prisma.receipt.findMany({
       where: { userId, ...(window ? { date: window } : {}) },
       orderBy: [{ date: "asc" }, { createdAt: "asc" }],

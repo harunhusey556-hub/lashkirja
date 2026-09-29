@@ -94,4 +94,15 @@ describe("salesInvoiceGroups", () => {
   it("returns no groups when a specific filter matches nothing", () => {
     expect(salesInvoiceGroups(MIXED, "credited")).toEqual([]);
   });
+
+  it("puts a credit note with the credited invoices, never under Odottaa maksua (SALES-13)", () => {
+    const note = { displayStatus: "sent" as const, documentKind: "credit_note" as const };
+    const open = { displayStatus: "sent" as const, documentKind: "invoice" as const };
+    const groups = salesInvoiceGroups([note, open], "all");
+    expect(groups.map((group) => [group.id, group.items.length])).toEqual([
+      ["sent", 1],
+      ["credited", 1],
+    ]);
+    expect(salesInvoiceGroups([note, open], "credited")[0].items).toEqual([note]);
+  });
 });

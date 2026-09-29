@@ -78,7 +78,7 @@ describe("countInvoicesByDisplayStatus / GET /api/invoices/counts", () => {
       status: "sent",
       documentKind: "credit_note",
       dueDate: utcMidnight(-10),
-    }); // credit note in sent status, past due - must stay "sent", never "overdue"
+    }); // credit note in sent status, past due - never "overdue"; counted with the credited (SALES-24)
     await makeRow({
       number: 8,
       status: "sent",
@@ -104,14 +104,14 @@ describe("countInvoicesByDisplayStatus / GET /api/invoices/counts", () => {
     const overall = await readJson(
       await getCounts(buildRequest("GET", "/api/invoices/counts", undefined, { cookie }))
     );
-    expect(overall.counts).toEqual({ draft: 1, sent: 4, overdue: 1, paid: 1, credited: 1 });
+    expect(overall.counts).toEqual({ draft: 1, sent: 3, overdue: 1, paid: 1, credited: 2 });
 
     const scoped = await readJson(
       await getCounts(
         buildRequest("GET", `/api/invoices/counts?customerId=${customerId}`, undefined, { cookie })
       )
     );
-    expect(scoped.counts).toEqual({ draft: 1, sent: 3, overdue: 1, paid: 1, credited: 1 });
+    expect(scoped.counts).toEqual({ draft: 1, sent: 2, overdue: 1, paid: 1, credited: 2 });
   });
 
   it("requires a session and returns the same numbers once signed in", async () => {

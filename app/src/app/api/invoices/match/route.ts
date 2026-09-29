@@ -4,6 +4,13 @@ import { noStoreJson, rejectCrossSite, rejectOversizedContentLength } from "@/li
 import { UnauthorizedError, withErrorHandler } from "@/lib/api-errors";
 import { matchInvoicePaymentsFromBank } from "@/lib/sales-invoices";
 
+/** What a run would book, without booking anything: the confirmation preview. */
+export const GET = withErrorHandler(async (req: NextRequest) => {
+  const session = await requireSession(req);
+  if (!session) throw new UnauthorizedError();
+  return noStoreJson(await matchInvoicePaymentsFromBank(session.userId, new Date(), { dryRun: true }));
+});
+
 /** Runs reference-based reconciliation and returns what it did and suggests. */
 export const POST = withErrorHandler(async (req: NextRequest) => {
   const session = await requireSession(req);

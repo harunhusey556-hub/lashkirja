@@ -39,6 +39,7 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
     status: rawStatus ? statusFilter.parse(rawStatus) : undefined,
     customerId: params.get("customerId") ?? undefined,
     month: rawMonth ? monthSchema.parse(rawMonth) : undefined,
+    search: params.get("search")?.slice(0, 80) || undefined,
   });
   return noStoreJson(result);
 });
