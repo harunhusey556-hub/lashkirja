@@ -1,6 +1,7 @@
 "use client";
 
 import { Button } from "@/components/ui";
+import { ConnectionNotice } from "@/components/ScreenState";
 
 export function LoadingState({
   label = "Ladataan...",
@@ -48,21 +49,39 @@ export function SkeletonList({ rows = 5 }: { rows?: number }) {
   );
 }
 
+/**
+ * Failure card with a retry. Pass `error` (preferred) and it classifies the
+ * failure exactly like ConnectionNotice (offline / unreachable / expired /
+ * generic, Finnish copy only); pass only `message` for a failure the caller
+ * has already put into words (e.g. "Kuittia ei löytynyt").
+ */
 export function ErrorState({
   message,
+  error,
   onRetry,
   compact = false,
 }: {
-  message: string;
+  message?: string;
+  error?: unknown;
   onRetry?: () => void;
   compact?: boolean;
 }) {
+  if (error !== undefined && error !== null) {
+    return (
+      <ConnectionNotice
+        error={error}
+        fallback={message || "Lataus epäonnistui"}
+        onRetry={onRetry}
+        compact={compact}
+      />
+    );
+  }
   return (
     <div
       className={`rounded-card bg-danger/10 text-danger text-sm text-center ${compact ? "p-4" : "p-6"}`}
       role="alert"
     >
-      <p>{message}</p>
+      <p>{message || "Lataus epäonnistui"}</p>
       {onRetry && (
         <Button type="button" variant="secondary" className="mt-3" onClick={onRetry}>
           Yritä uudelleen

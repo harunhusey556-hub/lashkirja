@@ -3,7 +3,7 @@
 import { CloudOff, Inbox, Lock, SearchX, type LucideIcon } from "lucide-react";
 import { Button } from "@/components/ui";
 import { Icon } from "@/components/ds/Icon";
-import { redirectToLogin } from "@/components/clientFetch";
+import { errorMessage, redirectToLogin } from "@/components/clientFetch";
 import {
   CONNECTION_COPY,
   classifyConnection,
@@ -12,6 +12,13 @@ import {
   type EmptyKind,
 } from "@/lib/screen-state";
 
+/**
+ * The shared failure card (L3, L4): classifies `error` as offline,
+ * unreachable, expired session or a generic failure, shows Finnish copy only,
+ * and offers "Yritä uudelleen" when `onRetry` is given (or "Kirjaudu sisään"
+ * for an expired session). Use it for every load failure; `ErrorState` in
+ * AsyncState is the same card for callers that only have a message.
+ */
 export function ConnectionNotice({
   error,
   fallback = "Lataus epäonnistui",
@@ -29,7 +36,8 @@ export function ConnectionNotice({
     kind === "generic"
       ? {
           title: "Jotain meni pieleen",
-          body: error instanceof Error && error.message ? error.message : fallback,
+          // Never the raw server/network string (L5): errorMessage maps it.
+          body: errorMessage(error, fallback),
         }
       : CONNECTION_COPY[kind];
 

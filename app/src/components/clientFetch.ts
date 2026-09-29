@@ -70,7 +70,7 @@ export class ApiGatewayError extends Error {
   status: number;
   constructor(status: number) {
     super(
-      `Palvelin ei vastannut tilapäisesti (virhe ${status}). Tarkista onnistuiko toiminto ennen kuin yrität uudelleen.`
+      "Palvelin ei vastannut hetkeen. Tarkista onnistuiko toiminto ennen kuin yrität uudelleen."
     );
     this.name = "ApiGatewayError";
     this.status = status;
@@ -303,20 +303,103 @@ export function isUnauthorized(error: unknown): boolean {
   return error instanceof ApiError && error.status === 401;
 }
 
-export function errorMessage(error: unknown, fallback: string): string {
-  if (error instanceof ApiError && error.details) {
-    // If we have detailed Zod/Validation issues, format them cleanly
-    if (Array.isArray(error.details)) {
-      return `${error.message}: ${error.details
-        .map((issue) =>
-          issue && typeof issue === "object" && "message" in issue
-            ? String((issue as { message?: unknown }).message ?? issue)
-            : String(issue)
-        )
-        .join(", ")}`;
-    }
+/** Finnish copy for a failure the user cannot read anything useful from. */
+export const ERROR_COPY = {
+  offline: "Ei verkkoyhteyttä. Tarkista yhteys ja yritä uudelleen.",
+  unreachable: "Palvelimeen ei saada yhteyttä. Yritä hetken kuluttua uudelleen.",
+  server: "Palvelimella tapahtui virhe. Yritä hetken kuluttua uudelleen.",
+  expired: "Istunto vanheni. Kirjaudu sisään uudelleen.",
+  forbidden: "Sinulla ei ole oikeutta tähän toimintoon.",
+  notFound: "Tietoa ei löytynyt. Se on ehkä poistettu.",
+  tooLarge: "Tiedosto on liian suuri.",
+  rateLimited: "Liian monta yritystä. Odota hetki ja yritä uudelleen.",
+} as const;
+
+const NETWORK_FAILURE = /failed to fetch|networkerror|load failed|network request failed|the network connection was lost|could not connect/i;
+
+/** WebKit "Load failed", Chrome "Failed to fetch", Firefox "NetworkError": no response at all. */
+export function isNetworkFailure(error: unknown): boolean {
+  if (error instanceof TypeError) return true;
+  return error instanceof Error && NETWORK_FAILURE.test(error.message);
+}
+
+// Word boundaries are spelled (?<![A-Za-z]) / (?![A-Za-z]) on purpose: ASCII
+// only, so a Finnish word such as "noin" or "ääni" never matches.
+const INTERNAL_WORDS =
+  /prisma|internal|exception|stack|undefined|(?<![A-Za-z])(null|nan)(?![A-Za-z])|econn|enotfound|etimedout|epipe|sqlite|constraint|unexpected token|json|syntaxerror|typeerror|referenceerror|https?:[/][/]/i;
+const INTERNAL_SHAPES =
+  /(?<![A-Za-z])P[0-9]{4}(?![0-9])|at [^ ]+ [(]|[a-z][A-Z][a-z]+[A-Z]|[A-Z]{2,}_[A-Z_]+/;
+const ENGLISH_WORDS =
+  /(?<![A-Za-z])(the|is|are|was|not|no|invalid|required|failed|fail|unable|cannot|can't|must|missing|expected|received|found|unauthorized|forbidden|too|already|error|server|request|response|string|number|object|please|try|again)(?![A-Za-z])/i;
+
+/**
+ * True when `message` is written for the user: Finnish, short, and free of
+ * exception names, codes, stack frames, URLs and English framework text.
+ * The server's own Finnish validation messages pass; "PrismaClient...",
+ * "Internal error: P2002", "fail", "Load failed" and Zod's English do not.
+ */
+export function isUserFacingMessage(message: string): boolean {
+  const text = message.trim();
+  if (!text || text.length > 300) return false;
+  if (INTERNAL_WORDS.test(text) || INTERNAL_SHAPES.test(text)) return false;
+  if (ENGLISH_WORDS.test(text)) return false;
+  return true;
+}
+
+function statusCopy(status: number): string | null {
+  if (status === 401) return ERROR_COPY.expired;
+  if (status === 403) return ERROR_COPY.forbidden;
+  if (status === 404) return ERROR_COPY.notFound;
+  if (status === 413) return ERROR_COPY.tooLarge;
+  if (status === 429) return ERROR_COPY.rateLimited;
+  if (status >= 500) return ERROR_COPY.server;
+  return null;
+}
+
+function detailText(details: unknown): string | null {
+  if (!Array.isArray(details)) return null;
+  const parts = details
+    .map((issue) =>
+      issue && typeof issue === "object" && "message" in issue
+        ? String((issue as { message?: unknown }).message ?? "")
+        : String(issue ?? "")
+    )
+    .filter((part) => isUserFacingMessage(part));
+  return parts.length > 0 ? parts.join(", ") : null;
+}
+
+function userMessage(error: unknown, fallback: string): string {
+  if (error instanceof ApiTimeoutError) return error.message;
+  if (error instanceof ApiGatewayError) return error.message;
+  if (isNetworkFailure(error)) {
+    const offline = typeof navigator !== "undefined" && navigator.onLine === false;
+    return offline ? ERROR_COPY.offline : ERROR_COPY.unreachable;
   }
-  return error instanceof Error && error.message ? error.message : fallback;
+  if (error instanceof ApiError) {
+    const own = isUserFacingMessage(error.message) ? error.message : null;
+    if (own) {
+      const details = detailText(error.details);
+      return details ? `${own}: ${details}` : own;
+    }
+    return statusCopy(error.status) ?? fallback;
+  }
+  if (error instanceof Error && isUserFacingMessage(error.message)) return error.message;
+  return fallback;
+}
+
+/**
+ * The one way to turn a failure into text for the user (AUTH-09, BOOKS-15,
+ * SALES-18). Always Finnish: status codes and network failures map to fixed
+ * copy, a server message is shown only when it is written for the user, and
+ * anything raw goes to the console instead of the screen.
+ */
+export function errorMessage(error: unknown, fallback: string): string {
+  const message = userMessage(error, fallback);
+  const raw = error instanceof Error ? error.message : String(error ?? "");
+  if (raw && raw !== message && typeof console !== "undefined") {
+    console.warn("[LashKirja] virhe:", error);
+  }
+  return message;
 }
 
 /**
