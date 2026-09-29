@@ -27,6 +27,7 @@ import {
 } from "lucide-react";
 import { Icon } from "@/components/ds/Icon";
 import { hapticNotify } from "@/lib/haptics";
+import { displayChatContent } from "@/lib/chat-legacy";
 import { useOverlayLock } from "@/lib/overlay-lock";
 
 interface ChatSourceLink {
@@ -78,9 +79,13 @@ const EXIT_MS = 250;
 
 /**
  * Whether the server can answer free-form questions (GET /api/ai/status).
- * Asked once per app session; null = not known yet (behave as available).
+ * null = not known yet (behave as available). Re-asked on a drawer open once
+ * the last answer is older than AVAILABILITY_TTL_MS, so adding the model on
+ * the server shows up without killing the app.
  */
 let cachedAvailability: boolean | null = null;
+let availabilityCheckedAt = 0;
+const AVAILABILITY_TTL_MS = 60_000;
 
 /** The two shortcuts that always work, model or not. */
 const SHORTCUTS = [
@@ -163,13 +168,15 @@ export function AiChatDrawer({
   });
 
   useEffect(() => {
-    if (!open || cachedAvailability !== null) return;
+    if (!open) return;
+    if (cachedAvailability !== null && Date.now() - availabilityCheckedAt < AVAILABILITY_TTL_MS) return;
     let cancelled = false;
     apiFetch("/api/ai/status")
       .then((response) => readJson<{ available: boolean }>(response, ""))
       .then((data) => {
         if (typeof data?.available !== "boolean") return;
         cachedAvailability = data.available;
+        availabilityCheckedAt = Date.now();
         if (!cancelled) setAiAvailable(data.available);
       })
       .catch(() => {
@@ -558,7 +565,7 @@ export function AiChatDrawer({
 
   async function copyMessage(message: ChatMessageItem) {
     try {
-      await navigator.clipboard.writeText(message.content);
+      await navigator.clipboard.writeText(displayChatContent(message.role, message.content));
       setCopiedId(message.id);
       window.setTimeout(() => setCopiedId((current) => (current === message.id ? null : current)), 1500);
     } catch {
@@ -1003,7 +1010,11 @@ export function AiChatDrawer({
                     : `rounded-bl-md border bg-surface text-ink ${message.incomplete ? "border-danger/30" : "border-line"}`
                 }`}
               >
-                {message.role === "assistant" ? <ChatMarkdown text={message.content} /> : message.content}
+                {message.role === "assistant" ? (
+                  <ChatMarkdown text={displayChatContent(message.role, message.content)} />
+                ) : (
+                  message.content
+                )}
               </div>
               {message.status === "cancelled" ? (
                 <p className="mt-1 px-1 text-[13px] text-ink-2">Keskeytetty</p>

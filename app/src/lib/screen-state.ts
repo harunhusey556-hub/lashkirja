@@ -1,4 +1,4 @@
-import { ApiError, ApiGatewayError, ApiTimeoutError } from "@/components/clientFetch";
+import { ApiError, ApiGatewayError, ApiTimeoutError, isNetworkFailure } from "@/components/clientFetch";
 
 export type ConnectionKind = "offline" | "unreachable" | "expired" | "generic";
 
@@ -20,11 +20,9 @@ export const CONNECTION_COPY: Record<
   },
 };
 
-function looksLikeNetworkFailure(error: unknown): boolean {
-  if (error instanceof TypeError) return true;
-  if (!(error instanceof Error)) return false;
-  return /failed to fetch|networkerror|load failed|network request failed/i.test(error.message);
-}
+// One list of engine network messages (clientFetch.ts): a TypeError from a
+// code bug is "generic", never a connection problem.
+const looksLikeNetworkFailure = isNetworkFailure;
 
 /** Offline, unreachable, and an expired session are different situations. */
 export function classifyConnection(error: unknown, online = true): ConnectionKind {

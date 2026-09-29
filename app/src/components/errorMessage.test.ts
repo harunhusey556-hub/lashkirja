@@ -96,3 +96,32 @@ describe("isUserFacingMessage", () => {
     }
   });
 });
+
+describe("isNetworkFailure", () => {
+  it("counts only the engines' real network messages", async () => {
+    const { isNetworkFailure } = await import("./clientFetch");
+    for (const raw of [
+      "Failed to fetch",
+      "NetworkError when attempting to fetch resource.",
+      "Load failed",
+      "Load failed (api.example.com)",
+      "The network connection was lost.",
+      "The Internet connection appears to be offline.",
+      "Could not connect to the server.",
+      "A server with the specified hostname could not be found.",
+      "The request timed out.",
+      "Network request failed",
+    ]) {
+      expect(isNetworkFailure(new TypeError(raw)), raw).toBe(true);
+    }
+  });
+
+  it("does not hide a client bug behind the connection message", async () => {
+    const { isNetworkFailure } = await import("./clientFetch");
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const bug = new TypeError("Cannot read properties of undefined (reading 'id')");
+    expect(isNetworkFailure(bug)).toBe(false);
+    expect(isNetworkFailure(new TypeError("undefined is not an object (evaluating 'a.b')"))).toBe(false);
+    expect(errorMessage(bug, "Tallennus epäonnistui")).not.toBe(ERROR_COPY.unreachable);
+  });
+});

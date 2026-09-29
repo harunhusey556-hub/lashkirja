@@ -315,12 +315,26 @@ export const ERROR_COPY = {
   rateLimited: "Liian monta yritystä. Odota hetki ja yritä uudelleen.",
 } as const;
 
-const NETWORK_FAILURE = /failed to fetch|networkerror|load failed|network request failed|the network connection was lost|could not connect/i;
+/**
+ * The messages engines put on a fetch that got no response at all:
+ * - Chromium: "Failed to fetch"
+ * - Firefox: "NetworkError when attempting to fetch resource."
+ * - WebKit: "Load failed", or the NSURLError text on iOS ("The network
+ *   connection was lost.", "The Internet connection appears to be offline.",
+ *   "Could not connect to the server.", "A server with the specified hostname
+ *   could not be found.", "The request timed out.")
+ * - React Native / polyfills: "Network request failed"
+ */
+const NETWORK_FAILURE =
+  /failed to fetch|networkerror when attempting to fetch|load failed|network request failed|the network connection was lost|internet connection appears to be offline|could not connect to the server|hostname could not be found|the request timed out/i;
 
-/** WebKit "Load failed", Chrome "Failed to fetch", Firefox "NetworkError": no response at all. */
+/**
+ * No response at all. Only the known network messages count: a TypeError from
+ * a code bug ("Cannot read properties of undefined") must surface as a bug,
+ * not as "Palvelimeen ei saada yhteyttä".
+ */
 export function isNetworkFailure(error: unknown): boolean {
-  if (error instanceof TypeError) return true;
-  return error instanceof Error && NETWORK_FAILURE.test(error.message);
+  return error instanceof Error && NETWORK_FAILURE.test(error.message.trim());
 }
 
 // Word boundaries are spelled (?<![A-Za-z]) / (?![A-Za-z]) on purpose: ASCII
