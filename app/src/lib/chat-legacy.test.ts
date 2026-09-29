@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
-import { DatabaseSync } from "node:sqlite";
+import { createRequire } from "node:module";
 import { describe, expect, it } from "vitest";
 import {
   LEGACY_LIMITED_NOTICE_EN,
@@ -10,6 +10,21 @@ import {
   stripLegacyLimitedNotice,
 } from "./chat-legacy";
 import { limitedModeNotice } from "./chat-policy";
+
+// node:sqlite (Node 22.13+, CI runs Node 24) has no types in this repo's
+// @types/node, so it is loaded through require with the few members used.
+interface SqliteStatement {
+  run(...params: unknown[]): unknown;
+  all(): unknown[];
+}
+interface SqliteDatabase {
+  exec(sql: string): void;
+  prepare(sql: string): SqliteStatement;
+}
+const { DatabaseSync } = createRequire(import.meta.url)("node:sqlite") as {
+  DatabaseSync: new (location: string) => SqliteDatabase;
+};
+type DatabaseSync = SqliteDatabase;
 
 const MIGRATION = path.join(
   process.cwd(),

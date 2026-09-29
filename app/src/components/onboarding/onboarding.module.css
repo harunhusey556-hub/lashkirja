@@ -13,6 +13,8 @@
   z-index: 75;
   display: flex;
   flex-direction: column;
+  /* The panel's FLIP slide may start below the bottom edge. */
+  overflow: hidden;
   background: var(--color-canvas);
 }
 
@@ -118,10 +120,12 @@
   animation: obFadeOut 160ms var(--ease-out) forwards;
 }
 
-/* The choice panel animates to its new height instead of jumping. */
+/* The choice panel sits above the surface's bottom edge. A height change
+   between questions is not animated as height: OnboardingChat slides the
+   panel and the thread with a transform (FLIP) instead. */
 .panel {
-  overflow: hidden;
-  transition: height 220ms var(--ease-out);
+  position: relative;
+  z-index: 1;
 }
 
 /* Typing indicator */
@@ -230,8 +234,8 @@
     opacity: 0.6;
   }
 
-  .progressFill,
-  .panel {
+  /* The panel's FLIP slide is skipped in script (readReducedMotion). */
+  .progressFill {
     transition: none !important;
   }
 

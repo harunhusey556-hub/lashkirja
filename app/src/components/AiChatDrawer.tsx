@@ -772,7 +772,7 @@ export function AiChatDrawer({
         </button>
         </div>
       </header>
-      {/* Conversation menu: stays mounted and opens by height (SHELL-10). */}
+      {/* Conversation menu: stays mounted and drops down over the thread (SHELL-10). */}
       <div className={styles.menu} data-open={menuOpen ? "true" : undefined} inert={!menuOpen}>
         <div className={styles.menuInner}>
         <div className="max-h-[50dvh] space-y-3 overflow-y-auto overscroll-contain border-b border-line bg-canvas px-4 py-3 *:mx-auto *:max-w-[40rem]">

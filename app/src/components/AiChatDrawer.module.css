@@ -4,25 +4,43 @@
  * 240 ms out, --ease-drawer), which already carry the reduced-motion fallback.
  */
 
-/* Conversation menu: height from 0 via grid rows, so no max-height guess. */
+/*
+ * Conversation menu: drops down over the top of the thread from under the
+ * header. Transform and opacity only (no layout animation), so the thread
+ * never reflows while it opens. Closed, it is invisible, inert and lets taps
+ * through to the thread.
+ */
 .menu {
-  display: grid;
-  grid-template-rows: 0fr;
-  opacity: 0;
-  transition:
-    grid-template-rows 180ms var(--ease-out),
-    opacity 180ms var(--ease-out);
-}
-
-.menu[data-open="true"] {
-  grid-template-rows: 1fr;
-  opacity: 1;
-  transition-duration: 240ms;
+  position: relative;
+  z-index: 5;
+  height: 0;
 }
 
 .menuInner {
-  min-height: 0;
-  overflow: hidden;
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  opacity: 0;
+  transform: translateY(-8px);
+  visibility: hidden;
+  pointer-events: none;
+  box-shadow: 0 12px 24px -12px rgb(0 0 0 / 0.18);
+  transition:
+    transform 180ms var(--ease-out),
+    opacity 180ms var(--ease-out),
+    visibility 0s linear 180ms;
+}
+
+.menu[data-open="true"] > .menuInner {
+  opacity: 1;
+  transform: translateY(0);
+  visibility: visible;
+  pointer-events: auto;
+  transition:
+    transform 240ms var(--ease-out),
+    opacity 240ms var(--ease-out),
+    visibility 0s;
 }
 
 /* A new message rises into place; streamed text itself is not animated. */
@@ -52,9 +70,18 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .menu,
-  .menu[data-open="true"] {
-    transition: opacity 120ms linear !important;
+  .menuInner,
+  .menu[data-open="true"] > .menuInner {
+    transform: none !important;
+    transition:
+      opacity 120ms linear,
+      visibility 0s linear 120ms !important;
+  }
+
+  .menu[data-open="true"] > .menuInner {
+    transition:
+      opacity 120ms linear,
+      visibility 0s !important;
   }
 
   .messageIn,

@@ -29,11 +29,10 @@ import { isOnboardingSnoozed } from "@/lib/onboarding-gate";
 import { AiChatDrawer } from "@/components/AiChatDrawer";
 import { ToastHost } from "@/components/ToastHost";
 import { useSignOut } from "@/components/useSignOut";
-import { readJson } from "@/components/clientFetch";
 
 import BottomSheet from "@/components/BottomSheet";
 import { AppLock } from "@/components/AppLock";
-import { apiFetch } from "@/components/clientFetch";
+import { apiFetch, readJson } from "@/components/clientFetch";
 import { useSession } from "@/components/SessionProvider";
 import { IS_MOBILE_BUILD } from "@/lib/build-target";
 import { markFirstScreen, onFirstScreen } from "@/lib/splash";
@@ -298,6 +297,34 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     };
   }, []);
 
+  // The connectivity banner makes room by changing <main>'s padding-top,
+  // which now snaps (no layout-property animation). The page slides the same
+  // distance with a transform instead, so the content still moves in step
+  // with the banner's own slide. Skipped under reduced motion.
+  useEffect(() => {
+    const main = mainRef.current;
+    const frame = main?.closest<HTMLElement>(".app-frame");
+    if (!main || !frame || typeof MutationObserver === "undefined") return;
+    const room = () =>
+      frame.dataset.banner === "shown" ? parseFloat(frame.style.getPropertyValue("--banner-h")) || 0 : 0;
+    let last = room();
+    const observer = new MutationObserver(() => {
+      const next = room();
+      const delta = next - last;
+      last = next;
+      const page = pageNodeRef.current;
+      if (!delta || !page || prefersReducedMotion() || typeof page.animate !== "function") return;
+      const easing = getComputedStyle(document.documentElement).getPropertyValue("--ease-out").trim() || "ease-out";
+      page.animate([{ transform: `translateY(${-delta}px)` }, { transform: "translateY(0)" }], {
+        duration: 220,
+        easing,
+        composite: "add",
+      });
+    });
+    observer.observe(frame, { attributes: true, attributeFilter: ["data-banner", "style"] });
+    return () => observer.disconnect();
+  }, []);
+
   // S1: a page whose content is only slightly taller than the frame drops
   // the slack padding (data-fit="snug") instead of scrolling a few px.
   const evaluateFit = useCallback(() => {
@@ -554,6 +581,11 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         if (anyFormDirty()) {
           clearInline();
           dropUnder();
+          // The swipe set position/z-index on <main> for the page underneath.
+          // Left in place, a cancelled prompt keeps <main> a stacking context,
+          // and a sheet opened later is trapped under the header and banner.
+          main.style.position = "";
+          main.style.zIndex = "";
           requestLeave(go);
           return;
         }

@@ -145,7 +145,9 @@ export function OnboardingChat({
   const surfaceRef = useRef<HTMLDivElement>(null);
   const titleRef = useRef<HTMLHeadingElement>(null);
   const threadRef = useRef<HTMLDivElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
   const panelContentRef = useRef<HTMLDivElement>(null);
+  const threadContentRef = useRef<HTMLDivElement>(null);
   const timersRef = useRef<number[]>([]);
 
   const [answers, setAnswers] = useState<OnboardingAnswers>({});
@@ -163,7 +165,6 @@ export function OnboardingChat({
   const [exiting, setExiting] = useState<"done" | "snooze" | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
-  const [panelHeight, setPanelHeight] = useState<number | null>(null);
   /** Bubbles appended in this session animate in; restored ones do not. */
   const [freshKeys, setFreshKeys] = useState<ReadonlySet<string>>(() => new Set());
   /** Back pressed while a question was showing: it fades out with the answer. */
@@ -224,15 +225,26 @@ export function OnboardingChat({
     thread.scrollTo({ top: thread.scrollHeight, behavior: readReducedMotion() ? "auto" : "smooth" });
   }, [isOpen, done, stage, removing]);
 
-  // The panel animates to the height of its new content (no jump between a
-  // two-choice and a four-choice question).
+  // A two-choice and a four-choice question need different panel heights.
+  // The height itself changes at once (no layout-property animation); the
+  // panel and the thread above it slide from where they were to where they
+  // are with a transform (FLIP), so nothing jumps. The ResizeObserver
+  // callback runs after layout and before paint, so no frame shows the jump.
   useLayoutEffect(() => {
     const content = panelContentRef.current;
-    if (!content || !isOpen) return;
-    const measure = () => setPanelHeight(content.offsetHeight);
-    measure();
-    if (typeof ResizeObserver === "undefined") return;
-    const observer = new ResizeObserver(measure);
+    if (!content || !isOpen || typeof ResizeObserver === "undefined") return;
+    let last = content.offsetHeight;
+    const observer = new ResizeObserver(() => {
+      const next = content.offsetHeight;
+      const delta = next - last;
+      last = next;
+      if (!delta || readReducedMotion()) return;
+      const easing = getComputedStyle(document.documentElement).getPropertyValue("--ease-out").trim() || "ease-out";
+      const frames = [{ transform: `translateY(${delta}px)` }, { transform: "translateY(0)" }];
+      for (const element of [panelRef.current, threadContentRef.current]) {
+        if (element && typeof element.animate === "function") element.animate(frames, { duration: 220, easing });
+      }
+    });
     observer.observe(content);
     return () => observer.disconnect();
   }, [isOpen]);
@@ -544,14 +556,13 @@ export function OnboardingChat({
       </header>
 
       <div ref={threadRef} className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pb-6 pt-4">
-        <div className="mx-auto flex min-h-full w-full max-w-lg flex-col justify-end gap-3">{thread}</div>
+        <div ref={threadContentRef} className="mx-auto flex min-h-full w-full max-w-lg flex-col justify-end gap-3">
+          {thread}
+        </div>
       </div>
 
       {/* Quick replies live where a composer would be. */}
-      <div
-        className={`flex-none border-t border-line bg-canvas ${styles.panel}`}
-        style={panelHeight !== null ? { height: panelHeight } : undefined}
-      >
+      <div ref={panelRef} className={`flex-none border-t border-line bg-canvas ${styles.panel}`}>
         <div
           ref={panelContentRef}
           className="mx-auto w-full max-w-lg px-4 pt-3 pb-[max(12px,var(--safe-bottom))]"
@@ -560,6 +571,9 @@ export function OnboardingChat({
             key={`${panel.current}-${panel.generation}`}
             className={styles.panelContent}
             data-hidden={panelHidden || removing !== null ? "true" : undefined}
+            // Hidden between questions: out of the tab order and out of
+            // VoiceOver's reach, not only invisible.
+            inert={panelHidden || removing !== null}
           >
             {panelStep && !panelStep.multiSelect && (
               <div role="radiogroup" aria-label={panelStep.question} className="flex flex-col gap-2">

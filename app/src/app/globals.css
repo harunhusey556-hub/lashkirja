@@ -892,11 +892,10 @@ html[data-keyboard="open"] .toast-viewport {
   background: var(--color-accent-soft);
 }
 
-/* <main> makes room while a lasting banner is up, in step with its slide. */
-.app-frame[data-banner] > .app-main {
-  transition: padding-top 220ms var(--ease-out);
-}
-
+/* <main> makes room while a lasting banner is up. The padding snaps (no
+   layout-property transition); AppShell slides the page by the same distance
+   with a transform, in step with the banner, and skips it under reduced
+   motion. */
 .app-frame[data-banner="shown"] > .app-main {
   padding-top: calc(var(--banner-h, 0px) + 1.25rem);
 }
@@ -928,7 +927,18 @@ body.signing-out {
  * opacity change; press feedback becomes an opacity dip; haptics stay.
  */
 @media (prefers-reduced-motion: reduce) {
-  .animate-sheet,
+  /* Sheets and the assistant drawer fade in and out, but carry no
+     transform: none here. Their drag sets an inline transform, and iOS keeps
+     direct manipulation under Reduce Motion, so the surface must still track
+     the finger (the entrance and exit keyframes are replaced by the fades). */
+  .animate-sheet {
+    animation: fadeIn 120ms linear !important;
+  }
+
+  .animate-sheet-out {
+    animation: fadeOut 120ms linear forwards !important;
+  }
+
   .animate-backdrop,
   .animate-fade-in,
   .animate-scale-in,
@@ -943,7 +953,6 @@ body.signing-out {
     transform: none !important;
   }
 
-  .animate-sheet-out,
   .animate-backdrop-out,
   .animate-scale-out {
     animation: fadeOut 120ms linear forwards !important;
