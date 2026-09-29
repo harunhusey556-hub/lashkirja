@@ -83,9 +83,7 @@ export default function StatementDetailPage() {
         ) : loading ? (
           <StatementDetailSkeleton />
         ) : !statement ? (
-          <div className="text-center py-8 text-body text-ink-2">
-            Tiliotetta ei löytynyt
-          </div>
+          <ErrorState title="Tiliotetta ei löytynyt" message="Tiliote on voitu poistaa." />
         ) : (
           <StatementDetailView
             statement={statement}

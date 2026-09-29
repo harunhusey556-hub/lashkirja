@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { LoadingState } from "@/components/AsyncState";
-import { ConnectionNotice, StaleBanner } from "@/components/ScreenState";
+import { ConnectionNotice, EmptySection, StaleBanner } from "@/components/ScreenState";
 import ConfirmModal from "@/components/ConfirmModal";
 import BottomSheet from "@/components/BottomSheet";
 import {
@@ -328,7 +328,7 @@ export default function BankAccountsPage() {
 
         {/* Connect first (OWN-06, BOOKS-01): the bank connection leads the page and
             never waits for the profile (BOOKS-07). Manual entry is the quiet link below. */}
-        <BankConnectCard onAddManual={openManualForm} />
+        <BankConnectCard onAddManual={openManualForm} quietError={status === "error"} />
 
         {loadFailure != null && status === "ready" && (
           <StaleBanner fetchedAt={pageCacheFetchedAt("bank-overview")} onRetry={() => void load()} />
@@ -372,6 +372,13 @@ export default function BankAccountsPage() {
               <MessageBanner message={message} isError={messageIsError} />
             )}
 
+            {overview.accounts.length === 0 ? (
+              <EmptySection title="Kirjanpidon tilit">
+                {archivedCount > 0
+                  ? `Ei käytössä olevia tilejä. Arkistoituja tilejä on ${archivedCount}.`
+                  : "Ei vielä tilejä. Yhdistä pankki yllä tai tuo tiliote tiedostona."}
+              </EmptySection>
+            ) : (
             <Section title="Kirjanpidon tilit">
               {overview.accounts.length > 0 ? (
                 overview.accounts.map((account) => (
@@ -387,14 +394,9 @@ export default function BankAccountsPage() {
                     />
                   </div>
                 ))
-              ) : (
-                <p className="px-4 py-4 text-caption leading-relaxed text-ink-2">
-                  {archivedCount > 0
-                    ? `Ei käytössä olevia tilejä. Arkistoituja tilejä on ${archivedCount}.`
-                    : "Ei vielä tilejä. Yhdistä pankki yllä tai tuo tiliote tiedostona."}
-                </p>
-              )}
+              ) : null}
             </Section>
+            )}
 
             <div className="flex flex-wrap items-center justify-between gap-x-4 px-1">
               <button
@@ -465,14 +467,14 @@ export default function BankAccountsPage() {
         {detailAccount && (
           <div className="flex min-h-0 flex-1 flex-col overflow-y-auto px-5 py-4 space-y-4 sheet-safe-bottom">
             <p className="text-caption text-ink-2">{accountSecondary(detailAccount)}</p>
-
-            <MessageBanner message={message} isError={messageIsError} />
             {detailAccount.iban ? (
               // AX-07, R25: the row shows the IBAN masked; the full number can be copied here.
               <div className="flex justify-start">
                 <CopyButton text={formatIban(detailAccount.iban)} what="IBAN" />
               </div>
             ) : null}
+
+            <MessageBanner message={message} isError={messageIsError} />
 
             <div className="flex flex-wrap gap-2">
               <Button
@@ -505,7 +507,7 @@ export default function BankAccountsPage() {
             </div>
 
             {rollforward === null ? (
-              <LoadingState label="Haetaan saldoja…" compact />
+              <LoadingState label="Ladataan saldoja" rows={2} />
             ) : (
               <>
                 {(rollforward.excluded.undatedTxCount > 0 ||

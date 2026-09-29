@@ -3,7 +3,7 @@
 import { PullToRefresh } from "@/components/ds/PullToRefresh";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { apiFetch, errorMessage, isUnauthorized, readJson, redirectToLogin } from "@/components/clientFetch";
-import { ConnectionNotice, StaleBanner } from "@/components/ScreenState";
+import { ConnectionNotice, EmptyNote, EmptySection, StaleBanner } from "@/components/ScreenState";
 import { SectionSkeleton } from "@/components/books/Skeletons";
 import { ActionPill, FilterChips, ListRow, PageTitle, Section, SkeletonGroup, StatusTag, useSkeletonFade } from "@/components/ds";
 import { jobKindLabel, jobStatusLabel, workKindLabel } from "@/lib/job-labels";
@@ -201,10 +201,11 @@ export default function TyotPage() {
             <StaleBanner fetchedAt={pageCacheFetchedAt(CACHE_KEY)} onRetry={() => void load()} />
           )}
 
+          {jobs.length === 0 ? (
+            <EmptySection title="Työt">Ei käynnissä olevia töitä.</EmptySection>
+          ) : (
           <Section title="Työt">
-            {jobs.length === 0 ? (
-              <p className="px-4 py-4 text-caption text-ink-2">Ei käynnissä olevia töitä.</p>
-            ) : (
+            {(
               jobs.map((job) => {
                 const status = jobStatusLabel(job.status);
                 const progress =
@@ -220,13 +221,17 @@ export default function TyotPage() {
               })
             )}
           </Section>
+          )}
 
+          {items.length === 0 ? (
+            <EmptySection title="Poikkeusjono">Ei avoimia poikkeuksia.</EmptySection>
+          ) : (
           <div className="space-y-3">
             <h2 className="px-1 text-caption text-ink-2">Poikkeusjono</h2>
             <FilterChips label="Suodata poikkeuksia" items={workChips} value={filter} onChange={setFilter} />
 
             {visible.length === 0 ? (
-              <p className="px-1 text-caption text-ink-2">Ei avoimia poikkeuksia.</p>
+              <EmptyNote>Ei avoimia poikkeuksia.</EmptyNote>
             ) : (
               <Section>
                 {visible.map((item) => (
@@ -252,6 +257,7 @@ export default function TyotPage() {
               </Section>
             )}
           </div>
+          )}
         </div>
       )}
     </div>

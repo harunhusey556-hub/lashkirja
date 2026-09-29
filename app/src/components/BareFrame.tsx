@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef } from "react";
+import { Skeleton, SkeletonGroup } from "@/components/ds/Skeleton";
 
 /**
  * The scroll frame for the pages outside the app shell (login, password
@@ -55,3 +56,17 @@ export const BARE_CARD_CLASS = "w-full space-y-5 rounded-card border border-line
 
 /** A text link on a bare page: 44 px tall and pressable (QUALITY-BAR T1). */
 export const BARE_LINK_CLASS = "active-press flex min-h-11 items-center justify-center text-sm text-accent";
+
+/** The card of a bare page at its final size while its search params resolve (no bare "Ladataan…" line). */
+export function BareCardSkeleton() {
+  return (
+    <SkeletonGroup label="Ladataan" className={BARE_CARD_CLASS}>
+      <Skeleton className="h-8 w-2/3" />
+      <div className="space-y-2">
+        <Skeleton tone="soft" className="h-3.5 w-full" />
+        <Skeleton tone="soft" className="h-3.5 w-4/5" />
+      </div>
+      <Skeleton radius="card" className="h-12 w-full" />
+    </SkeletonGroup>
+  );
+}

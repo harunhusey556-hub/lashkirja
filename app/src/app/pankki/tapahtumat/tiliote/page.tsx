@@ -1,10 +1,10 @@
 import { Suspense } from "react";
-import { LoadingState } from "@/components/AsyncState";
+import { StatementDetailSkeleton } from "@/components/books/Skeletons";
 import StatementDetailClient from "./StatementDetailClient";
 
 export default function StatementDetailPage() {
   return (
-    <Suspense fallback={<LoadingState label="Ladataan tiliotetta..." compact />}>
+    <Suspense fallback={<StatementDetailSkeleton />}>
       <StatementDetailClient />
     </Suspense>
   );

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ApiError, ApiGatewayError, ApiTimeoutError } from "@/components/clientFetch";
+import { ApiError, ApiGatewayError, ApiTimeoutError, ERROR_COPY } from "@/components/clientFetch";
 import {
   clearPageCache,
   invalidateForMutation,
@@ -7,8 +7,12 @@ import {
   readPageCache,
   writePageCache,
 } from "@/lib/page-cache";
+import { claimConnectionNotice, connectionNoticeClaims } from "@/lib/connection-notice";
 import {
+  ERROR_TITLE,
   RECEIPT_PHASE,
+  STALE_COPY,
+  STALE_SUFFIX,
   armIdleTimeout,
   bumpNavEpoch,
   classifyConnection,
@@ -36,6 +40,32 @@ describe("classifyConnection", () => {
     expect(classifyConnection(new ApiGatewayError(503), true)).toBe("unreachable");
     expect(classifyConnection(new ApiError("Ei kirjautunut", 401), true)).toBe("expired");
     expect(classifyConnection(new ApiError("Virheellinen", 400), true)).toBe("generic");
+  });
+
+  it("recognises a failure a hook already turned into its fixed copy", () => {
+    expect(classifyConnection(new Error(ERROR_COPY.offline), true)).toBe("offline");
+    expect(classifyConnection(new Error(ERROR_COPY.unreachable), true)).toBe("unreachable");
+    expect(classifyConnection(new Error(ERROR_COPY.expired), true)).toBe("expired");
+    expect(classifyConnection(new Error("Kuittia ei löytynyt"), true)).toBe("generic");
+  });
+});
+
+describe("state wording (VS-31, VS-32)", () => {
+  it("has one error title and one stale sentence", () => {
+    expect(ERROR_TITLE).toBe("Jotain meni pieleen");
+    expect(STALE_COPY.offline).toBe("Ei verkkoyhteyttä. Näytetään viimeksi haetut tiedot.");
+    for (const copy of Object.values(STALE_COPY)) expect(copy.endsWith(STALE_SUFFIX)).toBe(true);
+  });
+
+  it("counts page cards that own the connection message, and releases them", () => {
+    const release = claimConnectionNotice();
+    const releaseAgain = claimConnectionNotice();
+    expect(connectionNoticeClaims()).toBe(2);
+    release();
+    release(); // a double release must not release the other card's claim
+    expect(connectionNoticeClaims()).toBe(1);
+    releaseAgain();
+    expect(connectionNoticeClaims()).toBe(0);
   });
 });
 

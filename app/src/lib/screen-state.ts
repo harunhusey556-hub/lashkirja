@@ -1,4 +1,4 @@
-import { ApiError, ApiGatewayError, ApiTimeoutError, isNetworkFailure } from "@/components/clientFetch";
+import { ApiError, ApiGatewayError, ApiTimeoutError, ERROR_COPY, isNetworkFailure } from "@/components/clientFetch";
 
 export type ConnectionKind = "offline" | "unreachable" | "expired" | "generic";
 
@@ -29,6 +29,13 @@ export function classifyConnection(error: unknown, online = true): ConnectionKin
   if (error instanceof ApiError && error.status === 401) return "expired";
   if (error instanceof ApiTimeoutError || error instanceof ApiGatewayError) return "unreachable";
   if (looksLikeNetworkFailure(error)) return online ? "unreachable" : "offline";
+  // A hook that already turned the failure into its fixed Finnish copy (useProfile keeps only the
+  // text) still gets the right card, and the right banner behaviour, from that copy.
+  if (error instanceof Error) {
+    if (error.message === ERROR_COPY.offline) return "offline";
+    if (error.message === ERROR_COPY.unreachable) return "unreachable";
+    if (error.message === ERROR_COPY.expired) return "expired";
+  }
   return "generic";
 }
 

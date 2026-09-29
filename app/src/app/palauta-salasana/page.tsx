@@ -4,8 +4,9 @@ import { Suspense, useState, useSyncExternalStore } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { CircleCheck, Link2Off } from "lucide-react";
-import { BARE_CARD_CLASS, BARE_LINK_CLASS, BareFrame } from "@/components/BareFrame";
+import { BARE_CARD_CLASS, BARE_LINK_CLASS, BareCardSkeleton, BareFrame } from "@/components/BareFrame";
 import { apiFetch, errorMessage, readJson } from "@/components/clientFetch";
+import { NoticeCard } from "@/components/ScreenState";
 import { Icon } from "@/components/ds/Icon";
 import { PasswordField } from "@/components/ds/PasswordField";
 import { buttonClass } from "@/components/control-styles";
@@ -29,21 +30,19 @@ function useMailBrowserOnIos(): boolean {
 
 function TokenMissing() {
   return (
-    <div className={BARE_CARD_CLASS}>
-      <span className="flex h-12 w-12 items-center justify-center rounded-full bg-warning/10 text-warning">
-        <Icon icon={Link2Off} size="hero" />
-      </span>
-      <h1 className="text-title-2 font-bold leading-tight tracking-[-0.02em] text-ink">Linkki ei kelpaa</h1>
-      <p className="text-body leading-relaxed text-ink-2" role="alert">
-        Linkki puuttuu tai on vanhentunut. Pyydä uusi palautuslinkki.
-      </p>
-      <Link href="/unohtunut-salasana" className={buttonClass("primary", "w-full")}>
+    <NoticeCard
+      icon={Link2Off}
+      tone="warning"
+      title="Linkki ei kelpaa"
+      body="Linkki puuttuu tai on vanhentunut. Pyydä uusi palautuslinkki."
+    >
+      <Link href="/unohtunut-salasana" className={buttonClass("primary", "mt-5 w-full")}>
         Pyydä uusi linkki
       </Link>
-      <Link href="/login" className={BARE_LINK_CLASS}>
+      <Link href="/login" className={`mt-2 ${BARE_LINK_CLASS}`}>
         Kirjaudu sisään
       </Link>
-    </div>
+    </NoticeCard>
   );
 }
 
@@ -163,7 +162,7 @@ function ResetGate() {
 export default function ResetPasswordPage() {
   return (
     <BareFrame>
-      <Suspense fallback={<p className="text-center text-sm text-ink-2">Ladataan…</p>}>
+      <Suspense fallback={<BareCardSkeleton />}>
         <ResetGate />
       </Suspense>
     </BareFrame>

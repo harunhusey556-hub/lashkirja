@@ -1,11 +1,11 @@
 "use client";
 
 import { useEffect, useId, useMemo, useState } from "react";
-import { ChevronRight, Search } from "lucide-react";
+import { ChevronRight, Landmark, Search } from "lucide-react";
 import BottomSheet from "@/components/BottomSheet";
 import { Icon } from "@/components/ds";
 import { Skeleton, SkeletonGroup } from "@/components/ds/Skeleton";
-import { ConnectionNotice } from "@/components/ScreenState";
+import { ConnectionNotice, EmptyState } from "@/components/ScreenState";
 import { apiFetch, errorMessage, isUnauthorized, readJson, redirectToLogin } from "@/components/clientFetch";
 import { useProfile } from "@/app/asetukset/useProfile";
 import { leaveForBank } from "@/lib/open-bank-auth";
@@ -203,9 +203,18 @@ export default function BankPickerSheet({
             ))}
           </SkeletonGroup>
         ) : visible.length === 0 ? (
-          <p className="px-1 py-6 text-center text-body text-ink-2">
-            {query.trim() ? "Hakuasi vastaavaa pankkia ei löytynyt." : "Pankkeja ei löytynyt."}
-          </p>
+          query.trim() ? (
+            <EmptyState
+              kind="filtered"
+              icon={Landmark}
+              title="Ei osumia"
+              body="Hakuasi vastaavaa pankkia ei löytynyt."
+              onClear={() => setQuery("")}
+              clearLabel="Tyhjennä haku"
+            />
+          ) : (
+            <EmptyState kind="records" icon={Landmark} title="Ei pankkeja vielä" body="Pankkilistaa ei saatu. Yritä myöhemmin uudelleen." />
+          )
         ) : (
           <ul className="overflow-hidden rounded-card border border-line bg-surface divide-y divide-line">
             {visible.map((bank) => {

@@ -76,7 +76,7 @@ export default function TaydennysPage() {
           compact
         />
       ) : loading ? (
-        <SkeletonGroup label="Haetaan täsmäytystä" className="space-y-6">
+        <SkeletonGroup label="Ladataan täsmäytystä" className="space-y-6">
           <SectionSkeleton rows={3} />
           <SectionSkeleton rows={3} />
         </SkeletonGroup>
@@ -93,10 +93,10 @@ export default function TaydennysPage() {
         />
       ) : (
         <div className={`space-y-6 ${fade}`}>
-          <Section title="Pankkitapahtumat" count={rows.length}>
+          <Section title="Pankkitapahtumat">
             {rows.length === 0 ? (
               <div className="flex items-center justify-between gap-3 px-4 py-3">
-                <p className="text-caption leading-relaxed text-ink-2">
+                <p className="text-caption text-ink-2">
                   Ei avoimia pankkitapahtumia. Ne tulevat tähän tiliotteelta tai yhdistetystä pankista.
                 </p>
                 <Link href="/pankki/tapahtumat" className="active-press inline-flex min-h-11 shrink-0 items-center text-caption font-medium text-accent">
@@ -122,7 +122,7 @@ export default function TaydennysPage() {
             )}
           </Section>
 
-          <Section title="Kuitit ilman linkkiä" count={receipts.length}>
+          <Section title="Kuitit ilman linkkiä">
             {receipts.length === 0 ? (
               <p className="px-4 py-3 text-caption text-ink-2">Ei linkittämättömiä kuitteja.</p>
             ) : (

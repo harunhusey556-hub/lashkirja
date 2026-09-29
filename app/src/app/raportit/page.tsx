@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import { ConnectionNotice, StaleBanner } from "@/components/ScreenState";
+import { ConnectionNotice, EmptySection, StaleBanner } from "@/components/ScreenState";
 import {
   apiFetch,
   errorMessage,
@@ -109,7 +109,7 @@ function YearSwitcher({ year, currentYear, onChange }: { year: number; currentYe
 /** The report at its final layout while the year is computed (L1, SALES-19). */
 function ReportSkeleton() {
   return (
-    <SkeletonGroup label="Lasketaan raporttia" className="space-y-6">
+    <SkeletonGroup label="Ladataan raporttia" className="space-y-6">
       <div>
         <Skeleton tone="soft" className="mx-1 mb-3 h-3 w-12" />
         <SkeletonCard className="space-y-4">
@@ -322,14 +322,7 @@ export default function ReportsPage() {
             </p>
 
             {report.months.length === 0 ? (
-              <section className="mt-6 first:mt-0">
-                <div className="mb-2 px-1 text-caption text-ink-2">
-                  <h2 className="font-normal">Kuukaudet</h2>
-                </div>
-                <p className="rounded-card border border-line bg-surface px-4 py-4 text-body text-ink-2">
-                  Ei kirjauksia tälle vuodelle.
-                </p>
-              </section>
+              <EmptySection title="Kuukaudet">Ei kirjauksia tälle vuodelle.</EmptySection>
             ) : (
               <Section title="Kuukaudet">
                 {report.months.map((month) => (
@@ -345,10 +338,11 @@ export default function ReportsPage() {
               </Section>
             )}
 
+            {report.total.expenseByCategory.length === 0 ? (
+              <EmptySection title="Menot kategorioittain">Ei menoja tällä jaksolla.</EmptySection>
+            ) : (
             <Section title="Menot kategorioittain">
-              {report.total.expenseByCategory.length === 0 ? (
-                <p className="px-4 py-4 text-body text-ink-2">Ei menoja tällä jaksolla.</p>
-              ) : (
+              {(
                 report.total.expenseByCategory.map((row) => (
                   <ListRow
                     key={row.category}
@@ -361,6 +355,7 @@ export default function ReportsPage() {
                 ))
               )}
             </Section>
+            )}
 
             {report.total.incomeByCategory.length > 0 && (
               <Section title="Tulot kategorioittain">
@@ -428,7 +423,7 @@ export default function ReportsPage() {
             </Card>
 
             {/* The CSVs follow the year on screen (SALES-21); customers are not per period. */}
-            <Section title={`Vie CSV-tiedostona, ${year}`}>
+            <Section title="CSV-tiedostot">
               {EXPORTS.map((entry) => (
                 <DownloadRow
                   key={entry.type}

@@ -31,6 +31,11 @@ export function claimConnectionNotice(): () => void {
   };
 }
 
+/** How many page cards own the message right now (for tests). */
+export function connectionNoticeClaims(): number {
+  return owners;
+}
+
 function subscribe(listener: () => void): () => void {
   listeners.add(listener);
   return () => listeners.delete(listener);

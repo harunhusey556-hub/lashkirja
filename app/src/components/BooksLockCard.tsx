@@ -128,6 +128,9 @@ export default function BooksLockCard() {
 
   return (
     <div className="space-y-6">
+      {status === "error" ? (
+        <ConnectionNotice error={loadError} fallback="Lukituksen haku epäonnistui" onRetry={lock.reload} />
+      ) : (
       <Card className="space-y-3">
         {status === "loading" ? (
           <SkeletonGroup label="Ladataan lukitustietoja" className="space-y-3">
@@ -135,13 +138,6 @@ export default function BooksLockCard() {
             <Skeleton tone="soft" className="h-3 w-4/5" />
             <Skeleton radius="card" className="h-12 w-full" />
           </SkeletonGroup>
-        ) : status === "error" ? (
-          <ConnectionNotice
-            error={loadError}
-            fallback="Lukituksen haku epäonnistui"
-            onRetry={lock.reload}
-            compact
-          />
         ) : (
           <>
             <div>
@@ -195,6 +191,7 @@ export default function BooksLockCard() {
           </>
         )}
       </Card>
+      )}
 
       {precheck && precheckCount(precheck) > 0 && (
         // role="status": a precheck result appears after a plain button
@@ -204,13 +201,13 @@ export default function BooksLockCard() {
           <p className="px-1 text-body font-medium text-ink">
             Avoinna ennen lukitusta ({formatMonth(precheck.month)})
           </p>
-          <Section title="Puuttuvat tositteet" count={precheck.missingDocuments.length}>
+          <Section title="Puuttuvat tositteet">
             <PrecheckRows items={precheck.missingDocuments} empty="Ei puuttuvia tositteita." />
           </Section>
-          <Section title="Täsmäyttämättömät tapahtumat" count={precheck.unmatchedTransactions.length}>
+          <Section title="Täsmäyttämättömät tapahtumat">
             <PrecheckRows items={precheck.unmatchedTransactions} empty="Ei avoimia täsmäytyksiä." />
           </Section>
-          <Section title="Luonnoslaskut" count={precheck.draftInvoices.length}>
+          <Section title="Luonnoslaskut">
             <PrecheckRows items={precheck.draftInvoices} empty="Ei luonnoslaskuja." />
           </Section>
         </div>

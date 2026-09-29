@@ -151,9 +151,8 @@ export function AppLock({ children }: { children: React.ReactNode }) {
   if (view === "open") return <>{children}</>;
   if (!ready) {
     return (
-      <div className="app-frame bg-canvas">
-        <p className="mx-auto mt-24 max-w-sm px-4 text-center text-body text-ink-2">Tarkistetaan lukitusta…</p>
-      </div>
+      // No "Tarkistetaan…" line: the check takes a frame or two, so the canvas stands in silently.
+      <div className="app-frame bg-canvas" aria-busy="true" />
     );
   }
 

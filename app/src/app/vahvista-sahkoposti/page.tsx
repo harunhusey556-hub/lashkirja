@@ -4,9 +4,10 @@ import { Suspense, useState, useSyncExternalStore } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { CircleCheck, Link2Off } from "lucide-react";
-import { BARE_CARD_CLASS, BARE_LINK_CLASS, BareFrame } from "@/components/BareFrame";
+import { BARE_CARD_CLASS, BARE_LINK_CLASS, BareCardSkeleton, BareFrame } from "@/components/BareFrame";
 import { apiFetch, errorMessage, readJson } from "@/components/clientFetch";
 import { buttonClass } from "@/components/control-styles";
+import { NoticeCard } from "@/components/ScreenState";
 import { Icon } from "@/components/ds/Icon";
 import { Button } from "@/components/ui";
 import { IS_MOBILE_BUILD } from "@/lib/build-target";
@@ -97,18 +98,16 @@ function ConfirmForm({ token }: { token: string }) {
 
 function TokenMissing() {
   return (
-    <div className={BARE_CARD_CLASS}>
-      <span className="flex h-12 w-12 items-center justify-center rounded-full bg-warning/10 text-warning">
-        <Icon icon={Link2Off} size="hero" />
-      </span>
-      <h1 className="text-title-2 font-bold leading-tight tracking-[-0.02em] text-ink">Linkki ei kelpaa</h1>
-      <p className="text-body leading-relaxed text-ink-2" role="alert">
-        Vahvistuslinkki puuttuu tai on vanhentunut. Pyydä uusi vahvistus profiilistasi.
-      </p>
-      <Link href="/asetukset/profiili" className={buttonClass("primary", "w-full")}>
+    <NoticeCard
+      icon={Link2Off}
+      tone="warning"
+      title="Linkki ei kelpaa"
+      body="Vahvistuslinkki puuttuu tai on vanhentunut. Pyydä uusi vahvistus profiilistasi."
+    >
+      <Link href="/asetukset/profiili" className={buttonClass("primary", "mt-5 w-full")}>
         Avaa profiili
       </Link>
-    </div>
+    </NoticeCard>
   );
 }
 
@@ -120,7 +119,7 @@ function ConfirmGate() {
 export default function ConfirmEmailPage() {
   return (
     <BareFrame>
-      <Suspense fallback={<p className="text-center text-sm text-ink-2">Ladataan…</p>}>
+      <Suspense fallback={<BareCardSkeleton />}>
         <ConfirmGate />
       </Suspense>
     </BareFrame>

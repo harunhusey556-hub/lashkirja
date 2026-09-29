@@ -1,6 +1,7 @@
 "use client";
 
 import { StatusTag } from "@/components/ds";
+import { Skeleton, SkeletonGroup } from "@/components/ds/Skeleton";
 import { formatEur } from "@/lib/format";
 
 export interface BankTxMatch {
@@ -143,7 +144,12 @@ export default function ReceiptMatchPanel({
 
   const candidates = match.matchCandidates ?? [];
   if (match.candidatesDeferred && candidates.length === 0) {
-    return <p className={`text-caption text-ink-2 ${pad}`}>Ladataan ehdotuksia…</p>;
+    return (
+      <SkeletonGroup label="Ladataan ehdotuksia" className={`space-y-2 ${pad}`}>
+        <Skeleton className="h-3.5 w-3/5" />
+        <Skeleton tone="soft" className="h-3 w-2/5" />
+      </SkeletonGroup>
+    );
   }
   if (candidates.length === 0) {
     return (

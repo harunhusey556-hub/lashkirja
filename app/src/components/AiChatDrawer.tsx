@@ -7,7 +7,8 @@ import { apiFetch, authorizedFetch, errorMessage, readJson } from "@/components/
 import { STREAM_IDLE_MS, armIdleTimeout, subscribeOverlayClose } from "@/lib/screen-state";
 import { ChatMarkdown } from "@/components/ChatMarkdown";
 import { Button, chipClass, controlClass } from "@/components/ui";
-import { ConnectionNotice } from "@/components/ScreenState";
+import { SkeletonList } from "@/components/AsyncState";
+import { ConnectionNotice, EmptyNote } from "@/components/ScreenState";
 import { Skeleton } from "@/components/ds/Skeleton";
 import { useFocusTrap } from "@/components/useFocusTrap";
 import { useSheetDrag } from "@/components/useSheetDrag";
@@ -838,12 +839,8 @@ export function AiChatDrawer({
               </button>
             </div>
           )}
-          {conversations.length === 0 && !loadingConversations && (
-            <p className="px-1 text-caption text-ink-2">Ei keskusteluja</p>
-          )}
-          {loadingConversations && conversations.length === 0 && (
-            <p className="px-1 text-caption text-ink-2">Ladataan…</p>
-          )}
+          {conversations.length === 0 && !loadingConversations && <EmptyNote>Ei keskusteluja vielä.</EmptyNote>}
+          {loadingConversations && conversations.length === 0 && <SkeletonList rows={3} label="Ladataan keskusteluja" />}
           {conversations.length > 0 && (
             <div className="overflow-hidden rounded-card border border-line bg-surface divide-y divide-line">
               {conversations.map((conversation) => (

@@ -63,7 +63,7 @@ export default function QueuedReceiptsCard({ offlineNotice = false }: { offlineN
       )}
 
       {waiting.length > 0 && (
-        <Section title="Jonossa" count={waiting.length}>
+        <Section title="Jonossa">
           {waiting.map((row) => (
             <div key={row.id} className="px-4 py-3">
               <p className="min-w-0 truncate text-body font-medium text-ink">{row.fileName}</p>

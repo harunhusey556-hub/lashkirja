@@ -3,8 +3,7 @@
 import { PullToRefresh } from "@/components/ds/PullToRefresh";
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
-import { ErrorState } from "@/components/AsyncState";
-import { ConnectionNotice, StaleBanner } from "@/components/ScreenState";
+import { ConnectionNotice, PartialFailureNotice, StaleBanner } from "@/components/ScreenState";
 import {
   apiFetch,
   errorMessage,
@@ -737,11 +736,7 @@ export default function DashboardClient() {
                 </Link>
               </p>
             ) : null}
-            {data.sectionErrors?.vat ? (
-              <div className="mt-4 border-t border-line pt-3">
-                <ErrorState compact message={data.sectionErrors.vat} onRetry={retry} />
-              </div>
-            ) : (
+            {data.sectionErrors?.vat ? null : (
               <Link
                 href={alvDrillHref(month)}
                 aria-label="Avaa ALV-raportti"
@@ -762,17 +757,8 @@ export default function DashboardClient() {
             )}
           </div>
 
-          {data.sectionErrors?.pending || data.sectionErrors?.matching ? (
-            <ErrorState
-              compact
-              message={data.sectionErrors.pending || data.sectionErrors.matching}
-              onRetry={retry}
-            />
-          ) : null}
-
-          {data.sectionErrors?.items ? (
-            <ErrorState compact message={data.sectionErrors.items} onRetry={retry} />
-          ) : null}
+          {/* One card for every part that did not load, one retry (VS-31); the parts themselves are left out. */}
+          <PartialFailureNotice messages={Object.values(data.sectionErrors ?? {})} onRetry={retry} />
 
           {hasTasks ? (
             <Section title="Tarvitaan sinulta">
@@ -832,16 +818,9 @@ export default function DashboardClient() {
                 <SummaryCard label="Menot" value={formatEur(data.expenses)} />
               </Link>
             </div>
-            {data.sectionErrors?.receipts ? (
-              <div className="mt-3">
-                <ErrorState compact message={data.sectionErrors.receipts} onRetry={retry} />
-              </div>
-            ) : null}
           </section>
 
-          {data.sectionErrors?.position ? (
-            <ErrorState compact message={data.sectionErrors.position} onRetry={retry} />
-          ) : (
+          {data.sectionErrors?.position ? null : (
             <Section title="Rahatilanne">
               <ListRow
                 href="/kirjanpito/pankkitilit"
@@ -916,9 +895,7 @@ export default function DashboardClient() {
             </Section>
           ) : null}
 
-          {data.sectionErrors?.threshold ? (
-            <ErrorState compact message={data.sectionErrors.threshold} onRetry={retry} />
-          ) : !data.vat.registered && data.vat.ytdRevenue >= data.vat.threshold * 0.75 ? (
+          {data.sectionErrors?.threshold ? null : !data.vat.registered && data.vat.ytdRevenue >= data.vat.threshold * 0.75 ? (
             <div
               className={`rounded-card border p-4 text-sm ${
                 data.vat.ytdRevenue >= data.vat.threshold

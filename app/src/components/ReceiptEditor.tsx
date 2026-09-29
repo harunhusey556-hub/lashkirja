@@ -774,7 +774,7 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
   if (notFound) {
     return (
       <div className="space-y-4">
-        <ErrorState message="Kuittia ei löytynyt" />
+        <ErrorState title="Kuittia ei löytynyt" message="Kuitti on voitu poistaa." />
         <Link href="/kuitit" className={buttonClass("secondary", "w-full")}>
           Palaa kuitteihin
         </Link>
@@ -852,14 +852,10 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
       )}
 
       {showHandoff && (
-        <SkeletonGroup label="Luetaan kuittia" className="space-y-6">
+        <SkeletonGroup label="Käsitellään kuittia" className="space-y-6">
           <div className="flex items-center gap-3 rounded-card border border-line bg-surface p-4" data-testid="camera-handoff">
-            <span
-              className="h-5 w-5 shrink-0 rounded-full border-2 border-accent border-t-transparent animate-spin motion-reduce:animate-none"
-              aria-hidden
-            />
             <div className="min-w-0">
-              <p className="text-body font-medium text-ink">Luetaan kuittia</p>
+              <p className="text-body font-medium text-ink">Käsitellään kuittia</p>
               <p className="mt-0.5 text-caption text-ink-2">{handoffProgress}</p>
             </div>
           </div>

@@ -18,7 +18,7 @@ function ReceiptDetail() {
   const id = useSearchParams().get("id");
 
   if (!id) {
-    return <ErrorState message="Kuittia ei löytynyt" />;
+    return <ErrorState title="Kuittia ei löytynyt" message="Kuitti on voitu poistaa." />;
   }
 
   return <ReceiptEditor receiptId={id} />;

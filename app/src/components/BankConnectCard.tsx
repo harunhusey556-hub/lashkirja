@@ -7,7 +7,7 @@ import ConfirmModal from "@/components/ConfirmModal";
 import { apiFetch, errorMessage, isUnauthorized, readJson, redirectToLogin } from "@/components/clientFetch";
 import { ConnectionNotice } from "@/components/ScreenState";
 import { Button } from "@/components/ui";
-import { Icon, IconTile, SlotSkeleton } from "@/components/ds";
+import { Icon, IconTile, Section } from "@/components/ds";
 import { Skeleton } from "@/components/ds/Skeleton";
 import BankPickerSheet, { BankLogo } from "@/components/bank/BankPickerSheet";
 import BankSetupSheet from "@/components/bank/BankSetupSheet";
@@ -143,6 +143,33 @@ export function BankConnectRow() {
 }
 
 /**
+ * The "Pankki" section of the Kirjanpito hub: the connect row and the rows that follow it
+ * (`children`, ListRows). When the connection lookup fails, the shared failure card with its
+ * one retry stands in the place of the connect row, above the remaining rows, instead of a
+ * "Tilaa ei saatu haettua" subtitle that cannot be retried (VS-31).
+ */
+export function BankConnectSection({ children }: { children: React.ReactNode }) {
+  const { data, error, reload } = useBankConnections();
+  if (!data && error != null) {
+    return (
+      <section className="mt-6 first:mt-0">
+        <h2 className="mb-2 px-1 text-caption font-normal text-ink-2">Pankki</h2>
+        <div className="space-y-3">
+          <ConnectionNotice error={error} fallback="Pankkiyhteyden haku epäonnistui" onRetry={reload} />
+          <div className="overflow-hidden rounded-card border border-line bg-surface divide-y divide-line">{children}</div>
+        </div>
+      </section>
+    );
+  }
+  return (
+    <Section title="Pankki">
+      <BankConnectRow />
+      {children}
+    </Section>
+  );
+}
+
+/**
  * The bank connection card (OWN-06, BOOKS-01/03/04/06).
  *
  * - `full` (top of Pankkitilit): every state, including the connected banks
@@ -156,8 +183,11 @@ export function BankConnectRow() {
 export default function BankConnectCard({
   variant = "full",
   onAddManual,
+  quietError = false,
 }: {
   variant?: "full" | "compact";
+  /** The page already shows its own failure card: do not add a second one (VS-31). */
+  quietError?: boolean;
   /** Full variant: the quiet "Lisää tili käsin" route. */
   onAddManual?: () => void;
 }) {
@@ -290,11 +320,21 @@ export default function BankConnectCard({
         ? BANK_COPY.noneBody
         : state?.line ?? "";
 
+  // A failed lookup is the shared failure card in the place of this card, never a card inside it (VS-31).
+  if (!state && bank.error != null) {
+    if (quietError) return null;
+    return (
+      <div id="pankkiyhteys" data-testid="bank-connect-card" data-state="error" className="scroll-mt-20">
+        <ConnectionNotice error={bank.error} fallback="Pankkiyhteyden haku epäonnistui" onRetry={bank.reload} />
+      </div>
+    );
+  }
+
   return (
     <section
       id="pankkiyhteys"
       data-testid="bank-connect-card"
-      data-state={state?.kind ?? (bank.error ? "error" : "loading")}
+      data-state={state?.kind ?? "loading"}
       className="scroll-mt-20 rounded-card border border-line bg-surface"
     >
       <div className="flex items-start gap-3 px-4 pb-3 pt-4">
@@ -309,8 +349,6 @@ export default function BankConnectCard({
                 {lead}
               </p>
             </>
-          ) : bank.error ? (
-            <h2 className="text-body font-semibold text-ink">Pankkiyhteys</h2>
           ) : (
             <div aria-hidden className="space-y-2 pt-0.5">
               <Skeleton className="h-3.5 w-2/5" />
@@ -321,9 +359,7 @@ export default function BankConnectCard({
       </div>
 
       <div className="space-y-3 px-4 pb-4">
-        {!state && bank.error != null ? (
-          <ConnectionNotice error={bank.error} fallback="Pankkiyhteyden haku epäonnistui" onRetry={bank.reload} compact />
-        ) : !state ? (
+        {!state ? (
           <Skeleton radius="card" className="h-12 w-full" />
         ) : state.kind === "unconfigured" ? (
           <>

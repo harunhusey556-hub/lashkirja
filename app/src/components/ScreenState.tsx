@@ -107,6 +107,31 @@ export function ConnectionNotice({
 }
 
 /**
+ * The rest of the screen loaded but some parts did not (Koti): ONE failure card that names
+ * what is missing, with ONE retry, instead of a card and a retry button per part. The failed
+ * parts themselves are simply left out.
+ */
+export function PartialFailureNotice({ messages, onRetry }: { messages: string[]; onRetry?: () => void }) {
+  const unique = [...new Set(messages.filter(Boolean))];
+  if (unique.length === 0) return null;
+  return (
+    <div className="rounded-card border border-danger/30 bg-danger/10 p-4 text-danger" role="alert" data-connection="partial">
+      <p className="text-body font-semibold">{ERROR_TITLE}</p>
+      <ul className="mt-1 space-y-0.5 text-body leading-relaxed">
+        {unique.map((message) => (
+          <li key={message}>{message}</li>
+        ))}
+      </ul>
+      {onRetry && (
+        <Button type="button" variant="secondary" className="mt-3" onClick={onRetry}>
+          Yritä uudelleen
+        </Button>
+      )}
+    </div>
+  );
+}
+
+/**
  * A saved copy is on screen and the latest refresh failed. Says why in the
  * shared words ("… Näytetään viimeksi haetut tiedot."), when the copy is from,
  * and offers the one retry. Takes over the connection message from the global
@@ -144,19 +169,55 @@ export function StaleBanner({
 }
 
 /**
- * The failure card for a page outside the app shell (bank callback, recovery
- * pages, `error.tsx`, `not-found.tsx`): the same tile, title and wording, on its
- * own canvas, with one action.
+ * The notice card of a page outside the app shell: a 56 px tile, the title (17/600), one
+ * sentence and the page's own actions as `children`. `FullScreenNotice` puts it on its own
+ * canvas; the bare recovery pages use it inside `BareFrame`.
+ */
+export function NoticeCard({
+  icon,
+  title = ERROR_TITLE,
+  body,
+  tone = "accent",
+  children,
+}: {
+  icon: LucideIcon;
+  title?: string;
+  body: string;
+  tone?: "accent" | "danger" | "warning";
+  children?: ReactNode;
+}) {
+  return (
+    <div className="w-full max-w-sm rounded-card border border-line bg-surface p-6 text-center" role="alert">
+      <div
+        className={`mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full ${
+          tone === "danger"
+            ? "bg-danger/10 text-danger"
+            : tone === "warning"
+              ? "bg-warning/10 text-warning"
+              : "bg-accent-soft text-accent"
+        }`}
+      >
+        <Icon icon={icon} size="hero" />
+      </div>
+      <h1 className="text-headline font-semibold text-ink">{title}</h1>
+      <p className="mt-2 text-body text-ink-2">{body}</p>
+      {children}
+    </div>
+  );
+}
+
+/**
+ * The failure card for a page outside the app shell (bank callback, `error.tsx`,
+ * `not-found.tsx`): the same tile, title and wording, on its own canvas, with one action.
  */
 export function FullScreenNotice({
   icon,
-  title = ERROR_TITLE,
+  title,
   body,
   actionLabel,
   onAction,
   href,
   tone = "accent",
-  children,
 }: {
   icon: LucideIcon;
   title?: string;
@@ -165,24 +226,10 @@ export function FullScreenNotice({
   onAction?: () => void;
   href?: string;
   tone?: "accent" | "danger";
-  children?: ReactNode;
 }) {
   return (
     <main className="flex min-h-dvh items-center justify-center bg-canvas px-4">
-      <div
-        className="w-full max-w-sm rounded-card border border-line bg-surface p-6 text-center"
-        role="alert"
-      >
-        <div
-          className={`mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full ${
-            tone === "danger" ? "bg-danger/10 text-danger" : "bg-accent-soft text-accent"
-          }`}
-        >
-          <Icon icon={icon} size="hero" />
-        </div>
-        <h1 className="text-headline font-semibold text-ink">{title}</h1>
-        <p className="mt-2 text-body text-ink-2">{body}</p>
-        {children}
+      <NoticeCard icon={icon} title={title} body={body} tone={tone}>
         {href && actionLabel ? (
           <Link href={href} className={`mt-5 w-full ${buttonClass("primary")}`}>
             {actionLabel}
@@ -192,7 +239,7 @@ export function FullScreenNotice({
             {actionLabel}
           </button>
         ) : null}
-      </div>
+      </NoticeCard>
     </main>
   );
 }
@@ -304,6 +351,16 @@ export function EmptyNote({ children }: { children: ReactNode }) {
     <div className="rounded-card border border-line bg-surface p-4 text-body text-ink-2" data-empty="note">
       {children}
     </div>
+  );
+}
+
+/** `EmptyNote` under a section heading of its own (same heading style as `ds/Section`). */
+export function EmptySection({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <section className="mt-6 first:mt-0">
+      <h2 className="mb-2 px-1 text-caption font-normal text-ink-2">{title}</h2>
+      <EmptyNote>{children}</EmptyNote>
+    </section>
   );
 }
 
