@@ -26,6 +26,8 @@ import { STATEMENT_TX_STATUS, statementTxStatusKey } from "@/lib/status-labels";
 import StatementSummaryCards from "@/components/StatementSummaryCards";
 import ConfirmModal from "@/components/ConfirmModal";
 import { Button, controlClass } from "@/components/ui";
+import { showToast } from "@/lib/toast";
+import { hapticImpact } from "@/lib/haptics";
 import { ActionPill, DetailHero, FilterChips, ListRow, MoreMenu, Section, StatusTag } from "@/components/ds";
 
 const LABEL_CLASS = "mb-1.5 block text-[13px] font-normal text-ink-2";
@@ -316,7 +318,7 @@ export default function StatementDetailView({
     txId: string,
     url: string,
     body: Record<string, unknown>
-  ) {
+  ): Promise<boolean> {
     setMatchBusyTxId(txId);
     setActionError("");
     try {
@@ -339,17 +341,34 @@ export default function StatementDetailView({
       await reloadStatement();
       setCandidatesFor(null);
       setCandidates([]);
+      return true;
     } catch (error: unknown) {
       if (isUnauthorized(error)) {
         redirectToLogin();
-        return;
+        return false;
       }
       setActionError(
         errorMessage(error, "Kuittilinkityksen päivitys epäonnistui")
       );
+      return false;
     } finally {
       setMatchBusyTxId(null);
     }
+  }
+
+  /** One tap marks "no receipt needed"; the toast offers "Kumoa" (BOOKS-23, T4). */
+  async function ignoreWithUndo(txId: string) {
+    void hapticImpact("light");
+    const done = await matchAction(txId, "/api/matching/ignore", { transactionId: txId, ignored: true });
+    if (!done) return;
+    showToast({
+      tone: "success",
+      text: "Merkitty: tositetta ei tarvita.",
+      action: {
+        label: "Kumoa",
+        onAction: () => void matchAction(txId, "/api/matching/ignore", { transactionId: txId, ignored: false }),
+      },
+    });
   }
 
   async function openCandidates(txId: string) {
@@ -706,16 +725,11 @@ export default function StatementDetailView({
                       )}
                       {canQuickIgnore && (
                         <ActionPill
-                          ariaLabel={`Ei kuittia: ${rowLabel}`}
+                          ariaLabel={`Ei tositetta tarvita: ${rowLabel}`}
                           disabled={matchBusyTxId === t.id}
-                          onClick={() =>
-                            matchAction(t.id, "/api/matching/ignore", {
-                              transactionId: t.id,
-                              ignored: true,
-                            })
-                          }
+                          onClick={() => void ignoreWithUndo(t.id)}
                         >
-                          Ei kuittia
+                          Ei tositetta
                         </ActionPill>
                       )}
                       <MoreMenu

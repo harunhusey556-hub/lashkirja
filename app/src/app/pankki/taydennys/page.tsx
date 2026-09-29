@@ -1,11 +1,14 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { ErrorState, LoadingState } from "@/components/AsyncState";
-import { apiFetch, errorMessage, isUnauthorized, readJson, redirectToLogin } from "@/components/clientFetch";
+import Link from "next/link";
+import { apiFetch, isUnauthorized, readJson, redirectToLogin } from "@/components/clientFetch";
+import { buttonClass } from "@/components/ui";
+import { SectionSkeleton } from "@/components/books/Skeletons";
+import { SkeletonGroup, useSkeletonFade } from "@/components/ds";
 import { formatDate, formatEur } from "@/lib/format";
 import { ListRow, PageTitle, Section, StatusTag } from "@/components/ds";
-import { EmptyState } from "@/components/ScreenState";
+import { ConnectionNotice, EmptyState } from "@/components/ScreenState";
 import { MONTHS } from "@/lib/finnish-months";
 import { detailHref } from "@/lib/routes";
 
@@ -38,7 +41,7 @@ export default function TaydennysPage() {
   const [rows, setRows] = useState<UnmatchedTx[] | null>(null);
   const [receipts, setReceipts] = useState<UnlinkedReceipt[] | null>(null);
   const [month, setMonth] = useState("");
-  const [error, setError] = useState("");
+  const [error, setError] = useState<unknown>(null);
 
   const load = useCallback(async () => {
     try {
@@ -51,15 +54,14 @@ export default function TaydennysPage() {
       setRows(data.unmatchedTx ?? []);
       setReceipts(data.unlinkedReceipts ?? []);
       setMonth(data.month ?? "");
-      setError("");
+      setError(null);
     } catch (loadError: unknown) {
       if (isUnauthorized(loadError)) {
         redirectToLogin();
         return;
       }
-      setError(errorMessage(loadError, "Täsmäytyksen lataus epäonnistui"));
-      setRows([]);
-      setReceipts([]);
+      // The error object: ConnectionNotice words it in Finnish (BOOKS-15).
+      setError(loadError);
     }
   }, []);
 
@@ -69,6 +71,7 @@ export default function TaydennysPage() {
   }, [load]);
 
   const loading = rows === null || receipts === null;
+  const fade = useSkeletonFade(loading && error === null);
 
   return (
     <div className="space-y-6">
@@ -77,30 +80,44 @@ export default function TaydennysPage() {
         subtitle={`Avoimet pankkitapahtumat ja kuitit${monthAblative(month) ? ` ${monthAblative(month)}` : ""}.`}
       />
 
-      {error ? (
-        <ErrorState
-          message={error}
+      {error != null && loading ? (
+        <ConnectionNotice
+          error={error}
+          fallback="Täsmäytyksen lataus epäonnistui"
           onRetry={() => {
-            setError("");
-            setRows(null);
-            setReceipts(null);
+            setError(null);
             void load();
           }}
           compact
         />
       ) : loading ? (
-        <LoadingState label="Haetaan täsmäytystä…" />
+        <SkeletonGroup label="Haetaan täsmäytystä" className="space-y-6">
+          <SectionSkeleton rows={3} />
+          <SectionSkeleton rows={3} />
+        </SkeletonGroup>
       ) : rows.length === 0 && receipts.length === 0 ? (
         <EmptyState
           kind="records"
           title="Ei avoimia täsmäytyksiä"
-          body="Tämän kuukauden tapahtumat on käsitelty."
+          body="Tämän kuukauden tapahtumat ja kuitit on käsitelty."
+          action={
+            <Link href="/pankki/tapahtumat" className={buttonClass("secondary")}>
+              Avaa tapahtumat
+            </Link>
+          }
         />
       ) : (
-        <>
+        <div className={`space-y-6 ${fade}`}>
           <Section title="Pankkitapahtumat" count={rows.length}>
             {rows.length === 0 ? (
-              <p className="px-4 py-3 text-[13px] text-ink-2">Ei avoimia tapahtumia.</p>
+              <div className="flex items-center justify-between gap-3 px-4 py-3">
+                <p className="text-[13px] leading-relaxed text-ink-2">
+                  Ei avoimia pankkitapahtumia. Ne tulevat tähän tiliotteelta tai yhdistetystä pankista.
+                </p>
+                <Link href="/pankki/tapahtumat" className="active-press inline-flex min-h-11 shrink-0 items-center text-[13px] font-medium text-accent">
+                  Tapahtumat
+                </Link>
+              </div>
             ) : (
               rows.map((row) => (
                 <ListRow
@@ -135,7 +152,7 @@ export default function TaydennysPage() {
               ))
             )}
           </Section>
-        </>
+        </div>
       )}
     </div>
   );

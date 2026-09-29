@@ -2,7 +2,7 @@
 
 import { useEffect, useState, type ReactNode } from "react";
 import Link from "next/link";
-import { LoadingState } from "@/components/AsyncState";
+import { SectionSkeleton } from "@/components/books/Skeletons";
 import { ConnectionNotice, StaleBanner } from "@/components/ScreenState";
 import {
   apiFetch,
@@ -18,7 +18,7 @@ import { pageCacheFetchedAt, readPageCache, writePageCache } from "@/lib/page-ca
 import { usePersistedState, useScrollRestoration } from "@/lib/list-ui-state";
 import { MONTHS } from "@/lib/finnish-months";
 import { controlClass } from "@/components/ui";
-import { Card, FilterChips, PageTitle, Section, SummaryCard } from "@/components/ds";
+import { Card, FilterChips, ListRow, PageTitle, Section, Skeleton, SkeletonCard, SkeletonGroup, SummaryCard } from "@/components/ds";
 
 interface SalesField {
   label: string;
@@ -57,14 +57,12 @@ function FieldRow({ label, value }: { label: string; value: ReactNode }) {
   );
 }
 
-/** A field's amount, as a drill link when one is given, plain text otherwise. */
-function FieldAmount({ value, href, ariaLabel }: { value: number; href?: string; ariaLabel: string }) {
-  if (!href) return <>{formatEur(value)}</>;
-  return (
-    <Link href={href} aria-label={ariaLabel} className={`text-accent ${HIT44}`}>
-      {formatEur(value)}
-    </Link>
-  );
+/**
+ * A field whose receipts can be opened: a full-width row with a chevron
+ * (BOOKS-22, T1), not a 19 px inline link.
+ */
+function DrillRow({ label, value, href, ariaLabel }: { label: string; value: number; href: string; ariaLabel: string }) {
+  return <ListRow href={href} title={label} amount={formatEur(value)} chevron ariaLabel={`${ariaLabel}: ${label} ${formatEur(value)}`} />;
 }
 
 export default function ALVRaporttiPage() {
@@ -235,7 +233,15 @@ export default function ALVRaporttiPage() {
           compact
         />
       ) : loading ? (
-        <LoadingState label="Ladataan ALV-raporttia..." compact />
+        <SkeletonGroup label="Ladataan ALV-raporttia" className="space-y-6">
+          <Skeleton tone="soft" className="mx-1 h-3 w-3/5" />
+          <SkeletonCard>
+            <Skeleton className="h-3 w-24" />
+            <Skeleton className="mt-3 h-7 w-2/5" />
+          </SkeletonCard>
+          <SectionSkeleton rows={2} />
+          <SectionSkeleton rows={2} />
+        </SkeletonGroup>
       ) : data ? (
         <>
           <p className="px-1 text-[13px] leading-relaxed text-ink-2">
@@ -291,25 +297,17 @@ export default function ALVRaporttiPage() {
           />
 
           <Section title="301 · Vero kotimaan myynnistä 25,5 %">
-            <FieldRow
+            <DrillRow
               label="Myynti (veroton)"
-              value={
-                <FieldAmount
-                  value={data.field301.netSales}
-                  href={receiptDrillHref({ month: periodType === "month" ? period : null, type: "tulo" })}
-                  ariaLabel="Avaa kuitit kentälle 301"
-                />
-              }
+              value={data.field301.netSales}
+              href={receiptDrillHref({ month: periodType === "month" ? period : null, type: "tulo" })}
+              ariaLabel="Avaa kuitit kentälle 301"
             />
-            <FieldRow
+            <DrillRow
               label="Vero"
-              value={
-                <FieldAmount
-                  value={data.field301.vat}
-                  href={receiptDrillHref({ month: periodType === "month" ? period : null, type: "tulo" })}
-                  ariaLabel="Avaa kuitit kentälle 301"
-                />
-              }
+              value={data.field301.vat}
+              href={receiptDrillHref({ month: periodType === "month" ? period : null, type: "tulo" })}
+              ariaLabel="Avaa kuitit kentälle 301"
             />
           </Section>
 
@@ -330,15 +328,11 @@ export default function ALVRaporttiPage() {
           )}
 
           <Section title="307 · Verokauden vähennettävä vero">
-            <FieldRow
+            <DrillRow
               label="Vero"
-              value={
-                <FieldAmount
-                  value={data.field307.amount}
-                  href={receiptDrillHref({ month: periodType === "month" ? period : null, type: "meno" })}
-                  ariaLabel="Avaa ostokuitit"
-                />
-              }
+              value={data.field307.amount}
+              href={receiptDrillHref({ month: periodType === "month" ? period : null, type: "meno" })}
+              ariaLabel="Avaa ostokuitit"
             />
           </Section>
         </>

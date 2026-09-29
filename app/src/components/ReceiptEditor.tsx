@@ -8,7 +8,10 @@ import ReceiptMatchPanel, {
   type ReceiptMatchData,
   type BankTxMatch,
 } from "@/components/ReceiptMatchPanel";
-import { ErrorState, LoadingState } from "@/components/AsyncState";
+import { ErrorState } from "@/components/AsyncState";
+import { FieldsSkeleton, ReceiptDetailSkeleton } from "@/components/books/Skeletons";
+import { Skeleton, SkeletonGroup } from "@/components/ds";
+import { hasPendingCapture, PENDING_CAPTURE_PARAMS, takePendingCapture } from "@/lib/pending-capture";
 import ConfirmModal from "@/components/ConfirmModal";
 import {
   ApiError,
@@ -143,6 +146,9 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
   });
   const [matchBusy, setMatchBusy] = useState(false);
   const [error, setError] = useState("");
+  // The load failure itself, so ConnectionNotice can tell offline from a
+  // server error instead of showing its raw text (BOOKS-15).
+  const [loadFailure, setLoadFailure] = useState<unknown>(null);
   const [notFound, setNotFound] = useState(false);
   const [loadAttempt, setLoadAttempt] = useState(0);
   const [forceDuplicate, setForceDuplicate] = useState(false);
@@ -262,6 +268,35 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
   const uploading = uploadQueue.rows.some(
     (row) => row.status === "uploading" || row.status === "processing"
   );
+
+  // OWN-04 / BOOKS-18 / SHELL-02: "Ota kuva" in the Lisää sheet already took
+  // the photo. On /kuitit/uusi?from=camera the picked files are drained once
+  // and go straight to upload and review; the picker card is never shown.
+  // With nothing stashed (reload, deep link, expired) the normal picker shows.
+  const fromCamera =
+    !isEdit &&
+    searchParams.get(PENDING_CAPTURE_PARAMS.receipt.name) === PENDING_CAPTURE_PARAMS.receipt.value;
+  const [cameraHandoff, setCameraHandoff] = useState(() => fromCamera && hasPendingCapture("receipt"));
+  const handoffDrainedRef = useRef(false);
+  useEffect(() => {
+    if (!cameraHandoff || handoffDrainedRef.current) return;
+    handoffDrainedRef.current = true;
+    const files = takePendingCapture("receipt");
+    if (!files || files.length === 0) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- one-shot read of the Lisää sheet's hand-off; nothing was waiting, so the picker shows
+      setCameraHandoff(false);
+      return;
+    }
+    handleFilesPicked(files);
+    // handleFilesPicked is recreated every render; the drain is one-shot by design.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cameraHandoff]);
+  const handoffFailed = uploadQueue.rows.some((row) => row.status === "failed" || row.status === "cancelled");
+  const showHandoff = cameraHandoff && !formReady && !error && !handoffFailed;
+  const handoffProgress =
+    uploadQueue.rows.find((row) => row.status === "uploading" || row.status === "processing")?.progress ||
+    uploadProgress ||
+    "Lähetetään kuvaa…";
 
   function pickDocument() {
     return pickNativeOrInput(
@@ -394,6 +429,7 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
         // left on screen rather than replaced by the error screen -- see
         // the `isEdit && error && !formReady` render guard below, which
         // only fires when nothing has ever been shown for this receipt.
+        setLoadFailure(loadError);
         setError(errorMessage(loadError, "Kuitin lataus epäonnistui"));
       })
       .finally(() => {
@@ -713,7 +749,7 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
   });
 
   if (loading) {
-    return <LoadingState label="Ladataan kuittia..." />;
+    return <ReceiptDetailSkeleton />;
   }
 
   if (notFound) {
@@ -730,6 +766,7 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
   if (isEdit && error && !formReady) {
     return (
       <ErrorState
+        error={loadFailure ?? undefined}
         message={error}
         onRetry={() => {
           setError("");
@@ -795,7 +832,24 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
         !isEdit && <PageTitle title={isNewStep2 ? "Vaihe 2: Linkitys" : "Uusi kuitti"} />
       )}
 
-      {!isEdit && !formReady && (
+      {showHandoff && (
+        <SkeletonGroup label="Luetaan kuittia" className="space-y-6">
+          <div className="flex items-center gap-3 rounded-card border border-line bg-surface p-4" data-testid="camera-handoff">
+            <span
+              className="h-5 w-5 shrink-0 rounded-full border-2 border-accent border-t-transparent animate-spin motion-reduce:animate-none"
+              aria-hidden
+            />
+            <div className="min-w-0">
+              <p className="text-[15px] font-medium text-ink">Luetaan kuittia</p>
+              <p className="mt-0.5 text-[13px] text-ink-2">{handoffProgress}</p>
+            </div>
+          </div>
+          <Skeleton radius="card" className="h-48 w-full" />
+          <FieldsSkeleton />
+        </SkeletonGroup>
+      )}
+
+      {!isEdit && !formReady && !showHandoff && (
         <ReceiptUploadArea
           fileInputRef={fileInputRef}
           cameraInputRef={cameraInputRef}
@@ -1318,7 +1372,8 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
                 form="receipt-form"
                 busy={saving}
                 busyLabel="Tallennetaan…"
-                disabled={!isEdit && !uploadId}
+                // Edit: nothing to save until something changed (BOOKS-20).
+                disabled={(!isEdit && !uploadId) || (isEdit && !session.dirty && !forceDuplicate)}
                 disabledReason={!isEdit && !uploadId ? "Liitä ensin kuitti." : undefined}
                 className="flex-1"
               >

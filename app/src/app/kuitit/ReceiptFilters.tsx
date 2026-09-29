@@ -4,7 +4,12 @@ import { Button, controlClass } from "@/components/ui";
 import { ChevronDown, Search } from "lucide-react";
 import { FilterChips, Icon } from "@/components/ds";
 import { RECEIPT_CATEGORIES } from "@/lib/receipt-categories";
-import { receiptTabChips, type ReceiptTabCounts, type ReceiptTabId } from "@/lib/receipt-tabs";
+import {
+  receiptTabChips,
+  ZERO_RECEIPT_TAB_COUNTS,
+  type ReceiptTabCounts,
+  type ReceiptTabId,
+} from "@/lib/receipt-tabs";
 
 export interface ReceiptAdvancedFilters {
   type: string;
@@ -53,7 +58,8 @@ export function ReceiptFilters({
   onApplyAdvanced: () => void;
   onClearAdvanced: () => void;
   activeTab: ReceiptTabId;
-  tabCounts: ReceiptTabCounts;
+  /** null while unknown: the chips then show no number rather than a false 0. */
+  tabCounts: ReceiptTabCounts | null;
   onTabChange: (id: ReceiptTabId) => void;
   activeChips: { key: string; label: string; clear: () => void }[];
   onClearAll: () => void;
@@ -62,7 +68,9 @@ export function ReceiptFilters({
     <div className="space-y-3">
       <FilterChips
         label="Suodata kuitteja"
-        items={receiptTabChips(tabCounts)}
+        items={receiptTabChips(tabCounts ?? ZERO_RECEIPT_TAB_COUNTS).map((chip) =>
+          tabCounts ? chip : { ...chip, count: undefined }
+        )}
         value={activeTab}
         onChange={onTabChange}
       />
@@ -91,6 +99,8 @@ export function ReceiptFilters({
             <input
               aria-label="Hae kuitteja"
               type="search"
+              enterKeyHint="search"
+              autoComplete="off"
               value={searchInput}
               onChange={(e) => onSearchChange(e.target.value)}
               placeholder="Hae myyjää, tiedostoa tai kategoriaa"

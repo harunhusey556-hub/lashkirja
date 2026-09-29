@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import ConfirmModal from "@/components/ConfirmModal";
 import QueuedReceiptsCard from "@/components/QueuedReceiptsCard";
@@ -31,12 +32,11 @@ import {
 import {
   receiptTabFromQuery,
   receiptTabQuery,
-  ZERO_RECEIPT_TAB_COUNTS,
   type ReceiptTabCounts,
 } from "@/lib/receipt-tabs";
 import { Button, buttonClass } from "@/components/ui";
 import { Check, Minus, Plus } from "lucide-react";
-import { Icon, PageTitle, Section } from "@/components/ds";
+import { Icon, MoreMenu, PageTitle, Section } from "@/components/ds";
 import { batchOutcomeMessage } from "@/lib/upload-queue";
 import { ReceiptFilters, type ReceiptAdvancedFilters } from "./ReceiptFilters";
 import { ReceiptRow } from "./ReceiptRow";
@@ -44,6 +44,29 @@ import { BulkBar } from "./BulkBar";
 import type { SavedReceipt } from "./types";
 
 const RECENT_LIMIT = 5;
+
+/** "Kahvila Oy, E2E Testi ja 3 muuta" for the bulk-delete confirm (BOOKS-12). */
+function selectionSummary(selected: SavedReceipt[]): string {
+  const names = selected.map((receipt) => receipt.vendor || receipt.fileName || "Tuntematon");
+  if (names.length <= 3) return names.join(", ");
+  return `${names.slice(0, 2).join(", ")} ja ${names.length - 2} muuta`;
+}
+
+/**
+ * Chip counts when `/api/receipts/counts` has not answered: exact from the
+ * list itself when it holds every receipt (the "Kaikki" tab, not truncated),
+ * otherwise unknown. Never a made-up zero (Simulator run: "Kaikki 0" above
+ * two listed receipts).
+ */
+function countsFromList(receipts: SavedReceipt[]): ReceiptTabCounts {
+  return {
+    all: receipts.length,
+    tulo: receipts.filter((receipt) => receipt.type === "tulo").length,
+    meno: receipts.filter((receipt) => receipt.type === "meno").length,
+    linked: receipts.filter((receipt) => Boolean(receipt.linkedTransaction)).length,
+    unlinked: receipts.filter((receipt) => !receipt.linkedTransaction).length,
+  };
+}
 
 const emptyAdvanced: ReceiptAdvancedFilters = {
   type: "",
@@ -56,6 +79,7 @@ const emptyAdvanced: ReceiptAdvancedFilters = {
 };
 
 export default function KuititPage() {
+  const router = useRouter();
   const [listResult, setListResult] = useState<{
     query: string;
     receipts: SavedReceipt[];
@@ -76,8 +100,6 @@ export default function KuititPage() {
   );
   const [receiptToDelete, setReceiptToDelete] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
-  const [matchBusyId, setMatchBusyId] = useState<string | null>(null);
-  const [expandedId, setExpandedId] = useState<string | null>(null);
   const [showAllReceipts, setShowAllReceipts] = usePersistedState(
     "kuitit.showAllReceipts",
     false
@@ -85,7 +107,8 @@ export default function KuititPage() {
   const [loadError, setLoadError] = useState<{ query: string; error: unknown } | null>(null);
   const [actionError, setActionError] = useState("");
   const [loadAttempt, setLoadAttempt] = useState(0);
-  const [tabCounts, setTabCounts] = useState<ReceiptTabCounts>(ZERO_RECEIPT_TAB_COUNTS);
+  // null = not known yet: the chips show no number rather than a false 0.
+  const [fetchedCounts, setFetchedCounts] = useState<{ key: string; counts: ReceiptTabCounts } | null>(null);
   // Task 10: set once, right after the offline capture path (ReceiptEditor)
   // sends the user back here -- read from the URL rather than router state
   // so it survives the redirect cleanly, then stripped so a later back
@@ -242,7 +265,8 @@ export default function KuititPage() {
       const response = await apiFetch(`/api/receipts/counts${countsQuery ? `?${countsQuery}` : ""}`, { signal });
       const data = await readJson<{ counts: ReceiptTabCounts }>(response, "Määrien haku epäonnistui");
       if (signal?.aborted) return;
-      setTabCounts(data.counts);
+      writePageCache(`receipt-counts:${countsQuery}`, data.counts);
+      setFetchedCounts({ key: countsQuery, counts: data.counts });
     } catch (error) {
       if (signal?.aborted) return;
       if (isUnauthorized(error)) redirectToLogin();
@@ -257,7 +281,7 @@ export default function KuititPage() {
     void loadCounts(controller.signal);
     return () => controller.abort();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [countsQuery]);
+  }, [countsQuery, loadAttempt]);
 
   // A stale-but-cached copy paints immediately while the fetch above
   // revalidates; the skeleton is reserved for a genuinely never-seen query.
@@ -277,47 +301,14 @@ export default function KuititPage() {
 
   useScrollRestoration("kuitit", !loadingList);
 
-  useEffect(() => {
-    if (!expandedId || document.visibilityState === "hidden") return;
-    let cancelled = false;
-    apiFetch(`/api/receipts/${expandedId}`)
-      .then((response) =>
-        readJson<{ receipt?: { match?: SavedReceipt["match"] } }>(
-          response,
-          "Täsmäytyksen lataus epäonnistui"
-        )
-      )
-      .then((data) => {
-        if (cancelled || !data.receipt?.match) return;
-        const match = { ...data.receipt.match, candidatesDeferred: false };
-        setListResult((prev) => {
-          if (!prev) return prev;
-          return {
-            ...prev,
-            receipts: prev.receipts.map((item) =>
-              item.id === expandedId ? { ...item, match } : item
-            ),
-          };
-        });
-      })
-      .catch(() => {
-        if (cancelled) return;
-        setListResult((prev) => {
-          if (!prev) return prev;
-          return {
-            ...prev,
-            receipts: prev.receipts.map((item) =>
-              item.id === expandedId
-                ? { ...item, match: { ...item.match, candidatesDeferred: false } }
-                : item
-            ),
-          };
-        });
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [expandedId]);
+  const tabCounts: ReceiptTabCounts | null =
+    fetchedCounts?.key === countsQuery
+      ? fetchedCounts.counts
+      : readPageCache<ReceiptTabCounts>(`receipt-counts:${countsQuery}`) ??
+        (!loadingList && !truncated && receiptTabFromQuery(appliedAdvanced.type, appliedAdvanced.linkedStatus) === "all"
+          ? countsFromList(receipts)
+          : null);
+
 
   const activeChips = useMemo(() => {
     const chips: { key: string; label: string; clear: () => void }[] = [];
@@ -400,29 +391,6 @@ export default function KuititPage() {
     setSearchQuery("");
     setAdvanced(emptyAdvanced);
     setAppliedAdvanced(emptyAdvanced);
-  }
-
-  async function handleMatchConfirm(receiptId: string, transactionId: string) {
-    setMatchBusyId(receiptId);
-    setActionError("");
-    try {
-      const res = await apiFetch("/api/matching/confirm", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ transactionId, receiptId }),
-      });
-      if (!res.ok) await readJson(res, "Linkitys epäonnistui");
-      setLoadAttempt((a) => a + 1);
-      void loadCounts();
-    } catch (error: unknown) {
-      if (isUnauthorized(error)) {
-        redirectToLogin();
-        return;
-      }
-      setActionError(errorMessage(error, "Linkitys epäonnistui"));
-    } finally {
-      setMatchBusyId(null);
-    }
   }
 
   async function executeDeleteReceipt() {
@@ -514,14 +482,16 @@ export default function KuititPage() {
   }
 
   async function handleBulkDelete() {
-    if (selectedIds.size === 0) return;
+    // Only rows the user can see (BOOKS-12): a collapsed list never deletes hidden receipts.
+    const ids = selectedVisible.map((receipt) => receipt.id);
+    if (ids.length === 0) return;
     setBulkDeleting(true);
     setActionError("");
     try {
       const res = await apiFetch("/api/receipts/batch-delete", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ receiptIds: Array.from(selectedIds) }),
+        body: JSON.stringify({ receiptIds: ids }),
       });
       const data = await readJson<{
         succeeded?: string[];
@@ -647,7 +617,12 @@ export default function KuititPage() {
   );
 
   const visibleReceipts = showAllReceipts ? receipts : receipts.slice(0, RECENT_LIMIT);
-  const allSelected = receipts.length > 0 && selectedIds.size === receipts.length;
+  // Selection is always read through the visible rows (BOOKS-12, P0): "Valitse
+  // kaikki" selects what is on screen, and a row hidden by "Näytä vähemmän" or a
+  // filter change drops out of the selection instead of being deleted unseen.
+  const selectedVisible = visibleReceipts.filter((receipt) => selectedIds.has(receipt.id));
+  const selectedCount = selectedVisible.length;
+  const allSelected = visibleReceipts.length > 0 && selectedCount === visibleReceipts.length;
 
   return (
     <>
@@ -655,6 +630,7 @@ export default function KuititPage() {
         <PageTitle
           title="Kuitit"
           action={
+            <div className="flex items-center gap-2">
             <Link
               href="/kuitit/uusi"
               className="active-press relative inline-flex min-h-9 items-center gap-1 rounded-full bg-ink px-3.5 text-[13px] font-semibold text-canvas before:absolute before:inset-x-0 before:-inset-y-1 before:content-['']"
@@ -662,20 +638,16 @@ export default function KuititPage() {
               <Icon icon={Plus} size="inline" strokeWidth={2.5} />
               Lisää
             </Link>
+            {/* BOOKS-28: the jobs link lives in the header menu, not floating under the title. */}
+            <MoreMenu
+              label="Kuittien toiminnot"
+              items={[{ label: "Työt ja poikkeukset", onSelect: () => router.push("/tyot") }]}
+            />
+            </div>
           }
         />
 
-        <Link href="/tyot" className="active-press -mt-4 inline-flex min-h-11 items-center px-1 text-[13px] font-medium text-accent">
-          Työt ja poikkeukset
-        </Link>
-
-        {offlineCaptureNotice && (
-          <p className="rounded-card bg-accent-soft px-4 py-3 text-sm text-ink" role="status">
-            Ei yhteyttä. Kuva tallennettiin ja lähetetään automaattisesti, kun yhteys palaa.
-          </p>
-        )}
-
-        <QueuedReceiptsCard />
+        <QueuedReceiptsCard offlineNotice={offlineCaptureNotice} />
 
         {loadingPending && pendingReceipts.length === 0 && (
           <div className="h-24 animate-pulse rounded-card border border-line bg-surface" />
@@ -781,18 +753,18 @@ export default function KuititPage() {
                   type="checkbox"
                   className="peer sr-only"
                   checked={allSelected}
-                  onChange={() => setSelectedIds(allSelected ? new Set() : new Set(receipts.map((r) => r.id)))}
-                  aria-label="Valitse kaikki"
+                  onChange={() => setSelectedIds(allSelected ? new Set() : new Set(visibleReceipts.map((r) => r.id)))}
+                  aria-label={`Valitse kaikki näkyvät (${visibleReceipts.length})`}
                 />
                 <span
                   className={`flex h-5 w-5 items-center justify-center rounded-full border-[1.5px] transition-colors peer-focus-visible:ring-2 peer-focus-visible:ring-accent/40 ${
-                    selectedIds.size > 0 ? "border-ink bg-ink" : "border-ink-2/50 bg-surface"
+                    selectedCount > 0 ? "border-ink bg-ink" : "border-ink-2/50 bg-surface"
                   }`}
                 >
-                  {selectedIds.size > 0 && selectedIds.size === receipts.length && (
+                  {selectedCount > 0 && allSelected && (
                     <Check aria-hidden width={12} height={12} strokeWidth={3.5} className="text-canvas" />
                   )}
-                  {selectedIds.size > 0 && selectedIds.size < receipts.length && (
+                  {selectedCount > 0 && !allSelected && (
                     <Minus aria-hidden width={12} height={12} strokeWidth={3.5} className="text-canvas" />
                   )}
                 </span>
@@ -849,12 +821,8 @@ export default function KuititPage() {
                   <ReceiptRow
                     key={r.id}
                     receipt={r}
-                    expanded={expandedId === r.id}
-                    onToggleExpand={() => setExpandedId((id) => (id === r.id ? null : r.id))}
                     selected={selectedIds.has(r.id)}
                     onToggleSelect={() => toggleSelection(r.id)}
-                    matchBusy={matchBusyId === r.id}
-                    onConfirmMatch={(txId) => handleMatchConfirm(r.id, txId)}
                     onDeleteRequest={() => setReceiptToDelete(r.id)}
                     deleting={deletingId === r.id}
                   />
@@ -896,20 +864,19 @@ export default function KuititPage() {
 
       <ConfirmModal
         isOpen={showBulkConfirm}
-        title={`Poista ${selectedIds.size} kuittia?`}
-        description="Oletko varma, että haluat poistaa valitut kuitit? Tätä toimintoa ei voi perua."
+        title={selectedCount === 1 ? "Poista 1 kuitti?" : `Poista ${selectedCount} kuittia?`}
+        description={`${selectionSummary(selectedVisible)}. Poistoa ei voi perua.`}
         onConfirm={handleBulkDelete}
         onCancel={() => setShowBulkConfirm(false)}
       />
 
-      {selectedIds.size > 0 && (
-        <BulkBar
-          count={selectedIds.size}
-          busy={bulkDeleting}
-          onCancel={() => setSelectedIds(new Set())}
-          onDeleteRequest={() => setShowBulkConfirm(true)}
-        />
-      )}
+      <BulkBar
+        visible={selectedCount > 0}
+        count={selectedCount}
+        busy={bulkDeleting}
+        onCancel={() => setSelectedIds(new Set())}
+        onDeleteRequest={() => setShowBulkConfirm(true)}
+      />
     </>
   );
 }

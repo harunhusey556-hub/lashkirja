@@ -1,47 +1,89 @@
+"use client";
+
+import { useEffect, useState } from "react";
 import { Button } from "@/components/ui";
 
+const EXIT_MS = 170;
+
 /**
- * The sticky bar shown once one or more receipts are checkbox-selected.
+ * The floating bar shown once one or more receipts are checkbox-selected.
  *
  * Deliberately NOT the `BottomActions` ds component: that one assumes the
  * tab bar is hidden (it only ever ships on `kind: "detail"` pages - see
  * AppShell's `isDetail`/`data-tabs="hidden"`), and sits at `z-30`, below the
- * tab bar's `z-50`. `/kuitit` keeps its tab bar, so a `BottomActions` bar
- * would visually float above the tab bar but the tab bar's own hit-testing
- * would still win, making every button in it unclickable (caught by the
- * elementFromPoint probe - see the task report). This bar instead floats
- * above the tab bar (`z-55`) the same way the page's old bulk-action pill
- * did, just above the tab bar rather than sharing its row.
+ * tab bar's `z-50`. `/kuitit` keeps its tab bar, so this bar floats above it
+ * (`z-55`).
+ *
+ * Motion (SHELL-13): slides up 220 ms on `--ease-drawer` (`.bottom-actions`)
+ * and back down 160 ms when the selection clears, instead of popping. Under
+ * reduced motion both are an opacity change only.
  */
 export function BulkBar({
+  visible,
   count,
   busy,
   onCancel,
   onDeleteRequest,
 }: {
+  visible: boolean;
   count: number;
   busy: boolean;
   onCancel: () => void;
   onDeleteRequest: () => void;
 }) {
+  const [mounted, setMounted] = useState(visible);
+  const [leaving, setLeaving] = useState(false);
+  const [prevVisible, setPrevVisible] = useState(visible);
+  // The count the bar showed last, so it does not read "0 valittu" on its way out.
+  const [shownCount, setShownCount] = useState(count);
+  if (visible !== prevVisible) {
+    setPrevVisible(visible);
+    if (visible) {
+      setMounted(true);
+      setLeaving(false);
+    } else {
+      setLeaving(true);
+    }
+  }
+  if (visible && count > 0 && count !== shownCount) setShownCount(count);
+
+  useEffect(() => {
+    if (!leaving) return;
+    const timer = window.setTimeout(() => {
+      setMounted(false);
+      setLeaving(false);
+    }, EXIT_MS);
+    return () => window.clearTimeout(timer);
+  }, [leaving]);
+
+  if (!mounted) return null;
+
   return (
     <div
-      className="fixed inset-x-0 z-[55] flex justify-center px-4 md:left-[var(--app-sidebar-width,0px)]"
+      className={`fixed inset-x-0 z-[55] flex justify-center px-4 md:left-[var(--app-sidebar-width,0px)] ${
+        leaving ? "pointer-events-none" : ""
+      }`}
       style={{ bottom: "calc(var(--app-tab-height) + var(--safe-bottom) + 0.75rem)" }}
+      data-testid="bulk-bar"
     >
-      <div className="flex w-full max-w-sm items-center gap-3 rounded-card bg-ink px-4 py-2.5 text-canvas">
-        <span className="text-[13px] font-medium">{count} valittu</span>
+      <div
+        className="bottom-actions flex w-full max-w-sm items-center gap-3 rounded-card bg-ink px-4 py-2.5 text-canvas"
+        style={{
+          transition: "transform 160ms var(--ease-drawer), opacity 160ms var(--ease-out)",
+          transform: leaving ? "translateY(calc(100% + 1rem))" : undefined,
+          opacity: leaving ? 0 : undefined,
+        }}
+        role="toolbar"
+        aria-label="Valitut kuitit"
+      >
+        <span className="text-[13px] font-medium" aria-live="polite">
+          {shownCount} valittu
+        </span>
         <div className="ml-auto flex gap-2">
           <Button type="button" variant="secondary" onClick={onCancel}>
             Peruuta
           </Button>
-          <Button
-            type="button"
-            variant="danger"
-            busy={busy}
-            busyLabel="Poistetaan…"
-            onClick={onDeleteRequest}
-          >
+          <Button type="button" variant="danger" busy={busy} busyLabel="Poistetaan…" onClick={onDeleteRequest}>
             Poista
           </Button>
         </div>

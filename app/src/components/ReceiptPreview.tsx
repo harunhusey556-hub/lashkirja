@@ -38,6 +38,10 @@ export default function ReceiptPreview({
   compact = false,
 }: ReceiptPreviewProps) {
   const [fullscreen, setFullscreen] = useState(false);
+  // Exit motion (SHELL-13): the viewer stays mounted for its fade/scale out.
+  const [closing, setClosing] = useState(false);
+  // "Yritä uudelleen" after a failed preview (BOOKS-21) refetches with a fresh URL.
+  const [retryKey, setRetryKey] = useState(0);
   const [previewFailed, setPreviewFailed] = useState(false);
   const [loading, setLoading] = useState(true);
   const [zoom, setZoom] = useState(1);
@@ -46,7 +50,10 @@ export default function ReceiptPreview({
   const openButtonRef = useRef<HTMLButtonElement>(null);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
   const kind = previewKind(fileName);
-  const imageSrc = previewSrc(src, kind);
+  const baseImageSrc = previewSrc(src, kind);
+  const imageSrc = retryKey
+    ? `${baseImageSrc}${baseImageSrc.includes("?") ? "&" : "?"}retry=${retryKey}`
+    : baseImageSrc;
   // Web: `authedSrc` is `imageSrc` unchanged, exactly like today. Mobile:
   // fetched with the bearer token and exposed as a `blob:` object URL --
   // there is no cookie for a bare `<img src>` to ride along on.
@@ -67,8 +74,19 @@ export default function ReceiptPreview({
     setPreviewFailed(true);
   }, [authedFailed]);
 
+  function closeViewer() {
+    if (closing) return;
+    setClosing(true);
+    window.setTimeout(() => {
+      setFullscreen(false);
+      setClosing(false);
+      setZoom(1);
+      setRotation(0);
+    }, 200);
+  }
+
   useFocusTrap(dialogRef, fullscreen, {
-    onEscape: () => setFullscreen(false),
+    onEscape: closeViewer,
     initialFocusRef: closeButtonRef,
   });
 
@@ -93,6 +111,7 @@ export default function ReceiptPreview({
         rotation={fill ? rotation : 0}
         failed={previewFailed}
         loading={loading}
+        onRetry={() => setRetryKey((value) => value + 1)}
         onLoad={() => setLoading(false)}
         onError={() => {
           setLoading(false);
@@ -108,6 +127,7 @@ export default function ReceiptPreview({
         <div className={compact ? "h-28" : "h-48 sm:h-56"}>
           {renderViewer(false)}
         </div>
+        {!previewFailed && kind !== "other" && (
         <button
           ref={openButtonRef}
           type="button"
@@ -116,12 +136,13 @@ export default function ReceiptPreview({
         >
           Koko näyttö
         </button>
+        )}
       </div>
 
       {fullscreen && (
         <div
           ref={dialogRef}
-          className="fixed inset-0 z-[100] bg-ink/90 flex flex-col"
+          className={`fixed inset-0 z-[100] bg-ink/90 flex flex-col ${closing ? "animate-backdrop-out pointer-events-none" : "animate-fade-in"}`}
           role="dialog"
           aria-modal="true"
           aria-labelledby="receipt-preview-title"
@@ -153,11 +174,7 @@ export default function ReceiptPreview({
               <button
                 ref={closeButtonRef}
                 type="button"
-                onClick={() => {
-                  setFullscreen(false);
-                  setZoom(1);
-                  setRotation(0);
-                }}
+                onClick={closeViewer}
                 className="min-h-11 px-4 rounded-lg bg-white/15 text-white text-sm hover:bg-white/25 transition-colors"
               >
                 Sulje
@@ -170,7 +187,7 @@ export default function ReceiptPreview({
             </p>
           )}
           <div
-            className="flex-1 min-h-0 px-2 overflow-auto"
+            className={`flex-1 min-h-0 px-2 overflow-auto ${closing ? "animate-scale-out" : "animate-scale-in"}`}
             style={{ paddingBottom: "max(1rem, var(--safe-bottom))" }}
             data-testid="preview-stage"
           >
@@ -194,6 +211,7 @@ function PreviewBody({
   loading,
   onLoad,
   onError,
+  onRetry,
 }: {
   src: string;
   imageSrc: string | null;
@@ -206,6 +224,7 @@ function PreviewBody({
   loading: boolean;
   onLoad: () => void;
   onError: () => void;
+  onRetry: () => void;
 }) {
   if (kind === "other") {
     return <UnsupportedPreview src={src} fileName={fileName} />;
@@ -219,8 +238,9 @@ function PreviewBody({
         message={
           kind === "rendered"
             ? "Esikatselun luonti epäonnistui. Voit avata alkuperäisen tiedoston."
-            : "Esikatselun lataus epäonnistui."
+            : "Esikatselua ei saatu ladattua."
         }
+        onRetry={onRetry}
       />
     );
   }
@@ -272,10 +292,12 @@ function UnsupportedPreview({
   src,
   fileName,
   message = "Esikatselu ei ole saatavilla tälle tiedostotyypille.",
+  onRetry,
 }: {
   src: string;
   fileName: string;
   message?: string;
+  onRetry?: () => void;
 }) {
   return (
     <div className="w-full h-full flex flex-col items-center justify-center gap-2 text-sm text-ink-2 p-4">
@@ -288,6 +310,11 @@ function UnsupportedPreview({
       >
         Avaa tiedosto
       </AuthedFileLink>
+      {onRetry && (
+        <button type="button" onClick={onRetry} className="active-press min-h-11 font-medium text-accent">
+          Yritä uudelleen
+        </button>
+      )}
     </div>
   );
 }

@@ -40,6 +40,8 @@ test.describe("mobile (:3210)", () => {
 
     await page.goto(`/kuitit/kuitti?id=${receiptId}`);
     await page.getByRole("button", { name: /Tallenna muutokset|Tallenna/ }).waitFor({ state: "visible" });
+    // Save stays disabled until something changed (BOOKS-20): make one change.
+    await page.locator("#receipt-notes").fill(`offline e2e ${Date.now()}`);
 
     await context.setOffline(true);
     await expect(page.getByText("Ei verkkoyhteyttä. Näytetään viimeksi haetut tiedot.")).toBeVisible({

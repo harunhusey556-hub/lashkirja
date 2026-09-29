@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { formatEur } from "@/lib/statement-client";
 import { Button } from "@/components/ui";
+import ConfirmModal from "@/components/ConfirmModal";
 import { ChevronDown } from "lucide-react";
 import { ActionPill, Card, Icon, ListRow, MoreMenu } from "@/components/ds";
 
@@ -56,6 +57,10 @@ export default function ReviewQueue({
 }: Props) {
   const [open, setOpen] = useState(false);
   const [showAll, setShowAll] = useState(false);
+  const [confirmBulk, setConfirmBulk] = useState(false);
+  // A zero or missing total is almost always an unread receipt: approving it
+  // in bulk books nothing, so it is named before the tap (BOOKS-28).
+  const withoutTotal = receipts.filter((r) => !r.totalAmount).length;
 
   const total = receipts.reduce((sum, r) => sum + (r.totalAmount ?? 0), 0);
   const visible = showAll ? receipts : receipts.slice(0, COLLAPSED_ROWS);
@@ -85,10 +90,30 @@ export default function ReviewQueue({
           className="mt-3 w-full"
           busy={bulkBusy}
           busyLabel="Hyväksytään…"
-          onClick={onApproveAll}
+          onClick={() => (withoutTotal > 0 ? setConfirmBulk(true) : onApproveAll())}
         >
           Hyväksy kaikki {receipts.length} kpl
         </Button>
+      )}
+      {onApproveAll && withoutTotal > 0 && (
+        <p className="mt-2 text-[13px] text-warning" role="note">
+          {withoutTotal === 1 ? "1 kuitilta puuttuu summa." : `${withoutTotal} kuitilta puuttuu summa.`} Tarkista ennen
+          hyväksyntää.
+        </p>
+      )}
+      {onApproveAll && (
+        <ConfirmModal
+          isOpen={confirmBulk}
+          title={`Hyväksytäänkö ${receipts.length} kuittia?`}
+          description={`${withoutTotal === 1 ? "Yhdeltä kuitilta" : `${withoutTotal} kuitilta`} puuttuu summa (0,00 €). Ne kirjataan ilman summaa.`}
+          confirmLabel="Hyväksy silti"
+          isDestructive={false}
+          onConfirm={() => {
+            setConfirmBulk(false);
+            onApproveAll();
+          }}
+          onCancel={() => setConfirmBulk(false)}
+        />
       )}
 
       {open && (

@@ -3,10 +3,10 @@
 import { useCallback, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import StatementDetailView from "@/components/StatementDetailView";
-import { ErrorState, LoadingState } from "@/components/AsyncState";
+import { ErrorState } from "@/components/AsyncState";
+import { StatementDetailSkeleton } from "@/components/books/Skeletons";
 import {
   apiFetch,
-  errorMessage,
   isUnauthorized,
   readJson,
   redirectToLogin,
@@ -26,12 +26,12 @@ export default function StatementDetailPage() {
   const cachedStatement = statementId ? readPageCache<StatementData>(`statement:${statementId}`) : null;
   const [statement, setStatement] = useState<StatementData | null>(cachedStatement);
   const [loading, setLoading] = useState(!cachedStatement);
-  const [loadError, setLoadError] = useState("");
+  const [loadError, setLoadError] = useState<unknown>(null);
 
   const loadStatement = useCallback(async () => {
     if (!statementId) {
       setStatement(null);
-      setLoadError("");
+      setLoadError(null);
       setLoading(false);
       return;
     }
@@ -42,7 +42,7 @@ export default function StatementDetailPage() {
         "Tiliotteen lataus epäonnistui"
       );
       setStatement(data.statement ?? null);
-      setLoadError("");
+      setLoadError(null);
       if (data.statement) writePageCache(`statement:${statementId}`, data.statement);
     } catch (error: unknown) {
       if (isUnauthorized(error)) {
@@ -53,7 +53,8 @@ export default function StatementDetailPage() {
       // rather than being replaced by the error screen -- only a
       // statement never seen before goes to the error state.
       if (readPageCache<StatementData>(`statement:${statementId}`)) return;
-      setLoadError(errorMessage(error, "Tiliotteen lataus epäonnistui"));
+      // The error object: ConnectionNotice words it in Finnish (BOOKS-15).
+      setLoadError(error);
       setStatement(null);
     } finally {
       setLoading(false);
@@ -68,18 +69,19 @@ export default function StatementDetailPage() {
   return (
     <>
       <div className="space-y-6">
-        {loadError ? (
+        {loadError != null ? (
           <ErrorState
-            message={loadError}
+            error={loadError}
+            message="Tiliotteen lataus epäonnistui"
             onRetry={() => {
-              setLoadError("");
+              setLoadError(null);
               setLoading(true);
               void loadStatement();
             }}
             compact
           />
         ) : loading ? (
-          <LoadingState label="Ladataan tiliotetta..." compact />
+          <StatementDetailSkeleton />
         ) : !statement ? (
           <div className="text-center py-8 text-[15px] text-ink-2">
             Tiliotetta ei löytynyt

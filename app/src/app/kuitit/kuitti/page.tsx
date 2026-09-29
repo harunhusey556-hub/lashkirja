@@ -4,10 +4,11 @@ import { Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import { ErrorState } from "@/components/AsyncState";
 import ReceiptEditor from "@/components/ReceiptEditor";
+import { ReceiptDetailSkeleton } from "@/components/books/Skeletons";
 
 export default function Page() {
   return (
-    <Suspense fallback={null}>
+    <Suspense fallback={<ReceiptDetailSkeleton />}>
       <ReceiptDetail />
     </Suspense>
   );

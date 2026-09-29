@@ -2,11 +2,15 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { apiFetch, errorMessage, isUnauthorized, readJson, redirectToLogin } from "@/components/clientFetch";
-import { Button } from "@/components/ui";
-import { ActionPill, Card, FilterChips, ListRow, PageTitle, Section, StatusTag } from "@/components/ds";
+import { ConnectionNotice, StaleBanner } from "@/components/ScreenState";
+import { SectionSkeleton } from "@/components/books/Skeletons";
+import { ActionPill, FilterChips, ListRow, PageTitle, Section, SkeletonGroup, StatusTag, useSkeletonFade } from "@/components/ds";
 import { jobKindLabel, jobStatusLabel, workKindLabel } from "@/lib/job-labels";
 import { pollDelay, syncPageHiddenFlag } from "@/lib/page-activity";
 import { normalizeLegacyDetailPath } from "@/lib/routes";
+import { pageCacheFetchedAt, readPageCache, writePageCache } from "@/lib/page-cache";
+import { showToast } from "@/lib/toast";
+import { hapticNotify } from "@/lib/haptics";
 
 interface JobRow {
   id: string;
@@ -25,6 +29,12 @@ interface WorkRow {
   title: string;
   detail: string;
   href: string | null;
+  retryJobId?: string;
+}
+
+interface TyotData {
+  jobs: JobRow[];
+  items: WorkRow[];
 }
 
 const WORK_FILTERS = [
@@ -44,6 +54,9 @@ type WorkFilter = (typeof WORK_FILTERS)[number];
 // undercount, not the true total.
 const WORK_QUEUE_TAKE = 40;
 
+/** Finished jobs kept in view under the running ones (BOOKS-11). */
+const RECENT_FINISHED = 3;
+
 const JOB_STATUS_TONE: Record<string, "neutral" | "accent" | "danger" | "success" | "warning"> = {
   pending: "neutral",
   running: "accent",
@@ -52,46 +65,64 @@ const JOB_STATUS_TONE: Record<string, "neutral" | "accent" | "danger" | "success
   cancelled: "neutral",
 };
 
+const CACHE_KEY = "tyot";
+
+function isActive(job: JobRow): boolean {
+  return job.status === "pending" || job.status === "running";
+}
+
+/**
+ * Jobs (BOOKS-11): what is running now plus the last few finished. A failed
+ * analysis is listed once, in the exception queue with its retry, never twice.
+ */
+function visibleJobs(jobs: JobRow[]): JobRow[] {
+  const active = jobs.filter(isActive);
+  const finished = jobs.filter((job) => job.status === "done" || job.status === "cancelled").slice(0, RECENT_FINISHED);
+  return [...active, ...finished];
+}
+
 export default function TyotPage() {
-  const [jobs, setJobs] = useState<JobRow[]>([]);
-  const [items, setItems] = useState<WorkRow[]>([]);
+  const [data, setData] = useState<TyotData | null>(() => readPageCache<TyotData>(CACHE_KEY));
+  const [loadError, setLoadError] = useState<unknown>(null);
   const [filter, setFilter] = useState<WorkFilter>("all");
-  const [error, setError] = useState("");
-  const [loading, setLoading] = useState(true);
   const [retryingId, setRetryingId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
-    setError("");
     try {
-      const [jobResponse, workResponse] = await Promise.all([
-        apiFetch("/api/jobs"),
-        apiFetch("/api/work-queue"),
-      ]);
+      const [jobResponse, workResponse] = await Promise.all([apiFetch("/api/jobs"), apiFetch("/api/work-queue")]);
       const jobData = await readJson<{ jobs: JobRow[] }>(jobResponse, "Töiden lataus epäonnistui");
       const workData = await readJson<{ items: WorkRow[] }>(workResponse, "Poikkeusten lataus epäonnistui");
-      setJobs(jobData.jobs || []);
-      setItems(workData.items || []);
-    } catch (loadError: unknown) {
-      if (isUnauthorized(loadError)) {
+      const next = { jobs: jobData.jobs || [], items: workData.items || [] };
+      writePageCache(CACHE_KEY, next);
+      setData(next);
+      setLoadError(null);
+    } catch (error: unknown) {
+      if (isUnauthorized(error)) {
         redirectToLogin();
         return;
       }
-      setError(errorMessage(loadError, "Töiden lataus epäonnistui"));
-    } finally {
-      setLoading(false);
+      // "Not loaded" is not "empty" (BOOKS-16): the error is kept as is and
+      // the page shows it instead of zero counts.
+      setLoadError(error);
     }
   }, []);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional fetch-on-mount
+    void load();
+  }, [load]);
+
+  // Poll only while a job is actually running (BOOKS-16), and only while the
+  // page is visible; a finished page does not flicker every four seconds.
+  const hasActiveJob = Boolean(data?.jobs.some(isActive));
+  useEffect(() => {
     let timer = 0;
     const arm = () => {
       window.clearInterval(timer);
-      const delay = pollDelay(document.visibilityState, 4000);
-      syncPageHiddenFlag(delay == null);
+      const delay = hasActiveJob ? pollDelay(document.visibilityState, 4000) : null;
+      syncPageHiddenFlag(document.visibilityState === "hidden");
       if (delay == null) return;
-      timer = window.setInterval(() => {
-        void load();
-      }, delay);
+      timer = window.setInterval(() => void load(), delay);
     };
     const onVisibility = () => {
       if (document.visibilityState === "visible") void load();
@@ -103,35 +134,30 @@ export default function TyotPage() {
       window.clearInterval(timer);
       document.removeEventListener("visibilitychange", onVisibility);
     };
-  }, [load]);
+  }, [load, hasActiveJob]);
 
-  useEffect(() => {
-    void load();
-  }, [load]);
-
-  async function retry(id: string) {
-    setRetryingId(id);
-    setError("");
+  async function retry(jobId: string) {
+    setRetryingId(jobId);
     try {
-      const response = await apiFetch(`/api/jobs/${id}/retry`, { method: "POST" });
+      const response = await apiFetch(`/api/jobs/${jobId}/retry`, { method: "POST" });
       if (!response.ok) await readJson(response, "Uudelleenyritys epäonnistui");
+      showToast({ tone: "success", text: "Analyysi käynnistettiin uudelleen." });
       await load();
     } catch (retryError: unknown) {
       if (isUnauthorized(retryError)) {
         redirectToLogin();
         return;
       }
-      setError(errorMessage(retryError, "Uudelleenyritys epäonnistui"));
+      void hapticNotify("error");
+      showToast({ tone: "error", text: errorMessage(retryError, "Uudelleenyritys epäonnistui") });
     } finally {
       setRetryingId(null);
     }
   }
 
-  // Each kind is capped at WORK_QUEUE_TAKE rows server-side (/api/work-queue
-  // -> lib/work-queue.ts), so a kind whose fetched count hits that cap may
-  // have more rows than shown; its chip (and "Kaikki", which sums the
-  // kinds) gets a "+" so the count is never presented as exact when it
-  // might not be.
+  const items = useMemo(() => data?.items ?? [], [data]);
+  // Each kind is capped at WORK_QUEUE_TAKE rows server-side, so a kind whose
+  // fetched count hits that cap gets a "+" (never presented as exact).
   const workChips = useMemo(() => {
     const chips = WORK_FILTERS.filter((kind) => kind !== "all").map((kind) => {
       const count = items.filter((item) => item.kind === kind).length;
@@ -141,82 +167,84 @@ export default function TyotPage() {
     const anyCapped = chips.some((chip) => chip.capped);
     return [
       { id: "all" as const, label: "Kaikki", count: anyCapped ? `${items.length}+` : items.length },
-      ...chips,
+      // Only kinds that have something: six zero chips say nothing.
+      ...chips.filter((chip) => chip.count !== 0 || chip.id === filter),
     ];
-  }, [items]);
+  }, [items, filter]);
   const visible = filter === "all" ? items : items.filter((item) => item.kind === filter);
+  const jobs = data ? visibleJobs(data.jobs) : [];
+  const fade = useSkeletonFade(data === null && loadError === null);
 
   return (
     <div className="space-y-6">
-      <PageTitle
-        title="Työt ja poikkeukset"
-        subtitle="Pankkihaun, sähköpostin ja kuitin analysoinnin tila sekä avoimet poikkeukset."
-      />
+      <PageTitle title="Työt ja poikkeukset" subtitle="Taustatöiden tila ja avoimet poikkeukset." />
 
-      {error && (
-        <p className="rounded-card bg-danger/10 px-4 py-3 text-sm text-danger" role="alert">
-          {error}
-        </p>
-      )}
+      {data === null && loadError != null ? (
+        <ConnectionNotice error={loadError} fallback="Töiden lataus epäonnistui" onRetry={() => void load()} compact />
+      ) : data === null ? (
+        <SkeletonGroup label="Ladataan töitä" className="space-y-6">
+          <SectionSkeleton rows={2} />
+          <SectionSkeleton rows={4} />
+        </SkeletonGroup>
+      ) : (
+        <div className={`space-y-6 ${fade}`}>
+          {loadError != null && (
+            <StaleBanner fetchedAt={pageCacheFetchedAt(CACHE_KEY)} onRetry={() => void load()} />
+          )}
 
-      <Card className="space-y-3">
-        <h2 className="text-[13px] text-ink-2">Työt</h2>
-        {loading && jobs.length === 0 ? (
-          <p className="text-[13px] text-ink-2">Ladataan…</p>
-        ) : jobs.length === 0 ? (
-          <p className="text-[13px] text-ink-2">Ei taustatöitä.</p>
-        ) : (
-          <ul>
-            {jobs.map((job, index) => (
-              <li key={job.id} className={`space-y-1.5 py-3 ${index === 0 ? "pt-0" : "border-t border-line"}`}>
-                <div className="flex items-start justify-between gap-3">
-                  <p className="min-w-0 break-words text-[15px] font-medium text-ink">{job.title}</p>
-                  <StatusTag tone={JOB_STATUS_TONE[job.status] ?? "neutral"}>
-                    {jobStatusLabel(job.status)}
-                  </StatusTag>
-                </div>
-                <p className="text-[13px] text-ink-2">{jobKindLabel(job.kind)}</p>
-                {job.progressLabel && <p className="text-[13px] text-ink-2">{job.progressLabel}</p>}
-                {job.error && <p className="text-[13px] text-danger">{job.error}</p>}
-                {job.status === "failed" && job.kind === "document_analysis" && (
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    busy={retryingId === job.id}
-                    onClick={() => void retry(job.id)}
-                  >
-                    Yritä uudelleen
-                  </Button>
-                )}
-              </li>
-            ))}
-          </ul>
-        )}
-      </Card>
-
-      <div className="space-y-3">
-        <h2 className="px-1 text-[13px] text-ink-2">Poikkeusjono</h2>
-        <FilterChips label="Suodata poikkeuksia" items={workChips} value={filter} onChange={setFilter} />
-
-        {visible.length === 0 ? (
-          <p className="px-1 text-[13px] text-ink-2">Ei avoimia poikkeuksia.</p>
-        ) : (
-          <Section>
-            {visible.map((item) => (
-              <ListRow
-                key={item.id}
-                title={item.title}
-                secondary={`${workKindLabel(item.kind)} · ${item.detail}`}
-                trailing={
-                  item.href ? (
-                    <ActionPill href={normalizeLegacyDetailPath(item.href) ?? item.href}>Avaa</ActionPill>
-                  ) : undefined
-                }
-              />
-            ))}
+          <Section title="Työt">
+            {jobs.length === 0 ? (
+              <p className="px-4 py-4 text-[13px] text-ink-2">Ei käynnissä olevia töitä.</p>
+            ) : (
+              jobs.map((job) => {
+                const status = jobStatusLabel(job.status);
+                const progress =
+                  isActive(job) && job.progressLabel && job.progressLabel !== status ? ` · ${job.progressLabel}` : "";
+                return (
+                  <ListRow
+                    key={job.id}
+                    title={job.title}
+                    secondary={`${jobKindLabel(job.kind)}${progress}`}
+                    trailing={<StatusTag tone={JOB_STATUS_TONE[job.status] ?? "neutral"}>{status}</StatusTag>}
+                  />
+                );
+              })
+            )}
           </Section>
-        )}
-      </div>
+
+          <div className="space-y-3">
+            <h2 className="px-1 text-[13px] text-ink-2">Poikkeusjono</h2>
+            <FilterChips label="Suodata poikkeuksia" items={workChips} value={filter} onChange={setFilter} />
+
+            {visible.length === 0 ? (
+              <p className="px-1 text-[13px] text-ink-2">Ei avoimia poikkeuksia.</p>
+            ) : (
+              <Section>
+                {visible.map((item) => (
+                  <ListRow
+                    key={item.id}
+                    title={item.title}
+                    secondary={`${workKindLabel(item.kind)} · ${item.detail}`}
+                    trailing={
+                      item.retryJobId ? (
+                        <ActionPill
+                          onClick={() => void retry(item.retryJobId!)}
+                          disabled={retryingId !== null}
+                          ariaLabel={`Yritä uudelleen: ${item.title}`}
+                        >
+                          {retryingId === item.retryJobId ? "Käynnistetään…" : "Yritä uudelleen"}
+                        </ActionPill>
+                      ) : item.href ? (
+                        <ActionPill href={normalizeLegacyDetailPath(item.href) ?? item.href}>Avaa</ActionPill>
+                      ) : undefined
+                    }
+                  />
+                ))}
+              </Section>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

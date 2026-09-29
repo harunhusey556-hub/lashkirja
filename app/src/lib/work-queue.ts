@@ -16,6 +16,8 @@ export interface WorkQueueItem {
   title: string;
   detail: string;
   href: string | null;
+  /** A failed analysis has no screen of its own: its action is a retry of this job (BOOKS-14). */
+  retryJobId?: string;
 }
 
 const TAKE = 40;
@@ -132,7 +134,9 @@ export async function listWorkQueue(userId: string): Promise<WorkQueueItem[]> {
       kind: "corrupt_file",
       title: job.title,
       detail: job.error || "Tiedoston analysointi epäonnistui.",
-      href: "/tyot",
+      // Not "/tyot": that is the page the user is already on (BOOKS-14).
+      href: null,
+      retryJobId: job.id,
     });
   }
 

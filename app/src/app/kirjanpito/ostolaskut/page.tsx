@@ -12,6 +12,8 @@ import {
   readJson,
   redirectToLogin,
 } from "@/components/clientFetch";
+import { showToast } from "@/lib/toast";
+import { hapticNotify } from "@/lib/haptics";
 import { formatDate, formatDayMonth, formatEur, parseFinnishNumber } from "@/lib/format";
 import { isValidReferenceNumber, normalizeReference } from "@/lib/finnish-reference";
 import { PURCHASE_STATUS } from "@/lib/status-labels";
@@ -157,8 +159,8 @@ export default function PurchaseInvoicesPage() {
         redirectToLogin();
         return;
       }
+      // Shown once, by ConnectionNotice/StaleBanner below; never a second banner (BOOKS-15).
       setLoadFailure(error);
-      setMessage(errorMessage(error, "Ostolaskujen haku epäonnistui"));
       setStatus((current) => (current === "ready" ? "ready" : "error"));
     }
   }, [filter]);
@@ -332,13 +334,20 @@ export default function PurchaseInvoicesPage() {
         response,
         "Kohdistus epäonnistui"
       );
-      setMessage(
-        `Kohdistettiin ${result.applied.length} maksua viitenumerolla. ` +
-          `${result.suggestions.length} mahdollista osumaa vaatii tarkistuksen.`
-      );
+      // The outcome as a toast (BOOKS-29): it confirms the bulk write where the user is looking.
+      void hapticNotify("success");
+      showToast({
+        tone: "success",
+        text:
+          result.applied.length === 0 && result.suggestions.length === 0
+            ? "Ei kohdistettavia maksuja."
+            : `Kohdistettiin ${result.applied.length} maksua viitenumerolla. ` +
+              `${result.suggestions.length} mahdollista osumaa vaatii tarkistuksen.`,
+      });
       await Promise.all([load(), loadCounts()]);
     } catch (error) {
-      setMessage(errorMessage(error, "Kohdistus epäonnistui"));
+      void hapticNotify("error");
+      showToast({ tone: "error", text: errorMessage(error, "Kohdistus epäonnistui") });
     } finally {
       setBusy(false);
     }
@@ -491,6 +500,7 @@ export default function PurchaseInvoicesPage() {
               <label className={label} htmlFor="pi-supplier">Toimittaja</label>
               <input
                 id="pi-supplier"
+                enterKeyHint="next"
                 className={field}
                 value={form.supplierName}
                 onChange={(e) => setForm({ ...form, supplierName: e.target.value })}
@@ -511,6 +521,7 @@ export default function PurchaseInvoicesPage() {
                 <label className={label} htmlFor="pi-gross">Summa (€)</label>
                 <input
                   id="pi-gross"
+                enterKeyHint="next"
                   className={field}
                   value={form.gross}
                   onChange={(e) => setForm({ ...form, gross: e.target.value })}
@@ -528,6 +539,7 @@ export default function PurchaseInvoicesPage() {
                 <label className={label} htmlFor="pi-vat">ALV (€)</label>
                 <input
                   id="pi-vat"
+                enterKeyHint="next"
                   className={field}
                   value={form.vat}
                   onChange={(e) => setForm({ ...form, vat: e.target.value })}
@@ -579,6 +591,7 @@ export default function PurchaseInvoicesPage() {
                 <label className={label} htmlFor="pi-reference">Viitenumero</label>
                 <input
                   id="pi-reference"
+                enterKeyHint="next"
                   className={field}
                   value={form.reference}
                   onChange={(e) => setForm({ ...form, reference: e.target.value })}
@@ -601,6 +614,7 @@ export default function PurchaseInvoicesPage() {
                 <label className={label} htmlFor="pi-number">Laskun numero</label>
                 <input
                   id="pi-number"
+                enterKeyHint="done"
                   className={field}
                   value={form.invoiceNumber}
                   onChange={(e) => setForm({ ...form, invoiceNumber: e.target.value })}

@@ -149,7 +149,7 @@ test("captures offline, survives a restart, sends on reconnect, and warns before
   await expect(
     page.getByText("Ei yhteyttä. Kuva tallennettiin ja lähetetään automaattisesti, kun yhteys palaa.")
   ).toBeVisible();
-  await expect(page.getByText("Odottaa lähetystä")).toBeVisible();
+  await expect(page.getByText("Odottaa yhteyttä")).toBeVisible();
   await expect(page.getByText("Jonossa")).toBeVisible();
 
   // ---- restart: close this page, open a new one in the same context ----
@@ -161,7 +161,7 @@ test("captures offline, survives a restart, sends on reconnect, and warns before
   // ---- reconnect: within 10 s the row turns done ----
   await goOnline(relaunched);
   await expect(
-    relaunched.getByText("Lähetetty. Kuitti löytyy tarkistettavista, kun se on luettu.")
+    relaunched.getByText("1 kuva lähetetty.", { exact: false })
   ).toBeVisible({ timeout: 10_000 });
 
   // ---- the pending receipt landed in Tarkistettavat, unreadable variant
