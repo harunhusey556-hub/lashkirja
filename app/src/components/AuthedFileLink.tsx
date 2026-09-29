@@ -1,8 +1,8 @@
 "use client";
 
-import { useState } from "react";
 import { IS_MOBILE_BUILD } from "@/lib/build-target";
 import { openAuthedFile } from "@/lib/authed-file";
+import { showToast } from "@/lib/toast";
 
 /**
  * A link to an authenticated file (PDF, CSV, zip). On the web build it is a
@@ -26,8 +26,6 @@ export function AuthedFileLink({
   className?: string;
   children: React.ReactNode;
 }) {
-  const [error, setError] = useState<string | null>(null);
-
   if (!IS_MOBILE_BUILD) {
     // No target/rel here: today's per-site behaviour (a plain same-tab
     // link, letting Content-Disposition drive attachment vs. inline)
@@ -39,31 +37,21 @@ export function AuthedFileLink({
     );
   }
 
+  // A failure is a toast (SHELL-13/23), not a fixed paragraph that stays
+  // until the next tap.
   return (
-    <>
-      <a
-        href={href}
-        aria-label={title}
-        className={className}
-        onClick={(event) => {
-          event.preventDefault();
-          setError(null);
-          void openAuthedFile(href, fallbackName, title).catch(() => {
-            setError("Tiedosto ei ole saatavilla ilman yhteyttä.");
-          });
-        }}
-      >
-        {children}
-      </a>
-      {error && (
-        <p
-          role="alert"
-          className="fixed inset-x-4 z-50 rounded-card bg-danger px-4 py-3 text-center text-sm text-canvas"
-          style={{ bottom: "max(1rem, var(--safe-bottom))" }}
-        >
-          {error}
-        </p>
-      )}
-    </>
+    <a
+      href={href}
+      aria-label={title}
+      className={className}
+      onClick={(event) => {
+        event.preventDefault();
+        void openAuthedFile(href, fallbackName, title).catch(() => {
+          showToast({ tone: "error", text: "Tiedosto ei ole saatavilla ilman yhteyttä." });
+        });
+      }}
+    >
+      {children}
+    </a>
   );
 }
