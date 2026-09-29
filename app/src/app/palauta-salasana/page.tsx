@@ -12,8 +12,8 @@ import { buttonClass } from "@/components/control-styles";
 import { Button } from "@/components/ui";
 import { IS_MOBILE_BUILD } from "@/lib/build-target";
 import { hapticNotify } from "@/lib/haptics";
+import { PASSWORD_MIN as MIN_PASSWORD_LENGTH } from "@/lib/session-policy";
 
-const MIN_PASSWORD_LENGTH = 10;
 
 const noSubscribe = () => () => {};
 /** True in an iPhone/iPad browser outside the bundled app, where the reset

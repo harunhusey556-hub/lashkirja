@@ -7,9 +7,9 @@ import { PasswordField } from "@/components/ds/PasswordField";
 import { useSession } from "@/components/SessionProvider";
 import { Button, FormError } from "@/components/ui";
 import { hapticNotify } from "@/lib/haptics";
+import { PASSWORD_MIN as MIN_PASSWORD_LENGTH } from "@/lib/session-policy";
 import { showToast } from "@/lib/toast";
 
-const MIN_PASSWORD_LENGTH = 10;
 
 type Errors = { current?: string; next?: string; repeat?: string; form?: string };
 

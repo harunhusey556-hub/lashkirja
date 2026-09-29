@@ -22,7 +22,7 @@
  * 1. On the login screen, choose Unohditko salasanan?
  * 2. Enter the account email. The reply is the same whether or not the
  *    account exists.
- * 3. Open the link and choose a new password (at least 10 characters).
+ * 3. Open the link and choose a new password (at least 8 characters).
  * 4. Sign in. Other devices are signed out.
  *
  * While signed in, change the password under Asetukset → Turvallisuus. The
