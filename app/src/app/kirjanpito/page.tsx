@@ -143,7 +143,7 @@ export default function KirjanpitoPage() {
   const alvHref = alvKey ? `/kirjanpito/alv?period=${alvKey}` : "/kirjanpito/alv";
 
   return (
-    <div className="space-y-6 pb-6">
+    <div className="space-y-6">
       <PageTitle title="Kirjanpito" />
 
       <Section title="Tapahtumat ja kuitit">

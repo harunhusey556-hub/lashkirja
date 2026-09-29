@@ -203,7 +203,7 @@ export default function CustomersPage() {
   const filtered = Boolean(search) || showArchived;
 
   return (
-    <div className="space-y-6 pb-6">
+    <div className="space-y-6">
       <PageTitle
         title="Asiakkaat"
         action={

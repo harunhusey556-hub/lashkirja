@@ -153,7 +153,7 @@ export default function ALVRaporttiPage() {
   }
 
   return (
-    <div className="space-y-6 pb-6">
+    <div className="space-y-6">
       <PageTitle title="ALV-ilmoitus" subtitle="Kuukauden tai neljänneksen arvonlisävero." />
 
       {data && !data.vatRegistered && (

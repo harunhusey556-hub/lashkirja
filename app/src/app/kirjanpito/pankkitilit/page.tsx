@@ -292,7 +292,7 @@ export default function BankAccountsPage() {
 
   return (
     <>
-      <div className="space-y-6 pb-6">
+      <div className="space-y-6">
         <PageTitle
           title="Pankkitilit"
           subtitle="Kirjanpidon tilit, kuukausien loppusaldot ja pankkiyhteys."

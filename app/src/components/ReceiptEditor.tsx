@@ -749,7 +749,7 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
       : "Ei kategoriaa";
 
   return (
-    <div className="space-y-6 pb-6">
+    <div className="space-y-6">
       {isNewStep2 && (
         <div className="flex items-center gap-3 rounded-card border border-success/20 bg-success/10 p-4">
           <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-success/20 text-success">

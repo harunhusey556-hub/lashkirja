@@ -67,7 +67,7 @@ export default function StatementDetailPage() {
 
   return (
     <>
-      <div className="space-y-6 pb-6">
+      <div className="space-y-6">
         {loadError ? (
           <ErrorState
             message={loadError}

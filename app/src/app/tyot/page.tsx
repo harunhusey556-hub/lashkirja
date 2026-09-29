@@ -147,7 +147,7 @@ export default function TyotPage() {
   const visible = filter === "all" ? items : items.filter((item) => item.kind === filter);
 
   return (
-    <div className="space-y-6 pb-6">
+    <div className="space-y-6">
       <PageTitle
         title="Työt ja poikkeukset"
         subtitle="Pankkihaun, sähköpostin ja kuitin analysoinnin tila sekä avoimet poikkeukset."

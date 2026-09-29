@@ -355,7 +355,7 @@ export default function PurchaseInvoicesPage() {
 
   return (
     <>
-      <div className="space-y-6 pb-6">
+      <div className="space-y-6">
         <PageTitle
           title="Ostolaskut"
           subtitle="Mitä olet velkaa ja milloin."

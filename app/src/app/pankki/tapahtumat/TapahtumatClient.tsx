@@ -206,7 +206,7 @@ export default function TapahtumatClient() {
   const hasFilters = Boolean(monthFilter || accountFilter || query);
 
   return (
-    <div className="space-y-6 pb-6">
+    <div className="space-y-6">
       <PageTitle title="Tapahtumat" subtitle="Tapahtumat tulevat yhdistetystä pankista." />
 
       <div className="space-y-3">

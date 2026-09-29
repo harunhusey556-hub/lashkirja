@@ -183,7 +183,7 @@ export default function ReportsPage() {
 
   return (
     <>
-      <div className="space-y-6 pb-6">
+      <div className="space-y-6">
         <PageTitle title="Raportit" subtitle="Tuloslaskelma kuukausittain ja tiedot ulos kirjanpitäjälle." />
         <YearSwitcher year={year} currentYear={currentYear} onChange={setYear} />
 

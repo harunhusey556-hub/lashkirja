@@ -258,7 +258,7 @@ function InvoicesPageContent() {
   const reachedListLimit = invoices.length === INVOICE_LIST_LIMIT;
 
   return (
-    <div className="space-y-6 pb-6">
+    <div className="space-y-6">
       <PageTitle
         title="Myynti"
         action={

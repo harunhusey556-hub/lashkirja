@@ -260,7 +260,7 @@ function CustomerDetail() {
 
   return (
     <>
-      <div className="space-y-6 pb-6">
+      <div className="space-y-6">
         {state === "loading" && <LoadingState label="Haetaan asiakasta…" />}
         {state === "error" && (
           <ErrorState message={message || "Haku epäonnistui"} onRetry={() => void load()} />

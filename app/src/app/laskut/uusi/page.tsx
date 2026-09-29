@@ -93,7 +93,7 @@ function NewInvoicePage() {
   if (!customers) return <LoadingState label="Haetaan asiakkaita…" />;
 
   return (
-    <div className="space-y-6 pb-6">
+    <div className="space-y-6">
       <PageTitle title="Uusi lasku" subtitle="Luonnos tallentuu tälle laitteelle, kunnes lähetät laskun." />
       {customers.length === 0 ? (
         <p className="px-1 text-[15px] text-ink-2">

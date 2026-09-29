@@ -71,7 +71,7 @@ export default function TaydennysPage() {
   const loading = rows === null || receipts === null;
 
   return (
-    <div className="space-y-6 pb-6">
+    <div className="space-y-6">
       <PageTitle
         title="Täsmäytys"
         subtitle={`Avoimet pankkitapahtumat ja kuitit${monthAblative(month) ? ` ${monthAblative(month)}` : ""}.`}

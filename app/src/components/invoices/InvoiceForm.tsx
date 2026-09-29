@@ -276,7 +276,7 @@ export function InvoiceForm({
   return (
     <form
       noValidate
-      className="space-y-6 pb-6"
+      className="space-y-6"
       onSubmit={(event) => {
         event.preventDefault();
         const result = validateInvoiceForm(values);

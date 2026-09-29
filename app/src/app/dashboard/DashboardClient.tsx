@@ -184,7 +184,7 @@ export default function DashboardClient() {
     : 0;
 
   return (
-    <div className="space-y-6 pb-20">
+    <div className="space-y-6">
       <PageTitle title={monthName} subtitle={subtitle} />
       <MonthSwitcher
         month={month}
