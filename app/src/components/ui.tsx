@@ -3,6 +3,7 @@
 import { cloneElement, isValidElement, useId, type ButtonHTMLAttributes, type ReactElement, type ReactNode } from "react";
 import { buttonClass, type ButtonVariant } from "@/components/control-styles";
 import { invalidFieldProps } from "@/lib/focus-field";
+import { hapticImpact, type HapticImpactStyle } from "@/lib/haptics";
 
 export { buttonClass, chipClass, controlClass } from "@/components/control-styles";
 
@@ -14,6 +15,8 @@ type ButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & {
   variant?: ButtonVariant;
   /** Shown when the control is disabled, so the reason is not only a tooltip. */
   disabledReason?: string;
+  /** Native tap on click. Default: light impact for primary and danger, none otherwise. */
+  haptic?: HapticImpactStyle | false;
 };
 
 /**
@@ -30,9 +33,12 @@ export function Button({
   children,
   disabled,
   disabledReason,
+  haptic,
   type = "button",
+  onClick,
   ...props
 }: ButtonProps) {
+  const impact = haptic ?? (variant === "primary" || variant === "danger" ? "light" : false);
   const isBusy = busy;
   const isDisabled = Boolean(disabled || (isBusy && !allowBusySubmit));
   const reasonId = useId();
@@ -41,6 +47,10 @@ export function Button({
     <button
       type={type}
       {...props}
+      onClick={(event) => {
+        if (impact) void hapticImpact(impact);
+        onClick?.(event);
+      }}
       disabled={isDisabled}
       aria-busy={isBusy || undefined}
       aria-describedby={showReason ? reasonId : props["aria-describedby"]}

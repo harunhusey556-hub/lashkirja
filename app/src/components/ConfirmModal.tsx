@@ -2,7 +2,8 @@
 
 import { useEffect, useId, useRef, useState } from "react";
 import { useFocusTrap } from "@/components/useFocusTrap";
-import { settleConfirm } from "@/lib/confirm-action";
+import { CONFIRM_FAILED, settleConfirm } from "@/lib/confirm-action";
+import { isUserFacingMessage } from "@/components/clientFetch";
 import { useOverlayLock } from "@/lib/overlay-lock";
 import { subscribeOverlayClose } from "@/lib/screen-state";
 import { Button } from "@/components/ui";
@@ -66,13 +67,15 @@ export default function ConfirmModal({
       if (attemptRef.current !== attempt) return;
       setBusy(false);
       if (outcome.close) onCancel();
-      else setError(outcome.message);
+      // Raw server/network text never reaches the dialog (L5).
+      else setError(isUserFacingMessage(outcome.message) ? outcome.message : CONFIRM_FAILED);
     });
   }
 
   useEffect(() => {
     if (!closing) return;
-    const timer = window.setTimeout(() => setClosing(false), 180);
+    // Exit: --dur-pop (150 ms) plus a frame.
+    const timer = window.setTimeout(() => setClosing(false), 160);
     return () => window.clearTimeout(timer);
   }, [closing]);
 
@@ -172,6 +175,7 @@ export default function ConfirmModal({
               variant={isDestructive ? "danger" : "primary"}
               className="flex-1"
               onClick={confirm}
+              haptic={isDestructive ? "medium" : "light"}
               busy={busy}
               busyLabel="Odota…"
             >

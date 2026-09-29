@@ -2,11 +2,11 @@ import { describe, expect, it } from "vitest";
 import { motionFeedback } from "./motion-feedback";
 
 describe("reduced motion", () => {
-  it("drops animation, shimmer, and haptics together", () => {
+  it("drops animation and shimmer but keeps haptics", () => {
     expect(motionFeedback(true)).toEqual({
       animate: false,
       shimmer: false,
-      haptic: false,
+      haptic: true,
       pressed: true,
       statusText: true,
     });

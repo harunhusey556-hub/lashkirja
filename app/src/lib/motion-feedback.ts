@@ -6,12 +6,13 @@ export type MotionFeedback = {
   statusText: boolean;
 };
 
-/** Reduced motion drops movement and haptics. Pressed state and status text stay. */
+/** Reduced motion drops movement. Haptics, pressed state and status text stay:
+ * iOS "Reduce Motion" is unrelated to haptics (System Haptics governs them). */
 export function motionFeedback(reducedMotion: boolean): MotionFeedback {
   return {
     animate: !reducedMotion,
     shimmer: !reducedMotion,
-    haptic: !reducedMotion,
+    haptic: true,
     pressed: true,
     statusText: true,
   };
@@ -22,6 +23,3 @@ export function readReducedMotion(): boolean {
   return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 }
 
-export function motionAllowsHaptic(): boolean {
-  return motionFeedback(readReducedMotion()).haptic;
-}

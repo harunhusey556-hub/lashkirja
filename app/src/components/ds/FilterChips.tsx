@@ -1,5 +1,7 @@
 "use client";
 
+import { hapticSelection } from "@/lib/haptics";
+
 /**
  * Page level (default): one horizontally scrolling row that bleeds to the screen edge.
  * `wrap`: for a short option set inside a card, where the bleed would cut the last chip at the
@@ -22,7 +24,10 @@ export function FilterChips<T extends string>({ label, items, value, onChange, w
             key={item.id}
             type="button"
             aria-pressed={selected}
-            onClick={() => onChange(item.id)}
+            onClick={() => {
+              if (!selected) void hapticSelection();
+              onChange(item.id);
+            }}
             className={`ds-chip active-press inline-flex min-h-11 shrink-0 items-center gap-1.5 rounded-full border px-3.5 text-sm font-medium ${
               selected ? "border-ink bg-ink text-canvas" : "border-line bg-surface text-ink"
             }`}
