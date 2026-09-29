@@ -32,7 +32,6 @@ import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { useEditorSession } from "@/components/form-session";
 import { detailHref } from "@/lib/routes";
 import { Button, FormError, SavePhaseNote, buttonClass, chipClass, controlClass } from "@/components/ui";
-import { SelectMenu } from "@/components/SelectMenu";
 import { Check, X } from "lucide-react";
 import { Icon } from "@/components/ds/Icon";
 import { formatDate, formatEur, parseMoneyInput } from "@/lib/format";
@@ -962,6 +961,9 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
                       <input
                         id="receipt-vendor"
                         type="text"
+                        autoCapitalize="words"
+                        autoComplete="off"
+                        enterKeyHint="next"
                         required
                         value={formData.vendor}
                         onChange={(e) =>
@@ -989,6 +991,8 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
                         <input
                           id="receipt-date"
                           type="date"
+                          lang="fi"
+                          autoComplete="off"
                           required
                           value={formData.date}
                           onChange={(e) =>
@@ -1015,6 +1019,8 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
                           id="receipt-total"
                           type="text"
                           inputMode="decimal"
+                          autoComplete="off"
+                          enterKeyHint="next"
                           placeholder="0,00"
                           required
                           value={formData.totalAmount}
@@ -1077,20 +1083,16 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
                     return (
                       <div key={index} className="grid grid-cols-[1fr_1fr_auto] items-end gap-2">
                         <div>
-                          <SelectMenu
+                          <label htmlFor={`receipt-vat-rate-${index}`} className={LABEL_CLASS}>
+                            ALV-%
+                          </label>
+                          <select
                             id={`receipt-vat-rate-${index}`}
-                            label="ALV-%"
                             value={detail.rate}
-                            options={[
-                              ...(isLegacyRate
-                                ? [{ value: detail.rate, label: `${detail.rate.replace(".", ",")} %` }]
-                                : []),
-                              { value: "25.5", label: "25,5 %", description: "Yleinen (mm. palvelut & tuotteet)" },
-                              { value: "13.5", label: "13,5 %", description: "Ravintola, kirjat, liikunta" },
-                              { value: "10", label: "10 %", description: "Sanoma-/aikakauslehdet" },
-                              { value: "0", label: "0 %", description: "Vienti / veroton" },
-                            ]}
-                            onChange={(newRate) => {
+                            autoComplete="off"
+                            className={controlClass}
+                            onChange={(event) => {
+                              const newRate = event.target.value;
                               setFormData((prev) => {
                                 let newAmount = detail.amount;
                                 if (prev.vatDetails.length === 1 && prev.totalAmount) {
@@ -1111,7 +1113,15 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
                                 };
                               });
                             }}
-                          />
+                          >
+                            {isLegacyRate ? (
+                              <option value={detail.rate}>{detail.rate.replace(".", ",")} %</option>
+                            ) : null}
+                            <option value="25.5">25,5 %</option>
+                            <option value="13.5">13,5 %</option>
+                            <option value="10">10 %</option>
+                            <option value="0">0 %</option>
+                          </select>
                         </div>
                         <div>
                           <label htmlFor={`receipt-vat-amount-${index}`} className={LABEL_CLASS}>
@@ -1121,6 +1131,8 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
                             id={`receipt-vat-amount-${index}`}
                             type="text"
                             inputMode="decimal"
+                            autoComplete="off"
+                            enterKeyHint="next"
                             placeholder="0,00"
                             value={detail.amount}
                             onChange={(event) =>
@@ -1239,15 +1251,14 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
                 <p className={LABEL_CLASS} id="receipt-category-label">Kategoria</p>
                 {(formData.category || useCustomCategory) ? (
                   <div className="space-y-3">
-                    <SelectMenu
+                    <select
                       id="receipt-category"
-                      label="Valittu kategoria"
+                      aria-labelledby="receipt-category-label"
+                      className={controlClass}
+                      autoComplete="off"
                       value={useCustomCategory ? "custom" : formData.category}
-                      options={[
-                        ...RECEIPT_CATEGORIES.map((c) => ({ value: c.id, label: c.label })),
-                        { value: "custom", label: "Muu kategoria…" },
-                      ]}
-                      onChange={(newCat) => {
+                      onChange={(event) => {
+                        const newCat = event.target.value;
                         if (newCat === "custom") {
                           setUseCustomCategory(true);
                         } else {
@@ -1255,7 +1266,14 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
                           setFormData({ ...formData, category: newCat });
                         }
                       }}
-                    />
+                    >
+                      {RECEIPT_CATEGORIES.map((category) => (
+                        <option key={category.id} value={category.id}>
+                          {category.label}
+                        </option>
+                      ))}
+                      <option value="custom">Muu kategoria…</option>
+                    </select>
                     {useCustomCategory && (
                       <div>
                         <label htmlFor="receipt-custom-category" className={LABEL_CLASS}>
@@ -1264,6 +1282,9 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
                         <input
                           id="receipt-custom-category"
                           type="text"
+                          autoCapitalize="sentences"
+                          autoComplete="off"
+                          enterKeyHint="done"
                           value={formData.customCategory}
                           onChange={(e) =>
                             setFormData({
