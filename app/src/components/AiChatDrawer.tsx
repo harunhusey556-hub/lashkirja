@@ -944,7 +944,16 @@ export function AiChatDrawer({
         className="relative mx-auto min-h-0 w-full max-w-2xl flex-1 overflow-y-auto overscroll-contain px-4 py-4"
       >
         {/* C1.1: the thread always has a 1 px scroll range, so it rubber-bands. */}
-        <div className="thread-fill space-y-4">
+        {/* AX-06 / R7: the conversation is a polite log. aria-busy holds the announcement while a reply
+            streams, so VoiceOver reads the finished answer once instead of every token. */}
+        <div
+          className="thread-fill space-y-4"
+          role="log"
+          aria-label="Keskustelu"
+          aria-live="polite"
+          aria-relevant="additions"
+          aria-busy={loading}
+        >
         {hasMore && (
           <button
             type="button"

@@ -10,6 +10,7 @@ import { focusFirstInvalid } from "@/lib/focus-field";
 import { isValidBusinessId, normalizeBusinessId } from "@/lib/finnish-reference";
 import { hapticNotify } from "@/lib/haptics";
 import { formatIban, isValidIban, normalizeIban } from "@/lib/iban";
+import { CopyButton } from "@/components/ds/CopyButton";
 import { parseFinnishNumber } from "@/lib/format";
 import { showToast } from "@/lib/toast";
 
@@ -248,6 +249,11 @@ export default function SellerProfileCard() {
               enterKeyHint="next"
               placeholder="0201256-6"
             />
+            {values.businessId.trim() ? (
+              <div className="mt-1 flex justify-end">
+                <CopyButton text={values.businessId.trim()} what="Y-tunnus" />
+              </div>
+            ) : null}
           </Field>
           <Field label="Puhelin" htmlFor="sp-phone">
             <input
@@ -327,6 +333,11 @@ export default function SellerProfileCard() {
             enterKeyHint="next"
             placeholder="FI21 1234 5600 0007 85"
           />
+          {values.invoiceIban.trim() ? (
+            <div className="mt-1 flex justify-end">
+              <CopyButton text={values.invoiceIban.trim()} what="IBAN" />
+            </div>
+          ) : null}
         </Field>
         <Field label="BIC" htmlFor="sp-bic">
           <input

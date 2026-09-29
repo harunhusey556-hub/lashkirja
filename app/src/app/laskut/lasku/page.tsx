@@ -18,6 +18,7 @@ import { newIdempotencyKey } from "@/lib/idempotency-key";
 import { helsinkiCalendarDate } from "@/lib/validation";
 import { formatReference } from "@/lib/finnish-reference";
 import { copyToClipboard } from "@/lib/clipboard";
+import { CopyButton } from "@/components/ds/CopyButton";
 import { shareContent } from "@/lib/share";
 import { openAuthedFile } from "@/lib/authed-file";
 import { AuthedFileLink } from "@/components/AuthedFileLink";
@@ -899,7 +900,11 @@ function InvoiceDetail() {
               rows={[
                 { label: "Päivätty", value: formatDate(invoice.issueDate) },
                 { label: "Eräpäivä", value: formatDate(invoice.dueDate) },
-                { label: "Viite", value: formatReference(invoice.reference) },
+                {
+                  label: "Viite",
+                  value: formatReference(invoice.reference),
+                  ...(invoice.reference ? { copy: { text: formatReference(invoice.reference), what: "Viitenumero" } } : {}),
+                },
                 { label: "Veroton", value: formatEur(invoice.net) },
                 ...vatBreakdown(invoice.lines).map((row) => ({
                   label: `ALV ${String(row.rate).replace(".", ",")} %`,
@@ -1301,7 +1306,10 @@ function InvoiceDetail() {
               </div>
               <div className="flex justify-between gap-3">
                 <span className="shrink-0 text-ink-2">Tilinumero</span>
-                <span className="min-w-0 break-all text-right text-ink">{review.iban ?? "–"}</span>
+                <span className="flex min-w-0 items-center justify-end gap-3 text-right text-ink">
+                  <span className="min-w-0 select-text break-all">{review.iban ?? "–"}</span>
+                  {review.iban ? <CopyButton text={review.iban} what="IBAN" /> : null}
+                </span>
               </div>
               <div className="flex justify-between gap-3">
                 <span className="text-ink-2">Liite</span>

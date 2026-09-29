@@ -672,7 +672,9 @@ export default function PurchaseInvoicesPage() {
                 { label: "Veroton", value: formatEur(detailInvoice.net) },
                 { label: "ALV", value: formatEur(detailInvoice.vat) },
                 { label: "Yhteensä", value: formatEur(detailInvoice.gross) },
-                ...(detailInvoice.reference ? [{ label: "Viite", value: detailInvoice.reference }] : []),
+                ...(detailInvoice.reference
+                  ? [{ label: "Viite", value: detailInvoice.reference, copy: { text: detailInvoice.reference, what: "Viitenumero" } }]
+                  : []),
                 ...(detailInvoice.payments.length > 0
                   ? [{ label: "Maksettu", value: formatEur(detailInvoice.paid) }]
                   : []),

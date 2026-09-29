@@ -12,7 +12,8 @@ import {
 import { BalanceTable, type MonthRow } from "@/components/bank/BalanceTable";
 import { apiFetch, errorMessage, isUnauthorized, readJson, redirectToLogin } from "@/components/clientFetch";
 import { formatEur, formatMonth } from "@/lib/format";
-import { maskIban } from "@/lib/iban";
+import { formatIban, maskIban } from "@/lib/iban";
+import { CopyButton } from "@/components/ds/CopyButton";
 import BankConnectCard from "@/components/BankConnectCard";
 import { Button } from "@/components/ui";
 import { Card, ListRow, PageTitle, Section, Skeleton, SkeletonGroup, useSkeletonFade } from "@/components/ds";
@@ -466,6 +467,12 @@ export default function BankAccountsPage() {
             <p className="text-caption text-ink-2">{accountSecondary(detailAccount)}</p>
 
             <MessageBanner message={message} isError={messageIsError} />
+            {detailAccount.iban ? (
+              // AX-07, R25: the row shows the IBAN masked; the full number can be copied here.
+              <div className="flex justify-start">
+                <CopyButton text={formatIban(detailAccount.iban)} what="IBAN" />
+              </div>
+            ) : null}
 
             <div className="flex flex-wrap gap-2">
               <Button

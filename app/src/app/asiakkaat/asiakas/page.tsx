@@ -391,6 +391,9 @@ function CustomerDetail() {
                   ),
                 },
                 ...(customer.notes ? [{ label: "Muistiinpanot", value: customer.notes }] : []),
+                ...(customer.businessId
+                  ? [{ label: "Y-tunnus", value: customer.businessId, copy: { text: customer.businessId, what: "Y-tunnus" } }]
+                  : []),
                 { label: "Maksuaika", value: `${customer.defaultPaymentTermDays} pv` },
                 { label: "Avoimia laskuja", value: String(detail.openInvoiceCount) },
                 { label: "Laskutettu yhteensä", value: formatEur(detail.invoicedTotal) },
