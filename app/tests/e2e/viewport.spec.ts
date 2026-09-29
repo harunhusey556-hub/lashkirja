@@ -139,9 +139,10 @@ test.describe("confirm dialog", () => {
     await page.getByRole("button", { name: "Lisää toimintoja" }).click();
     const remove = page.getByRole("button", { name: "Poista" });
     await remove.click();
-    const dialog = page.getByRole("dialog", { name: "Poistetaanko asiakas?" });
+    // A destructive confirm is an alert dialog (AX-23, R6) titled by an h2 (AX-11).
+    const dialog = page.getByRole("alertdialog", { name: "Poistetaanko asiakas?" });
     await expect(dialog).toBeVisible();
-    const titleId = await dialog.locator("h3").getAttribute("id");
+    const titleId = await dialog.locator("h2").getAttribute("id");
     const descriptionId = await dialog.locator("p").first().getAttribute("id");
     expect(titleId).toBeTruthy();
     expect(descriptionId).toBeTruthy();

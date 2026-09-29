@@ -55,6 +55,7 @@ import {
   type NavDirection,
 } from "@/lib/nav-direction";
 import { hapticImpact } from "@/lib/haptics";
+import { EDGE_FINISH_MS, EDGE_ZONE, edgeSwipeCommits, VelocityTracker } from "@/lib/gesture";
 import { anyFormDirty, requestLeave } from "@/lib/form-guard";
 import { UnsavedChangesHost } from "@/components/UnsavedChangesHost";
 import { captureWithCamera, chooseDocuments, isNativeShell } from "@/lib/native-pick";
@@ -536,10 +537,9 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     const parentPath = inAppPrevious(pathname) ?? back?.href ?? null;
     const barFollows = Boolean(isDetail && tabBar && parentPath && matchNav(parentPath)?.kind !== "detail");
 
-    const EDGE = 24;
     let startX = 0;
     let startY = 0;
-    let startTime = 0;
+    const tracker = new VelocityTracker();
     let dx = 0;
     let tracking = false;
     let decided = false;
@@ -574,7 +574,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       if (swipeLock.current) return;
       if (event.touches.length !== 1) return;
       const touch = event.touches[0];
-      if (touch.clientX > EDGE) return;
+      if (touch.clientX > EDGE_ZONE) return;
       // IA-27: a chip row that bleeds to the screen edge keeps its own
       // horizontal scroll only while it is scrolled away from its start. At
       // its start a rightward drag cannot scroll it, so the back swipe wins.
@@ -585,7 +585,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       dx = 0;
       startX = touch.clientX;
       startY = touch.clientY;
-      startTime = performance.now();
+      tracker.reset(touch.clientX);
     };
 
     const onTouchMove = (event: TouchEvent) => {
@@ -610,6 +610,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         }
       }
       event.preventDefault();
+      tracker.add(touch.clientX);
       dx = Math.max(0, moveX);
       main.style.transform = `translateX(${dx}px)`;
       const progress = Math.min(1, dx / Math.max(main.offsetWidth, 1));
@@ -621,10 +622,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       if (!tracking) return;
       tracking = false;
       if (!decided) return;
-      const elapsed = Math.max(performance.now() - startTime, 1);
-      const velocity = dx / elapsed;
-      const commit =
-        dx > window.innerWidth * 0.32 || (dx > 56 && velocity > 0.45);
+      const commit = edgeSwipeCommits(dx, window.innerWidth, tracker.velocity());
       const reduceMotion = prefersReducedMotion();
 
       if (commit) {
@@ -650,14 +648,14 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
             return;
           }
           const curve = "var(--ease-drawer)";
-          main.style.transition = `transform 200ms ${curve}`;
+          main.style.transition = `transform ${EDGE_FINISH_MS}ms ${curve}`;
           main.style.transform = "translateX(100%)";
-          moveBar(1, `transform 200ms ${curve}`);
+          moveBar(1, `transform ${EDGE_FINISH_MS}ms ${curve}`);
           if (landedUnder) {
-            landedUnder.style.transition = `transform 200ms ${curve}`;
+            landedUnder.style.transition = `transform ${EDGE_FINISH_MS}ms ${curve}`;
             landedUnder.style.transform = "translateX(0)";
           } else {
-            main.style.transition = `transform 200ms ${curve}, opacity 200ms ${curve}`;
+            main.style.transition = `transform ${EDGE_FINISH_MS}ms ${curve}, opacity ${EDGE_FINISH_MS}ms ${curve}`;
             main.style.opacity = "0.4";
           }
           window.setTimeout(navigate, 190);
@@ -677,13 +675,13 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         go();
       } else {
         const curve = "var(--ease-drawer)";
-        main.style.transition = `transform 200ms ${curve}`;
+        main.style.transition = `transform ${EDGE_FINISH_MS}ms ${curve}`;
         main.style.transform = "translateX(0)";
         if (under) {
-          under.style.transition = `transform 200ms ${curve}`;
+          under.style.transition = `transform ${EDGE_FINISH_MS}ms ${curve}`;
           under.style.transform = "translateX(-28%)";
         }
-        moveBar(0, `transform 200ms ${curve}`);
+        moveBar(0, `transform ${EDGE_FINISH_MS}ms ${curve}`);
         const leaving = under;
         under = null;
         window.setTimeout(() => {
@@ -1165,7 +1163,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                 <button
                   type="button"
                   onClick={() => startPick("statement")}
-                  className="flex w-full items-center gap-3 px-4 py-3.5 text-left active-press touch-target"
+                  className="press-row flex w-full items-center gap-3 px-4 py-3.5 text-left touch-target"
                 >
                   <IconTile>
                     <Icon icon={FileUp} />
@@ -1188,7 +1186,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                       setAddOpenOn(null);
                       requestLeave(() => goForward(row.href));
                     }}
-                    className="flex w-full items-center gap-3 px-4 py-3.5 text-left active-press touch-target"
+                    className="press-row flex w-full items-center gap-3 px-4 py-3.5 text-left touch-target"
                   >
                     <IconTile>
                       <Icon icon={row.icon} />
@@ -1222,7 +1220,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                   type="button"
                   onClick={(event) => goToRoot(event, avatarRoot())}
                   aria-current={activeTabId === "asetukset" ? "page" : undefined}
-                  className="w-full flex items-center gap-3 px-4 py-3.5 text-left active-press touch-target"
+                  className="press-row w-full flex items-center gap-3 px-4 py-3.5 text-left touch-target"
                 >
                   <IconTile>
                     <Icon icon={Settings} />
@@ -1233,7 +1231,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                   type="button"
                   onClick={requestSignOut}
                   disabled={signingOut}
-                  className="w-full flex items-center gap-3 px-4 py-3.5 text-left active-press disabled:opacity-60 touch-target"
+                  className="press-row w-full flex items-center gap-3 px-4 py-3.5 text-left disabled:opacity-60 touch-target"
                 >
                   <IconTile tone="danger">
                     {signingOut ? (

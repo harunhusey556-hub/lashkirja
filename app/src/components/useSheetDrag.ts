@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState, type RefObject } from "react";
 import { sheetDragOffset } from "@/components/BottomSheet";
+import { DECIDE_SLOP, sheetDragCommits, SPRING_BACK_MS, VelocityTracker } from "@/lib/gesture";
 
 interface SheetDragOptions {
   /** Attach only while the surface is open. */
@@ -14,11 +15,7 @@ interface SheetDragOptions {
   onDismiss: () => void;
 }
 
-/** Commit thresholds shared with BottomSheet (SHELL-10). */
-const COMMIT_RATIO = 0.35;
-const FLICK_DISTANCE = 80;
-const FLICK_VELOCITY = 0.5; // px/ms
-const SPRING_BACK_MS = 280;
+/** Thresholds and velocity come from lib/gesture (C8), shared with BottomSheet. */
 const DISMISS_MS = 240;
 
 /**
@@ -58,7 +55,7 @@ export function useSheetDrag({ active, panelRef, handleRef, onDismiss }: SheetDr
     let height = 1;
     let tracking = false;
     let decided = false;
-    let samples: { t: number; y: number }[] = [];
+    const tracker = new VelocityTracker();
     let suppressClickUntil = 0;
     let timer: number | null = null;
 
@@ -81,7 +78,7 @@ export function useSheetDrag({ active, panelRef, handleRef, onDismiss }: SheetDr
       startX = event.touches[0].clientX;
       startY = event.touches[0].clientY;
       height = panel.offsetHeight || 1;
-      samples = [{ t: performance.now(), y: startY }];
+      tracker.reset(startY);
     };
 
     const onTouchMove = (event: TouchEvent) => {
@@ -91,7 +88,7 @@ export function useSheetDrag({ active, panelRef, handleRef, onDismiss }: SheetDr
       const moveX = x - startX;
       const moveY = y - startY;
       if (!decided) {
-        if (Math.abs(moveY) < 6 && Math.abs(moveX) < 6) return;
+        if (Math.abs(moveY) < DECIDE_SLOP && Math.abs(moveX) < DECIDE_SLOP) return;
         if (Math.abs(moveY) < Math.abs(moveX)) {
           tracking = false;
           return;
@@ -104,9 +101,7 @@ export function useSheetDrag({ active, panelRef, handleRef, onDismiss }: SheetDr
       event.preventDefault();
       dy = sheetDragOffset(moveY);
       panel.style.transform = `translateY(${dy}px)`;
-      const now = performance.now();
-      samples.push({ t: now, y });
-      samples = samples.filter((sample) => now - sample.t <= 100);
+      tracker.add(y);
     };
 
     const onTouchEnd = () => {
@@ -114,10 +109,7 @@ export function useSheetDrag({ active, panelRef, handleRef, onDismiss }: SheetDr
       tracking = false;
       if (!decided) return;
       suppressClickUntil = performance.now() + 400;
-      const first = samples[0];
-      const last = samples[samples.length - 1];
-      const velocity = first && last && last.t > first.t ? (last.y - first.y) / (last.t - first.t) : 0;
-      const commit = dy > 0 && (dy > height * COMMIT_RATIO || (dy > FLICK_DISTANCE && velocity > FLICK_VELOCITY));
+      const commit = sheetDragCommits(dy, height, tracker.velocity());
       const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
       if (!commit) {

@@ -5,7 +5,7 @@ import { Icon, IconTile } from "@/components/ds/Icon";
 /** The same trailing chevron `ListRow`'s `chevron` draws, for rows built outside `ListRow`. */
 export function SettingsChevron() {
   return (
-    <span aria-hidden className="-mr-1 flex text-ink-2/60">
+    <span aria-hidden className="-mr-1 flex text-ink-2/80">
       <Icon icon={ChevronRight} />
     </span>
   );
@@ -21,7 +21,8 @@ export function SettingsGroup({
   return (
     <section>
       {/* px-1: the same inset as ds `Section` headings, so every group heading in the app lines up. */}
-      <h3 className="mb-2 px-1 text-caption font-normal text-ink-2">{label}</h3>
+      {/* h2: the groups sit directly under the page's h1 (AX-11, R1). */}
+      <h2 className="mb-2 px-1 text-caption font-normal text-ink-2">{label}</h2>
       <div className="overflow-hidden rounded-card border border-line bg-surface divide-y divide-line">
         {children}
       </div>
@@ -42,7 +43,8 @@ export function SettingsRow({
   icon?: LucideIcon;
 }) {
   return (
-    <Link href={href} className="active-press flex min-h-16 items-center gap-3 px-4 py-3 touch-target">
+    // A full-width row tints when pressed; it never scales (C7, IA-15).
+    <Link href={href} className="press-row flex min-h-16 items-center gap-3 px-4 py-3 touch-target">
       {icon ? (
         <IconTile>
           <Icon icon={icon} />

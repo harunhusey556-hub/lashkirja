@@ -1,6 +1,7 @@
 "use client";
 
 import { Card } from "@/components/ds";
+import { Switch } from "@/components/ds/Switch";
 import {
   biometricEnableLabel,
   biometricUnavailableCopy,
@@ -42,22 +43,12 @@ export function BiometricUnlockCard({
           </p>
         </div>
         {ready && (
-          <button
-            type="button"
-            role="switch"
-            aria-checked={enabled}
-            aria-label={enabled ? "Biometrinen avaus päällä" : biometricEnableLabel(bio.kind)}
-            onClick={() => (enabled ? onDisable() : onEnable())}
-            className={`relative mt-0.5 h-8 w-14 shrink-0 rounded-full transition-colors active-press before:absolute before:inset-x-0 before:-inset-y-1.5 before:content-[''] ${
-              enabled ? "bg-accent" : "bg-line"
-            }`}
-          >
-            <span
-              className={`absolute top-1 h-6 w-6 rounded-full bg-surface shadow-sm transition-transform ${
-                enabled ? "translate-x-7" : "translate-x-1"
-              }`}
-            />
-          </button>
+          <Switch
+            checked={enabled}
+            label={enabled ? "Biometrinen avaus päällä" : biometricEnableLabel(bio.kind)}
+            onChange={(next) => (next ? onEnable() : onDisable())}
+            className="mt-0.5"
+          />
         )}
       </div>
       {ready && !enabled && (

@@ -7,6 +7,7 @@ import { Icon } from "@/components/ds/Icon";
 import { useOverlayLock } from "@/lib/overlay-lock";
 import { subscribeOverlayClose } from "@/lib/screen-state";
 import { anyDirtySince, registeredSourceIds, requestLeave } from "@/lib/form-guard";
+import { DECIDE_SLOP, rubberBand, sheetDragCommits, SPRING_BACK_MS, VelocityTracker } from "@/lib/gesture";
 
 interface BottomSheetProps {
   isOpen: boolean;
@@ -32,16 +33,13 @@ interface BottomSheetProps {
   dirty?: boolean | (() => boolean);
 }
 
-/** Max upward lift, px. Beyond this the sheet resists asymptotically. */
-const LIFT_LIMIT = 60;
 /** Exit animation (CSS --dur-exit, 240 ms) plus a frame. */
 const EXIT_MS = 250;
 
-/** Asymptotic rubber band: approaches -LIFT_LIMIT, never reaches it. */
+/** Down: 1:1. Up: the shared asymptotic rubber band (lib/gesture, LIFT_LIMIT). */
 export function sheetDragOffset(moveY: number): number {
   if (moveY >= 0) return moveY;
-  const pull = -moveY;
-  return -(pull * LIFT_LIMIT) / (pull + LIFT_LIMIT);
+  return rubberBand(moveY);
 }
 
 /** Nearest scrollable element between `target` and `stop` (exclusive). */
@@ -157,7 +155,7 @@ export default function BottomSheet({
 
     let startX = 0;
     let startY = 0;
-    let startTime = 0;
+    const tracker = new VelocityTracker();
     let dy = 0;
     let sheetHeight = 0;
     let tracking = false;
@@ -176,13 +174,13 @@ export default function BottomSheet({
     };
 
     const springBack = () => {
-      sheet.style.transition = "transform 280ms var(--ease-drawer)";
+      sheet.style.transition = `transform ${SPRING_BACK_MS}ms var(--ease-drawer)`;
       sheet.style.transform = "translateY(0)";
       if (backdrop) {
         backdrop.style.transition = "opacity 200ms var(--ease-out)";
         backdrop.style.opacity = "1";
       }
-      window.setTimeout(clearInline, 300);
+      window.setTimeout(clearInline, SPRING_BACK_MS + 20);
     };
 
     const onTouchStart = (event: TouchEvent) => {
@@ -199,7 +197,7 @@ export default function BottomSheet({
       dy = 0;
       startX = event.touches[0].clientX;
       startY = event.touches[0].clientY;
-      startTime = performance.now();
+      tracker.reset(startY);
       sheetHeight = sheet.offsetHeight || 1;
     };
 
@@ -212,13 +210,13 @@ export default function BottomSheet({
         if (!fromRegion) {
           const atTop = !scroller || scroller.scrollTop <= 0;
           if (!(atTop && vertical && moveY > 0)) {
-            if (Math.abs(moveY) >= 6 || Math.abs(moveX) >= 6) tracking = false;
+            if (Math.abs(moveY) >= DECIDE_SLOP || Math.abs(moveX) >= DECIDE_SLOP) tracking = false;
             return;
           }
           // Claim the gesture before the content starts its own bounce.
           event.preventDefault();
         }
-        if (Math.abs(moveY) < 6 && Math.abs(moveX) < 6) return;
+        if (Math.abs(moveY) < DECIDE_SLOP && Math.abs(moveX) < DECIDE_SLOP) return;
         if (!vertical) {
           tracking = false;
           return;
@@ -228,6 +226,7 @@ export default function BottomSheet({
         if (backdrop) backdrop.style.transition = "none";
       }
       event.preventDefault();
+      tracker.add(event.touches[0].clientY);
       dy = sheetDragOffset(moveY);
       sheet.style.transform = `translateY(${dy}px)`;
       if (backdrop) {
@@ -242,9 +241,7 @@ export default function BottomSheet({
       if (!decided) return;
       // A drag that started on a row or button must not also tap it.
       suppressClickUntil = performance.now() + 400;
-      const elapsed = Math.max(performance.now() - startTime, 1);
-      const velocity = dy / elapsed;
-      const commit = dy > 0 && (dy > sheetHeight * 0.35 || (dy > 80 && velocity > 0.5));
+      const commit = sheetDragCommits(dy, sheetHeight, tracker.velocity());
 
       if (!commit) {
         springBack();

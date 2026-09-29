@@ -1,6 +1,7 @@
 "use client";
 
 import { SelectMenu } from "@/components/SelectMenu";
+import { Switch } from "@/components/ds/Switch";
 import { Card, FilterChips, PageTitle } from "@/components/ds";
 import { ENTITY_TYPE_OPTIONS, type EntityType } from "@/lib/onboarding";
 import { showToast } from "@/lib/toast";
@@ -54,9 +55,9 @@ export default function YritysPage() {
                 <p className="text-body font-medium text-ink">ALV-rekisterissä</p>
                 <p className="mt-0.5 text-caption text-ink-2">Raja 20 000 € / kalenterivuosi</p>
               </div>
-              <button
-                type="button"
-                onClick={() =>
+              <Switch
+                checked={loaded.vatRegistered}
+                onChange={() =>
                   void change(
                     loaded,
                     { vatRegistered: !loaded.vatRegistered },
@@ -64,19 +65,8 @@ export default function YritysPage() {
                   )
                 }
                 disabled={saving}
-                role="switch"
-                aria-checked={loaded.vatRegistered}
-                aria-label="ALV-rekisterissä"
-                className={`relative h-7 w-12 shrink-0 rounded-full transition-colors after:absolute after:-inset-2 after:content-[''] ${
-                  loaded.vatRegistered ? "bg-accent" : "bg-line"
-                }`}
-              >
-                <span
-                  className={`absolute top-1 h-5 w-5 rounded-full bg-surface shadow transition-all ${
-                    loaded.vatRegistered ? "left-6" : "left-1"
-                  }`}
-                />
-              </button>
+                label="ALV-rekisterissä"
+              />
             </div>
 
             {loaded.vatRegistered && (

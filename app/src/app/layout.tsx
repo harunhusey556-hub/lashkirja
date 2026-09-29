@@ -78,7 +78,9 @@ export const viewport: Viewport = {
 
 /**
  * Single press feedback. pointerdown sets data-pressed on the hit control
- * only (the nearest button, link, or role=button — not a wrapper). Scroll,
+ * only (the nearest button, link, role=button, role=option, checkbox label,
+ * .active-press or .press-row — not a wrapper). Inside a scroller the paint
+ * waits 80 ms (or until the finger lifts, if sooner), as UIKit does. Scroll,
  * a route change, or an opening panel clears it immediately so a short hold
  * cannot stay painted on the previous control.
  *
@@ -97,13 +99,28 @@ function TouchActiveShim() {
   var startX = 0;
   var startY = 0;
   var MIN = 140;
+  var DELAY = 80;
+  var pending = null;
+  var pendingTimer = 0;
+  function dropPending(){
+    if (pendingTimer) { clearTimeout(pendingTimer); pendingTimer = 0; }
+    pending = null;
+  }
   function clearNow(){
+    dropPending();
     if (timer) { clearTimeout(timer); timer = 0; }
     if (!pressed) return;
     pressed.removeAttribute('data-pressed');
     pressed = null;
   }
   function release(){
+    if (pending) {
+      // The finger lifted before the 80 ms delay: paint the press now so a
+      // quick tap still shows it (UIKit delaysContentTouches).
+      var node = pending;
+      dropPending();
+      arm(node);
+    }
     if (!pressed) return;
     var wait = Math.max(0, MIN - (Date.now() - started));
     var node = pressed;
@@ -127,7 +144,16 @@ function TouchActiveShim() {
     if (!node) return null;
     if (node.nodeType !== 1) node = node.parentElement;
     if (!node || !node.closest) return null;
-    return node.closest('button, a, [role="button"]');
+    return node.closest('button, a, [role="button"], [role="option"], .active-press, .press-row, label:has(input[type="checkbox"], input[type="radio"])');
+  }
+  function inScroller(el){
+    var node = el.parentElement;
+    while (node && node !== document.body) {
+      var oy = getComputedStyle(node).overflowY;
+      if ((oy === 'auto' || oy === 'scroll') && node.scrollHeight > node.clientHeight) return true;
+      node = node.parentElement;
+    }
+    return false;
   }
   document.addEventListener('pointerdown', function(event){
     if (event.pointerType === 'mouse' && event.button !== 0) return;
@@ -137,12 +163,24 @@ function TouchActiveShim() {
     if (el.closest('.app-frame[data-overlay="open"] .app-header, .app-frame[data-overlay="open"] .app-tab-bar')) return;
     startX = event.clientX;
     startY = event.clientY;
+    // C7 (IA-16): inside a scroller the press paints after 80 ms, so the
+    // rows under a finger that starts a flick never flash.
+    if (event.pointerType !== 'mouse' && inScroller(el)) {
+      clearNow();
+      pending = el;
+      pendingTimer = setTimeout(function(){
+        var node = pending;
+        dropPending();
+        if (node) arm(node);
+      }, DELAY);
+      return;
+    }
     arm(el);
   }, {passive:true});
   document.addEventListener('pointerup', release, {passive:true});
   document.addEventListener('pointercancel', clearNow, {passive:true});
   document.addEventListener('pointermove', function(event){
-    if (!pressed) return;
+    if (!pressed && !pending) return;
     if (Math.abs(event.clientX - startX) > 10 || Math.abs(event.clientY - startY) > 10) clearNow();
   }, {passive:true});
   document.addEventListener('contextmenu', function(event){

@@ -9,6 +9,7 @@ import { subscribeOverlayClose } from "@/lib/screen-state";
 import { Button } from "@/components/ui";
 import { CircleHelp, TriangleAlert } from "lucide-react";
 import { Icon } from "@/components/ds/Icon";
+import { hapticNotify } from "@/lib/haptics";
 
 interface ConfirmModalProps {
   isOpen: boolean;
@@ -80,6 +81,11 @@ export default function ConfirmModal({
   }, [closing]);
 
   useFocusTrap(dialogRef, isOpen, { onEscape: dismiss });
+
+  // C7 (IA-19): a destructive alert announces itself with the warning haptic.
+  useEffect(() => {
+    if (isOpen && isDestructive) void hapticNotify("warning");
+  }, [isOpen, isDestructive]);
   useOverlayLock(isOpen);
 
   const cancelRef = useRef(onCancel);
@@ -120,15 +126,13 @@ export default function ConfirmModal({
         closing ? "pointer-events-none" : "pointer-events-auto"
       }`}
     >
-      {/* Backdrop */}
+      {/* Backdrop. An alert is never dismissed by tapping outside it (C3,
+          IA-21): the choice is Peruuta or the action. */}
       <div
         ref={overlayRef}
         className={`absolute inset-0 bg-ink/50 ${
           closing ? "animate-backdrop-out" : "animate-fade-in"
         }`}
-        onClick={(e) => {
-          if (e.target === overlayRef.current) dismiss();
-        }}
         aria-hidden="true"
       />
 
@@ -137,7 +141,8 @@ export default function ConfirmModal({
         className={`relative bg-surface rounded-3xl p-6 w-full max-w-sm shadow-2xl ${
           closing ? "animate-scale-out" : "animate-scale-in"
         }`}
-        role="dialog"
+        // R6 / AX-23: a destructive confirm is an alert dialog.
+        role={isDestructive ? "alertdialog" : "dialog"}
         aria-modal="true"
         aria-labelledby={titleId}
         aria-describedby={description ? descriptionId : undefined}
@@ -154,7 +159,7 @@ export default function ConfirmModal({
             </div>
           )}
 
-          <h3 id={titleId} className="text-headline font-semibold text-ink">{title}</h3>
+          <h2 id={titleId} className="text-headline font-semibold text-ink">{title}</h2>
 
           {description && (
             <p id={descriptionId} className="mt-2 text-sm text-ink-2">{description}</p>

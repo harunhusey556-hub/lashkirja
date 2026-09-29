@@ -631,7 +631,7 @@ html[data-keyboard="open"] .app-tab-bar {
 /* ------------------------------------------------------------------ */
 
 @layer base {
-  :where(button, a, [role="button"], .active-press) {
+  :where(button, a, [role="button"], .active-press, .press-row, [role="option"]) {
     transition-property: transform;
     transition-duration: var(--dur-press);
     transition-timing-function: var(--ease-out);
@@ -655,9 +655,25 @@ a:active,
   transform: scale(0.985);
 }
 
-/* ListRow's stretched link: the press paints the row, not the invisible overlay. */
-.row-link[data-pressed="true"] {
+/* C7 (IA-15): list and settings rows (full width) tint 5% ink and never
+   scale. ListRow's stretched link paints the row, not the invisible overlay;
+   `.press-row` is the same press for a row that is itself the link/button. */
+.row-link[data-pressed="true"],
+.press-row.press-row[data-pressed="true"] {
   transform: none;
+  background: rgb(38 34 31 / 0.05);
+}
+
+/* Switches and checkboxes animate their knob or check; they never scale. */
+[role="switch"][data-pressed="true"],
+[role="checkbox"][data-pressed="true"],
+label:has(> input[type="checkbox"])[data-pressed="true"] {
+  transform: none;
+}
+
+/* Options and checkbox rows get the row tint (IA-17). */
+[role="option"][data-pressed="true"],
+label:has(input[type="checkbox"], input[type="radio"])[data-pressed="true"] {
   background: rgb(38 34 31 / 0.05);
 }
 

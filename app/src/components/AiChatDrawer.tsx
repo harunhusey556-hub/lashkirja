@@ -733,25 +733,13 @@ export function AiChatDrawer({
       aria-modal="true"
       aria-labelledby="ai-chat-title"
     >
-      {/* Header: close (left), title (centre), conversation menu (right). Both controls are 36px
-          circles in 44px hit boxes, the same pair the app header uses. */}
+      {/* Header: conversation menu (left), title (centre), close (right: every modal closes
+          top-right, IA-21). Both controls are 36px circles in 44px hit boxes, the same pair the
+          app header uses. */}
       <header ref={headerRef} className="app-header border-b border-line bg-canvas">
         {/* Same max width as the thread and the composer, so on desktop the controls frame the
             conversation instead of sitting at the far edges of the window. */}
         <div className="mx-auto grid w-full max-w-2xl grid-cols-[44px_minmax(0,1fr)_44px] items-center gap-2 px-3 pb-1.5">
-        <button type="button" onClick={onClose} aria-label="Sulje" className="active-press flex h-11 w-11 items-center justify-center">
-          <span className="flex h-9 w-9 items-center justify-center rounded-full border border-line bg-surface text-ink">
-            <Icon icon={X} />
-          </span>
-        </button>
-        <div className="min-w-0 text-center">
-          <h2 id="ai-chat-title" ref={titleRef} tabIndex={-1} className="truncate text-headline font-semibold text-ink outline-none">
-            {conversationTitle || "Avustaja"}
-          </h2>
-          {conversationTitle && conversationTitle !== "Avustaja" && (
-            <p className="truncate text-caption text-ink-2">Avustaja</p>
-          )}
-        </div>
         <button
           type="button"
           aria-label="Valikko"
@@ -768,6 +756,19 @@ export function AiChatDrawer({
             }`}
           >
             <Icon icon={MessagesSquare} />
+          </span>
+        </button>
+        <div className="min-w-0 text-center">
+          <h2 id="ai-chat-title" ref={titleRef} tabIndex={-1} className="truncate text-headline font-semibold text-ink outline-none">
+            {conversationTitle || "Avustaja"}
+          </h2>
+          {conversationTitle && conversationTitle !== "Avustaja" && (
+            <p className="truncate text-caption text-ink-2">Avustaja</p>
+          )}
+        </div>
+        <button type="button" onClick={onClose} aria-label="Sulje" className="active-press flex h-11 w-11 items-center justify-center">
+          <span className="flex h-9 w-9 items-center justify-center rounded-full border border-line bg-surface text-ink">
+            <Icon icon={X} />
           </span>
         </button>
         </div>
