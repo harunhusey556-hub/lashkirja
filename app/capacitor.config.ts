@@ -58,7 +58,11 @@ const config: CapacitorConfig = {
       showSpinner: false,
     },
     StatusBar: {
-      style: "DARK",
+      // "LIGHT" = dark text for a light background (the plugin maps "DARK"
+      // to .lightContent, i.e. white text, which vanished on the cream
+      // canvas: SHELL-18). Not "DEFAULT": that follows the device's dark
+      // mode and would put white text on this light-only app.
+      style: "LIGHT",
       backgroundColor: "#f6f3ef",
     },
     // Stays disabled: enabling it would route the app's fetch calls (the
