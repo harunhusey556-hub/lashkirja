@@ -3,9 +3,11 @@
 import { Suspense, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
+import { TriangleAlert } from "lucide-react";
 import { apiFetch, errorMessage, isUnauthorized, readJson, redirectToLogin } from "@/components/clientFetch";
 import { buttonClass } from "@/components/control-styles";
 import { Card, DetailHero } from "@/components/ds";
+import { FullScreenNotice } from "@/components/ScreenState";
 import { appReturnUrl, classifyBankReturn, isAppBankState } from "@/lib/bank-return";
 import { clearBankAuth } from "@/lib/open-bank-auth";
 import { IS_MOBILE_BUILD } from "@/lib/build-target";
@@ -115,17 +117,22 @@ function BankCallback() {
     );
   }
 
+  // A failed consent is the shared full-screen failure card (VS-31): one title, one action.
+  if (phase === "error") {
+    return (
+      <FullScreenNotice
+        icon={TriangleAlert}
+        body={message}
+        actionLabel="Takaisin pankkitileihin"
+        href="/kirjanpito/pankkitilit#pankkiyhteys"
+      />
+    );
+  }
+
   return (
     <main className="flex min-h-dvh items-center justify-center bg-canvas px-4 py-10">
       <Card className="w-full max-w-md">
-        <DetailHero
-          title="Pankkiyhteys"
-          meta={
-            <span role={phase === "error" ? "alert" : "status"} className={phase === "error" ? "text-danger" : undefined}>
-              {message}
-            </span>
-          }
-        />
+        <DetailHero title="Pankkiyhteys" meta={<span role="status">{message}</span>} />
         {phase !== "working" && (
           <Link href="/kirjanpito/pankkitilit#pankkiyhteys" className={buttonClass("primary", "w-full")}>
             Takaisin pankkitileihin
@@ -140,8 +147,10 @@ export default function BankCallbackPage() {
   return (
     <Suspense
       fallback={
-        <main className="flex min-h-dvh items-center justify-center bg-canvas px-4">
-          <p className="text-sm text-ink-2">Yhdistetään pankkiin...</p>
+        <main className="flex min-h-dvh items-center justify-center bg-canvas px-4 py-10">
+          <Card className="w-full max-w-md">
+            <DetailHero title="Pankkiyhteys" meta={<span role="status">Yhdistetään pankkiin…</span>} />
+          </Card>
         </main>
       }
     >

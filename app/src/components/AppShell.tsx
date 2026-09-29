@@ -17,7 +17,6 @@ import {
   MessageSquareText,
   Plus,
   Settings,
-  User,
   type LucideIcon,
 } from "lucide-react";
 import { Icon, IconTile } from "@/components/ds/Icon";
@@ -384,34 +383,6 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       main.removeEventListener("touchstart", cancelPending);
       main.removeEventListener("wheel", cancelPending);
     };
-  }, []);
-
-  // The connectivity banner makes room by changing <main>'s padding-top,
-  // which now snaps (no layout-property animation). The page slides the same
-  // distance with a transform instead, so the content still moves in step
-  // with the banner's own slide. Skipped under reduced motion.
-  useEffect(() => {
-    const main = mainRef.current;
-    const frame = main?.closest<HTMLElement>(".app-frame");
-    if (!main || !frame || typeof MutationObserver === "undefined") return;
-    const room = () =>
-      frame.dataset.banner === "shown" ? parseFloat(frame.style.getPropertyValue("--banner-h")) || 0 : 0;
-    let last = room();
-    const observer = new MutationObserver(() => {
-      const next = room();
-      const delta = next - last;
-      last = next;
-      const page = pageNodeRef.current;
-      if (!delta || !page || prefersReducedMotion() || typeof page.animate !== "function") return;
-      const easing = getComputedStyle(document.documentElement).getPropertyValue("--ease-out").trim() || "ease-out";
-      page.animate([{ transform: `translateY(${-delta}px)` }, { transform: "translateY(0)" }], {
-        duration: 220,
-        easing,
-        composite: "add",
-      });
-    });
-    observer.observe(frame, { attributes: true, attributeFilter: ["data-banner", "style"] });
-    return () => observer.disconnect();
   }, []);
 
   // A back or tab landing restores the remembered scroll position, but the
@@ -1110,8 +1081,9 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                 aria-haspopup="dialog"
                 className="header-circle active-press flex h-11 w-11 items-center justify-center"
               >
+                {/* A stable tile: the initial fills it in, a person glyph never swaps for it (VS-33). */}
                 <span className="flex h-9 w-9 items-center justify-center rounded-full border border-accent-soft bg-accent-soft text-body font-semibold text-accent">
-                  {initials || <Icon icon={User} />}
+                  {initials}
                 </span>
               </button>
             </div>

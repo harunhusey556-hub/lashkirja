@@ -32,6 +32,19 @@ export function classifyConnection(error: unknown, online = true): ConnectionKin
   return "generic";
 }
 
+/** The one sentence every "showing saved data" surface ends on (banner and stale card). */
+export const STALE_SUFFIX = "Näytetään viimeksi haetut tiedot.";
+
+/** Lead sentence for a stale-data surface, by what actually went wrong. */
+export const STALE_COPY = {
+  offline: `Ei verkkoyhteyttä. ${STALE_SUFFIX}`,
+  unreachable: `Palvelimeen ei saada yhteyttä. ${STALE_SUFFIX}`,
+  failed: `Päivitys epäonnistui. ${STALE_SUFFIX}`,
+} as const;
+
+/** The one wording for every error card, page or full screen (VS-31). */
+export const ERROR_TITLE = "Jotain meni pieleen";
+
 export function isForbidden(error: unknown): boolean {
   return error instanceof ApiError && error.status === 403;
 }

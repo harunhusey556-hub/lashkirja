@@ -1,39 +1,51 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import { X } from "lucide-react";
 import { Icon } from "@/components/ds/Icon";
 import { API_VERSION } from "@/lib/app-origins";
 import { IS_MOBILE_BUILD } from "@/lib/build-target";
+import { useConnectionNoticeClaimed } from "@/lib/connection-notice";
 import { isServerNewer, retryConnection, useConnectivity } from "@/lib/connectivity";
+import { STALE_COPY } from "@/lib/screen-state";
 
 type BannerKind = "offline" | "unreachable" | "version" | "restored";
 
 const COPY: Record<BannerKind, string> = {
-  offline: "Ei verkkoyhteyttä. Näytetään viimeksi haetut tiedot.",
-  unreachable: "Palvelimeen ei saada yhteyttä. Näytetään viimeksi haetut tiedot.",
+  offline: STALE_COPY.offline,
+  unreachable: STALE_COPY.unreachable,
   version: "Uusi versio on saatavilla.",
   restored: "Yhteys palautui",
 };
 
 const RESTORED_MS = 2000;
 const EXIT_MS = 180;
+/** An offline or unreachable notice stays this long, then makes way for the content; a new screen shows it again. */
+const LINGER_MS = 7000;
 
 /** Per launch: a dismissed version notice stays dismissed until the next start. */
 let versionDismissed = false;
 
 /**
- * Offline / server unreachable / newer server version (SHELL-21).
+ * Offline / server unreachable / newer server version (SHELL-21, VS-32).
  *
- * Overlays the top of <main> instead of sitting in the flow: it slides down
- * from under the header (220 ms, --ease-out) and <main> makes room with a
- * matching padding transition, so nothing jumps. Unreachable offers
- * "Yritä uudelleen"; recovery shows "Yhteys palautui" for 2 s. The version
- * notice is dismissible for the launch and links to Ohje ja tuki.
+ * A pure overlay: it floats over the top of <main> under the header and never
+ * moves the content (no padding, no reflow). It slides down from under the
+ * header (220 ms, --ease-out).
+ * - Offline and unreachable say it once for 7 s and again on every new screen
+ *   while the problem lasts; a page that has its own card (`ConnectionNotice`,
+ *   `StaleBanner`) owns the message and the banner steps aside, so there is one
+ *   message and one retry per screen (FP-14). Unreachable offers "Yritä uudelleen".
+ * - Recovery shows "Yhteys palautui" for 2 s.
+ * - The version notice is dismissible for the launch and links to Ohje ja tuki.
  */
 export function ConnectivityBanner() {
   const { device, server, serverApiVersion } = useConnectivity();
+  const pathname = usePathname();
+  const claimed = useConnectionNoticeClaimed();
+  const [lingered, setLingered] = useState<{ kind: BannerKind; path: string } | null>(null);
   const [dismissedVersion, setDismissedVersion] = useState(versionDismissed);
   const [retrying, setRetrying] = useState(false);
 
@@ -57,7 +69,16 @@ export function ConnectivityBanner() {
     return () => window.clearTimeout(timer);
   }, [restoredAt]);
 
-  const kind: BannerKind | null = live ?? (restoredAt !== null ? "restored" : null);
+  // A page card owns the message, or the notice has been up long enough on this screen.
+  const connectionProblem = live === "offline" || live === "unreachable";
+  const quiet = connectionProblem && (claimed || (lingered?.kind === live && lingered.path === pathname));
+  const kind: BannerKind | null = live ? (quiet ? null : live) : restoredAt !== null ? "restored" : null;
+
+  useEffect(() => {
+    if (kind !== "offline" && kind !== "unreachable") return;
+    const timer = window.setTimeout(() => setLingered({ kind, path: pathname }), LINGER_MS);
+    return () => window.clearTimeout(timer);
+  }, [kind, pathname]);
 
   // Keep the last banner mounted for its exit.
   const [shown, setShown] = useState<BannerKind | null>(kind);
@@ -87,18 +108,6 @@ export function ConnectivityBanner() {
     }
   }, [phase, shown]);
 
-  // Tell the frame how much room to make at the top of <main>. The short
-  // "Yhteys palautui" confirmation only overlays.
-  const ref = useRef<HTMLDivElement>(null);
-  const holdsRoom = shown !== null && shown !== "restored" && phase !== "exit";
-  useLayoutEffect(() => {
-    const frame = ref.current?.closest<HTMLElement>(".app-frame") ?? document.querySelector<HTMLElement>(".app-frame");
-    if (!frame) return;
-    const height = holdsRoom ? Math.ceil(ref.current?.querySelector(".connectivity-banner")?.getBoundingClientRect().height ?? 0) : 0;
-    frame.style.setProperty("--banner-h", `${height}px`);
-    frame.dataset.banner = holdsRoom ? "shown" : "hidden";
-  }, [holdsRoom, shown]);
-
   async function retry() {
     if (retrying) return;
     setRetrying(true);
@@ -110,13 +119,13 @@ export function ConnectivityBanner() {
   }
 
   return (
-    <div ref={ref} className="relative z-[35] h-0 flex-none">
+    <div className="relative z-[35] h-0 flex-none">
       {shown && (
         <div
           role="status"
           data-connectivity={shown === "restored" ? "success" : shown === "version" ? "info" : "warning"}
           data-state={phase}
-          className="connectivity-banner flex min-h-10 items-center justify-center gap-3 border-b border-line px-4 py-1.5 text-center text-caption leading-snug text-ink"
+          className="connectivity-banner flex min-h-10 items-center justify-center gap-3 rounded-card border border-line px-4 py-1.5 text-center text-caption leading-snug text-ink"
         >
           <span>{COPY[shown]}</span>
           {shown === "unreachable" && (

@@ -23,8 +23,8 @@ export default function GlobalError({
         }}
       >
         <main style={{ maxWidth: "24rem", textAlign: "center" }}>
-          <h1>Palvelu ei ole juuri nyt käytettävissä</h1>
-          <p>Yritä ladata sovellus uudelleen.</p>
+          <h1 style={{ fontSize: "1.0625rem", fontWeight: 600 }}>Jotain meni pieleen</h1>
+          <p style={{ fontSize: "0.9375rem" }}>Sovellusta ei voitu näyttää. Yritä ladata se uudelleen.</p>
           <button
             type="button"
             onClick={unstable_retry}

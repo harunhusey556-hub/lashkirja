@@ -1,92 +1,89 @@
 "use client";
 
-import { Button } from "@/components/ui";
 import { ConnectionNotice } from "@/components/ScreenState";
+import { Skeleton, SkeletonGroup } from "@/components/ds/Skeleton";
 
+/**
+ * Loading (VS-33): a `ds/Skeleton` at the final layout, never a spinner in empty
+ * space and never a "Ladataan…" line next to it. The label is only for screen
+ * readers ("Ladataan …": the one verb, whatever the source). Spinners live inside
+ * a button or an image, nowhere else.
+ */
+
+/** One record row (type B) at its final height: title and amount, then the meta line. */
+function SkeletonRow() {
+  return (
+    <div className="flex min-h-16 flex-col justify-center gap-1.5 px-4 py-3" aria-hidden>
+      <div className="flex items-center justify-between gap-3">
+        <Skeleton className="h-4 w-2/5" />
+        <Skeleton className="h-4 w-16" />
+      </div>
+      <Skeleton tone="soft" className="h-3 w-3/5" />
+    </div>
+  );
+}
+
+/**
+ * Content-shaped loading placeholder for list pages: the rows sit in one card with
+ * dividers, like the real `Section`, so nothing moves when the data lands.
+ */
+export function SkeletonList({ rows = 5, label = "Ladataan" }: { rows?: number; label?: string }) {
+  return (
+    <SkeletonGroup label={label}>
+      <div className="overflow-hidden rounded-card border border-line bg-surface divide-y divide-line">
+        {Array.from({ length: rows }).map((_, index) => (
+          <SkeletonRow key={index} />
+        ))}
+      </div>
+    </SkeletonGroup>
+  );
+}
+
+/**
+ * The same placeholder for an inline fetch (a balance, a suggestion list) that has no page
+ * skeleton of its own. Same look as `SkeletonList`, fewer rows by default.
+ */
 export function LoadingState({
-  label = "Ladataan...",
-  compact = false,
+  label = "Ladataan",
+  rows = 2,
 }: {
   label?: string;
+  rows?: number;
+  /** Kept for callers; there is no separate compact size any more. */
   compact?: boolean;
 }) {
-  return (
-    <div
-      className={`flex items-center justify-center gap-3 text-sm text-ink-2 ${compact ? "py-8" : "py-20"}`}
-      role="status"
-      aria-live="polite"
-    >
-      <span
-        className="w-7 h-7 border-2 border-accent border-t-transparent rounded-full animate-spin motion-reduce:animate-none"
-        aria-hidden="true"
-      />
-      <span>{label}</span>
-    </div>
-  );
+  return <SkeletonList rows={rows} label={label} />;
 }
 
 /**
- * Content-shaped loading placeholder for list pages: shimmering rows that
- * arrive with the same stagger the real list uses, so the swap reads as the
- * data filling in rather than a spinner being replaced by a page.
- */
-export function SkeletonList({ rows = 5 }: { rows?: number }) {
-  return (
-    <div className="space-y-3 list-stagger" role="status" aria-label="Ladataan…">
-      {Array.from({ length: rows }).map((_, index) => (
-        <div key={index} className="rounded-card border border-line bg-surface p-4">
-          <div className="flex items-center gap-3">
-            <div className="h-9 w-9 shrink-0 rounded-[10px] bg-line/70 skeleton" />
-            <div className="flex-1 space-y-2 min-w-0">
-              <div className="h-3.5 w-2/5 rounded bg-line/70 skeleton" />
-              <div className="h-3 w-3/5 rounded bg-line/50 skeleton" />
-            </div>
-            <div className="h-4 w-14 shrink-0 rounded bg-line/70 skeleton" />
-          </div>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-/**
- * Failure card with a retry. Pass `error` (preferred) and it classifies the
- * failure exactly like ConnectionNotice (offline / unreachable / expired /
- * generic, Finnish copy only); pass only `message` for a failure the caller
- * has already put into words (e.g. "Kuittia ei löytynyt").
+ * Failure card with ONE retry, in the place of the content. Pass `error`
+ * (preferred) and it classifies the failure exactly like ConnectionNotice
+ * (offline / unreachable / expired / generic, Finnish copy only); pass only
+ * `message` for a failure the caller has already put into words. Same card and
+ * title ("Jotain meni pieleen") in both cases; `title` replaces the title for
+ * a failure with its own words (a receipt that does not exist).
  */
 export function ErrorState({
   message,
   error,
+  title,
   onRetry,
   compact = false,
 }: {
   message?: string;
   error?: unknown;
+  title?: string;
   onRetry?: () => void;
   compact?: boolean;
 }) {
-  if (error !== undefined && error !== null) {
-    return (
-      <ConnectionNotice
-        error={error}
-        fallback={message || "Lataus epäonnistui"}
-        onRetry={onRetry}
-        compact={compact}
-      />
-    );
-  }
+  const failure = error !== undefined && error !== null ? error : new Error(message || "Lataus epäonnistui");
   return (
-    <div
-      className={`rounded-card bg-danger/10 text-danger text-sm text-center ${compact ? "p-4" : "p-6"}`}
-      role="alert"
-    >
-      <p>{message || "Lataus epäonnistui"}</p>
-      {onRetry && (
-        <Button type="button" variant="secondary" className="mt-3" onClick={onRetry}>
-          Yritä uudelleen
-        </Button>
-      )}
-    </div>
+    <ConnectionNotice
+      error={failure}
+      fallback={message || "Lataus epäonnistui"}
+      onRetry={onRetry}
+      title={title}
+      compact={compact}
+    />
   );
 }

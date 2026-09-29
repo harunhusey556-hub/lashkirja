@@ -1071,8 +1071,11 @@ html[data-keyboard="open"] .toast-viewport {
 
 .connectivity-banner {
   position: absolute;
-  left: 0;
-  right: 0;
+  top: 0.5rem;
+  left: 1rem;
+  right: 1rem;
+  margin-inline: auto;
+  max-width: 30rem;
   z-index: 35;
   transition:
     transform 220ms var(--ease-out),
@@ -1090,14 +1093,6 @@ html[data-keyboard="open"] .toast-viewport {
 
 .connectivity-banner[data-connectivity="info"] {
   background: var(--color-accent-soft);
-}
-
-/* <main> makes room while a lasting banner is up. The padding snaps (no
-   layout-property transition); AppShell slides the page by the same distance
-   with a transform, in step with the banner, and skips it under reduced
-   motion. */
-.app-frame[data-banner="shown"] > .app-main {
-  padding-top: calc(var(--banner-h, 0px) + 1.25rem);
 }
 
 .connectivity-banner[data-state="enter"],
