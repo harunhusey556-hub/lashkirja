@@ -7,6 +7,10 @@
         <deployment identifier="iOS"/>
         <plugIn identifier="com.apple.InterfaceBuilder.IBCocoaTouchPlugin" version="14088"/>
     </dependencies>
+    <!-- Not loaded: Info.plist sets neither UIMainStoryboardFile nor
+         UISceneStoryboardFile. SceneDelegate creates the window and its
+         MainViewController in code. Kept only so the Xcode project needs no
+         file-reference edit. -->
     <scenes>
         <!--Bridge View Controller-->
         <scene sceneID="tne-QT-ifu">

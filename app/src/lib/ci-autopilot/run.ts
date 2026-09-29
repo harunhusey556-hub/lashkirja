@@ -17,6 +17,7 @@
  */
 import { appNavigate } from "@/lib/app-nav";
 import { CI_STEP_ORIGIN } from "@/lib/ci-autopilot/constants";
+import { onboardingStep, type OnboardingStepId } from "@/lib/onboarding";
 
 export const CI_AUTOPILOT_MARKER = "LASHKIRJA_CI_AUTOPILOT";
 
@@ -26,6 +27,9 @@ interface AutopilotConfig {
   routes: string[];
   email: string;
   password: string;
+  /** A user seeded with onboarded: false (`demo-seed.ts --ci`). */
+  onboardingEmail?: string;
+  onboardingPassword?: string;
   /** Extra wait after a page looks loaded, before its screenshot. */
   settleMs: number;
 }
@@ -283,7 +287,11 @@ async function waitForFirstScreen(): Promise<"login" | "app" | null> {
   return document.querySelector("#email") ? "login" : "app";
 }
 
-async function logIn(config: AutopilotConfig): Promise<void> {
+async function logIn(
+  config: AutopilotConfig,
+  credentials: { email: string; password: string } = config,
+  prefix = ""
+): Promise<void> {
   const email = document.querySelector<HTMLInputElement>("#email");
   const password = document.querySelector<HTMLInputElement>("#password");
   const submit = document.querySelector<HTMLButtonElement>('form button[type="submit"]');
@@ -291,14 +299,189 @@ async function logIn(config: AutopilotConfig): Promise<void> {
     problem("login form fields not found");
     return;
   }
-  email.value = config.email;
-  password.value = config.password;
+  email.value = credentials.email;
+  password.value = credentials.password;
   await sleep(300);
-  await step("login-filled");
+  await step(`${prefix}login-filled`);
   submit.click();
   await waitFor(() => Boolean(document.querySelector(".app-main")), 30_000, "the app shell after login");
   await settle("/dashboard", config.settleMs);
-  await step("after-login");
+  await step(`${prefix}after-login`);
+}
+
+function textOf(element: Element): string {
+  return (element.textContent ?? "").replace(/\s+/g, " ").trim();
+}
+
+function buttonWithText(root: ParentNode | null, text: string, selector = "button"): HTMLButtonElement | null {
+  if (!root) return null;
+  return (
+    Array.from(root.querySelectorAll<HTMLButtonElement>(selector)).find((button) => textOf(button).includes(text)) ??
+    null
+  );
+}
+
+/** Hidden or inert UI (a panel between questions) is not tappable. */
+function isLive(element: Element): boolean {
+  return !element.closest('[data-hidden="true"], [inert], [aria-hidden="true"]');
+}
+
+// ---- Chat onboarding (SHELL-14/15/16, OWN-11) with the not-onboarded user.
+
+const ONBOARDING_SURFACE = '[role="dialog"][aria-labelledby="onboarding-title"]';
+
+function onboardingSurface(): HTMLElement | null {
+  return document.querySelector<HTMLElement>(ONBOARDING_SURFACE);
+}
+
+/** The panel's choices for a question, once they are up and tappable. */
+function questionGroup(id: OnboardingStepId): HTMLElement | null {
+  const surface = onboardingSurface();
+  if (!surface) return null;
+  const question = onboardingStep(id).question;
+  const group = Array.from(surface.querySelectorAll<HTMLElement>('[role="radiogroup"], [role="group"]')).find(
+    (element) => element.getAttribute("aria-label") === question
+  );
+  return group && isLive(group) ? group : null;
+}
+
+async function showQuestion(id: OnboardingStepId, name: string): Promise<HTMLElement | null> {
+  if (!(await waitFor(() => questionGroup(id) !== null, 8_000, `onboarding question ${id}`))) return null;
+  // The chips' staggered entrance (up to ~320 ms) before the screenshot.
+  await sleep(600);
+  await step(name);
+  return questionGroup(id);
+}
+
+function chipLabel(id: OnboardingStepId, value: string | boolean): string {
+  const chip = onboardingStep(id).chips.find((item) => item.value === value);
+  if (!chip) throw new Error(`no chip ${String(value)} on ${id}`);
+  return chip.label;
+}
+
+async function answerSingle(id: OnboardingStepId, value: string | boolean, name: string): Promise<boolean> {
+  const group = await showQuestion(id, name);
+  const chip = buttonWithText(group, chipLabel(id, value), '[role="radio"]');
+  if (!chip) {
+    problem(`onboarding ${id}: no choice "${chipLabel(id, value)}"`);
+    return false;
+  }
+  chip.click();
+  return true;
+}
+
+async function answerMulti(id: OnboardingStepId, values: string[], name: string): Promise<boolean> {
+  const group = await showQuestion(id, `${name}-question`);
+  if (!group) return false;
+  for (const value of values) {
+    const chip = buttonWithText(group, chipLabel(id, value), "button[aria-pressed]");
+    if (!chip) {
+      problem(`onboarding ${id}: no choice "${chipLabel(id, value)}"`);
+      return false;
+    }
+    if (chip.getAttribute("aria-pressed") !== "true") chip.click();
+  }
+  await sleep(400);
+  await step(`${name}-selected`);
+  const next = buttonWithText(group.parentElement, "Jatka");
+  if (!next) {
+    problem(`onboarding ${id}: no "Jatka" button after choosing`);
+    return false;
+  }
+  next.click();
+  return true;
+}
+
+function approveButton(): HTMLButtonElement | null {
+  const button = buttonWithText(onboardingSurface(), "Hyväksy ja aloita");
+  return button && isLive(button) ? button : null;
+}
+
+async function showSummary(name: string): Promise<boolean> {
+  if (!(await waitFor(() => approveButton() !== null, 8_000, "the onboarding summary"))) return false;
+  await sleep(600);
+  await step(name);
+  return true;
+}
+
+async function signOutFromProfileSheet(): Promise<boolean> {
+  const open = document.querySelector<HTMLButtonElement>('.app-header button[aria-haspopup="dialog"]');
+  if (!open) {
+    problem("sign-out: no profile button in the header");
+    return false;
+  }
+  open.click();
+  if (!(await waitFor(() => buttonWithText(document, "Kirjaudu ulos") !== null, 5_000, "the profile sheet"))) {
+    return false;
+  }
+  await sleep(700);
+  buttonWithText(document, "Kirjaudu ulos")?.click();
+  return waitFor(() => Boolean(document.querySelector("#email")), 20_000, "the login form after signing out");
+}
+
+/**
+ * Walks the whole chat onboarding with the not-onboarded user: every
+ * question answered, one step back with the header button, one answer
+ * changed from the summary, then saved. A screenshot per step (onboarding-*).
+ */
+async function walkOnboarding(config: AutopilotConfig): Promise<void> {
+  if (!config.onboardingEmail || !config.onboardingPassword) {
+    problem("no onboarding user in the step server config");
+    return;
+  }
+  navigate("/dashboard");
+  await settle("/dashboard", config.settleMs);
+  if (!(await signOutFromProfileSheet())) return;
+  await sleep(config.settleMs);
+  await step("onboarding-signed-out");
+  await logIn(config, { email: config.onboardingEmail, password: config.onboardingPassword }, "onboarding-");
+
+  if (!(await waitFor(() => onboardingSurface() !== null, 15_000, "the onboarding chat for a new user"))) return;
+  // The sheet's entrance before the first screenshot.
+  await sleep(900);
+
+  if (!(await answerSingle("entityType", "toiminimi", "onboarding-01-yritysmuoto"))) return;
+  if (!(await answerSingle("vatRegistered", true, "onboarding-02-alv-rekisteri"))) return;
+  // The third question is up; go back once with the header button.
+  if (!(await showQuestion("vatPeriod", "onboarding-03-alv-kausi"))) return;
+  const back = buttonWithText(onboardingSurface()?.querySelector("header") ?? null, "Takaisin");
+  if (!back || back.getAttribute("aria-hidden") === "true") {
+    problem("onboarding: the header back button is missing on question 3");
+    return;
+  }
+  back.click();
+  if (!(await answerSingle("vatRegistered", true, "onboarding-04-takaisin-alv-rekisteri"))) return;
+  if (!(await answerSingle("vatPeriod", "month", "onboarding-05-alv-kausi"))) return;
+  if (!(await answerMulti("salesTypes", ["ripsipalvelut", "kulmapalvelut"], "onboarding-06-myynti"))) return;
+  if (!(await answerMulti("expenseCategories", ["tarvikkeet"], "onboarding-07-kulut"))) return;
+  if (!(await showSummary("onboarding-08-yhteenveto"))) return;
+
+  // Use the summary: reopen the VAT period from its row and change it.
+  const row = onboardingSurface()?.querySelector<HTMLButtonElement>('button[aria-label^="Muokkaa: ALV-kausi"]');
+  if (!row) {
+    problem("onboarding: no ALV-kausi row in the summary");
+    return;
+  }
+  row.click();
+  if (!(await answerSingle("vatPeriod", "quarter", "onboarding-09-muokkaa-alv-kausi"))) return;
+  // Later answers stay as defaults: continue through them unchanged.
+  if (!(await answerMulti("salesTypes", ["ripsipalvelut", "kulmapalvelut"], "onboarding-10-myynti"))) return;
+  if (!(await answerMulti("expenseCategories", ["tarvikkeet"], "onboarding-11-kulut"))) return;
+  if (!(await showSummary("onboarding-12-yhteenveto-muokattu"))) return;
+  if (!textOf(onboardingSurface() ?? document.body).includes("Neljännesvuosittain")) {
+    problem("onboarding: the summary does not show the changed VAT period (Neljännesvuosittain)");
+  }
+
+  approveButton()?.click();
+  await sleep(300);
+  await step("onboarding-13-tallennetaan");
+  if (!(await waitFor(() => onboardingSurface() === null, 15_000, "the onboarding chat to close after saving"))) {
+    const alert = onboardingSurface()?.querySelector('[role="alert"]');
+    if (alert) problem(`onboarding save failed: ${textOf(alert)}`);
+    return;
+  }
+  await settle("/dashboard", config.settleMs);
+  await step("onboarding-14-valmis");
 }
 
 async function firstLaunch(config: AutopilotConfig): Promise<void> {
@@ -323,6 +506,7 @@ async function firstLaunch(config: AutopilotConfig): Promise<void> {
   await openAndClose('.app-tab-bar button[aria-label="Lisää"]', "sheet-lisaa");
   await openAndClose('.app-header button[aria-label="Avustaja"]', "drawer-avustaja");
   await openAndClose('.app-header button[aria-haspopup="dialog"]', "sheet-profiili");
+  await walkOnboarding(config);
   await step("end");
 }
 

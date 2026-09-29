@@ -107,6 +107,10 @@ const server = createServer(async (req, res) => {
         // runner's own fresh database.
         email: "demo@lashkirja.fi",
         password: "demo123",
+        // The not-onboarded user that `demo-seed.ts --ci` adds; the first
+        // launch signs out and walks the chat onboarding with it.
+        onboardingEmail: "onboarding@lashkirja.fi",
+        onboardingPassword: "demo123",
         settleMs: SETTLE_MS,
       });
     }

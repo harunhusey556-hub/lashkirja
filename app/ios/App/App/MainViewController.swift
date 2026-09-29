@@ -130,9 +130,9 @@ struct NextExportRouter: Router {
 }
 
 /// Wires `CancelledNavigationIgnoringDelegate` in as the web view's
-/// navigation delegate right after Capacitor creates its own. Selected in
-/// `Base.lproj/Main.storyboard` as the bridge view controller's custom
-/// class (in place of `Capacitor.CAPBridgeViewController`).
+/// navigation delegate right after Capacitor creates its own. Created in
+/// code by `SceneDelegate` as the window's root view controller (in place of
+/// `Capacitor.CAPBridgeViewController`); no storyboard instantiates it.
 class MainViewController: CAPBridgeViewController {
     // WKWebView.navigationDelegate is `weak`; Capacitor keeps its own
     // handler alive via the bridge, but nothing retains ours unless we do.
@@ -145,6 +145,11 @@ class MainViewController: CAPBridgeViewController {
     override func capacitorDidLoad() {
         super.capacitorDidLoad()
 
+        // First, and independent of the delegate wrap below: if Capacitor's
+        // internals change shape and the guard bails out, the splash must
+        // still never be able to cover the app forever.
+        scheduleSplashSafetyNet()
+
         guard let webView = self.webView,
               let original = webView.navigationDelegate as? WebViewDelegationHandler else {
             // Conservative fallback: if Capacitor's internals ever change
@@ -156,8 +161,6 @@ class MainViewController: CAPBridgeViewController {
         let proxy = CancelledNavigationIgnoringDelegate(wrapping: original)
         cancelledNavigationDelegate = proxy
         webView.navigationDelegate = proxy
-
-        scheduleSplashSafetyNet()
     }
 
     /// `capacitor.config.ts` sets `SplashScreen.launchAutoHide: false` so the

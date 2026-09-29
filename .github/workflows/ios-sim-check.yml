@@ -86,7 +86,8 @@ jobs:
         run: |
           rm -f sim-check.db
           npx prisma migrate deploy
-          npx tsx scripts/demo-seed.ts
+          # --ci adds a second, not-onboarded user for the onboarding walk.
+          npx tsx scripts/demo-seed.ts --ci
 
       # Must precede the web build: both write .next, and `next start` below
       # needs the web build's .next (same order as ci.yml).

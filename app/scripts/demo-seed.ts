@@ -20,7 +20,34 @@ function isoDaysAgo(days: number): string {
   return date.toISOString().slice(0, 10);
 }
 
+/**
+ * `--ci` (the iOS Simulator check only, .github/workflows/ios-sim-check.yml):
+ * also seed a second, NOT onboarded user, so the autopilot can walk the chat
+ * onboarding end to end. Without the flag the demo seed is unchanged.
+ */
+const CI_FLAG = process.argv.slice(2).includes("--ci");
+const CI_ONBOARDING_EMAIL = "onboarding@lashkirja.fi";
+
+async function ensureCiOnboardingUser() {
+  const existing = await prisma.user.findUnique({ where: { email: CI_ONBOARDING_EMAIL } });
+  if (existing) {
+    console.log("CI onboarding user already present.");
+    return;
+  }
+  await prisma.user.create({
+    data: {
+      email: CI_ONBOARDING_EMAIL,
+      passwordHash: await bcrypt.hash("demo123", 10),
+      firstName: "Oona",
+      lastName: "Uusi",
+      onboarded: false,
+    },
+  });
+  console.log(`CI onboarding user ready: ${CI_ONBOARDING_EMAIL} / demo123 (onboarded: false)`);
+}
+
 async function main() {
+  if (CI_FLAG) await ensureCiOnboardingUser();
   const email = "demo@lashkirja.fi";
   const existing = await prisma.user.findUnique({ where: { email } });
   if (existing) {
