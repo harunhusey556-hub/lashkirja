@@ -11,6 +11,7 @@ import {
   type ChatTurnStatus,
   type ContextTurn,
 } from "./chat-turn";
+import { displayChatContent } from "./chat-legacy";
 
 export class ChatBusyError extends Error {
   constructor() {
@@ -164,7 +165,8 @@ export async function priorContextTurns(
   return rows
     .reverse()
     .filter((row) => row.role === "user" || row.role === "assistant")
-    .map((row) => ({ role: row.role as "user" | "assistant", content: row.content }));
+    // The model must not see (and echo) the pre-OWN-09 "Rajattu tila" notice either.
+    .map((row) => ({ role: row.role as "user" | "assistant", content: displayChatContent(row.role, row.content) }));
 }
 
 export type ClaimResult =

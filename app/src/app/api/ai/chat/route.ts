@@ -6,6 +6,7 @@ import { requireSession } from "@/lib/session";
 import { prepareChat, type ChatMatchProposal } from "@/lib/ai-assistant";
 import { askCopilotStream } from "@/lib/copilot";
 import { providerFailedNotice } from "@/lib/chat-policy";
+import { displayChatContent } from "@/lib/chat-legacy";
 import { errorText } from "@/lib/api-errors";
 import { consumeRateLimit } from "@/lib/rate-limit";
 import {
@@ -54,7 +55,8 @@ function mapMessage(message: {
   return {
     id: message.id,
     role: message.role,
-    content: message.content,
+    // Old replies can still start with the pre-OWN-09 "Rajattu tila" notice.
+    content: displayChatContent(message.role, message.content),
     clientId: message.clientId ?? null,
     proposal,
     limited: Boolean(raw?.limited),
