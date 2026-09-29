@@ -1,0 +1,245 @@
+/*
+ * Chat-style onboarding (OWN-11, findings-shell "Onboarding: audit and
+ * chat-style design"). Motion uses the app tokens from globals.css @theme.
+ * Reduced motion: every enter and exit becomes a 120 ms opacity change, the
+ * typing dots stand still; haptics are not affected.
+ */
+
+/* Full-height conversation above the chrome: above the drawer (z-70), below
+   ConfirmModal (z-80). Inside .app-frame, so UsableArea handles the keyboard. */
+.surface {
+  position: absolute;
+  inset: 0;
+  z-index: 75;
+  display: flex;
+  flex-direction: column;
+  background: var(--color-canvas);
+}
+
+.enter {
+  animation: obSheetUp var(--dur-sheet) var(--ease-drawer);
+}
+
+/* Completed: settles away in place. */
+.exitDone {
+  animation: obDone var(--dur-exit) var(--ease-out) forwards;
+  pointer-events: none;
+}
+
+/* Snoozed: leaves along the path it came in by. */
+.exitSnooze {
+  animation: obSheetDown var(--dur-exit) var(--ease-drawer) forwards;
+  pointer-events: none;
+}
+
+@keyframes obSheetUp {
+  from { transform: translateY(100%); }
+  to { transform: translateY(0); }
+}
+
+@keyframes obSheetDown {
+  from { transform: translateY(0); }
+  to { transform: translateY(100%); }
+}
+
+@keyframes obDone {
+  from { opacity: 1; transform: scale(1); }
+  to { opacity: 0; transform: scale(0.98); }
+}
+
+@keyframes obFadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes obFadeOut {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+
+/* Header back button: hidden on the first question without shifting the title. */
+.back {
+  transition: opacity 150ms var(--ease-out);
+}
+
+.back[data-hidden="true"] {
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* 2 px progress bar under the header. */
+.progressFill {
+  transform-origin: left center;
+  transition: transform 300ms var(--ease-out);
+}
+
+/* Thread bubbles */
+.bubbleIn {
+  animation: obBubbleIn 220ms var(--ease-out) backwards;
+}
+
+.mine {
+  transform-origin: bottom right;
+}
+
+.theirs {
+  transform-origin: bottom left;
+}
+
+@keyframes obBubbleIn {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+/* Back: the last answer leaves to the right, where it came from. */
+.answerOut {
+  animation: obAnswerOut 160ms var(--ease-out) forwards;
+}
+
+@keyframes obAnswerOut {
+  from {
+    opacity: 1;
+    transform: translateX(0);
+  }
+  to {
+    opacity: 0;
+    transform: translateX(12px);
+  }
+}
+
+/* Back: the question below the removed answer fades with it. */
+.bubbleOut {
+  animation: obFadeOut 160ms var(--ease-out) forwards;
+}
+
+/* The choice panel animates to its new height instead of jumping. */
+.panel {
+  overflow: hidden;
+  transition: height 220ms var(--ease-out);
+}
+
+/* Typing indicator */
+.typingIn {
+  animation: obBubbleIn 180ms var(--ease-out) backwards;
+}
+
+.dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 9999px;
+  background: var(--color-ink-2);
+  animation: obTyping 1.2s ease-in-out infinite;
+}
+
+.dot:nth-child(2) {
+  animation-delay: 150ms;
+}
+
+.dot:nth-child(3) {
+  animation-delay: 300ms;
+}
+
+@keyframes obTyping {
+  0%,
+  60%,
+  100% {
+    transform: translateY(0);
+    opacity: 0.35;
+  }
+  30% {
+    transform: translateY(-3px);
+    opacity: 1;
+  }
+}
+
+/* The choice panel keeps its height between questions, so nothing jumps. */
+.panelContent {
+  transition:
+    opacity 120ms var(--ease-out),
+    transform 120ms var(--ease-out);
+}
+
+.panelContent[data-hidden="true"] {
+  opacity: 0;
+  transform: translateY(4px);
+  pointer-events: none;
+}
+
+/* Chips arrive with a 40 ms stagger, at most four steps. */
+.chipIn {
+  animation: obChipIn 200ms var(--ease-out) backwards;
+}
+
+.chipIn:nth-child(2) { animation-delay: 40ms; }
+.chipIn:nth-child(3) { animation-delay: 80ms; }
+.chipIn:nth-child(n + 4) { animation-delay: 120ms; }
+
+@keyframes obChipIn {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Selected single choice: the check scales in with the colour change. */
+.check {
+  animation: obCheck 160ms var(--ease-out);
+}
+
+@keyframes obCheck {
+  from {
+    opacity: 0;
+    transform: scale(0.6);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .enter,
+  .bubbleIn,
+  .typingIn,
+  .chipIn,
+  .check {
+    animation: obFadeIn 120ms linear backwards !important;
+    transform: none !important;
+  }
+
+  .exitDone,
+  .exitSnooze,
+  .answerOut,
+  .bubbleOut {
+    animation: obFadeOut 120ms linear forwards !important;
+    transform: none !important;
+  }
+
+  .dot {
+    animation: none !important;
+    opacity: 0.6;
+  }
+
+  .progressFill,
+  .panel {
+    transition: none !important;
+  }
+
+  .panelContent {
+    transition: opacity 120ms linear !important;
+  }
+
+  .panelContent[data-hidden="true"] {
+    transform: none;
+  }
+}

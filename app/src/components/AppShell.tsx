@@ -23,13 +23,14 @@ import {
 import { Icon, IconTile } from "@/components/ds/Icon";
 import { AppMark } from "@/components/AppMark";
 import { ConnectivityBanner } from "@/components/ConnectivityBanner";
-import { OnboardingModal } from "@/components/OnboardingModal";
+import { OnboardingChat } from "@/components/onboarding/OnboardingChat";
+import { OnboardingResumeCard } from "@/components/onboarding/OnboardingResumeCard";
+import { isOnboardingSnoozed } from "@/lib/onboarding-gate";
 import { AiChatDrawer } from "@/components/AiChatDrawer";
 import { ToastHost } from "@/components/ToastHost";
 import { useSignOut } from "@/components/useSignOut";
 import { readJson } from "@/components/clientFetch";
 
-import type { BusinessProfile } from "@/lib/onboarding";
 import BottomSheet from "@/components/BottomSheet";
 import { AppLock } from "@/components/AppLock";
 import { apiFetch } from "@/components/clientFetch";
@@ -227,7 +228,8 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const [profileOpenOn, setProfileOpenOn] = useState<string | null>(null);
   const [addOpenOn, setAddOpenOn] = useState<string | null>(null);
   const [chatOpenOn, setChatOpenOn] = useState<string | null>(null);
-  const [onboardingProfile, setOnboardingProfile] = useState<BusinessProfile | null>(null);
+  // "Ohita nyt" hides the onboarding for 24 h; Koti then offers it again.
+  const [onboardingSnoozed, setOnboardingSnoozed] = useState(false);
   // AUTH-03: the one sign-out flow (queued-receipts confirm included). It also
   // mounts the offline queue's drain driver here, so the driver keeps running
   // app-wide while signed in (Task 10).
@@ -631,13 +633,14 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
     const controller = new AbortController();
     apiFetch("/api/onboarding", { signal: controller.signal })
-      .then((res) => readJson<{ onboarded: boolean; profile: BusinessProfile | null }>(res, ""))
+      .then((res) => readJson<{ onboarded: boolean }>(res, ""))
       .then((data) => {
         if (!data) return;
         if (data.onboarded) {
           writePageCache(ONBOARDED_CACHE_KEY, true);
+        } else if (isOnboardingSnoozed()) {
+          setOnboardingSnoozed(true);
         } else {
-          setOnboardingProfile(data.profile || null);
           setShowOnboarding(true);
         }
       })
@@ -927,6 +930,9 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
               is no "checking session" gate. Only an actual sign-out (a
               confirmed 401, or mobile finding no stored token) blanks this;
               SessionProvider is already navigating away by then. */}
+          {onboardingSnoozed && !showOnboarding && pathname === "/dashboard" && (
+            <OnboardingResumeCard onResume={() => setShowOnboarding(true)} />
+          )}
           {sessionStatus === "signed-out" ? null : children}
         </div>
       </main>
@@ -934,11 +940,15 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       {sessionStatus !== "signed-out" && (
         <>
           <AiChatDrawer open={chatOpen} onClose={() => setChatOpenOn(null)} />
-          <OnboardingModal
+          <OnboardingChat
             isOpen={showOnboarding}
-            initialProfile={onboardingProfile ?? undefined}
             onComplete={() => {
               writePageCache(ONBOARDED_CACHE_KEY, true);
+              setOnboardingSnoozed(false);
+              setShowOnboarding(false);
+            }}
+            onSnooze={() => {
+              setOnboardingSnoozed(true);
               setShowOnboarding(false);
             }}
           />

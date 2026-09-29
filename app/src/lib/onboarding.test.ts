@@ -6,7 +6,13 @@ import {
   ENTITY_TYPES,
   ENTITY_TYPE_OPTIONS,
   ONBOARDING_STEPS,
+  ONBOARDING_INTRO,
   BusinessProfile,
+  onboardingSteps,
+  profileSummaryRows,
+  profileFromAnswers,
+  answerText,
+  sanitizeAnswers,
 } from "./onboarding";
 
 describe("onboarding lib", () => {
@@ -80,5 +86,85 @@ describe("onboarding lib", () => {
     expect(ENTITY_TYPE_OPTIONS.find((option) => option.value === "oy")?.label).toBe(
       "Osakeyhtiö (Oy)"
     );
+  });
+
+  it("uses no emoji anywhere in the questions or answers (V1)", () => {
+    const emoji = /\p{Extended_Pictographic}/u;
+    const texts = [ONBOARDING_INTRO];
+    for (const step of ONBOARDING_STEPS) {
+      texts.push(step.question, step.hint ?? "");
+      for (const chip of step.chips) texts.push(chip.label, chip.detail ?? "");
+    }
+    for (const text of texts) expect(text).not.toMatch(emoji);
+  });
+
+  it("asks the VAT period only of a VAT-registered business", () => {
+    expect(onboardingSteps({}).map((step) => step.id)).toHaveLength(5);
+    expect(onboardingSteps({ vatRegistered: true }).map((step) => step.id)).toContain("vatPeriod");
+    const noVat = onboardingSteps({ vatRegistered: false }).map((step) => step.id);
+    expect(noVat).toHaveLength(4);
+    expect(noVat).not.toContain("vatPeriod");
+  });
+
+  it("summarises with Finnish labels, never raw ids or invented defaults", () => {
+    const rows = profileSummaryRows({
+      entityType: "kevytyrittaja",
+      vatRegistered: true,
+      vatPeriod: "month",
+      salesTypes: [],
+      expenseCategories: ["tarvikkeet", "vuokra"],
+    });
+    const text = rows.map((row) => `${row.label}: ${row.value}`).join("\n");
+    expect(text).toContain("Yritysmuoto: Kevytyrittäjä");
+    expect(text).toContain("ALV-kausi: Kuukausittain");
+    expect(text).toContain("Myynti: Ei mitään näistä");
+    expect(text).toContain("Kulut: Tarvikkeet, Liiketilan vuokra");
+    expect(text).not.toMatch(/month|kevytyrittaja|ripsipalvelut|Ripsipalvelut|\|/);
+    expect(rows.find((row) => row.id === "vatPeriod")).toBeTruthy();
+    expect(profileSummaryRows({ vatRegistered: false }).find((row) => row.id === "vatPeriod")).toBeUndefined();
+  });
+
+  it("does not invent sales or expenses in the model context either", () => {
+    const summary = generateProfileSummary({
+      entityType: "oy",
+      vatRegistered: false,
+      vatPeriod: "month",
+      salesTypes: [],
+      expenseCategories: [],
+    });
+    expect(summary).not.toMatch(/Ripsipalvelut|Tarvikkeet, vuokra/);
+    expect(summary).toContain("Myynti: ei valintaa");
+    expect(summary).toContain("Osakeyhtiö (Oy)");
+  });
+
+  it("builds a profile only when every asked question is answered", () => {
+    expect(profileFromAnswers({ entityType: "oy", vatRegistered: true })).toBeNull();
+    const profile = profileFromAnswers({
+      entityType: "oy",
+      vatRegistered: false,
+      salesTypes: ["koulutus"],
+      expenseCategories: [],
+    });
+    expect(profile).toEqual({
+      entityType: "oy",
+      vatRegistered: false,
+      vatPeriod: "month",
+      salesTypes: ["koulutus"],
+      expenseCategories: [],
+    });
+    expect(businessProfileSchema.safeParse(profile).success).toBe(true);
+    expect(answerText("vatRegistered", { vatRegistered: false })).toBe("En ole ALV-rekisterissä");
+  });
+
+  it("drops invalid values from a restored draft", () => {
+    expect(
+      sanitizeAnswers({
+        entityType: "osuuskunta",
+        vatRegistered: "yes",
+        vatPeriod: "quarter",
+        salesTypes: ["koulutus", "x", "koulutus"],
+      })
+    ).toEqual({ vatPeriod: "quarter", salesTypes: ["koulutus"] });
+    expect(sanitizeAnswers(null)).toEqual({});
   });
 });
