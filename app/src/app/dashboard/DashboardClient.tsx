@@ -60,11 +60,8 @@ import { approvalGapText } from "@/lib/receipt-approval";
 import { requestReceiptCapture } from "@/lib/capture-request";
 import { armNavigation } from "@/lib/nav-direction";
 import { ReceiptApprovalSheet, type ApprovalSheetReceipt } from "@/components/ReceiptApprovalSheet";
-import {
-  isBlockingKind,
-  type DashboardItem as ServerDashboardItem,
-  type DashboardItemKind,
-} from "@/app/api/dashboard/items";
+import type { DashboardItem as ServerDashboardItem, DashboardItemKind } from "@/app/api/dashboard/items";
+import { isBlockingKind } from "@/lib/dashboard-kinds";
 import { useProfile } from "@/app/asetukset/useProfile";
 import { useSession } from "@/components/SessionProvider";
 

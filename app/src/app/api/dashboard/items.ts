@@ -22,6 +22,7 @@ import { matchInvoicePaymentsFromBank } from "@/lib/sales-invoices";
 import { helsinkiCalendarDate, isoDateToUtc } from "@/lib/validation";
 import { openMonthRowsWhere } from "@/lib/month-rows";
 import { approvalGaps, type ApprovalGap } from "@/lib/receipt-approval";
+import { isBlockingKind } from "@/lib/dashboard-kinds";
 
 /** Rows shown per kind; the rest sit behind "Näytä kaikki". */
 export const ITEMS_PER_KIND = 3;
@@ -105,12 +106,8 @@ export type DashboardItem =
 
 export type DashboardItemKind = DashboardItem["kind"];
 
-/** Kinds that do not stop the month from being closed (FP-2, spec §5.1). */
-export const NON_BLOCKING_KINDS: ReadonlySet<DashboardItemKind> = new Set(["overdue_invoice"]);
-
-export function isBlockingKind(kind: DashboardItemKind): boolean {
-  return !NON_BLOCKING_KINDS.has(kind);
-}
+// The blocking-kind rule lives in a client-safe module (see lib/dashboard-kinds.ts).
+export { NON_BLOCKING_KINDS, isBlockingKind } from "@/lib/dashboard-kinds";
 
 export interface DashboardItems {
   items: DashboardItem[];
