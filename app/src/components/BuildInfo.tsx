@@ -1,5 +1,6 @@
 "use client";
 
+import { Disclosure } from "@/components/ds/Disclosure";
 import { useEffect, useState } from "react";
 import { version as appVersion } from "../../package.json";
 import { API_BASE_URL, IS_MOBILE_BUILD } from "@/lib/build-target";
@@ -66,7 +67,7 @@ export function BuildInfo() {
       >
         {showDetails ? "Piilota tekniset tiedot" : "Tekniset tiedot"}
       </button>
-      {showDetails && (
+      <Disclosure open={showDetails}>
         <div id="build-info-details" className="space-y-1">
           {IS_MOBILE_BUILD ? (
             <>
@@ -90,7 +91,7 @@ export function BuildInfo() {
             </p>
           )}
         </div>
-      )}
+      </Disclosure>
     </div>
   );
 }

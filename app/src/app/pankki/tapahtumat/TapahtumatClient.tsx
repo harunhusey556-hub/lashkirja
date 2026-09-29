@@ -1,5 +1,6 @@
 "use client";
 
+import { PullToRefresh } from "@/components/ds/PullToRefresh";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { ErrorState, SkeletonList } from "@/components/AsyncState";
@@ -255,6 +256,11 @@ export default function TapahtumatClient() {
 
   return (
     <div className="space-y-6">
+      {/* C1.6 (IA-24): pull to refresh runs the same reload as Yritä uudelleen. */}
+      <PullToRefresh onRefresh={() => {
+          setLoadError(null);
+          return loadStatements();
+        }} />
       <PageTitle title="Tapahtumat" subtitle="Tiliotteet ja pankin tapahtumat." />
 
       {/* No bank connected yet: the shared connect card leads (BOOKS-04). */}

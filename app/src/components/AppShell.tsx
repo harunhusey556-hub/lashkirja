@@ -331,6 +331,43 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const swipeHandoffRef = useRef<(() => void) | null>(null);
   const pendingScrollRef = useRef<{ top: number; until: number } | null>(null);
 
+  // C4 (IA-14): once the page's large title has scrolled under the header,
+  // a 17 px inline title fades in at the centre with a hairline under the
+  // header. Direct DOM writes, once per frame: no re-render while scrolling.
+  const headerRef = useRef<HTMLElement>(null);
+  const inlineTitleRef = useRef<HTMLParagraphElement>(null);
+  useEffect(() => {
+    const main = mainRef.current;
+    const header = headerRef.current;
+    const inline = inlineTitleRef.current;
+    if (!main || !header || !inline) return;
+    let raf = 0;
+    const update = () => {
+      raf = 0;
+      const heading = main.querySelector<HTMLElement>(".app-page h1");
+      const collapsed = Boolean(
+        heading && heading.getBoundingClientRect().bottom <= main.getBoundingClientRect().top + 2
+      );
+      if (collapsed) {
+        const text = heading?.textContent?.trim() ?? "";
+        if (inline.textContent !== text) inline.textContent = text;
+      }
+      if (collapsed !== (header.dataset.collapsed === "true")) {
+        if (collapsed) header.dataset.collapsed = "true";
+        else delete header.dataset.collapsed;
+      }
+    };
+    const schedule = () => {
+      if (!raf) raf = requestAnimationFrame(update);
+    };
+    main.addEventListener("scroll", schedule, { passive: true });
+    schedule();
+    return () => {
+      main.removeEventListener("scroll", schedule);
+      cancelAnimationFrame(raf);
+    };
+  }, [pathname]);
+
   // Scroll memory per route (SHELL-07). <main> persists across navigations.
   useEffect(() => {
     const main = mainRef.current;
@@ -1030,9 +1067,12 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     <div className="app-frame" data-tabs={isDetail ? "hidden" : undefined}>
       <UnsavedChangesHost />
       <header
-        className="app-header z-40 bg-canvas"
+        ref={headerRef}
+        className="app-header relative z-40 bg-canvas"
         onContextMenu={(event) => event.preventDefault()}
       >
+        {/* The collapsed inline title (IA-14). aria-hidden: the h1 is the name. */}
+        <p ref={inlineTitleRef} className="app-header-title" aria-hidden />
         {/* px-3 + the 4px inset of each 36px circle inside its 44px hit box puts the avatar's outer
             edge on the same 16px line as the cards below, and the back chevron's stroke on the
             page title's 20px line. */}

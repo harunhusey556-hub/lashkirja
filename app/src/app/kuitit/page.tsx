@@ -1,5 +1,6 @@
 "use client";
 
+import { PullToRefresh } from "@/components/ds/PullToRefresh";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -639,6 +640,11 @@ export default function KuititPage() {
     <>
       {/* BulkBar publishes its height while shown, so the last row and "Katso kaikki" scroll clear of it. */}
       <div className="space-y-6" style={{ paddingBottom: `var(${BULK_BAR_SPACE_VAR}, 0px)` }}>
+        {/* C1.6 (IA-24): pull to refresh runs the same reload as Yritä uudelleen. */}
+        <PullToRefresh onRefresh={() => {
+            setLoadError(null);
+            setLoadAttempt((attempt) => attempt + 1);
+          }} />
         <PageTitle
           title="Kuitit"
           action={

@@ -1,5 +1,6 @@
 "use client";
 
+import { PullToRefresh } from "@/components/ds/PullToRefresh";
 import { useMemo } from "react";
 import { ArrowLeftRight, Inbox, Link2, ListChecks, Lock, Percent, ReceiptEuro, Wallet } from "lucide-react";
 import { Icon, PageTitle, Section, ListRow, SlotSkeleton } from "@/components/ds";
@@ -143,6 +144,13 @@ export default function KirjanpitoPage() {
 
   return (
     <div className="space-y-6">
+      {/* C1.6 (IA-24): pull to refresh runs the same reload as Yritä uudelleen. */}
+      <PullToRefresh onRefresh={() => {
+          alvFetch.reload();
+          purchases.reload();
+          accounts.reload();
+          lock.reload();
+        }} />
       <PageTitle title="Kirjanpito" />
 
       <Section title="Tapahtumat ja kuitit">

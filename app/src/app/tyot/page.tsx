@@ -1,5 +1,6 @@
 "use client";
 
+import { PullToRefresh } from "@/components/ds/PullToRefresh";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { apiFetch, errorMessage, isUnauthorized, readJson, redirectToLogin } from "@/components/clientFetch";
 import { ConnectionNotice, StaleBanner } from "@/components/ScreenState";
@@ -183,6 +184,8 @@ export default function TyotPage() {
 
   return (
     <div className="space-y-6">
+      {/* C1.6 (IA-24): pull to refresh runs the same reload as Yritä uudelleen. */}
+      <PullToRefresh onRefresh={() => load()} />
       <PageTitle title="Työt ja poikkeukset" subtitle="Taustatöiden tila ja avoimet poikkeukset." />
 
       {data === null && loadError != null ? (

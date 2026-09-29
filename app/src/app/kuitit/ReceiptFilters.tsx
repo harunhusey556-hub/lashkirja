@@ -1,5 +1,6 @@
 "use client";
 
+import { Disclosure } from "@/components/ds/Disclosure";
 import { Button, controlClass } from "@/components/ui";
 import { ChevronDown, Search } from "lucide-react";
 import { FilterChips, Icon } from "@/components/ds";
@@ -94,7 +95,7 @@ export function ReceiptFilters({
           />
         </button>
 
-        {isSearchOpen && (
+        <Disclosure open={isSearchOpen}>
           <div id="kuitit-search-panel" className="space-y-3 pt-3">
             <input
               aria-label="Hae kuitteja"
@@ -131,7 +132,7 @@ export function ReceiptFilters({
               </button>
             </div>
 
-            {advancedOpen && (
+            <Disclosure open={advancedOpen}>
               <div id="advanced-receipt-filters" className="space-y-3 border-t border-line pt-3">
                 <div className="field-grid">
                   <div>
@@ -231,9 +232,9 @@ export function ReceiptFilters({
                   </Button>
                 </div>
               </div>
-            )}
+            </Disclosure>
           </div>
-        )}
+        </Disclosure>
       </div>
 
       {activeChips.length > 0 && (

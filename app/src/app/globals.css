@@ -182,7 +182,7 @@ body {
   pointer-events: none;
 }
 
-.app-frame[data-overlay="open"] > .app-main .overlay-root {
+.app-frame[data-overlay="open"] > .app-main :is(.overlay-root, [data-overlay-root]) {
   pointer-events: auto;
 }
 
@@ -373,6 +373,80 @@ button:disabled {
   min-height: calc(100% + 1px);
 }
 
+/* Inline disclosure (ds/Disclosure, IA-23): height and opacity, 200 ms. */
+.disclosure {
+  display: grid;
+  grid-template-rows: 0fr;
+  opacity: 0;
+  transition:
+    grid-template-rows 200ms var(--ease-out),
+    opacity 200ms var(--ease-out);
+}
+
+.disclosure[data-open="true"] {
+  grid-template-rows: 1fr;
+  opacity: 1;
+}
+
+.disclosure-inner {
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* Room for focus rings while open (the clip would cut them). */
+.disclosure[data-open="true"] > .disclosure-inner {
+  padding: 4px;
+  margin: -4px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .disclosure {
+    transition: opacity 120ms linear;
+  }
+}
+
+/* Pull to refresh (ds/PullToRefresh, C1.6). The band sits before the page;
+   at rest it is 0 px tall and its spinner waits above it, revealed only by
+   the pull. While refreshing the band holds 48 px open. */
+.ptr-indicator {
+  position: relative;
+  overflow: visible;
+  transition: height 200ms var(--ease-drawer);
+}
+
+.ptr-spinner {
+  position: absolute;
+  left: 50%;
+  bottom: 12px;
+  width: 24px;
+  height: 24px;
+  margin-left: -12px;
+  border-radius: 9999px;
+  border: 2.5px solid color-mix(in srgb, var(--color-ink-2) 25%, transparent);
+  border-top-color: var(--color-ink-2);
+  opacity: var(--ptr-progress, 0);
+  transform: rotate(calc(var(--ptr-progress, 0) * 270deg));
+}
+
+@keyframes ptrSpin {
+  to { transform: rotate(360deg); }
+}
+
+.ptr-indicator[data-refreshing="true"] .ptr-spinner {
+  opacity: 1;
+  animation: ptrSpin 0.8s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ptr-indicator {
+    transition: none;
+  }
+
+  .ptr-indicator[data-refreshing="true"] .ptr-spinner {
+    animation-duration: 2.4s;
+  }
+}
+
 .app-main[data-scroll-lock="true"] {
   overflow: hidden;
   touch-action: none;
@@ -476,6 +550,37 @@ button:disabled {
   padding-top: var(--safe-top);
   padding-right: env(safe-area-inset-right, 0px);
   padding-left: env(safe-area-inset-left, 0px);
+  box-shadow: 0 0.5px 0 transparent;
+  transition: box-shadow 150ms var(--ease-out);
+}
+
+/* C4 (IA-14): when the large title has scrolled under the header, a 17 px
+   semibold title fades in at the centre, with a 0.5 px hairline. */
+.app-header[data-collapsed="true"] {
+  box-shadow: 0 0.5px 0 var(--color-line);
+}
+
+.app-header-title {
+  position: absolute;
+  left: 50%;
+  bottom: 0;
+  height: 3.5rem;
+  max-width: 46%;
+  transform: translateX(-50%);
+  overflow: hidden;
+  line-height: 3.5rem;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 17px;
+  font-weight: 600;
+  color: var(--color-ink);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 150ms var(--ease-out);
+}
+
+.app-header[data-collapsed="true"] .app-header-title {
+  opacity: 1;
 }
 
 .app-tab-bar {

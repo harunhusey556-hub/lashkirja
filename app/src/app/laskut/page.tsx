@@ -1,5 +1,7 @@
 "use client";
 
+import { Disclosure } from "@/components/ds/Disclosure";
+import { PullToRefresh } from "@/components/ds/PullToRefresh";
 import { Suspense, useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -338,6 +340,8 @@ function InvoicesPageContent() {
 
   return (
     <div className="space-y-6">
+      {/* C1.6 (IA-24): pull to refresh runs the same reload as Yritä uudelleen. */}
+      <PullToRefresh onRefresh={() => load()} />
       <PageTitle
         title="Myynti"
         action={
@@ -392,7 +396,7 @@ function InvoicesPageContent() {
               />
             </span>
           </button>
-          {agingOpen && (
+          <Disclosure open={agingOpen}>
             <div
               id="laskut-aging"
               className="grid grid-cols-4 divide-x divide-line border-t border-line text-center"
@@ -406,7 +410,7 @@ function InvoicesPageContent() {
                 </div>
               ))}
             </div>
-          )}
+          </Disclosure>
         </div>
       )}
 

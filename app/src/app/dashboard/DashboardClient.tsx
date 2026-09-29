@@ -1,5 +1,6 @@
 "use client";
 
+import { PullToRefresh } from "@/components/ds/PullToRefresh";
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { ErrorState } from "@/components/AsyncState";
@@ -680,6 +681,8 @@ export default function DashboardClient() {
 
   return (
     <div className="space-y-6">
+      {/* C1.6 (IA-24): pull to refresh runs the same reload as Yritä uudelleen. */}
+      <PullToRefresh onRefresh={retry} />
       <PageTitle
         title={title}
         subtitle={subtitle}

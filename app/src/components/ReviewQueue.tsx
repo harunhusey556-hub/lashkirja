@@ -1,5 +1,6 @@
 "use client";
 
+import { Disclosure } from "@/components/ds/Disclosure";
 import { useState } from "react";
 import { formatEur } from "@/lib/statement-client";
 import { Button } from "@/components/ui";
@@ -116,7 +117,7 @@ export default function ReviewQueue({
         />
       )}
 
-      {open && (
+      <Disclosure open={open}>
         <div className="mt-3 -mx-4 border-t border-line">
           <div className="divide-y divide-line">
             {visible.map((r) => (
@@ -145,7 +146,7 @@ export default function ReviewQueue({
             </div>
           )}
         </div>
-      )}
+      </Disclosure>
     </Card>
   );
 }

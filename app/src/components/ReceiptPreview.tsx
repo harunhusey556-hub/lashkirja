@@ -5,6 +5,165 @@ import { useFocusTrap } from "@/components/useFocusTrap";
 import { AuthedFileLink } from "@/components/AuthedFileLink";
 import { useAuthedObjectUrl } from "@/lib/authed-file";
 import { nextRotation, nextZoom } from "@/lib/document-viewer";
+import { X } from "lucide-react";
+import { Icon } from "@/components/ds/Icon";
+import { useOverlayLock } from "@/lib/overlay-lock";
+import { DECIDE_SLOP, sheetDragCommits, SPRING_BACK_MS, VelocityTracker } from "@/lib/gesture";
+
+const MAX_ZOOM = 4;
+const DOUBLE_TAP_ZOOM = 2.5;
+const DOUBLE_TAP_MS = 300;
+
+type Pan = { x: number; y: number };
+
+/**
+ * The full-screen viewer's gestures (C8, IA-22): pinch to zoom (1x-4x), drag
+ * to pan while zoomed, double-tap to zoom in at the finger / back out, and
+ * at 1x a swipe down dismisses (the shared sheet thresholds).
+ */
+function useViewerGestures(
+  stageRef: React.RefObject<HTMLDivElement | null>,
+  active: boolean,
+  view: { zoom: number; pan: Pan },
+  set: (zoom: number, pan: Pan) => void,
+  onDismiss: () => void
+) {
+  const viewRef = useRef(view);
+  const setRef = useRef(set);
+  const dismissRef = useRef(onDismiss);
+  useEffect(() => {
+    viewRef.current = view;
+    setRef.current = set;
+    dismissRef.current = onDismiss;
+  });
+
+  useEffect(() => {
+    const stage = stageRef.current;
+    if (!active || !stage) return;
+    let mode: "none" | "pinch" | "pan" | "dismiss" | "undecided" = "none";
+    let startDist = 1;
+    let startZoom = 1;
+    let startPan: Pan = { x: 0, y: 0 };
+    let startX = 0;
+    let startY = 0;
+    let moved = false;
+    let dy = 0;
+    let lastTap = { t: 0, x: 0, y: 0 };
+    const tracker = new VelocityTracker();
+    const dialog = stage.closest<HTMLElement>('[role="dialog"]');
+
+    const distance = (touches: TouchList) =>
+      Math.hypot(touches[0].clientX - touches[1].clientX, touches[0].clientY - touches[1].clientY);
+
+    const onStart = (event: TouchEvent) => {
+      const { zoom, pan } = viewRef.current;
+      if (event.touches.length === 2) {
+        mode = "pinch";
+        startDist = distance(event.touches) || 1;
+        startZoom = zoom;
+        startPan = pan;
+        moved = true;
+        return;
+      }
+      if (event.touches.length !== 1) return;
+      startX = event.touches[0].clientX;
+      startY = event.touches[0].clientY;
+      startPan = pan;
+      moved = false;
+      dy = 0;
+      tracker.reset(startY);
+      mode = zoom > 1 ? "pan" : "undecided";
+    };
+
+    const onMove = (event: TouchEvent) => {
+      if (mode === "pinch" && event.touches.length === 2) {
+        event.preventDefault();
+        const next = Math.min(MAX_ZOOM, Math.max(1, (startZoom * distance(event.touches)) / startDist));
+        setRef.current(next, next === 1 ? { x: 0, y: 0 } : startPan);
+        return;
+      }
+      if (event.touches.length !== 1) return;
+      const mx = event.touches[0].clientX - startX;
+      const my = event.touches[0].clientY - startY;
+      if (!moved && Math.abs(mx) < DECIDE_SLOP && Math.abs(my) < DECIDE_SLOP) return;
+      moved = true;
+      if (mode === "pan") {
+        event.preventDefault();
+        setRef.current(viewRef.current.zoom, { x: startPan.x + mx, y: startPan.y + my });
+        return;
+      }
+      if (mode === "undecided") {
+        mode = my > 0 && Math.abs(my) > Math.abs(mx) ? "dismiss" : "none";
+        if (mode === "dismiss") stage.style.transition = "none";
+      }
+      if (mode === "dismiss") {
+        event.preventDefault();
+        tracker.add(event.touches[0].clientY);
+        dy = Math.max(0, my);
+        stage.style.transform = `translateY(${dy}px)`;
+        if (dialog) dialog.style.backgroundColor = `rgb(38 34 31 / ${0.9 * (1 - Math.min(1, dy / 400))})`;
+      }
+    };
+
+    const springBack = () => {
+      stage.style.transition = `transform ${SPRING_BACK_MS}ms var(--ease-drawer)`;
+      stage.style.transform = "";
+      if (dialog) dialog.style.backgroundColor = "";
+      window.setTimeout(() => {
+        stage.style.transition = "";
+      }, SPRING_BACK_MS + 20);
+    };
+
+    const onEnd = (event: TouchEvent) => {
+      if (mode === "dismiss") {
+        mode = "none";
+        if (sheetDragCommits(dy, stage.offsetHeight || 1, tracker.velocity())) {
+          dismissRef.current();
+        } else springBack();
+        return;
+      }
+      if (mode === "pinch") {
+        if (event.touches.length === 0) mode = "none";
+        return;
+      }
+      const wasTap = !moved && event.changedTouches.length === 1;
+      mode = "none";
+      if (!wasTap) return;
+      const touch = event.changedTouches[0];
+      const now = performance.now();
+      if (now - lastTap.t < DOUBLE_TAP_MS && Math.hypot(touch.clientX - lastTap.x, touch.clientY - lastTap.y) < 30) {
+        lastTap = { t: 0, x: 0, y: 0 };
+        event.preventDefault();
+        const { zoom } = viewRef.current;
+        if (zoom > 1) setRef.current(1, { x: 0, y: 0 });
+        else {
+          const rect = stage.getBoundingClientRect();
+          const cx = rect.left + rect.width / 2;
+          const cy = rect.top + rect.height / 2;
+          setRef.current(DOUBLE_TAP_ZOOM, {
+            x: (touch.clientX - cx) * (1 - DOUBLE_TAP_ZOOM),
+            y: (touch.clientY - cy) * (1 - DOUBLE_TAP_ZOOM),
+          });
+        }
+        return;
+      }
+      lastTap = { t: now, x: touch.clientX, y: touch.clientY };
+    };
+
+    stage.addEventListener("touchstart", onStart, { passive: true });
+    stage.addEventListener("touchmove", onMove, { passive: false });
+    stage.addEventListener("touchend", onEnd);
+    stage.addEventListener("touchcancel", onEnd);
+    return () => {
+      stage.removeEventListener("touchstart", onStart);
+      stage.removeEventListener("touchmove", onMove);
+      stage.removeEventListener("touchend", onEnd);
+      stage.removeEventListener("touchcancel", onEnd);
+      stage.style.transform = "";
+      stage.style.transition = "";
+    };
+  }, [active, stageRef]);
+}
 
 type PreviewKind = "rendered" | "raster" | "other";
 
@@ -46,7 +205,9 @@ export default function ReceiptPreview({
   const [loading, setLoading] = useState(true);
   const [zoom, setZoom] = useState(1);
   const [rotation, setRotation] = useState(0);
+  const [pan, setPan] = useState<Pan>({ x: 0, y: 0 });
   const dialogRef = useRef<HTMLDivElement>(null);
+  const stageRef = useRef<HTMLDivElement>(null);
   const openButtonRef = useRef<HTMLButtonElement>(null);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
   const kind = previewKind(fileName);
@@ -81,9 +242,23 @@ export default function ReceiptPreview({
       setFullscreen(false);
       setClosing(false);
       setZoom(1);
+      setPan({ x: 0, y: 0 });
       setRotation(0);
     }, 200);
   }
+
+  // AX-10 / IA-22: the page behind the viewer is locked and inert.
+  useOverlayLock(fullscreen);
+  useViewerGestures(
+    stageRef,
+    fullscreen && !closing,
+    { zoom, pan },
+    (nextZoomValue, nextPan) => {
+      setZoom(nextZoomValue);
+      setPan(nextPan);
+    },
+    closeViewer
+  );
 
   useFocusTrap(dialogRef, fullscreen, {
     onEscape: closeViewer,
@@ -108,6 +283,7 @@ export default function ReceiptPreview({
         fileName={fileName}
         fill={fill}
         zoom={fill ? zoom : 1}
+        pan={fill ? pan : { x: 0, y: 0 }}
         rotation={fill ? rotation : 0}
         failed={previewFailed}
         loading={loading}
@@ -146,6 +322,7 @@ export default function ReceiptPreview({
           role="dialog"
           aria-modal="true"
           aria-labelledby="receipt-preview-title"
+          data-overlay-root=""
         >
           <div
             className="flex items-center justify-between px-4 py-3 shrink-0"
@@ -158,7 +335,10 @@ export default function ReceiptPreview({
               <button
                 type="button"
                 data-testid="preview-zoom"
-                onClick={() => setZoom((current) => nextZoom(current))}
+                onClick={() => {
+                  setZoom((current) => nextZoom(current));
+                  setPan({ x: 0, y: 0 });
+                }}
                 className="min-h-11 px-3 rounded-lg bg-white/15 text-white text-sm hover:bg-white/25 transition-colors"
               >
                 Suurenna
@@ -171,13 +351,15 @@ export default function ReceiptPreview({
               >
                 Kierrä
               </button>
+              {/* Close is an X, top-right, as on every modal (IA-21). */}
               <button
                 ref={closeButtonRef}
                 type="button"
                 onClick={closeViewer}
-                className="min-h-11 px-4 rounded-lg bg-white/15 text-white text-sm hover:bg-white/25 transition-colors"
+                aria-label="Sulje"
+                className="flex h-11 w-11 items-center justify-center rounded-full bg-white/15 text-white hover:bg-white/25 transition-colors"
               >
-                Sulje
+                <Icon icon={X} strokeWidth={2} />
               </button>
             </div>
           </div>
@@ -187,8 +369,10 @@ export default function ReceiptPreview({
             </p>
           )}
           <div
+            ref={stageRef}
             className={`flex-1 min-h-0 px-2 overflow-auto ${closing ? "animate-scale-out" : "animate-scale-in"}`}
-            style={{ paddingBottom: "max(1rem, var(--safe-bottom))" }}
+            // The stage owns every touch (pinch, pan, double-tap, swipe down).
+            style={{ paddingBottom: "max(1rem, var(--safe-bottom))", touchAction: "none" }}
             data-testid="preview-stage"
           >
             {renderViewer(true)}
@@ -206,6 +390,7 @@ function PreviewBody({
   fileName,
   fill,
   zoom,
+  pan,
   rotation,
   failed,
   loading,
@@ -219,6 +404,7 @@ function PreviewBody({
   fileName: string;
   fill: boolean;
   zoom: number;
+  pan: Pan;
   rotation: number;
   failed: boolean;
   loading: boolean;
@@ -269,7 +455,10 @@ function PreviewBody({
           data-testid={fill ? "preview-image" : undefined}
           style={
             fill
-              ? { transform: `scale(${zoom}) rotate(${rotation}deg)`, transformOrigin: "center center" }
+              ? {
+                  transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom}) rotate(${rotation}deg)`,
+                  transformOrigin: "center center",
+                }
               : undefined
           }
         />

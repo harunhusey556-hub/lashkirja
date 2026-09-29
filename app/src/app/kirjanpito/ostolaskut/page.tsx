@@ -1,5 +1,6 @@
 "use client";
 
+import { PullToRefresh } from "@/components/ds/PullToRefresh";
 import { useCallback, useEffect, useState } from "react";
 import { SkeletonList } from "@/components/AsyncState";
 import { ConnectionNotice, EmptyState, StaleBanner } from "@/components/ScreenState";
@@ -372,6 +373,11 @@ export default function PurchaseInvoicesPage() {
   return (
     <>
       <div className="space-y-6">
+        {/* C1.6 (IA-24): pull to refresh runs the same reload as Yritä uudelleen. */}
+        <PullToRefresh onRefresh={() => {
+            reloadCounts();
+            return load();
+          }} />
         <PageTitle
           title="Ostolaskut"
           subtitle="Mitä olet velkaa ja milloin."
