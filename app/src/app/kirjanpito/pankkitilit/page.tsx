@@ -15,6 +15,7 @@ import { formatEur, formatMonth } from "@/lib/format";
 import { formatIban, maskIban } from "@/lib/iban";
 import { CopyButton } from "@/components/ds/CopyButton";
 import BankConnectCard from "@/components/BankConnectCard";
+import { StatementFilesSection } from "@/components/bank/StatementFilesSection";
 import { Button } from "@/components/ui";
 import { Card, ListRow, PageTitle, Section, Skeleton, SkeletonGroup, useSkeletonFade } from "@/components/ds";
 
@@ -324,7 +325,7 @@ export default function BankAccountsPage() {
   return (
     <>
       <div className="space-y-6">
-        <PageTitle title="Pankkitilit" subtitle="Pankkiyhteys, tilit ja kuukausien loppusaldot." />
+        <PageTitle title="Pankkiyhteys ja tilit" subtitle="Yhdistetyt pankit, tilit ja tiliotteet." />
 
         {/* Connect first (OWN-06, BOOKS-01): the bank connection leads the page and
             never waits for the profile (BOOKS-07). Manual entry is the quiet link below. */}
@@ -418,6 +419,8 @@ export default function BankAccountsPage() {
             </div>
           </div>
         )}
+        {/* Tiliote files moved here from the Pankki screen, whose list is the rows themselves. */}
+        <StatementFilesSection />
       </div>
 
       <BottomSheet

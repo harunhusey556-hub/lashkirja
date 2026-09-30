@@ -44,7 +44,7 @@ export default function BankSetupSheet({
           <p className="mb-2 px-1 text-caption text-ink-2">Toimii jo nyt</p>
           <div className="overflow-hidden rounded-card border border-line bg-surface divide-y divide-line">
             <Link
-              href="/pankki/tapahtumat"
+              href="/kirjanpito/pankkitilit#tiliotteet"
               onClick={onClose}
               className="active-press flex min-h-14 items-center gap-3 px-4 py-3"
             >

@@ -186,7 +186,7 @@ export default function TyotPage() {
     <div className="space-y-6">
       {/* C1.6 (IA-24): pull to refresh runs the same reload as Yritä uudelleen. */}
       <PullToRefresh onRefresh={() => load()} />
-      <PageTitle title="Työt ja poikkeukset" subtitle="Taustatöiden tila ja avoimet poikkeukset." />
+      <PageTitle title="Taustatyöt" subtitle="Tuonnit, haut ja niiden virheet." />
 
       {data === null && loadError != null ? (
         <ConnectionNotice error={loadError} fallback="Töiden lataus epäonnistui" onRetry={() => void load()} compact />

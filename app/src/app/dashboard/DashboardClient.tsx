@@ -137,9 +137,9 @@ interface Task {
 const KIND_LIST: Record<ItemKind, { href: string; label: string }> = {
   overdue_invoice: { href: "/laskut?status=overdue", label: "Myöhässä olevat laskut" },
   pending_receipt: { href: "/kuitit", label: "Hyväksyntää odottavat kuitit" },
-  missing_receipt: { href: "/pankki/taydennys", label: "Pankkitapahtumat ilman kuittia" },
+  missing_receipt: { href: "/pankki/tapahtumat?nayta=toimet", label: "Pankkitapahtumat ilman kuittia" },
   invoice_match: { href: "/laskut", label: "Laskujen maksut tiliotteella" },
-  receipt_match: { href: "/pankki/taydennys", label: "Kohdistusehdotukset" },
+  receipt_match: { href: "/pankki/tapahtumat?nayta=toimet", label: "Kohdistusehdotukset" },
   payment_duplicate: { href: "/tyot", label: "Mahdolliset kaksoiskirjaukset" },
   draft_invoice: { href: "/laskut?status=draft", label: "Lähettämättömät laskut" },
 };
@@ -490,7 +490,7 @@ export default function DashboardClient() {
           secondary: item.date ? `Kuitti puuttuu · ${formatDayMonth(item.date)}` : "Kuitti puuttuu",
           pill: "Lisää kuva",
           blocking: true,
-          href: "/pankki/taydennys",
+          href: "/pankki/tapahtumat?nayta=toimet",
           // FP-10: the verb is the effect. The camera opens and the photo is linked to this row.
           onAction: () => requestReceiptCapture({ transactionId: item.transactionId, label: item.party }),
         };
@@ -503,7 +503,7 @@ export default function DashboardClient() {
           secondary: "Kohdistusehdotus · tarkista",
           pill: "Tarkista",
           blocking: true,
-          href: "/pankki/taydennys",
+          href: "/pankki/tapahtumat?nayta=toimet",
         };
       case "invoice_match":
         return {

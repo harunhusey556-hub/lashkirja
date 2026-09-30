@@ -35,8 +35,8 @@ import {
   type ReceiptTabCounts,
 } from "@/lib/receipt-tabs";
 import { Button, buttonClass } from "@/components/ui";
-import { Check, ClipboardList, Minus, Receipt } from "lucide-react";
-import { HeaderAddPill, Icon, ListRow, PageTitle, Section, SlotSkeleton } from "@/components/ds";
+import { Check, Minus, Receipt } from "lucide-react";
+import { HeaderAddPill, PageTitle, Section, SlotSkeleton } from "@/components/ds";
 import { batchOutcomeMessage } from "@/lib/upload-queue";
 import { ReceiptFilters, type ReceiptAdvancedFilters } from "./ReceiptFilters";
 import { ReceiptRow } from "./ReceiptRow";
@@ -813,16 +813,6 @@ export default function KuititPage() {
           )}
         </div>
 
-        {/* BOOKS-28, VS-23: the jobs link is a row here, not a one-item menu in the header. */}
-        <Section>
-          <ListRow
-            leading={<Icon icon={ClipboardList} />}
-            chevron
-            title="Työt ja poikkeukset"
-            secondary="Tila ja avoimet poikkeukset"
-            href="/tyot"
-          />
-        </Section>
       </div>
 
       <ConfirmModal

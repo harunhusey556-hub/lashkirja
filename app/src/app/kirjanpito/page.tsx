@@ -1,14 +1,14 @@
 "use client";
 
 import { PullToRefresh } from "@/components/ds/PullToRefresh";
-import { ArrowLeftRight, Inbox, Link2, ListChecks, Lock, Percent, ReceiptEuro } from "lucide-react";
+import { Inbox, Lock, Percent, ReceiptEuro } from "lucide-react";
 import { Icon, PageTitle, Section, ListRow, SlotSkeleton } from "@/components/ds";
 import { apiFetch, readJson } from "@/components/clientFetch";
 import { MONTHS } from "@/lib/finnish-months";
 import { VAT_ROW_TITLE, vatDueAmount, vatDueSecondary } from "@/lib/vat-due";
 import { useVatDue } from "@/components/useVatDue";
 import { useProfile } from "@/app/asetukset/useProfile";
-import { BankConnectSection } from "@/components/BankConnectCard";
+import { BankConnectRow } from "@/components/BankConnectCard";
 import { useCachedResource } from "@/components/useCachedResource";
 import { PERIOD_LOCK_KEY, PURCHASE_COUNTS_KEY } from "@/lib/cached-resource";
 
@@ -81,7 +81,9 @@ export default function KirjanpitoPage() {
         }} />
       <PageTitle title="Kirjanpito" />
 
-      <Section title="Tapahtumat ja kuitit">
+      {/* Owner report 2026-09-30: one row per thing. Pankki holds every bank row,
+          the connection and the tiliote files; Täsmäytys is its "Vaatii toimia". */}
+      <Section>
         <ListRow
           href="/kuitit"
           leading={<Icon icon={ReceiptEuro} />}
@@ -89,31 +91,16 @@ export default function KirjanpitoPage() {
           title="Kuitit"
           secondary="Kaikki kuitit ja niiden tila"
         />
+        <BankConnectRow />
         <ListRow
-          href="/pankki/tapahtumat"
-          leading={<Icon icon={ArrowLeftRight} />}
+          href="/kirjanpito/ostolaskut"
+          leading={<Icon icon={Inbox} />}
           chevron
-          title="Tapahtumat"
-          secondary="Tiliotteet ja yhdistetyn pankin tapahtumat"
-        />
-        <ListRow
-          href="/pankki/taydennys"
-          leading={<Icon icon={Link2} />}
-          chevron
-          title="Täsmäytys"
-          secondary="Kuitit ja tapahtumat ilman linkkiä"
-        />
-        <ListRow
-          href="/tyot"
-          leading={<Icon icon={ListChecks} />}
-          chevron
-          title="Työt ja poikkeukset"
-          secondary="Taustatyöt ja avoimet poikkeukset"
+          title="Ostolaskut"
+          amount={pending(purchases) ? <SlotSkeleton width={64} /> : purchasesValue}
+          amountTone="muted"
         />
       </Section>
-
-      {/* Connect first (OWN-06): one bank row, "Yhdistä" one tap from the tab. */}
-      <BankConnectSection />
 
       <Section title="Ilmoitukset ja kaudet">
         <ListRow
@@ -123,14 +110,6 @@ export default function KirjanpitoPage() {
           title={VAT_ROW_TITLE}
           amount={alvWaiting ? <SlotSkeleton width={56} /> : (vatDueAmount(vat.figures) ?? undefined)}
           secondary={alvWaiting ? <SlotSkeleton width={176} height={11} tone="soft" /> : vat.due ? vatDueSecondary(vat.due, vat.figures) : undefined}
-        />
-        <ListRow
-          href="/kirjanpito/ostolaskut"
-          leading={<Icon icon={Inbox} />}
-          chevron
-          title="Ostolaskut"
-          amount={pending(purchases) ? <SlotSkeleton width={64} /> : purchasesValue}
-          amountTone="muted"
         />
         {/* TF-07 / FP-13: the month has a finish line; locking and reopening live behind it. */}
         <ListRow

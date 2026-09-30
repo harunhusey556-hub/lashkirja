@@ -117,6 +117,8 @@ describe("statement list order", () => {
       });
     }
     const list = await listStatementsForUser(user.id);
-    expect(list.map((statement) => statement.periodMonth)).toEqual(["2026-09", "2026-08", "2026-07"]);
+    // enrichStatements keeps every Statement field at runtime; its type lists only what it adds.
+    const months = list.map((statement) => (statement as { periodMonth?: string | null }).periodMonth);
+    expect(months).toEqual(["2026-09", "2026-08", "2026-07"]);
   });
 });

@@ -63,7 +63,7 @@ const SOURCE_RULES: Array<{ prefix: string; label: string }> = [
   { prefix: "/raportit", label: "Raportit" },
   { prefix: "/kuitit", label: "Kuitit" },
   { prefix: "/laskut", label: "Laskut" },
-  { prefix: "/pankki/tapahtumat", label: "Tapahtumat" },
+  { prefix: "/pankki/tapahtumat", label: "Pankki" },
   { prefix: "/tiliotteet", label: "Tiliotteet" },
 ];
 

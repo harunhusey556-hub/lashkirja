@@ -6,7 +6,8 @@ import { shareContent } from "@/lib/share";
 import { hapticNotify } from "@/lib/haptics";
 import { showToast } from "@/lib/toast";
 import { BuildInfo } from "@/components/BuildInfo";
-import { Card, PageTitle } from "@/components/ds";
+import { ClipboardList } from "lucide-react";
+import { Card, Icon, ListRow, PageTitle, Section } from "@/components/ds";
 import { buttonClass } from "@/components/control-styles";
 
 /** Shown and used as the mail recipient when the build carries one (NEXT_PUBLIC_SUPPORT_EMAIL). */
@@ -81,6 +82,17 @@ export default function OhjePage() {
         )}
         <BuildInfo />
       </Card>
+      {/* The background-job log is for troubleshooting, not everyday bookkeeping:
+          it left the Kirjanpito hub and Kuitit (owner report 2026-09-30). */}
+      <Section>
+        <ListRow
+          href="/tyot"
+          leading={<Icon icon={ClipboardList} />}
+          chevron
+          title="Taustatyöt"
+          secondary="Tuonnit, haut ja niiden virheet"
+        />
+      </Section>
     </div>
   );
 }

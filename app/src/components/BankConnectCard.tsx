@@ -7,7 +7,7 @@ import ConfirmModal from "@/components/ConfirmModal";
 import { apiFetch, errorMessage, isUnauthorized, readJson, redirectToLogin } from "@/components/clientFetch";
 import { ConnectionNotice } from "@/components/ScreenState";
 import { Button } from "@/components/ui";
-import { Icon, IconTile, Section } from "@/components/ds";
+import { Icon, IconTile } from "@/components/ds";
 import { Skeleton } from "@/components/ds/Skeleton";
 import BankPickerSheet, { BankLogo } from "@/components/bank/BankPickerSheet";
 import BankSetupSheet from "@/components/bank/BankSetupSheet";
@@ -60,17 +60,16 @@ function useConnectSheets() {
 }
 
 /**
- * The one bank row of the Kirjanpito hub (OWN-06). It always opens
- * Pankkitilit, where the connection and the accounts live; there used to be a
- * second "Pankkitilit" row that opened the same page. Not connected: a filled
- * "Yhdistä" pill still opens the bank list right here.
+ * The Pankki row of the Kirjanpito hub (OWN-06). It opens the Pankki screen,
+ * where every bank row, the accounts and the connection live. Not connected:
+ * a filled "Yhdistä" pill still opens the bank list right here.
  */
 export function BankConnectRow() {
   const { data, error } = useBankConnections();
   const sheets = useConnectSheets();
   const state = data ? bankState(data) : null;
   const line = state ? state.line : error ? "Tilaa ei saatu haettua" : " ";
-  const title = "Pankkitilit";
+  const title = "Pankki";
 
   const pill =
     "active-press relative z-10 inline-flex min-h-9 shrink-0 items-center rounded-full bg-ink px-3.5 text-caption font-semibold text-canvas before:absolute before:inset-x-0 before:-inset-y-1 before:content-['']";
@@ -79,7 +78,7 @@ export function BankConnectRow() {
     <>
       <div data-testid="bank-connect-row" className="relative flex min-h-16 w-full items-center gap-3 px-4 py-3 text-left">
         <Link
-          href="/kirjanpito/pankkitilit"
+          href="/pankki/tapahtumat"
           aria-label={typeof line === "string" && line.trim() ? `${title}, ${line}` : title}
           className="row-link active-press absolute inset-0"
         />
@@ -104,33 +103,6 @@ export function BankConnectRow() {
       </div>
       <BankPickerSheet isOpen={sheets.picker.open} onClose={sheets.closePicker} preferredPsu={sheets.picker.psu} />
     </>
-  );
-}
-
-/**
- * The "Pankki" section of the Kirjanpito hub: the bank row and any rows that follow it
- * (`children`, ListRows). When the connection lookup fails, the shared failure card with its
- * one retry stands in the place of the connect row, above the remaining rows, instead of a
- * "Tilaa ei saatu haettua" subtitle that cannot be retried (VS-31).
- */
-export function BankConnectSection({ children }: { children?: React.ReactNode }) {
-  const { data, error, reload } = useBankConnections();
-  if (!data && error != null) {
-    return (
-      <section className="mt-6 first:mt-0">
-        <h2 className="mb-2 px-1 text-caption font-normal text-ink-2">Pankki</h2>
-        <div className="space-y-3">
-          <ConnectionNotice error={error} fallback="Pankkiyhteyden haku epäonnistui" onRetry={reload} />
-          <div className="overflow-hidden rounded-card border border-line bg-surface divide-y divide-line">{children}</div>
-        </div>
-      </section>
-    );
-  }
-  return (
-    <Section title="Pankki">
-      <BankConnectRow />
-      {children}
-    </Section>
   );
 }
 
@@ -346,7 +318,7 @@ export default function BankConnectCard({
                 and quietly at the foot of Pankkitilit, never a second loud button here. */}
             {variant === "full" && (
               <div className="flex justify-center border-t border-line pt-1">
-                <Link href="/pankki/tapahtumat" className="active-press inline-flex min-h-11 items-center text-caption font-medium text-ink-2">
+                <Link href="/kirjanpito/pankkitilit#tiliotteet" className="active-press inline-flex min-h-11 items-center text-caption font-medium text-ink-2">
                   Tuo tiliote tiedostona
                 </Link>
               </div>

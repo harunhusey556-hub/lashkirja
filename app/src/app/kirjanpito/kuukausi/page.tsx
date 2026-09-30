@@ -91,7 +91,7 @@ function itemRow(item: DashboardItem) {
       return (
         <ListRow
           key={item.id}
-          href="/pankki/taydennys"
+          href="/pankki/tapahtumat?nayta=toimet"
           leading={<Icon icon={Camera} />}
           title={item.party}
           amount={formatEur(Math.abs(item.amount))}
@@ -111,7 +111,7 @@ function itemRow(item: DashboardItem) {
       return (
         <ListRow
           key={item.id}
-          href="/pankki/taydennys"
+          href="/pankki/tapahtumat?nayta=toimet"
           leading={<Icon icon={ArrowLeftRight} />}
           title={item.party}
           amount={formatEur(Math.abs(item.amount))}

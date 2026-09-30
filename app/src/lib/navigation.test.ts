@@ -115,9 +115,10 @@ describe("navigation registry", () => {
   it("labels back with the registry parent", () => {
     expect(backTarget("/kirjanpito/alv")).toEqual({ label: "Kirjanpito", href: "/kirjanpito" });
     expect(backTarget("/pankki/tapahtumat/tiliote?id=abc")).toEqual({
-      label: "Tapahtumat",
+      label: "Pankki",
       href: "/pankki/tapahtumat",
     });
+    expect(backTarget("/kirjanpito/pankkitilit")).toEqual({ label: "Pankki", href: "/pankki/tapahtumat" });
     expect(backTarget("/asiakkaat/asiakas?id=42")).toEqual({ label: "Asiakkaat", href: "/asiakkaat" });
     expect(backTarget("/asiakkaat")).toEqual({ label: "Myynti", href: "/laskut" });
     expect(backTarget("/asetukset/tili/salasana")).toEqual({ label: "Tili ja turvallisuus", href: "/asetukset/tili" });

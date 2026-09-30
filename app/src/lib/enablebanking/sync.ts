@@ -22,6 +22,7 @@ import {
 } from "./mapping";
 import type { PsuContext } from "./client";
 import { withTrackedJob } from "../job-tracker";
+import { normalizeIban } from "../iban";
 import { fallbackStatementMonth, statementMonthOrFallback } from "../report-calendar";
 import type { AccountSyncRow } from "../bank-sync-summary";
 
@@ -368,12 +369,27 @@ async function writeTransactions(input: {
 
 async function ensureStatement(userId: string, iban: string, month: string, aspspName: string) {
   const checksum = `eb:${iban}:${month}`;
+  // The owner's own account with this IBAN, when there is one: the tiliote then
+  // counts towards that account instead of showing "Ei pankkitiliä". No
+  // account is created here; one without an opening balance would report a
+  // wrong balance and a false reconciliation gap.
+  const account = await prisma.bankAccount.findFirst({
+    where: { userId, iban: normalizeIban(iban) },
+    select: { id: true },
+  });
+  const bankAccountId = account?.id ?? null;
   const found = await prisma.statement.findFirst({ where: { userId, checksum } });
-  if (found) return found;
+  if (found) {
+    if (bankAccountId && !found.bankAccountId) {
+      return prisma.statement.update({ where: { id: found.id }, data: { bankAccountId } });
+    }
+    return found;
+  }
   try {
     return await prisma.statement.create({
       data: {
         userId,
+        bankAccountId,
         fileName: `${aspspName} ${formatIbanDisplay(iban)}`,
         fileType: "enablebanking",
         filePath: "enablebanking",

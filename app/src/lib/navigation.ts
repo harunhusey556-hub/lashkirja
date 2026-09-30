@@ -29,13 +29,14 @@ export const NAV: readonly NavEntry[] = [
   { id: "kuitit", kind: "workspace", label: "Kuitit", path: "/kuitit", parent: "kirjanpito" },
   { id: "kuitit-uusi", kind: "detail", label: "Uusi kuitti", path: "/kuitit/uusi", parent: "kuitit" },
   { id: "kuitti", kind: "detail", label: "Kuitti", path: "/kuitit/kuitti", parent: "kuitit" },
-  { id: "pankki-tapahtumat", kind: "workspace", label: "Tapahtumat", path: "/pankki/tapahtumat", parent: "kirjanpito" },
+  { id: "pankki-tapahtumat", kind: "workspace", label: "Pankki", path: "/pankki/tapahtumat", parent: "kirjanpito" },
   { id: "pankki-tapahtuma", kind: "detail", label: "Tiliote", path: "/pankki/tapahtumat/tiliote", parent: "pankki-tapahtumat" },
-  { id: "pankki-taydennys", kind: "workspace", label: "Täsmäytys", path: "/pankki/taydennys", parent: "kirjanpito" },
-  { id: "tyot", kind: "workspace", label: "Työt ja poikkeukset", path: "/tyot", parent: "kirjanpito" },
+  { id: "pankki-taydennys", kind: "workspace", label: "Pankki", path: "/pankki/taydennys", parent: "kirjanpito" },
+  { id: "tyot", kind: "workspace", label: "Taustatyöt", path: "/tyot", parent: "kirjanpito" },
   { id: "alv", kind: "workspace", label: "ALV-ilmoitus", path: "/kirjanpito/alv", parent: "kirjanpito" },
   { id: "ostolaskut", kind: "workspace", label: "Ostolaskut", path: "/kirjanpito/ostolaskut", parent: "kirjanpito" },
-  { id: "pankkitilit", kind: "workspace", label: "Pankkitilit", path: "/kirjanpito/pankkitilit", parent: "kirjanpito" },
+  // Behind the gear on Pankki: connection, accounts and tiliote files (owner report 2026-09-30).
+  { id: "pankkitilit", kind: "detail", label: "Pankkiyhteys ja tilit", path: "/kirjanpito/pankkitilit", parent: "pankki-tapahtumat" },
   { id: "kaudet", kind: "workspace", label: "Suljetut kaudet", path: "/kirjanpito/kaudet", parent: "kirjanpito" },
   // FP-13 (TF-07): one month's finish line; a sticky primary owns the bottom edge.
   { id: "kuukausi", kind: "detail", label: "Kuukauden sulkeminen", path: "/kirjanpito/kuukausi", parent: "kirjanpito" },
