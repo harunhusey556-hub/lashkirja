@@ -34,7 +34,18 @@ import { detailHref } from "@/lib/routes";
 import { Button, FormError, SavePhaseNote, buttonClass, chipClass, controlClass } from "@/components/ui";
 import { Check, X } from "lucide-react";
 import { Icon } from "@/components/ds/Icon";
-import { formatDate, formatEur, parseMoneyInput } from "@/lib/format";
+import { formatDate, formatEur } from "@/lib/format";
+import {
+  autoVatAmount,
+  DEFAULT_VAT_RATE,
+  moneyField,
+  parseReceiptAmount,
+  syncAutoVat,
+  vatMismatchHint,
+  vatRowsFromSaved,
+  VAT_TOO_LARGE_MESSAGE,
+  type VatRow,
+} from "@/lib/receipt-vat";
 import { focusFirstInvalid } from "@/lib/focus-field";
 import {
   captureWithCamera,
@@ -72,7 +83,20 @@ function fieldClass(uncertain: boolean): string {
   return `${FIELD_BASE} ${uncertain ? uncertainClass : "border-line"}`;
 }
 
-const emptyForm = {
+interface ReceiptForm {
+  vendor: string;
+  date: string;
+  totalAmount: string;
+  category: string;
+  customCategory: string;
+  notes: string;
+  type: string;
+  vatDetails: VatRow[];
+  reference: string;
+  invoiceNumber: string;
+}
+
+const emptyForm: ReceiptForm = {
   vendor: "",
   date: "",
   totalAmount: "",
@@ -80,7 +104,7 @@ const emptyForm = {
   customCategory: "",
   notes: "",
   type: "meno",
-  vatDetails: [{ rate: "25.5", amount: "" }],
+  vatDetails: [{ rate: DEFAULT_VAT_RATE, amount: "", auto: true }],
   reference: "",
   invoiceNumber: "",
 };
@@ -190,21 +214,22 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
       rawText: upload.extracted.rawText,
       fieldConfidence: upload.extracted.fieldConfidence,
     });
+    const extractedTotal = moneyField(upload.extracted.totalAmount);
     setFormData({
       vendor: upload.extracted.vendor || "",
       date: upload.extracted.date || "",
-      totalAmount: upload.extracted.totalAmount?.toString() || "",
+      totalAmount: extractedTotal,
       category: knownCategory ? upload.extracted.category || "" : "",
       customCategory: knownCategory ? "" : upload.extracted.category || "",
       notes: upload.extracted.notes || "",
       type: upload.extracted.type || "meno",
-      vatDetails:
-        upload.extracted.vatDetails && upload.extracted.vatDetails.length > 0
-          ? upload.extracted.vatDetails.map((detail) => ({
-              rate: detail.rate?.toString() || "0",
-              amount: detail.amount?.toString() || "0",
-            }))
-          : [{ rate: "25.5", amount: "" }],
+      vatDetails: vatRowsFromSaved(
+        upload.extracted.vatDetails?.map((detail) => ({
+          rate: detail.rate ?? 0,
+          amount: detail.amount ?? 0,
+        })),
+        extractedTotal
+      ),
       reference: upload.extracted.reference || "",
       invoiceNumber: upload.extracted.invoiceNumber || "",
     });
@@ -353,23 +378,16 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
    * success handler, so both apply a `ReceiptResponse["receipt"]` the same
    * way (Task 7-style page-cache wiring for the detail pages). */
   function applyReceiptResponse(r: NonNullable<ReceiptResponse["receipt"]>) {
-    let vatDetails = [{ rate: "25.5", amount: "" }];
+    const totalText = moneyField(r.totalAmount);
+    let savedVat: { rate: number; amount: number }[] | null = null;
     if (r.vatDetails) {
       try {
-        const details = JSON.parse(r.vatDetails) as {
-          rate: number;
-          amount: number;
-        }[];
-        if (details.length > 0) {
-          vatDetails = details.map((detail) => ({
-            rate: String(detail.rate),
-            amount: String(detail.amount),
-          }));
-        }
+        savedVat = JSON.parse(r.vatDetails) as { rate: number; amount: number }[];
       } catch {
         /* ignore */
       }
     }
+    const vatDetails = vatRowsFromSaved(savedVat, totalText);
     setFilePath(r.filePath || "");
     setOriginalName(r.fileName || "");
     setMeta({
@@ -381,7 +399,7 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
     const loaded = {
       vendor: r.vendor || "",
       date: r.date ? String(r.date).slice(0, 10) : "",
-      totalAmount: r.totalAmount != null ? String(r.totalAmount) : "",
+      totalAmount: totalText,
       category: knownCategory ? r.category || "" : "",
       customCategory: knownCategory ? "" : r.category || "",
       notes: r.notes || "",
@@ -585,28 +603,32 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
       totalAmount: formData.totalAmount,
       category: resolvedCategory,
     });
-    const totalAmount = parseMoneyInput(formData.totalAmount) ?? NaN;
-    const populatedVatRows = formData.vatDetails.filter(
-      (detail) => detail.amount !== ""
-    );
+    const totalAmount = parseReceiptAmount(formData.totalAmount) ?? NaN;
+    // A single VAT row that shows a rate but no amount takes the VAT of the
+    // total: a rate on screen is never saved as "no VAT" (F35).
+    const vatRows =
+      formData.vatDetails.length === 1 && formData.vatDetails[0].amount.trim() === ""
+        ? syncAutoVat([{ ...formData.vatDetails[0], auto: true }], formData.totalAmount)
+        : formData.vatDetails;
+    const populatedVatRows = vatRows.filter((detail) => detail.amount !== "");
     if (
-      formData.vatDetails.length > 1 &&
-      populatedVatRows.length !== formData.vatDetails.length
+      vatRows.length > 1 &&
+      populatedVatRows.length !== vatRows.length
     ) {
       setError("Anna ALV-summa jokaiselle riville tai poista tyhjä rivi");
       return;
     }
     const vatDetails = populatedVatRows.map((detail) => ({
       rate: Number(detail.rate),
-      amount: parseMoneyInput(detail.amount) ?? NaN,
+      amount: parseReceiptAmount(detail.amount) ?? NaN,
     }));
-    const invalidVat = vatDetails.some(
+    const invalidVatIndex = vatDetails.findIndex(
       (detail) =>
         !Number.isFinite(detail.rate) ||
         !Number.isFinite(detail.amount) ||
         detail.amount < 0
     );
-    const totalVat = vatDetails.reduce((sum, detail) => sum + detail.amount, 0);
+    const totalVatCents = vatDetails.reduce((sum, detail) => sum + Math.round(detail.amount * 100), 0);
     if (Object.keys(nextFieldErrors).length > 0) {
       setFieldErrors(nextFieldErrors);
       setError("");
@@ -617,10 +639,19 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
       );
       return;
     }
-    if (invalidVat || totalVat > totalAmount) {
-      setFieldErrors({});
-      setError("Tarkista ALV-summa");
+    if (invalidVatIndex !== -1 || totalVatCents > Math.round(totalAmount * 100)) {
+      const vatIndex = invalidVatIndex !== -1 ? invalidVatIndex : 0;
+      const vatErrors = {
+        [`vat-${vatIndex}`]:
+          invalidVatIndex !== -1 ? "ALV-summa ei ole kelvollinen." : VAT_TOO_LARGE_MESSAGE,
+      };
+      setFieldErrors(vatErrors);
+      setError("");
+      focusFirstInvalid(vatErrors, [`vat-${vatIndex}`], () => `receipt-vat-amount-${vatIndex}`);
       return;
+    }
+    if (vatRows !== formData.vatDetails) {
+      setFormData((prev) => ({ ...prev, vatDetails: vatRows }));
     }
     setFieldErrors({});
 
@@ -796,7 +827,8 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
   }
 
   const matchStatus = RECEIPT_MATCH_STATUS[receiptMatchStatusKey(matchData)];
-  const totalAmountValue = parseMoneyInput(formData.totalAmount);
+  const totalAmountValue = parseReceiptAmount(formData.totalAmount);
+  const vatHint = vatMismatchHint(formData.vatDetails, formData.totalAmount);
   const categoryText = useCustomCategory
     ? formData.customCategory || "Ei kategoriaa"
     : formData.category
@@ -1024,9 +1056,15 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
                           placeholder="0,00"
                           required
                           value={formData.totalAmount}
-                          onChange={(e) =>
-                            setFormData({ ...formData, totalAmount: e.target.value })
-                          }
+                          onChange={(e) => {
+                            const totalAmount = e.target.value;
+                            // The VAT follows the total until an amount is typed by hand (F35).
+                            setFormData((prev) => ({
+                              ...prev,
+                              totalAmount,
+                              vatDetails: syncAutoVat(prev.vatDetails, totalAmount),
+                            }));
+                          }}
                           aria-invalid={Boolean(fieldErrors.totalAmount) || undefined}
                           aria-describedby={fieldErrors.totalAmount ? "receipt-total-error" : undefined}
                           className={fieldClass(lowAmount)}
@@ -1094,22 +1132,19 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
                             onChange={(event) => {
                               const newRate = event.target.value;
                               setFormData((prev) => {
-                                let newAmount = detail.amount;
-                                if (prev.vatDetails.length === 1 && prev.totalAmount) {
-                                  const total = parseFloat(prev.totalAmount.replace(",", "."));
-                                  const rateNum = parseFloat(newRate);
-                                  if (!isNaN(total) && !isNaN(rateNum)) {
-                                    const calculatedVat = total * (rateNum / (100 + rateNum));
-                                    newAmount = calculatedVat.toFixed(2);
-                                  }
-                                }
+                                const single = prev.vatDetails.length === 1;
+                                const rows = prev.vatDetails.map((row, rowIndex) =>
+                                  rowIndex === index ? { ...row, rate: newRate } : row
+                                );
+                                // Picking the rate of a single row asks for the VAT of the total,
+                                // with the same Finnish parser the save uses (F03).
+                                const calculated = single ? autoVatAmount(prev.totalAmount, newRate) : null;
                                 return {
                                   ...prev,
-                                  vatDetails: prev.vatDetails.map((row, rowIndex) =>
-                                    rowIndex === index
-                                      ? { ...row, rate: newRate, amount: newAmount }
-                                      : row
-                                  ),
+                                  vatDetails:
+                                    calculated !== null
+                                      ? [{ rate: newRate, amount: calculated, auto: true }]
+                                      : rows,
                                 };
                               });
                             }}
@@ -1140,11 +1175,18 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
                                 ...formData,
                                 vatDetails: formData.vatDetails.map((row, rowIndex) =>
                                   rowIndex === index
-                                    ? { ...row, amount: event.target.value }
+                                    ? {
+                                        ...row,
+                                        amount: event.target.value,
+                                        // Typed by hand: stop following the total. Emptied: follow again.
+                                        auto: event.target.value.trim() === "",
+                                      }
                                     : row
                                 ),
                               })
                             }
+                            aria-invalid={Boolean(fieldErrors[`vat-${index}`]) || undefined}
+                            aria-describedby={fieldErrors[`vat-${index}`] ? `receipt-vat-error-${index}` : undefined}
                             className={controlClass}
                           />
                         </div>
@@ -1155,7 +1197,10 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
                               ...formData,
                               vatDetails:
                                 formData.vatDetails.length === 1
-                                  ? [{ rate: "25.5", amount: "" }]
+                                  ? syncAutoVat(
+                                      [{ rate: DEFAULT_VAT_RATE, amount: "", auto: true }],
+                                      formData.totalAmount
+                                    )
                                   : formData.vatDetails.filter(
                                       (_, rowIndex) => rowIndex !== index
                                     ),
@@ -1174,14 +1219,24 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
                       </div>
                     );
                   })}
+                  {Object.entries(fieldErrors)
+                    .filter(([key]) => key.startsWith("vat-"))
+                    .map(([key, message]) => (
+                      <p key={key} id={`receipt-vat-error-${key.slice(4)}`} className="text-sm text-danger" role="alert">
+                        {message}
+                      </p>
+                    ))}
+                  {vatHint && !Object.keys(fieldErrors).some((key) => key.startsWith("vat-")) && (
+                    <p className="text-caption text-warning">{vatHint}</p>
+                  )}
                   <button
                     type="button"
                     onClick={() =>
                       setFormData({
                         ...formData,
                         vatDetails: [
-                          ...formData.vatDetails,
-                          { rate: "25.5", amount: "" },
+                          ...formData.vatDetails.map((row) => ({ ...row, auto: false })),
+                          { rate: DEFAULT_VAT_RATE, amount: "", auto: false },
                         ],
                       })
                     }

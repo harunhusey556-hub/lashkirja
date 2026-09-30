@@ -1,4 +1,4 @@
-import { parseMoneyInput } from "./format";
+import { parseReceiptAmount } from "./receipt-vat";
 import { isStrictIsoDate } from "./validation";
 
 export interface ReceiptFieldInput {
@@ -13,7 +13,7 @@ export function validateReceiptFields(input: ReceiptFieldInput): Record<string, 
   const errors: Record<string, string> = {};
   if (!input.vendor.trim()) errors.vendor = "Myyjä on pakollinen.";
   if (!isStrictIsoDate(input.date)) errors.date = "Valitse päivämäärä.";
-  const amount = parseMoneyInput(input.totalAmount);
+  const amount = parseReceiptAmount(input.totalAmount);
   if (!input.totalAmount.trim()) {
     errors.totalAmount = "Summa on pakollinen.";
   } else if (amount === null) {
