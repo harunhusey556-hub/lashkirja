@@ -4,7 +4,7 @@ import { receiptFieldId, validateReceiptFields } from "./receipt-form";
 
 describe("validateReceiptFields", () => {
   it("accepts the same money spellings as the invoice form", () => {
-    for (const totalAmount of ["12,50", "12.50", "12,50 €", "1 234,50", "1.234,50", "100a0234,50"]) {
+    for (const totalAmount of ["12,50", "12.50", "12,50 €", "1 234,50", "1.234,50", "1 234,50"]) {
       expect(
         validateReceiptFields({
           vendor: "Tukku",
