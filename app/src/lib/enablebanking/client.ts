@@ -5,7 +5,12 @@ import {
   type EnableBankingConfig,
 } from "./signing";
 
-const MAX_PAGES = 100;
+/**
+ * A safety ceiling against a bank that never stops paging, not a limit a real
+ * account reaches. A pull that does reach it is reported as truncated, never
+ * returned as if it were complete.
+ */
+export const MAX_TRANSACTION_PAGES = 1000;
 const FALLBACK_WINDOWS_DAYS = [365, 90, 30, 7];
 const TERMINAL_SESSION = new Set([
   "EXPIRED_SESSION",
@@ -176,6 +181,8 @@ export function publicBankError(error: EnableBankingError): { message: string; s
       return { message: "Pankki ei sallinut yhteyttä.", status: 400 };
     case "ASPSP_RATE_LIMIT_EXCEEDED":
       return { message: "Pankki rajoitti pyyntöjä. Yritä myöhemmin uudelleen.", status: 429 };
+    case "INVALID_RESPONSE":
+      return { message: "Pankin vastausta ei voitu lukea. Yritä uudelleen.", status: 502 };
     case "STATE_MISMATCH":
       return {
         message: error.message || "Yhteyden vahvistus epäonnistui. Yritä yhdistää uudelleen.",
@@ -216,6 +223,16 @@ export function findAspsp(
   );
 }
 
+/**
+ * `truncated` means the bank still had more to give when the pull stopped. The
+ * rows returned are real, but the caller must not treat the account as caught
+ * up: the next sync has to read the same window again.
+ */
+export interface PulledTransactions {
+  transactions: EbTransaction[];
+  truncated: boolean;
+}
+
 export async function collectAccountTransactions(
   fetcher: TransactionPageFetcher,
   params: {
@@ -227,7 +244,7 @@ export async function collectAccountTransactions(
     psuHeaders?: Record<string, string>;
     now?: Date;
   }
-): Promise<EbTransaction[]> {
+): Promise<PulledTransactions> {
   const now = params.now ?? new Date();
   const today = now.toISOString().slice(0, 10);
 
@@ -282,11 +299,11 @@ async function pullPages(
     psuHeaders?: Record<string, string>;
   },
   range: { dateFrom?: string; dateTo?: string; strategy?: "default" | "longest" }
-): Promise<EbTransaction[]> {
+): Promise<PulledTransactions> {
   const transactions: EbTransaction[] = [];
   const seenKeys = new Set<string>();
   let continuationKey: string | undefined;
-  for (let page = 0; page < MAX_PAGES; page += 1) {
+  for (let page = 0; page < MAX_TRANSACTION_PAGES; page += 1) {
     const result = await fetcher.getAccountTransactions({
       accountUid: params.accountUid,
       dateFrom: range.dateFrom,
@@ -296,11 +313,13 @@ async function pullPages(
       psuHeaders: params.psuHeaders,
     });
     transactions.push(...result.transactions);
-    if (!result.continuationKey || seenKeys.has(result.continuationKey)) break;
+    if (!result.continuationKey) return { transactions, truncated: false };
+    // A key the bank has already sent would loop for ever: stop, and say so.
+    if (seenKeys.has(result.continuationKey)) return { transactions, truncated: true };
     seenKeys.add(result.continuationKey);
     continuationKey = result.continuationKey;
   }
-  return transactions;
+  return { transactions, truncated: true };
 }
 
 export class EnableBankingClient {
@@ -362,9 +381,16 @@ export class EnableBankingClient {
     }>(`/accounts/${encodeURIComponent(query.accountUid)}/transactions${suffix}`, {
       psuHeaders: query.psuHeaders,
     });
+    // A real page always carries the array, empty or not. Anything else is a
+    // broken answer, and reading it as "no rows, no more pages" would end the
+    // pull quietly and let the sync report success.
+    const key = body.continuation_key;
+    if (!Array.isArray(body.transactions) || (key != null && typeof key !== "string")) {
+      throw invalidResponse();
+    }
     return {
-      transactions: body.transactions ?? [],
-      continuationKey: body.continuation_key || null,
+      transactions: body.transactions,
+      continuationKey: key || null,
     };
   }
 
@@ -414,6 +440,11 @@ export class EnableBankingClient {
     });
     const text = await response.text();
     const json = text ? parseJson(text) : null;
+    if (response.ok && (text ? json === null : response.status !== 204 && rest.method !== "DELETE")) {
+      // Fail closed: a 200 whose body is truncated, HTML, empty or not an
+      // object is a failed call, never an empty successful one.
+      throw invalidResponse();
+    }
     if (!response.ok) {
       const code = typeof json?.error === "string" ? json.error : undefined;
       const message =
@@ -424,6 +455,10 @@ export class EnableBankingClient {
     }
     return (json ?? {}) as T;
   }
+}
+
+function invalidResponse(): EnableBankingError {
+  return new EnableBankingError("Pankin vastausta ei voitu lukea.", 502, "INVALID_RESPONSE");
 }
 
 function assertHttpsRedirect(url: string | undefined): string {

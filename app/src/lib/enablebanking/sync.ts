@@ -28,6 +28,11 @@ import type { AccountSyncRow } from "../bank-sync-summary";
 
 const DEAD_SESSION_STATUS = new Set(["EXPIRED", "CLOSED", "REVOKED", "CANCELLED", "INVALID"]);
 
+export type BankSyncAccountRow = AccountSyncRow & {
+  /** The bank had more pages than one pull reads; the account is not caught up. */
+  partial?: boolean;
+};
+
 export interface BankSyncResult {
   connectionId: string;
   status: string;
@@ -35,8 +40,15 @@ export interface BankSyncResult {
   skipped: number;
   statementId: string | null;
   statementIds: string[];
-  accounts: AccountSyncRow[];
+  accounts: BankSyncAccountRow[];
+  /** True when something was left out, so lastSuccessAt did not move. */
+  partial: boolean;
+  /** The plain-language reason, the same text the connection card shows. */
+  notice: string | null;
 }
+
+export const PARTIAL_PULL_NOTICE =
+  "Kaikkia tapahtumia ei saatu haettua kerralla. Haku jatkuu seuraavalla kerralla.";
 
 export async function syncBankConnection(
   userId: string,
@@ -140,8 +152,9 @@ async function syncBankConnectionUntracked(
   let skipped = 0;
   const statementIds = new Set<string>();
   const failures: string[] = [];
-  const accounts: AccountSyncRow[] = [];
+  const accounts: BankSyncAccountRow[] = [];
   let succeeded = 0;
+  let truncatedAccounts = 0;
 
   const accountName = (account: { label: string | null; iban: string }) => {
     const label = account.label?.trim();
@@ -151,7 +164,7 @@ async function syncBankConnectionUntracked(
 
   for (const account of inScope) {
     try {
-      const transactions = await collectAccountTransactions(client, {
+      const { transactions, truncated } = await collectAccountTransactions(client, {
         accountUid: account.providerAccountUid,
         firstSync,
         dateFrom,
@@ -187,6 +200,7 @@ async function syncBankConnectionUntracked(
         });
       }
       succeeded += 1;
+      if (truncated) truncatedAccounts += 1;
       accounts.push({
         accountId: account.id,
         name: accountName(account),
@@ -194,6 +208,7 @@ async function syncBankConnectionUntracked(
         imported: written.imported,
         skipped: written.skipped,
         error: null,
+        ...(truncated ? { partial: true } : {}),
       });
     } catch (error) {
       const terminal = sessionTerminalStatus(error);
@@ -220,15 +235,21 @@ async function syncBankConnectionUntracked(
     }
   }
 
-  if (succeeded === inScope.length) {
+  // What was left out. While anything is, lastSuccessAt stays where it was so
+  // the next sync reads the same window again instead of the 5-day overlap.
+  const notices: string[] = [];
+  if (truncatedAccounts > 0) notices.push(PARTIAL_PULL_NOTICE);
+  const notice = notices.length > 0 ? notices.join(" ") : null;
+
+  if (succeeded === inScope.length && !notice) {
     await prisma.bankConnection.update({
       where: { id: connection.id },
       data: { lastSuccessAt: new Date(), lastError: null, status: "active" },
     });
-  } else if (failures.length > 0) {
+  } else if (failures.length > 0 || notice) {
     await prisma.bankConnection.update({
       where: { id: connection.id },
-      data: { lastError: failures[0] },
+      data: { lastError: failures[0] ?? notice },
     });
   }
 
@@ -256,6 +277,8 @@ async function syncBankConnectionUntracked(
     statementId,
     statementIds: [...statementIds],
     accounts,
+    partial: notice !== null,
+    notice,
   };
 }
 

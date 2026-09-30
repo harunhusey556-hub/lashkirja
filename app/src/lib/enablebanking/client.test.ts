@@ -1,12 +1,16 @@
-import { describe, expect, it } from "vitest";
+import { generateKeyPairSync } from "crypto";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  EnableBankingClient,
   EnableBankingError,
+  MAX_TRANSACTION_PAGES,
   buildPsuHeaders,
   collectAccountTransactions,
   publicBankError,
   type TransactionPageFetcher,
 } from "./client";
 import type { EbTransaction } from "./mapping";
+import type { EnableBankingConfig } from "./signing";
 
 const booked: EbTransaction = {
   status: "BOOK",
@@ -57,7 +61,7 @@ describe("collectAccountTransactions", () => {
       },
     };
 
-    const rows = await collectAccountTransactions(fetcher, {
+    const { transactions: rows } = await collectAccountTransactions(fetcher, {
       accountUid: "acc-1",
       firstSync: true,
       now: new Date("2026-09-26T00:00:00.000Z"),
@@ -75,7 +79,7 @@ describe("collectAccountTransactions", () => {
         return { transactions: [booked], continuationKey: null };
       },
     };
-    const rows = await collectAccountTransactions(fetcher, {
+    const { transactions: rows } = await collectAccountTransactions(fetcher, {
       accountUid: "acc-1",
       firstSync: true,
       historyFrom: "2026-01-01",
@@ -117,6 +121,128 @@ describe("collectAccountTransactions", () => {
   });
 });
 
+function pagedFetcher(pages: number, perPage = 2): TransactionPageFetcher & { calls: () => number } {
+  let calls = 0;
+  return {
+    calls: () => calls,
+    async getAccountTransactions(query) {
+      calls += 1;
+      const page = query.continuationKey ? Number(query.continuationKey) : 0;
+      const rows = Array.from({ length: perPage }, (_, index) => ({
+        ...booked,
+        entry_reference: `p${page}-${index}`,
+      }));
+      return { transactions: rows, continuationKey: page + 1 < pages ? String(page + 1) : null };
+    },
+  };
+}
+
+describe("collectAccountTransactions paging", () => {
+  it("pages past 100 until the bank has no continuation key (G27)", async () => {
+    const fetcher = pagedFetcher(250);
+    const result = await collectAccountTransactions(fetcher, {
+      accountUid: "acc-1",
+      firstSync: true,
+      now: new Date("2026-09-26T00:00:00.000Z"),
+    });
+    expect(result.truncated).toBe(false);
+    expect(result.transactions).toHaveLength(500);
+    expect(fetcher.calls()).toBe(250);
+  });
+
+  it("reports a pull that hits the safety ceiling instead of ending it silently (G27)", async () => {
+    const fetcher = pagedFetcher(MAX_TRANSACTION_PAGES + 50);
+    const result = await collectAccountTransactions(fetcher, {
+      accountUid: "acc-1",
+      firstSync: true,
+      now: new Date("2026-09-26T00:00:00.000Z"),
+    });
+    expect(result.truncated).toBe(true);
+    expect(result.transactions).toHaveLength(MAX_TRANSACTION_PAGES * 2);
+  });
+
+  it("reports a bank that keeps answering with the same continuation key (G27)", async () => {
+    const fetcher: TransactionPageFetcher = {
+      async getAccountTransactions() {
+        return { transactions: [booked], continuationKey: "same" };
+      },
+    };
+    const result = await collectAccountTransactions(fetcher, {
+      accountUid: "acc-1",
+      firstSync: true,
+      now: new Date("2026-09-26T00:00:00.000Z"),
+    });
+    expect(result.truncated).toBe(true);
+  });
+});
+
+describe("EnableBankingClient response handling (G28)", () => {
+  const { privateKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
+  const config: EnableBankingConfig = {
+    appId: "app-1",
+    privateKeyPem: privateKey.export({ type: "pkcs8", format: "pem" }).toString(),
+    redirectUrl: "https://example.test/cb",
+    apiBase: "https://api.example.test",
+  };
+  afterEach(() => vi.unstubAllGlobals());
+
+  function answerWith(pages: Array<{ status?: number; body: string }>) {
+    let index = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        const page = pages[Math.min(index, pages.length - 1)];
+        index += 1;
+        const status = page.status ?? 200;
+        return new Response(status === 204 ? null : page.body, { status });
+      })
+    );
+  }
+
+  const goodPage = (key: string | null) =>
+    JSON.stringify({ transactions: [booked], continuation_key: key });
+  const badBodies: Array<[string, string]> = [
+    ["truncated json", '{"transactions":[{"status":"BO'],
+    ["an html page", "<html><body>Service unavailable</body></html>"],
+    ["an empty body", ""],
+    ["an array", "[]"],
+    ["json without a transactions array", '{"message":"hello"}'],
+    ["a non-string continuation key", '{"transactions":[],"continuation_key":7}'],
+  ];
+
+  for (const [label, body] of badBodies) {
+    it(`fails the pull on a 200 with ${label}, on the first and on a later page`, async () => {
+      for (const pages of [[{ body }], [{ body: goodPage("2") }, { body }]]) {
+        answerWith(pages);
+        const client = new EnableBankingClient(config);
+        await expect(
+          collectAccountTransactions(client, {
+            accountUid: "acc-1",
+            firstSync: true,
+            now: new Date("2026-09-26T00:00:00.000Z"),
+          })
+        ).rejects.toMatchObject({ code: "INVALID_RESPONSE", status: 502 });
+      }
+    });
+  }
+
+  it("still reads a genuinely empty page", async () => {
+    answerWith([{ body: '{"transactions":[]}' }]);
+    const client = new EnableBankingClient(config);
+    const result = await collectAccountTransactions(client, {
+      accountUid: "acc-1",
+      firstSync: true,
+      now: new Date("2026-09-26T00:00:00.000Z"),
+    });
+    expect(result).toEqual({ transactions: [], truncated: false });
+  });
+
+  it("lets a session delete answer with an empty body", async () => {
+    answerWith([{ status: 204, body: "" }]);
+    await expect(new EnableBankingClient(config).deleteSession("s-1")).resolves.toBeUndefined();
+  });
+});
+
 describe("publicBankError", () => {
   it("does not turn an upstream auth failure into a user logout", () => {
     expect(publicBankError(new EnableBankingError("nope", 401, "UNAUTHORIZED_ACCESS"))).toEqual({
@@ -125,6 +251,12 @@ describe("publicBankError", () => {
     });
     expect(publicBankError(new EnableBankingError("gone", 400, "EXPIRED_SESSION")).message).toBe(
       "Yhteys vanhentui — yhdistä uudelleen."
+    );
+  });
+
+  it("explains an unreadable bank answer in plain Finnish", () => {
+    expect(publicBankError(new EnableBankingError("x", 502, "INVALID_RESPONSE")).message).toBe(
+      "Pankin vastausta ei voitu lukea. Yritä uudelleen."
     );
   });
 });
