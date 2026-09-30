@@ -7,7 +7,7 @@ import { Button, buttonClass } from "@/components/ui";
 import { KeyValueList } from "@/components/ds";
 import { apiFetch, errorMessage, isUnauthorized, readJson, redirectToLogin } from "@/components/clientFetch";
 import { formatDate, formatEur, formatEurSigned } from "@/lib/format";
-import { receiptLabel } from "@/lib/statement-client";
+import { receiptLabel, type StatementTransaction } from "@/lib/statement-client";
 import { rowState, type FeedRow } from "@/lib/bank-feed";
 import { detailHref } from "@/lib/routes";
 import { requestReceiptCapture } from "@/lib/capture-request";
@@ -19,6 +19,23 @@ type Action =
   | { url: "/api/matching/confirm" | "/api/matching/reject"; body: { transactionId: string; receiptId: string } }
   | { url: "/api/matching/ignore"; body: { transactionId: string; ignored: boolean } }
   | { url: "/api/matching/unlink"; body: { transactionId: string } };
+
+const UNSUGGESTED: Partial<StatementTransaction> = {
+  matchStatus: "unmatched",
+  suggestedReceiptId: null,
+  suggestedReceipt: null,
+};
+
+/** The row once its suggested kuitti (or recognised sale) is linked. */
+function linkedPatch(row: FeedRow): Partial<StatementTransaction> {
+  return {
+    matchStatus: "confirmed",
+    receiptId: row.suggestedReceiptId,
+    receipt: row.suggestedReceipt,
+    suggestedReceiptId: null,
+    suggestedReceipt: null,
+  };
+}
 
 const QUIET_LINK =
   "active-press mx-auto flex min-h-11 items-center px-3 text-caption text-ink-2 disabled:opacity-50";
@@ -36,8 +53,11 @@ export function BankRowSheet({
 }: {
   row: FeedRow | null;
   onClose: () => void;
-  /** After a change; `rowId` lets the list animate that row out. */
-  onChanged: (rowId: string) => void;
+  /**
+   * After a change. `patch` is the row's new state, so the list can show it at
+   * once (and fold the row out of "Vaatii toimia") before the reload lands.
+   */
+  onChanged: (rowId: string, patch?: Partial<StatementTransaction>) => void;
 }) {
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState("");
@@ -50,7 +70,12 @@ export function BankRowSheet({
     setError("");
   }
 
-  async function run(key: string, action: Action, done?: string): Promise<boolean> {
+  async function run(
+    key: string,
+    action: Action,
+    patch: Partial<StatementTransaction>,
+    done?: string
+  ): Promise<boolean> {
     if (!row || busy) return false;
     setBusy(key);
     setError("");
@@ -69,7 +94,7 @@ export function BankRowSheet({
       }
       void hapticNotify("success");
       if (done) showToast({ tone: "success", text: done });
-      onChanged(row.id);
+      onChanged(row.id, patch);
       onClose();
       return true;
     } catch (err: unknown) {
@@ -87,7 +112,11 @@ export function BankRowSheet({
 
   async function ignoreWithUndo(target: FeedRow) {
     void hapticImpact("light");
-    const ok = await run("ignore", { url: "/api/matching/ignore", body: { transactionId: target.id, ignored: true } });
+    const ok = await run(
+      "ignore",
+      { url: "/api/matching/ignore", body: { transactionId: target.id, ignored: true } },
+      { matchStatus: "ignored" }
+    );
     if (!ok) return;
     showToast({
       tone: "success",
@@ -148,6 +177,7 @@ export function BankRowSheet({
                   void run(
                     "approve",
                     { url: "/api/receipts/batch-approve", body: { receiptIds: [row.suggestedReceiptId!] } },
+                    linkedPatch(row),
                     "Myynti hyväksytty."
                   )
                 }
@@ -159,10 +189,14 @@ export function BankRowSheet({
                 className={QUIET_LINK}
                 disabled={busy !== null}
                 onClick={() =>
-                  void run("reject", {
-                    url: "/api/matching/reject",
-                    body: { transactionId: row.id, receiptId: row.suggestedReceiptId! },
-                  })
+                  void run(
+                    "reject",
+                    {
+                      url: "/api/matching/reject",
+                      body: { transactionId: row.id, receiptId: row.suggestedReceiptId! },
+                    },
+                    UNSUGGESTED
+                  )
                 }
               >
                 Ei ole myyntiä
@@ -185,6 +219,7 @@ export function BankRowSheet({
                       url: "/api/matching/confirm",
                       body: { transactionId: row.id, receiptId: row.suggestedReceiptId! },
                     },
+                    linkedPatch(row),
                     "Kuitti linkitetty."
                   )
                 }
@@ -196,10 +231,14 @@ export function BankRowSheet({
                 className={QUIET_LINK}
                 disabled={busy !== null}
                 onClick={() =>
-                  void run("reject", {
-                    url: "/api/matching/reject",
-                    body: { transactionId: row.id, receiptId: row.suggestedReceiptId! },
-                  })
+                  void run(
+                    "reject",
+                    {
+                      url: "/api/matching/reject",
+                      body: { transactionId: row.id, receiptId: row.suggestedReceiptId! },
+                    },
+                    UNSUGGESTED
+                  )
                 }
               >
                 Väärä kuitti
@@ -224,6 +263,11 @@ export function BankRowSheet({
                             {
                               url: "/api/matching/confirm",
                               body: { transactionId: row.id, receiptId: candidate.receipt.id },
+                            },
+                            {
+                              matchStatus: "confirmed",
+                              receiptId: candidate.receipt.id,
+                              receipt: candidate.receipt,
                             },
                             "Kuitti linkitetty."
                           )
@@ -281,7 +325,13 @@ export function BankRowSheet({
                 type="button"
                 className={QUIET_LINK}
                 disabled={busy !== null}
-                onClick={() => void run("unlink", { url: "/api/matching/unlink", body: { transactionId: row.id } })}
+                onClick={() =>
+                  void run(
+                    "unlink",
+                    { url: "/api/matching/unlink", body: { transactionId: row.id } },
+                    { matchStatus: "unmatched", receiptId: null, receipt: null }
+                  )
+                }
               >
                 Poista linkitys
               </button>
@@ -298,7 +348,11 @@ export function BankRowSheet({
                 busyLabel="Palautetaan…"
                 disabled={busy !== null}
                 onClick={() =>
-                  void run("restore", { url: "/api/matching/ignore", body: { transactionId: row.id, ignored: false } })
+                  void run(
+                    "restore",
+                    { url: "/api/matching/ignore", body: { transactionId: row.id, ignored: false } },
+                    { matchStatus: "unmatched" }
+                  )
                 }
               >
                 Palauta

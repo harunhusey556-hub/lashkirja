@@ -37,6 +37,7 @@ import {
   SlotSkeleton,
   StatusTag,
   SummaryCard,
+  useSkeletonFade,
 } from "@/components/ds";
 import { ReceiptText } from "lucide-react";
 import { pageCacheFetchedAt, readPageCache, writePageCache } from "@/lib/page-cache";
@@ -111,6 +112,8 @@ export default function PurchaseInvoicesPage() {
   // so paint it once it is there instead of holding the skeleton (N3).
   const lateCache = useCacheAfterBoot<{ invoices: PurchaseInvoice[]; aging: Aging }>("purchases");
   const [appliedLateCache, setAppliedLateCache] = useState<unknown>(null);
+  // Content that replaces the skeleton fades in (owner report 2026-09-30: fluidity).
+  const readyFade = useSkeletonFade(status === "loading");
   if (lateCache && lateCache !== appliedLateCache && status === "loading") {
     setAppliedLateCache(lateCache);
     setInvoices(lateCache.invoices);
@@ -438,7 +441,7 @@ export default function PurchaseInvoicesPage() {
           ))}
 
         {status === "ready" && (
-          <>
+          <div className={readyFade || undefined}>
             {groups.map((group) => (
               <Section key={group.id} title={group.label}>
                 {group.items.map((invoice) => (
@@ -476,7 +479,7 @@ export default function PurchaseInvoicesPage() {
                 Näytetään {PURCHASE_LIST_LIMIT} vanhinta erääntyvää laskua. Valitse suodatin nähdäksesi kaikki.
               </p>
             )}
-          </>
+          </div>
         )}
       </div>
 

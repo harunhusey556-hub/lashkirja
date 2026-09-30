@@ -1,6 +1,7 @@
 "use client";
 
 import { Disclosure } from "@/components/ds/Disclosure";
+import { useLeavingRows } from "@/components/useLeavingRows";
 import { useState } from "react";
 import Link from "next/link";
 import { formatEur } from "@/lib/statement-client";
@@ -57,6 +58,25 @@ export default function ReviewQueue({
   const [open, setOpen] = useState(false);
   const [showAll, setShowAll] = useState(false);
   const [confirmBulk, setConfirmBulk] = useState(false);
+  // An approved row folds out at once and stays out until the list reloads;
+  // a refused approval (e.g. no amount) comes back with the reload.
+  const { leaving, leave } = useLeavingRows();
+  const [gone, setGone] = useState<ReadonlySet<string>>(() => new Set());
+  const [prevReceipts, setPrevReceipts] = useState(receipts);
+  if (prevReceipts !== receipts) {
+    setPrevReceipts(receipts);
+    setGone(new Set());
+  }
+  function approve(receipt: ReviewQueueReceipt) {
+    if (receipt.totalAmount == null) {
+      onReview(receipt.id, "approved");
+      return;
+    }
+    leave(receipt.id, () => {
+      setGone((current) => new Set(current).add(receipt.id));
+      onReview(receipt.id, "approved");
+    });
+  }
   // VS-23: a row carries one action pill; "Hylkää" and the details live in the row's own sheet.
   const [sheetFor, setSheetFor] = useState<ReviewQueueReceipt | null>(null);
   // A zero or missing total is almost always an unread receipt: approving it
@@ -120,16 +140,17 @@ export default function ReviewQueue({
       <Disclosure open={open}>
         <div className="mt-3 -mx-4 border-t border-line">
           <div className="divide-y divide-line">
-            {visible.map((r) => (
+            {visible.filter((r) => !gone.has(r.id)).map((r) => (
+              <div key={r.id} className={leaving.has(r.id) ? "row-leave" : undefined}>
               <ListRow
-                key={r.id}
                 title={r.vendor || "Tuntematon myyjä"}
                 amount={r.totalAmount != null ? formatEur(r.totalAmount) : "–"}
                 secondary={rowSecondary(r)}
                 onClick={() => setSheetFor(r)}
                 ariaLabel={`${r.vendor || "Tuntematon myyjä"}, ${r.totalAmount != null ? formatEur(r.totalAmount) : "ei summaa"}, ${rowSecondary(r)}`}
-                trailing={<ActionPill onClick={() => onReview(r.id, "approved")}>Hyväksy</ActionPill>}
+                trailing={<ActionPill onClick={() => approve(r)}>Hyväksy</ActionPill>}
               />
+              </div>
             ))}
           </div>
           {hidden > 0 && (

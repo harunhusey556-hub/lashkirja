@@ -27,6 +27,7 @@ import {
   Section,
   SlotSkeleton,
   StatusTag,
+  useSkeletonFade,
 } from "@/components/ds";
 import { SALES_STATUS } from "@/lib/status-labels";
 import { detailHref } from "@/lib/routes";
@@ -161,6 +162,8 @@ function InvoicesPageContent() {
     customerFilter || monthFilter || query ? null : "invoices"
   );
   const [appliedLateCache, setAppliedLateCache] = useState<unknown>(null);
+  // Content that replaces the skeleton fades in (owner report 2026-09-30: fluidity).
+  const readyFade = useSkeletonFade(status === "loading");
   if (lateCache && lateCache !== appliedLateCache && status === "loading") {
     setAppliedLateCache(lateCache);
     setInvoices(lateCache.invoices);
@@ -421,7 +424,7 @@ function InvoicesPageContent() {
         ))}
 
       {status === "ready" && (
-        <>
+        <div className={readyFade || undefined}>
           {groups.map((group) => (
             <Section key={group.id} title={group.label}>
               {group.items.map((invoice) => (
@@ -465,7 +468,7 @@ function InvoicesPageContent() {
               Näytetään {INVOICE_LIST_LIMIT} uusinta laskua. Hae tai valitse suodatin nähdäksesi muut.
             </p>
           )}
-        </>
+        </div>
       )}
 
       <Section>

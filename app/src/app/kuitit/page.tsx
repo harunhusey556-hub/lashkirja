@@ -36,7 +36,7 @@ import {
 } from "@/lib/receipt-tabs";
 import { Button, buttonClass } from "@/components/ui";
 import { Check, Minus, Receipt } from "lucide-react";
-import { HeaderAddPill, PageTitle, Section, SlotSkeleton } from "@/components/ds";
+import { HeaderAddPill, PageTitle, Section, SlotSkeleton, useSkeletonFade } from "@/components/ds";
 import { batchOutcomeMessage } from "@/lib/upload-queue";
 import { ReceiptFilters, type ReceiptAdvancedFilters } from "./ReceiptFilters";
 import { ReceiptRow } from "./ReceiptRow";
@@ -299,6 +299,8 @@ export default function KuititPage() {
   const currentLoadError = loadError?.query === query ? loadError.error : null;
   const loadingList =
     listResult?.query !== query && cachedList === null && !currentLoadError;
+  // The list that replaces the skeleton fades in (owner report 2026-09-30: fluidity).
+  const listFade = useSkeletonFade(loadingList);
 
   useScrollRestoration("kuitit", !loadingList);
 
@@ -777,7 +779,7 @@ export default function KuititPage() {
               }
             />
           ) : (
-            <div className="space-y-3">
+            <div className={`space-y-3 ${listFade}`}>
               <Section>
                 {visibleReceipts.map((r) => (
                   <ReceiptRow

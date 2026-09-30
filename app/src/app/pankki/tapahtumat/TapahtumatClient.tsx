@@ -8,13 +8,14 @@ import { CheckCircle2, Landmark, RefreshCw, Settings } from "lucide-react";
 import { ErrorState, SkeletonList } from "@/components/AsyncState";
 import { EmptyState } from "@/components/ScreenState";
 import { apiFetch, errorMessage, isUnauthorized, readJson, redirectToLogin } from "@/components/clientFetch";
-import { formatMonth, type StatementData } from "@/lib/statement-client";
+import { formatMonth, type StatementData, type StatementTransaction } from "@/lib/statement-client";
 import { formatDayMonth, formatEur, formatEurSigned } from "@/lib/format";
 import { readPageCache, writePageCache } from "@/lib/page-cache";
 import { useCacheAfterBoot } from "@/components/invoices/useCacheAfterBoot";
 import { useScrollRestoration } from "@/lib/list-ui-state";
 import { Button } from "@/components/ui";
-import { FilterChips, Icon, ListRow, PageTitle, SearchField, Section, StatusTag } from "@/components/ds";
+import { FilterChips, Icon, ListRow, PageTitle, SearchField, Section, StatusTag, useSkeletonFade } from "@/components/ds";
+import { useLeavingRows } from "@/components/useLeavingRows";
 import BankConnectCard from "@/components/BankConnectCard";
 import { BankLogo } from "@/components/bank/BankPickerSheet";
 import { BankRowSheet } from "@/components/bank/BankRowSheet";
@@ -170,6 +171,10 @@ export default function TapahtumatClient() {
   const [monthsShown, setMonthsShown] = useState(FIRST_MONTHS);
   const [openMonths, setOpenMonths] = useState<Set<string>>(() => new Set());
   const [sheetRowId, setSheetRowId] = useState<string | null>(null);
+  const { leaving, leave } = useLeavingRows();
+  const [doneRowId, setDoneRowId] = useState<string | null>(null);
+  const [unfolded, setUnfolded] = useState<string | null>(null);
+  const fade = useSkeletonFade(loading);
 
   const loadStatements = useCallback(async () => {
     try {
@@ -231,6 +236,43 @@ export default function TapahtumatClient() {
     else next.delete(key);
     const queryString = next.toString();
     router.replace(queryString ? `/pankki/tapahtumat?${queryString}` : "/pankki/tapahtumat");
+  }
+
+  /**
+   * A decision in the row sheet shows at once: the row takes its new state
+   * locally, and in "Vaatii toimia" it folds out of the list after the sheet
+   * has closed. The reload that follows brings the server's truth.
+   */
+  function handleChanged(rowId: string, patch?: Partial<StatementTransaction>) {
+    if (!patch) {
+      void loadStatements();
+      return;
+    }
+    const apply = () =>
+      setStatements((current) =>
+        current.map((statement) => ({
+          ...statement,
+          transactions: statement.transactions.map((row) => (row.id === rowId ? { ...row, ...patch } : row)),
+        }))
+      );
+    const row = statements.flatMap((statement) => statement.transactions).find((candidate) => candidate.id === rowId);
+    const leavesView = view === "toimet" && row !== undefined && !needsAction({ ...row, ...patch });
+    if (leavesView) {
+      // 200 ms: the sheet is mostly down, so the owner sees the row go.
+      leave(
+        rowId,
+        () => {
+          apply();
+          void loadStatements();
+        },
+        200
+      );
+      return;
+    }
+    apply();
+    setDoneRowId(rowId);
+    window.setTimeout(() => setDoneRowId((current) => (current === rowId ? null : current)), 900);
+    void loadStatements();
   }
 
   const rows = useMemo(() => feedRows(statements), [statements]);
@@ -356,7 +398,7 @@ export default function TapahtumatClient() {
           />
         )
       ) : (
-        <div className="space-y-1">
+        <div key={`${view}|${monthFilter}`} className={`space-y-1 ${fade || "list-swap"}`}>
           {shownMonths.map((group, index) => {
             // A finished month folds into one line; the newest month always shows.
             const folded = !narrowed && index > 0 && group.open === 0 && !openMonths.has(group.month);
@@ -379,20 +421,35 @@ export default function TapahtumatClient() {
                         <Icon icon={CheckCircle2} size="inline" />
                       </span>
                     }
-                    onClick={() => setOpenMonths((current) => new Set(current).add(group.month))}
+                    onClick={() => {
+                      setOpenMonths((current) => new Set(current).add(group.month));
+                      setUnfolded(group.month);
+                    }}
                     ariaLabel={`${formatMonth(group.month)}: ${group.rows.length} tapahtumaa, kaikki kunnossa. Näytä`}
                   />
                 ) : (
                   group.rows.map((row) => (
-                    <ListRow
+                    <div
                       key={row.id}
-                      title={row.counterparty || (row.amount > 0 ? "Tulo" : "Meno")}
-                      secondary={rowSecondary(row)}
-                      amount={formatEurSigned(row.amount)}
-                      amountTone={row.amount > 0 ? "positive" : "default"}
-                      trailing={rowTag(row)}
-                      onClick={() => setSheetRowId(row.id)}
-                    />
+                      className={
+                        [
+                          leaving.has(row.id) ? "row-leave" : "",
+                          doneRowId === row.id ? "row-done" : "",
+                          unfolded === group.month ? "list-swap" : "",
+                        ]
+                          .filter(Boolean)
+                          .join(" ") || undefined
+                      }
+                    >
+                      <ListRow
+                        title={row.counterparty || (row.amount > 0 ? "Tulo" : "Meno")}
+                        secondary={rowSecondary(row)}
+                        amount={formatEurSigned(row.amount)}
+                        amountTone={row.amount > 0 ? "positive" : "default"}
+                        trailing={rowTag(row)}
+                        onClick={() => setSheetRowId(row.id)}
+                      />
+                    </div>
                   ))
                 )}
               </Section>
@@ -411,7 +468,7 @@ export default function TapahtumatClient() {
         </div>
       )}
 
-      <BankRowSheet row={sheetRow} onClose={() => setSheetRowId(null)} onChanged={() => void loadStatements()} />
+      <BankRowSheet row={sheetRow} onClose={() => setSheetRowId(null)} onChanged={handleChanged} />
     </div>
   );
 }

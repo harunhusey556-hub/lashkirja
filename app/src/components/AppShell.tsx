@@ -133,6 +133,8 @@ const noSubscribe = () => () => {};
 
 /** Push/pop duration (--dur-push) plus a margin for the snapshot fallback timer. */
 const PUSH_FALLBACK_MS = 360;
+/** `.page-tab-in` runs 160 ms; the class is dropped a little after. */
+const TAB_SETTLE_MS = 220;
 /** Longest the native splash waits for the first page to have real content. */
 const SPLASH_MAX_WAIT_MS = 350;
 
@@ -452,7 +454,20 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       return;
     }
 
-    // Tab switches (100+/day) and the first render do not animate (SHELL-06).
+    // Tab switches (100+/day) get no slide (SHELL-06), only a 160 ms settle
+    // from 0.55 opacity so the new tab does not snap in (owner report
+    // 2026-09-30). The first render does not animate.
+    if (direction === "tab") {
+      main.classList.remove("page-tab-in");
+      void main.offsetWidth;
+      main.classList.add("page-tab-in");
+      const clearTab = () => main.classList.remove("page-tab-in");
+      const tabTimer = window.setTimeout(clearTab, TAB_SETTLE_MS);
+      return () => {
+        window.clearTimeout(tabTimer);
+        clearTab();
+      };
+    }
     if (direction !== "forward" && direction !== "back") return;
 
     const enterClass = direction === "forward" ? "page-push-in" : "page-pop-in";

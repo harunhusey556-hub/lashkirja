@@ -58,6 +58,7 @@ import { VAT_ROW_TITLE, vatDueAmount, vatDueSecondary, vatPendingNote } from "@/
 import { useVatDue } from "@/components/useVatDue";
 import { approvalGapText } from "@/lib/receipt-approval";
 import { requestReceiptCapture } from "@/lib/capture-request";
+import { useLeavingRows } from "@/components/useLeavingRows";
 import { armNavigation } from "@/lib/nav-direction";
 import { ReceiptApprovalSheet, type ApprovalSheetReceipt } from "@/components/ReceiptApprovalSheet";
 import type { DashboardItem as ServerDashboardItem, DashboardItemKind } from "@/app/api/dashboard/items";
@@ -326,6 +327,8 @@ export default function DashboardClient() {
   const [loadAttempt, setLoadAttempt] = useState(0);
   // Items acted on in place: hidden at once, back if the action is undone or fails.
   const [hiddenItems, setHiddenItems] = useState<ReadonlySet<string>>(() => new Set());
+  // A done task folds out of the list before it is hidden (owner report 2026-09-30).
+  const { leaving, leave } = useLeavingRows();
   const [busyItem, setBusyItem] = useState<string | null>(null);
   const [remindTarget, setRemindTarget] = useState<{ invoiceId: string; customerId: string } | null>(null);
   // TF-03: the row body of a pending receipt opens the approval sheet in place.
@@ -357,7 +360,7 @@ export default function DashboardClient() {
    * Closing the app meanwhile leaves the receipt pending, never half-done.
    */
   function approveReceipt(item: { id: string; receiptId: string; party: string }) {
-    hideItem(item.id, true);
+    leave(item.id, () => hideItem(item.id, true));
     showToast({
       tone: "success",
       text: `${item.party} hyväksyttiin`,
@@ -404,7 +407,7 @@ export default function DashboardClient() {
       const paymentId = result.invoice.payments.find(
         (payment) => payment.transactionId === item.transactionId
       )?.id;
-      hideItem(item.id, true);
+      leave(item.id, () => hideItem(item.id, true));
       showToast({
         tone: "success",
         text: `Maksu kirjattiin laskulle ${item.number}`,
@@ -705,8 +708,8 @@ export default function DashboardClient() {
 
   function renderTask(task: Task) {
     return (
+      <div key={task.key} className={leaving.has(task.key) ? "row-leave" : undefined}>
       <ListRow
-        key={task.key}
         href={task.onRowClick ? undefined : task.href}
         onClick={task.onRowClick}
         leading={<Icon icon={task.icon} />}
@@ -731,6 +734,7 @@ export default function DashboardClient() {
           )
         }
       />
+      </div>
     );
   }
 

@@ -677,6 +677,62 @@ html[data-keyboard="open"] .app-tab-bar {
 .list-stagger > *:nth-child(5) { animation-delay: 120ms; }
 .list-stagger > *:nth-child(n+6) { animation-delay: 150ms; }
 
+/* A row whose task is done leaves its list: it fades and folds its height so
+   the rows below slide up instead of jumping (owner report 2026-09-30). The
+   caller removes the row when the animation ends (ROW_EXIT_MS). */
+@keyframes rowLeave {
+  from {
+    opacity: 1;
+    grid-template-rows: 1fr;
+  }
+  to {
+    opacity: 0;
+    grid-template-rows: 0fr;
+  }
+}
+.row-leave {
+  display: grid;
+  animation: rowLeave var(--dur-exit) var(--ease-out) forwards;
+  pointer-events: none;
+}
+.row-leave > * {
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* A row that stays but just got done (e.g. "Kunnossa"): a brief success tint. */
+@keyframes rowDone {
+  from {
+    background-color: color-mix(in srgb, var(--color-success) 14%, transparent);
+  }
+  to {
+    background-color: transparent;
+  }
+}
+.row-done {
+  animation: rowDone 900ms var(--ease-out);
+}
+
+/* A list whose content swaps (filter chip, an unfolded month): a short
+   settle-in, `backwards` only so no transform survives. */
+.list-swap {
+  animation: slideUpFade 200ms var(--ease-out) backwards;
+}
+
+/* Tab switch: a brief settle so the new tab does not snap in. Opacity only,
+   from 0.55: the page is already painted, so it never flashes blank. */
+@keyframes tabIn {
+  from {
+    opacity: 0.55;
+  }
+  to {
+    opacity: 1;
+  }
+}
+.page-tab-in {
+  animation: tabIn 160ms var(--ease-out);
+}
+
 /* Dialogs (ConfirmModal): centred, so they scale from the centre. */
 @keyframes scaleIn {
   from {
@@ -1137,11 +1193,21 @@ body.signing-out {
   .animate-in,
   .fade-in-content,
   .list-stagger > *,
+  .list-swap,
   .page-push-in,
   .page-pop-in,
+  .page-tab-in,
   .bottom-actions {
     animation: fadeIn 120ms linear !important;
     transform: none !important;
+  }
+
+  .row-leave {
+    animation: fadeOut 120ms linear forwards !important;
+  }
+
+  .row-done {
+    animation: none !important;
   }
 
   .animate-backdrop-out,
