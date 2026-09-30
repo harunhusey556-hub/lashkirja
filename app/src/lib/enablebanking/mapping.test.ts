@@ -1,12 +1,14 @@
 import { describe, expect, it } from "vitest";
 import {
   bankRefFor,
+  contentFingerprint,
   decimalToCents,
   mapBookedTransaction,
   normalizeIban,
   pickBookedBalance,
   sessionAccountsForStorage,
   toPublicConnection,
+  withOccurrenceRefs,
   type EbTransaction,
 } from "./mapping";
 
@@ -68,6 +70,92 @@ describe("mapBookedTransaction", () => {
     expect(first).toBe(second);
     expect(first.startsWith("eb:FI2112345600000785:")).toBe(true);
     expect(mapBookedTransaction(tx, "FI2112345600000785")?.amountCents).toBe(150);
+  });
+});
+
+describe("fallback identity without a bank reference (G26, G29)", () => {
+  const IBAN = "FI2112345600000785";
+  const bare: EbTransaction = {
+    status: "BOOK",
+    booking_date: "2026-09-29",
+    transaction_date: "2026-09-28",
+    credit_debit_indicator: "DBIT",
+    transaction_amount: { currency: "EUR", amount: "7.5" },
+    reference_number: "RF1",
+    remittance_information: ["Kahvi  ostos"],
+    creditor: { name: "R-kioski" },
+  };
+  const ref = (tx: EbTransaction) => mapBookedTransaction(tx, IBAN)!.bankRef;
+
+  it("is the same for '7.5' and '7.50', for a comma amount and for padded whitespace", () => {
+    const base = ref(bare);
+    expect(ref({ ...bare, transaction_amount: { currency: "EUR", amount: "7.50" } })).toBe(base);
+    expect(ref({ ...bare, transaction_amount: { currency: "EUR", amount: "7,5" } })).toBe(base);
+    expect(ref({ ...bare, remittance_information: ["Kahvi ostos "] })).toBe(base);
+    expect(ref({ ...bare, remittance_information: ["  Kahvi", "ostos"] })).toBe(base);
+  });
+
+  it("ignores letter case in names and text, and a late or changed transaction_date", () => {
+    const base = ref(bare);
+    expect(ref({ ...bare, creditor: { name: " R-KIOSKI " }, remittance_information: ["KAHVI OSTOS"] })).toBe(base);
+    expect(ref({ ...bare, transaction_date: undefined })).toBe(base);
+    expect(ref({ ...bare, transaction_date: "2026-09-29" })).toBe(base);
+    expect(ref({ ...bare, booking_date: "2026-09-29T00:00:00Z" })).toBe(base);
+  });
+
+  it("differs when the money, the day or the counterparty really differ", () => {
+    const base = ref(bare);
+    expect(ref({ ...bare, transaction_amount: { currency: "EUR", amount: "7.51" } })).not.toBe(base);
+    expect(ref({ ...bare, booking_date: "2026-09-30" })).not.toBe(base);
+    expect(ref({ ...bare, creditor: { name: "Toinen kioski" } })).not.toBe(base);
+    expect(ref({ ...bare, credit_debit_indicator: "CRDT" })).not.toBe(base);
+  });
+
+  it("keeps the old raw-string digest as legacyBankRef so stored rows are still recognised", () => {
+    const mapped = mapBookedTransaction(bare, IBAN)!;
+    expect(mapped.stableRef).toBe(false);
+    expect(mapped.legacyBankRef).toBe(`eb:${IBAN}:c6105c483cacfc96d57d2b474204b5a2`);
+    const withRef = mapBookedTransaction({ ...bare, entry_reference: "E1" }, IBAN)!;
+    expect(withRef.stableRef).toBe(true);
+    expect(withRef.bankRef).toBe(`eb:${IBAN}:E1`);
+    expect(withRef.legacyBankRef).toBeNull();
+  });
+
+  it("gives genuine identical twins their own refs and leaves the first one stable", () => {
+    const [first, second, third] = withOccurrenceRefs([
+      mapBookedTransaction(bare, IBAN)!,
+      mapBookedTransaction({ ...bare, transaction_amount: { currency: "EUR", amount: "7.50" } }, IBAN)!,
+      mapBookedTransaction(bare, IBAN)!,
+    ]);
+    expect(first.bankRef).toBe(ref(bare));
+    expect(first.occurrence).toBe(1);
+    expect(second.bankRef).toBe(`${ref(bare)}~2`);
+    expect(third.bankRef).toBe(`${ref(bare)}~3`);
+    expect(second.legacyBankRef).toBeNull();
+    expect(new Set([first, second, third].map((row) => row.bankRef)).size).toBe(3);
+  });
+
+  it("does not touch rows that carry a bank reference, even when they look alike", () => {
+    const rows = withOccurrenceRefs([
+      mapBookedTransaction({ ...bare, entry_reference: "A" }, IBAN)!,
+      mapBookedTransaction({ ...bare, entry_reference: "A" }, IBAN)!,
+      mapBookedTransaction({ ...bare, entry_reference: "B" }, IBAN)!,
+    ]);
+    expect(rows.map((row) => row.bankRef)).toEqual([`eb:${IBAN}:A`, `eb:${IBAN}:A`, `eb:${IBAN}:B`]);
+  });
+
+  it("fingerprints a stored row the same way as a fetched one", () => {
+    const mapped = mapBookedTransaction(bare, IBAN)!;
+    expect(
+      contentFingerprint({
+        iban: IBAN,
+        date: mapped.date,
+        amountCents: mapped.amountCents,
+        reference: mapped.reference,
+        message: "KAHVI OSTOS ",
+        counterparty: "r-kioski",
+      })
+    ).toBe(mapped.fingerprint);
   });
 });
 

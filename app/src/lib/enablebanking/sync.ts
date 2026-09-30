@@ -15,9 +15,12 @@ import {
 import { isBankSyncDue, overlapDateFrom } from "./consent";
 import { attendedHeaders } from "./connect";
 import {
+  contentFingerprint,
   formatIbanDisplay,
+  isFingerprintRef,
   mapBookedTransaction,
   pickBookedBalance,
+  withOccurrenceRefs,
   type MappedBankTransaction,
 } from "./mapping";
 import type { PsuContext } from "./client";
@@ -171,9 +174,11 @@ async function syncBankConnectionUntracked(
         historyFrom: connection.historyFrom ?? undefined,
         psuHeaders,
       });
-      const mapped = transactions
-        .map((tx) => mapBookedTransaction(tx, account.iban))
-        .filter((tx): tx is MappedBankTransaction => tx !== null);
+      const mapped = withOccurrenceRefs(
+        transactions
+          .map((tx) => mapBookedTransaction(tx, account.iban))
+          .filter((tx): tx is MappedBankTransaction => tx !== null)
+      );
       const written = await writeTransactions({
         userId,
         aspspName: connection.aspspName,
@@ -340,18 +345,22 @@ async function writeTransactions(input: {
   const uniqueRows = new Map<string, MappedBankTransaction>();
   for (const row of input.rows) uniqueRows.set(row.bankRef, row);
   const rows = [...uniqueRows.values()];
+  // A row is known by its key, or by the key earlier syncs stored for it.
   const known = new Set<string>();
-  for (let index = 0; index < rows.length; index += 400) {
-    const slice = rows.slice(index, index + 400).map((row) => row.bankRef);
+  const keys = rows.flatMap((row) => (row.legacyBankRef ? [row.bankRef, row.legacyBankRef] : [row.bankRef]));
+  for (let index = 0; index < keys.length; index += 400) {
     const existing = await prisma.transaction.findMany({
-      where: { userId: input.userId, bankRef: { in: slice } },
+      where: { userId: input.userId, bankRef: { in: keys.slice(index, index + 400) } },
       select: { bankRef: true },
     });
     for (const row of existing) {
       if (row.bankRef) known.add(row.bankRef);
     }
   }
-  const fresh = rows.filter((row) => !known.has(row.bankRef));
+  const unmatched = rows.filter(
+    (row) => !known.has(row.bankRef) && !(row.legacyBankRef && known.has(row.legacyBankRef))
+  );
+  const fresh = await dropRowsAlreadyStoredByContent(input.userId, unmatched, known);
   const skipped = rows.length - fresh.length;
   if (fresh.length === 0) return { imported: 0, skipped, statementIds: [] };
 
@@ -388,6 +397,92 @@ async function writeTransactions(input: {
     imported += await insertTransactions(data);
   }
   return { imported, skipped, statementIds };
+}
+
+/**
+ * The bank can change how it identifies a movement between two deliveries (a
+ * reference that disappears or appears), which a key lookup alone reads as a
+ * new row. So the rows the keys do not recognise are compared with what is
+ * stored by content. A reference-less row is already stored when the database
+ * holds at least as many rows with that content as this row's occurrence
+ * number, and a row with a bank reference takes over the row an earlier sync
+ * stored without one. Only as many rows are matched as exist, so a genuine
+ * extra purchase is still new.
+ */
+async function dropRowsAlreadyStoredByContent(
+  userId: string,
+  unmatched: MappedBankTransaction[],
+  knownKeys: Set<string>
+): Promise<MappedBankTransaction[]> {
+  if (unmatched.length === 0) return unmatched;
+  const dates = unmatched.map((row) => row.date).filter((date): date is string => date !== null);
+  const undated = unmatched.some((row) => row.date === null);
+  const from = dates.reduce((min, date) => (date < min ? date : min), dates[0] ?? "");
+  const to = dates.reduce((max, date) => (date > max ? date : max), dates[0] ?? "");
+  const storedRows = await prisma.transaction.findMany({
+    where: {
+      userId,
+      source: "enablebanking",
+      iban: { in: [...new Set(unmatched.map((row) => row.iban))] },
+      OR: [
+        ...(dates.length > 0
+          ? [{ date: { gte: new Date(`${from}T00:00:00.000Z`), lte: new Date(`${to}T00:00:00.000Z`) } }]
+          : []),
+        ...(undated ? [{ date: null }] : []),
+      ],
+    },
+    select: {
+      id: true,
+      bankRef: true,
+      iban: true,
+      date: true,
+      amountCents: true,
+      reference: true,
+      message: true,
+      counterparty: true,
+    },
+  });
+  const byFingerprint = new Map<string, Array<{ id: string; bankRef: string | null }>>();
+  for (const stored of storedRows) {
+    const fingerprint = contentFingerprint({
+      iban: stored.iban ?? "",
+      date: stored.date ? stored.date.toISOString().slice(0, 10) : null,
+      amountCents: stored.amountCents,
+      reference: stored.reference,
+      message: stored.message,
+      counterparty: stored.counterparty,
+    });
+    const bucket = byFingerprint.get(fingerprint) ?? [];
+    bucket.push({ id: stored.id, bankRef: stored.bankRef });
+    byFingerprint.set(fingerprint, bucket);
+  }
+
+  const fresh: MappedBankTransaction[] = [];
+  const claimed = new Set<string>();
+  for (const row of unmatched) {
+    const same = byFingerprint.get(row.fingerprint) ?? [];
+    if (!row.stableRef) {
+      if (same.length >= row.occurrence) continue;
+      fresh.push(row);
+      continue;
+    }
+    // A stable reference: adopt an earlier row that was stored without one and
+    // that no row of this delivery already claims by its own key.
+    const adoptable = same.find(
+      (candidate) =>
+        candidate.bankRef !== null &&
+        isFingerprintRef(candidate.bankRef) &&
+        !knownKeys.has(candidate.bankRef) &&
+        !claimed.has(candidate.id)
+    );
+    if (!adoptable) {
+      fresh.push(row);
+      continue;
+    }
+    claimed.add(adoptable.id);
+    await prisma.transaction.update({ where: { id: adoptable.id }, data: { bankRef: row.bankRef } });
+  }
+  return fresh;
 }
 
 async function ensureStatement(userId: string, iban: string, month: string, aspspName: string) {

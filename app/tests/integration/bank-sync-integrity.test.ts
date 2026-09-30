@@ -140,3 +140,134 @@ describe("a pull that is not complete never counts as a finished sync", () => {
     expect(stored?.lastSuccessAt).not.toBeNull();
   });
 });
+
+const T = (ibanRow: EbTransaction[]) => fakeClient([{ transactions: ibanRow, continuationKey: null }]).client;
+const run = (rows: EbTransaction[], id: string) => syncBankConnection(user.id, id, { attended: false, client: T(rows) });
+const stored = () =>
+  prisma.transaction.findMany({ where: { userId: user.id }, orderBy: [{ date: "asc" }, { bankRef: "asc" }] });
+
+function bare(date: string, amount: string, extra: Partial<EbTransaction> = {}): EbTransaction {
+  return {
+    status: "BOOK",
+    booking_date: date,
+    credit_debit_indicator: "DBIT",
+    transaction_amount: { currency: "EUR", amount },
+    creditor: { name: "R-kioski" },
+    remittance_information: ["Kahvi  ostos"],
+    ...extra,
+  };
+}
+
+describe("one bank movement is one row (G26)", () => {
+  it("a re-delivery with '7.50', stray whitespace or case adds nothing", async () => {
+    const connection = await createConnection();
+    expect((await run([bare("2026-09-29", "7.5")], connection.id)).imported).toBe(1);
+    const again = await run(
+      [bare("2026-09-29", "7.50", { remittance_information: ["kahvi ostos "], creditor: { name: " R-KIOSKI" } })],
+      connection.id
+    );
+    expect(again.imported).toBe(0);
+    expect(again.skipped).toBe(1);
+    expect(await stored()).toHaveLength(1);
+  });
+
+  it("a bank that drops entry_reference later does not double the row", async () => {
+    const connection = await createConnection();
+    const withRef = bare("2026-09-30", "80.00", { entry_reference: "E004", credit_debit_indicator: "CRDT" });
+    const { entry_reference: _dropped, ...withoutRef } = withRef;
+    void _dropped;
+    await run([withRef], connection.id);
+    const second = await run([withoutRef], connection.id);
+    expect(second.imported).toBe(0);
+    const third = await run([withRef], connection.id);
+    expect(third.imported).toBe(0);
+    const rows = await stored();
+    expect(rows).toHaveLength(1);
+    expect(rows[0].bankRef).toBe(`eb:${IBAN}:E004`);
+  });
+
+  it("a reference that appears later adopts the row stored without one", async () => {
+    const connection = await createConnection();
+    await run([bare("2026-09-30", "4.00")], connection.id);
+    const second = await run([bare("2026-09-30", "4.00", { entry_reference: "LATE-1" })], connection.id);
+    expect(second.imported).toBe(0);
+    const rows = await stored();
+    expect(rows).toHaveLength(1);
+    expect(rows[0].bankRef).toBe(`eb:${IBAN}:LATE-1`);
+  });
+
+  it("recognises a row stored under the old raw-string key", async () => {
+    const connection = await createConnection();
+    const statement = await prisma.statement.create({
+      data: {
+        userId: user.id,
+        fileName: "eb",
+        fileType: "enablebanking",
+        filePath: "enablebanking",
+        checksum: `eb:${IBAN}:2026-09`,
+        periodMonth: "2026-09",
+      },
+    });
+    // What the pre-fix sync stored for bare("2026-09-29", "7.5"): sha256 of the raw strings.
+    const { createHash } = await import("crypto");
+    const digest = createHash("sha256")
+      .update([IBAN, "2026-09-29", "", "7.5", "DBIT", "", "Kahvi  ostos", "R-kioski", ""].join("\n"), "utf8")
+      .digest("hex")
+      .slice(0, 32);
+    await prisma.transaction.create({
+      data: {
+        statementId: statement.id,
+        userId: user.id,
+        date: new Date("2026-09-29T00:00:00.000Z"),
+        counterparty: "R-kioski",
+        amountCents: -750,
+        message: "Kahvi  ostos",
+        type: "meno",
+        bankRef: `eb:${IBAN}:${digest}`,
+        source: "enablebanking",
+        iban: IBAN,
+      },
+    });
+    const result = await run([bare("2026-09-29", "7.5")], connection.id);
+    expect(result.imported).toBe(0);
+    expect(result.skipped).toBe(1);
+    expect(await stored()).toHaveLength(1);
+  });
+
+  it("keeps two different movements that only look alike when their references differ", async () => {
+    const connection = await createConnection();
+    const result = await run(
+      [bare("2026-09-29", "3.50", { entry_reference: "A" }), bare("2026-09-29", "3.50", { entry_reference: "B" })],
+      connection.id
+    );
+    expect(result.imported).toBe(2);
+  });
+});
+
+describe("two genuine identical rows without a reference are both kept (G29)", () => {
+  it("stores twins from one delivery and stays stable on re-sync", async () => {
+    const connection = await createConnection();
+    const twin = () => bare("2026-09-30", "3.50");
+    const first = await run([twin(), twin()], connection.id);
+    expect(first.imported).toBe(2);
+    expect((await stored()).reduce((sum, row) => sum + row.amountCents, 0)).toBe(-700);
+    const again = await run([twin(), twin()], connection.id);
+    expect(again.imported).toBe(0);
+    expect(await stored()).toHaveLength(2);
+  });
+
+  it("imports only the new twin when the feed grows from one to two", async () => {
+    const connection = await createConnection();
+    await run([bare("2026-09-30", "3.50")], connection.id);
+    const next = await run([bare("2026-09-30", "3.50"), bare("2026-09-30", "3.50")], connection.id);
+    expect(next.imported).toBe(1);
+    expect(await stored()).toHaveLength(2);
+  });
+
+  it("still treats a repeated bank reference as one movement", async () => {
+    const connection = await createConnection();
+    const row = bare("2026-09-30", "3.50", { entry_reference: "SAME" });
+    const result = await run([row, row], connection.id);
+    expect(result.imported).toBe(1);
+  });
+});

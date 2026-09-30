@@ -54,7 +54,24 @@ export interface MappedBankTransaction {
   amountCents: number;
   reference: string | null;
   message: string | null;
+  /**
+   * The row's identity. With a bank reference it is `eb:<iban>:<reference>`;
+   * without one it is a fingerprint of the normalised content, and
+   * `withOccurrenceRefs` adds `~2`, `~3` ... for genuine identical twins.
+   */
   bankRef: string;
+  /** True when the bank supplied entry_reference or transaction_id. */
+  stableRef: boolean;
+  /** Which of several identical rows this is within one fetch (1 = first). */
+  occurrence: number;
+  /** Normalised content hash; also computable from a stored Transaction. */
+  fingerprint: string;
+  /**
+   * The key pre-fix syncs stored for this row (a hash of the raw strings), so a
+   * row already in the database is recognised. Null when the bank gave a
+   * reference, and for the second and later twins, which the old key collapsed.
+   */
+  legacyBankRef: string | null;
   iban: string;
 }
 
@@ -126,9 +143,50 @@ export function decimalToCents(amount: string): number | null {
   return cents;
 }
 
-export function bankRefFor(iban: string, tx: EbTransaction): string {
+/** Trim, collapse inner whitespace, fold case: "Kahvi  ostos " equals "kahvi ostos". */
+function normalizeText(value: string | null | undefined): string {
+  return (value ?? "").normalize("NFC").replace(/\s+/g, " ").trim().toLowerCase();
+}
+
+export interface FingerprintParts {
+  iban: string;
+  /** YYYY-MM-DD, or null for an undated row. */
+  date: string | null;
+  amountCents: number;
+  reference: string | null;
+  message: string | null;
+  counterparty: string | null;
+}
+
+/**
+ * Identity of a movement by what it is, not by how the bank spelled it: the
+ * amount as integer cents, the day as an ISO date, and the free text collapsed
+ * and case-folded. Works on a fetched row and on a stored Transaction alike.
+ */
+export function contentFingerprint(parts: FingerprintParts): string {
+  return createHash("sha256")
+    .update(
+      [
+        parts.iban,
+        parts.date ?? "",
+        String(parts.amountCents),
+        normalizeText(parts.reference),
+        normalizeText(parts.message),
+        normalizeText(parts.counterparty),
+      ].join("\n"),
+      "utf8"
+    )
+    .digest("hex")
+    .slice(0, 32);
+}
+
+function stableBankRef(iban: string, tx: EbTransaction): string | null {
   const stable = (tx.entry_reference || tx.transaction_id || "").trim();
-  if (stable) return `eb:${iban}:${stable}`.slice(0, 240);
+  return stable ? `eb:${iban}:${stable}`.slice(0, 240) : null;
+}
+
+/** The pre-fix key: a hash of the raw strings. Kept only to recognise stored rows. */
+function legacyFallbackRef(iban: string, tx: EbTransaction): string {
   const digest = createHash("sha256")
     .update(
       [
@@ -149,6 +207,73 @@ export function bankRefFor(iban: string, tx: EbTransaction): string {
   return `eb:${iban}:${digest}`;
 }
 
+function txFingerprint(iban: string, tx: EbTransaction, amountCents: number, indicator: string | undefined): string {
+  return contentFingerprint({
+    iban,
+    date: transactionDate(tx),
+    amountCents,
+    reference: clip(tx.reference_number, 80),
+    message: remittance(tx.remittance_information),
+    counterparty: counterpartyName(tx, indicator),
+  });
+}
+
+function signedCents(tx: EbTransaction): { cents: number; indicator: string | undefined } | null {
+  const rawAmount = tx.transaction_amount?.amount;
+  if (!rawAmount) return null;
+  const parsed = decimalToCents(rawAmount);
+  if (parsed == null) return null;
+  const indicator = tx.credit_debit_indicator?.trim().toUpperCase();
+  const cents =
+    indicator === "DBIT" ? -Math.abs(parsed) : indicator === "CRDT" ? Math.abs(parsed) : parsed;
+  return { cents, indicator };
+}
+
+/** Prefix of a fingerprint-based ref; a bank reference never gets it from us. */
+export const FINGERPRINT_REF_TAG = "fp-";
+
+/**
+ * The key of a movement: the bank's own reference when it gives one,
+ * otherwise a fingerprint of the normalised content (first occurrence; see
+ * `withOccurrenceRefs` for identical twins).
+ */
+export function bankRefFor(iban: string, tx: EbTransaction): string {
+  const stable = stableBankRef(iban, tx);
+  if (stable) return stable;
+  const money = signedCents(tx);
+  // An amount that cannot be read never reaches the database (the row is
+  // dropped by mapBookedTransaction); keep a deterministic key for callers.
+  if (!money) return legacyFallbackRef(iban, tx);
+  return `eb:${iban}:${FINGERPRINT_REF_TAG}${txFingerprint(iban, tx, money.cents, money.indicator)}`;
+}
+
+/** True for a key built from content, false for a bank reference. */
+export function isFingerprintRef(bankRef: string): boolean {
+  const tail = bankRef.split(":").slice(2).join(":");
+  return /^(?:fp-)?[0-9a-f]{32}(?:~\d+)?$/.test(tail);
+}
+
+/**
+ * Makes the refs of reference-less rows unique within one fetch: the n-th
+ * identical row gets `~n` (n >= 2). The first keeps the plain key, so it is the
+ * same on every re-sync, and genuine twins are kept instead of collapsing.
+ */
+export function withOccurrenceRefs(rows: MappedBankTransaction[]): MappedBankTransaction[] {
+  const seen = new Map<string, number>();
+  return rows.map((row) => {
+    if (row.stableRef) return row;
+    const occurrence = (seen.get(row.fingerprint) ?? 0) + 1;
+    seen.set(row.fingerprint, occurrence);
+    if (occurrence === 1) return row;
+    return {
+      ...row,
+      occurrence,
+      bankRef: `${row.bankRef.split("~")[0]}~${occurrence}`,
+      legacyBankRef: null,
+    };
+  });
+}
+
 /** BOOK rows only. Accounts without an IBAN are skipped. */
 export function mapBookedTransaction(
   tx: EbTransaction,
@@ -159,13 +284,10 @@ export function mapBookedTransaction(
   if (!iban) return null;
   const currency = tx.transaction_amount?.currency?.trim().toUpperCase();
   if (currency && currency !== "EUR") return null;
-  const rawAmount = tx.transaction_amount?.amount;
-  if (!rawAmount) return null;
-  const parsed = decimalToCents(rawAmount);
-  if (parsed == null) return null;
-  const indicator = tx.credit_debit_indicator?.trim().toUpperCase();
-  const amountCents =
-    indicator === "DBIT" ? -Math.abs(parsed) : indicator === "CRDT" ? Math.abs(parsed) : parsed;
+  const money = signedCents(tx);
+  if (!money) return null;
+  const { cents: amountCents, indicator } = money;
+  const stable = stableBankRef(iban, tx);
 
   return {
     date: transactionDate(tx),
@@ -174,6 +296,10 @@ export function mapBookedTransaction(
     reference: clip(tx.reference_number, 80),
     message: remittance(tx.remittance_information),
     bankRef: bankRefFor(iban, tx),
+    stableRef: stable !== null,
+    occurrence: 1,
+    fingerprint: txFingerprint(iban, tx, amountCents, indicator),
+    legacyBankRef: stable ? null : legacyFallbackRef(iban, tx),
     iban,
   };
 }
