@@ -857,34 +857,31 @@ export default function StatementDetailView({
                                     : ""}
                                 </p>
                               </div>
-                              <div className="flex gap-2">
-                                <Button
-                                  type="button"
-                                  variant="secondary"
-                                  className="flex-1"
-                                  disabled={matchBusyTxId === t.id}
-                                  onClick={() =>
-                                    matchAction(t.id, "/api/matching/reject", {
-                                      transactionId: t.id,
-                                      receiptId: t.suggestedReceiptId,
-                                    })
-                                  }
-                                >
-                                  Ei myyntiä
-                                </Button>
-                                <Button
-                                  type="button"
-                                  className="flex-1"
-                                  disabled={matchBusyTxId === t.id}
-                                  onClick={() =>
-                                    matchAction(t.id, "/api/receipts/batch-approve", {
-                                      receiptIds: [t.suggestedReceiptId],
-                                    })
-                                  }
-                                >
-                                  Hyväksy
-                                </Button>
-                              </div>
+                              <Button
+                                type="button"
+                                className="w-full"
+                                disabled={matchBusyTxId === t.id}
+                                onClick={() =>
+                                  matchAction(t.id, "/api/receipts/batch-approve", {
+                                    receiptIds: [t.suggestedReceiptId],
+                                  })
+                                }
+                              >
+                                Hyväksy
+                              </Button>
+                              <button
+                                type="button"
+                                className="active-press mx-auto flex min-h-11 items-center px-3 text-caption text-ink-2 disabled:opacity-50"
+                                disabled={matchBusyTxId === t.id}
+                                onClick={() =>
+                                  matchAction(t.id, "/api/matching/reject", {
+                                    transactionId: t.id,
+                                    receiptId: t.suggestedReceiptId,
+                                  })
+                                }
+                              >
+                                Ei ole myyntiä
+                              </button>
                             </div>
                           ) : (
                             <p className="text-caption text-ink-2">
@@ -966,6 +963,13 @@ export default function StatementDetailView({
                             )}
                           </div>
                         )}
+                        {/* A recognised sale has one decision (Hyväksy / Ei ole
+                            myyntiä); more row actions here read as three
+                            competing choices. They return once it is decided. */}
+                        {!(
+                          t.matchStatus === "suggested" &&
+                          t.suggestedReceipt?.source === "auto_income"
+                        ) && (
                         <RowActionList
                           items={[
                             { label: "Muokkaa", onSelect: () => startEditTx(t) },
@@ -1033,6 +1037,7 @@ export default function StatementDetailView({
                             },
                           ]}
                         />
+                        )}
                       </>
                     )}
                   </div>

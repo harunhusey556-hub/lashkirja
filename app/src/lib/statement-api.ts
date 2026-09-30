@@ -109,7 +109,10 @@ export async function listStatementsForUser(userId: string, month?: string | nul
       ...(month ? { periodMonth: month } : {}),
     },
     include: statementInclude,
-    orderBy: { uploadedAt: "desc" },
+    // Newest month first. A bank sync creates one statement per month in the
+    // order the bank returns rows (often newest first), so upload time alone
+    // put the newest month at the bottom. SQLite sorts NULL months last here.
+    orderBy: [{ periodMonth: "desc" }, { uploadedAt: "desc" }],
   });
   return enrichStatements(userId, statements);
 }

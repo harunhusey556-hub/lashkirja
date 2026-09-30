@@ -1,7 +1,7 @@
 "use client";
 
 import { PullToRefresh } from "@/components/ds/PullToRefresh";
-import { ArrowLeftRight, Inbox, Link2, ListChecks, Lock, Percent, ReceiptEuro, Wallet } from "lucide-react";
+import { ArrowLeftRight, Inbox, Link2, ListChecks, Lock, Percent, ReceiptEuro } from "lucide-react";
 import { Icon, PageTitle, Section, ListRow, SlotSkeleton } from "@/components/ds";
 import { apiFetch, readJson } from "@/components/clientFetch";
 import { MONTHS } from "@/lib/finnish-months";
@@ -10,7 +10,7 @@ import { useVatDue } from "@/components/useVatDue";
 import { useProfile } from "@/app/asetukset/useProfile";
 import { BankConnectSection } from "@/components/BankConnectCard";
 import { useCachedResource } from "@/components/useCachedResource";
-import { BANK_ACCOUNT_COUNT_KEY, PERIOD_LOCK_KEY, PURCHASE_COUNTS_KEY } from "@/lib/cached-resource";
+import { PERIOD_LOCK_KEY, PURCHASE_COUNTS_KEY } from "@/lib/cached-resource";
 
 /**
  * Phase 1 hub, restyled: one place for everything bookkeeping. Phase 3
@@ -43,11 +43,6 @@ export default function KirjanpitoPage() {
       return (await readJson<{ counts: { open: number; overdue: number; paid: number; cancelled: number } }>(response, "")).counts;
     }
   );
-  const accounts = useCachedResource<{ count: number }>(BANK_ACCOUNT_COUNT_KEY, async (signal) => {
-    const response = await apiFetch("/api/bank-accounts", { credentials: "include", signal });
-    const data = await readJson<{ accounts: Array<{ id: string }> }>(response, "");
-    return { count: data.accounts.length };
-  });
   const lock = useCachedResource<{ lockedThrough: string | null }>(PERIOD_LOCK_KEY, async (signal) => {
     const response = await apiFetch("/api/period-lock", { credentials: "include", signal });
     return readJson<{ lockedThrough: string | null }>(response, "");
@@ -62,15 +57,6 @@ export default function KirjanpitoPage() {
       ? "1 avoin"
       : `${purchases.value.open + purchases.value.overdue} avointa`
     : undefined;
-
-  // A count, never "Ei tilejä": an archived account still exists, and the
-  // connect row above already carries the call to action (BOOKS-05).
-  const bankValue =
-    !accounts.value || accounts.value.count === 0
-      ? undefined
-      : accounts.value.count === 1
-        ? "1 tili"
-        : `${accounts.value.count} tiliä`;
 
   const lockedThrough = lock.value?.lockedThrough;
   const lockValue =
@@ -91,7 +77,6 @@ export default function KirjanpitoPage() {
       <PullToRefresh onRefresh={() => {
           vat.reload();
           purchases.reload();
-          accounts.reload();
           lock.reload();
         }} />
       <PageTitle title="Kirjanpito" />
@@ -127,18 +112,8 @@ export default function KirjanpitoPage() {
         />
       </Section>
 
-      {/* Connect first (OWN-06): "Yhdistä pankki" one tap from the tab. */}
-      <BankConnectSection>
-        <ListRow
-          href="/kirjanpito/pankkitilit"
-          leading={<Icon icon={Wallet} />}
-          chevron
-          title="Pankkitilit"
-          secondary="Tilit ja kuukausien saldot"
-          amount={pending(accounts) ? <SlotSkeleton width={44} /> : bankValue}
-          amountTone="muted"
-        />
-      </BankConnectSection>
+      {/* Connect first (OWN-06): one bank row, "Yhdistä" one tap from the tab. */}
+      <BankConnectSection />
 
       <Section title="Ilmoitukset ja kaudet">
         <ListRow

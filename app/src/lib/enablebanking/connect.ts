@@ -48,6 +48,7 @@ export async function startBankConsent(
     aspspCountry: string;
     psuType: "personal" | "business";
     client?: "web" | "app";
+    historyFrom?: string;
   },
   ebClient = new EnableBankingClient()
 ): Promise<{ url: string; connectionId: string }> {
@@ -86,6 +87,7 @@ export async function startBankConsent(
       status: "pending",
       authStateHash: hashAuthState(state),
       requiredPsuHeaders: JSON.stringify(aspsp.required_psu_headers ?? []),
+      historyFrom: input.historyFrom ?? null,
     },
   });
 

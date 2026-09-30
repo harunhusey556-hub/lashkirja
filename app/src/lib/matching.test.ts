@@ -8,6 +8,8 @@ import {
   SUGGEST_THRESHOLD,
   CANDIDATE_THRESHOLD,
   shouldAutoConfirm,
+  sourceDraftPairs,
+  isSourceDraft,
   type MatchTx,
   type MatchReceipt,
 } from "./matching";
@@ -210,5 +212,30 @@ describe("candidatesFor", () => {
     const result = candidatesFor(tx(), receipts, new Set(["tx1:rejected"]));
     expect(result.map((c) => c.receiptId)).toEqual(["good", "meh"]);
     expect(result[0].score).toBeGreaterThan(result[1].score);
+  });
+});
+
+describe("sourceDraftPairs", () => {
+  const rows = [{ id: "tx-1" }, { id: "tx-2" }];
+  const drafts = [
+    { id: "r-1", source: "auto_income", sourceTransactionId: "tx-1" },
+    { id: "r-2", source: "auto_income", sourceTransactionId: "tx-9" },
+    { id: "r-3", source: "manual", sourceTransactionId: null },
+  ];
+
+  it("pairs an income draft only with the bank row it was made from", () => {
+    expect(sourceDraftPairs(rows, drafts, new Set())).toEqual([
+      { transactionId: "tx-1", receiptId: "r-1", score: 1, reasons: ["auto_income"] },
+    ]);
+  });
+
+  it("drops a pair the owner rejected with Ei ole myyntiä", () => {
+    expect(sourceDraftPairs(rows, drafts, new Set(["tx-1:r-1"]))).toEqual([]);
+  });
+
+  it("keeps drafts out of every other row's candidates", () => {
+    expect(isSourceDraft(drafts[0])).toBe(true);
+    expect(isSourceDraft(drafts[2])).toBe(false);
+    expect(isSourceDraft({ source: "auto_income", sourceTransactionId: null })).toBe(false);
   });
 });

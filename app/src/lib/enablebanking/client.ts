@@ -222,6 +222,8 @@ export async function collectAccountTransactions(
     accountUid: string;
     firstSync: boolean;
     dateFrom?: string;
+    /** The owner's "Mistä lähtien" choice for the first sync. */
+    historyFrom?: string;
     psuHeaders?: Record<string, string>;
     now?: Date;
   }
@@ -229,7 +231,14 @@ export async function collectAccountTransactions(
   const now = params.now ?? new Date();
   const today = now.toISOString().slice(0, 10);
 
-  if (params.firstSync) {
+  if (params.firstSync && params.historyFrom) {
+    try {
+      return await pullPages(fetcher, params, { dateFrom: params.historyFrom, dateTo: today });
+    } catch (error) {
+      if (isTerminalSessionError(error)) throw error;
+      if (!isWrongTransactionsPeriod(error) && !shouldRetryWithoutStrategy(error)) throw error;
+    }
+  } else if (params.firstSync) {
     try {
       return await pullPages(fetcher, params, { strategy: "longest" });
     } catch (error) {
@@ -246,9 +255,13 @@ export async function collectAccountTransactions(
 
   let lastError: unknown;
   for (const days of FALLBACK_WINDOWS_DAYS) {
-    const dateFrom = new Date(now.getTime() - days * 24 * 60 * 60 * 1000)
+    let dateFrom = new Date(now.getTime() - days * 24 * 60 * 60 * 1000)
       .toISOString()
       .slice(0, 10);
+    // Never reach further back than the owner asked for.
+    if (params.firstSync && params.historyFrom && dateFrom < params.historyFrom) {
+      dateFrom = params.historyFrom;
+    }
     try {
       return await pullPages(fetcher, params, { dateFrom, dateTo: today });
     } catch (error) {

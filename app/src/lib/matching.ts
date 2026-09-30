@@ -457,6 +457,16 @@ export async function buildReceiptMatchViews(
         })
       : Promise.resolve([]),
   ]);
+  const draftSource = new Map(
+    needsCandidates.length > 0
+      ? (
+          await prisma.receipt.findMany({
+            where: { id: { in: needsCandidates.map((r) => r.id) }, userId, source: "auto_income" },
+            select: { id: true, sourceTransactionId: true },
+          })
+        ).flatMap((r) => (r.sourceTransactionId ? [[r.id, r.sourceTransactionId] as const] : []))
+      : []
+  );
 
   const suggestedByReceipt = new Map(
     suggestedTxs
@@ -506,9 +516,11 @@ export async function buildReceiptMatchViews(
       reference: receipt.reference,
       invoiceNumber: receipt.invoiceNumber,
     };
+    // An income draft only ever fits the bank row it was made from.
+    const sourceTxId = draftSource.get(receipt.id);
     const scored = candidatesForReceipt(
       receiptModel,
-      openTxModels,
+      sourceTxId ? openTxModels.filter((tx) => tx.id === sourceTxId) : openTxModels,
       rejectedPairs,
       3
     );
@@ -639,6 +651,9 @@ export async function confirmAllSuggestions(
     where: {
       matchStatus: "suggested",
       suggestedReceiptId: { not: null },
+      // Income drafts are approved one by one with "Hyväksy" (batch-approve
+      // checks the amount); a bulk link must never approve them silently.
+      suggestedReceipt: { source: { not: "auto_income" } },
       statement: {
         userId,
         ...(scope?.statementId ? { id: scope.statementId } : {}),
@@ -655,6 +670,55 @@ export async function confirmAllSuggestions(
     count += 1;
   }
   return count;
+}
+
+/** An automatic income draft that knows the bank row it was made from. */
+export function isSourceDraft(receipt: {
+  source?: string | null;
+  sourceTransactionId?: string | null;
+}): boolean {
+  return receipt.source === "auto_income" && !!receipt.sourceTransactionId;
+}
+
+export const SOURCE_DRAFT_REASONS = ["auto_income"];
+
+/**
+ * Prisma filter: receipts that may be offered to a bank row as a candidate.
+ * Income drafts are left out, except the one made from `ownRowId` itself.
+ */
+export function offerableReceiptWhere(ownRowId?: string) {
+  return {
+    OR: [
+      { source: { not: "auto_income" } },
+      { sourceTransactionId: null },
+      ...(ownRowId ? [{ sourceTransactionId: ownRowId }] : []),
+    ],
+  };
+}
+
+/**
+ * Each income draft paired with its own source row, when that row is still
+ * open and the user has not rejected the pair ("Ei myyntiä").
+ */
+export function sourceDraftPairs(
+  txs: Array<{ id: string }>,
+  receipts: Array<{ id: string; source?: string | null; sourceTransactionId?: string | null }>,
+  rejectedPairs: Set<string>
+): ScoredPair[] {
+  const openTx = new Set(txs.map((tx) => tx.id));
+  const pairs: ScoredPair[] = [];
+  for (const receipt of receipts) {
+    if (!isSourceDraft(receipt)) continue;
+    const txId = receipt.sourceTransactionId!;
+    if (!openTx.has(txId) || rejectedPairs.has(pairKey(txId, receipt.id))) continue;
+    pairs.push({
+      transactionId: txId,
+      receiptId: receipt.id,
+      score: 1,
+      reasons: [...SOURCE_DRAFT_REASONS],
+    });
+  }
+  return pairs;
 }
 
 export interface RunMatchingResult {
@@ -699,6 +763,8 @@ export async function runMatching(userId: string): Promise<RunMatchingResult> {
         reference: true,
         invoiceNumber: true,
         reviewStatus: true,
+        source: true,
+        sourceTransactionId: true,
       },
     }),
     prisma.matchRejection.findMany({
@@ -710,15 +776,30 @@ export async function runMatching(userId: string): Promise<RunMatchingResult> {
   const rejectedPairs = new Set(
     rejections.map((r) => pairKey(r.transactionId, r.receiptId))
   );
-  const txs = rawTxs.map(({ amountCents, ...tx }) => ({
+  const allTxs = rawTxs.map(({ amountCents, ...tx }) => ({
     ...tx,
     amount: centsToEuros(amountCents),
   }));
-  const receipts = rawReceipts.map(({ totalAmountCents, ...receipt }) => ({
+  const allReceipts = rawReceipts.map(({ totalAmountCents, ...receipt }) => ({
     ...receipt,
     totalAmount: totalAmountCents == null ? null : centsToEuros(totalAmountCents),
   }));
-  const assignments = computeSuggestions(txs, receipts, rejectedPairs);
+
+  // An income draft was made from one bank row, so that row is its only match.
+  // Scoring it against every row made all MobilePay drafts (same vendor) rivals
+  // for all MobilePay rows, and the user had to pick from three look-alikes.
+  // A real document still wins the row; the draft only fills an empty one.
+  const receipts = allReceipts.filter((r) => !isSourceDraft(r));
+  const documentPairs = computeSuggestions(allTxs, receipts, rejectedPairs);
+  const takenTx = new Set(documentPairs.map((p) => p.transactionId));
+  const assignments = [
+    ...documentPairs,
+    ...sourceDraftPairs(
+      allTxs.filter((tx) => !takenTx.has(tx.id)),
+      allReceipts,
+      rejectedPairs
+    ),
+  ];
 
   // A pending document must never post automatically, however strong the match.
   // It can still be suggested — the user approves it in the review queue.
@@ -809,7 +890,9 @@ export async function buildInlineCandidates(
 
   const [receipts, rejections] = await Promise.all([
     prisma.receipt.findMany({
-      where: { userId, linkedTransaction: null },
+      // Income drafts are paired with their own row by runMatching; offering
+      // them to other rows is what produced three look-alike MobilePay picks.
+      where: { userId, linkedTransaction: null, ...offerableReceiptWhere() },
       select: {
         id: true,
         vendor: true,

@@ -20,6 +20,14 @@ const startSchema = z.object({
     .default("FI"),
   psuType: z.enum(["personal", "business"]),
   client: z.enum(["web", "app"]).optional().default("web"),
+  /** First sync starts here ("Mistä lähtien haetaan?"); omitted = all the bank allows. */
+  historyFrom: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/)
+    .refine((value) => !Number.isNaN(Date.parse(`${value}T00:00:00Z`)) && value <= new Date().toISOString().slice(0, 10), {
+      message: "Virheellinen päivä",
+    })
+    .optional(),
 });
 
 export async function GET(req: NextRequest) {

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { requireSession } from "@/lib/session";
-import { candidatesFor } from "@/lib/matching";
+import { candidatesFor, offerableReceiptWhere } from "@/lib/matching";
 import { centsToEuros } from "@/lib/money";
 
 export async function GET(req: NextRequest) {
@@ -30,7 +30,11 @@ export async function GET(req: NextRequest) {
 
   const [receipts, rejections] = await Promise.all([
     prisma.receipt.findMany({
-      where: { userId: session.userId!, linkedTransaction: null },
+      where: {
+        userId: session.userId!,
+        linkedTransaction: null,
+        ...offerableReceiptWhere(transactionId),
+      },
       select: {
         id: true,
         vendor: true,

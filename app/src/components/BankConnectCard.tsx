@@ -60,95 +60,60 @@ function useConnectSheets() {
 }
 
 /**
- * Hub row (OWN-06): "Yhdistä pankki" one tap from the Kirjanpito tab, with
- * the state line. Not connected: a filled "Yhdistä" opens the bank list
- * right here. Not configured: opens "Mitä tarvitaan". Connected: goes to
- * the connection on Pankkitilit. Render it inside a ds `Section`.
+ * The one bank row of the Kirjanpito hub (OWN-06). It always opens
+ * Pankkitilit, where the connection and the accounts live; there used to be a
+ * second "Pankkitilit" row that opened the same page. Not connected: a filled
+ * "Yhdistä" pill still opens the bank list right here.
  */
 export function BankConnectRow() {
   const { data, error } = useBankConnections();
   const sheets = useConnectSheets();
   const state = data ? bankState(data) : null;
-  const line = state ? state.line : error ? "Tilaa ei saatu haettua" : " ";
-  const title = state?.kind === "connected" || state?.kind === "attention" ? "Pankkiyhteys" : "Yhdistä pankki";
+  const line = state ? state.line : error ? "Tilaa ei saatu haettua" : " ";
+  const title = "Pankkitilit";
 
-  const body = (
-    <>
-      <IconTile>
-        <Icon icon={Landmark} />
-      </IconTile>
-      <span className="pointer-events-none min-w-0 flex-1">
-        <span className="block truncate text-body font-medium text-ink">{title}</span>
-        <span className={`mt-0.5 block text-caption ${state?.kind === "attention" ? "text-warning" : "text-ink-2"}`}>
-          {line}
-        </span>
-      </span>
-    </>
-  );
-  const rowClass = "relative flex min-h-16 w-full items-center gap-3 px-4 py-3 text-left";
   const pill =
-    "active-press relative pointer-events-auto inline-flex min-h-9 shrink-0 items-center rounded-full bg-ink px-3.5 text-caption font-semibold text-canvas before:absolute before:inset-x-0 before:-inset-y-1 before:content-['']";
-
-  let row;
-  if (state?.kind === "none") {
-    row = (
-      <div data-testid="bank-connect-row" className={rowClass}>
-        <button type="button" aria-label="Yhdistä pankki" onClick={() => sheets.openPicker()} className="row-link active-press absolute inset-0" />
-        {body}
-        <span className="relative z-10 pointer-events-none">
-          <button type="button" onClick={() => sheets.openPicker()} className={pill} tabIndex={-1} aria-hidden>
-            Yhdistä
-          </button>
-        </span>
-      </div>
-    );
-  } else if (state?.kind === "unconfigured") {
-    row = (
-      <div data-testid="bank-connect-row" className={rowClass}>
-        <button
-          type="button"
-          aria-label="Yhdistä pankki, ei vielä käytössä. Mitä tarvitaan"
-          onClick={sheets.openSetup}
-          className="row-link active-press absolute inset-0"
-        />
-        {body}
-        <span aria-hidden className="pointer-events-none -mr-1 flex text-ink-2/60">
-          <Icon icon={ChevronRight} />
-        </span>
-      </div>
-    );
-  } else {
-    row = (
-      <div data-testid="bank-connect-row" className={rowClass}>
-        <Link
-          href="/kirjanpito/pankkitilit#pankkiyhteys"
-          aria-label={typeof line === "string" ? `${title}, ${line}` : title}
-          className="row-link active-press absolute inset-0"
-        />
-        {body}
-        <span aria-hidden className="pointer-events-none -mr-1 flex text-ink-2/60">
-          <Icon icon={ChevronRight} />
-        </span>
-      </div>
-    );
-  }
+    "active-press relative z-10 inline-flex min-h-9 shrink-0 items-center rounded-full bg-ink px-3.5 text-caption font-semibold text-canvas before:absolute before:inset-x-0 before:-inset-y-1 before:content-['']";
 
   return (
     <>
-      {row}
+      <div data-testid="bank-connect-row" className="relative flex min-h-16 w-full items-center gap-3 px-4 py-3 text-left">
+        <Link
+          href="/kirjanpito/pankkitilit"
+          aria-label={typeof line === "string" && line.trim() ? `${title}, ${line}` : title}
+          className="row-link active-press absolute inset-0"
+        />
+        <IconTile>
+          <Icon icon={Landmark} />
+        </IconTile>
+        <span className="pointer-events-none min-w-0 flex-1">
+          <span className="block truncate text-body font-medium text-ink">{title}</span>
+          <span className={`mt-0.5 block text-caption ${state?.kind === "attention" ? "text-warning" : "text-ink-2"}`}>
+            {line}
+          </span>
+        </span>
+        {state?.kind === "none" ? (
+          <button type="button" onClick={() => sheets.openPicker()} className={pill}>
+            Yhdistä
+          </button>
+        ) : (
+          <span aria-hidden className="pointer-events-none -mr-1 flex text-ink-2/60">
+            <Icon icon={ChevronRight} />
+          </span>
+        )}
+      </div>
       <BankPickerSheet isOpen={sheets.picker.open} onClose={sheets.closePicker} preferredPsu={sheets.picker.psu} />
-      <BankSetupSheet isOpen={sheets.setupOpen} onClose={sheets.closeSetup} />
     </>
   );
 }
 
 /**
- * The "Pankki" section of the Kirjanpito hub: the connect row and the rows that follow it
+ * The "Pankki" section of the Kirjanpito hub: the bank row and any rows that follow it
  * (`children`, ListRows). When the connection lookup fails, the shared failure card with its
  * one retry stands in the place of the connect row, above the remaining rows, instead of a
  * "Tilaa ei saatu haettua" subtitle that cannot be retried (VS-31).
  */
-export function BankConnectSection({ children }: { children: React.ReactNode }) {
+export function BankConnectSection({ children }: { children?: React.ReactNode }) {
   const { data, error, reload } = useBankConnections();
   if (!data && error != null) {
     return (

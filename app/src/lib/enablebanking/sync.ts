@@ -154,6 +154,7 @@ async function syncBankConnectionUntracked(
         accountUid: account.providerAccountUid,
         firstSync,
         dateFrom,
+        historyFrom: connection.historyFrom ?? undefined,
         psuHeaders,
       });
       const mapped = transactions

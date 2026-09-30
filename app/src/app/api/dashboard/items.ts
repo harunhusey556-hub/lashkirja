@@ -53,6 +53,8 @@ export type DashboardItem =
       vatRate: number | null;
       /** FP-6: what is missing before a one-tap approve; empty = "Hyväksy". */
       gaps: ApprovalGap[];
+      /** Drafted from a bank row (MobilePay etc.), not read from a kuitti. */
+      fromBank?: boolean;
     }
   | {
       id: string;
@@ -187,6 +189,7 @@ export async function buildDashboardItems(
         date: true,
         category: true,
         vatDetails: true,
+        source: true,
         sourceTransactionId: true,
       },
       orderBy: { createdAt: "desc" },
@@ -243,6 +246,7 @@ export async function buildDashboardItems(
         date: true,
         category: true,
         vatDetails: true,
+        source: true,
         sourceTransactionId: true,
       },
     });
@@ -295,6 +299,7 @@ export async function buildDashboardItems(
       category: receipt.category,
       vatRate: rates.length === 1 ? rates[0] : null,
       gaps: approvalGaps({ totalAmountCents: receipt.totalAmountCents, vendor: receipt.vendor }),
+      fromBank: receipt.source === "auto_income",
     };
   });
 

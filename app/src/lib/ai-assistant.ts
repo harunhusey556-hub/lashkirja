@@ -1,7 +1,7 @@
 import { prisma } from "./db";
 import { parseBusinessDetails, generateProfileSummary } from "./onboarding";
 import { centsToEuros } from "./money";
-import { candidatesFor, MatchTx, MatchReceipt } from "./matching";
+import { candidatesFor, MatchTx, MatchReceipt, offerableReceiptWhere } from "./matching";
 import { askCopilot, type CopilotTurn } from "./copilot";
 import { computeAlvReport } from "./alv";
 import { loadAlvPeriodSources } from "./alv-period";
@@ -144,7 +144,7 @@ export async function prepareChat(
     });
 
     const openReceipts = await prisma.receipt.findMany({
-      where: { userId, linkedTransaction: null },
+      where: { userId, linkedTransaction: null, ...offerableReceiptWhere() },
       select: {
         id: true,
         vendor: true,

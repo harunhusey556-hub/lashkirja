@@ -67,6 +67,44 @@ describe("collectAccountTransactions", () => {
     expect(rows).toEqual([booked]);
   });
 
+  it("starts the first sync from the owner's chosen day, not the whole history", async () => {
+    const queries: Array<{ strategy?: string; dateFrom?: string; dateTo?: string }> = [];
+    const fetcher: TransactionPageFetcher = {
+      async getAccountTransactions(query) {
+        queries.push({ strategy: query.strategy, dateFrom: query.dateFrom, dateTo: query.dateTo });
+        return { transactions: [booked], continuationKey: null };
+      },
+    };
+    const rows = await collectAccountTransactions(fetcher, {
+      accountUid: "acc-1",
+      firstSync: true,
+      historyFrom: "2026-01-01",
+      now: new Date("2026-09-26T00:00:00.000Z"),
+    });
+    expect(queries).toEqual([{ strategy: undefined, dateFrom: "2026-01-01", dateTo: "2026-09-26" }]);
+    expect(rows).toEqual([booked]);
+  });
+
+  it("never falls back further than the chosen day", async () => {
+    const froms: Array<string | undefined> = [];
+    const fetcher: TransactionPageFetcher = {
+      async getAccountTransactions(query) {
+        froms.push(query.dateFrom);
+        if (froms.length === 1) {
+          throw new EnableBankingError("period", 422, "WRONG_TRANSACTIONS_PERIOD");
+        }
+        return { transactions: [booked], continuationKey: null };
+      },
+    };
+    await collectAccountTransactions(fetcher, {
+      accountUid: "acc-1",
+      firstSync: true,
+      historyFrom: "2026-09-01",
+      now: new Date("2026-09-26T00:00:00.000Z"),
+    });
+    expect(froms.every((from) => from !== undefined && from >= "2026-09-01")).toBe(true);
+  });
+
   it("does not retry a dead session", async () => {
     const fetcher: TransactionPageFetcher = {
       async getAccountTransactions() {

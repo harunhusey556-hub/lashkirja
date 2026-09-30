@@ -402,6 +402,8 @@ model BankConnection {
   lastSyncAt         DateTime?
   lastSuccessAt      DateTime?
   lastError          String?
+  /// "YYYY-MM-DD": the first sync fetches from this day. Null = all the bank allows.
+  historyFrom        String?
   createdAt          DateTime           @default(now())
   updatedAt          DateTime           @updatedAt
   accounts           ConnectedAccount[]

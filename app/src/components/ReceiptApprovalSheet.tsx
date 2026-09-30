@@ -16,6 +16,13 @@ export interface ApprovalSheetReceipt {
   category: string | null;
   vatRate: number | null;
   gaps: ApprovalGap[];
+  /** Drafted from a bank row (MobilePay etc.): nothing was read from a kuitti. */
+  fromBank?: boolean;
+}
+
+function sheetSubtitle(receipt: ApprovalSheetReceipt): string {
+  if (receipt.fromBank) return "Tunnistettu myynti pankkitililtä";
+  return receipt.type === "tulo" ? "Tulokuitti odottaa hyväksyntää" : "Kuitti odottaa hyväksyntää";
 }
 
 /**
@@ -41,7 +48,7 @@ export function ReceiptApprovalSheet({
       isOpen={open}
       onClose={onClose}
       title={receipt?.party ?? "Kuitti"}
-      subtitle={receipt ? (receipt.type === "tulo" ? "Tulokuitti odottaa hyväksyntää" : "Kuitti odottaa hyväksyntää") : undefined}
+      subtitle={receipt ? sheetSubtitle(receipt) : undefined}
       labelledBy="approval-sheet-title"
       heightClass="max-h-[80dvh]"
       dirty={false}
@@ -60,7 +67,11 @@ export function ReceiptApprovalSheet({
             ]}
           />
           {complete ? (
-            <p className="px-1 text-caption text-ink-2">Tiedot on luettu kuitista. Tarkista ne ennen hyväksyntää.</p>
+            <p className="px-1 text-caption text-ink-2">
+              {receipt.fromBank
+                ? "Tiedot tulevat pankkitapahtumasta. Hyväksy, jos tämä on myyntiä."
+                : "Tiedot on luettu kuitista. Tarkista ne ennen hyväksyntää."}
+            </p>
           ) : (
             <p className="px-1 text-caption text-warning" role="note">
               {approvalGapText(receipt.gaps)}, ennen kuin kuitin voi hyväksyä.

@@ -2,13 +2,15 @@ import { prisma } from "./db";
 import { parseBusinessDetails, deriveVatProfile } from "./onboarding";
 import { getVendorIntelligence, isAmountWithinRange } from "./vendor-intelligence";
 import { computeConfidence } from "./confidence";
+import { SOURCE_DRAFT_REASONS } from "./matching";
 
 /**
  * Drafts sales receipts (myyntitositteet) for incoming bank transfers that
  * look like payment-processor settlements, for the user to review.
  *
  * Every draft is created as `pending` and is never linked to the transaction
- * automatically. Nothing here reaches the ALV report until a human approves it.
+ * automatically: it is only *suggested* on its own row, where one "Hyväksy"
+ * links and approves it. Nothing here reaches the ALV report until then.
  *
  * Why this is deliberately timid: an incoming transfer is not evidence of a
  * sale. It could equally be an owner contribution, a loan, a tax refund, an
@@ -41,7 +43,8 @@ export async function autoGenerateIncomeReceipts(userId: string, statementId: st
       statementId,
       statement: { userId },
       type: "tulo",
-      matchStatus: { in: ["unmatched", "suggested"] },
+      // A row already suggested to a real document does not need a draft.
+      matchStatus: "unmatched",
       receiptId: null,
     },
   });
@@ -135,7 +138,7 @@ export async function autoGenerateIncomeReceipts(userId: string, statementId: st
         dateAlignedWithCycle: true, // we assume it is since it's a bank tx
       });
 
-      await prisma.receipt.create({
+      const draft = await prisma.receipt.create({
         data: {
           userId,
           type: "tulo",
@@ -154,6 +157,19 @@ export async function autoGenerateIncomeReceipts(userId: string, statementId: st
           confidence,
           rawText: "Luonnos tiliotteen rivistä. Ei vahvistettu tosite.",
           reviewStatus: "pending",
+        },
+      });
+
+      // Offer the draft on its own row right away, as the one suggestion with
+      // a single "Hyväksy". Matching runs before drafting, so without this the
+      // row stayed "unmatched" until some later matching run.
+      await prisma.transaction.updateMany({
+        where: { id: tx.id, matchStatus: "unmatched", receiptId: null },
+        data: {
+          matchStatus: "suggested",
+          suggestedReceiptId: draft.id,
+          matchScore: 1,
+          matchReasons: JSON.stringify(SOURCE_DRAFT_REASONS),
         },
       });
 

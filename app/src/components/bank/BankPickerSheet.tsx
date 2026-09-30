@@ -4,6 +4,7 @@ import { useEffect, useId, useMemo, useState } from "react";
 import { ChevronRight, Landmark, Search } from "lucide-react";
 import BottomSheet from "@/components/BottomSheet";
 import { Icon } from "@/components/ds";
+import { Button } from "@/components/ui";
 import { Skeleton, SkeletonGroup } from "@/components/ds/Skeleton";
 import { ConnectionNotice, EmptyState } from "@/components/ScreenState";
 import { apiFetch, errorMessage, isUnauthorized, readJson, redirectToLogin } from "@/components/clientFetch";
@@ -21,6 +22,30 @@ interface Aspsp {
 }
 
 type PsuType = "business" | "personal";
+
+interface HistoryChoice {
+  key: string;
+  label: string;
+  hint?: string;
+  /** "YYYY-MM-DD", or null for everything the bank allows. */
+  from: string | null;
+}
+
+function isoDay(date: Date): string {
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+}
+
+/** "Mistä lähtien haetaan?": the first sync used to pull the bank's whole history. */
+export function historyChoices(now = new Date()): HistoryChoice[] {
+  const year = now.getFullYear();
+  return [
+    { key: "month", label: "Tämä kuukausi", from: isoDay(new Date(year, now.getMonth(), 1)) },
+    { key: "year", label: `Vuoden ${year} alusta`, hint: "Suositus", from: `${year}-01-01` },
+    { key: "12m", label: "Viimeiset 12 kuukautta", from: isoDay(new Date(year, now.getMonth() - 11, 1)) },
+    { key: "all", label: "Kaikki, mitä pankki antaa", hint: "Voi olla useita vuosia", from: null },
+  ];
+}
 
 /**
  * The bank list (BOOKS-06): a sheet with one scroller. The account type and
@@ -50,6 +75,9 @@ export default function BankPickerSheet({
   const [query, setQuery] = useState("");
   const [busyBank, setBusyBank] = useState<string | null>(null);
   const [connectError, setConnectError] = useState("");
+  const [chosenBank, setChosenBank] = useState<Aspsp | null>(null);
+  const choices = useMemo(() => historyChoices(), []);
+  const [historyKey, setHistoryKey] = useState("year");
 
   // A fresh sheet every time it opens: no leftover search or error.
   const [prevOpen, setPrevOpen] = useState(isOpen);
@@ -60,6 +88,8 @@ export default function BankPickerSheet({
       setQuery("");
       setConnectError("");
       setBusyBank(null);
+      setChosenBank(null);
+      setHistoryKey("year");
     }
   }
 
@@ -93,6 +123,7 @@ export default function BankPickerSheet({
 
   async function connect(bank: Aspsp) {
     if (busyBank) return;
+    const historyFrom = choices.find((choice) => choice.key === historyKey)?.from ?? null;
     setBusyBank(bank.name);
     setConnectError("");
     try {
@@ -103,6 +134,7 @@ export default function BankPickerSheet({
           aspspName: bank.name,
           aspspCountry: bank.country,
           psuType,
+          ...(historyFrom ? { historyFrom } : {}),
           // The server prefixes the auth state with "app1." so the bank's
           // redirect comes back into the app (bank-return.ts).
           ...(IS_MOBILE_BUILD ? { client: "app" as const } : {}),
@@ -143,6 +175,64 @@ export default function BankPickerSheet({
       heightClass="h-[85dvh] max-h-[85dvh]"
       dirty={false}
     >
+      {chosenBank ? (
+        <div className="min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain px-4 pt-1 sheet-safe-bottom">
+          <div className="flex items-center gap-3 px-1">
+            <BankLogo name={chosenBank.name} logo={chosenBank.logo} />
+            <div className="min-w-0">
+              <p className="truncate text-body font-semibold text-ink">Mistä lähtien haetaan?</p>
+              <p className="text-caption text-ink-2">{chosenBank.name}</p>
+            </div>
+          </div>
+          <div role="radiogroup" aria-label="Mistä lähtien tapahtumat haetaan" className="space-y-2">
+            {choices.map((choice) => {
+              const selected = choice.key === historyKey;
+              return (
+                <button
+                  key={choice.key}
+                  type="button"
+                  role="radio"
+                  aria-checked={selected}
+                  onClick={() => {
+                    void hapticSelection();
+                    setHistoryKey(choice.key);
+                  }}
+                  className={`active-press flex min-h-14 w-full items-center justify-between gap-3 rounded-card bg-surface px-4 py-2.5 text-left ${
+                    selected ? "border-2 border-ink" : "border border-line"
+                  }`}
+                >
+                  <span className="min-w-0">
+                    <span className="block text-body font-medium text-ink">{choice.label}</span>
+                    {choice.hint && <span className="block text-caption text-ink-2">{choice.hint}</span>}
+                  </span>
+                  <span
+                    aria-hidden
+                    className={`h-5 w-5 shrink-0 rounded-full border-2 ${selected ? "border-[6px] border-ink" : "border-line"}`}
+                  />
+                </button>
+              );
+            })}
+          </div>
+          <p className="px-1 text-caption text-ink-2">Vanhemmat tapahtumat voi tuoda myöhemmin tiliotetiedostona.</p>
+          {connectError && (
+            <p className="rounded-card bg-danger/10 px-4 py-3 text-sm text-danger" role="alert">
+              {connectError}
+            </p>
+          )}
+          <Button className="w-full" haptic="medium" busy={busyBank !== null} busyLabel="Avataan pankkia…" onClick={() => void connect(chosenBank)}>
+            Jatka pankkiin
+          </Button>
+          <button
+            type="button"
+            onClick={() => setChosenBank(null)}
+            disabled={busyBank !== null}
+            className="active-press mx-auto flex min-h-11 items-center px-3 text-caption text-ink-2 disabled:opacity-50"
+          >
+            Vaihda pankkia
+          </button>
+        </div>
+      ) : (
+      <>
       <div className="shrink-0 space-y-3 px-4 pb-3 pt-1">
         <div role="radiogroup" aria-label="Tilin tyyppi" className="grid grid-cols-2 gap-1 rounded-card bg-line/60 p-1">
           {(["business", "personal"] as const).map((type) => {
@@ -223,7 +313,10 @@ export default function BankPickerSheet({
                 <li key={`${bank.country}-${bank.name}`}>
                   <button
                     type="button"
-                    onClick={() => void connect(bank)}
+                    onClick={() => {
+                      setConnectError("");
+                      setChosenBank(bank);
+                    }}
                     disabled={busyBank !== null}
                     aria-label={`Yhdistä ${bank.name}`}
                     className="active-press flex min-h-14 w-full items-center gap-3 px-4 py-2.5 text-left disabled:opacity-60"
@@ -253,6 +346,8 @@ export default function BankPickerSheet({
           </ul>
         )}
       </div>
+      </>
+      )}
     </BottomSheet>
   );
 }
