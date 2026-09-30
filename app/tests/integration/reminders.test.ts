@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { prisma } from "@/lib/db";
 import {
   GET as reminderPreview,
@@ -13,6 +13,23 @@ import { POST as addPayment } from "@/app/api/invoices/[id]/payments/route";
 import { encrypt } from "@/lib/encryption";
 import { createUser, resetDatabase, type TestUser } from "./helpers/factories";
 import { buildRequest, readJson, routeContext, sessionCookie, type JsonValue } from "./helpers/http";
+
+const mail = vi.hoisted(() => ({ sent: 0, failNext: false }));
+
+vi.mock("@/lib/mailer", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/mailer")>();
+  return {
+    ...actual,
+    sendMail: async (...args: Parameters<typeof actual.sendMail>) => {
+      if (mail.failNext) {
+        mail.failNext = false;
+        throw new Error("SMTP down");
+      }
+      mail.sent += 1;
+      return actual.sendMail(...args);
+    },
+  };
+});
 
 let user: TestUser;
 let cookie: string;
@@ -76,6 +93,8 @@ async function connectMailAccount(userId: string) {
 }
 
 beforeEach(async () => {
+  mail.sent = 0;
+  mail.failNext = false;
   await resetDatabase();
   user = await createUser();
   cookie = await sessionCookie(user);
@@ -280,6 +299,11 @@ describe("POST /api/invoices/[id]/reminders", () => {
       buildRequest("POST", `/api/invoices/${invoice.id}/reminders`, {}, { cookie }),
       routeContext({ id: invoice.id })
     );
+    // The first one has run its course: its own 7 day term and the cooldown are over.
+    await prisma.invoiceReminder.updateMany({
+      where: { invoiceId: invoice.id },
+      data: { sentAt: new Date(Date.now() - 8 * 24 * 60 * 60 * 1000) },
+    });
     const second = await readJson(
       await sendReminder(
         buildRequest("POST", `/api/invoices/${invoice.id}/reminders`, {}, { cookie }),
@@ -288,6 +312,88 @@ describe("POST /api/invoices/[id]/reminders", () => {
     );
     expect(second.reminder.level).toBe(2);
     expect(await prisma.invoiceReminder.count({ where: { invoiceId: invoice.id } })).toBe(2);
+  });
+
+  it("sends exactly one mail and stores one reminder when three calls arrive together", async () => {
+    const invoice = await makeSentInvoice();
+    const post = () =>
+      sendReminder(
+        buildRequest("POST", `/api/invoices/${invoice.id}/reminders`, {}, { cookie }),
+        routeContext({ id: invoice.id })
+      );
+
+    const responses = await Promise.all([post(), post(), post()]);
+    const statuses = responses.map((response) => response.status).sort();
+
+    expect(statuses).toEqual([201, 409, 409]);
+    expect(mail.sent).toBe(1);
+    const stored = await prisma.invoiceReminder.findMany({ where: { invoiceId: invoice.id } });
+    expect(stored).toHaveLength(1);
+    expect(stored[0].level).toBe(1);
+  });
+
+  it("refuses an immediate repeat and says when the next reminder may go out", async () => {
+    const invoice = await makeSentInvoice();
+    const post = () =>
+      sendReminder(
+        buildRequest("POST", `/api/invoices/${invoice.id}/reminders`, {}, { cookie }),
+        routeContext({ id: invoice.id })
+      );
+
+    expect((await post()).status).toBe(201);
+    const repeat = await post();
+    expect(repeat.status).toBe(409);
+    const error = (await readJson(repeat)).error;
+    expect(error.code).toBe("REMINDER_TOO_SOON");
+    expect(error.message).toMatch(
+      /^Muistutus lähetettiin jo \d+\.\d+\.\d{4}\. Seuraava voidaan lähettää vasta \d+\.\d+\.\d{4}\.$/
+    );
+    expect(mail.sent).toBe(1);
+    expect(await prisma.invoiceReminder.count({ where: { invoiceId: invoice.id } })).toBe(1);
+  });
+
+  it("frees the slot again when the mail could not be sent", async () => {
+    const invoice = await makeSentInvoice();
+    const post = () =>
+      sendReminder(
+        buildRequest("POST", `/api/invoices/${invoice.id}/reminders`, {}, { cookie }),
+        routeContext({ id: invoice.id })
+      );
+
+    mail.failNext = true;
+    expect((await post()).status).toBeGreaterThanOrEqual(500);
+    expect(await prisma.invoiceReminder.count({ where: { invoiceId: invoice.id } })).toBe(0);
+
+    const retry = await post();
+    expect(retry.status).toBe(201);
+    expect((await readJson(retry)).reminder.level).toBe(1);
+    expect(mail.sent).toBe(1);
+  });
+
+  it("does not let a reservation that never went out block the next reminder for long", async () => {
+    const invoice = await makeSentInvoice();
+    // Left behind by a process that died before it could send.
+    await prisma.invoiceReminder.create({
+      data: {
+        invoiceId: invoice.id,
+        level: 1,
+        sentTo: null,
+        sentAt: new Date(Date.now() - 30 * 60 * 1000),
+        dueDate: new Date("2026-02-01T00:00:00.000Z"),
+        openCents: 12_550,
+        interestCents: 0,
+        feeCents: 500,
+        totalCents: 13_050,
+        daysLate: 10,
+      },
+    });
+    const response = await sendReminder(
+      buildRequest("POST", `/api/invoices/${invoice.id}/reminders`, {}, { cookie }),
+      routeContext({ id: invoice.id })
+    );
+    expect(response.status).toBe(201);
+    expect((await readJson(response)).reminder.level).toBe(1);
+    expect(await prisma.invoiceReminder.count({ where: { invoiceId: invoice.id } })).toBe(1);
   });
 
   it("does not record a reminder when there is no mail account", async () => {

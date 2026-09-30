@@ -6,15 +6,27 @@
  * so the figure stays reconstructible months later.
  */
 import { prisma } from "./db";
+import { formatDate } from "./format";
 import { AppError, NotFoundError, ValidationError } from "./api-errors";
 import { centsToEuros } from "./money";
 import { buildReminderTotals, daysLate } from "./late-interest";
 import { addDaysUtc, openPosition } from "./invoices";
+import { helsinkiCalendarDate } from "./validation";
 import { buildInvoicePdfData, getInvoice, type PublicInvoice } from "./sales-invoices";
 import { renderReminderPdf, type ReminderPdfData } from "./invoice-pdf";
 
 /** Days the customer is given to pay a reminder. */
 export const REMINDER_TERM_DAYS = 7;
+
+/** A new reminder for the same invoice waits this long after the previous one. */
+export const REMINDER_COOLDOWN_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * A reminder row is written before its mail goes out and has no recipient
+ * until the mail server has accepted it. A row that stays in that state longer
+ * than this belongs to a process that died, and is swept away.
+ */
+export const REMINDER_RESERVATION_STALE_MS = 10 * 60 * 1000;
 
 export interface ReminderPreview {
   invoice: PublicInvoice;
@@ -67,7 +79,8 @@ export async function previewReminder(
 
   const settings = await loadSettings(userId);
   const reminders = await prisma.invoiceReminder.findMany({
-    where: { invoiceId },
+    // A row without a recipient is a send in flight, not a reminder yet.
+    where: { invoiceId, sentTo: { not: null } },
     orderBy: { sentAt: "asc" },
   });
 
@@ -101,9 +114,11 @@ export async function previewReminder(
 export async function buildReminderPdfData(
   userId: string,
   invoiceId: string,
-  now: Date = new Date()
+  now: Date = new Date(),
+  /** The preview the caller already holds, so the figures and level stay the ones it reserved. */
+  given?: ReminderPreview
 ): Promise<{ pdf: ReminderPdfData; preview: ReminderPreview }> {
-  const preview = await previewReminder(userId, invoiceId, now);
+  const preview = given ?? (await previewReminder(userId, invoiceId, now));
   const invoiceData = await buildInvoicePdfData(userId, invoiceId);
 
   return {
@@ -130,45 +145,103 @@ export async function buildReminderPdfData(
 export async function renderReminder(
   userId: string,
   invoiceId: string,
-  now: Date = new Date()
+  now: Date = new Date(),
+  given?: ReminderPreview
 ): Promise<{ buffer: Buffer; preview: ReminderPreview }> {
-  const { pdf, preview } = await buildReminderPdfData(userId, invoiceId, now);
+  const { pdf, preview } = await buildReminderPdfData(userId, invoiceId, now, given);
   return { buffer: await renderReminderPdf(pdf), preview };
 }
 
-export interface RecordReminderInput {
-  sentTo: string | null;
-  now?: Date;
+function cooldownMessage(sentAt: Date): string {
+  const again = new Date(sentAt.getTime() + REMINDER_COOLDOWN_MS);
+  return (
+    `Muistutus lähetettiin jo ${formatDate(helsinkiCalendarDate(sentAt))}. ` +
+    `Seuraava voidaan lähettää vasta ${formatDate(helsinkiCalendarDate(again))}.`
+  );
 }
 
-/** Stores what was demanded. Called only after the reminder actually went out. */
-export async function recordReminder(
+/**
+ * Claims the next reminder slot of an invoice before anything is mailed.
+ *
+ * The row is written first, in one transaction, and its level is counted in
+ * that same transaction. SQLite lets one writer through at a time, so two calls
+ * that arrive together are numbered one after the other and the second one
+ * finds the first one's row and is refused, instead of both mailing. The row
+ * has no recipient until `confirmReminder`; `releaseReminder` takes it back
+ * when the mail did not go out.
+ */
+export async function reserveReminder(
   userId: string,
   invoiceId: string,
   preview: ReminderPreview,
-  input: RecordReminderInput
+  now: Date = new Date()
 ) {
-  const invoice = await prisma.salesInvoice.findFirst({
-    where: { id: invoiceId, userId },
-    select: { id: true },
-  });
-  if (!invoice) throw new NotFoundError("Laskua ei löytynyt.");
+  return prisma.$transaction(async (tx) => {
+    // The first statement of the transaction is a write, so the write lock is
+    // taken here and every read below sees what the previous caller committed.
+    await tx.invoiceReminder.deleteMany({
+      where: {
+        invoiceId,
+        invoice: { userId },
+        sentTo: null,
+        sentAt: { lt: new Date(now.getTime() - REMINDER_RESERVATION_STALE_MS) },
+      },
+    });
 
-  return prisma.invoiceReminder.create({
-    data: {
-      invoiceId,
-      level: preview.level,
-      sentTo: input.sentTo,
-      sentAt: input.now ?? new Date(),
-      dueDate: new Date(`${preview.dueDate}T00:00:00.000Z`),
-      openCents: Math.round(preview.open * 100),
-      interestCents: Math.round(preview.interest * 100),
-      feeCents: Math.round(preview.fee * 100),
-      totalCents: Math.round(preview.total * 100),
-      annualRatePercent: preview.annualRatePercent,
-      daysLate: preview.daysLate,
-    },
+    const invoice = await tx.salesInvoice.findFirst({
+      where: { id: invoiceId, userId },
+      select: { id: true },
+    });
+    if (!invoice) throw new NotFoundError("Laskua ei löytynyt.");
+
+    const existing = await tx.invoiceReminder.findMany({
+      where: { invoiceId },
+      select: { sentTo: true, sentAt: true },
+    });
+    if (existing.some((row) => row.sentTo === null)) {
+      throw new AppError(
+        "Muistutusta lähetetään juuri nyt. Odota hetki.",
+        "REMINDER_IN_PROGRESS",
+        409
+      );
+    }
+    const latest = existing.reduce<Date | null>(
+      (best, row) => (best === null || row.sentAt > best ? row.sentAt : best),
+      null
+    );
+    if (latest && now.getTime() - latest.getTime() < REMINDER_COOLDOWN_MS) {
+      throw new AppError(cooldownMessage(latest), "REMINDER_TOO_SOON", 409);
+    }
+
+    return tx.invoiceReminder.create({
+      data: {
+        invoiceId,
+        level: existing.length + 1,
+        sentTo: null,
+        sentAt: now,
+        dueDate: new Date(`${preview.dueDate}T00:00:00.000Z`),
+        openCents: Math.round(preview.open * 100),
+        interestCents: Math.round(preview.interest * 100),
+        feeCents: Math.round(preview.fee * 100),
+        totalCents: Math.round(preview.total * 100),
+        annualRatePercent: preview.annualRatePercent,
+        daysLate: preview.daysLate,
+      },
+    });
   });
+}
+
+/** The mail server accepted the reminder: it now counts as sent to `sentTo`. */
+export async function confirmReminder(reminderId: string, sentTo: string, now: Date = new Date()) {
+  return prisma.invoiceReminder.update({
+    where: { id: reminderId },
+    data: { sentTo, sentAt: now },
+  });
+}
+
+/** The mail did not go out: give the slot back so a retry is possible. */
+export async function releaseReminder(reminderId: string): Promise<void> {
+  await prisma.invoiceReminder.deleteMany({ where: { id: reminderId, sentTo: null } });
 }
 
 export interface OverdueSummary {
@@ -193,8 +266,8 @@ export async function listOverdueInvoices(
     include: {
       customer: { select: { name: true, email: true } },
       payments: { select: { amountCents: true } },
-      reminders: { orderBy: { sentAt: "desc" }, take: 1 },
-      _count: { select: { reminders: true } },
+      reminders: { where: { sentTo: { not: null } }, orderBy: { sentAt: "desc" }, take: 1 },
+      _count: { select: { reminders: { where: { sentTo: { not: null } } } } },
     },
     orderBy: { dueDate: "asc" },
   });

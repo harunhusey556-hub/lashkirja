@@ -4,9 +4,11 @@ import { requireSession } from "@/lib/session";
 import { noStoreJson, rejectCrossSite, rejectOversizedContentLength } from "@/lib/http-security";
 import { AppError, UnauthorizedError, ValidationError, withErrorHandler } from "@/lib/api-errors";
 import {
+  confirmReminder,
   previewReminder,
-  recordReminder,
+  releaseReminder,
   renderReminder,
+  reserveReminder,
   REMINDER_TERM_DAYS,
 } from "@/lib/invoice-reminders";
 import { findSenderAccount, sendMail } from "@/lib/mailer";
@@ -33,9 +35,11 @@ export const GET = withErrorHandler(async (req: NextRequest, context: RouteConte
 });
 
 /**
- * Sends the reminder and records what was demanded. The record is written only
- * after the mail server accepts the message: a stored reminder must mean the
- * customer received one.
+ * Sends the reminder and records what was demanded. The slot is claimed in the
+ * database before anything is mailed, so calls that arrive together send one
+ * mail, and a repeat within the cooldown is refused. The claim is confirmed
+ * only after the mail server accepts the message and is given back when the
+ * send fails: a stored reminder must mean the customer received one.
  */
 export const POST = withErrorHandler(async (req: NextRequest, context: RouteContext) => {
   const session = await requireSession(req);
@@ -49,7 +53,7 @@ export const POST = withErrorHandler(async (req: NextRequest, context: RouteCont
   const { id } = await context.params;
   const body = bodySchema.parse(await req.json().catch(() => ({})));
 
-  const { buffer, preview } = await renderReminder(session.userId, id);
+  const preview = await previewReminder(session.userId, id);
 
   const to = body.to ?? preview.recipient;
   if (!to) {
@@ -68,35 +72,45 @@ export const POST = withErrorHandler(async (req: NextRequest, context: RouteCont
   }
 
   const invoiceNumber = preview.invoice.number;
-  await sendMail(account, {
-    to,
-    subject: body.subject ?? `Maksumuistutus: lasku ${invoiceNumber}`,
-    text:
-      body.message ??
-      [
-        "Hei,",
-        "",
-        `laskun ${invoiceNumber} eräpäivä on ylittynyt ${preview.daysLate} päivällä.`,
-        "",
-        `Avoin pääoma: ${formatEur(preview.open)}`,
-        ...(preview.interest > 0 ? [`Viivästyskorko: ${formatEur(preview.interest)}`] : []),
-        ...(preview.fee > 0 ? [`Muistutusmaksu: ${formatEur(preview.fee)}`] : []),
-        `Maksettava yhteensä: ${formatEur(preview.total)}`,
-        `Viitenumero: ${formatReference(preview.invoice.reference)}`,
-        `Maksettava viimeistään: ${preview.dueDate} (${REMINDER_TERM_DAYS} pv)`,
-        "",
-        "Jos maksu on jo matkalla, tämän viestin voi jättää huomiotta.",
-      ].join("\n"),
-    attachments: [
-      {
-        filename: `muistutus-${String(invoiceNumber).padStart(4, "0")}.pdf`,
-        content: buffer,
-        contentType: "application/pdf",
-      },
-    ],
-  });
+  const reservation = await reserveReminder(session.userId, id, preview);
+  try {
+    // The level comes from the claimed slot, not from the earlier read.
+    const reserved = { ...preview, level: reservation.level };
+    const { buffer } = await renderReminder(session.userId, id, new Date(), reserved);
 
-  const reminder = await recordReminder(session.userId, id, preview, { sentTo: to });
+    await sendMail(account, {
+      to,
+      subject: body.subject ?? `Maksumuistutus: lasku ${invoiceNumber}`,
+      text:
+        body.message ??
+        [
+          "Hei,",
+          "",
+          `laskun ${invoiceNumber} eräpäivä on ylittynyt ${preview.daysLate} päivällä.`,
+          "",
+          `Avoin pääoma: ${formatEur(preview.open)}`,
+          ...(preview.interest > 0 ? [`Viivästyskorko: ${formatEur(preview.interest)}`] : []),
+          ...(preview.fee > 0 ? [`Muistutusmaksu: ${formatEur(preview.fee)}`] : []),
+          `Maksettava yhteensä: ${formatEur(preview.total)}`,
+          `Viitenumero: ${formatReference(preview.invoice.reference)}`,
+          `Maksettava viimeistään: ${preview.dueDate} (${REMINDER_TERM_DAYS} pv)`,
+          "",
+          "Jos maksu on jo matkalla, tämän viestin voi jättää huomiotta.",
+        ].join("\n"),
+      attachments: [
+        {
+          filename: `muistutus-${String(invoiceNumber).padStart(4, "0")}.pdf`,
+          content: buffer,
+          contentType: "application/pdf",
+        },
+      ],
+    });
+  } catch (error) {
+    await releaseReminder(reservation.id).catch(() => undefined);
+    throw error;
+  }
+
+  const reminder = await confirmReminder(reservation.id, to);
 
   return noStoreJson(
     {
