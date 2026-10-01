@@ -48,6 +48,12 @@ export const PATCH = withErrorHandler(
     // A receipt that is linked to a transaction is part of bookkeeping.
     // It shouldn't be markable as "rejected" unless it's unlinked first.
     if (parsed.reviewStatus === "rejected") {
+      // Rejecting an approved receipt takes it out of the books, which moves a
+      // closed month's VAT return as much as editing or deleting it would (F06).
+      // A pending receipt is not in the books yet, so it may still be rejected.
+      if (receipt.reviewStatus === "approved") {
+        await assertPeriodOpen(session.userId, [receipt.date]);
+      }
       const isLinked = await prisma.transaction.findFirst({
         where: { receiptId: receipt.id },
       });
