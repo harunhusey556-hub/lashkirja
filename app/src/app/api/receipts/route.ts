@@ -24,7 +24,7 @@ import {
   type StagedUploadRow,
 } from "@/lib/receipt-staging";
 import { buildReceiptMatchViews } from "@/lib/matching";
-import { buildReceiptWhere, ReceiptFilterError } from "@/lib/receipt-filters";
+import { buildReceiptWhere, ReceiptFilterError, withReceiptSearch } from "@/lib/receipt-filters";
 import { noteRequest, timeDb } from "@/lib/observe";
 import {
   noStoreJson,
@@ -245,6 +245,7 @@ export async function GET(req: NextRequest) {
   let where: Prisma.ReceiptWhereInput;
   try {
     where = buildReceiptWhere(session.userId!, { reviewStatus, month, q, category, source, minAmount, maxAmount });
+    where = await withReceiptSearch(where, q);
   } catch (error) {
     if (error instanceof ReceiptFilterError) return noStoreJson({ error: error.message }, { status: 400 });
     throw error;

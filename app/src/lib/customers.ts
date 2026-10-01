@@ -14,6 +14,7 @@ import {
   openPosition,
 } from "./invoices";
 import { centsToEuros } from "./money";
+import { customerSearchFields, matchesSearch } from "./search";
 
 export interface CustomerInput {
   name: string;
@@ -227,11 +228,10 @@ export async function listCustomers(
   options: { includeArchived?: boolean; search?: string } = {}
 ): Promise<CustomerWithStats[]> {
   const search = options.search?.trim();
-  const customers = await prisma.customer.findMany({
+  const found = await prisma.customer.findMany({
     where: {
       userId,
       ...(options.includeArchived ? {} : { archivedAt: null }),
-      ...(search ? { name: { contains: search } } : {}),
     },
     orderBy: { name: "asc" },
     include: {
@@ -247,6 +247,11 @@ export async function listCustomers(
       },
     },
   });
+
+  // Filtered in memory: SQLite LIKE folds ASCII case only and reads % and _ as wildcards.
+  const customers = search
+    ? found.filter((customer) => matchesSearch(search, customerSearchFields(customer)))
+    : found;
 
   return customers.map((customer) => {
     let openBalanceCents = 0;
@@ -287,6 +292,15 @@ export async function listCustomers(
       lastInvoiceDate: lastInvoiceDate ? lastInvoiceDate.toISOString().slice(0, 10) : null,
     };
   });
+}
+
+/** Ids of the customers a search text finds (name, contact, e-mail, Y-tunnus). */
+export async function findCustomerIdsBySearch(userId: string, search: string): Promise<string[]> {
+  const all = await prisma.customer.findMany({
+    where: { userId },
+    select: { id: true, name: true, contactPerson: true, email: true, businessId: true },
+  });
+  return all.filter((customer) => matchesSearch(search, customerSearchFields(customer))).map((c) => c.id);
 }
 
 export async function getCustomer(userId: string, id: string): Promise<PublicCustomer> {

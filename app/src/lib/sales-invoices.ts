@@ -37,7 +37,7 @@ import {
   sellerFromUser,
   serializePartySnapshot,
 } from "./invoice-snapshot";
-import { requireActiveCustomer } from "./customers";
+import { findCustomerIdsBySearch, requireActiveCustomer } from "./customers";
 import { assertPeriodOpen, getLockedThrough, isDateLocked, PeriodLockedError } from "./period-lock";
 import { INVOICE_LIST_LIMIT } from "./invoice-groups";
 import { DUPLICATE_DATE_WINDOW_DAYS, DUPLICATE_DISMISSED_KIND } from "./alv-period";
@@ -1401,11 +1401,19 @@ export interface ListInvoicesOptions {
   limit?: number;
 }
 
-/** Search across customer name, invoice number and reference. */
-function invoiceSearchWhere(search: string): Record<string, unknown> | null {
+/**
+ * Search across the customer (name, contact, e-mail, Y-tunnus), invoice
+ * number and reference. The customer part is matched in memory so that
+ * Finnish letters fold case and % or _ are literal.
+ */
+async function invoiceSearchWhere(
+  userId: string,
+  search: string
+): Promise<Record<string, unknown> | null> {
   const text = search.trim().slice(0, 80);
   if (!text) return null;
-  const or: Array<Record<string, unknown>> = [{ customer: { name: { contains: text } } }];
+  const customerIds = await findCustomerIdsBySearch(userId, text);
+  const or: Array<Record<string, unknown>> = [{ customerId: { in: customerIds } }];
   const digits = text.replace(/\s+/g, "");
   if (/^\d{1,9}$/.test(digits)) {
     or.push({ number: Number(digits) });
@@ -1461,7 +1469,7 @@ export async function listInvoices(
   } else if (options.status && options.status !== "all") {
     where.status = options.status;
   }
-  const search = options.search ? invoiceSearchWhere(options.search) : null;
+  const search = options.search ? await invoiceSearchWhere(userId, options.search) : null;
   if (search) and.push(search);
   if (and.length > 0) where.AND = and;
 

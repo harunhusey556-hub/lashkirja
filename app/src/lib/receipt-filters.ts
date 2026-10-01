@@ -1,5 +1,7 @@
 import { Prisma } from "@/generated/prisma/client";
+import { prisma } from "@/lib/db";
 import { eurosToCents } from "@/lib/money";
+import { matchesSearch } from "@/lib/search";
 import { periodScopeBoundsUtc, periodScopeSchema } from "@/lib/validation";
 
 export interface ReceiptWhereInput {
@@ -52,14 +54,26 @@ export function buildReceiptWhere(userId: string, input: ReceiptWhereInput): Pri
   }
   if (Object.keys(amountFilter).length > 0) where.totalAmountCents = amountFilter;
 
-  const q = (input.q || "").trim().slice(0, 100);
-  if (q) {
-    where.OR = [
-      { vendor: { contains: q } },
-      { fileName: { contains: q } },
-      { category: { contains: q } },
-    ];
-  }
-
   return where;
+}
+
+/**
+ * Narrows a receipt `where` to the rows a search text finds in vendor, file
+ * name or category. Done in memory: SQLite LIKE folds ASCII case only and
+ * reads % and _ as wildcards (`äiti` must find `Äiti`).
+ */
+export async function withReceiptSearch(
+  where: Prisma.ReceiptWhereInput,
+  q: string | null | undefined
+): Promise<Prisma.ReceiptWhereInput> {
+  const text = (q || "").trim().slice(0, 100);
+  if (!text) return where;
+  const candidates = await prisma.receipt.findMany({
+    where,
+    select: { id: true, vendor: true, fileName: true, category: true },
+  });
+  const ids = candidates
+    .filter((row) => matchesSearch(text, [row.vendor, row.fileName, row.category]))
+    .map((row) => row.id);
+  return { ...where, id: { in: ids } };
 }

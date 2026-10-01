@@ -4,7 +4,7 @@ import { prisma } from "@/lib/db";
 import { requireSession } from "@/lib/session";
 import { noStoreJson } from "@/lib/http-security";
 import { UnauthorizedError, withErrorHandler } from "@/lib/api-errors";
-import { buildReceiptWhere, ReceiptFilterError } from "@/lib/receipt-filters";
+import { buildReceiptWhere, ReceiptFilterError, withReceiptSearch } from "@/lib/receipt-filters";
 
 /**
  * Per-tab receipt counts for the kuitit list's filter chips (Kaikki /
@@ -31,6 +31,7 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
       minAmount: params.get("minAmount"),
       maxAmount: params.get("maxAmount"),
     });
+    base = await withReceiptSearch(base, params.get("q"));
   } catch (error) {
     if (error instanceof ReceiptFilterError) return noStoreJson({ error: error.message }, { status: 400 });
     throw error;
