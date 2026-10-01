@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   checkStepState,
   monthCloseButton,
+  monthCloseComplete,
+  monthCloseDoneText,
   monthCloseSubtitle,
   monthCloseWarnings,
   type MonthCloseFacts,
@@ -91,5 +93,32 @@ describe("the close button and its confirm text", () => {
       "ALV:ta ei ole merkitty maksetuksi.",
     ]);
     expect(monthCloseWarnings(settled)).toEqual([]);
+  });
+});
+
+describe("the finished moment is for a month that is truly complete", () => {
+  const done: MonthCloseFacts = { ...settled, locked: true };
+  const vat = { state: "paid" as const, done: true, changedSinceFiling: false, nothingToPay: false };
+
+  it("is shown for a closed month with everything in order", () => {
+    expect(monthCloseComplete(done)).toBe(true);
+    expect(monthCloseComplete({ ...done, vat })).toBe(true);
+  });
+
+  it("is never shown before the month is closed", () => {
+    expect(monthCloseComplete(settled)).toBe(false);
+  });
+
+  it("is never shown for a month closed with something open", () => {
+    expect(monthCloseComplete({ ...done, blocking: 1 })).toBe(false);
+    expect(monthCloseComplete({ ...done, hasStatement: false })).toBe(false);
+    expect(monthCloseComplete({ ...done, hasContent: false })).toBe(false);
+    expect(monthCloseComplete({ ...done, ended: false })).toBe(false);
+    expect(monthCloseComplete({ ...done, vat: { ...vat, state: "open", done: false } })).toBe(false);
+    expect(monthCloseComplete({ ...done, vat: { ...vat, changedSinceFiling: true } })).toBe(false);
+  });
+
+  it("says one sentence and one supporting line", () => {
+    expect(monthCloseDoneText("Syyskuu")).toEqual({ title: "Syyskuu on valmis.", support: "Kirjanpitäjä saa kaiken tarvittavan." });
   });
 });

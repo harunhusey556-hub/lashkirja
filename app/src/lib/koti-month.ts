@@ -99,3 +99,17 @@ export function rememberKotiMonth(month: string, current: string): void {
   window.history.replaceState(null, "", href);
   updateCurrentHref("/dashboard", href);
 }
+
+/**
+ * "N / M tapahtumaa on kunnossa": the month's events that are in order of all
+ * of them. Bank rows count by the one rule of lib/month-rows.ts; receipts that
+ * no bank row accounts for count as in order once approved. A month with
+ * neither has no bar (total 0), never a full one.
+ */
+export function monthEvents(
+  bank: { matchable: number; matched: number },
+  receipts: { approved: number; pending: number }
+): { done: number; total: number } {
+  const done = bank.matched + receipts.approved;
+  return { done, total: bank.matchable + receipts.approved + receipts.pending };
+}

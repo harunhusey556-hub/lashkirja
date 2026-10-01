@@ -28,7 +28,6 @@ import {
   Percent,
   Tag,
   Wallet,
-  Sparkles,
   type LucideIcon,
 } from "lucide-react";
 import {
@@ -43,6 +42,7 @@ import {
   SummaryCard,
   useSkeletonFade,
 } from "@/components/ds";
+import { SegmentedProgress } from "@/components/ds/charts";
 
 import { formatDayMonth, formatEur } from "@/lib/format";
 import { detailHref } from "@/lib/routes";
@@ -65,6 +65,8 @@ import {
   parseKotiMonth,
   rememberKotiMonth,
 } from "@/lib/koti-month";
+import { kotiGreeting } from "@/lib/koti-greeting";
+import { handledDetail, handledHref, handledTitle, type Handled } from "@/lib/koti-handled";
 import { useVatDue } from "@/components/useVatDue";
 import { approvalGapText } from "@/lib/receipt-approval";
 import { requestReceiptCapture, requestStatementImport } from "@/lib/capture-request";
@@ -96,6 +98,10 @@ interface DashboardData {
   estimatedVat: number;
   isRefund: boolean;
   matching: { matchable: number; matched: number; suggested: number };
+  /** The month's events in order of all of them: bank rows and receipts (additive; absent in an old cache). */
+  events?: { done: number; total: number };
+  /** What the app did in the last 7 days; null when nothing (the current month only). */
+  handled?: Handled | null;
   vat: {
     registered: boolean;
     entityType: string;
@@ -161,14 +167,6 @@ function vatRateText(rate: number): string {
   return `ALV ${String(rate).replace(".", ",")} %`;
 }
 
-function getGreeting(firstName: string): string {
-  const hour = new Date().getHours();
-  if (hour >= 5 && hour < 10) return `Hyvää huomenta, ${firstName}!`;
-  if (hour >= 10 && hour < 17) return `Hyvää päivää, ${firstName}!`;
-  if (hour >= 17 && hour < 23) return `Hyvää iltaa, ${firstName}!`;
-  return `Hyvää yötä, ${firstName}!`;
-}
-
 function currentMonth(): string {
   return helsinkiMonthKey();
 }
@@ -227,7 +225,12 @@ export function KotiFallback() {
     <div className="space-y-6">
       <PageTitle
         title={" "}
-        subtitle={<span className="block min-h-[22px]" />}
+        subtitle={
+          <>
+            <span className="block min-h-[22px]" />
+            <span className="block min-h-[20px]" />
+          </>
+        }
         action={<MonthStepper month={currentMonth()} onChange={() => {}} />}
       />
       <KotiSkeleton />
@@ -270,29 +273,6 @@ export function KotiSkeleton() {
         ))}
       </div>
     </SkeletonGroup>
-  );
-}
-
-/** Done / total as a row of segments, like the approved Koti mockup. */
-function ProgressSegments({ done, total }: { done: number; total: number }) {
-  const segments = Math.min(Math.max(total, 1), 14);
-  const filled = total === 0 ? 0 : Math.round((done / total) * segments);
-  return (
-    <div
-      role="progressbar"
-      aria-label="Tapahtumat kunnossa"
-      aria-valuemin={0}
-      aria-valuemax={total}
-      aria-valuenow={done}
-      className="mt-3.5 flex gap-1"
-    >
-      {Array.from({ length: segments }).map((_, index) => (
-        <span
-          key={index}
-          className={`h-2 flex-1 rounded-full ${index < filled ? "bg-success" : "bg-line"}`}
-        />
-      ))}
-    </div>
   );
 }
 
@@ -379,6 +359,18 @@ export default function DashboardClient() {
     mounted.current = true;
     return () => {
       mounted.current = false;
+    };
+  }, []);
+
+  // The greeting follows the Helsinki clock; a minute is fine-grained enough.
+  const [now, setNow] = useState(() => new Date());
+  useEffect(() => {
+    const tick = () => setNow(new Date());
+    const timer = window.setInterval(tick, 60_000);
+    document.addEventListener("visibilitychange", tick);
+    return () => {
+      window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", tick);
     };
   }, []);
 
@@ -677,25 +669,6 @@ export default function DashboardClient() {
   const atCurrent = month >= currentMonth();
   const title =
     yearText === currentMonth().slice(0, 4) ? monthName : `${monthName} ${yearText}`;
-  const subtitle = atCurrent ? (
-    // The line is always there (min height), so nothing below moves when the
-    // profile or the name arrives after the first frame (SHELL-08).
-    <span className="block min-h-[22px]">
-      {profile?.businessName || (displayName ? getGreeting(displayName) : "")}
-    </span>
-  ) : (
-    <button
-      type="button"
-      onClick={() => {
-        setRefreshFailed(null);
-        setMonth(currentMonth());
-      }}
-      className="relative block min-h-[22px] font-medium text-accent before:absolute before:inset-x-0 before:-inset-y-[11px] before:content-['']"
-    >
-      Palaa kuluvaan kuuhun
-    </button>
-  );
-
   const visibleItems = (data?.items ?? []).filter((item) => !hiddenItems.has(item.id));
   const itemTasks = visibleItems.map(itemTask);
   const accountTasks = data && atCurrent ? buildAccountTasks(data) : [];
@@ -745,7 +718,40 @@ export default function DashboardClient() {
   const statementLine = data
     ? kotiStatementLine({ atCurrent, hasActivity, hasStatement, setupEmpty: Boolean(setup?.empty) })
     : null;
+  // One quiet line under the business name: the greeting, or one honest sentence on the month's turn.
+  // Not while loading (no data, no line), but its height is held so nothing below moves.
+  const greeting =
+    data && atCurrent
+      ? kotiGreeting({
+          now,
+          firstName: displayName,
+          blockingCount,
+          hasActivity,
+          setupEmpty: Boolean(setup?.empty),
+          previousMonth: data.previousMonth ?? null,
+        })
+      : null;
+  const subtitle = atCurrent ? (
+    // The lines are always there (min height), so nothing below moves when the
+    // profile or the name arrives after the first frame (SHELL-08).
+    <>
+      <span className="block min-h-[22px]">{profile?.businessName || ""}</span>
+      <span className="block min-h-[20px] text-caption">{greeting}</span>
+    </>
+  ) : (
+    <button
+      type="button"
+      onClick={() => {
+        setRefreshFailed(null);
+        setMonth(currentMonth());
+      }}
+      className="relative block min-h-[22px] font-medium text-accent before:absolute before:inset-x-0 before:-inset-y-[11px] before:content-['']"
+    >
+      Palaa kuluvaan kuuhun
+    </button>
+  );
   const matching = data?.matching;
+  const events = data?.events ?? (matching ? { done: matching.matched, total: matching.matchable } : null);
   const documentsBasis = data?.source !== "tiliote";
   const tulotHref = !data
     ? "/raportit"
@@ -848,15 +854,22 @@ export default function DashboardClient() {
           {/* Month status: what is still open, how much of the bank is in order, VAT. */}
           <div className="rounded-card border border-line bg-surface p-4">
             <p className="text-headline font-semibold text-ink">{headline}</p>
-            {matching && matching.matchable > 0 && !data.sectionErrors?.matching ? (
+            {events && events.total > 0 && !data.sectionErrors?.matching ? (
               <>
                 <p className="mt-0.5 text-body text-ink-2">
-                  {matching.matched} / {matching.matchable} pankkitapahtumaa kunnossa
+                  {events.done} / {events.total} tapahtumaa on kunnossa
                 </p>
-                <ProgressSegments done={matching.matched} total={matching.matchable} />
+                <SegmentedProgress
+                  done={events.done}
+                  total={events.total}
+                  label={`${events.done} tapahtumaa ${events.total}:sta on kunnossa`}
+                  animateKey={`koti-month:${month}`}
+                  className="mt-3.5"
+                />
               </>
-            ) : statementLine ? (
-              <p className="mt-0.5 text-body text-ink-2">
+            ) : null}
+            {statementLine ? (
+              <p className={`${events && events.total > 0 ? "mt-2" : "mt-0.5"} text-body text-ink-2`}>
                 {statementLine}{" "}
                 {/* F24: the file picker opens from this tap (it cannot open after a page change). */}
                 <button
@@ -975,6 +988,19 @@ export default function DashboardClient() {
             </Section>
           ) : null}
 
+          {/* What the app did for the owner this week; no card when it did nothing (real records only). */}
+          {atCurrent && data.handled && data.handled.count > 0 ? (
+            <Section title="Hoidettu automaattisesti">
+              <ListRow
+                href={handledHref(data.handled.parts)}
+                chevron
+                title={handledTitle(data.handled.count)}
+                secondary={handledDetail(data.handled.parts)}
+                secondaryLines="all"
+              />
+            </Section>
+          ) : null}
+
           <section>
             {/* One heading line: the basis belongs to the section, not to the Menot card below it. */}
             <h2 className="mb-2 px-1 text-caption font-normal text-ink-2">
@@ -1053,22 +1079,6 @@ export default function DashboardClient() {
               ) : null}
             </Section>
           )}
-
-          {matching && matching.matched > 0 ? (
-            <Section title="Hoidettu">
-              <ListRow
-                href="/pankki/tapahtumat"
-                leading={<Icon icon={matching.matched === matching.matchable ? CircleCheck : Sparkles} />}
-                chevron
-                title={`${plural(matching.matched, "tapahtuma", "tapahtumaa")} kohdistettu`}
-                secondary={
-                  data.hasImap
-                    ? "Kuitit tulevat myös sähköpostista"
-                    : "Tiliotteen tapahtumat, joilla on kuitti"
-                }
-              />
-            </Section>
-          ) : null}
 
           {data.sectionErrors?.threshold ? null : !data.vat.registered && data.vat.ytdRevenue >= data.vat.threshold * 0.75 ? (
             <div

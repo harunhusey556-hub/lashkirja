@@ -85,3 +85,21 @@ export function monthCloseWarnings(facts: MonthCloseFacts): string[] {
   }
   return lines;
 }
+
+/**
+ * The calm "{Kuukausi} on valmis." moment: the month is closed AND every part
+ * of it was in order. A month closed with things still open, without its
+ * tiliote, with VAT undone or changed after filing, or with nothing in it, is
+ * closed but not "valmis" in this sense (F10, F66): no check is drawn for it.
+ */
+export function monthCloseComplete(facts: MonthCloseFacts): boolean {
+  if (!facts.locked || !facts.ended) return false;
+  if (facts.blocking > 0 || !facts.hasContent || !facts.hasStatement) return false;
+  if (facts.vat && (facts.vat.changedSinceFiling || !facts.vat.done)) return false;
+  return true;
+}
+
+/** The two lines of the finished moment. */
+export function monthCloseDoneText(monthName: string): { title: string; support: string } {
+  return { title: `${monthName} on valmis.`, support: "Kirjanpitäjä saa kaiken tarvittavan." };
+}

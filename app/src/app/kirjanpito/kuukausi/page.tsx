@@ -19,9 +19,10 @@ import { detailHref } from "@/lib/routes";
 import { helsinkiMonthKey } from "@/lib/validation";
 import { vatPeriodEndingIn, vatPeriodKindOf } from "@/lib/vat-deadline";
 import { vatChangedNote, vatChangedSinceFiling, vatDueSecondary, vatFilingState, vatNothingToPay } from "@/lib/vat-due";
-import { checkStepState, monthCloseButton, monthCloseSubtitle, monthCloseWarnings, type StepState } from "@/lib/month-close";
+import { checkStepState, monthCloseButton, monthCloseComplete, monthCloseSubtitle, monthCloseWarnings, type StepState } from "@/lib/month-close";
 import { approvalGapText } from "@/lib/receipt-approval";
 import { requestReceiptCapture, requestStatementImport } from "@/lib/capture-request";
+import { MonthDone } from "./MonthDone";
 import { hapticNotify } from "@/lib/haptics";
 import { showToast } from "@/lib/toast";
 import { PERIOD_LOCK_KEY, storeCached } from "@/lib/cached-resource";
@@ -375,6 +376,8 @@ function MonthClose() {
         <MonthCloseSkeleton />
       ) : (
         <>
+          {/* Not while the VAT figures are still loading: the verdict would flip. */}
+          {monthCloseComplete(closeFacts) && !(vat.due && !vatState) ? <MonthDone month={month} name={name} /> : null}
           {steps.map((step) => (
             <Section key={step.key} title={step.title}>
               <ListRow

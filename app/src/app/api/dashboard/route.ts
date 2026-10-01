@@ -13,6 +13,11 @@ import { helsinkiMonthKey } from "@/lib/validation";
 import { buildDashboardItems, loadSharedMatchData, type DashboardItems } from "./items";
 import { MONTH_ROW_FACTS, monthProgress } from "@/lib/month-rows";
 import { getLockedThrough, isMonthLocked } from "@/lib/period-lock";
+import { summariseHandled, type Handled } from "@/lib/koti-handled";
+import { monthEvents } from "@/lib/koti-month";
+
+/** Koti's "Hoidettu automaattisesti" looks back this far. */
+const HANDLED_DAYS = 7;
 
 function previousMonthKey(month: string): string {
   const [y, m] = month.split("-").map(Number);
@@ -261,6 +266,51 @@ export async function GET(req: NextRequest) {
     setup = null;
   }
 
+  // The month's events for the bar: bank rows plus receipts no bank row accounts for.
+  let events = { done: matched, total: matchable };
+  try {
+    const receiptWhere = {
+      userId: session.userId,
+      date: { gte: startOfMonth, lt: endOfMonth },
+      linkedTransaction: null,
+      sourceTransactionId: null,
+    };
+    const [approved, pending] = await Promise.all([
+      prisma.receipt.count({ where: { ...receiptWhere, reviewStatus: "approved" } }),
+      prisma.receipt.count({ where: { ...receiptWhere, reviewStatus: "pending" } }),
+    ]);
+    events = monthEvents({ matchable, matched }, { approved, pending });
+  } catch {
+    // The bar then counts the bank rows alone, which is still true.
+  }
+
+  // What the app did for the owner in the last 7 days: real records only (see lib/koti-handled.ts).
+  let handled: Handled | null = null;
+  if (month >= currentMonth) {
+    try {
+      const since = new Date(now.getTime() - HANDLED_DAYS * 24 * 60 * 60 * 1000);
+      const [emailReceipts, salesPayments, purchasePayments, recurringInvoices] = await Promise.all([
+        prisma.receipt.count({ where: { userId: session.userId, source: "email_sync", createdAt: { gte: since } } }),
+        prisma.invoicePayment.count({
+          where: { invoice: { userId: session.userId }, source: "bank", note: "Kohdistettu viitenumerolla", createdAt: { gte: since } },
+        }),
+        prisma.purchasePayment.count({
+          where: { purchaseInvoice: { userId: session.userId }, source: "bank", note: "Kohdistettu viitenumerolla", createdAt: { gte: since } },
+        }),
+        prisma.recurringInvoiceRun.count({
+          where: { recurringInvoice: { userId: session.userId }, status: "created", createdAt: { gte: since } },
+        }),
+      ]);
+      handled = summariseHandled({
+        emailReceipts,
+        referencePayments: salesPayments + purchasePayments,
+        recurringInvoices,
+      });
+    } catch {
+      handled = null;
+    }
+  }
+
   return NextResponse.json({
     firstName: session.firstName,
     month,
@@ -276,6 +326,8 @@ export async function GET(req: NextRequest) {
     receiptCount: books?.receiptCount ?? 0,
     invoiceCount: monthBooks ? monthBooks.invoiceCount + monthBooks.creditNoteCount : 0,
     matching: { matchable, matched, suggested },
+    events,
+    handled: handled && handled.count > 0 ? handled : null,
     estimatedVat: round2(estimatedVat),
     isRefund: estimatedVat < 0,
     vat: {
