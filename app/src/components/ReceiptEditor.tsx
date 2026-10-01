@@ -24,6 +24,7 @@ import {
   ApiError,
   apiFetch,
   errorMessage,
+  fieldErrorsFromApi,
   isUnauthorized,
   readJson,
   redirectToLogin,
@@ -59,7 +60,7 @@ import {
   type NativePick,
 } from "@/lib/native-pick";
 import { clearDraft } from "@/lib/draft-store";
-import { receiptCategoryFocusId, receiptFieldId, validateReceiptFields } from "@/lib/receipt-form";
+import { RECEIPT_LIMITS, receiptCategoryFocusId, receiptFieldId, validateReceiptFields } from "@/lib/receipt-form";
 import { RECEIPT_PHASE } from "@/lib/screen-state";
 import { isLowConfidenceField } from "@/lib/receipt-confidence";
 import {
@@ -160,6 +161,7 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
   const cameraInputRef = useRef<HTMLInputElement>(null);
   const photoInputRef = useRef<HTMLInputElement>(null);
   const matchPanelRef = useRef<HTMLDivElement>(null);
+  const saveNoteRef = useRef<HTMLDivElement>(null);
 
   const [loading, setLoading] = useState(isEdit);
   const [uploadProgress, setUploadProgress] = useState("");
@@ -203,6 +205,11 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
     active: !isEdit || formReady,
     onRestore: setFormData,
   });
+
+  // A refused save lands in view above the save bar, not off screen (F37).
+  useEffect(() => {
+    if (session.phase === "failed") saveNoteRef.current?.scrollIntoView({ block: "center" });
+  }, [session.phase]);
 
   const connectivity = useConnectivity();
   const offlineQueue = useOfflineReceiptQueue();
@@ -622,6 +629,9 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
       date: formData.date,
       totalAmount: formData.totalAmount,
       category: resolvedCategory,
+      reference: formData.reference,
+      invoiceNumber: formData.invoiceNumber,
+      notes: formData.notes,
     });
     const totalAmount = parseReceiptAmount(formData.totalAmount) ?? NaN;
     if (Object.keys(nextFieldErrors).length > 0) {
@@ -630,7 +640,7 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
       // The category is a chip group until one is chosen: it has its own id to focus (V12).
       focusFirstInvalid(
         nextFieldErrors,
-        ["vendor", "date", "totalAmount", "category"],
+        ["vendor", "date", "totalAmount", "category", "reference", "invoiceNumber", "notes"],
         (key) =>
           key === "category"
             ? receiptCategoryFocusId({ useCustom: useCustomCategory, hasCategory: Boolean(formData.category) })
@@ -740,6 +750,19 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
     } catch (saveError: unknown) {
       if (isUnauthorized(saveError)) {
         redirectToLogin();
+        return;
+      }
+      // A refusal that names fields goes to those fields (F64); the rest is one message.
+      const serverFields = fieldErrorsFromApi(saveError);
+      if (Object.keys(serverFields).length > 0) {
+        setFieldErrors(serverFields);
+        setError("");
+        session.setPhase("dirty");
+        focusFirstInvalid(
+          serverFields,
+          ["vendor", "date", "totalAmount", "category", "reference", "invoiceNumber", "notes"],
+          receiptFieldId
+        );
         return;
       }
       setError(errorMessage(saveError, "Tallennus epäonnistui"));
@@ -913,7 +936,11 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
         />
       )}
 
-      <FormError message={error} className="rounded-card bg-danger/10 px-4 py-3" />
+      {/* A refused save is shown once, by the note above the save bar (F37). */}
+      <FormError
+        message={session.phase === "failed" && formReady ? "" : error}
+        className="rounded-card bg-danger/10 px-4 py-3"
+      />
 
       {uploadProgress && !uploading && (
         <p className="text-center text-caption text-ink-2" role="status" aria-live="polite">
@@ -1006,6 +1033,7 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
                         autoComplete="off"
                         enterKeyHint="next"
                         required
+                        maxLength={RECEIPT_LIMITS.vendor}
                         value={formData.vendor}
                         onChange={(e) =>
                           setFormData({ ...formData, vendor: e.target.value })
@@ -1265,12 +1293,20 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
                         id="receipt-reference"
                         type="text"
                         value={formData.reference}
+                        maxLength={RECEIPT_LIMITS.reference}
                         onChange={(e) =>
                           setFormData({ ...formData, reference: e.target.value })
                         }
                         placeholder="esim. 1009"
+                        aria-invalid={Boolean(fieldErrors.reference) || undefined}
+                        aria-describedby={fieldErrors.reference ? "receipt-reference-error" : undefined}
                         className={controlClass}
                       />
+                      {fieldErrors.reference && (
+                        <p id="receipt-reference-error" className="mt-1.5 text-sm text-danger" role="alert">
+                          {fieldErrors.reference}
+                        </p>
+                      )}
                     </div>
                     <div>
                       <label htmlFor="receipt-invoice-number" className={LABEL_CLASS}>
@@ -1280,14 +1316,22 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
                         id="receipt-invoice-number"
                         type="text"
                         value={formData.invoiceNumber}
+                        maxLength={RECEIPT_LIMITS.invoiceNumber}
                         onChange={(e) =>
                           setFormData({
                             ...formData,
                             invoiceNumber: e.target.value,
                           })
                         }
+                        aria-invalid={Boolean(fieldErrors.invoiceNumber) || undefined}
+                        aria-describedby={fieldErrors.invoiceNumber ? "receipt-invoice-number-error" : undefined}
                         className={controlClass}
                       />
+                      {fieldErrors.invoiceNumber && (
+                        <p id="receipt-invoice-number-error" className="mt-1.5 text-sm text-danger" role="alert">
+                          {fieldErrors.invoiceNumber}
+                        </p>
+                      )}
                     </div>
                   </div>
 
@@ -1299,12 +1343,20 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
                       id="receipt-notes"
                       rows={3}
                       value={formData.notes}
+                      maxLength={RECEIPT_LIMITS.notes}
                       onChange={(e) =>
                         setFormData({ ...formData, notes: e.target.value })
                       }
                       placeholder="Valinnainen selite kirjanpitoon..."
+                      aria-invalid={Boolean(fieldErrors.notes) || undefined}
+                      aria-describedby={fieldErrors.notes ? "receipt-notes-error" : undefined}
                       className={`${controlClass} min-h-[5rem] resize-y py-3`}
                     />
+                    {fieldErrors.notes && (
+                      <p id="receipt-notes-error" className="mt-1.5 text-sm text-danger" role="alert">
+                        {fieldErrors.notes}
+                      </p>
+                    )}
                   </div>
                 </div>
               </Section>
@@ -1439,20 +1491,25 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
               </button>
             </p>
           )}
-          <SavePhaseNote phase={session.phase} error={error} />
-          {conflict && (
-            <Button
-              type="button"
-              variant="secondary"
-              onClick={() => {
-                clearDraft(draftKey);
-                setConflict(false);
-                setLoadAttempt((attempt) => attempt + 1);
-              }}
-            >
-              Lataa uudelleen
-            </Button>
-          )}
+          <div ref={saveNoteRef} className="scroll-mb-28 space-y-3">
+            <SavePhaseNote phase={session.phase} error={error} />
+            {conflict && (
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() => {
+                  clearDraft(draftKey);
+                  setConflict(false);
+                  setError("");
+                  session.setPhase("clean");
+                  session.setNotice("");
+                  setLoadAttempt((attempt) => attempt + 1);
+                }}
+              >
+                Lataa uudelleen
+              </Button>
+            )}
+          </div>
         </form>
       )}
 

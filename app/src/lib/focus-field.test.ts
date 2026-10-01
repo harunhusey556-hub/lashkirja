@@ -42,3 +42,25 @@ describe("field error names", () => {
     });
   });
 });
+
+describe("focusFirstInvalid", () => {
+  it("focuses the first invalid control and centres it above the sticky save bar", async () => {
+    const { vi } = await import("vitest");
+    const { focusFirstInvalid } = await import("./focus-field");
+    class FakeElement {
+      focus = vi.fn();
+      scrollIntoView = vi.fn();
+    }
+    const element = new FakeElement();
+    vi.stubGlobal("HTMLElement", FakeElement);
+    vi.stubGlobal("document", { getElementById: (id: string) => (id === "receipt-vendor" ? element : null) });
+    try {
+      const key = focusFirstInvalid({ notes: "x", vendor: "y" }, ["vendor", "notes"], (k) => `receipt-${k}`);
+      expect(key).toBe("vendor");
+      expect(element.focus).toHaveBeenCalledWith({ preventScroll: true });
+      expect(element.scrollIntoView).toHaveBeenCalledWith({ block: "center" });
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+});

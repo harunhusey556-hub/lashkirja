@@ -22,8 +22,10 @@ export function focusFirstInvalid(
   if (!key || typeof document === "undefined") return key;
   const element = document.getElementById(idFor(key));
   if (element instanceof HTMLElement) {
-    element.focus();
-    element.scrollIntoView({ block: "nearest" });
+    // Centred, so the field is not left behind the sticky save bar (F37);
+    // preventScroll stops focus() from jumping first.
+    element.focus({ preventScroll: true });
+    element.scrollIntoView({ block: "center" });
   }
   return key;
 }

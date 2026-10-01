@@ -533,3 +533,21 @@ export async function leaveAfterSignOut(): Promise<boolean> {
     window.addEventListener("pagehide", onPageHide, { once: true });
   });
 }
+
+/**
+ * The per-field messages of a refused request (`details: [{ field, message }]`
+ * from the shared validation answer), keyed by the server's field name, so a
+ * form can put each message at its field. Empty when the error carries none.
+ */
+export function fieldErrorsFromApi(error: unknown): Record<string, string> {
+  if (!(error instanceof ApiError) || !Array.isArray(error.details)) return {};
+  const result: Record<string, string> = {};
+  for (const item of error.details) {
+    if (!item || typeof item !== "object") continue;
+    const { field, message } = item as { field?: unknown; message?: unknown };
+    if (typeof field !== "string" || !field || typeof message !== "string") continue;
+    if (!isUserFacingMessage(message)) continue;
+    if (!(field in result)) result[field] = message;
+  }
+  return result;
+}

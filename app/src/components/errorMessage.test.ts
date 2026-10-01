@@ -5,6 +5,7 @@ import {
   ApiTimeoutError,
   ERROR_COPY,
   errorMessage,
+  fieldErrorsFromApi,
   isUserFacingMessage,
 } from "./clientFetch";
 
@@ -123,5 +124,18 @@ describe("isNetworkFailure", () => {
     expect(isNetworkFailure(bug)).toBe(false);
     expect(isNetworkFailure(new TypeError("undefined is not an object (evaluating 'a.b')"))).toBe(false);
     expect(errorMessage(bug, "Tallennus epäonnistui")).not.toBe(ERROR_COPY.unreachable);
+  });
+});
+
+describe("fieldErrorsFromApi", () => {
+  it("maps the server's per-field Finnish messages by field name", () => {
+    const error = new ApiError("Tarkista lomakkeen tiedot", 400, [
+      { path: "vendor", field: "vendor", message: "Myyjä saa olla enintään 300 merkkiä" },
+      { path: "vendor", field: "vendor", message: "Toinen" },
+      { path: "x", field: "x", message: "Invalid input" },
+    ]);
+    expect(fieldErrorsFromApi(error)).toEqual({ vendor: "Myyjä saa olla enintään 300 merkkiä" });
+    expect(fieldErrorsFromApi(new Error("x"))).toEqual({});
+    expect(fieldErrorsFromApi(new ApiError("x", 400))).toEqual({});
   });
 });

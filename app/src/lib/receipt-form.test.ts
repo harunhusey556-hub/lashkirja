@@ -41,3 +41,26 @@ describe("receiptCategoryFocusId (V12)", () => {
     expect(receiptCategoryFocusId({ useCustom: true, hasCategory: false })).toBe("receipt-custom-category");
   });
 });
+
+describe("validateReceiptFields length limits (F64)", () => {
+  const ok = { vendor: "Tukku", date: "2026-01-02", totalAmount: "10", category: "x" };
+
+  it("names the field and the limit the server enforces", () => {
+    const errors = validateReceiptFields({
+      ...ok,
+      vendor: "v".repeat(301),
+      reference: "r".repeat(41),
+      invoiceNumber: "i".repeat(41),
+      notes: "n".repeat(501),
+    });
+    expect(errors.vendor).toBe("Myyjä saa olla enintään 300 merkkiä.");
+    expect(errors.reference).toBe("Viitenumero saa olla enintään 40 merkkiä.");
+    expect(errors.invoiceNumber).toBe("Laskun numero saa olla enintään 40 merkkiä.");
+    expect(errors.notes).toBe("Selite saa olla enintään 500 merkkiä.");
+    expect(receiptFieldId("notes")).toBe("receipt-notes");
+  });
+
+  it("accepts values at the limit", () => {
+    expect(validateReceiptFields({ ...ok, vendor: "v".repeat(300), notes: "n".repeat(500) })).toEqual({});
+  });
+});
