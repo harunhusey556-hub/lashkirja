@@ -203,9 +203,16 @@ export interface CustomerDeleteOutcome {
   deleted: boolean;
   archived: boolean;
   invoiceCount: number;
+  /** Recurring schedules the customer has; they are paused when it is archived. */
+  scheduleCount: number;
 }
 
-/** A customer with invoice history is archived; the history must survive. */
+/**
+ * A customer with invoice history is archived; the history must survive. One
+ * with a recurring schedule is archived too: a schedule is a standing order
+ * that names the customer, so deleting would break it. Its schedules are
+ * paused, because an archived customer cannot be invoiced.
+ */
 export async function removeCustomer(
   userId: string,
   id: string
@@ -213,14 +220,23 @@ export async function removeCustomer(
   const existing = await prisma.customer.findFirst({ where: { id, userId } });
   if (!existing) throw new NotFoundError("Asiakasta ei löytynyt.");
 
-  const invoiceCount = await prisma.salesInvoice.count({ where: { customerId: id } });
-  if (invoiceCount > 0) {
-    await prisma.customer.update({ where: { id }, data: { archivedAt: new Date() } });
-    return { deleted: false, archived: true, invoiceCount };
+  const [invoiceCount, scheduleCount] = await Promise.all([
+    prisma.salesInvoice.count({ where: { customerId: id } }),
+    prisma.recurringInvoice.count({ where: { customerId: id } }),
+  ]);
+  if (invoiceCount > 0 || scheduleCount > 0) {
+    await prisma.$transaction([
+      prisma.customer.update({ where: { id }, data: { archivedAt: new Date() } }),
+      prisma.recurringInvoice.updateMany({
+        where: { customerId: id, active: true },
+        data: { active: false },
+      }),
+    ]);
+    return { deleted: false, archived: true, invoiceCount, scheduleCount };
   }
 
   await prisma.customer.delete({ where: { id } });
-  return { deleted: true, archived: false, invoiceCount: 0 };
+  return { deleted: true, archived: false, invoiceCount: 0, scheduleCount: 0 };
 }
 
 export async function listCustomers(
@@ -327,6 +343,8 @@ export interface CustomerDetail {
   invoicedTotal: number;
   lastPayment: { paidDate: string; amount: number; invoiceNumber: number } | null;
   invoices: CustomerInvoiceRow[];
+  /** Recurring schedules naming this customer, paused ones included. */
+  recurringCount: number;
 }
 
 export async function getCustomerDetail(userId: string, id: string): Promise<CustomerDetail> {
@@ -340,6 +358,7 @@ export async function getCustomerDetail(userId: string, id: string): Promise<Cus
     },
   });
   if (!customer) throw new NotFoundError("Asiakasta ei löytynyt.");
+  const recurringCount = await prisma.recurringInvoice.count({ where: { customerId: id } });
 
   let openBalanceCents = 0;
   let invoicedCents = 0;
@@ -397,6 +416,7 @@ export async function getCustomerDetail(userId: string, id: string): Promise<Cus
     invoicedTotal: centsToEuros(invoicedCents),
     lastPayment,
     invoices,
+    recurringCount,
   };
 }
 

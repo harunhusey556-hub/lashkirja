@@ -58,6 +58,8 @@ interface CustomerDetail {
   openBalance: number;
   openInvoiceCount: number;
   invoicedTotal: number;
+  /** Absent in a copy cached before it existed. */
+  recurringCount?: number;
   lastPayment: { paidDate: string; amount: number; invoiceNumber: number } | null;
   invoices: Array<{
     id: string;
@@ -245,13 +247,17 @@ function CustomerDetail() {
         method: "DELETE",
         credentials: "include",
       });
-      const result = await readJson<{ archived: boolean; invoiceCount: number }>(
+      const result = await readJson<{ archived: boolean; invoiceCount: number; scheduleCount?: number }>(
         response,
         "Poisto epäonnistui"
       );
       setConfirmRemove(false);
       if (result.archived) {
-        setMessage("Asiakas arkistoitiin. Sen voi palauttaa Lisää toimintoja -valikosta.");
+        setMessage(
+          result.scheduleCount
+            ? "Asiakas arkistoitiin ja sen toistuvat laskut pysäytettiin. Asiakkaan voi palauttaa Lisää toimintoja -valikosta, toistuvat laskut jatkat Toistuvat-sivulta."
+            : "Asiakas arkistoitiin. Sen voi palauttaa Lisää toimintoja -valikosta."
+        );
         await load();
       } else {
         try {
@@ -531,8 +537,12 @@ function CustomerDetail() {
         description={
           customer
             ? detail && detail.invoices.length > 0
-              ? `${customer.name}. Asiakkaalla on ${detail.invoices.length} laskua, joten se arkistoidaan poiston sijaan.`
-              : customer.name
+              ? `${customer.name}. Asiakkaalla on ${detail.invoices.length} laskua, joten se arkistoidaan poiston sijaan.${
+                  detail.recurringCount ? " Toistuvat laskut pysäytetään." : ""
+                }`
+              : detail?.recurringCount
+                ? `${customer.name}. Asiakkaalla on ${detail.recurringCount === 1 ? "toistuva lasku" : `${detail.recurringCount} toistuvaa laskua`}, joten se arkistoidaan poiston sijaan ja toistuvat laskut pysäytetään.`
+                : customer.name
             : ""
         }
         confirmLabel="Poista"
