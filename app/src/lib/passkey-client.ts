@@ -197,20 +197,30 @@ export function cancelPasskeyAutofill(): void {
   }
 }
 
-/** Signed in: creates a passkey on this device and stores it on the server. */
-export async function createPasskey(deviceName?: string): Promise<PasskeyOutcome<PasskeyRow>> {
+/**
+ * Signed in: creates a passkey on this device and stores it on the server.
+ * The current password is required (re-authentication): a session alone
+ * cannot add a way to sign in.
+ */
+export async function createPasskey(currentPassword: string, deviceName?: string): Promise<PasskeyOutcome<PasskeyRow>> {
   const native = isNative();
   let start: Response;
   try {
     start = await apiFetch("/api/auth/passkey/register/options", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: "{}",
+      body: JSON.stringify({ currentPassword }),
     });
   } catch {
     return { ok: false, reason: "network" };
   }
   if (start.status === 503) return { ok: false, reason: "not-configured" };
+  // 401 is normally the wrong password (a dead session also answers 401, and
+  // its own server message then says so); 400 is a missing password.
+  if (start.status === 401 || start.status === 400) {
+    return { ok: false, reason: "password", message: await readError(start) };
+  }
+  if (start.status === 429) return { ok: false, reason: "rate", message: await readError(start) };
   if (!start.ok) return { ok: false, reason: "failed", message: await readError(start) };
   const { challengeId, options } = (await start.json()) as {
     challengeId: string;

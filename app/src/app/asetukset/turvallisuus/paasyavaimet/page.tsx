@@ -2,7 +2,9 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { KeyRound } from "lucide-react";
+import BottomSheet from "@/components/BottomSheet";
 import ConfirmModal from "@/components/ConfirmModal";
+import { PasswordField } from "@/components/ds/PasswordField";
 import { ErrorState } from "@/components/AsyncState";
 import { controlClass, tintedButtonClass } from "@/components/control-styles";
 import { Card, Icon, PageTitle, Skeleton, SkeletonCard, SkeletonGroup, useSkeletonFade } from "@/components/ds";
@@ -37,6 +39,11 @@ export default function PaasyavaimetPage() {
   const [canCreate, setCanCreate] = useState<boolean | null>(null);
   const [creating, setCreating] = useState(false);
   const [message, setMessage] = useState("");
+  // Re-authentication sheet: the current password is asked before the
+  // system passkey sheet, because a session alone cannot add a sign-in.
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [password, setPassword] = useState("");
+  const [passwordError, setPasswordError] = useState("");
   const [editing, setEditing] = useState<{ id: string; name: string; error: string; saving: boolean } | null>(null);
   const [pendingDelete, setPendingDelete] = useState<PasskeyRow | null>(null);
   const editInputRef = useRef<HTMLInputElement>(null);
@@ -67,21 +74,47 @@ export default function PaasyavaimetPage() {
     if (editing && !editing.saving) editInputRef.current?.focus();
   }, [editing]);
 
+  function openConfirm() {
+    setMessage("");
+    setPassword("");
+    setPasswordError("");
+    setConfirmOpen(true);
+  }
+
+  function closeConfirm() {
+    if (creating) return;
+    setConfirmOpen(false);
+    setPassword("");
+    setPasswordError("");
+  }
+
   async function create() {
     if (creating) return;
+    if (!password) {
+      setPasswordError("Kirjoita nykyinen salasana.");
+      document.getElementById("passkeyPassword")?.focus();
+      return;
+    }
     setCreating(true);
     setMessage("");
-    const result = await createPasskey();
+    setPasswordError("");
+    const result = await createPasskey(password);
     setCreating(false);
     if (result.ok) {
+      setConfirmOpen(false);
+      setPassword("");
       setRows((current) => [...(current ?? []), result.value]);
       void hapticNotify("success");
       showToast({ tone: "success", text: "Pääsyavain luotu.", haptic: false });
       return;
     }
     const text = passkeyFailureMessage(result.reason, "create", result.message);
-    if (text) {
-      void hapticNotify("error");
+    if (!text) return;
+    void hapticNotify("error");
+    if (result.reason === "password") {
+      setPasswordError(text);
+      document.getElementById("passkeyPassword")?.focus();
+    } else {
       setMessage(text);
     }
   }
@@ -217,7 +250,7 @@ export default function PaasyavaimetPage() {
         )}
 
         {canCreate && (
-          <Button type="button" className="w-full" busy={creating} busyLabel="Luodaan…" onClick={() => void create()}>
+          <Button type="button" className="w-full" onClick={openConfirm}>
             <span className="inline-flex items-center gap-2">
               <Icon icon={KeyRound} size="inline" />
               Luo pääsyavain
@@ -229,12 +262,50 @@ export default function PaasyavaimetPage() {
             Tällä laitteella ei voi luoda pääsyavainta juuri nyt: palvelinta ei ole vielä määritetty pääsyavaimille tai laite ei tue niitä. Kirjaudu salasanalla.
           </p>
         )}
-        {message && (
+        {message && !confirmOpen && (
           <p role="alert" className="text-sm text-danger">
             {message}
           </p>
         )}
       </Card>
+
+      <BottomSheet isOpen={confirmOpen} onClose={closeConfirm} title="Vahvista salasanalla" dirty={false}>
+        <form
+          noValidate
+          className="space-y-4 px-5 py-4 sheet-safe-bottom"
+          onSubmit={(event) => {
+            event.preventDefault();
+            void create();
+          }}
+        >
+          <p className="text-caption leading-relaxed text-ink-2">
+            Pääsyavain on uusi tapa kirjautua tilillesi, joten vahvista ensin nykyinen salasanasi. Sen jälkeen laite pyytää Face ID:n tai Touch ID:n.
+          </p>
+          <PasswordField
+            id="passkeyPassword"
+            name="passkeyPassword"
+            label="Nykyinen salasana"
+            autoComplete="current-password"
+            enterKeyHint="go"
+            required
+            value={password}
+            error={passwordError}
+            disabled={creating}
+            onChange={(event) => {
+              setPassword(event.target.value);
+              if (passwordError) setPasswordError("");
+            }}
+          />
+          {message && (
+            <p role="alert" className="text-sm text-danger">
+              {message}
+            </p>
+          )}
+          <Button type="submit" className="w-full" busy={creating} busyLabel="Luodaan…">
+            Jatka
+          </Button>
+        </form>
+      </BottomSheet>
 
       <ConfirmModal
         isOpen={pendingDelete !== null}

@@ -1,3 +1,4 @@
+import bcrypt from "bcryptjs";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { POST as registerOptions } from "@/app/api/auth/passkey/register/options/route";
 import { POST as registerVerify } from "@/app/api/auth/passkey/register/verify/route";
@@ -8,6 +9,10 @@ import { DELETE as deleteRoute, PATCH as renameRoute } from "@/app/api/auth/pass
 import { GET as statusRoute } from "@/app/api/auth/passkey/status/route";
 import { GET as aasaRoute } from "@/app/.well-known/apple-app-site-association/route";
 import { GET as me } from "@/app/api/auth/me/route";
+import { POST as resetPassword } from "@/app/api/auth/password/reset/route";
+import { POST as changePassword } from "@/app/api/auth/password/route";
+import { POST as sessionsRoute } from "@/app/api/auth/sessions/route";
+import { issuePasswordReset } from "@/lib/account-security";
 import { unstable_doesMiddlewareMatch } from "next/experimental/testing/server";
 import { config as proxyConfig } from "@/proxy";
 import { prisma } from "@/lib/db";
@@ -19,6 +24,7 @@ import { SoftAuthenticator } from "./helpers/soft-authenticator";
 
 const RP_ID = "lashkirja.test";
 const ORIGIN = `https://${RP_ID}`;
+const PASSWORD = "oikea-salasana-123";
 
 let user: TestUser;
 let cookie: string;
@@ -31,6 +37,7 @@ beforeEach(async () => {
   await prisma.passkeyChallenge.deleteMany();
   await resetDatabase();
   user = await createUser();
+  await prisma.user.update({ where: { id: user.id }, data: { passwordHash: await bcrypt.hash(PASSWORD, 4) } });
   cookie = await sessionCookie(user);
 });
 
@@ -40,7 +47,7 @@ afterEach(() => {
 });
 
 async function registerPasskey(authenticator: SoftAuthenticator, asCookie = cookie, deviceName?: string) {
-  const optionsRes = await registerOptions(buildRequest("POST", "/api/auth/passkey/register/options", {}, { cookie: asCookie }));
+  const optionsRes = await registerOptions(buildRequest("POST", "/api/auth/passkey/register/options", { currentPassword: PASSWORD }, { cookie: asCookie }));
   expect(optionsRes.status).toBe(200);
   const { challengeId, options } = await readJson(optionsRes);
   const response = authenticator.register(options);
@@ -112,7 +119,7 @@ describe("registration", () => {
   it("excludes already registered credentials in later options", async () => {
     const authenticator = new SoftAuthenticator(RP_ID, ORIGIN);
     await registerPasskey(authenticator);
-    const res = await registerOptions(buildRequest("POST", "/api/auth/passkey/register/options", {}, { cookie }));
+    const res = await registerOptions(buildRequest("POST", "/api/auth/passkey/register/options", { currentPassword: PASSWORD }, { cookie }));
     const { options } = await readJson(res);
     expect(options.excludeCredentials.map((c: { id: string }) => c.id)).toEqual([authenticator.id]);
     expect(options.authenticatorSelection).toMatchObject({ residentKey: "required", userVerification: "required" });
@@ -127,7 +134,7 @@ describe("registration", () => {
 
   it("rejects another user's registration challenge", async () => {
     const other = await createUser({ email: "toinen@example.com" });
-    const optionsRes = await registerOptions(buildRequest("POST", "/api/auth/passkey/register/options", {}, { cookie }));
+    const optionsRes = await registerOptions(buildRequest("POST", "/api/auth/passkey/register/options", { currentPassword: PASSWORD }, { cookie }));
     const { challengeId, options } = await readJson(optionsRes);
     const response = new SoftAuthenticator(RP_ID, ORIGIN).register(options);
     const res = await registerVerify(
@@ -233,7 +240,7 @@ describe("usernameless sign-in", () => {
   it("a registration challenge cannot be used to sign in", async () => {
     const authenticator = new SoftAuthenticator(RP_ID, ORIGIN);
     await registerPasskey(authenticator);
-    const optionsRes = await registerOptions(buildRequest("POST", "/api/auth/passkey/register/options", {}, { cookie }));
+    const optionsRes = await registerOptions(buildRequest("POST", "/api/auth/passkey/register/options", { currentPassword: PASSWORD }, { cookie }));
     const { challengeId, options } = await readJson(optionsRes);
     const res = await verify({ challengeId, response: authenticator.authenticate(options), transport: "bearer" });
     expect(res.status).toBe(401);
@@ -347,5 +354,100 @@ describe("management", () => {
 
   it("list requires a session", async () => {
     expect((await listRoute(buildRequest("GET", "/api/auth/passkey"))).status).toBe(401);
+  });
+});
+
+describe("re-authentication before adding a passkey", () => {
+  it("a stolen session without the password cannot start a registration", async () => {
+    const missing = await registerOptions(buildRequest("POST", "/api/auth/passkey/register/options", {}, { cookie }));
+    expect(missing.status).toBe(400);
+    const wrong = await registerOptions(
+      buildRequest("POST", "/api/auth/passkey/register/options", { currentPassword: "arvaus-123" }, { cookie })
+    );
+    expect(wrong.status).toBe(401);
+    expect(await readJson(wrong)).toEqual({ error: "Nykyinen salasana on väärä." });
+    expect(await prisma.passkeyChallenge.count()).toBe(0);
+    expect(await prisma.passkeyCredential.count()).toBe(0);
+  });
+
+  it("the confirmation lasts only the challenge's five minutes", async () => {
+    const authenticator = new SoftAuthenticator(RP_ID, ORIGIN);
+    const optionsRes = await registerOptions(
+      buildRequest("POST", "/api/auth/passkey/register/options", { currentPassword: PASSWORD }, { cookie })
+    );
+    const { challengeId, options } = await readJson(optionsRes);
+    await prisma.passkeyChallenge.update({
+      where: { id: challengeId },
+      data: { expiresAt: new Date(Date.now() - 1000) },
+    });
+    const res = await registerVerify(
+      buildRequest("POST", "/api/auth/passkey/register/verify", { challengeId, response: authenticator.register(options) }, { cookie })
+    );
+    expect(res.status).toBe(400);
+    expect(await prisma.passkeyCredential.count()).toBe(0);
+  });
+
+  it("password guesses through this route are rate limited", async () => {
+    for (let attempt = 0; attempt < 10; attempt += 1) {
+      await registerOptions(buildRequest("POST", "/api/auth/passkey/register/options", { currentPassword: "x" }, { cookie }));
+    }
+    const res = await registerOptions(
+      buildRequest("POST", "/api/auth/passkey/register/options", { currentPassword: PASSWORD }, { cookie })
+    );
+    expect(res.status).toBe(429);
+  });
+});
+
+describe("passkeys are removed when access is reset", () => {
+  async function signInStatus(authenticator: SoftAuthenticator) {
+    const { challengeId, options } = await startSignIn();
+    const res = await verify({ challengeId, response: authenticator.authenticate(options), transport: "bearer" });
+    return res.status;
+  }
+
+  it("after a password reset the old passkey no longer signs in", async () => {
+    const authenticator = new SoftAuthenticator(RP_ID, ORIGIN);
+    expect((await registerPasskey(authenticator)).status).toBe(201);
+    const token = await issuePasswordReset(user.id);
+    const reset = await resetPassword(
+      buildRequest("POST", "/api/auth/password/reset", { token, password: "palautettu-salasana" })
+    );
+    expect(reset.status).toBe(200);
+    expect(await prisma.passkeyCredential.count({ where: { userId: user.id } })).toBe(0);
+    expect(await signInStatus(authenticator)).toBe(401);
+  });
+
+  it("a password change removes passkeys too", async () => {
+    const authenticator = new SoftAuthenticator(RP_ID, ORIGIN);
+    await registerPasskey(authenticator);
+    const res = await changePassword(
+      buildRequest("POST", "/api/auth/password", { currentPassword: PASSWORD, newPassword: "uusi-salasana-123" }, { cookie })
+    );
+    expect(res.status).toBe(200);
+    expect(await prisma.passkeyCredential.count({ where: { userId: user.id } })).toBe(0);
+    expect(await signInStatus(authenticator)).toBe(401);
+  });
+
+  it.each(["others", "all"] as const)("signing out %s devices removes every passkey", async (scope) => {
+    const other = await createUser({ email: "toinen@example.com" });
+    await prisma.passkeyCredential.create({
+      data: { id: "muun-kayttajan-avain", userId: other.id, publicKey: new Uint8Array([1]), deviceName: "Muu" },
+    });
+    const authenticator = new SoftAuthenticator(RP_ID, ORIGIN);
+    await registerPasskey(authenticator);
+    const res = await sessionsRoute(buildRequest("POST", "/api/auth/sessions", { scope }, { cookie }));
+    expect(res.status).toBe(200);
+    expect(await readJson(res)).toMatchObject({ ok: true, passkeysRemoved: 1 });
+    expect(await prisma.passkeyCredential.count({ where: { userId: user.id } })).toBe(0);
+    expect(await prisma.passkeyCredential.count({ where: { userId: other.id } })).toBe(1);
+    expect(await signInStatus(authenticator)).toBe(401);
+  });
+
+  it("signing out one device keeps passkeys", async () => {
+    await registerPasskey(new SoftAuthenticator(RP_ID, ORIGIN));
+    const row = await prisma.authSession.create({ data: { userId: user.id, label: "Toinen" } });
+    const res = await sessionsRoute(buildRequest("POST", "/api/auth/sessions", { id: row.id }, { cookie }));
+    expect(res.status).toBe(200);
+    expect(await prisma.passkeyCredential.count({ where: { userId: user.id } })).toBe(1);
   });
 });

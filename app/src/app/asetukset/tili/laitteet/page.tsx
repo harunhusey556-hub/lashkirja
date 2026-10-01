@@ -7,6 +7,7 @@ import { apiFetch, leaveAfterSignOut, readJson } from "@/components/clientFetch"
 import { Card, PageTitle, Skeleton, SkeletonCard, SkeletonGroup, useSkeletonFade } from "@/components/ds";
 import { Button } from "@/components/ui";
 import { hapticNotify } from "@/lib/haptics";
+import { passkeysRemovedNote } from "@/lib/passkey-copy";
 import { showToast } from "@/lib/toast";
 import { tintedButtonClass } from "@/components/control-styles";
 
@@ -76,7 +77,7 @@ export default function LaitteetPage() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
     });
-    const data = await readJson<{ signedOut: boolean }>(response, "Istunnon sulkeminen epäonnistui");
+    const data = await readJson<{ signedOut: boolean; passkeysRemoved?: number }>(response, "Istunnon sulkeminen epäonnistui");
     if (data.signedOut) {
       const left = await leaveAfterSignOut();
       if (!left) throw new Error("Uloskirjautuminen epäonnistui. Istunto voi olla yhä voimassa.");
@@ -86,7 +87,11 @@ export default function LaitteetPage() {
       (rows ?? []).filter((row) => (body.id ? row.id !== body.id : row.current))
     );
     void hapticNotify("success");
-    showToast({ tone: "success", text: body.id ? "Laite suljettu." : "Muut laitteet suljettu.", haptic: false });
+    showToast({
+      tone: "success",
+      text: body.id ? "Laite suljettu." : `Muut laitteet suljettu. ${passkeysRemovedNote(data.passkeysRemoved)}`.trim(),
+      haptic: false,
+    });
   }
 
   if (failure !== null) {
@@ -178,7 +183,7 @@ export default function LaitteetPage() {
         title={pending?.kind === "others" ? "Kirjataanko muut laitteet ulos?" : "Kirjataanko laite ulos?"}
         description={
           pending?.kind === "others"
-            ? "Kaikki muut laitteet kirjataan ulos. Tämä laite pysyy kirjautuneena."
+            ? "Kaikki muut laitteet kirjataan ulos ja kaikki pääsyavaimet poistetaan, myös tämän laitteen. Tämä laite pysyy kirjautuneena salasanalla."
             : "Laite kirjataan ulos. Se voi kirjautua uudelleen salasanalla."
         }
         confirmLabel="Kirjaa ulos"

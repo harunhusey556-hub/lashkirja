@@ -13,6 +13,7 @@ import { buttonClass } from "@/components/control-styles";
 import { Button } from "@/components/ui";
 import { IS_MOBILE_BUILD } from "@/lib/build-target";
 import { hapticNotify } from "@/lib/haptics";
+import { passkeysRemovedNote } from "@/lib/passkey-copy";
 import { PASSWORD_MIN as MIN_PASSWORD_LENGTH } from "@/lib/session-policy";
 
 
@@ -52,6 +53,7 @@ function ResetForm({ token }: { token: string }) {
   const [repeat, setRepeat] = useState("");
   const [errors, setErrors] = useState<{ password?: string; repeat?: string; form?: string }>({});
   const [done, setDone] = useState(false);
+  const [passkeysRemoved, setPasskeysRemoved] = useState(0);
   const [busy, setBusy] = useState(false);
 
   async function submit(event: React.FormEvent) {
@@ -75,7 +77,8 @@ function ResetForm({ token }: { token: string }) {
         headers: { "Content-Type": "application/json", Accept: "application/json" },
         body: JSON.stringify({ token, password }),
       });
-      await readJson(response, "Salasanan vaihto epäonnistui");
+      const result = await readJson<{ passkeysRemoved?: number }>(response, "Salasanan vaihto epäonnistui");
+      setPasskeysRemoved(result?.passkeysRemoved ?? 0);
       void hapticNotify("success");
       setPassword("");
       setRepeat("");
@@ -96,7 +99,7 @@ function ResetForm({ token }: { token: string }) {
         </span>
         <h1 className="text-title-2 font-bold leading-tight tracking-[-0.02em] text-ink">Salasana vaihdettu</h1>
         <p className="text-body leading-relaxed text-ink-2" role="status">
-          Voit nyt kirjautua sisään uudella salasanalla.
+          Voit nyt kirjautua sisään uudella salasanalla. Kaikki laitteet kirjattiin ulos. {passkeysRemovedNote(passkeysRemoved)}
         </p>
         <Link href="/login" className={buttonClass("primary", "w-full")}>
           Kirjaudu sisään

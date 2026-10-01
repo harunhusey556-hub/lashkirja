@@ -10,6 +10,7 @@ export type PasskeyFailure =
   | "rate"
   | "closed"
   | "rejected"
+  | "password"
   | "failed";
 
 /**
@@ -64,10 +65,23 @@ export function passkeyFailureMessage(
       return serverMessage ?? "Tili on suljettu.";
     case "rejected":
       return "Pääsyavain ei kelpaa. Kirjaudu salasanalla.";
+    case "password":
+      return serverMessage ?? "Nykyinen salasana on väärä.";
     case "failed":
     default:
       return context === "sign-in"
         ? "Kirjautuminen pääsyavaimella epäonnistui. Yritä uudelleen tai kirjaudu salasanalla."
         : "Pääsyavaimen luonti epäonnistui. Yritä uudelleen.";
   }
+}
+
+/**
+ * Appended to the success copy of a password reset/change or a bulk sign-out:
+ * those delete every passkey (account-security revokeAccess), and the user
+ * has to know why Face ID sign-in stopped working.
+ */
+export function passkeysRemovedNote(count: number | undefined): string {
+  if (!count || count < 1) return "";
+  const lead = count === 1 ? "Pääsyavain poistettiin." : `${count} pääsyavainta poistettiin.`;
+  return `${lead} Luo uusi kohdassa Asetukset > Pääsyavaimet.`;
 }

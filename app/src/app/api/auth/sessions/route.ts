@@ -3,7 +3,7 @@ import { getIronSession } from "iron-session";
 import { z } from "zod";
 import { requireSession, sessionOptions, type SessionData } from "@/lib/session";
 import { guardWrite } from "@/lib/http-security";
-import { listAuthSessions, revokeAuthSessions } from "@/lib/account-security";
+import { listAuthSessions, revokeAccess } from "@/lib/account-security";
 import { prisma } from "@/lib/db";
 
 const bodySchema = z.object({
@@ -29,6 +29,7 @@ export async function POST(req: NextRequest) {
   }
 
   let signedOut = false;
+  let passkeysRemoved = 0;
   if (parsed.data.id) {
     const target = await prisma.authSession.findFirst({
       where: { id: parsed.data.id, userId: session.userId, revokedAt: null },
@@ -41,13 +42,14 @@ export async function POST(req: NextRequest) {
     });
     signedOut = target.id === session.sessionId;
   } else if (parsed.data.scope === "all") {
-    await revokeAuthSessions(session.userId);
+    // Bulk sign-outs also delete every passkey (see revokeAccess).
+    ({ passkeysRemoved } = await revokeAccess(session.userId));
     signedOut = true;
   } else {
-    await revokeAuthSessions(session.userId, session.sessionId);
+    ({ passkeysRemoved } = await revokeAccess(session.userId, session.sessionId));
   }
 
-  const res = NextResponse.json({ ok: true, signedOut });
+  const res = NextResponse.json({ ok: true, signedOut, passkeysRemoved });
   if (signedOut && session.kind !== "bearer") {
     const iron = await getIronSession<SessionData>(req, res, sessionOptions);
     iron.destroy();

@@ -90,6 +90,10 @@ export default function LoginForm() {
   const searchParams = useSearchParams();
   const emailRef = useRef<HTMLInputElement>(null);
   const passwordRef = useRef<HTMLInputElement>(null);
+  // The password just typed, kept in memory only while the passkey offer is
+  // on screen: adding a passkey needs a fresh password confirmation, and the
+  // sign-in a moment ago is exactly that. Cleared when the offer ends.
+  const offerPasswordRef = useRef("");
   // A ref, not state: must be readable synchronously inside handleSubmit to
   // block a second submit fired before the next render (Enter key repeat,
   // a second click landing before React re-renders the disabled button).
@@ -247,6 +251,7 @@ export default function LoginForm() {
   }
 
   function leaveAfterSignIn() {
+    offerPasswordRef.current = "";
     setPhase("success");
     router.push(next || "/dashboard");
   }
@@ -255,7 +260,7 @@ export default function LoginForm() {
     if (offerBusy) return;
     setOfferBusy(true);
     setOfferMessage("");
-    const result = await createPasskey();
+    const result = await createPasskey(offerPasswordRef.current);
     setOfferBusy(false);
     if (result.ok) {
       void hapticNotify("success");
@@ -302,6 +307,7 @@ export default function LoginForm() {
         void hapticNotify("success");
         if (await shouldOfferPasskey(email)) {
           markPasskeyOfferSeen(email);
+          offerPasswordRef.current = password;
           setPhase("offer");
           return;
         }

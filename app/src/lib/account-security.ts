@@ -44,7 +44,28 @@ export async function openAuthSession(
 
 export async function revokeAuthSessions(userId: string, exceptId?: string) {
   const now = new Date();
-  await prisma.$transaction([
+  await prisma.$transaction(revokeSessionWrites(userId, now, exceptId));
+}
+
+/**
+ * The "lock everyone else out" path: password reset, password change and
+ * signing out other/all devices. Revokes the sessions AND deletes every
+ * passkey, because a passkey is a login that outlives sessions: one added
+ * through a stolen session would otherwise survive the very action the owner
+ * takes to get rid of the intruder. The owner adds their own again afterwards.
+ * Returns how many passkeys were removed, so the UI can say so.
+ */
+export async function revokeAccess(userId: string, exceptSessionId?: string): Promise<{ passkeysRemoved: number }> {
+  const now = new Date();
+  const [removed] = await prisma.$transaction([
+    prisma.passkeyCredential.deleteMany({ where: { userId } }),
+    ...revokeSessionWrites(userId, now, exceptSessionId),
+  ]);
+  return { passkeysRemoved: removed.count };
+}
+
+function revokeSessionWrites(userId: string, now: Date, exceptId?: string) {
+  return [
     prisma.authSession.updateMany({
       where: {
         userId,
@@ -59,7 +80,7 @@ export async function revokeAuthSessions(userId: string, exceptId?: string) {
       where: { id: userId },
       data: { legacySessionsRevokedAt: now },
     }),
-  ]);
+  ] as [ReturnType<typeof prisma.authSession.updateMany>, ReturnType<typeof prisma.user.update>];
 }
 
 export async function listAuthSessions(userId: string, currentId?: string) {
@@ -69,6 +90,11 @@ export async function listAuthSessions(userId: string, currentId?: string) {
     select: { id: true, label: true, createdAt: true, lastSeenAt: true },
   });
   return rows.map((row) => ({ ...row, current: row.id === currentId }));
+}
+
+/** Re-authentication for sensitive actions: throws 401 "Nykyinen salasana on väärä." */
+export async function confirmCurrentPassword(userId: string, currentPassword: string): Promise<void> {
+  await requireCurrentPassword(userId, currentPassword);
 }
 
 async function requireCurrentPassword(userId: string, currentPassword: string) {
@@ -96,7 +122,7 @@ export async function changePassword(
   await requireCurrentPassword(userId, currentPassword);
   const passwordHash = await bcrypt.hash(nextPassword, 12);
   await prisma.user.update({ where: { id: userId }, data: { passwordHash } });
-  await revokeAuthSessions(userId, currentSessionId);
+  return revokeAccess(userId, currentSessionId);
 }
 
 async function retireTokens(userId: string, purpose: string) {
@@ -135,7 +161,7 @@ export async function resetPasswordWithToken(token: string, nextPassword: string
     prisma.user.update({ where: { id: row.userId }, data: { passwordHash } }),
     prisma.accountToken.update({ where: { id: row.id }, data: { usedAt: new Date() } }),
   ]);
-  await revokeAuthSessions(row.userId);
+  return revokeAccess(row.userId);
 }
 
 export function normalizeLoginEmail(email: string): string {

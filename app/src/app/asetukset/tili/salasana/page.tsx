@@ -7,6 +7,7 @@ import { PasswordField } from "@/components/ds/PasswordField";
 import { useSession } from "@/components/SessionProvider";
 import { Button, FormError } from "@/components/ui";
 import { hapticNotify } from "@/lib/haptics";
+import { passkeysRemovedNote } from "@/lib/passkey-copy";
 import { PASSWORD_MIN as MIN_PASSWORD_LENGTH } from "@/lib/session-policy";
 import { showToast } from "@/lib/toast";
 
@@ -45,11 +46,14 @@ export default function SalasanaPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ currentPassword, newPassword }),
       });
-      await readJson(response, "Salasanan vaihto epäonnistui");
+      const result = await readJson<{ passkeysRemoved?: number }>(response, "Salasanan vaihto epäonnistui");
       setCurrentPassword("");
       setNewPassword("");
       setRepeatPassword("");
-      showToast({ tone: "success", text: "Salasana vaihdettu. Muut laitteet kirjattiin ulos." });
+      showToast({
+        tone: "success",
+        text: `Salasana vaihdettu. Muut laitteet kirjattiin ulos. ${passkeysRemovedNote(result?.passkeysRemoved)}`.trim(),
+      });
     } catch (error: unknown) {
       void hapticNotify("error");
       // A wrong current password comes back as 401 with its own message: it
@@ -71,7 +75,7 @@ export default function SalasanaPage() {
       <form onSubmit={(event) => void changePassword(event)} noValidate>
         <Card className="space-y-4">
           <p className="text-caption text-ink-2">
-            Nykyinen salasana vaaditaan. Uudessa on vähintään {MIN_PASSWORD_LENGTH} merkkiä. Muut kirjautuneet laitteet suljetaan.
+            Nykyinen salasana vaaditaan. Uudessa on vähintään {MIN_PASSWORD_LENGTH} merkkiä. Muut kirjautuneet laitteet suljetaan ja pääsyavaimet poistetaan.
           </p>
           {/* Lets iOS Password AutoFill pair the new password with this account (AUTH-10). */}
           <input
