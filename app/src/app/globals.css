@@ -1279,8 +1279,9 @@ body.signing-out {
   }
 }
 
-/* The heading focused after a navigation (AX-04) shows no ring on touch. */
-main h1[tabindex="-1"]:focus:not(:focus-visible) {
+/* The heading focused after a navigation (AX-04) never shows a ring: it is not interactive, and WebKit
+   matches :focus-visible for the script focus (touch emulation, iOS simulator; F92, G40). */
+main h1[tabindex="-1"]:focus {
   outline: none;
 }
 
