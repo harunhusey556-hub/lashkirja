@@ -36,14 +36,18 @@ import { Check, X } from "lucide-react";
 import { Icon } from "@/components/ds/Icon";
 import { formatDate, formatEur } from "@/lib/format";
 import {
+  addVatRow,
   autoVatAmount,
-  DEFAULT_VAT_RATE,
+  followDateRate,
   moneyField,
+  newReceiptVatRows,
   parseReceiptAmount,
   syncAutoVat,
   vatMismatchHint,
+  vatPayload,
+  vatRateChoicesForDate,
+  vatRowsChanged,
   vatRowsFromSaved,
-  VAT_TOO_LARGE_MESSAGE,
   type VatRow,
 } from "@/lib/receipt-vat";
 import { focusFirstInvalid } from "@/lib/focus-field";
@@ -55,7 +59,7 @@ import {
   type NativePick,
 } from "@/lib/native-pick";
 import { clearDraft } from "@/lib/draft-store";
-import { receiptFieldId, validateReceiptFields } from "@/lib/receipt-form";
+import { receiptCategoryFocusId, receiptFieldId, validateReceiptFields } from "@/lib/receipt-form";
 import { RECEIPT_PHASE } from "@/lib/screen-state";
 import { isLowConfidenceField } from "@/lib/receipt-confidence";
 import {
@@ -65,7 +69,7 @@ import {
 } from "@/lib/receipt-categories";
 import { RECEIPT_MATCH_STATUS, receiptMatchStatusKey } from "@/lib/status-labels";
 import { readPageCache, writePageCache } from "@/lib/page-cache";
-import { UNREADABLE_RECEIPT_NOTE } from "@/lib/receipt-unreadable";
+import { isUnreadableNote, UNREADABLE_RECEIPT_NOTE } from "@/lib/receipt-unreadable";
 import { useReceiptUploadQueue, validateUploadFile, type ReadyUpload } from "@/components/useReceiptUploadQueue";
 import ReceiptUploadArea from "@/components/ReceiptUploadArea";
 import { BottomActions, DetailHero, MoreMenu, PageTitle, Section, StatusTag } from "@/components/ds";
@@ -105,7 +109,8 @@ const emptyForm: ReceiptForm = {
   customCategory: "",
   notes: "",
   type: "meno",
-  vatDetails: [{ rate: DEFAULT_VAT_RATE, amount: "", auto: true }],
+  // No rows = "Ei ALV-erittelyä". A new receipt gets its default row from the upload (applyUpload).
+  vatDetails: [],
   reference: "",
   invoiceNumber: "",
 };
@@ -228,12 +233,14 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
       customCategory: knownCategory ? "" : upload.extracted.category || "",
       notes: upload.extracted.notes || "",
       type: upload.extracted.type || "meno",
-      vatDetails: vatRowsFromSaved(
+      // Only a NEW receipt is prefilled: what extraction read, else the general rate of the date.
+      vatDetails: newReceiptVatRows(
         upload.extracted.vatDetails?.map((detail) => ({
           rate: detail.rate ?? 0,
           amount: detail.amount ?? 0,
         })),
-        extractedTotal
+        extractedTotal,
+        upload.extracted.date || ""
       ),
       reference: upload.extracted.reference || "",
       invoiceNumber: upload.extracted.invoiceNumber || "",
@@ -384,6 +391,7 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
    * way (Task 7-style page-cache wiring for the detail pages). */
   function applyReceiptResponse(r: NonNullable<ReceiptResponse["receipt"]>) {
     const totalText = moneyField(r.totalAmount);
+    // Stored VAT only: a receipt without it opens with an empty VAT section (V8, R53, R57).
     let savedVat: { rate: number; amount: number }[] | null = null;
     if (r.vatDetails) {
       try {
@@ -397,11 +405,14 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
     setOriginalName(r.fileName || "");
     // A capture nothing could be read from carries the calm line as its note: show it
     // as the line above the form, not as the user's own Selite.
-    const wasUnreadable = r.notes === UNREADABLE_RECEIPT_NOTE;
+    // Older pending receipts carry the earlier wording of the same note (V13).
+    const wasUnreadable = isUnreadableNote(r.notes);
     setUnreadable(wasUnreadable);
+    // A receipt typed in by hand has no recognition score to doubt, whatever an old row stored (V11).
+    const typedByHand = wasUnreadable || r.source === "manual";
     setMeta({
       source: wasUnreadable ? "manual" : r.source || "manual",
-      confidence: wasUnreadable ? null : r.confidence ?? null,
+      confidence: typedByHand ? null : r.confidence ?? null,
       rawText: r.rawText,
     });
     const knownCategory = isKnownCategory(r.category);
@@ -613,55 +624,30 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
       category: resolvedCategory,
     });
     const totalAmount = parseReceiptAmount(formData.totalAmount) ?? NaN;
-    // A single VAT row that shows a rate but no amount takes the VAT of the
-    // total: a rate on screen is never saved as "no VAT" (F35).
-    const vatRows =
-      formData.vatDetails.length === 1 && formData.vatDetails[0].amount.trim() === ""
-        ? syncAutoVat([{ ...formData.vatDetails[0], auto: true }], formData.totalAmount)
-        : formData.vatDetails;
-    const populatedVatRows = vatRows.filter((detail) => detail.amount !== "");
-    if (
-      vatRows.length > 1 &&
-      populatedVatRows.length !== vatRows.length
-    ) {
-      setError("Anna ALV-summa jokaiselle riville tai poista tyhjä rivi");
-      return;
-    }
-    const vatDetails = populatedVatRows.map((detail) => ({
-      rate: Number(detail.rate),
-      amount: parseReceiptAmount(detail.amount) ?? NaN,
-    }));
-    const invalidVatIndex = vatDetails.findIndex(
-      (detail) =>
-        !Number.isFinite(detail.rate) ||
-        !Number.isFinite(detail.amount) ||
-        detail.amount < 0
-    );
-    const totalVatCents = vatDetails.reduce((sum, detail) => sum + Math.round(detail.amount * 100), 0);
     if (Object.keys(nextFieldErrors).length > 0) {
       setFieldErrors(nextFieldErrors);
       setError("");
+      // The category is a chip group until one is chosen: it has its own id to focus (V12).
       focusFirstInvalid(
         nextFieldErrors,
         ["vendor", "date", "totalAmount", "category"],
-        (key) => (key === "category" && useCustomCategory ? "receipt-custom-category" : receiptFieldId(key))
+        (key) =>
+          key === "category"
+            ? receiptCategoryFocusId({ useCustom: useCustomCategory, hasCategory: Boolean(formData.category) })
+            : receiptFieldId(key)
       );
       return;
     }
-    if (invalidVatIndex !== -1 || totalVatCents > Math.round(totalAmount * 100)) {
-      const vatIndex = invalidVatIndex !== -1 ? invalidVatIndex : 0;
-      const vatErrors = {
-        [`vat-${vatIndex}`]:
-          invalidVatIndex !== -1 ? "ALV-summa ei ole kelvollinen." : VAT_TOO_LARGE_MESSAGE,
-      };
-      setFieldErrors(vatErrors);
+    // What is stored is what the screen shows: an empty amount is refused, never filled in here.
+    const vat = vatPayload(formData.vatDetails, formData.totalAmount);
+    if ("errorKey" in vat) {
+      setFieldErrors({ [vat.errorKey]: vat.message });
       setError("");
-      focusFirstInvalid(vatErrors, [`vat-${vatIndex}`], () => `receipt-vat-amount-${vatIndex}`);
+      focusFirstInvalid({ [vat.errorKey]: vat.message }, [vat.errorKey], () => `receipt-vat-amount-${vat.errorKey.slice(4)}`);
       return;
     }
-    if (vatRows !== formData.vatDetails) {
-      setFormData((prev) => ({ ...prev, vatDetails: vatRows }));
-    }
+    // A saved receipt gets vatDetails only when the user changed the rows (V8, R53, R57, R61).
+    const sendVat = !isEdit || vatRowsChanged(formData.vatDetails, baseline.vatDetails);
     setFieldErrors({});
 
     setSaving(true);
@@ -673,7 +659,7 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
         vendor: formData.vendor || null,
         date: formData.date || null,
         totalAmount,
-        vatDetails,
+        ...(sendVat ? { vatDetails: vat.lines } : {}),
         category: resolvedCategory,
         notes: formData.notes.trim() || null,
         type: formData.type,
@@ -790,22 +776,24 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
     : filePath
       ? `/api/uploads/${encodeURIComponent(filePath)}`
       : null;
+  // Typed by hand (an unreadable photo, or a manual receipt): there is no recognition to doubt (V11, V13).
+  const showUncertainty = !unreadable && meta?.source !== "manual";
   const lowVendor =
-    !unreadable &&
+    showUncertainty &&
     isLowConfidenceField({
       value: formData.vendor,
       overall: meta?.confidence,
       field: meta?.fieldConfidence?.vendor,
     });
   const lowDate =
-    !unreadable &&
+    showUncertainty &&
     isLowConfidenceField({
       value: formData.date,
       overall: meta?.confidence,
       field: meta?.fieldConfidence?.date,
     });
   const lowAmount =
-    !unreadable &&
+    showUncertainty &&
     isLowConfidenceField({
       value: formData.totalAmount,
       overall: meta?.confidence,
@@ -1048,9 +1036,15 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
                           autoComplete="off"
                           required
                           value={formData.date}
-                          onChange={(e) =>
-                            setFormData({ ...formData, date: e.target.value })
-                          }
+                          onChange={(e) => {
+                            const date = e.target.value;
+                            // A VAT rate nobody chose follows the date: 24 % before 1.9.2024 (V9).
+                            setFormData((prev) => ({
+                              ...prev,
+                              date,
+                              vatDetails: followDateRate(prev.vatDetails, date, prev.totalAmount),
+                            }));
+                          }}
                           aria-invalid={Boolean(fieldErrors.date) || undefined}
                           aria-describedby={fieldErrors.date ? "receipt-date-error" : undefined}
                           className={fieldClass(lowDate)}
@@ -1136,9 +1130,14 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
 
               <Section title="ALV-erittely">
                 <div className="space-y-3 px-4 py-4">
+                  {formData.vatDetails.length === 0 && (
+                    <p className="text-body text-ink-2" data-testid="vat-empty">
+                      Ei ALV-erittelyä. Lisää rivi, jos kuitilla on ALV.
+                    </p>
+                  )}
                   {formData.vatDetails.map((detail, index) => {
-                    const standardRates = ["25.5", "13.5", "10", "0"];
-                    const isLegacyRate = !standardRates.includes(detail.rate);
+                    const rateChoices = vatRateChoicesForDate(formData.date);
+                    const isLegacyRate = !rateChoices.includes(detail.rate);
                     return (
                       <div key={index} className="grid grid-cols-[1fr_1fr_auto] items-end gap-2">
                         <div>
@@ -1154,8 +1153,9 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
                               const newRate = event.target.value;
                               setFormData((prev) => {
                                 const single = prev.vatDetails.length === 1;
+                                // A rate picked by hand is no longer the default of the date.
                                 const rows = prev.vatDetails.map((row, rowIndex) =>
-                                  rowIndex === index ? { ...row, rate: newRate } : row
+                                  rowIndex === index ? { ...row, rate: newRate, defaulted: false } : row
                                 );
                                 // Picking the rate of a single row asks for the VAT of the total,
                                 // with the same Finnish parser the save uses (F03).
@@ -1173,10 +1173,11 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
                             {isLegacyRate ? (
                               <option value={detail.rate}>{detail.rate.replace(".", ",")} %</option>
                             ) : null}
-                            <option value="25.5">25,5 %</option>
-                            <option value="13.5">13,5 %</option>
-                            <option value="10">10 %</option>
-                            <option value="0">0 %</option>
+                            {rateChoices.map((rate) => (
+                              <option key={rate} value={rate}>
+                                {rate.replace(".", ",")} %
+                              </option>
+                            ))}
                           </select>
                         </div>
                         <div>
@@ -1214,26 +1215,14 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
                         <button
                           type="button"
                           onClick={() =>
+                            // The only row can go too: a receipt may have no VAT breakdown at all.
                             setFormData({
                               ...formData,
-                              vatDetails:
-                                formData.vatDetails.length === 1
-                                  ? syncAutoVat(
-                                      [{ rate: DEFAULT_VAT_RATE, amount: "", auto: true }],
-                                      formData.totalAmount
-                                    )
-                                  : formData.vatDetails.filter(
-                                      (_, rowIndex) => rowIndex !== index
-                                    ),
+                              vatDetails: formData.vatDetails.filter((_, rowIndex) => rowIndex !== index),
                             })
                           }
-                          className="active-press flex h-12 w-12 items-center justify-center rounded-card border border-danger/30 text-danger disabled:opacity-40"
+                          className="active-press flex h-12 w-12 items-center justify-center rounded-card border border-danger/30 text-danger"
                           aria-label={`Poista ALV-rivi ${index + 1}`}
-                          disabled={
-                            formData.vatDetails.length === 1 &&
-                            detail.amount === "" &&
-                            detail.rate === "25.5"
-                          }
                         >
                           <Icon icon={X} />
                         </button>
@@ -1255,10 +1244,7 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
                     onClick={() =>
                       setFormData({
                         ...formData,
-                        vatDetails: [
-                          ...formData.vatDetails.map((row) => ({ ...row, auto: false })),
-                          { rate: DEFAULT_VAT_RATE, amount: "", auto: false },
-                        ],
+                        vatDetails: addVatRow(formData.vatDetails, formData.totalAmount, formData.date),
                       })
                     }
                     className="active-press min-h-12 w-full rounded-card border border-line bg-surface text-body font-semibold text-ink"
@@ -1323,7 +1309,12 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
                 </div>
               </Section>
 
-              <div>
+              <div
+                // No category yet: the chip group is what the refusal focuses and scrolls to (V12).
+                id={formData.category || useCustomCategory ? undefined : "receipt-category-group"}
+                tabIndex={formData.category || useCustomCategory ? undefined : -1}
+                className="scroll-mb-32 outline-none"
+              >
                 <p className={LABEL_CLASS} id="receipt-category-label">Kategoria</p>
                 {(formData.category || useCustomCategory) ? (
                   <div className="space-y-3">
@@ -1375,7 +1366,12 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
                     )}
                   </div>
                 ) : (
-                  <div role="group" aria-labelledby="receipt-category-label" className="flex flex-wrap gap-2">
+                  <div
+                    role="group"
+                    aria-labelledby="receipt-category-label"
+                    aria-describedby={fieldErrors.category ? "receipt-category-error" : undefined}
+                    className="flex flex-wrap gap-2"
+                  >
                     {RECEIPT_CATEGORIES.map((c) => (
                       <button
                         key={c.id}

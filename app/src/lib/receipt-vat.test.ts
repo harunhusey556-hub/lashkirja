@@ -1,6 +1,14 @@
 import { describe, expect, it } from "vitest";
 import {
+  addVatRow,
   autoVatAmount,
+  defaultVatRateForDate,
+  defaultVatRows,
+  followDateRate,
+  newReceiptVatRows,
+  vatPayload,
+  vatRateChoicesForDate,
+  vatRowsChanged,
   moneyField,
   parseReceiptAmount,
   syncAutoVat,
@@ -117,9 +125,10 @@ describe("vatRowsFromSaved", () => {
     ]);
   });
 
-  it("starts an empty receipt with the default rate and the computed VAT", () => {
-    expect(vatRowsFromSaved(null, "12,50")).toEqual([{ rate: "25.5", amount: "2,54", auto: true }]);
-    expect(vatRowsFromSaved([], "")).toEqual([{ rate: "25.5", amount: "", auto: true }]);
+  it("opens a receipt with no saved VAT with an empty VAT section, never a prefill (V8, R53, R57)", () => {
+    expect(vatRowsFromSaved(null, "12,50")).toEqual([]);
+    expect(vatRowsFromSaved([], "12,50")).toEqual([]);
+    expect(vatRowsFromSaved(undefined, "")).toEqual([]);
   });
 
   it("marks several saved rows as typed", () => {
@@ -185,5 +194,117 @@ describe("vatLinesProblem", () => {
   it("refuses a rate the VAT return does not know", () => {
     expect(vatLinesProblem([{ rate: 99, amount: 0.5 }], 10)).toMatch(/99 %/);
     expect(vatLinesProblem([{ rate: 12.5, amount: 0.5 }], 10)).toMatch(/12,5 %/);
+  });
+});
+
+describe("default rate by receipt date (V9)", () => {
+  it("is 25,5 from 1.9.2024 and 24 before it, and 25,5 while the date is unknown", () => {
+    expect(defaultVatRateForDate("")).toBe("25.5");
+    expect(defaultVatRateForDate("2026-09-20")).toBe("25.5");
+    expect(defaultVatRateForDate("2024-09-01")).toBe("25.5");
+    expect(defaultVatRateForDate("2024-08-31")).toBe("24");
+    expect(defaultVatRateForDate("2023-05-10")).toBe("24");
+  });
+
+  it("offers 14 % as the reduced rate until 31.12.2025 and 13,5 % after it", () => {
+    expect(vatRateChoicesForDate("2026-01-01")).toEqual(["25.5", "13.5", "10", "0"]);
+    expect(vatRateChoicesForDate("")).toEqual(["25.5", "13.5", "10", "0"]);
+    expect(vatRateChoicesForDate("2025-12-31")).toEqual(["25.5", "14", "10", "0"]);
+    expect(vatRateChoicesForDate("2023-05-10")).toEqual(["24", "14", "10", "0"]);
+  });
+});
+
+describe("a new receipt prefills the VAT, an existing one never does", () => {
+  it("prefills the default row of the date for manual entry and follows the total", () => {
+    expect(defaultVatRows("124,00", "2023-05-10")).toEqual([
+      { rate: "24", amount: "24,00", auto: true, defaulted: true },
+    ]);
+    expect(defaultVatRows("", "")).toEqual([{ rate: "25.5", amount: "", auto: true, defaulted: true }]);
+  });
+
+  it("keeps what extraction read, and prefills only when it read no VAT", () => {
+    expect(newReceiptVatRows([{ rate: 10, amount: 1 }], "11,00", "2026-09-20")).toEqual([
+      { rate: "10", amount: "1,00", auto: true },
+    ]);
+    expect(newReceiptVatRows([], "12,50", "2026-09-20")).toEqual([
+      { rate: "25.5", amount: "2,54", auto: true, defaulted: true },
+    ]);
+  });
+
+  it("moves the rate of a row nobody set by hand when the date moves, and leaves a chosen rate", () => {
+    const prefilled = defaultVatRows("124,00", "2026-09-20");
+    expect(followDateRate(prefilled, "2023-05-10", "124,00")).toEqual([
+      { rate: "24", amount: "24,00", auto: true, defaulted: true },
+    ]);
+    const chosen = [{ rate: "10", amount: "11,27", auto: true }];
+    expect(followDateRate(chosen, "2023-05-10", "124,00")).toBe(chosen);
+    const typed = [{ rate: "25.5", amount: "5,00", auto: false, defaulted: true }];
+    expect(followDateRate(typed, "2023-05-10", "124,00")).toBe(typed);
+  });
+});
+
+describe("adding VAT rows", () => {
+  it("adds the first row from the empty state with the VAT of the total, on the user's tap", () => {
+    expect(addVatRow([], "12,50", "2026-09-20")).toEqual([
+      { rate: "25.5", amount: "2,54", auto: true, defaulted: true },
+    ]);
+  });
+
+  it("adds a further row blank and freezes the others", () => {
+    expect(addVatRow([{ rate: "25.5", amount: "2,54", auto: true }], "12,50", "2026-09-20")).toEqual([
+      { rate: "25.5", amount: "2,54", auto: false },
+      { rate: "25.5", amount: "", auto: false },
+    ]);
+  });
+});
+
+describe("vatRowsChanged", () => {
+  it("compares rate and amount, not the following flag", () => {
+    const stored = vatRowsFromSaved([{ rate: 25.5, amount: 2.54 }], "12,50");
+    expect(vatRowsChanged(stored, [{ rate: "25.5", amount: "2,54", auto: false }])).toBe(false);
+    expect(vatRowsChanged(stored, [{ rate: "25.5", amount: "2,50", auto: false }])).toBe(true);
+    expect(vatRowsChanged(stored, [{ rate: "13.5", amount: "2,54", auto: false }])).toBe(true);
+    expect(vatRowsChanged([], [])).toBe(false);
+    expect(vatRowsChanged([], defaultVatRows("12,50", ""))).toBe(true);
+    expect(vatRowsChanged(stored, [])).toBe(true);
+  });
+});
+
+describe("vatPayload", () => {
+  it("is an empty list for no VAT rows, so nothing is invented", () => {
+    expect(vatPayload([], "12,50")).toEqual({ lines: [] });
+  });
+
+  it("turns the rows into lines in euros", () => {
+    expect(vatPayload([{ rate: "25.5", amount: "2,54", auto: true }], "12,50")).toEqual({
+      lines: [{ rate: 25.5, amount: 2.54 }],
+    });
+  });
+
+  it("refuses a row with an empty amount, on any row count, instead of filling it (V10)", () => {
+    expect(vatPayload([{ rate: "25.5", amount: "", auto: true }], "12,50")).toEqual({
+      errorKey: "vat-0",
+      message: "Anna ALV-summa tai poista rivi.",
+    });
+    expect(
+      vatPayload(
+        [
+          { rate: "25.5", amount: "1,00", auto: false },
+          { rate: "10", amount: " ", auto: false },
+        ],
+        "12,50"
+      )
+    ).toEqual({ errorKey: "vat-1", message: "Anna ALV-summa tai poista rivi." });
+  });
+
+  it("refuses a bad amount and a VAT larger than the total", () => {
+    expect(vatPayload([{ rate: "25.5", amount: "x", auto: false }], "12,50")).toMatchObject({
+      errorKey: "vat-0",
+      message: "ALV-summa ei ole kelvollinen.",
+    });
+    expect(vatPayload([{ rate: "25.5", amount: "20,00", auto: false }], "12,50")).toMatchObject({
+      errorKey: "vat-0",
+      message: "ALV-summa ei voi olla suurempi kuin kuitin summa.",
+    });
   });
 });

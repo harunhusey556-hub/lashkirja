@@ -32,3 +32,13 @@ export function receiptFieldId(key: string): string {
   if (key === "category") return "receipt-category";
   return key;
 }
+
+/**
+ * The element that takes focus when the category is the first invalid field.
+ * While no category is chosen the control is a chip group, which has its own id
+ * so the refusal is scrolled to and focused instead of staying off screen (V12).
+ */
+export function receiptCategoryFocusId(state: { useCustom: boolean; hasCategory: boolean }): string {
+  if (state.useCustom) return "receipt-custom-category";
+  return state.hasCategory ? "receipt-category" : "receipt-category-group";
+}

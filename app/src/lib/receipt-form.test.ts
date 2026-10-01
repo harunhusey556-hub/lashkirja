@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { firstInvalidKey } from "./focus-field";
-import { receiptFieldId, validateReceiptFields } from "./receipt-form";
+import { receiptCategoryFocusId, receiptFieldId, validateReceiptFields } from "./receipt-form";
 
 describe("validateReceiptFields", () => {
   it("accepts the same money spellings as the invoice form", () => {
@@ -28,5 +28,16 @@ describe("validateReceiptFields", () => {
     expect(receiptFieldId("vendor")).toBe("receipt-vendor");
     expect(errors.date).toBeTruthy();
     expect(errors.totalAmount).toMatch(/nolla|kelvollinen|pakollinen/);
+  });
+});
+
+describe("receiptCategoryFocusId (V12)", () => {
+  it("points at the chip group while no category is chosen, so the refusal can be focused and scrolled to", () => {
+    expect(receiptCategoryFocusId({ useCustom: false, hasCategory: false })).toBe("receipt-category-group");
+  });
+
+  it("points at the select once a category is chosen, and at the free text for an own category", () => {
+    expect(receiptCategoryFocusId({ useCustom: false, hasCategory: true })).toBe("receipt-category");
+    expect(receiptCategoryFocusId({ useCustom: true, hasCategory: false })).toBe("receipt-custom-category");
   });
 });
