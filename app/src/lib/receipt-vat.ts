@@ -123,9 +123,11 @@ export const VAT_TOO_LARGE_MESSAGE = "ALV-summa ei voi olla suurempi kuin kuitin
  */
 export function vatLinesProblem(
   lines: Array<{ rate: number; amount: number }>,
-  totalAmount: number | null | undefined
+  totalAmount: number | null | undefined,
+  /** False when the lines were stored earlier and are not being changed: only the amounts are checked. */
+  checkRates = true
 ): string | null {
-  for (const line of lines) {
+  for (const line of checkRates ? lines : []) {
     if (!isSupportedVatRate(line.rate)) {
       return `ALV-kanta ${String(line.rate).replace(".", ",")} % ei ole tuettu. Valitse 25,5, 13,5, 10 tai 0 %.`;
     }

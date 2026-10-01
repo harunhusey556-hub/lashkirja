@@ -11,10 +11,12 @@ import {
   rejectCrossSite,
   rejectOversizedContentLength,
 } from "@/lib/http-security";
-import { withErrorHandler, UnauthorizedError, NotFoundError } from "@/lib/api-errors";
+import { withErrorHandler, UnauthorizedError, NotFoundError, ValidationError } from "@/lib/api-errors";
 import { sanitizeText } from "@/lib/sanitizer";
 
 import { assertPeriodOpen } from "@/lib/period-lock";
+import { parseVatDetails } from "@/lib/alv";
+import { vatLinesProblem } from "@/lib/receipt-vat";
 import { expectedUpdatedAtDate, versionConflict } from "@/lib/edit-conflict";
 const patchSchema = z.object({
   vendor: z.string().trim().max(300).nullish(),
@@ -151,6 +153,26 @@ export const PATCH = withErrorHandler(async (
     return noStoreJson({ error: "Ei päivitettäviä kenttiä" }, { status: 400 });
   }
   const expected = expectedUpdatedAtDate(expectedUpdatedAt);
+
+  // The VAT that would be stored (the sent one, or the stored one when only the
+  // total changes) must fit the total that would be stored: same rule as save.
+  if (body.vatDetails !== undefined || body.totalAmount !== undefined) {
+    const vatLines =
+      body.vatDetails !== undefined
+        ? (body.vatDetails ?? [])
+        : (parseVatDetails(owned.vatDetails) ?? []).map((line) => ({
+            rate: line.rate,
+            amount: centsToEuros(line.amountCents),
+          }));
+    const totalAmount =
+      body.totalAmount !== undefined
+        ? body.totalAmount
+        : owned.totalAmountCents == null
+          ? null
+          : centsToEuros(owned.totalAmountCents);
+    const vatProblem = vatLinesProblem(vatLines, totalAmount, body.vatDetails !== undefined);
+    if (vatProblem) throw new ValidationError(vatProblem);
+  }
 
   // Both where the receipt is now and where it would move to must be open.
   await assertPeriodOpen(session.userId!, [

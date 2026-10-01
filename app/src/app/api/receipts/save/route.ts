@@ -10,9 +10,10 @@ import {
   rejectCrossSite,
   rejectOversizedContentLength,
 } from "@/lib/http-security";
-import { withErrorHandler, UnauthorizedError, AppError } from "@/lib/api-errors";
+import { withErrorHandler, UnauthorizedError, AppError, ValidationError } from "@/lib/api-errors";
 import { sanitizeText } from "@/lib/sanitizer";
 import { assertPeriodOpen } from "@/lib/period-lock";
+import { vatLinesProblem } from "@/lib/receipt-vat";
 
 const vatLineSchema = z.object({
   rate: z.number().finite().min(0).max(100),
@@ -45,6 +46,10 @@ export const POST = withErrorHandler(async (req: NextRequest) => {
   // Let ZodError bubble up to the global error handler
   const parsed = saveSchema.parse(await req.json());
   const body = parsed;
+
+  // The form refuses a VAT larger than the total or an unknown rate; an API client is held to the same rule.
+  const vatProblem = vatLinesProblem(body.vatDetails ?? [], body.totalAmount);
+  if (vatProblem) throw new ValidationError(vatProblem);
 
   // A receipt dated inside a closed period would change a filed VAT return.
   await assertPeriodOpen(session.userId, [body.date ? isoDateToUtc(body.date) : null]);
