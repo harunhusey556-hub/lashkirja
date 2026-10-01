@@ -14,6 +14,7 @@ import { buildInvoicePdfData, getInvoice, type PublicInvoice } from "./sales-inv
 import { renderReminderPdf, type ReminderPdfData } from "./invoice-pdf";
 import { nextReminderWait, reminderWaitMessage } from "./reminder-schedule";
 import { pendingReminderAt } from "./reminder-waits";
+import { findSenderAccount } from "./mailer";
 
 /** Days the customer is given to pay a reminder. */
 export const REMINDER_TERM_DAYS = 7;
@@ -43,6 +44,8 @@ export interface ReminderPreview {
    */
   nextReminderAt: string | null;
   nextReminderNote: string | null;
+  /** True when no sending mailbox is connected: sending would be refused (F41). */
+  mailboxMissing: boolean;
 }
 
 async function loadSettings(userId: string) {
@@ -117,6 +120,7 @@ export async function previewReminder(
     })),
     nextReminderAt: waiting ? wait.at.toISOString() : null,
     nextReminderNote: waiting && latest ? reminderWaitMessage(latest) : null,
+    mailboxMissing: (await findSenderAccount(userId)) === null,
   };
 }
 

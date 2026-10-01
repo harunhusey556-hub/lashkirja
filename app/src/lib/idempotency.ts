@@ -83,6 +83,49 @@ export async function withIdempotency<T>(
     return { ...fresh, replayed: false };
   }
 
+  const answered = await claimKey<T>(userId, scope, key, requestHash);
+  if (answered) return answered;
+
+  const maxAttempts = 5;
+  let lastError: unknown;
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    try {
+      const result = await prisma.$transaction(async (tx) => {
+        const produced = await run(tx);
+        if (failResponseSaves > 0) {
+          failResponseSaves -= 1;
+          throw new Error("idempotency response was not stored");
+        }
+        await tx.idempotencyRecord.update({
+          where: { userId_scope_key: { userId, scope, key } },
+          data: { statusCode: produced.status, body: JSON.stringify(produced.body) },
+        });
+        return produced;
+      });
+      return { ...result, replayed: false };
+    } catch (error) {
+      lastError = error;
+      if (isUniqueConflict(error) && attempt < maxAttempts - 1) continue;
+      await prisma.idempotencyRecord.deleteMany({
+        where: { userId, scope, key, statusCode: 0 },
+      });
+      throw error;
+    }
+  }
+  throw lastError;
+}
+
+/**
+ * Claims the key for this request (a row with statusCode 0), or returns the
+ * answer an earlier request with the same key already stored. Null means the
+ * key is now this request's to use.
+ */
+async function claimKey<T>(
+  userId: string,
+  scope: string,
+  key: string,
+  requestHash: string | null
+): Promise<IdempotentResult<T> | null> {
   const existing = await prisma.idempotencyRecord.findUnique({
     where: { userId_scope_key: { userId, scope, key } },
   });
@@ -114,34 +157,52 @@ export async function withIdempotency<T>(
     if (raced) return replay(raced, requestHash);
     throw error;
   }
+  return null;
+}
 
-  const maxAttempts = 5;
-  let lastError: unknown;
-  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+/**
+ * Like withIdempotency, for work that must not sit inside a database
+ * transaction: a mail leaving the server cannot be rolled back, and the PDF
+ * render and SMTP take longer than an interactive transaction may. The key is
+ * claimed first, the work runs on its own, and the answer is stored after. A
+ * retry with the same key gets that answer instead of doing the work again; if
+ * the work failed the key is released, so the retry runs it.
+ */
+export async function withIdempotentSideEffect<T>(
+  userId: string,
+  scope: string,
+  key: string | null,
+  run: () => Promise<{ status: number; body: T }>,
+  requestHash: string | null = null
+): Promise<IdempotentResult<T>> {
+  if (!key) {
+    const fresh = await run();
+    return { ...fresh, replayed: false };
+  }
+  const answered = await claimKey<T>(userId, scope, key, requestHash);
+  if (answered) return answered;
+
+  let produced: { status: number; body: T };
+  try {
+    produced = await run();
+  } catch (error) {
+    await prisma.idempotencyRecord.deleteMany({ where: { userId, scope, key, statusCode: 0 } });
+    throw error;
+  }
+  // The work is done and cannot be undone: a failure to store the answer must
+  // not turn into a failure of the request.
+  for (let attempt = 0; attempt < 3; attempt += 1) {
     try {
-      const result = await prisma.$transaction(async (tx) => {
-        const produced = await run(tx);
-        if (failResponseSaves > 0) {
-          failResponseSaves -= 1;
-          throw new Error("idempotency response was not stored");
-        }
-        await tx.idempotencyRecord.update({
-          where: { userId_scope_key: { userId, scope, key } },
-          data: { statusCode: produced.status, body: JSON.stringify(produced.body) },
-        });
-        return produced;
+      await prisma.idempotencyRecord.update({
+        where: { userId_scope_key: { userId, scope, key } },
+        data: { statusCode: produced.status, body: JSON.stringify(produced.body) },
       });
-      return { ...result, replayed: false };
+      break;
     } catch (error) {
-      lastError = error;
-      if (isUniqueConflict(error) && attempt < maxAttempts - 1) continue;
-      await prisma.idempotencyRecord.deleteMany({
-        where: { userId, scope, key, statusCode: 0 },
-      });
-      throw error;
+      if (attempt === 2) console.error("Idempotent send answer was not stored", error);
     }
   }
-  throw lastError;
+  return { ...produced, replayed: false };
 }
 
 function replay<T>(row: IdempotencyRow, requestHash: string | null): IdempotentResult<T> {

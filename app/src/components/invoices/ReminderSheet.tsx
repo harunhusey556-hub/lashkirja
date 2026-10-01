@@ -25,6 +25,8 @@ export interface ReminderPreview {
   /** Set while a new reminder is certain to be refused: when it is accepted, and why. */
   nextReminderAt?: string | null;
   nextReminderNote?: string | null;
+  /** No sending mailbox is connected: the sheet says so before the tap (F41). */
+  mailboxMissing?: boolean;
 }
 
 /**
@@ -189,6 +191,16 @@ export function ReminderSheet({
                 </Link>
               </div>
             )}
+            {reminder.recipient && reminder.mailboxMissing && (
+              <div className="space-y-2">
+                <p className="text-caption text-danger" role="alert">
+                  Sähköpostitiliä ei ole yhdistetty, joten muistutusta ei voi lähettää.
+                </p>
+                <Link href="/asetukset/sahkoposti" className={buttonClass("secondary", "w-full")}>
+                  Yhdistä sähköposti
+                </Link>
+              </div>
+            )}
             {waitNote && (
               <p className="text-caption text-ink-2" role="status">
                 {waitNote}
@@ -203,9 +215,14 @@ export function ReminderSheet({
               <Button
                 type="button"
                 className="flex-1"
-                disabled={!reminder.recipient || waitNote !== null}
+                disabled={!reminder.recipient || reminder.mailboxMissing === true || waitNote !== null}
                 disabledReason={
-                  waitNote ?? (!reminder.recipient ? "Sähköpostiosoite puuttuu." : undefined)
+                  waitNote ??
+                  (!reminder.recipient
+                    ? "Sähköpostiosoite puuttuu."
+                    : reminder.mailboxMissing
+                      ? "Sähköpostitiliä ei ole yhdistetty."
+                      : undefined)
                 }
                 busy={sending}
                 busyLabel="Lähetetään…"

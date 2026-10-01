@@ -9,12 +9,13 @@
  */
 import { createHash, randomUUID } from "crypto";
 import { AppError, ValidationError } from "./api-errors";
-import { formatEur } from "./format";
+import { formatEur, formatMonth } from "./format";
 import { formatReference } from "./finnish-reference";
 import { renderInvoicePdf, type InvoicePdfData } from "./invoice-pdf";
 import { missingSellerSendFields, parsePartySnapshot } from "./invoice-snapshot";
 import { findSenderAccount, sendMail, type MailSenderAccount, type SentMail } from "./mailer";
-import { assertPeriodOpen } from "./period-lock";
+import { assertPeriodOpen, getLockedThrough, isDateLocked } from "./period-lock";
+import { monthKey } from "./bank-balances";
 import {
   assertDraftVatCurrent,
   buildInvoicePdfData,
@@ -423,6 +424,10 @@ export interface SendPreview {
   attachment: string;
   missing: string[];
   blockedReason: string | null;
+  /** True when no sending mailbox is connected: a send would be refused (F41). */
+  mailboxMissing: boolean;
+  /** The month key ("2026-08") of the issue date when that month is closed; a send would be refused (G09). */
+  lockedMonth: string | null;
 }
 
 /** What the sender confirms before SMTP. Does not send. */
@@ -446,6 +451,10 @@ export async function previewInvoiceSend(userId: string, invoiceId: string): Pro
   }
   const missing = missingSellerSendFields(data.seller);
   const creditNote = stored.documentKind === "credit_note";
+  // The same two gates sendInvoiceByEmail applies, told before the tap.
+  const mailboxMissing = (await findSenderAccount(userId)) === null;
+  const lockedThrough = await getLockedThrough(userId);
+  const lockedMonth = isDateLocked(lockedThrough, invoice.issueDate) ? monthKey(invoice.issueDate) : null;
   let blockedReason: string | null = null;
   if (invoice.status === "credited") {
     blockedReason = "Hyvitettyä laskua ei lähetetä.";
@@ -454,6 +463,10 @@ export async function previewInvoiceSend(userId: string, invoiceId: string): Pro
       "Lähettäjän nimi tai tilinumero puuttuu. Täydennä yrityksen tiedot ennen lähetystä.";
   } else if (!invoice.customer.email) {
     blockedReason = "Vastaanottaja puuttuu.";
+  } else if (mailboxMissing) {
+    blockedReason = "Sähköpostitiliä ei ole yhdistetty.";
+  } else if (lockedMonth) {
+    blockedReason = `Kausi ${formatMonth(lockedMonth)} on suljettu.`;
   }
 
   return {
@@ -465,5 +478,7 @@ export async function previewInvoiceSend(userId: string, invoiceId: string): Pro
     attachment: invoicePdfFileName(invoice.number, creditNote ? "credit_note" : "invoice"),
     missing,
     blockedReason,
+    mailboxMissing,
+    lockedMonth,
   };
 }

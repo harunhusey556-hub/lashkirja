@@ -9,6 +9,7 @@ import BottomSheet from "@/components/BottomSheet";
 import {
   apiFetch,
   errorMessage,
+  isNetworkFailure,
   isUnauthorized,
   readJson,
   redirectToLogin,
@@ -81,6 +82,10 @@ interface SendPreview {
   attachment: string;
   missing: string[];
   blockedReason: string | null;
+  /** No sending mailbox is connected (F41). */
+  mailboxMissing?: boolean;
+  /** The issue date's month key when that month is closed (G09). */
+  lockedMonth?: string | null;
 }
 
 interface Invoice {
@@ -270,6 +275,9 @@ function InvoiceDetail() {
   const [paymentError, setPaymentError] = useState("");
   const [paymentDate, setPaymentDate] = useState(() => helsinkiCalendarDate());
   const paymentKey = useRef(newIdempotencyKey());
+  // One key per send: a retry after a lost answer reuses it, so the server
+  // answers with the first send instead of mailing the invoice twice (G04).
+  const sendKey = useRef(newIdempotencyKey());
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [confirmRemovePayment, setConfirmRemovePayment] = useState<string | null>(null);
   const [review, setReview] = useState<SendPreview | null>(null);
@@ -603,6 +611,8 @@ function InvoiceDetail() {
     try {
       const response = await apiFetch(`/api/invoices/${id}/send`, { credentials: "include" });
       const result = await readJson<{ preview: SendPreview }>(response, "Tarkistuksen haku epäonnistui");
+      // A sheet opened now is a new send, not the retry of an earlier one.
+      sendKey.current = newIdempotencyKey();
       setReview(result.preview);
     } catch (error) {
       setMessage(errorMessage(error, "Tarkistuksen haku epäonnistui"));
@@ -655,14 +665,20 @@ function InvoiceDetail() {
       const response = await apiFetch(`/api/invoices/${id}/send`, {
         method: "POST",
         credentials: "include",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", "Idempotency-Key": sendKey.current },
         body: JSON.stringify({}),
       });
-      const result = await readJson<{ sentTo: string; recorded?: boolean; notice?: string | null }>(
-        response,
-        "Lähetys epäonnistui"
-      );
-      if (result.recorded === false) {
+      const result = await readJson<{
+        sentTo: string;
+        recorded?: boolean;
+        notice?: string | null;
+        replayed?: boolean;
+      }>(response, "Lähetys epäonnistui");
+      sendKey.current = newIdempotencyKey();
+      if (result.replayed) {
+        // The earlier tap went through and only its answer was lost.
+        setMessage(`Lasku oli jo lähetetty osoitteeseen ${result.sentTo}. Toista lähetystä ei tehty.`);
+      } else if (result.recorded === false) {
         setMessage(
           result.notice ??
             "Viesti lähti, mutta lähetyksen kirjausta ei saatu tallennettua. Älä lähetä samaa laskua uudelleen ennen tarkistusta."
@@ -675,7 +691,11 @@ function InvoiceDetail() {
     } catch (error) {
       // Same as addPayment: this renders inside the "Lähetä lasku" sheet
       // (which stays open), not the page-level message behind it.
-      setSendError(errorMessage(error, "Lähetys epäonnistui"));
+      setSendError(
+        isNetworkFailure(error)
+          ? "Yhteys katkesi, emmekä tiedä ehtikö viesti lähteä. Voit yrittää uudelleen: samaa laskua ei lähetetä kahdesti."
+          : errorMessage(error, "Lähetys epäonnistui")
+      );
     } finally {
       setSending(false);
     }
@@ -1375,6 +1395,19 @@ function InvoiceDetail() {
                     className={buttonClass("secondary", "w-full")}
                   >
                     Lisää asiakkaalle sähköposti
+                  </Link>
+                ) : review.mailboxMissing ? (
+                  <>
+                    <Link href="/asetukset/sahkoposti" className={buttonClass("secondary", "w-full")}>
+                      Yhdistä sähköposti
+                    </Link>
+                    <p className="text-caption text-ink-2">
+                      Voit myös jakaa PDF:n tai merkitä laskun lähetetyksi toimintovalikosta.
+                    </p>
+                  </>
+                ) : review.lockedMonth ? (
+                  <Link href="/kirjanpito/kaudet" className={buttonClass("secondary", "w-full")}>
+                    Avaa kaudet
                   </Link>
                 ) : null}
               </div>
