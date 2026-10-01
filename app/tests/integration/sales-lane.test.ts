@@ -153,7 +153,7 @@ describe("GET /api/recurring-invoices/run (preview)", () => {
       customerName: "Anna Asiakas",
       customerEmail: "anna@example.fi",
       autoSend: true,
-      gross: 125.5,
+      grossByDate: [125.5, 125.5],
       issueDates: ["2020-01-01", "2020-02-01"],
     });
     expect(await prisma.salesInvoice.count()).toBe(0);
