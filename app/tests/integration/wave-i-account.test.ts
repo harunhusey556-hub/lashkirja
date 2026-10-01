@@ -153,7 +153,7 @@ describe("wave I account", () => {
         { cookie }
       )
     );
-    expect(undelivered.status).toBe(503);
+    expect(undelivered.status).toBe(409);
     const refusal = await readJson<{ error: string; ok?: boolean }>(undelivered);
     expect(refusal.ok).toBeUndefined();
     expect(refusal.error).toMatch(/ei vaihdettu/);

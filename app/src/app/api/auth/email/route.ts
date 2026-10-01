@@ -46,13 +46,13 @@ export async function POST(req: NextRequest) {
     });
     if (!delivered) {
       // Delivery is part of the change: nothing stays pending that no link
-      // exists for, and the answer is an error, not a success (F53).
+      // exists for, and the answer is an error, not a success (F53). Not a 502/503/504: those read as a dead gateway on the client.
       await cancelEmailChange(session.userId);
       return NextResponse.json(
         {
           error: `Vahvistusviestiä ei voitu lähettää, joten sähköpostia ei vaihdettu. Yritä myöhemmin uudelleen tai ${contactSupportPhrase()}.`,
         },
-        { status: 503 }
+        { status: 409 }
       );
     }
     return NextResponse.json({

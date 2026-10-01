@@ -231,8 +231,13 @@ async function apiFetchAttempt(input: RequestInfo | URL, init?: ApiFetchInit): P
     const { signal, cleanup } = withTimeout(rest.signal, timeoutMs);
     try {
       const response = await fetch(input, { ...rest, signal });
-      // If it's a 502/503/504 gateway/timeout error, we should retry!
-      if (isGatewayStatus(response.status)) {
+      // If it's a 502/503/504 gateway/timeout error, we should retry! Unless
+      // the app itself sent it: proxy.ts puts the version header on every
+      // answer of the app and a gateway page never carries it (probeHealth
+      // draws the same line), so an app-written 5xx with its own message goes
+      // on to the caller's readJson instead of becoming "the server did not
+      // answer" and a network-error outcome.
+      if (isGatewayStatus(response.status) && response.headers.get("X-LashKirja-Api-Version") === null) {
         throw new ApiGatewayError(response.status);
       }
       // Connectivity (Task 8): any other HTTP response means the server
