@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { prisma } from "@/lib/db";
 import { GET as invoicePdf } from "@/app/api/invoices/[id]/pdf/route";
-import { POST as sendInvoice } from "@/app/api/invoices/[id]/send/route";
+import { GET as previewSend, POST as sendInvoice } from "@/app/api/invoices/[id]/send/route";
 import { POST as createInvoice } from "@/app/api/invoices/route";
 import { POST as createCustomer } from "@/app/api/customers/route";
 import { POST as setStatus } from "@/app/api/invoices/[id]/status/route";
@@ -372,6 +372,35 @@ describe("POST /api/invoices/[id]/send", () => {
       routeContext({ id: other.id })
     );
     expect(badAddress.status).toBe(400);
+  });
+
+  it("shows no due date or account for a credit note (V5)", async () => {
+    await connectMailAccount(user.id);
+    const invoice = await makeInvoice();
+    await setStatus(
+      buildRequest("POST", `/api/invoices/${invoice.id}/status`, { status: "sent" }, { cookie }),
+      routeContext({ id: invoice.id })
+    );
+    const { POST: creditNote } = await import("@/app/api/invoices/[id]/credit/route");
+    const note = (
+      await readJson(
+        await creditNote(
+          buildRequest("POST", `/api/invoices/${invoice.id}/credit`, {}, { cookie }),
+          routeContext({ id: invoice.id })
+        )
+      )
+    ).invoice;
+    const preview = (
+      await readJson(
+        await previewSend(
+          buildRequest("GET", `/api/invoices/${note.id}/send`, undefined, { cookie }),
+          routeContext({ id: note.id })
+        )
+      )
+    ).preview;
+    expect(preview.creditNote).toBe(true);
+    expect(preview.dueDate).toBeNull();
+    expect(preview.iban).toBeNull();
   });
 
   it("keeps a sent invoice sent instead of resetting it", async () => {

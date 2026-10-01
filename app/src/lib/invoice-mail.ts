@@ -16,6 +16,7 @@ import { missingSellerSendFields, parsePartySnapshot } from "./invoice-snapshot"
 import { findSenderAccount, sendMail, type MailSenderAccount, type SentMail } from "./mailer";
 import { assertPeriodOpen } from "./period-lock";
 import {
+  assertDraftVatCurrent,
   buildInvoicePdfData,
   capturePartySnapshot,
   getInvoice,
@@ -41,7 +42,7 @@ export interface SendInvoiceResult {
   notice: string | null;
 }
 
-function defaultMessage(data: {
+export function defaultMessage(data: {
   number: number;
   gross: string;
   dueDate: string;
@@ -49,14 +50,16 @@ function defaultMessage(data: {
   sellerName: string;
   creditNote?: boolean;
 }): string {
+  // A credit note is not payable: no due date, no reference to pay against.
+  const payment = data.creditNote
+    ? [`Summa: ${data.gross}`, "Tämä on hyvityslasku, ei maksettava lasku."]
+    : [`Summa: ${data.gross}`, `Eräpäivä: ${data.dueDate}`, `Viitenumero: ${data.reference}`];
   return [
     "Hei,",
     "",
     data.creditNote ? `liitteenä hyvityslasku ${data.number}.` : `liitteenä lasku ${data.number}.`,
     "",
-    `Summa: ${data.gross}`,
-    `Eräpäivä: ${data.dueDate}`,
-    `Viitenumero: ${data.reference}`,
+    ...payment,
     "",
     "Kiitos!",
     data.sellerName,
@@ -215,8 +218,9 @@ export async function sendInvoiceByEmail(
   if (invoice.lines.length === 0) {
     throw new ValidationError("Tyhjää laskua ei voi lähettää.");
   }
+  if (invoice.status === "draft") await assertDraftVatCurrent(userId, invoiceId);
 
-  const to = input.to ?? invoice.customer.email;
+  const to =input.to ?? invoice.customer.email;
   if (!to) {
     throw new ValidationError(
       "Asiakkaalla ei ole sähköpostiosoitetta. Lisää se asiakastietoihin tai anna osoite."
@@ -411,8 +415,11 @@ export async function sendInvoiceByEmail(
 export interface SendPreview {
   recipient: string | null;
   gross: number;
-  dueDate: string;
+  /** Null for a credit note: it has no due date. */
+  dueDate: string | null;
+  /** Null for a credit note: nothing to pay. */
   iban: string | null;
+  creditNote: boolean;
   attachment: string;
   missing: string[];
   blockedReason: string | null;
@@ -452,8 +459,9 @@ export async function previewInvoiceSend(userId: string, invoiceId: string): Pro
   return {
     recipient: invoice.customer.email,
     gross: invoice.gross,
-    dueDate: invoice.dueDate,
-    iban: data.seller.iban ?? null,
+    dueDate: creditNote ? null : invoice.dueDate,
+    iban: creditNote ? null : (data.seller.iban ?? null),
+    creditNote,
     attachment: invoicePdfFileName(invoice.number, creditNote ? "credit_note" : "invoice"),
     missing,
     blockedReason,

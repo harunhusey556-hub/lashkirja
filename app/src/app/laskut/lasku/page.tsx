@@ -72,8 +72,9 @@ interface BankRowCandidate {
 interface SendPreview {
   recipient: string | null;
   gross: number;
-  dueDate: string;
+  dueDate: string | null;
   iban: string | null;
+  creditNote?: boolean;
   attachment: string;
   missing: string[];
   blockedReason: string | null;
@@ -786,7 +787,8 @@ function InvoiceDetail() {
         },
         { label: "Jaa", onSelect: () => void shareInvoice(), disabled: busy || sharing },
         // AX-07, R25: the reference the customer pays with can be copied.
-        ...(invoice.reference
+        // A credit note is not paid, so it has none.
+        ...(invoice.reference && invoice.documentKind !== "credit_note"
           ? [
               {
                 label: "Kopioi viitenumero",
@@ -911,12 +913,18 @@ function InvoiceDetail() {
             <KeyValueList
               rows={[
                 { label: "Päivätty", value: formatDate(invoice.issueDate) },
-                { label: "Eräpäivä", value: formatDate(invoice.dueDate) },
-                {
-                  label: "Viite",
-                  value: formatReference(invoice.reference),
-                  ...(invoice.reference ? { copy: { text: formatReference(invoice.reference), what: "Viitenumero" } } : {}),
-                },
+                ...(invoice.documentKind === "credit_note"
+                  ? []
+                  : [
+                      { label: "Eräpäivä", value: formatDate(invoice.dueDate) },
+                      {
+                        label: "Viite",
+                        value: formatReference(invoice.reference),
+                        ...(invoice.reference
+                          ? { copy: { text: formatReference(invoice.reference), what: "Viitenumero" } }
+                          : {}),
+                      },
+                    ]),
                 { label: "Veroton", value: formatEur(invoice.net) },
                 ...vatBreakdown(invoice.lines).map((row) => ({
                   label: `ALV ${String(row.rate).replace(".", ",")} %`,
@@ -1319,17 +1327,21 @@ function InvoiceDetail() {
                   {formatEur(review.gross)}
                 </span>
               </div>
-              <div className="flex justify-between gap-3">
-                <span className="text-ink-2">Eräpäivä</span>
-                <span className="text-ink">{formatDate(review.dueDate)}</span>
-              </div>
-              <div className="flex justify-between gap-3">
-                <span className="shrink-0 text-ink-2">Tilinumero</span>
-                <span className="flex min-w-0 items-center justify-end gap-3 text-right text-ink">
-                  <span className="min-w-0 select-text break-all">{review.iban ?? "–"}</span>
-                  {review.iban ? <CopyButton text={review.iban} what="IBAN" /> : null}
-                </span>
-              </div>
+              {review.creditNote || !review.dueDate ? null : (
+                <div className="flex justify-between gap-3">
+                  <span className="text-ink-2">Eräpäivä</span>
+                  <span className="text-ink">{formatDate(review.dueDate)}</span>
+                </div>
+              )}
+              {review.creditNote ? null : (
+                <div className="flex justify-between gap-3">
+                  <span className="shrink-0 text-ink-2">Tilinumero</span>
+                  <span className="flex min-w-0 items-center justify-end gap-3 text-right text-ink">
+                    <span className="min-w-0 select-text break-all">{review.iban ?? "–"}</span>
+                    {review.iban ? <CopyButton text={review.iban} what="IBAN" /> : null}
+                  </span>
+                </div>
+              )}
               <div className="flex justify-between gap-3">
                 <span className="text-ink-2">Liite</span>
                 <span className="text-ink">{review.attachment}</span>
