@@ -20,6 +20,7 @@ import {
   capturePartySnapshot,
   getInvoice,
   invoicePdfFileName,
+  SEND_ATTEMPT_STALE_MS,
 } from "./sales-invoices";
 import { prisma } from "./db";
 
@@ -66,6 +67,7 @@ const UNRECORDED_NOTICE =
   "Viesti lähti, mutta lähetyksen kirjausta ei saatu tallennettua. Älä lähetä samaa laskua uudelleen ennen tarkistusta.";
 
 const SEND_LOCK_STALE_MS = 2 * 60 * 1000;
+const CRASHED_SEND_NOTE = "Lähetys keskeytyi, kun palvelin käynnistyi uudelleen kesken lähetyksen.";
 const AMBIGUOUS_SEND =
   "Edellinen lähetys jäi epäselväksi. Älä lähetä samaa laskua uudelleen ennen tarkistusta.";
 const SEND_IN_PROGRESS = "Laskua lähetetään juuri nyt. Odota hetki.";
@@ -84,13 +86,27 @@ async function claimSendLock(userId: string, invoiceId: string): Promise<string>
   });
   if (!row) throw new AppError("Laskua ei löytynyt.", "NOT_FOUND", 404);
 
-  const ambiguous = await prisma.invoiceEmailSend.findFirst({
-    where: { invoiceId, status: { in: ["sending", "ambiguous"] } },
-    select: { id: true },
+  // An attempt that has sat in pending/sending for longer than a live send can
+  // take belongs to a process that died. It is closed as failed, so it stops
+  // blocking this invoice for good; the lock it left behind is reclaimed below.
+  await prisma.invoiceEmailSend.updateMany({
+    where: {
+      invoiceId,
+      status: { in: ["pending", "sending"] },
+      createdAt: { lt: new Date(Date.now() - SEND_ATTEMPT_STALE_MS) },
+    },
+    data: { status: "failed", error: CRASHED_SEND_NOTE, finishedAt: new Date() },
   });
-  if (ambiguous) {
+
+  const open = await prisma.invoiceEmailSend.findFirst({
+    where: { invoiceId, status: { in: ["sending", "ambiguous"] } },
+    select: { status: true },
+  });
+  if (open?.status === "ambiguous") {
     throw new AppError(AMBIGUOUS_SEND, "SEND_AMBIGUOUS", 409);
   }
+  // Still within the time a live send can take: it is in progress, not lost.
+  if (open) throw new AppError(SEND_IN_PROGRESS, "SEND_IN_PROGRESS", 409);
 
   const stale = Boolean(row.sendLockAt && Date.now() - row.sendLockAt.getTime() > SEND_LOCK_STALE_MS);
   if (stale && row.sendLockToken) {

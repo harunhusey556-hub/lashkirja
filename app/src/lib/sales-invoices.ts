@@ -588,6 +588,13 @@ export async function updateInvoice(
   return getInvoice(userId, id);
 }
 
+/**
+ * A send that has held its lock this long belongs to a process that died (the
+ * mail server's own timeouts are shorter). Past this age neither an edit nor a
+ * new send is held back by it.
+ */
+export const SEND_ATTEMPT_STALE_MS = 10 * 60 * 1000;
+
 async function applyInvoiceUpdate(
   tx: Prisma.TransactionClient,
   userId: string,
@@ -595,11 +602,12 @@ async function applyInvoiceUpdate(
   expected: Date | null,
   data: Prisma.SalesInvoiceUncheckedUpdateManyInput
 ): Promise<void> {
+  const staleBefore = new Date(Date.now() - SEND_ATTEMPT_STALE_MS);
   const updated = await tx.salesInvoice.updateMany({
     where: {
       id,
       userId,
-      sendLockToken: null,
+      OR: [{ sendLockToken: null }, { sendLockAt: { lt: staleBefore } }],
       ...(expected ? { updatedAt: expected } : {}),
     },
     data,
@@ -607,10 +615,10 @@ async function applyInvoiceUpdate(
   if (updated.count > 0) return;
   const still = await tx.salesInvoice.findFirst({
     where: { id, userId },
-    select: { sendLockToken: true },
+    select: { sendLockToken: true, sendLockAt: true },
   });
   if (!still) throw new NotFoundError("Laskua ei löytynyt.");
-  if (still.sendLockToken) {
+  if (still.sendLockToken && !(still.sendLockAt && still.sendLockAt < staleBefore)) {
     throw new ConflictError(
       "Laskua lähetetään juuri nyt. Odota hetki ja lataa tiedot uudelleen.",
       "SEND_IN_PROGRESS"
