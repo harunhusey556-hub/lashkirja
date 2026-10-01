@@ -110,6 +110,19 @@ describe("a send that was left in 'sending' by a crash", () => {
     ).resolves.toBeTruthy();
   });
 
+  it("V42: never lets the draft change under a send the mail server accepted, however old", async () => {
+    await leaveAttempt("ambiguous", 60 * MINUTE);
+    const stored = await prisma.salesInvoice.findUnique({ where: { id: invoiceId } });
+
+    await expect(
+      updateInvoice(user.id, invoiceId, {
+        expectedUpdatedAt: stored?.updatedAt.toISOString() ?? updatedAt,
+        notes: "Korjattu",
+      })
+    ).rejects.toMatchObject({ code: "SEND_AMBIGUOUS", statusCode: 409 });
+    expect((await prisma.salesInvoice.findUnique({ where: { id: invoiceId } }))?.notes).not.toBe("Korjattu");
+  });
+
   it("keeps refusing an edit while the lock is fresh", async () => {
     await leaveAttempt("sending", 1 * MINUTE);
     const stored = await prisma.salesInvoice.findUnique({ where: { id: invoiceId } });

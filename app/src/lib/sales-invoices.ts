@@ -648,6 +648,20 @@ async function applyInvoiceUpdate(
   expected: Date | null,
   data: Prisma.SalesInvoiceUncheckedUpdateManyInput
 ): Promise<void> {
+  // A mail the server accepted but whose outcome was not stored leaves its lock
+  // behind on purpose. The customer holds that PDF, so the draft is not changed
+  // under it, however old the lock is (the send guard never lets it go either).
+  const unrecorded = await tx.invoiceEmailSend.findFirst({
+    where: { invoiceId: id, status: "ambiguous", invoice: { userId, sendLockToken: { not: null } } },
+    select: { id: true },
+  });
+  if (unrecorded) {
+    throw new ConflictError(
+      "Edellinen lähetys jäi epäselväksi, joten laskua ei voi muokata. Älä lähetä samaa laskua uudelleen ennen tarkistusta.",
+      "SEND_AMBIGUOUS"
+    );
+  }
+
   const staleBefore = new Date(Date.now() - SEND_ATTEMPT_STALE_MS);
   const updated = await tx.salesInvoice.updateMany({
     where: {
