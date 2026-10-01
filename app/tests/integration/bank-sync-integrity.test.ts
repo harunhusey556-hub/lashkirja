@@ -271,3 +271,72 @@ describe("two genuine identical rows without a reference are both kept (G29)", (
     expect(result.imported).toBe(1);
   });
 });
+
+describe("bank sync honours the period lock (G25)", () => {
+  const lockThrough = (month: string | null) =>
+    prisma.user.update({ where: { id: user.id }, data: { booksLockedThrough: month } });
+  const income = (id: string, date: string, amount: string) =>
+    row(id, date, amount, { credit_debit_indicator: "CRDT", debtor: { name: "Asiakas Kaksi" }, creditor: undefined });
+
+  it("writes nothing into a closed month, drafts no sale for it, and says so", async () => {
+    const before = new Date("2026-09-20T10:00:00.000Z");
+    const connection = await createConnection({ lastSuccessAt: before });
+    await lockThrough("2026-09");
+    const result = await run(
+      [income("S1", "2026-09-29", "55.00"), row("S2", "2026-09-29", "18.00"), income("O1", "2026-10-01", "10.00")],
+      connection.id
+    );
+    expect(result.imported).toBe(1);
+    expect(result.heldBack).toBe(2);
+    expect(result.partial).toBe(true);
+    expect(result.notice).toBe("Kuukausi on lukittu, 2 tapahtumaa jäi tuomatta.");
+    expect(result.accounts[0].heldBack).toBe(2);
+
+    const rows = await stored();
+    expect(rows.map((tx) => tx.bankRef)).toEqual([`eb:${IBAN}:O1`]);
+    const statements = await prisma.statement.findMany({ where: { userId: user.id } });
+    expect(statements.map((statement) => statement.periodMonth)).toEqual(["2026-10"]);
+    const drafts = await prisma.receipt.findMany({ where: { userId: user.id } });
+    expect(drafts.every((receipt) => receipt.date && receipt.date.toISOString() >= "2026-10-01")).toBe(true);
+
+    const connectionRow = await prisma.bankConnection.findUnique({ where: { id: connection.id } });
+    expect(connectionRow?.lastSuccessAt?.toISOString()).toBe(before.toISOString());
+    expect(connectionRow?.lastError).toBe("Kuukausi on lukittu, 2 tapahtumaa jäi tuomatta.");
+  });
+
+  it("uses the singular for one held row", async () => {
+    const connection = await createConnection();
+    await lockThrough("2026-09");
+    const result = await run([income("S1", "2026-09-29", "55.00")], connection.id);
+    expect(result.notice).toBe("Kuukausi on lukittu, 1 tapahtuma jäi tuomatta.");
+  });
+
+  it("brings the held rows in on the next sync once the month is reopened", async () => {
+    const connection = await createConnection();
+    await lockThrough("2026-09");
+    const rows = [income("S1", "2026-09-29", "55.00"), income("O1", "2026-10-01", "10.00")];
+    await run(rows, connection.id);
+    expect(await stored()).toHaveLength(1);
+
+    await lockThrough(null);
+    const after = await run(rows, connection.id);
+    expect(after.imported).toBe(1);
+    expect(after.heldBack).toBe(0);
+    expect(after.partial).toBe(false);
+    expect(await stored()).toHaveLength(2);
+    const connectionRow = await prisma.bankConnection.findUnique({ where: { id: connection.id } });
+    expect(connectionRow?.lastError).toBeNull();
+    expect(connectionRow?.lastSuccessAt).not.toBeNull();
+  });
+
+  it("holds back a first sync whose whole history lies in closed months", async () => {
+    const connection = await createConnection();
+    await lockThrough("2026-09");
+    const result = await run([row("A", "2026-03-01", "5.00"), row("B", "2026-08-01", "6.00")], connection.id);
+    expect(result.imported).toBe(0);
+    expect(result.heldBack).toBe(2);
+    expect(await prisma.statement.count({ where: { userId: user.id } })).toBe(0);
+    const connectionRow = await prisma.bankConnection.findUnique({ where: { id: connection.id } });
+    expect(connectionRow?.lastSuccessAt).toBeNull();
+  });
+});

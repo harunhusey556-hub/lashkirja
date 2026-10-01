@@ -50,6 +50,9 @@ export async function POST(
       statementId: result.statementId,
       statementIds: result.statementIds,
       accounts: result.accounts,
+      heldBack: result.heldBack,
+      partial: result.partial,
+      notice: result.notice,
     });
   } catch (error) {
     return respondToBankError(error);

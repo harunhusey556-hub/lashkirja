@@ -25,6 +25,7 @@ import {
 } from "./mapping";
 import type { PsuContext } from "./client";
 import { withTrackedJob } from "../job-tracker";
+import { getLockedThrough, isDateLocked, isMonthLocked } from "../period-lock";
 import { normalizeIban } from "../iban";
 import { fallbackStatementMonth, statementMonthOrFallback } from "../report-calendar";
 import type { AccountSyncRow } from "../bank-sync-summary";
@@ -34,6 +35,8 @@ const DEAD_SESSION_STATUS = new Set(["EXPIRED", "CLOSED", "REVOKED", "CANCELLED"
 export type BankSyncAccountRow = AccountSyncRow & {
   /** The bank had more pages than one pull reads; the account is not caught up. */
   partial?: boolean;
+  /** Rows left out because their month is closed (period lock). */
+  heldBack?: number;
 };
 
 export interface BankSyncResult {
@@ -44,10 +47,18 @@ export interface BankSyncResult {
   statementId: string | null;
   statementIds: string[];
   accounts: BankSyncAccountRow[];
+  /** Rows left out because their month is closed; they come when it is reopened. */
+  heldBack: number;
   /** True when something was left out, so lastSuccessAt did not move. */
   partial: boolean;
   /** The plain-language reason, the same text the connection card shows. */
   notice: string | null;
+}
+
+export function heldBackNotice(count: number): string {
+  return count === 1
+    ? "Kuukausi on lukittu, 1 tapahtuma jäi tuomatta."
+    : `Kuukausi on lukittu, ${count} tapahtumaa jäi tuomatta.`;
 }
 
 export const PARTIAL_PULL_NOTICE =
@@ -158,6 +169,7 @@ async function syncBankConnectionUntracked(
   const accounts: BankSyncAccountRow[] = [];
   let succeeded = 0;
   let truncatedAccounts = 0;
+  let heldBack = 0;
 
   const accountName = (account: { label: string | null; iban: string }) => {
     const label = account.label?.trim();
@@ -186,6 +198,7 @@ async function syncBankConnectionUntracked(
       });
       imported += written.imported;
       skipped += written.skipped;
+      heldBack += written.heldBack;
       for (const id of written.statementIds) statementIds.add(id);
 
       try {
@@ -214,6 +227,7 @@ async function syncBankConnectionUntracked(
         skipped: written.skipped,
         error: null,
         ...(truncated ? { partial: true } : {}),
+        ...(written.heldBack > 0 ? { heldBack: written.heldBack } : {}),
       });
     } catch (error) {
       const terminal = sessionTerminalStatus(error);
@@ -243,6 +257,7 @@ async function syncBankConnectionUntracked(
   // What was left out. While anything is, lastSuccessAt stays where it was so
   // the next sync reads the same window again instead of the 5-day overlap.
   const notices: string[] = [];
+  if (heldBack > 0) notices.push(heldBackNotice(heldBack));
   if (truncatedAccounts > 0) notices.push(PARTIAL_PULL_NOTICE);
   const notice = notices.length > 0 ? notices.join(" ") : null;
 
@@ -282,6 +297,7 @@ async function syncBankConnectionUntracked(
     statementId,
     statementIds: [...statementIds],
     accounts,
+    heldBack,
     partial: notice !== null,
     notice,
   };
@@ -340,8 +356,8 @@ async function writeTransactions(input: {
   userId: string;
   aspspName: string;
   rows: MappedBankTransaction[];
-}): Promise<{ imported: number; skipped: number; statementIds: string[] }> {
-  if (input.rows.length === 0) return { imported: 0, skipped: 0, statementIds: [] };
+}): Promise<{ imported: number; skipped: number; heldBack: number; statementIds: string[] }> {
+  if (input.rows.length === 0) return { imported: 0, skipped: 0, heldBack: 0, statementIds: [] };
   const uniqueRows = new Map<string, MappedBankTransaction>();
   for (const row of input.rows) uniqueRows.set(row.bankRef, row);
   const rows = [...uniqueRows.values()];
@@ -360,12 +376,21 @@ async function writeTransactions(input: {
   const unmatched = rows.filter(
     (row) => !known.has(row.bankRef) && !(row.legacyBankRef && known.has(row.legacyBankRef))
   );
-  const fresh = await dropRowsAlreadyStoredByContent(input.userId, unmatched, known);
-  const skipped = rows.length - fresh.length;
-  if (fresh.length === 0) return { imported: 0, skipped, statementIds: [] };
+  const notStored = await dropRowsAlreadyStoredByContent(input.userId, unmatched, known);
+  const skipped = rows.length - notStored.length;
+
+  // A closed month stays closed: its rows are not written and no sale draft
+  // follows from them. They are not lost, because the caller keeps lastSuccessAt
+  // where it was, so the next sync reads them again (and they are then deduped).
+  const lockedThrough = await getLockedThrough(input.userId);
+  const fallbackMonth = fallbackStatementMonth();
+  const fresh = notStored.filter((row) =>
+    row.date ? !isDateLocked(lockedThrough, row.date) : !isMonthLocked(lockedThrough, fallbackMonth)
+  );
+  const heldBack = notStored.length - fresh.length;
+  if (fresh.length === 0) return { imported: 0, skipped, heldBack, statementIds: [] };
 
   const byMonth = new Map<string, MappedBankTransaction[]>();
-  const fallbackMonth = fallbackStatementMonth();
   for (const row of fresh) {
     const month = row.date ? statementMonthOrFallback(row.date, fallbackMonth) : fallbackMonth;
     const bucket = byMonth.get(month) ?? [];
@@ -396,7 +421,7 @@ async function writeTransactions(input: {
     }));
     imported += await insertTransactions(data);
   }
-  return { imported, skipped, statementIds };
+  return { imported, skipped, heldBack, statementIds };
 }
 
 /**
