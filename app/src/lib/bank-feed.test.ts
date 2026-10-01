@@ -43,6 +43,31 @@ describe("rowState", () => {
     ).toBe("suggested");
   });
 
+  it("calls a row that settled an invoice done, whatever sale the sync drafted for it (F12)", () => {
+    const draft = { id: "r1", vendor: "Asiakas", totalAmount: 245, date: null, source: "auto_income" };
+    const settled = row({
+      amount: 245,
+      type: "tulo",
+      matchStatus: "suggested",
+      suggestedReceiptId: "r1",
+      suggestedReceipt: draft,
+      settlesInvoice: true,
+      paidInvoice: { id: "i5", number: 5 },
+    });
+    expect(rowState(settled)).toBe("invoice");
+    expect(needsAction(settled)).toBe(false);
+    expect(rowState(row({ settlesPurchase: true }))).toBe("invoice");
+    // A row that did not pay anything keeps its task.
+    expect(needsAction(row({ settlesInvoice: false, paidInvoice: null }))).toBe(true);
+  });
+
+  it("counts a settled row in no month's open tally, like the month close", () => {
+    const settled = row({ id: "a", settlesInvoice: true, paidInvoice: { id: "i5", number: 5 } });
+    const open = row({ id: "b" });
+    const [month] = groupByMonth(feedRows([statement("s1", "2026-09", [settled, open])]));
+    expect(month.open).toBe(1);
+  });
+
   it("never asks for a document for own transfers or wages", () => {
     expect(rowState(row({ type: "oma_siirto" }))).toBe("transfer");
     expect(needsAction(row({ type: "palkka" }))).toBe(false);

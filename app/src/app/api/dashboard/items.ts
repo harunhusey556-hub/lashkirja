@@ -273,6 +273,30 @@ export async function buildDashboardItems(
   }
   const monthRowIds = new Set(monthRows.map((row) => row.id));
 
+  // F12: a sale the bank sync drafted for a row that has since settled an invoice is not a task.
+  // The invoice is the document; the draft is never counted in the VAT return either
+  // (alv-period.ts leaves it out), so asking for its approval would only be noise.
+  const draftRowIds = pendingRows.map((receipt) => receipt.sourceTransactionId).filter((id): id is string => id !== null);
+  if (draftRowIds.length > 0) {
+    const settled = new Set(
+      (
+        await prisma.transaction.findMany({
+          where: {
+            id: { in: draftRowIds },
+            OR: [{ invoicePayment: { isNot: null } }, { purchasePayment: { isNot: null } }],
+          },
+          select: { id: true },
+        })
+      ).map((row) => row.id)
+    );
+    if (settled.size > 0) {
+      for (let index = pendingRows.length - 1; index >= 0; index -= 1) {
+        const rowId = pendingRows[index].sourceTransactionId;
+        if (rowId !== null && settled.has(rowId)) pendingRows.splice(index, 1);
+      }
+    }
+  }
+
   // An invoice whose payment is already on the statement gets "Kohdista",
   // never a reminder: the customer has paid.
   const paidOnStatement = new Set(

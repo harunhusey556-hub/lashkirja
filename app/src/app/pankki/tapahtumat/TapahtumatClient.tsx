@@ -47,13 +47,21 @@ const ROW_TAG: Partial<Record<ReturnType<typeof rowState>, { tone: "warning" | "
   suggested: { tone: "accent", label: "Tarkista" },
 };
 
+/** "Maksu laskulle 5": the row is done because an invoice took it (F12). */
+function invoicePaymentNote(row: FeedRow): string {
+  if (row.paidInvoice) return `Maksu laskulle ${row.paidInvoice.number}`;
+  return row.settlesPurchase ? "Maksu ostolaskulle" : "Kunnossa";
+}
+
 function rowSecondary(row: FeedRow): string {
   const day = row.date ? formatDayMonth(row.date) : "";
   const state = rowState(row);
   const note =
     state === "linked"
       ? "Kunnossa"
-      : state === "ignored"
+      : state === "invoice"
+        ? invoicePaymentNote(row)
+        : state === "ignored"
         ? "Ei kuittia tarvita"
         : state === "transfer"
           ? row.type === "palkka"

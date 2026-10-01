@@ -33,8 +33,9 @@ const statementInclude = {
           date: true,
         },
       },
-      // Only whether the row paid an invoice, for the delete dialog.
-      invoicePayment: { select: { id: true } },
+      // Which invoice the row paid: the delete dialog, and Pankki's "Maksu laskulle N" (F12).
+      invoicePayment: { select: { id: true, invoice: { select: { id: true, number: true } } } },
+      purchasePayment: { select: { id: true } },
     },
   },
 };
@@ -45,7 +46,8 @@ async function enrichStatements(
     transactions: Array<{
       id: string;
       suggestedReceiptId: string | null;
-      invoicePayment?: { id: string } | null;
+      invoicePayment?: { id: string; invoice: { id: string; number: number } } | null;
+      purchasePayment?: { id: string } | null;
       receipt: {
         id: string;
         vendor: string | null;
@@ -91,9 +93,11 @@ async function enrichStatements(
 
   return statements.map((s) => ({
     ...s,
-    transactions: s.transactions.map(({ invoicePayment, ...t }) => ({
+    transactions: s.transactions.map(({ invoicePayment, purchasePayment, ...t }) => ({
       ...publicTransaction(t),
       settlesInvoice: Boolean(invoicePayment),
+      paidInvoice: invoicePayment ? { id: invoicePayment.invoice.id, number: invoicePayment.invoice.number } : null,
+      settlesPurchase: Boolean(purchasePayment),
       receipt: t.receipt ? publicReceipt(t.receipt) : null,
       suggestedReceipt: t.suggestedReceiptId
         ? suggestedById.get(t.suggestedReceiptId)

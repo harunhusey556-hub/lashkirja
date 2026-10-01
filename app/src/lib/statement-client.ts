@@ -24,6 +24,10 @@ export interface StatementTransaction {
   matchCandidates?: MatchCandidate[];
   /** The row paid a sales invoice. */
   settlesInvoice?: boolean;
+  /** F12: which invoice the row paid, so Pankki can say it and link to it. */
+  paidInvoice?: { id: string; number: number } | null;
+  /** F12: the row paid a purchase invoice. */
+  settlesPurchase?: boolean;
 }
 
 export interface MatchCandidate {

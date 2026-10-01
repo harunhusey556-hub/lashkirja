@@ -18,12 +18,16 @@ export interface FeedRow extends StatementTransaction {
  * - `sale`: a recognised sale (MobilePay etc.) waiting for one "Hyväksy".
  * - `suggested`: a kuitti is proposed for the row.
  * - `missing`: no document yet.
+ * - `invoice`: the row settled an invoice (F12): done, like on Koti and in the month close.
  * - `linked` / `ignored` / `transfer`: nothing to do.
  */
-export type RowState = "sale" | "suggested" | "missing" | "linked" | "ignored" | "transfer";
+export type RowState = "sale" | "suggested" | "missing" | "linked" | "invoice" | "ignored" | "transfer";
 
 export function rowState(row: StatementTransaction): RowState {
   if (row.type === "oma_siirto" || row.type === "palkka") return "transfer";
+  // One rule with Koti and the month close (lib/month-rows.ts): a row that paid an invoice is
+  // documented by that payment, whatever sale the bank sync drafted for it.
+  if (row.paidInvoice || row.settlesInvoice || row.settlesPurchase) return "invoice";
   if (row.matchStatus === "confirmed") return "linked";
   if (row.matchStatus === "ignored") return "ignored";
   if (row.matchStatus === "suggested" && row.suggestedReceiptId) {

@@ -271,3 +271,73 @@ describe("a purchase invoice's VAT reaches the ALV return once, never twice (F39
     expect(body.field308.isRefund).toBe(true);
   });
 });
+
+describe("a bank row an invoice payment settled is done on Pankki and Koti alike (F12)", () => {
+  async function settledRow() {
+    const statement = await createStatementWithTransactions(user.id, {
+      periodMonth: previous,
+      transactions: [{ date: `${previous}-20`, amountCents: 24_500, counterparty: "Anna Asiakas" }],
+    });
+    const row = statement.transactions[0]!;
+    const customer = await prisma.customer.create({ data: { userId: user.id, name: "Anna Asiakas" } });
+    const invoice = await prisma.salesInvoice.create({
+      data: {
+        userId: user.id,
+        customerId: customer.id,
+        number: 5,
+        reference: "55",
+        issueDate: new Date(`${previous}-01T00:00:00.000Z`),
+        dueDate: new Date(`${previous}-15T00:00:00.000Z`),
+        status: "paid",
+        grossCents: 24_500,
+        netCents: 19_522,
+        vatCents: 4_978,
+      },
+    });
+    await prisma.invoicePayment.create({
+      data: { invoiceId: invoice.id, transactionId: row.id, paidDate: row.date!, amountCents: 24_500, source: "bank" },
+    });
+    // The bank sync had drafted a sale for the same income row before the payment was recorded.
+    const draft = await prisma.receipt.create({
+      data: {
+        userId: user.id,
+        type: "tulo",
+        source: "auto_income",
+        date: row.date,
+        totalAmountCents: 24_500,
+        vendor: "Anna Asiakas",
+        reviewStatus: "pending",
+        sourceTransactionId: row.id,
+        filePath: "/tmp/x.pdf",
+        fileName: "x.pdf",
+      },
+    });
+    await prisma.transaction.update({ where: { id: row.id }, data: { matchStatus: "suggested", suggestedReceiptId: draft.id } });
+    return { statement, row, invoice, draft };
+  }
+
+  it("tells the statement API which invoice the row paid, so Pankki can say so", async () => {
+    const { GET: getStatement } = await import("@/app/api/statements/[id]/route");
+    const { routeContext } = await import("./helpers/http");
+    const { statement, row, invoice } = await settledRow();
+    const response = await getStatement(
+      buildRequest("GET", `/api/statements/${statement.id}`, undefined, { cookie }),
+      routeContext({ id: statement.id })
+    );
+    const rows = (await readJson(response)).statement.transactions as Json[];
+    const paid = rows.find((tx) => tx.id === row.id)!;
+    expect(paid.settlesInvoice).toBe(true);
+    expect(paid.paidInvoice).toEqual({ id: invoice.id, number: 5 });
+    expect(paid.invoicePayment).toBeUndefined();
+  });
+
+  it("does not ask Koti's owner to approve the sale drafted for a row an invoice already took", async () => {
+    const { draft } = await settledRow();
+    const body = await getMonth(previous);
+    expect(body.totals.pending_receipt).toBe(0);
+    expect(body.items.some((item: Json) => item.kind === "pending_receipt" && item.receiptId === draft.id)).toBe(false);
+    expect(body.totals.missing_receipt).toBe(0);
+    expect(body.blockingTotal).toBe(0);
+    expect(body.progress).toMatchObject({ matchable: 1, matched: 1 });
+  });
+});

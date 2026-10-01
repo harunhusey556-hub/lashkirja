@@ -313,6 +313,39 @@ export function BankRowSheet({
             </>
           )}
 
+          {state === "invoice" && (
+            <>
+              <KeyValueList
+                rows={[
+                  {
+                    label: "Maksu",
+                    value: row.paidInvoice
+                      ? `Laskulle ${row.paidInvoice.number}`
+                      : row.settlesPurchase
+                        ? "Ostolaskulle"
+                        : "Laskulle",
+                  },
+                ]}
+              />
+              <p className="px-1 text-caption text-ink-2">
+                Tapahtuma on jo kirjattu laskun maksuksi. Siitä ei tarvitse hyväksyä myyntiä eikä lisätä kuittia.
+              </p>
+              {row.paidInvoice ? (
+                <Link
+                  href={detailHref("invoice", row.paidInvoice.id)}
+                  onClick={onClose}
+                  className={buttonClass("secondary", "w-full")}
+                >
+                  Avaa lasku
+                </Link>
+              ) : row.settlesPurchase ? (
+                <Link href="/kirjanpito/ostolaskut" onClick={onClose} className={buttonClass("secondary", "w-full")}>
+                  Avaa ostolaskut
+                </Link>
+              ) : null}
+            </>
+          )}
+
           {state === "linked" && (
             <>
               <KeyValueList
