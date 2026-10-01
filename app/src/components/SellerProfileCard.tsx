@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { apiFetch, errorMessage, readJson } from "@/components/clientFetch";
+import { apiFetch, errorMessage, fieldErrorsFromApi, readJson } from "@/components/clientFetch";
 import { ErrorState } from "@/components/AsyncState";
 import { BottomActions, Card, Skeleton, SkeletonCard, SkeletonGroup, useSkeletonFade } from "@/components/ds";
 import { useEditorSession } from "@/components/form-session";
@@ -13,6 +13,8 @@ import { formatIban, isValidIban, normalizeIban } from "@/lib/iban";
 import { CopyButton } from "@/components/ds/CopyButton";
 import { parseFinnishNumber } from "@/lib/format";
 import { showToast } from "@/lib/toast";
+import { SELLER_LIMITS } from "@/lib/seller-limits";
+import { sellerBlankedErrors, sellerSavedText, sellerUnchanged } from "@/lib/seller-form";
 
 interface SellerProfile {
   lateInterestPercent: number | null;
@@ -46,19 +48,31 @@ const EMPTY: Values = {
 
 /** Field order on screen, for focusing the first invalid one. */
 const FIELD_ORDER = [
+  "businessName",
   "businessId",
+  "phone",
+  "addressStreet",
   "addressPostalCode",
+  "addressCity",
   "invoiceIban",
+  "invoiceBic",
   "lateInterestPercent",
   "reminderFeeCents",
+  "invoiceTerms",
 ] as const;
 
 const FIELD_ID: Record<string, string> = {
+  businessName: "sp-name",
   businessId: "sp-business-id",
+  phone: "sp-phone",
+  addressStreet: "sp-street",
   addressPostalCode: "sp-postal",
+  addressCity: "sp-city",
   invoiceIban: "sp-iban",
+  invoiceBic: "sp-bic",
   lateInterestPercent: "sp-interest",
   reminderFeeCents: "sp-fee",
+  invoiceTerms: "sp-terms",
 };
 
 function fromProfile(profile: Partial<SellerProfile>): Values {
@@ -153,14 +167,21 @@ export default function SellerProfileCard() {
   async function save(event: React.FormEvent) {
     event.preventDefault();
     if (saving) return;
-    const nextErrors: Record<string, string> = {};
-    if (values.businessId.trim() && !isValidBusinessId(values.businessId)) {
+    // Nothing changed: nothing is sent and nothing is claimed as saved (F23).
+    if (sellerUnchanged(values, baseline)) {
+      setErrors({});
+      setFormError("");
+      showToast({ tone: "info", text: "Ei tallennettavia muutoksia." });
+      return;
+    }
+    const nextErrors: Record<string, string> = { ...sellerBlankedErrors(values, baseline) };
+    if (!nextErrors.businessId && values.businessId.trim() && !isValidBusinessId(values.businessId)) {
       nextErrors.businessId = "Y-tunnus ei täsmää (esim. 0201256-6).";
     }
     if (values.addressPostalCode.trim() && !/^\d{5}$/.test(values.addressPostalCode.trim())) {
       nextErrors.addressPostalCode = "Postinumerossa on 5 numeroa.";
     }
-    if (values.invoiceIban.trim() && !isValidIban(values.invoiceIban)) {
+    if (!nextErrors.invoiceIban && values.invoiceIban.trim() && !isValidIban(values.invoiceIban)) {
       nextErrors.invoiceIban = "IBAN ei ole kelvollinen.";
     }
     const interest = values.lateInterestPercent.trim() ? parseFinnishNumber(values.lateInterestPercent) : null;
@@ -201,10 +222,19 @@ export default function SellerProfileCard() {
       });
       await readJson(response, "Tallennus epäonnistui");
       setBaseline(values);
-      showToast({ tone: "success", text: "Laskuttajan tiedot tallennettu." });
+      showToast({ tone: "success", text: sellerSavedText(values) });
     } catch (error) {
       void hapticNotify("error");
-      setFormError(errorMessage(error, "Tallennus epäonnistui"));
+      // The server names the field it refused; mark it and bring it into view (F14).
+      const fieldErrors = fieldErrorsFromApi(error);
+      const known = Object.fromEntries(Object.entries(fieldErrors).filter(([key]) => key in FIELD_ID));
+      if (Object.keys(known).length > 0) {
+        setErrors(known);
+        setFormError("");
+        focusFirstInvalid(known, FIELD_ORDER, (key) => FIELD_ID[key] ?? key);
+      } else {
+        setFormError(errorMessage(error, "Tallennus epäonnistui"));
+      }
     } finally {
       setSaving(false);
     }
@@ -219,17 +249,18 @@ export default function SellerProfileCard() {
     // VS-02, R18: a long form saves from the sticky bar, which sits at the same place on every screen.
     <form onSubmit={save} className={`space-y-4 ${fade}`.trim()} noValidate>
       <Card className="space-y-4">
-        <Field label="Toiminimi tai yrityksen nimi" htmlFor="sp-name">
+        <Field label="Toiminimi tai yrityksen nimi" htmlFor="sp-name" error={errors.businessName}>
           <input
             id="sp-name"
             name="businessName"
-            className={controlClass}
+            maxLength={SELLER_LIMITS.businessName}
+            className={`${controlClass}${errors.businessName ? " !border-danger" : ""}`}
             value={values.businessName}
             onChange={(e) => set("businessName", e.target.value)}
             autoComplete="organization"
             autoCapitalize="words"
             enterKeyHint="next"
-            placeholder="Liisan Ripsistudio"
+            placeholder="Esim. Liisan Ripsistudio"
           />
         </Field>
 
@@ -248,7 +279,7 @@ export default function SellerProfileCard() {
               spellCheck={false}
               maxLength={9}
               enterKeyHint="next"
-              placeholder="0201256-6"
+              placeholder="Esim. 0201256-6"
             />
             {values.businessId.trim() ? (
               <div className="mt-1 flex justify-end">
@@ -256,11 +287,12 @@ export default function SellerProfileCard() {
               </div>
             ) : null}
           </Field>
-          <Field label="Puhelin" htmlFor="sp-phone" optional>
+          <Field label="Puhelin" htmlFor="sp-phone" optional error={errors.phone}>
             <input
               id="sp-phone"
               name="phone"
-              className={controlClass}
+              maxLength={SELLER_LIMITS.phone}
+              className={`${controlClass}${errors.phone ? " !border-danger" : ""}`}
               value={values.phone}
               onChange={(e) => set("phone", e.target.value)}
               type="tel"
@@ -271,11 +303,12 @@ export default function SellerProfileCard() {
           </Field>
         </div>
 
-        <Field label="Katuosoite" htmlFor="sp-street">
+        <Field label="Katuosoite" htmlFor="sp-street" error={errors.addressStreet}>
           <input
             id="sp-street"
             name="addressStreet"
-            className={controlClass}
+            maxLength={SELLER_LIMITS.addressStreet}
+            className={`${controlClass}${errors.addressStreet ? " !border-danger" : ""}`}
             value={values.addressStreet}
             onChange={(e) => set("addressStreet", e.target.value)}
             autoComplete="address-line1"
@@ -296,20 +329,21 @@ export default function SellerProfileCard() {
               autoComplete="postal-code"
               maxLength={5}
               enterKeyHint="next"
-              placeholder="00100"
+              placeholder="Esim. 00100"
             />
           </Field>
-          <Field label="Postitoimipaikka" htmlFor="sp-city">
+          <Field label="Postitoimipaikka" htmlFor="sp-city" error={errors.addressCity}>
             <input
               id="sp-city"
               name="addressCity"
-              className={controlClass}
+              maxLength={SELLER_LIMITS.addressCity}
+              className={`${controlClass}${errors.addressCity ? " !border-danger" : ""}`}
               value={values.addressCity}
               onChange={(e) => set("addressCity", e.target.value)}
               autoComplete="address-level2"
               autoCapitalize="words"
               enterKeyHint="next"
-              placeholder="Helsinki"
+              placeholder="Esim. Helsinki"
             />
           </Field>
         </div>
@@ -332,7 +366,7 @@ export default function SellerProfileCard() {
             autoCorrect="off"
             spellCheck={false}
             enterKeyHint="next"
-            placeholder="FI21 1234 5600 0007 85"
+            placeholder="Esim. FI21 1234 5600 0007 85"
           />
           {values.invoiceIban.trim() ? (
             <div className="mt-1 flex justify-end">
@@ -340,11 +374,12 @@ export default function SellerProfileCard() {
             </div>
           ) : null}
         </Field>
-        <Field label="BIC" htmlFor="sp-bic" optional>
+        <Field label="BIC" htmlFor="sp-bic" optional error={errors.invoiceBic}>
           <input
             id="sp-bic"
             name="invoiceBic"
-            className={controlClass}
+            maxLength={SELLER_LIMITS.invoiceBic}
+            className={`${controlClass}${errors.invoiceBic ? " !border-danger" : ""}`}
             value={values.invoiceBic}
             onChange={(e) => set("invoiceBic", e.target.value.toUpperCase())}
             autoComplete="off"
@@ -352,7 +387,7 @@ export default function SellerProfileCard() {
             autoCorrect="off"
             spellCheck={false}
             enterKeyHint="next"
-            placeholder="NDEAFIHH"
+            placeholder="Esim. NDEAFIHH"
           />
         </Field>
 
@@ -390,21 +425,23 @@ export default function SellerProfileCard() {
           </Field>
         </div>
 
-        <Field label="Laskun ehdot" htmlFor="sp-terms" optional>
+        <Field label="Laskun ehdot" htmlFor="sp-terms" optional error={errors.invoiceTerms}>
           <textarea
             id="sp-terms"
             name="invoiceTerms"
-            className={`${controlClass} min-h-24`}
+            maxLength={SELLER_LIMITS.invoiceTerms}
+            className={`${controlClass} min-h-24${errors.invoiceTerms ? " !border-danger" : ""}`}
             value={values.invoiceTerms}
             onChange={(e) => set("invoiceTerms", e.target.value)}
-            placeholder="Viivästyskorko 8 %. Huomautusaika 8 päivää."
+            placeholder="Esim. Viivästyskorko 8 %. Huomautusaika 8 päivää."
           />
         </Field>
 
       </Card>
 
-      <FormError message={formError} />
       <BottomActions>
+        {/* Inside the sticky bar, so a refusal is visible where the person tapped (F14). */}
+        <FormError message={formError} className="mb-2" />
         <Button type="submit" className="w-full" busy={saving} busyLabel="Tallennetaan…">
           Tallenna laskuttajan tiedot
         </Button>

@@ -540,9 +540,17 @@ export async function leaveAfterSignOut(): Promise<boolean> {
  * form can put each message at its field. Empty when the error carries none.
  */
 export function fieldErrorsFromApi(error: unknown): Record<string, string> {
-  if (!(error instanceof ApiError) || !Array.isArray(error.details)) return {};
+  if (!(error instanceof ApiError)) return {};
+  // The envelope carries the list as `details`; a route that answers with a plain
+  // `error` string carries it as `{ details: [...] }` beside it.
+  const list = Array.isArray(error.details)
+    ? error.details
+    : error.details && typeof error.details === "object" && Array.isArray((error.details as { details?: unknown }).details)
+      ? ((error.details as { details: unknown[] }).details)
+      : null;
+  if (!list) return {};
   const result: Record<string, string> = {};
-  for (const item of error.details) {
+  for (const item of list) {
     if (!item || typeof item !== "object") continue;
     const { field, message } = item as { field?: unknown; message?: unknown };
     if (typeof field !== "string" || !field || typeof message !== "string") continue;

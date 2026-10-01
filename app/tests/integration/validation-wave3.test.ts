@@ -5,6 +5,7 @@
 import { NextRequest } from "next/server";
 import { beforeEach, describe, expect, it } from "vitest";
 import { POST as createCustomer } from "@/app/api/customers/route";
+import { PATCH as patchProfile } from "@/app/api/profile/route";
 import { PATCH as patchReceipt } from "@/app/api/receipts/[id]/route";
 import { createReceipt, createUser, resetDatabase, type TestUser } from "./helpers/factories";
 import { buildRequest, readJson, routeContext, sessionCookie } from "./helpers/http";
@@ -44,5 +45,16 @@ describe("F64 validation answers", () => {
     expect(response.status).toBe(400);
     const body = await readJson(response);
     expect(body.error.message).toMatch(/ei voitu lukea/);
+  });
+
+  it("a too long seller value names the field and the limit (F14)", async () => {
+    const response = await patchProfile(
+      buildRequest("PATCH", "/api/profile", { businessName: "x".repeat(130), phone: "1".repeat(50) }, { cookie })
+    );
+    expect(response.status).toBe(400);
+    const body = await readJson(response);
+    expect(body.error).toBe("Toiminimi saa olla enintään 120 merkkiä");
+    expect(body.field).toBe("businessName");
+    expect(body.details.map((issue: { field: string }) => issue.field)).toEqual(["businessName", "phone"]);
   });
 });

@@ -138,4 +138,12 @@ describe("fieldErrorsFromApi", () => {
     expect(fieldErrorsFromApi(new Error("x"))).toEqual({});
     expect(fieldErrorsFromApi(new ApiError("x", 400))).toEqual({});
   });
+
+  it("reads the list from a route that answers with a plain error string and details beside it", () => {
+    const error = new ApiError("Toiminimi saa olla enintään 120 merkkiä", 400, {
+      field: "businessName",
+      details: [{ field: "businessName", message: "Toiminimi saa olla enintään 120 merkkiä" }],
+    });
+    expect(fieldErrorsFromApi(error)).toEqual({ businessName: "Toiminimi saa olla enintään 120 merkkiä" });
+  });
 });

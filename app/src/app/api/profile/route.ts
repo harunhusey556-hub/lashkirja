@@ -8,6 +8,8 @@ import { reminderSettingsData } from "@/lib/invoice-reminders";
 import { ValidationError } from "@/lib/api-errors";
 import { ENTITY_TYPES } from "@/lib/onboarding";
 import { guardWrite } from "@/lib/http-security";
+import { SELLER_LIMITS } from "@/lib/seller-limits";
+import { zodIssuesFi } from "@/lib/zod-messages";
 
 const patchSchema = z.object({
   // Trimmed and capped like the other text fields. The messages are the ones
@@ -28,15 +30,15 @@ const patchSchema = z.object({
   vatRegistered: z.boolean().optional(),
   vatPeriod: z.enum(["month", "quarter", "year"]).optional(),
   // Seller details printed on sales invoices.
-  businessName: z.string().trim().max(120).nullish(),
-  businessId: z.string().trim().max(20).nullish(),
-  addressStreet: z.string().trim().max(120).nullish(),
-  addressPostalCode: z.string().trim().max(20).nullish(),
-  addressCity: z.string().trim().max(80).nullish(),
-  phone: z.string().trim().max(40).nullish(),
-  invoiceIban: z.string().trim().max(42).nullish(),
-  invoiceBic: z.string().trim().max(11).nullish(),
-  invoiceTerms: z.string().trim().max(1000).nullish(),
+  businessName: z.string().trim().max(SELLER_LIMITS.businessName).nullish(),
+  businessId: z.string().trim().max(SELLER_LIMITS.businessId).nullish(),
+  addressStreet: z.string().trim().max(SELLER_LIMITS.addressStreet).nullish(),
+  addressPostalCode: z.string().trim().max(SELLER_LIMITS.addressPostalCode).nullish(),
+  addressCity: z.string().trim().max(SELLER_LIMITS.addressCity).nullish(),
+  phone: z.string().trim().max(SELLER_LIMITS.phone).nullish(),
+  invoiceIban: z.string().trim().max(SELLER_LIMITS.invoiceIban).nullish(),
+  invoiceBic: z.string().trim().max(SELLER_LIMITS.invoiceBic).nullish(),
+  invoiceTerms: z.string().trim().max(SELLER_LIMITS.invoiceTerms).nullish(),
   // Collection settings; validated by reminderSettingsData so the rules live
   // in one place rather than being restated here.
   lateInterestPercent: z.number().finite().nullable().optional(),
@@ -96,12 +98,13 @@ export async function PATCH(req: NextRequest) {
 
   const parsed = patchSchema.safeParse(await req.json().catch(() => null));
   if (!parsed.success) {
-    // A name problem is the person's to fix, so it is named; anything else keeps
-    // the plain refusal.
-    const nameIssue = parsed.error.issues.find(
-      (issue) => issue.path[0] === "firstName" || issue.path[0] === "lastName"
+    // The first problem is named in Finnish with its field and limit; `field`
+    // and `details` let the form mark the field (F14, F64).
+    const issues = zodIssuesFi(parsed.error);
+    return NextResponse.json(
+      { error: issues[0]?.message ?? "Tarkista lomakkeen tiedot", field: issues[0]?.field ?? null, details: issues },
+      { status: 400 }
     );
-    return NextResponse.json({ error: nameIssue?.message ?? "Virheellinen pyyntö" }, { status: 400 });
   }
 
   const { lateInterestPercent, reminderFee, ...data } = parsed.data;
