@@ -113,13 +113,23 @@ describe("F52: autodetect never files a statement under an archived account", ()
     expect(statement.bankAccountId).toBe(active.id);
   });
 
-  it("a file whose own account is archived goes to the default active account, not the archived one", async () => {
+  it("M1-4: a file whose own account is archived is left without an account and says why, never put on another one", async () => {
     const active = await createBankAccountRow(user.id, { name: "Aktiivinen", iban: IBAN_B, isDefault: true });
     const archived = await createBankAccountRow(user.id, { name: "Vanha", iban: IBAN_A });
     await archive(archived.id);
     const csv = `Tilinumero;${IBAN_A}\nKirjauspäivä;Summa;Saaja\n05.01.2026;120,00;Asiakas Oy\n`;
-    const { statement } = await readJson(await upload(csv));
-    expect(statement.bankAccountId).toBe(active.id);
+    const body = await readJson(await upload(csv));
+    expect(body.statement.bankAccountId).toBeNull();
+    expect(body.notice).toContain("arkistoituun tiliin Vanha");
+    // The active account's balance is not touched by the file.
+    expect(await prisma.statement.count({ where: { bankAccountId: active.id } })).toBe(0);
+  });
+
+  it("a file with no own IBAN still goes to the default active account, without a notice", async () => {
+    const active = await createBankAccountRow(user.id, { name: "Aktiivinen", iban: IBAN_B, isDefault: true });
+    const body = await readJson(await upload("Kirjauspäivä;Summa;Saaja\n05.01.2026;120,00;Asiakas Oy\n"));
+    expect(body.statement.bankAccountId).toBe(active.id);
+    expect(body.notice).toBeNull();
   });
 
   it("a counterparty IBAN of another active own account does not decide either", async () => {

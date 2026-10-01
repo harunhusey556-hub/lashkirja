@@ -23,7 +23,7 @@ import { inferTransactionType } from "@/lib/statements";
 import { listStatementsForUser } from "@/lib/statement-api";
 import { centsToEuros } from "@/lib/money";
 import { autoGenerateIncomeReceipts } from "@/lib/income-automation";
-import { resolveAccountForImport } from "@/lib/bank-accounts";
+import { archivedAccountForIban, archivedAccountImportNotice, resolveAccountForImport } from "@/lib/bank-accounts";
 import { extractOwnIban } from "@/lib/iban";
 import { Prisma } from "@/generated/prisma/client";
 import { loadStoredRowIdentities, lockedRowsNotice, skippedRowsNotice, splitNewRows } from "@/lib/bank-row-fingerprint";
@@ -153,6 +153,7 @@ export async function POST(req: NextRequest) {
     // wins, then an IBAN found inside the file, then the default account.
     const requestedAccountId = formData.get("bankAccountId");
     let bankAccountId: string | null = null;
+    let accountNotice: string | null = null;
     // Only text formats are cheap to scan; xlsx/pdf have no IBAN hint.
     const scannable = detected.kind === "xml" || detected.kind === "csv";
     // The file's own account, never a counterparty's (a transfer to the owner's
@@ -174,6 +175,11 @@ export async function POST(req: NextRequest) {
       bankAccountId = owned.id;
     } else {
       bankAccountId = await resolveAccountForImport(userId, { iban: ibanHint });
+      // M1-4: the file's own account is archived, so it was filed under none; say so.
+      if (bankAccountId === null) {
+        const archivedHolder = await archivedAccountForIban(userId, ibanHint);
+        if (archivedHolder) accountNotice = archivedAccountImportNotice(archivedHolder.name);
+      }
     }
 
     const { statement, statements, skippedDuplicates, heldBack } = await prisma.$transaction(async (db) => {
@@ -309,7 +315,7 @@ export async function POST(req: NextRequest) {
       skippedDuplicates,
       heldBack,
       notice:
-        [splitNotice(statements.length), skippedRowsNotice(skippedDuplicates), lockedRowsNotice(heldBack)]
+        [accountNotice, splitNotice(statements.length), skippedRowsNotice(skippedDuplicates), lockedRowsNotice(heldBack)]
           .filter(Boolean)
           .join(" ") || null,
     });

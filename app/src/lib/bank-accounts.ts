@@ -507,9 +507,33 @@ export async function assignStatementAccount(
   });
 }
 
+/** The archived account that owns an IBAN, when no active account does (M1-4). */
+export async function archivedAccountForIban(
+  userId: string,
+  ibanInput: string | null | undefined
+): Promise<{ id: string; name: string } | null> {
+  const iban = ibanInput ? normalizeIban(ibanInput) : null;
+  if (!iban || !isValidIban(iban)) return null;
+  const holders = await prisma.bankAccount.findMany({
+    where: { userId, iban },
+    select: { id: true, name: true, archivedAt: true },
+  });
+  if (holders.some((holder) => holder.archivedAt === null)) return null;
+  const archived = holders.find((holder) => holder.archivedAt !== null);
+  return archived ? { id: archived.id, name: archived.name } : null;
+}
+
+/** Said when a file was left without an account because its own account is archived. */
+export function archivedAccountImportNotice(accountName: string): string {
+  return `Tiliote jätettiin ilman tiliä, koska se kuuluu arkistoituun tiliin ${accountName}. Palauta tili Pankki-sivulta tai valitse tiliotteelle tili.`;
+}
+
 /**
  * Pick the account a freshly uploaded statement belongs to: an IBAN seen in
- * the file wins, otherwise the default account, otherwise nothing.
+ * the file wins, otherwise the default account, otherwise nothing. A file whose
+ * own IBAN belongs only to an archived account is not guessed onto another
+ * account (that would add its rows to the wrong balance): it stays without an
+ * account until the owner restores the account or picks one.
  */
 export async function resolveAccountForImport(
   userId: string,
@@ -525,6 +549,7 @@ export async function resolveAccountForImport(
       select: { id: true },
     });
     if (byIban) return byIban.id;
+    if (await archivedAccountForIban(userId, iban)) return null;
   }
   const fallback = await prisma.bankAccount.findFirst({
     where: { userId, archivedAt: null },
