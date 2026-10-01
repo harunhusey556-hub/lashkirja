@@ -177,6 +177,32 @@ describe("OWN-18: Koti counts a connected bank", () => {
     // Closing balances: two months ago 900, last month 800, this month 1000 (the bank's figure).
     expect(body.bankTrend.points.map((p: { balance: number }) => p.balance)).toEqual([900, 800, 1000]);
   });
+
+  it("rows older than the chart window still date the history, and a hand-added account without statements adds its opening", async () => {
+    await connect({ accounts: [{ iban: IBAN_A, uid: "acc-1", inScope: true, balanceCents: 1_000_00 }] });
+    await createBankAccountRow(user.id, { iban: null, name: "Käteiskassa", openingBalanceCents: 50_00, openingDate: "2020-01-01" });
+    const now = new Date();
+    const statement = await prisma.statement.create({
+      data: { userId: user.id, fileName: "S-Pankki", fileType: "enablebanking", filePath: "", checksum: `eb:${IBAN_A}:old`, periodMonth: "2026-01" },
+    });
+    for (const [n, cents] of [[10, 400_00], [1, -100_00]] as const) {
+      await prisma.transaction.create({
+        data: {
+          statementId: statement.id,
+          userId: user.id,
+          iban: IBAN_A,
+          source: "enablebanking",
+          date: new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - n, 10)),
+          amountCents: cents,
+          counterparty: "Testi",
+          type: cents > 0 ? "tulo" : "meno",
+        },
+      });
+    }
+    const body = await koti();
+    // Six months plotted: 1100 until the -100 last month, then 1000; plus 50 cash in every month.
+    expect(body.bankTrend.points.map((p: { balance: number }) => p.balance)).toEqual([1150, 1150, 1150, 1150, 1050, 1050]);
+  });
 });
 
 describe("OWN-18: Pankkitilit counts connected accounts in its total", () => {

@@ -43,6 +43,7 @@ export interface PositionConnectionAccount {
 export interface PositionConnection {
   id: string;
   aspspName: string;
+  aspspCountry: string;
   status: string;
   validUntil: Date | null;
   lastError: string | null;
@@ -139,8 +140,21 @@ export function combineBankPosition(
   const coveredIbans = new Set(
     usable.flatMap((connection) => connection.accounts.map((account) => normalizeIban(account.iban)))
   );
+  // ...and only while the owner has not connected the same bank (name and
+  // country) again since: a newer usable consent for that bank supersedes it,
+  // whatever accounts either one lists. Without this an old failed consent
+  // with no accounts kept Koti on "Yhteys vanhentunut" after a reconnect.
+  const superseded = (connection: PositionConnection) =>
+    usable.some(
+      (other) =>
+        other.id !== connection.id &&
+        other.aspspName === connection.aspspName &&
+        other.aspspCountry === connection.aspspCountry &&
+        other.createdAt.getTime() > connection.createdAt.getTime()
+    );
   const ended = ordered.find((connection) => {
     if (!consentEnded(connection, now)) return false;
+    if (superseded(connection)) return false;
     const scoped = connection.accounts.filter((account) => account.inScope);
     const relevant = scoped.length > 0 ? scoped : connection.accounts;
     return relevant.length === 0 || relevant.some((account) => !coveredIbans.has(normalizeIban(account.iban)));
@@ -188,6 +202,7 @@ export async function loadPositionConnections(userId: string): Promise<PositionC
     select: {
       id: true,
       aspspName: true,
+      aspspCountry: true,
       status: true,
       validUntil: true,
       lastError: true,
@@ -239,15 +254,21 @@ export interface BalancePoint {
  * balance the bank reported: a month's closing is today's balance minus every
  * synced row booked after that month. Months before the first synced row are
  * unknown and left out (never extrapolated).
+ *
+ * `rows` only needs the rows booked from the window's first month on (older
+ * ones never change a closing inside the window); pass `firstRowMonth` (the
+ * month of the oldest synced row overall) when older rows were left out.
  */
 export function connectedClosings(
   balanceCents: number,
   rows: ReadonlyArray<{ date: Date; amountCents: number }>,
   throughMonth: string,
-  months: number
+  months: number,
+  firstRowMonth?: string | null
 ): Array<{ month: string; cents: number }> {
-  if (rows.length === 0) return [{ month: throughMonth, cents: balanceCents }];
-  const firstMonth = rows.reduce((min, row) => (monthKey(row.date) < min ? monthKey(row.date) : min), throughMonth);
+  if (rows.length === 0 && !firstRowMonth) return [{ month: throughMonth, cents: balanceCents }];
+  const firstMonth =
+    firstRowMonth ?? rows.reduce((min, row) => (monthKey(row.date) < min ? monthKey(row.date) : min), throughMonth);
   const out: Array<{ month: string; cents: number }> = [];
   for (let back = months - 1; back >= 0; back -= 1) {
     const month = addMonths(throughMonth, -back);
@@ -258,22 +279,48 @@ export function connectedClosings(
   return out;
 }
 
+export interface TrendSeries {
+  /** Known closings; months after the window are ignored. */
+  points: ReadonlyArray<{ month: string; cents: number }>;
+  /** The balance before the series' first point: a ledger account's opening
+   * balance, a connected account's balance before its oldest synced row. */
+  openingCents: number;
+}
+
 /**
- * The summed EUR balance of every counted account, per month, for the months
- * every one of them has a figure. Null under two points (nothing to draw).
+ * The summed EUR balance of every counted account, per month. A month is
+ * plotted when at least one series has a figure for it. A series without a
+ * figure for that month counts with its last known closing before it, or with
+ * its opening balance while it has none yet (a hand-added account with no
+ * statements stays flat at its opening balance). So one account without data
+ * never blanks the whole chart. Null under two points (nothing to draw).
  */
 export function combineTrend(
-  series: ReadonlyArray<ReadonlyArray<{ month: string; cents: number }>>,
+  series: ReadonlyArray<TrendSeries>,
   throughMonth: string,
   months: number
 ): BalancePoint[] | null {
   if (series.length === 0) return null;
   const window = Array.from({ length: months }, (_, index) => addMonths(throughMonth, index - (months - 1)));
-  const maps = series.map((one) => new Map(one.map((point) => [point.month, point.cents])));
+  const sorted = series.map((one) => ({
+    openingCents: one.openingCents,
+    points: one.points
+      .filter((point) => point.month <= throughMonth)
+      .slice()
+      .sort((a, b) => a.month.localeCompare(b.month)),
+  }));
+  const valueAt = (one: (typeof sorted)[number], month: string): number => {
+    let value = one.openingCents;
+    for (const point of one.points) {
+      if (point.month > month) break;
+      value = point.cents;
+    }
+    return value;
+  };
   const points: BalancePoint[] = [];
   for (const month of window) {
-    if (!maps.every((map) => map.has(month))) continue;
-    points.push({ month, balance: centsToEuros(maps.reduce((sum, map) => sum + (map.get(month) ?? 0), 0)) });
+    if (!sorted.some((one) => one.points.some((point) => point.month === month))) continue;
+    points.push({ month, balance: centsToEuros(sorted.reduce((sum, one) => sum + valueAt(one, month), 0)) });
   }
   return points.length >= 2 ? points : null;
 }
@@ -285,29 +332,42 @@ export async function loadBalanceTrend(
   throughMonth: string,
   months = 6
 ): Promise<BalancePoint[] | null> {
-  const series: Array<Array<{ month: string; cents: number }>> = [];
+  const series: TrendSeries[] = [];
   for (const account of overview.accounts) {
     if (account.archivedAt || account.currency !== "EUR") continue;
-    series.push(
-      account.monthlyClosings
+    series.push({
+      openingCents: eurosToCents(account.openingBalance),
+      points: account.monthlyClosings
         .filter((row) => row.month <= throughMonth)
-        .map((row) => ({ month: row.month, cents: eurosToCents(row.balance) }))
-    );
+        .map((row) => ({ month: row.month, cents: eurosToCents(row.balance) })),
+    });
   }
+  // Rows booked from the window's first month on are enough for every closing
+  // inside the window. The oldest row's month and the sum of all rows (for the
+  // opening) come from one aggregate instead of loading the whole history.
+  const windowStart = addMonths(throughMonth, -(months - 1));
+  const windowStartDate = new Date(`${windowStart}-01T00:00:00.000Z`);
   for (const account of position.connectedOnly) {
     if (account.currency !== "EUR" || account.balance === null) continue;
-    const rows = await prisma.transaction.findMany({
-      where: { userId, iban: account.iban, source: "enablebanking", date: { not: null } },
-      select: { date: true, amountCents: true },
-    });
-    series.push(
-      connectedClosings(
-        eurosToCents(account.balance),
+    const where = { userId, iban: account.iban, source: "enablebanking", date: { not: null } };
+    const [rows, all] = await Promise.all([
+      prisma.transaction.findMany({
+        where: { ...where, date: { gte: windowStartDate } },
+        select: { date: true, amountCents: true },
+      }),
+      prisma.transaction.aggregate({ where, _min: { date: true }, _sum: { amountCents: true } }),
+    ]);
+    const balanceCents = eurosToCents(account.balance);
+    series.push({
+      openingCents: balanceCents - (all._sum.amountCents ?? 0),
+      points: connectedClosings(
+        balanceCents,
         rows.filter((row): row is { date: Date; amountCents: number } => row.date !== null),
         throughMonth,
-        months
-      )
-    );
+        months,
+        all._min.date ? monthKey(all._min.date) : null
+      ),
+    });
   }
   return combineTrend(series, throughMonth, months);
 }
