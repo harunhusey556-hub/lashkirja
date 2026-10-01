@@ -45,3 +45,38 @@ describe("parseHolviTilioteLayout", () => {
     expect(inferTransactionType(mobilePay!.amount, mobilePay!)).toBe("tulo");
   });
 });
+
+describe("V30: a file the parser cannot read is refused in plain Finnish", () => {
+  async function failure(name: string, bytes: Buffer, parse: (file: string) => Promise<unknown>) {
+    const fs = await import("fs");
+    const os = await import("os");
+    const path = await import("path");
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "lk-parse-"));
+    const file = path.join(dir, name);
+    fs.writeFileSync(file, bytes);
+    try {
+      await parse(file);
+      return null;
+    } catch (error) {
+      return error as { message: string; code?: string };
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  }
+  const raw = /Unclosed|Line:|Column:|unzip|ENOENT|spawn|Couldn't|undefined|Error/;
+
+  it("a truncated camt XML names no library text", async () => {
+    const { parseCamtXML } = await import("./parsers");
+    const error = await failure("a.xml", Buffer.from('<?xml version="1.0"?><Document><BkToCstmrAcctRpt>'), parseCamtXML);
+    expect(error?.code).toBe("INVALID_XML");
+    expect(error?.message).not.toMatch(raw);
+    expect(error?.message).toMatch(/XML/);
+  });
+
+  it("a junk xlsx that starts with PK names no library text", async () => {
+    const { parseXLSX } = await import("./parsers");
+    const error = await failure("a.xlsx", Buffer.concat([Buffer.from("PK"), Buffer.from("not really a zip file")]), parseXLSX);
+    expect(error?.code).toBe("INVALID_XLSX");
+    expect(error?.message).not.toMatch(raw);
+  });
+});

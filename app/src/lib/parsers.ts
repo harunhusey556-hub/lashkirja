@@ -284,10 +284,12 @@ export async function parseCamtXML(filePath: string): Promise<ParsedTransaction[
       tagNameProcessors: [xml2js.processors.stripPrefix],
     });
   } catch (error) {
+    // The library's own wording (English, line numbers) is for the log, not the owner.
+    console.warn("camt XML parse failed:", error instanceof Error ? error.message : error);
     throw new StatementParseError(
       "camt",
       "INVALID_XML",
-      `Virheellinen XML-tiliote: ${error instanceof Error ? error.message : "jäsennys epäonnistui"}`
+      "XML-tiliotetta ei voitu lukea. Tiedosto on virheellinen tai katkennut. Lataa se pankista uudelleen."
     );
   }
 
@@ -554,10 +556,11 @@ export async function parseXLSX(filePath: string): Promise<ParsedTransaction[]> 
   try {
     workbook = await readXlsxFile(buffer);
   } catch (error) {
+    console.warn("XLSX read failed:", error instanceof Error ? error.message : error);
     throw new StatementParseError(
       "xlsx",
       "INVALID_XLSX",
-      `XLSX-tiedoston lukeminen epäonnistui: ${error instanceof Error ? error.message : "tuntematon virhe"}`
+      "Excel-tiedostoa ei voitu lukea. Tiedosto on virheellinen tai katkennut. Lataa se pankista uudelleen."
     );
   }
 
@@ -969,10 +972,13 @@ function scannedPdfText(filePath: string): string {
     return text;
   } catch (error) {
     if (error instanceof StatementParseError) throw error;
+    // Also the case where the reader program is missing on the server: the
+    // owner gets the way forward, the cause goes to the log.
+    console.warn("Scanned PDF read failed:", error instanceof Error ? error.message : error);
     throw new StatementParseError(
       "pdf",
       "SCANNED_PDF_OCR_FAILED",
-      `Skannatun PDF-tiliotteen OCR epäonnistui: ${error instanceof Error ? error.message : "tuntematon virhe"}`
+      "Skannattua PDF-tiliotetta ei voitu lukea. Lataa pankin XML-, XLSX- tai CSV-tiedosto."
     );
   } finally {
     fs.rmSync(resolvedTempDir, { recursive: true, force: false });
@@ -1010,10 +1016,11 @@ export async function parsePDFStatement(filePath: string): Promise<ParsedTransac
         await parser.destroy();
       }
     } catch (error) {
+      console.warn("PDF text extraction failed:", error instanceof Error ? error.message : error);
       throw new StatementParseError(
         "pdf",
         "PDF_TEXT_EXTRACTION_FAILED",
-        `PDF:n tekstin luku epäonnistui: ${error instanceof Error ? error.message : "tuntematon virhe"}`
+        "PDF-tiedoston tekstiä ei voitu lukea. Lataa pankin XML-, XLSX- tai CSV-tiedosto."
       );
     }
   }
