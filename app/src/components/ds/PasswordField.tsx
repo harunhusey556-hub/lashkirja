@@ -3,9 +3,9 @@
 import {
   forwardRef,
   useCallback,
+  useEffect,
   useId,
   useImperativeHandle,
-  useLayoutEffect,
   useRef,
   useState,
   type InputHTMLAttributes,
@@ -17,6 +17,36 @@ import { hapticSelection } from "@/lib/haptics";
 
 export const SHOW_PASSWORD_LABEL = "Näytä salasana";
 export const HIDE_PASSWORD_LABEL = "Piilota salasana";
+
+/** What the user had in the field before the eye was tapped. */
+export interface FieldSelection {
+  start: number;
+  end: number;
+  focused: boolean;
+}
+
+type SelectableField = Pick<HTMLInputElement, "value" | "selectionStart" | "selectionEnd">;
+type FocusableField = Pick<HTMLInputElement, "focus" | "setSelectionRange">;
+
+/** Reads the caret and selection; `focused` says the field had focus when the eye was pressed. */
+export function captureSelection(input: SelectableField | null, focused: boolean): FieldSelection {
+  return {
+    start: input?.selectionStart ?? input?.value.length ?? 0,
+    end: input?.selectionEnd ?? input?.value.length ?? 0,
+    focused,
+  };
+}
+
+/** Puts focus and the selection back after the input's type flipped; a field that was not focused stays so. */
+export function restoreSelection(input: FocusableField | null, saved: FieldSelection): void {
+  if (!input || !saved.focused) return;
+  input.focus({ preventScroll: true });
+  try {
+    input.setSelectionRange(saved.start, saved.end);
+  } catch {
+    // Some input types refuse a selection; the value is unaffected.
+  }
+}
 
 type PasswordFieldProps = Omit<InputHTMLAttributes<HTMLInputElement>, "type" | "id"> & {
   /** Input id; also the label's `htmlFor`. */
@@ -39,8 +69,10 @@ type PasswordFieldProps = Omit<InputHTMLAttributes<HTMLInputElement>, "type" | "
  * eye toggle with a 44 px target ("Näytä salasana" / "Piilota salasana").
  *
  * - Toggling keeps focus and the caret: the button never takes focus from the
- *   input (pointer and mouse down are cancelled), and the selection is put
- *   back after the input's `type` flips.
+ *   input (mouse down is cancelled), and the selection is put back after the
+ *   input's `type` flips. The pointer events themselves are never cancelled:
+ *   a cancelled touch pointerdown suppresses the click in WebKit, and the eye
+ *   would not react to a tap (F07).
  * - Works controlled (`value`/`onChange`) and uncontrolled (a forwarded ref,
  *   as the login form reads it).
  * - Autofill hints stay on the input: pass `autoComplete` (`current-password`
@@ -66,37 +98,29 @@ export const PasswordField = forwardRef<HTMLInputElement, PasswordFieldProps>(fu
   const inputRef = useRef<HTMLInputElement>(null);
   useImperativeHandle(forwardedRef, () => inputRef.current as HTMLInputElement, []);
   const [visible, setVisible] = useState(false);
-  const caret = useRef<{ start: number; end: number; focused: boolean } | null>(null);
+  // Whether the input had focus when the finger went down, for engines where the tap itself blurs it.
+  const focusedAtPress = useRef(false);
+  const frame = useRef(0);
   const hintId = useId();
   const errorId = `${id}-error`;
 
   const describedBy =
     [describedByProp, error ? errorId : hint ? hintId : undefined].filter(Boolean).join(" ") || undefined;
 
-  // After the type flips, restore focus and the selection the user had.
-  useLayoutEffect(() => {
-    const saved = caret.current;
-    const input = inputRef.current;
-    if (!saved || !input) return;
-    caret.current = null;
-    if (!saved.focused) return;
-    input.focus({ preventScroll: true });
-    try {
-      input.setSelectionRange(saved.start, saved.end);
-    } catch {
-      // Some input types refuse a selection; the value is unaffected.
-    }
-  }, [visible]);
+  useEffect(() => () => cancelAnimationFrame(frame.current), []);
 
   const toggle = useCallback(() => {
     const input = inputRef.current;
-    caret.current = {
-      start: input?.selectionStart ?? input?.value.length ?? 0,
-      end: input?.selectionEnd ?? input?.value.length ?? 0,
-      focused: typeof document !== "undefined" && document.activeElement === input,
-    };
+    const saved = captureSelection(
+      input,
+      focusedAtPress.current || (typeof document !== "undefined" && document.activeElement === input)
+    );
+    focusedAtPress.current = false;
     void hapticSelection();
     setVisible((current) => !current);
+    // After the type flipped and painted, put focus and the selection back.
+    cancelAnimationFrame(frame.current);
+    frame.current = requestAnimationFrame(() => restoreSelection(inputRef.current, saved));
   }, []);
 
   return (
@@ -124,10 +148,11 @@ export const PasswordField = forwardRef<HTMLInputElement, PasswordFieldProps>(fu
           type="button"
           onClick={toggle}
           // The button must not steal focus: the keyboard stays up and the
-          // caret stays where it was.
+          // caret stays where it was. Only the mouse press is cancelled; the
+          // pointer events stay alive so a touch tap still clicks (F07).
           onMouseDown={(event) => event.preventDefault()}
-          onPointerDown={(event) => {
-            if (event.pointerType !== "mouse") event.preventDefault();
+          onPointerDown={() => {
+            focusedAtPress.current = document.activeElement === inputRef.current;
           }}
           aria-label={visible ? hideLabel : showLabel}
           className="active-press absolute right-0 top-0.5 flex h-11 w-11 items-center justify-center text-ink-2"
