@@ -125,6 +125,7 @@ describe("renderInvoicePdf", () => {
       await renderInvoicePdf(
         data({
           seller: { ...data().seller, vatRegistered: false },
+          lines: [{ ...data().lines[0], vatRatePermille: 0 }],
           breakdown: [{ ratePermille: 0, netCents: 10_000, vatCents: 0 }],
           vatCents: 0,
           grossCents: 10_000,
@@ -162,5 +163,151 @@ describe("renderInvoicePdf", () => {
     expect(text).toContain("ALV 14 %");
     // Finnish grouping: the non-breaking space is collapsed by extractText.
     expect(text).toContain("3 592,50 €");
+  });
+});
+
+const creditNote = (overrides: Partial<InvoicePdfData> = {}): InvoicePdfData =>
+  data({
+    documentKind: "credit_note",
+    originalNumber: 7,
+    number: 18,
+    netCents: -5_140,
+    vatCents: -1_310,
+    grossCents: -6_450,
+    breakdown: [{ ratePermille: 255, netCents: -5_140, vatCents: -1_310 }],
+    lines: [
+      {
+        description: "Ripsienpidennys",
+        quantityMilli: 1_000,
+        unit: "kpl",
+        unitPriceCents: -5_140,
+        vatRatePermille: 255,
+        netCents: -5_140,
+      },
+    ],
+    ...overrides,
+  });
+
+describe("renderInvoicePdf: credit note (F02, G01)", () => {
+  it("prints negative amounts with a minus sign, never a quotation mark", async () => {
+    const pdf = await renderInvoicePdf(creditNote());
+    const text = await extractText(pdf);
+    expect(text).toContain("HYVITYSLASKU");
+    expect(text).toContain("-64,50 €");
+    expect(text).toContain("-51,40 €");
+    expect(text).toContain("-13,10 €");
+    expect(text).not.toContain('"');
+    // pdfkit writes an unmapped U+2212 as the hex digits 2212.
+    expect(pdf.toString("latin1")).not.toContain("<2212");
+  });
+
+  it("does not present itself as payable", async () => {
+    const text = await extractText(await renderInvoicePdf(creditNote()));
+    expect(text).not.toContain("Maksutiedot");
+    expect(text).not.toContain("Summa:");
+    expect(text).not.toContain("Eräpäivä");
+    expect(text).not.toContain("Virtuaaliviivakoodi");
+    expect(text).not.toContain(IBAN.slice(0, 4) + " ");
+    expect(text).toContain("Tämä on hyvityslasku");
+    expect(text).toContain("laskun 7");
+  });
+
+  it("prints no negative zero on a 0 % row", async () => {
+    const text = await extractText(
+      await renderInvoicePdf(
+        creditNote({
+          seller: { ...data().seller, vatRegistered: true },
+          breakdown: [
+            { ratePermille: 255, netCents: -5_140, vatCents: -1_310 },
+            { ratePermille: 0, netCents: -1_000, vatCents: -0 },
+          ],
+        })
+      )
+    );
+    expect(text).not.toMatch(/-0,00/);
+  });
+});
+
+describe("renderInvoicePdf: text the font may not know (F02)", () => {
+  const hostile = () =>
+    data({
+      notes: "Huom: \u0141\u00f3d\u017a \u0151\u0171 \u017e \t\u0007loppu",
+      customer: {
+        ...data().customer,
+        name: "\u015e\u00fckr\u00fc A\u011fao\u011flu \u0130n\u015faat",
+      },
+      lines: [
+        {
+          description: "\u0141ukasz \u017b\u00f3\u0142\u0107 \u0418\u0432\u0430\u043d \u041f\u0435\u0442\u0440\u043e\u0432 \u{1F600}",
+          quantityMilli: 1_000,
+          unit: "kpl",
+          unitPriceCents: 10_000,
+          vatRatePermille: 255,
+          netCents: 10_000,
+        },
+      ],
+    });
+
+  it("keeps the next column readable and drops control characters", async () => {
+    const pdf = await renderInvoicePdf(hostile());
+    const text = await extractText(pdf);
+    // The amounts after the description are still in place.
+    expect(text).toContain("100,00 €");
+    expect(text).toContain("125,50 €");
+    expect(text).not.toContain("\u0007");
+    expect(text).toContain("loppu");
+    // No unpaired hex digit from an unmapped code point inside a string.
+    expect(pdf.toString("latin1")).not.toMatch(/<[0-9a-f]*[0-9a-f]{1}>\s*Tj/i);
+  });
+
+  it("draws Latin Extended and Cyrillic as typed when the Unicode font is available", async () => {
+    const text = await extractText(await renderInvoicePdf(hostile()));
+    expect(text).toContain("\u015e\u00fckr\u00fc A\u011fao\u011flu \u0130n\u015faat");
+    expect(text).toContain("\u0141ukasz \u017b\u00f3\u0142\u0107");
+    expect(text).toContain("\u0418\u0432\u0430\u043d \u041f\u0435\u0442\u0440\u043e\u0432");
+  });
+});
+
+describe("renderInvoicePdf: VAT and a seller who is not registered (F01)", () => {
+  const plainLine = {
+    description: "Ripsienpidennys",
+    quantityMilli: 1_000,
+    unit: "kpl",
+    unitPriceCents: 10_000,
+    vatRatePermille: 0,
+    netCents: 10_000,
+  };
+
+  it("prints no VAT column or breakdown and states the exemption", async () => {
+    const text = await extractText(
+      await renderInvoicePdf(
+        data({
+          seller: { ...data().seller, vatRegistered: false },
+          lines: [plainLine],
+          breakdown: [{ ratePermille: 0, netCents: 10_000, vatCents: 0 }],
+          vatCents: 0,
+          grossCents: 10_000,
+        })
+      )
+    );
+    expect(text).toContain("Ei arvonlisäverovelvollinen (AVL 3 §)");
+    expect(text).not.toMatch(/ALV/);
+    expect(text).not.toContain("Veroton");
+    expect(text).toContain("100,00 €");
+  });
+
+  it("never claims the exemption next to VAT that was charged", async () => {
+    const text = await extractText(
+      await renderInvoicePdf(data({ seller: { ...data().seller, vatRegistered: false } }))
+    );
+    expect(text).not.toContain("Ei arvonlisäverovelvollinen");
+    expect(text).toContain("ALV 25,5 %");
+    expect(text).toContain("125,50 €");
+  });
+
+  it("keeps the VAT columns for a registered seller", async () => {
+    const text = await extractText(await renderInvoicePdf(data()));
+    expect(text).toContain("ALV");
+    expect(text).not.toContain("Ei arvonlisäverovelvollinen");
   });
 });
