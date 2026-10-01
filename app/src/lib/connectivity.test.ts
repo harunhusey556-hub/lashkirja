@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  applyDeviceSignal,
   assertCanWrite,
   connectivitySnapshotForTests,
   isServerNewer,
@@ -196,5 +197,38 @@ describe("isServerNewer", () => {
   });
   it("a strictly greater server version is newer", () => {
     expect(isServerNewer(2, 1)).toBe(true);
+  });
+});
+
+describe("C-8: the connection returning is probed at once", () => {
+  it("probes on the online signal while the server counts as unreachable, debounced", async () => {
+    vi.useFakeTimers();
+    const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 401 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const reconnected = vi.fn();
+    vi.stubGlobal("document", { visibilityState: "visible", dispatchEvent: reconnected });
+    reportRequestOutcome("network-error");
+    reportRequestOutcome("network-error");
+    expect(connectivitySnapshotForTests().server).toBe("unreachable");
+
+    applyDeviceSignal(true);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(connectivitySnapshotForTests().server).toBe("ok");
+    expect(reconnected).toHaveBeenCalledTimes(1);
+
+    // Back to unreachable: a second flip within the debounce does not probe again.
+    reportRequestOutcome("network-error");
+    reportRequestOutcome("network-error");
+    applyDeviceSignal(true);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("an offline signal or a healthy server does not probe", () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    applyDeviceSignal(false);
+    applyDeviceSignal(true);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });

@@ -155,12 +155,32 @@ function onReconnect(): void {
   document.dispatchEvent(new Event("lashkirja-reconnected"));
 }
 
+/** Repeated online flips (a flapping Wi-Fi) probe at most once per this long. */
+const ONLINE_PROBE_DEBOUNCE_MS = 1_000;
+let lastOnlineProbeAt = 0;
+
+/**
+ * A device-level signal (the browser's online/offline events, the native
+ * plugin). Coming back online while the server still counts as unreachable
+ * probes at once instead of waiting for the 15 s timer, so the banner and the
+ * error card clear when the connection returns (C-8); the probe's own "ok"
+ * runs the reconnect refetch.
+ */
+export function applyDeviceSignal(connected: boolean): void {
+  setState({ device: nextDeviceState(connected) });
+  if (!connected || state.server !== "unreachable") return;
+  const now = Date.now();
+  if (now - lastOnlineProbeAt < ONLINE_PROBE_DEBOUNCE_MS) return;
+  lastOnlineProbeAt = now;
+  void probeHealth();
+}
+
 function onWindowOnline(): void {
-  setState({ device: "online" });
+  applyDeviceSignal(true);
 }
 
 function onWindowOffline(): void {
-  setState({ device: "offline" });
+  applyDeviceSignal(false);
 }
 
 function onVisibilityChange(): void {
@@ -176,7 +196,7 @@ async function wireNativeNetwork(): Promise<void> {
     const status = await Network.getStatus();
     setState({ device: nextDeviceState(status.connected) });
     nativeNetworkHandle = await Network.addListener("networkStatusChange", (next) => {
-      setState({ device: nextDeviceState(next.connected) });
+      applyDeviceSignal(next.connected);
     });
   } catch {
     // No native plugin (web, or an IPA built before it was added) --
@@ -247,6 +267,7 @@ export function setDeviceStateForTests(next: DeviceState): void {
 export function resetConnectivityForTests(): void {
   state = { device: initialDeviceState(), server: "ok", lastOkAt: null, serverApiVersion: null };
   consecutiveNetworkErrors = 0;
+  lastOnlineProbeAt = 0;
   stopHealthProbe();
   if (wired && typeof window !== "undefined") {
     window.removeEventListener("online", onWindowOnline);
