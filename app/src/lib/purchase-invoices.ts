@@ -6,9 +6,11 @@
  * paid; a cancelled one counts nothing. The return reads it through
  * lib/alv-period.ts, which counts one purchase once: an invoice linked to an
  * approved receipt (`receiptId`), or paid from a bank row that an approved
- * receipt documents, is counted through the receipt and left out of the
- * invoice side. Same amount and a close date without such a link is counted
- * twice and flagged on the ALV page, never removed on resemblance alone.
+ * receipt documents, or matching a receipt on number, reference or supplier +
+ * amount + date, is counted through the receipt and left out of the invoice
+ * side. The one written rule is in alv-period.ts (`classifyPurchaseInvoices`).
+ * The owner settles a flagged pair by linking the receipt here, never by
+ * rejecting or cancelling.
  */
 import { prisma } from "./db";
 import { AppError, NotFoundError, ValidationError } from "./api-errors";
@@ -391,6 +393,85 @@ export async function getPurchaseInvoice(
   });
   if (!invoice) throw new NotFoundError("Ostolaskua ei löytynyt.");
   return toPublicPurchaseInvoice(invoice);
+}
+
+export interface PurchaseReceiptCandidate {
+  id: string;
+  vendor: string | null;
+  date: string | null;
+  gross: number | null;
+  reviewStatus: string;
+  /** Same amount as the invoice: the likeliest candidate, listed first. */
+  sameAmount: boolean;
+}
+
+const CANDIDATE_WINDOW_MS = 60 * 24 * 60 * 60 * 1000;
+const CANDIDATE_LIMIT = 8;
+
+/**
+ * The receipts an owner can link to a purchase invoice (it is the same
+ * purchase), plus the one already linked. Candidates are expense receipts that
+ * no other invoice has, near the invoice in time, the same amount or the same
+ * supplier first.
+ */
+export async function listReceiptCandidatesForPurchase(
+  userId: string,
+  invoiceId: string
+): Promise<{ linked: PurchaseReceiptCandidate | null; candidates: PurchaseReceiptCandidate[] }> {
+  const invoice = await prisma.purchaseInvoice.findFirst({
+    where: { id: invoiceId, userId },
+    select: { id: true, supplierName: true, grossCents: true, issueDate: true, receiptId: true },
+  });
+  if (!invoice) throw new NotFoundError("Ostolaskua ei löytynyt.");
+
+  const select = { id: true, vendor: true, date: true, totalAmountCents: true, reviewStatus: true } as const;
+  const toCandidate = (receipt: {
+    id: string;
+    vendor: string | null;
+    date: Date | null;
+    totalAmountCents: number | null;
+    reviewStatus: string;
+  }): PurchaseReceiptCandidate => ({
+    id: receipt.id,
+    vendor: receipt.vendor,
+    date: receipt.date ? receipt.date.toISOString().slice(0, 10) : null,
+    gross: receipt.totalAmountCents == null ? null : centsToEuros(receipt.totalAmountCents),
+    reviewStatus: receipt.reviewStatus,
+    sameAmount: receipt.totalAmountCents === invoice.grossCents,
+  });
+
+  const linkedReceipt = invoice.receiptId
+    ? await prisma.receipt.findFirst({ where: { id: invoice.receiptId, userId }, select })
+    : null;
+  const nearby = await prisma.receipt.findMany({
+    where: {
+      userId,
+      type: "meno",
+      reviewStatus: { in: ["approved", "pending"] },
+      purchaseInvoice: { is: null },
+      date: {
+        gte: new Date(invoice.issueDate.getTime() - CANDIDATE_WINDOW_MS),
+        lte: new Date(invoice.issueDate.getTime() + CANDIDATE_WINDOW_MS),
+      },
+    },
+    select,
+  });
+  const supplier = invoice.supplierName.trim().toLowerCase();
+  const gap = (receipt: { date: Date | null }) =>
+    receipt.date ? Math.abs(receipt.date.getTime() - invoice.issueDate.getTime()) : Number.MAX_SAFE_INTEGER;
+  const candidates = nearby
+    .filter(
+      (receipt) =>
+        receipt.totalAmountCents === invoice.grossCents ||
+        (receipt.vendor ?? "").trim().toLowerCase() === supplier
+    )
+    .sort((a, b) => {
+      const amount = Number(b.totalAmountCents === invoice.grossCents) - Number(a.totalAmountCents === invoice.grossCents);
+      return amount !== 0 ? amount : gap(a) - gap(b);
+    })
+    .slice(0, CANDIDATE_LIMIT)
+    .map(toCandidate);
+  return { linked: linkedReceipt ? toCandidate(linkedReceipt) : null, candidates };
 }
 
 export interface RecordPurchasePaymentInput {

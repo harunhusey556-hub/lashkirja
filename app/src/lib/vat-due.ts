@@ -153,10 +153,18 @@ export function vatChangedSinceFiling(figures: VatDueFigures | null): boolean {
 
 /**
  * F39: the rule for purchase invoices, in the ALV notice. Their VAT is
- * deductible by invoice date; one that a receipt already counts is left out;
- * a receipt that looks like the same purchase is flagged, not removed.
+ * deductible by invoice date; one whose purchase a receipt already counts is
+ * left out; a receipt that only looks like the same purchase is flagged, and
+ * the way to settle it is to link the receipt to the invoice (nothing is
+ * rejected or cancelled).
  */
-export function alvPurchaseNote(input: { count: number; vat: number; skipped: number; suspected: number }): string {
+export function alvPurchaseNote(input: {
+  count: number;
+  vat: number;
+  skipped: number;
+  suspected: number;
+  unusable?: number;
+}): string {
   const parts: string[] = [];
   if (input.count > 0) {
     const invoices = input.count === 1 ? "1 ostolaskun" : `${input.count} ostolaskun`;
@@ -165,15 +173,23 @@ export function alvPurchaseNote(input: { count: number; vat: number; skipped: nu
   if (input.skipped > 0) {
     parts.push(
       input.skipped === 1
-        ? "1 ostolasku jätettiin pois, koska siihen liitetty kuitti on jo mukana."
-        : `${input.skipped} ostolaskua jätettiin pois, koska niihin liitetty kuitti on jo mukana.`
+        ? "1 ostolasku jätettiin pois, koska sama osto on jo mukana kuittina."
+        : `${input.skipped} ostolaskua jätettiin pois, koska samat ostot ovat jo mukana kuitteina.`
     );
   }
   if (input.suspected > 0) {
     parts.push(
       input.suspected === 1
-        ? "1 ostolaskulle löytyy samansuuruinen kuitti. Jos se on sama osto, hylkää kuitti tai peru lasku, niin ALV ei lasketa kahdesti."
-        : `${input.suspected} ostolaskulle löytyy samansuuruinen kuitti. Jos ne ovat samoja ostoja, hylkää kuitit tai peru laskut, niin ALV ei lasketa kahdesti.`
+        ? "1 ostolaskulle löytyy samansuuruinen kuitti. Jos se on sama osto, liitä kuitti laskuun, niin ALV ei lasketa kahdesti."
+        : `${input.suspected} ostolaskulle löytyy samansuuruinen kuitti. Jos ne ovat samoja ostoja, liitä kuitit laskuihin, niin ALV ei lasketa kahdesti.`
+    );
+  }
+  const unusable = input.unusable ?? 0;
+  if (unusable > 0) {
+    parts.push(
+      unusable === 1
+        ? "1 ostolaskuun liitetyssä kuitissa ei ole päivää tai ALV-erittelyä, joten laskun ALV on mukana. Täydennä kuitti, niin lasku jää pois."
+        : `${unusable} ostolaskuun liitetyissä kuiteissa ei ole päivää tai ALV-erittelyä, joten laskujen ALV on mukana. Täydennä kuitit, niin laskut jäävät pois.`
     );
   }
   return parts.join(" ");

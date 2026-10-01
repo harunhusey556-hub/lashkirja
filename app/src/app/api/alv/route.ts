@@ -48,6 +48,7 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
     // F39: purchase invoices count as deductible VAT; these say what was left out or may be counted twice.
     skippedPurchaseInvoiceCount: sources.skippedPurchaseInvoiceCount,
     suspectedPurchaseDuplicateCount: sources.suspectedPurchaseDuplicateCount,
+    purchaseReceiptUnusableCount: sources.purchaseReceiptUnusableCount,
     creditedInvoiceCount: sources.creditedInvoiceCount,
     creditNoteCount: sources.creditNoteCount,
     // FP-13 / TF-11: the filed and paid state, and what is not in the figure yet.

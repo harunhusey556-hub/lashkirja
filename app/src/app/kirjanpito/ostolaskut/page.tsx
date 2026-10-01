@@ -70,6 +70,26 @@ interface PurchaseInvoice {
   payments: Array<{ id: string; paidDate: string; amount: number; source: string }>;
 }
 
+interface ReceiptChoice {
+  id: string;
+  vendor: string | null;
+  date: string | null;
+  gross: number | null;
+  reviewStatus: string;
+  sameAmount: boolean;
+}
+
+/** "Kauppa · 12.8.2026 · 124,00 €", whatever of it is known. */
+function receiptChoiceText(receipt: ReceiptChoice): string {
+  return [
+    receipt.vendor?.trim() || "Kuitti",
+    receipt.date ? formatDate(receipt.date) : null,
+    receipt.gross == null ? null : formatEur(receipt.gross),
+  ]
+    .filter(Boolean)
+    .join(" · ");
+}
+
 interface Aging {
   buckets: Record<string, { count: number; openCents: number }>;
   totalOpen: number;
@@ -140,6 +160,8 @@ export default function PurchaseInvoicesPage() {
     paymentId: string;
     amount: number;
   } | null>(null);
+  // M1-2: the receipt linked to the open invoice and the ones that could be the same purchase.
+  const [receiptLinks, setReceiptLinks] = useState<{ linked: ReceiptChoice | null; candidates: ReceiptChoice[] } | null>(null);
   const [paymentDraft, setPaymentDraft] = useState("");
   const [payError, setPayError] = useState("");
 
@@ -298,6 +320,45 @@ export default function PurchaseInvoicesPage() {
     setDetailInvoice(invoice);
     setPaymentDraft(String(invoice.open > 0 ? invoice.open : "").replace(".", ","));
     setPayError("");
+    void loadReceiptLinks(invoice.id);
+  }
+
+  async function loadReceiptLinks(invoiceId: string) {
+    setReceiptLinks(null);
+    try {
+      const response = await apiFetch(`/api/purchase-invoices/${invoiceId}/receipts`, { credentials: "include" });
+      setReceiptLinks(
+        await readJson<{ linked: ReceiptChoice | null; candidates: ReceiptChoice[] }>(response, "Kuittien haku epäonnistui")
+      );
+    } catch {
+      // The link control is a convenience; the sheet works without it.
+      setReceiptLinks(null);
+    }
+  }
+
+  /** Links the receipt of the same purchase to the invoice, or removes the link (receiptId null). */
+  async function setReceiptLink(invoice: PurchaseInvoice, receiptId: string | null) {
+    setBusy(true);
+    try {
+      const response = await apiFetch(`/api/purchase-invoices/${invoice.id}`, {
+        method: "PATCH",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ receiptId }),
+      });
+      const data = await readJson<{ invoice: PurchaseInvoice }>(response, "Kuitin liittäminen epäonnistui");
+      setDetailInvoice(data.invoice);
+      showToast({ tone: "success", text: receiptId ? "Kuitti liitettiin" : "Liitos poistettiin" });
+      await Promise.all([load(), reloadCounts(), loadReceiptLinks(invoice.id)]);
+    } catch (error) {
+      if (isUnauthorized(error)) {
+        redirectToLogin();
+        return;
+      }
+      showToast({ tone: "error", text: errorMessage(error, "Kuitin liittäminen epäonnistui") });
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function pay() {
@@ -601,7 +662,7 @@ export default function PurchaseInvoicesPage() {
             {/* F39: the rule, where the amount is typed. */}
             <p className="-mt-1 text-caption text-ink-2">
               Laskun ALV on mukana ALV-ilmoituksen vähennettävässä verossa laskun päivän mukaan. Jos sama osto on myös
-              kuittina, hylkää kuitti tai peru lasku, niin ALV ei lasketa kahdesti.
+              kuittina, liitä kuitti laskuun, niin ALV ei lasketa kahdesti.
             </p>
 
             <div className="field-dates">
@@ -721,9 +782,48 @@ export default function PurchaseInvoicesPage() {
             {detailInvoice.status !== "cancelled" && detailInvoice.vat > 0 ? (
               <p className="text-caption text-ink-2">
                 {detailInvoice.receiptId
-                  ? "Kuitti on liitetty: ALV lasketaan kuitin kautta."
+                  ? "Kuitti on liitetty: ALV lasketaan kuitin kautta, kun kuitti on hyväksytty ja siinä on ALV-erittely."
                   : "ALV on mukana ALV-ilmoituksen vähennettävässä verossa."}
               </p>
+            ) : null}
+
+            {detailInvoice.status !== "cancelled" && receiptLinks?.linked ? (
+              <div className="space-y-2">
+                <p className="text-caption text-ink-2">Liitetty kuitti: {receiptChoiceText(receiptLinks.linked)}</p>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  className="w-full"
+                  disabled={busy}
+                  onClick={() => void setReceiptLink(detailInvoice, null)}
+                >
+                  Poista liitos
+                </Button>
+              </div>
+            ) : null}
+
+            {detailInvoice.status !== "cancelled" && receiptLinks && !receiptLinks.linked && receiptLinks.candidates.length > 0 ? (
+              <div className="space-y-2">
+                <p className="text-caption text-ink-2">
+                  Onko tämä osto jo kuittina? Liitä kuitti, niin ALV ei lasketa kahdesti.
+                </p>
+                <ul className="space-y-1">
+                  {receiptLinks.candidates.map((receipt) => (
+                    <li key={receipt.id} className="flex items-center justify-between gap-3 text-caption text-ink">
+                      <span className="min-w-0 truncate">{receiptChoiceText(receipt)}</span>
+                      <button
+                        type="button"
+                        className="active-press min-h-11 shrink-0 px-2 text-caption font-semibold text-accent disabled:opacity-50"
+                        disabled={busy}
+                        aria-label={`Liitä kuitti ${receiptChoiceText(receipt)}`}
+                        onClick={() => void setReceiptLink(detailInvoice, receipt.id)}
+                      >
+                        Liitä kuitti
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </div>
             ) : null}
 
             {detailInvoice.payments.length > 0 && (

@@ -15,11 +15,8 @@
  * - Approved receipts count by their date.
  * - A purchase invoice's VAT is deductible (field 307) in the period of its
  *   invoice date, once it is recorded (open or paid, never cancelled) (F39).
- *   One purchase must count once: an invoice linked to an approved receipt, or
- *   paid from a bank row that an approved receipt documents, is counted through
- *   that receipt and left out here. Without such evidence an invoice and a
- *   receipt of the same amount close in date are both counted and flagged
- *   (`suspectedPurchaseDuplicateCount`), like the income side below.
+ *   One purchase must count once: the rule for that is written in
+ *   `classifyPurchaseInvoices` below, and only there.
  * - A receipt drafted from, or matched to, a bank row that already settled a
  *   sales invoice is left out: that money is the invoice, not new income.
  * - A payment recorded by hand has no bank row, so the rule above cannot see
@@ -30,6 +27,7 @@
  */
 import { prisma } from "./db";
 import { centsToEuros } from "./money";
+import { formatReference } from "./finnish-reference";
 import { computeInvoiceTotals } from "./invoices";
 import { computeAlvReport, parseVatDetails, type AlvReport, type InvoiceVatSource, type PurchaseVatSource, type ReceiptLike } from "./alv";
 import type { ReportInvoice, ReportReceipt } from "./reports";
@@ -50,6 +48,10 @@ export interface AlvPeriodSources {
   skippedPurchaseInvoiceCount: number;
   /** Counted purchase invoices that look like a receipt that is also counted (same amount, close date). */
   suspectedPurchaseDuplicateCount: number;
+  /** Counted purchase invoices whose linked receipt cannot count (no date or no VAT breakdown). */
+  purchaseReceiptUnusableCount: number;
+  /** Every purchase invoice dated in the period and what the return did with it. */
+  purchaseInvoiceRows: PurchaseVatRow[];
   receiptCount: number;
   /** Receipts dropped because the same bank row already settled an invoice. */
   excludedReceiptCount: number;
@@ -128,24 +130,111 @@ export async function findReceiptsWithoutVatBreakdown(userId: string, start: Dat
 /** How far apart a purchase invoice's date and a receipt's may be to look like one purchase. */
 export const PURCHASE_DUPLICATE_WINDOW_DAYS = 7;
 
+/** What the VAT return did with one purchase invoice, and why (shared with the accountant package). */
+export type PurchaseVatTreatment =
+  | "counted"
+  | "linked_receipt"
+  | "bank_receipt"
+  | "same_purchase_receipt"
+  | "cancelled"
+  | "no_vat";
+
+export interface PurchaseVatRow {
+  id: string;
+  issueDate: Date;
+  supplierName: string;
+  invoiceNumber: string | null;
+  grossCents: number;
+  vatCents: number;
+  status: string;
+  treatment: PurchaseVatTreatment;
+  /** Counted, but a receipt of the same amount and a close date may be the same purchase. */
+  suspected: boolean;
+  /** Counted although a receipt is linked, because that receipt has no date or no VAT breakdown. */
+  receiptUnusable: boolean;
+}
+
+type PurchaseReceiptEvidence = {
+  id: string;
+  type: string;
+  reviewStatus: string;
+  date: Date | null;
+  vatDetails: string | null;
+  vendor: string | null;
+  invoiceNumber: string | null;
+  reference: string | null;
+  totalAmountCents: number | null;
+};
+
+const PURCHASE_RECEIPT_SELECT = {
+  id: true,
+  type: true,
+  reviewStatus: true,
+  date: true,
+  vatDetails: true,
+  vendor: true,
+  invoiceNumber: true,
+  reference: true,
+  totalAmountCents: true,
+} as const;
+
+/** A receipt the VAT return actually counts as a purchase: approved, dated, with a usable VAT breakdown. */
+function receiptCountsPurchase(receipt: PurchaseReceiptEvidence | null | undefined): boolean {
+  return (
+    !!receipt &&
+    receipt.reviewStatus === "approved" &&
+    receipt.type === "meno" &&
+    receipt.date !== null &&
+    parseVatDetails(receipt.vatDetails) !== null
+  );
+}
+
+const SUPPLIER_SUFFIX = /\b(oy|oyj|ab|ky|tmi|ltd|gmbh|as)\b\.?/g;
+function supplierKey(name: string | null | undefined): string {
+  return (name ?? "")
+    .toLowerCase()
+    .replace(SUPPLIER_SUFFIX, " ")
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .trim();
+}
+function documentKey(value: string | null | undefined): string {
+  return (value ?? "").replace(/\s+/g, "").toUpperCase();
+}
+
 /**
- * F39: the purchase invoices that add deductible VAT to the period, with the
- * ones a receipt already counts taken out (evidence only), and how many look
- * like a receipt as well (resemblance only, flagged and never removed).
+ * F39, the rule for one purchase counting once, written here and nowhere else.
+ * A purchase invoice's VAT is deductible in the period of its invoice date
+ * (open or paid; never cancelled). A receipt of the same purchase is what
+ * documents it, so the invoice VAT is then left out and the receipt's VAT is
+ * the one that counts. "The same purchase" is decided on evidence:
+ *  - the receipt is linked to the invoice, or documents the bank row that paid it;
+ *  - or the invoice number or the reference is equal;
+ *  - or supplier, gross amount and date (within 7 days) are equal.
+ * Either way only a receipt the return really counts (approved, dated, VAT
+ * breakdown readable) takes the invoice's place; with an unusable receipt the
+ * invoice VAT stays in and is flagged. A receipt that only has the same amount
+ * and a close date is a resemblance: both are counted and the pair is flagged
+ * (`suspected`), never removed. The owner settles it by linking the receipt to
+ * the invoice (Ostolaskut), not by rejecting or cancelling anything.
  */
-async function loadPurchaseVat(userId: string, start: Date, end: Date) {
+async function classifyPurchaseInvoices(userId: string, start: Date, end: Date): Promise<PurchaseVatRow[]> {
   const invoices = await prisma.purchaseInvoice.findMany({
-    where: { userId, issueDate: { gte: start, lt: end }, status: { in: ["open", "paid"] }, vatCents: { gt: 0 } },
+    where: { userId, issueDate: { gte: start, lt: end } },
+    orderBy: [{ issueDate: "asc" }, { createdAt: "asc" }],
     select: {
       id: true,
+      supplierName: true,
+      invoiceNumber: true,
+      reference: true,
+      status: true,
       vatCents: true,
       grossCents: true,
       issueDate: true,
-      receipt: { select: { reviewStatus: true } },
+      receipt: { select: PURCHASE_RECEIPT_SELECT },
       payments: { select: { transactionId: true } },
     },
   });
-  if (invoices.length === 0) return { counted: [] as PurchaseVatSource[], skipped: 0, suspected: 0 };
+  if (invoices.length === 0) return [];
 
   const rowIds = invoices.flatMap((invoice) =>
     invoice.payments.map((payment) => payment.transactionId).filter((id): id is string => id !== null)
@@ -156,48 +245,124 @@ async function loadPurchaseVat(userId: string, start: Date, end: Date) {
       : (
           await prisma.transaction.findMany({
             where: { id: { in: rowIds }, receipt: { is: { reviewStatus: "approved" } } },
-            select: { id: true },
+            select: { id: true, receipt: { select: PURCHASE_RECEIPT_SELECT } },
           })
-        ).map((row) => row.id)
+        )
+          .filter((row) => receiptCountsPurchase(row.receipt))
+          .map((row) => row.id)
   );
-  const viaReceipt = (invoice: (typeof invoices)[number]) =>
-    invoice.receipt?.reviewStatus === "approved" ||
-    invoice.payments.some((payment) => payment.transactionId !== null && documentedRows.has(payment.transactionId));
 
-  const open = invoices.filter((invoice) => !viaReceipt(invoice));
-  const window = PURCHASE_DUPLICATE_WINDOW_DAYS * DAY_MS;
-  const candidates =
-    open.length === 0
-      ? []
-      : await prisma.receipt.findMany({
-          where: {
-            userId,
-            type: "meno",
-            reviewStatus: "approved",
-            totalAmountCents: { in: [...new Set(open.map((invoice) => invoice.grossCents))] },
-            date: { gte: new Date(start.getTime() - window), lt: new Date(end.getTime() + window) },
-          },
-          select: { id: true, totalAmountCents: true, date: true },
-        });
-  const usedReceipts = new Set<string>();
-  let suspected = 0;
-  for (const invoice of open) {
-    const match = candidates.find(
-      (receipt) =>
-        !usedReceipts.has(receipt.id) &&
-        receipt.totalAmountCents === invoice.grossCents &&
-        receipt.date !== null &&
-        Math.abs(receipt.date.getTime() - invoice.issueDate.getTime()) <= window
-    );
-    if (match) {
-      usedReceipts.add(match.id);
-      suspected += 1;
+  const rows = new Map<string, PurchaseVatRow>();
+  const undecided: typeof invoices = [];
+  for (const invoice of invoices) {
+    const row: PurchaseVatRow = {
+      id: invoice.id,
+      issueDate: invoice.issueDate,
+      supplierName: invoice.supplierName,
+      invoiceNumber: invoice.invoiceNumber,
+      grossCents: invoice.grossCents,
+      vatCents: invoice.vatCents,
+      status: invoice.status,
+      treatment: "counted",
+      suspected: false,
+      receiptUnusable: false,
+    };
+    rows.set(invoice.id, row);
+    if (invoice.status !== "open" && invoice.status !== "paid") row.treatment = "cancelled";
+    else if (invoice.vatCents <= 0) row.treatment = "no_vat";
+    else if (receiptCountsPurchase(invoice.receipt)) row.treatment = "linked_receipt";
+    else if (invoice.payments.some((payment) => payment.transactionId !== null && documentedRows.has(payment.transactionId))) {
+      row.treatment = "bank_receipt";
+    } else {
+      // An approved receipt the return cannot use does not replace the invoice.
+      row.receiptUnusable = invoice.receipt?.reviewStatus === "approved";
+      undecided.push(invoice);
     }
   }
+  if (undecided.length === 0) return invoices.map((invoice) => rows.get(invoice.id)!);
+
+  const window = PURCHASE_DUPLICATE_WINDOW_DAYS * DAY_MS;
+  const times = undecided.map((invoice) => invoice.issueDate.getTime());
+  const numbers = [...new Set(undecided.map((invoice) => invoice.invoiceNumber?.trim()).filter((n): n is string => !!n))];
+  // A receipt keeps a reference as printed ("12345 67890"), an invoice normalized.
+  const references = [
+    ...new Set(
+      undecided
+        .map((invoice) => invoice.reference?.trim())
+        .filter((n): n is string => !!n)
+        .flatMap((reference) => [reference, formatReference(reference)])
+    ),
+  ];
+  const candidates = (
+    await prisma.receipt.findMany({
+      where: {
+        userId,
+        type: "meno",
+        reviewStatus: "approved",
+        date: { not: null },
+        // A receipt linked to a purchase invoice documents that invoice only.
+        purchaseInvoice: { is: null },
+        OR: [
+          {
+            totalAmountCents: { in: [...new Set(undecided.map((invoice) => invoice.grossCents))] },
+            date: { gte: new Date(Math.min(...times) - window), lte: new Date(Math.max(...times) + window) },
+          },
+          ...(numbers.length > 0 ? [{ invoiceNumber: { in: numbers } }] : []),
+          ...(references.length > 0 ? [{ reference: { in: references } }] : []),
+        ],
+      },
+      select: PURCHASE_RECEIPT_SELECT,
+    })
+  ).filter(receiptCountsPurchase);
+
+  const used = new Set<string>();
+  const near = (receipt: PurchaseReceiptEvidence, invoice: (typeof invoices)[number]) =>
+    Math.abs(receipt.date!.getTime() - invoice.issueDate.getTime()) <= window;
+  const sameAmount = (receipt: PurchaseReceiptEvidence, invoice: (typeof invoices)[number]) =>
+    receipt.totalAmountCents === invoice.grossCents;
+  const strong = (receipt: PurchaseReceiptEvidence, invoice: (typeof invoices)[number]) =>
+    (documentKey(invoice.invoiceNumber) !== "" && documentKey(receipt.invoiceNumber) === documentKey(invoice.invoiceNumber)) ||
+    (documentKey(invoice.reference) !== "" && documentKey(receipt.reference) === documentKey(invoice.reference)) ||
+    (sameAmount(receipt, invoice) &&
+      near(receipt, invoice) &&
+      supplierKey(invoice.supplierName) !== "" &&
+      supplierKey(receipt.vendor) === supplierKey(invoice.supplierName));
+
+  for (const invoice of undecided) {
+    const match = candidates.find((receipt) => !used.has(receipt.id) && strong(receipt, invoice));
+    if (!match) continue;
+    used.add(match.id);
+    const row = rows.get(invoice.id)!;
+    row.treatment = "same_purchase_receipt";
+    row.receiptUnusable = false;
+  }
+  for (const invoice of undecided) {
+    const row = rows.get(invoice.id)!;
+    if (row.treatment !== "counted") continue;
+    const match = candidates.find((receipt) => !used.has(receipt.id) && sameAmount(receipt, invoice) && near(receipt, invoice));
+    if (match) {
+      used.add(match.id);
+      row.suspected = true;
+    }
+  }
+  return invoices.map((invoice) => rows.get(invoice.id)!);
+}
+
+/**
+ * F39: the purchase invoices of the period with what the return did with each.
+ * Used by the VAT return and by the accountant package, so the two agree.
+ */
+async function loadPurchaseVat(userId: string, start: Date, end: Date) {
+  const rows = await classifyPurchaseInvoices(userId, start, end);
+  const counted = rows.filter((row) => row.treatment === "counted");
   return {
-    counted: open.map((invoice) => ({ vatCents: invoice.vatCents })),
-    skipped: invoices.length - open.length,
-    suspected,
+    rows,
+    counted: counted.map((row): PurchaseVatSource => ({ vatCents: row.vatCents })),
+    skipped: rows.filter(
+      (row) => row.treatment === "linked_receipt" || row.treatment === "bank_receipt" || row.treatment === "same_purchase_receipt"
+    ).length,
+    suspected: counted.filter((row) => row.suspected).length,
+    receiptUnusable: counted.filter((row) => row.receiptUnusable).length,
   };
 }
 
@@ -253,6 +418,8 @@ export async function loadAlvPeriodSources(
     purchaseInvoices: purchases.counted,
     skippedPurchaseInvoiceCount: purchases.skipped,
     suspectedPurchaseDuplicateCount: purchases.suspected,
+    purchaseReceiptUnusableCount: purchases.receiptUnusable,
+    purchaseInvoiceRows: purchases.rows,
     receiptCount: counted.length,
     excludedReceiptCount: receipts.length - counted.length,
     creditedInvoiceCount: invoices.filter(

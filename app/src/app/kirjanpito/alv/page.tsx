@@ -60,6 +60,7 @@ interface ALVData {
   };
   skippedPurchaseInvoiceCount?: number;
   suspectedPurchaseDuplicateCount?: number;
+  purchaseReceiptUnusableCount?: number;
   excludedReceiptCount?: number;
   creditedInvoiceCount?: number;
   creditNoteCount?: number;
@@ -292,7 +293,7 @@ export default function ALVRaporttiPage() {
             </Card>
           )}
 
-          {(data.sources?.purchaseInvoiceCount ?? 0) > 0 || (data.skippedPurchaseInvoiceCount ?? 0) > 0 ? (
+          {(data.sources?.purchaseInvoiceCount ?? 0) > 0 || (data.skippedPurchaseInvoiceCount ?? 0) > 0 || (data.purchaseReceiptUnusableCount ?? 0) > 0 ? (
             <Card className="space-y-1 text-sm text-ink">
               <p className="font-medium">Ostolaskujen ALV</p>
               <p className="text-caption text-ink-2">
@@ -301,6 +302,7 @@ export default function ALVRaporttiPage() {
                   vat: data.sources?.purchaseInvoiceVat ?? 0,
                   skipped: data.skippedPurchaseInvoiceCount ?? 0,
                   suspected: data.suspectedPurchaseDuplicateCount ?? 0,
+                  unusable: data.purchaseReceiptUnusableCount ?? 0,
                 })}
               </p>
             </Card>

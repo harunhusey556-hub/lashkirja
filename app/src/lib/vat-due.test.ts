@@ -192,8 +192,15 @@ describe("the ALV notice states the purchase invoice rule (F39)", () => {
 
   it("says which invoices a receipt already counts, and flags a likely double entry", () => {
     const text = plain(alvPurchaseNote({ count: 1, vat: 5, skipped: 1, suspected: 1 }));
-    expect(text).toContain("1 ostolasku jätettiin pois, koska siihen liitetty kuitti on jo mukana.");
+    expect(text).toContain("1 ostolasku jätettiin pois, koska sama osto on jo mukana kuittina.");
     expect(text).toContain("niin ALV ei lasketa kahdesti");
+  });
+
+  it("names linking as the remedy, never rejecting or cancelling (M1-2)", () => {
+    const text = plain(alvPurchaseNote({ count: 1, vat: 5, skipped: 0, suspected: 2, unusable: 1 }));
+    expect(text).toContain("liitä kuitit laskuihin");
+    expect(text).toContain("Täydennä kuitti");
+    expect(text).not.toMatch(/hylkää|peru/i);
   });
 
   it("is empty when there is nothing to say", () => {
