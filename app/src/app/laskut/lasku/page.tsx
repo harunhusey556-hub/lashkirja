@@ -127,6 +127,12 @@ interface Invoice {
   activity?: Array<{ id: string; kind: string; summary: string; createdAt: string }>;
 }
 
+/** Same name the server and the mail attachment use: lasku-0007.pdf, hyvitys-0018.pdf. */
+function pdfFileName(invoice: Pick<Invoice, "number" | "documentKind">): string {
+  const prefix = invoice.documentKind === "credit_note" ? "hyvitys" : "lasku";
+  return `${prefix}-${String(invoice.number).padStart(4, "0")}.pdf`;
+}
+
 /** One row per distinct VAT rate present on the invoice's lines. */
 function vatBreakdown(lines: Invoice["lines"]): Array<{ rate: number; net: number; vat: number }> {
   const byRate = new Map<number, number>();
@@ -572,7 +578,7 @@ function InvoiceDetail() {
       });
       if (!response.ok) throw new Error("PDF:n haku epäonnistui");
       const blob = await response.blob();
-      const file = new File([blob], `lasku-${invoice.number}.pdf`, {
+      const file = new File([blob], pdfFileName(invoice), {
         type: blob.type || "application/pdf",
       });
       const result = await shareContent({
@@ -769,7 +775,7 @@ function InvoiceDetail() {
             setPdfBusy(true);
             void openAuthedFile(
               `/api/invoices/${invoice.id}/pdf`,
-              `lasku-${invoice.number}.pdf`,
+              pdfFileName(invoice),
               `Lasku ${invoice.number}`
             )
               .catch((error: unknown) =>

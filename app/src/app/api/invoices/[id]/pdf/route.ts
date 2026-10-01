@@ -16,7 +16,7 @@ export const GET = withErrorHandler(
     return new NextResponse(new Uint8Array(pdf), {
       headers: {
         "Content-Type": "application/pdf",
-        "Content-Disposition": `inline; filename="${invoicePdfFileName(data.number)}"`,
+        "Content-Disposition": `inline; filename="${invoicePdfFileName(data.number, data.documentKind)}"`,
         "Cache-Control": "private, no-store, max-age=0",
         "X-Content-Type-Options": "nosniff",
       },
