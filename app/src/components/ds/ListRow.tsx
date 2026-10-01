@@ -14,8 +14,10 @@ const AMOUNT_TONE = { default: "text-ink", positive: "text-success", negative: "
  * mockups; record rows (a transaction, an invoice) leave it off. A chevron row's secondary line may wrap
  * to two lines.
  */
-export function ListRow({ title, amount, amountTone = "default", secondary, trailing, leading, chevron = false, href, onClick, ariaLabel }: {
+export function ListRow({ title, amount, amountTone = "default", secondary, secondaryLines = "clamp", trailing, leading, chevron = false, href, onClick, ariaLabel }: {
   title: string; amount?: ReactNode; amountTone?: keyof typeof AMOUNT_TONE; secondary?: ReactNode;
+  /** "all" shows the whole secondary text and drops the trailing action to its own line: for a failure whose last sentence is the advice (F29). */
+  secondaryLines?: "clamp" | "all";
   trailing?: ReactNode; leading?: ReactNode; chevron?: boolean; href?: string; onClick?: () => void; ariaLabel?: string;
 }) {
   const interactive = Boolean(href || onClick);
@@ -54,7 +56,11 @@ export function ListRow({ title, amount, amountTone = "default", secondary, trai
           <span className="mt-0.5 flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
             <span
               aria-hidden={interactive || undefined}
-              className="min-w-0 clamp-lines text-caption text-ink-2 [flex:1_1_9em]"
+              className={
+                secondaryLines === "all"
+                  ? "min-w-0 basis-full text-caption text-ink-2 [overflow-wrap:anywhere]"
+                  : "min-w-0 clamp-lines text-caption text-ink-2 [flex:1_1_9em]"
+              }
             >
               {secondary}
             </span>

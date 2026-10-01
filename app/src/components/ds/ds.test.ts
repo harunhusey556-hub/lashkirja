@@ -151,6 +151,16 @@ describe("design system components", () => {
     expect(out).not.toContain("Avaa: Muistuta");
   });
 
+  it("a row can show its secondary text in full, with the action on its own line below (F29)", () => {
+    const text = "Kuittia ei voitu lukea. Kokeile terävämpää kuvaa tai tekstipohjaista PDF:ää.";
+    const clamped = html(createElement(ListRow, { title: "Kuitti 28.9.", secondary: text }));
+    expect(clamped).toContain("clamp-lines text-caption");
+    const full = html(createElement(ListRow, { title: "Kuitti 28.9.", secondary: text, secondaryLines: "all" }));
+    expect(full).toContain(text);
+    expect(full).not.toContain("clamp-lines text-caption");
+    expect(full).toContain("basis-full");
+  });
+
   it("KeyValueList never shrinks inside a flex column, so a scrolling sheet scrolls to its last row (F42)", () => {
     const kv = html(createElement(KeyValueList, { rows: [{ label: "Luotu", value: "3 laskua" }] }));
     // overflow-hidden gives the list a minimum height of 0: without shrink-0 a

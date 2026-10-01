@@ -472,7 +472,7 @@ async function extractDocumentText(
             "NO_TEXT",
             error instanceof ReceiptExtractionError
               ? error.message
-              : "Kuitista ei saatu luettua tekstiä. Kokeile terävämpää kuvaa tai tekstipohjaista PDF:ää."
+              : "Kuvaa ei voitu lukea. Kokeile terävämpää kuvaa tai tekstipohjaista PDF:ää."
           );
         }
       }
@@ -505,7 +505,7 @@ async function extractDocumentText(
   if (rawText.trim().length < 10) {
     throw new ReceiptExtractionError(
       "NO_TEXT",
-      "Kuitista ei saatu luettua tekstiä. Kokeile terävämpää kuvaa tai tekstipohjaista PDF:ää."
+      "Kuvaa ei voitu lukea. Kokeile terävämpää kuvaa tai tekstipohjaista PDF:ää."
     );
   }
   return rawText;

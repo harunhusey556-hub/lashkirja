@@ -39,7 +39,7 @@ const COLLAPSED_ROWS = 5;
 
 function rowSecondary(receipt: ReviewQueueReceipt, gaps: ApprovalGap[] = []): string {
   const date = receipt.date ? new Date(receipt.date).toLocaleDateString("fi-FI") : "–";
-  const base = `${date} · ${receipt.fileName}`;
+  const base = date;
   return gaps.length > 0 ? `${approvalGapText(gaps)} · ${base}` : base;
 }
 

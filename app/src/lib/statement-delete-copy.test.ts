@@ -23,10 +23,10 @@ describe("V19 V24: the delete dialogs only talk about what is really involved", 
   });
 
   it("a statement dialog counts what is inside", () => {
-    expect(deleteStatementDescription("tili.csv", [plain, plain])).toBe(
-      '"tili.csv" ja kaikki sen tapahtumat poistetaan pysyvästi. Tätä ei voi perua.'
+    expect(deleteStatementDescription("Tiliote · elokuu 2026", [plain, plain])).toBe(
+      'Tiliote · elokuu 2026 ja kaikki sen tapahtumat poistetaan pysyvästi. Tätä ei voi perua.'
     );
-    const rich = deleteStatementDescription("tili.csv", [
+    const rich = deleteStatementDescription("Tiliote · elokuu 2026", [
       { settlesInvoice: true, pendingSale: true },
       plain,
     ]);

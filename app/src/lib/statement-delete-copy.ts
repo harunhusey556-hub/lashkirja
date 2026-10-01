@@ -24,11 +24,11 @@ export function deleteRowDescription(facts: DeleteFacts): string {
     .join(" ");
 }
 
-export function deleteStatementDescription(fileName: string, rows: DeleteFacts[]): string {
+export function deleteStatementDescription(title: string, rows: DeleteFacts[]): string {
   const sales = rows.some((row) => row.pendingSale);
   const invoices = rows.some((row) => row.settlesInvoice);
   return [
-    `"${fileName}" ja kaikki sen tapahtumat poistetaan pysyvästi.`,
+    `${title} ja kaikki sen tapahtumat poistetaan pysyvästi.`,
     sales ? "Niistä tehdyt hyväksymättömät myyntiehdotukset poistuvat myös." : "",
     invoices ? `Osa tapahtumista on maksanut laskuja. ${INVOICE_STAYS_PAID}` : "",
     "Tätä ei voi perua.",

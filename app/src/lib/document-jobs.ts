@@ -122,7 +122,7 @@ export async function enqueueDocumentAnalysis(input: {
       userId: input.userId,
       kind: "document_analysis",
       status: "pending",
-      title: `Kuitin analysointi: ${input.originalName}`.slice(0, 180),
+      title: "Kuitin lukeminen",
       progressLabel: "Jonossa",
       resourceType: "upload",
       resourceId: input.uploadId,

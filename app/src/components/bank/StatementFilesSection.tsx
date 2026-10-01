@@ -6,6 +6,7 @@ import { apiFetch, isUnauthorized, readJson, redirectToLogin } from "@/component
 import { Button, controlClass } from "@/components/ui";
 import { ListRow, Section, StatusTag } from "@/components/ds";
 import { formatEurSigned } from "@/lib/format";
+import { statementTitle } from "@/lib/display-titles";
 import { formatMonth, type StatementData } from "@/lib/statement-client";
 import { readPageCache, writePageCache } from "@/lib/page-cache";
 import { showToast } from "@/lib/toast";
@@ -111,7 +112,7 @@ export function StatementFilesSection() {
           <ListRow
             key={statement.id}
             href={detailHref("statement", statement.id)}
-            title={statement.fileType === "enablebanking" ? `Pankkiyhteys · ${formatMonth(statement.periodMonth)}` : statement.fileName}
+            title={statementTitle(statement)}
             secondary={secondary}
             amount={formatEurSigned(statement.totals.net)}
             amountTone={statement.totals.net >= 0 ? "positive" : "default"}

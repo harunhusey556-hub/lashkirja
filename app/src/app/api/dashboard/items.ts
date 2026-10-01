@@ -15,6 +15,7 @@
  */
 import { prisma } from "@/lib/db";
 import { centsToEuros } from "@/lib/money";
+import { receiptTitle } from "@/lib/display-titles";
 import { openPosition } from "@/lib/invoices";
 import { parseVatDetails } from "@/lib/alv";
 import { findPaymentReceiptDuplicates, findReceiptsWithoutVatBreakdown } from "@/lib/alv-period";
@@ -197,7 +198,7 @@ export async function buildDashboardItems(
       select: {
         id: true,
         vendor: true,
-        fileName: true,
+        createdAt: true,
         totalAmountCents: true,
         type: true,
         date: true,
@@ -259,7 +260,7 @@ export async function buildDashboardItems(
       select: {
         id: true,
         vendor: true,
-        fileName: true,
+        createdAt: true,
         totalAmountCents: true,
         type: true,
         date: true,
@@ -341,7 +342,7 @@ export async function buildDashboardItems(
       kind: "pending_receipt",
       action: "approve",
       receiptId: receipt.id,
-      party: receipt.vendor || receipt.fileName || "Kuitti",
+      party: receiptTitle(receipt),
       amount: receipt.totalAmountCents == null ? null : centsToEuros(receipt.totalAmountCents),
       type: receipt.type,
       date: iso(receipt.date),
@@ -357,7 +358,7 @@ export async function buildDashboardItems(
     kind: "vat_gap",
     action: "add_vat",
     receiptId: receipt.id,
-    party: receipt.vendor || receipt.fileName || "Kuitti",
+    party: receiptTitle(receipt),
     amount: centsToEuros(receipt.totalAmountCents ?? 0),
     type: receipt.type === "tulo" ? "tulo" : "meno",
     date: iso(receipt.date),

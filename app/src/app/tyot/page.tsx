@@ -32,6 +32,8 @@ interface WorkRow {
   detail: string;
   href: string | null;
   retryJobId?: string;
+  /** All the identical failures this row stands for; one retry starts them all (F29). */
+  retryJobIds?: string[];
 }
 
 interface TyotData {
@@ -98,7 +100,7 @@ export default function TyotPage() {
     try {
       const [jobResponse, workResponse] = await Promise.all([apiFetch("/api/jobs"), apiFetch("/api/work-queue")]);
       const jobData = await readJson<{ jobs: JobRow[] }>(jobResponse, "Töiden lataus epäonnistui");
-      const workData = await readJson<{ items: WorkRow[] }>(workResponse, "Poikkeusten lataus epäonnistui");
+      const workData = await readJson<{ items: WorkRow[] }>(workResponse, "Huomioitavien lataus epäonnistui");
       const next = { jobs: jobData.jobs || [], items: workData.items || [] };
       writePageCache(CACHE_KEY, next);
       setData(next);
@@ -143,12 +145,14 @@ export default function TyotPage() {
     };
   }, [load, hasActiveJob]);
 
-  async function retry(jobId: string) {
-    setRetryingId(jobId);
+  async function retry(jobIds: string[], rowId: string) {
+    setRetryingId(rowId);
     try {
-      const response = await apiFetch(`/api/jobs/${jobId}/retry`, { method: "POST" });
-      if (!response.ok) await readJson(response, "Uudelleenyritys epäonnistui");
-      showToast({ tone: "success", text: "Analyysi käynnistettiin uudelleen." });
+      for (const jobId of jobIds) {
+        const response = await apiFetch(`/api/jobs/${jobId}/retry`, { method: "POST" });
+        if (!response.ok) await readJson(response, "Uudelleenyritys epäonnistui");
+      }
+      showToast({ tone: "success", text: "Luku käynnistettiin uudelleen." });
       await load();
     } catch (retryError: unknown) {
       if (isUnauthorized(retryError)) {
@@ -186,7 +190,7 @@ export default function TyotPage() {
     <div className="space-y-6">
       {/* C1.6 (IA-24): pull to refresh runs the same reload as Yritä uudelleen. */}
       <PullToRefresh onRefresh={() => load()} />
-      <PageTitle title="Taustatyöt" subtitle="Tuonnit, haut ja niiden virheet." />
+      <PageTitle title="Huomioitavat" subtitle="Tuonnit, haut ja niiden virheet." />
 
       {data === null && loadError != null ? (
         <ConnectionNotice error={loadError} fallback="Töiden lataus epäonnistui" onRetry={() => void load()} compact />
@@ -224,25 +228,27 @@ export default function TyotPage() {
           )}
 
           {items.length === 0 ? (
-            <EmptySection title="Poikkeusjono">Ei avoimia poikkeuksia.</EmptySection>
+            <EmptySection title="Korjattavat">Ei korjattavaa.</EmptySection>
           ) : (
           <div className="space-y-3">
-            <h2 className="px-1 text-caption text-ink-2">Poikkeusjono</h2>
-            <FilterChips label="Suodata poikkeuksia" items={workChips} value={filter} onChange={setFilter} />
+            <h2 className="px-1 text-caption text-ink-2">Korjattavat</h2>
+            <FilterChips label="Suodata huomioitavia" items={workChips} value={filter} onChange={setFilter} />
 
             {visible.length === 0 ? (
-              <EmptyNote>Ei avoimia poikkeuksia.</EmptyNote>
+              <EmptyNote>Ei korjattavaa.</EmptyNote>
             ) : (
               <Section>
                 {visible.map((item) => (
                   <ListRow
                     key={item.id}
                     title={item.title}
+                    // The reason ends in the advice, so it is shown in full (F29).
                     secondary={`${workKindLabel(item.kind)} · ${item.detail}`}
+                    secondaryLines="all"
                     trailing={
                       item.retryJobId ? (
                         <ActionPill
-                          onClick={() => void retry(item.retryJobId!)}
+                          onClick={() => void retry(item.retryJobIds ?? [item.retryJobId!], item.retryJobId!)}
                           disabled={retryingId !== null}
                           ariaLabel={`Yritä uudelleen: ${item.title}`}
                         >

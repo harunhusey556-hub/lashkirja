@@ -7,6 +7,7 @@ import { centsToEuros } from "./money";
 import { formatEur } from "./format";
 import { monthBoundsUtc } from "./validation";
 import { detailHref } from "./routes";
+import { receiptTitle } from "./display-titles";
 
 export interface PeriodPrecheckItem {
   id: string;
@@ -78,7 +79,7 @@ export async function listPeriodPrecheck(userId: string, month: string): Promise
       },
       orderBy: { date: "asc" },
       take: TAKE,
-      select: { id: true, vendor: true, fileName: true, totalAmountCents: true },
+      select: { id: true, vendor: true, date: true, createdAt: true, totalAmountCents: true },
     }),
     prisma.salesInvoice.findMany({
       where: {
@@ -109,7 +110,7 @@ export async function listPeriodPrecheck(userId: string, month: string): Promise
       })),
       ...pending.map((receipt) => ({
         id: receipt.id,
-        title: receipt.vendor || receipt.fileName || "Kuitti",
+        title: receiptTitle(receipt),
         detail:
           receipt.totalAmountCents == null
             ? "Odottaa hyväksyntää"

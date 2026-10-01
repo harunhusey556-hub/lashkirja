@@ -1,5 +1,5 @@
 export const JOB_KIND_LABEL: Record<string, string> = {
-  document_analysis: "Asiakirjan analysointi",
+  document_analysis: "Kuitin lukeminen",
   bank_sync: "Pankkitapahtumien haku",
   email_scan: "Sähköpostin tarkistus",
 };
@@ -14,16 +14,16 @@ export const JOB_STATUS_LABEL: Record<string, string> = {
 
 export const WORK_KIND_LABEL: Record<string, string> = {
   pending_review: "Odottaa tarkistusta",
-  missing_document: "Puuttuva tosite",
+  missing_document: "Kuitti puuttuu",
   amount_mismatch: "Summa ei täsmää",
-  corrupt_file: "Tiedosto rikki",
-  link_error: "Linkitysvirhe",
-  ambiguous_match: "Epäselvä täsmäytys",
+  corrupt_file: "Kuittia ei voitu lukea",
+  link_error: "Kohdistus ei onnistunut",
+  ambiguous_match: "Epäselvä kohdistus",
   payment_duplicate: "Mahdollinen tuplamaksu",
 };
 
 export function jobKindLabel(kind: string): string {
-  return JOB_KIND_LABEL[kind] ?? "Taustatyö";
+  return JOB_KIND_LABEL[kind] ?? "Työ";
 }
 
 export function jobStatusLabel(status: string): string {
@@ -31,5 +31,5 @@ export function jobStatusLabel(status: string): string {
 }
 
 export function workKindLabel(kind: string): string {
-  return WORK_KIND_LABEL[kind] ?? "Poikkeus";
+  return WORK_KIND_LABEL[kind] ?? "Huomioitava";
 }

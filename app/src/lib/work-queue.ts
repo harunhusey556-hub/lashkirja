@@ -2,6 +2,8 @@ import { prisma } from "./db";
 import { detailHref } from "./routes";
 import { findPaymentReceiptDuplicates } from "./alv-period";
 import { formatEur } from "./format";
+import { receiptTitle } from "./display-titles";
+import { groupFailedJobs } from "./work-queue-group";
 import { centsToEuros } from "./money";
 
 export const AMOUNT_MISMATCH_CENTS = 50;
@@ -22,6 +24,10 @@ export interface WorkQueueItem {
   href: string | null;
   /** A failed analysis has no screen of its own: its action is a retry of this job (BOOKS-14). */
   retryJobId?: string;
+  /** Every failed job a grouped row retries with its one button (F29); retryJobId is the newest. */
+  retryJobIds?: string[];
+  /** How many identical failures the row stands for. */
+  count?: number;
 }
 
 const TAKE = 40;
@@ -32,7 +38,7 @@ export async function listWorkQueue(userId: string): Promise<WorkQueueItem[]> {
       where: { userId, reviewStatus: "pending" },
       orderBy: { createdAt: "desc" },
       take: TAKE,
-      select: { id: true, vendor: true, fileName: true },
+      select: { id: true, vendor: true, date: true, createdAt: true },
     }),
     prisma.transaction.findMany({
       where: {
@@ -71,7 +77,7 @@ export async function listWorkQueue(userId: string): Promise<WorkQueueItem[]> {
       where: { userId, kind: "document_analysis", status: "failed" },
       orderBy: { createdAt: "desc" },
       take: TAKE,
-      select: { id: true, title: true, error: true },
+      select: { id: true, kind: true, title: true, error: true, createdAt: true },
     }),
     prisma.automationEvent.findMany({
       where: { userId, kind: "link_error" },
@@ -102,7 +108,7 @@ export async function listWorkQueue(userId: string): Promise<WorkQueueItem[]> {
     items.push({
       id: `pending_review:${receipt.id}`,
       kind: "pending_review",
-      title: receipt.vendor || receipt.fileName || "Kuitti",
+      title: receiptTitle(receipt),
       detail: "Kuitti odottaa tarkistusta.",
       href: detailHref("receipt", receipt.id),
     });
@@ -113,7 +119,7 @@ export async function listWorkQueue(userId: string): Promise<WorkQueueItem[]> {
       id: `missing_document:${tx.id}`,
       kind: "missing_document",
       title: tx.counterparty || tx.message || "Pankkitapahtuma",
-      detail: "Tapahtumalla ei ole tositetta.",
+      detail: "Tapahtumalla ei ole kuittia.",
       href: detailHref("statement", tx.statementId),
     });
   }
@@ -125,22 +131,25 @@ export async function listWorkQueue(userId: string): Promise<WorkQueueItem[]> {
     items.push({
       id: `amount_mismatch:${tx.id}`,
       kind: "amount_mismatch",
-      title: tx.receipt?.vendor || tx.counterparty || "Täsmäytys",
-      detail: "Linkitetyn kuitin summa eroaa pankkitapahtumasta.",
+      title: tx.receipt?.vendor || tx.counterparty || "Pankkitapahtuma",
+      detail: "Kohdistetun kuitin summa eroaa pankkitapahtumasta.",
       href: tx.receipt ? detailHref("receipt", tx.receipt.id) : detailHref("statement", tx.statementId),
     });
     if (items.filter((item) => item.kind === "amount_mismatch").length >= TAKE) break;
   }
 
-  for (const job of failedJobs) {
+  // Identical failures are one row with one retry that starts them all again (F29).
+  for (const group of groupFailedJobs(failedJobs)) {
     items.push({
-      id: `corrupt_file:${job.id}`,
+      id: `corrupt_file:${group.id}`,
       kind: "corrupt_file",
-      title: job.title,
-      detail: job.error || "Tiedoston analysointi epäonnistui.",
+      title: group.title,
+      detail: group.detail,
       // Not "/tyot": that is the page the user is already on (BOOKS-14).
       href: null,
-      retryJobId: job.id,
+      retryJobId: group.id,
+      retryJobIds: group.jobIds,
+      count: group.count,
     });
   }
 
@@ -148,7 +157,7 @@ export async function listWorkQueue(userId: string): Promise<WorkQueueItem[]> {
     items.push({
       id: `link_error:${event.id}`,
       kind: "link_error",
-      title: "Linkitys epäonnistui",
+      title: "Kohdistus epäonnistui",
       detail: event.reason,
       href: event.resourceId ? detailHref("receipt", event.resourceId) : null,
     });
@@ -158,7 +167,7 @@ export async function listWorkQueue(userId: string): Promise<WorkQueueItem[]> {
     items.push({
       id: `ambiguous_match:${tx.id}`,
       kind: "ambiguous_match",
-      title: tx.counterparty || "Ehdotettu täsmäytys",
+      title: tx.counterparty || "Ehdotettu kohdistus",
       detail:
         tx.matchScore == null
           ? "Useita tai epävarmoja osumia."

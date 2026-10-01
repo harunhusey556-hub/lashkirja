@@ -48,10 +48,12 @@ export interface QueueRow {
   fileName: string;
   status: QueuedReceipt["status"];
   lastError?: string;
+  /** Epoch ms the photo was taken, for the row title "Kuitti 28.9.". */
+  createdAt: number;
 }
 
 function toRow(item: QueuedReceipt): QueueRow {
-  return { id: item.id, fileName: item.fileName, status: item.status, lastError: item.lastError };
+  return { id: item.id, fileName: item.fileName, status: item.status, lastError: item.lastError, createdAt: item.createdAt };
 }
 
 const listeners = new Set<() => void>();
@@ -122,7 +124,7 @@ async function sendOne(userId: string, item: QueuedReceipt): Promise<void> {
         ...item,
         status: "failed",
         attempts: item.attempts + 1,
-        lastError: "Kuvaa ei voitu lukea. Ota kuva uudelleen.",
+        lastError: "Kuvaa ei voitu lukea. Kuvaa kuitti uudelleen.",
       });
       return;
     }

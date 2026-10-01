@@ -83,7 +83,7 @@ async function queueFromStagedUpload(
           userId,
           kind: "document_analysis",
           status: "done",
-          title: `Kuitin analysointi: ${originalName}`.slice(0, 180),
+          title: "Kuitin lukeminen",
           progressLabel: "Valmis",
           resourceType: "upload",
           resourceId: upload.id,

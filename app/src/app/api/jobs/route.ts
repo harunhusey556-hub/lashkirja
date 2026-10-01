@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { prisma } from "@/lib/db";
 import { requireSession } from "@/lib/session";
 import { noStoreJson } from "@/lib/http-security";
+import { jobTitle } from "@/lib/display-titles";
 
 export async function GET(req: NextRequest) {
   const session = await requireSession(req);
@@ -27,5 +28,6 @@ export async function GET(req: NextRequest) {
     },
   });
 
-  return noStoreJson({ jobs });
+  // A job is named by what it is, never by the file it read (F28).
+  return noStoreJson({ jobs: jobs.map((job) => ({ ...job, title: jobTitle(job) })) });
 }

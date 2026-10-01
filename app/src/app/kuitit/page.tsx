@@ -10,6 +10,7 @@ import { useOfflineReceiptQueue } from "@/components/useOfflineReceiptQueue";
 import ReviewQueue from "@/components/ReviewQueue";
 import RejectedReceipts from "@/components/RejectedReceipts";
 import { showToast } from "@/lib/toast";
+import { receiptTitle } from "@/lib/display-titles";
 import { SkeletonList } from "@/components/AsyncState";
 import { ConnectionNotice, EmptyState, StaleBanner } from "@/components/ScreenState";
 import {
@@ -57,7 +58,7 @@ const RECENT_LIMIT = 5;
 
 /** "Kahvila Oy, E2E Testi ja 3 muuta" for the bulk-delete confirm (BOOKS-12). */
 function selectionSummary(selected: SavedReceipt[]): string {
-  const names = selected.map((receipt) => receipt.vendor || receipt.fileName || "Tuntematon");
+  const names = selected.map((receipt) => receiptTitle(receipt));
   if (names.length <= 3) return names.join(", ");
   return `${names.slice(0, 2).join(", ")} ja ${names.length - 2} muuta`;
 }

@@ -22,6 +22,7 @@ import {
   type StatementTxFilter,
 } from "@/lib/statement-client";
 import { formatDate, formatEurSigned, parseFinnishNumber } from "@/lib/format";
+import { statementTitle } from "@/lib/display-titles";
 import { STATEMENT_TX_STATUS, statementTxStatusKey } from "@/lib/status-labels";
 import StatementSummaryCards from "@/components/StatementSummaryCards";
 import ConfirmModal from "@/components/ConfirmModal";
@@ -303,7 +304,7 @@ export default function StatementDetailView({
       );
       await reloadStatement();
       if ((data.confirmed ?? 0) > 0) {
-        setStatusMsg(`${data.confirmed} kuittia linkitetty`);
+        setStatusMsg(`${data.confirmed} kuittia kohdistettu`);
       }
     } catch (error: unknown) {
       if (isUnauthorized(error)) {
@@ -331,7 +332,7 @@ export default function StatementDetailView({
       await reloadStatement();
       const parts: string[] = [];
       if ((data.autoConfirmed ?? 0) > 0) {
-        parts.push(`${data.autoConfirmed} linkitetty automaattisesti`);
+        parts.push(`${data.autoConfirmed} kohdistettu automaattisesti`);
       }
       if ((data.suggested ?? 0) > 0) {
         parts.push(`${data.suggested} ehdotusta odottaa`);
@@ -400,7 +401,7 @@ export default function StatementDetailView({
     if (!done) return;
     showToast({
       tone: "success",
-      text: "Merkitty: tositetta ei tarvita.",
+      text: "Merkitty: kuittia ei tarvita.",
       action: {
         label: "Kumoa",
         onAction: () => void matchAction(txId, "/api/matching/ignore", { transactionId: txId, ignored: false }),
@@ -563,14 +564,14 @@ export default function StatementDetailView({
       <DetailHero
         amount={formatEurSigned(statement.totals.net)}
         amountTone={statement.totals.net >= 0 ? "positive" : "default"}
-        title={statement.fileName}
+        title={statementTitle(statement)}
         meta={
           <>
             <span className="block">{formatMonth(periodValue() || statement.periodMonth)}</span>
             <span className="block">{statement.bankAccount ? statement.bankAccount.name : "Ei pankkitiliä"}</span>
             {relevantCount > 0 && (
               <span className="block">
-                {linkedCount}/{relevantCount} kuittia linkitetty
+                {linkedCount}/{relevantCount} kuittia kohdistettu
                 {periodDirty() && " · tallentamaton"}
               </span>
             )}
@@ -609,7 +610,7 @@ export default function StatementDetailView({
         </p>
       )}
 
-      <Section title="Kuukausi etusivulla">
+      <Section title="Kuukausi Kotona">
         <div className="space-y-3 px-4 py-4">
           <div>
             <label htmlFor={`statement-${statement.id}-period`} className={LABEL_CLASS}>
@@ -624,7 +625,7 @@ export default function StatementDetailView({
               className={controlClass}
             />
             <p className="mt-1.5 text-caption text-ink-2">
-              Määrittää millä kuukaudella etusivu näyttää tämän tiliotteen.
+              Valitse, minkä kuukauden luvuissa tämä tiliote näkyy Kodissa.
             </p>
           </div>
 
@@ -698,10 +699,10 @@ export default function StatementDetailView({
             type="button"
             className="w-full"
             busy={bulkBusy}
-            busyLabel="Linkitetään…"
+            busyLabel="Kohdistetaan…"
             onClick={() => void confirmAllSuggested()}
           >
-            Linkitä kaikki ({regularSuggestedCount})
+            Kohdista kaikki ({regularSuggestedCount})
           </Button>
         </div>
       )}
@@ -749,7 +750,7 @@ export default function StatementDetailView({
                   trailing={
                     canQuickLink ? (
                       <ActionPill
-                        ariaLabel={`Linkitä: ${rowLabel}`}
+                        ariaLabel={`Kohdista: ${rowLabel}`}
                         disabled={matchBusyTxId === t.id}
                         onClick={() =>
                           matchAction(t.id, "/api/matching/confirm", {
@@ -758,7 +759,7 @@ export default function StatementDetailView({
                           })
                         }
                       >
-                        Linkitä
+                        Kohdista
                       </ActionPill>
                     ) : status ? (
                       <StatusTag tone={status.tone}>{status.label}</StatusTag>
@@ -904,7 +905,7 @@ export default function StatementDetailView({
 
                         {t.matchStatus === "confirmed" && t.receipt && (
                           <p className="text-caption text-ink-2">
-                            Linkitetty kuitti: {receiptLabel(t.receipt)}
+                            Kohdistettu kuitti: {receiptLabel(t.receipt)}
                           </p>
                         )}
 
@@ -947,7 +948,7 @@ export default function StatementDetailView({
                               </SkeletonGroup>
                             ) : candidates.length === 0 ? (
                               <p className="text-caption text-ink-2">
-                                Ei sopivia kuitteja. Lisää kuitti ensin Kuitit-sivulla.
+                                Ei sopivia kuitteja. Lisää ensin uusi kuitti Kuitit-näkymässä.
                               </p>
                             ) : (
                               <div className="divide-y divide-line">
@@ -1064,7 +1065,7 @@ export default function StatementDetailView({
       <ConfirmModal
         isOpen={confirmingDelete}
         title="Poistetaanko tiliote?"
-        description={deleteStatementDescription(statement.fileName, statement.transactions.map(deleteFacts))}
+        description={deleteStatementDescription(statementTitle(statement), statement.transactions.map(deleteFacts))}
         confirmLabel="Poista tiliote"
         onConfirm={() => handleDelete()}
         onCancel={() => setConfirmingDelete(false)}

@@ -12,6 +12,7 @@
 import { useState } from "react";
 import ConfirmModal from "@/components/ConfirmModal";
 import { Section } from "@/components/ds";
+import { receiptTitle } from "@/lib/display-titles";
 import { useOfflineReceiptQueue } from "@/components/useOfflineReceiptQueue";
 
 function statusText(row: { status: string; lastError?: string }): string {
@@ -66,7 +67,7 @@ export default function QueuedReceiptsCard({ offlineNotice = false }: { offlineN
         <Section title="Jonossa">
           {waiting.map((row) => (
             <div key={row.id} className="px-4 py-3">
-              <p className="min-w-0 truncate text-body font-medium text-ink">{row.fileName}</p>
+              <p className="min-w-0 truncate text-body font-medium text-ink">{receiptTitle({ createdAt: new Date(row.createdAt) })}</p>
               <p
                 className={`mt-1 text-caption ${row.status === "failed" ? "text-danger" : "text-ink-2"}`}
                 role={row.status === "failed" ? "alert" : undefined}
@@ -98,7 +99,7 @@ export default function QueuedReceiptsCard({ offlineNotice = false }: { offlineN
       )}
 
       {sent.length > 0 && (
-        <Section title="Lähetetty">
+        <Section title="Lähetetyt kuvat">
           <div className="flex items-center gap-3 px-4 py-2">
             <p className="min-w-0 flex-1 text-caption leading-relaxed text-ink-2">
               {sent.length === 1 ? "1 kuva lähetetty." : `${sent.length} kuvaa lähetetty.`} Kuitit näkyvät
