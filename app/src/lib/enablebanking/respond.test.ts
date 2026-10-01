@@ -15,3 +15,18 @@ describe("V33: a definite bank failure is not answered like a dead gateway", () 
     expect(respondToBankError(new EnableBankingError("x", 404, "NOT_FOUND")).status).toBe(404);
   });
 });
+
+describe("G35 / G34: the sentence the app wrote is the sentence the owner reads", () => {
+  it("a refused disconnect keeps its own sentence and is not read as a dead gateway", async () => {
+    const error = new EnableBankingError("Pankkia ei tavoitettu, joten yhteyttä ei katkaistu. Yritä hetken päästä uudelleen.", 424, "REVOKE_FAILED");
+    const response = respondToBankError(error);
+    expect(response.status).toBe(424);
+    expect((await response.json()).error).toBe(error.message);
+  });
+
+  it("a bank 429 stays a request to wait", async () => {
+    const response = respondToBankError(new EnableBankingError("x", 429, "ASPSP_RATE_LIMIT_EXCEEDED"));
+    expect(response.status).toBe(429);
+    expect((await response.json()).error).toBe("Pankki pyytää odottamaan. Yritä hetken päästä uudelleen.");
+  });
+});
