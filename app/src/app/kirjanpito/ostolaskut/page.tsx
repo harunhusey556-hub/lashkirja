@@ -9,6 +9,7 @@ import BottomSheet from "@/components/BottomSheet";
 import {
   apiFetch,
   errorMessage,
+  fieldErrorsFromApi,
   isUnauthorized,
   readJson,
   redirectToLogin,
@@ -16,6 +17,7 @@ import {
 import { showToast } from "@/lib/toast";
 import { hapticNotify } from "@/lib/haptics";
 import { formatDate, formatDayMonth, formatEur, parseFinnishNumber } from "@/lib/format";
+import { moneyEntryProblem } from "@/lib/money-entry";
 import { isValidReferenceNumber, normalizeReference } from "@/lib/finnish-reference";
 import { PURCHASE_STATUS } from "@/lib/status-labels";
 import {
@@ -213,8 +215,16 @@ export default function PurchaseInvoicesPage() {
     if (!form.supplierName.trim()) errors.supplierName = "Anna toimittajan nimi.";
     const gross = parseFinnishNumber(form.gross);
     if (gross === null || gross <= 0) errors.gross = "Anna laskun summa, esim. 124,00.";
+    else {
+      const problem = moneyEntryProblem(gross);
+      if (problem) errors.gross = problem;
+    }
     const vat = form.vat.trim() ? parseFinnishNumber(form.vat) : 0;
     if (vat === null || vat < 0) errors.vat = "ALV on virheellinen.";
+    else {
+      const problem = moneyEntryProblem(vat);
+      if (problem) errors.vat = problem;
+    }
     if (gross !== null && vat !== null && vat > gross) errors.vat = "ALV ei voi ylittää summaa.";
     if (form.dueDate < form.issueDate) errors.dueDate = "Eräpäivä ei voi olla ennen laskun päivää.";
     if (form.reference.trim() && !isValidReferenceNumber(form.reference)) {
@@ -268,7 +278,14 @@ export default function PurchaseInvoicesPage() {
     } catch (error) {
       // Renders inside the "Uusi ostolasku" sheet, which stays open, not the
       // page-level message behind it.
-      setCreateError(errorMessage(error, "Tallennus epäonnistui"));
+      // A refusal that names fields is shown at those fields (F64).
+      const fields = fieldErrorsFromApi(error);
+      if (Object.keys(fields).length > 0) {
+        setFormErrors(fields);
+        setCreateError("");
+      } else {
+        setCreateError(errorMessage(error, "Tallennus epäonnistui"));
+      }
     } finally {
       setBusy(false);
     }
