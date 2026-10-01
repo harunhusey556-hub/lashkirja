@@ -246,8 +246,14 @@ from the day after the due date, actual days over 365.
 
 `lib/invoice-reminders.ts` refuses to produce a reminder unless the invoice is
 sent, unpaid and actually overdue, and stores what was demanded on the day it
-was sent (`InvoiceReminder`), so the figure stays reconstructible. The row is
-written only after the mail server accepts the message.
+was sent (`InvoiceReminder`), so the figure stays reconstructible. The slot is
+claimed before anything is mailed: `reserveReminder` writes the row first, with
+no recipient (`sentTo` null), in one transaction that also numbers the level, so
+two simultaneous sends cannot both go out. `confirmReminder` fills in the
+recipient once the mail server accepts the message, and `releaseReminder` deletes
+the row if the mail did not go out. A row that has no recipient for more than 10
+minutes is treated as a crashed send and swept at the next reservation. A new
+reminder waits for the term the previous one gave, and never less than 24 hours.
 
 ### Closed books
 
