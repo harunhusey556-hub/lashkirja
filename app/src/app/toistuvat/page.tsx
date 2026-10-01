@@ -585,15 +585,14 @@ export default function RecurringInvoicesPage() {
               >
                 {selected.active ? "Pysäytä" : "Jatka"}
               </Button>
-              <Button
+              <button
                 type="button"
-                variant="ghost"
-                className="w-full text-danger"
+                className={tintedButtonClass("danger", "w-full")}
                 disabled={busy}
                 onClick={() => setConfirmRemove(selected)}
               >
                 Poista
-              </Button>
+              </button>
             </div>
           </div>
         )}
