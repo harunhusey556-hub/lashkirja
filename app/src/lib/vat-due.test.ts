@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { nextVatDue, vatDueFor, vatPeriodEndingIn, vatPeriodKey, vatPeriodKindOf } from "./vat-deadline";
 import {
+  vatAmountToPay,
+  vatChangedNote,
   vatChangedSinceFiling,
   vatDueAmount,
   vatDueSecondary,
@@ -34,7 +36,7 @@ describe("next VAT due (TF-01)", () => {
 
   it("a refund says so and needs no payment", () => {
     const due = vatDueFor({ kind: "month", year: 2026, month: 9 });
-    const refund = { ...august, isRefund: true, filing: { filedAt: "2026-10-05T00:00:00Z", paidAt: null, filedAmount: -20.8 } };
+    const refund = { ...august, isRefund: true, filing: { filedAt: "2026-10-05T00:00:00Z", paidAt: null, filedAmount: -159.38 } };
     expect(vatDueSecondary(due, refund)).toBe("Syyskuu 2026 · palautus · eräpäivä 12.11. · Ilmoitettu");
   });
 
@@ -109,5 +111,54 @@ describe("filing card sentences (F73)", () => {
     const zero: VatDueFigures = { amount: 0, isRefund: false, filing: { filedAt: "2026-10-05", paidAt: null, filedAmount: 0 }, pendingReceiptCount: 0 };
     const due = nextVatDue(new Date("2026-09-30T10:00:00Z"), "month");
     expect(vatDueSecondary(due, zero)).toBe("Elokuu 2026 · eräpäivä 12.10. · Ilmoitettu");
+  });
+});
+
+describe("a return that changed after filing is flagged everywhere the row is shown (F66)", () => {
+  const due = vatDueFor({ kind: "month", year: 2026, month: 8 });
+  const filed = { filedAt: "2026-10-05T00:00:00Z", paidAt: null, filedAmount: 232.88 };
+  const plain = (text: string | null) => (text ?? "").replace(/ /g, " ");
+  const changed: VatDueFigures = { amount: 212.56, isRefund: false, filing: filed, pendingReceiptCount: 0 };
+
+  it("adds the change to the shared row words, filed or paid", () => {
+    expect(vatDueSecondary(due, changed)).toBe(
+      "Elokuu 2026 · eräpäivä 12.10. · Ilmoitettu, maksamatta · muuttunut ilmoituksen jälkeen"
+    );
+    expect(vatDueSecondary(due, { ...changed, filing: { ...filed, paidAt: "2026-10-10T00:00:00Z" } })).toBe(
+      "Elokuu 2026 · eräpäivä 12.10. · Maksettu · muuttunut ilmoituksen jälkeen"
+    );
+  });
+
+  it("leaves an unchanged return alone", () => {
+    expect(vatDueSecondary(due, { ...changed, amount: 232.88 })).toBe(
+      "Elokuu 2026 · eräpäivä 12.10. · Ilmoitettu, maksamatta"
+    );
+    expect(vatChangedNote({ ...changed, amount: 232.88 })).toBeNull();
+    expect(vatChangedNote(null)).toBeNull();
+  });
+
+  it("names both the filed and the current figure", () => {
+    expect(plain(vatChangedNote(changed))).toBe(
+      "Luvut ovat muuttuneet ilmoituksen jälkeen: ilmoitettu 232,88 €, nyt 212,56 €."
+    );
+    const refund = { ...changed, isRefund: true, amount: 20.8, filing: { ...filed, filedAmount: 10 } };
+    expect(plain(vatChangedNote(refund))).toBe(
+      "Luvut ovat muuttuneet ilmoituksen jälkeen: ilmoitettu 10,00 €, nyt palautus 20,80 €."
+    );
+  });
+
+  it("asks for the filed amount once a return is filed, the live one before", () => {
+    expect(vatAmountToPay(changed)).toBe(232.88);
+    expect(vatAmountToPay({ ...changed, filing: null })).toBe(212.56);
+  });
+});
+
+describe("a filed return owes what was filed (F66)", () => {
+  it("is not paid-off by a refund that appeared after filing", () => {
+    const filedOwing = { filedAt: "2026-10-05T00:00:00Z", paidAt: null, filedAmount: 232.88 };
+    expect(vatNothingToPay({ amount: 5, isRefund: true, filing: filedOwing })).toBe(false);
+    expect(vatNothingToPay({ amount: 5, isRefund: true, filing: null })).toBe(true);
+    expect(vatNothingToPay({ amount: 50, isRefund: false, filing: { ...filedOwing, filedAmount: -20 } })).toBe(true);
+    expect(vatNothingToPay({ amount: 0, isRefund: false })).toBe(true);
   });
 });

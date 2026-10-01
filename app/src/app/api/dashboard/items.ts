@@ -17,7 +17,7 @@ import { prisma } from "@/lib/db";
 import { centsToEuros } from "@/lib/money";
 import { openPosition } from "@/lib/invoices";
 import { parseVatDetails } from "@/lib/alv";
-import { findPaymentReceiptDuplicates } from "@/lib/alv-period";
+import { findPaymentReceiptDuplicates, findReceiptsWithoutVatBreakdown } from "@/lib/alv-period";
 import { matchInvoicePaymentsFromBank } from "@/lib/sales-invoices";
 import { reminderWaitsFor } from "@/lib/reminder-waits";
 import { helsinkiCalendarDate, isoDateToUtc } from "@/lib/validation";
@@ -58,6 +58,17 @@ export type DashboardItem =
       gaps: ApprovalGap[];
       /** Drafted from a bank row (MobilePay etc.), not read from a kuitti. */
       fromBank?: boolean;
+    }
+  | {
+      id: string;
+      kind: "vat_gap";
+      action: "add_vat";
+      receiptId: string;
+      party: string;
+      amount: number;
+      /** "meno" loses a VAT deduction, "tulo" leaves sales VAT out of the return. */
+      type: "meno" | "tulo";
+      date: string | null;
     }
   | {
       id: string;
@@ -155,7 +166,7 @@ export async function buildDashboardItems(
   const monthStart = new Date(Date.UTC(year, monthNum - 1, 1));
   const monthEnd = new Date(Date.UTC(year, monthNum, 1));
 
-  const [overdueRows, pendingRows, { matchRun, duplicates }, monthRows, draftRows] = await Promise.all([
+  const [overdueRows, pendingRows, { matchRun, duplicates }, monthRows, draftRows, vatGapRows] = await Promise.all([
     prisma.salesInvoice.findMany({
       where: {
         userId,
@@ -228,6 +239,11 @@ export async function buildDashboardItems(
       },
       orderBy: { number: "asc" },
     }),
+    // F72: approved receipts of a VAT-registered owner that the VAT return cannot use.
+    // The rule is the return's own (alv-period.ts), so this list and the ALV page agree.
+    prisma.user
+      .findUnique({ where: { id: userId }, select: { vatRegistered: true } })
+      .then((user) => (user?.vatRegistered ? findReceiptsWithoutVatBreakdown(userId, monthStart, monthEnd) : [])),
   ]);
 
   // A past month's income draft is tied to its bank row, whose booking date can
@@ -311,6 +327,17 @@ export async function buildDashboardItems(
       fromBank: receipt.source === "auto_income",
     };
   });
+
+  const vatGaps = vatGapRows.map((receipt): DashboardItem => ({
+    id: `vat_gap:${receipt.id}`,
+    kind: "vat_gap",
+    action: "add_vat",
+    receiptId: receipt.id,
+    party: receipt.vendor || receipt.fileName || "Kuitti",
+    amount: centsToEuros(receipt.totalAmountCents ?? 0),
+    type: receipt.type === "tulo" ? "tulo" : "meno",
+    date: iso(receipt.date),
+  }));
 
   // Reference hits first (certain), then amount suggestions; one item per invoice.
   const matchEntries = [
@@ -399,6 +426,7 @@ export async function buildDashboardItems(
   // non-blocking overdue invoices form their own group on Koti.
   const groups: Array<[DashboardItemKind, DashboardItem[]]> = [
     ["pending_receipt", pending],
+    ["vat_gap", vatGaps],
     ["missing_receipt", missing],
     ["invoice_match", matches],
     ["receipt_match", receiptMatches],

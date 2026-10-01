@@ -42,9 +42,12 @@ export function vatStateLabel(state: VatFilingState, nothingToPay: boolean): str
 
 /**
  * A return with nothing to pay: a refund, or a zero return. Filing it is the whole job, so no payment
- * step is shown and the state never waits for a payment that cannot be made (F73).
+ * step is shown and the state never waits for a payment that cannot be made (F73). Once a return is
+ * filed, what is owed is what was filed (F66), not what the books say afterwards.
  */
-export function vatNothingToPay(figures: { amount: number; isRefund: boolean }): boolean {
+export function vatNothingToPay(figures: { amount: number; isRefund: boolean; filing?: VatFilingRecord | null }): boolean {
+  const filed = figures.filing?.filedAt ? figures.filing.filedAmount : null;
+  if (filed != null) return filed <= 0;
   return figures.isRefund || figures.amount <= 0;
 }
 
@@ -82,7 +85,34 @@ export function vatDueSecondary(due: VatDue, figures: VatDueFigures | null): str
   if (figures?.isRefund) parts.push("palautus");
   parts.push(`eräpäivä ${formatDayMonth(due.dueIso)}`);
   if (figures) parts.push(vatStateLabel(vatFilingState(figures.filing), vatNothingToPay(figures)));
+  // F66: one rule for every screen that shows the row, not only the ALV page.
+  if (vatChangedSinceFiling(figures)) parts.push("muuttunut ilmoituksen jälkeen");
   return parts.join(" · ");
+}
+
+/** "232,88 €", or "palautus 20,80 €" for a signed refund. */
+function signedVatText(signed: number): string {
+  return signed < 0 ? `palautus ${formatEur(-signed)}` : formatEur(signed);
+}
+
+/**
+ * F66: the warning under the row of a return whose figures moved after it was
+ * filed (or paid): what was filed, what the books say now. Null when nothing moved.
+ */
+export function vatChangedNote(figures: VatDueFigures | null): string | null {
+  if (!figures || !vatChangedSinceFiling(figures)) return null;
+  const filed = figures.filing!.filedAmount!;
+  const now = figures.isRefund ? -figures.amount : figures.amount;
+  return `Luvut ovat muuttuneet ilmoituksen jälkeen: ilmoitettu ${signedVatText(filed)}, nyt ${signedVatText(now)}.`;
+}
+
+/**
+ * The amount to pay for a filed return: what was filed, since that is what
+ * OmaVero asks for until the return is corrected. An open return pays the live figure.
+ */
+export function vatAmountToPay(figures: VatDueFigures): number {
+  const filedAmount = figures.filing?.filedAmount;
+  return figures.filing?.filedAt && filedAmount != null ? Math.max(filedAmount, 0) : figures.amount;
 }
 
 /** The amount slot: "159,38 €"; null when there is no figure to show. */

@@ -24,7 +24,7 @@
 import { prisma } from "./db";
 import { centsToEuros } from "./money";
 import { computeInvoiceTotals } from "./invoices";
-import type { InvoiceVatSource, ReceiptLike } from "./alv";
+import { parseVatDetails, type InvoiceVatSource, type ReceiptLike } from "./alv";
 import type { ReportInvoice, ReportReceipt } from "./reports";
 
 /** Ordinary invoices that are part of the books: sent, paid, or later credited. */
@@ -63,19 +63,17 @@ export function bookedSalesWhere(userId: string, start: Date, end: Date) {
   };
 }
 
-export async function loadAlvPeriodSources(
-  userId: string,
-  start: Date,
-  end: Date
-): Promise<AlvPeriodSources> {
-  const [receipts, invoices, payments] = await Promise.all([
+/**
+ * The approved receipts of a period and which of them count in the books: a
+ * receipt drafted from, or matched to, a bank row that already settled a sales
+ * invoice is left out. One place, so the VAT return and the "ALV-erittely
+ * puuttuu" exception below can never disagree about which receipts exist.
+ */
+async function loadCountedReceipts(userId: string, start: Date, end: Date) {
+  const [receipts, payments] = await Promise.all([
     prisma.receipt.findMany({
       where: { userId, date: { gte: start, lt: end }, reviewStatus: "approved" },
       include: { linkedTransaction: { select: { id: true } } },
-    }),
-    prisma.salesInvoice.findMany({
-      where: bookedSalesWhere(userId, start, end),
-      include: { lines: true },
     }),
     prisma.invoicePayment.findMany({
       where: { invoice: { userId }, transactionId: { not: null } },
@@ -95,6 +93,37 @@ export async function loadAlvPeriodSources(
     }
     return !(receipt.linkedTransaction && settledTransactionIds.has(receipt.linkedTransaction.id));
   });
+  return { receipts, counted };
+}
+
+/**
+ * F72: counted receipts with an amount but no usable VAT breakdown. They are
+ * left out of the return (computeAlvReport sends them to `review`), so a
+ * VAT-registered owner loses the deduction (or the sales VAT) until the
+ * breakdown is added. The month close lists them as an exception.
+ */
+export async function findReceiptsWithoutVatBreakdown(userId: string, start: Date, end: Date) {
+  const { counted } = await loadCountedReceipts(userId, start, end);
+  return counted.filter(
+    (receipt) =>
+      (receipt.type === "meno" || receipt.type === "tulo") &&
+      (receipt.totalAmountCents ?? 0) > 0 &&
+      parseVatDetails(receipt.vatDetails) === null
+  );
+}
+
+export async function loadAlvPeriodSources(
+  userId: string,
+  start: Date,
+  end: Date
+): Promise<AlvPeriodSources> {
+  const [{ receipts, counted }, invoices] = await Promise.all([
+    loadCountedReceipts(userId, start, end),
+    prisma.salesInvoice.findMany({
+      where: bookedSalesWhere(userId, start, end),
+      include: { lines: true },
+    }),
+  ]);
 
   const bookedInvoices = invoices.map((invoice) => {
     // Totals from the lines, exactly as the VAT return reads them. A credit

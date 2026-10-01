@@ -5,11 +5,13 @@ import { CircleCheck } from "lucide-react";
 import { Card, Icon } from "@/components/ds";
 import { Button } from "@/components/ui";
 import { apiFetch, errorMessage, isUnauthorized, readJson, redirectToLogin } from "@/components/clientFetch";
-import { formatDate, formatDayMonth, formatEur } from "@/lib/format";
+import { formatDate, formatDayMonth } from "@/lib/format";
 import { hapticNotify } from "@/lib/haptics";
 import { showToast } from "@/lib/toast";
 import { alvSummaryKey, readCached, storeCached } from "@/lib/cached-resource";
 import {
+  vatAmountToPay,
+  vatChangedNote,
   vatChangedSinceFiling,
   vatFileStepText,
   vatFiledNote,
@@ -52,9 +54,10 @@ export function VatFilingCard({
   const state = vatFilingState(filing);
   const figures: VatDueFigures = { amount, isRefund, filing, pendingReceiptCount };
   const changed = vatChangedSinceFiling(figures);
-  // A refund and a zero return have no payment step (F73).
+  // A refund and a zero return have no payment step (F73). A filed return owes what was filed (F66).
   const nothingToPay = vatNothingToPay(figures);
-  const payStep = nothingToPay ? null : vatPayStepText(amount, dueIso);
+  const owed = vatAmountToPay(figures);
+  const payStep = nothingToPay ? null : vatPayStepText(owed, dueIso);
 
   async function update(change: { filed?: boolean; paid?: boolean }, which: "filed" | "paid" | "undo") {
     setBusy(which);
@@ -113,7 +116,7 @@ export function VatFilingCard({
         ) : null}
         {state === "filed" && !nothingToPay ? (
           <p className="text-caption text-ink-2">
-            {vatFiledNote(filing?.filedAt ? formatDate(filing.filedAt) : "", amount, dueIso, nothingToPay)}
+            {vatFiledNote(filing?.filedAt ? formatDate(filing.filedAt) : "", owed, dueIso, nothingToPay)}
           </p>
         ) : null}
         {state === "paid" ? (
@@ -121,8 +124,7 @@ export function VatFilingCard({
         ) : null}
         {changed ? (
           <p className="text-caption text-warning" role="note">
-            Luvut ovat muuttuneet ilmoituksen jälkeen ({formatEur(Math.abs(filing?.filedAmount ?? 0))}). Tarkista, pitääkö
-            ilmoitusta korjata OmaVerossa.
+            {vatChangedNote(figures)} Tarkista, pitääkö ilmoitusta korjata OmaVerossa.
           </p>
         ) : null}
         {!periodEnded ? (

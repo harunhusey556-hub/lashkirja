@@ -3,7 +3,7 @@ import { prisma } from "@/lib/db";
 import { requireSession } from "@/lib/session";
 import { noStoreJson } from "@/lib/http-security";
 import { UnauthorizedError, withErrorHandler } from "@/lib/api-errors";
-import { helsinkiMonthKey, monthSchema } from "@/lib/validation";
+import { helsinkiMonthKey, monthBoundsUtc, monthSchema } from "@/lib/validation";
 import { getLockedThrough, isMonthLocked } from "@/lib/period-lock";
 import { MONTH_ROW_FACTS, monthProgress } from "@/lib/month-rows";
 import { buildDashboardItems } from "../items";
@@ -30,9 +30,12 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
       select: { vatRegistered: true, vatPeriod: true },
     }),
   ]);
-  const statements = await prisma.statement.count({
-    where: { userId: session.userId, periodMonth: month },
-  });
+  const { start, end } = monthBoundsUtc(month);
+  const [statements, receiptCount, invoiceCount] = await Promise.all([
+    prisma.statement.count({ where: { userId: session.userId, periodMonth: month } }),
+    prisma.receipt.count({ where: { userId: session.userId, date: { gte: start, lt: end } } }),
+    prisma.salesInvoice.count({ where: { userId: session.userId, issueDate: { gte: start, lt: end } } }),
+  ]);
 
   return noStoreJson({
     month,
@@ -45,6 +48,11 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
     blockingTotal: items.blockingTotal,
     progress: monthProgress(rows),
     hasStatement: statements > 0,
+    /** F10: receipts and sales documents dated in the month (any state). */
+    receiptCount,
+    invoiceCount,
+    /** Nothing was recorded in the month: there is nothing to check or close (F10). */
+    hasContent: statements + receiptCount + invoiceCount + items.items.length > 0,
     vatRegistered: user?.vatRegistered ?? false,
     vatPeriod: user?.vatPeriod ?? "month",
   });

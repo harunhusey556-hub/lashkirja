@@ -3,7 +3,7 @@
 import { PullToRefresh } from "@/components/ds/PullToRefresh";
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { ConnectionNotice, PartialFailureNotice, StaleBanner } from "@/components/ScreenState";
 import {
   apiFetch,
@@ -25,6 +25,7 @@ import {
   FilePen,
   FileText,
   Landmark,
+  Percent,
   Tag,
   Wallet,
   Sparkles,
@@ -54,10 +55,19 @@ import { MONTHS } from "@/lib/finnish-months";
 import { pageCacheFetchedAt, readPageCache, writePageCache } from "@/lib/page-cache";
 import { pollDelay, syncPageHiddenFlag } from "@/lib/page-activity";
 import { vatPeriodEndingIn, vatPeriodKindOf } from "@/lib/vat-deadline";
-import { VAT_ROW_TITLE, vatDueAmount, vatDueSecondary, vatPendingNote } from "@/lib/vat-due";
+import { VAT_ROW_TITLE, vatChangedNote, vatDueAmount, vatDueSecondary, vatPendingNote } from "@/lib/vat-due";
+import {
+  kotiHeadline,
+  kotiMonthHasActivity,
+  kotiMonthHref,
+  kotiResultBasis,
+  kotiResultLabel,
+  kotiStatementLine,
+  parseKotiMonth,
+} from "@/lib/koti-month";
 import { useVatDue } from "@/components/useVatDue";
 import { approvalGapText } from "@/lib/receipt-approval";
-import { requestReceiptCapture } from "@/lib/capture-request";
+import { requestReceiptCapture, requestStatementImport } from "@/lib/capture-request";
 import { useLeavingRows } from "@/components/useLeavingRows";
 import { armNavigation } from "@/lib/nav-direction";
 import { ReceiptApprovalSheet, type ApprovalSheetReceipt } from "@/components/ReceiptApprovalSheet";
@@ -139,6 +149,7 @@ interface Task {
 const KIND_LIST: Record<ItemKind, { href: string; label: string }> = {
   overdue_invoice: { href: "/laskut?status=overdue", label: "Myöhässä olevat laskut" },
   pending_receipt: { href: "/kuitit", label: "Hyväksyntää odottavat kuitit" },
+  vat_gap: { href: "/kuitit", label: "Kuitit ilman ALV-erittelyä" },
   missing_receipt: { href: "/pankki/tapahtumat?nayta=toimet", label: "Pankkitapahtumat ilman kuittia" },
   invoice_match: { href: "/laskut", label: "Laskujen maksut tiliotteella" },
   receipt_match: { href: "/pankki/tapahtumat?nayta=toimet", label: "Kohdistusehdotukset" },
@@ -205,7 +216,7 @@ function MonthStepper({ month, onChange }: { month: string; onChange: (next: str
 }
 
 /** Koti's first frame at the final layout sizes (L1, SHELL-34). */
-function KotiSkeleton() {
+export function KotiSkeleton() {
   return (
     <SkeletonGroup label="Ladataan kuukauden tilannetta" className="space-y-6">
       <SkeletonCard>
@@ -323,7 +334,14 @@ export default function DashboardClient() {
     month: string;
     data: DashboardData;
   } | null>(null);
-  const [month, setMonth] = useState(currentMonth());
+  // F25: the month is part of the address, so Back from the month close or an invoice returns to it.
+  const urlMonth = useSearchParams().get("month");
+  const [month, setMonthState] = useState(() => parseKotiMonth(urlMonth, currentMonth()));
+  const setMonth = (next: string) => {
+    setMonthState(next);
+    // replaceState, not a navigation: no history entry per tap, and Back still leaves Koti in one step.
+    window.history.replaceState(null, "", kotiMonthHref(next, currentMonth()));
+  };
   const [refreshFailed, setRefreshFailed] = useState<unknown>(null);
   const [loadAttempt, setLoadAttempt] = useState(0);
   // Items acted on in place: hidden at once, back if the action is undone or fails.
@@ -491,6 +509,21 @@ export default function DashboardClient() {
           onRowClick: openSheet,
         };
       }
+      case "vat_gap":
+        // F72: an approved receipt the VAT return cannot use; one tap to the receipt to add the breakdown.
+        return {
+          key: item.id,
+          icon: Percent,
+          title: item.party,
+          amount: formatEur(item.amount),
+          secondary:
+            item.type === "meno"
+              ? "ALV-erittely puuttuu · vähennys jää pois"
+              : "ALV-erittely puuttuu · ei mukana ALV:ssa",
+          pill: "Täydennä",
+          blocking: true,
+          href: detailHref("receipt", item.receiptId),
+        };
       case "missing_receipt":
         return {
           key: item.id,
@@ -679,18 +712,19 @@ export default function DashboardClient() {
   const setup = atCurrent ? data?.setup : null;
   // TF-06: a new account starts from a checklist, never from "Kaikki kunnossa".
   const showSetup = Boolean(setup && (setup.empty || !setup.receipts || !setup.bank));
-  const headline =
-    blockingCount > 0
-      ? atCurrent
-        ? `${plural(blockingCount, "asia", "asiaa")} ennen kuun loppua`
-        : `${plural(blockingCount, "asia", "asiaa")} kesken`
-      : setup?.empty
-        ? "Aloitetaan"
-        : atCurrent
-          ? otherTasks.length > 0 || otherMore.length > 0
-            ? "Kirjanpito on ajan tasalla"
-            : "Kaikki kunnossa"
-          : "Kaikki kirjattu";
+  const hasStatement = data?.source === "tiliote";
+  const hasActivity = data ? kotiMonthHasActivity(data) : false;
+  const headline = kotiHeadline({
+    atCurrent,
+    blockingCount,
+    setupEmpty: Boolean(setup?.empty),
+    otherOpen: otherTasks.length > 0 || otherMore.length > 0,
+    hasActivity,
+    hasStatement,
+  });
+  const statementLine = data
+    ? kotiStatementLine({ atCurrent, hasActivity, hasStatement, setupEmpty: Boolean(setup?.empty) })
+    : null;
   const matching = data?.matching;
   const documentsBasis = data?.source !== "tiliote";
   const tulotHref = !data
@@ -708,6 +742,7 @@ export default function DashboardClient() {
   const vat = useVatDue(atCurrent || vatPastPeriod ? profile : null, vatPastPeriod);
   const vatHref = vat.due?.queryKey ? `/kirjanpito/alv?period=${vat.due.queryKey}` : "/kirjanpito/alv";
   const vatNote = vatPendingNote(vat.figures);
+  const vatChanged = vatChangedNote(vat.figures);
 
   function openReceipt(receiptId: string) {
     const href = detailHref("receipt", receiptId);
@@ -800,15 +835,17 @@ export default function DashboardClient() {
                 </p>
                 <ProgressSegments done={matching.matched} total={matching.matchable} />
               </>
-            ) : data.source === "kuitit" && !setup?.empty ? (
+            ) : statementLine ? (
               <p className="mt-0.5 text-body text-ink-2">
-                Tämän kuun tiliotetta ei ole vielä.{" "}
-                <Link
-                  href="/pankki/tapahtumat?import=1"
+                {statementLine}{" "}
+                {/* F24: the file picker opens from this tap (it cannot open after a page change). */}
+                <button
+                  type="button"
+                  onClick={requestStatementImport}
                   className="relative font-medium text-accent before:absolute before:inset-x-0 before:-inset-y-[12px] before:content-['']"
                 >
                   Tuo tiliote
-                </Link>
+                </button>
               </p>
             ) : null}
             {/* FP-3: last month stays on Koti until it is closed. */}
@@ -850,6 +887,7 @@ export default function DashboardClient() {
                   <span className="block text-caption text-ink-2">
                     {vat.waiting ? <Skeleton tone="soft" className="mt-1 h-3 w-40" /> : vatDueSecondary(vat.due, vat.figures)}
                   </span>
+                  {vatChanged ? <span className="mt-0.5 block text-caption text-warning">{vatChanged}</span> : null}
                   {vatNote ? <span className="mt-0.5 block text-caption text-warning">{vatNote}</span> : null}
                 </span>
                 <span className="shrink-0 whitespace-nowrap font-semibold tabular-nums text-ink">
@@ -924,20 +962,21 @@ export default function DashboardClient() {
               {/* AX-11: VoiceOver joined the two parts ("tuloslaskujen") when the separator was its only gap. */}
               <span aria-hidden> · </span>
               <span className="sr-only">, </span>
-              <span>{documentsBasis ? "laskujen ja kuittien mukaan" : "tiliotteen mukaan"}</span>
+              <span>{kotiResultBasis(documentsBasis ? "kuitit" : "tiliote", data.vat.registered)}</span>
             </h2>
             <div className="grid grid-cols-2 gap-3">
-              <Link href={tulotHref} aria-label={`Tulot ${formatEur(data.income)}, avaa`} className="active-press block">
+              <Link href={tulotHref} aria-label={kotiResultLabel("Tulot", formatEur(data.income), data.vat.registered)} className="active-press block">
                 <SummaryCard label="Tulot" value={formatEur(data.income)} />
               </Link>
-              <Link href={menotHref} aria-label={`Menot ${formatEur(data.expenses)}, avaa`} className="active-press block">
+              <Link href={menotHref} aria-label={kotiResultLabel("Menot", formatEur(data.expenses), data.vat.registered)} className="active-press block">
                 <SummaryCard label="Menot" value={formatEur(data.expenses)} />
               </Link>
             </div>
           </section>
 
           {data.sectionErrors?.position ? null : (
-            <Section title="Rahatilanne">
+            // F26: the balances and receivables are as of today, whichever month is shown.
+            <Section title={atCurrent ? "Rahatilanne" : "Rahatilanne tänään"}>
               <ListRow
                 href="/kirjanpito/pankkitilit"
                 leading={<Icon icon={Landmark} />}

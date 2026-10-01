@@ -3,7 +3,7 @@
 import { Suspense, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
-import { ArrowLeftRight, Camera, Circle, CircleCheck, Copy, FilePen, FileUp, Percent, Tag, type LucideIcon } from "lucide-react";
+import { ArrowLeftRight, Camera, Circle, CircleCheck, CircleDashed, Copy, FilePen, FileUp, Percent, Tag, type LucideIcon } from "lucide-react";
 import { ActionPill, BottomActions, Icon, ListRow, PageTitle, Section } from "@/components/ds";
 import { SectionSkeleton } from "@/components/books/Skeletons";
 import { ConnectionNotice } from "@/components/ScreenState";
@@ -18,9 +18,10 @@ import { formatDayMonth, formatEur } from "@/lib/format";
 import { detailHref } from "@/lib/routes";
 import { helsinkiMonthKey } from "@/lib/validation";
 import { vatPeriodEndingIn, vatPeriodKindOf } from "@/lib/vat-deadline";
-import { vatDueSecondary, vatFilingState, vatNothingToPay } from "@/lib/vat-due";
+import { vatChangedNote, vatChangedSinceFiling, vatDueSecondary, vatFilingState, vatNothingToPay } from "@/lib/vat-due";
+import { checkStepState, monthCloseButton, monthCloseSubtitle, monthCloseWarnings, type StepState } from "@/lib/month-close";
 import { approvalGapText } from "@/lib/receipt-approval";
-import { requestReceiptCapture } from "@/lib/capture-request";
+import { requestReceiptCapture, requestStatementImport } from "@/lib/capture-request";
 import { hapticNotify } from "@/lib/haptics";
 import { showToast } from "@/lib/toast";
 import { PERIOD_LOCK_KEY, storeCached } from "@/lib/cached-resource";
@@ -45,6 +46,10 @@ interface MonthStatus {
   blockingTotal: number;
   progress: { matchable: number; matched: number; suggested: number };
   hasStatement: boolean;
+  /** F10: receipts and sales documents dated in the month, and whether the month holds anything at all. */
+  receiptCount: number;
+  invoiceCount: number;
+  hasContent: boolean;
 }
 
 function previousMonth(month: string): string {
@@ -65,10 +70,16 @@ interface Step {
   key: string;
   icon: LucideIcon;
   title: string;
-  done: boolean;
+  /** none: nothing in the month to check, so no tick (F10). */
+  state: StepState;
   doneText: string;
   openText: string;
+  noneText: string;
   items: DashboardItem[];
+}
+
+function stepText(step: Step): string {
+  return step.state === "done" ? step.doneText : step.state === "open" ? step.openText : step.noneText;
 }
 
 function itemRow(item: DashboardItem) {
@@ -87,6 +98,22 @@ function itemRow(item: DashboardItem) {
         />
       );
     }
+    case "vat_gap":
+      return (
+        <ListRow
+          key={item.id}
+          href={detailHref("receipt", item.receiptId)}
+          leading={<Icon icon={Percent} />}
+          title={item.party}
+          amount={formatEur(item.amount)}
+          secondary={item.type === "meno" ? "ALV-erittely puuttuu · vähennys jää pois" : "ALV-erittely puuttuu · ei mukana ALV:ssa"}
+          trailing={
+            <ActionPill href={detailHref("receipt", item.receiptId)} ariaLabel={`Täydennä: ${item.party}`}>
+              Täydennä
+            </ActionPill>
+          }
+        />
+      );
     case "missing_receipt":
       return (
         <ListRow
@@ -220,6 +247,7 @@ function MonthClose() {
   const count = (kinds: DashboardItemKind[]) => kinds.reduce((sum, k) => sum + (data?.totals?.[k] ?? 0), 0);
 
   const receiptKinds: DashboardItemKind[] = ["pending_receipt"];
+  const vatGapKinds: DashboardItemKind[] = ["vat_gap"];
   const bankKinds: DashboardItemKind[] = ["missing_receipt", "receipt_match", "invoice_match", "payment_duplicate"];
   const invoiceKinds: DashboardItemKind[] = ["draft_invoice"];
 
@@ -229,37 +257,74 @@ function MonthClose() {
           key: "receipts",
           icon: Tag,
           title: "Kuitit",
-          done: count(receiptKinds) === 0,
+          state: checkStepState(count(receiptKinds), data.receiptCount > 0),
           doneText: "Kaikki kuitit on hyväksytty",
           openText: `${plural(count(receiptKinds), "kuitti odottaa", "kuittia odottaa")} hyväksyntää`,
+          noneText: "Ei kuitteja tässä kuussa",
           items: byKind(receiptKinds),
         },
+        // F72: only when there is something to add (exceptions first).
+        ...(count(vatGapKinds) > 0
+          ? [
+              {
+                key: "vat",
+                icon: Percent,
+                title: "ALV-erittely",
+                state: "open" as const,
+                doneText: "",
+                openText: `${plural(count(vatGapKinds), "kuitti", "kuittia")} ilman ALV-erittelyä`,
+                noneText: "",
+                items: byKind(vatGapKinds),
+              },
+            ]
+          : []),
         {
           key: "bank",
           icon: ArrowLeftRight,
           title: "Pankkitapahtumat",
-          done: count(bankKinds) === 0,
-          doneText: data.hasStatement
-            ? `${data.progress.matched} / ${data.progress.matchable} pankkitapahtumaa kunnossa`
-            : "Tiliotetta ei ole tuotu",
+          // No tiliote means the rows cannot be checked: that is not "in order".
+          state: checkStepState(count(bankKinds), data.hasStatement && data.progress.matchable > 0),
+          doneText: `${data.progress.matched} / ${data.progress.matchable} pankkitapahtumaa kunnossa`,
           openText: `${plural(count(bankKinds), "pankkitapahtuma", "pankkitapahtumaa")} kesken`,
+          noneText: data.hasStatement ? "Tiliotteella ei ole kirjattavia tapahtumia" : "Tiliotetta ei ole tuotu",
           items: byKind(bankKinds),
         },
         {
           key: "invoices",
           icon: FilePen,
           title: "Myyntilaskut",
-          done: count(invoiceKinds) === 0,
+          state: checkStepState(count(invoiceKinds), data.invoiceCount > 0),
           doneText: "Ei lähettämättömiä laskuja",
           openText: `${plural(count(invoiceKinds), "lasku", "laskua")} lähettämättä`,
+          noneText: "Ei laskuja tässä kuussa",
           items: byKind(invoiceKinds),
         },
       ]
     : [];
 
   const vatState = vat.figures ? vatFilingState(vat.figures.filing) : null;
-  const vatDone = vatState === "paid" || (vatState === "filed" && vat.figures != null && vatNothingToPay(vat.figures));
+  // F66: a return whose figures moved after it was filed or paid is not done.
+  const vatChanged = vatChangedSinceFiling(vat.figures);
+  const vatDone =
+    !vatChanged && (vatState === "paid" || (vatState === "filed" && vat.figures != null && vatNothingToPay(vat.figures)));
   const blocking = data?.blockingTotal ?? 0;
+  const closeFacts = {
+    ended: data?.ended ?? false,
+    locked: data?.locked ?? false,
+    blocking,
+    hasContent: data?.hasContent ?? false,
+    hasStatement: data?.hasStatement ?? false,
+    vat:
+      vat.due && vatState
+        ? {
+            state: vatState,
+            done: vatDone,
+            changedSinceFiling: vatChanged,
+            nothingToPay: vat.figures != null && vatNothingToPay(vat.figures),
+          }
+        : null,
+  };
+  const closeButton = monthCloseButton(closeFacts);
   const earlierOpen = data ? (data.lockedThrough ?? "") < previousMonth(month) : false;
 
   async function closeMonth() {
@@ -291,15 +356,7 @@ function MonthClose() {
     }
   }
 
-  const subtitle = !data
-    ? " "
-    : data.locked
-      ? "Kuukausi on suljettu."
-      : !data.ended
-        ? "Kuukausi on vielä kesken."
-        : blocking > 0
-          ? `${plural(blocking, "asia", "asiaa")} kesken`
-          : "Kaikki kirjattu. Voit sulkea kuukauden.";
+  const subtitle = data ? monthCloseSubtitle(closeFacts) : " ";
 
   return (
     <div className="space-y-6">
@@ -321,14 +378,20 @@ function MonthClose() {
           {steps.map((step) => (
             <Section key={step.key} title={step.title}>
               <ListRow
-                leading={<Icon icon={step.done ? CircleCheck : Circle} className={step.done ? "text-success" : "text-ink-2"} />}
-                title={step.done ? step.doneText : step.openText}
-                ariaLabel={`${step.title}: ${step.done ? step.doneText : step.openText}`}
+                leading={
+                  <Icon
+                    icon={step.state === "done" ? CircleCheck : step.state === "none" ? CircleDashed : Circle}
+                    className={step.state === "done" ? "text-success" : "text-ink-2"}
+                  />
+                }
+                title={stepText(step)}
+                ariaLabel={`${step.title}: ${stepText(step)}`}
               />
               {step.items.map(itemRow)}
               {step.key === "bank" && !data.hasStatement ? (
                 <ListRow
-                  href="/pankki/tapahtumat?import=1"
+                  // F24: the picker opens from this tap, the file goes on to Pankki.
+                  onClick={requestStatementImport}
                   leading={<Icon icon={FileUp} />}
                   title="Tuo kuukauden tiliote"
                   secondary="Ilman tiliotetta puuttuvia kuitteja ei näe"
@@ -348,6 +411,11 @@ function MonthClose() {
                 secondary={vatDueSecondary(vat.due, vat.figures)}
                 chevron
               />
+              {vatChanged ? (
+                <p className="px-4 pb-3 text-caption text-warning" role="note">
+                  {vatChangedNote(vat.figures)}
+                </p>
+              ) : null}
               {!vatDone ? (
                 <ListRow
                   href={vat.due.queryKey ? `/kirjanpito/alv?period=${vat.due.queryKey}#ilmoita` : "/kirjanpito/alv"}
@@ -376,8 +444,8 @@ function MonthClose() {
                 className="w-full"
                 busy={closing}
                 busyLabel="Suljetaan…"
-                disabled={!data.ended}
-                disabledReason={data.ended ? undefined : "Kuukauden voi sulkea, kun se on päättynyt."}
+                disabled={closeButton.disabled}
+                disabledReason={closeButton.reason}
                 onClick={() => setConfirmOpen(true)}
               >
                 {`Merkitse ${name.toLowerCase()} valmiiksi`}
@@ -389,8 +457,7 @@ function MonthClose() {
             isOpen={confirmOpen}
             title={`Merkitäänkö ${name.toLowerCase()} valmiiksi?`}
             description={[
-              blocking > 0 ? `${plural(blocking, "asia", "asiaa")} on vielä kesken.` : null,
-              vat.due && !vatDone ? "ALV-ilmoitusta ei ole merkitty annetuksi." : null,
+              ...monthCloseWarnings(closeFacts),
               "Kuukausi suljetaan: sen kuitteja, laskuja ja pankkitapahtumia ei voi enää muuttaa.",
               earlierOpen ? "Myös aiemmat sulkemattomat kuukaudet suljetaan." : null,
             ]
