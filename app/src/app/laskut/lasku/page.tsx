@@ -47,6 +47,7 @@ import {
 import { pageCacheFetchedAt, readPageCache, writePageCache } from "@/lib/page-cache";
 import { useCacheAfterBoot } from "@/components/invoices/useCacheAfterBoot";
 import { showToast } from "@/lib/toast";
+import { firstInvoiceSentMoment, type SentCounts } from "@/lib/quiet-moments";
 import { hapticNotify } from "@/lib/haptics";
 import { ReminderSheet, type ReminderPreview } from "@/components/invoices/ReminderSheet";
 import { reminderWaitNote } from "@/lib/reminder-schedule";
@@ -670,6 +671,19 @@ function InvoiceDetail() {
     }
   }
 
+  /** The quiet moment: counted from the account's invoices, so it can only be true once. */
+  async function announceFirstSent(): Promise<boolean> {
+    try {
+      const response = await apiFetch("/api/invoices/counts", { credentials: "include" });
+      const { counts } = await readJson<{ counts: SentCounts }>(response, "Laskujen haku epäonnistui");
+      const text = firstInvoiceSentMoment(counts);
+      if (text) showToast({ tone: "success", text });
+      return text !== null;
+    } catch {
+      return false;
+    }
+  }
+
   async function sendByEmail() {
     setSending(true);
     setMessage(null);
@@ -697,6 +711,7 @@ function InvoiceDetail() {
         );
       } else {
         setMessage(`Lasku lähetettiin osoitteeseen ${result.sentTo}.`);
+        void announceFirstSent();
       }
       setReview(null);
       await load();
@@ -1213,7 +1228,7 @@ function InvoiceDetail() {
         onConfirm={async () => {
           const ok = await changeStatus("sent");
           if (!ok) throw new Error("Tilan vaihto epäonnistui");
-          showToast({ tone: "success", text: "Lasku merkittiin lähetetyksi" });
+          if (!(await announceFirstSent())) showToast({ tone: "success", text: "Lasku merkittiin lähetetyksi" });
         }}
         onCancel={() => setConfirmMarkSent(false)}
       />

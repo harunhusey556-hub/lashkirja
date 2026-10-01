@@ -63,6 +63,11 @@ async function signedVatCents(userId: string, period: string): Promise<number> {
   return report.field308.isRefund ? -cents : cents;
 }
 
+/** True when the account has never had an ALV filing record (a filing that was undone still counts). */
+export async function hasNoVatFilingYet(userId: string): Promise<boolean> {
+  return (await prisma.vatFiling.count({ where: { userId } })) === 0;
+}
+
 export interface FilingChange {
   filed?: boolean;
   paid?: boolean;

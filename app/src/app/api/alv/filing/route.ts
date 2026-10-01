@@ -3,7 +3,7 @@ import { z } from "zod";
 import { requireSession } from "@/lib/session";
 import { guardWrite, noStoreJson } from "@/lib/http-security";
 import { UnauthorizedError, withErrorHandler } from "@/lib/api-errors";
-import { isFilingPeriod, updateVatFiling } from "@/lib/vat-filing";
+import { hasNoVatFilingYet, isFilingPeriod, updateVatFiling } from "@/lib/vat-filing";
 
 const bodySchema = z
   .object({
@@ -24,6 +24,8 @@ export const PATCH = withErrorHandler(async (req: NextRequest) => {
   if (!session) throw new UnauthorizedError();
 
   const body = bodySchema.parse(await req.json());
+  // Additive: true when this is the account's very first ALV filing record (the quiet "first return" moment).
+  const noFilingBefore = body.filed === true ? await hasNoVatFilingYet(session.userId) : false;
   const filing = await updateVatFiling(session.userId, body.period, { filed: body.filed, paid: body.paid });
-  return noStoreJson({ period: body.period, filing });
+  return noStoreJson({ period: body.period, filing, firstFiled: noFilingBefore && filing?.filedAt != null });
 });

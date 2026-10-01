@@ -324,8 +324,8 @@ export default function TapahtumatClient() {
   )?.lastError;
   const connected = (bank.data?.connections ?? []).some((connection) => connection.status === "active");
   const emptyBody = connected
-    ? connectedNote ?? "Pankki on yhdistetty. Tapahtumat tulevat tähän, kun pankki antaa ne. Voit myös tuoda tiliotteen tiedostona."
-    : "Yhdistä pankki, niin tapahtumat tulevat tähän itsestään. Voit myös tuoda tiliotteen tiedostona.";
+    ? connectedNote ?? "Pankki on yhdistetty. Tapahtumat ilmestyvät tänne, kun pankki antaa ne."
+    : "Yhdistä pankki, niin tapahtumat ilmestyvät tänne ja kohdistuvat kuitteihin.";
   const sheetRow = sheetRowId ? rows.find((row) => row.id === sheetRowId) ?? null : null;
 
   return (

@@ -206,7 +206,7 @@ export default function TyotPage() {
           )}
 
           {jobs.length === 0 ? (
-            <EmptySection title="Työt">Ei käynnissä olevia töitä.</EmptySection>
+            <EmptySection title="Työt">Ei käynnissä olevia töitä. Tuonnit ja haut näkyvät tässä, kun ne ovat kesken.</EmptySection>
           ) : (
           <Section title="Työt">
             {(
@@ -228,7 +228,7 @@ export default function TyotPage() {
           )}
 
           {items.length === 0 ? (
-            <EmptySection title="Korjattavat">Ei korjattavaa.</EmptySection>
+            <EmptySection title="Korjattavat">Ei korjattavaa. Jos tuonti tai haku epäonnistuu, se näkyy tässä.</EmptySection>
           ) : (
           <div className="space-y-3">
             <h2 className="px-1 text-caption text-ink-2">Korjattavat</h2>

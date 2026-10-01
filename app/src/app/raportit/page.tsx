@@ -443,7 +443,7 @@ export default function ReportsPage() {
             </p>
 
             {report.months.length === 0 ? (
-              <EmptySection title="Kuukaudet">Ei kirjauksia tälle vuodelle.</EmptySection>
+              <EmptySection title="Kuukaudet">Kuukaudet ilmestyvät tähän, kun vuodelle on kirjauksia.</EmptySection>
             ) : (
               <Section title="Kuukaudet, ilman ALV:ta">
                 {report.months.map((month) => {
@@ -478,7 +478,7 @@ export default function ReportsPage() {
             )}
 
             {!expenseRanked || expenseRanked.items.length === 0 ? (
-              <EmptySection title="Menot kategorioittain">Ei menoja tällä jaksolla.</EmptySection>
+              <EmptySection title="Menot kategorioittain">Kun kirjaat menoja, näet tässä mihin rahaa kuluu.</EmptySection>
             ) : (
               <Section title="Menot kategorioittain, ilman ALV:ta">
                 <HBarList

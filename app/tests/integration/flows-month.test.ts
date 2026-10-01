@@ -238,6 +238,24 @@ describe("VAT filing record (FP-13, TF-16, TF-11)", () => {
     expect(body.filing).toBeNull();
   });
 
+  it("says firstFiled only for the account's very first filing, even after an undo", async () => {
+    const first = await readJson(await patch({ period: previous, filed: true }));
+    expect(first.firstFiled).toBe(true);
+    // Marking paid, or filing the same period again, is not a first.
+    expect((await readJson(await patch({ period: previous, paid: true }))).firstFiled).toBe(false);
+    expect((await readJson(await patch({ period: previous, filed: true }))).firstFiled).toBe(false);
+    // Undo and file again: the moment was already shown once.
+    await patch({ period: previous, filed: false });
+    expect((await readJson(await patch({ period: previous, filed: true }))).firstFiled).toBe(false);
+    // Another account has its own first.
+    const other = await createUser();
+    const otherCookie = await sessionCookie(other);
+    const theirs = await readJson(
+      await filing(buildRequest("PATCH", "/api/alv/filing", { period: previous, filed: true }, { cookie: otherCookie }))
+    );
+    expect(theirs.firstFiled).toBe(true);
+  });
+
   it("refuses to mark a period that has not ended", async () => {
     const response = await patch({ period: current, filed: true });
     expect(response.status).toBe(409);

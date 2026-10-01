@@ -840,7 +840,7 @@ export default function KuititPage() {
               body={
                 hasFilters
                   ? "Kokeile väljempää hakua."
-                  : "Lisää ensimmäinen kuitti kuvana tai PDF-tiedostona."
+                  : "Kun kuvaat kuitin, se kirjautuu tänne ja luetaan puolestasi."
               }
               onClear={hasFilters ? clearAllFilters : undefined}
               action={

@@ -6,7 +6,7 @@ import { Card, Icon } from "@/components/ds";
 import { Button } from "@/components/ui";
 import { apiFetch, errorMessage, isUnauthorized, readJson, redirectToLogin } from "@/components/clientFetch";
 import { formatDate } from "@/lib/format";
-import { hapticNotify } from "@/lib/haptics";
+import { firstVatFiledMoment } from "@/lib/quiet-moments";
 import { showToast } from "@/lib/toast";
 import { alvSummaryKey, readCached, storeCached } from "@/lib/cached-resource";
 import {
@@ -71,17 +71,17 @@ export function VatFilingCard({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ period: periodKey, ...change }),
       });
-      const result = await readJson<{ filing: VatFilingRecord | null }>(response, "Merkinnän tallennus epäonnistui");
+      const result = await readJson<{ filing: VatFilingRecord | null; firstFiled?: boolean }>(response, "Merkinnän tallennus epäonnistui");
       onChanged(result.filing);
       // Koti and Kirjanpito read the same cache entry (FP-4): update it in place.
       const cached = readCached<VatDueFigures>(alvSummaryKey(periodKey));
       if (cached) storeCached(alvSummaryKey(periodKey), { ...cached, filing: result.filing });
-      void hapticNotify("success");
+      // ToastHost buzzes for a success toast. The first return ever gets its own quiet sentence.
       showToast({
         tone: "success",
         text:
           which === "filed"
-            ? "ALV-ilmoitus merkitty annetuksi"
+            ? firstVatFiledMoment(result.firstFiled) ?? "ALV-ilmoitus merkitty annetuksi"
             : which === "paid"
               ? "ALV merkitty maksetuksi"
               : "Merkintä peruttiin",

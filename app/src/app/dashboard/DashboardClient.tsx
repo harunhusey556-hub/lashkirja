@@ -933,6 +933,9 @@ export default function DashboardClient() {
           {/* TF-06: the first steps of a new account. */}
           {showSetup && setup ? (
             <Section title="Aloitetaan">
+              <p className="px-4 py-3 text-caption text-ink-2">
+                Kolme askelta, niin kirjanpitosi on käyttövalmis.
+              </p>
               {[
                 {
                   key: "receipt",

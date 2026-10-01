@@ -322,7 +322,7 @@ export default function CustomersPage() {
               body={
                 filtered
                   ? "Yksikään asiakas ei vastaa hakua."
-                  : "Lisää ensimmäinen asiakas, niin laskutus löytää sen."
+                  : "Tähän kootaan asiakkaasi, jotta laskun teko on yhden napautuksen päässä."
               }
               onCreate={!createOpen ? () => setCreateOpen(true) : undefined}
               createLabel="Uusi asiakas"

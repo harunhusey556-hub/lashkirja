@@ -451,7 +451,7 @@ export default function RecurringInvoicesPage() {
               kind="records"
               icon={Repeat}
               title="Ei toistuvia laskuja vielä"
-              body="Kun asiakkaalla on säännöllinen veloitus, lasku luodaan tästä automaattisesti joka kerta."
+              body="Kun asiakas maksaa säännöllisesti, lasku tehdään tästä joka kerta itsestään."
               onCreate={() => {
                 setFormError("");
                 setFormFor("new");

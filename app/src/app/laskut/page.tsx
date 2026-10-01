@@ -499,7 +499,7 @@ function InvoicesPageContent() {
               <EmptyState
                 kind="records"
                 title="Ei laskuja vielä"
-                body="Luo ensimmäinen myyntilasku. Se tallentuu luonnokseksi, kunnes lähetät sen."
+                body="Tähän ilmestyvät ensimmäiset laskusi. Luonnos pysyy tallessa, kunnes lähetät sen."
                 icon={FileText}
                 onCreate={() => router.push("/laskut/uusi")}
                 createLabel="Uusi lasku"

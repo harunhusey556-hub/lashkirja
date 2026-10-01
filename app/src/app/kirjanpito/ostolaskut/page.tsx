@@ -579,7 +579,7 @@ export default function PurchaseInvoicesPage() {
                 kind={filtered ? "filtered" : "records"}
                 icon={ReceiptText}
                 title={filtered ? "Ei ostolaskuja tällä suodattimella" : "Ei ostolaskuja vielä"}
-                body={filtered ? "Kokeile toista suodatinta." : "Lisää ensimmäinen ostolasku."}
+                body={filtered ? "Kokeile toista suodatinta." : "Tähän ilmestyvät saamasi ostolaskut ja niiden eräpäivät."}
                 onCreate={filtered ? undefined : () => setCreateOpen(true)}
                 createLabel="Uusi ostolasku"
                 onClear={filtered ? () => setFilter("all") : undefined}
