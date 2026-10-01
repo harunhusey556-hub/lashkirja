@@ -6,6 +6,8 @@
  * be compared, and "Tulot" / "Menot" name the basis they are counted on.
  */
 
+import { updateCurrentHref } from "./nav-direction";
+
 export interface KotiMonthFacts {
   /** The month shown is the current one (or later). */
   atCurrent: boolean;
@@ -85,4 +87,15 @@ export function parseKotiMonth(raw: string | null | undefined, current: string):
 /** The address for a month: plain `/dashboard` for the current one. */
 export function kotiMonthHref(month: string, current: string): string {
   return month >= current ? "/dashboard" : `/dashboard?month=${month}`;
+}
+
+/**
+ * The month stepper moved to `month`: write it into the address (replaceState,
+ * no history entry) and into the navigation stack, so the Koti tab and Back
+ * return to this month and not to the one the page opened on (C-4).
+ */
+export function rememberKotiMonth(month: string, current: string): void {
+  const href = kotiMonthHref(month, current);
+  window.history.replaceState(null, "", href);
+  updateCurrentHref("/dashboard", href);
 }

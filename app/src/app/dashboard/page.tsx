@@ -1,5 +1,5 @@
 import { Suspense } from "react";
-import DashboardClient, { KotiSkeleton } from "./DashboardClient";
+import DashboardClient, { KotiFallback } from "./DashboardClient";
 
 // No `cookies()`/`getSession()` here on purpose: this page prerenders at
 // build time in the mobile static export (see static-exports.md,
@@ -9,7 +9,7 @@ import DashboardClient, { KotiSkeleton } from "./DashboardClient";
 // static page may read search params on the client only inside one.
 export default function DashboardPage() {
   return (
-    <Suspense fallback={<KotiSkeleton />}>
+    <Suspense fallback={<KotiFallback />}>
       <DashboardClient />
     </Suspense>
   );

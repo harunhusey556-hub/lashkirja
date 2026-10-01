@@ -1,4 +1,5 @@
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { recordRoute, resetNavigationForTests, tabTarget } from "./nav-direction";
 import {
   kotiHeadline,
   kotiMonthHasActivity,
@@ -7,6 +8,7 @@ import {
   kotiResultLabel,
   kotiStatementLine,
   parseKotiMonth,
+  rememberKotiMonth,
   type KotiMonthFacts,
 } from "./koti-month";
 
@@ -82,5 +84,22 @@ describe("the month Koti shows survives Back (F25)", () => {
   it("writes the current month as the plain address", () => {
     expect(kotiMonthHref("2026-08", "2026-10")).toBe("/dashboard?month=2026-08");
     expect(kotiMonthHref("2026-10", "2026-10")).toBe("/dashboard");
+  });
+});
+
+describe("C-4: the month picked on Koti is what the Koti tab returns to", () => {
+  beforeEach(() => resetNavigationForTests());
+
+  it("writes the address and the navigation stack", () => {
+    const replaceState = vi.fn();
+    vi.stubGlobal("window", { history: { replaceState } });
+    recordRoute("/dashboard", "tab");
+    expect(tabTarget("etusivu")).toBe("/dashboard");
+    rememberKotiMonth("2026-08", "2026-10");
+    expect(replaceState).toHaveBeenCalledWith(null, "", "/dashboard?month=2026-08");
+    expect(tabTarget("etusivu")).toBe("/dashboard?month=2026-08");
+    rememberKotiMonth("2026-10", "2026-10");
+    expect(tabTarget("etusivu")).toBe("/dashboard");
+    vi.unstubAllGlobals();
   });
 });

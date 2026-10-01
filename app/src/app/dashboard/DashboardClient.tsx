@@ -59,11 +59,11 @@ import { VAT_ROW_TITLE, vatChangedNote, vatDueAmount, vatDueSecondary, vatPendin
 import {
   kotiHeadline,
   kotiMonthHasActivity,
-  kotiMonthHref,
   kotiResultBasis,
   kotiResultLabel,
   kotiStatementLine,
   parseKotiMonth,
+  rememberKotiMonth,
 } from "@/lib/koti-month";
 import { useVatDue } from "@/components/useVatDue";
 import { approvalGapText } from "@/lib/receipt-approval";
@@ -215,6 +215,26 @@ function MonthStepper({ month, onChange }: { month: string; onChange: (next: str
   );
 }
 
+/**
+ * The Suspense fallback of the page: the same title row (month stepper and a
+ * subtitle line of the final height) above the skeleton, so the static HTML is
+ * already at the layout the loaded page has and nothing shifts when it hydrates
+ * (L1, SHELL-34). The title text is a blank line: the month is only known on
+ * the client, and the build month would show the wrong name.
+ */
+export function KotiFallback() {
+  return (
+    <div className="space-y-6">
+      <PageTitle
+        title={" "}
+        subtitle={<span className="block min-h-[22px]" />}
+        action={<MonthStepper month={currentMonth()} onChange={() => {}} />}
+      />
+      <KotiSkeleton />
+    </div>
+  );
+}
+
 /** Koti's first frame at the final layout sizes (L1, SHELL-34). */
 export function KotiSkeleton() {
   return (
@@ -340,7 +360,7 @@ export default function DashboardClient() {
   const setMonth = (next: string) => {
     setMonthState(next);
     // replaceState, not a navigation: no history entry per tap, and Back still leaves Koti in one step.
-    window.history.replaceState(null, "", kotiMonthHref(next, currentMonth()));
+    rememberKotiMonth(next, currentMonth());
   };
   const [refreshFailed, setRefreshFailed] = useState<unknown>(null);
   const [loadAttempt, setLoadAttempt] = useState(0);
