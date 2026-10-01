@@ -24,6 +24,7 @@ import {
   SEND_ATTEMPT_STALE_MS,
 } from "./sales-invoices";
 import { prisma } from "./db";
+import { CRASHED_SEND_NOTE } from "./send-history";
 
 export interface SendInvoiceInput {
   to?: string;
@@ -70,7 +71,6 @@ const UNRECORDED_NOTICE =
   "Viesti lähti, mutta lähetyksen kirjausta ei saatu tallennettua. Älä lähetä samaa laskua uudelleen ennen tarkistusta.";
 
 const SEND_LOCK_STALE_MS = 2 * 60 * 1000;
-const CRASHED_SEND_NOTE = "Lähetys keskeytyi, kun palvelin käynnistyi uudelleen kesken lähetyksen.";
 const AMBIGUOUS_SEND =
   "Edellinen lähetys jäi epäselväksi. Älä lähetä samaa laskua uudelleen ennen tarkistusta.";
 const SEND_IN_PROGRESS = "Laskua lähetetään juuri nyt. Odota hetki.";

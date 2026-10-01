@@ -50,6 +50,7 @@ import { hapticNotify } from "@/lib/haptics";
 import { ReminderSheet, type ReminderPreview } from "@/components/invoices/ReminderSheet";
 import { reminderWaitNote } from "@/lib/reminder-schedule";
 import { overOpenMessage } from "@/lib/payment-entry";
+import { sendAttemptView } from "@/lib/send-history";
 
 /** A hand-recorded payment that an income receipt from a bank row seems to count again. */
 interface PaymentDuplicate {
@@ -169,24 +170,19 @@ function historyItems(invoice: Invoice): HistoryItem[] {
   }
 
   for (const send of invoice.sends ?? []) {
-    const title =
-      send.status === "sent"
-        ? "Lähetetty sähköpostilla"
-        : send.status === "failed"
-          ? "Lähetys epäonnistui"
-          : "Lähetys kesken";
+    const view = sendAttemptView(send);
+    // Never the raw SMTP text (L5): it is English and internal.
     const metaParts = [
       formatDate(send.createdAt),
       send.toAddress,
       send.attachmentName,
       send.gross != null ? formatEur(send.gross) : null,
-      // Never the raw SMTP text (L5): it is English and internal.
-      send.status === "failed" ? "vastaanottajan palvelin ei ottanut viestiä vastaan" : null,
+      view.reason,
     ].filter((part): part is string => Boolean(part));
     dated.push({
-      title,
+      title: view.title,
       meta: metaParts.join(", "),
-      tone: send.status === "failed" ? "accent" : "muted",
+      tone: view.tone,
       at: new Date(send.createdAt).getTime(),
     });
   }
