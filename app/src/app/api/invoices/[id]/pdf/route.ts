@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireSession } from "@/lib/session";
 import { UnauthorizedError, withErrorHandler } from "@/lib/api-errors";
-import { buildInvoicePdfData, invoicePdfFileName } from "@/lib/sales-invoices";
+import { buildInvoicePdfData, invoicePdfFileName, noteInvoicePdfServed } from "@/lib/sales-invoices";
 import { renderInvoicePdf } from "@/lib/invoice-pdf";
 
 export const GET = withErrorHandler(
@@ -11,6 +11,8 @@ export const GET = withErrorHandler(
 
     const { id } = await context.params;
     const data = await buildInvoicePdfData(session.userId, id);
+    // A draft that leaves the app this way keeps its number (F08) and says LUONNOS.
+    if (await noteInvoicePdfServed(session.userId, id)) data.draft = true;
     const pdf = await renderInvoicePdf(data);
 
     return new NextResponse(new Uint8Array(pdf), {

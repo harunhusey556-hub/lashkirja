@@ -48,6 +48,8 @@ export interface InvoicePdfData {
   number: number;
   documentKind?: "invoice" | "credit_note";
   originalNumber?: number | null;
+  /** An unissued draft: the page carries a LUONNOS mark so it cannot pass for the real invoice. */
+  draft?: boolean;
   reference: string;
   issueDate: string; // YYYY-MM-DD
   dueDate: string;
@@ -111,6 +113,22 @@ function createPdf(): PdfContext {
   return { doc, fonts, text: (value) => sanitizePdfText(value, canDraw) };
 }
 
+/**
+ * A faint diagonal LUONNOS across the current page. The layout cursor is put
+ * back afterwards, because the page text below is placed relative to it.
+ */
+function drawDraftMark(doc: InstanceType<typeof PDFDocument>, boldFont: string): void {
+  const { x, y } = doc;
+  const { width, height } = doc.page;
+  doc.save();
+  doc.fillColor("#c62828").fillOpacity(0.16).font(boldFont).fontSize(110);
+  doc.rotate(-30, { origin: [width / 2, height / 2] });
+  doc.text("LUONNOS", 0, height / 2 - 60, { width, align: "center", lineBreak: false });
+  doc.restore();
+  doc.x = x;
+  doc.y = y;
+}
+
 function cleanParty<T extends object>(party: T, clean: PdfContext["text"]): T {
   const result = { ...party } as Record<string, unknown>;
   for (const [key, value] of Object.entries(result)) {
@@ -160,6 +178,11 @@ export function renderInvoicePdf(input: InvoicePdfData): Promise<Buffer> {
     doc.on("data", (chunk: Buffer) => chunks.push(chunk));
     doc.on("end", () => resolve(Buffer.concat(chunks)));
     doc.on("error", reject);
+
+    if (data.draft) {
+      drawDraftMark(doc, fonts.bold);
+      doc.on("pageAdded", () => drawDraftMark(doc, fonts.bold));
+    }
 
     const left = doc.page.margins.left;
     const right = doc.page.width - doc.page.margins.right;

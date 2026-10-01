@@ -726,7 +726,9 @@ export async function deleteInvoice(userId: string, id: string): Promise<void> {
         _count: {
           select: {
             emailSends: true,
-            activities: { where: { kind: { in: ["sent", "status_changed"] } } },
+            // "shared": the draft's PDF was opened or passed on with Jaa, so its
+            // number and viitenumero may be in someone else's hands.
+            activities: { where: { kind: { in: ["sent", "status_changed", "shared"] } } },
           },
         },
       },
@@ -1821,6 +1823,31 @@ export async function buildInvoicePdfData(
       netCents: line.netCents,
     })),
   };
+}
+
+/**
+ * Called when an invoice's PDF is served to the owner (Avaa PDF, Jaa). Returns
+ * whether the invoice is still a draft, so the PDF can say so. A draft that
+ * leaves the app this way is recorded once as "shared": the number and the
+ * viitenumero printed on it are then out in the world, and deleting the draft
+ * must not hand them to the next invoice (F08).
+ */
+export async function noteInvoicePdfServed(userId: string, invoiceId: string): Promise<boolean> {
+  const invoice = await prisma.salesInvoice.findFirst({
+    where: { id: invoiceId, userId },
+    select: { status: true, documentKind: true },
+  });
+  if (!invoice || invoice.status !== "draft" || invoice.documentKind === "credit_note") return false;
+  const already = await prisma.invoiceActivity.count({ where: { invoiceId, kind: "shared" } });
+  if (already === 0) {
+    await recordActivity(
+      prisma,
+      invoiceId,
+      "shared",
+      "Luonnoksen PDF avattiin tai jaettiin. Laskun numeroa ei anneta uudelleen."
+    );
+  }
+  return true;
 }
 
 /** Filename used for downloads and email attachments. */

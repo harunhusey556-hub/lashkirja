@@ -4,13 +4,16 @@ import { prisma } from "@/lib/db";
 import { POST as createRecurring } from "@/app/api/recurring-invoices/route";
 import { GET as cron } from "@/app/api/cron/recurring-invoices/route";
 import { POST as createCustomer } from "@/app/api/customers/route";
+import { POST as createInvoice } from "@/app/api/invoices/route";
+import { DELETE as deleteInvoice } from "@/app/api/invoices/[id]/route";
+import { GET as invoicePdf } from "@/app/api/invoices/[id]/pdf/route";
 import { PUT as setLock } from "@/app/api/period-lock/route";
 import { runRecurringInvoices } from "@/lib/recurring-invoices";
 import { completeAccountClose } from "@/lib/account-requests";
 import { encrypt } from "@/lib/encryption";
 import type { EnableBankingClient } from "@/lib/enablebanking/client";
 import { createUser, resetDatabase, type TestUser } from "./helpers/factories";
-import { buildRequest, readJson, sessionCookie } from "./helpers/http";
+import { buildRequest, readJson, routeContext, sessionCookie } from "./helpers/http";
 
 let user: TestUser;
 let cookie: string;
@@ -219,5 +222,66 @@ describe("closing an account ends the bank consent at the bank (M2-5)", () => {
     expect(done.note).toMatch(/Pankki B/);
     expect(done.note).not.toMatch(/Pankki A/);
     expect((await prisma.user.findUniqueOrThrow({ where: { id: user.id } })).accessDisabledAt).not.toBeNull();
+  });
+});
+
+describe("a draft whose PDF was shared keeps its number (M2-4)", () => {
+  const INVOICE_LINE = { description: "Ripsienpidennys", quantity: 1, unitPrice: 100, vatRate: 25.5 };
+
+  async function makeInvoice() {
+    const response = await createInvoice(
+      buildRequest(
+        "POST",
+        "/api/invoices",
+        { customerId, issueDate: "2026-01-15", dueDate: "2026-01-29", lines: [INVOICE_LINE] },
+        { cookie }
+      )
+    );
+    expect(response.status).toBe(201);
+    return (await readJson(response)).invoice;
+  }
+
+  async function openPdf(id: string) {
+    const response = await invoicePdf(
+      buildRequest("GET", `/api/invoices/${id}/pdf`, undefined, { cookie }),
+      routeContext({ id })
+    );
+    expect(response.status).toBe(200);
+    return response;
+  }
+
+  async function remove(id: string) {
+    const response = await deleteInvoice(
+      buildRequest("DELETE", `/api/invoices/${id}`, undefined, { cookie }),
+      routeContext({ id })
+    );
+    expect(response.status).toBe(200);
+  }
+
+  it("serving the PDF of a draft records it once, and deleting the draft does not give the number back", async () => {
+    const draft = await makeInvoice();
+    await openPdf(draft.id);
+    await openPdf(draft.id);
+    const shared = await prisma.invoiceActivity.findMany({ where: { invoiceId: draft.id, kind: "shared" } });
+    expect(shared).toHaveLength(1);
+
+    await remove(draft.id);
+    const next = await makeInvoice();
+    expect(next.number).not.toBe(draft.number);
+    expect(next.reference).not.toBe(draft.reference);
+  });
+
+  it("a draft that nobody opened still gives its number back", async () => {
+    const draft = await makeInvoice();
+    await remove(draft.id);
+    const next = await makeInvoice();
+    expect(next.number).toBe(draft.number);
+  });
+
+  it("an issued invoice's PDF leaves no shared record", async () => {
+    const invoice = await makeInvoice();
+    await prisma.salesInvoice.update({ where: { id: invoice.id }, data: { status: "sent", sentAt: new Date() } });
+    await openPdf(invoice.id);
+    expect(await prisma.invoiceActivity.count({ where: { invoiceId: invoice.id, kind: "shared" } })).toBe(0);
   });
 });
