@@ -7,8 +7,13 @@ import { Button, controlClass } from "@/components/ui";
 import { Card } from "@/components/ds";
 import { focusFirstInvalid, invalidFieldProps } from "@/lib/focus-field";
 import { parseFinnishNumber, parseMoneyInput } from "@/lib/format";
-import { VAT_RATES_PERMILLE } from "@/lib/invoices";
-import { RECURRENCE_INTERVALS, type RecurrenceInterval } from "@/lib/recurrence";
+import {
+  applySellerVatRules,
+  InvoiceValidationError,
+  vatRateLabel,
+  vatRatesForDate,
+} from "@/lib/invoices";
+import { firstRun, RECURRENCE_INTERVALS, type RecurrenceInterval } from "@/lib/recurrence";
 import { helsinkiCalendarDate, isStrictIsoDate } from "@/lib/validation";
 
 export const INTERVAL_LABEL: Record<RecurrenceInterval, string> = {
@@ -63,8 +68,45 @@ const EMPTY_LINE: RecurringFormLine = {
   vatRate: 25.5,
 };
 
+/** A blank line; a seller who is not VAT registered starts at ALV 0 % (F01). */
+export function newRecurringLine(vatRegistered = true): RecurringFormLine {
+  return { ...EMPTY_LINE, vatRate: vatRegistered ? EMPTY_LINE.vatRate : 0 };
+}
+
+/**
+ * The date the rates are checked against: the first invoice the schedule
+ * makes. Each later run follows the rate change by itself (an old 14 % line
+ * bills 13,5 % from 1.1.2026), so only the first date can be wrong.
+ */
+function firstInvoiceDate(values: RecurringFormValues): string {
+  const anchorDay = Number(values.anchorDay);
+  if (isStrictIsoDate(values.startDate) && Number.isInteger(anchorDay) && anchorDay >= 1 && anchorDay <= 31) {
+    try {
+      return firstRun({
+        interval: values.interval,
+        anchorDay,
+        startDate: values.startDate,
+        endDate: values.endDate || null,
+      });
+    } catch {
+      // fall through to the start date
+    }
+  }
+  return isStrictIsoDate(values.startDate) ? values.startDate : helsinkiCalendarDate();
+}
+
+/**
+ * The rates the ALV select offers (permille); the line's own rate stays in
+ * the list when it is no longer valid, so the select never shows another one.
+ */
+export function recurringVatOptions(currentRatePercent: number, values: RecurringFormValues): number[] {
+  const offered: number[] = vatRatesForDate(firstInvoiceDate(values));
+  const current = Math.round(currentRatePercent * 10);
+  return offered.includes(current) ? offered : [...offered, current];
+}
+
 /** A blank schedule; the start date is today in Helsinki, not in UTC (SALES-33). */
-export function emptyRecurringForm(): RecurringFormValues {
+export function emptyRecurringForm(vatRegistered = true): RecurringFormValues {
   return {
     customerId: "",
     name: "",
@@ -74,7 +116,7 @@ export function emptyRecurringForm(): RecurringFormValues {
     endDate: "",
     paymentTermDays: "14",
     autoSend: false,
-    lines: [{ ...EMPTY_LINE }],
+    lines: [newRecurringLine(vatRegistered)],
   };
 }
 
@@ -84,8 +126,10 @@ export function emptyRecurringForm(): RecurringFormValues {
  * a dropped line is lost revenue on every run of the schedule.
  */
 export function validateRecurringForm(
-  values: RecurringFormValues
+  values: RecurringFormValues,
+  options: { vatRegistered?: boolean } = {}
 ): { ok: true; payload: RecurringPayload } | { ok: false; errors: Record<string, string> } {
+  const vatRegistered = options.vatRegistered ?? true;
   const errors: Record<string, string> = {};
   if (!values.customerId) errors.customerId = "Valitse asiakas.";
   const anchorDay = Number(values.anchorDay);
@@ -111,13 +155,24 @@ export function validateRecurringForm(
     if (!line.unitPrice.trim()) errors[`line-${index}-unitPrice`] = "Hinta puuttuu.";
     else if (unitPrice === null) errors[`line-${index}-unitPrice`] = "Hinta ei ole kelvollinen summa.";
     else if (unitPrice < 0) errors[`line-${index}-unitPrice`] = "Hinta ei voi olla negatiivinen.";
+    if (vatRegistered) {
+      try {
+        applySellerVatRules([{ vatRatePermille: Math.round(line.vatRate * 10) }], {
+          vatRegistered: true,
+          issueDate: firstInvoiceDate(values),
+        });
+      } catch (error) {
+        if (!(error instanceof InvoiceValidationError)) throw error;
+        errors[`line-${index}-vatRate`] = error.message;
+      }
+    }
     if (line.description.trim() && quantity !== null && quantity > 0 && unitPrice !== null && unitPrice >= 0) {
       lines.push({
         description: line.description.trim(),
         quantity,
         unit: line.unit.trim() || "kpl",
         unitPrice,
-        vatRate: line.vatRate,
+        vatRate: vatRegistered ? line.vatRate : 0,
       });
     }
   });
@@ -143,7 +198,12 @@ export function validateRecurringForm(
 export function recurringFieldOrder(lineCount: number): string[] {
   const order = ["customerId", "anchorDay", "startDate", "endDate", "paymentTermDays"];
   for (let index = 0; index < lineCount; index += 1) {
-    order.push(`line-${index}-description`, `line-${index}-quantity`, `line-${index}-unitPrice`);
+    order.push(
+      `line-${index}-description`,
+      `line-${index}-quantity`,
+      `line-${index}-unitPrice`,
+      `line-${index}-vatRate`
+    );
   }
   return order;
 }
@@ -157,13 +217,21 @@ function fieldId(key: string): string {
     paymentTermDays: "ri-term",
   };
   if (ids[key]) return ids[key];
-  const line = /^line-(\d+)-(description|quantity|unitPrice)$/.exec(key);
+  const line = /^line-(\d+)-(description|quantity|unitPrice|vatRate)$/.exec(key);
   if (!line) return "ri-customer";
-  const slot = line[2] === "description" ? "desc" : line[2] === "quantity" ? "qty" : "price";
+  const slot =
+    line[2] === "description"
+      ? "desc"
+      : line[2] === "quantity"
+        ? "qty"
+        : line[2] === "vatRate"
+          ? "vat"
+          : "price";
   return `ri-line-${line[1]}-${slot}`;
 }
 
 export function RecurringForm({
+  vatRegistered = true,
   customers,
   customersError,
   onRetryCustomers,
@@ -176,6 +244,8 @@ export function RecurringForm({
   onSubmit,
   onCancel,
 }: {
+  /** A seller who is not VAT registered gets ALV 0 % and no ALV choice (F01). */
+  vatRegistered?: boolean;
   customers: RecurringCustomer[] | null;
   customersError?: unknown;
   onRetryCustomers?: () => void;
@@ -189,7 +259,13 @@ export function RecurringForm({
   onSubmit: (payload: RecurringPayload) => Promise<boolean>;
   onCancel: () => void;
 }) {
-  const [baseline] = useState<RecurringFormValues>(() => initial ?? emptyRecurringForm());
+  const [baseline] = useState<RecurringFormValues>(() => {
+    const start = initial ?? emptyRecurringForm(vatRegistered);
+    // A template saved while the seller was registered shows the 0 % it will be saved with.
+    return vatRegistered
+      ? start
+      : { ...start, lines: start.lines.map((line) => ({ ...line, vatRate: 0 })) };
+  });
   const [values, setValues] = useState<RecurringFormValues>(baseline);
   const [errors, setErrors] = useState<Record<string, string>>({});
   // The draft survives an accidental close or an app switch (SALES-27), and
@@ -264,7 +340,7 @@ export function RecurringForm({
       className="space-y-4"
       onSubmit={(event) => {
         event.preventDefault();
-        const result = validateRecurringForm(values);
+        const result = validateRecurringForm(values, { vatRegistered });
         if (!result.ok) {
           setErrors(result.errors);
           focusFirstInvalid(result.errors, recurringFieldOrder(values.lines.length), fieldId);
@@ -403,6 +479,11 @@ export function RecurringForm({
 
       <div className="space-y-3">
         <p className="text-caption text-ink-2">Rivit</p>
+        {!vatRegistered && (
+          <p className="text-caption text-ink-2">
+            Et ole ALV-rekisterissä, laskulle ei lisätä ALV:tä.
+          </p>
+        )}
         {values.lines.map((line, index) => (
           <Card key={index} className="space-y-2">
             <label className={lineLabel} htmlFor={`ri-line-${index}-desc`}>Kuvaus</label>
@@ -465,20 +546,28 @@ export function RecurringForm({
             </div>
             <div className="flex items-end gap-2">
               <div className="min-w-0 flex-1">
-                <label className={lineLabel} htmlFor={`ri-line-${index}-vat`}>ALV</label>
-                <select
-                  id={`ri-line-${index}-vat`}
-                  aria-label={`Rivin ${index + 1} ALV`}
-                  className={field}
-                  value={line.vatRate}
-                  onChange={(e) => setLine(index, { vatRate: Number(e.target.value) })}
-                >
-                  {VAT_RATES_PERMILLE.map((permille) => (
-                    <option key={permille} value={permille / 10}>
-                      ALV {permille / 10} %
-                    </option>
-                  ))}
-                </select>
+                {vatRegistered ? (
+                  <>
+                    <label className={lineLabel} htmlFor={`ri-line-${index}-vat`}>ALV</label>
+                    <select
+                      aria-label={`Rivin ${index + 1} ALV`}
+                      className={field}
+                      value={line.vatRate}
+                      onChange={(e) => setLine(index, { vatRate: Number(e.target.value) })}
+                      {...invalidFieldProps(`ri-line-${index}-vat`, errors[`line-${index}-vatRate`])}
+                    >
+                      {recurringVatOptions(line.vatRate, values).map((permille) => (
+                        <option key={permille} value={permille / 10}>
+                          {vatRateLabel(permille)}
+                          {vatRatesForDate(firstInvoiceDate(values)).some((rate) => rate === permille)
+                            ? ""
+                            : " (ei enää käytössä)"}
+                        </option>
+                      ))}
+                    </select>
+                    {errorText(`line-${index}-vatRate`, `ri-line-${index}-vat`)}
+                  </>
+                ) : null}
               </div>
               {values.lines.length > 1 && (
                 <Button
@@ -503,7 +592,10 @@ export function RecurringForm({
           variant="secondary"
           className="w-full"
           onClick={() =>
-            setValues((current) => ({ ...current, lines: [...current.lines, { ...EMPTY_LINE }] }))
+            setValues((current) => ({
+              ...current,
+              lines: [...current.lines, newRecurringLine(vatRegistered)],
+            }))
           }
         >
           Lisää rivi

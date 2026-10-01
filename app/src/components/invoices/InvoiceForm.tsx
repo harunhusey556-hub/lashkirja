@@ -8,9 +8,12 @@ import { apiFetch, errorMessage, readJson } from "@/components/clientFetch";
 import { focusFirstInvalid } from "@/lib/focus-field";
 import { formatEur, parseFinnishNumber, parseMoneyInput } from "@/lib/format";
 import {
+  adjustVatRateForDate,
+  applySellerVatRules,
   computeInvoiceTotals,
   InvoiceValidationError,
-  VAT_RATES_PERMILLE,
+  vatRateLabel,
+  vatRatesForDate,
 } from "@/lib/invoices";
 import { helsinkiCalendarDate, isStrictIsoDate } from "@/lib/validation";
 
@@ -52,9 +55,30 @@ export const EMPTY_LINE: InvoiceFormLine = {
   vatRate: 25.5,
 };
 
+/** A blank line; a seller who is not VAT registered starts at ALV 0 % (F01). */
+export function newInvoiceLine(vatRegistered = true): InvoiceFormLine {
+  return { ...EMPTY_LINE, vatRate: vatRegistered ? EMPTY_LINE.vatRate : 0 };
+}
+
+/**
+ * The rates the ALV select offers for an invoice dated `issueDate`, as
+ * permille. The line's own rate stays in the list when it is no longer valid
+ * (a 14 % draft moved into 2026), so the select shows the truth and the
+ * validation error says what to pick instead.
+ */
+export function vatRateOptions(currentRatePercent: number, issueDate: string): number[] {
+  const offered: number[] = vatRatesForDate(
+    isStrictIsoDate(issueDate) ? issueDate : helsinkiCalendarDate()
+  );
+  const current = Math.round(currentRatePercent * 10);
+  return offered.includes(current) ? offered : [...offered, current];
+}
+
 export function validateInvoiceForm(
-  values: InvoiceFormValues
+  values: InvoiceFormValues,
+  options: { vatRegistered?: boolean } = {}
 ): { ok: true; payload: InvoicePayload } | { ok: false; errors: Record<string, string> } {
+  const vatRegistered = options.vatRegistered ?? true;
   const errors: Record<string, string> = {};
   if (!values.customerId) errors.customerId = "Valitse asiakas.";
   if (!isStrictIsoDate(values.issueDate)) errors.issueDate = "Valitse laskun päivä.";
@@ -77,13 +101,24 @@ export function validateInvoiceForm(
     if (!line.unitPrice.trim()) errors[`line-${index}-unitPrice`] = "Hinta puuttuu.";
     else if (unitPrice === null) errors[`line-${index}-unitPrice`] = "Hinta ei ole kelvollinen summa.";
     else if (unitPrice < 0) errors[`line-${index}-unitPrice`] = "Hinta ei voi olla negatiivinen.";
+    if (vatRegistered && isStrictIsoDate(values.issueDate)) {
+      try {
+        applySellerVatRules([{ vatRatePermille: Math.round(line.vatRate * 10) }], {
+          vatRegistered: true,
+          issueDate: values.issueDate,
+        });
+      } catch (error) {
+        if (!(error instanceof InvoiceValidationError)) throw error;
+        errors[`line-${index}-vatRate`] = error.message;
+      }
+    }
     if (quantity !== null && unitPrice !== null && line.description.trim()) {
       lines.push({
         description: line.description.trim(),
         quantity,
         unit: line.unit.trim() || "kpl",
         unitPrice,
-        vatRate: line.vatRate,
+        vatRate: vatRegistered ? line.vatRate : 0,
       });
     }
   });
@@ -104,7 +139,11 @@ export function validateInvoiceForm(
 }
 
 /** Live totals while typing; invalid rows are simply skipped. */
-export function previewTotals(lines: InvoiceFormLine[]) {
+export function previewTotals(
+  lines: InvoiceFormLine[],
+  options: { vatRegistered?: boolean } = {}
+) {
+  const vatRegistered = options.vatRegistered ?? true;
   const parsed = lines
     .map((line) => {
       const quantity = parseFinnishNumber(line.quantity);
@@ -113,7 +152,7 @@ export function previewTotals(lines: InvoiceFormLine[]) {
       return {
         quantityMilli: Math.round(quantity * 1000),
         unitPriceCents: Math.round(unitPrice * 100),
-        vatRatePermille: Math.round(line.vatRate * 10),
+        vatRatePermille: vatRegistered ? Math.round(line.vatRate * 10) : 0,
       };
     })
     .filter((line): line is NonNullable<typeof line> => line !== null);
@@ -136,7 +175,8 @@ export function invoiceFieldOrder(lineCount: number): string[] {
     order.push(
       `line-${index}-description`,
       `line-${index}-quantity`,
-      `line-${index}-unitPrice`
+      `line-${index}-unitPrice`,
+      `line-${index}-vatRate`
     );
   }
   order.push("lines");
@@ -147,9 +187,16 @@ export function invoiceFieldId(key: string): string {
   if (key === "customerId") return "if-customer";
   if (key === "issueDate") return "if-issue";
   if (key === "dueDate") return "if-due";
-  const line = /^line-(\d+)-(description|quantity|unitPrice)$/.exec(key);
+  const line = /^line-(\d+)-(description|quantity|unitPrice|vatRate)$/.exec(key);
   if (!line) return "if-customer";
-  const slot = line[2] === "description" ? "desc" : line[2] === "quantity" ? "qty" : "price";
+  const slot =
+    line[2] === "description"
+      ? "desc"
+      : line[2] === "quantity"
+        ? "qty"
+        : line[2] === "vatRate"
+          ? "vat"
+          : "price";
   return `if-line-${line[1]}-${slot}`;
 }
 
@@ -159,6 +206,11 @@ interface Props {
   submitLabel: string;
   busy?: boolean;
   draftKey?: string;
+  /**
+   * Whether the seller is VAT registered. A seller who is not gets ALV 0 % on
+   * every line and no ALV choice (F01); the server enforces the same.
+   */
+  vatRegistered?: boolean;
   /** Opens an inline "Uusi asiakas" sheet; the page selects the new customer via `selectCustomerId`. */
   onAddCustomer?: () => void;
   /** A customer the page just created; selected (with its payment term) once it is in `customers`. */
@@ -180,6 +232,7 @@ export function InvoiceForm({
   submitLabel,
   busy,
   draftKey = "invoice:new",
+  vatRegistered = true,
   onAddCustomer,
   selectCustomerId,
   onSubmit,
@@ -191,14 +244,18 @@ export function InvoiceForm({
     // bill the first name in the list. A preset customer brings its own term.
     const preset = customers.find((customer) => customer.id === initial?.customerId);
     const issueDate = initial?.issueDate ?? today;
-    return {
+    const start: InvoiceFormValues = {
       customerId: "",
       issueDate,
       dueDate: addDays(issueDate, preset?.defaultPaymentTermDays ?? 14),
       notes: "",
-      lines: [{ ...EMPTY_LINE }],
+      lines: [newInvoiceLine(vatRegistered)],
       ...initial,
     };
+    // A draft saved while the seller was registered shows the 0 % it will be saved with.
+    return vatRegistered
+      ? start
+      : { ...start, lines: start.lines.map((line) => ({ ...line, vatRate: 0 })) };
   });
   const [values, setValues] = useState<InvoiceFormValues>(baseline);
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -232,7 +289,10 @@ export function InvoiceForm({
     };
   }, []);
 
-  const totals = useMemo(() => previewTotals(values.lines), [values.lines]);
+  const totals = useMemo(
+    () => previewTotals(values.lines, { vatRegistered }),
+    [values.lines, vatRegistered]
+  );
 
   async function saveLineAsProduct(index: number) {
     const line = values.lines[index];
@@ -251,7 +311,7 @@ export function InvoiceForm({
           name: line.description.trim(),
           unit: line.unit.trim() || "kpl",
           unitPrice,
-          vatRate: line.vatRate,
+          vatRate: vatRegistered ? line.vatRate : 0,
         }),
       });
       const data = await readJson<{
@@ -307,7 +367,7 @@ export function InvoiceForm({
       className="space-y-6"
       onSubmit={(event) => {
         event.preventDefault();
-        const result = validateInvoiceForm(values);
+        const result = validateInvoiceForm(values, { vatRegistered });
         if (!result.ok) {
           setErrors(result.errors);
           setSaveError("");
@@ -393,6 +453,11 @@ export function InvoiceForm({
 
       <div>
         <p className="mb-2 px-1 text-caption text-ink-2">Rivit</p>
+        {!vatRegistered && (
+          <p className="mb-2 px-1 text-caption text-ink-2">
+            Et ole ALV-rekisterissä, laskulle ei lisätä ALV:tä.
+          </p>
+        )}
         <div className="space-y-3">
           {values.lines.map((line, index) => (
             <Card key={index} className="space-y-3">
@@ -409,7 +474,9 @@ export function InvoiceForm({
                         description: item.name,
                         unit: item.unit,
                         unitPrice: String(item.unitPrice).replace(".", ","),
-                        vatRate: item.vatRate,
+                        vatRate: vatRegistered
+                          ? adjustVatRateForDate(Math.round(item.vatRate * 10), values.issueDate) / 10
+                          : 0,
                       });
                     }}
                   >
@@ -491,21 +558,30 @@ export function InvoiceForm({
               </div>
               <div className="flex items-end gap-2">
                 <div className="min-w-0 flex-1">
-                  <Field label="ALV" htmlFor={`if-line-${index}-vat`}>
-                    <select
-                      aria-label={`Rivin ${index + 1} ALV`}
-                      className={field}
-                      value={line.vatRate}
-                      autoComplete="off"
-                      onChange={(e) => setLine(index, { vatRate: Number(e.target.value) })}
+                  {vatRegistered ? (
+                    <Field
+                      label="ALV"
+                      htmlFor={`if-line-${index}-vat`}
+                      error={errors[`line-${index}-vatRate`]}
                     >
-                      {VAT_RATES_PERMILLE.map((permille) => (
-                        <option key={permille} value={permille / 10}>
-                          ALV {permille / 10} %
-                        </option>
-                      ))}
-                    </select>
-                  </Field>
+                      <select
+                        aria-label={`Rivin ${index + 1} ALV`}
+                        className={field}
+                        value={line.vatRate}
+                        autoComplete="off"
+                        onChange={(e) => setLine(index, { vatRate: Number(e.target.value) })}
+                      >
+                        {vatRateOptions(line.vatRate, values.issueDate).map((permille) => (
+                          <option key={permille} value={permille / 10}>
+                            {vatRateLabel(permille)}
+                            {vatRatesForDate(values.issueDate).some((rate) => rate === permille)
+                              ? ""
+                              : " (ei enää käytössä)"}
+                          </option>
+                        ))}
+                      </select>
+                    </Field>
+                  ) : null}
                 </div>
                 <Button
                   type="button"
@@ -539,7 +615,10 @@ export function InvoiceForm({
             variant="secondary"
             className="w-full"
             onClick={() =>
-              setValues((current) => ({ ...current, lines: [...current.lines, { ...EMPTY_LINE }] }))
+              setValues((current) => ({
+                ...current,
+                lines: [...current.lines, newInvoiceLine(vatRegistered)],
+              }))
             }
           >
             Lisää rivi
@@ -549,14 +628,18 @@ export function InvoiceForm({
       </div>
 
       <Card className="space-y-1 text-body">
-        <div className="flex justify-between text-ink-2">
-          <span>Veroton</span>
-          <span className="tabular-nums">{formatEur(totals.netCents / 100)}</span>
-        </div>
-        <div className="flex justify-between text-ink-2">
-          <span>ALV</span>
-          <span className="tabular-nums">{formatEur(totals.vatCents / 100)}</span>
-        </div>
+        {vatRegistered && (
+          <>
+            <div className="flex justify-between text-ink-2">
+              <span>Veroton</span>
+              <span className="tabular-nums">{formatEur(totals.netCents / 100)}</span>
+            </div>
+            <div className="flex justify-between text-ink-2">
+              <span>ALV</span>
+              <span className="tabular-nums">{formatEur(totals.vatCents / 100)}</span>
+            </div>
+          </>
+        )}
         <div className="flex justify-between pt-1 font-semibold text-ink">
           <span>Yhteensä</span>
           <span className="tabular-nums">{formatEur(totals.grossCents / 100)}</span>

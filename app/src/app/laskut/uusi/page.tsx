@@ -8,6 +8,7 @@ import {
   type InvoicePayload,
 } from "@/components/invoices/InvoiceForm";
 import { QuickCustomerSheet, type CreatedCustomer } from "@/components/invoices/QuickCustomerSheet";
+import { useProfile } from "@/app/asetukset/useProfile";
 import {
   apiFetch,
   isUnauthorized,
@@ -107,6 +108,9 @@ function NewInvoicePage() {
   const [addOpen, setAddOpen] = useState(false);
   const [justCreated, setJustCreated] = useState<string | undefined>(undefined);
   const createKey = useRef(newIdempotencyKey());
+  // The seller's VAT status decides the ALV choice, so the form waits for it
+  // (it is cached, so this is instant after the first visit).
+  const { profile, loadError: profileError } = useProfile();
 
   useEffect(() => {
     let cancelled = false;
@@ -211,7 +215,8 @@ function NewInvoicePage() {
   }
 
   const title = editId ? "Muokkaa laskua" : "Uusi lasku";
-  const ready = customers !== null && (!editId || editing !== null);
+  const ready =
+    customers !== null && (!editId || editing !== null) && (profile !== null || Boolean(profileError));
 
   return (
     <div className="space-y-6">
@@ -248,6 +253,7 @@ function NewInvoicePage() {
           submitLabel={editing ? "Tallenna muutokset" : "Luo lasku"}
           busy={busy}
           draftKey={editing ? `invoice:edit:${editing.id}` : "invoice:new"}
+          vatRegistered={profile?.vatRegistered ?? true}
           initial={
             editing
               ? toFormValues(editing)

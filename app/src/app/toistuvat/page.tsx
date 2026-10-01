@@ -29,6 +29,7 @@ import {
   type RecurringPayload,
 } from "@/components/invoices/RecurringForm";
 import { QuickCustomerSheet, type CreatedCustomer } from "@/components/invoices/QuickCustomerSheet";
+import { useProfile } from "@/app/asetukset/useProfile";
 
 import { pageCacheFetchedAt, readPageCache, writePageCache } from "@/lib/page-cache";
 import { useCacheAfterBoot } from "@/components/invoices/useCacheAfterBoot";
@@ -138,6 +139,8 @@ function runPlanSummary(plan: RunPlan["plan"] | null): string {
 }
 
 export default function RecurringInvoicesPage() {
+  // The seller's VAT status decides whether the form offers an ALV choice (F01).
+  const { profile, loadError: profileError } = useProfile();
   const cached = readPageCache<{ recurring: RecurringInvoice[]; dueNow: number }>("recurring");
   const [recurring, setRecurring] = useState<RecurringInvoice[]>(cached?.recurring ?? []);
   const [dueNow, setDueNow] = useState(cached?.dueNow ?? 0);
@@ -589,9 +592,15 @@ export default function RecurringInvoicesPage() {
         heightClass="max-h-[94dvh]"
       >
         <div className="flex min-h-0 flex-1 flex-col overflow-y-auto px-5 py-4 sheet-safe-bottom">
-          {formFor !== null && (
+          {formFor !== null && profile === null && !profileError && (
+            <p className="text-caption text-ink-2" role="status">
+              Ladataan…
+            </p>
+          )}
+          {formFor !== null && (profile !== null || Boolean(profileError)) && (
             <RecurringForm
               key={`${editing ? editing.id : "new"}:${pendingCustomer ?? ""}`}
+              vatRegistered={profile?.vatRegistered ?? true}
               customers={customers}
               customersError={customersError}
               onRetryCustomers={() => setCustomersAttempt((value) => value + 1)}
@@ -600,7 +609,7 @@ export default function RecurringInvoicesPage() {
                   ? toFormValues(editing)
                   : pendingCustomer
                     ? {
-                        ...emptyRecurringForm(),
+                        ...emptyRecurringForm(profile?.vatRegistered ?? true),
                         customerId: pendingCustomer,
                         paymentTermDays: String(
                           customers?.find((c) => c.id === pendingCustomer)?.defaultPaymentTermDays ?? 14

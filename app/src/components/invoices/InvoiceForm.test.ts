@@ -4,8 +4,10 @@ import {
   EMPTY_LINE,
   invoiceFieldId,
   invoiceFieldOrder,
+  newInvoiceLine,
   previewTotals,
   validateInvoiceForm,
+  vatRateOptions,
   type InvoiceFormValues,
 } from "./InvoiceForm";
 
@@ -98,5 +100,67 @@ describe("validateInvoiceForm", () => {
       expect(invoiceFieldId("dueDate")).toBe("if-due");
     }
     if (!leap.ok) expect(leap.errors.issueDate).toBeTruthy();
+  });
+});
+
+describe("an invoice from a seller who is not VAT registered (F01)", () => {
+  it("starts a new line at ALV 0 %", () => {
+    expect(newInvoiceLine(false).vatRate).toBe(0);
+    expect(newInvoiceLine(true).vatRate).toBe(25.5);
+  });
+
+  it("sends 0 % whatever the line holds", () => {
+    const result = validateInvoiceForm(
+      values({ lines: [{ ...EMPTY_LINE, description: "Työ", unitPrice: "100", vatRate: 25.5 }] }),
+      { vatRegistered: false }
+    );
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.payload.lines[0].vatRate).toBe(0);
+  });
+
+  it("previews no VAT", () => {
+    const totals = previewTotals(
+      [{ ...EMPTY_LINE, quantity: "1", unitPrice: "100", vatRate: 25.5 }],
+      { vatRegistered: false }
+    );
+    expect(totals).toEqual({ netCents: 10_000, vatCents: 0, grossCents: 10_000 });
+  });
+});
+
+describe("the VAT rates offered follow the invoice date (F44, F129)", () => {
+  it("offers 13,5 % and not 14 % from 1.1.2026", () => {
+    expect(vatRateOptions(25.5, "2026-09-30")).toEqual([255, 135, 100, 0]);
+    expect(vatRateOptions(25.5, "2025-12-31")).toEqual([255, 140, 100, 0]);
+  });
+
+  it("keeps the line's own rate in the list so the select never shows another one", () => {
+    expect(vatRateOptions(14, "2026-09-30")).toEqual([255, 135, 100, 0, 140]);
+  });
+
+  it("refuses 14 % on a 2026 invoice and says which rate to use", () => {
+    const result = validateInvoiceForm(
+      values({ lines: [{ ...EMPTY_LINE, description: "Työ", unitPrice: "10", vatRate: 14 }] })
+    );
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.errors["line-0-vatRate"]).toContain("13,5");
+      expect(invoiceFieldId("line-0-vatRate")).toBe("if-line-0-vat");
+      expect(firstInvalidKey(result.errors, invoiceFieldOrder(1))).toBe("line-0-vatRate");
+    }
+  });
+
+  it("accepts 14 % on an invoice dated in 2025 and 13,5 % in 2026", () => {
+    const old = validateInvoiceForm(
+      values({
+        issueDate: "2025-12-31",
+        dueDate: "2026-01-14",
+        lines: [{ ...EMPTY_LINE, description: "Työ", unitPrice: "10", vatRate: 14 }],
+      })
+    );
+    const current = validateInvoiceForm(
+      values({ lines: [{ ...EMPTY_LINE, description: "Työ", unitPrice: "10", vatRate: 13.5 }] })
+    );
+    expect(old.ok).toBe(true);
+    expect(current.ok).toBe(true);
   });
 });
