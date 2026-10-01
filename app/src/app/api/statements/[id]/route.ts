@@ -154,7 +154,10 @@ export const DELETE = withErrorHandler(async (
   // allowLegacy: statements uploaded before per-user storage landed still carry
   // a flat data/uploads/<uuid>.<ext> path.
   try {
-    await removeUserUpload(session.userId, path.basename(statement.filePath), true);
+    // A file that crossed a month boundary is shared by one tiliote per month:
+    // it goes with the last of them.
+    const shared = await prisma.statement.count({ where: { userId: session.userId, filePath: statement.filePath } });
+    if (shared === 0) await removeUserUpload(session.userId, path.basename(statement.filePath), true);
   } catch {
     // file already gone or unreadable — DB row removal is what matters
   }

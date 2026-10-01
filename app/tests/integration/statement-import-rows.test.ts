@@ -49,7 +49,8 @@ describe("F47: an export that overlaps an earlier one does not double its rows",
 
     expect(body.count).toBe(2);
     expect(body.skippedDuplicates).toBe(2);
-    expect(body.notice).toBe("2 tapahtumaa oli jo tuotu aiemmin, joten ne ohitettiin.");
+    // The two new rows are dated in two months, so the answer also says the file was split (F48).
+    expect(body.notice).toContain("2 tapahtumaa oli jo tuotu aiemmin, joten ne ohitettiin.");
     expect(await prisma.transaction.count()).toBe(4);
     expect(await prisma.transaction.count({ where: { counterparty: "Spotify" } })).toBe(1);
     // One sale draft per payment, not one per copy.

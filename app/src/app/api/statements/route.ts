@@ -47,6 +47,11 @@ function dominantMonth(rows: Array<{ date: string | null }>, fallback: string): 
   return [...counts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] || fallback;
 }
 
+/** One sentence for the owner when a file crossed a month boundary and was stored per month. */
+function splitNotice(months: number): string | null {
+  return months > 1 ? `Tiedostossa oli tapahtumia ${months} kuukaudelta, joten ne tallennettiin kuukausittain.` : null;
+}
+
 /** Every row of the file is already stored (an overlapping or repeated export). */
 class AllRowsKnownError extends Error {
   constructor(readonly skipped: number) {
@@ -171,7 +176,7 @@ export async function POST(req: NextRequest) {
       bankAccountId = await resolveAccountForImport(userId, { iban: ibanHint });
     }
 
-    const { statement, skippedDuplicates, heldBack } = await prisma.$transaction(async (db) => {
+    const { statement, statements, skippedDuplicates, heldBack } = await prisma.$transaction(async (db) => {
       // The statement is written first: that takes SQLite's write lock, so the
       // stored rows read below cannot change under a concurrent import.
       const created = await db.statement.create({
@@ -207,14 +212,44 @@ export async function POST(req: NextRequest) {
         const month = fresh[0].date ? fresh[0].date.slice(0, 7) : fallbackMonth;
         throw new PeriodLockedError(month, lockedThrough!);
       }
+      // A row belongs to the month of its own date: a file that crosses a month
+      // boundary is stored as one tiliote per month, so every screen that reads
+      // a statement's month (Pankki, Koti, the VAT figures, the account's
+      // balances) reads the same month for the same row. The month most rows
+      // belong to keeps the file's own checksum, so the same file is refused as
+      // already imported; a row without a date goes with that month.
       const periodMonth = dominantMonth(open, fallbackMonth);
       const labelled =
         periodMonth === provisionalMonth
           ? created
           : await db.statement.update({ where: { id: created.id }, data: { periodMonth } });
+      const byMonth = new Map<string, typeof open>();
+      for (const tx of open) {
+        const month = tx.date ? tx.date.slice(0, 7) : periodMonth;
+        byMonth.set(month, [...(byMonth.get(month) ?? []), tx]);
+      }
+      const made = [labelled];
+      for (const month of byMonth.keys()) {
+        if (month === periodMonth) continue;
+        made.push(
+          await db.statement.create({
+            data: {
+              userId,
+              bankAccountId,
+              fileName: file.name,
+              fileType,
+              filePath: storageKey!,
+              checksum: `${fileChecksum}:${month}`,
+              periodMonth: month,
+              periodSource: "auto",
+            },
+          })
+        );
+      }
+      const statementOf = new Map(made.map((item) => [item.periodMonth, item.id]));
       await db.transaction.createMany({
         data: open.map((tx) => ({
-          statementId: created.id,
+          statementId: statementOf.get(tx.date ? tx.date.slice(0, 7) : periodMonth)!,
           userId,
           source: "file",
           date: tx.date ? new Date(tx.date) : null,
@@ -228,7 +263,7 @@ export async function POST(req: NextRequest) {
           }),
         })),
       });
-      return { statement: labelled, skippedDuplicates: duplicates.length, heldBack: fresh.length - open.length };
+      return { statement: labelled, statements: made, skippedDuplicates: duplicates.length, heldBack: fresh.length - open.length };
     });
 
     // Fetch recent emails from connected accounts before matching so that
@@ -253,23 +288,30 @@ export async function POST(req: NextRequest) {
 
     // Drafts pending sales receipts for recognised settlement providers only.
     // Nothing here is approved or linked automatically.
-    await autoGenerateIncomeReceipts(userId, statement.id).catch((e) =>
-      console.error("Income draft generation failed:", e)
-    );
+    for (const made of statements) {
+      await autoGenerateIncomeReceipts(userId, made.id).catch((e) =>
+        console.error("Income draft generation failed:", e)
+      );
+    }
 
     const transactions = await prisma.transaction.findMany({
-      where: { statementId: statement.id },
+      where: { statementId: { in: statements.map((made) => made.id) } },
       orderBy: { date: "asc" },
     });
 
     return NextResponse.json({
       ok: true,
       statement,
+      // The tiliotteet this file became, one per month (additive; `statement` is the main one).
+      statements,
       transactions: transactions.map(publicTransaction),
       count: transactions.length,
       skippedDuplicates,
       heldBack,
-      notice: [skippedRowsNotice(skippedDuplicates), lockedRowsNotice(heldBack)].filter(Boolean).join(" ") || null,
+      notice:
+        [splitNotice(statements.length), skippedRowsNotice(skippedDuplicates), lockedRowsNotice(heldBack)]
+          .filter(Boolean)
+          .join(" ") || null,
     });
   } catch (e) {
     // A rejected or unparseable upload must not leave bytes on disk.
