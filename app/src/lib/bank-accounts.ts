@@ -89,19 +89,54 @@ export function prepareIban(value: string | null | undefined): string | null {
   return normalized;
 }
 
+/**
+ * An account of this user already holding the IBAN, if any. An archived holder
+ * is named, so the owner is never told only that "another account" has it.
+ */
+async function findIbanHolder(userId: string, iban: string | null, exceptId?: string) {
+  if (!iban) return null;
+  const where = { userId, iban, ...(exceptId ? { id: { not: exceptId } } : {}) };
+  return (await prisma.bankAccount.findFirst({ where: { ...where, archivedAt: null } })) ?? prisma.bankAccount.findFirst({ where });
+}
+
 async function assertIbanFree(
   userId: string,
   iban: string | null,
   exceptId?: string
 ): Promise<void> {
-  if (!iban) return;
-  const existing = await prisma.bankAccount.findFirst({
-    where: { userId, iban, ...(exceptId ? { id: { not: exceptId } } : {}) },
-    select: { id: true },
-  });
-  if (existing) {
-    throw new AppError("Tämä IBAN on jo lisätty toiselle tilille.", "IBAN_IN_USE", 409);
+  const holder = await findIbanHolder(userId, iban, exceptId);
+  if (!holder) return;
+  if (holder.archivedAt) {
+    throw new AppError(
+      `Tämä IBAN kuuluu arkistoituun tiliin "${holder.name}". Palauta se käyttöön Näytä arkistoidut -kohdasta.`,
+      "IBAN_ARCHIVED",
+      409,
+      { accountId: holder.id, name: holder.name }
+    );
   }
+  throw new AppError("Tämä IBAN on jo lisätty toiselle tilille.", "IBAN_IN_USE", 409);
+}
+
+/**
+ * Statements of this IBAN that no account has claimed yet (a bank sync that ran
+ * before the account existed) become the account's. A statement the owner has
+ * already filed under an account is never moved.
+ */
+export async function adoptStatementsByIban(
+  userId: string,
+  bankAccountId: string,
+  iban: string | null
+): Promise<number> {
+  if (!iban) return 0;
+  const result = await prisma.statement.updateMany({
+    where: {
+      userId,
+      bankAccountId: null,
+      OR: [{ checksum: { startsWith: `eb:${iban}:` } }, { transactions: { some: { userId, iban } } }],
+    },
+    data: { bankAccountId },
+  });
+  return result.count;
 }
 
 /** Only one account per user may be the default; flipping one clears the rest. */
@@ -115,8 +150,21 @@ async function clearOtherDefaults(userId: string, keepId: string): Promise<void>
 export async function createBankAccount(
   userId: string,
   input: BankAccountInput
-): Promise<PublicBankAccount> {
+): Promise<PublicBankAccount & { restored?: boolean }> {
   const iban = prepareIban(input.iban);
+  const holder = await findIbanHolder(userId, iban);
+  if (holder?.archivedAt) {
+    // Adding the IBAN of an archived account brings that account back, with the
+    // opening balance its statements are already counted against: a second
+    // account for the same IBAN would split one account's history in two.
+    const activeOthers = await prisma.bankAccount.count({ where: { userId, archivedAt: null } });
+    const restored = await prisma.bankAccount.update({
+      where: { id: holder.id },
+      data: { archivedAt: null, ...(activeOthers === 0 ? { isDefault: true } : {}) },
+    });
+    await adoptStatementsByIban(userId, restored.id, iban);
+    return { ...toPublicBankAccount(restored), restored: true };
+  }
   await assertIbanFree(userId, iban);
 
   const existingCount = await prisma.bankAccount.count({ where: { userId } });
@@ -137,6 +185,7 @@ export async function createBankAccount(
   });
 
   if (created.isDefault) await clearOtherDefaults(userId, created.id);
+  await adoptStatementsByIban(userId, created.id, iban);
   return toPublicBankAccount(created);
 }
 
@@ -173,6 +222,11 @@ export async function updateBankAccount(
 
   const updated = await prisma.bankAccount.update({ where: { id }, data });
   if (updated.isDefault) await clearOtherDefaults(userId, id);
+  // An account with a new IBAN, or one that is back in use, claims the bank
+  // statements of that IBAN that nobody has claimed.
+  if (!updated.archivedAt && (input.iban !== undefined || input.archived === false)) {
+    await adoptStatementsByIban(userId, id, updated.iban);
+  }
   return toPublicBankAccount(updated);
 }
 
@@ -463,8 +517,11 @@ export async function resolveAccountForImport(
 ): Promise<string | null> {
   const iban = hints.iban ? normalizeIban(hints.iban) : null;
   if (iban && isValidIban(iban)) {
+    // An archived account is out of use: a file is never filed under it by
+    // detection. An IBAN found in the file is also only a hint (see
+    // extractOwnIban), so it decides only when it is the file's own account.
     const byIban = await prisma.bankAccount.findFirst({
-      where: { userId, iban },
+      where: { userId, iban, archivedAt: null },
       select: { id: true },
     });
     if (byIban) return byIban.id;

@@ -24,7 +24,7 @@ import { listStatementsForUser } from "@/lib/statement-api";
 import { centsToEuros } from "@/lib/money";
 import { autoGenerateIncomeReceipts } from "@/lib/income-automation";
 import { resolveAccountForImport } from "@/lib/bank-accounts";
-import { extractIbans } from "@/lib/iban";
+import { extractOwnIban } from "@/lib/iban";
 import { Prisma } from "@/generated/prisma/client";
 import { loadStoredRowIdentities, lockedRowsNotice, skippedRowsNotice, splitNewRows } from "@/lib/bank-row-fingerprint";
 
@@ -150,7 +150,9 @@ export async function POST(req: NextRequest) {
     let bankAccountId: string | null = null;
     // Only text formats are cheap to scan; xlsx/pdf have no IBAN hint.
     const scannable = detected.kind === "xml" || detected.kind === "csv";
-    const ibanHint = scannable ? extractIbans(buffer.toString("utf8").slice(0, 200_000))[0] ?? null : null;
+    // The file's own account, never a counterparty's (a transfer to the owner's
+    // other account names that account in the rows too).
+    const ibanHint = scannable ? extractOwnIban(buffer.toString("utf8").slice(0, 200_000)) : null;
     if (typeof requestedAccountId === "string" && requestedAccountId.trim()) {
       const owned = await prisma.bankAccount.findFirst({
         where: { id: requestedAccountId.trim(), userId },

@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   bankNameFromIban,
   extractIbans,
+  extractOwnIban,
   formatIban,
   isValidIban,
   maskIban,
@@ -140,5 +141,37 @@ describe("extractIbans", () => {
 
   it("returns an empty list for empty input", () => {
     expect(extractIbans("")).toEqual([]);
+  });
+});
+
+describe("F52: extractOwnIban names the file's own account, never a counterparty's", () => {
+  const A = "FI2112345600000785";
+  const B = "FI4950009420028730";
+
+  it("takes a labelled line, whatever the counterparty columns hold", () => {
+    const csv = `Tilinumero;${B}
+Päivä;Summa;Saaja;Saajan tilinumero
+05.01.2026;-5,00;Oma siirto;${A}
+`;
+    expect(extractOwnIban(csv)).toBe(B);
+    expect(extractOwnIban(`IBAN: ${B.slice(0, 4)} ${B.slice(4, 8)} ${B.slice(8)}
+x;y
+`)).toBe(B);
+  });
+
+  it("takes the camt statement's own account, not an entry's", () => {
+    const xml = `<Stmt><Acct><Id><IBAN>${B}</IBAN></Id></Acct><Ntry><RltdPties><CdtrAcct><Id><IBAN>${A}</IBAN></Id></CdtrAcct></RltdPties></Ntry><Ntry><CdtrAcct><Id><IBAN>${A}</IBAN></Id></CdtrAcct></Ntry></Stmt>`;
+    expect(extractOwnIban(xml)).toBe(B);
+  });
+
+  it("falls back to the one IBAN mentioned most, and to nothing on a tie", () => {
+    expect(extractOwnIban(`a;${A}
+b;${A}
+c;${B}
+`)).toBe(A);
+    expect(extractOwnIban(`Saaja;${A}
+Saaja;${B}
+`)).toBeNull();
+    expect(extractOwnIban("ei tilinumeroa täällä")).toBeNull();
   });
 });

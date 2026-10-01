@@ -36,6 +36,7 @@ export const POST = withErrorHandler(async (req: NextRequest) => {
   if (oversized) return oversized;
 
   const body = createSchema.parse(await req.json());
-  const account = await createBankAccount(session.userId, body);
-  return noStoreJson({ account }, { status: 201 });
+  const { restored, ...account } = await createBankAccount(session.userId, body);
+  // An archived account that held the IBAN came back instead of a second one.
+  return noStoreJson(restored ? { account, restored: true } : { account }, { status: restored ? 200 : 201 });
 });

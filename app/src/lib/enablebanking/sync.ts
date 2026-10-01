@@ -27,6 +27,7 @@ import type { PsuContext } from "./client";
 import { withTrackedJob } from "../job-tracker";
 import { getLockedThrough, isDateLocked, isMonthLocked } from "../period-lock";
 import { normalizeIban } from "../iban";
+import { adoptStatementsByIban } from "../bank-accounts";
 import { CONSENT_REVOKED_MESSAGE } from "../bank-consent-copy";
 import { StoredRowPool } from "../bank-row-fingerprint";
 import { fallbackStatementMonth, statementMonthOrFallback } from "../report-calendar";
@@ -115,6 +116,10 @@ async function syncBankConnectionUntracked(
   if (inScope.length === 0) {
     throw new EnableBankingError("Valitse ainakin yksi tili ennen hakua.", 400, "NO_ACCOUNTS_ADDED");
   }
+  // An account the owner added after earlier syncs claims those statements now,
+  // also when this sync brings nothing new (statements are otherwise linked only
+  // when a row is written).
+  await claimStatementsOfOwnAccounts(userId, inScope.map((account) => account.iban));
 
   const psuHeaders = options.attended
     ? attendedHeaders(connection.requiredPsuHeaders, options.context ?? null)
@@ -608,6 +613,13 @@ async function dropRowsAlreadyStoredByContent(
   return fresh;
 }
 
+async function claimStatementsOfOwnAccounts(userId: string, ibans: string[]) {
+  for (const iban of new Set(ibans.map((value) => normalizeIban(value)))) {
+    const account = await prisma.bankAccount.findFirst({ where: { userId, iban, archivedAt: null }, select: { id: true } });
+    if (account) await adoptStatementsByIban(userId, account.id, iban);
+  }
+}
+
 async function ensureStatement(userId: string, iban: string, month: string, aspspName: string) {
   const checksum = `eb:${iban}:${month}`;
   // The owner's own account with this IBAN, when there is one: the tiliote then
@@ -615,7 +627,7 @@ async function ensureStatement(userId: string, iban: string, month: string, asps
   // account is created here; one without an opening balance would report a
   // wrong balance and a false reconciliation gap.
   const account = await prisma.bankAccount.findFirst({
-    where: { userId, iban: normalizeIban(iban) },
+    where: { userId, iban: normalizeIban(iban), archivedAt: null },
     select: { id: true },
   });
   const bankAccountId = account?.id ?? null;

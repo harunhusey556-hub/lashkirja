@@ -220,8 +220,12 @@ export default function BankAccountsPage() {
           body: JSON.stringify(payload),
         }
       );
-      await readJson(response, "Tallennus epäonnistui");
+      const saved = await readJson<{ restored?: boolean; account?: { name?: string } }>(response, "Tallennus epäonnistui");
       setFormMode("hidden");
+      if (saved.restored) {
+        // The IBAN belonged to an archived account: it is back, as it was.
+        showSuccess(`Tämä IBAN kuului arkistoituun tiliin${saved.account?.name ? ` "${saved.account.name}"` : ""}. Tili palautettiin käyttöön entisillä tiedoillaan.`);
+      }
       await load();
       if (editing && detailAccount?.id === editing.id) await loadRollforward(editing.id);
     } catch (error) {
@@ -295,6 +299,23 @@ export default function BankAccountsPage() {
       throw new Error(message);
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function restoreAccount(account: AccountSummary) {
+    try {
+      const response = await apiFetch(`/api/bank-accounts/${account.id}`, {
+        method: "PATCH",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ archived: false }),
+      });
+      await readJson(response, "Tilin palautus epäonnistui");
+      showSuccess("Tili on taas käytössä.");
+      await load();
+      setDetailAccount((current) => (current ? { ...current, archivedAt: null } : current));
+    } catch (error) {
+      showError(errorMessage(error, "Tilin palautus epäonnistui"));
     }
   }
 
@@ -496,17 +517,25 @@ export default function BankAccountsPage() {
                   Aseta oletukseksi
                 </Button>
               )}
-              <Button
-                type="button"
-                variant="danger"
-                onClick={() => {
-                  setMessage(null);
-                  setDetailAccount(null);
-                  setConfirmRemove(detailAccount);
-                }}
-              >
-                Poista
-              </Button>
+              {detailAccount.archivedAt && (
+                <Button type="button" onClick={() => void restoreAccount(detailAccount)}>
+                  Palauta käyttöön
+                </Button>
+              )}
+              {/* An account with tiliotteet can only be archived, and it already is. */}
+              {!(detailAccount.archivedAt && detailAccount.statementCount > 0) && (
+                <Button
+                  type="button"
+                  variant="danger"
+                  onClick={() => {
+                    setMessage(null);
+                    setDetailAccount(null);
+                    setConfirmRemove(detailAccount);
+                  }}
+                >
+                  Poista
+                </Button>
+              )}
             </div>
 
             {rollforward === null ? (

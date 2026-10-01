@@ -93,13 +93,55 @@ export function bankNameFromIban(value: string | null | undefined): string | nul
  */
 export function extractIbans(text: string): string[] {
   const counts = new Map<string, number>();
-  const pattern = /\b[A-Z]{2}[0-9]{2}(?:[ -]?[0-9A-Z]{4}){2,7}(?:[ -]?[0-9A-Z]{1,3})?\b/gi;
-  for (const match of text.matchAll(pattern)) {
-    const candidate = normalizeIban(match[0]);
-    if (!isValidIban(candidate)) continue;
-    counts.set(candidate, (counts.get(candidate) ?? 0) + 1);
-  }
+  for (const iban of ibanMentions(text)) counts.set(iban, (counts.get(iban) ?? 0) + 1);
   return [...counts.entries()]
     .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
     .map(([iban]) => iban);
+}
+
+/** Every valid IBAN in the text, once per mention, in the order they appear. */
+function ibanMentions(text: string): string[] {
+  const found: string[] = [];
+  const pattern = /\b[A-Z]{2}[0-9]{2}(?:[ -]?[0-9A-Z]{4}){2,7}(?:[ -]?[0-9A-Z]{1,3})?\b/gi;
+  for (const match of text.matchAll(pattern)) {
+    const candidate = normalizeIban(match[0]);
+    if (isValidIban(candidate)) found.push(candidate);
+  }
+  return found;
+}
+
+/** A line label that names the account the file is about (not a counterparty). */
+const OWN_ACCOUNT_LABEL = /^(?:tilinumero|tilin numero|tili|iban|tilin iban|omistajan tili|account|account number|account no\.?|konto)$/i;
+
+/**
+ * The account a statement file is about, or null when the file does not say.
+ *
+ * - camt.053: the statement's own account, which stands before the first entry.
+ *   The creditor and debtor accounts of the entries are the other party's.
+ * - A labelled line ("Tilinumero;FI21 ...", "IBAN: FI21 ...") above the rows.
+ * - Otherwise the one IBAN the file mentions most, and only when that is
+ *   unambiguous: with a tie, which one is the file's own is not known, and a
+ *   guess would file the statement under the wrong account.
+ *
+ * Counterparty columns ("Saajan tilinumero") are never a label for this.
+ */
+export function extractOwnIban(text: string): string | null {
+  const head = text.split(/<Ntry[\s>]/)[0];
+  const camt = /<Acct>[\s\S]*?<IBAN>\s*([^<]+?)\s*<\/IBAN>/i.exec(head);
+  if (camt) {
+    const candidate = normalizeIban(camt[1]);
+    if (isValidIban(candidate)) return candidate;
+  }
+  for (const line of text.split(/\r?\n/).slice(0, 40)) {
+    const cells = line.split(/[;\t,:]/).map((cell) => cell.trim().replace(/^"|"$/g, ""));
+    if (cells.length < 2 || !OWN_ACCOUNT_LABEL.test(cells[0])) continue;
+    const found = extractIbans(cells.slice(1).join(" "))[0];
+    if (found) return found;
+  }
+  const counts = new Map<string, number>();
+  for (const iban of ibanMentions(text)) counts.set(iban, (counts.get(iban) ?? 0) + 1);
+  const ranked = [...counts.entries()].sort((a, b) => b[1] - a[1]);
+  if (ranked.length === 0) return null;
+  if (ranked.length > 1 && ranked[0][1] === ranked[1][1]) return null;
+  return ranked[0][0];
 }
