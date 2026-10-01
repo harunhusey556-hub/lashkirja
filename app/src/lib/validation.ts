@@ -2,7 +2,8 @@ import { z } from "zod";
 import { isCentAmount, MAX_MONEY_EUR } from "./money";
 
 export const monthSchema = z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/);
-export const alvPeriodSchema = z.string().regex(/^\d{4}-(?:(?:0[1-9]|1[0-2])|Q[1-4])$/);
+/** A VAT period key: "2026-08", "2026-Q3", or a bare year for a yearly filer (F13). */
+export const alvPeriodSchema = z.string().regex(/^\d{4}(?:-(?:(?:0[1-9]|1[0-2])|Q[1-4]))?$/);
 
 export const moneySchema = z
   .number()
@@ -84,6 +85,7 @@ export function periodScopeBoundsUtc(scope: string): { start: Date; end: Date } 
 
 export function alvPeriodBoundsUtc(period: string): { start: Date; end: Date } {
   const parsed = alvPeriodSchema.parse(period);
+  if (/^\d{4}$/.test(parsed)) return periodScopeBoundsUtc(parsed);
   const quarterMatch = /^(\d{4})-Q([1-4])$/.exec(parsed);
   if (quarterMatch) {
     const year = Number(quarterMatch[1]);

@@ -13,16 +13,24 @@ import {
 
 import { formatEur, kuittiCount } from "@/lib/format";
 import { receiptDrillHref } from "@/lib/report-drill";
-import { alvPeriodBoundsUtc, helsinkiCalendarDate, helsinkiMonthKey, helsinkiQuarterKey } from "@/lib/validation";
+import { alvPeriodBoundsUtc, helsinkiCalendarDate, helsinkiMonthKey } from "@/lib/validation";
 import { VatFilingCard } from "@/components/VatFilingCard";
-import { nextVatDue, vatDueFor, vatPeriodKindOf, type VatPeriod } from "@/lib/vat-deadline";
+import { vatDueFor, vatPeriodKindOf, type VatPeriodKind } from "@/lib/vat-deadline";
+import {
+  ALV_PERIOD_KEY,
+  alvKeyForKind,
+  alvKeyKind,
+  alvPeriodOptions,
+  periodOfKey,
+  resolveAlvPeriod,
+  type AlvChoice,
+} from "@/lib/alv-period-choice";
 import { vatPendingNote, type VatFilingRecord } from "@/lib/vat-due";
 import { useProfile } from "@/app/asetukset/useProfile";
 import { useRefetchOnReconnect } from "@/components/useRefetchOnReconnect";
 import { pageCacheFetchedAt, readPageCache, writePageCache } from "@/lib/page-cache";
 import { useCacheAfterBoot } from "@/components/invoices/useCacheAfterBoot";
 import { usePersistedState, useScrollRestoration } from "@/lib/list-ui-state";
-import { MONTHS } from "@/lib/finnish-months";
 import { controlClass } from "@/components/ui";
 import { Card, FilterChips, ListRow, PageTitle, Section, Skeleton, SkeletonCard, SkeletonGroup, SummaryCard } from "@/components/ds";
 
@@ -52,12 +60,24 @@ interface ALVData {
   pendingReceiptCount?: number;
 }
 
-/** "2026-08" / "2026-Q3" as the shared VatPeriod. */
-function periodOfKey(key: string): VatPeriod {
-  const year = Number(key.slice(0, 4));
-  const quarter = /-Q([1-4])$/.exec(key);
-  return quarter ? { kind: "quarter", year, quarter: Number(quarter[1]) } : { kind: "month", year, month: Number(key.slice(5, 7)) };
+/** The period a link asks for (`?period=2026-Q3`), read once when the page opens. */
+function periodFromLink(): string | null {
+  if (typeof window === "undefined") return null;
+  const raw = new URLSearchParams(window.location.search).get("period");
+  return raw && ALV_PERIOD_KEY.test(raw) ? raw : null;
 }
+
+const KIND_CHIPS: Array<{ id: VatPeriodKind; label: string }> = [
+  { id: "month", label: "Kuukausi" },
+  { id: "quarter", label: "Neljännes" },
+  { id: "year", label: "Vuosi" },
+];
+
+const PERIOD_SELECT_LABEL: Record<VatPeriodKind, string> = {
+  month: "ALV-raportin kuukausi",
+  quarter: "ALV-raportin neljännes",
+  year: "ALV-raportin vuosi",
+};
 
 // Extends a small inline text link's touch target to >=44px tall without
 // growing what's actually drawn (mirrors ActionPill's own before:-inset-y-1
@@ -84,17 +104,23 @@ function DrillRow({ label, value, href, ariaLabel }: { label: string; value: num
 
 export default function ALVRaporttiPage() {
   const now = new Date();
-  const { profile } = useProfile();
+  const { profile, loadError: profileError } = useProfile();
   const dueKind = vatPeriodKindOf(profile?.vatPeriod);
-  const nextDue = nextVatDue(now, dueKind === "year" ? "month" : dueKind);
-  const defaultPeriod = nextDue.period.kind === "month" ? nextDue.key : helsinkiMonthKey(now);
 
-  const [periodType, setPeriodType] = usePersistedState<"month" | "quarter">("alv.periodType", "month");
-  const [selectedMonth, setSelectedMonth] = usePersistedState("alv.month", defaultPeriod);
-  const [selectedQuarter, setSelectedQuarter] = usePersistedState(
-    "alv.quarter",
-    nextDue.period.kind === "quarter" ? nextDue.key : helsinkiQuarterKey(now)
-  );
+  // F13: the page opens on the return the profile's ALV-verokausi makes due (the same one Koti and the
+  // month close name), unless a link asked for another period or the owner chose one under this setting.
+  const [linkKey, setLinkKey] = useState<string | null>(periodFromLink);
+  const [choice, setChoice] = usePersistedState<AlvChoice | null>("alv.choice", null);
+  const period = resolveAlvPeriod({ link: linkKey, choice, vatPeriod: profile?.vatPeriod, now });
+  const periodKind = alvKeyKind(period);
+  // Until the profile is known the default period is a guess; do not fetch or paint it.
+  const ready = linkKey !== null || profile !== null || Boolean(profileError);
+  function pickPeriod(key: string) {
+    setLoadError(null);
+    setLinkKey(null);
+    setChoice({ key, kind: dueKind });
+  }
+
   const [filingOverride, setFilingOverride] = useState<{ period: string; filing: VatFilingRecord | null } | null>(null);
   const [result, setResult] = useState<{
     period: string;
@@ -102,25 +128,10 @@ export default function ALVRaporttiPage() {
   } | null>(null);
   const [loadError, setLoadError] = useState<unknown>(null);
   const [loadAttempt, setLoadAttempt] = useState(0);
-
-  const period = periodType === "month" ? selectedMonth : selectedQuarter;
   useRefetchOnReconnect(() => setLoadAttempt((attempt) => attempt + 1));
 
   useEffect(() => {
-    const raw = new URLSearchParams(window.location.search).get("period");
-    if (!raw) return;
-    if (/^\d{4}-(0[1-9]|1[0-2])$/.test(raw)) {
-      setPeriodType("month");
-      setSelectedMonth(raw);
-    } else if (/^\d{4}-Q[1-4]$/.test(raw)) {
-      setPeriodType("quarter");
-      setSelectedQuarter(raw);
-    }
-    // The link's period wins over the last period the page remembered.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  useEffect(() => {
+    if (!ready) return;
     const controller = new AbortController();
     apiFetch(`/api/alv?period=${period}`, { signal: controller.signal })
       .then((response) =>
@@ -144,50 +155,35 @@ export default function ALVRaporttiPage() {
         setLoadError(error);
       });
     return () => controller.abort();
-  }, [period, loadAttempt]);
+  }, [period, loadAttempt, ready]);
 
   // A previously computed period paints instantly from the cache while the
   // fetch above recomputes it in the background.
   // On a cold launch the cache is hydrated after this page mounted, so the
   // copy from the last session is picked up once it is readable (N3).
   const lateData = useCacheAfterBoot<ALVData>(`alv:${period}`);
-  const data =
-    result?.period === period
+  const data = !ready
+    ? null
+    : result?.period === period
       ? result.data
       : readPageCache<ALVData>(`alv:${period}`) ?? lateData;
   const loading = !data && !loadError;
   // FP-12: the drill opens the documents the figure is made of.
   const invoiceSales = (data?.sources?.invoiceCount ?? 0) > 0;
   const salesFromBoth = invoiceSales && (data?.sources?.receiptSalesVat ?? 0) !== 0;
+  // Lists filter by a month or a whole year; a quarter has no list filter of its own.
+  const drillScope = periodKind === "quarter" ? null : period;
   const salesHref = invoiceSales
-    ? periodType === "month"
-      ? `/laskut?month=${period}`
+    ? drillScope
+      ? `/laskut?month=${drillScope}`
       : "/laskut"
-    : receiptDrillHref({ month: periodType === "month" ? period : null, type: "tulo" });
+    : receiptDrillHref({ month: drillScope, type: "tulo" });
   const salesDrillLabel = invoiceSales ? "Avaa myyntilaskut kentälle 301" : "Avaa kuitit kentälle 301";
   useScrollRestoration("alv", Boolean(data));
 
-  function buildMonthOptions() {
-    const opts: { value: string; label: string }[] = [];
-    const year = Number(helsinkiMonthKey(now).slice(0, 4));
-    for (let m = 0; m < 12; m++) {
-      const val = `${year}-${String(m + 1).padStart(2, "0")}`;
-      opts.push({ value: val, label: `${MONTHS[m]} ${year}` });
-    }
-    return opts;
-  }
-
-  function buildQuarterOptions() {
-    const year = Number(helsinkiMonthKey(now).slice(0, 4));
-    return [1, 2, 3, 4].map((q) => ({
-      value: `${year}-Q${q}`,
-      label: `Q${q} / ${year}`,
-    }));
-  }
-
   return (
     <div className="space-y-6">
-      <PageTitle title="ALV-ilmoitus" subtitle="Kuukauden tai neljänneksen arvonlisävero." />
+      <PageTitle title="ALV-ilmoitus" subtitle="Arvonlisävero ilmoituskaudelta." />
 
       {data && !data.vatRegistered && (
         <Card className="space-y-1 text-sm text-ink">
@@ -205,50 +201,23 @@ export default function ALVRaporttiPage() {
 
       <FilterChips
         label="Ilmoituskausi"
-        items={[
-          { id: "month", label: "Kuukausi" },
-          { id: "quarter", label: "Neljännes" },
-        ]}
-        value={periodType}
-        onChange={(value) => {
-          setLoadError(null);
-          setPeriodType(value);
-        }}
+        items={KIND_CHIPS}
+        value={periodKind}
+        onChange={(value) => pickPeriod(alvKeyForKind(value, now))}
       />
 
-      {periodType === "month" ? (
-        <select
-          aria-label="ALV-raportin kuukausi"
-          value={selectedMonth}
-          onChange={(e) => {
-            setLoadError(null);
-            setSelectedMonth(e.target.value);
-          }}
-          className={controlClass}
-        >
-          {buildMonthOptions().map((o) => (
-            <option key={o.value} value={o.value}>
-              {o.label}
-            </option>
-          ))}
-        </select>
-      ) : (
-        <select
-          aria-label="ALV-raportin neljännes"
-          value={selectedQuarter}
-          onChange={(e) => {
-            setLoadError(null);
-            setSelectedQuarter(e.target.value);
-          }}
-          className={controlClass}
-        >
-          {buildQuarterOptions().map((o) => (
-            <option key={o.value} value={o.value}>
-              {o.label}
-            </option>
-          ))}
-        </select>
-      )}
+      <select
+        aria-label={PERIOD_SELECT_LABEL[periodKind]}
+        value={period}
+        onChange={(e) => pickPeriod(e.target.value)}
+        className={controlClass}
+      >
+        {alvPeriodOptions(periodKind, Number(helsinkiMonthKey(now).slice(0, 4)), period).map((o) => (
+          <option key={o.value} value={o.value}>
+            {o.label}
+          </option>
+        ))}
+      </select>
 
       {loadError != null && data ? (
         <StaleBanner
@@ -367,7 +336,7 @@ export default function ALVRaporttiPage() {
               <DrillRow
                 label="Myyntikuiteista"
                 value={data.sources?.receiptSalesVat ?? 0}
-                href={receiptDrillHref({ month: periodType === "month" ? period : null, type: "tulo" })}
+                href={receiptDrillHref({ month: drillScope, type: "tulo" })}
                 ariaLabel="Avaa myyntikuitit kentälle 301"
               />
             ) : null}
@@ -393,7 +362,7 @@ export default function ALVRaporttiPage() {
             <DrillRow
               label="Vero"
               value={data.field307.amount}
-              href={receiptDrillHref({ month: periodType === "month" ? period : null, type: "meno" })}
+              href={receiptDrillHref({ month: drillScope, type: "meno" })}
               ariaLabel="Avaa ostokuitit"
             />
           </Section>

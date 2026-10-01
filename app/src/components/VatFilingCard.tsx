@@ -5,7 +5,7 @@ import { CircleCheck } from "lucide-react";
 import { Card, Icon } from "@/components/ds";
 import { Button } from "@/components/ui";
 import { apiFetch, errorMessage, isUnauthorized, readJson, redirectToLogin } from "@/components/clientFetch";
-import { formatDate, formatDayMonth } from "@/lib/format";
+import { formatDate } from "@/lib/format";
 import { hapticNotify } from "@/lib/haptics";
 import { showToast } from "@/lib/toast";
 import { alvSummaryKey, readCached, storeCached } from "@/lib/cached-resource";
@@ -16,6 +16,7 @@ import {
   vatFileStepText,
   vatFiledNote,
   vatFilingState,
+  vatDueDate,
   vatNothingToPay,
   vatPayStepText,
   vatStateLabel,
@@ -57,7 +58,9 @@ export function VatFilingCard({
   // A refund and a zero return have no payment step (F73). A filed return owes what was filed (F66).
   const nothingToPay = vatNothingToPay(figures);
   const owed = vatAmountToPay(figures);
-  const payStep = nothingToPay ? null : vatPayStepText(owed, dueIso);
+  // The year is named when the deadline falls after the period's own year (a yearly return, November, December).
+  const periodYear = Number(periodKey.slice(0, 4));
+  const payStep = nothingToPay ? null : vatPayStepText(owed, dueIso, periodYear);
 
   async function update(change: { filed?: boolean; paid?: boolean }, which: "filed" | "paid" | "undo") {
     setBusy(which);
@@ -94,7 +97,7 @@ export function VatFilingCard({
     }
   }
 
-  const due = formatDayMonth(dueIso);
+  const due = vatDueDate(dueIso, periodYear);
   return (
     <section id="ilmoita" className="scroll-mt-4">
       <h2 className="mb-2 px-1 text-caption font-normal text-ink-2">Ilmoita ja maksa</h2>
@@ -108,7 +111,7 @@ export function VatFilingCard({
           <ol className="list-decimal space-y-1 pl-5 text-caption text-ink-2">
             <li>Kirjaudu OmaVeroon (vero.fi/omavero).</li>
             <li>Valitse Arvonlisävero ja kausiveroilmoitus kaudelle {periodLabel}.</li>
-            <li>{vatFileStepText(dueIso)}</li>
+            <li>{vatFileStepText(dueIso, periodYear)}</li>
             {payStep ? (
               <li>{payStep} Viitenumero ja tilinumero ovat OmaVerossa kohdassa Maksut.</li>
             ) : null}
@@ -116,7 +119,7 @@ export function VatFilingCard({
         ) : null}
         {state === "filed" && !nothingToPay ? (
           <p className="text-caption text-ink-2">
-            {vatFiledNote(filing?.filedAt ? formatDate(filing.filedAt) : "", owed, dueIso, nothingToPay)}
+            {vatFiledNote(filing?.filedAt ? formatDate(filing.filedAt) : "", owed, dueIso, nothingToPay, periodYear)}
           </p>
         ) : null}
         {state === "paid" ? (

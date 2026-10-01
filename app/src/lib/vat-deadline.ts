@@ -196,8 +196,12 @@ export interface VatDue {
   period: VatPeriod;
   /** "2026-08", "2026-Q3" or "2026": the /api/alv `period` and the filing key. */
   key: string;
-  /** The ALV page understands month and quarter keys only; a year has none. */
-  queryKey: string | null;
+  /**
+   * The key /api/alv and the ALV page's `?period=` take: always the key itself
+   * (a yearly filer's year included, F13). Kept as its own field so callers that
+   * link or fetch say what they mean.
+   */
+  queryKey: string;
   /** "Elokuu 2026", "Q3/2026", "2026". */
   label: string;
   /** Statutory due date, already moved off a weekend or holiday (YYYY-MM-DD). */
@@ -230,7 +234,7 @@ export function vatDueFor(period: VatPeriod): VatDue {
   return {
     period,
     key,
-    queryKey: period.kind === "year" ? null : key,
+    queryKey: key,
     label:
       period.kind === "month"
         ? `${MONTH_NAMES[period.month! - 1]} ${period.year}`

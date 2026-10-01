@@ -51,26 +51,41 @@ export function vatNothingToPay(figures: { amount: number; isRefund: boolean; fi
   return figures.isRefund || figures.amount <= 0;
 }
 
+/**
+ * "12.10.", or with the year ("1.3.2027") when the deadline falls in a later year
+ * than the period itself: a yearly return, or November and December (F13).
+ */
+export function vatDueDate(dueIso: string, periodYear?: number): string {
+  const year = dueIso.slice(0, 4);
+  return periodYear != null && Number(year) !== periodYear ? `${formatDayMonth(dueIso)}${year}` : formatDayMonth(dueIso);
+}
+
 /** A sentence that ends in a date like "12.10." already carries its full stop (F73: no "12.10.."). */
 function endSentence(text: string): string {
   return text.endsWith(".") ? text : `${text}.`;
 }
 
 /** Step 3 of "Ilmoita ja maksa". */
-export function vatFileStepText(dueIso: string): string {
-  return endSentence(`Kirjoita kentät tältä sivulta ja lähetä ilmoitus viimeistään ${formatDayMonth(dueIso)}`);
+export function vatFileStepText(dueIso: string, periodYear?: number): string {
+  return endSentence(`Kirjoita kentät tältä sivulta ja lähetä ilmoitus viimeistään ${vatDueDate(dueIso, periodYear)}`);
 }
 
 /** Step 4; null when there is nothing to pay. */
-export function vatPayStepText(amount: number, dueIso: string): string | null {
+export function vatPayStepText(amount: number, dueIso: string, periodYear?: number): string | null {
   if (amount <= 0) return null;
-  return endSentence(`Maksa ${formatEur(amount)} viimeistään ${formatDayMonth(dueIso)}`);
+  return endSentence(`Maksa ${formatEur(amount)} viimeistään ${vatDueDate(dueIso, periodYear)}`);
 }
 
 /** The note under a filed return: when it was filed, and what is still to pay. */
-export function vatFiledNote(filedOn: string, amount: number, dueIso: string, nothingToPay: boolean): string {
+export function vatFiledNote(
+  filedOn: string,
+  amount: number,
+  dueIso: string,
+  nothingToPay: boolean,
+  periodYear?: number
+): string {
   const filed = filedOn ? `Ilmoitettu ${filedOn}.` : "Ilmoitettu.";
-  const pay = nothingToPay ? null : vatPayStepText(amount, dueIso);
+  const pay = nothingToPay ? null : vatPayStepText(amount, dueIso, periodYear);
   return pay ? `${filed} ${pay}` : filed;
 }
 
@@ -83,7 +98,7 @@ export const VAT_ROW_TITLE = "ALV-ilmoitus";
 export function vatDueSecondary(due: VatDue, figures: VatDueFigures | null): string {
   const parts = [due.label];
   if (figures?.isRefund) parts.push("palautus");
-  parts.push(`eräpäivä ${formatDayMonth(due.dueIso)}`);
+  parts.push(`eräpäivä ${vatDueDate(due.dueIso, due.period.year)}`);
   if (figures) parts.push(vatStateLabel(vatFilingState(figures.filing), vatNothingToPay(figures)));
   // F66: one rule for every screen that shows the row, not only the ALV page.
   if (vatChangedSinceFiling(figures)) parts.push("muuttunut ilmoituksen jälkeen");

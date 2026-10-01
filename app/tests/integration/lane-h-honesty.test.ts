@@ -143,3 +143,34 @@ describe("an approved receipt without a VAT breakdown is an open item (F72)", ()
     expect(body.totals.vat_gap).toBe(report.review.count);
   });
 });
+
+describe("a yearly filer has an annual view of the return (F13)", () => {
+  it("answers /api/alv for a bare year, sums the whole calendar year and files it", async () => {
+    const { GET: alv } = await import("@/app/api/alv/route");
+    const { PATCH: filing } = await import("@/app/api/alv/filing/route");
+    await createReceipt(user.id, { type: "tulo", date: "2025-03-05", totalAmountCents: 12_550 });
+    await createReceipt(user.id, { type: "tulo", date: "2025-11-20", totalAmountCents: 12_550 });
+    await createReceipt(user.id, { type: "tulo", date: "2026-01-02", totalAmountCents: 12_550 });
+
+    const response = await alv(buildRequest("GET", "/api/alv?period=2025", undefined, { cookie }));
+    expect(response.status).toBe(200);
+    const body = await readJson(response);
+    expect(body.period.key).toBe("2025");
+    expect(body.period.start).toBe("2025-01-01T00:00:00.000Z");
+    expect(body.receiptCount).toBe(2);
+    expect(body.field308.amount).toBeGreaterThan(0);
+
+    const filed = await filing(buildRequest("PATCH", "/api/alv/filing", { period: "2025", filed: true }, { cookie }));
+    expect(filed.status).toBe(200);
+    const again = await readJson(await alv(buildRequest("GET", "/api/alv?period=2025", undefined, { cookie })));
+    expect(again.filing.filedAmount).toBe(body.field308.amount);
+  });
+
+  it("still refuses a malformed period", async () => {
+    const { GET: alv } = await import("@/app/api/alv/route");
+    for (const bad of ["20256", "2025-13", "2025-Q5", "abc"]) {
+      const response = await alv(buildRequest("GET", `/api/alv?period=${bad}`, undefined, { cookie }));
+      expect(response.status).toBe(400);
+    }
+  });
+});

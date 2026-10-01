@@ -5,6 +5,7 @@ import {
   vatChangedNote,
   vatChangedSinceFiling,
   vatDueAmount,
+  vatDueDate,
   vatDueSecondary,
   vatFileStepText,
   vatFiledNote,
@@ -51,7 +52,7 @@ describe("next VAT due (TF-01)", () => {
   it("keys and kinds", () => {
     expect(vatPeriodKey({ kind: "quarter", year: 2026, quarter: 3 })).toBe("2026-Q3");
     expect(vatPeriodKey({ kind: "year", year: 2026 })).toBe("2026");
-    expect(vatDueFor({ kind: "year", year: 2026 }).queryKey).toBeNull();
+    expect(vatDueFor({ kind: "year", year: 2026 }).queryKey).toBe("2026");
     expect(vatPeriodKindOf("quarter")).toBe("quarter");
     expect(vatPeriodKindOf("whatever")).toBe("month");
     expect(vatPeriodKindOf(null)).toBe("month");
@@ -160,5 +161,22 @@ describe("a filed return owes what was filed (F66)", () => {
     expect(vatNothingToPay({ amount: 5, isRefund: true, filing: null })).toBe(true);
     expect(vatNothingToPay({ amount: 50, isRefund: false, filing: { ...filedOwing, filedAmount: -20 } })).toBe(true);
     expect(vatNothingToPay({ amount: 0, isRefund: false })).toBe(true);
+  });
+});
+
+describe("a deadline in a later year names the year (F13)", () => {
+  it("shows the year for a yearly return and for November, not for August", () => {
+    expect(vatDueDate("2027-03-01", 2026)).toBe("1.3.2027");
+    expect(vatDueDate("2027-01-12", 2026)).toBe("12.1.2027");
+    expect(vatDueDate("2026-10-12", 2026)).toBe("12.10.");
+    expect(vatDueDate("2026-10-12")).toBe("12.10.");
+  });
+
+  it("puts it in the row text every screen shares", () => {
+    const yearly = vatDueFor({ kind: "year", year: 2026 });
+    expect(vatDueSecondary(yearly, null)).toBe("2026 · eräpäivä 1.3.2027");
+    expect(vatDueSecondary(vatDueFor({ kind: "month", year: 2026, month: 11 }), null)).toBe(
+      "Marraskuu 2026 · eräpäivä 12.1.2027"
+    );
   });
 });
