@@ -12,11 +12,13 @@ import { Button, FormError } from "@/components/ui";
 import { hapticNotify } from "@/lib/haptics";
 import { showToast } from "@/lib/toast";
 import { ACCOUNTING_RETENTION_YEARS } from "@/lib/session-policy";
+import { CLOSE_NEXT_COPY, CLOSE_PURGE_COPY, CLOSE_RETENTION_COPY } from "@/lib/account-copy";
 
 interface AccountRequestRow {
   id: string;
   kindLabel: string;
   statusLabel: string;
+  status: string;
   downloadable: boolean;
   createdAt: string;
 }
@@ -102,8 +104,12 @@ export default function TietosuojaPage() {
         <h2 className="text-caption text-ink-2">Mitä LashKirja säilyttää</h2>
         <p>
           Tilillä ovat nimesi, sähköpostisi ja salasanan tiiviste, yrityksen laskutustiedot,
-          kuitit ja niiden tiedostot, tiliotteet, pankkitilit, asiakkaat, laskut, maksut ja
-          keskustelut avustajan kanssa.
+          kuitit ja niiden tiedostot, tiliotteet, pankkitilit, asiakkaat, laskut, maksut,
+          yhdistetyn postilaatikon tiedot ja keskustelut avustajan kanssa.
+        </p>
+        <p>
+          Tietojen kopio sisältää nämä tiedot ja kuittien tiedostot. Siinä ei ole salasanaasi,
+          postilaatikon salasanaa eikä pankkiyhteyden salaisuuksia, eikä tiliotteiden alkuperäisiä tiedostoja.
         </p>
         <h2 className="pt-2 text-caption text-ink-2">Avustaja</h2>
         <p>
@@ -113,7 +119,7 @@ export default function TietosuojaPage() {
         <h2 className="pt-2 text-caption text-ink-2">Säilytys</h2>
         <p>
           Kirjanpitoaineistoa säilytetään {ACCOUNTING_RETENTION_YEARS} vuotta tilikauden päättymisestä.
-          Tilin sulkeminen ei poista kuitteja tai laskuja heti.
+          Tilin sulkeminen ei poista kuitteja eikä laskuja.
         </p>
         <p>Kuukauden viennin zip löytyy Raporteista.</p>
         <Link href="/raportit" className="active-press -mt-1 inline-flex min-h-11 items-center text-accent">
@@ -135,8 +141,8 @@ export default function TietosuojaPage() {
           <div>
             <h2 className="text-body font-medium text-ink">Pyyntö tuelle</h2>
             <p className="mt-1 text-caption text-ink-2">
-              Nykyinen salasana vahvistaa, että pyyntö tulee sinulta. Tuki käsittelee sen. Aineistoa ei tuhota
-              tästä näkymästä. Sulkeminen estää kirjautumisen, kun pyyntö on valmis. Kuitit ja laskut säilyvät.
+              Nykyinen salasana vahvistaa, että pyyntö tulee sinulta. Tuki käsittelee pyynnön ja ilmoittaa sinulle
+              sähköpostilla. Kun tili suljetaan, kirjautuminen estetään. {CLOSE_PURGE_COPY} {CLOSE_RETENTION_COPY}
             </p>
           </div>
           {requestsFailed && (
@@ -158,6 +164,12 @@ export default function TietosuojaPage() {
                   <span className="min-w-0 flex-1">
                     <span className="block text-ink">{row.kindLabel}</span>
                     <span className="block text-caption text-ink-2">{row.statusLabel}</span>
+                    {(row.status === "pending" || row.status === "in_progress") && (
+                      <span className="block text-caption text-ink-2">
+                        Kirjattu {new Date(row.createdAt).toLocaleDateString("fi-FI")}. Tuki ilmoittaa sähköpostilla, kun
+                        pyyntö on käsitelty.
+                      </span>
+                    )}
                   </span>
                   {row.downloadable && (
                     <AuthedFileLink
@@ -228,7 +240,7 @@ export default function TietosuojaPage() {
       <ConfirmModal
         isOpen={confirmClose}
         title="Pyydetäänkö tilin sulkemista?"
-        description={`Pyyntö kirjataan tuelle. Kirjautuminen estetään, kun pyyntö on käsitelty. Kirjanpitoaineistoa säilytetään ${ACCOUNTING_RETENTION_YEARS} vuotta tilikauden päättymisestä.`}
+        description={`Pyyntö kirjataan tuelle. ${CLOSE_NEXT_COPY} ${CLOSE_PURGE_COPY} ${CLOSE_RETENTION_COPY}`}
         confirmLabel="Pyydä sulkemista"
         onConfirm={async () => {
           const ok = await sendRequest("close");

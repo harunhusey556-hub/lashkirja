@@ -2,6 +2,7 @@ import bcrypt from "bcryptjs";
 import type { NextRequest } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
+import { CLOSED_LOGIN_MESSAGE } from "@/lib/account-copy";
 import {
   clearRateLimit,
   consumeRateLimit,
@@ -74,7 +75,7 @@ export async function checkCredentials(
     return {
       ok: false,
       status: 403,
-      error: "Tilin käyttö on suljettu. Kirjanpitoaineisto säilyy säilytysajan.",
+      error: CLOSED_LOGIN_MESSAGE,
     };
   }
 

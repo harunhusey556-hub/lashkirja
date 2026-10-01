@@ -12,6 +12,7 @@ import {
   completeAccountExport,
   setAccountRequestStatus,
 } from "@/lib/account-requests";
+import { CLOSED_LOGIN_MESSAGE } from "@/lib/account-copy";
 import { resetRateLimitsForTests } from "@/lib/rate-limit";
 import { createReceipt, createUser, resetDatabase, type TestUser } from "./helpers/factories";
 import { buildRequest, readJson, routeContext } from "./helpers/http";
@@ -118,9 +119,8 @@ describe("account request workflow", () => {
       buildRequest("POST", "/api/auth/login", { email: user.email, password: PASSWORD })
     );
     expect(again.status).toBe(403);
-    expect(await readJson<{ error: string }>(again)).toMatchObject({
-      error: "Tilin käyttö on suljettu. Kirjanpitoaineisto säilyy säilytysajan.",
-    });
+    expect((await readJson<{ error: string }>(again)).error).toBe(CLOSED_LOGIN_MESSAGE);
+    expect(CLOSED_LOGIN_MESSAGE).toMatch(/^Tilin käyttö on suljettu\./);
   });
 
   it("lets the owner download a completed export and hides it from another user", async () => {
@@ -169,7 +169,7 @@ describe("password recovery without invoice SMTP", () => {
         buildRequest("POST", "/api/auth/password/forgot", { email: user.email })
       );
       expect(sent.status).toBe(200);
-      expect((await readJson<{ message: string }>(sent)).message).toMatch(/tuesta/);
+      expect((await readJson<{ message: string }>(sent)).message).toMatch(/tukeen/);
       expect(await prisma.accountToken.count({ where: { userId: user.id } })).toBe(1);
       const queued = await prisma.accountRequest.findMany({
         where: { userId: user.id, kind: "recovery" },

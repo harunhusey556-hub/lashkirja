@@ -18,6 +18,7 @@ import { getAccessToken, signIn } from "@/lib/auth-client";
 import { IS_MOBILE_BUILD } from "@/lib/build-target";
 import { bootMobile } from "@/lib/mobile/boot";
 import { markFirstScreen } from "@/lib/splash";
+import { CLOSED_LOGIN_MESSAGE } from "@/lib/account-copy";
 
 const SHOW_DEMO_LOGIN = !IS_MOBILE_BUILD && process.env.NEXT_PUBLIC_SHOW_DEMO_LOGIN === "true";
 
@@ -41,7 +42,7 @@ const INITIAL_NOTICES: Record<string, { message: string; tone: Tone }> = {
   },
   expired: { message: "Istuntosi vanhentui. Kirjaudu sisään uudelleen.", tone: "info" },
   closed: {
-    message: "Tilin käyttö on suljettu. Kirjanpitoaineisto säilyy säilytysajan.",
+    message: CLOSED_LOGIN_MESSAGE,
     tone: "danger",
   },
 };

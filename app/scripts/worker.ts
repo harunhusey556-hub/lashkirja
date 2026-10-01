@@ -1,7 +1,6 @@
-import { prisma } from "../src/lib/db";
 import { enableBankingStatus } from "../src/lib/enablebanking/signing";
 import { syncDueBankConnections } from "../src/lib/enablebanking/sync";
-import { syncImapAccount } from "../src/lib/mail-sync";
+import { listSyncableImapAccounts, syncImapAccount } from "../src/lib/mail-sync";
 import { drainPendingDocumentJobs } from "../src/lib/document-jobs";
 
 const SYNC_INTERVAL_MS = 10 * 60 * 1000; // 10 minutes
@@ -22,7 +21,7 @@ async function runBankSyncCycle() {
 async function runSyncCycle() {
   console.log(`[${new Date().toISOString()}] Starting background email sync cycle...`);
   try {
-    const accounts = await prisma.imapAccount.findMany();
+    const accounts = await listSyncableImapAccounts();
     if (accounts.length === 0) {
       console.log(`[${new Date().toISOString()}] No IMAP accounts connected. Skipping sync.`);
       return;

@@ -5,7 +5,7 @@ import { guardWrite } from "@/lib/http-security";
 import { consumeRateLimit } from "@/lib/rate-limit";
 import { AccountSecurityError, recordAccountRequest } from "@/lib/account-security";
 import { listUserAccountRequests } from "@/lib/account-requests";
-import { ACCOUNTING_RETENTION_YEARS } from "@/lib/session-policy";
+import { CLOSE_REQUEST_MESSAGE } from "@/lib/account-copy";
 
 const bodySchema = z.object({
   kind: z.enum(["close", "export"]),
@@ -43,8 +43,8 @@ export async function POST(req: NextRequest) {
     );
     const message =
       parsed.data.kind === "close"
-        ? `Pyyntö on kirjattu. Kirjanpitoaineistoa säilytetään ${ACCOUNTING_RETENTION_YEARS} vuotta tilikauden päättymisestä, joten tiliä ei suljeta tästä pyynnöstä.`
-        : "Pyyntö kopiosta on kirjattu. Kuukausipaketti löytyy Raporteista jo nyt.";
+        ? CLOSE_REQUEST_MESSAGE
+        : "Pyyntö kopiosta on kirjattu. Tuki ilmoittaa sinulle sähköpostilla, kun kopio on valmis. Kuukausipaketti löytyy Raporteista jo nyt.";
     return NextResponse.json({ ok: true, request, message });
   } catch (error) {
     if (error instanceof AccountSecurityError) {

@@ -63,12 +63,18 @@ function isBodyOnlyReceipt(envelope: { subject?: string } | null | undefined): b
   return keywords.some(kw => subject.includes(kw));
 }
 
+/** The mailboxes a background run may read: a closed account's mailbox is never polled again (F57). */
+export async function listSyncableImapAccounts() {
+  return prisma.imapAccount.findMany({ where: { user: { accessDisabledAt: null } } });
+}
+
 export async function syncImapAccount(accountId: string) {
   const account = await prisma.imapAccount.findUnique({
     where: { id: accountId },
-    select: { userId: true },
+    select: { userId: true, user: { select: { accessDisabledAt: true } } },
   });
   if (!account) throw new Error("Account not found");
+  if (account.user.accessDisabledAt) throw new Error("Tili on suljettu, postilaatikkoa ei tarkisteta.");
   return withTrackedJob(
     account.userId,
     {

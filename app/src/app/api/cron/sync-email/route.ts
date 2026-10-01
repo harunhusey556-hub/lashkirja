@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/db";
-import { syncImapAccount } from "@/lib/mail-sync";
+import { listSyncableImapAccounts, syncImapAccount } from "@/lib/mail-sync";
 
 import { errorText } from "@/lib/api-errors";
 import { checkCronAuth } from "@/lib/cron-auth";
@@ -11,7 +10,7 @@ export async function GET(req: NextRequest) {
   if (!auth.ok) return auth.response;
 
   try {
-    const accounts = await prisma.imapAccount.findMany();
+    const accounts = await listSyncableImapAccounts();
     let totalSynced = 0;
     const errors: Array<{ accountId?: string; email?: string; error: string }> = [];
 

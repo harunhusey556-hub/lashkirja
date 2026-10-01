@@ -335,7 +335,8 @@ export async function syncDueBankConnections(now = new Date()): Promise<{
   errors: Array<{ connectionId: string; message: string }>;
 }> {
   const connections = await prisma.bankConnection.findMany({
-    where: { status: "active" },
+    // A closed account's bank connection is not pulled again (F57).
+    where: { status: "active", user: { accessDisabledAt: null } },
     select: { id: true, userId: true, lastSyncAt: true, validUntil: true },
   });
   let imported = 0;

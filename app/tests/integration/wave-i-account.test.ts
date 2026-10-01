@@ -322,6 +322,9 @@ describe("wave I account", () => {
     expect(accepted.status).toBe(200);
     const body = await readJson<{ message: string }>(accepted);
     expect(body.message).toMatch(/6 vuotta/);
+    // One story for the toast, the dialog and the login refusal (F55).
+    expect(body.message).toMatch(/kirjautuminen estetään/);
+    expect(body.message).not.toMatch(/ei suljeta/);
     expect(await prisma.user.findUnique({ where: { id: user.id } })).not.toBeNull();
     expect(await prisma.accountRequest.count({ where: { userId: user.id, kind: "close" } })).toBe(1);
   });

@@ -1,8 +1,9 @@
 /**
  * Account close, data-copy, and mail-recovery requests.
  *
- * Completing a close request sets User.accessDisabledAt and revokes sessions.
- * Receipts and invoices stay. Completing an export writes a zip the user can
+ * Completing a close request sets User.accessDisabledAt, revokes sessions and
+ * purges what is not accounting material (mailbox credential, assistant
+ * conversations, bank secrets, phone). Receipts and invoices stay. Completing an export writes a zip the user can
  * download. A recovery row is queued when a reset link could not be mailed.
  */
 import { mkdir, readFile, writeFile } from "fs/promises";
@@ -11,6 +12,7 @@ import { prisma } from "@/lib/db";
 import { revokeAuthSessions } from "@/lib/account-security";
 import { toCsv, type CsvValue } from "@/lib/csv";
 import { buildStoredZip } from "@/lib/zip-store";
+import { readUserUpload, safeOriginalName } from "@/lib/storage";
 import { ACCOUNTING_RETENTION_YEARS } from "@/lib/session-policy";
 
 export const ACCOUNT_REQUEST_STATUSES = [
@@ -151,41 +153,85 @@ export async function setAccountRequestStatus(id: string, status: AccountRequest
   });
 }
 
+const COPY_FILE_KEY = /^[a-f0-9-]{36}\.[a-z0-9]{2,5}$/;
+
+function jsonEntry(value: unknown): Buffer {
+  return Buffer.from(JSON.stringify(value, null, 2), "utf8");
+}
+
+/**
+ * The data copy: everything the Tietosuoja page says the account holds, as
+ * JSON (one file per kind, all columns) plus the three CSV overviews and the
+ * receipt files. Left out on purpose and said in lue-minut.txt: the password
+ * hash, the mailbox password and the bank connection's secrets.
+ */
 export async function buildAccountCopyZip(userId: string): Promise<Buffer> {
   const user = await prisma.user.findUnique({
     where: { id: userId },
-    select: {
-      email: true,
-      firstName: true,
-      lastName: true,
-      entityType: true,
-      businessName: true,
-      businessId: true,
-      createdAt: true,
-    },
+    omit: { passwordHash: true, legacySessionsRevokedAt: true },
   });
   if (!user) throw new AccountRequestError("Ei käyttäjää", 404);
-  const [customers, invoices, receipts] = await Promise.all([
-    prisma.customer.findMany({
-      where: { userId },
-      orderBy: { name: "asc" },
-      select: { name: true, email: true, businessId: true, archivedAt: true },
-    }),
+  const byUser = { where: { userId } };
+  const [
+    customers,
+    invoices,
+    purchaseInvoices,
+    receipts,
+    statements,
+    transactions,
+    bankAccounts,
+    bankConnections,
+    vatFilings,
+    recurring,
+    catalog,
+    mailboxes,
+    conversations,
+  ] = await Promise.all([
+    prisma.customer.findMany({ ...byUser, orderBy: { name: "asc" } }),
     prisma.salesInvoice.findMany({
-      where: { userId },
+      ...byUser,
       orderBy: { number: "asc" },
-      select: { number: true, status: true, issueDate: true, grossCents: true },
+      include: { lines: true, payments: true, reminders: true, emailSends: true, activities: true },
     }),
-    prisma.receipt.findMany({
-      where: { userId },
+    prisma.purchaseInvoice.findMany({ ...byUser, orderBy: { createdAt: "asc" }, include: { payments: true } }),
+    prisma.receipt.findMany({ ...byUser, orderBy: { createdAt: "asc" } }),
+    prisma.statement.findMany({ ...byUser, orderBy: { id: "asc" } }),
+    prisma.transaction.findMany({ where: { statement: { userId } }, orderBy: { createdAt: "asc" } }),
+    prisma.bankAccount.findMany({ ...byUser, orderBy: { createdAt: "asc" }, include: { monthlyBalances: true } }),
+    prisma.bankConnection.findMany({
+      ...byUser,
       orderBy: { createdAt: "asc" },
-      select: { vendor: true, date: true, totalAmountCents: true, fileName: true, category: true },
+      omit: { sessionIdEnc: true, authStateHash: true },
+      include: { accounts: true },
+    }),
+    prisma.vatFiling.findMany({ ...byUser }),
+    prisma.recurringInvoice.findMany({ ...byUser, include: { lines: true, runs: true } }),
+    prisma.catalogItem.findMany({ ...byUser }),
+    prisma.imapAccount.findMany({ ...byUser, omit: { encryptedPass: true } }),
+    prisma.conversation.findMany({
+      ...byUser,
+      orderBy: { createdAt: "asc" },
+      include: { messages: { orderBy: { createdAt: "asc" } } },
     }),
   ]);
-  const readme =
-    `LashKirjan tietokopio.\n` +
-    `Kirjanpitoaineistoa säilytetään ${ACCOUNTING_RETENTION_YEARS} vuotta. ` +
-    `Tämä paketti ei sisällä salasanaa, sähköpostin salasanaa eikä pankkiyhteyden salaisuuksia.\n`;
+
+  const jsonFiles: Array<[string, unknown[] | object]> = [
+    ["profiili.json", user],
+    ["asiakkaat.json", customers],
+    ["laskut.json", invoices],
+    ["ostolaskut.json", purchaseInvoices],
+    ["kuitit.json", receipts],
+    ["tiliotteet.json", statements],
+    ["tilitapahtumat.json", transactions],
+    ["pankkitilit.json", bankAccounts],
+    ["pankkiyhteydet.json", bankConnections],
+    ["alv-ilmoitukset.json", vatFilings],
+    ["toistuvat-laskut.json", recurring],
+    ["tuotteet.json", catalog],
+    ["postilaatikko.json", mailboxes],
+    ["avustaja.json", conversations],
+  ];
+
   const customerRows: CsvValue[][] = customers.map((row) => [
     row.name,
     row.email,
@@ -205,25 +251,58 @@ export async function buildAccountCopyZip(userId: string): Promise<Buffer> {
     row.category,
     row.fileName,
   ]);
-  return buildStoredZip([
-    { name: "lue-minut.txt", data: Buffer.from(readme, "utf8") },
-    {
-      name: "profiili.json",
-      data: Buffer.from(JSON.stringify(user, null, 2), "utf8"),
-    },
-    {
-      name: "asiakkaat.csv",
-      data: Buffer.from(toCsv(["nimi", "sahkoposti", "ytunnus", "tila"], customerRows), "utf8"),
-    },
-    {
-      name: "laskut.csv",
-      data: Buffer.from(toCsv(["numero", "tila", "paiva", "summa"], invoiceRows), "utf8"),
-    },
+
+  const entries: Array<{ name: string; data: Buffer }> = [];
+  for (const [name, value] of jsonFiles) entries.push({ name, data: jsonEntry(value) });
+  entries.push(
+    { name: "asiakkaat.csv", data: Buffer.from(toCsv(["nimi", "sahkoposti", "ytunnus", "tila"], customerRows), "utf8") },
+    { name: "laskut.csv", data: Buffer.from(toCsv(["numero", "tila", "paiva", "summa"], invoiceRows), "utf8") },
     {
       name: "kuitit.csv",
       data: Buffer.from(toCsv(["myyja", "paiva", "summa", "kategoria", "tiedosto"], receiptRows), "utf8"),
-    },
-  ]);
+    }
+  );
+
+  // The receipt files themselves, with a list of any that could not be read.
+  const missingFiles: string[] = [];
+  const usedNames = new Set<string>();
+  for (const receipt of receipts) {
+    if (!COPY_FILE_KEY.test(receipt.filePath)) {
+      missingFiles.push(`${receipt.fileName}: tiedostoa ei ole tallennettu palvelimelle`);
+      continue;
+    }
+    try {
+      const bytes = await readUserUpload(userId, receipt.filePath);
+      const base = safeOriginalName(receipt.fileName || "tosite");
+      let name = `tositteet/${base}`;
+      for (let n = 2; usedNames.has(name); n += 1) name = `tositteet/${n}-${base}`;
+      usedNames.add(name);
+      entries.push({ name, data: bytes });
+    } catch {
+      missingFiles.push(`${receipt.fileName}: tiedostoa ei löytynyt`);
+    }
+  }
+  if (missingFiles.length > 0) {
+    entries.push({ name: "tositteet/puuttuvat.txt", data: Buffer.from(missingFiles.join("\n"), "utf8") });
+  }
+
+  const counts = jsonFiles
+    .filter((entry): entry is [string, unknown[]] => Array.isArray(entry[1]))
+    .map(([name, rows]) => `${name}: ${rows.length}`);
+  const readme =
+    `LashKirjan tietokopio.\n\n` +
+    `Tässä ovat tilisi tiedot: profiili ja laskutustiedot, asiakkaat, myynti- ja ostolaskut, maksut, kuitit ja niiden tiedostot, ` +
+    `tiliotteet ja tilitapahtumat, pankkitilit ja pankkiyhteydet, ALV-ilmoitukset, toistuvat laskut, tuotteet, ` +
+    `yhdistetyn postilaatikon tiedot ja keskustelut avustajan kanssa. Jokainen tieto on JSON-tiedostossa; ` +
+    `laskut, asiakkaat ja kuitit ovat lisäksi csv-yhteenvetona.\n\n` +
+    `Mukana ei ole salasanasi tiivistettä, postilaatikon salasanaa eikä pankkiyhteyden salaisuuksia. ` +
+    `Tiliotteiden alkuperäisiä tiedostoja ei ole mukana, mutta niiden rivit ovat tiedostossa tilitapahtumat.json.\n` +
+    `Kirjanpitoaineistoa säilytetään ${ACCOUNTING_RETENTION_YEARS} vuotta.\n\n` +
+    `Rivejä tiedostoissa:\n` +
+    counts.join("\n") +
+    `\ntositteet/ (kuittien tiedostot): ${usedNames.size}\n`;
+  entries.unshift({ name: "lue-minut.txt", data: Buffer.from(readme, "utf8") });
+  return buildStoredZip(entries);
 }
 
 export async function completeAccountExport(id: string) {
@@ -248,11 +327,25 @@ export async function completeAccountClose(id: string) {
     throw new AccountRequestError("Sulkeminen koskee vain sulkemispyyntöä.", 400);
   }
   const now = new Date();
+  // What is purged and what stays (F57). Receipts, invoices, statements, bank
+  // rows, customers and the seller details printed on invoices are accounting
+  // records and stay for the retention period. The mailbox connection and its
+  // password, the assistant conversations, the bank connection's secrets, the
+  // phone number and the onboarding answers are not part of any retained
+  // document and go now.
   await prisma.$transaction([
+    prisma.imapAccount.deleteMany({ where: { userId: row.userId } }),
+    prisma.chatMessage.deleteMany({ where: { userId: row.userId } }),
+    prisma.conversation.deleteMany({ where: { userId: row.userId } }),
+    prisma.bankConnection.updateMany({
+      where: { userId: row.userId },
+      data: { sessionIdEnc: null, authStateHash: null, status: "revoked" },
+    }),
     prisma.user.update({
       where: { id: row.userId },
-      data: { accessDisabledAt: now },
+      data: { accessDisabledAt: now, phone: null, businessDetails: null, pendingEmail: null },
     }),
+    prisma.accountToken.updateMany({ where: { userId: row.userId, usedAt: null }, data: { usedAt: now } }),
     prisma.accountRequest.update({
       where: { id: row.id },
       data: { status: "completed", resolvedAt: now },
