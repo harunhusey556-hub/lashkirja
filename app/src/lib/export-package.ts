@@ -3,7 +3,8 @@
  * the user already stored. No bank session secrets and no server paths.
  */
 import { prisma } from "./db";
-import { alvReportOf, loadAlvPeriodSources } from "./alv-period";
+import { alvReportOf, loadAlvPeriodSources, type PurchaseVatTreatment } from "./alv-period";
+import { PURCHASE_STATUS } from "./status-labels";
 import { buildProfitLoss, periodToEuros } from "./reports";
 import { centsToEuros } from "./money";
 import { csvMoney, toCsv, type CsvValue } from "./csv";
@@ -17,6 +18,16 @@ const STORAGE_KEY = /^[a-f0-9-]{36}\.[a-z0-9]{2,5}$/;
 function isoDate(value: Date | null): string {
   return value ? value.toISOString().slice(0, 10) : "";
 }
+
+/** What the VAT return did with a purchase invoice, in the words the accountant reads (M1-5). */
+const PURCHASE_TREATMENT_TEXT: Record<PurchaseVatTreatment, string> = {
+  counted: "Mukana vähennettävässä ALV:ssä",
+  linked_receipt: "Pois: liitetty kuitti on mukana",
+  bank_receipt: "Pois: maksun tilirivillä on kuitti",
+  same_purchase_receipt: "Pois: sama osto on mukana kuittina",
+  cancelled: "Pois: mitätöity",
+  no_vat: "Ei ALV:ta",
+};
 
 /**
  * A package period: one month ("2026-03"), a quarter ("2026-Q1") or a whole
@@ -152,6 +163,25 @@ export async function buildPeriodPackage(
     })
   );
 
+  // The purchase invoices behind field 307, one row each, as the VAT return treated them.
+  const purchaseCsv = toCsv(
+    ["Päivä", "Toimittaja", "Laskun numero", "Yhteensä", "ALV", "Tila", "ALV:n käsittely", "Huomio"],
+    sources.purchaseInvoiceRows.map((row): CsvValue[] => [
+      isoDate(row.issueDate),
+      row.supplierName,
+      row.invoiceNumber,
+      csvMoney(centsToEuros(row.grossCents)),
+      csvMoney(centsToEuros(row.vatCents)),
+      PURCHASE_STATUS[row.status === "paid" || row.status === "cancelled" ? row.status : "open"].label,
+      PURCHASE_TREATMENT_TEXT[row.treatment],
+      row.suspected
+        ? "Samansuuruinen kuitti löytyy, tarkista onko se sama osto"
+        : row.receiptUnusable
+          ? "Liitetystä kuitista puuttuu päivä tai ALV-erittely"
+          : "",
+    ])
+  );
+
   const matches = {
     month,
     basis: "Pankkitapahtumat kohdekuukauden (periodMonth) mukaan. Kuitit ja laskut kalenteripäivän mukaan.",
@@ -174,6 +204,7 @@ export async function buildPeriodPackage(
           `Kirjanpitopaketti ${month}`,
           "",
           "Tuloslaskelma ja ALV perustuvat hyväksyttyihin kuitteihin ja myyntilaskuihin laskun päivän mukaan (laskutusperuste). Luonnokset eivät ole mukana.",
+          "Ostolaskun ALV on mukana vähennettävässä verossa laskun päivän mukaan. Jos sama osto on jo kuittina, ostolaskun ALV jätetään pois (csv/ostolaskut.csv kertoo jokaisesta laskusta, onko se mukana).",
           "Hyvityslasku vähentää myyntiä sillä kaudella, jolla se on annettu. Hyvitetty lasku pysyy omalla kaudellaan.",
           "Tuloa ei lasketa kahteen kertaan: kuitti, joka on tehty laskun maksaneesta tilitapahtumasta, jätetään pois.",
           "Käteisnäkymä (kohdistukset.json) käyttää tiliotteen kohdekuukautta, ei kuitin päivää.",
@@ -207,6 +238,7 @@ export async function buildPeriodPackage(
     { name: "csv/kuitit.csv", data: Buffer.from(receiptCsv, "utf8") },
     { name: "csv/pankkitapahtumat.csv", data: Buffer.from(transactionCsv, "utf8") },
     { name: "csv/myyntilaskut.csv", data: Buffer.from(invoiceCsv, "utf8") },
+    { name: "csv/ostolaskut.csv", data: Buffer.from(purchaseCsv, "utf8") },
     { name: "taydennys/kohdistukset.json", data: Buffer.from(JSON.stringify(matches, null, 2), "utf8") },
   ];
 

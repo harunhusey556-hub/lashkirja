@@ -1,6 +1,8 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { GET as alv } from "@/app/api/alv/route";
 import { GET as monthStatus } from "@/app/api/dashboard/month/route";
+import { GET as exportPackage } from "@/app/api/export/package/route";
+import { readStoredZip } from "@/lib/zip-store";
 import { PATCH as patchInvoice } from "@/app/api/purchase-invoices/[id]/route";
 import { GET as receiptCandidates } from "@/app/api/purchase-invoices/[id]/receipts/route";
 import { prisma } from "@/lib/db";
@@ -182,5 +184,29 @@ describe("M1-3: a month that holds only a purchase invoice has content", () => {
       await monthStatus(buildRequest("GET", "/api/dashboard/month?month=2026-05", undefined, { cookie }))
     );
     expect(other.hasContent).toBe(false);
+  });
+});
+
+describe("M1-5: the accountant package lists the purchase invoices behind field 307", () => {
+  it("has csv/ostolaskut.csv saying which invoice counted and which was left out, and agrees with alv.json", async () => {
+    await createReceipt(user.id, { date: `${PERIOD}-12`, totalAmountCents: 12_400, vendor: "Ripsitukku Oy" });
+    await purchase({ invoiceNumber: "A-1" }); // same purchase as the receipt: left out
+    await purchase({ supplierName: "=HYPERLINK(1)", grossCents: 5_000, vatCents: 1_000, netCents: 4_000, invoiceNumber: "B-2" });
+    await purchase({ supplierName: "Mitätöity Oy", status: "cancelled", grossCents: 7_000, vatCents: 1_400, netCents: 5_600 });
+
+    const response = await exportPackage(buildRequest("GET", `/api/export/package?month=${PERIOD}`, undefined, { cookie }));
+    expect(response.status).toBe(200);
+    const files = readStoredZip(Buffer.from(await response.arrayBuffer()));
+    const csv = files.get("csv/ostolaskut.csv")!.toString("utf8");
+    const lines = csv.replace(/^﻿/, "").trim().split(/\r?\n/);
+    expect(lines[0]).toBe("Päivä;Toimittaja;Laskun numero;Yhteensä;ALV;Tila;ALV:n käsittely;Huomio");
+    expect(lines).toHaveLength(4);
+    expect(csv).toContain("2026-08-10;Ripsitukku Oy;A-1;124,00;25,19;Odottaa maksua;Pois: sama osto on mukana kuittina;");
+    // A text cell that starts like a formula is neutralised, like in the other CSVs.
+    expect(csv).toContain("'=HYPERLINK(1);B-2;50,00;10,00;Odottaa maksua;Mukana vähennettävässä ALV:ssä");
+    expect(csv).toContain("Mitätöity Oy;;70,00;14,00;Mitätöity;Pois: mitätöity");
+    const alvJson = JSON.parse(files.get("raportit/alv.json")!.toString("utf8"));
+    expect(alvJson.sources.purchaseInvoiceVat).toBe(10);
+    expect(files.get("lue-minut.txt")!.toString("utf8")).toContain("ostolaskut.csv");
   });
 });
