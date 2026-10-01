@@ -33,14 +33,14 @@ The Bar column cites the QUALITY-BAR item.
 
 | ID | Sev | Bar | Report (owner's words, translated) | Status |
 |---|---|---|---|---|
-| OWN-16 | P1 | N2, L1 | "It doesn't feel like an app." | open |
-| OWN-17 | P1 | N3 | "The screen flashes when the page changes." | open |
-| OWN-18 | P0 | A2 | "The bank is connected, but the home page says 'Yhdistä pankki' / no connected bank." Cause, confirmed on prod.db: an Enable Banking consent writes `ConnectedAccount` rows (1 in scope, with a balance, active S-Pankki connection), while Koti (`api/dashboard` -> `getBankOverview`, and `setup.bank`) only reads `BankAccount` (0 rows). | open |
-| OWN-19 | P1 | N2, N4 | "Page transition animations are not good enough for a phone app; they don't give enough feedback." | open |
-| OWN-20 | P1 | T2 | "Some buttons have no background and don't give the press animation feedback." | open |
-| OWN-21 | P1 | F | "The app needs passkey." | open |
-| OWN-22 | P2 | V | "Cool charts on the home page would look good." | open |
-| OWN-23 | P1 | V, L1 | "Bring the front end forward in general": more visual presence and polish. | open |
+| OWN-16 | P1 | N2, L1 | "It doesn't feel like an app." | done in code (6c01c96, e24c112); needs the owner device check |
+| OWN-17 | P1 | N3 | "The screen flashes when the page changes." | done (6c01c96): cause = slide started with the first heavy paint, tab fade dimmed the page a frame; frame probe in .superpowers/quality/batch-3/laneB |
+| OWN-18 | P0 | A2 | "The bank is connected, but the home page says 'Yhdistä pankki' / no connected bank." Cause, confirmed on prod.db: an Enable Banking consent writes `ConnectedAccount` rows (1 in scope, with a balance, active S-Pankki connection), while Koti (`api/dashboard` -> `getBankOverview`, and `setup.bank`) only reads `BankAccount` (0 rows). | done (bc6a8d9, c9e95ff); deployed 12a8fe0 |
+| OWN-19 | P1 | N2, N4 | "Page transition animations are not good enough for a phone app; they don't give enough feedback." | done (6c01c96): 420 ms spring push/pop after paint, tab crossfade |
+| OWN-20 | P1 | T2 | "Some buttons have no background and don't give the press animation feedback." | done (6c01c96, e24c112, 12a8fe0): press state everywhere, 64 text buttons tinted; icon-only buttons untinted (ask owner) |
+| OWN-21 | P1 | F | "The app needs passkey." | done in code (f38d39c, cb96a43, 4037b3c, 1c3e75b); needs APPLE_TEAM_ID + WEBAUTHN_RP_ID in prod .env, Associated Domains on the App ID and an Xcode/TestFlight-signed build (docs/PASSKEY.md) |
+| OWN-22 | P2 | V | "Cool charts on the home page would look good." | done (81d3942, c9e95ff): balance trend + 6-month income/expense on Koti |
+| OWN-23 | P1 | V, L1 | "Bring the front end forward in general": more visual presence and polish. | partly (charts, transitions, tinted buttons); continues next batch |
 
 ## Audit findings
 
@@ -94,3 +94,8 @@ The Bar column cites the QUALITY-BAR item.
 - Verified: tsc clean, unit 1132 pass (5 known Windows failures), integration 562/562, lint at baseline, live smoke 12/12 (one inferred, F07 only in desktop emulation).
 - Still open: 66 P1 and 78 P2 of the live-test list. Themes: onboarding/Koti/month-close honesty (F10-F13, F20-F26), glossary and developer text (F27, F28), offline recovery (F31-F34), account and privacy (F53-F57, F18), AI assistant (F58-F60), bank connection states (G30-G35, F48, F50-F52), forms and validation (F14, F23, F37, F62-F65), send and recurring edge cases (G03-G07, G09), search and misc (F08, F09, F38-F42, F66, F70, F72).
 - Owner decisions pending: OCR for receipt photos in production (Tesseract + Poppler on the PC, or a cloud/local AI image path; "Kuitti luetaan automaattisesti" copy is untrue without it), the AI "main brain" choice (local model vs cloud, privacy), reminder wait = the term the last reminder gave (7 days) instead of 24 h, an unregistered seller forces VAT 0 silently, overpayment refused, existing orphan drafts and invoices with VAT from an unregistered seller in dev data.
+
+## Batch 3 (2026-10-01), deployed 12a8fe0, IPA run 36862695221, iOS Simulator run 36862699917 green
+- Lanes: Koti bank truth + charts, shell transitions + press, passkeys, text-button sweep; one review (2 P1, 5 P2), all fixed.
+- Verification: tsc clean; integration 742/742; unit 1408 pass (5 known Windows failures); mobile e2e no regressions vs baseline (12 environmental failures on both).
+- Passkey removal also happens on password change and "sign out other devices" (wider than the review asked); owner to confirm.
