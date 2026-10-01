@@ -53,6 +53,10 @@ interface Overview {
   archivedCount?: number;
   excludedCurrencies: string[];
   needsAttention: number;
+  /** OWN-18: accounts of a bank consent that no ledger account covers (additive; absent in an old cache). */
+  connected?: { accountCount: number };
+  /** OWN-18: ledger plus connected accounts, each IBAN once. */
+  combined?: { accountCount: number; totalBalance: number; excludedCurrencies: string[] };
 }
 
 interface Rollforward {
@@ -365,6 +369,11 @@ export default function BankAccountsPage() {
   }
 
   const archivedCount = overview?.archivedCount ?? 0;
+  // OWN-18: the total counts the connected bank accounts too (one IBAN once).
+  const total = overview?.combined ?? (overview
+    ? { accountCount: overview.totalAccounts, totalBalance: overview.totalBalance, excludedCurrencies: overview.excludedCurrencies }
+    : null);
+  const connectedCount = overview?.connected?.accountCount ?? 0;
   const fade = useSkeletonFade(status === "loading");
 
   return (
@@ -391,21 +400,21 @@ export default function BankAccountsPage() {
 
         {status === "ready" && overview && (
           <div className={`space-y-3 ${fade}`}>
-            {overview.accounts.length > 0 && (
+            {total && total.accountCount > 0 && (
               <Card className="space-y-1">
                 <p className="text-caption text-ink-2">Yhteenlaskettu saldo</p>
                 <p className="text-title-2 font-bold tracking-[-0.02em] tabular-nums text-ink">
-                  {formatEur(overview.totalBalance)}
+                  {formatEur(total.totalBalance)}
                 </p>
                 <p className="text-caption text-ink-2">
-                  {overview.totalAccounts === 1 ? "1 tili" : `${overview.totalAccounts} tiliä`}
+                  {total.accountCount === 1 ? "1 tili" : `${total.accountCount} tiliä`}
                   {overview.needsAttention > 0 && (
                     <span className="text-danger"> · {overview.needsAttention} vaatii saldon tarkistusta</span>
                   )}
                 </p>
-                {overview.excludedCurrencies.length > 0 && (
+                {total.excludedCurrencies.length > 0 && (
                   <p className="text-caption text-warning">
-                    Summasta puuttuvat muut valuutat: {overview.excludedCurrencies.join(", ")}
+                    Summasta puuttuvat muut valuutat: {total.excludedCurrencies.join(", ")}
                   </p>
                 )}
               </Card>
@@ -420,9 +429,11 @@ export default function BankAccountsPage() {
 
             {overview.accounts.length === 0 ? (
               <EmptySection title="Kirjanpidon tilit">
-                {archivedCount > 0
-                  ? `Ei käytössä olevia tilejä. Arkistoituja tilejä on ${archivedCount}.`
-                  : "Ei vielä tilejä. Yhdistä pankki yllä tai tuo tiliote tiedostona."}
+                {connectedCount > 0
+                  ? "Pankkiyhteyden tilit näkyvät yllä. Tiliä ei tarvitse lisätä käsin."
+                  : archivedCount > 0
+                    ? `Ei käytössä olevia tilejä. Arkistoituja tilejä on ${archivedCount}.`
+                    : "Ei vielä tilejä. Yhdistä pankki yllä tai tuo tiliote tiedostona."}
               </EmptySection>
             ) : (
             <Section title="Kirjanpidon tilit">

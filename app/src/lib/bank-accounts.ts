@@ -51,6 +51,8 @@ export interface BankAccountWithPosition extends PublicBankAccount {
   transactionCount: number;
   /** Closing balances (euros) of the last up to 6 months, oldest first; empty under 3 months of data. */
   balanceTrend: number[];
+  /** Closing balance (euros) per month, oldest first, up to the current month (Koti's balance chart). */
+  monthlyClosings: Array<{ month: string; balance: number }>;
 }
 
 type BankAccountRow = {
@@ -399,6 +401,10 @@ export async function getBankOverview(
       balanceTrend: balanceTrendPoints(
         result.months.map((row) => centsToEuros(row.reportedClosingCents ?? row.computedClosingCents))
       ),
+      monthlyClosings: result.months.map((row) => ({
+        month: row.month,
+        balance: centsToEuros(row.reportedClosingCents ?? row.computedClosingCents),
+      })),
     });
   }
 

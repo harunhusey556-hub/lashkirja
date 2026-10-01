@@ -66,6 +66,7 @@ import {
   rememberKotiMonth,
 } from "@/lib/koti-month";
 import { kotiGreeting } from "@/lib/koti-greeting";
+import { kotiBankRow, type KotiBank } from "@/lib/koti-bank";
 import { handledDetail, handledHref, handledTitle, type Handled } from "@/lib/koti-handled";
 import { useVatDue } from "@/components/useVatDue";
 import { approvalGapText } from "@/lib/receipt-approval";
@@ -110,7 +111,8 @@ interface DashboardData {
   };
   hasImap: boolean;
   pendingReceiptsCount?: number;
-  bank?: { totalBalance: number; accountCount: number; needsAttention: number } | null;
+  /** OWN-18: ledger accounts plus the accounts of a bank consent (lib/bank-position.ts). */
+  bank?: KotiBank | null;
   receivables?: Position;
   payables?: Position;
   isSingleVatProfile?: boolean;
@@ -750,6 +752,7 @@ export default function DashboardClient() {
       Palaa kuluvaan kuuhun
     </button>
   );
+  const bankRow = kotiBankRow(data?.bank);
   const matching = data?.matching;
   const events = data?.events ?? (matching ? { done: matching.matched, total: matching.matchable } : null);
   const documentsBasis = data?.source !== "tiliote";
@@ -1030,23 +1033,15 @@ export default function DashboardClient() {
                 href="/kirjanpito/pankkitilit"
                 leading={<Icon icon={Landmark} />}
                 title="Pankkitilit"
-                amount={data.bank && data.bank.accountCount > 0 ? formatEur(data.bank.totalBalance) : undefined}
-                secondary={
-                  data.bank && data.bank.accountCount > 0
-                    ? plural(data.bank.accountCount, "tili", "tiliä")
-                    : "Ei yhdistettyä tiliä"
-                }
-                ariaLabel={
-                  data.bank && data.bank.accountCount > 0
-                    ? `Pankkitilit, ${formatEur(data.bank.totalBalance)}`
-                    : "Pankkitilit, ei yhdistettyä tiliä"
-                }
+                amount={bankRow.amount}
+                secondary={bankRow.warn ? <span className="text-warning">{bankRow.secondary}</span> : bankRow.secondary}
+                ariaLabel={bankRow.ariaLabel}
                 trailing={
-                  data.bank && data.bank.accountCount > 0 ? undefined : (
-                    <ActionPill href="/kirjanpito/pankkitilit" ariaLabel="Yhdistä pankki">
-                      Yhdistä
+                  bankRow.pill ? (
+                    <ActionPill href="/kirjanpito/pankkitilit" ariaLabel={bankRow.pill.ariaLabel}>
+                      {bankRow.pill.label}
                     </ActionPill>
-                  )
+                  ) : undefined
                 }
               />
               <ListRow
