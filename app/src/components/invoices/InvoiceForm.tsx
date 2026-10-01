@@ -718,7 +718,7 @@ export function InvoiceForm({
       <BottomActions>
         <button
           type="button"
-          className="active-press flex min-h-12 w-full items-center justify-center text-body font-semibold text-accent"
+          className="active-press flex min-h-12 w-full items-center justify-center rounded-card bg-accent-soft text-body font-semibold text-accent"
           onClick={() => session.requestCancel(onCancel)}
         >
           Peruuta

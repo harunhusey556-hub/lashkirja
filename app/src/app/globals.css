@@ -74,8 +74,20 @@
   --dur-pop: 150ms;
   --dur-sheet: 320ms;
   --dur-exit: 240ms;
-  /* Page push/pop (QUALITY-BAR N2 caps it at 300 ms). */
-  --dur-push: 300ms;
+  /* Page push/pop and the tab bar that moves with it (QUALITY-BAR N2,
+     batch 3: 420 ms on a critically damped spring that starts from rest, so
+     the first frames are readable instead of a jump). */
+  --dur-push: 420ms;
+  /* Fallback for WebKit without linear() (before iOS 17.2). */
+  --ease-nav: cubic-bezier(0.3, 0.6, 0.15, 1);
+}
+
+/* A critically damped spring (damping 1.0, response 0.34 s) sampled over
+   --dur-push: 3.6 % after one 60 Hz frame, 55 % at 100 ms, 97 % at 300 ms. */
+@supports (transition-timing-function: linear(0, 1)) {
+  :root {
+    --ease-nav: linear(0, 0.032, 0.1071, 0.2026, 0.3042, 0.4033, 0.4952, 0.5776, 0.6497, 0.7116, 0.7641, 0.8081, 0.8446, 0.8747, 0.8993, 0.9193, 0.9356, 0.9487, 0.9592, 0.9677, 0.9744, 0.9798, 0.9841, 0.9874, 0.9901, 0.9922, 0.9939, 0.9952, 1);
+  }
 }
 
 /* The frame fills the WKWebView. Notch and home indicator are padding inside
@@ -190,6 +202,11 @@ body {
   color: var(--color-ink);
   background: var(--color-canvas);
   -webkit-tap-highlight-color: transparent;
+  /* App feel (batch 3): iOS must not inflate text on rotation (Dynamic Type
+     is handled by --text-scale), and type renders like native labels. */
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+  -webkit-font-smoothing: antialiased;
 }
 
 /* Installed app, not a website: long-press must not reveal the tunnel URL,
@@ -482,63 +499,49 @@ button:disabled {
   opacity: 0;
 }
 
-@keyframes pushIn {
-  from { transform: translateX(100%); }
-  to { transform: translateX(0); }
-}
-
-@keyframes pushOut {
-  from { transform: translateX(0); }
-  to { transform: translateX(-28%); }
-}
-
-@keyframes popIn {
-  from { transform: translateX(-28%); }
-  to { transform: translateX(0); }
-}
-
-@keyframes popOut {
-  from { transform: translateX(0); }
-  to { transform: translateX(100%); }
-}
-
-@keyframes scrimIn {
-  from { opacity: 0; }
-  to { opacity: 1; }
-}
-
-/* No fill mode on the incoming page: a retained transform would turn it into
+/* The motion itself is Web Animations (lib/page-transition.ts,
+   playNavTransition), started on the frame after the commit is painted, so
+   no keyframes here. These rules only stack the layers. Nothing keeps a
+   transform after the motion: a retained transform would turn <main> into
    the containing block for position:fixed descendants (bulk bars). */
-.page-push-in {
-  z-index: 1;
-  animation: pushIn var(--dur-push) var(--ease-drawer);
+
+/* Push: the new page slides in above the old one, its left edge lifted by
+   a soft shadow; the old page shifts left 30 % and dims under a scrim. */
+.app-main[data-nav-moving="push"] {
+  box-shadow: -8px 0 24px rgb(38 34 31 / 0.1);
 }
 
-.page-pop-in {
-  z-index: 0;
-  animation: popIn var(--dur-push) var(--ease-drawer);
+.page-snapshot-scrim {
+  position: absolute;
+  inset: 0;
+  background: rgb(38 34 31 / 0.1);
+  opacity: 0;
+  pointer-events: none;
 }
 
-.page-snapshot.page-push-out {
-  animation: pushOut var(--dur-push) var(--ease-drawer) forwards;
-}
-
-.page-snapshot.page-push-out::after {
-  animation: scrimIn var(--dur-push) var(--ease-drawer) forwards;
-}
-
-/* Back: the leaving page slides off to the right above the returning one,
-   its left edge lifted by a soft shadow (the iOS pop). */
+/* Pop: the leaving page slides off to the right above the returning one. */
 .page-snapshot.page-pop-out {
   z-index: 2;
-  box-shadow: -6px 0 20px rgb(38 34 31 / 0.08);
-  animation: popOut var(--dur-push) var(--ease-drawer) forwards;
+  box-shadow: -8px 0 24px rgb(38 34 31 / 0.1);
+}
+
+/* Pop: the returning page starts dimmed and brightens as it slides back. */
+.page-scrim {
+  position: absolute;
+  z-index: 1;
+  background: rgb(38 34 31 / 0.1);
+  pointer-events: none;
+}
+
+/* Tab switch: the old tab fades out above the new one (no slide). */
+.page-snapshot.page-tab-out {
+  z-index: 2;
 }
 
 /* Interactive edge swipe: the parent page waits under the current one. */
 .page-snapshot.page-swipe-under {
   z-index: 0;
-  transform: translateX(-28%);
+  transform: translateX(-30%);
 }
 
 .page-snapshot.page-swipe-under::after {
@@ -719,20 +722,6 @@ html[data-keyboard="open"] .app-tab-bar {
   animation: slideUpFade 200ms var(--ease-out) backwards;
 }
 
-/* Tab switch: a brief settle so the new tab does not snap in. Opacity only,
-   from 0.55: the page is already painted, so it never flashes blank. */
-@keyframes tabIn {
-  from {
-    opacity: 0.55;
-  }
-  to {
-    opacity: 1;
-  }
-}
-.page-tab-in {
-  animation: tabIn 160ms var(--ease-out);
-}
-
 /* Dialogs (ConfirmModal): centred, so they scale from the centre. */
 @keyframes scaleIn {
   from {
@@ -805,8 +794,9 @@ html[data-keyboard="open"] .app-tab-bar {
     opacity: 1;
   }
 
+  /* Release eases back over --dur-press. */
   :where(button, a, [role="button"], .active-press, .press-row, [role="option"]) {
-    transition-property: transform;
+    transition-property: transform, opacity, background-color;
     transition-duration: var(--dur-press);
     transition-timing-function: var(--ease-out);
   }
@@ -816,12 +806,21 @@ button:not(:disabled):active,
 a:active,
 [role="button"]:not([aria-disabled="true"]):active {
   filter: none;
-  opacity: 1;
 }
 
+/* OWN-20: the press is visible on every control, instantly on touch-down.
+   Filled and bordered controls give a little (scale 0.97) and dim slightly,
+   as iOS highlights a filled button. */
 :is(button, a, [role="button"], .active-press)[data-pressed="true"] {
   transform: scale(0.97);
-  transition-duration: 100ms;
+  opacity: 0.8;
+  transition-duration: 90ms, 0ms, 0ms;
+}
+
+/* A control with no fill of its own (a text or icon button, a ghost link)
+   has no surface to scale, so it dims like an iOS plain button. */
+:is(button, a, [role="button"], .active-press)[data-pressed="true"]:is(:not([class*="bg-"]), [class*="bg-transparent"]) {
+  opacity: 0.45;
 }
 
 /* Full-width rows and cards: a smaller scale, or the edges visibly jump. */
@@ -832,23 +831,26 @@ a:active,
 /* C7 (IA-15): list and settings rows (full width) tint 5% ink and never
    scale. ListRow's stretched link paints the row, not the invisible overlay;
    `.press-row` is the same press for a row that is itself the link/button. */
-.row-link[data-pressed="true"],
-.press-row.press-row[data-pressed="true"] {
+.row-link.row-link[data-pressed="true"],
+.press-row.press-row.press-row[data-pressed="true"] {
   transform: none;
-  background: rgb(38 34 31 / 0.05);
+  opacity: 1;
+  background: rgb(38 34 31 / 0.06);
 }
 
 /* Switches and checkboxes animate their knob or check; they never scale. */
-[role="switch"][data-pressed="true"],
-[role="checkbox"][data-pressed="true"],
+[role="switch"][role="switch"][data-pressed="true"],
+[role="checkbox"][role="checkbox"][data-pressed="true"],
 label:has(> input[type="checkbox"])[data-pressed="true"] {
   transform: none;
+  opacity: 1;
 }
 
 /* Options and checkbox rows get the row tint (IA-17). */
-[role="option"][data-pressed="true"],
+[role="option"][role="option"][data-pressed="true"],
 label:has(input[type="checkbox"], input[type="radio"])[data-pressed="true"] {
-  background: rgb(38 34 31 / 0.05);
+  opacity: 1;
+  background: rgb(38 34 31 / 0.06);
 }
 
 /* Tab items: only the glyph gives, the label stays put. */
@@ -1016,10 +1018,10 @@ button.ds-chip[aria-pressed="true"] { box-shadow: none; }
 /* leaves the flow at once so <main> takes the space under it.         */
 /* ------------------------------------------------------------------ */
 
-/* IA-28: the bar moves with the push (--dur-push, 300 ms). */
+/* IA-28: the bar moves with the push (--dur-push on --ease-nav). */
 .app-tab-bar {
   transition:
-    transform var(--dur-push) var(--ease-drawer),
+    transform var(--dur-push) var(--ease-nav),
     visibility 0s linear 0s;
 }
 
@@ -1031,7 +1033,7 @@ button.ds-chip[aria-pressed="true"] { box-shadow: none; }
   transform: translateY(100%);
   visibility: hidden;
   transition:
-    transform var(--dur-push) var(--ease-drawer),
+    transform var(--dur-push) var(--ease-nav),
     visibility 0s linear var(--dur-push);
 }
 
@@ -1194,9 +1196,6 @@ body.signing-out {
   .fade-in-content,
   .list-stagger > *,
   .list-swap,
-  .page-push-in,
-  .page-pop-in,
-  .page-tab-in,
   .bottom-actions {
     animation: fadeIn 120ms linear !important;
     transform: none !important;
@@ -1216,7 +1215,9 @@ body.signing-out {
     transform: none !important;
   }
 
-  .page-snapshot {
+  /* Push, pop and tab switches all become the short crossfade of the old
+     page (playNavTransition); only that snapshot is ever shown. */
+  .page-snapshot:not(.page-tab-out) {
     display: none !important;
   }
 

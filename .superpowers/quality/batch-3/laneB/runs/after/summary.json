@@ -1,0 +1,122 @@
+[
+ {
+  "step": "cold-1-koti-to-kirjanpito-tab",
+  "frames": 60,
+  "documents": 1,
+  "minVisibleText": 174,
+  "blankFrames": 0,
+  "skeletonFramesAfterTap": 4,
+  "dimFrames": 0,
+  "tapToNewPathMs": 139,
+  "tapToAnimationEndMs": 276,
+  "tapVideoMs": 2480
+ },
+ {
+  "step": "cold-2-kirjanpito-to-alv-push",
+  "frames": 46,
+  "documents": 1,
+  "minVisibleText": 174,
+  "blankFrames": 0,
+  "skeletonFramesAfterTap": 4,
+  "dimFrames": 0,
+  "tapToNewPathMs": 101,
+  "tapToAnimationEndMs": 611,
+  "tapVideoMs": 4669
+ },
+ {
+  "step": "cold-3-alv-back-pop",
+  "frames": 44,
+  "documents": 1,
+  "minVisibleText": 174,
+  "blankFrames": 0,
+  "skeletonFramesAfterTap": 0,
+  "dimFrames": 0,
+  "tapToNewPathMs": 127,
+  "tapToAnimationEndMs": 471,
+  "tapVideoMs": 6897
+ },
+ {
+  "step": "cold-4-kirjanpito-to-myynti-tab",
+  "frames": 34,
+  "documents": 1,
+  "minVisibleText": 174,
+  "blankFrames": 0,
+  "skeletonFramesAfterTap": 4,
+  "dimFrames": 0,
+  "tapToNewPathMs": 466,
+  "tapToAnimationEndMs": 580,
+  "tapVideoMs": 9168
+ },
+ {
+  "step": "cold-5-myynti-to-koti-tab",
+  "frames": 52,
+  "documents": 1,
+  "minVisibleText": 918,
+  "blankFrames": 0,
+  "skeletonFramesAfterTap": 0,
+  "dimFrames": 0,
+  "tapToNewPathMs": 408,
+  "tapToAnimationEndMs": 714,
+  "tapVideoMs": 11806
+ },
+ {
+  "step": "warm-1-koti-to-kirjanpito-tab",
+  "frames": 41,
+  "documents": 1,
+  "minVisibleText": 174,
+  "blankFrames": 0,
+  "skeletonFramesAfterTap": 0,
+  "dimFrames": 0,
+  "tapToNewPathMs": 206,
+  "tapToAnimationEndMs": 356,
+  "tapVideoMs": 14565
+ },
+ {
+  "step": "warm-2-kirjanpito-to-alv-push",
+  "frames": 44,
+  "documents": 1,
+  "minVisibleText": 174,
+  "blankFrames": 0,
+  "skeletonFramesAfterTap": 0,
+  "dimFrames": 0,
+  "tapToNewPathMs": 120,
+  "tapToAnimationEndMs": 525,
+  "tapVideoMs": 17021
+ },
+ {
+  "step": "warm-3-alv-back-pop",
+  "frames": 48,
+  "documents": 1,
+  "minVisibleText": 174,
+  "blankFrames": 0,
+  "skeletonFramesAfterTap": 0,
+  "dimFrames": 0,
+  "tapToNewPathMs": 42,
+  "tapToAnimationEndMs": 436,
+  "tapVideoMs": 19177
+ },
+ {
+  "step": "warm-4-kirjanpito-to-myynti-tab",
+  "frames": 52,
+  "documents": 1,
+  "minVisibleText": 174,
+  "blankFrames": 0,
+  "skeletonFramesAfterTap": 0,
+  "dimFrames": 0,
+  "tapToNewPathMs": 122,
+  "tapToAnimationEndMs": 289,
+  "tapVideoMs": 21288
+ },
+ {
+  "step": "warm-5-myynti-to-koti-tab",
+  "frames": 55,
+  "documents": 1,
+  "minVisibleText": 918,
+  "blankFrames": 0,
+  "skeletonFramesAfterTap": 0,
+  "dimFrames": 0,
+  "tapToNewPathMs": 134,
+  "tapToAnimationEndMs": 307,
+  "tapVideoMs": 23460
+ }
+]
