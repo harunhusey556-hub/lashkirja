@@ -13,6 +13,7 @@ import { detailHref } from "@/lib/routes";
 import { requestReceiptCapture } from "@/lib/capture-request";
 import { hapticImpact, hapticNotify } from "@/lib/haptics";
 import { showToast } from "@/lib/toast";
+import { tintedButtonClass } from "@/components/control-styles";
 
 type Action =
   | { url: "/api/receipts/batch-approve"; body: { receiptIds: string[] } }
@@ -43,7 +44,7 @@ function linkedPatch(row: FeedRow): Partial<StatementTransaction> {
 }
 
 const QUIET_LINK =
-  "active-press mx-auto flex min-h-11 items-center px-3 text-caption text-ink-2 disabled:opacity-50";
+  "active-press mx-auto flex min-h-11 items-center justify-center rounded-full bg-ink/5 px-3.5 text-caption font-medium text-ink-2 disabled:opacity-50";
 
 /**
  * One bank row, one decision. The sheet shows only what this row needs:
@@ -415,7 +416,7 @@ export function BankRowSheet({
           <Link
             href={detailHref("statement", row.statementId)}
             onClick={onClose}
-            className="active-press mx-auto flex min-h-11 items-center px-3 text-caption text-ink-2"
+            className={tintedButtonClass("neutral", "mx-auto")}
           >
             Avaa tiliote
           </Link>

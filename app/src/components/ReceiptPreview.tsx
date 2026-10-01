@@ -9,6 +9,7 @@ import { X } from "lucide-react";
 import { Icon } from "@/components/ds/Icon";
 import { useOverlayLock } from "@/lib/overlay-lock";
 import { DECIDE_SLOP, sheetDragCommits, SPRING_BACK_MS, VelocityTracker } from "@/lib/gesture";
+import { tintedButtonClass } from "@/components/control-styles";
 
 const MAX_ZOOM = 4;
 const DOUBLE_TAP_ZOOM = 2.5;
@@ -500,7 +501,7 @@ function UnsupportedPreview({
         Avaa tiedosto
       </AuthedFileLink>
       {onRetry && (
-        <button type="button" onClick={onRetry} className="active-press min-h-11 font-medium text-accent">
+        <button type="button" onClick={onRetry} className={tintedButtonClass("accent")}>
           Yritä uudelleen
         </button>
       )}

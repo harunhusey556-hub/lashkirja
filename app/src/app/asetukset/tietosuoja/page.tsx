@@ -13,6 +13,7 @@ import { hapticNotify } from "@/lib/haptics";
 import { showToast } from "@/lib/toast";
 import { ACCOUNTING_RETENTION_YEARS } from "@/lib/session-policy";
 import { CLOSE_NEXT_COPY, CLOSE_PURGE_COPY, CLOSE_RETENTION_COPY } from "@/lib/account-copy";
+import { tintedButtonClass } from "@/components/control-styles";
 
 interface AccountRequestRow {
   id: string;
@@ -122,7 +123,7 @@ export default function TietosuojaPage() {
           Tilin sulkeminen ei poista kuitteja eikä laskuja.
         </p>
         <p>Kuukauden viennin zip löytyy Raporteista.</p>
-        <Link href="/raportit" className="active-press -mt-1 inline-flex min-h-11 items-center text-accent">
+        <Link href="/raportit" className={tintedButtonClass("accent", "-mt-1")}>
           Avaa Raportit
         </Link>
       </Card>
@@ -151,7 +152,7 @@ export default function TietosuojaPage() {
               <button
                 type="button"
                 onClick={() => void loadRequests()}
-                className="active-press flex min-h-11 shrink-0 items-center px-2 font-medium"
+                className={tintedButtonClass("accent", "shrink-0")}
               >
                 Yritä uudelleen
               </button>

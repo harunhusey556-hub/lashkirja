@@ -33,6 +33,7 @@ import {
   stripPendingCaptureFlag,
   takePendingCapture,
 } from "@/lib/pending-capture";
+import { tintedButtonClass } from "@/components/control-styles";
 
 /** Months painted at first; older ones come in on request. */
 const FIRST_MONTHS = 3;
@@ -371,7 +372,7 @@ export default function TapahtumatClient() {
             <button
               type="button"
               onClick={() => setParam("month", "")}
-              className="active-press flex min-h-11 items-center px-1 text-caption font-medium text-accent"
+              className={tintedButtonClass("accent")}
             >
               {formatMonth(monthFilter)} · näytä kaikki kuukaudet
             </button>

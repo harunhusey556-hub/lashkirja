@@ -39,6 +39,7 @@ import { usePersistedState, useScrollRestoration } from "@/lib/list-ui-state";
 import { isForbidden } from "@/lib/screen-state";
 import { showToast } from "@/lib/toast";
 import { hapticNotify } from "@/lib/haptics";
+import { tintedButtonClass } from "@/components/control-styles";
 
 interface RecurringInvoice {
   id: string;
@@ -512,7 +513,7 @@ export default function RecurringInvoicesPage() {
                 </p>
                 <Link
                   href={detailHref("invoice", failed.invoiceId)}
-                  className="active-press flex min-h-11 items-center font-medium text-accent"
+                  className={tintedButtonClass("accent")}
                 >
                   Avaa lasku ja lähetä
                 </Link>
@@ -526,7 +527,7 @@ export default function RecurringInvoicesPage() {
                     ? "Kausi on suljettu. Laskut luodaan, kun avaat kauden."
                     : "Laskun luonti epäonnistui."}
                 </p>
-                <Link href="/kirjanpito/kaudet" className="active-press flex min-h-11 items-center font-medium text-accent">
+                <Link href="/kirjanpito/kaudet" className={tintedButtonClass("accent")}>
                   Avaa kaudet
                 </Link>
               </div>
@@ -544,7 +545,7 @@ export default function RecurringInvoicesPage() {
             {selected.lastRun?.invoiceId && (
               <Link
                 href={detailHref("invoice", selected.lastRun.invoiceId)}
-                className="active-press flex min-h-11 items-center text-body font-medium text-accent"
+                className={tintedButtonClass("accent")}
               >
                 Avaa viimeisin lasku ({formatDate(selected.lastRun.issueDate)})
               </Link>

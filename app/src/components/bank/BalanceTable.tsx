@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { formatEur, formatEurSigned, formatMonthShort, parseFinnishNumber } from "@/lib/format";
+import { tintedButtonClass } from "@/components/control-styles";
 
 export interface MonthRow {
   month: string;
@@ -192,7 +193,7 @@ export function BalanceTable({ months, busyMonth, onSave, onClear }: Props) {
                     <button
                       type="button"
                       onClick={() => startEdit(row)}
-                      className="active-press min-h-11 inline-flex items-center px-2 -mx-2 text-xs font-medium text-accent"
+                      className={tintedButtonClass("accent")}
                     >
                       {row.reportedClosing === null ? "Kirjaa saldo" : "Muokkaa"}
                     </button>
@@ -201,7 +202,7 @@ export function BalanceTable({ months, busyMonth, onSave, onClear }: Props) {
                         type="button"
                         onClick={() => void handleClear(row.month)}
                         disabled={busyMonth === row.month}
-                        className="active-press min-h-11 inline-flex items-center px-2 -mx-2 text-xs font-medium text-ink-2 disabled:opacity-50"
+                        className={tintedButtonClass("neutral")}
                       >
                         Poista
                       </button>

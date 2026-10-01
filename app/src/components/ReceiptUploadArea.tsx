@@ -7,6 +7,7 @@ import { Icon, Section } from "@/components/ds";
 import { filePickDecision } from "@/lib/native-file-flow";
 import { detailHref } from "@/lib/routes";
 import type { useReceiptUploadQueue } from "@/components/useReceiptUploadQueue";
+import { tintedButtonClass } from "@/components/control-styles";
 
 const ACCEPTED_UPLOAD = ".pdf,.jpg,.jpeg,.png,.heic,.heif,image/jpeg,image/png,image/heic";
 
@@ -149,14 +150,14 @@ export default function ReceiptUploadArea({
               <button
                 type="button"
                 onClick={() => uploadQueue.cancel()}
-                className="min-h-11 text-caption font-medium text-ink"
+                className={tintedButtonClass("neutral")}
               >
                 Peruuta
               </button>
               <button
                 type="button"
                 onClick={() => uploadQueue.retryFailed()}
-                className="min-h-11 text-caption font-medium text-accent"
+                className={tintedButtonClass("accent")}
               >
                 Yritä epäonnistuneet
               </button>
@@ -178,7 +179,7 @@ export default function ReceiptUploadArea({
               {row.duplicateReceiptId && (
                 <Link
                   href={detailHref("receipt", row.duplicateReceiptId)}
-                  className="mt-1 inline-flex min-h-11 items-center text-caption font-medium text-accent"
+                  className={tintedButtonClass("accent", "mt-1")}
                 >
                   Avaa olemassa oleva
                 </Link>
@@ -187,7 +188,7 @@ export default function ReceiptUploadArea({
                 <button
                   type="button"
                   onClick={() => uploadQueue.useReady(row.localId)}
-                  className="min-h-11 text-caption font-medium text-accent"
+                  className={tintedButtonClass("accent")}
                 >
                   Käytä lomakkeessa
                 </button>

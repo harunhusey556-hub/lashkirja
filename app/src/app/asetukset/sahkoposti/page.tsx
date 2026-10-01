@@ -9,7 +9,7 @@ import { ProfileGate } from "../ProfileGate";
 import { Plus } from "lucide-react";
 import { Card, Icon, PageTitle } from "@/components/ds";
 import { PasswordField } from "@/components/ds/PasswordField";
-import { controlClass } from "@/components/control-styles";
+import { controlClass, tintedButtonClass } from "@/components/control-styles";
 import { Button, Field, FormError } from "@/components/ui";
 import { hapticNotify } from "@/lib/haptics";
 import { showToast } from "@/lib/toast";
@@ -262,7 +262,7 @@ function ImapCard({
                 <button
                   type="button"
                   onClick={() => setAccountToDisconnect(account.id)}
-                  className="active-press flex min-h-11 shrink-0 items-center px-2 text-body font-medium text-danger"
+                  className={tintedButtonClass("danger", "shrink-0")}
                 >
                   Katkaise yhteys
                 </button>
@@ -291,7 +291,7 @@ function ImapCard({
                   <button
                     type="button"
                     onClick={cancelAdding}
-                    className="active-press flex min-h-11 items-center px-2 text-body font-medium text-ink-2"
+                    className={tintedButtonClass("neutral")}
                   >
                     Peruuta
                   </button>

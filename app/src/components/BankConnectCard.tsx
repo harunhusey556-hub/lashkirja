@@ -7,7 +7,7 @@ import ConfirmModal from "@/components/ConfirmModal";
 import { apiFetch, errorMessage, isUnauthorized, readJson, redirectToLogin } from "@/components/clientFetch";
 import { ConnectionNotice } from "@/components/ScreenState";
 import { Button } from "@/components/ui";
-import { buttonClass } from "@/components/control-styles";
+import { buttonClass, tintedButtonClass } from "@/components/control-styles";
 import { Icon, IconTile } from "@/components/ds";
 import { Skeleton } from "@/components/ds/Skeleton";
 import BankPickerSheet, { BankLogo } from "@/components/bank/BankPickerSheet";
@@ -335,7 +335,7 @@ export default function BankConnectCard({
               Yhdistä pankki
             </button>
             <p id="bank-unconfigured-note" className="text-center text-caption text-ink-2">
-              <button type="button" onClick={sheets.openSetup} className="active-press min-h-11 font-medium text-accent">
+              <button type="button" onClick={sheets.openSetup} className={tintedButtonClass("accent")}>
                 {BANK_COPY.setupLink}
               </button>
             </p>
@@ -343,7 +343,7 @@ export default function BankConnectCard({
                 and quietly at the foot of Pankkitilit, never a second loud button here. */}
             {variant === "full" && (
               <div className="flex justify-center border-t border-line pt-1">
-                <Link href="/kirjanpito/pankkitilit#tiliotteet" className="active-press inline-flex min-h-11 items-center text-caption font-medium text-ink-2">
+                <Link href="/kirjanpito/pankkitilit#tiliotteet" className={tintedButtonClass("neutral")}>
                   Tuo tiliote tiedostona
                 </Link>
               </div>
@@ -402,7 +402,7 @@ export default function BankConnectCard({
               </ul>
             )}
             {statementHref && (
-              <Link href={statementHref} className="inline-flex min-h-11 items-center text-sm font-medium text-accent">
+              <Link href={statementHref} className={tintedButtonClass("accent")}>
                 Avaa tiliote
               </Link>
             )}

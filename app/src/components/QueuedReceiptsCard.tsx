@@ -14,6 +14,7 @@ import ConfirmModal from "@/components/ConfirmModal";
 import { Section } from "@/components/ds";
 import { receiptTitle } from "@/lib/display-titles";
 import { useOfflineReceiptQueue } from "@/components/useOfflineReceiptQueue";
+import { tintedButtonClass } from "@/components/control-styles";
 
 function statusText(row: { status: string; lastError?: string }): string {
   if (row.status === "sending") return "Lähetetään…";
@@ -80,14 +81,14 @@ export default function QueuedReceiptsCard({ offlineNotice = false }: { offlineN
                     type="button"
                     disabled={busyId === row.id}
                     onClick={() => void handleRetry(row.id)}
-                    className="active-press min-h-11 text-caption font-medium text-accent disabled:opacity-50"
+                    className={tintedButtonClass("accent")}
                   >
                     Yritä uudelleen
                   </button>
                   <button
                     type="button"
                     onClick={() => setConfirmDeleteId(row.id)}
-                    className="active-press min-h-11 text-caption font-medium text-danger"
+                    className={tintedButtonClass("danger")}
                   >
                     Poista
                   </button>
@@ -109,7 +110,7 @@ export default function QueuedReceiptsCard({ offlineNotice = false }: { offlineN
               type="button"
               onClick={() => void clearSent()}
               disabled={clearingDone}
-              className="active-press min-h-11 shrink-0 text-caption font-medium text-accent disabled:opacity-50"
+              className={tintedButtonClass("accent", "shrink-0")}
             >
               Poista listalta
             </button>

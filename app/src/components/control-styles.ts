@@ -25,3 +25,20 @@ export type ButtonVariant = keyof typeof BUTTON_VARIANTS;
 export function buttonClass(variant: ButtonVariant = "primary", extra = ""): string {
   return `active-press inline-flex min-h-12 items-center justify-center gap-2 rounded-card px-4 text-body font-semibold disabled:opacity-60 ${BUTTON_VARIANTS[variant]} ${extra}`;
 }
+
+/**
+ * OWN-20: compact tinted text button (iOS "tinted" style) for standalone text actions
+ * that are not a full-width Button: "Peruuta", "Näytä kaikki", "Katkaise yhteys".
+ * Inline links inside running text stay links; rows keep their pressed background.
+ */
+export const TINTED_BUTTON_TONES = {
+  accent: "bg-accent-soft text-accent",
+  neutral: "bg-ink/5 text-ink-2",
+  danger: "bg-danger/10 text-danger",
+} as const;
+
+export type TintedButtonTone = keyof typeof TINTED_BUTTON_TONES;
+
+export function tintedButtonClass(tone: TintedButtonTone = "accent", extra = ""): string {
+  return `active-press inline-flex min-h-11 items-center justify-center rounded-full px-3.5 text-caption font-medium disabled:opacity-60 ${TINTED_BUTTON_TONES[tone]} ${extra}`.trim();
+}

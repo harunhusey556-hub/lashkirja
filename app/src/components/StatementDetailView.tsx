@@ -32,6 +32,7 @@ import { showToast } from "@/lib/toast";
 import { hapticImpact } from "@/lib/haptics";
 import { deleteRowDescription, deleteStatementDescription, type DeleteFacts } from "@/lib/statement-delete-copy";
 import { ActionPill, DetailHero, FilterChips, ListRow, MoreMenu, Section, StatusTag } from "@/components/ds";
+import { tintedButtonClass } from "@/components/control-styles";
 
 const LABEL_CLASS = "mb-1.5 block text-caption font-normal text-ink-2";
 
@@ -885,7 +886,7 @@ export default function StatementDetailView({
                               </Button>
                               <button
                                 type="button"
-                                className="active-press mx-auto flex min-h-11 items-center px-3 text-caption text-ink-2 disabled:opacity-50"
+                                className={tintedButtonClass("neutral", "mx-auto")}
                                 disabled={matchBusyTxId === t.id}
                                 onClick={() =>
                                   matchAction(t.id, "/api/matching/reject", {

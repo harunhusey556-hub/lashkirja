@@ -11,6 +11,7 @@ import {
   type ReceiptTabCounts,
   type ReceiptTabId,
 } from "@/lib/receipt-tabs";
+import { tintedButtonClass } from "@/components/control-styles";
 
 export interface ReceiptAdvancedFilters {
   type: string;
@@ -231,7 +232,7 @@ export function ReceiptFilters({
           <button
             type="button"
             onClick={onClearAll}
-            className="active-press inline-flex min-h-11 items-center text-caption font-medium text-accent"
+            className={tintedButtonClass("accent")}
           >
             Tyhjennä kaikki
           </button>

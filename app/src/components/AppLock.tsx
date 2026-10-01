@@ -23,6 +23,7 @@ import { PasswordField } from "@/components/ds/PasswordField";
 import { AppMark } from "@/components/AppMark";
 import { leaveAfterSignOut } from "@/components/clientFetch";
 import { useSession } from "@/components/SessionProvider";
+import { tintedButtonClass } from "@/components/control-styles";
 
 let lockView: LockView = "open";
 let lockUserId: string | null = null;
@@ -246,12 +247,12 @@ export function AppLock({ children }: { children: React.ReactNode }) {
             <Button type="button" variant="secondary" className="w-full" onClick={() => void forgetPin()}>
               Kirjaa ulos
             </Button>
-            <button type="button" className="active-press block min-h-11 w-full text-body text-ink-2" onClick={() => setConfirmForget(false)}>
+            <button type="button" className={tintedButtonClass("neutral", "w-full")} onClick={() => setConfirmForget(false)}>
               Peruuta
             </button>
           </div>
         ) : (
-          <button type="button" className="active-press block min-h-11 w-full text-body font-medium text-accent" onClick={() => setConfirmForget(true)}>
+          <button type="button" className={tintedButtonClass("accent", "w-full")} onClick={() => setConfirmForget(true)}>
             Unohdin koodin
           </button>
         )}

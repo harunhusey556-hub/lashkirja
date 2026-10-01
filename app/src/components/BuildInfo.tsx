@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { version as appVersion } from "../../package.json";
 import { API_BASE_URL, IS_MOBILE_BUILD } from "@/lib/build-target";
 import { isPageCachePersistent } from "@/lib/page-cache";
+import { tintedButtonClass } from "@/components/control-styles";
 
 function apiHost(): string {
   try {
@@ -63,7 +64,7 @@ export function BuildInfo() {
         aria-expanded={showDetails}
         aria-controls="build-info-details"
         onClick={() => setShowDetails((value) => !value)}
-        className="mx-auto flex min-h-11 items-center px-3 text-xs font-medium text-ink-2"
+        className={tintedButtonClass("neutral", "mx-auto")}
       >
         {showDetails ? "Piilota tekniset tiedot" : "Tekniset tiedot"}
       </button>

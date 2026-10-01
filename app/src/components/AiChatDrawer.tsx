@@ -723,7 +723,7 @@ export function AiChatDrawer({
   const showShortcutsAfterLast =
     aiAvailable === false && !loading && lastMessage?.role === "assistant" && Boolean(lastMessage.limited);
 
-  const smallAction = "active-press inline-flex min-h-11 items-center px-1 text-caption font-medium";
+  const smallAction = "active-press inline-flex min-h-11 items-center justify-center rounded-full px-3.5 text-caption font-medium";
 
   return (
     <div
@@ -830,7 +830,7 @@ export function AiChatDrawer({
               <span>Keskustelu poistettu</span>
               <button
                 type="button"
-                className={`${smallAction} text-accent`}
+                className={`${smallAction} bg-accent-soft text-accent`}
                 onClick={() => {
                   const removed = removedConversation;
                   void runMenuAction(() => undoRemove(removed), "Palautus epäonnistui");
@@ -887,7 +887,7 @@ export function AiChatDrawer({
                   <div className="-mt-1 flex flex-wrap gap-x-4">
                     <button
                       type="button"
-                      className={`${smallAction} text-accent`}
+                      className={`${smallAction} bg-accent-soft text-accent`}
                       onClick={() => {
                         setRenamingId(conversation.id);
                         setRenameValue(conversation.title);
@@ -897,14 +897,14 @@ export function AiChatDrawer({
                     </button>
                     <button
                       type="button"
-                      className={`${smallAction} text-ink-2`}
+                      className={`${smallAction} bg-ink/5 text-ink-2`}
                       onClick={() => void runMenuAction(() => toggleArchive(conversation), "Arkistointi epäonnistui")}
                     >
                       {conversation.archivedAt ? "Palauta" : "Arkistoi"}
                     </button>
                     <button
                       type="button"
-                      className={`${smallAction} text-danger`}
+                      className={`${smallAction} bg-danger/10 text-danger`}
                       onClick={() => void runMenuAction(() => removeConversation(conversation), "Poisto epäonnistui")}
                     >
                       Poista
@@ -1037,7 +1037,7 @@ export function AiChatDrawer({
                     <a
                       key={source.href}
                       href={source.href}
-                      className="active-press inline-flex min-h-11 items-center gap-1.5 text-caption font-medium text-accent"
+                      className="active-press inline-flex min-h-11 items-center gap-1.5 rounded-full bg-accent-soft px-3.5 text-caption font-medium text-accent"
                     >
                       <Icon icon={Link2} size="inline" />
                       {source.label}
@@ -1046,7 +1046,7 @@ export function AiChatDrawer({
                   {message.content && (
                     <button
                       type="button"
-                      className="active-press inline-flex min-h-11 items-center gap-1.5 text-caption font-medium text-ink-2"
+                      className="active-press inline-flex min-h-11 items-center gap-1.5 rounded-full bg-ink/5 px-3.5 text-caption font-medium text-ink-2"
                       onClick={() => void copyMessage(message)}
                     >
                       <Icon icon={copiedId === message.id ? Check : Copy} size="inline" />
@@ -1056,7 +1056,7 @@ export function AiChatDrawer({
                   {message.content && message.incomplete && failed && !loading && (
                     <button
                       type="button"
-                      className="active-press inline-flex min-h-11 items-center gap-1.5 text-caption font-medium text-accent"
+                      className="active-press inline-flex min-h-11 items-center gap-1.5 rounded-full bg-accent-soft px-3.5 text-caption font-medium text-accent"
                       onClick={() => void handleSendMessage(failed.text, { clientId: failed.clientId })}
                     >
                       <Icon icon={RotateCcw} size="inline" />

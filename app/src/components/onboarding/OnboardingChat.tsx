@@ -52,6 +52,7 @@ import {
   snoozeOnboarding,
 } from "@/lib/onboarding-gate";
 import styles from "./onboarding.module.css";
+import { tintedButtonClass } from "@/components/control-styles";
 
 /** Lucide icon per answer value (V1: no emoji). */
 const CHOICE_ICONS: Record<string, LucideIcon> = {
@@ -542,7 +543,7 @@ export function OnboardingChat({
             type="button"
             onClick={snooze}
             disabled={saving}
-            className="active-press flex min-h-11 items-center justify-self-end px-2 text-body font-medium text-accent disabled:opacity-40"
+            className={tintedButtonClass("accent", "justify-self-end disabled:opacity-40")}
           >
             Ohita nyt
           </button>

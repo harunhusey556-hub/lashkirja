@@ -3,6 +3,7 @@
 import { StatusTag } from "@/components/ds";
 import { Skeleton, SkeletonGroup } from "@/components/ds/Skeleton";
 import { formatEur } from "@/lib/format";
+import { tintedButtonClass } from "@/components/control-styles";
 
 export interface BankTxMatch {
   id: string;
@@ -102,7 +103,7 @@ export default function ReceiptMatchPanel({
             type="button"
             onClick={onUnlink}
             disabled={busy}
-            className="active-press min-h-11 inline-flex items-center px-2 -mx-2 text-caption font-medium text-accent disabled:opacity-50"
+            className={tintedButtonClass("accent")}
           >
             Poista kohdistus
           </button>

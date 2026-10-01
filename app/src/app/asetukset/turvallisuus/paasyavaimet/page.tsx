@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { KeyRound } from "lucide-react";
 import ConfirmModal from "@/components/ConfirmModal";
 import { ErrorState } from "@/components/AsyncState";
-import { controlClass } from "@/components/control-styles";
+import { controlClass, tintedButtonClass } from "@/components/control-styles";
 import { Card, Icon, PageTitle, Skeleton, SkeletonCard, SkeletonGroup, useSkeletonFade } from "@/components/ds";
 import { Button } from "@/components/ui";
 import { hapticNotify } from "@/lib/haptics";
@@ -192,7 +192,7 @@ export default function PaasyavaimetPage() {
                     <div className="-ml-2 flex gap-2">
                       <button
                         type="button"
-                        className="active-press flex min-h-11 items-center px-2 text-body text-accent"
+                        className={tintedButtonClass("accent")}
                         onClick={() => setEditing({ id: row.id, name: row.deviceName, error: "", saving: false })}
                         aria-label={`Nimeä uudelleen: ${row.deviceName}`}
                       >
@@ -200,7 +200,7 @@ export default function PaasyavaimetPage() {
                       </button>
                       <button
                         type="button"
-                        className="active-press flex min-h-11 items-center px-2 text-body text-danger"
+                        className={tintedButtonClass("danger")}
                         onClick={() => setPendingDelete(row)}
                         aria-label={`Poista: ${row.deviceName}`}
                       >

@@ -12,6 +12,7 @@ import { useProfile } from "@/app/asetukset/useProfile";
 import { leaveForBank } from "@/lib/open-bank-auth";
 import { IS_MOBILE_BUILD } from "@/lib/build-target";
 import { hapticSelection } from "@/lib/haptics";
+import { tintedButtonClass } from "@/components/control-styles";
 
 interface Aspsp {
   name: string;
@@ -226,7 +227,7 @@ export default function BankPickerSheet({
             type="button"
             onClick={() => setChosenBank(null)}
             disabled={busyBank !== null}
-            className="active-press mx-auto flex min-h-11 items-center px-3 text-caption text-ink-2 disabled:opacity-50"
+            className={tintedButtonClass("neutral", "mx-auto")}
           >
             Vaihda pankkia
           </button>

@@ -55,7 +55,7 @@ export function BareFrame({ children }: { children: React.ReactNode }) {
 export const BARE_CARD_CLASS = "w-full space-y-5 rounded-card border border-line bg-surface p-6 sm:p-8";
 
 /** A text link on a bare page: 44 px tall and pressable (QUALITY-BAR T1). */
-export const BARE_LINK_CLASS = "active-press flex min-h-11 items-center justify-center text-sm text-accent";
+export const BARE_LINK_CLASS = "active-press flex min-h-11 items-center justify-center rounded-full bg-accent-soft px-3.5 text-sm font-medium text-accent";
 
 /** The card of a bare page at its final size while its search params resolve (no bare "Ladataan…" line). */
 export function BareCardSkeleton() {

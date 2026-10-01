@@ -53,6 +53,7 @@ import { ReceiptFilters, type ReceiptAdvancedFilters } from "./ReceiptFilters";
 import { ReceiptRow } from "./ReceiptRow";
 import { BULK_BAR_SPACE_VAR, BulkBar } from "./BulkBar";
 import type { SavedReceipt } from "./types";
+import { tintedButtonClass } from "@/components/control-styles";
 
 const RECENT_LIMIT = 5;
 
@@ -695,7 +696,7 @@ export default function KuititPage() {
             {retryApproveIds.length > 0 && (
               <button
                 type="button"
-                className="min-h-11 text-body font-medium text-accent"
+                className={tintedButtonClass("accent")}
                 onClick={() => void handleReviewMany(retryApproveIds)}
               >
                 Yritä epäonnistuneet uudelleen

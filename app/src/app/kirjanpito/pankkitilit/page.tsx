@@ -24,6 +24,7 @@ import { Card, ListRow, PageTitle, Section, Skeleton, SkeletonGroup, useSkeleton
 import { pageCacheFetchedAt, readPageCache, writePageCache } from "@/lib/page-cache";
 import { useCacheAfterBoot } from "@/components/invoices/useCacheAfterBoot";
 import { usePersistedState } from "@/lib/list-ui-state";
+import { tintedButtonClass } from "@/components/control-styles";
 
 interface AccountSummary {
   id: string;
@@ -460,7 +461,7 @@ export default function BankAccountsPage() {
               <button
                 type="button"
                 onClick={openManualForm}
-                className="active-press inline-flex min-h-11 items-center text-caption font-medium text-accent"
+                className={tintedButtonClass("accent")}
               >
                 Lisää tili käsin
               </button>
@@ -468,7 +469,7 @@ export default function BankAccountsPage() {
                 <button
                   type="button"
                   onClick={() => setShowArchived((value) => !value)}
-                  className="active-press inline-flex min-h-11 items-center text-caption text-ink-2"
+                  className={tintedButtonClass("neutral")}
                 >
                   {showArchived ? "Piilota arkistoidut" : `Näytä arkistoidut (${archivedCount})`}
                 </button>

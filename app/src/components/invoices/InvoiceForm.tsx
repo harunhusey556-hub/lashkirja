@@ -16,6 +16,7 @@ import {
   vatRatesForDate,
 } from "@/lib/invoices";
 import { helsinkiCalendarDate, isStrictIsoDate } from "@/lib/validation";
+import { tintedButtonClass } from "@/components/control-styles";
 
 export interface InvoiceFormLine {
   description: string;
@@ -446,7 +447,7 @@ export function InvoiceForm({
             <button
               type="button"
               onClick={onAddCustomer}
-              className="active-press mt-1 inline-flex min-h-11 items-center text-body font-medium text-accent"
+              className={tintedButtonClass("accent", "mt-1")}
             >
               Uusi asiakas
             </button>

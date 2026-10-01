@@ -152,7 +152,7 @@ function ToastItem({ toast, leaving }: { toast: ToastRecord; leaving: boolean })
             toast.action?.onAction();
             dismissToast(toast.id, "action");
           }}
-          className="-my-2 -mr-2 min-h-11 min-w-11 shrink-0 rounded-card px-3 text-body font-semibold text-accent-soft"
+          className="-my-2 -mr-2 min-h-11 min-w-11 shrink-0 rounded-card bg-white/15 px-3 text-body font-semibold text-accent-soft"
         >
           {toast.action.label}
         </button>

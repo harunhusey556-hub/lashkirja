@@ -81,6 +81,7 @@ import { isBlockingKind } from "@/lib/dashboard-kinds";
 import { useProfile } from "@/app/asetukset/useProfile";
 import { useSession } from "@/components/SessionProvider";
 import { useRefetchOnReconnect } from "@/components/useRefetchOnReconnect";
+import { tintedButtonClass } from "@/components/control-styles";
 
 interface Position {
   totalOpen: number;
@@ -753,7 +754,7 @@ export default function DashboardClient() {
         setRefreshFailed(null);
         setMonth(currentMonth());
       }}
-      className="relative block min-h-[22px] font-medium text-accent before:absolute before:inset-x-0 before:-inset-y-[11px] before:content-['']"
+      className={tintedButtonClass("accent")}
     >
       Palaa kuluvaan kuuhun
     </button>
@@ -887,7 +888,7 @@ export default function DashboardClient() {
                 <button
                   type="button"
                   onClick={requestStatementImport}
-                  className="relative font-medium text-accent before:absolute before:inset-x-0 before:-inset-y-[12px] before:content-['']"
+                  className={tintedButtonClass("accent")}
                 >
                   Tuo tiliote
                 </button>

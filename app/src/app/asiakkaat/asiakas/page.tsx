@@ -38,6 +38,7 @@ import { clearDraft } from "@/lib/draft-store";
 import { detailHref } from "@/lib/routes";
 import { pageCacheFetchedAt, readPageCache, writePageCache } from "@/lib/page-cache";
 import { useCacheAfterBoot } from "@/components/invoices/useCacheAfterBoot";
+import { tintedButtonClass } from "@/components/control-styles";
 
 interface CustomerDetail {
   customer: {
@@ -418,7 +419,7 @@ function CustomerDetail() {
               action={
                 <Link
                   href={`/laskut?customerId=${customer.id}`}
-                  className="inline-flex min-h-11 items-center text-caption font-semibold text-accent"
+                  className={tintedButtonClass("accent")}
                 >
                   Näytä kaikki
                 </Link>

@@ -12,6 +12,7 @@ import { readPageCache, writePageCache } from "@/lib/page-cache";
 import { showToast } from "@/lib/toast";
 import { detailHref } from "@/lib/routes";
 import { useStatementUpload } from "./useStatementUpload";
+import { tintedButtonClass } from "@/components/control-styles";
 
 const RECENT_LIMIT = 6;
 
@@ -125,7 +126,7 @@ export function StatementFilesSection() {
           <button
             type="button"
             onClick={() => setShowAll((value) => !value)}
-            className="active-press flex min-h-11 w-full items-center justify-center text-caption font-medium text-accent"
+            className={tintedButtonClass("accent", "w-full")}
           >
             {showAll ? "Näytä vähemmän" : `Näytä kaikki (${list.length})`}
           </button>

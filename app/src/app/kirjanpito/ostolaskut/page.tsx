@@ -49,6 +49,7 @@ import { usePersistedState, useScrollRestoration } from "@/lib/list-ui-state";
 import { useCachedResource } from "@/components/useCachedResource";
 import { useCacheAfterBoot } from "@/components/invoices/useCacheAfterBoot";
 import { PURCHASE_COUNTS_KEY } from "@/lib/cached-resource";
+import { tintedButtonClass } from "@/components/control-styles";
 
 interface PurchaseInvoice {
   id: string;
@@ -818,7 +819,7 @@ export default function PurchaseInvoicesPage() {
                       <span className="min-w-0 truncate">{receiptChoiceText(receipt)}</span>
                       <button
                         type="button"
-                        className="active-press min-h-11 shrink-0 px-2 text-caption font-semibold text-accent disabled:opacity-50"
+                        className={tintedButtonClass("accent", "shrink-0")}
                         disabled={busy}
                         aria-label={`Liitä kuitti ${receiptChoiceText(receipt)}`}
                         onClick={() => void setReceiptLink(detailInvoice, receipt.id)}

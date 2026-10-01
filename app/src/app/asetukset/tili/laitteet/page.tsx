@@ -8,6 +8,7 @@ import { Card, PageTitle, Skeleton, SkeletonCard, SkeletonGroup, useSkeletonFade
 import { Button } from "@/components/ui";
 import { hapticNotify } from "@/lib/haptics";
 import { showToast } from "@/lib/toast";
+import { tintedButtonClass } from "@/components/control-styles";
 
 interface SessionRow {
   id: string;
@@ -148,7 +149,7 @@ export default function LaitteetPage() {
                   </span>
                   <button
                     type="button"
-                    className="active-press flex min-h-11 shrink-0 items-center px-2 text-body text-danger"
+                    className={tintedButtonClass("danger", "shrink-0")}
                     onClick={() => setPending({ kind: "one", id: row.id })}
                     aria-label={`Kirjaa ulos: ${row.label}`}
                   >
@@ -160,7 +161,7 @@ export default function LaitteetPage() {
             {others.length > VISIBLE_OTHERS && (
               <button
                 type="button"
-                className="active-press flex min-h-11 w-full items-center justify-center text-body font-medium text-accent"
+                className={tintedButtonClass("accent", "w-full")}
                 onClick={() => setShowAll((value) => !value)}
               >
                 {showAll ? "Näytä vähemmän" : `Näytä kaikki (${others.length})`}

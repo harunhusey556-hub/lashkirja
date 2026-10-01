@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { AlertCircle, Check, Info, KeyRound } from "lucide-react";
-import { controlClass } from "@/components/control-styles";
+import { controlClass, tintedButtonClass } from "@/components/control-styles";
 import { AppMark } from "@/components/AppMark";
 import { BareFrame } from "@/components/BareFrame";
 import { ConnectivityBanner } from "@/components/ConnectivityBanner";
@@ -498,7 +498,7 @@ export default function LoginForm() {
           </Button>
           <Link
             href="/unohtunut-salasana"
-            className="active-press flex min-h-11 items-center justify-center text-sm text-accent"
+            className={tintedButtonClass("accent", "w-full")}
           >
             Unohditko salasanan?
           </Link>

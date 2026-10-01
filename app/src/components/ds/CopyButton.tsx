@@ -13,7 +13,7 @@ export function CopyButton({ text, what, className = "" }: { text: string; what:
       type="button"
       aria-label={`Kopioi ${what}`}
       onClick={() => void copyToClipboard(text, what)}
-      className={`active-press relative inline-flex min-h-6 shrink-0 items-center text-caption font-medium text-accent before:absolute before:-inset-x-2 before:-inset-y-3 before:content-[''] ${className}`}
+      className={`active-press relative inline-flex min-h-6 shrink-0 items-center rounded-full bg-accent-soft px-2.5 text-caption font-medium text-accent before:absolute before:-inset-x-2 before:-inset-y-3 before:content-[''] ${className}`}
     >
       Kopioi
     </button>

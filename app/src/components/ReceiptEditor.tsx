@@ -78,6 +78,7 @@ import { BottomActions, DetailHero, MoreMenu, PageTitle, Section, StatusTag } fr
 import { IS_MOBILE_BUILD } from "@/lib/build-target";
 import { useConnectivity } from "@/lib/connectivity";
 import { useOfflineReceiptQueue } from "@/components/useOfflineReceiptQueue";
+import { tintedButtonClass } from "@/components/control-styles";
 
 /** The fields the receipt form shows an error under (the VAT rows are `vat-<n>`). */
 const RECEIPT_FORM_SLOTS = ["vendor", "date", "totalAmount", "category", "reference", "invoiceNumber", "notes"];
@@ -1001,7 +1002,7 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
                           type="button"
                           onClick={() => void pickDocument()}
                           disabled={uploading}
-                          className="min-h-11 text-caption font-medium text-accent disabled:opacity-50"
+                          className={tintedButtonClass("accent")}
                         >
                           Vaihda tiedosto
                         </button>

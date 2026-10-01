@@ -140,7 +140,7 @@ export function ConnectivityBanner() {
           )}
           {shown === "version" && (
             <>
-              <Link href="/asetukset/ohje" className="-my-1 flex min-h-9 shrink-0 items-center font-semibold text-accent">
+              <Link href="/asetukset/ohje" className="-my-1 flex min-h-9 shrink-0 items-center rounded-full bg-accent-soft px-3 font-semibold text-accent">
                 Lisätietoja
               </Link>
               <button

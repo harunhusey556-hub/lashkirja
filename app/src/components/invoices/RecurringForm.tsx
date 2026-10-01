@@ -16,6 +16,7 @@ import {
 } from "@/lib/invoices";
 import { firstRun, RECURRENCE_INTERVALS, type RecurrenceInterval } from "@/lib/recurrence";
 import { helsinkiCalendarDate, isStrictIsoDate } from "@/lib/validation";
+import { tintedButtonClass } from "@/components/control-styles";
 
 export const INTERVAL_LABEL: Record<RecurrenceInterval, string> = {
   monthly: "Kuukausittain",
@@ -366,7 +367,7 @@ export function RecurringForm({
             <button
               type="button"
               onClick={onAddCustomer}
-              className="relative text-caption font-medium text-accent before:absolute before:-inset-x-2 before:-inset-y-[14px] before:content-['']"
+              className={tintedButtonClass("accent")}
             >
               Uusi asiakas
             </button>

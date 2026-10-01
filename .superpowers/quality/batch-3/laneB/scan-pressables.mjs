@@ -22,7 +22,7 @@ for (const file of files) {
     if (!pressable) continue;
     total++;
     const cls = (attrs.match(/className=(?:"([^"]*)"|\{`([^`]*)`\}|\{([^}]*)\})/s) ?? []).slice(1).find(Boolean) ?? "";
-    if (/buttonClass|chipClass|PILL|press-row|row-link|tab-plus|header-circle|sr-only|hidden/.test(cls)) continue;
+    if (/buttonClass|tintedButtonClass|chipClass|BARE_LINK_CLASS|QUIET_LINK|PILL|press-row|row-link|tab-plus|header-circle|sr-only|hidden/.test(cls)) continue;
     const hasBg = /\bbg-(?!transparent)/.test(cls);
     const bordered = /\bborder\b/.test(cls);
     const role = /role="button"/.test(attrs) ? " role=button" : "";
