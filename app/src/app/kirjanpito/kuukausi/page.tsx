@@ -18,7 +18,7 @@ import { formatDayMonth, formatEur } from "@/lib/format";
 import { detailHref } from "@/lib/routes";
 import { helsinkiMonthKey } from "@/lib/validation";
 import { vatPeriodEndingIn, vatPeriodKindOf } from "@/lib/vat-deadline";
-import { vatDueSecondary, vatFilingState } from "@/lib/vat-due";
+import { vatDueSecondary, vatFilingState, vatNothingToPay } from "@/lib/vat-due";
 import { approvalGapText } from "@/lib/receipt-approval";
 import { requestReceiptCapture } from "@/lib/capture-request";
 import { hapticNotify } from "@/lib/haptics";
@@ -258,7 +258,7 @@ function MonthClose() {
     : [];
 
   const vatState = vat.figures ? vatFilingState(vat.figures.filing) : null;
-  const vatDone = vatState === "paid" || (vatState === "filed" && vat.figures?.isRefund === true);
+  const vatDone = vatState === "paid" || (vatState === "filed" && vat.figures != null && vatNothingToPay(vat.figures));
   const blocking = data?.blockingTotal ?? 0;
   const earlierOpen = data ? (data.lockedThrough ?? "") < previousMonth(month) : false;
 

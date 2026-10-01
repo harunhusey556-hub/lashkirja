@@ -11,7 +11,11 @@ import { showToast } from "@/lib/toast";
 import { alvSummaryKey, readCached, storeCached } from "@/lib/cached-resource";
 import {
   vatChangedSinceFiling,
+  vatFileStepText,
+  vatFiledNote,
   vatFilingState,
+  vatNothingToPay,
+  vatPayStepText,
   vatStateLabel,
   type VatDueFigures,
   type VatFilingRecord,
@@ -48,6 +52,9 @@ export function VatFilingCard({
   const state = vatFilingState(filing);
   const figures: VatDueFigures = { amount, isRefund, filing, pendingReceiptCount };
   const changed = vatChangedSinceFiling(figures);
+  // A refund and a zero return have no payment step (F73).
+  const nothingToPay = vatNothingToPay(figures);
+  const payStep = nothingToPay ? null : vatPayStepText(amount, dueIso);
 
   async function update(change: { filed?: boolean; paid?: boolean }, which: "filed" | "paid" | "undo") {
     setBusy(which);
@@ -91,25 +98,22 @@ export function VatFilingCard({
       <Card className="space-y-3 text-body text-ink">
         <p className="flex items-center gap-2 font-medium">
           {state !== "open" ? <Icon icon={CircleCheck} className="text-success" /> : null}
-          {vatStateLabel(state, isRefund)}
+          {vatStateLabel(state, nothingToPay)}
           <span className="font-normal text-ink-2">· eräpäivä {due}</span>
         </p>
         {state === "open" ? (
           <ol className="list-decimal space-y-1 pl-5 text-caption text-ink-2">
             <li>Kirjaudu OmaVeroon (vero.fi/omavero).</li>
             <li>Valitse Arvonlisävero ja kausiveroilmoitus kaudelle {periodLabel}.</li>
-            <li>Kirjoita kentät tältä sivulta ja lähetä ilmoitus viimeistään {due}.</li>
-            {isRefund ? null : (
-              <li>
-                Maksa {formatEur(amount)} viimeistään {due}. Viitenumero ja tilinumero ovat OmaVerossa kohdassa
-                Maksut.
-              </li>
-            )}
+            <li>{vatFileStepText(dueIso)}</li>
+            {payStep ? (
+              <li>{payStep} Viitenumero ja tilinumero ovat OmaVerossa kohdassa Maksut.</li>
+            ) : null}
           </ol>
         ) : null}
-        {state === "filed" && !isRefund ? (
+        {state === "filed" && !nothingToPay ? (
           <p className="text-caption text-ink-2">
-            Ilmoitettu {filing?.filedAt ? formatDate(filing.filedAt) : ""}. Maksa {formatEur(amount)} viimeistään {due}.
+            {vatFiledNote(filing?.filedAt ? formatDate(filing.filedAt) : "", amount, dueIso, nothingToPay)}
           </p>
         ) : null}
         {state === "paid" ? (
@@ -130,7 +134,7 @@ export function VatFilingCard({
                 Merkitse ilmoitetuksi
               </Button>
             ) : null}
-            {state === "filed" && !isRefund ? (
+            {state === "filed" && !nothingToPay ? (
               <Button className="w-full" busy={busy === "paid"} busyLabel="Tallennetaan…" onClick={() => void update({ paid: true }, "paid")}>
                 Merkitse maksetuksi
               </Button>
@@ -141,9 +145,9 @@ export function VatFilingCard({
                 className="w-full"
                 busy={busy === "undo"}
                 busyLabel="Perutaan…"
-                onClick={() => void update(state === "paid" && !isRefund ? { paid: false } : { filed: false }, "undo")}
+                onClick={() => void update(state === "paid" && !nothingToPay ? { paid: false } : { filed: false }, "undo")}
               >
-                {state === "paid" && !isRefund ? "Peru maksettu-merkintä" : "Peru ilmoitettu-merkintä"}
+                {state === "paid" && !nothingToPay ? "Peru maksettu-merkintä" : "Peru ilmoitettu-merkintä"}
               </Button>
             ) : null}
           </div>

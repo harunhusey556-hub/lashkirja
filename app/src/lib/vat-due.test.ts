@@ -4,7 +4,11 @@ import {
   vatChangedSinceFiling,
   vatDueAmount,
   vatDueSecondary,
+  vatFileStepText,
+  vatFiledNote,
   vatFilingState,
+  vatNothingToPay,
+  vatPayStepText,
   vatPendingNote,
   vatStateLabel,
   type VatDueFigures,
@@ -72,5 +76,38 @@ describe("what the VAT figure does not contain yet (TF-11)", () => {
     expect(vatChangedSinceFiling({ ...august, filing: filed })).toBe(false);
     expect(vatChangedSinceFiling({ ...august, amount: 170, filing: filed })).toBe(true);
     expect(vatChangedSinceFiling({ ...august, isRefund: true, amount: 159.38, filing: filed })).toBe(true);
+  });
+});
+
+describe("filing card sentences (F73)", () => {
+  const plain = (value: string) => value.replace(/ /g, " ");
+
+  it("never doubles the full stop after a due date like 12.10.", () => {
+    expect(vatFileStepText("2026-10-12")).toBe("Kirjoita kentät tältä sivulta ja lähetä ilmoitus viimeistään 12.10.");
+    expect(plain(vatPayStepText(159.38, "2026-11-12")!)).toBe("Maksa 159,38 € viimeistään 12.11.");
+    for (const text of [
+      vatFileStepText("2026-10-12"),
+      vatPayStepText(159.38, "2026-11-12"),
+      vatFiledNote("5.10.2026", 159.38, "2026-10-12", false),
+      vatFiledNote("", 159.38, "2026-10-12", false),
+    ]) {
+      expect(text).not.toContain("..");
+    }
+  });
+
+  it("says nothing about paying a zero return or a refund", () => {
+    expect(vatNothingToPay({ amount: 0, isRefund: false })).toBe(true);
+    expect(vatNothingToPay({ amount: 12.5, isRefund: true })).toBe(true);
+    expect(vatNothingToPay({ amount: 12.5, isRefund: false })).toBe(false);
+    expect(vatPayStepText(0, "2026-07-13")).toBeNull();
+    expect(vatFiledNote("5.10.2026", 0, "2026-10-12", true)).toBe("Ilmoitettu 5.10.2026.");
+    expect(plain(vatFiledNote("5.10.2026", 159.38, "2026-10-12", false))).toBe("Ilmoitettu 5.10.2026. Maksa 159,38 € viimeistään 12.10.");
+  });
+
+  it("a filed zero return is done, not waiting for a payment that cannot be made", () => {
+    expect(vatStateLabel("filed", true)).toBe("Ilmoitettu");
+    const zero: VatDueFigures = { amount: 0, isRefund: false, filing: { filedAt: "2026-10-05", paidAt: null, filedAmount: 0 }, pendingReceiptCount: 0 };
+    const due = nextVatDue(new Date("2026-09-30T10:00:00Z"), "month");
+    expect(vatDueSecondary(due, zero)).toBe("Elokuu 2026 · eräpäivä 12.10. · Ilmoitettu");
   });
 });

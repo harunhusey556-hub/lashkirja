@@ -7,6 +7,7 @@ import {
   formatEurSigned,
   formatMonth,
   formatMonthShort,
+  kuittiCount,
   parseFinnishNumber,
   parseMoneyInput,
 } from "./format";
@@ -71,6 +72,14 @@ describe("formatDate", () => {
     expect(formatDate(null)).toBe("–");
     expect(formatDate("")).toBe("–");
     expect(formatDate("not-a-date")).toBe("–");
+  });
+});
+
+describe("kuittiCount (F73)", () => {
+  it("uses the singular for one receipt", () => {
+    expect(kuittiCount(0)).toBe("0 kuittia");
+    expect(kuittiCount(1)).toBe("1 kuitti");
+    expect(kuittiCount(2)).toBe("2 kuittia");
   });
 });
 

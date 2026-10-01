@@ -63,6 +63,11 @@ export function formatDayMonth(value: string | null | undefined): string {
   return `${date.getUTCDate()}.${date.getUTCMonth() + 1}.`;
 }
 
+/** "1 kuitti", "0 kuittia", "2 kuittia". */
+export function kuittiCount(count: number): string {
+  return `${count} ${count === 1 ? "kuitti" : "kuittia"}`;
+}
+
 /**
  * Accepts "1 234,56", "1234.56" and a pasted "12,50 €".
  * Empty and junk are null. A leading minus is kept.

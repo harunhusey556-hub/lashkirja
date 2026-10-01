@@ -11,7 +11,7 @@ import {
   redirectToLogin,
 } from "@/components/clientFetch";
 
-import { formatEur } from "@/lib/format";
+import { formatEur, kuittiCount } from "@/lib/format";
 import { receiptDrillHref } from "@/lib/report-drill";
 import { alvPeriodBoundsUtc, helsinkiCalendarDate, helsinkiMonthKey, helsinkiQuarterKey } from "@/lib/validation";
 import { VatFilingCard } from "@/components/VatFilingCard";
@@ -296,7 +296,7 @@ export default function ALVRaporttiPage() {
                 {data.excludedReceiptCount ? (
                   <>
                     {" "}
-                    {data.excludedReceiptCount} kuittia jätettiin pois, koska sama
+                    {kuittiCount(data.excludedReceiptCount)} jätettiin pois, koska sama
                     tilitapahtuma on jo kohdistettu laskulle.
                   </>
                 ) : null}
@@ -314,7 +314,7 @@ export default function ALVRaporttiPage() {
 
           {data.review.count > 0 && (
             <Card className="space-y-1 text-sm text-ink">
-              <p className="font-medium">{data.review.count} kuittia ilman ALV-erittelyä</p>
+              <p className="font-medium">{kuittiCount(data.review.count)} ilman ALV-erittelyä</p>
               <p className="text-caption text-ink-2">
                 Myynnit {formatEur(data.review.salesGross)} · Ostot{" "}
                 {formatEur(data.review.purchasesGross)}. Lisää ALV-tiedot kuiteille, jotta ne
