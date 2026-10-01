@@ -1,6 +1,7 @@
 "use client";
 
 import { Suspense, useCallback, useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   InvoiceForm,
@@ -17,6 +18,7 @@ import {
 } from "@/components/clientFetch";
 import { ConnectionNotice, EmptyState } from "@/components/ScreenState";
 import { newIdempotencyKey } from "@/lib/idempotency-key";
+import { sellerPreflight } from "@/lib/invoice-preflight";
 import { armNavigation } from "@/lib/nav-direction";
 import { DETAIL_ROUTES, detailHref } from "@/lib/routes";
 import { writePageCache } from "@/lib/page-cache";
@@ -219,11 +221,25 @@ function NewInvoicePage() {
     customers !== null && (!editId || editing !== null) && profile !== null;
   // Without the profile the form cannot know whether to offer an ALV choice: ask again instead of guessing.
   const profileFailed = profile === null && Boolean(profileError);
+  // F22: a new invoice says what its send will need, before the invoice exists. Non-blocking: drafts can be made.
+  const sellerNote = editId ? null : sellerPreflight(profile);
 
   return (
     <div className="space-y-6">
       {/* R4: no subtitle on a form page. */}
       <PageTitle title={title} />
+      {ready && sellerNote ? (
+        <div className="rounded-card border border-warning/30 bg-warning/10 p-4 text-body text-ink" role="note">
+          <p className="font-semibold">{sellerNote.title}</p>
+          <p className="mt-0.5 text-caption text-ink-2">{sellerNote.body}</p>
+          <Link
+            href="/asetukset/laskutus"
+            className="relative mt-1 inline-block font-medium text-accent before:absolute before:inset-x-0 before:-inset-y-3 before:content-['']"
+          >
+            Täydennä tiedot
+          </Link>
+        </div>
+      ) : null}
       {loadError != null && !ready ? (
         <ConnectionNotice
           error={loadError}

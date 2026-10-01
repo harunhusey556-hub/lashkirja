@@ -212,7 +212,13 @@ export function CustomerForm({
       </div>
 
       <div className="field-grid">
-        <Field label="Sähköposti" htmlFor="cf-email" error={errors.email} optional>
+        <Field
+          label="Sähköposti"
+          htmlFor="cf-email"
+          error={errors.email}
+          optional
+          hint="Tarvitaan laskun lähetykseen."
+        >
           <input
             className={field}
             value={values.email}

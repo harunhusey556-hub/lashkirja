@@ -23,6 +23,8 @@ export interface Profile {
   vatPeriod: string;
   /** Seller display name (also editable on /asetukset/laskutus); optional since not every account has set it. */
   businessName?: string | null;
+  /** The IBAN printed on invoices: the send gate needs it (F22). */
+  invoiceIban?: string | null;
   imapAccounts: { id: string; email: string }[];
 }
 

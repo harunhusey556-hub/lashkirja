@@ -52,6 +52,7 @@ import { ReminderSheet, type ReminderPreview } from "@/components/invoices/Remin
 import { reminderWaitNote } from "@/lib/reminder-schedule";
 import { overOpenMessage } from "@/lib/payment-entry";
 import { sendAttemptView } from "@/lib/send-history";
+import { rememberSendReopen, takeSendReopen } from "@/lib/send-reopen";
 
 /** A hand-recorded payment that an income receipt from a bank row seems to count again. */
 interface PaymentDuplicate {
@@ -620,6 +621,17 @@ function InvoiceDetail() {
       setSending(false);
     }
   }
+
+  // F22: back from the fix the sheet names (seller details, the customer's e-mail), the sheet is open again.
+  const reopenChecked = useRef(false);
+  useEffect(() => {
+    if (state !== "ready" || reopenChecked.current || !id) return;
+    reopenChecked.current = true;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- a one-shot reopen of the sheet the owner left to fix a blocker
+    if (takeSendReopen(id)) void openReview();
+    // Once, when the invoice first shows; openReview reads the current render's id.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state, id]);
 
   async function createCreditNote() {
     setBusy(true);
@@ -1386,12 +1398,17 @@ function InvoiceDetail() {
                 </p>
                 {/* Every block names its fix (SALES-15): no dead end. */}
                 {review.missing.length > 0 ? (
-                  <Link href="/asetukset/laskutus" className={buttonClass("secondary", "w-full")}>
+                  <Link
+                    href="/asetukset/laskutus"
+                    onClick={() => rememberSendReopen(id)}
+                    className={buttonClass("secondary", "w-full")}
+                  >
                     Avaa yritystiedot
                   </Link>
                 ) : !review.recipient && invoice ? (
                   <Link
                     href={detailHref("customer", invoice.customer.id)}
+                    onClick={() => rememberSendReopen(id)}
                     className={buttonClass("secondary", "w-full")}
                   >
                     Lisää asiakkaalle sähköposti
@@ -1421,8 +1438,8 @@ function InvoiceDetail() {
               <Button
                 type="button"
                 className="flex-1"
+                // The reason is already shown above the button; saying it twice made the button two lines (F22).
                 disabled={Boolean(review.blockedReason) || busy}
-                disabledReason={review.blockedReason ?? undefined}
                 busy={sending}
                 busyLabel="Lähetetään…"
                 onClick={() => void sendByEmail()}
