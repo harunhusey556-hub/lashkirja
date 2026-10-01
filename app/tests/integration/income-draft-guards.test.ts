@@ -140,3 +140,72 @@ describe("G18: a draft the owner deleted does not come back", () => {
     expect(body.autoConfirmed).toBe(0);
   });
 });
+
+describe("M1-1: an old draft the owner has changed is never taken back", () => {
+  const AUTO_NOTE = "Tulo (Automaattinen luonnos) — LUONNOS. Tarkista summa ja ALV ennen hyväksyntää.";
+
+  async function legacyDraft(counterparty: string, amountCents: number, vatDetails: string | null = null) {
+    const { id } = await statement([{ counterparty, amountCents }]);
+    const tx = await prisma.transaction.findFirstOrThrow({ where: { statementId: id } });
+    const draft = await prisma.receipt.create({
+      data: {
+        userId: user.id,
+        type: "tulo",
+        vendor: counterparty,
+        date: tx.date ?? new Date(),
+        totalAmountCents: tx.amountCents,
+        vatDetails,
+        category: "myynti",
+        notes: AUTO_NOTE,
+        filePath: "auto-generated",
+        fileName: "Myyntitosite_luonnos.txt",
+        source: "auto_income",
+        sourceTransactionId: tx.id,
+        reviewStatus: "pending",
+      },
+    });
+    await prisma.transaction.update({
+      where: { id: tx.id },
+      data: { matchStatus: "suggested", suggestedReceiptId: draft.id, matchScore: 1 },
+    });
+    return { statementId: id, draft, tx };
+  }
+
+  async function runs(statementId: string) {
+    await autoGenerateIncomeReceipts(user.id, statementId);
+    await rerunMatching(buildRequest("POST", "/api/matching/run", undefined, { cookie }));
+  }
+
+  for (const [label, change] of [
+    ["category", { category: "palvelut" }],
+    ["VAT", { vatDetails: JSON.stringify([{ rate: 10, amount: 3 }]) }],
+    ["amount", { totalAmountCents: 9_000 }],
+    ["type", { type: "meno" }],
+  ] as const) {
+    it(`keeps a draft whose ${label} was edited and saved without approving, notes untouched`, async () => {
+      const { statementId, draft } = await legacyDraft("Muokkaaja Oy", 10_000);
+      await prisma.receipt.update({ where: { id: draft.id }, data: change });
+      await runs(statementId);
+      const left = await prisma.receipt.findUnique({ where: { id: draft.id } });
+      expect(left).not.toBeNull();
+      expect(left).toMatchObject({ notes: AUTO_NOTE, reviewStatus: "pending" });
+    });
+  }
+
+  it("keeps a draft that was re-saved even when every value is still the generated one", async () => {
+    const { statementId, draft } = await legacyDraft("Tallentaja Oy", 10_000);
+    // Made an hour ago; the owner's save (even of the same values) is "now".
+    await prisma.receipt.update({ where: { id: draft.id }, data: { createdAt: new Date(Date.now() - 3_600_000) } });
+    await prisma.receipt.update({ where: { id: draft.id }, data: { notes: AUTO_NOTE } });
+    await runs(statementId);
+    expect(await prisma.receipt.findUnique({ where: { id: draft.id } })).not.toBeNull();
+  });
+
+  it("still takes back one nobody touched, VAT included", async () => {
+    const { statementId, draft, tx } = await legacyDraft("Koskematon Oy", 12_400, JSON.stringify([{ rate: 25.5, amount: 25.2 }]));
+    await runs(statementId);
+    expect(await prisma.receipt.findUnique({ where: { id: draft.id } })).toBeNull();
+    const row = await prisma.transaction.findUniqueOrThrow({ where: { id: tx.id } });
+    expect(row).toMatchObject({ matchStatus: "unmatched", suggestedReceiptId: null });
+  });
+});

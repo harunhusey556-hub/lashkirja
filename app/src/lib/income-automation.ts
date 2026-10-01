@@ -70,18 +70,65 @@ export async function dismissIncomeDraft(
 }
 
 /**
+ * A legacy draft is only "untouched" when it still equals what the old
+ * generation wrote for its bank row AND was never saved after it was made. The
+ * automatic note is not evidence: an owner who edits category, VAT, amount or
+ * type keeps the note, so the note only says where the draft came from.
+ */
+const UNTOUCHED_SAVE_TOLERANCE_MS = 2000;
+
+function isUntouchedLegacyDraft(
+  draft: {
+    vendor: string | null;
+    type: string;
+    category: string | null;
+    date: Date | null;
+    totalAmountCents: number | null;
+    vatDetails: string | null;
+    reference: string | null;
+    invoiceNumber: string | null;
+    createdAt: Date;
+    updatedAt: Date;
+  },
+  row: { counterparty: string | null; amountCents: number; date: Date | null; reference: string | null }
+): boolean {
+  if (Math.abs(draft.updatedAt.getTime() - draft.createdAt.getTime()) > UNTOUCHED_SAVE_TOLERANCE_MS) return false;
+  const grossCents = Math.abs(row.amountCents);
+  if (draft.type !== "tulo" || draft.category !== "myynti") return false;
+  if (draft.vendor !== (row.counterparty || "Tuntematon maksaja")) return false;
+  if (draft.totalAmountCents !== grossCents) return false;
+  if (draft.invoiceNumber != null) return false;
+  if ((draft.reference ?? null) !== (row.reference ?? null)) return false;
+  const expectedDate = row.date ?? draft.createdAt;
+  const dateTolerance = row.date ? 0 : 60_000;
+  if (!draft.date || Math.abs(draft.date.getTime() - expectedDate.getTime()) > dateTolerance) return false;
+  if (draft.vatDetails == null) return true;
+  // The generation wrote a single rate with the VAT worked out from the gross.
+  try {
+    const parsed: unknown = JSON.parse(draft.vatDetails);
+    if (!Array.isArray(parsed) || parsed.length !== 1) return false;
+    const { rate, amount } = parsed[0] as { rate?: unknown; amount?: unknown };
+    if (typeof rate !== "number" || typeof amount !== "number") return false;
+    return Math.round(amount * 100) === Math.round((grossCents * rate) / (100 + rate));
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Earlier versions drafted a "sale" for every incoming row. A draft of an
- * unknown payer that is still pending and still carries the automatic note is
- * taken back, and its row is a plain row again. One the owner has edited is
- * theirs and stays.
+ * unknown payer that is provably untouched (see isUntouchedLegacyDraft) is
+ * taken back, and its row is a plain row again. Anything the owner has changed
+ * is theirs and stays, whatever its note says.
  */
 async function takeBackUnknownPayerDrafts(userId: string, statementId: string): Promise<void> {
   const rows = await prisma.transaction.findMany({
     where: { statementId, statement: { userId } },
-    select: { id: true },
+    select: { id: true, counterparty: true, amountCents: true, date: true, reference: true },
   });
   if (rows.length === 0) return;
-  const stale = await prisma.receipt.findMany({
+  const rowById = new Map(rows.map((row) => [row.id, row]));
+  const candidates = await prisma.receipt.findMany({
     where: {
       userId,
       source: "auto_income",
@@ -89,7 +136,10 @@ async function takeBackUnknownPayerDrafts(userId: string, statementId: string): 
       notes: { startsWith: UNKNOWN_PAYER_NOTE },
       sourceTransactionId: { in: rows.map((row) => row.id) },
     },
-    select: { id: true },
+  });
+  const stale = candidates.filter((draft) => {
+    const row = draft.sourceTransactionId ? rowById.get(draft.sourceTransactionId) : undefined;
+    return row ? isUntouchedLegacyDraft(draft, row) : false;
   });
   if (stale.length === 0) return;
   const ids = stale.map((draft) => draft.id);
