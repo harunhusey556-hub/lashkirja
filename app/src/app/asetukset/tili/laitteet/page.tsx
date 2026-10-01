@@ -137,7 +137,7 @@ export default function LaitteetPage() {
         {others.length > 0 ? (
           <>
             <Button type="button" variant="secondary" className="w-full" onClick={() => setPending({ kind: "others" })}>
-              Sulje muut laitteet ({others.length})
+              Kirjaa muut laitteet ulos ({others.length})
             </Button>
             <ul className="divide-y divide-line">
               {visibleOthers.map((row) => (
@@ -150,8 +150,9 @@ export default function LaitteetPage() {
                     type="button"
                     className="active-press flex min-h-11 shrink-0 items-center px-2 text-body text-danger"
                     onClick={() => setPending({ kind: "one", id: row.id })}
+                    aria-label={`Kirjaa ulos: ${row.label}`}
                   >
-                    Sulje
+                    Kirjaa ulos
                   </button>
                 </li>
               ))}
@@ -173,13 +174,13 @@ export default function LaitteetPage() {
 
       <ConfirmModal
         isOpen={pending !== null}
-        title={pending?.kind === "others" ? "Suljetaanko muut laitteet?" : "Suljetaanko laite?"}
+        title={pending?.kind === "others" ? "Kirjataanko muut laitteet ulos?" : "Kirjataanko laite ulos?"}
         description={
           pending?.kind === "others"
             ? "Kaikki muut laitteet kirjataan ulos. Tämä laite pysyy kirjautuneena."
             : "Laite kirjataan ulos. Se voi kirjautua uudelleen salasanalla."
         }
-        confirmLabel="Sulje"
+        confirmLabel="Kirjaa ulos"
         onConfirm={async () => {
           if (!pending) return;
           await revoke(pending.kind === "others" ? { scope: "others" } : { id: pending.id });
