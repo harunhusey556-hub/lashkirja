@@ -3,10 +3,16 @@ import { parseBusinessDetails, deriveVatProfile } from "./onboarding";
 import { getVendorIntelligence, isAmountWithinRange } from "./vendor-intelligence";
 import { computeConfidence } from "./confidence";
 import { SOURCE_DRAFT_REASONS } from "./matching";
+import type { Prisma } from "@/generated/prisma/client";
 
 /**
  * Drafts sales receipts (myyntitositteet) for incoming bank transfers that
- * look like payment-processor settlements, for the user to review.
+ * look like payment-processor settlements, for the user to review. Only a
+ * settlement of a known provider is a recognised sale: any other incoming money
+ * (a customer paying an invoice, a loan, the owner's own deposit, a refund) is
+ * left as a plain row, because calling it a sale would be a claim nobody made.
+ * A customer's invoice payment is settled against the invoice itself, so a
+ * second sale document made from the same row would count the sale twice.
  *
  * Every draft is created as `pending` and is never linked to the transaction
  * automatically: it is only *suggested* on its own row, where one "Hyväksy"
@@ -37,7 +43,67 @@ const SETTLEMENT_PROVIDERS: SettlementProvider[] = [
   { needle: "sumup", vendor: "SumUp Myyntitilitys", note: "SumUp tilitys", feePercent: 1.69, isExactGross: false },
 ];
 
+/** The note an older version put on a draft it made for an unknown payer. */
+const UNKNOWN_PAYER_NOTE = "Tulo (Automaattinen luonnos)";
+
+/**
+ * The owner deleted a sale draft: remember it on the bank row, so the row does
+ * not qualify for a new draft the next time drafting runs. Called in the same
+ * transaction that deletes the draft.
+ */
+export async function dismissIncomeDraft(
+  db: Prisma.TransactionClient,
+  userId: string,
+  receipt: { source: string | null; sourceTransactionId: string | null }
+): Promise<void> {
+  if (receipt.source !== "auto_income" || !receipt.sourceTransactionId) return;
+  const row = await db.transaction.findFirst({
+    where: { id: receipt.sourceTransactionId, statement: { userId } },
+    select: { id: true },
+  });
+  if (!row) return;
+  await db.incomeDraftDismissal.upsert({
+    where: { transactionId: row.id },
+    create: { transactionId: row.id },
+    update: {},
+  });
+}
+
+/**
+ * Earlier versions drafted a "sale" for every incoming row. A draft of an
+ * unknown payer that is still pending and still carries the automatic note is
+ * taken back, and its row is a plain row again. One the owner has edited is
+ * theirs and stays.
+ */
+async function takeBackUnknownPayerDrafts(userId: string, statementId: string): Promise<void> {
+  const rows = await prisma.transaction.findMany({
+    where: { statementId, statement: { userId } },
+    select: { id: true },
+  });
+  if (rows.length === 0) return;
+  const stale = await prisma.receipt.findMany({
+    where: {
+      userId,
+      source: "auto_income",
+      reviewStatus: "pending",
+      notes: { startsWith: UNKNOWN_PAYER_NOTE },
+      sourceTransactionId: { in: rows.map((row) => row.id) },
+    },
+    select: { id: true },
+  });
+  if (stale.length === 0) return;
+  const ids = stale.map((draft) => draft.id);
+  await prisma.$transaction(async (db) => {
+    await db.transaction.updateMany({
+      where: { statement: { userId }, OR: [{ receiptId: { in: ids } }, { suggestedReceiptId: { in: ids } }] },
+      data: { receiptId: null, suggestedReceiptId: null, matchStatus: "unmatched", matchScore: null, matchReasons: null },
+    });
+    await db.receipt.deleteMany({ where: { id: { in: ids }, userId } });
+  });
+}
+
 export async function autoGenerateIncomeReceipts(userId: string, statementId: string): Promise<number> {
+  await takeBackUnknownPayerDrafts(userId, statementId);
   const unmatchedIncomes = await prisma.transaction.findMany({
     where: {
       statementId,
@@ -71,6 +137,13 @@ export async function autoGenerateIncomeReceipts(userId: string, statementId: st
       })
     ).flatMap((r) => (r.sourceTransactionId ? [r.sourceTransactionId] : []))
   );
+  // A draft the owner deleted is not made again.
+  for (const dismissed of await prisma.incomeDraftDismissal.findMany({
+    where: { transactionId: { in: unmatchedIncomes.map((t) => t.id) } },
+    select: { transactionId: true },
+  })) {
+    alreadyDrafted.add(dismissed.transactionId);
+  }
 
   let generatedCount = 0;
 
@@ -83,17 +156,12 @@ export async function autoGenerateIncomeReceipts(userId: string, statementId: st
         cp.toLowerCase().includes(p.needle)
       );
 
-      let vendor = cp || "Tuntematon maksaja";
-      let feePercent: number | null = 0;
-      let isExactGross = true;
-      let note = "Tulo (Automaattinen luonnos)";
-
-      if (provider) {
-        vendor = provider.vendor;
-        feePercent = provider.feePercent;
-        isExactGross = provider.isExactGross;
-        note = provider.note;
-      }
+      // Not a settlement of a known provider: a plain income row, not a sale.
+      if (!provider) continue;
+      const vendor = provider.vendor;
+      const feePercent = provider.feePercent;
+      const isExactGross = provider.isExactGross;
+      const note = provider.note;
 
       const netCents = Math.abs(tx.amountCents);
       let grossCents = netCents;
@@ -127,7 +195,7 @@ export async function autoGenerateIncomeReceipts(userId: string, statementId: st
       
       // Compute dynamic confidence
       const confidence = computeConfidence({
-        providerRecognized: !!provider,
+        providerRecognized: true,
         singleVatProfile: vatProfile.isSingleRate,
         isExactGross,
         feeReverseCalculated,

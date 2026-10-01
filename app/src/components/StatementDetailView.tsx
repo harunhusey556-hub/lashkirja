@@ -326,6 +326,7 @@ export default function StatementDetailView({
       const data = await readJson<{
         autoConfirmed?: number;
         suggested?: number;
+        draftsCreated?: number;
       }>(res, "Kuittien etsintä epäonnistui");
       await reloadStatement();
       const parts: string[] = [];
@@ -334,6 +335,9 @@ export default function StatementDetailView({
       }
       if ((data.suggested ?? 0) > 0) {
         parts.push(`${data.suggested} ehdotusta odottaa`);
+      }
+      if ((data.draftsCreated ?? 0) > 0) {
+        parts.push(data.draftsCreated === 1 ? "1 uusi myyntiehdotus odottaa" : `${data.draftsCreated} uutta myyntiehdotusta odottaa`);
       }
       if (parts.length > 0) setStatusMsg(parts.join(" · "));
     } catch (error: unknown) {

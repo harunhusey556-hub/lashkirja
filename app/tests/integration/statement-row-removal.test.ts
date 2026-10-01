@@ -37,7 +37,7 @@ async function saleFixture(opts: { rows?: number } = {}) {
     transactions: Array.from({ length: opts.rows ?? 1 }, (_, index) => ({
       date: `2026-09-${String(20 + index).padStart(2, "0")}`,
       amountCents: 125_50,
-      counterparty: "Asiakas Oy",
+      counterparty: "MobilePay Asiakas Oy",
     })),
   });
   return { account, statement };

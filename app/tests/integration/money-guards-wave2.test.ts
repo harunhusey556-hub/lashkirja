@@ -38,7 +38,7 @@ async function bankRow(opts: { date: string; amountCents: number }) {
   const statement = await createStatementWithTransactions(user.id, {
     bankAccountId: account.id,
     periodMonth: opts.date.slice(0, 7),
-    transactions: [{ date: opts.date, amountCents: opts.amountCents, counterparty: "Asiakas Oy" }],
+    transactions: [{ date: opts.date, amountCents: opts.amountCents, counterparty: "MobilePay Asiakas Oy" }],
   });
   return { statement, row: statement.transactions[0] };
 }

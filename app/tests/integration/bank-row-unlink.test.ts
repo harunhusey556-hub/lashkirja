@@ -30,7 +30,7 @@ async function saleFixture() {
     statement: await createStatementWithTransactions(user.id, {
       bankAccountId: account.id,
       periodMonth: "2026-09",
-      transactions: [{ date: "2026-09-20", amountCents: 125_50, counterparty: "Asiakas Oy" }],
+      transactions: [{ date: "2026-09-20", amountCents: 125_50, counterparty: "MobilePay Asiakas Oy" }],
     }),
   };
 }

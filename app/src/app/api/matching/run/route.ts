@@ -25,14 +25,9 @@ export async function POST(req: NextRequest) {
       autoIncomeCount += await autoGenerateIncomeReceipts(session.userId, stmt.id);
     }
 
-    // Drafts generated from bank rows count towards the same total the
-    // matcher reports, so the caller sees one number.
-    const totals = {
-      ...result,
-      autoConfirmed: result.autoConfirmed + autoIncomeCount,
-    };
-
-    return NextResponse.json({ ok: true, ...totals });
+    // A draft is not a link: the matcher's own count stays "linked
+    // automatically", and the drafts made are reported as their own number.
+    return NextResponse.json({ ok: true, ...result, draftsCreated: autoIncomeCount });
   } catch (error) {
     return NextResponse.json({ error: "Matching failed" }, { status: 500 });
   }

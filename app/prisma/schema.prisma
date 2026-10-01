@@ -210,6 +210,8 @@ model Transaction {
   invoicePayment InvoicePayment?
   // Set when this bank row settles a purchase invoice.
   purchasePayment PurchasePayment?
+  // Set when the owner deleted the sale draft made from this row.
+  incomeDraftDismissal IncomeDraftDismissal?
 
   // Denormalized for Enable Banking dedupe. File imports may leave bankRef null.
   userId  String?
@@ -222,6 +224,15 @@ model Transaction {
   @@index([suggestedReceiptId])
   @@unique([userId, bankRef])
   @@index([userId, source])
+}
+
+// The owner deleted the sale draft that was made from a bank row: the row does
+// not get another one. Without this the row, back to "unmatched", qualified for
+// a fresh draft on the next matching run.
+model IncomeDraftDismissal {
+  transactionId String      @id
+  transaction   Transaction @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+  createdAt     DateTime    @default(now())
 }
 
 model Upload {

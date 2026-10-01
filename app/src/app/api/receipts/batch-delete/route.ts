@@ -6,6 +6,7 @@ import { removeUserUpload } from "@/lib/storage";
 import { noStoreJson, rejectCrossSite, rejectOversizedContentLength } from "@/lib/http-security";
 import { withErrorHandler, UnauthorizedError, AppError } from "@/lib/api-errors";
 import { assertPeriodOpen } from "@/lib/period-lock";
+import { dismissIncomeDraft } from "@/lib/income-automation";
 
 const batchDeleteSchema = z.object({
   receiptIds: z.array(z.string()).min(1).max(50),
@@ -35,6 +36,8 @@ export const POST = withErrorHandler(async (req: NextRequest) => {
       filePath: true,
       uploadId: true,
       date: true,
+      source: true,
+      sourceTransactionId: true,
     },
   });
   const byId = new Map(existingReceipts.map((receipt) => [receipt.id, receipt]));
@@ -64,6 +67,7 @@ export const POST = withErrorHandler(async (req: NextRequest) => {
             matchReasons: null,
           },
         });
+        await dismissIncomeDraft(db, session.userId!, receipt);
         await db.receipt.delete({ where: { id: receipt.id } });
         if (receipt.uploadId) {
           await db.upload.deleteMany({

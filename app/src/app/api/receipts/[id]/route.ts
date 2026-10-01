@@ -3,6 +3,7 @@ import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { requireSession } from "@/lib/session";
 import { runMatching, buildReceiptMatchViews } from "@/lib/matching";
+import { dismissIncomeDraft } from "@/lib/income-automation";
 import { centsToEuros, eurosToCents } from "@/lib/money";
 import { removeUserUpload } from "@/lib/storage";
 import { isoDateSchema, isoDateToUtc, nonnegativeMoneySchema } from "@/lib/validation";
@@ -291,6 +292,7 @@ export const DELETE = withErrorHandler(async (
         matchReasons: null,
       },
     });
+    await dismissIncomeDraft(db, session.userId!, existing);
     await db.receipt.delete({ where: { id } });
     if (existing.uploadId) await db.upload.deleteMany({ where: { id: existing.uploadId, userId: session.userId! } });
   });
