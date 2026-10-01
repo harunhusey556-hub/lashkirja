@@ -575,7 +575,7 @@ export async function confirmMatch(
   ]);
   if (!tx || !receipt) throw new MatchNotFoundError();
   if (receipt.linkedTransaction && receipt.linkedTransaction.id !== tx.id) {
-    throw new MatchConflictError("Kuitti on jo linkitetty toiseen tapahtumaan");
+    throw new MatchConflictError("Kuitti on jo kohdistettu toiseen tapahtumaan");
   }
   // Confirming approves a waiting receipt, which moves its month's VAT return
   // and report exactly as approving it from the review queue does.
@@ -590,7 +590,7 @@ export async function confirmMatch(
         resourceId: transactionId,
         previousValue: tx.matchStatus,
         newValue: "confirmed",
-        reason: fromSuggestion ? "automaattinen täsmäytys" : "käyttäjän vahvistus",
+        reason: fromSuggestion ? "automaattinen kohdistus" : "käyttäjän vahvistus",
       },
     });
     await client.transaction.updateMany({

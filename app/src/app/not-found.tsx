@@ -9,7 +9,7 @@ export default function NotFound() {
       icon={SearchX}
       title="Sivua ei löytynyt"
       body="Osoite on virheellinen tai sivu on poistettu."
-      actionLabel="Palaa etusivulle"
+      actionLabel="Palaa Kotiin"
       href="/dashboard"
     />
   );

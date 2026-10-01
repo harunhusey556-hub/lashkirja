@@ -324,7 +324,7 @@ describe("period export package", () => {
     const matches = JSON.parse(files.get("taydennys/kohdistukset.json")!.toString("utf8"));
     expect(matches.transactions).toHaveLength(1);
     expect(matches.transactions[0].counterparty).toBe("Paketti Oy");
-    expect(files.get("tositteet/kuitti.pdf")?.subarray(0, 5).toString("utf8")).toBe("%PDF-");
+    expect(files.get("kuitit/kuitti.pdf")?.subarray(0, 5).toString("utf8")).toBe("%PDF-");
     const joined = [...files.keys()].join("\n");
     expect(joined).not.toContain("session");
     expect(joined).not.toContain(".env");

@@ -98,7 +98,7 @@ describe("the data copy (F56)", () => {
       "laskut.json",
       "kuitit.json",
       "tiliotteet.json",
-      "tilitapahtumat.json",
+      "pankkitapahtumat.json",
       "pankkiyhteydet.json",
       "postilaatikko.json",
       "avustaja.json",
@@ -113,7 +113,7 @@ describe("the data copy (F56)", () => {
     expect(invoices[0].lines[0].description).toBe("Ripsien pidennys");
     expect(invoices[0].dueDate).toContain("2026-09-15");
     expect(JSON.parse(text("avustaja.json"))[0].messages).toHaveLength(2);
-    expect(JSON.parse(text("tilitapahtumat.json"))).toHaveLength(1);
+    expect(JSON.parse(text("pankkitapahtumat.json"))).toHaveLength(1);
 
     // Secrets stay out, and the manifest says so.
     const everything = [...files.values()].map((bytes) => bytes.toString("latin1")).join("\n");

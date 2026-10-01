@@ -216,7 +216,7 @@ export function BankRowSheet({
               <Button
                 className="w-full"
                 busy={busy === "confirm"}
-                busyLabel="Linkitetään…"
+                busyLabel="Kohdistetaan…"
                 disabled={busy !== null}
                 onClick={() =>
                   void run(
@@ -226,11 +226,11 @@ export function BankRowSheet({
                       body: { transactionId: row.id, receiptId: row.suggestedReceiptId! },
                     },
                     linkedPatch(row),
-                    "Kuitti linkitetty."
+                    "Kuitti kohdistettu."
                   )
                 }
               >
-                Linkitä kuitti
+                Kohdista kuitti
               </Button>
               <button
                 type="button"
@@ -275,7 +275,7 @@ export function BankRowSheet({
                               receiptId: candidate.receipt.id,
                               receipt: candidate.receipt,
                             },
-                            "Kuitti linkitetty."
+                            "Kuitti kohdistettu."
                           )
                         }
                         className="active-press flex min-h-12 w-full items-center justify-between gap-3 px-4 py-2.5 text-left disabled:opacity-50"
@@ -283,7 +283,7 @@ export function BankRowSheet({
                         <span className="min-w-0 text-body text-ink [overflow-wrap:anywhere]">
                           {receiptLabel(candidate.receipt)}
                         </span>
-                        <span className="shrink-0 text-caption font-medium text-accent">Linkitä</span>
+                        <span className="shrink-0 text-caption font-medium text-accent">Kohdista</span>
                       </button>
                     ))}
                   </div>
@@ -299,7 +299,7 @@ export function BankRowSheet({
                     requestReceiptCapture({ transactionId: row.id, label: row.counterparty ?? undefined });
                   }}
                 >
-                  Ota kuva kuitista
+                  Kuvaa kuitti
                 </Button>
               )}
               <button
@@ -308,7 +308,7 @@ export function BankRowSheet({
                 disabled={busy !== null}
                 onClick={() => void ignoreWithUndo(row)}
               >
-                {income ? "Ei vaadi tositetta" : "Kuittia ei tarvita"}
+                {income ? "Ei vaadi kuittia" : "Kuittia ei tarvita"}
               </button>
             </>
           )}
@@ -349,7 +349,7 @@ export function BankRowSheet({
           {state === "linked" && (
             <>
               <KeyValueList
-                rows={[{ label: "Linkitetty", value: row.receipt ? receiptLabel(row.receipt) : "Kunnossa" }]}
+                rows={[{ label: "Kohdistettu", value: row.receipt ? receiptLabel(row.receipt) : "Kunnossa" }]}
               />
               {row.receipt && (
                 <Link

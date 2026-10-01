@@ -234,7 +234,7 @@ test("survives a relaunch, paints instantly from cache, and wipes cleanly on log
 
   // ---- logout: the persistent cache and the emulated key are both gone ----
   await dashboardPage.getByRole("button", { name: /Profiili, asetukset/ }).click();
-  await dashboardPage.getByRole("button", { name: "Kirjaudu ulos" }).click();
+  await dashboardPage.getByRole("button", { name: "Kirjaa ulos" }).click();
   await dashboardPage.waitForURL("**/login");
 
   const rowsAfterLogout = await readRawCacheRows(dashboardPage);

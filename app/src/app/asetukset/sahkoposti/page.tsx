@@ -146,7 +146,7 @@ function ImapCard({
       default:
         return (
           <p className="text-caption text-ink-2">
-            Täytä IMAP-palvelimen tiedot ja sovellussalasana. Varmista sähköpostintarjoajaltasi IMAP-asetukset.
+            Täytä saapuvan postin palvelimen tiedot ja sovellussalasana. Löydät palvelimen tiedot sähköpostin tarjoajalta.
           </p>
         );
     }
@@ -305,7 +305,7 @@ function ImapCard({
                       ["gmail", "Gmail"],
                       ["outlook", "Outlook / Hotmail"],
                       ["icloud", "iCloud"],
-                      ["other", "Muu IMAP"],
+                      ["other", "Muu sähköposti"],
                     ] as const
                   ).map(([value, label]) => (
                     <button
@@ -325,7 +325,7 @@ function ImapCard({
                   <form onSubmit={(event) => void connect(event)} className="space-y-4">
                     {selectedProvider === "other" && (
                       <div className="grid grid-cols-[1fr_100px] gap-3">
-                        <Field label="IMAP-palvelin" htmlFor="imapHost">
+                        <Field label="Saapuvan postin palvelin" htmlFor="imapHost">
                           <input
                             id="imapHost"
                             name="imapHost"

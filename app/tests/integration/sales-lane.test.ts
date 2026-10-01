@@ -204,7 +204,7 @@ describe("exports follow the chosen period", () => {
     expect(response.status).toBe(200);
     expect(response.headers.get("Content-Disposition")).toContain("kirjanpito-2025-Q1.zip");
     const files = readStoredZip(Buffer.from(await response.arrayBuffer()));
-    const csv = files.get("csv/tilitapahtumat.csv")?.toString("utf8") ?? "";
+    const csv = files.get("csv/pankkitapahtumat.csv")?.toString("utf8") ?? "";
     expect(csv).toContain("2025-02-10");
     expect(csv).not.toContain("2025-04-10");
   });

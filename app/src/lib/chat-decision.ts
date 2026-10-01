@@ -42,7 +42,7 @@ export async function decideChatProposal(
   if (!message) throw new ChatDecisionError("Viestiä ei löydy", 404);
   const proposal = readProposal(message.proposalData);
   if (proposal.type !== "match_proposal" || !proposal.transactionId || !proposal.receiptId) {
-    throw new ChatDecisionError("Viestissä ei ole täsmäytysehdotusta", 400);
+    throw new ChatDecisionError("Viestissä ei ole kohdistusehdotusta", 400);
   }
   if (proposal.status === input.decision) return message;
   if (proposal.status === "accepted" || proposal.status === "rejected") {

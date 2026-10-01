@@ -135,7 +135,7 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
         statement: { select: { bankAccount: { select: { name: true } } } },
       },
     });
-    headers = ["Päivä", "Pankkitili", "Vastapuoli", "Summa", "Viite", "Viesti", "Tyyppi", "Täsmäytys"];
+    headers = ["Päivä", "Pankkitili", "Vastapuoli", "Summa", "Viite", "Viesti", "Tyyppi", "Kohdistus"];
     rows = transactions.map((transaction) => [
       isoDate(transaction.date),
       transaction.statement.bankAccount?.name ?? "",
@@ -146,7 +146,7 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
       transaction.type,
       transaction.matchStatus,
     ]);
-    fileName = `tilitapahtumat${suffix}.csv`;
+    fileName = `pankkitapahtumat${suffix}.csv`;
   } else if (type === "invoices") {
     const invoices = await prisma.salesInvoice.findMany({
       where: { userId, ...(window ? { issueDate: window } : {}) },

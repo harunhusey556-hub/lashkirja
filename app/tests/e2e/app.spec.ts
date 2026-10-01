@@ -53,7 +53,7 @@ test("login lands on the dashboard and the tab bar navigates", async ({ page }) 
   await expect(page).toHaveURL(/\/kirjanpito$/);
 
   await nav.getByRole("button", { name: "Lisää" }).click();
-  await expect(page.getByRole("button", { name: "Ota kuva" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Kuvaa kuitti" })).toBeVisible();
   await page.keyboard.press("Escape");
 
   await nav.getByRole("link", { name: "Raportit" }).click();
@@ -130,7 +130,7 @@ test("invoice goes from draft to paid", async ({ page }) => {
   await page.getByRole("button", { name: /^Merkitse lähetetyksi/ }).click();
   await expect(page.getByRole("dialog").getByText("Merkitäänkö lähetetyksi?")).toBeVisible();
   await page.getByRole("dialog").getByRole("button", { name: "Merkitse", exact: true }).click();
-  await expect(page.getByText("Lähetetty", { exact: true })).toBeVisible();
+  await expect(page.getByText("Odottaa maksua", { exact: true })).toBeVisible();
 
   // The payment form now opens in a "Kirjaa maksu" sheet (BottomActions'
   // primary for a sent, still-open invoice) instead of sitting inline.

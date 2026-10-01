@@ -928,7 +928,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     router.push(href);
   }
 
-  // Lisää sheet: "Ota kuva" opens the camera and "Tuo tiliote" the document
+  // Lisää sheet: "Kuvaa kuitti" opens the camera and "Tuo tiliote" the document
   // picker straight from the tap (SHELL-02 / OWN-04, SHELL-30). The picked
   // files wait in lib/pending-capture for the receiving screen. Web: the tap
   // is the user gesture a hidden file input needs.
@@ -1244,7 +1244,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
               >
                 <Icon icon={Camera} size="tab" />
                 <span className="min-w-0">
-                  <span className="block text-base font-semibold">Ota kuva</span>
+                  <span className="block text-base font-semibold">Kuvaa kuitti</span>
                   <span className="block text-caption text-canvas/70">Kuitti luetaan automaattisesti</span>
                 </span>
               </button>
@@ -1333,7 +1333,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                     )}
                   </IconTile>
                   <span className="text-body font-medium text-danger">
-                    {signingOut ? "Kirjaudutaan ulos…" : "Kirjaudu ulos"}
+                    {signingOut ? "Kirjaudutaan ulos…" : "Kirjaa ulos"}
                   </span>
                 </button>
               </div>

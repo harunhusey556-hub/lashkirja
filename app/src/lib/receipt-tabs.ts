@@ -18,10 +18,10 @@ export const ZERO_RECEIPT_TAB_COUNTS: ReceiptTabCounts = {
 
 const TAB_LABEL: Record<ReceiptTabId, string> = {
   all: "Kaikki",
-  tulo: "Myynnit",
-  meno: "Ostot",
-  linked: "Linkitetty",
-  unlinked: "Ei linkitetty",
+  tulo: "Tulot",
+  meno: "Menot",
+  linked: "Kohdistettu",
+  unlinked: "Ei kohdistettu",
 };
 
 export interface ReceiptTabChip {

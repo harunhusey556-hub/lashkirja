@@ -39,7 +39,7 @@ function reasonLabel(reasons: string[] | null | undefined): string {
     amount: "summa",
     vendor: "myyjä",
     date: "päivä",
-    manual: "linkitetty käsin",
+    manual: "kohdistettu käsin",
     auto_income: "tulo tiliotteelta",
     approved: "hyväksytty",
   };
@@ -87,7 +87,7 @@ export default function ReceiptMatchPanel({
     return (
       <div className={`space-y-1.5 ${pad}`}>
         <StatusTag tone="success">
-          {strong ? "Täsmää pankkitapahtumaan" : "Linkitetty pankkitapahtumaan"}
+          {strong ? "Kohdistettu, varma osuma" : "Kohdistettu pankkitapahtumaan"}
         </StatusTag>
         <p className={`text-caption text-ink ${compact ? "truncate" : ""}`}>
           {txLabel(tx)}
@@ -117,7 +117,7 @@ export default function ReceiptMatchPanel({
     return (
       <div className={`space-y-2 ${pad}`}>
         <StatusTag tone="accent">
-          {strong ? "Täsmää, ehdotettu tapahtuma" : "Ehdotettu pankkitapahtuma"}
+          {strong ? "Ehdotettu tapahtuma, varma osuma" : "Ehdotettu pankkitapahtuma"}
         </StatusTag>
         {onConfirm ? (
           <button
@@ -133,7 +133,7 @@ export default function ReceiptMatchPanel({
                 {Math.round((tx.score ?? tx.matchScore ?? 0) * 100)} %
               </p>
             ) : null}
-            <p className="mt-1 text-caption font-medium text-success">Napauta linkittääksesi</p>
+            <p className="mt-1 text-caption font-medium text-success">Napauta kohdistaaksesi</p>
           </button>
         ) : (
           <p className="text-caption text-ink">{txLabel(tx)}</p>
@@ -154,8 +154,7 @@ export default function ReceiptMatchPanel({
   if (candidates.length === 0) {
     return (
       <p className={`text-caption text-ink-2 ${pad}`}>
-        Ei löytynyt pankkitapahtumaa, linkitä Tiliotteet-sivulla tai lisää
-        tiliote.
+        Ei löytynyt pankkitapahtumaa. Kohdista kuitti tapahtumalta Pankki-näkymässä tai tuo tiliote.
       </p>
     );
   }

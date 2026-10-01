@@ -173,7 +173,7 @@ describe("wave F receipts", () => {
     });
     expect(matchEvent?.previousValue).toBe("unmatched");
     expect(matchEvent?.newValue).toBe("confirmed");
-    expect(matchEvent?.reason).toBe("automaattinen täsmäytys");
+    expect(matchEvent?.reason).toBe("automaattinen kohdistus");
 
     const pending = await createReceipt(user.id, { reviewStatus: "pending", date: "2026-03-02" });
     const approved = await batchApprove(

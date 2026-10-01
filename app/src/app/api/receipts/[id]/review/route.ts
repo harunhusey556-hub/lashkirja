@@ -66,7 +66,7 @@ export const PATCH = withErrorHandler(
       });
       if (isLinked) {
         throw new AppError(
-          "Kuitti on linkitetty tiliotetapahtumaan. Irrota kuitti ensin, jotta voit hylätä sen.",
+          "Kuitti on kohdistettu pankkitapahtumaan. Irrota kuitti ensin, jotta voit hylätä sen.",
           "CONFLICT",
           409
         );

@@ -259,7 +259,7 @@ export default function RecurringInvoicesPage() {
       const response = await apiFetch(`/api/recurring-invoices/run${query}`, { credentials: "include" });
       const data = await readJson<RunPlan>(response, "Tarkistus epäonnistui");
       if (data.plan.length === 0) {
-        showToast({ text: "Yhtään laskua ei ole juuri nyt erääntynyt luotavaksi." });
+        showToast({ text: "Yhtään laskua ei ole juuri nyt luotavana." });
         return;
       }
       if (runPlanInvoiceCount(data.plan) === 0) {
@@ -384,8 +384,8 @@ export default function RecurringInvoicesPage() {
           <Card className="space-y-3">
             <p className="text-body text-ink">
               {dueNow === 1
-                ? "1 toistuva lasku on erääntynyt luotavaksi."
-                : `${dueNow} toistuvaa laskua on erääntynyt luotavaksi.`}
+                ? "1 toistuva lasku odottaa luontia."
+                : `${dueNow} toistuvaa laskua odottaa luontia.`}
             </p>
             <Button
               type="button"
@@ -394,7 +394,7 @@ export default function RecurringInvoicesPage() {
               busyLabel="Tarkistetaan…"
               onClick={() => void previewRun()}
             >
-              Luo erääntyneet laskut
+              Luo odottavat laskut
             </Button>
           </Card>
         )}

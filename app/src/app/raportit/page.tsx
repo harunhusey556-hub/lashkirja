@@ -81,7 +81,7 @@ interface Report {
 const EXPORTS = [
   { type: "profit-loss", label: "Tuloslaskelma" },
   { type: "receipts", label: "Kuitit" },
-  { type: "transactions", label: "Tilitapahtumat" },
+  { type: "transactions", label: "Pankkitapahtumat" },
   { type: "invoices", label: "Myyntilaskut" },
   { type: "purchase-invoices", label: "Ostolaskut" },
   { type: "customers", label: "Asiakkaat" },
@@ -438,7 +438,7 @@ export default function ReportsPage() {
                 <p className="text-body font-medium text-ink">Kirjanpitopaketti</p>
                 <p className="text-caption text-ink-2">
                   Zip kuukaudelta, neljännekseltä tai koko vuodelta: tuloslaskelma, ALV, CSV,
-                  kohdistukset ja tositteet.
+                  kohdistukset ja kuitit.
                 </p>
               </div>
               <div className="flex gap-2">

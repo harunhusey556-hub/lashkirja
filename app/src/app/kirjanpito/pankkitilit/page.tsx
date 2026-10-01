@@ -118,7 +118,7 @@ function accountSecondary(account: AccountSummary): string {
   if (account.isDefault) flags.push("Oletus");
   if (account.archivedAt) flags.push("Arkistoitu");
   if (account.mismatchCount > 0) flags.push(`${account.mismatchCount} kk ei täsmää`);
-  if (account.lastReconciledMonth) flags.push(`Täsmätty ${formatMonth(account.lastReconciledMonth)}`);
+  if (account.lastReconciledMonth) flags.push(`Saldo täsmää ${formatMonth(account.lastReconciledMonth)}`);
   flags.push(account.statementCount === 1 ? "1 tiliote" : `${account.statementCount} tiliotetta`);
   return flags.length > 0 ? `${base} · ${flags.join(" · ")}` : base;
 }
@@ -376,7 +376,7 @@ export default function BankAccountsPage() {
                 <p className="text-caption text-ink-2">
                   {overview.totalAccounts === 1 ? "1 tili" : `${overview.totalAccounts} tiliä`}
                   {overview.needsAttention > 0 && (
-                    <span className="text-danger"> · {overview.needsAttention} vaatii täsmäytystä</span>
+                    <span className="text-danger"> · {overview.needsAttention} vaatii saldon tarkistusta</span>
                   )}
                 </p>
                 {overview.excludedCurrencies.length > 0 && (

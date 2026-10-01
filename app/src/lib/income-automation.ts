@@ -223,7 +223,7 @@ export async function autoGenerateIncomeReceipts(userId: string, statementId: st
           source: "auto_income",
           sourceTransactionId: tx.id,
           confidence,
-          rawText: "Luonnos tiliotteen rivistä. Ei vahvistettu tosite.",
+          rawText: "Luonnos tiliotteen rivistä. Ei vahvistettu kuitti.",
           reviewStatus: "pending",
         },
       });

@@ -236,7 +236,7 @@ test("Asetukset: sign-out goes through the shared hook and ends at the login pag
     if (request.url().includes("/api/auth/logout")) logouts.push(request.method());
   });
   await open(page, "/asetukset");
-  await page.getByRole("button", { name: "Kirjaudu ulos" }).click();
+  await page.getByRole("button", { name: "Kirjaa ulos" }).click();
   await page.waitForURL("**/login", { timeout: 15_000 });
   // The login page must not bounce a signed-out person back into the app.
   await page.waitForTimeout(1500);

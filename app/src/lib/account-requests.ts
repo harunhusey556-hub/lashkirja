@@ -222,7 +222,7 @@ export async function buildAccountCopyZip(userId: string): Promise<Buffer> {
     ["ostolaskut.json", purchaseInvoices],
     ["kuitit.json", receipts],
     ["tiliotteet.json", statements],
-    ["tilitapahtumat.json", transactions],
+    ["pankkitapahtumat.json", transactions],
     ["pankkitilit.json", bankAccounts],
     ["pankkiyhteydet.json", bankConnections],
     ["alv-ilmoitukset.json", vatFilings],
@@ -273,9 +273,9 @@ export async function buildAccountCopyZip(userId: string): Promise<Buffer> {
     }
     try {
       const bytes = await readUserUpload(userId, receipt.filePath);
-      const base = safeOriginalName(receipt.fileName || "tosite");
-      let name = `tositteet/${base}`;
-      for (let n = 2; usedNames.has(name); n += 1) name = `tositteet/${n}-${base}`;
+      const base = safeOriginalName(receipt.fileName || "kuitti");
+      let name = `kuitit/${base}`;
+      for (let n = 2; usedNames.has(name); n += 1) name = `kuitit/${n}-${base}`;
       usedNames.add(name);
       entries.push({ name, data: bytes });
     } catch {
@@ -283,7 +283,7 @@ export async function buildAccountCopyZip(userId: string): Promise<Buffer> {
     }
   }
   if (missingFiles.length > 0) {
-    entries.push({ name: "tositteet/puuttuvat.txt", data: Buffer.from(missingFiles.join("\n"), "utf8") });
+    entries.push({ name: "kuitit/puuttuvat.txt", data: Buffer.from(missingFiles.join("\n"), "utf8") });
   }
 
   const counts = jsonFiles
@@ -292,15 +292,15 @@ export async function buildAccountCopyZip(userId: string): Promise<Buffer> {
   const readme =
     `LashKirjan tietokopio.\n\n` +
     `Tässä ovat tilisi tiedot: profiili ja laskutustiedot, asiakkaat, myynti- ja ostolaskut, maksut, kuitit ja niiden tiedostot, ` +
-    `tiliotteet ja tilitapahtumat, pankkitilit ja pankkiyhteydet, ALV-ilmoitukset, toistuvat laskut, tuotteet, ` +
+    `tiliotteet ja pankkitapahtumat, pankkitilit ja pankkiyhteydet, ALV-ilmoitukset, toistuvat laskut, tuotteet, ` +
     `yhdistetyn postilaatikon tiedot ja keskustelut avustajan kanssa. Jokainen tieto on JSON-tiedostossa; ` +
     `laskut, asiakkaat ja kuitit ovat lisäksi csv-yhteenvetona.\n\n` +
     `Mukana ei ole salasanasi tiivistettä, postilaatikon salasanaa eikä pankkiyhteyden salaisuuksia. ` +
-    `Tiliotteiden alkuperäisiä tiedostoja ei ole mukana, mutta niiden rivit ovat tiedostossa tilitapahtumat.json.\n` +
+    `Tiliotteiden alkuperäisiä tiedostoja ei ole mukana, mutta niiden rivit ovat tiedostossa pankkitapahtumat.json.\n` +
     `Kirjanpitoaineistoa säilytetään ${ACCOUNTING_RETENTION_YEARS} vuotta.\n\n` +
     `Rivejä tiedostoissa:\n` +
     counts.join("\n") +
-    `\ntositteet/ (kuittien tiedostot): ${usedNames.size}\n`;
+    `\nkuitit/ (kuittien tiedostot): ${usedNames.size}\n`;
   entries.unshift({ name: "lue-minut.txt", data: Buffer.from(readme, "utf8") });
   return buildStoredZip(entries);
 }

@@ -168,7 +168,7 @@ function historyItems(invoice: Invoice): HistoryItem[] {
 
   if (invoice.displayStatus === "overdue") {
     dated.push({
-      title: "Erääntyi",
+      title: "Myöhässä eräpäivästä",
       meta: formatDayMonth(invoice.dueDate),
       tone: "accent",
       at: new Date(invoice.dueDate).getTime(),

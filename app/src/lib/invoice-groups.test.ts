@@ -28,12 +28,12 @@ describe("INVOICE_LIST_LIMIT", () => {
 });
 
 describe("salesFilterChips", () => {
-  it("always shows Kaikki, Myöhässä, Luonnokset, Avoimet, Maksetut with live counts, in that order", () => {
+  it("always shows Kaikki, Myöhässä, Luonnokset, Odottaa maksua, Maksetut with live counts, in that order", () => {
     expect(salesFilterChips(COUNTS)).toEqual([
       { id: "all", label: "Kaikki", count: 5 },
       { id: "overdue", label: "Myöhässä", count: 1 },
       { id: "draft", label: "Luonnokset", count: 1 },
-      { id: "sent", label: "Avoimet", count: 2 },
+      { id: "sent", label: "Odottaa maksua", count: 2 },
       { id: "paid", label: "Maksetut", count: 1 },
     ]);
   });
@@ -55,7 +55,7 @@ describe("salesFilterChips", () => {
       { id: "all", label: "Kaikki", count: 0 },
       { id: "overdue", label: "Myöhässä", count: 0 },
       { id: "draft", label: "Luonnokset", count: 0 },
-      { id: "sent", label: "Avoimet", count: 0 },
+      { id: "sent", label: "Odottaa maksua", count: 0 },
       { id: "paid", label: "Maksetut", count: 0 },
     ]);
   });

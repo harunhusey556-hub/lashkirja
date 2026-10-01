@@ -6,14 +6,14 @@ type Label = { label: string; tone: Tone };
 
 export const SALES_STATUS: Record<InvoiceDisplayStatus, Label> = {
   draft: { label: "Luonnos", tone: "neutral" },
-  sent: { label: "Lähetetty", tone: "accent" },
+  sent: { label: "Odottaa maksua", tone: "neutral" },
   overdue: { label: "Myöhässä", tone: "danger" },
   paid: { label: "Maksettu", tone: "success" },
   credited: { label: "Hyvitetty", tone: "neutral" },
 };
 
 export const PURCHASE_STATUS: Record<"open" | "overdue" | "paid" | "cancelled", Label> = {
-  open: { label: "Avoin", tone: "accent" },
+  open: { label: "Odottaa maksua", tone: "neutral" },
   overdue: { label: "Myöhässä", tone: "danger" },
   paid: { label: "Maksettu", tone: "success" },
   cancelled: { label: "Mitätöity", tone: "neutral" },
@@ -22,10 +22,10 @@ export const PURCHASE_STATUS: Record<"open" | "overdue" | "paid" | "cancelled", 
 /** A receipt's bank-match state, for the kuitit list's `StatusTag`. */
 export type ReceiptMatchStatusKey = "linked" | "suggested" | "candidates" | "unlinked";
 export const RECEIPT_MATCH_STATUS: Record<ReceiptMatchStatusKey, Label> = {
-  linked: { label: "Linkitetty", tone: "success" },
+  linked: { label: "Kohdistettu", tone: "success" },
   suggested: { label: "Ehdotus", tone: "warning" },
-  candidates: { label: "Ehdotuksia", tone: "warning" },
-  unlinked: { label: "Ei linkitystä", tone: "neutral" },
+  candidates: { label: "Ehdotus", tone: "warning" },
+  unlinked: { label: "Ei kohdistettu", tone: "neutral" },
 };
 
 /**
@@ -48,11 +48,11 @@ export function receiptMatchStatusKey(match: {
 /** A bank statement transaction's document-state, for the tiliote detail's `StatusTag`. */
 export type StatementTxStatusKey = "linked" | "suggested" | "ignored" | "palkka" | "missing";
 export const STATEMENT_TX_STATUS: Record<StatementTxStatusKey, Label> = {
-  linked: { label: "Linkitetty", tone: "success" },
+  linked: { label: "Kohdistettu", tone: "success" },
   suggested: { label: "Ehdotus", tone: "warning" },
-  ignored: { label: "Ei tarvita", tone: "neutral" },
+  ignored: { label: "Ei kuittia tarvita", tone: "neutral" },
   palkka: { label: "Palkka", tone: "neutral" },
-  missing: { label: "Puuttuu", tone: "danger" },
+  missing: { label: "Kuitti puuttuu", tone: "danger" },
 };
 
 /**

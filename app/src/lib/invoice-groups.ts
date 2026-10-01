@@ -36,12 +36,12 @@ export const INVOICE_LIST_LIMIT = 200;
  */
 const STATUS_ORDER: StatusFilterId[] = ["overdue", "draft", "sent", "paid", "credited"];
 
-/** Chip wording. "sent" reads "Avoimet" here, distinct from its group heading below. */
+/** Chip wording. "sent" reads "Odottaa maksua" here, distinct from its group heading below. */
 const FILTER_LABEL: Record<SalesFilterId, string> = {
   all: "Kaikki",
   overdue: "Myöhässä",
   draft: "Luonnokset",
-  sent: "Avoimet",
+  sent: "Odottaa maksua",
   paid: "Maksetut",
   credited: "Hyvitetyt",
 };

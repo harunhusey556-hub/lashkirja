@@ -79,7 +79,7 @@ export const STATEMENT_TX_FILTERS: {
   shortLabel?: string;
 }[] = [
   { id: "all", label: "Kaikki" },
-  { id: "linked", label: "Linkitetyt kuitit", shortLabel: "Linkitetyt" },
+  { id: "linked", label: "Kohdistetut kuitit", shortLabel: "Kohdistetut" },
   { id: "missing", label: "Puuttuvat kuitit", shortLabel: "Puuttuvat" },
   { id: "suggested", label: "Ehdotukset" },
   { id: "ignored", label: "Ei kuittia tarvita", shortLabel: "Merkitty" },

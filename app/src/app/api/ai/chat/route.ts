@@ -341,7 +341,7 @@ export async function POST(req: NextRequest) {
     }
     console.error("AI Chat API Error:", errorText(error));
     return NextResponse.json(
-      { error: "Tekoälyapurin käsittely epäonnistui. Yritä hetken kuluttua uudelleen." },
+      { error: "Avustaja ei saanut vastausta valmiiksi. Yritä hetken kuluttua uudelleen." },
       { status: 500 }
     );
   }

@@ -190,7 +190,7 @@ export async function nextInvoiceNumber(userId: string): Promise<number> {
 
 const STATUS_FI: Record<string, string> = {
   draft: "Luonnos",
-  sent: "Lähetetty",
+  sent: "Odottaa maksua",
   paid: "Maksettu",
   credited: "Hyvitetty",
 };
@@ -1134,13 +1134,13 @@ export async function recordPayment(
         where: { id: invoiceId },
         data: { status: "paid", paidAt: isoDateToUtc(input.paidDate) },
       });
-      await recordActivity(conn, invoiceId, "status_changed", "Tila muuttui: Lähetetty → Maksettu.");
+      await recordActivity(conn, invoiceId, "status_changed", "Tila muuttui: Odottaa maksua → Maksettu.");
     } else if (reopens) {
       await conn.salesInvoice.update({
         where: { id: invoiceId },
         data: { status: "sent", paidAt: null },
       });
-      await recordActivity(conn, invoiceId, "status_changed", "Tila muuttui: Maksettu → Lähetetty.");
+      await recordActivity(conn, invoiceId, "status_changed", "Tila muuttui: Maksettu → Odottaa maksua.");
     }
   };
   if (db) await run(db);
@@ -1382,7 +1382,7 @@ export async function removePayment(
           where: { id: invoiceId },
           data: { status: "sent", paidAt: null },
         });
-        await recordActivity(tx, invoiceId, "status_changed", "Tila muuttui: Maksettu → Lähetetty.");
+        await recordActivity(tx, invoiceId, "status_changed", "Tila muuttui: Maksettu → Odottaa maksua.");
       }
     }
     return true;

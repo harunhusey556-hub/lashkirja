@@ -21,7 +21,7 @@ export function queuedReceiptsCountLabel(count: number): string {
  *
  *   const { requestSignOut, signingOut, signOutError, confirmDialog } = useSignOut();
  *   ...
- *   <button onClick={requestSignOut} disabled={signingOut}>Kirjaudu ulos</button>
+ *   <button onClick={requestSignOut} disabled={signingOut}>Kirjaa ulos</button>
  *   {confirmDialog}
  *
  * Render `confirmDialog` once, anywhere in the tree of the caller. This hook
@@ -70,7 +70,7 @@ export function useSignOut(options: { onBeforeSignOut?: () => void } = {}): {
       isOpen={confirmOpen}
       title="Kirjaudutaanko ulos?"
       description={`${queuedReceiptsCountLabel(queuedCount)} Jos kirjaudut ulos, ne poistetaan tästä laitteesta.`}
-      confirmLabel="Kirjaudu ulos"
+      confirmLabel="Kirjaa ulos"
       cancelLabel="Peruuta"
       onConfirm={signOutNow}
       onCancel={() => setConfirmOpen(false)}

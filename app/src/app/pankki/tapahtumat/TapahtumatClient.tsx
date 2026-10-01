@@ -69,7 +69,7 @@ function rowSecondary(row: FeedRow): string {
             : "Oma siirto"
           : state === "missing"
             ? row.amount > 0
-              ? "Tositetta ei vielä ole"
+              ? "Kuittia ei vielä ole"
               : "Kuitti puuttuu"
             : "";
   return [day, note].filter(Boolean).join(" · ");
@@ -78,7 +78,7 @@ function rowSecondary(row: FeedRow): string {
 function rowTag(row: FeedRow) {
   const state = rowState(row);
   if (state === "missing") {
-    return <StatusTag tone="warning">{row.amount > 0 ? "Puuttuu" : "Lisää kuitti"}</StatusTag>;
+    return <StatusTag tone="warning">{row.amount > 0 ? "Puuttuu" : "Uusi kuitti"}</StatusTag>;
   }
   const tag = ROW_TAG[state];
   return tag ? <StatusTag tone={tag.tone}>{tag.label}</StatusTag> : null;

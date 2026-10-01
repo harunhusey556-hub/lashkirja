@@ -32,14 +32,14 @@ const STATUS_ORDER: PurchaseStatusFilterId[] = ["overdue", "open", "paid", "canc
 const FILTER_LABEL: Record<PurchaseFilterId, string> = {
   all: "Kaikki",
   overdue: "Myöhässä",
-  open: "Avoimet",
+  open: "Odottaa maksua",
   paid: "Maksetut",
   cancelled: "Mitätöidyt",
 };
 
 const GROUP_LABEL: Record<PurchaseStatusFilterId, string> = {
   overdue: "Myöhässä",
-  open: "Avoimet",
+  open: "Odottaa maksua",
   paid: "Maksetut",
   cancelled: "Mitätöidyt",
 };

@@ -18,7 +18,7 @@ export interface MonthRow {
 }
 
 const STATUS_LABEL: Record<MonthRow["status"], string> = {
-  reconciled: "Täsmää",
+  reconciled: "Saldo täsmää",
   mismatch: "Ero",
   unreported: "Ei saldoa",
 };

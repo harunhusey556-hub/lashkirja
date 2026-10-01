@@ -86,7 +86,7 @@ export default function ReceiptUploadArea({
         type="file"
         accept="image/*,.heic,.heif,image/heic"
         capture="environment"
-        aria-label="Ota kuva kuitista tai laskusta"
+        aria-label="Kuvaa kuitti tai lasku"
         className="hidden"
         onChange={(e) => enqueueFromInput(e, onFilesPicked)}
       />
@@ -104,7 +104,7 @@ export default function ReceiptUploadArea({
         <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-canvas text-ink-2">
           <Icon icon={FileUp} size="tab" />
         </div>
-        <p className="text-body font-medium text-ink">Lisää kuitti tai lasku kuvana tai PDF-tiedostona</p>
+        <p className="text-body font-medium text-ink">Lisää kuva tai PDF kuitista tai laskusta</p>
 
         <div className="mx-auto flex max-w-sm flex-col gap-3">
           <button
@@ -113,7 +113,7 @@ export default function ReceiptUploadArea({
             disabled={uploading}
             className="active-press min-h-12 w-full rounded-card bg-ink px-4 text-body font-semibold text-canvas disabled:opacity-60"
           >
-            Ota kuva
+            Kuvaa kuitti
           </button>
           <button
             type="button"

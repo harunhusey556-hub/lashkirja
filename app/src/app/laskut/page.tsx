@@ -89,11 +89,11 @@ function lockedNote(count: number): string {
 
 const AGING_BUCKETS = ["1-30", "31-60", "61-90", "90+"] as const;
 
-/** "Lasku N, eräpäivä d.m." - "erääntyi" once overdue, no date at all while still a draft. */
+/** "Lasku N, eräpäivä d.m." - "myöhässä" once overdue, no date at all while still a draft. */
 function rowSecondary(invoice: InvoiceSummary): string {
   if (invoice.documentKind === "credit_note") return `Hyvityslasku ${invoice.number}`;
   if (invoice.displayStatus === "draft") return `Lasku ${invoice.number}`;
-  const datePhrase = invoice.displayStatus === "overdue" ? "erääntyi" : "eräpäivä";
+  const datePhrase = invoice.displayStatus === "overdue" ? "myöhässä, eräpäivä" : "eräpäivä";
   return `Lasku ${invoice.number}, ${datePhrase} ${formatDayMonth(invoice.dueDate)}`;
 }
 

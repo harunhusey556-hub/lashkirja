@@ -11,22 +11,22 @@ import {
 describe("status labels", () => {
   it("keeps the Finnish sales invoice words the app already shows", () => {
     expect(Object.fromEntries(Object.entries(SALES_STATUS).map(([k, v]) => [k, v.label]))).toEqual({
-      draft: "Luonnos", sent: "Lähetetty", overdue: "Myöhässä", paid: "Maksettu", credited: "Hyvitetty",
+      draft: "Luonnos", sent: "Odottaa maksua", overdue: "Myöhässä", paid: "Maksettu", credited: "Hyvitetty",
     });
     expect(SALES_STATUS.overdue.tone).toBe("danger");
     expect(SALES_STATUS.paid.tone).toBe("success");
   });
   it("keeps the purchase invoice words", () => {
-    expect(PURCHASE_STATUS.open.label).toBe("Avoin");
+    expect(PURCHASE_STATUS.open.label).toBe("Odottaa maksua");
     expect(PURCHASE_STATUS.cancelled.label).toBe("Mitätöity");
     expect(PURCHASE_STATUS.overdue.tone).toBe("danger");
   });
   it("keeps the receipt match words the kuitit list already showed", () => {
     expect(Object.fromEntries(Object.entries(RECEIPT_MATCH_STATUS).map(([k, v]) => [k, v.label]))).toEqual({
-      linked: "Linkitetty",
+      linked: "Kohdistettu",
       suggested: "Ehdotus",
-      candidates: "Ehdotuksia",
-      unlinked: "Ei linkitystä",
+      candidates: "Ehdotus",
+      unlinked: "Ei kohdistettu",
     });
     expect(RECEIPT_MATCH_STATUS.linked.tone).toBe("success");
     expect(RECEIPT_MATCH_STATUS.unlinked.tone).toBe("neutral");
@@ -40,11 +40,11 @@ describe("status labels", () => {
   });
   it("keeps the statement transaction document-state words the tiliote detail already showed", () => {
     expect(Object.fromEntries(Object.entries(STATEMENT_TX_STATUS).map(([k, v]) => [k, v.label]))).toEqual({
-      linked: "Linkitetty",
+      linked: "Kohdistettu",
       suggested: "Ehdotus",
-      ignored: "Ei tarvita",
+      ignored: "Ei kuittia tarvita",
       palkka: "Palkka",
-      missing: "Puuttuu",
+      missing: "Kuitti puuttuu",
     });
     expect(STATEMENT_TX_STATUS.linked.tone).toBe("success");
     expect(STATEMENT_TX_STATUS.missing.tone).toBe("danger");

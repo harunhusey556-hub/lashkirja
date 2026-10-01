@@ -101,7 +101,7 @@ test("signing out from the profile sheet lands on /login with no document naviga
   });
 
   await page.getByRole("button", { name: /Profiili, asetukset/ }).click();
-  await page.getByRole("button", { name: "Kirjaudu ulos" }).click();
+  await page.getByRole("button", { name: "Kirjaa ulos" }).click();
 
   await page.waitForURL("**/login");
   expect(documentLoads).toBe(0);

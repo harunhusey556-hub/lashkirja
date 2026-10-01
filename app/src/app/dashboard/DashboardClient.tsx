@@ -613,7 +613,7 @@ export default function DashboardClient() {
     let cancelled = false;
     apiFetch(`/api/dashboard?month=${month}`, { credentials: "include" })
       .then((response) =>
-        readJson<DashboardData>(response, "Etusivun tietojen lataus epäonnistui")
+        readJson<DashboardData>(response, "Kodin tietojen lataus epäonnistui")
       )
       .then((data) => {
         if (cancelled) return;
@@ -622,7 +622,7 @@ export default function DashboardClient() {
           !Number.isFinite(data.expenses) ||
           !data.vat
         ) {
-          throw new Error("Palvelin palautti virheelliset etusivun tiedot");
+          throw new Error("Palvelin palautti virheelliset Kodin tiedot");
         }
         setRefreshFailed(null);
         writePageCache(`dashboard:${month}`, data);
@@ -818,7 +818,7 @@ export default function DashboardClient() {
       {refreshFailed && !data ? (
         <ConnectionNotice
           error={refreshFailed}
-          fallback={errorMessage(refreshFailed, "Etusivun tietojen lataus epäonnistui")}
+          fallback={errorMessage(refreshFailed, "Kodin tietojen lataus epäonnistui")}
           onRetry={retry}
         />
       ) : !data ? (
@@ -1003,14 +1003,14 @@ export default function DashboardClient() {
               <ListRow
                 href="/laskut"
                 leading={<Icon icon={Wallet} />}
-                title="Myyntisaamiset"
+                title="Avoimet myyntilaskut"
                 amount={formatEur(data.receivables?.totalOpen ?? 0)}
                 secondary={
                   data.receivables && data.receivables.overdue > 0
-                    ? `${formatEur(data.receivables.overdue)} erääntynyt`
-                    : "Ei erääntyneitä"
+                    ? `${formatEur(data.receivables.overdue)} myöhässä`
+                    : "Ei myöhässä olevia"
                 }
-                ariaLabel={`Myyntisaamiset, ${formatEur(data.receivables?.totalOpen ?? 0)}`}
+                ariaLabel={`Avoimet myyntilaskut, ${formatEur(data.receivables?.totalOpen ?? 0)}`}
                 trailing={
                   <ActionPill href="/laskut/uusi" ariaLabel="Uusi lasku">
                     Uusi lasku
@@ -1021,14 +1021,14 @@ export default function DashboardClient() {
                 <ListRow
                   href="/kirjanpito/ostolaskut"
                   leading={<Icon icon={FileText} />}
-                  title="Ostovelat"
+                  title="Avoimet ostolaskut"
                   amount={formatEur(data.payables.totalOpen)}
                   secondary={
                     data.payables.overdue > 0
-                      ? `${formatEur(data.payables.overdue)} erääntynyt`
-                      : "Ei erääntyneitä"
+                      ? `${formatEur(data.payables.overdue)} myöhässä`
+                      : "Ei myöhässä olevia"
                   }
-                  ariaLabel={`Ostovelat, ${formatEur(data.payables.totalOpen)}`}
+                  ariaLabel={`Avoimet ostolaskut, ${formatEur(data.payables.totalOpen)}`}
                 />
               ) : null}
             </Section>
@@ -1044,7 +1044,7 @@ export default function DashboardClient() {
                 secondary={
                   data.hasImap
                     ? "Kuitit tulevat myös sähköpostista"
-                    : "Tiliotteen tapahtumat, joilla on tosite"
+                    : "Tiliotteen tapahtumat, joilla on kuitti"
                 }
               />
             </Section>

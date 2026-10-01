@@ -80,7 +80,7 @@ interface Aging {
 const PENDING_CHIP_LABELS: Array<{ id: PurchaseFilterId; label: string }> = [
   { id: "all", label: "Kaikki" },
   { id: "overdue", label: "Myöhässä" },
-  { id: "open", label: "Avoimet" },
+  { id: "open", label: "Odottaa maksua" },
   { id: "paid", label: "Maksetut" },
 ];
 const AGING_BUCKETS = ["1-30", "31-60", "61-90", "90+"] as const;
@@ -88,14 +88,14 @@ const AGING_BUCKETS = ["1-30", "31-60", "61-90", "90+"] as const;
 const today = () => new Date().toISOString().slice(0, 10);
 
 /**
- * "<number> · eräpäivä d.m. · avoinna X" - "erääntyi" once overdue, no invoice
+ * "<number> · eräpäivä d.m. · avoinna X" - "myöhässä" once overdue, no invoice
  * number when there is none, and the trailing "avoinna" clause only when the
  * invoice is partially paid (paid something, but not the full amount yet) -
  * otherwise the open amount already equals the row's own gross figure and
  * repeating it here would be redundant.
  */
 function rowSecondary(invoice: PurchaseInvoice): string {
-  const datePhrase = invoice.displayStatus === "overdue" ? "erääntyi" : "eräpäivä";
+  const datePhrase = invoice.displayStatus === "overdue" ? "myöhässä, eräpäivä" : "eräpäivä";
   const dateText = `${datePhrase} ${formatDayMonth(invoice.dueDate)}`;
   // Without an invoice number the date phrase starts the line, so it starts with a capital.
   const base = invoice.invoiceNumber

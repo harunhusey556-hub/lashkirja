@@ -5,7 +5,7 @@ describe("receipt-tabs", () => {
   it("builds five chips in a fixed order with their counts", () => {
     const chips = receiptTabChips({ ...ZERO_RECEIPT_TAB_COUNTS, all: 9, tulo: 2, meno: 7, linked: 3, unlinked: 6 });
     expect(chips.map((c) => c.id)).toEqual(["all", "tulo", "meno", "linked", "unlinked"]);
-    expect(chips.map((c) => c.label)).toEqual(["Kaikki", "Myynnit", "Ostot", "Linkitetty", "Ei linkitetty"]);
+    expect(chips.map((c) => c.label)).toEqual(["Kaikki", "Tulot", "Menot", "Kohdistettu", "Ei kohdistettu"]);
     expect(chips.map((c) => c.count)).toEqual([9, 2, 7, 3, 6]);
   });
 

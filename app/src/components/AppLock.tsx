@@ -172,7 +172,7 @@ export function AppLock({ children }: { children: React.ReactNode }) {
       const next = registerPinFailure(readPinAttempts(userId), Date.now());
       writePinAttempts(userId, next);
       setNow(Date.now());
-      setError(next.count >= 5 ? "Liian monta yritystä. Jos koodi on unohtunut, kirjaudu ulos." : "Koodi ei täsmää.");
+      setError(next.count >= 5 ? "Liian monta yritystä. Jos koodi on unohtunut, kirjaa ulos." : "Koodi ei täsmää.");
       return;
     }
     writePinAttempts(userId, null);
@@ -244,7 +244,7 @@ export function AppLock({ children }: { children: React.ReactNode }) {
           <div className="space-y-2">
             <p className="text-sm text-ink">Lukitus poistetaan ja sinut kirjataan ulos. Jatka?</p>
             <Button type="button" variant="secondary" className="w-full" onClick={() => void forgetPin()}>
-              Kirjaudu ulos
+              Kirjaa ulos
             </Button>
             <button type="button" className="active-press block min-h-11 w-full text-body text-ink-2" onClick={() => setConfirmForget(false)}>
               Peruuta

@@ -32,7 +32,7 @@ export const NAV: readonly NavEntry[] = [
   { id: "pankki-tapahtumat", kind: "workspace", label: "Pankki", path: "/pankki/tapahtumat", parent: "kirjanpito" },
   { id: "pankki-tapahtuma", kind: "detail", label: "Tiliote", path: "/pankki/tapahtumat/tiliote", parent: "pankki-tapahtumat" },
   { id: "pankki-taydennys", kind: "workspace", label: "Pankki", path: "/pankki/taydennys", parent: "kirjanpito" },
-  { id: "tyot", kind: "workspace", label: "Taustatyöt", path: "/tyot", parent: "kirjanpito" },
+  { id: "tyot", kind: "workspace", label: "Huomioitavat", path: "/tyot", parent: "kirjanpito" },
   { id: "alv", kind: "workspace", label: "ALV-ilmoitus", path: "/kirjanpito/alv", parent: "kirjanpito" },
   { id: "ostolaskut", kind: "workspace", label: "Ostolaskut", path: "/kirjanpito/ostolaskut", parent: "kirjanpito" },
   // Behind the gear on Pankki: connection, accounts and tiliote files (owner report 2026-09-30).

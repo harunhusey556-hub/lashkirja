@@ -121,7 +121,7 @@ export async function buildPeriodPackage(
     ])
   );
   const transactionCsv = toCsv(
-    ["Päivä", "Vastapuoli", "Summa", "Viite", "Viesti", "Tyyppi", "Täsmäytys", "Kuitti"],
+    ["Päivä", "Vastapuoli", "Summa", "Viite", "Viesti", "Tyyppi", "Kohdistus", "Kuitti"],
     transactions.map((transaction) => [
       isoDate(transaction.date),
       transaction.counterparty,
@@ -154,7 +154,7 @@ export async function buildPeriodPackage(
 
   const matches = {
     month,
-    basis: "Tilitapahtumat kohdekuukauden (periodMonth) mukaan. Kuitit ja laskut kalenteripäivän mukaan.",
+    basis: "Pankkitapahtumat kohdekuukauden (periodMonth) mukaan. Kuitit ja laskut kalenteripäivän mukaan.",
     transactions: transactions.map((transaction) => ({
       id: transaction.id,
       date: isoDate(transaction.date),
@@ -205,7 +205,7 @@ export async function buildPeriodPackage(
       ),
     },
     { name: "csv/kuitit.csv", data: Buffer.from(receiptCsv, "utf8") },
-    { name: "csv/tilitapahtumat.csv", data: Buffer.from(transactionCsv, "utf8") },
+    { name: "csv/pankkitapahtumat.csv", data: Buffer.from(transactionCsv, "utf8") },
     { name: "csv/myyntilaskut.csv", data: Buffer.from(invoiceCsv, "utf8") },
     { name: "taydennys/kohdistukset.json", data: Buffer.from(JSON.stringify(matches, null, 2), "utf8") },
   ];
@@ -219,11 +219,11 @@ export async function buildPeriodPackage(
     }
     try {
       const bytes = await readUserUpload(userId, receipt.filePath);
-      const base = safeOriginalName(receipt.fileName || "tosite");
-      let name = `tositteet/${base}`;
+      const base = safeOriginalName(receipt.fileName || "kuitti");
+      let name = `kuitit/${base}`;
       let n = 2;
       while (usedNames.has(name)) {
-        name = `tositteet/${n}-${base}`;
+        name = `kuitit/${n}-${base}`;
         n += 1;
       }
       usedNames.add(name);
@@ -234,7 +234,7 @@ export async function buildPeriodPackage(
   }
   if (missingFiles.length > 0) {
     entries.push({
-      name: "tositteet/puuttuvat.txt",
+      name: "kuitit/puuttuvat.txt",
       data: Buffer.from(missingFiles.join("\n"), "utf8"),
     });
   }

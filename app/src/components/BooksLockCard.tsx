@@ -221,11 +221,11 @@ export default function BooksLockCard() {
           <p className="px-1 text-body font-medium text-ink">
             Avoinna ennen lukitusta ({formatMonth(precheck.month)})
           </p>
-          <Section title="Puuttuvat tositteet">
+          <Section title="Puuttuvat kuitit">
             <PrecheckRows items={precheck.missingDocuments} empty="Ei puuttuvia tositteita." />
           </Section>
-          <Section title="Täsmäyttämättömät tapahtumat">
-            <PrecheckRows items={precheck.unmatchedTransactions} empty="Ei avoimia täsmäytyksiä." />
+          <Section title="Kohdistamattomat tapahtumat">
+            <PrecheckRows items={precheck.unmatchedTransactions} empty="Ei kohdistettavia tapahtumia." />
           </Section>
           <Section title="Luonnoslaskut">
             <PrecheckRows items={precheck.draftInvoices} empty="Ei luonnoslaskuja." />

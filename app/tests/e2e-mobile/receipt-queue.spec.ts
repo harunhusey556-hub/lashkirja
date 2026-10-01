@@ -197,7 +197,7 @@ test("captures offline, survives a restart, sends on reconnect, and warns before
   await expect(relaunched.getByText("Jonossa")).toBeVisible();
 
   await relaunched.getByRole("button", { name: /Profiili, asetukset/ }).click();
-  await relaunched.getByRole("dialog").getByRole("button", { name: "Kirjaudu ulos" }).click();
+  await relaunched.getByRole("dialog").getByRole("button", { name: "Kirjaa ulos" }).click();
   // The earlier item is "done" (already delivered) and never counted here
   // -- only this second, still-queued item is "waiting to be sent".
   await expect(
