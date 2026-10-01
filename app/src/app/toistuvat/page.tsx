@@ -30,6 +30,8 @@ import {
 } from "@/components/invoices/RecurringForm";
 import { QuickCustomerSheet, type CreatedCustomer } from "@/components/invoices/QuickCustomerSheet";
 import { useProfile } from "@/app/asetukset/useProfile";
+import { adjustVatRateForDate } from "@/lib/invoices";
+import { runPlanSummary, type RunPlan } from "./runPlan";
 
 import { pageCacheFetchedAt, readPageCache, writePageCache } from "@/lib/page-cache";
 import { useCacheAfterBoot } from "@/components/invoices/useCacheAfterBoot";
@@ -54,18 +56,6 @@ interface RecurringInvoice {
   total: number;
   generatedCount: number;
   lastRun: { issueDate: string; status: string; invoiceId: string | null } | null;
-}
-
-interface RunPlan {
-  plan: Array<{
-    recurringInvoiceId: string;
-    name: string;
-    customerName: string;
-    customerEmail: string | null;
-    autoSend: boolean;
-    gross: number;
-    issueDates: string[];
-  }>;
 }
 
 /**
@@ -120,27 +110,15 @@ function toFormValues(entry: RecurringInvoice): RecurringFormValues {
   };
 }
 
-/** "Uusi vuosilasku 100,00 € ja Kuukausilasku 50,00 €. 1 lähetetään sähköpostilla. Lähetettyä laskua ei voi perua, vain hyvittää." */
-function runPlanSummary(plan: RunPlan["plan"] | null): string {
-  if (!plan) return "";
-  const sends = plan.filter((entry) => entry.autoSend && entry.customerEmail).length;
-  const parts = plan.map(
-    (entry) =>
-      `${entry.name} ${entry.issueDates.length > 1 ? `${entry.issueDates.length} × ` : ""}${formatEur(entry.gross)}`
-  );
-  const drafts = plan.length - sends;
-  const sentence = [
-    `${parts.join(", ")}.`,
-    sends > 0 ? `${sends === 1 ? "1 lähetetään" : `${sends} lähetetään`} sähköpostilla.` : "",
-    drafts > 0 ? `${drafts === 1 ? "1 jää" : `${drafts} jää`} luonnokseksi.` : "",
-    sends > 0 ? "Lähetettyä laskua ei voi perua, vain hyvittää." : "",
-  ];
-  return sentence.filter(Boolean).join(" ");
-}
-
 export default function RecurringInvoicesPage() {
   // The seller's VAT status decides whether the form offers an ALV choice (F01).
   const { profile, loadError: profileError } = useProfile();
+  // The rate a run bills today: 0 % for a seller who is not VAT registered, and
+  // the 13,5 % that replaced 14 % (what the run itself does), not the stored one.
+  const shownVatRate = (stored: number) =>
+    profile && !profile.vatRegistered
+      ? 0
+      : adjustVatRateForDate(Math.round(stored * 10), new Date().toISOString().slice(0, 10)) / 10;
   const cached = readPageCache<{ recurring: RecurringInvoice[]; dueNow: number }>("recurring");
   const [recurring, setRecurring] = useState<RecurringInvoice[]>(cached?.recurring ?? []);
   const [dueNow, setDueNow] = useState(cached?.dueNow ?? 0);
@@ -523,7 +501,7 @@ export default function RecurringInvoicesPage() {
                   key={line.id}
                   title={line.description}
                   amount={formatEur(line.quantity * line.unitPrice)}
-                  secondary={`${String(line.quantity).replace(".", ",")} ${line.unit} × ${formatEur(line.unitPrice)} · ALV ${String(line.vatRate).replace(".", ",")} %`}
+                  secondary={`${String(line.quantity).replace(".", ",")} ${line.unit} × ${formatEur(line.unitPrice)} · ALV ${String(shownVatRate(line.vatRate)).replace(".", ",")} %`}
                 />
               ))}
             </Section>

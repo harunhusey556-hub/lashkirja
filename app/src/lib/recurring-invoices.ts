@@ -12,7 +12,12 @@ import { centsToEuros } from "./money";
 import { isoDateToUtc } from "./validation";
 import { requireActiveCustomer } from "./customers";
 import { PeriodLockedError } from "./period-lock";
-import { adjustVatRateForDate } from "./invoices";
+import {
+  adjustVatRateForDate,
+  applySellerVatRules,
+  computeInvoiceTotals,
+  InvoiceValidationError,
+} from "./invoices";
 import {
   applyVatRules,
   createInvoice,
@@ -370,6 +375,30 @@ export interface RunOptions {
   recurringInvoiceId?: string;
   /** Injected so the run can be tested without a mail server. */
   send?: (invoiceId: string) => Promise<void>;
+}
+
+/**
+ * What one run billed on `issueDate` will total, VAT included: the same rate
+ * adjustment and seller rule the run applies, so the preview the user confirms
+ * matches the invoice the customer gets (F01). If the rule would refuse the
+ * lines the run fails too; the preview then falls back to the stored rates.
+ */
+export function previewRunGrossCents(
+  lines: Array<{ quantityMilli: number; unitPriceCents: number; vatRatePermille: number }>,
+  issueDate: string,
+  vatRegistered: boolean
+): number {
+  const adjusted = lines.map((line) => ({
+    ...line,
+    vatRatePermille: adjustVatRateForDate(line.vatRatePermille, issueDate),
+  }));
+  let billed = adjusted;
+  try {
+    billed = applySellerVatRules(adjusted, { vatRegistered, issueDate });
+  } catch (error) {
+    if (!(error instanceof InvoiceValidationError)) throw error;
+  }
+  return computeInvoiceTotals(billed).grossCents;
 }
 
 /**

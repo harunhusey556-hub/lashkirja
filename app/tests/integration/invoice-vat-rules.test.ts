@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { prisma } from "@/lib/db";
 import { POST as createInvoice } from "@/app/api/invoices/route";
 import { PATCH as patchInvoice } from "@/app/api/invoices/[id]/route";
+import { GET as previewRun } from "@/app/api/recurring-invoices/run/route";
 import { POST as setStatus } from "@/app/api/invoices/[id]/status/route";
 import { POST as creditInvoice } from "@/app/api/invoices/[id]/credit/route";
 import { POST as duplicateInvoice } from "@/app/api/invoices/[id]/duplicate/route";
@@ -286,5 +287,52 @@ describe("14 % ended on 1.1.2026 (F44)", () => {
       { date: "2025-12-01", vatRate: 14 },
       { date: "2026-01-01", vatRate: 13.5 },
     ]);
+  });
+});
+
+describe("a draft saved before the seller was corrected (V1, V2)", () => {
+  it("refuses to send a draft that still carries VAT and sends it after a save", async () => {
+    await setRegistered(true);
+    const draft = await makeInvoice();
+    expect(draft.vat).toBe(25.5);
+    await setRegistered(false);
+
+    const refused = await setStatus(
+      buildRequest("POST", `/api/invoices/${draft.id}/status`, { status: "sent" }, { cookie }),
+      routeContext({ id: draft.id })
+    );
+    expect(refused.status).toBe(409);
+    const body = await readJson(refused);
+    expect(JSON.stringify(body)).toContain("Avaa luonnos ja tallenna");
+    const stored = await prisma.salesInvoice.findUnique({ where: { id: draft.id } });
+    expect(stored?.status).toBe("draft");
+    expect(stored?.grossCents).toBe(12_550);
+
+    const saved = await patchInvoice(
+      buildRequest(
+        "PATCH",
+        `/api/invoices/${draft.id}`,
+        { lines: [line(25.5)], expectedUpdatedAt: draft.updatedAt },
+        { cookie }
+      ),
+      routeContext({ id: draft.id })
+    );
+    expect(saved.status).toBe(200);
+    await markSent(draft.id);
+  });
+
+  it("shows in the run preview what the run will bill", async () => {
+    await setRegistered(true);
+    expect((await postRecurring({ startDate: "2025-12-01", lines: [line(14)] })).status).toBe(201);
+    await setRegistered(false);
+
+    const response = await previewRun(
+      buildRequest("GET", "/api/recurring-invoices/run", undefined, { cookie })
+    );
+    const plan = (await readJson(response)).plan[0];
+    const result = await runRecurringInvoices(user.id, { now: new Date() });
+    const billed = result.generated.map((entry) => entry.invoice.gross);
+    expect(plan.grossByDate).toEqual(billed);
+    expect(plan.grossByDate.every((gross: number) => gross === 100)).toBe(true);
   });
 });

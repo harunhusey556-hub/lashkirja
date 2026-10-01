@@ -3,14 +3,15 @@ import { z } from "zod";
 import { requireSession } from "@/lib/session";
 import { noStoreJson, rejectCrossSite, rejectOversizedContentLength } from "@/lib/http-security";
 import { UnauthorizedError, withErrorHandler } from "@/lib/api-errors";
+import { prisma } from "@/lib/db";
 import {
   listRecurringInvoices,
+  previewRunGrossCents,
   requireOwnedRecurring,
   runRecurringInvoices,
 } from "@/lib/recurring-invoices";
 import { sendInvoiceByEmail } from "@/lib/invoice-mail";
 import { dueRuns, type RecurrenceInterval } from "@/lib/recurrence";
-import { computeInvoiceTotals } from "@/lib/invoices";
 import { centsToEuros } from "@/lib/money";
 
 /**
@@ -24,6 +25,11 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
   const only = req.nextUrl.searchParams.get("recurringInvoiceId");
   const today = new Date().toISOString().slice(0, 10);
   const schedules = await listRecurringInvoices(session.userId, { includeInactive: false });
+  const seller = await prisma.user.findUnique({
+    where: { id: session.userId },
+    select: { vatRegistered: true },
+  });
+  const vatRegistered = seller?.vatRegistered ?? true;
   const plan = schedules
     .filter((entry) => entry.active && entry.nextRunAt && (!only || entry.id === only))
     .map((entry) => {
@@ -43,15 +49,20 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
         customerName: entry.customer.name,
         customerEmail: entry.customer.email,
         autoSend: entry.autoSend,
-        // What the customer is billed: VAT included, as on the invoice.
-        gross: centsToEuros(
-          computeInvoiceTotals(
-            entry.lines.map((line) => ({
-              quantityMilli: Math.round(line.quantity * 1000),
-              unitPriceCents: Math.round(line.unitPrice * 100),
-              vatRatePermille: Math.round(line.vatRate * 10),
-            }))
-          ).grossCents
+        // What the customer is billed on each date: VAT included, with the
+        // seller rule and the rate change applied exactly as the run does.
+        grossByDate: runs.dates.map((date) =>
+          centsToEuros(
+            previewRunGrossCents(
+              entry.lines.map((line) => ({
+                quantityMilli: Math.round(line.quantity * 1000),
+                unitPriceCents: Math.round(line.unitPrice * 100),
+                vatRatePermille: Math.round(line.vatRate * 10),
+              })),
+              date,
+              vatRegistered
+            )
+          )
         ),
         issueDates: runs.dates,
       };
