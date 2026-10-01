@@ -33,6 +33,8 @@ const statementInclude = {
           date: true,
         },
       },
+      // Only whether the row paid an invoice, for the delete dialog.
+      invoicePayment: { select: { id: true } },
     },
   },
 };
@@ -43,6 +45,7 @@ async function enrichStatements(
     transactions: Array<{
       id: string;
       suggestedReceiptId: string | null;
+      invoicePayment?: { id: string } | null;
       receipt: {
         id: string;
         vendor: string | null;
@@ -88,8 +91,9 @@ async function enrichStatements(
 
   return statements.map((s) => ({
     ...s,
-    transactions: s.transactions.map((t) => ({
+    transactions: s.transactions.map(({ invoicePayment, ...t }) => ({
       ...publicTransaction(t),
+      settlesInvoice: Boolean(invoicePayment),
       receipt: t.receipt ? publicReceipt(t.receipt) : null,
       suggestedReceipt: t.suggestedReceiptId
         ? suggestedById.get(t.suggestedReceiptId)

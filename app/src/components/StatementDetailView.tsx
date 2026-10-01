@@ -29,6 +29,7 @@ import { Skeleton, SkeletonGroup } from "@/components/ds/Skeleton";
 import { Button, controlClass } from "@/components/ui";
 import { showToast } from "@/lib/toast";
 import { hapticImpact } from "@/lib/haptics";
+import { deleteRowDescription, deleteStatementDescription, type DeleteFacts } from "@/lib/statement-delete-copy";
 import { ActionPill, DetailHero, FilterChips, ListRow, MoreMenu, Section, StatusTag } from "@/components/ds";
 
 const LABEL_CLASS = "mb-1.5 block text-caption font-normal text-ink-2";
@@ -44,6 +45,14 @@ function typeLabel(type: string): string {
   if (type === "palkka") return "Palkka";
   if (type === "oma_siirto") return "Siirto";
   return "Meno";
+}
+
+/** What a delete takes along with the row: a waiting sale proposal, an invoice it paid. */
+function deleteFacts(t: StatementTransaction | null): DeleteFacts {
+  return {
+    settlesInvoice: t?.settlesInvoice === true,
+    pendingSale: t?.matchStatus === "suggested" && t.suggestedReceipt?.source === "auto_income",
+  };
 }
 
 function txSecondary(t: StatementTransaction): string {
@@ -1051,7 +1060,7 @@ export default function StatementDetailView({
       <ConfirmModal
         isOpen={confirmingDelete}
         title="Poistetaanko tiliote?"
-        description={`"${statement.fileName}" ja kaikki sen tapahtumat poistetaan pysyvästi. Niistä tehdyt hyväksymättömät myyntiehdotukset poistuvat myös. Lasku jää maksetuksi, myynti ei tuplaannu. Tätä ei voi perua.`}
+        description={deleteStatementDescription(statement.fileName, statement.transactions.map(deleteFacts))}
         confirmLabel="Poista tiliote"
         onConfirm={() => handleDelete()}
         onCancel={() => setConfirmingDelete(false)}
@@ -1060,7 +1069,9 @@ export default function StatementDetailView({
       <ConfirmModal
         isOpen={confirmingTxDelete !== null}
         title="Poistetaanko tapahtuma?"
-        description="Tapahtuma ja siitä tehty hyväksymätön myyntiehdotus poistetaan pysyvästi. Lasku jää maksetuksi, myynti ei tuplaannu."
+        description={deleteRowDescription(
+          deleteFacts(statement.transactions.find((t) => t.id === confirmingTxDelete) ?? null)
+        )}
         confirmLabel="Poista"
         onConfirm={() =>
           confirmingTxDelete ? deleteTransaction(confirmingTxDelete) : Promise.resolve()

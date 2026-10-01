@@ -6,7 +6,7 @@ import { POST as createInvoice } from "@/app/api/invoices/route";
 import { POST as setStatus } from "@/app/api/invoices/[id]/status/route";
 import { POST as addPayment } from "@/app/api/invoices/[id]/payments/route";
 import { PATCH as reviewReceipt } from "@/app/api/receipts/[id]/review/route";
-import { DELETE as deleteStatement } from "@/app/api/statements/[id]/route";
+import { DELETE as deleteStatement, GET as getStatement } from "@/app/api/statements/[id]/route";
 import {
   DELETE as deleteRow,
   PATCH as patchRow,
@@ -316,5 +316,22 @@ describe("G16: bank row edit, delete and ignore honour the period lock", () => {
       routeContext({ id: statement.id })
     );
     expect(response.status).toBe(200);
+  });
+});
+
+describe("V19 V24: the statement tells which rows paid an invoice, for an honest delete dialog", () => {
+  it("flags only the row that settled an invoice", async () => {
+    const { statement, row } = await paidSaleWithApprovedDraft();
+    const other = await prisma.transaction.create({
+      data: { statementId: statement.id, userId: user.id, date: new Date("2026-09-21T00:00:00.000Z"), amountCents: -500, counterparty: "Kioski", type: "meno" },
+    });
+    const response = await getStatement(
+      buildRequest("GET", `/api/statements/${statement.id}`, undefined, { cookie }),
+      routeContext({ id: statement.id })
+    );
+    const rows = (await readJson(response)).statement.transactions as Array<{ id: string; settlesInvoice: boolean; invoicePayment?: unknown }>;
+    expect(rows.find((tx) => tx.id === row.id)?.settlesInvoice).toBe(true);
+    expect(rows.find((tx) => tx.id === other.id)?.settlesInvoice).toBe(false);
+    expect(rows.every((tx) => tx.invoicePayment === undefined)).toBe(true);
   });
 });

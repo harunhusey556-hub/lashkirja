@@ -22,6 +22,8 @@ export interface StatementTransaction {
   suggestedReceiptId: string | null;
   suggestedReceipt: LinkedReceipt | null;
   matchCandidates?: MatchCandidate[];
+  /** The row paid a sales invoice. */
+  settlesInvoice?: boolean;
 }
 
 export interface MatchCandidate {
