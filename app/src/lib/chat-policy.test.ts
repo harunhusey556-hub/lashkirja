@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  asksAboutProfile,
+  asksVatThisMonth,
   greetingReply,
   isGreeting,
   isMatchRequest,
@@ -19,7 +21,34 @@ describe("chat policy", () => {
 
   it("does not treat a bare invoice question as a match action", () => {
     expect(isMatchRequest("Mikä on laskun ALV?")).toBe(false);
+    expect(isMatchRequest("Kohdista kuitit")).toBe(true);
     expect(isMatchRequest("Täsmäytä kuitit")).toBe(true);
+  });
+
+  it("F58: only a clear question about this month's VAT is a VAT question", () => {
+    for (const text of ["Mikä on tämän kuun ALV?", "Paljonko ALV:ia maksan tässä kuussa?", "How much VAT do I owe this month?", "ALV?"]) {
+      expect(asksVatThisMonth(text), text).toBe(true);
+    }
+    // "palvelun" holds "alv", "ovat" holds "vat", "veroilmoitus" holds "vero": none is a VAT question.
+    for (const text of [
+      "Miten hinnoittelen palvelun?",
+      "Missä ovat kuittini?",
+      "Mikä on kalvon hinta?",
+      "Tarvitsen apua veroilmoituksen kanssa",
+      "Mikä on kotitalousvähennys?",
+      "Mitä voin tehdä tällä sovelluksella?",
+      "Kirjoita runo kulutuksesta",
+      "Mitä ALV on?",
+    ]) {
+      expect(asksVatThisMonth(text), text).toBe(false);
+    }
+  });
+
+  it("F58: the profile is shown only when asked for", () => {
+    expect(asksAboutProfile("Mikä on yritysmuotoni?")).toBe(true);
+    expect(asksAboutProfile("Näytä profiili")).toBe(true);
+    expect(asksAboutProfile("Miten muokkaan profiilia?")).toBe(false);
+    expect(asksAboutProfile("Kerro runo yritysmuodoista")).toBe(false);
   });
 
   it("does not call an empty bank all matched", () => {
@@ -39,7 +68,8 @@ describe("chat policy", () => {
         expect(text).not.toMatch(/Rajattu|Rajoitettu|Limited mode|kielimalli|provider|Copilot|token/i);
       }
     }
-    expect(limitedModeNotice(false)).toMatch(/täsmäyttää kuitit/);
+    expect(limitedModeNotice(false)).toMatch(/kohdistaa kuitit/);
+    expect(limitedModeNotice(false).match(/[.!?]/g)).toHaveLength(1);
     expect(limitedModeNotice(false)).toMatch(/ALV/);
     expect(providerFailedNotice(false)).toMatch(/Yritä/);
     expect(prefersEnglish("Hello there")).toBe(true);

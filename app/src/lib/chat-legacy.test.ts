@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import {
   LEGACY_LIMITED_NOTICE_EN,
   LEGACY_LIMITED_NOTICE_FI,
+  PREVIOUS_LIMITED_NOTICE_FI,
   displayChatContent,
   hasLegacyLimitedNotice,
   stripLegacyLimitedNotice,
@@ -71,7 +72,7 @@ describe("migration 20260929120000_strip_legacy_chat_notice", () => {
     const quoted = (text: string) => `'${text.replace(/'/g, "''")}'`;
     expect(sql).toContain(quoted(LEGACY_LIMITED_NOTICE_FI));
     expect(sql).toContain(quoted(LEGACY_LIMITED_NOTICE_EN));
-    expect(sql).toContain(quoted(limitedModeNotice(false)));
+    expect(sql).toContain(quoted(PREVIOUS_LIMITED_NOTICE_FI));
     expect(sql).toContain(quoted(limitedModeNotice(true)));
   });
 
@@ -98,7 +99,10 @@ describe("migration 20260929120000_strip_legacy_chat_notice", () => {
     db.exec(sql);
     const once = contents(db);
     expect(once["fi-vat"]).toBe(VAT_TAIL);
-    expect(once["fi-only"]).toBe(limitedModeNotice(false));
+    expect(once["fi-only"]).toBe(PREVIOUS_LIMITED_NOTICE_FI);
+    // ...and is shown with the current glossary wording (F27).
+    expect(displayChatContent("assistant", once["fi-only"])).toBe(limitedModeNotice(false));
+    expect(displayChatContent("assistant", once["fi-only"])).not.toMatch(/täsmäy/);
     expect(once["en-only"]).toBe(limitedModeNotice(true));
     expect(once["en-profile"]).toBe("Toiminimi, ALV-velvollinen.");
     expect(once["user-typed"]).toBe(LEGACY_LIMITED_NOTICE_FI);
@@ -118,6 +122,7 @@ describe("migration 20260929120000_strip_legacy_chat_notice", () => {
     }>;
     db.exec(sql);
     const after = contents(db);
-    for (const row of before) expect(after[row.id]).toBe(displayChatContent(row.role, row.content));
+    // The migration kept its original wording; shown through the sanitiser both end up the same.
+    for (const row of before) expect(displayChatContent(row.role, after[row.id])).toBe(displayChatContent(row.role, row.content));
   });
 });

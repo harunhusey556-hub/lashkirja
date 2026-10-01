@@ -66,7 +66,7 @@ describe("free-form question without a model", () => {
     expect(body.status).toBe("complete");
     expect(body.limited).toBe(true);
     expect(explainsLimitedMode(body.content)).toBe(true);
-    expect(body.content).toMatch(/täsmäyttää kuitit/);
+    expect(body.content).toMatch(/kohdistaa kuitit/);
     expect(body.content).not.toMatch(/Rajattu|Rajoitettu|kielimalli|Copilot|COPILOT|GITHUB|token/i);
   });
 });

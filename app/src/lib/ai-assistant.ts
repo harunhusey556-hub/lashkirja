@@ -14,6 +14,8 @@ import {
 import { receiptDrillHref, statementDrillHref } from "./report-drill";
 import type { ChatSource, ContextTurn } from "./chat-turn";
 import {
+  asksAboutProfile,
+  asksVatThisMonth,
   greetingReply,
   isGreeting,
   isMatchRequest,
@@ -69,7 +71,28 @@ function monthKey(date: Date | null | undefined): string | null {
   return /^\d{4}-\d{2}$/.test(month) ? month : null;
 }
 
-async function currentMonthVat(userId: string, english: boolean): Promise<{ text: string; sources: ChatSource[] } | null> {
+/** What the assistant says about this month's VAT; `amount` is the canonical figure the honesty check allows. */
+interface VatAnswer {
+  text: string;
+  sources: ChatSource[];
+  amount: string | null;
+}
+
+async function currentMonthVat(
+  userId: string,
+  english: boolean,
+  vatRegistered: boolean
+): Promise<VatAnswer | null> {
+  // A seller outside the VAT register files no return: say so instead of a payable amount (F59).
+  if (!vatRegistered) {
+    return {
+      text: english
+        ? "You have not marked yourself as VAT registered, so no VAT return is needed."
+        : "Et ole ALV-rekisterissä, joten ALV-ilmoitusta ei tarvitse antaa.",
+      sources: [{ label: "ALV-ilmoitus", href: "/kirjanpito/alv" }],
+      amount: null,
+    };
+  }
   try {
     const now = new Date();
     const start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
@@ -113,7 +136,6 @@ export async function prepareChat(
   const profile = parseBusinessDetails(user?.businessDetails);
   const profileSummary = generateProfileSummary(profile);
 
-  const normalizedQuery = userMessage.toLowerCase().trim();
   const english = prefersEnglish(userMessage);
 
   if (isGreeting(userMessage)) {
@@ -275,47 +297,39 @@ export async function prepareChat(
     };
   }
 
-  const asksVat = normalizedQuery.includes("alv") || normalizedQuery.includes("vero") || normalizedQuery.includes("vat");
-  const asksDeduction =
-    normalizedQuery.includes("kulut") ||
-    normalizedQuery.includes("vähennys") ||
-    normalizedQuery.includes("mitä voin") ||
-    normalizedQuery.includes("deduct");
-  const asksProfile = normalizedQuery.includes("profiili") || normalizedQuery.includes("yritysmuoto");
-  const vatAnswer = asksVat ? await currentMonthVat(userId, english) : null;
+  // Whole-word intents only (F58): a substring such as "alv" in "palvelun" is not a question about VAT.
+  const asksVat = asksVatThisMonth(userMessage);
+  const asksProfile = asksAboutProfile(userMessage);
+  const vatRegistered = Boolean(user?.vatRegistered);
+  const vatAnswer = asksVat ? await currentMonthVat(userId, english, vatRegistered) : null;
   const vatLine = vatAnswer?.text ?? null;
   const who = entityPhrase(user?.entityType, english);
 
-  // No model configured: answer what the books and the rules can answer, as
-  // plain answers. Only a question nothing local can answer is `limited`, and
-  // its reply says calmly what does work (OWN-09).
+  // No model configured: answer only what the books can answer exactly (this
+  // month's VAT, the profile that was asked for). Everything else gets the one
+  // calm sentence that says what does work (OWN-09, F58). General advice such as
+  // what a business may deduct is not an answer from the books, so it is not given.
   if (!assistantAvailable()) {
     if (asksVat) {
-      const reply = `${vatLine ?? ""}\n\n${
-        english
-          ? "Standard rate for lash services in 2026 is **25.5%**. See /kirjanpito/alv."
-          : "Ripsipalveluiden yleinen ALV-kanta 2026 on **25,5 %**. Katso /kirjanpito/alv."
-      }`.trim();
+      if (!vatAnswer) {
+        return { kind: "local", limited: true, reply: providerFailedNotice(english) };
+      }
+      const rate = vatRegistered
+        ? english
+          ? " The usual VAT rate for lash services in 2026 is **25.5%**."
+          : " Ripsipalveluiden yleinen ALV-kanta 2026 on **25,5 %**."
+        : "";
+      const reply = `${vatAnswer.text}${rate}`;
       return {
         kind: "local",
         reply,
-        sources: mergeSources(vatAnswer?.sources, reply),
+        sources: mergeSources(vatAnswer.sources, reply),
         honesty: {
           performedActions: [],
-          allowedAmounts: vatAnswer ? [vatAnswer.text.match(/(\d+\.\d{2})/)?.[1] ?? ""].filter(Boolean) : [],
+          allowedAmounts: vatAnswer.amount ? [vatAnswer.amount] : [],
           allowedRecordIds: [],
-          allowedHrefs: (vatAnswer?.sources ?? []).map((source) => source.href),
+          allowedHrefs: vatAnswer.sources.map((source) => source.href),
         },
-      };
-    }
-    if (asksDeduction) {
-      return {
-        kind: "local",
-        reply: `${who} ${
-          english
-            ? "you can deduct costs that belong to the business: materials, workspace, software, and training. Keep the receipt in Kuitit."
-            : "voit vähentää yritystoimintaan kuuluvat kulut: tarvikkeet, työtila, ohjelmistot ja koulutus. Tallenna kuitti Kuitteihin."
-        }`,
       };
     }
     if (asksProfile) {
@@ -335,7 +349,7 @@ export async function prepareChat(
     "Separate information from actions. Do not claim you changed the books.",
     asksProfile ? `Profile: ${profileSummary}` : `Business form: ${who}.`,
     vatLine ? `Use this calculated figure, do not invent another: ${vatLine}` : "",
-    "When you cite an amount from the books, name the screen (/kirjanpito/alv, /raportit, /kuitit, /laskut).",
+    "When you cite an amount from the books, name the screen by its Finnish name (ALV-ilmoitus, Raportit, Kuitit, Laskut), never by an address or path. Write euro amounts in Finnish form, for example 12,50 €.",
     prior.length > 0 ? "Use the earlier turns. Answer the latest question." : "",
   ]
     .filter(Boolean)
@@ -349,7 +363,7 @@ export async function prepareChat(
     sources: vatAnswer?.sources,
     honesty: {
       performedActions: [],
-      allowedAmounts: vatAnswer ? [vatAnswer.text.match(/(\d+\.\d{2})/)?.[1] ?? ""].filter(Boolean) : [],
+      allowedAmounts: vatAnswer?.amount ? [vatAnswer.amount] : [],
       allowedRecordIds: [],
       allowedHrefs: (vatAnswer?.sources ?? []).map((source) => source.href),
     },

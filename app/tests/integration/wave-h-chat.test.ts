@@ -5,6 +5,7 @@ import { claimAssistantReply, listConversationMessages, priorContextTurns, runAs
 import { decideChatProposal } from "@/lib/chat-decision";
 import { copilotRequestMessages } from "@/lib/chat-turn";
 import { prepareChat } from "@/lib/ai-assistant";
+import { limitedModeNotice } from "@/lib/chat-policy";
 import { computeAlvReport } from "@/lib/alv";
 import { loadAlvPeriodSources } from "@/lib/alv-period";
 import { replyClaimsUnperformedAction, replyUsesCalculatedAmount, explainsLimitedMode } from "@/lib/chat-honesty";
@@ -345,7 +346,7 @@ describe("chat limits and decisions", () => {
       type: "meno",
     });
     const transaction = statement.transactions[0];
-    const conversation = await prisma.conversation.create({ data: { userId: user.id, title: "Täsmäytys" } });
+    const conversation = await prisma.conversation.create({ data: { userId: user.id, title: "Kohdistus" } });
     const assistant = await prisma.chatMessage.create({
       data: {
         userId: user.id,
@@ -395,7 +396,7 @@ describe("chat limits and decisions", () => {
       type: "meno",
     });
     const transaction = statement.transactions[0];
-    const before = await prepareChat(user.id, "Täsmäytä kuitit");
+    const before = await prepareChat(user.id, "Kohdista kuitit");
     expect(before.kind).toBe("local");
     if (before.kind === "local") expect(before.proposal?.receiptId).toBe(receipt.id);
 
@@ -426,7 +427,7 @@ describe("chat limits and decisions", () => {
       where: { transactionId_receiptId: { transactionId: transaction.id, receiptId: receipt.id } },
     });
     expect(rejection).toBeTruthy();
-    const after = await prepareChat(user.id, "Täsmäytä kuitit");
+    const after = await prepareChat(user.id, "Kohdista kuitit");
     if (after.kind === "local") expect(after.proposal?.receiptId).not.toBe(receipt.id);
   });
 });
@@ -454,7 +455,41 @@ describe("honest book answers", () => {
     const report = computeAlvReport(sources.receipts, sources.invoices);
     expect(replyUsesCalculatedAmount(sent.body.content, report.field308.amount.toFixed(2))).toBe(true);
     expect(sent.body.sources).toEqual(
-      expect.arrayContaining([{ label: "ALV-raportti", href: expect.stringContaining("/kirjanpito/alv?period=") }])
+      expect.arrayContaining([{ label: "ALV-ilmoitus", href: expect.stringContaining("/kirjanpito/alv?period=") }])
     );
+  });
+});
+
+describe("no model configured: only what the books can answer exactly (F58 F59)", () => {
+  it("a question that merely contains alv, vat or vähennys gets the calm sentence, not a VAT or expense answer", async () => {
+    for (const question of [
+      "Miten hinnoittelen palvelun?",
+      "Mikä on kotitalousvähennys?",
+      "Mitä voin tehdä tällä sovelluksella?",
+      "Missä ovat kuittini?",
+      "Tarvitsen apua veroilmoituksen kanssa",
+    ]) {
+      const sent = await postMessage(question);
+      expect(sent.response.status).toBe(200);
+      expect(sent.body.limited, question).toBe(true);
+      expect(sent.body.content, question).toBe(limitedModeNotice(false));
+      expect(sent.body.content).not.toMatch(/ALV maksettavaa|vähentää/);
+    }
+  });
+
+  it("the VAT answer has no route path, ISO period or dot decimal, and one link chip", async () => {
+    const sent = await postMessage("Paljonko ALV:ia maksan tässä kuussa?");
+    expect(sent.body.limited).toBe(false);
+    expect(sent.body.content).toMatch(/ALV: (maksettavaa|palautusta) \d+,\d{2}/);
+    expect(sent.body.content).not.toMatch(/\/kirjanpito|\/raportit|\d{4}-\d{2}|\d\.\d{2} €|kohta 308/);
+    expect(sent.body.sources).toHaveLength(1);
+    expect(sent.body.sources[0].label).toBe("ALV-ilmoitus");
+  });
+
+  it("a seller outside the VAT register is told so, with no payable amount and no rate", async () => {
+    await prisma.user.update({ where: { id: user.id }, data: { vatRegistered: false } });
+    const sent = await postMessage("Mikä on tämän kuun ALV?");
+    expect(sent.body.content).toMatch(/ei ole ALV-rekisterissä|ALV-rekisterissä/);
+    expect(sent.body.content).not.toMatch(/maksettavaa|25,5|€/);
   });
 });

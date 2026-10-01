@@ -16,6 +16,15 @@ export const LEGACY_LIMITED_NOTICE_FI =
 export const LEGACY_LIMITED_NOTICE_EN =
   "Limited mode: the language provider is not connected, so this is not a model answer. I can still use your books for matching, VAT rules, and calculated amounts.";
 
+/**
+ * The calm notice as the SQL migration wrote it into stored rows, before the
+ * glossary sweep changed "täsmäyttää" to "kohdistaa" (F27). The migration is
+ * applied history and stays byte-identical; the display-time sanitiser shows
+ * these rows with the current wording instead.
+ */
+export const PREVIOUS_LIMITED_NOTICE_FI =
+  "Tähän en osaa vielä vastata. Voin täsmäyttää kuitit tiliotteeseen ja kertoa tämän kuun ALV:n.";
+
 // Any first paragraph that opens with the old label, in case an earlier
 // wording than the two above was stored.
 const LEGACY_PARAGRAPH = /^\s*(Rajattu tila|Rajoitettu tila|Limited mode)\s*:[^\n]*(?:\r?\n\s*|$)/i;
@@ -31,11 +40,12 @@ export function hasLegacyLimitedNotice(content: string): boolean {
  * Anything else is returned unchanged.
  */
 export function stripLegacyLimitedNotice(content: string): string {
+  const current = (text: string) => text.split(PREVIOUS_LIMITED_NOTICE_FI).join(limitedModeNotice(false));
   const match = LEGACY_PARAGRAPH.exec(content);
-  if (!match) return content;
+  if (!match) return current(content);
   const english = /^limited mode$/i.test(match[1]);
   const rest = content.slice(match[0].length).replace(/^\s+/, "");
-  return rest || limitedModeNotice(english);
+  return current(rest) || limitedModeNotice(english);
 }
 
 /** Display-time filter for one stored chat row: only assistant text changes. */

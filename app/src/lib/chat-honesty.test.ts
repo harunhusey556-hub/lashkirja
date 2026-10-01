@@ -2,8 +2,10 @@ import { describe, expect, it } from "vitest";
 import { centsToEuros } from "./money";
 import { greetingReply, limitedModeNotice, matchStatusReply } from "./chat-policy";
 import {
+  citedEuroAmounts,
   explainsLimitedMode,
   formatBookedVatAnswer,
+  mergeSources,
   replyClaimsUnperformedAction,
   replyUsesCalculatedAmount,
   EMPTY_HONESTY,
@@ -48,9 +50,38 @@ describe("chat honesty", () => {
     expect(replyUsesCalculatedAmount(answer.text, amount)).toBe(true);
     expect(replyUsesCalculatedAmount(answer.text, "99.00")).toBe(false);
     expect(answer.sources).toEqual([
-      { label: "ALV-raportti", href: "/kirjanpito/alv?period=2026-09" },
+      { label: "ALV-ilmoitus", href: "/kirjanpito/alv?period=2026-09" },
     ]);
     expect(replyClaimsUnperformedAction(answer.text)).toBe(false);
+  });
+
+  it("F59: the VAT answer is written for a person, with one link chip", () => {
+    const answer = formatBookedVatAnswer({ month: "2026-09", amount: "287.01", isRefund: false, english: false });
+    expect(answer.text).toBe("Syyskuun ALV: maksettavaa 287,01 €.");
+    expect(answer.amount).toBe("287.01");
+    // No route path, no ISO period, no dot decimal, no field number.
+    expect(answer.text).not.toMatch(/\/kirjanpito|2026-09|\d\.\d{2}|kohta 308|Lähde/);
+    expect(answer.sources).toEqual([{ label: "ALV-ilmoitus", href: "/kirjanpito/alv?period=2026-09" }]);
+    const refund = formatBookedVatAnswer({ month: "2026-01", amount: "12.50", isRefund: true, english: false });
+    expect(refund.text).toBe("Tammikuun ALV: palautusta 12,50 €.");
+    expect(replyUsesCalculatedAmount(answer.text, answer.amount)).toBe(true);
+  });
+
+  it("F59: a bare screen link next to the same screen with a period is not a second chip", () => {
+    const merged = mergeSources(
+      [{ label: "ALV-ilmoitus", href: "/kirjanpito/alv?period=2026-09" }],
+      "Katso /kirjanpito/alv."
+    );
+    expect(merged).toEqual([{ label: "ALV-ilmoitus", href: "/kirjanpito/alv?period=2026-09" }]);
+    // A different period is a different place.
+    expect(
+      mergeSources([{ label: "Kuitit", href: "/kuitit?month=2026-08" }], "/kuitit?month=2026-09")
+    ).toHaveLength(2);
+  });
+
+  it("reads a euro amount with a space as the thousands separator", () => {
+    expect(citedEuroAmounts("ALV 1 234,56 €")).toEqual(["1234.56"]);
+    expect(citedEuroAmounts("ALV 12,50 € ja 3.00 €")).toEqual(["12.50", "3.00"]);
   });
 
   it("rejects a fabricated action, amount, record, or period link", () => {
@@ -99,7 +130,7 @@ describe("chat honesty", () => {
     expect(
       sourcesFromText("Katso [ALV](/kirjanpito/alv?period=2026-09) ja /kuitit?month=2026-09.")
     ).toEqual([
-      { label: "ALV-raportti", href: "/kirjanpito/alv?period=2026-09" },
+      { label: "ALV-ilmoitus", href: "/kirjanpito/alv?period=2026-09" },
       { label: "Kuitit", href: "/kuitit?month=2026-09" },
     ]);
   });
@@ -108,7 +139,7 @@ describe("chat honesty", () => {
     expect(
       sourcesFromText("Katso /kirjanpito/alv?period=2026-09 ja /kuitit?month=2026-09.")
     ).toEqual([
-      { label: "ALV-raportti", href: "/kirjanpito/alv?period=2026-09" },
+      { label: "ALV-ilmoitus", href: "/kirjanpito/alv?period=2026-09" },
       { label: "Kuitit", href: "/kuitit?month=2026-09" },
     ]);
   });

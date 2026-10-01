@@ -31,14 +31,40 @@ export function isGreeting(text: string): boolean {
 
 export function isMatchRequest(text: string): boolean {
   const normalized = text.toLowerCase();
-  return /täsmäyt|yhdistä|\bmatch\b/.test(normalized);
+  return /kohdist|täsmäyt|yhdistä kuit|\bmatch\b/.test(normalized);
+}
+
+// Intent is read from whole words, never from a substring: "palvelun" holds "alv",
+// "ovat" holds "vat", "kotitalousvähennys" holds "vähennys" (F58).
+const BEFORE = String.raw`(?<![\p{L}])`;
+const AFTER = String.raw`(?![\p{L}])`;
+const VAT_WORD = new RegExp(String.raw`${BEFORE}(?:alv|arvonlisäver\p{L}*|vat)${AFTER}`, "u");
+const VAT_THIS_MONTH_CUE = new RegExp(
+  String.raw`${BEFORE}(?:kuu|kuun|kuussa|kuulta|kuukau\p{L}*|tämän|tässä|maksan|maksettava\p{L}*|paljonko|palautus\p{L}*|month|owe|pay|much)${AFTER}`,
+  "u"
+);
+
+/** The one VAT question the app can answer exactly from the books: what this month's VAT is. */
+export function asksVatThisMonth(text: string): boolean {
+  const normalized = text.toLowerCase().trim();
+  if (!VAT_WORD.test(normalized)) return false;
+  return VAT_THIS_MONTH_CUE.test(normalized) || /^(?:alv|vat)\s*[?!.]*$/.test(normalized);
+}
+
+const PROFILE_WORD = new RegExp(String.raw`${BEFORE}(?:profiili\p{L}*|yritysmuoto\p{L}*)${AFTER}`, "u");
+const SHOW_CUE = new RegExp(String.raw`${BEFORE}(?:mikä|mitkä|mitä|näytä|kerro|what|show)${AFTER}`, "u");
+
+/** The business profile is read out only when the question asks to see it. */
+export function asksAboutProfile(text: string): boolean {
+  const normalized = text.toLowerCase();
+  return PROFILE_WORD.test(normalized) && SHOW_CUE.test(normalized);
 }
 
 export function greetingReply(english: boolean): string {
   if (english) {
     return "Hello. I can match receipts to bank rows, explain VAT, or look up amounts from your books. What do you need?";
   }
-  return "Hei. Voin täsmäyttää kuitteja tiliotteeseen, selittää ALV:n tai hakea summia kirjanpidostasi. Miten voin auttaa?";
+  return "Hei. Voin kohdistaa kuitteja tiliotteeseen ja kertoa tämän kuun ALV:n. Miten voin auttaa?";
 }
 
 /**
@@ -50,7 +76,7 @@ export function limitedModeNotice(english: boolean): string {
   if (english) {
     return "I can't answer that yet. I can match receipts to bank rows and tell you this month's VAT.";
   }
-  return "Tähän en osaa vielä vastata. Voin täsmäyttää kuitit tiliotteeseen ja kertoa tämän kuun ALV:n.";
+  return "Tähän en osaa vielä vastata, mutta voin kohdistaa kuitit tiliotteeseen ja kertoa tämän kuun ALV:n.";
 }
 
 /** A transient failure: the model is configured but did not answer this time. */
@@ -70,17 +96,17 @@ export function matchStatusReply(input: {
   if (input.totalTransactions === 0) {
     return input.english
       ? 'There are no bank transactions yet. Go to Kirjanpito → Pankkitilit to connect or sync the bank. A statement file can still be imported there. That is not the same as everything being matched.'
-      : "Pankkitapahtumia ei ole vielä. Siirry Kirjanpito → Pankkitilit ja yhdistä tai hae pankki. Tiliotteen voi yhä tuoda sieltä. Tämä ei tarkoita, että kaikki olisi täsmäytetty.";
+      : "Pankkitapahtumia ei ole vielä. Siirry Kirjanpito → Pankkitilit ja yhdistä tai hae pankki. Tiliotteen voi yhä tuoda sieltä. Tämä ei tarkoita, että kaikki olisi kohdistettu.";
   }
   if (input.unmatched === 0) {
     return input.english
       ? "Every bank transaction is already matched to a receipt."
-      : "Kaikki tiliotteen tapahtumat on jo täsmäytetty kuitteihin.";
+      : "Kaikki tiliotteen tapahtumat on jo kohdistettu kuitteihin.";
   }
   if (input.openReceipts === 0) {
     return input.english
       ? `There are ${input.unmatched} unmatched bank transactions and no open receipts. Add one from "+" → "Kuvaa kuitti".`
-      : `Täsmäyttämättömiä pankkitapahtumia on ${input.unmatched}, mutta avoimia kuitteja ei ole. Lisää kuitti "+"-valikosta (Kuvaa kuitti).`;
+      : `Kohdistamattomia pankkitapahtumia on ${input.unmatched}, mutta avoimia kuitteja ei ole. Valitse "+"-valikosta Kuvaa kuitti.`;
   }
   return null;
 }

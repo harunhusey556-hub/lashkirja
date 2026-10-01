@@ -1,4 +1,5 @@
 import { alvDrillHref } from "./report-drill";
+import { MONTHS } from "./finnish-months";
 import type { ChatSource, ChatTurnStatus } from "./chat-turn";
 
 export interface HonestyContext {
@@ -43,7 +44,10 @@ export function explainsLimitedMode(text: string): boolean {
 
 /** Euro amounts written like 12,50 € or 12.50 €. */
 export function citedEuroAmounts(text: string): string[] {
-  return [...text.matchAll(/(\d+[.,]\d{2})\s*€/g)].map((match) => match[1].replace(",", "."));
+  // A space (or no-break space) between thousands is part of the number: "1 234,56 €".
+  return [...text.matchAll(/(\d{1,3}(?:[\s ]\d{3})+|\d+)[.,](\d{2})\s*€/g)].map(
+    (match) => `${match[1].replace(/[\s ]/g, "")}.${match[2]}`
+  );
 }
 
 /** Every cited euro figure is the one the calculation helper produced. */
@@ -54,12 +58,12 @@ export function replyUsesCalculatedAmount(reply: string, expected: string): bool
 }
 
 const SOURCE_RULES: Array<{ prefix: string; label: string }> = [
-  { prefix: "/kirjanpito/alv", label: "ALV-raportti" },
+  { prefix: "/kirjanpito/alv", label: "ALV-ilmoitus" },
   // Legacy alias: a model can still emit the pre-restructure path from an
   // older prompt or cached memory. Keeping it recognised here means the
   // period/href honesty guard still checks it instead of silently letting
   // it through unexamined.
-  { prefix: "/alv-raportti", label: "ALV-raportti" },
+  { prefix: "/alv-raportti", label: "ALV-ilmoitus" },
   { prefix: "/raportit", label: "Raportit" },
   { prefix: "/kuitit", label: "Kuitit" },
   { prefix: "/laskut", label: "Laskut" },
@@ -143,32 +147,51 @@ export function guardStreamReply(
 }
 
 export function mergeSources(explicit: ChatSource[] | undefined, text: string): ChatSource[] {
+  const all = [...(explicit ?? []), ...sourcesFromText(text)];
+  // A bare screen link ("/kirjanpito/alv") next to the same screen opened on a
+  // period is the same chip twice, labelled alike (F59).
+  const withQuery = new Set(all.filter((source) => source.href.includes("?")).map((source) => source.href.split("?")[0]));
   const merged: ChatSource[] = [];
   const seen = new Set<string>();
-  for (const source of [...(explicit ?? []), ...sourcesFromText(text)]) {
+  for (const source of all) {
     if (seen.has(source.href)) continue;
+    if (!source.href.includes("?") && withQuery.has(source.href)) continue;
     seen.add(source.href);
     merged.push(source);
   }
   return merged;
 }
 
+/** "Syyskuun" from "2026-09": every Finnish month name ends in "kuu", its genitive in "kuun". */
+function monthGenitive(month: string): string {
+  const index = Number(month.slice(5, 7)) - 1;
+  const name = MONTHS[index];
+  return name ? `${name}n` : month;
+}
+
+const ENGLISH_MONTHS = [
+  "January", "February", "March", "April", "May", "June",
+  "July", "August", "September", "October", "November", "December",
+];
+
+/**
+ * This month's booked VAT, written for a person: month name, fi-FI money, no
+ * screen path, no ISO period, no field number (F59). `amount` stays the canonical
+ * "287.01" so the honesty check compares numbers, never wording.
+ */
 export function formatBookedVatAnswer(input: {
   month: string;
   amount: string;
   isRefund: boolean;
   english: boolean;
-}): { text: string; sources: ChatSource[] } {
+}): { text: string; sources: ChatSource[]; amount: string } {
   const href = alvDrillHref(input.month);
-  const kind = input.isRefund
-    ? input.english
-      ? "refund"
-      : "palautusta"
-    : input.english
-      ? "to pay"
-      : "maksettavaa";
+  const [whole, cents] = input.amount.split(".");
+  const grouped = whole.replace(/\B(?=(\d{3})+(?!\d))/g, "\u00a0");
+  const money = input.english ? `${input.amount} €` : `${grouped},${cents ?? "00"}\u00a0€`;
+  const english = ENGLISH_MONTHS[Number(input.month.slice(5, 7)) - 1] ?? input.month;
   const text = input.english
-    ? `From your books for ${input.month}: VAT ${kind} ${input.amount} € (field 308). Source: ${href}.`
-    : `Kirjanpidostasi kaudelta ${input.month}: ALV ${kind} ${input.amount} € (kohta 308). Lähde: ${href}.`;
-  return { text, sources: [{ label: "ALV-raportti", href }] };
+    ? `VAT for ${english}: ${money} ${input.isRefund ? "to be refunded" : "to pay"}.`
+    : `${monthGenitive(input.month)} ALV: ${input.isRefund ? "palautusta" : "maksettavaa"} ${money}.`;
+  return { text, sources: [{ label: "ALV-ilmoitus", href }], amount: input.amount };
 }
