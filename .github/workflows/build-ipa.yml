@@ -7,6 +7,15 @@ on:
         description: "HTTPS API base URL baked into the bundled UI (NEXT_PUBLIC_API_BASE_URL)"
         required: true
         type: string
+      embed_passkey_entitlements:
+        description: >-
+          Embed the passkey associated-domains entitlement with an ad-hoc
+          signature. Off by default: Sideloadly and similar tools can refuse or
+          strip it ("entitlement not allowed by profile"). Only for a re-signer
+          that keeps the app's entitlements (docs/PASSKEY.md).
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -99,11 +108,13 @@ jobs:
             exit 1
           fi
 
-      # OWN-21 passkeys: the associated domain must be the API host (the
-      # server's WEBAUTHN_RP_ID). The unsigned build below ignores the
-      # entitlements (CODE_SIGN_ENTITLEMENTS=""); the file is carried into the
-      # package step and the artifact so a re-signer can apply it.
+      # OWN-21 passkeys, opt-in only (embed_passkey_entitlements): the
+      # associated domain must be the API host (the server's WEBAUTHN_RP_ID).
+      # The unsigned build below always ignores the entitlements
+      # (CODE_SIGN_ENTITLEMENTS=""); with the input on, the file is carried
+      # into the package step and a separate artifact for a re-signer.
       - name: Point the passkey entitlement at the API host
+        if: ${{ inputs.embed_passkey_entitlements }}
         working-directory: app
         env:
           API_BASE_URL: ${{ inputs.api_base_url }}
@@ -136,6 +147,8 @@ jobs:
 
       - name: Package unsigned IPA
         working-directory: app
+        env:
+          EMBED_PASSKEY_ENTITLEMENTS: ${{ inputs.embed_passkey_entitlements }}
         run: |
           APP="build/ios-unsigned/Build/Products/Release-iphoneos/App.app"
           if [[ ! -d "$APP" ]]; then
@@ -146,28 +159,34 @@ jobs:
           rm -rf Payload
           mkdir -p Payload
           cp -R "$APP" Payload/
-          # Passkeys (OWN-21): embed the associated-domains entitlement with an
-          # ad-hoc ("-") signature, so a re-signer that keeps the app's own
-          # entitlements has it. Fail-soft: on any error the bundle is put back
-          # exactly as built and the IPA is packaged unsigned as before.
-          ENT="ios/App/App/App.entitlements"
-          cp -R Payload/App.app adhoc-backup.app
-          adhoc_ok=1
-          if [[ -d Payload/App.app/Frameworks ]]; then
-            while IFS= read -r -d '' nested; do
-              codesign --force --sign - "$nested" || adhoc_ok=0
-            done < <(find Payload/App.app/Frameworks -maxdepth 1 \( -name '*.framework' -o -name '*.dylib' \) -print0)
-          fi
-          if [[ "$adhoc_ok" == 1 ]] \
-            && codesign --force --sign - --entitlements "$ENT" Payload/App.app \
-            && codesign -d --entitlements - Payload/App.app 2>/dev/null | grep -q "webcredentials:"; then
-            echo "Associated-domains entitlement embedded (ad-hoc signature; re-sign before install)"
+          # Default: the plain unsigned app, exactly as before batch 3 (no
+          # signature, no embedded entitlements), so Sideloadly installs it.
+          if [[ "$EMBED_PASSKEY_ENTITLEMENTS" == "true" ]]; then
+            # Passkeys (OWN-21): embed the associated-domains entitlement with an
+            # ad-hoc ("-") signature, so a re-signer that keeps the app's own
+            # entitlements has it. Fail-soft: on any error the bundle is put back
+            # exactly as built and the IPA is packaged unsigned as before.
+            ENT="ios/App/App/App.entitlements"
+            cp -R Payload/App.app adhoc-backup.app
+            adhoc_ok=1
+            if [[ -d Payload/App.app/Frameworks ]]; then
+              while IFS= read -r -d '' nested; do
+                codesign --force --sign - "$nested" || adhoc_ok=0
+              done < <(find Payload/App.app/Frameworks -maxdepth 1 \( -name '*.framework' -o -name '*.dylib' \) -print0)
+            fi
+            if [[ "$adhoc_ok" == 1 ]] \
+              && codesign --force --sign - --entitlements "$ENT" Payload/App.app \
+              && codesign -d --entitlements - Payload/App.app 2>/dev/null | grep -q "webcredentials:"; then
+              echo "Associated-domains entitlement embedded (ad-hoc signature; re-sign before install)"
+            else
+              echo "::warning::Could not embed the passkey entitlement; packaging the plain unsigned app"
+              rm -rf Payload/App.app
+              mv adhoc-backup.app Payload/App.app
+            fi
+            rm -rf adhoc-backup.app
           else
-            echo "::warning::Could not embed the passkey entitlement; packaging the plain unsigned app"
-            rm -rf Payload/App.app
-            mv adhoc-backup.app Payload/App.app
+            echo "Passkey entitlement not embedded (default; see docs/PASSKEY.md)"
           fi
-          rm -rf adhoc-backup.app
           zip -qry LashKirja-unsigned.ipa Payload
           rm -rf Payload
           # A remote-URL shell was about 1 MB; the bundled UI must be
@@ -185,10 +204,17 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: LashKirja-unsigned-ipa
-          # App.entitlements rides along for re-signers that take an
-          # entitlements file (docs/PASSKEY.md).
-          path: |
-            app/LashKirja-unsigned.ipa
-            app/ios/App/App/App.entitlements
+          path: app/LashKirja-unsigned.ipa
+          retention-days: 30
+          if-no-files-found: error
+
+      # Opt-in only: App.entitlements (pointed at the API host) for
+      # re-signers that take an entitlements file (docs/PASSKEY.md).
+      - name: Upload passkey entitlements
+        if: ${{ inputs.embed_passkey_entitlements }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: LashKirja-passkey-entitlements
+          path: app/ios/App/App/App.entitlements
           retention-days: 30
           if-no-files-found: error
