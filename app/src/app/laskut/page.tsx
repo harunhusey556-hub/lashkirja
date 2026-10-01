@@ -26,9 +26,13 @@ import {
   SearchField,
   Section,
   SlotSkeleton,
+  Skeleton,
+  SkeletonGroup,
   StatusTag,
   useSkeletonFade,
 } from "@/components/ds";
+import { StackedBar, StackedBarSkeleton } from "@/components/ds/charts";
+import { receivablesSegments } from "@/lib/receivables-summary";
 import { SALES_STATUS } from "@/lib/status-labels";
 import { detailHref } from "@/lib/routes";
 import {
@@ -71,6 +75,9 @@ interface Aging {
   totalOpen: number;
   overdue: number;
   overdueCount: number;
+  overdueCents?: number;
+  /** Received in the last 90 days. Missing in a list cached before the field existed. */
+  paidRecentCents?: number;
 }
 
 interface MatchPreview {
@@ -369,6 +376,15 @@ function InvoicesPageContent() {
         }
       />
 
+      {status === "loading" && !aging && (
+        // Final size of the card below (header 56 px, bar and one legend line), so nothing moves when it lands.
+        <SkeletonGroup label="Ladataan saatavia" className="rounded-card border border-line bg-surface px-4 pb-1 pt-4">
+          <Skeleton tone="soft" className="h-3 w-28" />
+          <Skeleton className="mt-2 h-6 w-32" />
+          <StackedBarSkeleton className="mt-3" />
+        </SkeletonGroup>
+      )}
+
       {aging && !noInvoicesAtAll && status !== "error" && (
         <div className="overflow-hidden rounded-card border border-line bg-surface">
           <button
@@ -376,16 +392,13 @@ function InvoicesPageContent() {
             aria-expanded={agingOpen}
             aria-controls="laskut-aging"
             onClick={() => setAgingOpen((open) => !open)}
-            className="active-press flex w-full items-start justify-between gap-3 p-4 text-left"
+            className="active-press flex w-full items-start justify-between gap-3 px-4 pb-1 pt-4 text-left"
           >
             <span>
-              <span className="block text-caption text-ink-2">Avoinna</span>
+              <span className="block text-caption text-ink-2">Saatavat, avoinna</span>
               <span className="mt-0.5 block text-title-2 font-bold tracking-[-0.02em] tabular-nums text-ink">
                 {formatEur(aging.totalOpen)}
               </span>
-              {aging.overdueCount > 0 ? (
-                <span className="mt-0.5 block text-caption text-accent">{formatEur(aging.overdue)} myöhässä</span>
-              ) : null}
             </span>
             <span className="mt-1 flex items-center gap-1 text-caption text-ink-2">
               Erittely
@@ -396,6 +409,22 @@ function InvoicesPageContent() {
               />
             </span>
           </button>
+          <div className="px-4 pb-1">
+            <StackedBar
+              segments={receivablesSegments({
+                buckets: aging.buckets,
+                overdueCents: aging.overdueCents ?? Math.round(aging.overdue * 100),
+                paidCents: aging.paidRecentCents,
+              })}
+              emptyText="Ei avoimia laskuja."
+              animateKey="laskut-saatavat"
+              selectedKey={filter === "all" ? null : filter}
+              onSelect={(key) => {
+                const next = key as SalesFilterId;
+                setFilter(filter === next ? "all" : next);
+              }}
+            />
+          </div>
           <Disclosure open={agingOpen}>
             <div
               id="laskut-aging"

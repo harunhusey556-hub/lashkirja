@@ -5,6 +5,7 @@
  * rules that need the database: the per-user invoice number sequence, which
  * edits a non-draft invoice still allows, and how a bank row becomes a payment.
  */
+import { paidWithinWindowCents } from "./receivables-summary";
 import type { Prisma } from "@/generated/prisma/client";
 import { prisma } from "./db";
 import { AppError, ConflictError, NotFoundError, ValidationError } from "./api-errors";
@@ -1454,7 +1455,7 @@ export async function listInvoices(
   userId: string,
   options: ListInvoicesOptions = {},
   now: Date = new Date()
-): Promise<{ invoices: PublicInvoice[]; aging: AgingReport & { totalOpen: number; overdue: number } }> {
+): Promise<{ invoices: PublicInvoice[]; aging: AgingReport & { totalOpen: number; overdue: number; paidRecentCents: number } }> {
   const where = invoiceScopeWhere(userId, options);
   const and: Array<Record<string, unknown>> = [];
   if (options.status === "overdue") {
@@ -1491,7 +1492,7 @@ export async function listInvoices(
       dueDate: true,
       grossCents: true,
       closedReason: true,
-      payments: { select: { amountCents: true } },
+      payments: { select: { amountCents: true, paidDate: true } },
     },
   });
   const aging = buildAgingReport(
@@ -1511,6 +1512,8 @@ export async function listInvoices(
       ...aging,
       totalOpen: centsToEuros(aging.totalOpenCents),
       overdue: centsToEuros(aging.overdueCents),
+      // Additive: money received in the last 90 days, for the "Saatavat" bar on Myynti.
+      paidRecentCents: paidWithinWindowCents(allOpen.flatMap((invoice) => invoice.payments), now),
     },
   };
 }

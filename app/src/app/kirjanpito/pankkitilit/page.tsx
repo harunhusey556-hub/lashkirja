@@ -17,6 +17,8 @@ import { CopyButton } from "@/components/ds/CopyButton";
 import BankConnectCard from "@/components/BankConnectCard";
 import { StatementFilesSection } from "@/components/bank/StatementFilesSection";
 import { Button } from "@/components/ui";
+import { Sparkline } from "@/components/ds/charts";
+import { TREND_MIN_POINTS, trendAriaLabel, trendCaption } from "@/lib/bank-trend";
 import { Card, ListRow, PageTitle, Section, Skeleton, SkeletonGroup, useSkeletonFade } from "@/components/ds";
 
 import { pageCacheFetchedAt, readPageCache, writePageCache } from "@/lib/page-cache";
@@ -40,6 +42,8 @@ interface AccountSummary {
   unreportedCount: number;
   statementCount: number;
   transactionCount: number;
+  /** Closing balances (euros) of the last up to 6 months; empty when there are fewer than 3. */
+  balanceTrend?: number[];
 }
 
 interface Overview {
@@ -121,6 +125,26 @@ function accountSecondary(account: AccountSummary): string {
   if (account.lastReconciledMonth) flags.push(`Saldo täsmää ${formatMonth(account.lastReconciledMonth)}`);
   flags.push(account.statementCount === 1 ? "1 tiliote" : `${account.statementCount} tiliotetta`);
   return flags.length > 0 ? `${base} · ${flags.join(" · ")}` : base;
+}
+
+/** The "6 kk saldo" line under an account row; nothing under three months of data. */
+function AccountTrend({ account }: { account: AccountSummary }) {
+  const points = account.balanceTrend ?? [];
+  if (points.length < TREND_MIN_POINTS) return null;
+  const rose = points[points.length - 1] >= points[0];
+  return (
+    <span className="flex items-center gap-3">
+      <span className="shrink-0 text-caption text-ink-2">{trendCaption(points.length)}</span>
+      <Sparkline
+        points={points}
+        tone={rose ? "success" : "neutral"}
+        height={24}
+        className="max-w-36"
+        animateKey={`bank-trend-${account.id}`}
+        ariaLabel={trendAriaLabel(points, account.currency, formatEur)}
+      />
+    </span>
+  );
 }
 
 export default function BankAccountsPage() {
@@ -413,6 +437,7 @@ export default function BankAccountsPage() {
                       title={account.name}
                       amount={formatEur(account.currentBalance)}
                       secondary={accountSecondary(account)}
+                      footer={<AccountTrend account={account} />}
                     />
                   </div>
                 ))

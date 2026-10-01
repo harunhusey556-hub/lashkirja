@@ -14,10 +14,12 @@ const AMOUNT_TONE = { default: "text-ink", positive: "text-success", negative: "
  * mockups; record rows (a transaction, an invoice) leave it off. A chevron row's secondary line may wrap
  * to two lines.
  */
-export function ListRow({ title, amount, amountTone = "default", secondary, secondaryLines = "clamp", trailing, leading, chevron = false, href, onClick, ariaLabel }: {
+export function ListRow({ title, amount, amountTone = "default", secondary, secondaryLines = "clamp", trailing, leading, chevron = false, href, onClick, ariaLabel, footer }: {
   title: string; amount?: ReactNode; amountTone?: keyof typeof AMOUNT_TONE; secondary?: ReactNode;
   /** "all" shows the whole secondary text and drops the trailing action to its own line: for a failure whose last sentence is the advice (F29). */
   secondaryLines?: "clamp" | "all";
+  /** A quiet extra line under the secondary text (a small chart). It keeps its own accessible name. */
+  footer?: ReactNode;
   trailing?: ReactNode; leading?: ReactNode; chevron?: boolean; href?: string; onClick?: () => void; ariaLabel?: string;
 }) {
   const interactive = Boolean(href || onClick);
@@ -74,6 +76,7 @@ export function ListRow({ title, amount, amountTone = "default", secondary, seco
             {trailingNode ? <span className="pointer-events-none relative z-10 ml-auto shrink-0">{trailingNode}</span> : null}
           </span>
         ) : null}
+        {footer ? <span className="pointer-events-none mt-2 block">{footer}</span> : null}
       </span>
       {chevron ? (
         <span aria-hidden className="pointer-events-none -mr-1 flex text-ink-2/80">

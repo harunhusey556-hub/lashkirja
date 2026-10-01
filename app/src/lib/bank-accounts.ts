@@ -4,6 +4,7 @@
  * All money crosses the API boundary as euros (numbers), while the database
  * keeps integer cents. Conversion happens here so no route has to remember.
  */
+import { balanceTrendPoints } from "./bank-trend";
 import { prisma } from "./db";
 import { centsToEuros, eurosToCents } from "./money";
 import { isValidIban, normalizeIban } from "./iban";
@@ -48,6 +49,8 @@ export interface BankAccountWithPosition extends PublicBankAccount {
   unreportedCount: number;
   statementCount: number;
   transactionCount: number;
+  /** Closing balances (euros) of the last up to 6 months, oldest first; empty under 3 months of data. */
+  balanceTrend: number[];
 }
 
 type BankAccountRow = {
@@ -393,6 +396,9 @@ export async function getBankOverview(
       unreportedCount: result.unreportedMonths.length,
       statementCount,
       transactionCount: transactions.length,
+      balanceTrend: balanceTrendPoints(
+        result.months.map((row) => centsToEuros(row.reportedClosingCents ?? row.computedClosingCents))
+      ),
     });
   }
 
