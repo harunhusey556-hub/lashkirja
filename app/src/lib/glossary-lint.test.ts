@@ -84,7 +84,7 @@ describe("the retired-word patterns", () => {
       "Lisää kuitti", "Ota kuva", "Kirjaudu ulos", "Kopioi virheviite", "Muu IMAP", "Maksuaika 14 pv",
       "Hyväksy kaikki 3 kpl", "Lähetetty", "Avoimet", "Täsmää",
       "Ei puuttuvia tositteita.", "Poista linkitys", "Linkitys epäonnistui", "Tilitapahtuma", "tilitapahtumaan",
-      "Tilitapahtumasta", "Kirjaudutaan ulos…", "Kirjaudu ulos", "Kirjaudutko ulos", "Kirjaudut ulos",
+      "Tilitapahtumasta", "Kirjaudutaan ulos…", "Kirjaudu ulos", "Kirjaudutko ulos", "Kirjaudutaanko ulos", "Kirjaudut ulos",
     ]) {
       expect(flagged(text), text).toBe(true);
     }

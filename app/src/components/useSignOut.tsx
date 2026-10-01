@@ -68,7 +68,7 @@ export function useSignOut(options: { onBeforeSignOut?: () => void } = {}): {
   const confirmDialog = (
     <ConfirmModal
       isOpen={confirmOpen}
-      title="Kirjaudutaanko ulos?"
+      title="Kirjataanko ulos?"
       description={`${queuedReceiptsCountLabel(queuedCount)} Jos kirjaat ulos, ne poistetaan tästä laitteesta.`}
       confirmLabel="Kirjaa ulos"
       cancelLabel="Peruuta"
