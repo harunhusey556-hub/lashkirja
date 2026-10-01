@@ -15,12 +15,15 @@ import { AuthedFileLink } from "@/components/AuthedFileLink";
 import { ChevronLeft, ChevronRight, Download } from "lucide-react";
 import {
   ActionPill,
+  BarChart,
+  BarChartSkeleton,
   Card,
   Icon,
   IconTile,
   KeyValueList,
   ListRow,
   PageTitle,
+  HBarList,
   Section,
   Skeleton,
   SkeletonCard,
@@ -35,6 +38,16 @@ import {
   receiptDrillHref,
   type DrillTarget,
 } from "@/lib/report-drill";
+import {
+  MIN_CHART_MONTHS,
+  activeMonths,
+  chartMonths,
+  defaultSelectedKey,
+  type ChartMonth,
+  expenseRankedItems,
+  reportSentence,
+  sentenceCase,
+} from "./report-chart";
 import { pageCacheFetchedAt, readPageCache, writePageCache } from "@/lib/page-cache";
 import { useCacheAfterBoot } from "@/components/invoices/useCacheAfterBoot";
 import { usePersistedState, useScrollRestoration } from "@/lib/list-ui-state";
@@ -118,6 +131,12 @@ function ReportSkeleton() {
   return (
     <SkeletonGroup label="Ladataan raporttia" className="space-y-6">
       <div>
+        <Skeleton tone="soft" className="mx-1 mb-3 h-3 w-40" />
+        <SkeletonCard>
+          <BarChartSkeleton />
+        </SkeletonCard>
+      </div>
+      <div>
         <Skeleton tone="soft" className="mx-1 mb-3 h-3 w-12" />
         <SkeletonCard className="space-y-4">
           {[0, 1, 2].map((row) => (
@@ -173,11 +192,6 @@ function DrillLinks({ targets }: { targets: DrillTarget[] }) {
   );
 }
 
-/** Category keys are stored lower-case ("tarvikkeet"); a list title starts with a capital. */
-function sentenceCase(text: string): string {
-  return text ? text.charAt(0).toLocaleUpperCase("fi-FI") + text.slice(1) : text;
-}
-
 /**
  * Same markup/classes as `ListRow`, but a real, authenticated file link
  * instead of `next/link`'s `Link`: these hrefs are file downloads
@@ -214,6 +228,39 @@ function DownloadRow({
         className="pointer-events-none h-4 w-4 shrink-0 animate-spin rounded-full border-2 border-line border-t-ink-2 opacity-0 peer-data-[busy=true]:opacity-100"
       />
     </div>
+  );
+}
+
+/** The selected month under the chart: its result, and the lists its figures live in (F71). */
+function SelectedMonthRow({ item }: { item: ChartMonth }) {
+  const period = item.period;
+  if (!period) return null;
+  const expense = expenseDrillTarget(period);
+  const targets = [...incomeDrillTargets(period), ...(expense ? [expense] : [])];
+  return (
+    <ListRow
+      href={targets.length === 1 ? targets[0].href : undefined}
+      chevron={targets.length === 1}
+      title={item.title}
+      amount={formatEur(period.profitNet)}
+      secondary={targets.length === 1 ? `Tulos · ${targets[0].label}` : "Tulos"}
+      trailing={
+        targets.length > 1 ? (
+          <span className="flex flex-wrap justify-end gap-x-2 gap-y-1">
+            {targets.map((target) => (
+              <ActionPill key={target.id} href={target.href} ariaLabel={`${target.ariaLabel}, ${item.title}`}>
+                {target.label}
+              </ActionPill>
+            ))}
+          </span>
+        ) : undefined
+      }
+      ariaLabel={
+        targets.length === 1
+          ? `${targets[0].ariaLabel}, ${item.title}, tulos ${formatEur(period.profitNet)}`
+          : `${item.title}, tulos ${formatEur(period.profitNet)}`
+      }
+    />
   );
 }
 
@@ -281,6 +328,21 @@ export default function ReportsPage() {
   const totalIncomeTargets = report ? incomeDrillTargets({ ...report.total, month: String(year) }) : [];
   const totalExpenseTarget = report ? expenseDrillTarget({ ...report.total, month: String(year) }) : null;
 
+  // The bar chart: six months (or a whole past year), one of them selected. The lists below stay the
+  // exact figures and the text alternative.
+  const now = { year: currentYear, month: new Date().getUTCMonth() + 1 };
+  const [picked, setPicked] = useState<{ year: number; key: string } | null>(null);
+  const dataMonths = report ? activeMonths(report.months).length : 0;
+  const chartItems = report && dataMonths >= MIN_CHART_MONTHS ? chartMonths(report.months, year, now) : [];
+  const windowHasData = chartItems.some((item) => item.income !== 0 || item.expense !== 0);
+  const selectedKey =
+    picked && picked.year === year && chartItems.some((item) => item.key === picked.key)
+      ? picked.key
+      : defaultSelectedKey(chartItems);
+  const selectedMonth = chartItems.find((item) => item.key === selectedKey) ?? null;
+  const sentence = report ? reportSentence(report.months, year, now) : null;
+  const expenseRanked = report ? expenseRankedItems(report.total.expenseByCategory, year) : null;
+
   const packagePeriod = packageMonth.startsWith(`${year}`) ? packageMonth : `${year}-01`;
 
   return (
@@ -306,6 +368,25 @@ export default function ReportsPage() {
 
         {status === "ready" && report && (
           <div className={`space-y-6 ${fade}`}>
+            {chartItems.length > 0 ? (
+              <Section title="Tulot ja menot, ilman ALV:ta">
+                <div className="p-4">
+                  <BarChart
+                    items={chartItems}
+                    selectedKey={selectedKey}
+                    onSelect={(key) => setPicked({ year, key })}
+                    emptyText="Näiltä kuukausilta ei ole kirjauksia."
+                    animateKey={`raportit-${year}`}
+                  />
+                </div>
+                {windowHasData && selectedMonth ? <SelectedMonthRow item={selectedMonth} /> : null}
+              </Section>
+            ) : dataMonths === 1 ? (
+              <p className="px-1 text-body text-ink-2">
+                Kuukausien vertailu ilmestyy tähän, kun kirjauksia on kahdelta kuukaudelta.
+              </p>
+            ) : null}
+
             <section className="mt-6 first:mt-0">
               <div className="mb-2 flex items-baseline justify-between gap-3 px-1 text-caption text-ink-2">
                 {/* F11: Koti counts gross (sis. ALV); every figure here is net, and the heading says so. */}
@@ -352,6 +433,8 @@ export default function ReportsPage() {
               />
             </section>
 
+            {sentence ? <p className="-mt-3 px-1 text-body text-ink">{sentence}</p> : null}
+
             {/* What the figures are built from, and on which basis (SALES-01, SALES-37). */}
             <p className="-mt-3 px-1 text-caption leading-relaxed text-ink-2">
               {report.total.receiptCount} {report.total.receiptCount === 1 ? "kuitti" : "kuittia"} ja{" "}
@@ -394,23 +477,17 @@ export default function ReportsPage() {
               </Section>
             )}
 
-            {report.total.expenseByCategory.length === 0 ? (
+            {!expenseRanked || expenseRanked.items.length === 0 ? (
               <EmptySection title="Menot kategorioittain">Ei menoja tällä jaksolla.</EmptySection>
             ) : (
-            <Section title="Menot kategorioittain">
-              {(
-                report.total.expenseByCategory.map((row) => (
-                  <ListRow
-                    key={row.category}
-                    href={receiptDrillHref({ month: String(year), type: "meno", category: row.category })}
-                    ariaLabel={`Avaa kuitit: ${row.category}`}
-                    title={sentenceCase(row.category)}
-                    secondary={`${row.count} ${row.count === 1 ? "kuitti" : "kuittia"} · brutto ${formatEur(row.gross)}`}
-                    amount={formatEur(row.net)}
-                  />
-                ))
-              )}
-            </Section>
+              <Section title="Menot kategorioittain, ilman ALV:ta">
+                <HBarList
+                  items={expenseRanked.items}
+                  totalCents={expenseRanked.totalCents}
+                  tone="neutral"
+                  animateKey={`raportit-menot-${year}`}
+                />
+              </Section>
             )}
 
             {report.total.incomeByCategory.length > 0 && (
