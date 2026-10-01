@@ -14,6 +14,7 @@ import {
   readJson,
   redirectToLogin,
 } from "@/components/clientFetch";
+import { routeFieldErrors } from "@/lib/field-error-routing";
 import { showToast } from "@/lib/toast";
 import { hapticNotify } from "@/lib/haptics";
 import { formatDate, formatDayMonth, formatEur, parseFinnishNumber } from "@/lib/format";
@@ -104,6 +105,9 @@ const PENDING_CHIP_LABELS: Array<{ id: PurchaseFilterId; label: string }> = [
   { id: "paid", label: "Maksetut" },
 ];
 const AGING_BUCKETS = ["1-30", "31-60", "61-90", "90+"] as const;
+
+/** The fields the "Uusi ostolasku" form shows an error under. */
+const PURCHASE_FORM_SLOTS = ["supplierName", "gross", "vat", "dueDate", "reference"];
 
 const today = () => new Date().toISOString().slice(0, 10);
 
@@ -303,12 +307,13 @@ export default function PurchaseInvoicesPage() {
       // Renders inside the "Uusi ostolasku" sheet, which stays open, not the
       // page-level message behind it.
       // A refusal that names fields is shown at those fields (F64).
-      const fields = fieldErrorsFromApi(error);
-      if (Object.keys(fields).length > 0) {
-        setFormErrors(fields);
+      const routed = routeFieldErrors(fieldErrorsFromApi(error), (key) => PURCHASE_FORM_SLOTS.includes(key));
+      if (Object.keys(routed.fields).length > 0) {
+        setFormErrors(routed.fields);
         setCreateError("");
       } else {
-        setCreateError(errorMessage(error, "Tallennus epäonnistui"));
+        // A field the form shows no slot for (a date) would vanish: its message is the generic one.
+        setCreateError(routed.message || errorMessage(error, "Tallennus epäonnistui"));
       }
     } finally {
       setBusy(false);

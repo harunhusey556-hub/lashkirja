@@ -60,6 +60,7 @@ import {
   type NativePick,
 } from "@/lib/native-pick";
 import { clearDraft } from "@/lib/draft-store";
+import { routeFieldErrors } from "@/lib/field-error-routing";
 import { RECEIPT_LIMITS, receiptCategoryFocusId, receiptFieldId, validateReceiptFields } from "@/lib/receipt-form";
 import { RECEIPT_PHASE } from "@/lib/screen-state";
 import { isLowConfidenceField } from "@/lib/receipt-confidence";
@@ -77,6 +78,9 @@ import { BottomActions, DetailHero, MoreMenu, PageTitle, Section, StatusTag } fr
 import { IS_MOBILE_BUILD } from "@/lib/build-target";
 import { useConnectivity } from "@/lib/connectivity";
 import { useOfflineReceiptQueue } from "@/components/useOfflineReceiptQueue";
+
+/** The fields the receipt form shows an error under (the VAT rows are `vat-<n>`). */
+const RECEIPT_FORM_SLOTS = ["vendor", "date", "totalAmount", "category", "reference", "invoiceNumber", "notes"];
 
 const LABEL_CLASS = "mb-1.5 block text-caption font-normal text-ink-2";
 /** Same recipe as controlClass (see components/ui.tsx) but with a swappable border
@@ -754,7 +758,8 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
       }
       // A refusal that names fields goes to those fields (F64); the rest is one message.
       const serverFields = fieldErrorsFromApi(saveError);
-      if (Object.keys(serverFields).length > 0) {
+      const routed = routeFieldErrors(serverFields, (key) => RECEIPT_FORM_SLOTS.includes(key) || /^vat-\d+$/.test(key));
+      if (Object.keys(routed.fields).length > 0) {
         setFieldErrors(serverFields);
         setError("");
         session.setPhase("dirty");
@@ -765,7 +770,8 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
         );
         return;
       }
-      setError(errorMessage(saveError, "Tallennus epäonnistui"));
+      // A field the form shows no slot for (the VAT rows as a whole) would vanish: its message is the generic one.
+      setError(routed.message || errorMessage(saveError, "Tallennus epäonnistui"));
       session.setPhase("failed");
     } finally {
       setSaving(false);
