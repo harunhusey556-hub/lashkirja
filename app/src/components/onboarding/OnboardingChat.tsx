@@ -218,12 +218,16 @@ export function OnboardingChat({
   const progress = current === "summary" ? 1 : done.length / total;
   const questionNumber = Math.min(done.length + 1, total);
 
-  // Keep the newest bubble in view.
+  // Keep the newest bubble in view. The choice panel swaps to the next step's
+  // choices a moment after the question is up, and a four-choice panel is taller
+  // than the two-choice one it replaces: the thread shrinks and its bottom moves.
+  // So the thread is anchored again when the panel has changed (panel.generation),
+  // not only when the stage does (F20).
   useEffect(() => {
     const thread = threadRef.current;
     if (!thread || !isOpen) return;
     thread.scrollTo({ top: thread.scrollHeight, behavior: readReducedMotion() ? "auto" : "smooth" });
-  }, [isOpen, done, stage, removing]);
+  }, [isOpen, done, stage, removing, panel.generation]);
 
   // A two-choice and a four-choice question need different panel heights.
   // The height itself changes at once (no layout-property animation); the
@@ -577,7 +581,7 @@ export function OnboardingChat({
             inert={panelHidden || removing !== null}
           >
             {panelStep && !panelStep.multiSelect && (
-              <div role="radiogroup" aria-label={panelStep.question} className="flex flex-col gap-2">
+              <div role="radiogroup" aria-label={panelStep.question} className={`${styles.choiceGroup} flex flex-col gap-2`}>
                 {panelStep.chips.map((chip) => {
                   const selected = held !== null ? held === chip.value : answers[panelStep.id] === chip.value;
                   return (
@@ -613,7 +617,7 @@ export function OnboardingChat({
 
             {panelStep?.multiSelect && (
               <div className="flex flex-col gap-2">
-                <div className="flex flex-col gap-2" role="group" aria-label={panelStep.question}>
+                <div className={`${styles.choiceGroup} flex flex-col gap-2`} role="group" aria-label={panelStep.question}>
                   {panelStep.chips.map((chip) => {
                     const value = String(chip.value);
                     const selected = multi.includes(value);
@@ -655,7 +659,7 @@ export function OnboardingChat({
                     commitAnswer(panelStep.id, [...multi]);
                   }}
                   disabled={stage !== "ready" || panelHidden}
-                  className={`${styles.chipIn} active-press mt-1 flex min-h-12 w-full items-center justify-center rounded-card bg-ink text-body font-semibold text-canvas`}
+                  className={`${styles.chipIn} ${styles.doneButton} active-press mt-1 flex min-h-12 w-full items-center justify-center rounded-card bg-ink text-body font-semibold text-canvas`}
                 >
                   {multi.length === 0 ? NO_SELECTION_LABEL : "Jatka"}
                 </button>

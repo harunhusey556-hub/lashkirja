@@ -175,6 +175,18 @@
   pointer-events: none;
 }
 
+/* Short phones (320 x 568): four choices and Jatka would leave the thread less
+   room than one two-line question needs, so the rows are a little tighter (F20). */
+@media (max-height: 640px) {
+  .panelContent .choiceGroup {
+    gap: 6px;
+  }
+  .panelContent .choiceGroup > button,
+  .panelContent .doneButton {
+    min-height: 44px;
+  }
+}
+
 /* Chips arrive with a 40 ms stagger, at most four steps. */
 .chipIn {
   animation: obChipIn 200ms var(--ease-out) backwards;
