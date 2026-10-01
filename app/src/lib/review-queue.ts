@@ -53,6 +53,13 @@ export function approvalFailureText(approved: number, failed: ApprovalFailure[])
   return approved > 0 ? `Hyväksyttiin ${approved}. ${refused}` : refused;
 }
 
+/** How the outcome of a bulk action is shown. Decided from the count of failures, never from the message text. */
+export type NoticeTone = "success" | "error";
+
+export function noticeToneFor(failedCount: number): NoticeTone {
+  return failedCount > 0 ? "error" : "success";
+}
+
 /** Refusals the server states on purpose; a second try gives the same answer. */
 const FINAL_FAILURES = new Set([
   MISSING_AMOUNT_MESSAGE,

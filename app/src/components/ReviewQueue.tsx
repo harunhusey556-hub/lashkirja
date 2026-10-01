@@ -148,7 +148,7 @@ export default function ReviewQueue({
           {hidden > 0 && (
             <div className="px-4 py-3">
               <Button type="button" variant="secondary" className="w-full" onClick={() => setShowAll(true)}>
-                Näytä loput {hidden} kpl
+                Näytä loput ({hidden})
               </Button>
             </div>
           )}

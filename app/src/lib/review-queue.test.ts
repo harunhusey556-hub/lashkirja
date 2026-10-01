@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   approvalFailureText,
+  noticeToneFor,
   queueTotalText,
   retryableFailureIds,
   splitApprovable,
@@ -86,5 +87,16 @@ describe("retryableFailureIds", () => {
         { id: "e", error: "Jokin odottamaton virhe" },
       ])
     ).toEqual(["e"]);
+  });
+});
+
+describe("noticeToneFor (V14, R56)", () => {
+  it("is success when nothing failed, whatever the message says", () => {
+    expect(noticeToneFor(0)).toBe("success");
+  });
+
+  it("is an error as soon as one item failed", () => {
+    expect(noticeToneFor(1)).toBe("error");
+    expect(noticeToneFor(7)).toBe("error");
   });
 });

@@ -38,7 +38,12 @@ import { Button, buttonClass } from "@/components/ui";
 import { Check, Minus, Receipt } from "lucide-react";
 import { HeaderAddPill, PageTitle, Section, SlotSkeleton, useSkeletonFade } from "@/components/ds";
 import { batchOutcomeMessage } from "@/lib/upload-queue";
-import { approvalFailureText, retryableFailureIds } from "@/lib/review-queue";
+import {
+  approvalFailureText,
+  noticeToneFor,
+  retryableFailureIds,
+  type NoticeTone,
+} from "@/lib/review-queue";
 import { ReceiptFilters, type ReceiptAdvancedFilters } from "./ReceiptFilters";
 import { ReceiptRow } from "./ReceiptRow";
 import { BULK_BAR_SPACE_VAR, BulkBar } from "./BulkBar";
@@ -102,7 +107,13 @@ export default function KuititPage() {
     false
   );
   const [loadError, setLoadError] = useState<{ query: string; error: unknown } | null>(null);
-  const [actionError, setActionError] = useState("");
+  const [actionNotice, setActionNotice] = useState<{ text: string; tone: NoticeTone }>({
+    text: "",
+    tone: "error",
+  });
+  const actionError = actionNotice.text;
+  // The tone comes from the data of the outcome (failed count), never from the wording (V14, R56).
+  const setActionError = (text: string, tone: NoticeTone = "error") => setActionNotice({ text, tone });
   const actionErrorRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (actionError) actionErrorRef.current?.scrollIntoView({ block: "nearest", behavior: "smooth" });
@@ -440,7 +451,7 @@ export default function KuititPage() {
       const failedCount = data.failedCount ?? failed.length;
       const updatedCount = data.updatedCount ?? Math.max(0, ids.length - failedCount);
       // The refusal is named (F15), and a retry is only offered when a second try can differ.
-      setActionError(approvalFailureText(updatedCount, failed));
+      setActionError(approvalFailureText(updatedCount, failed), noticeToneFor(failed.length));
       setRetryApproveIds(retryableFailureIds(failed));
       setLoadAttempt((a) => a + 1);
       void loadCounts();
@@ -491,7 +502,10 @@ export default function KuititPage() {
         });
         void loadCounts();
       }
-      setActionError(batchOutcomeMessage("Poistettiin", deletedCount, failedCount));
+      setActionError(
+        batchOutcomeMessage("Poistettiin", deletedCount, failedCount),
+        noticeToneFor(failedCount)
+      );
       setSelectedIds(new Set(failed.map((item) => item.id)));
       setShowBulkConfirm(false);
     } catch (error: unknown) {
@@ -624,7 +638,7 @@ export default function KuititPage() {
           <div
             ref={actionErrorRef}
             className={`space-y-2 rounded-card px-4 py-3 text-caption ${
-              actionError.includes("epäonnistui 0") || /^Hyväksyttiin d+.$/.test(actionError) ? "bg-canvas text-ink" : "bg-danger/10 text-danger"
+              actionNotice.tone === "success" ? "bg-success/10 text-success" : "bg-danger/10 text-danger"
             }`}
             role="status"
           >
