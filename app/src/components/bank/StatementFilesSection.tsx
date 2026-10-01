@@ -8,6 +8,7 @@ import { ListRow, Section, StatusTag } from "@/components/ds";
 import { formatEurSigned } from "@/lib/format";
 import { formatMonth, type StatementData } from "@/lib/statement-client";
 import { readPageCache, writePageCache } from "@/lib/page-cache";
+import { showToast } from "@/lib/toast";
 import { detailHref } from "@/lib/routes";
 import { useStatementUpload } from "./useStatementUpload";
 
@@ -25,7 +26,8 @@ export function StatementFilesSection() {
   );
   const [showAll, setShowAll] = useState(false);
   const uploader = useStatementUpload({
-    onUploaded: ({ statementId }) => {
+    onUploaded: ({ statementId, notice }) => {
+      if (notice) showToast({ tone: "info", text: notice });
       if (statementId) router.push(detailHref("statement", statementId));
     },
   });

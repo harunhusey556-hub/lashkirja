@@ -16,6 +16,8 @@ export interface BankAccountOption {
 export interface UploadResult {
   count: number;
   statementId: string | null;
+  /** One sentence about rows that were already stored and left out, or null. */
+  notice: string | null;
 }
 
 /**
@@ -64,9 +66,12 @@ export function useStatementUpload({ onUploaded }: { onUploaded: (result: Upload
       fd.append("file", file);
       if (targetAccountId) fd.append("bankAccountId", targetAccountId);
       const res = await apiFetch("/api/statements", { method: "POST", body: fd, timeoutMs: 120_000 });
-      const data = await readJson<{ count: number; statement?: { id?: string } }>(res, "Tiliotteen käsittely epäonnistui");
+      const data = await readJson<{ count: number; notice?: string | null; statement?: { id?: string } }>(
+        res,
+        "Tiliotteen käsittely epäonnistui"
+      );
       setMessage(null);
-      onUploaded({ count: data.count, statementId: data.statement?.id ?? null });
+      onUploaded({ count: data.count, statementId: data.statement?.id ?? null, notice: data.notice ?? null });
     } catch (error: unknown) {
       if (isUnauthorized(error)) {
         redirectToLogin();

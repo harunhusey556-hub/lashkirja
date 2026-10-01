@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { requireSession } from "@/lib/session";
 import {
+  StatementParseError,
   parseCamtXML,
   parseXLSX,
   parseCSV,
@@ -24,12 +25,21 @@ import { centsToEuros } from "@/lib/money";
 import { autoGenerateIncomeReceipts } from "@/lib/income-automation";
 import { resolveAccountForImport } from "@/lib/bank-accounts";
 import { extractIbans } from "@/lib/iban";
+import { Prisma } from "@/generated/prisma/client";
+import { loadStoredRowIdentities, skippedRowsNotice, splitNewRows } from "@/lib/bank-row-fingerprint";
 
 import { assertMonthOpen } from "@/lib/period-lock";
 import { AppError } from "@/lib/api-errors";
 function publicTransaction<T extends { amountCents: number }>(tx: T) {
   const { amountCents, ...rest } = tx;
   return { ...rest, amount: centsToEuros(amountCents) };
+}
+
+/** Every row of the file is already stored (an overlapping or repeated export). */
+class AllRowsKnownError extends Error {
+  constructor(readonly skipped: number) {
+    super("all rows already stored");
+  }
 }
 
 export async function POST(req: NextRequest) {
@@ -48,6 +58,7 @@ export async function POST(req: NextRequest) {
   if (oversized) return oversized;
 
   let storageKey: string | null = null;
+  let checksum: string | null = null;
   try {
     const formData = await req.formData();
     const file = formData.get("file") as File | null;
@@ -59,6 +70,10 @@ export async function POST(req: NextRequest) {
     }
 
     const buffer = Buffer.from(await file.arrayBuffer());
+    // An empty file is the user's mistake, not an oversized payload (413).
+    if (buffer.length === 0) {
+      return NextResponse.json({ error: "Tiedosto on tyhjä" }, { status: 400 });
+    }
 
     // Content-sniffed, not extension-trusted. The old code chose a parser from
     // the client-supplied filename and wrote unbounded bytes into a directory
@@ -69,9 +84,10 @@ export async function POST(req: NextRequest) {
     // Statement.checksum has been unique-per-user in the schema from the start,
     // but nothing ever populated it, so it stayed null and the same tiliote
     // could be imported repeatedly, duplicating every transaction inside it.
-    const checksum = sha256(buffer);
+    const fileChecksum = sha256(buffer);
+    checksum = fileChecksum;
     const duplicate = await prisma.statement.findFirst({
-      where: { userId, checksum },
+      where: { userId, checksum: fileChecksum },
       select: { id: true, fileName: true },
     });
     if (duplicate) {
@@ -149,7 +165,9 @@ export async function POST(req: NextRequest) {
       bankAccountId = await resolveAccountForImport(userId, { iban: ibanHint });
     }
 
-    const statement = await prisma.$transaction(async (db) => {
+    const { statement, skippedDuplicates } = await prisma.$transaction(async (db) => {
+      // The statement is written first: that takes SQLite's write lock, so the
+      // stored rows read below cannot change under a concurrent import.
       const created = await db.statement.create({
         data: {
           userId,
@@ -157,19 +175,25 @@ export async function POST(req: NextRequest) {
           fileName: file.name,
           fileType,
           filePath: storageKey!,
-          checksum,
+          checksum: fileChecksum,
           periodMonth,
           periodSource: "auto",
         },
       });
+      const incoming = parsedTransactions.map((tx) => ({ ...tx, amountCents: eurosToCents(tx.amount) }));
+      // The file hash only catches a byte-identical file. An export that
+      // overlaps an earlier one, or the bank feed, repeats rows under new ids.
+      const stored = await loadStoredRowIdentities(db, userId, bankAccountId, incoming);
+      const { fresh, duplicates } = splitNewRows(incoming, stored);
+      if (fresh.length === 0) throw new AllRowsKnownError(duplicates.length);
       await db.transaction.createMany({
-        data: parsedTransactions.map((tx) => ({
+        data: fresh.map((tx) => ({
           statementId: created.id,
           userId,
           source: "file",
           date: tx.date ? new Date(tx.date) : null,
           counterparty: tx.counterparty,
-          amountCents: eurosToCents(tx.amount),
+          amountCents: tx.amountCents,
           reference: tx.reference,
           message: tx.message,
           type: inferTransactionType(tx.amount, {
@@ -178,7 +202,7 @@ export async function POST(req: NextRequest) {
           }),
         })),
       });
-      return created;
+      return { statement: created, skippedDuplicates: duplicates.length };
     });
 
     // Fetch recent emails from connected accounts before matching so that
@@ -217,6 +241,8 @@ export async function POST(req: NextRequest) {
       statement,
       transactions: transactions.map(publicTransaction),
       count: transactions.length,
+      skippedDuplicates,
+      notice: skippedRowsNotice(skippedDuplicates),
     });
   } catch (e) {
     // A rejected or unparseable upload must not leave bytes on disk.
@@ -225,6 +251,42 @@ export async function POST(req: NextRequest) {
     }
     if (e instanceof UploadValidationError) {
       return NextResponse.json({ error: e.message }, { status: e.status });
+    }
+    if (e instanceof AllRowsKnownError) {
+      return NextResponse.json(
+        {
+          error: "Kaikki tiedoston tapahtumat oli jo tuotu aiemmin, joten mitään ei lisätty.",
+          skippedDuplicates: e.skipped,
+        },
+        { status: 409 }
+      );
+    }
+    // The same file arriving twice at once (double tap, two devices): both pass
+    // the check above, the unique index lets one create the statement. The other
+    // gets the answer a sequential repeat would have got.
+    if (
+      e instanceof Prisma.PrismaClientKnownRequestError &&
+      e.code === "P2002" &&
+      checksum
+    ) {
+      const winner = await prisma.statement.findFirst({
+        where: { userId, checksum },
+        select: { id: true, fileName: true },
+      });
+      if (winner) {
+        return NextResponse.json(
+          {
+            error: `Tämä tiliote on jo tuotu aiemmin (${winner.fileName}).`,
+            statementId: winner.id,
+          },
+          { status: 409 }
+        );
+      }
+    }
+    // A file the parser could read but not use: its own Finnish reason, a user
+    // problem and not a server fault. (The temp directory failure is ours.)
+    if (e instanceof StatementParseError && e.code !== "TEMP_DIR_FAILED") {
+      return NextResponse.json({ error: e.message, code: e.code }, { status: 422 });
     }
     // A closed period is a deliberate refusal, not a server fault.
     if (e instanceof AppError) {

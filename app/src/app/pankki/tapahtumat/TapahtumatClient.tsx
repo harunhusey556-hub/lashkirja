@@ -202,9 +202,10 @@ export default function TapahtumatClient() {
   useScrollRestoration("pankki", !loading);
 
   const uploader = useStatementUpload({
-    onUploaded: ({ count }) => {
+    onUploaded: ({ count, notice }) => {
       void hapticNotify("success");
-      showToast({ tone: "success", text: count === 1 ? "1 tapahtuma tuotu." : `${count} tapahtumaa tuotu.` });
+      const imported = count === 1 ? "1 tapahtuma tuotu." : `${count} tapahtumaa tuotu.`;
+      showToast({ tone: "success", text: notice ? `${imported} ${notice}` : imported });
       void loadStatements();
     },
   });
