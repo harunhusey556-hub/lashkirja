@@ -233,6 +233,13 @@ describe("sourceDraftPairs", () => {
     expect(sourceDraftPairs(rows, drafts, new Set(["tx-1:r-1"]))).toEqual([]);
   });
 
+  it("does not offer a rejected draft: Hyväksy on it could only fail", () => {
+    const rejected = [{ id: "r-1", source: "auto_income", sourceTransactionId: "tx-1", reviewStatus: "rejected" }];
+    expect(sourceDraftPairs(rows, rejected, new Set())).toEqual([]);
+    const pending = [{ ...rejected[0], reviewStatus: "pending" }];
+    expect(sourceDraftPairs(rows, pending, new Set())).toHaveLength(1);
+  });
+
   it("keeps drafts out of every other row's candidates", () => {
     expect(isSourceDraft(drafts[0])).toBe(true);
     expect(isSourceDraft(drafts[2])).toBe(false);

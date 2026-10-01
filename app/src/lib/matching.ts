@@ -702,13 +702,20 @@ export function offerableReceiptWhere(ownRowId?: string) {
  */
 export function sourceDraftPairs(
   txs: Array<{ id: string }>,
-  receipts: Array<{ id: string; source?: string | null; sourceTransactionId?: string | null }>,
+  receipts: Array<{
+    id: string;
+    source?: string | null;
+    sourceTransactionId?: string | null;
+    reviewStatus?: string | null;
+  }>,
   rejectedPairs: Set<string>
 ): ScoredPair[] {
   const openTx = new Set(txs.map((tx) => tx.id));
   const pairs: ScoredPair[] = [];
   for (const receipt of receipts) {
     if (!isSourceDraft(receipt)) continue;
+    // A rejected draft is not a sale to offer: "Hyväksy" on it could only fail.
+    if (receipt.reviewStatus === "rejected") continue;
     const txId = receipt.sourceTransactionId!;
     if (!openTx.has(txId) || rejectedPairs.has(pairKey(txId, receipt.id))) continue;
     pairs.push({
@@ -806,8 +813,15 @@ export async function runMatching(userId: string): Promise<RunMatchingResult> {
   const approvedReceiptIds = new Set(
     receipts.filter((r) => r.reviewStatus === "approved").map((r) => r.id)
   );
+  // An income draft that is already approved is booked: its own open row is not
+  // a question ("Hyväksy" would fail, the draft is no longer pending), so the
+  // two are simply linked again.
+  const approvedDraftIds = new Set(
+    allReceipts.filter((r) => isSourceDraft(r) && r.reviewStatus === "approved").map((r) => r.id)
+  );
   const canAutoPost = (a: ScoredPair) =>
-    shouldAutoConfirm(a.score, a.reasons) && approvedReceiptIds.has(a.receiptId);
+    (shouldAutoConfirm(a.score, a.reasons) && approvedReceiptIds.has(a.receiptId)) ||
+    (approvedDraftIds.has(a.receiptId) && a.reasons.includes(SOURCE_DRAFT_REASONS[0]));
 
   const autoPairs = assignments.filter(canAutoPost);
   const suggestPairs = assignments.filter((a) => !canAutoPost(a));

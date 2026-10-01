@@ -36,7 +36,7 @@ export async function POST(req: NextRequest) {
         continue;
       }
       if (receipt.reviewStatus !== "pending") {
-        failed.push({ id, error: "Kuitti ei ole tarkastettavana" });
+        failed.push({ id, error: "Kuitti on jo käsitelty." });
         continue;
       }
       // TF-02: the same guard as the single approve; the rest of the batch goes through.
