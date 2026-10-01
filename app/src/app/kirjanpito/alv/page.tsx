@@ -18,6 +18,7 @@ import { VatFilingCard } from "@/components/VatFilingCard";
 import { nextVatDue, vatDueFor, vatPeriodKindOf, type VatPeriod } from "@/lib/vat-deadline";
 import { vatPendingNote, type VatFilingRecord } from "@/lib/vat-due";
 import { useProfile } from "@/app/asetukset/useProfile";
+import { useRefetchOnReconnect } from "@/components/useRefetchOnReconnect";
 import { pageCacheFetchedAt, readPageCache, writePageCache } from "@/lib/page-cache";
 import { useCacheAfterBoot } from "@/components/invoices/useCacheAfterBoot";
 import { usePersistedState, useScrollRestoration } from "@/lib/list-ui-state";
@@ -103,6 +104,7 @@ export default function ALVRaporttiPage() {
   const [loadAttempt, setLoadAttempt] = useState(0);
 
   const period = periodType === "month" ? selectedMonth : selectedQuarter;
+  useRefetchOnReconnect(() => setLoadAttempt((attempt) => attempt + 1));
 
   useEffect(() => {
     const raw = new URLSearchParams(window.location.search).get("period");

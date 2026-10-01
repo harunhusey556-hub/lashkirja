@@ -5,6 +5,8 @@ import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import ConfirmModal from "@/components/ConfirmModal";
 import QueuedReceiptsCard from "@/components/QueuedReceiptsCard";
+import { useRefetchOnReconnect } from "@/components/useRefetchOnReconnect";
+import { useOfflineReceiptQueue } from "@/components/useOfflineReceiptQueue";
 import ReviewQueue from "@/components/ReviewQueue";
 import { SkeletonList } from "@/components/AsyncState";
 import { ConnectionNotice, EmptyState, StaleBanner } from "@/components/ScreenState";
@@ -119,6 +121,17 @@ export default function KuititPage() {
     if (actionError) actionErrorRef.current?.scrollIntoView({ block: "nearest", behavior: "smooth" });
   }, [actionError]);
   const [loadAttempt, setLoadAttempt] = useState(0);
+  // The connection came back, or the offline queue just delivered a photo:
+  // the list refetches by itself instead of showing "Lähetetty" next to an
+  // old list or an error card (F32).
+  useRefetchOnReconnect(() => setLoadAttempt((attempt) => attempt + 1));
+  const { rows: queueRows } = useOfflineReceiptQueue();
+  const deliveredCount = queueRows.filter((row) => row.status === "done").length;
+  const deliveredSeen = useRef(deliveredCount);
+  useEffect(() => {
+    if (deliveredCount > deliveredSeen.current) setLoadAttempt((attempt) => attempt + 1);
+    deliveredSeen.current = deliveredCount;
+  }, [deliveredCount]);
   // null = not known yet: the chips show no number rather than a false 0.
   const [fetchedCounts, setFetchedCounts] = useState<{ key: string; counts: ReceiptTabCounts } | null>(null);
   // Task 10: set once, right after the offline capture path (ReceiptEditor)

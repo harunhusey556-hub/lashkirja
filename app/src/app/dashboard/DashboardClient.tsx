@@ -65,6 +65,7 @@ import type { DashboardItem as ServerDashboardItem, DashboardItemKind } from "@/
 import { isBlockingKind } from "@/lib/dashboard-kinds";
 import { useProfile } from "@/app/asetukset/useProfile";
 import { useSession } from "@/components/SessionProvider";
+import { useRefetchOnReconnect } from "@/components/useRefetchOnReconnect";
 
 interface Position {
   totalOpen: number;
@@ -616,6 +617,7 @@ export default function DashboardClient() {
   const fade = useSkeletonFade(!data && !refreshFailed);
   const displayName = data?.firstName || firstName;
   const retry = () => setLoadAttempt((a) => a + 1);
+  useRefetchOnReconnect(retry);
 
   const [yearText, monthText] = month.split("-");
   const monthName = MONTHS[Number(monthText) - 1] || "";

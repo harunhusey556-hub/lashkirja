@@ -24,6 +24,7 @@ import { showToast } from "@/lib/toast";
 import { newIdempotencyKey } from "@/lib/idempotency-key";
 import { pageCacheFetchedAt, readPageCache, writePageCache } from "@/lib/page-cache";
 import { useCacheAfterBoot } from "@/components/invoices/useCacheAfterBoot";
+import { useRefetchOnReconnect } from "@/components/useRefetchOnReconnect";
 import { readTextFile } from "@/components/invoices/decodeText";
 import { usePersistedState, useScrollRestoration } from "@/lib/list-ui-state";
 import { isForbidden } from "@/lib/screen-state";
@@ -139,6 +140,7 @@ export default function CustomersPage() {
     }
   }, [search, showArchived]);
 
+  useRefetchOnReconnect(() => void load());
   useScrollRestoration("asiakkaat", status !== "loading");
 
   useEffect(() => {

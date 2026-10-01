@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useRefetchOnReconnect } from "@/components/useRefetchOnReconnect";
 import { isUnauthorized, redirectToLogin } from "@/components/clientFetch";
 import { useCacheAfterBoot } from "@/components/invoices/useCacheAfterBoot";
 import {
@@ -74,6 +75,9 @@ export function useCachedResource<T>(
     setFailure(null);
     setAttempt((n) => n + 1);
   }, []);
+
+  // The connection came back: an error card clears and a cached copy catches up (F32).
+  useRefetchOnReconnect(reload);
 
   return { value, failed: error !== null, error, set, reload };
 }
