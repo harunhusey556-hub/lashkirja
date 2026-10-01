@@ -1,6 +1,6 @@
 "use client";
 
-import { KeyRound, Lock, ScanFace, Smartphone } from "lucide-react";
+import { Fingerprint, KeyRound, Lock, ScanFace, Smartphone } from "lucide-react";
 import { PageTitle } from "@/components/ds";
 import { SettingsGroup, SettingsRow } from "@/components/SettingsList";
 
@@ -16,6 +16,12 @@ export default function TiliPage() {
           icon={KeyRound}
           label="Vaihda salasana"
           hint="Nykyinen ja uusi salasana"
+        />
+        <SettingsRow
+          href="/asetukset/turvallisuus/paasyavaimet"
+          icon={Fingerprint}
+          label="Pääsyavaimet"
+          hint="Kirjaudu ilman salasanaa"
         />
         <SettingsRow
           href="/asetukset/tili/laitteet"

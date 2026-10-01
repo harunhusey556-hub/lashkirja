@@ -158,6 +158,19 @@ async function signInMobile(input: { email: string; password: string }): Promise
     };
   }
 
+  return acceptIssuedToken({ token: body.token, expiresAt: body.expiresAt, user: body.user });
+}
+
+/**
+ * Mobile: stores a bearer token the server just issued (password sign-in via
+ * /api/auth/token, or a passkey sign-in, which returns the same body) and
+ * starts the signed-in period exactly the same way for both.
+ */
+export async function acceptIssuedToken(body: {
+  token: string;
+  expiresAt?: string;
+  user: { userId: string; email: string; firstName: string };
+}): Promise<SignInResult> {
   const stored: StoredAuth = {
     token: body.token,
     expiresAt: body.expiresAt ?? "",
