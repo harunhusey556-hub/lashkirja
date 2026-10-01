@@ -28,3 +28,21 @@ describe("sanitizeText keeps ordinary text", () => {
     expect(sanitizeText("<b></b>")).toBeNull();
   });
 });
+
+describe("sanitizeText never rebuilds a tag from nested ones (V17)", () => {
+  it("removes tags until nothing changes", () => {
+    expect(sanitizeText("<scr<script>ipt>alert(1)</scr</script>ipt>")).toBe("alert(1)");
+    expect(sanitizeText("<<b>script>alert(1)<</b>/script>")).toBe("alert(1)");
+    expect(sanitizeText("<!<!-- x -->-- y -->z")).toBe("z");
+  });
+
+  it("does not let a removed control character join a tag", () => {
+    expect(sanitizeText("<scr\u0001ipt>x")).toBe("x");
+  });
+
+  it("leaves no tag-like text behind in a nested case", () => {
+    const out = sanitizeText("<scr<script>ipt>alert(1)</scr</script>ipt>") ?? "";
+    expect(out).not.toMatch(/<\/?script/i);
+  });
+});
+

@@ -4,6 +4,7 @@
  *   to its closing ">"); a lone "<" or ">" as in "a < b" or "<3" is ordinary
  *   text and is kept
  * - Strips control characters (U+0000 to U+001F) except newlines (U+000A)
+ * - Repeats the tag removal until the text is stable, so nested tags cannot rebuild one
  * - Trims leading and trailing whitespace
  *
  * Stored text is always rendered escaped, so this is defence in depth, not the
@@ -18,11 +19,15 @@ export function sanitizeText(input: string | null | undefined): string | null {
     return null;
   }
 
-  const sanitized = input
-    .replace(HTML_COMMENT, "")
-    .replace(HTML_TAG, "") // Remove HTML tags
-    .replace(/[\x00-\x09\x0B-\x1F\x7F]/g, "") // Remove control characters except newline
-    .trim();
+  // Control characters go first: removed later they could join the halves of a tag.
+  let sanitized = input.replace(/[\x00-\x09\x0B-\x1F\x7F]/g, "");
+  // Removing a tag can join the text around it into a new tag ("<scr<b>ipt>"), so repeat
+  // until nothing changes. Every pass shortens the text, so this ends.
+  for (let previous = ""; previous !== sanitized; ) {
+    previous = sanitized;
+    sanitized = sanitized.replace(HTML_COMMENT, "").replace(HTML_TAG, "");
+  }
+  sanitized = sanitized.trim();
 
   return sanitized || null;
 }
