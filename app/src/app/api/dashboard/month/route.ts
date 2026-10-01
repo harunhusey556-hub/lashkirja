@@ -31,10 +31,12 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
     }),
   ]);
   const { start, end } = monthBoundsUtc(month);
-  const [statements, receiptCount, invoiceCount] = await Promise.all([
+  const [statements, receiptCount, invoiceCount, purchaseInvoiceCount] = await Promise.all([
     prisma.statement.count({ where: { userId: session.userId, periodMonth: month } }),
     prisma.receipt.count({ where: { userId: session.userId, date: { gte: start, lt: end } } }),
     prisma.salesInvoice.count({ where: { userId: session.userId, issueDate: { gte: start, lt: end } } }),
+    // M1-3: a purchase invoice reaches the VAT return by its invoice date, so it is content.
+    prisma.purchaseInvoice.count({ where: { userId: session.userId, issueDate: { gte: start, lt: end } } }),
   ]);
 
   return noStoreJson({
@@ -51,8 +53,9 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
     /** F10: receipts and sales documents dated in the month (any state). */
     receiptCount,
     invoiceCount,
+    purchaseInvoiceCount,
     /** Nothing was recorded in the month: there is nothing to check or close (F10). */
-    hasContent: statements + receiptCount + invoiceCount + items.items.length > 0,
+    hasContent: statements + receiptCount + invoiceCount + purchaseInvoiceCount + items.items.length > 0,
     vatRegistered: user?.vatRegistered ?? false,
     vatPeriod: user?.vatPeriod ?? "month",
   });

@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { GET as alv } from "@/app/api/alv/route";
+import { GET as monthStatus } from "@/app/api/dashboard/month/route";
 import { PATCH as patchInvoice } from "@/app/api/purchase-invoices/[id]/route";
 import { GET as receiptCandidates } from "@/app/api/purchase-invoices/[id]/receipts/route";
 import { prisma } from "@/lib/db";
@@ -164,5 +165,22 @@ describe("M1-2: an invoice and the receipt of the same purchase count once", () 
     const body = await alvOf();
     expect(body.sources.purchaseInvoiceCount).toBe(1);
     expect(body.purchaseReceiptUnusableCount).toBe(1);
+  });
+});
+
+describe("M1-3: a month that holds only a purchase invoice has content", () => {
+  it("does not say the month is empty, so it can be checked and closed", async () => {
+    const month = async () =>
+      readJson(await monthStatus(buildRequest("GET", `/api/dashboard/month?month=${PERIOD}`, undefined, { cookie })));
+    expect((await month()).hasContent).toBe(false);
+    await purchase();
+    const body = await month();
+    expect(body.purchaseInvoiceCount).toBe(1);
+    expect(body.hasContent).toBe(true);
+    // Another month stays empty.
+    const other = await readJson(
+      await monthStatus(buildRequest("GET", "/api/dashboard/month?month=2026-05", undefined, { cookie }))
+    );
+    expect(other.hasContent).toBe(false);
   });
 });
