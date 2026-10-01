@@ -50,6 +50,9 @@ async function main() {
     if (command === "complete-close") {
       const row = await completeAccountClose(id);
       console.log(`${row.id}\t${row.status}\taccess-disabled`);
+      // The bank consent is ended at the bank first; a bank that did not answer
+      // is recorded on the request and told here so support can follow it up.
+      if (row.note) console.warn(row.note);
       return;
     }
     if (command === "set") {

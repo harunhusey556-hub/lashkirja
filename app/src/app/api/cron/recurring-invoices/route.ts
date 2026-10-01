@@ -19,7 +19,7 @@ export async function GET(req: NextRequest) {
   const users = await prisma.recurringInvoice.findMany({
     // Not only schedules with a run due: a month that opened again or a mail
     // to retry belongs to a schedule that is not due.
-    where: { active: true },
+    where: { active: true, user: { accessDisabledAt: null } },
     select: { userId: true },
     distinct: ["userId"],
   });

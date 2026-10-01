@@ -53,7 +53,7 @@ export function forgotPasswordMessage(mailConfigured: boolean, address: string =
 /** What closing the account does. Used by the dialog, the page intro, the toast and the login refusal. */
 export const CLOSE_RETENTION_COPY = `Kuitit, laskut ja tiliotteet säilyvät ${ACCOUNTING_RETENTION_YEARS} vuotta, koska laki vaatii sen.`;
 export const CLOSE_PURGE_COPY =
-  "Yhdistetty postilaatikko, pankkiyhteys ja avustajan keskustelut poistetaan.";
+  "Yhdistetty postilaatikko ja avustajan keskustelut poistetaan. Pankkiyhteys katkaistaan pankissa. Jos pankki ei vastaa, suostumus päättyy itsestään, tai voit päättää sen oman pankkisi sovelluksessa.";
 export const CLOSE_NEXT_COPY = "Tuki käsittelee pyynnön ja ilmoittaa sinulle sähköpostilla. Sen jälkeen kirjautuminen estetään.";
 
 export const CLOSE_REQUEST_MESSAGE = `Pyyntö on kirjattu. ${CLOSE_NEXT_COPY} ${CLOSE_PURGE_COPY} ${CLOSE_RETENTION_COPY}`;

@@ -496,6 +496,10 @@ export async function runRecurringInvoices(
   const truncated: string[] = [];
   const sendRetries: SendRetry[] = [];
 
+  // A closed account bills no one, whatever its schedules still say.
+  const owner = await prisma.user.findUnique({ where: { id: userId }, select: { accessDisabledAt: true } });
+  if (!owner || owner.accessDisabledAt) return { generated: [], skipped: [], truncated, sendRetries };
+
   // 1. A mail that failed in a recent run is tried again before anything new.
   if (options.send) await retryFailedSends(userId, scope, now, options.send, sendRetries);
 
@@ -510,13 +514,17 @@ export async function runRecurringInvoices(
   for (const row of missed) {
     const issueDate = iso(row.issueDate)!;
     if (isDateLocked(lockedThrough, issueDate)) continue;
-    // One run wins the right to make it; the loser sees count 0.
+    // One run wins the right to make it; the loser sees count 0. The row's
+    // clock restarts: any retry window counts from the recovery, not from the
+    // run that held the date back.
     const claim = await prisma.recurringInvoiceRun.updateMany({
       where: { id: row.id, status: "skipped_locked" },
-      data: { status: "created", note: null },
+      data: { status: "created", note: null, createdAt: now },
     });
     if (claim.count === 0) continue;
-    await fulfilOccurrence(userId, row.recurringInvoice, issueDate, row.id, options, out);
+    // A recovered invoice can belong to a month the owner has already filed
+    // for, so it waits as a draft; the owner sends it from the list.
+    await fulfilOccurrence(userId, row.recurringInvoice, issueDate, row.id, options, out, { recovered: true });
   }
 
   const schedules = await prisma.recurringInvoice.findMany({
@@ -598,7 +606,8 @@ async function fulfilOccurrence(
   issueDate: string,
   runId: string,
   options: RunOptions,
-  out: Pick<RunResult, "generated" | "skipped">
+  out: Pick<RunResult, "generated" | "skipped">,
+  { recovered = false }: { recovered?: boolean } = {}
 ): Promise<void> {
   try {
     const invoice = await createInvoice(userId, {
@@ -619,7 +628,7 @@ async function fulfilOccurrence(
 
     let sent = false;
     let sendError: string | null = null;
-    if (schedule.autoSend && options.send) {
+    if (schedule.autoSend && options.send && !recovered) {
       try {
         await options.send(invoice.id);
         sent = true;
@@ -692,6 +701,13 @@ async function retryFailedSends(
       issueDate: iso(row.issueDate)!,
       invoiceId: row.invoiceId!,
     };
+    // The rows were loaded a moment ago. An overlapping run (cron and "run now")
+    // may have mailed this one since, so look again right before sending.
+    const stillOwed = await prisma.recurringInvoiceRun.findFirst({
+      where: { id: row.id, status: "created_send_failed", invoice: { status: "draft" } },
+      select: { id: true },
+    });
+    if (!stillOwed) continue;
     try {
       await send(row.invoiceId!);
       await prisma.recurringInvoiceRun.updateMany({

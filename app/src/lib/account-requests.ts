@@ -1,9 +1,10 @@
 /**
  * Account close, data-copy, and mail-recovery requests.
  *
- * Completing a close request sets User.accessDisabledAt, revokes sessions and
- * purges what is not accounting material (mailbox credential, assistant
- * conversations, bank secrets, phone). Receipts and invoices stay. Completing an export writes a zip the user can
+ * Completing a close request sets User.accessDisabledAt, revokes sessions,
+ * ends the bank consents at the bank, stops recurring schedules and purges what
+ * is not accounting material (mailbox credential, assistant conversations,
+ * bank secrets, phone). Receipts and invoices stay. Completing an export writes a zip the user can
  * download. A recovery row is queued when a reset link could not be mailed.
  */
 import { mkdir, readFile, writeFile } from "fs/promises";
@@ -14,6 +15,8 @@ import { toCsv, type CsvValue } from "@/lib/csv";
 import { buildStoredZip } from "@/lib/zip-store";
 import { readUserUpload, safeOriginalName } from "@/lib/storage";
 import { ACCOUNTING_RETENTION_YEARS } from "@/lib/session-policy";
+import { revokeBankConnection } from "@/lib/enablebanking/connect";
+import type { EnableBankingClient } from "@/lib/enablebanking/client";
 
 export const ACCOUNT_REQUEST_STATUSES = [
   "pending",
@@ -321,12 +324,44 @@ export async function completeAccountExport(id: string) {
   });
 }
 
-export async function completeAccountClose(id: string) {
+/**
+ * Ends each of the owner's bank consents at the bank (F57), because wiping the
+ * session id locally would leave the consent live until its valid_until with
+ * nothing in the app able to revoke it. A bank that does not answer must not
+ * keep the account open, so a failure is returned for the request note and the
+ * local wipe goes on. Names of the banks whose consent was not ended.
+ */
+async function endBankConsents(userId: string, client?: EnableBankingClient): Promise<string[]> {
+  const connections = await prisma.bankConnection.findMany({
+    where: { userId, sessionIdEnc: { not: null }, status: { not: "revoked" } },
+    select: { id: true, aspspName: true },
+    orderBy: { createdAt: "asc" },
+  });
+  const left: string[] = [];
+  for (const connection of connections) {
+    try {
+      await revokeBankConnection(userId, connection.id, null, client);
+    } catch (error) {
+      console.error("Account close: bank consent was not ended at the bank", {
+        connectionId: connection.id,
+        error: error instanceof Error ? error.message : "unknown",
+      });
+      left.push(connection.aspspName);
+    }
+  }
+  return left;
+}
+
+export async function completeAccountClose(id: string, options: { bankClient?: EnableBankingClient } = {}) {
   const row = await requireOpen(id);
   if (row.kind !== "close") {
     throw new AccountRequestError("Sulkeminen koskee vain sulkemispyyntöä.", 400);
   }
   const now = new Date();
+  const consentsLeft = await endBankConsents(row.userId, options.bankClient);
+  const consentNote = consentsLeft.length
+    ? `Pankin suostumusta ei saatu päätettyä pankissa: ${consentsLeft.join(", ")}. Se päättyy itsestään tai omassa pankkisovelluksessa.`
+    : null;
   // What is purged and what stays (F57). Receipts, invoices, statements, bank
   // rows, customers and the seller details printed on invoices are accounting
   // records and stay for the retention period. The mailbox connection and its
@@ -339,8 +374,12 @@ export async function completeAccountClose(id: string) {
     prisma.conversation.deleteMany({ where: { userId: row.userId } }),
     prisma.bankConnection.updateMany({
       where: { userId: row.userId },
-      data: { sessionIdEnc: null, authStateHash: null, status: "revoked" },
+      // lastError goes too: a revoked row that keeps it is later shown as an
+      // expired bank card.
+      data: { sessionIdEnc: null, authStateHash: null, status: "revoked", lastError: null },
     }),
+    // A closed account bills no one: its schedules stop with it.
+    prisma.recurringInvoice.updateMany({ where: { userId: row.userId }, data: { active: false } }),
     prisma.user.update({
       where: { id: row.userId },
       data: { accessDisabledAt: now, phone: null, businessDetails: null, pendingEmail: null },
@@ -348,7 +387,11 @@ export async function completeAccountClose(id: string) {
     prisma.accountToken.updateMany({ where: { userId: row.userId, usedAt: null }, data: { usedAt: now } }),
     prisma.accountRequest.update({
       where: { id: row.id },
-      data: { status: "completed", resolvedAt: now },
+      data: {
+        status: "completed",
+        resolvedAt: now,
+        ...(consentNote ? { note: row.note ? `${row.note}\n${consentNote}` : consentNote } : {}),
+      },
     }),
   ]);
   await revokeAuthSessions(row.userId);
