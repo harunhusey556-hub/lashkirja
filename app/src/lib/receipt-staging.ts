@@ -9,11 +9,12 @@ import type { Prisma } from "@/generated/prisma/client";
 import { prisma } from "./db";
 import type { ExtractedReceipt } from "./ai";
 import { removeUserUpload } from "./storage";
+import { UNREADABLE_RECEIPT_NOTE } from "./receipt-unreadable";
 
 export const STAGING_TTL_MS = 24 * 60 * 60 * 1000;
 /** How long an inbox-claimed upload's file is kept after it becomes a receipt. */
 export const INBOX_UPLOAD_RETENTION_MS = 365 * 24 * 60 * 60 * 1000;
-export const INBOX_UNREADABLE_NOTE = "Tietoja ei saatu luettua kuvasta. Täydennä käsin.";
+export const INBOX_UNREADABLE_NOTE = UNREADABLE_RECEIPT_NOTE;
 
 export type StagedUploadRow = {
   id: string;
@@ -52,6 +53,8 @@ export function extractedFromStagedUpload(upload: StagedUploadRow): ExtractedRec
     provenance: upload.extractionSource === "ai" ? "openai-compatible" : "local-ocr",
     confidence: upload.confidence ?? 0.25,
     rawText: upload.rawText ?? undefined,
+    // A file nothing could be read from was stored as "manual" (document-jobs.ts persistExtraction).
+    ...(upload.extractionSource === "manual" ? { unreadable: true } : {}),
   };
 }
 
@@ -126,6 +129,8 @@ export function receiptFieldsFromExtraction(
   extracted: ExtractedReceipt,
   fallbackDate: Date
 ): PendingReceiptFields {
+  // Nothing was read: the same empty receipt with the same note on every path.
+  if (extracted.unreadable) return unreadableReceiptFields(fallbackDate);
   return {
     vendor: extracted.vendor,
     date: extracted.date ? new Date(extracted.date) : fallbackDate,

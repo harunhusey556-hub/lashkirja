@@ -32,6 +32,8 @@ export interface ExtractedUpload {
   reference?: string | null;
   invoiceNumber?: string | null;
   fieldConfidence?: { vendor?: number; date?: number; totalAmount?: number } | null;
+  /** Nothing could be read from the file: the form opens empty for manual entry (F04). */
+  unreadable?: boolean;
 }
 
 export interface ReadyUpload {

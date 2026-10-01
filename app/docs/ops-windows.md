@@ -204,7 +204,7 @@ https://desktop-7gu8ukj.tail42feb1.ts.net:8443/bank/callback
 
 Receipt OCR and PDF text extraction call `tesseract`, `pdftotext` and `pdftoppm` on `PATH` (`src/lib/ai.ts`, `src/lib/parsers.ts`). None of them is on this PC's `PATH` today. Without them:
 
-- **photo receipts** (JPG, PNG, HEIC) are not read by the local OCR (`tesseract`). The fields stay empty for manual entry. The cloud AI (`LLM_API_KEY` with `CLOUD_AI_ENABLED`) reads images when it is configured;
+- **photo receipts** (JPG, PNG, HEIC) are not read by the local OCR (`tesseract`). The job still finishes: the receipt form opens with the photo attached and empty fields, with the line "Kuvasta ei voitu lukea tietoja, täytä ne itse." The cloud AI (`LLM_API_KEY` with `CLOUD_AI_ENABLED`) only structures text that OCR has already read, so it does not read a photo without `tesseract`;
 - **scanned PDFs** (no text layer) are not rasterised and OCR'd (`pdftoppm` + `tesseract`);
 - **text PDFs** still work. `pdftotext` falls back to the bundled `pdf-parse`. Bank statement parsing loses the `-layout` text and uses the plain text, so column-heavy statements may parse less well. To add the tools, install Tesseract (with the `fin` and `swe` language data) and Poppler for Windows. Add both `bin` folders to the user `PATH`, then restart the supervisor.
 

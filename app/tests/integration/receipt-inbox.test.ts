@@ -164,7 +164,7 @@ describe("POST /api/receipts/inbox", () => {
       source: "app_capture",
       reviewStatus: "pending",
       totalAmountCents: null,
-      notes: "Tietoja ei saatu luettua kuvasta. Täydennä käsin.",
+      notes: "Kuvasta ei voitu lukea tietoja, täytä ne itse.",
     });
   });
 

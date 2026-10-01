@@ -65,6 +65,7 @@ import {
 } from "@/lib/receipt-categories";
 import { RECEIPT_MATCH_STATUS, receiptMatchStatusKey } from "@/lib/status-labels";
 import { readPageCache, writePageCache } from "@/lib/page-cache";
+import { UNREADABLE_RECEIPT_NOTE } from "@/lib/receipt-unreadable";
 import { useReceiptUploadQueue, validateUploadFile, type ReadyUpload } from "@/components/useReceiptUploadQueue";
 import ReceiptUploadArea from "@/components/ReceiptUploadArea";
 import { BottomActions, DetailHero, MoreMenu, PageTitle, Section, StatusTag } from "@/components/ds";
@@ -163,6 +164,8 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
   const [uploadId, setUploadId] = useState("");
   const [originalName, setOriginalName] = useState("");
   const [meta, setMeta] = useState<ExtractedMeta | null>(null);
+  // The file could not be read (no OCR): the fields are empty on purpose and one calm line says so (F04).
+  const [unreadable, setUnreadable] = useState(false);
   const [formData, setFormData] = useState(emptyForm);
   const [baseline, setBaseline] = useState(emptyForm);
   const [updatedAt, setUpdatedAt] = useState("");
@@ -208,9 +211,11 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
     setUploadId(upload.uploadId);
     setFilePath(upload.filePath);
     setOriginalName(upload.originalName);
+    const unreadableFile = Boolean(upload.extracted.unreadable);
+    setUnreadable(unreadableFile);
     setMeta({
-      source: upload.extracted.source || "ocr",
-      confidence: upload.extracted.confidence ?? null,
+      source: unreadableFile ? "manual" : upload.extracted.source || "ocr",
+      confidence: unreadableFile ? null : upload.extracted.confidence ?? null,
       rawText: upload.extracted.rawText,
       fieldConfidence: upload.extracted.fieldConfidence,
     });
@@ -390,9 +395,13 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
     const vatDetails = vatRowsFromSaved(savedVat, totalText);
     setFilePath(r.filePath || "");
     setOriginalName(r.fileName || "");
+    // A capture nothing could be read from carries the calm line as its note: show it
+    // as the line above the form, not as the user's own Selite.
+    const wasUnreadable = r.notes === UNREADABLE_RECEIPT_NOTE;
+    setUnreadable(wasUnreadable);
     setMeta({
-      source: r.source || "manual",
-      confidence: r.confidence ?? null,
+      source: wasUnreadable ? "manual" : r.source || "manual",
+      confidence: wasUnreadable ? null : r.confidence ?? null,
       rawText: r.rawText,
     });
     const knownCategory = isKnownCategory(r.category);
@@ -402,7 +411,7 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
       totalAmount: totalText,
       category: knownCategory ? r.category || "" : "",
       customCategory: knownCategory ? "" : r.category || "",
-      notes: r.notes || "",
+      notes: wasUnreadable ? "" : r.notes || "",
       type: r.type === "tulo" ? "tulo" : "meno",
       vatDetails,
       reference: r.reference || "",
@@ -781,21 +790,27 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
     : filePath
       ? `/api/uploads/${encodeURIComponent(filePath)}`
       : null;
-  const lowVendor = isLowConfidenceField({
-    value: formData.vendor,
-    overall: meta?.confidence,
-    field: meta?.fieldConfidence?.vendor,
-  });
-  const lowDate = isLowConfidenceField({
-    value: formData.date,
-    overall: meta?.confidence,
-    field: meta?.fieldConfidence?.date,
-  });
-  const lowAmount = isLowConfidenceField({
-    value: formData.totalAmount,
-    overall: meta?.confidence,
-    field: meta?.fieldConfidence?.totalAmount,
-  });
+  const lowVendor =
+    !unreadable &&
+    isLowConfidenceField({
+      value: formData.vendor,
+      overall: meta?.confidence,
+      field: meta?.fieldConfidence?.vendor,
+    });
+  const lowDate =
+    !unreadable &&
+    isLowConfidenceField({
+      value: formData.date,
+      overall: meta?.confidence,
+      field: meta?.fieldConfidence?.date,
+    });
+  const lowAmount =
+    !unreadable &&
+    isLowConfidenceField({
+      value: formData.totalAmount,
+      overall: meta?.confidence,
+      field: meta?.fieldConfidence?.totalAmount,
+    });
 
   if (loading) {
     return <ReceiptDetailSkeleton />;
@@ -983,6 +998,12 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
                       <p className="text-caption text-warning">
                         Automaattinen tunnistus epävarma, tarkista kaikki kentät ennen
                         tallennusta.
+                      </p>
+                    )}
+
+                    {unreadable && (
+                      <p className="text-caption text-ink-2" role="note">
+                        {UNREADABLE_RECEIPT_NOTE}
                       </p>
                     )}
 

@@ -3,7 +3,9 @@ import { Prisma } from "@/generated/prisma/client";
 import { prisma } from "./db";
 import {
   extractReceipt,
+  isUnreadableDocumentError,
   ReceiptExtractionError,
+  unreadableExtraction,
   type ExtractedReceipt,
 } from "./ai";
 import { ensureReceiptPreviewImage } from "./preview";
@@ -74,7 +76,8 @@ async function persistExtraction(
         reference: extracted.reference,
         invoiceNumber: extracted.invoiceNumber,
       }),
-      extractionSource: extracted.source === "ai" ? "ai" : "ocr",
+      // An unreadable file is typed in by hand: its receipt is "manual", not "ocr".
+      extractionSource: extracted.unreadable ? "manual" : extracted.source === "ai" ? "ai" : "ocr",
       confidence: Number.isFinite(extracted.confidence)
         ? Math.min(1, Math.max(0, extracted.confidence))
         : null,
@@ -175,12 +178,21 @@ export async function processDocumentJob(jobId: string): Promise<void> {
 
   try {
     const absolutePath = resolveUserUploadPath(job.userId, payload.storageKey);
-    let extracted = await extractor(
-      absolutePath,
-      payload.mimeType,
-      payload.profileContext,
-      payload.vendorPriors
-    );
+    let extracted: ExtractedReceipt;
+    try {
+      extracted = await extractor(
+        absolutePath,
+        payload.mimeType,
+        payload.profileContext,
+        payload.vendorPriors
+      );
+    } catch (extractionError) {
+      // F04: nothing readable (no OCR on this machine) finishes the job like any other,
+      // with empty fields and the file attached, so the user types the receipt in.
+      // Only a genuinely broken file or a failed call stays a failure.
+      if (!isUnreadableDocumentError(extractionError)) throw extractionError;
+      extracted = unreadableExtraction();
+    }
     await ensureReceiptPreviewImage(absolutePath, payload.mimeType).catch((error) =>
       console.warn("Preview generation failed:", error)
     );

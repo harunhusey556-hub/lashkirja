@@ -29,6 +29,8 @@ export interface ExtractedReceipt {
   provenance: "local-ocr" | "openai-compatible" | "github-copilot";
   confidence: number;
   rawText?: string;
+  /** Nothing could be read from the file: the form opens empty for manual entry (F04). */
+  unreadable?: boolean;
 }
 
 export class ReceiptExtractionError extends Error {
@@ -39,6 +41,33 @@ export class ReceiptExtractionError extends Error {
     this.name = "ReceiptExtractionError";
     this.code = code;
   }
+}
+
+/** No text could be read (no OCR on the machine, or an image with nothing to read): not a broken file. */
+export function isUnreadableDocumentError(error: unknown): boolean {
+  return (
+    error instanceof ReceiptExtractionError &&
+    (error.code === "NO_TEXT" || error.code === "PDF_OCR_FAILED")
+  );
+}
+
+/** The extraction of a file nothing could be read from: every field empty, to be typed in by hand. */
+export function unreadableExtraction(): ExtractedReceipt {
+  return {
+    vendor: null,
+    date: null,
+    totalAmount: null,
+    vatDetails: [],
+    category: null,
+    notes: null,
+    type: "meno",
+    reference: null,
+    invoiceNumber: null,
+    source: "ocr",
+    provenance: "local-ocr",
+    confidence: 0,
+    unreadable: true,
+  };
 }
 
 const MAX_RECEIPT_BYTES = 20 * 1024 * 1024;

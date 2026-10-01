@@ -181,7 +181,7 @@ test("captures offline, survives a restart, sends on reconnect, and warns before
   const detail = (await detailResponse.json()) as {
     receipt: { notes: string | null; totalAmount: number | null };
   };
-  expect(detail.receipt.notes).toBe("Tietoja ei saatu luettua kuvasta. Täydennä käsin.");
+  expect(detail.receipt.notes).toBe("Kuvasta ei voitu lukea tietoja, täytä ne itse.");
   expect(detail.receipt.totalAmount).toBeNull();
 
   await deleteReceipt(request, auth.token, captured!.id);
