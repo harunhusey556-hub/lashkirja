@@ -42,26 +42,10 @@ export async function openAuthSession(
   });
 }
 
+/** Password change/reset and device sign-out revoke sessions only; passkeys are credentials and stay (like Google/Apple/GitHub). */
 export async function revokeAuthSessions(userId: string, exceptId?: string) {
   const now = new Date();
   await prisma.$transaction(revokeSessionWrites(userId, now, exceptId));
-}
-
-/**
- * The "lock everyone else out" path: password reset, password change and
- * signing out other/all devices. Revokes the sessions AND deletes every
- * passkey, because a passkey is a login that outlives sessions: one added
- * through a stolen session would otherwise survive the very action the owner
- * takes to get rid of the intruder. The owner adds their own again afterwards.
- * Returns how many passkeys were removed, so the UI can say so.
- */
-export async function revokeAccess(userId: string, exceptSessionId?: string): Promise<{ passkeysRemoved: number }> {
-  const now = new Date();
-  const [removed] = await prisma.$transaction([
-    prisma.passkeyCredential.deleteMany({ where: { userId } }),
-    ...revokeSessionWrites(userId, now, exceptSessionId),
-  ]);
-  return { passkeysRemoved: removed.count };
 }
 
 function revokeSessionWrites(userId: string, now: Date, exceptId?: string) {
@@ -122,7 +106,7 @@ export async function changePassword(
   await requireCurrentPassword(userId, currentPassword);
   const passwordHash = await bcrypt.hash(nextPassword, 12);
   await prisma.user.update({ where: { id: userId }, data: { passwordHash } });
-  return revokeAccess(userId, currentSessionId);
+  await revokeAuthSessions(userId, currentSessionId);
 }
 
 async function retireTokens(userId: string, purpose: string) {
@@ -161,7 +145,7 @@ export async function resetPasswordWithToken(token: string, nextPassword: string
     prisma.user.update({ where: { id: row.userId }, data: { passwordHash } }),
     prisma.accountToken.update({ where: { id: row.id }, data: { usedAt: new Date() } }),
   ]);
-  return revokeAccess(row.userId);
+  await revokeAuthSessions(row.userId);
 }
 
 export function normalizeLoginEmail(email: string): string {

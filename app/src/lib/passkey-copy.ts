@@ -74,14 +74,3 @@ export function passkeyFailureMessage(
         : "Pääsyavaimen luonti epäonnistui. Yritä uudelleen.";
   }
 }
-
-/**
- * Appended to the success copy of a password reset/change or a bulk sign-out:
- * those delete every passkey (account-security revokeAccess), and the user
- * has to know why Face ID sign-in stopped working.
- */
-export function passkeysRemovedNote(count: number | undefined): string {
-  if (!count || count < 1) return "";
-  const lead = count === 1 ? "Pääsyavain poistettiin." : `${count} pääsyavainta poistettiin.`;
-  return `${lead} Luo uusi kohdassa Asetukset > Pääsyavaimet.`;
-}

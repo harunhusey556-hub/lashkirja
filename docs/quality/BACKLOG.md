@@ -98,4 +98,4 @@ The Bar column cites the QUALITY-BAR item.
 ## Batch 3 (2026-10-01), deployed 12a8fe0, IPA run 36862695221, iOS Simulator run 36862699917 green
 - Lanes: Koti bank truth + charts, shell transitions + press, passkeys, text-button sweep; one review (2 P1, 5 P2), all fixed.
 - Verification: tsc clean; integration 742/742; unit 1408 pass (5 known Windows failures); mobile e2e no regressions vs baseline (12 environmental failures on both).
-- Passkey removal also happens on password change and "sign out other devices" (wider than the review asked); owner to confirm.
+- Passkey removal on password change/reset/sign-out was reverted: passkeys now stay (industry norm, owner decision).

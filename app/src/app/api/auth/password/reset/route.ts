@@ -25,8 +25,8 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Virheellinen pyyntö" }, { status: 400 });
   }
   try {
-    const { passkeysRemoved } = await resetPasswordWithToken(parsed.data.token, parsed.data.password);
-    return NextResponse.json({ ok: true, passkeysRemoved });
+    await resetPasswordWithToken(parsed.data.token, parsed.data.password);
+    return NextResponse.json({ ok: true });
   } catch (error) {
     if (error instanceof AccountSecurityError) {
       return NextResponse.json({ error: error.message }, { status: error.status });

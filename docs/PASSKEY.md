@@ -102,8 +102,9 @@ one-time offer after a password sign-in reuses the password just typed). The ser
 registration challenge only after that check, and the challenge lives five minutes, so a
 stolen session alone cannot add a passkey.
 
-A password reset, a password change and "Kirjaa ulos muut laitteet" delete **every** passkey of
-the account (the app says so). Add them again afterwards.
+A password reset, a password change and "Kirjaa ulos muut laitteet" revoke sessions but keep
+passkeys: passkeys are credentials, not sessions (same as Google, Apple and GitHub). Removing
+one is a separate, explicit action in Settings.
 
 ## Desktop development
 

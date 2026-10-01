@@ -7,7 +7,6 @@ import { PasswordField } from "@/components/ds/PasswordField";
 import { useSession } from "@/components/SessionProvider";
 import { Button, FormError } from "@/components/ui";
 import { hapticNotify } from "@/lib/haptics";
-import { passkeysRemovedNote } from "@/lib/passkey-copy";
 import { PASSWORD_MIN as MIN_PASSWORD_LENGTH } from "@/lib/session-policy";
 import { showToast } from "@/lib/toast";
 
@@ -46,13 +45,13 @@ export default function SalasanaPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ currentPassword, newPassword }),
       });
-      const result = await readJson<{ passkeysRemoved?: number }>(response, "Salasanan vaihto epäonnistui");
+      await readJson<{ ok: boolean }>(response, "Salasanan vaihto epäonnistui");
       setCurrentPassword("");
       setNewPassword("");
       setRepeatPassword("");
       showToast({
         tone: "success",
-        text: `Salasana vaihdettu. Muut laitteet kirjattiin ulos. ${passkeysRemovedNote(result?.passkeysRemoved)}`.trim(),
+        text: "Salasana vaihdettu. Muut laitteet kirjattiin ulos.",
       });
     } catch (error: unknown) {
       void hapticNotify("error");

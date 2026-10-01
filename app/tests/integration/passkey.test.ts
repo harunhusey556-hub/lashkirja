@@ -398,14 +398,14 @@ describe("re-authentication before adding a passkey", () => {
   });
 });
 
-describe("passkeys are removed when access is reset", () => {
+describe("passkeys survive password change, reset and sign-out", () => {
   async function signInStatus(authenticator: SoftAuthenticator) {
     const { challengeId, options } = await startSignIn();
     const res = await verify({ challengeId, response: authenticator.authenticate(options), transport: "bearer" });
     return res.status;
   }
 
-  it("after a password reset the old passkey no longer signs in", async () => {
+  it("after a password reset the passkey still signs in", async () => {
     const authenticator = new SoftAuthenticator(RP_ID, ORIGIN);
     expect((await registerPasskey(authenticator)).status).toBe(201);
     const token = await issuePasswordReset(user.id);
@@ -413,34 +413,30 @@ describe("passkeys are removed when access is reset", () => {
       buildRequest("POST", "/api/auth/password/reset", { token, password: "palautettu-salasana" })
     );
     expect(reset.status).toBe(200);
-    expect(await prisma.passkeyCredential.count({ where: { userId: user.id } })).toBe(0);
-    expect(await signInStatus(authenticator)).toBe(401);
+    expect(await readJson(reset)).toEqual({ ok: true });
+    expect(await prisma.passkeyCredential.count({ where: { userId: user.id } })).toBe(1);
+    expect(await signInStatus(authenticator)).toBe(200);
   });
 
-  it("a password change removes passkeys too", async () => {
+  it("a password change keeps the passkey", async () => {
     const authenticator = new SoftAuthenticator(RP_ID, ORIGIN);
     await registerPasskey(authenticator);
     const res = await changePassword(
       buildRequest("POST", "/api/auth/password", { currentPassword: PASSWORD, newPassword: "uusi-salasana-123" }, { cookie })
     );
     expect(res.status).toBe(200);
-    expect(await prisma.passkeyCredential.count({ where: { userId: user.id } })).toBe(0);
-    expect(await signInStatus(authenticator)).toBe(401);
+    expect(await prisma.passkeyCredential.count({ where: { userId: user.id } })).toBe(1);
+    expect(await signInStatus(authenticator)).toBe(200);
   });
 
-  it.each(["others", "all"] as const)("signing out %s devices removes every passkey", async (scope) => {
-    const other = await createUser({ email: "toinen@example.com" });
-    await prisma.passkeyCredential.create({
-      data: { id: "muun-kayttajan-avain", userId: other.id, publicKey: new Uint8Array([1]), deviceName: "Muu" },
-    });
+  it.each(["others", "all"] as const)("signing out %s devices keeps passkeys but ends the old session", async (scope) => {
     const authenticator = new SoftAuthenticator(RP_ID, ORIGIN);
     await registerPasskey(authenticator);
     const res = await sessionsRoute(buildRequest("POST", "/api/auth/sessions", { scope }, { cookie }));
     expect(res.status).toBe(200);
-    expect(await readJson(res)).toMatchObject({ ok: true, passkeysRemoved: 1 });
-    expect(await prisma.passkeyCredential.count({ where: { userId: user.id } })).toBe(0);
-    expect(await prisma.passkeyCredential.count({ where: { userId: other.id } })).toBe(1);
-    expect(await signInStatus(authenticator)).toBe(401);
+    expect(await readJson(res)).toMatchObject({ ok: true });
+    expect(await prisma.passkeyCredential.count({ where: { userId: user.id } })).toBe(1);
+    expect(await signInStatus(authenticator)).toBe(200);
   });
 
   it("signing out one device keeps passkeys", async () => {

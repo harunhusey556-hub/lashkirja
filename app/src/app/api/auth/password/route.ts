@@ -30,13 +30,13 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Virheellinen pyyntö" }, { status: 400 });
   }
   try {
-    const { passkeysRemoved } = await changePassword(
+    await changePassword(
       session.userId,
       session.sessionId,
       parsed.data.currentPassword,
       parsed.data.newPassword
     );
-    return NextResponse.json({ ok: true, passkeysRemoved });
+    return NextResponse.json({ ok: true });
   } catch (error) {
     if (error instanceof AccountSecurityError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
