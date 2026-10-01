@@ -35,11 +35,11 @@ afterAll(() => {
 });
 
 describe("F47: an export that overlaps an earlier one does not double its rows", () => {
-  const fileA = HEADER + "23.09.2026;-24,90;Spotify\n24.09.2026;1 234,56;Toinen Asiakas Oy\n";
+  const fileA = HEADER + "23.09.2026;-24,90;Spotify\n24.09.2026;1 234,56;MobilePay Toinen Asiakas\n";
   // A wider export that repeats both rows and adds two new ones.
   const fileB =
     HEADER +
-    "28.08.2026;-10,00;Kahvila\n23.09.2026;-24,90;Spotify\n24.09.2026;1 234,56;Toinen Asiakas Oy\n27.09.2026;50,00;Uusi Asiakas\n";
+    "28.08.2026;-10,00;Kahvila\n23.09.2026;-24,90;Spotify\n24.09.2026;1 234,56;MobilePay Toinen Asiakas\n27.09.2026;50,00;MobilePay Uusi Asiakas\n";
 
   it("skips the rows already stored and tells the owner in one sentence", async () => {
     expect((await upload(fileA, "a.csv")).status).toBe(200);
@@ -53,7 +53,7 @@ describe("F47: an export that overlaps an earlier one does not double its rows",
     expect(body.notice).toContain("2 tapahtumaa oli jo tuotu aiemmin, joten ne ohitettiin.");
     expect(await prisma.transaction.count()).toBe(4);
     expect(await prisma.transaction.count({ where: { counterparty: "Spotify" } })).toBe(1);
-    // One sale draft per payment, not one per copy.
+    // One sale draft per payment (settlement), not one per copy.
     expect(await prisma.receipt.count({ where: { source: "auto_income" } })).toBe(2);
   });
 
