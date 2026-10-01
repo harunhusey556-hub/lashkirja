@@ -107,3 +107,31 @@ export function matchesSearch(row: FeedRow, query: string): boolean {
     .toLocaleLowerCase("fi");
   return haystack.includes(needle);
 }
+
+/**
+ * The row after "Poista linkitys". When the link was the approval of the row's
+ * own sale, the sale is waiting again and the row offers "Hyväksy" at once;
+ * otherwise the row is simply open.
+ */
+export function unlinkedRowPatch(
+  receipt: StatementTransaction["receipt"],
+  restoredSale: boolean
+): Partial<StatementTransaction> {
+  if (restoredSale && receipt) {
+    return {
+      matchStatus: "suggested",
+      receiptId: null,
+      receipt: null,
+      suggestedReceiptId: receipt.id,
+      suggestedReceipt: { ...receipt, source: "auto_income" },
+    };
+  }
+  return { matchStatus: "unmatched", receiptId: null, receipt: null };
+}
+
+/** What happened, in one sentence: an approved sale that left the books says so. */
+export function unlinkMessage(restoredSale: boolean): string {
+  return restoredSale
+    ? "Linkitys poistettu. Myynti ei ole kirjanpidossa, ennen kuin hyväksyt sen uudelleen."
+    : "Linkitys poistettu.";
+}

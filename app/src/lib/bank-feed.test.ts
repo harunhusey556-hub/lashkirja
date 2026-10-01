@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { StatementData, StatementTransaction } from "@/lib/statement-client";
-import { feedRows, groupByMonth, matchesSearch, needsAction, rowState } from "./bank-feed";
+import { feedRows, groupByMonth, matchesSearch, needsAction, rowState, unlinkMessage, unlinkedRowPatch } from "./bank-feed";
 
 function row(overrides: Partial<StatementTransaction> = {}): StatementTransaction {
   return {
@@ -94,5 +94,26 @@ describe("matchesSearch", () => {
     expect(matchesSearch(feedRow, "65,00")).toBe(true);
     expect(matchesSearch(feedRow, "65.00")).toBe(true);
     expect(matchesSearch(feedRow, "prisma")).toBe(false);
+  });
+});
+
+describe("V29: after Poista linkitys", () => {
+  const receipt = { id: "r1", vendor: "MobilePay", totalAmount: 125.5, date: "2026-09-20" };
+
+  it("a restored sale puts the row back to the state that offers Hyväksy", () => {
+    const patch = unlinkedRowPatch(receipt, true);
+    const after = { ...row({ matchStatus: "confirmed", receiptId: "r1", receipt }), ...patch };
+    expect(rowState(after)).toBe("sale");
+    expect(needsAction(after)).toBe(true);
+  });
+
+  it("an ordinary kuitti leaves the row open as a missing one", () => {
+    const after = { ...row({ matchStatus: "confirmed", receiptId: "r1", receipt }), ...unlinkedRowPatch(receipt, false) };
+    expect(rowState(after)).toBe("missing");
+  });
+
+  it("says in one sentence that the sale is out of the books", () => {
+    expect(unlinkMessage(true)).toBe("Linkitys poistettu. Myynti ei ole kirjanpidossa, ennen kuin hyväksyt sen uudelleen.");
+    expect(unlinkMessage(false)).toBe("Linkitys poistettu.");
   });
 });

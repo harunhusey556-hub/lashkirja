@@ -8,7 +8,7 @@ import { KeyValueList } from "@/components/ds";
 import { apiFetch, errorMessage, isUnauthorized, readJson, redirectToLogin } from "@/components/clientFetch";
 import { formatDate, formatEur, formatEurSigned } from "@/lib/format";
 import { receiptLabel, type StatementTransaction } from "@/lib/statement-client";
-import { rowState, type FeedRow } from "@/lib/bank-feed";
+import { rowState, unlinkMessage, unlinkedRowPatch, type FeedRow } from "@/lib/bank-feed";
 import { detailHref } from "@/lib/routes";
 import { requestReceiptCapture } from "@/lib/capture-request";
 import { hapticImpact, hapticNotify } from "@/lib/haptics";
@@ -19,6 +19,11 @@ type Action =
   | { url: "/api/matching/confirm" | "/api/matching/reject"; body: { transactionId: string; receiptId: string } }
   | { url: "/api/matching/ignore"; body: { transactionId: string; ignored: boolean } }
   | { url: "/api/matching/unlink"; body: { transactionId: string } };
+
+/** What the unlink route says: the row's approved sale went back to waiting. */
+interface UnlinkAnswer {
+  restoredSale?: boolean;
+}
 
 const UNSUGGESTED: Partial<StatementTransaction> = {
   matchStatus: "unmatched",
@@ -73,8 +78,8 @@ export function BankRowSheet({
   async function run(
     key: string,
     action: Action,
-    patch: Partial<StatementTransaction>,
-    done?: string
+    patch: Partial<StatementTransaction> | ((data: UnlinkAnswer) => Partial<StatementTransaction>),
+    done?: string | ((data: UnlinkAnswer) => string)
   ): Promise<boolean> {
     if (!row || busy) return false;
     setBusy(key);
@@ -85,7 +90,7 @@ export function BankRowSheet({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(action.body),
       });
-      const data = await readJson<{ failedCount?: number; failed?: { error?: string }[] }>(
+      const data = await readJson<UnlinkAnswer & { failedCount?: number; failed?: { error?: string }[] }>(
         res,
         "Muutos ei onnistunut"
       );
@@ -93,8 +98,9 @@ export function BankRowSheet({
         throw new Error(data.failed?.[0]?.error || "Muutos ei onnistunut");
       }
       void hapticNotify("success");
-      if (done) showToast({ tone: "success", text: done });
-      onChanged(row.id, patch);
+      const text = typeof done === "function" ? done(data) : done;
+      if (text) showToast({ tone: "success", text });
+      onChanged(row.id, typeof patch === "function" ? patch(data) : patch);
       onClose();
       return true;
     } catch (err: unknown) {
@@ -329,7 +335,8 @@ export function BankRowSheet({
                   void run(
                     "unlink",
                     { url: "/api/matching/unlink", body: { transactionId: row.id } },
-                    { matchStatus: "unmatched", receiptId: null, receipt: null }
+                    (answer) => unlinkedRowPatch(row.receipt, answer.restoredSale === true),
+                    (answer) => unlinkMessage(answer.restoredSale === true)
                   )
                 }
               >

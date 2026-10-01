@@ -7,6 +7,7 @@ import { autoGenerateIncomeReceipts } from "@/lib/income-automation";
 import { runMatching } from "@/lib/matching";
 import {
   createBankAccountRow,
+  createReceipt,
   createStatementWithTransactions,
   createUser,
   resetDatabase,
@@ -55,7 +56,15 @@ describe("F45: Poista linkitys on an approved sale leaves a row that can be appr
 
   it("puts the draft back to pending so the row honestly offers Hyväksy again", async () => {
     const { row, draft } = await approvedSaleRow();
-    expect((await unlink(row.id)).status).toBe(200);
+    const response = await unlink(row.id);
+    expect(response.status).toBe(200);
+    expect((await readJson(response)).restoredSale).toBe(true);
+    // At once, with no matching run in between (V29): the row already offers Hyväksy.
+    expect(await prisma.transaction.findUniqueOrThrow({ where: { id: row.id } })).toMatchObject({
+      matchStatus: "suggested",
+      suggestedReceiptId: draft.id,
+      receiptId: null,
+    });
     await runMatching(user.id);
 
     expect((await prisma.receipt.findUniqueOrThrow({ where: { id: draft.id } })).reviewStatus).toBe("pending");
@@ -91,5 +100,21 @@ describe("F45: Poista linkitys on an approved sale leaves a row that can be appr
     const response = await unlink(row.id);
     expect(response.status).toBe(409);
     expect((await prisma.transaction.findUniqueOrThrow({ where: { id: row.id } })).matchStatus).toBe("confirmed");
+  });
+});
+
+describe("V29: unlinking an ordinary kuitti is not a restored sale", () => {
+  it("leaves the row open and says nothing about a sale", async () => {
+    const { statement } = await saleFixture();
+    const row = statement.transactions[0];
+    const receipt = await createReceipt(user.id, { type: "tulo", date: "2026-09-20", totalAmountCents: 125_50 });
+    await prisma.transaction.update({ where: { id: row.id }, data: { receiptId: receipt.id, matchStatus: "confirmed" } });
+    const response = await unlinkRow(buildRequest("POST", "/api/matching/unlink", { transactionId: row.id }, { cookie }));
+    expect(response.status).toBe(200);
+    expect((await readJson(response)).restoredSale).toBe(false);
+    expect(await prisma.transaction.findUniqueOrThrow({ where: { id: row.id } })).toMatchObject({
+      matchStatus: "unmatched",
+      suggestedReceiptId: null,
+    });
   });
 });
