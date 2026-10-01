@@ -30,8 +30,14 @@ describe("escapeCsvField", () => {
     expect(escapeCsvField("+41")).toBe("'+41");
     expect(escapeCsvField("-41")).toBe("'-41");
     expect(escapeCsvField("@SUM(A1)")).toBe("'@SUM(A1)");
-    // A negative number is data, not a formula, once it goes through csvMoney.
-    expect(escapeCsvField(csvMoney(-41))).toBe("'-41,00");
+    expect(escapeCsvField("-1+2")).toBe("'-1+2");
+    expect(escapeCsvField("-Foo")).toBe("'-Foo");
+  });
+
+  it("keeps a negative amount a plain number so a spreadsheet can sum it", () => {
+    expect(escapeCsvField(csvMoney(-41))).toBe("-41,00");
+    expect(escapeCsvField(csvMoney(-1255))).toBe("-1255,00");
+    expect(escapeCsvField(-5)).toBe("-5");
   });
 });
 

@@ -23,7 +23,12 @@ export function escapeCsvField(value: CsvValue): string {
   if (value === null || value === undefined) return "";
   const text = String(value);
   // A leading =, +, - or @ makes a spreadsheet evaluate the cell as a formula.
-  const guarded = /^[=+\-@\t\r]/.test(text) ? `'${text}` : text;
+  // A real number, and the plain negative amount csvMoney writes ("-12,50"),
+  // cannot be a formula and must stay a number so a spreadsheet can sum it;
+  // the guard is for text cells only.
+  const isPlainNumber = typeof value === "number" || /^-\d+,\d{2}$/.test(text);
+  const guarded =
+    !isPlainNumber && /^[=+\-@\t\r]/.test(text) ? `'${text}` : text;
   if (
     guarded.includes(CSV_SEPARATOR) ||
     guarded.includes('"') ||
