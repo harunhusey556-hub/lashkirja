@@ -136,3 +136,12 @@ describe("parseMoneyInput", () => {
     expect(parseMoneyInput("€")).toBeNull();
   });
 });
+
+describe("formatEur negative zero (F128)", () => {
+  it("never prints a sign in front of zero", () => {
+    expect(plain(formatEur(-0))).toBe("0,00 €");
+    expect(plain(formatEur(-0.001))).toBe("0,00 €");
+    expect(plain(formatEur(-0.004))).toBe("0,00 €");
+    expect(plain(formatEur(-0.005))).toBe("\u22120,01 €");
+  });
+});

@@ -10,7 +10,9 @@ const eurFormatter = new Intl.NumberFormat("fi-FI", {
 
 export function formatEur(value: number | null | undefined): string {
   if (value === null || value === undefined || !Number.isFinite(value)) return "–";
-  return eurFormatter.format(value);
+  // Intl keeps the sign of -0 and of a tiny negative that rounds to zero
+  // ("−0,00 €"); an amount that shows as zero has no sign.
+  return eurFormatter.format(Math.abs(value) < 0.005 ? 0 : value);
 }
 
 /** Same as formatEur but always shows the sign, for differences and deltas. */

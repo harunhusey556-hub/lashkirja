@@ -9,7 +9,7 @@
 import { prisma } from "./db";
 import { AppError, NotFoundError, ValidationError, errorText } from "./api-errors";
 import { centsToEuros } from "./money";
-import { helsinkiCalendarDate, isoDateToUtc } from "./validation";
+import { isoDateToUtc } from "./validation";
 import { requireActiveCustomer } from "./customers";
 import { PeriodLockedError } from "./period-lock";
 import { adjustVatRateForDate } from "./invoices";
@@ -301,9 +301,16 @@ export async function updateRecurringInvoice(
   }
 
   if (input.lines) {
-    const ruleDate =
-      (data.nextRunAt instanceof Date ? iso(data.nextRunAt) : iso(existing.nextRunAt)) ??
-      helsinkiCalendarDate();
+    // Same date the form checks: the first invoice of the schedule as it will
+    // be saved (an old 14 % template stays editable, its runs follow the change).
+    const ruleDate = firstRun(
+      validateSchedule({
+        interval: (input.interval ?? existing.interval) as RecurrenceInterval,
+        anchorDay: input.anchorDay ?? existing.anchorDay,
+        startDate: input.startDate ?? iso(existing.startDate)!,
+        endDate: input.endDate !== undefined ? input.endDate : iso(existing.endDate),
+      })
+    );
     const lines = await applyVatRules(userId, toLineInputs(input.lines), ruleDate);
     await prisma.$transaction([
       prisma.recurringInvoiceLine.deleteMany({ where: { recurringInvoiceId: id } }),

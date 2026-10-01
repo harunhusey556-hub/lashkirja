@@ -476,3 +476,11 @@ describe("applySellerVatRules (F01, F44)", () => {
     expect(result[0].vatRatePermille).toBe(0);
   });
 });
+
+describe("negative zero (F128)", () => {
+  it("never returns -0 for the VAT of a 0 % credit note row", () => {
+    expect(Object.is(vatForNet(-777, 0), 0)).toBe(true);
+    expect(Object.is(vatForNet(0, 255), 0)).toBe(true);
+    expect(vatForNet(-1_000, 255)).toBe(-255);
+  });
+});

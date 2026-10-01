@@ -550,8 +550,19 @@ export async function updateInvoice(
     data.dueDate = dueDate;
   }
 
+  const issueDateIso = issueDate.toISOString().slice(0, 10);
+  if (input.issueDate && !input.lines) {
+    // The lines stay as they are, so they must still be valid on the new date
+    // (a 14 % line cannot ride a draft into 2026).
+    const stored = await prisma.invoiceLine.findMany({
+      where: { invoiceId: id },
+      select: { vatRatePermille: true },
+    });
+    await applyVatRules(userId, stored, issueDateIso);
+  }
+
   if (input.lines) {
-    const lineInputs = toLineInputs(input.lines);
+    const lineInputs = await applyVatRules(userId, toLineInputs(input.lines), issueDateIso);
     const totals = computeInvoiceTotals(lineInputs);
     data.netCents = totals.netCents;
     data.vatCents = totals.vatCents;
@@ -696,6 +707,10 @@ export async function createCreditNote(userId: string, invoiceId: string): Promi
   // locked month can still be corrected by crediting in an open one.
   await assertPeriodOpen(userId, [issueDate]);
   const dueDate = issueDate;
+  // Deliberately not through applyVatRules: a credit note reverses what the
+  // original charged, rate for rate, even when the seller is no longer VAT
+  // registered or the rate has since ended (a 14 % invoice from 2025 is
+  // credited at 14 %). Anything else would leave VAT on the customer's account.
   const lineInputs = toLineInputs(
     original.lines.map((line) => ({
       description: line.description,
@@ -800,7 +815,9 @@ export async function duplicateInvoice(userId: string, invoiceId: string): Promi
       quantity: line.quantityMilli / 1000,
       unit: line.unit,
       unitPrice: centsToEuros(line.unitPriceCents * sign),
-      vatRate: line.vatRatePermille / 10,
+      // A copy is a new invoice dated today: an ended 14 % becomes 13,5 %, and
+      // createInvoice forces 0 % for a seller who is not VAT registered.
+      vatRate: adjustVatRateForDate(line.vatRatePermille, issueDate) / 10,
     })),
   });
   await prisma.$transaction([

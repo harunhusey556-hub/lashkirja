@@ -258,6 +258,23 @@ describe("14 % ended on 1.1.2026 (F44)", () => {
     expect(response.status).toBe(400);
   });
 
+  it("keeps an old 14 % template editable: its runs follow the change", async () => {
+    const created = (
+      await readJson(await postRecurring({ startDate: "2025-12-01", lines: [line(14)] }))
+    ).recurring;
+    const response = await patchRecurring(
+      buildRequest(
+        "PATCH",
+        `/api/recurring-invoices/${created.id}`,
+        { name: "Ylläpito", lines: [line(14)] },
+        { cookie }
+      ),
+      routeContext({ id: created.id })
+    );
+    expect(response.status).toBe(200);
+    expect((await readJson(response)).recurring.lines[0].vatRate).toBe(14);
+  });
+
   it("bills an old 14 % template at 13,5 % from 2026", async () => {
     expect((await postRecurring({ startDate: "2025-12-01", lines: [line(14)] })).status).toBe(201);
     const result = await runRecurringInvoices(user.id, { now: new Date("2026-01-15T10:00:00Z") });

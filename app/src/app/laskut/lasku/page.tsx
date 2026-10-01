@@ -23,7 +23,7 @@ import { shareContent } from "@/lib/share";
 import { openAuthedFile } from "@/lib/authed-file";
 import { AuthedFileLink } from "@/components/AuthedFileLink";
 import { IS_MOBILE_BUILD } from "@/lib/build-target";
-import { daysOverdue } from "@/lib/invoices";
+import { daysOverdue, vatForNet } from "@/lib/invoices";
 import { SALES_STATUS } from "@/lib/status-labels";
 import { detailHref } from "@/lib/routes";
 import { Button, buttonClass, controlClass, Field } from "@/components/ui";
@@ -135,7 +135,13 @@ function vatBreakdown(lines: Invoice["lines"]): Array<{ rate: number; net: numbe
   }
   return [...byRate.entries()]
     .sort((a, b) => b[0] - a[0])
-    .map(([rate, net]) => ({ rate, net, vat: (net * rate) / 100 }));
+    // Same cent rounding as the server and the PDF; a plain (net * rate) / 100
+    // gives -0 for a 0 % row of a credit note.
+    .map(([rate, net]) => ({
+      rate,
+      net,
+      vat: vatForNet(Math.round(net * 100), Math.round(rate * 10)) / 100,
+    }));
 }
 
 type HistoryItem = { title: string; meta?: string; tone?: "accent" | "muted" };
