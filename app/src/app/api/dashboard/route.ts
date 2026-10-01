@@ -4,7 +4,8 @@ import { requireSession } from "@/lib/session";
 import { VAT_REGISTRATION_THRESHOLD_EUR } from "@/lib/vero/omavero-fields";
 import { centsToEuros } from "@/lib/money";
 import { parseBusinessDetails, deriveVatProfile } from "@/lib/onboarding";
-import { getBankOverview } from "@/lib/bank-accounts";
+import { bankEverConnected, getBankPosition, loadBalanceTrend, type BalancePoint, type BankPosition, type PositionConnection } from "@/lib/bank-position";
+import { loadCashflow, type CashflowMonth } from "@/lib/koti-cashflow";
 import { buildAging, buildAgingReport, openPosition, type InvoiceStatus } from "@/lib/invoices";
 import { alvReportOf, loadAlvPeriodSources, type AlvPeriodSources } from "@/lib/alv-period";
 import { computeYearTurnover } from "@/lib/alv-threshold";
@@ -152,11 +153,22 @@ export async function GET(req: NextRequest) {
 
   // Bank position and receivables: the two numbers a business owner checks
   // first, and neither was visible on the front page before.
-  let bankOverview: Awaited<ReturnType<typeof getBankOverview>> | null = null;
+  // OWN-18: ledger accounts AND the accounts of an Enable Banking consent (lib/bank-position.ts).
+  let bankPosition: BankPosition | null = null;
+  let bankConnections: PositionConnection[] | null = null;
+  let bankTrend: BalancePoint[] | null = null;
   let receivables = { totalOpen: 0, overdue: 0, overdueCount: 0 };
   let payables = { totalOpen: 0, overdue: 0, overdueCount: 0 };
   try {
-    bankOverview = await getBankOverview(session.userId);
+    const bank = await getBankPosition(session.userId, { now });
+    bankPosition = bank.position;
+    bankConnections = bank.connections;
+    try {
+      // The balance line on Koti: today's accounts, the last six months (OWN-22).
+      bankTrend = await loadBalanceTrend(session.userId, bank.overview, bank.position, helsinkiMonthKey(now));
+    } catch {
+      bankTrend = null;
+    }
     const openInvoices = await prisma.salesInvoice.findMany({
       where: { userId: session.userId, status: { in: ["sent", "paid"] } },
       select: {
@@ -258,12 +270,22 @@ export async function GET(req: NextRequest) {
     const seller = Boolean(user?.businessName && user?.businessId && user?.invoiceIban);
     setup = {
       receipts: anyReceipt > 0,
-      bank: anyStatement + anyAccount > 0,
+      // OWN-18: a bank connected through Enable Banking is a connected bank.
+      bank: anyStatement + anyAccount > 0 || bankEverConnected(bankConnections ?? [], now),
       seller,
       empty: anyReceipt + anyStatement + anyInvoice === 0,
     };
   } catch {
     setup = null;
+  }
+
+  // OWN-22: income and expenses of the last six months (ending this month, so
+  // the chart stays put while the owner steps through the months it shows).
+  let cashflow: CashflowMonth[] | null = null;
+  try {
+    cashflow = await loadCashflow(session.userId, currentMonth);
+  } catch {
+    cashflow = null;
   }
 
   // The month's events for the bar: bank rows plus receipts no bank row accounts for.
@@ -338,13 +360,18 @@ export async function GET(req: NextRequest) {
     },
     hasImap: (user?.imapAccounts?.length ?? 0) > 0,
     pendingReceiptsCount,
-    bank: bankOverview
+    bank: bankPosition
       ? {
-          totalBalance: bankOverview.totalBalance,
-          accountCount: bankOverview.accounts.length,
-          needsAttention: bankOverview.needsAttention,
+          totalBalance: bankPosition.totalBalance,
+          accountCount: bankPosition.accountCount,
+          needsAttention: bankPosition.needsAttention,
+          state: bankPosition.state,
+          hasBalance: bankPosition.hasBalance,
+          reconnectBank: bankPosition.reconnectBank,
         }
       : null,
+    bankTrend: bankTrend ? { points: bankTrend } : null,
+    cashflow,
     receivables,
     payables,
     items: koti?.items ?? [],

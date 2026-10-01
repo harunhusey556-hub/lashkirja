@@ -4,6 +4,7 @@ import { requireSession } from "@/lib/session";
 import { noStoreJson, rejectCrossSite, rejectOversizedContentLength } from "@/lib/http-security";
 import { UnauthorizedError, withErrorHandler } from "@/lib/api-errors";
 import { createBankAccount, getBankOverview } from "@/lib/bank-accounts";
+import { getBankPosition } from "@/lib/bank-position";
 import { isoDateSchema, moneySchema } from "@/lib/validation";
 
 const createSchema = z.object({
@@ -23,7 +24,24 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
 
   const includeArchived = req.nextUrl.searchParams.get("includeArchived") === "1";
   const overview = await getBankOverview(session.userId, { includeArchived });
-  return noStoreJson(overview);
+  // OWN-18: the accounts of a bank consent are the owner's accounts too. The
+  // list stays the ledger accounts (they open a detail sheet); the total and
+  // the count say what is really connected, each IBAN once.
+  const { position } = await getBankPosition(session.userId, { overview });
+  return noStoreJson({
+    ...overview,
+    connected: {
+      accountCount: position.connectedOnly.length,
+      accounts: position.connectedOnly,
+    },
+    combined: {
+      state: position.state,
+      accountCount: position.accountCount,
+      totalBalance: position.totalBalance,
+      excludedCurrencies: position.excludedCurrencies,
+      reconnectBank: position.reconnectBank,
+    },
+  });
 });
 
 export const POST = withErrorHandler(async (req: NextRequest) => {
