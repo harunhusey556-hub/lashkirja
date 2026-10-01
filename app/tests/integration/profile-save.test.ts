@@ -53,6 +53,45 @@ describe("profile save", () => {
     expect(stored.lateInterestPercent).toBe(7);
   });
 
+  it("trims the names, caps them and answers a blank name in plain Finnish (F63)", async () => {
+    const trimmed = await patchProfile(
+      buildRequest("PATCH", "/api/profile", { firstName: "  Anna  ", lastName: " Virtanen " }, { cookie })
+    );
+    expect(trimmed.status).toBe(200);
+    const stored = await prisma.user.findUniqueOrThrow({
+      where: { id: user.id },
+      select: { firstName: true, lastName: true },
+    });
+    expect(stored).toEqual({ firstName: "Anna", lastName: "Virtanen" });
+
+    const blank = await patchProfile(
+      buildRequest("PATCH", "/api/profile", { firstName: "   " }, { cookie })
+    );
+    expect(blank.status).toBe(400);
+    expect((await readJson(blank)).error).toBe("Anna etunimi.");
+    const blankLast = await patchProfile(
+      buildRequest("PATCH", "/api/profile", { lastName: "" }, { cookie })
+    );
+    expect(blankLast.status).toBe(400);
+    expect((await readJson(blankLast)).error).toBe("Anna sukunimi.");
+
+    const long = await patchProfile(
+      buildRequest("PATCH", "/api/profile", { firstName: "F".repeat(5000) }, { cookie })
+    );
+    expect(long.status).toBe(400);
+    expect((await readJson(long)).error).toBe("Etunimi saa olla enintään 120 merkkiä.");
+    const longLast = await patchProfile(
+      buildRequest("PATCH", "/api/profile", { lastName: "L".repeat(300) }, { cookie })
+    );
+    expect(longLast.status).toBe(400);
+    expect((await readJson(longLast)).error).toBe("Sukunimi saa olla enintään 120 merkkiä.");
+    const after = await prisma.user.findUniqueOrThrow({
+      where: { id: user.id },
+      select: { firstName: true, lastName: true },
+    });
+    expect(after).toEqual({ firstName: "Anna", lastName: "Virtanen" });
+  });
+
   it("writes reminder settings and seller details in one update", async () => {
     const response = await patchProfile(
       buildRequest(

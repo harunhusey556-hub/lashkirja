@@ -10,8 +10,20 @@ import { ENTITY_TYPES } from "@/lib/onboarding";
 import { guardWrite } from "@/lib/http-security";
 
 const patchSchema = z.object({
-  firstName: z.string().min(1).optional(),
-  lastName: z.string().min(1).optional(),
+  // Trimmed and capped like the other text fields. The messages are the ones
+  // the person sees, so they are plain Finnish.
+  firstName: z
+    .string()
+    .trim()
+    .min(1, "Anna etunimi.")
+    .max(120, "Etunimi saa olla enintään 120 merkkiä.")
+    .optional(),
+  lastName: z
+    .string()
+    .trim()
+    .min(1, "Anna sukunimi.")
+    .max(120, "Sukunimi saa olla enintään 120 merkkiä.")
+    .optional(),
   entityType: z.enum(ENTITY_TYPES).optional(),
   vatRegistered: z.boolean().optional(),
   vatPeriod: z.enum(["month", "quarter", "year"]).optional(),
@@ -84,7 +96,12 @@ export async function PATCH(req: NextRequest) {
 
   const parsed = patchSchema.safeParse(await req.json().catch(() => null));
   if (!parsed.success) {
-    return NextResponse.json({ error: "Virheellinen pyyntö" }, { status: 400 });
+    // A name problem is the person's to fix, so it is named; anything else keeps
+    // the plain refusal.
+    const nameIssue = parsed.error.issues.find(
+      (issue) => issue.path[0] === "firstName" || issue.path[0] === "lastName"
+    );
+    return NextResponse.json({ error: nameIssue?.message ?? "Virheellinen pyyntö" }, { status: 400 });
   }
 
   const { lateInterestPercent, reminderFee, ...data } = parsed.data;

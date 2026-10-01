@@ -4,6 +4,7 @@ import { useState } from "react";
 import { ApiError, apiFetch, errorMessage, isUserFacingMessage, readJson } from "@/components/clientFetch";
 import { type Profile, SaveStatus, useProfile } from "../useProfile";
 import { ProfileGate } from "../ProfileGate";
+import { NAME_MAX_LENGTH, type NameErrors, validateProfileNames } from "../profile-names";
 import { Card, PageTitle } from "@/components/ds";
 import { PasswordField } from "@/components/ds/PasswordField";
 import { Button, Field, FormError, SavePhaseNote } from "@/components/ui";
@@ -53,6 +54,7 @@ function ProfileForm({
   const [currentPassword, setCurrentPassword] = useState("");
   const [emailError, setEmailError] = useState<{ email?: string; password?: string; form?: string }>({});
   const [emailBusy, setEmailBusy] = useState(false);
+  const [nameError, setNameError] = useState<NameErrors>({});
 
   // AUTH-13: leaving with unsaved name edits asks first (Back, tabs).
   const { dirty } = useEditorSession({
@@ -62,6 +64,18 @@ function ProfileForm({
     value: { firstName, lastName },
     onRestore: () => {},
   });
+
+  function submitNames(event: React.FormEvent) {
+    event.preventDefault();
+    const errors = validateProfileNames(firstName, lastName);
+    setNameError(errors);
+    if (errors.firstName || errors.lastName) {
+      void hapticNotify("error");
+      document.getElementById(errors.firstName ? "firstName" : "lastName")?.focus();
+      return;
+    }
+    void save({ firstName: firstName.trim(), lastName: lastName.trim() });
+  }
 
   async function sendEmailChange(event: React.FormEvent) {
     event.preventDefault();
@@ -118,15 +132,10 @@ function ProfileForm({
         </div>
       </Card>
 
-      <form
-        onSubmit={(event) => {
-          event.preventDefault();
-          void save({ firstName: firstName.trim(), lastName: lastName.trim() });
-        }}
-      >
+      <form onSubmit={submitNames} noValidate>
         <Card className="space-y-4">
           <div className="field-grid">
-            <Field label="Etunimi" htmlFor="firstName">
+            <Field label="Etunimi" htmlFor="firstName" error={nameError.firstName}>
               <input
                 id="firstName"
                 name="firstName"
@@ -135,12 +144,13 @@ function ProfileForm({
                 autoCapitalize="words"
                 enterKeyHint="next"
                 required
+                maxLength={NAME_MAX_LENGTH}
                 value={firstName}
                 onChange={(e) => setFirstName(e.target.value)}
-                className={controlClass}
+                className={`${controlClass}${nameError.firstName ? " !border-danger" : ""}`}
               />
             </Field>
-            <Field label="Sukunimi" htmlFor="lastName">
+            <Field label="Sukunimi" htmlFor="lastName" error={nameError.lastName}>
               <input
                 id="lastName"
                 name="lastName"
@@ -149,9 +159,10 @@ function ProfileForm({
                 autoCapitalize="words"
                 enterKeyHint="done"
                 required
+                maxLength={NAME_MAX_LENGTH}
                 value={lastName}
                 onChange={(e) => setLastName(e.target.value)}
-                className={controlClass}
+                className={`${controlClass}${nameError.lastName ? " !border-danger" : ""}`}
               />
             </Field>
           </div>
