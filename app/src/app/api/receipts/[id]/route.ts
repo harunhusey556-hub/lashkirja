@@ -144,7 +144,8 @@ export const PATCH = withErrorHandler(async (
     return noStoreJson({ error: "Kuittia ei löytynyt" }, { status: 404 });
   }
   const parsed = patchSchema.safeParse(await req.json().catch(() => null));
-  if (!parsed.success) return noStoreJson({ error: "Virheelliset kuittitiedot" }, { status: 400 });
+  // The shared 400 answer names the field and the limit in Finnish (F64).
+  if (!parsed.success) throw parsed.error;
   if (Object.keys(parsed.data).length === 0) {
     return noStoreJson({ error: "Ei päivitettäviä kenttiä" }, { status: 400 });
   }

@@ -1,6 +1,7 @@
 import { ZodError } from "zod";
 import type { NextRequest } from "next/server";
 import { noStoreJson } from "./http-security";
+import { zodErrorBody } from "./zod-messages";
 
 export interface ApiErrorResponse {
   error: {
@@ -82,14 +83,14 @@ export function withErrorHandler<Args extends unknown[]>(
       }
 
       if (error instanceof ZodError) {
+        return noStoreJson({ error: zodErrorBody(error) }, { status: 400 });
+      }
+
+      // A body that is not JSON (`await req.json()` threw) is the caller's
+      // mistake, not a server fault.
+      if (error instanceof SyntaxError && /json/i.test(error.message)) {
         return noStoreJson(
-          {
-            error: {
-              code: "VALIDATION_FAILED",
-              message: "Invalid request payload",
-              details: error.issues,
-            },
-          },
+          { error: { code: "INVALID_JSON", message: "Pyyntöä ei voitu lukea. Yritä uudelleen." } },
           { status: 400 }
         );
       }
