@@ -112,6 +112,28 @@ describe("probe scheduling (fake timers)", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
+  it("a gateway answer (502/503/504) from the probe is still unreachable and announces no recovery (F33)", async () => {
+    for (const status of [502, 503, 504]) {
+      resetConnectivityForTests();
+      vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(null, { status })));
+      reportRequestOutcome("network-error");
+      reportRequestOutcome("network-error");
+      await vi.advanceTimersByTimeAsync(15_000);
+      expect(connectivitySnapshotForTests().server).toBe("unreachable");
+    }
+  });
+
+  it("a degraded 503 that carries the app's own version header still proves the server is up", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(new Response(null, { status: 503, headers: { "X-LashKirja-Api-Version": "2" } }))
+    );
+    reportRequestOutcome("network-error");
+    reportRequestOutcome("network-error");
+    await vi.advanceTimersByTimeAsync(15_000);
+    expect(connectivitySnapshotForTests().server).toBe("ok");
+  });
+
   it("a probe that itself throws (still offline) keeps retrying on schedule", async () => {
     const fetchMock = vi.fn().mockRejectedValue(new TypeError("network error"));
     vi.stubGlobal("fetch", fetchMock);

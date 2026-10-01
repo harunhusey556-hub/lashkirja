@@ -6,7 +6,7 @@ import { appNavigate } from "@/lib/app-nav";
 import { expireSession, getAccessToken, retryPendingRevoke, signOutThisDevice } from "@/lib/auth-client";
 import { bootMobile } from "@/lib/mobile/boot";
 import { rememberGet, staleResponseFor } from "@/lib/offline/http-cache";
-import { assertCanWrite, reportRequestOutcome } from "@/lib/connectivity";
+import { assertCanWrite, isGatewayStatus, reportRequestOutcome } from "@/lib/connectivity";
 
 export class ApiError extends Error {
   status: number;
@@ -232,7 +232,7 @@ async function apiFetchAttempt(input: RequestInfo | URL, init?: ApiFetchInit): P
     try {
       const response = await fetch(input, { ...rest, signal });
       // If it's a 502/503/504 gateway/timeout error, we should retry!
-      if (response.status === 502 || response.status === 503 || response.status === 504) {
+      if (isGatewayStatus(response.status)) {
         throw new ApiGatewayError(response.status);
       }
       // Connectivity (Task 8): any other HTTP response means the server

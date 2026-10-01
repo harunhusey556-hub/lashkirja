@@ -100,14 +100,23 @@ function stopHealthProbe(): void {
   }
 }
 
+/** A gateway or proxy answer: the request never reached the app. One rule for probe and apiFetch. */
+export function isGatewayStatus(status: number): boolean {
+  return status === 502 || status === 503 || status === 504;
+}
+
 async function probeHealth(): Promise<void> {
   if (typeof document !== "undefined" && document.visibilityState !== "visible") return;
   try {
-    // Any HTTP status counts as reachable (production answers 401 with no
-    // health token) -- a plain fetch, not apiFetch: this must never itself
-    // be blocked by assertCanWrite, and it carries no auth by design.
-    await fetch(apiUrl("/api/health"), { credentials: "omit", cache: "no-store" });
-    reportRequestOutcome("ok");
+    // A plain fetch, not apiFetch: this must never itself be blocked by
+    // assertCanWrite, and it carries no auth by design. Production answers
+    // 401 with no health token, which still proves the server is there. A
+    // 502/503/504 does not -- unless the app itself sent it (a degraded
+    // health check carries the app's version header, a gateway page does
+    // not) -- so "Yhteys palautui" is never announced over a dead server.
+    const response = await fetch(apiUrl("/api/health"), { credentials: "omit", cache: "no-store" });
+    const fromApp = response.headers.get("X-LashKirja-Api-Version") !== null;
+    reportRequestOutcome(isGatewayStatus(response.status) && !fromApp ? "network-error" : "ok");
   } catch {
     reportRequestOutcome("network-error");
   }
