@@ -1,6 +1,6 @@
 import { Prisma } from "@/generated/prisma/client";
 import { eurosToCents } from "@/lib/money";
-import { monthBoundsUtc, monthSchema } from "@/lib/validation";
+import { periodScopeBoundsUtc, periodScopeSchema } from "@/lib/validation";
 
 export interface ReceiptWhereInput {
   reviewStatus?: string | null;
@@ -31,9 +31,10 @@ export function buildReceiptWhere(userId: string, input: ReceiptWhereInput): Pri
   } else where.reviewStatus = "approved"; // Default to approved only
 
   if (input.month) {
-    const parsedMonth = monthSchema.safeParse(input.month);
+    // A month, or a whole year when a yearly report figure opened the list.
+    const parsedMonth = periodScopeSchema.safeParse(input.month);
     if (!parsedMonth.success) throw new ReceiptFilterError("Virheellinen kuukausi");
-    const bounds = monthBoundsUtc(parsedMonth.data);
+    const bounds = periodScopeBoundsUtc(parsedMonth.data);
     where.date = { gte: bounds.start, lt: bounds.end };
   }
   if (input.category) where.category = input.category.slice(0, 100);

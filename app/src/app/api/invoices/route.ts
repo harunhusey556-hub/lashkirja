@@ -5,7 +5,7 @@ import { noStoreJson, rejectCrossSite, rejectOversizedContentLength } from "@/li
 import { UnauthorizedError, withErrorHandler } from "@/lib/api-errors";
 import { hashIdempotencyPayload, idempotencyKeyFrom, withIdempotency } from "@/lib/idempotency";
 import { createInvoice, listInvoices } from "@/lib/sales-invoices";
-import { isoDateSchema, monthSchema, moneySchema } from "@/lib/validation";
+import { isoDateSchema, moneySchema, periodScopeSchema } from "@/lib/validation";
 
 const lineSchema = z.object({
   description: z.string().trim().min(1, "Rivin kuvaus puuttuu").max(200),
@@ -38,7 +38,7 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
   const result = await listInvoices(session.userId, {
     status: rawStatus ? statusFilter.parse(rawStatus) : undefined,
     customerId: params.get("customerId") ?? undefined,
-    month: rawMonth ? monthSchema.parse(rawMonth) : undefined,
+    month: rawMonth ? periodScopeSchema.parse(rawMonth) : undefined,
     search: params.get("search")?.slice(0, 80) || undefined,
   });
   return noStoreJson(result);

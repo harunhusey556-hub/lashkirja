@@ -3,7 +3,7 @@ import { requireSession } from "@/lib/session";
 import { noStoreJson } from "@/lib/http-security";
 import { UnauthorizedError, withErrorHandler } from "@/lib/api-errors";
 import { countInvoicesByDisplayStatus } from "@/lib/sales-invoices";
-import { monthSchema } from "@/lib/validation";
+import { periodScopeSchema } from "@/lib/validation";
 
 /**
  * Per-status invoice counts for the sales list's filter chips. Separate from
@@ -19,7 +19,7 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
   const rawMonth = params.get("month");
   const counts = await countInvoicesByDisplayStatus(session.userId, {
     customerId: params.get("customerId") ?? undefined,
-    month: rawMonth ? monthSchema.parse(rawMonth) : undefined,
+    month: rawMonth ? periodScopeSchema.parse(rawMonth) : undefined,
   });
   return noStoreJson({ counts });
 });

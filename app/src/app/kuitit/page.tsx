@@ -155,16 +155,20 @@ export default function KuititPage() {
   useEffect(() => {
     const drill = drillFromSearch(window.location.search);
     if (!drill.month && !drill.type && !drill.category) return;
-    if (drill.month) setMonthFilter(drill.month);
-    if (drill.type || drill.category) {
-      const next = {
-        ...emptyAdvanced,
-        type: drill.type || "",
-        category: drill.category || "",
-      };
-      setAdvanced(next);
-      setAppliedAdvanced(next);
-    }
+    // A report link opens exactly the list it names: month, type and category
+    // from the link, and nothing remembered from an earlier visit (search,
+    // other filters, the show-all toggle) (V44).
+    setMonthFilter(drill.month || "");
+    setSearchInput("");
+    setSearchQuery("");
+    setShowAllReceipts(false);
+    const next = {
+      ...emptyAdvanced,
+      type: drill.type || "",
+      category: drill.category || "",
+    };
+    setAdvanced(next);
+    setAppliedAdvanced(next);
     // A report link sets the filter once; later edits stay on this page.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -334,7 +338,7 @@ export default function KuititPage() {
     if (monthFilter) {
       chips.push({
         key: "month",
-        label: formatMonth(monthFilter),
+        label: monthFilter.length === 4 ? monthFilter : formatMonth(monthFilter),
         clear: () => setMonthFilter(""),
       });
     }

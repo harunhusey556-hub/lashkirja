@@ -85,3 +85,15 @@ describe("income drill targets (F71)", () => {
     expect(invoiceDrillHref({ status: "credited" })).toBe("/laskut?status=credited");
   });
 });
+
+describe("year-level drill links (V44, V45, R60)", () => {
+  it("carries the selected year to the receipt and invoice lists", () => {
+    expect(receiptDrillHref({ month: "2025", type: "meno" })).toBe("/kuitit?month=2025&type=meno");
+    expect(drillFromSearch("month=2025&type=tulo")).toEqual({ month: "2025", type: "tulo" });
+    expect(invoiceDrillHref({ month: "2025", status: "all" })).toBe("/laskut?month=2025&status=all");
+  });
+
+  it("an income category row opens the invoice list on every status", () => {
+    expect(invoiceDrillHref({ status: "all" })).toBe("/laskut?status=all");
+  });
+});

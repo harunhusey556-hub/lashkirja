@@ -31,6 +31,7 @@ import { formatEur, formatMonthShort } from "@/lib/format";
 import {
   expenseDrillTarget,
   incomeDrillTargets,
+  invoiceDrillHref,
   receiptDrillHref,
   type DrillTarget,
 } from "@/lib/report-drill";
@@ -277,8 +278,8 @@ export default function ReportsPage() {
 
   useScrollRestoration("raportit", status === "ready");
 
-  const totalIncomeTargets = report ? incomeDrillTargets(report.total) : [];
-  const totalExpenseTarget = report ? expenseDrillTarget(report.total) : null;
+  const totalIncomeTargets = report ? incomeDrillTargets({ ...report.total, month: String(year) }) : [];
+  const totalExpenseTarget = report ? expenseDrillTarget({ ...report.total, month: String(year) }) : null;
 
   const packagePeriod = packageMonth.startsWith(`${year}`) ? packageMonth : `${year}-01`;
 
@@ -400,7 +401,7 @@ export default function ReportsPage() {
                 report.total.expenseByCategory.map((row) => (
                   <ListRow
                     key={row.category}
-                    href={receiptDrillHref({ type: "meno", category: row.category })}
+                    href={receiptDrillHref({ month: String(year), type: "meno", category: row.category })}
                     ariaLabel={`Avaa kuitit: ${row.category}`}
                     title={sentenceCase(row.category)}
                     secondary={`${row.count} ${row.count === 1 ? "kuitti" : "kuittia"} · brutto ${formatEur(row.gross)}`}
@@ -418,10 +419,10 @@ export default function ReportsPage() {
                     key={row.category}
                     href={
                       row.category === "Myyntilaskut"
-                        ? "/laskut"
+                        ? invoiceDrillHref({ month: String(year), status: "all" })
                         : row.category === "Hyvityslaskut"
-                          ? "/laskut?status=credited"
-                          : receiptDrillHref({ type: "tulo", category: row.category })
+                          ? invoiceDrillHref({ month: String(year), status: "credited" })
+                          : receiptDrillHref({ month: String(year), type: "tulo", category: row.category })
                     }
                     ariaLabel={`Avaa: ${row.category}`}
                     title={sentenceCase(row.category)}

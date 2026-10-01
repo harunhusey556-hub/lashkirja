@@ -133,7 +133,7 @@ function InvoicesPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const customerFilter = searchParams.get("customerId") ?? "";
-  const monthFilter = /^\d{4}-(0[1-9]|1[0-2])$/.test(searchParams.get("month") || "")
+  const monthFilter = /^\d{4}(-(0[1-9]|1[0-2]))?$/.test(searchParams.get("month") || "")
     ? searchParams.get("month")!
     : "";
   const statusFromUrl = searchParams.get("status");
@@ -171,11 +171,18 @@ function InvoicesPageContent() {
     setStatus("ready");
   }
   useEffect(() => {
-    if (statusFromUrl && (SALES_FILTER_IDS as readonly string[]).includes(statusFromUrl)) {
-      setFilter(statusFromUrl as SalesFilterId);
-    }
+    // A report link opens exactly the list it names: its status tab (Kaikki
+    // when it names none) and no remembered search (V44).
+    if (!statusFromUrl && !monthFilter) return;
+    setSearch("");
+    setQuery("");
+    setFilter(
+      statusFromUrl && (SALES_FILTER_IDS as readonly string[]).includes(statusFromUrl)
+        ? (statusFromUrl as SalesFilterId)
+        : "all"
+    );
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [statusFromUrl]);
+  }, [statusFromUrl, monthFilter]);
   const [loadFailure, setLoadFailure] = useState<unknown>(null);
   const [matchPreview, setMatchPreview] = useState<MatchPreview | null>(null);
   const [matchLoading, setMatchLoading] = useState(false);

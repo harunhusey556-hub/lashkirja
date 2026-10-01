@@ -70,6 +70,18 @@ export function monthBoundsUtc(month: string): { start: Date; end: Date } {
   };
 }
 
+/** A list scope that is one month (YYYY-MM) or a whole year (YYYY): what a report figure links to. */
+export const periodScopeSchema = z.string().regex(/^\d{4}(-(0[1-9]|1[0-2]))?$/);
+
+export function periodScopeBoundsUtc(scope: string): { start: Date; end: Date } {
+  const parsed = periodScopeSchema.parse(scope);
+  if (parsed.length === 4) {
+    const year = Number(parsed);
+    return { start: new Date(Date.UTC(year, 0, 1)), end: new Date(Date.UTC(year + 1, 0, 1)) };
+  }
+  return monthBoundsUtc(parsed);
+}
+
 export function alvPeriodBoundsUtc(period: string): { start: Date; end: Date } {
   const parsed = alvPeriodSchema.parse(period);
   const quarterMatch = /^(\d{4})-Q([1-4])$/.exec(parsed);
