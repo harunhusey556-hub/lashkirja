@@ -25,6 +25,8 @@ export function invoiceDrillHref(filter: { month?: string | null; status?: strin
   const params = new URLSearchParams();
   if (filter.month && MONTH.test(filter.month)) params.set("month", filter.month);
   if (
+    filter.status === "all" ||
+    filter.status === "credited" ||
     filter.status === "draft" ||
     filter.status === "sent" ||
     filter.status === "paid" ||
@@ -34,6 +36,73 @@ export function invoiceDrillHref(filter: { month?: string | null; status?: strin
   }
   const query = params.toString();
   return query ? `/laskut?${query}` : "/laskut";
+}
+
+/** Category rows the profit and loss puts sales invoices and credit notes in (lib/reports.ts). */
+const INVOICE_CATEGORIES = new Set(["Myyntilaskut", "Hyvityslaskut"]);
+
+export interface DrillTarget {
+  id: "invoices" | "income-receipts" | "expense-receipts";
+  /** Short visible label of the destination. */
+  label: string;
+  href: string;
+  /** What the link opens, named for a screen reader. */
+  ariaLabel: string;
+}
+
+interface DrillPeriod {
+  month?: string | null;
+  invoiceCount?: number;
+  creditNoteCount?: number;
+  incomeByCategory?: Array<{ category: string; count: number }>;
+  expenseByCategory?: Array<{ category: string; count: number }>;
+}
+
+function sumCounts(rows: Array<{ count: number }>): number {
+  return rows.reduce((sum, row) => sum + row.count, 0);
+}
+
+/**
+ * Where a report income figure lives (F71). Sales invoices and credit notes
+ * are not receipts, so the receipts list never contains them: the invoice
+ * list is one destination, cash-sale receipts the other. A destination is
+ * offered only when it holds rows for the period, so a figure can never open
+ * a list that claims to be empty.
+ */
+export function incomeDrillTargets(period: DrillPeriod): DrillTarget[] {
+  const rows = period.incomeByCategory ?? [];
+  const invoiceRows = sumCounts(rows.filter((row) => INVOICE_CATEGORIES.has(row.category)));
+  const invoiceDocuments = Math.max((period.invoiceCount ?? 0) + (period.creditNoteCount ?? 0), invoiceRows);
+  const receiptRows = sumCounts(rows.filter((row) => !INVOICE_CATEGORIES.has(row.category)));
+  const targets: DrillTarget[] = [];
+  if (invoiceDocuments > 0) {
+    targets.push({
+      id: "invoices",
+      label: "Laskut",
+      href: invoiceDrillHref({ month: period.month, status: "all" }),
+      ariaLabel: "Avaa myyntilaskut",
+    });
+  }
+  if (receiptRows > 0) {
+    targets.push({
+      id: "income-receipts",
+      label: "Tulokuitit",
+      href: receiptDrillHref({ month: period.month, type: "tulo" }),
+      ariaLabel: "Avaa tulokuitit",
+    });
+  }
+  return targets;
+}
+
+/** Expenses are receipts only. */
+export function expenseDrillTarget(period: DrillPeriod): DrillTarget | null {
+  if (sumCounts(period.expenseByCategory ?? []) === 0) return null;
+  return {
+    id: "expense-receipts",
+    label: "Menokuitit",
+    href: receiptDrillHref({ month: period.month, type: "meno" }),
+    ariaLabel: "Avaa menokuitit",
+  };
 }
 
 export function alvDrillHref(period: string): string {

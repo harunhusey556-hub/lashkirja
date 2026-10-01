@@ -14,6 +14,7 @@ import { buttonClass, controlClass } from "@/components/control-styles";
 import { AuthedFileLink } from "@/components/AuthedFileLink";
 import { ChevronLeft, ChevronRight, Download } from "lucide-react";
 import {
+  ActionPill,
   Card,
   Icon,
   IconTile,
@@ -27,7 +28,12 @@ import {
   useSkeletonFade,
 } from "@/components/ds";
 import { formatEur, formatMonthShort } from "@/lib/format";
-import { receiptDrillHref } from "@/lib/report-drill";
+import {
+  expenseDrillTarget,
+  incomeDrillTargets,
+  receiptDrillHref,
+  type DrillTarget,
+} from "@/lib/report-drill";
 import { pageCacheFetchedAt, readPageCache, writePageCache } from "@/lib/page-cache";
 import { useCacheAfterBoot } from "@/components/invoices/useCacheAfterBoot";
 import { usePersistedState, useScrollRestoration } from "@/lib/list-ui-state";
@@ -139,6 +145,33 @@ function ReportSkeleton() {
   );
 }
 
+/**
+ * A report figure that opens the rows it is made of (F71). One destination makes the figure itself the
+ * link; with two (invoices and receipts) the figure stays plain text and the destinations are labelled
+ * links beside it. No destination, no link: a figure must never open a list that says it is empty.
+ */
+function DrillFigure({ value, targets, className }: { value: string; targets: DrillTarget[]; className?: string }) {
+  if (targets.length !== 1) return <span className={className}>{value}</span>;
+  return (
+    <Link href={targets[0].href} aria-label={`${targets[0].ariaLabel}, ${value}`} className={`text-accent ${HIT44}`}>
+      {value}
+    </Link>
+  );
+}
+
+/** The labelled destinations of a figure that lives in more than one list. */
+function DrillLinks({ targets }: { targets: DrillTarget[] }) {
+  return (
+    <span className="flex flex-wrap items-center justify-end gap-x-4">
+      {targets.map((target) => (
+        <Link key={target.id} href={target.href} aria-label={target.ariaLabel} className={`text-accent ${HIT44}`}>
+          {target.label}
+        </Link>
+      ))}
+    </span>
+  );
+}
+
 /** Category keys are stored lower-case ("tarvikkeet"); a list title starts with a capital. */
 function sentenceCase(text: string): string {
   return text ? text.charAt(0).toLocaleUpperCase("fi-FI") + text.slice(1) : text;
@@ -244,6 +277,9 @@ export default function ReportsPage() {
 
   useScrollRestoration("raportit", status === "ready");
 
+  const totalIncomeTargets = report ? incomeDrillTargets(report.total) : [];
+  const totalExpenseTarget = report ? expenseDrillTarget(report.total) : null;
+
   const packagePeriod = packageMonth.startsWith(`${year}`) ? packageMonth : `${year}-01`;
 
   return (
@@ -285,18 +321,18 @@ export default function ReportsPage() {
                   },
                   {
                     label: "Tulot",
-                    value: (
-                      <Link href={receiptDrillHref({ type: "tulo" })} aria-label={`Avaa tulokuitit, ${formatEur(report.total.incomeNet)}`} className={`text-accent ${HIT44}`}>
-                        {formatEur(report.total.incomeNet)}
-                      </Link>
-                    ),
+                    value: <DrillFigure value={formatEur(report.total.incomeNet)} targets={totalIncomeTargets} />,
                   },
+                  ...(totalIncomeTargets.length > 1
+                    ? [{ label: "Avaa tulot", value: <DrillLinks targets={totalIncomeTargets} /> }]
+                    : []),
                   {
                     label: "Menot",
                     value: (
-                      <Link href={receiptDrillHref({ type: "meno" })} aria-label={`Avaa menokuitit, ${formatEur(report.total.expenseNet)}`} className={`text-accent ${HIT44}`}>
-                        {formatEur(report.total.expenseNet)}
-                      </Link>
+                      <DrillFigure
+                        value={formatEur(report.total.expenseNet)}
+                        targets={totalExpenseTarget ? [totalExpenseTarget] : []}
+                      />
                     ),
                   },
                   ...(report.total.missingVatCount > 0
@@ -325,16 +361,34 @@ export default function ReportsPage() {
               <EmptySection title="Kuukaudet">Ei kirjauksia tälle vuodelle.</EmptySection>
             ) : (
               <Section title="Kuukaudet">
-                {report.months.map((month) => (
+                {report.months.map((month) => {
+                  // Income lives in invoices and cash-sale receipts, expenses in receipts: a month with
+                  // more than one source gets labelled links instead of one wrong list (F71).
+                  const expense = expenseDrillTarget(month);
+                  const targets = [...incomeDrillTargets(month), ...(expense ? [expense] : [])];
+                  const label = formatMonthShort(month.month!);
+                  return (
                   <ListRow
                     key={month.month}
-                    href={receiptDrillHref({ month: month.month })}
-                    title={formatMonthShort(month.month!)}
+                    href={targets.length === 1 ? targets[0].href : undefined}
+                    trailing={
+                      targets.length > 1 ? (
+                        <span className="flex flex-wrap justify-end gap-x-2 gap-y-1">
+                          {targets.map((target) => (
+                            <ActionPill key={target.id} href={target.href} ariaLabel={`${target.ariaLabel}, ${label}`}>
+                              {target.label}
+                            </ActionPill>
+                          ))}
+                        </span>
+                      ) : undefined
+                    }
+                    title={label}
                     amount={formatEur(month.profitNet)}
                     secondary={`Tulot ${formatEur(month.incomeNet)} · Menot ${formatEur(month.expenseNet)}`}
-                    ariaLabel={`${formatMonthShort(month.month!)}, tulos ${formatEur(month.profitNet)}, tulot ${formatEur(month.incomeNet)}, menot ${formatEur(month.expenseNet)}`}
+                    ariaLabel={`${label}, tulos ${formatEur(month.profitNet)}, tulot ${formatEur(month.incomeNet)}, menot ${formatEur(month.expenseNet)}`}
                   />
-                ))}
+                  );
+                })}
               </Section>
             )}
 
