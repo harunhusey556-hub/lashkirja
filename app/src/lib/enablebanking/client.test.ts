@@ -246,12 +246,37 @@ describe("EnableBankingClient response handling (G28)", () => {
 describe("publicBankError", () => {
   it("does not turn an upstream auth failure into a user logout", () => {
     expect(publicBankError(new EnableBankingError("nope", 401, "UNAUTHORIZED_ACCESS"))).toEqual({
-      message: "Pankkiyhteyden tunnistautuminen epäonnistui. Tarkista sovelluksen avain ja APP_ID.",
+      message: "Pankkiyhteyden tunnistautuminen epäonnistui. Yritä myöhemmin uudelleen.",
       status: 502,
     });
     expect(publicBankError(new EnableBankingError("gone", 400, "EXPIRED_SESSION")).message).toBe(
       "Yhteys vanhentui — yhdistä uudelleen."
     );
+  });
+
+  it("G33: no setting or env-var name ever reaches the person using the app", () => {
+    const failures = [
+      new EnableBankingError("redirect", 400, "REDIRECT_URI_NOT_ALLOWED"),
+      new EnableBankingError("Forbidden", 403),
+      new EnableBankingError("nope", 401, "UNAUTHORIZED_ACCESS"),
+      new EnableBankingError("boom", 500),
+    ];
+    for (const failure of failures) {
+      const { message } = publicBankError(failure);
+      expect(message).not.toMatch(/ENABLEBANKING|APP_ID|Control Panel|avain|Enable Banking|Forbidden/i);
+    }
+    expect(publicBankError(failures[0]).message).toBe("Pankkiyhteyttä ei voitu avata. Yritä myöhemmin uudelleen.");
+  });
+
+  it("G34: a bank 429 keeps its meaning, however it is reported", () => {
+    const calm = "Pankki pyytää odottamaan. Yritä hetken päästä uudelleen.";
+    expect(publicBankError(new EnableBankingError("x", 429, "ASPSP_RATE_LIMIT_EXCEEDED"))).toEqual({ message: calm, status: 429 });
+    expect(publicBankError(new EnableBankingError("x", 429))).toEqual({ message: calm, status: 429 });
+  });
+
+  it("G31: a withdrawn consent says so, and an expired one still says expired", () => {
+    expect(publicBankError(new EnableBankingError("x", 403, "REVOKED_SESSION")).message).toBe("Pankki on peruuttanut luvan.");
+    expect(publicBankError(new EnableBankingError("x", 403, "EXPIRED_SESSION")).message).toBe("Yhteys vanhentui — yhdistä uudelleen.");
   });
 
   it("explains an unreadable bank answer in plain Finnish", () => {

@@ -27,6 +27,7 @@ import type { PsuContext } from "./client";
 import { withTrackedJob } from "../job-tracker";
 import { getLockedThrough, isDateLocked, isMonthLocked } from "../period-lock";
 import { normalizeIban } from "../iban";
+import { CONSENT_REVOKED_MESSAGE } from "../bank-consent-copy";
 import { StoredRowPool } from "../bank-row-fingerprint";
 import { fallbackStatementMonth, statementMonthOrFallback } from "../report-calendar";
 import {
@@ -131,30 +132,24 @@ async function syncBankConnectionUntracked(
     );
   }
 
+  let remoteStatus: string | undefined;
   try {
-    const remote = await client.getSession(sessionId);
-    if (remote.status && DEAD_SESSION_STATUS.has(remote.status)) {
-      const status = remote.status === "REVOKED" ? "revoked" : "expired";
-      await markConnection(connection.id, status, "Yhteys vanhentui — yhdistä uudelleen.");
-      throw new EnableBankingError("Yhteys vanhentui — yhdistä uudelleen.", 409, "EXPIRED_SESSION");
-    }
+    remoteStatus = (await client.getSession(sessionId)).status;
   } catch (error) {
     const terminal = sessionTerminalStatus(error);
-    if (terminal) {
-      await markConnection(connection.id, terminal, "Yhteys vanhentui — yhdistä uudelleen.");
-      throw new EnableBankingError(
-        "Yhteys vanhentui — yhdistä uudelleen.",
-        409,
-        terminal === "revoked" ? "REVOKED_SESSION" : "EXPIRED_SESSION"
-      );
-    }
+    if (terminal) throw await endConsent(connection.id, terminal === "revoked");
     if (error instanceof EnableBankingError && (error.status === 401 || error.status === 403)) {
-      throw error;
+      // Said in plain Finnish here, so neither the answer nor the job log
+      // carries the provider's own English.
+      throw new EnableBankingError(publicBankError(error).message, error.status, error.code);
     }
     console.error("Enable Banking session check failed", {
       connectionId: connection.id,
       code: error instanceof EnableBankingError ? error.code : "unknown",
     });
+  }
+  if (remoteStatus && DEAD_SESSION_STATUS.has(remoteStatus)) {
+    throw await endConsent(connection.id, remoteStatus === "REVOKED");
   }
 
   await prisma.bankConnection.update({
@@ -168,6 +163,8 @@ async function syncBankConnectionUntracked(
   let skipped = 0;
   const statementIds = new Set<string>();
   const failures: string[] = [];
+  /** The first bank-side failure, so the answer keeps its meaning (a 429 stays a 429). */
+  let firstFailure: EnableBankingError | null = null;
   const accounts: BankSyncAccountRow[] = [];
   let succeeded = 0;
   let truncatedAccounts = 0;
@@ -244,14 +241,11 @@ async function syncBankConnectionUntracked(
       });
     } catch (error) {
       const terminal = sessionTerminalStatus(error);
-      if (terminal) {
-        const message = "Yhteys vanhentui — yhdistä uudelleen.";
-        await markConnection(connection.id, terminal, message);
-        throw new EnableBankingError(message, 409, terminal === "revoked" ? "REVOKED_SESSION" : "EXPIRED_SESSION");
-      }
+      if (terminal) throw await endConsent(connection.id, terminal === "revoked");
       const message =
         error instanceof EnableBankingError ? publicBankError(error).message : "Tapahtumien haku epäonnistui.";
       failures.push(message);
+      if (!firstFailure && error instanceof EnableBankingError) firstFailure = error;
       accounts.push({
         accountId: account.id,
         name: accountName(account),
@@ -313,7 +307,10 @@ async function syncBankConnectionUntracked(
   }
 
   if (succeeded === 0 && failures.length > 0) {
-    throw new EnableBankingError(failures[0], 502);
+    // The sentence is already the calm one; the status and code are the bank's
+    // own, so the answer maps to the very same sentence (a request to wait is
+    // not told as a general failure) and the card does not repeat it twice.
+    throw new EnableBankingError(failures[0], firstFailure?.status ?? 502, firstFailure?.code);
   }
 
   const statementId = await newestStatementId([...statementIds]);
@@ -694,6 +691,18 @@ async function newestStatementId(ids: string[]): Promise<string | null> {
   });
   statements.sort((a, b) => (b.periodMonth || "").localeCompare(a.periodMonth || ""));
   return statements[0]?.id ?? null;
+}
+
+/**
+ * The bank no longer honours the session. Both ways a bank can say so (an error
+ * code, or a session status) end the same: "expired", visible, with the reason,
+ * so the owner can confirm again. "revoked" stays the owner's own Katkaise and
+ * is never written from here; a hidden status would make the connection vanish.
+ */
+async function endConsent(id: string, withdrawn: boolean): Promise<EnableBankingError> {
+  const message = withdrawn ? CONSENT_REVOKED_MESSAGE : "Yhteys vanhentui — yhdistä uudelleen.";
+  await markConnection(id, "expired", message);
+  return new EnableBankingError(message, 409, withdrawn ? "REVOKED_SESSION" : "EXPIRED_SESSION");
 }
 
 async function markConnection(id: string, status: "expired" | "revoked" | "error", lastError: string) {

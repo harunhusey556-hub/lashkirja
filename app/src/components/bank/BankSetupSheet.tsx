@@ -5,10 +5,12 @@ import Link from "next/link";
 import { FileUp, PenLine } from "lucide-react";
 import BottomSheet from "@/components/BottomSheet";
 import { Icon, IconTile } from "@/components/ds";
+import { BANK_COPY } from "@/lib/bank-status";
 
 /**
- * "Mitä tarvitaan" (BOOKS-03): why "Yhdistä pankki" cannot work yet, in plain
- * Finnish, and the two routes that work today. Never a setting name (L5).
+ * What "Yhdistä pankki" can do while the connection is not in use (BOOKS-03):
+ * one calm sentence and the two routes that work today. Whatever the server
+ * still needs is for its owner and never shown here (L5).
  */
 export default function BankSetupSheet({
   isOpen,
@@ -22,22 +24,10 @@ export default function BankSetupSheet({
 }) {
   const titleId = useId();
   return (
-    <BottomSheet isOpen={isOpen} onClose={onClose} title="Mitä tarvitaan" labelledBy={titleId} dirty={false}>
+    <BottomSheet isOpen={isOpen} onClose={onClose} title={BANK_COPY.setupTitle} labelledBy={titleId} dirty={false}>
       <div className="min-h-0 flex-1 space-y-5 overflow-y-auto px-5 pb-2 pt-1 sheet-safe-bottom">
         <div className="space-y-3 text-body leading-relaxed text-ink">
-          <p>
-            Pankkiyhteys hakee tilitapahtumat suoraan pankista Enable Banking -palvelun kautta. Sitä
-            varten palvelimelle tarvitaan kaksi asiaa:
-          </p>
-          <ol className="list-decimal space-y-1.5 pl-5 marker:text-ink-2">
-            <li>Enable Banking -sovelluksen tunnus</li>
-            <li>Sovelluksen yksityinen avain</li>
-          </ol>
-          <p className="text-caption text-ink-2">
-            Lisäksi sovelluksen paluuosoite hyväksytään Enable Bankingin hallinnassa. Kun tunnukset on
-            asetettu, &ldquo;Yhdistä pankki&rdquo; toimii tästä samasta kohdasta, eikä sovellusta
-            tarvitse päivittää.
-          </p>
+          <p>{BANK_COPY.setupLead}</p>
         </div>
 
         <div>

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { consentReconnectCopy } from "./bank-consent-copy";
+import { calmBankError, consentReconnectCopy, consentWithdrawn } from "./bank-consent-copy";
 
 const base = {
   status: "active",
@@ -47,5 +47,33 @@ describe("consentReconnectCopy", () => {
   it("warns when validUntil has passed even if status is still active", () => {
     const copy = consentReconnectCopy(base, new Date("2026-07-01T00:00:00.000Z"));
     expect(copy?.reason).toBe("Suostumus on vanhentunut.");
+  });
+});
+
+describe("G33: a stored operator text is never shown", () => {
+  it("replaces text that names settings or is the provider's English", () => {
+    for (const stored of [
+      "Ohjausosoite ei ole sallittu Enable Bankingissa. Tarkista ENABLEBANKING_REDIRECT_URL Control Panelissa.",
+      "Pankkiyhteyden tunnistautuminen epäonnistui. Tarkista sovelluksen avain ja APP_ID.",
+      "Forbidden",
+    ]) {
+      expect(calmBankError(stored)).toBe("Pankkiyhteys epäonnistui. Yritä uudelleen.");
+    }
+    expect(calmBankError("Pankki ei sallinut yhteyttä.")).toBe("Pankki ei sallinut yhteyttä.");
+    expect(calmBankError("  ")).toBeNull();
+  });
+
+  it("uses the calm text as the reconnect reason", () => {
+    const copy = consentReconnectCopy({ ...base, status: "error", lastError: "Tarkista sovelluksen avain ja APP_ID." });
+    expect(copy?.reason).toBe("Pankkiyhteys epäonnistui. Yritä uudelleen.");
+  });
+});
+
+describe("G31: a consent the bank withdrew", () => {
+  it("is a reconnect case with its own reason", () => {
+    const connection = { ...base, status: "expired", lastError: "Pankki on peruuttanut luvan." };
+    expect(consentWithdrawn(connection)).toBe(true);
+    expect(consentReconnectCopy(connection, new Date("2026-04-01T00:00:00.000Z"))?.reason).toBe("Pankki on peruuttanut luvan.");
+    expect(consentWithdrawn({ lastError: "Yhteys vanhentui — yhdistä uudelleen." })).toBe(false);
   });
 });

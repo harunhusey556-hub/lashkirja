@@ -4,12 +4,10 @@ import {
   EnableBankingClient,
   EnableBankingError,
   findAspsp,
-  publicBankError,
   type PsuContext,
   buildPsuHeaders,
   parseRequiredPsuHeaders,
 } from "./client";
-import { EnableBankingNotConfiguredError } from "./signing";
 import {
   authStateMatches,
   consentValidUntil,
@@ -19,19 +17,40 @@ import {
   psuIdForUser,
 } from "./consent";
 import { sessionAccountsForStorage, toPublicConnection, type PublicBankConnection } from "./mapping";
+import { CONSENT_REVOKED_MESSAGE } from "../bank-consent-copy";
 
 const connectionInclude = { accounts: { orderBy: { iban: "asc" as const } } };
+
+/**
+ * "revoked" is the owner's own Katkaise and, with nothing else set, a hidden
+ * tombstone. It is also where an attempt that never became a connection goes,
+ * and a connection that a newer one replaced: neither is something the owner
+ * has to confirm again. A bank that ends a consent is "expired" (it must be
+ * confirmed again) and stays visible.
+ */
+const RETIRED = { status: "revoked", sessionIdEnc: null, authStateHash: null, lastError: null } as const;
 
 export async function listBankConnections(userId: string): Promise<PublicBankConnection[]> {
   const cutoff = new Date(Date.now() - 60 * 60 * 1000);
   const authorizingCutoff = new Date(Date.now() - 15 * 60 * 1000);
   await prisma.bankConnection.updateMany({
     where: { userId, status: "pending", createdAt: { lt: cutoff } },
-    data: { status: "error", lastError: "Yhdistäminen vanheni. Yritä uudelleen." },
+    data: RETIRED,
   });
   await prisma.bankConnection.updateMany({
     where: { userId, status: "authorizing", updatedAt: { lt: authorizingCutoff } },
-    data: { status: "error", lastError: "Yhdistäminen keskeytyi. Yritä uudelleen." },
+    data: RETIRED,
+  });
+  // Earlier versions kept a failed attempt (no session was ever made) as an
+  // "error" card, and hid a consent the bank had withdrawn. A withdrawn consent
+  // is told as such; the failed attempts are gone.
+  await prisma.bankConnection.updateMany({
+    where: { userId, status: "error", sessionIdEnc: null },
+    data: RETIRED,
+  });
+  await prisma.bankConnection.updateMany({
+    where: { userId, status: "revoked", lastError: { not: null } },
+    data: { status: "expired", lastError: CONSENT_REVOKED_MESSAGE },
   });
   const rows = await prisma.bankConnection.findMany({
     where: { userId, status: { not: "revoked" } },
@@ -73,7 +92,7 @@ export async function startBankConsent(
       psuType: input.psuType,
       status: { in: ["pending", "authorizing"] },
     },
-    data: { status: "error", lastError: "Yhdistäminen korvattiin uudella yrityksellä." },
+    data: RETIRED,
   });
 
   const state = createAuthState(input.client);
@@ -102,11 +121,9 @@ export async function startBankConsent(
     });
     return { url: started.url, connectionId: connection.id };
   } catch (error) {
-    const message = error instanceof EnableBankingError ? publicBankError(error).message : "Pankkiyhteys epäonnistui. Yritä uudelleen.";
-    await prisma.bankConnection.update({
-      where: { id: connection.id },
-      data: { status: "error", lastError: message },
-    });
+    // No session was made: the attempt is not a connection, so nothing is left
+    // that asks the owner to confirm it again. The caller answers with the reason.
+    await prisma.bankConnection.update({ where: { id: connection.id }, data: RETIRED });
     throw error;
   }
 }
@@ -172,7 +189,28 @@ export async function completeBankConsent(
     }
     const validUntil = session.access?.valid_until ? new Date(session.access.valid_until) : null;
     await prisma.$transaction(async (db) => {
-      await db.connectedAccount.createMany({ data: accounts });
+      // A reconnect replaces what it renews: the earlier connection of the same
+      // bank that stopped working is retired, and the accounts the owner had
+      // chosen stay chosen. Done only now that the new session is really there,
+      // so a reconnect that fails leaves the old card to try again.
+      const earlier = await db.bankConnection.findMany({
+        where: {
+          userId,
+          id: { not: pending.id },
+          aspspName: pending.aspspName,
+          aspspCountry: pending.aspspCountry,
+          psuType: pending.psuType,
+          status: { in: ["expired", "error"] },
+        },
+        include: { accounts: true },
+      });
+      const chosen = new Set(earlier.flatMap((old) => old.accounts.filter((a) => a.inScope).map((a) => a.iban)));
+      await db.connectedAccount.createMany({
+        data: accounts.map((account) => ({ ...account, inScope: chosen.has(account.iban) })),
+      });
+      if (earlier.length > 0) {
+        await db.bankConnection.updateMany({ where: { id: { in: earlier.map((old) => old.id) } }, data: RETIRED });
+      }
       await db.bankConnection.update({
         where: { id: pending.id },
         data: {
@@ -189,16 +227,9 @@ export async function completeBankConsent(
     });
     return toPublicConnection(ready);
   } catch (error) {
-    const message =
-      error instanceof EnableBankingError
-        ? error.code === "NO_ACCOUNTS_ADDED"
-          ? error.message
-          : publicBankError(error).message
-        : "Pankkiyhteys epäonnistui. Yritä uudelleen.";
-    await prisma.bankConnection.update({
-      where: { id: pending.id },
-      data: { status: "error", lastError: message },
-    });
+    // Nothing was connected: the attempt leaves no card behind (the caller
+    // answers with the reason), and an earlier expired connection stays.
+    await prisma.bankConnection.update({ where: { id: pending.id }, data: RETIRED });
     throw error;
   }
 }
@@ -252,21 +283,29 @@ export async function revokeBankConnection(
       const api = client ?? new EnableBankingClient();
       await api.deleteSession(decrypt(connection.sessionIdEnc), headers);
     } catch (error) {
-      const terminal =
-        error instanceof EnableBankingNotConfiguredError ||
-        (error instanceof EnableBankingError &&
-          (error.status === 404 ||
-            error.code === "SESSION_DOES_NOT_EXIST" ||
-            error.code === "CLOSED_SESSION" ||
-            error.code === "REVOKED_SESSION" ||
-            error.code === "EXPIRED_SESSION" ||
-            error.code === "PSU_HEADER_NOT_PROVIDED"));
-      if (!terminal) {
+      // Only a session the bank no longer holds counts as closed. Anything else
+      // (the bank did not answer, refused, is not reachable from here) is not
+      // proof, so the connection stays as it is, with its session, and the
+      // owner is told it was not disconnected and can try again.
+      const closedAlready =
+        error instanceof EnableBankingError &&
+        (error.status === 404 ||
+          error.code === "SESSION_DOES_NOT_EXIST" ||
+          error.code === "CLOSED_SESSION" ||
+          error.code === "REVOKED_SESSION" ||
+          error.code === "EXPIRED_SESSION");
+      if (!closedAlready) {
+        if (error instanceof EnableBankingError && error.code === "PSU_HEADER_NOT_PROVIDED") throw error;
         console.error("Enable Banking session delete failed", {
           connectionId: connection.id,
           code: error instanceof EnableBankingError ? error.code : "unknown",
           status: error instanceof EnableBankingError ? error.status : undefined,
         });
+        throw new EnableBankingError(
+          "Pankkia ei tavoitettu, joten yhteyttä ei katkaistu. Yritä hetken päästä uudelleen.",
+          424,
+          "REVOKE_FAILED"
+        );
       }
     }
   }

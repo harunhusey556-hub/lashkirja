@@ -58,8 +58,11 @@ export interface BankState {
 export const BANK_COPY = {
   unconfiguredTitle: "Pankkiyhteys ei ole vielä käytössä",
   unconfiguredLine: "Ei vielä käytössä",
-  unconfiguredBody:
-    "Pankkiyhteyden tunnukset puuttuvat palvelimelta. Tilien tuonti tiedostona toimii.",
+  unconfiguredBody: "Tapahtumat voi tällä välin tuoda tiedostona tai kirjata käsin.",
+  /** The sheet behind "Yhdistä pankki" while the connection is not in use: what works today. */
+  setupTitle: "Pankkiyhteys",
+  setupLead: "Pankkiyhteys ei ole vielä käytössä. Kun se avataan, tapahtumat haetaan pankista automaattisesti.",
+  setupLink: "Mitä voin tehdä nyt?",
   connectTitle: "Yhdistä pankki",
   noneLine: "Ei yhdistetty",
   noneBody: "Tapahtumat haetaan pankista automaattisesti, noin kuuden tunnin välein.",

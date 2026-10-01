@@ -1,4 +1,6 @@
 import type { EbBalance, EbSessionAccount, EbTransaction } from "./mapping";
+import { CONSENT_REVOKED_MESSAGE, GENERIC_BANK_ERROR, RATE_LIMITED_MESSAGE } from "../bank-consent-copy";
+import { logBankOperatorHint } from "./public-status";
 import {
   loadEnableBankingConfig,
   signEnableBankingJwt,
@@ -163,15 +165,15 @@ export function isWrongTransactionsPeriod(error: unknown): boolean {
 
 export function publicBankError(error: EnableBankingError): { message: string; status: number } {
   if (sessionTerminalStatus(error)) {
+    if (error.code === "REVOKED_SESSION") return { message: CONSENT_REVOKED_MESSAGE, status: 409 };
     return { message: "Yhteys vanhentui — yhdistä uudelleen.", status: 409 };
   }
+  // What the owner of the server must fix goes to the server log; the person
+  // using the app gets one calm sentence (QUALITY-BAR L5).
   switch (error.code) {
     case "REDIRECT_URI_NOT_ALLOWED":
-      return {
-        message:
-          "Ohjausosoite ei ole sallittu Enable Bankingissa. Tarkista ENABLEBANKING_REDIRECT_URL Control Panelissa.",
-        status: 502,
-      };
+      logBankOperatorHint("Enable Banking refused the redirect URL: allow ENABLEBANKING_REDIRECT_URL in the Control Panel.");
+      return { message: "Pankkiyhteyttä ei voitu avata. Yritä myöhemmin uudelleen.", status: 502 };
     case "WRONG_ASPSP_PROVIDED":
       return { message: "Pankkia ei löytynyt. Valitse pankki uudelleen.", status: 400 };
     case "EXPIRED_AUTHORIZATION_CODE":
@@ -180,7 +182,7 @@ export function publicBankError(error: EnableBankingError): { message: string; s
     case "ACCESS_DENIED":
       return { message: "Pankki ei sallinut yhteyttä.", status: 400 };
     case "ASPSP_RATE_LIMIT_EXCEEDED":
-      return { message: "Pankki rajoitti pyyntöjä. Yritä myöhemmin uudelleen.", status: 429 };
+      return { message: RATE_LIMITED_MESSAGE, status: 429 };
     case "INVALID_RESPONSE":
       return { message: "Pankin vastausta ei voitu lukea. Yritä uudelleen.", status: 502 };
     case "STATE_MISMATCH":
@@ -192,18 +194,16 @@ export function publicBankError(error: EnableBankingError): { message: string; s
       break;
   }
   if (error.status === 401 || error.status === 403) {
-    return {
-      message: "Pankkiyhteyden tunnistautuminen epäonnistui. Tarkista sovelluksen avain ja APP_ID.",
-      status: 502,
-    };
+    logBankOperatorHint(`Enable Banking rejected the app credentials (${error.status}): check the app id and the private key.`);
+    return { message: "Pankkiyhteyden tunnistautuminen epäonnistui. Yritä myöhemmin uudelleen.", status: 502 };
   }
   if (error.status === 429) {
-    return { message: "Pankki rajoitti pyyntöjä. Yritä myöhemmin uudelleen.", status: 429 };
+    return { message: RATE_LIMITED_MESSAGE, status: 429 };
   }
   if (error.status >= 400 && error.status < 500 && /[äöåÄÖÅ]/.test(error.message)) {
     return { message: error.message, status: error.status };
   }
-  return { message: "Pankkiyhteys epäonnistui. Yritä uudelleen.", status: 502 };
+  return { message: GENERIC_BANK_ERROR, status: 502 };
 }
 
 export function findAspsp(

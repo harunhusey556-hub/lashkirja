@@ -3,6 +3,28 @@
  * `lastSuccessAt` only — a failed attempt must not look like a successful fetch.
  */
 
+/** The bank itself withdrew the consent (the owner did not press Katkaise). */
+export const CONSENT_REVOKED_MESSAGE = "Pankki on peruuttanut luvan.";
+/** A bank asked the app to slow down. */
+export const RATE_LIMITED_MESSAGE = "Pankki pyytää odottamaan. Yritä hetken päästä uudelleen.";
+/** Any bank-side failure the owner cannot act on. */
+export const GENERIC_BANK_ERROR = "Pankkiyhteys epäonnistui. Yritä uudelleen.";
+
+/** Older rows stored text written for the server's operator; never show it. */
+const OPERATOR_TEXT = /ENABLEBANKING|APP_ID|Control Panel|sovelluksen avain|palvelimelta|Forbidden|Unauthorized/i;
+
+/** A stored bank error, as the owner may read it. */
+export function calmBankError(text: string | null | undefined): string | null {
+  const trimmed = text?.trim();
+  if (!trimmed) return null;
+  return OPERATOR_TEXT.test(trimmed) ? GENERIC_BANK_ERROR : trimmed;
+}
+
+/** True for a connection the bank itself ended with a withdrawn consent. */
+export function consentWithdrawn(connection: { lastError: string | null }): boolean {
+  return connection.lastError?.trim() === CONSENT_REVOKED_MESSAGE;
+}
+
 export interface ConsentAccount {
   iban: string;
   label: string | null;
@@ -44,7 +66,7 @@ export function consentReconnectCopy(
   if (!broken) return null;
 
   const reason =
-    connection.lastError?.trim() ||
+    calmBankError(connection.lastError) ||
     (connection.status === "revoked"
       ? "Suostumus on katkaistu pankissa."
       : connection.status === "error" && !expired

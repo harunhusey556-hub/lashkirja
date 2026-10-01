@@ -18,7 +18,11 @@ export function respondToBankError(error: unknown) {
     if (error.code === "NOT_FOUND") {
       return noStoreJson({ error: error.message }, { status: 404 });
     }
-    if (error.code === "NO_ACCOUNTS_ADDED" || error.code === "PSU_HEADER_NOT_PROVIDED") {
+    if (
+      error.code === "NO_ACCOUNTS_ADDED" ||
+      error.code === "PSU_HEADER_NOT_PROVIDED" ||
+      error.code === "REVOKE_FAILED"
+    ) {
       return noStoreJson({ error: error.message }, { status: error.status });
     }
     const mapped = publicBankError(error);

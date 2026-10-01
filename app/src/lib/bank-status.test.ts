@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { bankState, fetchedWhen, type BankConnectionSummary } from "./bank-status";
+import { BANK_COPY, bankState, fetchedWhen, type BankConnectionSummary } from "./bank-status";
 
 const NOW = new Date(2026, 8, 29, 14, 30);
 
@@ -83,5 +83,14 @@ describe("fetchedWhen", () => {
     expect(fetchedWhen(new Date(2026, 8, 29, 9, 0).toISOString(), NOW)).toBe("9.00");
     expect(fetchedWhen(new Date(2026, 8, 28, 9, 0).toISOString(), NOW)).toBe("28.9.");
     expect(fetchedWhen(new Date(2025, 11, 31, 9, 0).toISOString(), NOW)).toBe("31.12.2025");
+  });
+});
+
+describe("F16 / G33: the not-in-use copy is written for the person using the app", () => {
+  it("names no server, setting, key or provider, and still says what works", () => {
+    const words = Object.values(BANK_COPY).join(" ");
+    expect(words).not.toMatch(/palvelim|tunnus|avain|paluuosoite|Enable Banking|ENABLEBANKING|APP_ID|hallinta/i);
+    expect(BANK_COPY.unconfiguredBody).toMatch(/tiedostona/);
+    expect(BANK_COPY.unconfiguredBody).toMatch(/käsin/);
   });
 });
