@@ -238,6 +238,9 @@ export const config = {
     // Pages: everything except /api (handled above), Next internals, and
     // files served from public/. The fixed-name exclusions are anchored
     // with `$` so a real page like /manifest.jsonfoo is still matched.
-    "/((?!api/|_next/|favicon\\.ico$|manifest\\.json$|offline\\.html$|index\\.html$|icons/|.*\\.(?:png|svg|jpg|jpeg|webp|ico|txt|webmanifest)$).*)",
+    // OWN-21: Apple's CDN fetches /.well-known/apple-app-site-association
+    // anonymously before iOS lets the app use passkeys; a redirect to /login
+    // there breaks passkeys, so the proxy never runs on it.
+    "/((?!api/|_next/|favicon\\.ico$|manifest\\.json$|offline\\.html$|index\\.html$|\\.well-known/apple-app-site-association$|icons/|.*\\.(?:png|svg|jpg|jpeg|webp|ico|txt|webmanifest)$).*)",
   ],
 };
