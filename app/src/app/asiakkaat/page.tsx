@@ -346,7 +346,7 @@ export default function CustomersPage() {
         <Card className="space-y-3">
           <p className="text-body font-medium text-ink">Tuo asiakkaita</p>
           <p className="text-caption text-ink-2">
-            Valitse CSV-tiedosto tai liitä sen sisältö. Ensimmäinen rivi on otsikko.
+            Valitse CSV-tiedosto tai liitä sen sisältö. Ensimmäinen rivi on otsikko. Erotin voi olla pilkku tai puolipiste.
           </p>
           <label className={buttonClass("secondary", "w-full cursor-pointer")}>
             Valitse tiedosto

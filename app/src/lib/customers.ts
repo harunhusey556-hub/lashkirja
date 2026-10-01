@@ -6,7 +6,7 @@ import { expectedUpdatedAtDate, versionConflict } from "./edit-conflict";
 
 type Writer = Prisma.TransactionClient | typeof prisma;
 import { isValidBusinessId, normalizeBusinessId } from "./finnish-reference";
-import { parseCustomerCsv, type CustomerCsvRow } from "./customer-import";
+import { CustomerCsvFileError, parseCustomerCsv, type CustomerCsvRow } from "./customer-import";
 import {
   DEFAULT_PAYMENT_TERM_DAYS,
   displayStatus,
@@ -431,7 +431,13 @@ export async function importCustomers(
   csv: string,
   commit: boolean
 ): Promise<CustomerImportResult> {
-  const rows = parseCustomerCsv(csv);
+  let rows: CustomerCsvRow[];
+  try {
+    rows = parseCustomerCsv(csv);
+  } catch (error) {
+    if (error instanceof CustomerCsvFileError) throw new ValidationError(error.message);
+    throw error;
+  }
   if (!commit) return { rows, created: 0 };
 
   let created = 0;

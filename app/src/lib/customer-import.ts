@@ -2,6 +2,8 @@
  * CSV preview for the customer register.
  *
  * Invalid rows are reported and never inserted. A header row is optional.
+ * The separator (comma, semicolon or tab) is detected, because Finnish
+ * Excel and Sheets write semicolons.
  */
 import { isValidBusinessId, normalizeBusinessId } from "./finnish-reference";
 
@@ -16,41 +18,89 @@ export interface CustomerCsvRow {
 
 const EMAIL = /^[^\s@]+@[^\s@.]+(\.[^\s@.]+)+$/;
 
-function unquote(value: string): string {
-  const trimmed = value.trim();
-  if (trimmed.startsWith('"') && trimmed.endsWith('"')) {
-    return trimmed.slice(1, -1).replace(/""/g, '"').trim();
+/** Picks the separator from the first non-empty line, ignoring quoted text. */
+function detectDelimiter(text: string): string {
+  const counts: Record<string, number> = { ",": 0, ";": 0, "\t": 0 };
+  let quoted = false;
+  let seenContent = false;
+  for (const char of text) {
+    if (char === '"') {
+      quoted = !quoted;
+      seenContent = true;
+      continue;
+    }
+    if (!quoted && (char === "\n" || char === "\r")) {
+      if (seenContent) break;
+      continue;
+    }
+    if (!/\s/.test(char)) seenContent = true;
+    if (!quoted && char in counts) counts[char] += 1;
   }
-  return trimmed;
+  let best = ",";
+  for (const candidate of [";", "\t"]) {
+    if (counts[candidate] > counts[best]) best = candidate;
+  }
+  return best;
 }
 
-/** Splits one CSV line on commas, keeping quoted commas together. */
-export function splitCsvLine(line: string): string[] {
-  const cells: string[] = [];
+/**
+ * Parses the whole text as CSV (RFC 4180): quoted cells may contain the
+ * separator, a line break or a doubled quote. Rows that are entirely empty
+ * are dropped.
+ */
+export function parseCsvTable(text: string): string[][] {
+  const input = text.replace(/^﻿/, "");
+  const delimiter = detectDelimiter(input);
+  const table: string[][] = [];
+  let row: string[] = [];
   let current = "";
   let quoted = false;
-  for (let i = 0; i < line.length; i += 1) {
-    const char = line[i];
-    if (char === '"') {
-      if (quoted && line[i + 1] === '"') {
-        current += '"';
-        i += 1;
+
+  const endCell = () => {
+    row.push(current.trim());
+    current = "";
+  };
+  const endRow = () => {
+    endCell();
+    if (row.some((value) => value.length > 0)) table.push(row);
+    row = [];
+  };
+
+  for (let i = 0; i < input.length; i += 1) {
+    const char = input[i];
+    if (quoted) {
+      if (char === '"') {
+        if (input[i + 1] === '"') {
+          current += '"';
+          i += 1;
+        } else {
+          quoted = false;
+        }
       } else {
-        quoted = !quoted;
         current += char;
       }
       continue;
     }
-    if (char === "," && !quoted) {
-      cells.push(unquote(current));
+    if (char === '"' && current.trim() === "") {
+      quoted = true;
       current = "";
-      continue;
+    } else if (char === delimiter) {
+      endCell();
+    } else if (char === "\n" || char === "\r") {
+      if (char === "\r" && input[i + 1] === "\n") i += 1;
+      endRow();
+    } else {
+      current += char;
     }
-    current += char;
   }
-  cells.push(unquote(current));
-  return cells;
+  endRow();
+  return table;
 }
+
+/** The file could not be read as a customer list at all. */
+export class CustomerCsvFileError extends Error {}
+
+const HEADER_WORDS = ["email", "sähköposti", "sahkoposti", "phone", "puhelin", "businessid", "y-tunnus", "ytunnus"];
 
 function headerIndex(header: string[]): Record<string, number> | null {
   const normalized = header.map((cell) => cell.trim().toLowerCase());
@@ -71,22 +121,22 @@ function cell(cells: string[], index: number): string {
 }
 
 export function parseCustomerCsv(text: string): CustomerCsvRow[] {
-  const lines = text
-    .replace(/^\uFEFF/, "")
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter((line) => line.length > 0);
-  if (lines.length === 0) return [];
+  const table = parseCsvTable(text);
+  if (table.length === 0) return [];
 
-  const first = splitCsvLine(lines[0]);
+  const first = table[0];
   const columns = headerIndex(first);
-  const dataLines = columns ? lines.slice(1) : lines;
+  if (!columns && first.some((value) => HEADER_WORDS.includes(value.toLowerCase()))) {
+    throw new CustomerCsvFileError(
+      "Tiedostoa ei voitu lukea: otsikkoriviltä puuttuu Nimi-sarake. Tarkista erotin (, tai ;) ja otsikkorivi."
+    );
+  }
+  const dataLines = columns ? table.slice(1) : table;
   const index = columns ?? { name: 0, email: 1, phone: 2, businessId: 3 };
   const seen = new Set<string>();
   const rows: CustomerCsvRow[] = [];
 
-  dataLines.forEach((line, offset) => {
-    const cells = splitCsvLine(line);
+  dataLines.forEach((cells, offset) => {
     const name = cell(cells, index.name);
     const emailRaw = cell(cells, index.email);
     const phone = cell(cells, index.phone);
