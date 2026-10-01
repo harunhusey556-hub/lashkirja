@@ -1,0 +1,15 @@
+/* Koti charts (OWN-22). Only what the shared chart classes in globals.css do
+   not already give: a scrub surface that never selects text or opens the iOS
+   callout while a finger reads the line. */
+.plot {
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .plot {
+    cursor: crosshair;
+  }
+}

@@ -66,7 +66,9 @@ import {
   rememberKotiMonth,
 } from "@/lib/koti-month";
 import { kotiGreeting } from "@/lib/koti-greeting";
-import { kotiBankRow, type KotiBank } from "@/lib/koti-bank";
+import { kotiBankRow, kotiBankState, type KotiBank } from "@/lib/koti-bank";
+import { BalanceTrendCard, type BalanceTrendPoint } from "@/components/charts/BalanceTrendCard";
+import { CashflowCard, type CashflowRow } from "@/components/charts/CashflowCard";
 import { handledDetail, handledHref, handledTitle, type Handled } from "@/lib/koti-handled";
 import { useVatDue } from "@/components/useVatDue";
 import { approvalGapText } from "@/lib/receipt-approval";
@@ -113,6 +115,10 @@ interface DashboardData {
   pendingReceiptsCount?: number;
   /** OWN-18: ledger accounts plus the accounts of a bank consent (lib/bank-position.ts). */
   bank?: KotiBank | null;
+  /** OWN-22: monthly closing balance of the counted accounts; null under two months. */
+  bankTrend?: { points: BalanceTrendPoint[] } | null;
+  /** OWN-22: the last six months' income and expenses (Koti's month rule). */
+  cashflow?: CashflowRow[] | null;
   receivables?: Position;
   payables?: Position;
   isSingleVatProfile?: boolean;
@@ -753,6 +759,9 @@ export default function DashboardClient() {
     </button>
   );
   const bankRow = kotiBankRow(data?.bank);
+  // OWN-22: a connected bank with a known balance gets the balance card (its
+  // link replaces the Pankkitilit row); every other state keeps the row and its pill.
+  const showBalanceCard = Boolean(data?.bank && kotiBankState(data.bank) === "connected" && bankRow.amount !== undefined);
   const matching = data?.matching;
   const events = data?.events ?? (matching ? { done: matching.matched, total: matching.matchable } : null);
   const documentsBasis = data?.source !== "tiliote";
@@ -1026,9 +1035,31 @@ export default function DashboardClient() {
             </div>
           </section>
 
+          <CashflowCard
+            rows={data.cashflow}
+            shownMonth={month}
+            onSelectMonth={(next) => {
+              setRefreshFailed(null);
+              setMonth(next);
+            }}
+          />
+
           {data.sectionErrors?.position ? null : (
             // F26: the balances and receivables are as of today, whichever month is shown.
-            <Section title={atCurrent ? "Rahatilanne" : "Rahatilanne tänään"}>
+            <section>
+              <h2 className="mb-2 px-1 text-caption font-normal text-ink-2">{atCurrent ? "Rahatilanne" : "Rahatilanne tänään"}</h2>
+              {showBalanceCard && data.bank ? (
+                <div className="mb-3">
+                  <BalanceTrendCard
+                    total={data.bank.totalBalance}
+                    accountCount={data.bank.accountCount}
+                    points={data.bankTrend === undefined ? undefined : (data.bankTrend?.points ?? null)}
+                    animateKey="koti-balance"
+                  />
+                </div>
+              ) : null}
+            <Section>
+              {showBalanceCard ? null : (
               <ListRow
                 href="/kirjanpito/pankkitilit"
                 leading={<Icon icon={Landmark} />}
@@ -1044,6 +1075,7 @@ export default function DashboardClient() {
                   ) : undefined
                 }
               />
+              )}
               <ListRow
                 href="/laskut"
                 leading={<Icon icon={Wallet} />}
@@ -1076,6 +1108,7 @@ export default function DashboardClient() {
                 />
               ) : null}
             </Section>
+            </section>
           )}
 
           {data.sectionErrors?.threshold ? null : !data.vat.registered && data.vat.ytdRevenue >= data.vat.threshold * 0.75 ? (
