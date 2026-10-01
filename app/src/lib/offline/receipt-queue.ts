@@ -239,6 +239,44 @@ export function pickNextQueued(items: QueuedReceipt[], now: number = Date.now())
   return candidates[0] ?? null;
 }
 
+/**
+ * The connection came back: every row that is only waiting out a backoff is
+ * due now. Attempts are kept, so a row that keeps failing while online still
+ * reaches the cap. (Pure: the driver saves the returned rows.)
+ */
+export function releaseBackoff(items: QueuedReceipt[], now: number = Date.now()): QueuedReceipt[] {
+  return items.map((item) =>
+    item.status === "queued" && item.nextAttemptAt > now ? { ...item, nextAttemptAt: now } : item
+  );
+}
+
+/**
+ * What to store after a send failed without any answer from the server. While
+ * the device is offline the failure says nothing about the upload, so it does
+ * not spend the attempt budget or push the next try out: the reconnect sends
+ * it. Online failures keep the exponential backoff.
+ */
+export function retryPatchAfterNetworkFailure(
+  item: QueuedReceipt,
+  context: { deviceOffline: boolean; now?: number }
+): Pick<QueuedReceipt, "status" | "attempts" | "nextAttemptAt" | "lastError"> {
+  if (context.deviceOffline) {
+    return {
+      status: "queued",
+      attempts: item.attempts,
+      nextAttemptAt: item.nextAttemptAt,
+      lastError: "Odottaa yhteyttä.",
+    };
+  }
+  const attempts = item.attempts + 1;
+  return {
+    status: "queued",
+    attempts,
+    nextAttemptAt: (context.now ?? Date.now()) + nextAttemptDelayMs(attempts),
+    lastError: "Ei yhteyttä. Lähetetään uudelleen automaattisesti.",
+  };
+}
+
 /** The earliest `nextAttemptAt` among still-queued rows, for the driver's
  * timer -- null when there is nothing waiting on a delay. */
 export function earliestNextAttemptAt(items: QueuedReceipt[]): number | null {

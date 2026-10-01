@@ -30,6 +30,8 @@ import {
   MAX_SEND_ATTEMPTS,
   nextAttemptDelayMs,
   pickNextQueued,
+  releaseBackoff,
+  retryPatchAfterNetworkFailure,
   pruneDoneReceipts,
   recoverCrashedSends,
   ReceiptDecryptError,
@@ -162,6 +164,36 @@ describe("pickNextQueued", () => {
 
   it("returns null for an empty queue", () => {
     expect(pickNextQueued([], 1_000)).toBeNull();
+  });
+});
+
+describe("reconnect (F31)", () => {
+  it("releaseBackoff makes every waiting row due now, so the reconnect sends at once", () => {
+    const items = [
+      makeItem({ id: "a", attempts: 2, nextAttemptAt: 600_000 }),
+      makeItem({ id: "b", status: "failed", nextAttemptAt: 600_000 }),
+    ];
+    const released = releaseBackoff(items, 1_000);
+    expect(pickNextQueued(released, 1_000)?.id).toBe("a");
+    // The failed row stays failed and untouched.
+    expect(released.find((row) => row.id === "b")?.nextAttemptAt).toBe(600_000);
+    // The attempt count is not erased: the cap still bounds online failures.
+    expect(released.find((row) => row.id === "a")?.attempts).toBe(2);
+  });
+
+  it("a failure while the device is offline neither spends an attempt nor lengthens the wait", () => {
+    const item = makeItem({ attempts: 1, nextAttemptAt: 0 });
+    const patch = retryPatchAfterNetworkFailure(item, { deviceOffline: true, now: 10_000 });
+    expect(patch.attempts).toBe(1);
+    expect(patch.nextAttemptAt).toBe(0);
+    expect(patch.status).toBe("queued");
+  });
+
+  it("a failure while online still backs off and counts", () => {
+    const item = makeItem({ attempts: 1, nextAttemptAt: 0 });
+    const patch = retryPatchAfterNetworkFailure(item, { deviceOffline: false, now: 10_000 });
+    expect(patch.attempts).toBe(2);
+    expect(patch.nextAttemptAt).toBe(10_000 + nextAttemptDelayMs(2));
   });
 });
 

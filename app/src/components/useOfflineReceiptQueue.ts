@@ -33,6 +33,8 @@ import {
   listQueuedReceipts,
   nextAttemptDelayMs,
   pickNextQueued,
+  releaseBackoff,
+  retryPatchAfterNetworkFailure,
   pruneDoneReceipts,
   recoverCrashedSends,
   saveQueuedReceipt,
@@ -58,6 +60,8 @@ let currentUserId: string | null = null;
 let wired = false;
 let draining = false;
 let paused = false;
+/** A reconnect arrived while a drain was running: run once more with the backoff released. */
+let releaseAgain = false;
 let drainTimer: ReturnType<typeof setTimeout> | null = null;
 
 function emit(): void {
@@ -69,6 +73,11 @@ async function refresh(userId: string): Promise<QueuedReceipt[]> {
   rows = items.map(toRow);
   emit();
   return items;
+}
+
+/** The device itself has no network: a send now cannot reach the server. */
+function deviceIsOffline(): boolean {
+  return typeof navigator !== "undefined" && navigator.onLine === false;
 }
 
 function clearDrainTimer(): void {
@@ -171,13 +180,15 @@ async function sendOne(userId: string, item: QueuedReceipt): Promise<void> {
     await saveQueuedReceipt({ ...item, status: "queued" });
     return;
   }
-  const attempts = item.attempts + 1;
   if (outcome === "retry") {
+    const offlineNow = status === "network-error" && deviceIsOffline();
+    const attempts = offlineNow ? item.attempts : item.attempts + 1;
     // Security review I2 (client half): 5xx and network-error outcomes
     // used to retry forever. Past MAX_SEND_ATTEMPTS this stops being an
     // automatic retry and becomes a permanent "failed" -- the existing
     // retry button (`retry()` below, which resets `attempts`) is how the
-    // person gets another automatic budget.
+    // person gets another automatic budget. A failure while the device is
+    // offline spends nothing (F31): the reconnect sends the photo at once.
     if (exceedsRetryCap(attempts)) {
       await saveQueuedReceipt({
         ...item,
@@ -190,6 +201,10 @@ async function sendOne(userId: string, item: QueuedReceipt): Promise<void> {
       });
       return;
     }
+    if (status === "network-error") {
+      await saveQueuedReceipt({ ...item, ...retryPatchAfterNetworkFailure(item, { deviceOffline: offlineNow }) });
+      return;
+    }
     await saveQueuedReceipt({
       ...item,
       status: "queued",
@@ -199,6 +214,7 @@ async function sendOne(userId: string, item: QueuedReceipt): Promise<void> {
     });
     return;
   }
+  const attempts = item.attempts + 1;
   // "failed": a permanent 4xx -- surfaced in the card with retry/delete.
   await saveQueuedReceipt({
     ...item,
@@ -208,28 +224,49 @@ async function sendOne(userId: string, item: QueuedReceipt): Promise<void> {
   });
 }
 
-async function drain(userId: string): Promise<void> {
-  if (!IS_MOBILE_BUILD || draining || paused) return;
+async function drain(userId: string, options: { releaseBackoff?: boolean } = {}): Promise<void> {
+  if (!IS_MOBILE_BUILD || paused) return;
+  if (draining) {
+    if (options.releaseBackoff) releaseAgain = true;
+    return;
+  }
   draining = true;
   clearDrainTimer();
   try {
     await pruneDoneReceipts(userId);
     let items = await refresh(userId);
-    while (!paused) {
+    if (options.releaseBackoff) {
+      // The connection returned: rows that were only waiting out a backoff
+      // are due now (F31).
+      const now = Date.now();
+      for (const row of releaseBackoff(items, now)) {
+        const before = items.find((item) => item.id === row.id);
+        if (before && before.nextAttemptAt !== row.nextAttemptAt) await saveQueuedReceipt(row);
+      }
+      items = await refresh(userId);
+    }
+    // No network: nothing to try. The online / reconnect triggers drain again.
+    while (!paused && !deviceIsOffline()) {
       const next = pickNextQueued(items, Date.now());
       if (!next) break;
       await sendOne(userId, next);
       items = await refresh(userId);
     }
-    scheduleDrain(items, userId);
+    // Offline there is nothing to wait for: the reconnect triggers drain
+    // again, and a timer on an already-due row would spin.
+    if (!deviceIsOffline()) scheduleDrain(items, userId);
   } finally {
     draining = false;
+    if (releaseAgain) {
+      releaseAgain = false;
+      void drain(userId, { releaseBackoff: true });
+    }
   }
 }
 
-function requestDrain(userId: string | null): void {
+function requestDrain(userId: string | null, options: { releaseBackoff?: boolean } = {}): void {
   if (!IS_MOBILE_BUILD || !userId) return;
-  void drain(userId);
+  void drain(userId, options);
 }
 
 async function wireAppStateChange(): Promise<void> {
@@ -238,7 +275,7 @@ async function wireAppStateChange(): Promise<void> {
     if (!Capacitor.isNativePlatform()) return;
     const { App } = await import("@capacitor/app");
     await App.addListener("appStateChange", (state) => {
-      if (state.isActive) requestDrain(currentUserId);
+      if (state.isActive) requestDrain(currentUserId, { releaseBackoff: true });
     });
   } catch {
     // No native App plugin (web, or an IPA built before it was added) --
@@ -251,8 +288,8 @@ async function wireAppStateChange(): Promise<void> {
 function wireOnce(): void {
   if (wired || typeof window === "undefined") return;
   wired = true;
-  window.addEventListener("online", () => requestDrain(currentUserId));
-  document.addEventListener("lashkirja-reconnected", () => requestDrain(currentUserId));
+  window.addEventListener("online", () => requestDrain(currentUserId, { releaseBackoff: true }));
+  document.addEventListener("lashkirja-reconnected", () => requestDrain(currentUserId, { releaseBackoff: true }));
   void wireAppStateChange();
   // A fresh sign-in un-pauses a queue stopped by a 401, and re-arms the
   // queue for whichever user just signed in (a device shared between
