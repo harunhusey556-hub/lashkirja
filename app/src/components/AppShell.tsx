@@ -56,6 +56,7 @@ import {
 import { hapticImpact } from "@/lib/haptics";
 import { EDGE_FINISH_MS, EDGE_ZONE, edgeSwipeCommits, VelocityTracker } from "@/lib/gesture";
 import { anyFormDirty, requestLeave } from "@/lib/form-guard";
+import { keepPendingTab, PENDING_TAB_TIMEOUT_MS, type PendingTab } from "@/lib/pending-tab";
 import { UnsavedChangesHost } from "@/components/UnsavedChangesHost";
 import { captureWithCamera, chooseDocuments, isNativeShell } from "@/lib/native-pick";
 import {
@@ -304,9 +305,17 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   // path's own root: a cross-tab push keeps its origin tab lit (IA-07).
   const landedTabId = typeof window === "undefined" ? rootIdOf(pathname) : tabAfterLanding(pathname, direction);
   // OWN-19: the tapped tab lights up on the tap, as on iOS, not only once the
-  // new screen has loaded. Dropped as soon as any navigation lands.
-  const [pendingTab, setPendingTab] = useState<{ id: string; from: string } | null>(null);
-  const activeTabId = pendingTab && pendingTab.from === pathname ? pendingTab.id : landedTabId;
+  // new screen has loaded. Dropped on any path change (adjusted during render,
+  // like navFrame above) and after a timeout if the push never lands.
+  const [pendingTab, setPendingTab] = useState<PendingTab | null>(null);
+  if (pendingTab && keepPendingTab(pendingTab, pathname) === null) setPendingTab(null);
+  const livePending = keepPendingTab(pendingTab, pathname);
+  const activeTabId = livePending ? livePending.id : landedTabId;
+  useEffect(() => {
+    if (!pendingTab) return;
+    const timer = window.setTimeout(() => setPendingTab(null), PENDING_TAB_TIMEOUT_MS);
+    return () => window.clearTimeout(timer);
+  }, [pendingTab]);
   // SHELL-31: the back button returns to the real previous screen when there
   // is one, so the label names that screen, not the logical parent.
   const previousScreen = typeof window === "undefined" ? null : previousAfterLanding(pathname, direction);
