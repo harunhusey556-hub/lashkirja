@@ -7,12 +7,13 @@ import ConfirmModal from "@/components/ConfirmModal";
 import { apiFetch, errorMessage, isUnauthorized, readJson, redirectToLogin } from "@/components/clientFetch";
 import { ConnectionNotice } from "@/components/ScreenState";
 import { Button } from "@/components/ui";
+import { buttonClass } from "@/components/control-styles";
 import { Icon, IconTile } from "@/components/ds";
 import { Skeleton } from "@/components/ds/Skeleton";
 import BankPickerSheet, { BankLogo } from "@/components/bank/BankPickerSheet";
 import BankSetupSheet from "@/components/bank/BankSetupSheet";
 import { useBankConnections } from "@/components/bank/useBankConnections";
-import { consentReconnectCopy } from "@/lib/bank-consent-copy";
+import { calmBankError, consentReconnectCopy, consentWithdrawn } from "@/lib/bank-consent-copy";
 import { consumeInterruptedBankAuth } from "@/lib/open-bank-auth";
 import { accountOutcomeText, isSyncNotice, syncOutcomeMessage, type AccountSyncRow } from "@/lib/bank-sync-summary";
 import { BANK_COPY, bankState, type BankAccountSummary, type BankConnectionSummary } from "@/lib/bank-status";
@@ -66,9 +67,26 @@ function useConnectSheets() {
  */
 export function BankConnectRow() {
   const { data, error } = useBankConnections();
+  return <BankConnectRowView data={data} error={error} />;
+}
+
+/**
+ * The row for a page that loads the connections itself (the Kirjanpito hub):
+ * with `quietError` a failed load leaves the line blank, because the page's
+ * one failure card says it (F34).
+ */
+export function BankConnectRowView({
+  data,
+  error,
+  quietError = false,
+}: {
+  data: ReturnType<typeof useBankConnections>["data"];
+  error: unknown;
+  quietError?: boolean;
+}) {
   const sheets = useConnectSheets();
   const state = data ? bankState(data) : null;
-  const line = state ? state.line : error ? "Tilaa ei saatu haettua" : " ";
+  const line = state ? state.line : error && !quietError ? "Tilaa ei saatu haettua" : " ";
   const title = "Pankki";
 
   const pill =
@@ -305,18 +323,20 @@ export default function BankConnectCard({
           <Skeleton radius="card" className="h-12 w-full" />
         ) : state.kind === "unconfigured" ? (
           <>
-            {/* Looks unavailable, stays tappable: the tap explains what is missing. */}
+            {/* Not the dark primary, because it cannot connect yet, but fully legible
+                and still tappable: the tap says what works today. */}
             <button
               type="button"
               onClick={sheets.openSetup}
+              aria-disabled="true"
               aria-describedby="bank-unconfigured-note"
-              className="active-press flex min-h-12 w-full items-center justify-center rounded-card bg-ink/30 px-4 text-body font-semibold text-canvas"
+              className={buttonClass("secondary", "w-full")}
             >
               Yhdistä pankki
             </button>
             <p id="bank-unconfigured-note" className="text-center text-caption text-ink-2">
               <button type="button" onClick={sheets.openSetup} className="active-press min-h-11 font-medium text-accent">
-                Mitä tarvitaan?
+                {BANK_COPY.setupLink}
               </button>
             </p>
             {/* The routes that work today. "Lisää tili käsin" is in "Mitä tarvitaan"
@@ -423,8 +443,11 @@ function ConnectionBlock({
   onToggleAccount: (account: BankAccountSummary) => void;
 }) {
   const reconnect = consentReconnectCopy(connection);
+  const withdrawn = consentWithdrawn(connection);
   const canSync = connection.status === "active" && !reconnect;
   const hasScope = connection.accounts.some((account) => account.inScope);
+  // Older rows can still hold text written for the server's operator.
+  const shownError = calmBankError(connection.lastError);
   return (
     <div className="space-y-3 rounded-card border border-line p-3" data-testid="bank-connection">
       <div className="flex items-start gap-3">
@@ -432,7 +455,7 @@ function ConnectionBlock({
         <div className="min-w-0 flex-1">
           <p className="text-body font-medium text-ink">{connection.aspspName}</p>
           <p className="mt-0.5 text-caption text-ink-2">
-            {STATUS_LABEL[connection.status] || "Tuntematon tila"} ·{" "}
+            {withdrawn ? "Lupa peruttu" : STATUS_LABEL[connection.status] || "Tuntematon tila"} ·{" "}
             {connection.psuType === "business" ? "Yritystili" : "Henkilötili"}
           </p>
           <p className="mt-0.5 text-caption text-ink-2">Viimeisin onnistunut haku {formatWhen(connection.lastSuccessAt)}</p>
@@ -441,24 +464,28 @@ function ConnectionBlock({
 
       {reconnect && (
         <div className="space-y-1 rounded-card bg-accent-soft px-3 py-3" role="status">
-          <p className="text-sm font-medium text-ink">Yhteys pitää vahvistaa uudelleen</p>
-          <p className="text-sm leading-relaxed text-ink">Syy: {reconnect.reason}</p>
+          <p className="text-sm font-medium text-ink">
+            {withdrawn ? "Pankki on peruuttanut luvan" : "Yhteys pitää vahvistaa uudelleen"}
+          </p>
+          <p className="text-sm leading-relaxed text-ink">
+            {withdrawn ? "Vahvista yhteys uudelleen, niin tapahtumat haetaan taas." : `Syy: ${reconnect.reason}`}
+          </p>
           <p className="text-sm leading-relaxed text-ink">
             Tilit: {reconnect.accounts.length > 0 ? reconnect.accounts.join(", ") : "ei tilejä"}
           </p>
         </div>
       )}
 
-      {connection.lastError && connection.status === "active" && !reconnect && connection.lastError !== shownMessage && (
+      {shownError && connection.status === "active" && !reconnect && shownError !== shownMessage && (
         // A notice (something waits, something is older than asked for) is a calm
         // note; only a failure is an alarm.
-        isSyncNotice(connection.lastError) ? (
+        isSyncNotice(shownError) ? (
           <p className="text-sm leading-relaxed text-ink-2" role="status">
-            {connection.lastError}
+            {shownError}
           </p>
         ) : (
           <p className="text-sm leading-relaxed text-danger" role="alert">
-            {connection.lastError}
+            {shownError}
           </p>
         )
       )}

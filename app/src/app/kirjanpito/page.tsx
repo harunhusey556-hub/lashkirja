@@ -8,7 +8,10 @@ import { MONTHS } from "@/lib/finnish-months";
 import { VAT_ROW_TITLE, vatDueAmount, vatDueSecondary } from "@/lib/vat-due";
 import { useVatDue } from "@/components/useVatDue";
 import { useProfile } from "@/app/asetukset/useProfile";
-import { BankConnectRow } from "@/components/BankConnectCard";
+import { BankConnectRowView } from "@/components/BankConnectCard";
+import { useBankConnections } from "@/components/bank/useBankConnections";
+import { ConnectionNotice } from "@/components/ScreenState";
+import { firstHubFailure } from "@/lib/hub-failure";
 import { useCachedResource } from "@/components/useCachedResource";
 import { PERIOD_LOCK_KEY, PURCHASE_COUNTS_KEY } from "@/lib/cached-resource";
 
@@ -23,7 +26,7 @@ import { PERIOD_LOCK_KEY, PURCHASE_COUNTS_KEY } from "@/lib/cached-resource";
  */
 
 export default function KirjanpitoPage() {
-  const { profile, loadError } = useProfile();
+  const { profile, loadError, retry: retryProfile } = useProfile();
 
   // FP-4 / TF-01: the next return actually due (nextDueVatPeriod), with the
   // same figures, words and state as Koti, from the same cache entry. A yearly
@@ -47,6 +50,24 @@ export default function KirjanpitoPage() {
     const response = await apiFetch("/api/period-lock", { credentials: "include", signal });
     return readJson<{ lockedThrough: string | null }>(response, "");
   });
+  const bank = useBankConnections();
+
+  // One failure card with one retry when a value failed and nothing is cached
+  // in its place (F34). The link rows stay: they are navigation and still work.
+  const failure = firstHubFailure([
+    { failed: purchases.failed, empty: purchases.value === null, error: purchases.error },
+    { failed: lock.failed, empty: lock.value === null, error: lock.error },
+    { failed: bank.error !== null, empty: bank.data === null, error: bank.error },
+    { failed: vat.failed, empty: vat.figures === null },
+    { failed: Boolean(loadError), empty: profile === null },
+  ]);
+  const reloadAll = () => {
+    vat.reload();
+    purchases.reload();
+    lock.reload();
+    bank.reload();
+    retryProfile();
+  };
 
   // "Not known yet" (skeleton) vs "known to be empty" (no value): a slot whose
   // refresh failed with nothing cached falls back to no value, like before.
@@ -74,12 +95,12 @@ export default function KirjanpitoPage() {
   return (
     <div className="space-y-6">
       {/* C1.6 (IA-24): pull to refresh runs the same reload as Yritä uudelleen. */}
-      <PullToRefresh onRefresh={() => {
-          vat.reload();
-          purchases.reload();
-          lock.reload();
-        }} />
+      <PullToRefresh onRefresh={reloadAll} />
       <PageTitle title="Kirjanpito" />
+
+      {failure && (
+        <ConnectionNotice error={failure.error} fallback="Kirjanpidon tietoja ei saatu haettua" onRetry={reloadAll} />
+      )}
 
       {/* Owner report 2026-09-30: one row per thing. Pankki holds every bank row,
           the connection and the tiliote files; Täsmäytys is its "Vaatii toimia". */}
@@ -91,7 +112,7 @@ export default function KirjanpitoPage() {
           title="Kuitit"
           secondary="Kaikki kuitit ja niiden tila"
         />
-        <BankConnectRow />
+        <BankConnectRowView data={bank.data} error={bank.error} quietError />
         <ListRow
           href="/kirjanpito/ostolaskut"
           leading={<Icon icon={Inbox} />}
