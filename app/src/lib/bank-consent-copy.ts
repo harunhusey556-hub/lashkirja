@@ -5,6 +5,10 @@
 
 /** The bank itself withdrew the consent (the owner did not press Katkaise). */
 export const CONSENT_REVOKED_MESSAGE = "Pankki on peruuttanut luvan.";
+/** The bank session ended without a withdrawal; the owner connects again. */
+export const EXPIRED_CONNECTION_MESSAGE = "Yhteys vanhentui. Yhdistä uudelleen.";
+/** The same sentence as older rows stored it, with a dash. */
+const OLD_EXPIRED_CONNECTION_MESSAGE = "Yhteys vanhentui — yhdistä uudelleen.";
 /** A bank asked the app to slow down. */
 export const RATE_LIMITED_MESSAGE = "Pankki pyytää odottamaan. Yritä hetken päästä uudelleen.";
 /** Any bank-side failure the owner cannot act on. */
@@ -17,6 +21,7 @@ const OPERATOR_TEXT = /ENABLEBANKING|APP_ID|Control Panel|sovelluksen avain|palv
 export function calmBankError(text: string | null | undefined): string | null {
   const trimmed = text?.trim();
   if (!trimmed) return null;
+  if (trimmed === OLD_EXPIRED_CONNECTION_MESSAGE) return EXPIRED_CONNECTION_MESSAGE;
   return OPERATOR_TEXT.test(trimmed) ? GENERIC_BANK_ERROR : trimmed;
 }
 

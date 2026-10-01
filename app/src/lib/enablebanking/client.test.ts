@@ -250,7 +250,7 @@ describe("publicBankError", () => {
       status: 502,
     });
     expect(publicBankError(new EnableBankingError("gone", 400, "EXPIRED_SESSION")).message).toBe(
-      "Yhteys vanhentui — yhdistä uudelleen."
+      "Yhteys vanhentui. Yhdistä uudelleen."
     );
   });
 
@@ -276,7 +276,7 @@ describe("publicBankError", () => {
 
   it("G31: a withdrawn consent says so, and an expired one still says expired", () => {
     expect(publicBankError(new EnableBankingError("x", 403, "REVOKED_SESSION")).message).toBe("Pankki on peruuttanut luvan.");
-    expect(publicBankError(new EnableBankingError("x", 403, "EXPIRED_SESSION")).message).toBe("Yhteys vanhentui — yhdistä uudelleen.");
+    expect(publicBankError(new EnableBankingError("x", 403, "EXPIRED_SESSION")).message).toBe("Yhteys vanhentui. Yhdistä uudelleen.");
   });
 
   it("explains an unreadable bank answer in plain Finnish", () => {

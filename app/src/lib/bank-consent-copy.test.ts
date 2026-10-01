@@ -23,13 +23,13 @@ describe("consentReconnectCopy", () => {
       {
         ...base,
         status: "expired",
-        lastError: "Yhteys vanhentui — yhdistä uudelleen.",
+        lastError: "Yhteys vanhentui. Yhdistä uudelleen.",
         lastSuccessAt: "2026-01-15T08:00:00.000Z",
         lastSyncAt: "2026-04-01T08:00:00.000Z",
       },
       new Date("2026-04-02T00:00:00.000Z")
     );
-    expect(copy?.reason).toBe("Yhteys vanhentui — yhdistä uudelleen.");
+    expect(copy?.reason).toBe("Yhteys vanhentui. Yhdistä uudelleen.");
     expect(copy?.accounts).toEqual(["Käyttötili · FI2112345600000785"]);
     expect(copy?.lastSuccessAt).toBe("2026-01-15T08:00:00.000Z");
     expect(copy?.lastAttemptAt).toBe("2026-04-01T08:00:00.000Z");
@@ -74,6 +74,13 @@ describe("G31: a consent the bank withdrew", () => {
     const connection = { ...base, status: "expired", lastError: "Pankki on peruuttanut luvan." };
     expect(consentWithdrawn(connection)).toBe(true);
     expect(consentReconnectCopy(connection, new Date("2026-04-01T00:00:00.000Z"))?.reason).toBe("Pankki on peruuttanut luvan.");
-    expect(consentWithdrawn({ lastError: "Yhteys vanhentui — yhdistä uudelleen." })).toBe(false);
+    expect(consentWithdrawn({ lastError: "Yhteys vanhentui. Yhdistä uudelleen." })).toBe(false);
+  });
+});
+
+describe("C-6: a stored row with the older dash text is shown with the new one", () => {
+  it("maps the stored text at display time", () => {
+    expect(calmBankError("Yhteys vanhentui — yhdistä uudelleen.")).toBe("Yhteys vanhentui. Yhdistä uudelleen.");
+    expect(calmBankError("Yhteys vanhentui. Yhdistä uudelleen.")).toBe("Yhteys vanhentui. Yhdistä uudelleen.");
   });
 });

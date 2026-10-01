@@ -28,7 +28,7 @@ import { withTrackedJob } from "../job-tracker";
 import { getLockedThrough, isDateLocked, isMonthLocked } from "../period-lock";
 import { normalizeIban } from "../iban";
 import { adoptStatementsByIban } from "../bank-accounts";
-import { CONSENT_REVOKED_MESSAGE } from "../bank-consent-copy";
+import { CONSENT_REVOKED_MESSAGE, EXPIRED_CONNECTION_MESSAGE } from "../bank-consent-copy";
 import { StoredRowPool } from "../bank-row-fingerprint";
 import { fallbackStatementMonth, statementMonthOrFallback } from "../report-calendar";
 import {
@@ -102,14 +102,14 @@ async function syncBankConnectionUntracked(
     throw new EnableBankingError("Pankkiyhteyttä ei löytynyt.", 404, "NOT_FOUND");
   }
   if (connection.status === "expired") {
-    throw new EnableBankingError("Yhteys vanhentui — yhdistä uudelleen.", 409, "EXPIRED_SESSION");
+    throw new EnableBankingError(EXPIRED_CONNECTION_MESSAGE, 409, "EXPIRED_SESSION");
   }
   if (connection.status !== "active" || !connection.sessionIdEnc) {
     throw new EnableBankingError("Pankkiyhteys ei ole valmis. Yhdistä pankki uudelleen.", 409, "WRONG_SESSION_STATUS");
   }
   if (connection.validUntil && connection.validUntil.getTime() <= Date.now()) {
-    await markConnection(connection.id, "expired", "Yhteys vanhentui — yhdistä uudelleen.");
-    throw new EnableBankingError("Yhteys vanhentui — yhdistä uudelleen.", 409, "EXPIRED_SESSION");
+    await markConnection(connection.id, "expired", EXPIRED_CONNECTION_MESSAGE);
+    throw new EnableBankingError(EXPIRED_CONNECTION_MESSAGE, 409, "EXPIRED_SESSION");
   }
 
   const inScope = connection.accounts.filter((account) => account.inScope);
@@ -351,7 +351,7 @@ export async function syncDueBankConnections(now = new Date()): Promise<{
 
   for (const connection of connections) {
     if (connection.validUntil && connection.validUntil.getTime() <= now.getTime()) {
-      await markConnection(connection.id, "expired", "Yhteys vanhentui — yhdistä uudelleen.");
+      await markConnection(connection.id, "expired", EXPIRED_CONNECTION_MESSAGE);
       continue;
     }
     if (!isBankSyncDue(connection.lastSyncAt, now)) {
@@ -713,7 +713,7 @@ async function newestStatementId(ids: string[]): Promise<string | null> {
  * is never written from here; a hidden status would make the connection vanish.
  */
 async function endConsent(id: string, withdrawn: boolean): Promise<EnableBankingError> {
-  const message = withdrawn ? CONSENT_REVOKED_MESSAGE : "Yhteys vanhentui — yhdistä uudelleen.";
+  const message = withdrawn ? CONSENT_REVOKED_MESSAGE : EXPIRED_CONNECTION_MESSAGE;
   await markConnection(id, "expired", message);
   return new EnableBankingError(message, 409, withdrawn ? "REVOKED_SESSION" : "EXPIRED_SESSION");
 }

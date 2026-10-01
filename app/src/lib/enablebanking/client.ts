@@ -1,5 +1,5 @@
 import type { EbBalance, EbSessionAccount, EbTransaction } from "./mapping";
-import { CONSENT_REVOKED_MESSAGE, GENERIC_BANK_ERROR, RATE_LIMITED_MESSAGE } from "../bank-consent-copy";
+import { CONSENT_REVOKED_MESSAGE, EXPIRED_CONNECTION_MESSAGE, GENERIC_BANK_ERROR, RATE_LIMITED_MESSAGE } from "../bank-consent-copy";
 import { logBankOperatorHint } from "./public-status";
 import {
   loadEnableBankingConfig,
@@ -166,7 +166,7 @@ export function isWrongTransactionsPeriod(error: unknown): boolean {
 export function publicBankError(error: EnableBankingError): { message: string; status: number } {
   if (sessionTerminalStatus(error)) {
     if (error.code === "REVOKED_SESSION") return { message: CONSENT_REVOKED_MESSAGE, status: 409 };
-    return { message: "Yhteys vanhentui — yhdistä uudelleen.", status: 409 };
+    return { message: EXPIRED_CONNECTION_MESSAGE, status: 409 };
   }
   // What the owner of the server must fix goes to the server log; the person
   // using the app gets one calm sentence (QUALITY-BAR L5).
