@@ -34,8 +34,22 @@ export class PeriodLockedError extends AppError {
 export class PeriodReopenRequiredError extends AppError {
   constructor(lockedThrough: string) {
     super(
-      `Kirjanpito on suljettu ${formatMonth(lockedThrough)} asti. Aiemman kuukauden lukitseminen ei avaa myöhempiä kausia. Jos haluat avata kausia uudelleen, valitse Avaa kaudet.`,
+      `Kirjanpito on suljettu ${formatMonth(lockedThrough)} asti. Aiemman kuukauden lukitseminen ei avaa myöhempiä kausia. Jos haluat avata kausia uudelleen, tee se kohdassa Kirjanpito > Suljetut kaudet.`,
       "PERIOD_REOPEN_REQUIRED",
+      409
+    );
+  }
+}
+
+/**
+ * The caller acted on a lock month that is no longer the real one (changed on
+ * another device or tab), so the change is refused instead of guessed (V48).
+ */
+export class PeriodLockChangedError extends AppError {
+  constructor() {
+    super(
+      "Lukitus on muuttunut toisessa näkymässä. Avaa Kirjanpito > Suljetut kaudet uudelleen ja tee muutos siitä.",
+      "PERIOD_LOCK_CHANGED",
       409
     );
   }
@@ -103,6 +117,8 @@ export interface LockChangeOptions {
   now?: Date;
   /** The caller has chosen to reopen months: lower or clear the boundary. */
   reopen?: boolean;
+  /** The lock the caller's screen showed. A different stored lock refuses the change. */
+  expectedLockedThrough?: string | null;
 }
 
 /**
@@ -145,6 +161,9 @@ export async function setLockedThrough(
 ): Promise<LockState> {
   return prisma.$transaction(async (tx) => {
     const previous = await getLockedThrough(userId, tx);
+    if (options.expectedLockedThrough !== undefined && options.expectedLockedThrough !== previous) {
+      throw new PeriodLockChangedError();
+    }
     checkLockChange(previous, month, options);
     if (previous === month) return { lockedThrough: previous };
 

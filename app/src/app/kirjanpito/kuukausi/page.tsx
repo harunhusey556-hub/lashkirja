@@ -284,6 +284,8 @@ function MonthClose() {
       }
       setConfirmOpen(false);
       showToast({ tone: "error", text: errorMessage(error, "Kuukauden sulkeminen epäonnistui") });
+      // The page may be showing an old lock; load the real one again.
+      setAttempt((a) => a + 1);
     } finally {
       setClosing(false);
     }

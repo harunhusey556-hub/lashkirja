@@ -11,6 +11,8 @@ const bodySchema = z.object({
   month: monthSchema.nullable(),
   // Lowering or clearing the lock must be asked for on purpose (F68).
   reopen: z.boolean().optional(),
+  // The lock the user's screen showed; a different stored lock refuses the change (V48).
+  expectedLockedThrough: monthSchema.nullable().optional(),
 });
 
 export const GET = withErrorHandler(async (req: NextRequest) => {
@@ -29,6 +31,6 @@ export const PUT = withErrorHandler(async (req: NextRequest) => {
   const oversized = rejectOversizedContentLength(req);
   if (oversized) return oversized;
 
-  const { month, reopen } = bodySchema.parse(await req.json());
-  return noStoreJson(await setLockedThrough(session.userId, month, { reopen }));
+  const { month, reopen, expectedLockedThrough } = bodySchema.parse(await req.json());
+  return noStoreJson(await setLockedThrough(session.userId, month, { reopen, expectedLockedThrough }));
 });

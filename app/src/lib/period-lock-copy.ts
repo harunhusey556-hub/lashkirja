@@ -1,5 +1,6 @@
 /** Words for the Suljetut kaudet screen: what a lock change does, in named months (F68). */
 import { formatMonth } from "./format";
+import { helsinkiMonthKey } from "./validation";
 
 export type LockChangeKind = "lock" | "reopen" | "none";
 
@@ -27,4 +28,26 @@ export function reopenedRangeLabel(selected: string | null, lockedThrough: strin
     return `${first}–${formatMonth(lockedThrough)}`;
   }
   return `${formatMonth(from)}–${formatMonth(lockedThrough)}`;
+}
+
+/**
+ * The months the lock card offers: the last 24 finished months, newest first,
+ * by the Helsinki calendar the server checks with. The running month is never
+ * lockable. A month the books are already locked through (an older lock, or the
+ * running month under the former rule) is always listed so the select can show it.
+ */
+export function lockMonthOptions(now: Date, lockedThrough: string | null): string[] {
+  const [year, month] = helsinkiMonthKey(now).split("-").map(Number);
+  const options: string[] = [];
+  for (let back = 1; back <= 24; back += 1) {
+    const total = year * 12 + (month - 1) - back;
+    const optionYear = Math.floor(total / 12);
+    const optionMonth = total - optionYear * 12 + 1;
+    options.push(`${optionYear}-${String(optionMonth).padStart(2, "0")}`);
+  }
+  if (lockedThrough && !options.includes(lockedThrough)) {
+    options.push(lockedThrough);
+    options.sort().reverse();
+  }
+  return options;
 }

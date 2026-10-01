@@ -107,6 +107,34 @@ describe("/api/period-lock", () => {
     ]);
   });
 
+  it("says where to reopen when a plain lock would lower the boundary (V48)", async () => {
+    await lockThrough("2026-09");
+    const refused = await setLock(buildRequest("PUT", "/api/period-lock", { month: "2026-06" }, { cookie }));
+    expect((await readJson(refused)).error.message).toContain("Kirjanpito > Suljetut kaudet");
+  });
+
+  it("refuses a change made from a screen that no longer shows the real lock (V48)", async () => {
+    await lockThrough("2026-09");
+    await lockThrough(null, true);
+    // The first screen still shows 2026-09 and asks to reopen down to 2026-06.
+    const stale = await setLock(
+      buildRequest("PUT", "/api/period-lock", { month: "2026-06", reopen: true, expectedLockedThrough: "2026-09" }, { cookie })
+    );
+    expect(stale.status).toBe(409);
+    const body = await readJson(stale);
+    expect(body.error.code).toBe("PERIOD_LOCK_CHANGED");
+    expect(body.error.message).toContain("muuttunut");
+    expect(
+      (await readJson(await lockState(buildRequest("GET", "/api/period-lock", undefined, { cookie }))))
+        .lockedThrough
+    ).toBeNull();
+    // A screen that is up to date goes through.
+    const fresh = await setLock(
+      buildRequest("PUT", "/api/period-lock", { month: "2026-06", expectedLockedThrough: null }, { cookie })
+    );
+    expect(fresh.status).toBe(200);
+  });
+
   it("refuses the running month, like the Kuukausi page (F69)", async () => {
     const running = helsinkiMonthKey(new Date());
     const response = await setLock(buildRequest("PUT", "/api/period-lock", { month: running }, { cookie }));
