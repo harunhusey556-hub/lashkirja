@@ -10,11 +10,13 @@ import { prisma } from "./db";
 import { AppError, ConflictError, NotFoundError, ValidationError } from "./api-errors";
 import { expectedUpdatedAtDate, versionConflict } from "./edit-conflict";
 import { centsToEuros, eurosToCents } from "./money";
-import { formatEur } from "./format";
+import { formatDate, formatEur } from "./format";
 import { allocateInvoiceNumber, peekInvoiceNumber } from "./invoice-sequence";
 import { helsinkiCalendarDate, isoDateToUtc } from "./validation";
 import { normalizeReference, referenceForInvoice } from "./finnish-reference";
 import {
+  adjustVatRateForDate,
+  applySellerVatRules,
   buildAgingReport,
   canTransition,
   computeInvoiceTotals as computeTotalsUnsafe,
@@ -115,6 +117,32 @@ export function toLineInputs(lines: InvoiceLinePayload[]): Array<InvoiceLineInpu
       vatRatePermille: vatRateToPermille(line.vatRate),
     };
   });
+}
+
+/**
+ * The VAT a seller's lines may carry on `issueDate` (F01, F44): 0 % on every
+ * line when the seller is not VAT registered, and for a registered seller only
+ * the rates valid that day. Every path that writes new lines goes through
+ * here, so the form is a convenience and the server is the authority. A credit
+ * note does not: it reverses the original as it was charged.
+ */
+export async function applyVatRules<T extends { vatRatePermille: number }>(
+  userId: string,
+  lines: T[],
+  issueDate: string,
+  db: InvoiceWriter = prisma
+): Promise<T[]> {
+  const seller = await db.user.findUnique({
+    where: { id: userId },
+    select: { vatRegistered: true },
+  });
+  if (!seller) throw new NotFoundError("Käyttäjää ei löytynyt.");
+  try {
+    return applySellerVatRules(lines, { vatRegistered: seller.vatRegistered, issueDate });
+  } catch (error) {
+    if (error instanceof InvoiceValidationError) throw new ValidationError(error.message);
+    throw error;
+  }
 }
 
 /**
@@ -393,7 +421,12 @@ export async function createInvoice(
   db?: Prisma.TransactionClient
 ): Promise<PublicInvoice> {
   const customer = await requireActiveCustomer(userId, input.customerId, db ?? prisma);
-  const lineInputs = toLineInputs(input.lines);
+  const lineInputs = await applyVatRules(
+    userId,
+    toLineInputs(input.lines),
+    input.issueDate,
+    db ?? prisma
+  );
   const totals = computeInvoiceTotals(lineInputs);
 
   const issueDate = isoDateToUtc(input.issueDate);
@@ -881,58 +914,101 @@ export interface RecordPaymentInput {
   source?: "manual" | "bank";
 }
 
-/** Records a payment and closes the invoice once it is fully covered. */
+/**
+ * Records a payment and closes the invoice once it is fully covered.
+ *
+ * A payment keyed in by hand is checked against what the invoice still owes:
+ * it must be positive, not dated before the invoice or in the future, and not
+ * larger than the open balance. The balance is read in the same transaction as
+ * the insert, after a write has taken SQLite's write lock, so two payments that
+ * arrive together (two devices, two idempotency keys) cannot both fit. Rows
+ * that come from the bank (`source: "bank"`) record what the bank says
+ * happened and are not refused on amount or date.
+ */
 export async function recordPayment(
   userId: string,
   invoiceId: string,
   input: RecordPaymentInput,
   db?: Prisma.TransactionClient
 ): Promise<PublicInvoice> {
-  const conn = db ?? prisma;
-  const invoice = await conn.salesInvoice.findFirst({
-    where: { id: invoiceId, userId },
-    include: { payments: { select: { amountCents: true } } },
-  });
-  if (!invoice) throw new NotFoundError("Laskua ei löytynyt.");
-  if (invoice.status === "draft") {
-    throw new AppError("Luonnokselle ei voi kirjata maksua.", "INVOICE_IS_DRAFT", 409);
-  }
-  if (invoice.status === "credited" || invoice.documentKind === "credit_note") {
-    throw new AppError("Hyvitetylle laskulle ei voi kirjata maksua.", "INVOICE_CREDITED", 409);
-  }
-
-  await assertPeriodOpen(userId, [isoDateToUtc(input.paidDate)], conn);
-
+  const manual = (input.source ?? "manual") === "manual";
   const amountCents = eurosToCents(input.amount);
-  if (amountCents === 0) throw new ValidationError("Maksun summa ei voi olla nolla.");
+  if (amountCents === 0 || (manual && amountCents < 0)) {
+    throw new ValidationError("Maksun summan pitää olla suurempi kuin nolla.");
+  }
+  if (manual && input.paidDate > helsinkiCalendarDate()) {
+    throw new AppError(
+      "Maksupäivä ei voi olla tulevaisuudessa.",
+      "PAYMENT_IN_FUTURE",
+      422
+    );
+  }
 
-  if (input.transactionId) {
-    const transaction = await conn.transaction.findFirst({
-      where: { id: input.transactionId, statement: { userId } },
-      select: { id: true },
+  const run = async (conn: Prisma.TransactionClient) => {
+    // A write comes first: it takes the write lock, so the balance read below
+    // is still true when this transaction commits.
+    await conn.$executeRaw`UPDATE "SalesInvoice" SET "grossCents" = "grossCents" WHERE "id" = ${invoiceId} AND "userId" = ${userId}`;
+
+    const invoice = await conn.salesInvoice.findFirst({
+      where: { id: invoiceId, userId },
+      include: { payments: { select: { amountCents: true } } },
     });
-    if (!transaction) throw new NotFoundError("Tapahtumaa ei löytynyt.");
-    const taken = await conn.invoicePayment.findUnique({
-      where: { transactionId: input.transactionId },
-      select: { invoiceId: true },
-    });
-    if (taken) {
+    if (!invoice) throw new NotFoundError("Laskua ei löytynyt.");
+    if (invoice.status === "draft") {
+      throw new AppError("Luonnokselle ei voi kirjata maksua.", "INVOICE_IS_DRAFT", 409);
+    }
+    if (invoice.status === "credited" || invoice.documentKind === "credit_note") {
+      throw new AppError("Hyvitetylle laskulle ei voi kirjata maksua.", "INVOICE_CREDITED", 409);
+    }
+
+    await assertPeriodOpen(userId, [isoDateToUtc(input.paidDate)], conn);
+
+    if (manual && isoDateToUtc(input.paidDate) < invoice.issueDate) {
       throw new AppError(
-        "Tämä tilitapahtuma on jo kohdistettu laskulle.",
-        "TRANSACTION_ALREADY_USED",
-        409
+        `Maksupäivä (${formatDate(input.paidDate)}) on ennen laskun päivää (${formatDate(invoice.issueDate.toISOString())}).`,
+        "PAYMENT_BEFORE_INVOICE",
+        422
       );
     }
-  }
 
-  const paidCents =
-    invoice.payments.reduce((sum, payment) => sum + payment.amountCents, 0) + amountCents;
-  const covered = paidCents >= invoice.grossCents;
-  const reopens =
-    invoice.status === "paid" && !invoice.closedReason?.trim() && paidCents < invoice.grossCents;
+    if (input.transactionId) {
+      const transaction = await conn.transaction.findFirst({
+        where: { id: input.transactionId, statement: { userId } },
+        select: { id: true },
+      });
+      if (!transaction) throw new NotFoundError("Tapahtumaa ei löytynyt.");
+      const taken = await conn.invoicePayment.findUnique({
+        where: { transactionId: input.transactionId },
+        select: { invoiceId: true },
+      });
+      if (taken) {
+        throw new AppError(
+          "Tämä tilitapahtuma on jo kohdistettu laskulle.",
+          "TRANSACTION_ALREADY_USED",
+          409
+        );
+      }
+    }
 
-  const writePayment = async (tx: Prisma.TransactionClient) => {
-    await tx.invoicePayment.create({
+    const paidBefore = invoice.payments.reduce((sum, payment) => sum + payment.amountCents, 0);
+    const openCents = invoice.grossCents - paidBefore;
+    if (manual && amountCents > openCents) {
+      throw new AppError(
+        openCents <= 0
+          ? `Lasku on jo maksettu. Avoin summa on ${formatEur(0)}.`
+          : `Maksu on suurempi kuin laskun avoin summa (${formatEur(centsToEuros(openCents))}). Kirjaa enintään avoin summa.`,
+        "PAYMENT_EXCEEDS_OPEN",
+        422,
+        { openCents }
+      );
+    }
+
+    const paidCents = paidBefore + amountCents;
+    const covered = paidCents >= invoice.grossCents;
+    const reopens =
+      invoice.status === "paid" && !invoice.closedReason?.trim() && paidCents < invoice.grossCents;
+
+    await conn.invoicePayment.create({
       data: {
         invoiceId,
         transactionId: input.transactionId ?? null,
@@ -943,7 +1019,7 @@ export async function recordPayment(
       },
     });
     await recordActivity(
-      tx,
+      conn,
       invoiceId,
       "payment_added",
       amountCents < 0
@@ -951,23 +1027,23 @@ export async function recordPayment(
         : `Maksu ${formatEur(centsToEuros(amountCents))} kirjattiin.`
     );
     if (covered && invoice.status === "sent") {
-      await tx.salesInvoice.update({
+      await conn.salesInvoice.update({
         where: { id: invoiceId },
         data: { status: "paid", paidAt: isoDateToUtc(input.paidDate) },
       });
-      await recordActivity(tx, invoiceId, "status_changed", "Tila muuttui: Lähetetty → Maksettu.");
+      await recordActivity(conn, invoiceId, "status_changed", "Tila muuttui: Lähetetty → Maksettu.");
     } else if (reopens) {
-      await tx.salesInvoice.update({
+      await conn.salesInvoice.update({
         where: { id: invoiceId },
         data: { status: "sent", paidAt: null },
       });
-      await recordActivity(tx, invoiceId, "status_changed", "Tila muuttui: Maksettu → Lähetetty.");
+      await recordActivity(conn, invoiceId, "status_changed", "Tila muuttui: Maksettu → Lähetetty.");
     }
   };
-  if (db) await writePayment(db);
-  else await prisma.$transaction(writePayment);
+  if (db) await run(db);
+  else await prisma.$transaction(run);
 
-  return getInvoice(userId, invoiceId, conn);
+  return getInvoice(userId, invoiceId, db ?? prisma);
 }
 
 export interface BankRowCandidate {

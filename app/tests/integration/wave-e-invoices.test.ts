@@ -71,6 +71,15 @@ async function pay(id: string, amount: number, paidDate = "2026-01-20") {
   return (await readJson(response)).invoice;
 }
 
+/** Overpaid data from before the guard: written straight to the table. */
+async function payPastTheBalance(id: string, amount: number) {
+  await prisma.invoicePayment.create({
+    data: { invoiceId: id, paidDate: new Date("2026-01-20T00:00:00.000Z"), amountCents: Math.round(amount * 100) },
+  });
+  const { getInvoice } = await import("@/lib/sales-invoices");
+  return getInvoice(user.id, id);
+}
+
 beforeEach(async () => {
   await resetDatabase();
   user = await createUser();
@@ -119,7 +128,7 @@ describe("credit notes", () => {
 });
 
 describe("open balance across payments", () => {
-  it("stays consistent through partial payments, overpay, deletion and a refund", async () => {
+  it("stays consistent through partial payments, old overpay data and its removal", async () => {
     const invoice = await send((await makeInvoice()).id);
 
     const first = await pay(invoice.id, 50);
@@ -130,7 +139,18 @@ describe("open balance across payments", () => {
     expect(covered.open).toBe(0);
     expect(covered.status).toBe("paid");
 
-    const over = await pay(invoice.id, 10);
+    // A payment past the balance is refused now; rows from before the guard still add up.
+    const refused = await addPayment(
+      buildRequest(
+        "POST",
+        `/api/invoices/${invoice.id}/payments`,
+        { amount: 10, paidDate: "2026-01-20" },
+        { cookie }
+      ),
+      routeContext({ id: invoice.id })
+    );
+    expect(refused.status).toBe(422);
+    const over = await payPastTheBalance(invoice.id, 10);
     expect(over.open).toBeCloseTo(-10);
     expect(over.status).toBe("paid");
     expect(
@@ -146,7 +166,7 @@ describe("open balance across payments", () => {
       await deletePayment(
         buildRequest(
           "DELETE",
-          `/api/invoices/${invoice.id}/payments?paymentId=${overPayment.id}`,
+          `/api/invoices/${invoice.id}/payments?paymentId=${overPayment?.id}`,
           undefined,
           { cookie }
         ),
@@ -156,12 +176,17 @@ describe("open balance across payments", () => {
     expect(afterDelete.invoice.open).toBe(0);
     expect(afterDelete.invoice.status).toBe("paid");
 
-    const refunded = await pay(invoice.id, -20);
-    expect(refunded.open).toBeCloseTo(20);
-    expect(refunded.status).toBe("sent");
-    expect(refunded.activity.some((entry: { kind: string }) => entry.kind === "payment_added")).toBe(
-      true
+    // A negative payment is not a way to reopen an invoice any more.
+    const refund = await addPayment(
+      buildRequest(
+        "POST",
+        `/api/invoices/${invoice.id}/payments`,
+        { amount: -20, paidDate: "2026-01-20" },
+        { cookie }
+      ),
+      routeContext({ id: invoice.id })
     );
+    expect(refund.status).toBe(400);
   });
 });
 

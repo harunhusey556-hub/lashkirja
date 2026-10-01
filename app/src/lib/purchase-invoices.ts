@@ -9,6 +9,7 @@
 import { prisma } from "./db";
 import { AppError, NotFoundError, ValidationError } from "./api-errors";
 import { centsToEuros, eurosToCents } from "./money";
+import { formatEur } from "./format";
 import { isoDateToUtc } from "./validation";
 import { isValidBusinessId, isValidReferenceNumber, normalizeBusinessId, normalizeReference } from "./finnish-reference";
 import { isValidIban, normalizeIban } from "./iban";
@@ -396,63 +397,87 @@ export interface RecordPurchasePaymentInput {
   source?: "manual" | "bank";
 }
 
+/**
+ * Records a payment on a payable. A payment keyed in by hand may not exceed
+ * what is still owed. The balance is read in the same transaction as the
+ * insert, after a write has taken SQLite's write lock, so two payments that
+ * arrive together cannot both fit.
+ */
 export async function recordPurchasePayment(
   userId: string,
   invoiceId: string,
   input: RecordPurchasePaymentInput
 ): Promise<PublicPurchaseInvoice> {
-  const invoice = await prisma.purchaseInvoice.findFirst({
-    where: { id: invoiceId, userId },
-    include: purchaseInclude,
-  });
-  if (!invoice) throw new NotFoundError("Ostolaskua ei löytynyt.");
-  if (invoice.status === "cancelled") {
-    throw new AppError("Mitätöidylle laskulle ei voi kirjata maksua.", "INVOICE_CANCELLED", 409);
-  }
-
-  await assertPeriodOpen(userId, [isoDateToUtc(input.paidDate)]);
-
   const amountCents = eurosToCents(input.amount);
   if (amountCents <= 0) throw new ValidationError("Maksun summan on oltava positiivinen.");
+  const manual = (input.source ?? "manual") === "manual";
 
-  if (input.transactionId) {
-    const transaction = await prisma.transaction.findFirst({
-      where: { id: input.transactionId, statement: { userId } },
-      select: { id: true },
+  await prisma.$transaction(async (tx) => {
+    // A write comes first: it takes the write lock, so the balance read below
+    // is still true when this transaction commits.
+    await tx.$executeRaw`UPDATE "PurchaseInvoice" SET "grossCents" = "grossCents" WHERE "id" = ${invoiceId} AND "userId" = ${userId}`;
+
+    const invoice = await tx.purchaseInvoice.findFirst({
+      where: { id: invoiceId, userId },
+      include: purchaseInclude,
     });
-    if (!transaction) throw new NotFoundError("Tapahtumaa ei löytynyt.");
-    const taken = await prisma.purchasePayment.findUnique({
-      where: { transactionId: input.transactionId },
-      select: { id: true },
-    });
-    if (taken) {
+    if (!invoice) throw new NotFoundError("Ostolaskua ei löytynyt.");
+    if (invoice.status === "cancelled") {
+      throw new AppError("Mitätöidylle laskulle ei voi kirjata maksua.", "INVOICE_CANCELLED", 409);
+    }
+
+    await assertPeriodOpen(userId, [isoDateToUtc(input.paidDate)], tx);
+
+    if (input.transactionId) {
+      const transaction = await tx.transaction.findFirst({
+        where: { id: input.transactionId, statement: { userId } },
+        select: { id: true },
+      });
+      if (!transaction) throw new NotFoundError("Tapahtumaa ei löytynyt.");
+      const taken = await tx.purchasePayment.findUnique({
+        where: { transactionId: input.transactionId },
+        select: { id: true },
+      });
+      if (taken) {
+        throw new AppError(
+          "Tämä tilitapahtuma on jo kohdistettu ostolaskulle.",
+          "TRANSACTION_ALREADY_USED",
+          409
+        );
+      }
+    }
+
+    const paidBefore = invoice.payments.reduce((sum, payment) => sum + payment.amountCents, 0);
+    const openCents = invoice.grossCents - paidBefore;
+    if (manual && amountCents > openCents) {
       throw new AppError(
-        "Tämä tilitapahtuma on jo kohdistettu ostolaskulle.",
-        "TRANSACTION_ALREADY_USED",
-        409
+        openCents <= 0
+          ? `Ostolasku on jo maksettu. Avoin summa on ${formatEur(0)}.`
+          : `Maksu on suurempi kuin ostolaskun avoin summa (${formatEur(centsToEuros(openCents))}). Kirjaa enintään avoin summa.`,
+        "PAYMENT_EXCEEDS_OPEN",
+        422,
+        { openCents }
       );
     }
-  }
 
-  await prisma.purchasePayment.create({
-    data: {
-      purchaseInvoiceId: invoiceId,
-      transactionId: input.transactionId ?? null,
-      paidDate: isoDateToUtc(input.paidDate),
-      amountCents,
-      source: input.source ?? "manual",
-      note: input.note?.trim() || null,
-    },
-  });
-
-  const paidCents =
-    invoice.payments.reduce((sum, payment) => sum + payment.amountCents, 0) + amountCents;
-  if (paidCents >= invoice.grossCents && invoice.status === "open") {
-    await prisma.purchaseInvoice.update({
-      where: { id: invoiceId },
-      data: { status: "paid", paidAt: isoDateToUtc(input.paidDate) },
+    await tx.purchasePayment.create({
+      data: {
+        purchaseInvoiceId: invoiceId,
+        transactionId: input.transactionId ?? null,
+        paidDate: isoDateToUtc(input.paidDate),
+        amountCents,
+        source: input.source ?? "manual",
+        note: input.note?.trim() || null,
+      },
     });
-  }
+
+    if (paidBefore + amountCents >= invoice.grossCents && invoice.status === "open") {
+      await tx.purchaseInvoice.update({
+        where: { id: invoiceId },
+        data: { status: "paid", paidAt: isoDateToUtc(input.paidDate) },
+      });
+    }
+  });
 
   return getPurchaseInvoice(userId, invoiceId);
 }

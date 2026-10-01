@@ -465,21 +465,21 @@ describe("payments", () => {
     expect(rest.invoice.paidAt).not.toBeNull();
   });
 
-  it("treats an overpayment as settled", async () => {
+  it("refuses an overpayment and leaves the invoice open", async () => {
     const invoice = await sentInvoice();
-    const result = await readJson(
-      await addPayment(
-        buildRequest(
-          "POST",
-          `/api/invoices/${invoice.id}/payments`,
-          { amount: 130, paidDate: "2026-01-15" },
-          { cookie }
-        ),
-        routeContext({ id: invoice.id })
-      )
+    const response = await addPayment(
+      buildRequest(
+        "POST",
+        `/api/invoices/${invoice.id}/payments`,
+        { amount: 130, paidDate: "2026-01-15" },
+        { cookie }
+      ),
+      routeContext({ id: invoice.id })
     );
-    expect(result.invoice.status).toBe("paid");
-    expect(result.invoice.open).toBe(-4.5);
+    expect(response.status).toBe(422);
+    expect((await readJson(response)).error.code).toBe("PAYMENT_EXCEEDS_OPEN");
+    const stored = await prisma.salesInvoice.findUnique({ where: { id: invoice.id } });
+    expect(stored?.status).toBe("sent");
   });
 
   it("reopens the invoice when the payment is removed", async () => {
