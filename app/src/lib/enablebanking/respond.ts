@@ -22,7 +22,11 @@ export function respondToBankError(error: unknown) {
       return noStoreJson({ error: error.message }, { status: error.status });
     }
     const mapped = publicBankError(error);
-    return noStoreJson({ error: mapped.message }, { status: mapped.status });
+    // The app itself answered, with a sentence of its own. A 502/503/504 would be
+    // read by the client as a dead gateway ("Palvelin ei vastannut hetkeen,
+    // tarkista onnistuiko toiminto") and replace that sentence.
+    const status = mapped.status >= 502 && mapped.status <= 504 ? 500 : mapped.status;
+    return noStoreJson({ error: mapped.message }, { status });
   }
   console.error("Bank route failed", error instanceof Error ? error.name : "unknown");
   return noStoreJson({ error: "Pankkiyhteys epäonnistui. Yritä uudelleen." }, { status: 500 });

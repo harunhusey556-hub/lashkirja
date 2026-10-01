@@ -8,6 +8,7 @@ import {
   type TransactionQuery,
 } from "@/lib/enablebanking/client";
 import type { EbTransaction } from "@/lib/enablebanking/mapping";
+import { overlapDateFrom } from "@/lib/enablebanking/consent";
 import { syncBankConnection } from "@/lib/enablebanking/sync";
 import { createUser, resetDatabase, type TestUser } from "./helpers/factories";
 
@@ -289,7 +290,7 @@ describe("bank sync honours the period lock (G25)", () => {
     expect(result.imported).toBe(1);
     expect(result.heldBack).toBe(2);
     expect(result.partial).toBe(true);
-    expect(result.notice).toBe("Kuukausi on lukittu, 2 tapahtumaa jäi tuomatta.");
+    expect(result.notice).toBe("Kuukausi on lukittu, joten 2 tapahtumaa tulee vasta, kun avaat kuukauden.");
     expect(result.accounts[0].heldBack).toBe(2);
 
     const rows = await stored();
@@ -300,15 +301,17 @@ describe("bank sync honours the period lock (G25)", () => {
     expect(drafts.every((receipt) => receipt.date && receipt.date.toISOString() >= "2026-10-01")).toBe(true);
 
     const connectionRow = await prisma.bankConnection.findUnique({ where: { id: connection.id } });
-    expect(connectionRow?.lastSuccessAt?.toISOString()).toBe(before.toISOString());
-    expect(connectionRow?.lastError).toBe("Kuukausi on lukittu, 2 tapahtumaa jäi tuomatta.");
+    // The watermark moves up to the oldest held row only, so the next sync reads it again.
+    expect(overlapDateFrom(connectionRow!.lastSuccessAt!) <= "2026-09-29").toBe(true);
+    expect(connectionRow!.lastSuccessAt!.getTime()).toBeGreaterThanOrEqual(before.getTime());
+    expect(connectionRow?.lastError).toBe("Kuukausi on lukittu, joten 2 tapahtumaa tulee vasta, kun avaat kuukauden.");
   });
 
   it("uses the singular for one held row", async () => {
     const connection = await createConnection();
     await lockThrough("2026-09");
     const result = await run([income("S1", "2026-09-29", "55.00")], connection.id);
-    expect(result.notice).toBe("Kuukausi on lukittu, 1 tapahtuma jäi tuomatta.");
+    expect(result.notice).toBe("Kuukausi on lukittu, joten 1 tapahtuma tulee vasta, kun avaat kuukauden.");
   });
 
   it("brings the held rows in on the next sync once the month is reopened", async () => {
@@ -337,6 +340,8 @@ describe("bank sync honours the period lock (G25)", () => {
     expect(result.heldBack).toBe(2);
     expect(await prisma.statement.count({ where: { userId: user.id } })).toBe(0);
     const connectionRow = await prisma.bankConnection.findUnique({ where: { id: connection.id } });
-    expect(connectionRow?.lastSuccessAt).toBeNull();
+    // Not a wedge: an ordinary incremental connection that reads back to the oldest held row.
+    expect(connectionRow?.lastSuccessAt).not.toBeNull();
+    expect(overlapDateFrom(connectionRow!.lastSuccessAt!) <= "2026-03-01").toBe(true);
   });
 });

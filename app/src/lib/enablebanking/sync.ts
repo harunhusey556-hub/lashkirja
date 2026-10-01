@@ -12,7 +12,7 @@ import {
   publicBankError,
   sessionTerminalStatus,
 } from "./client";
-import { isBankSyncDue, overlapDateFrom } from "./consent";
+import { BANK_SYNC_OVERLAP_DAYS, isBankSyncDue, overlapDateFrom } from "./consent";
 import { attendedHeaders } from "./connect";
 import {
   contentFingerprint,
@@ -29,9 +29,16 @@ import { getLockedThrough, isDateLocked, isMonthLocked } from "../period-lock";
 import { normalizeIban } from "../iban";
 import { StoredRowPool } from "../bank-row-fingerprint";
 import { fallbackStatementMonth, statementMonthOrFallback } from "../report-calendar";
-import type { AccountSyncRow } from "../bank-sync-summary";
+import {
+  PARTIAL_PULL_NOTICE,
+  SHORTENED_NOTICE_START,
+  heldBackNotice,
+  shortenedNotice,
+  type AccountSyncRow,
+} from "../bank-sync-summary";
 
-const DEAD_SESSION_STATUS = new Set(["EXPIRED", "CLOSED", "REVOKED", "CANCELLED", "INVALID"]);
+const DAY_MS = 24 * 60 * 60 * 1000;
+const DEAD_SESSION_STATUS =new Set(["EXPIRED", "CLOSED", "REVOKED", "CANCELLED", "INVALID"]);
 
 export type BankSyncAccountRow = AccountSyncRow & {
   /** The bank had more pages than one pull reads; the account is not caught up. */
@@ -50,20 +57,14 @@ export interface BankSyncResult {
   accounts: BankSyncAccountRow[];
   /** Rows left out because their month is closed; they come when it is reopened. */
   heldBack: number;
-  /** True when something was left out, so lastSuccessAt did not move. */
+  /** True when something was left out or the history is shorter than asked for. */
   partial: boolean;
   /** The plain-language reason, the same text the connection card shows. */
   notice: string | null;
 }
 
-export function heldBackNotice(count: number): string {
-  return count === 1
-    ? "Kuukausi on lukittu, 1 tapahtuma jäi tuomatta."
-    : `Kuukausi on lukittu, ${count} tapahtumaa jäi tuomatta.`;
-}
-
-export const PARTIAL_PULL_NOTICE =
-  "Kaikkia tapahtumia ei saatu haettua kerralla. Haku jatkuu seuraavalla kerralla.";
+// The sentences live with the screens that show them.
+export { PARTIAL_PULL_NOTICE, heldBackNotice };
 
 export async function syncBankConnection(
   userId: string,
@@ -171,6 +172,9 @@ async function syncBankConnectionUntracked(
   let succeeded = 0;
   let truncatedAccounts = 0;
   let heldBack = 0;
+  let earliestHeld: string | null = null;
+  /** The shortest window a bank gave on this sync, in days. */
+  let shortenedDays: number | null = null;
 
   const accountName = (account: { label: string | null; iban: string }) => {
     const label = account.label?.trim();
@@ -180,7 +184,7 @@ async function syncBankConnectionUntracked(
 
   for (const account of inScope) {
     try {
-      const { transactions, truncated } = await collectAccountTransactions(client, {
+      const { transactions, truncated, shortenedFrom } = await collectAccountTransactions(client, {
         accountUid: account.providerAccountUid,
         firstSync,
         dateFrom,
@@ -200,6 +204,14 @@ async function syncBankConnectionUntracked(
       imported += written.imported;
       skipped += written.skipped;
       heldBack += written.heldBack;
+      if (written.earliestHeld && (!earliestHeld || written.earliestHeld < earliestHeld)) {
+        earliestHeld = written.earliestHeld;
+      }
+      if (shortenedFrom) {
+        const since = new Date(`${shortenedFrom}T00:00:00.000Z`).getTime();
+        const days = Math.max(1, Math.round((Date.now() - since) / DAY_MS));
+        shortenedDays = shortenedDays === null ? days : Math.min(shortenedDays, days);
+      }
       for (const id of written.statementIds) statementIds.add(id);
 
       try {
@@ -255,17 +267,32 @@ async function syncBankConnectionUntracked(
     }
   }
 
-  // What was left out. While anything is, lastSuccessAt stays where it was so
-  // the next sync reads the same window again instead of the 5-day overlap.
+  // What was left out. The owner is always told (the notice is the connection's
+  // lastError, shown as a calm note) and the sync does not look finished:
+  // - a pull that ended short keeps lastSuccessAt, so the next sync reads the
+  //   same window again;
+  // - rows of a closed month are held back, and lastSuccessAt moves only up to
+  //   the oldest of them. The connection stays an ordinary incremental one
+  //   (never the open-ended first sync again, which a wedge of held rows used
+  //   to cause) and the held rows are read again until their month is reopened;
+  // - a window the bank shortened is said, and kept as a note on later syncs,
+  //   because the older history can only come from a tiliote file.
   const notices: string[] = [];
   if (heldBack > 0) notices.push(heldBackNotice(heldBack));
   if (truncatedAccounts > 0) notices.push(PARTIAL_PULL_NOTICE);
+  if (shortenedDays !== null) notices.push(shortenedNotice(shortenedDays));
   const notice = notices.length > 0 ? notices.join(" ") : null;
+  const keptShortened =
+    !firstSync && connection.lastError?.startsWith(SHORTENED_NOTICE_START) ? connection.lastError : null;
 
-  if (succeeded === inScope.length && !notice) {
+  if (succeeded === inScope.length && truncatedAccounts === 0) {
+    const now = Date.now();
+    const watermark = earliestHeld
+      ? Math.min(now, new Date(`${earliestHeld}T00:00:00.000Z`).getTime() + BANK_SYNC_OVERLAP_DAYS * DAY_MS)
+      : now;
     await prisma.bankConnection.update({
       where: { id: connection.id },
-      data: { lastSuccessAt: new Date(), lastError: null, status: "active" },
+      data: { lastSuccessAt: new Date(watermark), lastError: notice ?? keptShortened, status: "active" },
     });
   } else if (failures.length > 0 || notice) {
     await prisma.bankConnection.update({
@@ -357,8 +384,17 @@ async function writeTransactions(input: {
   userId: string;
   aspspName: string;
   rows: MappedBankTransaction[];
-}): Promise<{ imported: number; skipped: number; heldBack: number; statementIds: string[] }> {
-  if (input.rows.length === 0) return { imported: 0, skipped: 0, heldBack: 0, statementIds: [] };
+}): Promise<{
+  imported: number;
+  skipped: number;
+  heldBack: number;
+  /** The oldest day among the rows held back ("YYYY-MM-DD"), when any were. */
+  earliestHeld: string | null;
+  statementIds: string[];
+}> {
+  if (input.rows.length === 0) {
+    return { imported: 0, skipped: 0, heldBack: 0, earliestHeld: null, statementIds: [] };
+  }
   const uniqueRows = new Map<string, MappedBankTransaction>();
   for (const row of input.rows) uniqueRows.set(row.bankRef, row);
   const rows = [...uniqueRows.values()];
@@ -388,8 +424,14 @@ async function writeTransactions(input: {
   const fresh = notStored.filter((row) =>
     row.date ? !isDateLocked(lockedThrough, row.date) : !isMonthLocked(lockedThrough, fallbackMonth)
   );
-  const heldBack = notStored.length - fresh.length;
-  if (fresh.length === 0) return { imported: 0, skipped, heldBack, statementIds: [] };
+  const freshRows = new Set(fresh);
+  const heldRows = notStored.filter((row) => !freshRows.has(row));
+  const heldBack = heldRows.length;
+  const earliestHeld = heldRows.reduce<string | null>(
+    (min, row) => (row.date && (!min || row.date < min) ? row.date : min),
+    null
+  );
+  if (fresh.length === 0) return { imported: 0, skipped, heldBack, earliestHeld, statementIds: [] };
 
   const byMonth = new Map<string, MappedBankTransaction[]>();
   for (const row of fresh) {
@@ -422,7 +464,7 @@ async function writeTransactions(input: {
     }));
     imported += await insertTransactions(data);
   }
-  return { imported, skipped, heldBack, statementIds };
+  return { imported, skipped, heldBack, earliestHeld, statementIds };
 }
 
 /**

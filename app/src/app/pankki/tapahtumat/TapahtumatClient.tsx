@@ -23,7 +23,7 @@ import { useBankConnections } from "@/components/bank/useBankConnections";
 import { useStatementUpload } from "@/components/bank/useStatementUpload";
 import { fetchedWhen, type BankConnectionSummary } from "@/lib/bank-status";
 import { feedRows, groupByMonth, matchesSearch, needsAction, rowState, type FeedRow } from "@/lib/bank-feed";
-import { syncOutcomeMessage, type AccountSyncRow } from "@/lib/bank-sync-summary";
+import { isSyncNotice, syncOutcomeMessage, type AccountSyncRow } from "@/lib/bank-sync-summary";
 import { hapticNotify } from "@/lib/haptics";
 import { showToast } from "@/lib/toast";
 import {
@@ -77,23 +77,37 @@ function rowTag(row: FeedRow) {
 }
 
 /** The connected accounts at the top: balance, when fetched, and a refresh. */
-function AccountsCard({ onSynced }: { onSynced: () => void }) {
-  const bank = useBankConnections();
+function AccountsCard({
+  bank,
+  onSynced,
+}: {
+  bank: ReturnType<typeof useBankConnections>;
+  onSynced: () => void;
+}) {
   const [busyId, setBusyId] = useState<string | null>(null);
   const connections = (bank.data?.connections ?? []).filter(
     (connection) => connection.status === "active" && connection.accounts.some((account) => account.inScope)
   );
   if (connections.length === 0) return null;
+  // What the last sync left out or shortened, as the bank connection stored it.
+  const notes = connections.map((connection) => connection.lastError).filter((text) => isSyncNotice(text));
 
   async function sync(connection: BankConnectionSummary) {
     if (busyId) return;
     setBusyId(connection.id);
     try {
       const response = await apiFetch(`/api/bank/connections/${connection.id}/sync`, { method: "POST" });
-      const data = await readJson<{ imported: number; accounts?: AccountSyncRow[] }>(response, "Päivitys epäonnistui");
-      const outcome = syncOutcomeMessage(data.accounts || [], data.imported);
+      const data = await readJson<{ imported: number; accounts?: AccountSyncRow[]; notice?: string | null }>(
+        response,
+        "Päivitys epäonnistui"
+      );
+      const outcome = syncOutcomeMessage(data.accounts || [], data.imported, data.notice ?? null);
       void hapticNotify(outcome.tone === "ok" ? "success" : "warning");
-      showToast({ tone: outcome.tone === "ok" ? "success" : "error", text: outcome.text });
+      // Something waiting is told as a note, never as the green all-clear.
+      showToast({
+        tone: outcome.tone === "ok" ? "success" : outcome.tone === "note" ? "info" : "error",
+        text: outcome.text,
+      });
       bank.reload();
       onSynced();
     } catch (error: unknown) {
@@ -142,6 +156,11 @@ function AccountsCard({ onSynced }: { onSynced: () => void }) {
             </div>
           ))
       )}
+      {notes.map((text) => (
+        <p key={text} className="px-4 py-3 text-caption text-ink-2" role="status">
+          {text}
+        </p>
+      ))}
     </div>
   );
 }
@@ -175,6 +194,7 @@ export default function TapahtumatClient() {
   const [doneRowId, setDoneRowId] = useState<string | null>(null);
   const [unfolded, setUnfolded] = useState<string | null>(null);
   const fade = useSkeletonFade(loading);
+  const bank = useBankConnections();
 
   const loadStatements = useCallback(async () => {
     try {
@@ -292,6 +312,14 @@ export default function TapahtumatClient() {
   // Narrowed views show everything they found; the full feed pages by month.
   const narrowed = Boolean(view || monthFilter || query.trim());
   const shownMonths = narrowed ? months : months.slice(0, monthsShown);
+  // A connected bank with nothing to show is not "connect your bank": say what is known.
+  const connectedNote = (bank.data?.connections ?? []).find(
+    (connection) => connection.status === "active" && isSyncNotice(connection.lastError)
+  )?.lastError;
+  const connected = (bank.data?.connections ?? []).some((connection) => connection.status === "active");
+  const emptyBody = connected
+    ? connectedNote ?? "Pankki on yhdistetty. Tapahtumat tulevat tähän, kun pankki antaa ne. Voit myös tuoda tiliotteen tiedostona."
+    : "Yhdistä pankki, niin tapahtumat tulevat tähän itsestään. Voit myös tuoda tiliotteen tiedostona.";
   const sheetRow = sheetRowId ? rows.find((row) => row.id === sheetRowId) ?? null : null;
 
   return (
@@ -317,7 +345,7 @@ export default function TapahtumatClient() {
 
       {/* Not connected, or the consent needs renewing: the shared card leads (BOOKS-04). */}
       <BankConnectCard variant="compact" />
-      <AccountsCard onSynced={() => void loadStatements()} />
+      <AccountsCard bank={bank} onSynced={() => void loadStatements()} />
 
       {rows.length > 0 && (
         <div className="space-y-3">
@@ -373,7 +401,7 @@ export default function TapahtumatClient() {
           kind="records"
           icon={Landmark}
           title="Ei pankkitapahtumia vielä"
-          body="Yhdistä pankki, niin tapahtumat tulevat tähän itsestään. Voit myös tuoda tiliotteen tiedostona."
+          body={emptyBody}
           action={
             <Button variant="secondary" busy={uploader.uploading} busyLabel="Tuodaan…" onClick={() => void uploader.pick()}>
               Tuo tiliote

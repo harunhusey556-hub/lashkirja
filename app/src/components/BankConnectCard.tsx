@@ -14,7 +14,7 @@ import BankSetupSheet from "@/components/bank/BankSetupSheet";
 import { useBankConnections } from "@/components/bank/useBankConnections";
 import { consentReconnectCopy } from "@/lib/bank-consent-copy";
 import { consumeInterruptedBankAuth } from "@/lib/open-bank-auth";
-import { syncOutcomeMessage, type AccountSyncRow } from "@/lib/bank-sync-summary";
+import { accountOutcomeText, isSyncNotice, syncOutcomeMessage, type AccountSyncRow } from "@/lib/bank-sync-summary";
 import { BANK_COPY, bankState, type BankAccountSummary, type BankConnectionSummary } from "@/lib/bank-status";
 import { detailHref } from "@/lib/routes";
 import { hapticNotify } from "@/lib/haptics";
@@ -132,7 +132,7 @@ export default function BankConnectCard({
   const sheets = useConnectSheets();
   const [busyId, setBusyId] = useState<string | null>(null);
   const [message, setMessage] = useState("");
-  const [messageTone, setMessageTone] = useState<"ok" | "err">("ok");
+  const [messageTone, setMessageTone] = useState<"ok" | "note" | "err">("ok");
   const [syncAccounts, setSyncAccounts] = useState<AccountSyncRow[] | null>(null);
   const [statementHref, setStatementHref] = useState<string | null>(null);
   const [disconnectId, setDisconnectId] = useState<string | null>(null);
@@ -198,13 +198,18 @@ export default function BankConnectCard({
     setMessage("");
     try {
       const response = await apiFetch(`/api/bank/connections/${connectionId}/sync`, { method: "POST" });
-      const data = await readJson<{ imported: number; statementId: string | null; accounts?: AccountSyncRow[] }>(
+      const data = await readJson<{
+        imported: number;
+        statementId: string | null;
+        accounts?: AccountSyncRow[];
+        notice?: string | null;
+      }>(
         response,
         "Synkronointi epäonnistui"
       );
       bank.reload();
       const accounts = data.accounts || [];
-      const outcome = syncOutcomeMessage(accounts, data.imported);
+      const outcome = syncOutcomeMessage(accounts, data.imported, data.notice ?? null);
       setSyncAccounts(accounts);
       setStatementHref(data.statementId ? detailHref("statement", data.statementId) : null);
       setMessageTone(outcome.tone);
@@ -342,6 +347,7 @@ export default function BankConnectCard({
                 key={connection.id}
                 connection={connection}
                 busyId={busyId}
+                shownMessage={message}
                 onSync={() => void syncConnection(connection.id)}
                 onReconnect={() => sheets.openPicker(connection.psuType === "personal" ? "personal" : "business")}
                 onDisconnect={() => setDisconnectId(connection.id)}
@@ -356,16 +362,20 @@ export default function BankConnectCard({
 
         {variant === "full" && message && (
           <div className="space-y-2" role={messageTone === "err" ? "alert" : "status"}>
-            <p className={`text-sm leading-relaxed ${messageTone === "err" ? "text-danger" : "text-success"}`}>{message}</p>
+            <p
+              className={`text-sm leading-relaxed ${
+                messageTone === "err" ? "text-danger" : messageTone === "note" ? "text-ink" : "text-success"
+              }`}
+            >
+              {message}
+            </p>
             {syncAccounts && syncAccounts.length > 0 && (
               <ul className="space-y-1">
                 {syncAccounts.map((account) => (
                   <li key={account.accountId} className="text-sm leading-relaxed text-ink">
                     {account.name}:{" "}
                     {account.ok
-                      ? account.imported > 0
-                        ? `${account.imported} uutta tapahtumaa`
-                        : "ei uusia tapahtumia"
+                      ? accountOutcomeText(account)
                       : `epäonnistui. ${account.error || "Tapahtumien haku epäonnistui."}`}
                   </li>
                 ))}
@@ -397,6 +407,7 @@ export default function BankConnectCard({
 function ConnectionBlock({
   connection,
   busyId,
+  shownMessage,
   onSync,
   onReconnect,
   onDisconnect,
@@ -404,6 +415,8 @@ function ConnectionBlock({
 }: {
   connection: BankConnectionSummary;
   busyId: string | null;
+  /** The sync message already on screen; the stored note is not repeated under it. */
+  shownMessage: string;
   onSync: () => void;
   onReconnect: () => void;
   onDisconnect: () => void;
@@ -436,10 +449,18 @@ function ConnectionBlock({
         </div>
       )}
 
-      {connection.lastError && connection.status === "active" && !reconnect && (
-        <p className="text-sm leading-relaxed text-danger" role="alert">
-          {connection.lastError}
-        </p>
+      {connection.lastError && connection.status === "active" && !reconnect && connection.lastError !== shownMessage && (
+        // A notice (something waits, something is older than asked for) is a calm
+        // note; only a failure is an alarm.
+        isSyncNotice(connection.lastError) ? (
+          <p className="text-sm leading-relaxed text-ink-2" role="status">
+            {connection.lastError}
+          </p>
+        ) : (
+          <p className="text-sm leading-relaxed text-danger" role="alert">
+            {connection.lastError}
+          </p>
+        )
       )}
 
       {connection.accounts.length > 0 && (

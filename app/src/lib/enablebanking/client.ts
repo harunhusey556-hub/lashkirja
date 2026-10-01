@@ -231,7 +231,17 @@ export function findAspsp(
 export interface PulledTransactions {
   transactions: EbTransaction[];
   truncated: boolean;
+  /**
+   * The pull finished, but over a shorter window than it needed (the bank
+   * rejected the owner's start day or its longest history): the day the window
+   * that worked began. Older rows were never read, so the account is not
+   * caught up in the owner's sense.
+   */
+  shortenedFrom?: string;
 }
+
+/** One pull may take this long; after it the pull ends as truncated. */
+export const PULL_BUDGET_MS = 120_000;
 
 export async function collectAccountTransactions(
   fetcher: TransactionPageFetcher,
@@ -243,6 +253,8 @@ export async function collectAccountTransactions(
     historyFrom?: string;
     psuHeaders?: Record<string, string>;
     now?: Date;
+    /** Time one pull may take before it ends as truncated. */
+    budgetMs?: number;
   }
 ): Promise<PulledTransactions> {
   const now = params.now ?? new Date();
@@ -250,20 +262,20 @@ export async function collectAccountTransactions(
 
   if (params.firstSync && params.historyFrom) {
     try {
-      return await pullPages(fetcher, params, { dateFrom: params.historyFrom, dateTo: today });
+      return await pullPages(fetcher, params, { dateFrom: params.historyFrom, dateTo: today }, params.budgetMs);
     } catch (error) {
       if (isTerminalSessionError(error)) throw error;
       if (!isWrongTransactionsPeriod(error) && !shouldRetryWithoutStrategy(error)) throw error;
     }
   } else if (params.firstSync) {
     try {
-      return await pullPages(fetcher, params, { strategy: "longest" });
+      return await pullPages(fetcher, params, { strategy: "longest" }, params.budgetMs);
     } catch (error) {
       if (!shouldRetryWithoutStrategy(error)) throw error;
     }
   } else if (params.dateFrom) {
     try {
-      return await pullPages(fetcher, params, { dateFrom: params.dateFrom, dateTo: today });
+      return await pullPages(fetcher, params, { dateFrom: params.dateFrom, dateTo: today }, params.budgetMs);
     } catch (error) {
       if (isTerminalSessionError(error)) throw error;
       if (!isWrongTransactionsPeriod(error) && !shouldRetryWithoutStrategy(error)) throw error;
@@ -280,7 +292,11 @@ export async function collectAccountTransactions(
       dateFrom = params.historyFrom;
     }
     try {
-      return await pullPages(fetcher, params, { dateFrom, dateTo: today });
+      const pulled = await pullPages(fetcher, params, { dateFrom, dateTo: today }, params.budgetMs);
+      // What the pull needed: from the owner's day (first sync), from the day
+      // after the last sync (incremental), or the bank's whole history.
+      const needed = params.firstSync ? params.historyFrom : params.dateFrom;
+      return needed !== undefined && dateFrom <= needed ? pulled : { ...pulled, shortenedFrom: dateFrom };
     } catch (error) {
       lastError = error;
       if (isTerminalSessionError(error)) throw error;
@@ -298,8 +314,10 @@ async function pullPages(
     accountUid: string;
     psuHeaders?: Record<string, string>;
   },
-  range: { dateFrom?: string; dateTo?: string; strategy?: "default" | "longest" }
+  range: { dateFrom?: string; dateTo?: string; strategy?: "default" | "longest" },
+  budgetMs: number = PULL_BUDGET_MS
 ): Promise<PulledTransactions> {
+  const startedAt = Date.now();
   const transactions: EbTransaction[] = [];
   const seenKeys = new Set<string>();
   let continuationKey: string | undefined;
@@ -318,6 +336,9 @@ async function pullPages(
     if (seenKeys.has(result.continuationKey)) return { transactions, truncated: true };
     seenKeys.add(result.continuationKey);
     continuationKey = result.continuationKey;
+    // A bank that never stops paging must not hold the sync (and the 6-hourly
+    // worker) for ever: say the pull is incomplete and stop.
+    if (Date.now() - startedAt > budgetMs) return { transactions, truncated: true };
   }
   return { transactions, truncated: true };
 }

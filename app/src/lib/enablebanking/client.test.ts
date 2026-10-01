@@ -260,3 +260,85 @@ describe("publicBankError", () => {
     );
   });
 });
+
+describe("R55: a first sync whose window the bank shortened says so", () => {
+  const now = new Date("2026-09-26T00:00:00.000Z");
+  const rejectBefore = (earliest: string): TransactionPageFetcher => ({
+    async getAccountTransactions(query) {
+      if (query.dateFrom && query.dateFrom < earliest) {
+        throw new EnableBankingError("period", 422, "WRONG_TRANSACTIONS_PERIOD");
+      }
+      return { transactions: [booked], continuationKey: null };
+    },
+  });
+
+  it("reports where the successful window began when it starts after the chosen day", async () => {
+    const result = await collectAccountTransactions(rejectBefore("2026-06-01"), {
+      accountUid: "acc-1",
+      firstSync: true,
+      historyFrom: "2025-01-01",
+      now,
+    });
+    expect(result.truncated).toBe(false);
+    expect(result.shortenedFrom).toBe("2026-06-28");
+  });
+
+  it("says nothing when the chosen day itself was served", async () => {
+    const result = await collectAccountTransactions(rejectBefore("2020-01-01"), {
+      accountUid: "acc-1",
+      firstSync: true,
+      historyFrom: "2026-01-01",
+      now,
+    });
+    expect(result.shortenedFrom).toBeUndefined();
+  });
+
+  it("says nothing when the fallback window is clamped to the chosen day", async () => {
+    const result = await collectAccountTransactions(rejectBefore("2026-01-01"), {
+      accountUid: "acc-1",
+      firstSync: true,
+      historyFrom: "2026-09-01",
+      now,
+    });
+    expect(result.shortenedFrom).toBeUndefined();
+  });
+
+  it("reports the year window when the bank refuses to give all of its history", async () => {
+    const fetcher: TransactionPageFetcher = {
+      async getAccountTransactions(query) {
+        if (query.strategy === "longest") {
+          throw new EnableBankingError("strategy is not supported", 400, "WRONG_REQUEST_PARAMETERS");
+        }
+        return { transactions: [booked], continuationKey: null };
+      },
+    };
+    const result = await collectAccountTransactions(fetcher, { accountUid: "acc-1", firstSync: true, now });
+    expect(result.shortenedFrom).toBe("2025-09-26");
+  });
+
+  it("an incremental pull that was served as asked is not shortened", async () => {
+    const result = await collectAccountTransactions(rejectBefore("2020-01-01"), {
+      accountUid: "acc-1",
+      firstSync: false,
+      dateFrom: "2026-09-20",
+      now,
+    });
+    expect(result.shortenedFrom).toBeUndefined();
+  });
+});
+
+describe("R65: a pull has a time budget", () => {
+  it("ends as truncated when the budget is used up, with what was read", async () => {
+    let calls = 0;
+    const fetcher: TransactionPageFetcher = {
+      async getAccountTransactions() {
+        calls += 1;
+        return { transactions: [booked], continuationKey: `k${calls}` };
+      },
+    };
+    const result = await collectAccountTransactions(fetcher, { accountUid: "acc-1", firstSync: true, budgetMs: -1 });
+    expect(result.truncated).toBe(true);
+    expect(calls).toBe(1);
+    expect(result.transactions).toHaveLength(1);
+  });
+});
