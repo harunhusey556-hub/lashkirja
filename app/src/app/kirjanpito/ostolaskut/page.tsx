@@ -131,6 +131,11 @@ export default function PurchaseInvoicesPage() {
   const [createOpen, setCreateOpen] = useState(false);
   const [confirmRemove, setConfirmRemove] = useState<PurchaseInvoice | null>(null);
   const [detailInvoice, setDetailInvoice] = useState<PurchaseInvoice | null>(null);
+  const [confirmRemovePayment, setConfirmRemovePayment] = useState<{
+    invoiceId: string;
+    paymentId: string;
+    amount: number;
+  } | null>(null);
   const [paymentDraft, setPaymentDraft] = useState("");
   const [payError, setPayError] = useState("");
 
@@ -317,6 +322,29 @@ export default function PurchaseInvoicesPage() {
       const failureMessage = errorMessage(error, "Poisto epäonnistui");
       setMessage(failureMessage);
       throw new Error(failureMessage);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  /** The way back from a wrong payment, or an overpayment that was booked before it was refused. */
+  async function removePayment(target: { invoiceId: string; paymentId: string }) {
+    setBusy(true);
+    try {
+      const response = await apiFetch(
+        `/api/purchase-invoices/${target.invoiceId}/payments?paymentId=${encodeURIComponent(target.paymentId)}`,
+        { method: "DELETE", credentials: "include" }
+      );
+      await readJson(response, "Maksun poisto epäonnistui");
+      setConfirmRemovePayment(null);
+      showToast({ tone: "success", text: "Maksu poistettiin" });
+      await Promise.all([load(), reloadCounts()]);
+    } catch (error) {
+      if (isUnauthorized(error)) {
+        redirectToLogin();
+        return;
+      }
+      throw new Error(errorMessage(error, "Maksun poisto epäonnistui"));
     } finally {
       setBusy(false);
     }
@@ -670,9 +698,27 @@ export default function PurchaseInvoicesPage() {
             {detailInvoice.payments.length > 0 && (
               <ul className="space-y-1 text-caption text-ink-2">
                 {detailInvoice.payments.map((payment) => (
-                  <li key={payment.id}>
-                    {formatDate(payment.paidDate)} · {formatEur(payment.amount)}
-                    {payment.source === "bank" ? " · pankista" : ""}
+                  <li key={payment.id} className="flex items-center justify-between gap-3">
+                    <span>
+                      {formatDate(payment.paidDate)} · {formatEur(payment.amount)}
+                      {payment.source === "bank" ? " · pankista" : ""}
+                    </span>
+                    <button
+                      type="button"
+                      className="active-press min-h-11 shrink-0 px-2 text-caption font-semibold text-danger disabled:opacity-50"
+                      disabled={busy}
+                      aria-label={`Poista maksu ${formatEur(payment.amount)}`}
+                      onClick={() => {
+                        setConfirmRemovePayment({
+                          invoiceId: detailInvoice.id,
+                          paymentId: payment.id,
+                          amount: payment.amount,
+                        });
+                        setDetailInvoice(null);
+                      }}
+                    >
+                      Poista maksu
+                    </button>
                   </li>
                 ))}
               </ul>
@@ -723,6 +769,19 @@ export default function PurchaseInvoicesPage() {
           </div>
         )}
       </BottomSheet>
+
+      <ConfirmModal
+        isOpen={confirmRemovePayment !== null}
+        title="Poistetaanko maksu?"
+        description={
+          confirmRemovePayment
+            ? `${formatEur(confirmRemovePayment.amount)} poistetaan ostolaskulta. Ostolasku palaa avoimeksi, jos se ei ole sen jälkeen kokonaan maksettu.`
+            : ""
+        }
+        confirmLabel="Poista maksu"
+        onConfirm={() => (confirmRemovePayment ? removePayment(confirmRemovePayment) : Promise.resolve())}
+        onCancel={() => setConfirmRemovePayment(null)}
+      />
 
       <ConfirmModal
         isOpen={confirmRemove !== null}

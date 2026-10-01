@@ -9,7 +9,10 @@ import {
   POST as addPayment,
 } from "@/app/api/invoices/[id]/payments/route";
 import { POST as createPurchase } from "@/app/api/purchase-invoices/route";
-import { POST as addPurchasePayment } from "@/app/api/purchase-invoices/[id]/payments/route";
+import {
+  DELETE as removePurchasePayment,
+  POST as addPurchasePayment,
+} from "@/app/api/purchase-invoices/[id]/payments/route";
 import { POST as confirmMatchRoute } from "@/app/api/matching/confirm/route";
 import { PATCH as reviewReceipt } from "@/app/api/receipts/[id]/review/route";
 import { PUT as setLock } from "@/app/api/period-lock/route";
@@ -264,5 +267,37 @@ describe("V40: purchase payments get the sales payment date guard", () => {
     expect(response.status).toBe(201);
     const stored = await prisma.purchasePayment.findFirstOrThrow({ where: { purchaseInvoiceId: invoice.id } });
     expect(stored.source).toBe("bank");
+  });
+});
+
+describe("V38: a purchase payment can be taken back", () => {
+  it("removes an overpayment that was booked before it was refused and reopens the invoice", async () => {
+    const created = await createPurchase(
+      buildRequest(
+        "POST",
+        "/api/purchase-invoices",
+        { supplierName: "Tukku Oy", issueDate: "2026-09-15", dueDate: "2026-09-29", gross: 50, vat: 0 },
+        { cookie }
+      )
+    );
+    const invoice = (await readJson(created)).invoice as { id: string };
+    const payment = await prisma.purchasePayment.create({
+      data: {
+        purchaseInvoiceId: invoice.id,
+        paidDate: new Date("2026-09-20T00:00:00.000Z"),
+        amountCents: 520_00,
+        source: "manual",
+      },
+    });
+    await prisma.purchaseInvoice.update({ where: { id: invoice.id }, data: { status: "paid" } });
+
+    const response = await removePurchasePayment(
+      buildRequest("DELETE", `/api/purchase-invoices/${invoice.id}/payments?paymentId=${payment.id}`, undefined, {
+        cookie,
+      }),
+      routeContext({ id: invoice.id })
+    );
+    expect(response.status).toBe(200);
+    expect((await readJson(response)).invoice).toMatchObject({ status: "open", paid: 0, open: 50 });
   });
 });

@@ -49,6 +49,7 @@ import { showToast } from "@/lib/toast";
 import { hapticNotify } from "@/lib/haptics";
 import { ReminderSheet, type ReminderPreview } from "@/components/invoices/ReminderSheet";
 import { reminderWaitNote } from "@/lib/reminder-schedule";
+import { overOpenMessage } from "@/lib/payment-entry";
 
 /** A hand-recorded payment that an income receipt from a bank row seems to count again. */
 interface PaymentDuplicate {
@@ -291,7 +292,6 @@ function InvoiceDetail() {
   const [confirmCredit, setConfirmCredit] = useState(false);
   const [confirmMarkSent, setConfirmMarkSent] = useState(false);
   const [reminderSheetOpen, setReminderSheetOpen] = useState(false);
-  const [overpayConfirmed, setOverpayConfirmed] = useState(false);
   const [pdfBusy, setPdfBusy] = useState(false);
   const [paymentDuplicates, setPaymentDuplicates] = useState<PaymentDuplicate[]>([]);
   const [duplicateBusy, setDuplicateBusy] = useState<string | null>(null);
@@ -466,12 +466,12 @@ function InvoiceDetail() {
       setPaymentError("Maksupäivä ei voi olla tulevaisuudessa.");
       return;
     }
-    // Overpayment is possible (a customer pays twice), but never silent (SALES-14).
-    if (invoice && amount > invoice.open + 0.004 && !overpayConfirmed) {
-      setPaymentError(
-        `Summa on suurempi kuin avoin saldo ${formatEur(invoice.open)}. Napauta uudelleen, jos kirjaat sen silti.`
-      );
-      setOverpayConfirmed(true);
+    // The server refuses a hand-keyed payment above the open balance, so the
+    // sheet says so on the first tap instead of offering a second tap that fails.
+    const tooMuch = invoice ? overOpenMessage(amount, invoice.open, Boolean(bankRow && useBankRow)) : null;
+    if (tooMuch) {
+      setPaymentError(tooMuch);
+      document.getElementById("payment-amount")?.focus();
       return;
     }
     setPaymentError("");
@@ -497,7 +497,6 @@ function InvoiceDetail() {
       paymentKey.current = newIdempotencyKey();
       setPaymentAmount("");
       setPaymentSheetOpen(false);
-      setOverpayConfirmed(false);
       showToast({ tone: "success", text: `Maksu ${formatEur(amount)} kirjattiin` });
       await load();
     } catch (error) {
@@ -516,7 +515,6 @@ function InvoiceDetail() {
     setBankRow(null);
     setUseBankRow(true);
     setPaymentError("");
-    setOverpayConfirmed(false);
     setPaymentAmount(amountText(invoice.open));
     setPaymentDate(helsinkiCalendarDate());
     setPaymentSheetOpen(true);
@@ -1195,7 +1193,11 @@ function InvoiceDetail() {
       <ConfirmModal
         isOpen={confirmRemovePayment !== null}
         title="Poistetaanko maksu?"
-        description="Maksu poistetaan pysyvästi laskulta."
+        description={
+          invoice?.payments.find((payment) => payment.id === confirmRemovePayment)?.source === "bank"
+            ? "Maksu poistetaan laskulta. Tiliotteen tapahtuma jää kohdistamatta."
+            : "Maksu poistetaan pysyvästi laskulta."
+        }
         confirmLabel="Poista"
         onConfirm={() =>
           confirmRemovePayment ? removePayment(confirmRemovePayment) : Promise.resolve()
@@ -1254,10 +1256,7 @@ function InvoiceDetail() {
                 aria-describedby={paymentError ? "payment-amount-error" : undefined}
                 className={`${controlClass} min-h-12 tabular-nums`}
                 value={paymentAmount}
-                onChange={(e) => {
-                  setPaymentAmount(e.target.value);
-                  setOverpayConfirmed(false);
-                }}
+                onChange={(e) => setPaymentAmount(e.target.value)}
                 inputMode="decimal"
                 autoComplete="off"
                 enterKeyHint="next"
@@ -1317,7 +1316,7 @@ function InvoiceDetail() {
             disabledReason={busy ? "Tallennus on kesken." : undefined}
             onClick={() => void addPayment()}
           >
-            {overpayConfirmed ? "Kirjaa silti" : "Kirjaa maksu"}
+            Kirjaa maksu
           </Button>
         </div>
       </BottomSheet>
