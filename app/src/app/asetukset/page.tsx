@@ -90,7 +90,7 @@ export default function AsetuksetPage() {
       </SettingsGroup>
 
       <SettingsGroup label="Ohje">
-        <SettingsRow href="/asetukset/ohje" icon={CircleHelp} label="Ohje ja tuki" hint="Ilmoita ongelmasta ja yhteystiedot" />
+        <SettingsRow href="/asetukset/ohje" icon={CircleHelp} label="Ohje ja tuki" hint="Ilmoita ongelmasta" />
       </SettingsGroup>
 
       {signOutError && (
@@ -104,9 +104,9 @@ export default function AsetuksetPage() {
         className="w-full"
         onClick={requestSignOut}
         busy={signingOut}
-        busyLabel="Kirjaudutaan ulos…"
+        busyLabel="Kirjataan ulos…"
       >
-        Kirjaudu ulos
+        Kirjaa ulos
       </Button>
       {confirmDialog}
     </div>

@@ -21,6 +21,23 @@ export function contactSupportPhrase(address: string = supportEmail()): string {
 }
 
 /**
+ * Where to write, as the help page says it (F54). With an address it is named;
+ * without one the page says so and points to the report button that exists,
+ * instead of promising a contact it cannot show.
+ */
+export function supportContactLine(address: string = supportEmail()): string {
+  if (address) return `Voit myös kirjoittaa suoraan osoitteeseen ${address}.`;
+  return "Tukiosoitetta ei ole vielä määritetty tähän versioon. Ilmoita ongelmasta -painike avaa jaon, jolla voit lähettää viestin sille, joka sovelluksen sinulle antoi.";
+}
+
+/** The toast after the report text was copied instead of shared. */
+export function reportCopiedToast(address: string = supportEmail()): string {
+  return address
+    ? `Viesti kopioitu. Liitä se sähköpostiin osoitteeseen ${address}.`
+    : "Viesti kopioitu. Liitä se viestiin ja lähetä se sovelluksen ylläpitäjälle.";
+}
+
+/**
  * The one answer to a password-recovery request. It depends only on whether
  * this server can send mail at all, never on the address typed, so it does not
  * reveal which accounts exist.
