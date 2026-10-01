@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { BANK_COPY, bankState, fetchedWhen, type BankConnectionSummary } from "./bank-status";
+import { BANK_COPY, accountSubline, bankState, fetchedWhen, type BankConnectionSummary } from "./bank-status";
 
 const NOW = new Date(2026, 8, 29, 14, 30);
 
@@ -92,5 +92,17 @@ describe("F16 / G33: the not-in-use copy is written for the person using the app
     expect(words).not.toMatch(/palvelim|tunnus|avain|paluuosoite|Enable Banking|ENABLEBANKING|APP_ID|hallinta/i);
     expect(BANK_COPY.unconfiguredBody).toMatch(/tiedostona/);
     expect(BANK_COPY.unconfiguredBody).toMatch(/käsin/);
+  });
+});
+
+describe("G37: the account line under a name", () => {
+  it("shows the last four digits of the IBAN, spaced or not", () => {
+    expect(accountSubline("FI21 1234 5600 0007 85", null)).toBe("•••• 0785");
+    expect(accountSubline("FI2112345600000785", null)).toBe("•••• 0785");
+  });
+
+  it("adds when it was updated, in the owner's date style", () => {
+    const iso = new Date(2026, 8, 29, 8, 5).toISOString();
+    expect(accountSubline("FI21 1234 5600 0007 85", iso, NOW)).toBe("•••• 0785 · päivitetty 8.05");
   });
 });

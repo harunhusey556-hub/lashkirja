@@ -87,6 +87,18 @@ export function fetchedWhen(iso: string, now: Date = new Date()): string {
   return at.getFullYear() === now.getFullYear() ? dayMonth : `${dayMonth}${at.getFullYear()}`;
 }
 
+/**
+ * "•••• 0785 · päivitetty 8.05": the line under an account's name. The IBAN
+ * arrives spaced for reading ("FI21 1234 5600 0007 85"), so the tail is taken
+ * from the compact form, never from the spaced string.
+ */
+export function accountSubline(iban: string, lastSuccessAt: string | null, now: Date = new Date()): string {
+  const compact = iban.replace(/\s+/g, "");
+  const tail = `•••• ${compact.slice(-4)}`;
+  const when = lastSuccessAt ? fetchedWhen(lastSuccessAt, now) : "";
+  return when ? `${tail} · päivitetty ${when}` : tail;
+}
+
 /** "Nordea", "Nordea ja OP", "3 pankkia". */
 function bankNames(connections: BankConnectionSummary[]): string {
   const names = [...new Set(connections.map((connection) => connection.aspspName))];

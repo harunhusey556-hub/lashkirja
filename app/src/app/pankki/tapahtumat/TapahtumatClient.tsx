@@ -21,7 +21,7 @@ import { BankLogo } from "@/components/bank/BankPickerSheet";
 import { BankRowSheet } from "@/components/bank/BankRowSheet";
 import { useBankConnections } from "@/components/bank/useBankConnections";
 import { useStatementUpload } from "@/components/bank/useStatementUpload";
-import { fetchedWhen, type BankConnectionSummary } from "@/lib/bank-status";
+import { accountSubline, type BankConnectionSummary } from "@/lib/bank-status";
 import { feedRows, groupByMonth, matchesSearch, needsAction, rowState, type FeedRow } from "@/lib/bank-feed";
 import { isSyncNotice, syncOutcomeMessage, type AccountSyncRow } from "@/lib/bank-sync-summary";
 import { hapticNotify } from "@/lib/haptics";
@@ -132,10 +132,8 @@ function AccountsCard({
               <BankLogo name={connection.aspspName} logo={connection.aspspLogo} />
               <div className="min-w-0 flex-1">
                 <p className="truncate text-body font-medium text-ink">{account.label?.trim() || connection.aspspName}</p>
-                <p className="truncate text-caption text-ink-2">
-                  •••• {account.iban.slice(-4)}
-                  {connection.lastSuccessAt ? ` · päivitetty ${fetchedWhen(connection.lastSuccessAt)}` : ""}
-                </p>
+                {/* Wraps instead of clipping: the update time is the part that matters at 390 px. */}
+                <p className="text-caption text-ink-2">{accountSubline(account.iban, connection.lastSuccessAt)}</p>
               </div>
               {account.balance != null && (
                 <span className="shrink-0 text-body font-semibold tabular-nums text-ink">{formatEur(account.balance)}</span>
