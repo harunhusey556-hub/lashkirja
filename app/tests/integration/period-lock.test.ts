@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { prisma } from "@/lib/db";
+import { helsinkiMonthKey } from "@/lib/validation";
 import { GET as lockState, PUT as setLock } from "@/app/api/period-lock/route";
 import { POST as createInvoice } from "@/app/api/invoices/route";
 import { PATCH as patchInvoice, DELETE as deleteInvoice } from "@/app/api/invoices/[id]/route";
@@ -30,8 +31,10 @@ let customerId: string;
 const LOCKED_MONTH = "2026-01";
 const OPEN_MONTH = "2026-05";
 
-async function lockThrough(month: string | null) {
-  const response = await setLock(buildRequest("PUT", "/api/period-lock", { month }, { cookie }));
+async function lockThrough(month: string | null, reopen = false) {
+  const response = await setLock(
+    buildRequest("PUT", "/api/period-lock", reopen ? { month, reopen } : { month }, { cookie })
+  );
   expect(response.status).toBe(200);
   return readJson(response);
 }
@@ -71,7 +74,46 @@ describe("/api/period-lock", () => {
     ).toBeNull();
 
     expect((await lockThrough("2026-01")).lockedThrough).toBe("2026-01");
-    expect((await lockThrough(null)).lockedThrough).toBeNull();
+    expect((await lockThrough(null, true)).lockedThrough).toBeNull();
+  });
+
+  it("keeps later locks when an earlier month is chosen without reopening (F68)", async () => {
+    await lockThrough("2026-09");
+    const refused = await setLock(buildRequest("PUT", "/api/period-lock", { month: "2026-06" }, { cookie }));
+    expect(refused.status).toBe(409);
+    expect((await readJson(refused)).error.code).toBe("PERIOD_REOPEN_REQUIRED");
+    const cleared = await setLock(buildRequest("PUT", "/api/period-lock", { month: null }, { cookie }));
+    expect(cleared.status).toBe(409);
+    expect(
+      (await readJson(await lockState(buildRequest("GET", "/api/period-lock", undefined, { cookie }))))
+        .lockedThrough
+    ).toBe("2026-09");
+  });
+
+  it("reopens months on an explicit choice and leaves an audit trail (F68)", async () => {
+    await lockThrough("2026-08");
+    expect((await lockThrough("2026-06", true)).lockedThrough).toBe("2026-06");
+    await lockThrough("2026-07");
+    await lockThrough(null, true);
+    const events = await prisma.automationEvent.findMany({
+      where: { userId: user.id, kind: "lock" },
+      orderBy: { createdAt: "asc" },
+    });
+    expect(events.map((event) => [event.previousValue, event.newValue, event.reason])).toEqual([
+      [null, "2026-08", "käyttäjä lukitsi kauden"],
+      ["2026-08", "2026-06", "käyttäjä avasi kaudet"],
+      ["2026-06", "2026-07", "käyttäjä lukitsi kauden"],
+      ["2026-07", null, "käyttäjä avasi kaudet"],
+    ]);
+  });
+
+  it("refuses the running month, like the Kuukausi page (F69)", async () => {
+    const running = helsinkiMonthKey(new Date());
+    const response = await setLock(buildRequest("PUT", "/api/period-lock", { month: running }, { cookie }));
+    expect(response.status).toBe(400);
+    expect((await readJson(response)).error.message).toContain("kesken");
+    const stored = await prisma.user.findUniqueOrThrow({ where: { id: user.id } });
+    expect(stored.booksLockedThrough).toBeNull();
   });
 
   it("refuses a future month and a malformed one", async () => {
@@ -110,7 +152,8 @@ describe("a closed period refuses changes", () => {
     const blocked = await makeInvoice("2026-01-20");
     expect(blocked.status).toBe(409);
     expect(blocked.body.error.code).toBe("PERIOD_LOCKED");
-    expect(blocked.body.error.message).toContain("2026-01");
+    expect(blocked.body.error.message).toContain("tammikuu 2026");
+    expect(blocked.body.error.message).toContain("Suljetut kaudet");
 
     const allowed = await makeInvoice("2026-05-20");
     expect(allowed.status).toBe(201);
@@ -318,7 +361,7 @@ describe("a closed period refuses changes", () => {
 
   it("lets everything through again once the books are reopened", async () => {
     expect((await makeInvoice("2026-01-20")).status).toBe(409);
-    await lockThrough(null);
+    await lockThrough(null, true);
     expect((await makeInvoice("2026-01-20")).status).toBe(201);
   });
 

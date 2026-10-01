@@ -538,8 +538,8 @@ function InvoicesPageContent() {
             )}
             {(matchPreview.skippedLocked?.length ?? 0) > 0 && (
               <p className="text-caption text-ink-2">
-                {lockedNote(matchPreview.skippedLocked?.length ?? 0)} Avaa lukitus asetuksista, jos
-                maksu kuuluu kirjata.
+                {lockedNote(matchPreview.skippedLocked?.length ?? 0)} Voit avata kauden kohdassa
+                Kirjanpito &gt; Suljetut kaudet, jos maksu kuuluu kirjata.
               </p>
             )}
             {matchPreview.suggestions.length > 0 && (

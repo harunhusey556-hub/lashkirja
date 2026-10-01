@@ -357,17 +357,18 @@ function MonthClose() {
             </Section>
           ) : null}
 
-          {data.locked ? (
-            <p className="px-1 text-caption text-ink-2">
-              Suljetun kuukauden kuitteja, laskuja ja tapahtumia ei voi muuttaa.{" "}
-              <Link
-                href="/kirjanpito/kaudet"
-                className="relative font-medium text-accent before:absolute before:inset-x-0 before:-inset-y-3 before:content-['']"
-              >
-                Suljetut kaudet
-              </Link>
-            </p>
-          ) : (
+          {/* F67: the way to Suljetut kaudet does not depend on which month is shown. */}
+          <p className="px-1 text-caption text-ink-2">
+            {data.locked ? "Suljetun kuukauden kuitteja, laskuja ja tapahtumia ei voi muuttaa. " : "Jo suljetut kaudet ja niiden avaaminen: "}
+            <Link
+              href="/kirjanpito/kaudet"
+              className="relative font-medium text-accent before:absolute before:inset-x-0 before:-inset-y-3 before:content-['']"
+            >
+              Suljetut kaudet
+            </Link>
+          </p>
+
+          {data.locked ? null : (
             <BottomActions>
               <Button
                 className="w-full"

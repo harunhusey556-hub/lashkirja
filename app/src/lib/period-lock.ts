@@ -13,12 +13,29 @@ import { prisma } from "./db";
 type LockReader = Prisma.TransactionClient | typeof prisma;
 import { AppError, ValidationError } from "./api-errors";
 import { isMonthKey, monthKey } from "./bank-balances";
+import { formatMonth } from "./format";
+import { helsinkiMonthKey } from "./validation";
 
 export class PeriodLockedError extends AppError {
   constructor(month: string, lockedThrough: string) {
+    // The period lock lives in Kirjanpito > Suljetut kaudet (/kirjanpito/kaudet); Asetukset has none.
     super(
-      `Kausi ${month} on lukittu (kirjanpito suljettu ${lockedThrough} asti). Avaa lukitus asetuksista, jos muutos on välttämätön.`,
+      `Kausi ${formatMonth(month)} on suljettu (kirjanpito on suljettu ${formatMonth(lockedThrough)} asti). Voit avata sen kohdassa Kirjanpito > Suljetut kaudet, jos muutos on välttämätön.`,
       "PERIOD_LOCKED",
+      409
+    );
+  }
+}
+
+/**
+ * Lowering or clearing the boundary reopens months that may already be filed,
+ * so it is refused unless the caller says it means exactly that (F68).
+ */
+export class PeriodReopenRequiredError extends AppError {
+  constructor(lockedThrough: string) {
+    super(
+      `Kirjanpito on suljettu ${formatMonth(lockedThrough)} asti. Aiemman kuukauden lukitseminen ei avaa myöhempiä kausia. Jos haluat avata kausia uudelleen, valitse Avaa kaudet.`,
+      "PERIOD_REOPEN_REQUIRED",
       409
     );
   }
@@ -82,29 +99,72 @@ export interface LockState {
   lockedThrough: string | null;
 }
 
+export interface LockChangeOptions {
+  now?: Date;
+  /** The caller has chosen to reopen months: lower or clear the boundary. */
+  reopen?: boolean;
+}
+
 /**
- * Sets or clears the watermark. A future month cannot be closed - the period
- * has not happened yet - and moving the watermark backwards (unlocking) is
- * allowed on purpose, because a correction sometimes has to be made.
+ * The one rule for moving the boundary (F68, F69). Only a month that has
+ * ended can be closed, by the same Helsinki calendar the Kuukausi page uses
+ * for its `ended` flag, so the two entry points cannot disagree. Moving the
+ * boundary backwards (or clearing it) is allowed on purpose, because a
+ * correction sometimes has to be made, but only as an explicit `reopen`:
+ * choosing an earlier month to lock must never quietly reopen later ones.
  */
-export async function setLockedThrough(
-  userId: string,
+export function checkLockChange(
+  current: string | null,
   month: string | null,
-  now: Date = new Date()
-): Promise<LockState> {
+  options: LockChangeOptions = {}
+): void {
+  const now = options.now ?? new Date();
   if (month !== null) {
     if (!isMonthKey(month)) {
       throw new ValidationError("Kuukausi on muotoa YYYY-MM.");
     }
-    if (month > monthKey(now)) {
+    const running = helsinkiMonthKey(now);
+    if (month > running) {
       throw new ValidationError("Tulevaa kuukautta ei voi lukita.");
     }
+    if (month === running) {
+      throw new ValidationError("Kuukausi on vielä kesken. Sen voi lukita, kun se on päättynyt.");
+    }
   }
+  const lowering = current !== null && (month === null || month < current);
+  if (lowering && !options.reopen) {
+    throw new PeriodReopenRequiredError(current);
+  }
+}
 
-  const user = await prisma.user.update({
-    where: { id: userId },
-    data: { booksLockedThrough: month },
-    select: { booksLockedThrough: true },
+/** Sets or clears the watermark and leaves a trace of the change. */
+export async function setLockedThrough(
+  userId: string,
+  month: string | null,
+  options: LockChangeOptions = {}
+): Promise<LockState> {
+  return prisma.$transaction(async (tx) => {
+    const previous = await getLockedThrough(userId, tx);
+    checkLockChange(previous, month, options);
+    if (previous === month) return { lockedThrough: previous };
+
+    const user = await tx.user.update({
+      where: { id: userId },
+      data: { booksLockedThrough: month },
+      select: { booksLockedThrough: true },
+    });
+    const reopened = previous !== null && (month === null || month < previous);
+    await tx.automationEvent.create({
+      data: {
+        userId,
+        kind: "lock",
+        resourceType: "period",
+        resourceId: "books",
+        previousValue: previous,
+        newValue: month,
+        reason: reopened ? "käyttäjä avasi kaudet" : "käyttäjä lukitsi kauden",
+      },
+    });
+    return { lockedThrough: user.booksLockedThrough };
   });
-  return { lockedThrough: user.booksLockedThrough };
 }

@@ -12,6 +12,7 @@ import { Card, ListRow, Section, Skeleton, SkeletonGroup } from "@/components/ds
 import { normalizeLegacyDetailPath } from "@/lib/routes";
 import { showToast } from "@/lib/toast";
 import { hapticNotify } from "@/lib/haptics";
+import { lockChangeKind, reopenedRangeLabel } from "@/lib/period-lock-copy";
 
 /**
  * Closing the books. Everything dated on or before the chosen month becomes
@@ -41,11 +42,11 @@ function capitalize(text: string): string {
   return text.charAt(0).toLocaleUpperCase("fi") + text.slice(1);
 }
 
-/** The last 24 months, newest first; a future month cannot be closed. */
+/** The last 24 finished months, newest first: a month still in progress cannot be closed (F69). */
 function monthOptions(): string[] {
   const [year, month] = currentMonthKey().split("-").map(Number);
   const options: string[] = [];
-  for (let back = 0; back < 24; back += 1) {
+  for (let back = 1; back <= 24; back += 1) {
     const total = year * 12 + (month - 1) - back;
     const optionYear = Math.floor(total / 12);
     const optionMonth = total - optionYear * 12 + 1;
@@ -71,20 +72,27 @@ export default function BooksLockCard() {
   const loadError = lock.error;
   const [precheck, setPrecheck] = useState<PeriodPrecheck | null>(null);
   const [actionError, setActionError] = useState("");
-  const [confirm, setConfirm] = useState<{ month: string | null } | null>(null);
+  const [confirm, setConfirm] = useState<{ month: string | null; reopen: boolean } | null>(null);
 
   const selected = (choice ?? lockedThrough) || null;
-  const unchanged = selected === lockedThrough;
+  const change = lockChangeKind(lockedThrough, selected);
+  const unchanged = change === "none";
+  // An earlier month than the current lock reopens the months after it: never a plain "Lukitse" (F68).
+  const reopening = change === "reopen";
   const acknowledged = Boolean(selected) && precheck?.month === selected && precheckCount(precheck) > 0;
 
   /** Lock: list what is still open first; a clean month goes straight to the confirm. */
   async function requestLock() {
     if (!selected) {
-      setConfirm({ month: null });
+      setConfirm({ month: null, reopen: true });
+      return;
+    }
+    if (reopening) {
+      setConfirm({ month: selected, reopen: true });
       return;
     }
     if (acknowledged) {
-      setConfirm({ month: selected });
+      setConfirm({ month: selected, reopen: false });
       return;
     }
     setChecking(true);
@@ -93,7 +101,7 @@ export default function BooksLockCard() {
       const preview = await apiFetch(`/api/period-lock/precheck?month=${selected}`, { credentials: "include" });
       const listed = await readJson<PeriodPrecheck>(preview, "Tarkistus epäonnistui");
       setPrecheck(listed);
-      if (precheckCount(listed) === 0) setConfirm({ month: selected });
+      if (precheckCount(listed) === 0) setConfirm({ month: selected, reopen: false });
     } catch (error) {
       if (isUnauthorized(error)) {
         redirectToLogin();
@@ -105,12 +113,13 @@ export default function BooksLockCard() {
     }
   }
 
-  async function commit(month: string | null) {
+  async function commit(month: string | null, reopen: boolean) {
+    const previous = lockedThrough;
     const response = await apiFetch("/api/period-lock", {
       method: "PUT",
       credentials: "include",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ month }),
+      body: JSON.stringify(reopen ? { month, reopen } : { month }),
     });
     const data = await readJson<{ lockedThrough: string | null }>(response, "Tallennus epäonnistui");
     lock.set({ lockedThrough: data.lockedThrough });
@@ -120,11 +129,18 @@ export default function BooksLockCard() {
     void hapticNotify("success");
     showToast({
       tone: "success",
-      text: data.lockedThrough ? `Kirjanpito lukittu ${formatMonth(data.lockedThrough)} asti.` : "Kirjanpito avattiin.",
+      text:
+        reopen && previous && data.lockedThrough
+          ? `${capitalize(reopenedRangeLabel(data.lockedThrough, previous))} avattiin.`
+          : data.lockedThrough
+            ? `Kirjanpito lukittu ${formatMonth(data.lockedThrough)} asti.`
+            : "Kirjanpito avattiin.",
     });
   }
 
   const options = monthOptions();
+  // The months a reopen frees, named in the dialog and the toast (F68).
+  const reopenRange = confirm?.reopen && lockedThrough ? reopenedRangeLabel(confirm.month, lockedThrough) : null;
 
   return (
     <div className="space-y-6">
@@ -173,12 +189,12 @@ export default function BooksLockCard() {
                 disabled={unchanged}
                 className="shrink-0"
               >
-                {!selected ? "Poista lukitus" : acknowledged ? "Lukitse silti" : "Lukitse"}
+                {!selected ? "Poista lukitus" : reopening ? "Avaa kaudet" : acknowledged ? "Lukitse silti" : "Lukitse"}
               </Button>
             </div>
 
             {lockedThrough && unchanged && (
-              <Button type="button" variant="secondary" className="w-full" onClick={() => setConfirm({ month: null })}>
+              <Button type="button" variant="secondary" className="w-full" onClick={() => setConfirm({ month: null, reopen: true })}>
                 Avaa kirjanpito uudelleen
               </Button>
             )}
@@ -216,16 +232,22 @@ export default function BooksLockCard() {
       <ConfirmModal
         isOpen={confirm !== null}
         title={
-          confirm?.month ? `Lukitaanko kaudet ${formatMonth(confirm.month)} asti?` : "Avataanko kirjanpito uudelleen?"
+          reopenRange && confirm?.month
+            ? `Avataanko ${reopenRange}?`
+            : confirm?.month
+              ? `Lukitaanko kaudet ${formatMonth(confirm.month)} asti?`
+              : "Avataanko kirjanpito uudelleen?"
         }
         description={
-          confirm?.month
-            ? `${capitalize(formatMonth(confirm.month))} ja sitä vanhemmat kaudet muuttuvat vain luettaviksi: kuitteja, tiliotteita, laskuja ja maksuja ei voi lisätä, muuttaa eikä poistaa. Voit avata ne myöhemmin.`
-            : "Kaikkia kausia voi taas muuttaa. Tee tämä vain, jos jokin ilmoitettu kausi pitää korjata."
+          reopenRange && confirm?.month
+            ? `Nämä kaudet muuttuvat taas muokattaviksi: ${reopenRange}. Kuitteja, tiliotteita, laskuja ja maksuja voi silloin lisätä, muuttaa ja poistaa. Jos jokin niistä on jo ilmoitettu, avaa ne vain korjausta varten. Kirjanpito pysyy suljettuna ${formatMonth(confirm.month)} asti.`
+            : confirm?.month
+              ? `${capitalize(formatMonth(confirm.month))} ja sitä vanhemmat kaudet muuttuvat vain luettaviksi: kuitteja, tiliotteita, laskuja ja maksuja ei voi lisätä, muuttaa eikä poistaa. Voit avata ne myöhemmin.`
+              : `Nämä kaudet muuttuvat taas muokattaviksi: ${reopenRange ?? "kaikki kaudet"}. Tee tämä vain, jos jokin ilmoitettu kausi pitää korjata.`
         }
-        confirmLabel={confirm?.month ? "Lukitse" : "Avaa kirjanpito"}
-        isDestructive={!confirm?.month}
-        onConfirm={() => commit(confirm?.month ?? null)}
+        confirmLabel={confirm?.reopen ? "Avaa kaudet" : "Lukitse"}
+        isDestructive={Boolean(confirm?.reopen)}
+        onConfirm={() => commit(confirm?.month ?? null, Boolean(confirm?.reopen))}
         onCancel={() => setConfirm(null)}
       />
     </div>

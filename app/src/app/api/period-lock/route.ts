@@ -9,6 +9,8 @@ import { monthSchema } from "@/lib/validation";
 const bodySchema = z.object({
   // null reopens the books.
   month: monthSchema.nullable(),
+  // Lowering or clearing the lock must be asked for on purpose (F68).
+  reopen: z.boolean().optional(),
 });
 
 export const GET = withErrorHandler(async (req: NextRequest) => {
@@ -27,6 +29,6 @@ export const PUT = withErrorHandler(async (req: NextRequest) => {
   const oversized = rejectOversizedContentLength(req);
   if (oversized) return oversized;
 
-  const { month } = bodySchema.parse(await req.json());
-  return noStoreJson(await setLockedThrough(session.userId, month));
+  const { month, reopen } = bodySchema.parse(await req.json());
+  return noStoreJson(await setLockedThrough(session.userId, month, { reopen }));
 });

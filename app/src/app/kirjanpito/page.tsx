@@ -1,7 +1,7 @@
 "use client";
 
 import { PullToRefresh } from "@/components/ds/PullToRefresh";
-import { Inbox, Lock, Percent, ReceiptEuro } from "lucide-react";
+import { Inbox, Lock, LockKeyhole, Percent, ReceiptEuro } from "lucide-react";
 import { Icon, PageTitle, Section, ListRow, SlotSkeleton } from "@/components/ds";
 import { apiFetch, readJson } from "@/components/clientFetch";
 import { MONTHS } from "@/lib/finnish-months";
@@ -111,12 +111,19 @@ export default function KirjanpitoPage() {
           amount={alvWaiting ? <SlotSkeleton width={56} /> : (vatDueAmount(vat.figures) ?? undefined)}
           secondary={alvWaiting ? <SlotSkeleton width={176} height={11} tone="soft" /> : vat.due ? vatDueSecondary(vat.due, vat.figures) : undefined}
         />
-        {/* TF-07 / FP-13: the month has a finish line; locking and reopening live behind it. */}
+        {/* TF-07 / FP-13: the month has a finish line. */}
         <ListRow
           href="/kirjanpito/kuukausi"
           leading={<Icon icon={Lock} />}
           chevron
           title="Kuukauden sulkeminen"
+        />
+        {/* F67: locked months and reopening have their own row, so the lock error can point here. */}
+        <ListRow
+          href="/kirjanpito/kaudet"
+          leading={<Icon icon={LockKeyhole} />}
+          chevron
+          title="Suljetut kaudet"
           amount={pending(lock) ? <SlotSkeleton width={72} /> : lockValue}
           amountTone="muted"
         />
