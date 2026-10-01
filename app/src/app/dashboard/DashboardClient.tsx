@@ -2,7 +2,7 @@
 
 import { PullToRefresh } from "@/components/ds/PullToRefresh";
 import Link from "next/link";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { ConnectionNotice, PartialFailureNotice, StaleBanner } from "@/components/ScreenState";
 import {
@@ -50,12 +50,21 @@ import { showToast } from "@/lib/toast";
 import { newIdempotencyKey } from "@/lib/idempotency-key";
 import { ReminderSheet } from "@/components/invoices/ReminderSheet";
 import { receiptDrillHref, statementDrillHref } from "@/lib/report-drill";
-import { helsinkiMonthKey } from "@/lib/validation";
+import { helsinkiCalendarDate, helsinkiMonthKey } from "@/lib/validation";
+import { kotiTimeBands, type KotiTimeBand } from "@/lib/koti-time-bands";
 import { MONTHS } from "@/lib/finnish-months";
 import { pageCacheFetchedAt, readPageCache, writePageCache } from "@/lib/page-cache";
 import { pollDelay, syncPageHiddenFlag } from "@/lib/page-activity";
 import { vatPeriodEndingIn, vatPeriodKindOf } from "@/lib/vat-deadline";
-import { VAT_ROW_TITLE, vatChangedNote, vatDueAmount, vatDueSecondary, vatPendingNote } from "@/lib/vat-due";
+import {
+  VAT_ROW_TITLE,
+  vatChangedNote,
+  vatDueAmount,
+  vatDueSecondary,
+  vatFilingState,
+  vatNothingToPay,
+  vatPendingNote,
+} from "@/lib/vat-due";
 import {
   kotiHeadline,
   kotiMonthHasActivity,
@@ -324,14 +333,66 @@ function buildAccountTasks(data: DashboardData): Task[] {
   return tasks;
 }
 
-/** The month's name in a sentence start: "Elokuu". */
-function monthNameOf(month: string): string {
-  return MONTHS[Number(month.slice(5, 7)) - 1] || month;
-}
-
 /** Where a month's close lives (FP-13). */
 function monthCloseHref(month: string): string {
   return `/kirjanpito/kuukausi?month=${month}`;
+}
+
+/**
+ * One period on Koti. The caption names the layer; the card never mixes it
+ * with another month. Section isn't used: the selected month is a status
+ * block, not a divided list.
+ */
+function KotiBand({
+  band,
+  children,
+}: {
+  band: KotiTimeBand;
+  children: ReactNode;
+}) {
+  return (
+    <section data-koti-band={band.id}>
+      {band.caption ? (
+        <h2
+          className={`mb-2 px-1 text-caption font-normal ${band.captionTone === "warning" ? "text-warning" : "text-ink-2"}`}
+        >
+          {band.caption}
+        </h2>
+      ) : null}
+      <div className="overflow-hidden rounded-card border border-line bg-surface">{children}</div>
+    </section>
+  );
+}
+
+function CloseRow({
+  href,
+  title,
+  secondary,
+  ariaLabel,
+  divided,
+  prominent,
+}: {
+  href: string;
+  title: string;
+  secondary?: string;
+  ariaLabel?: string;
+  divided: boolean;
+  prominent: boolean;
+}) {
+  return (
+    <Link
+      href={href}
+      aria-label={ariaLabel}
+      className={`active-press flex min-h-12 items-center gap-3 px-4 text-body ${prominent ? "py-4" : "py-3"} ${divided ? "border-t border-line" : ""}`}
+    >
+      <Icon icon={CalendarCheck} className="shrink-0 text-ink-2" />
+      <span className="min-w-0 flex-1">
+        <span className={`block text-ink ${prominent ? "text-headline font-semibold" : ""}`}>{title}</span>
+        {secondary ? <span className="block text-caption text-ink-2">{secondary}</span> : null}
+      </span>
+      <Icon icon={ChevronRight} className="shrink-0 text-ink-2" />
+    </Link>
+  );
 }
 
 export default function DashboardClient() {
@@ -782,6 +843,19 @@ export default function DashboardClient() {
   const vatHref = vat.due?.queryKey ? `/kirjanpito/alv?period=${vat.due.queryKey}` : "/kirjanpito/alv";
   const vatNote = vatPendingNote(vat.figures);
   const vatChanged = vatChangedNote(vat.figures);
+  const vatSettled = vat.figures
+    ? vatFilingState(vat.figures.filing) === "paid" ||
+      (vatFilingState(vat.figures.filing) === "filed" && vatNothingToPay(vat.figures))
+    : null;
+  // Past periods above the month the header shows. Filing state only changes
+  // the caption; the order is the due date, so the cards do not jump.
+  const timeBands = kotiTimeBands({
+    selectedMonth: month,
+    atCurrent,
+    today: helsinkiCalendarDate(now),
+    previousMonth: atCurrent && data?.previousMonth ? data.previousMonth : null,
+    vat: vat.due ? { periodKey: vat.due.key, dueIso: vat.due.dueIso, settled: vatSettled } : null,
+  });
 
   function openReceipt(receiptId: string) {
     const href = detailHref("receipt", receiptId);
@@ -833,6 +907,46 @@ export default function DashboardClient() {
     );
   }
 
+  function renderVatRow(divided: boolean, prominent: boolean) {
+    if (!vat.due) return null;
+    return (
+      <Link
+        key="vat"
+        href={vatHref}
+        aria-label={`${VAT_ROW_TITLE}, ${vatDueSecondary(vat.due, vat.figures)}${vat.figures ? `, ${vatDueAmount(vat.figures)}` : ""}`}
+        className={`active-press flex min-h-12 justify-between gap-3 px-4 text-body ${prominent ? "items-start py-4" : "items-center py-3"} ${divided ? "border-t border-line" : ""}`}
+      >
+        <span className="min-w-0">
+          <span className={`block text-ink ${prominent ? "text-headline font-semibold" : ""}`}>{VAT_ROW_TITLE}</span>
+          <span className="block text-caption text-ink-2">
+            {vat.waiting ? <Skeleton tone="soft" className="mt-1 h-3 w-40" /> : vatDueSecondary(vat.due, vat.figures)}
+          </span>
+          {vatChanged ? <span className="mt-0.5 block text-caption text-warning">{vatChanged}</span> : null}
+          {vatNote ? <span className="mt-0.5 block text-caption text-warning">{vatNote}</span> : null}
+        </span>
+        <span className={`shrink-0 whitespace-nowrap font-semibold tabular-nums text-ink ${prominent ? "text-headline" : ""}`}>
+          {vat.waiting ? <Skeleton className="h-4 w-16" /> : vatDueAmount(vat.figures)}
+        </span>
+      </Link>
+    );
+  }
+
+  function renderPreviousClose(band: KotiTimeBand, divided: boolean, prominent: boolean) {
+    const close = band.previousClose;
+    if (!close) return null;
+    return (
+      <CloseRow
+        key="close"
+        href={monthCloseHref(close.month)}
+        title={close.title}
+        secondary="Kuukauden sulkeminen"
+        ariaLabel={`${close.monthName}, ${close.title}, Kuukauden sulkeminen`}
+        divided={divided}
+        prominent={prominent}
+      />
+    );
+  }
+
   return (
     <div className="space-y-6">
       {/* C1.6 (IA-24): pull to refresh runs the same reload as Yritä uudelleen. */}
@@ -864,84 +978,56 @@ export default function DashboardClient() {
         <KotiSkeleton />
       ) : (
         <div className={`space-y-6 ${fade}`}>
-          {/* Month status: what is still open, how much of the bank is in order, VAT. */}
-          <div className="rounded-card border border-line bg-surface p-4">
-            <p className="text-headline font-semibold text-ink">{headline}</p>
-            {events && events.total > 0 && !data.sectionErrors?.matching ? (
-              <>
-                <p className="mt-0.5 text-body text-ink-2">
-                  {events.done} / {events.total} tapahtumaa on kunnossa
-                </p>
-                <SegmentedProgress
-                  done={events.done}
-                  total={events.total}
-                  label={`${events.done} tapahtumaa ${events.total}:sta on kunnossa`}
-                  animateKey={`koti-month:${month}`}
-                  className="mt-3.5"
-                />
-              </>
-            ) : null}
-            {statementLine ? (
-              <p className={`${events && events.total > 0 ? "mt-2" : "mt-0.5"} text-body text-ink-2`}>
-                {statementLine}{" "}
-                {/* F24: the file picker opens from this tap (it cannot open after a page change). */}
-                <button
-                  type="button"
-                  onClick={requestStatementImport}
-                  className={tintedButtonClass("accent")}
-                >
-                  Tuo tiliote
-                </button>
-              </p>
-            ) : null}
-            {/* FP-3: last month stays on Koti until it is closed. */}
-            {atCurrent && data.previousMonth ? (
-              <Link
-                href={monthCloseHref(data.previousMonth.month)}
-                className="active-press -mx-4 mt-4 flex min-h-12 items-center gap-3 border-t border-line px-4 py-3 text-body"
-              >
-                <Icon icon={CalendarCheck} className="shrink-0 text-ink-2" />
-                <span className="min-w-0 flex-1">
-                  <span className="block text-ink">
-                    {data.previousMonth.open > 0
-                      ? `${monthNameOf(data.previousMonth.month)}: ${plural(data.previousMonth.open, "asia", "asiaa")} kesken`
-                      : `${monthNameOf(data.previousMonth.month)} on valmis suljettavaksi`}
-                  </span>
-                  <span className="block text-caption text-ink-2">Kuukauden sulkeminen</span>
-                </span>
-                <Icon icon={ChevronRight} className="shrink-0 text-ink-2" />
-              </Link>
-            ) : null}
-            {!atCurrent ? (
-              <Link
-                href={monthCloseHref(month)}
-                className="active-press -mx-4 mt-4 flex min-h-12 items-center gap-3 border-t border-line px-4 py-3 text-body"
-              >
-                <Icon icon={CalendarCheck} className="shrink-0 text-ink-2" />
-                <span className="min-w-0 flex-1 text-ink">Kuukauden sulkeminen</span>
-                <Icon icon={ChevronRight} className="shrink-0 text-ink-2" />
-              </Link>
-            ) : null}
-            {vat.due ? (
-              <Link
-                href={vatHref}
-                aria-label={`${VAT_ROW_TITLE}, ${vatDueSecondary(vat.due, vat.figures)}${vat.figures ? `, ${vatDueAmount(vat.figures)}` : ""}`}
-                className="active-press -mx-4 -mb-4 mt-4 flex min-h-12 items-center justify-between gap-3 border-t border-line px-4 py-3 text-body"
-              >
-                <span className="min-w-0">
-                  <span className="block text-ink">{VAT_ROW_TITLE}</span>
-                  <span className="block text-caption text-ink-2">
-                    {vat.waiting ? <Skeleton tone="soft" className="mt-1 h-3 w-40" /> : vatDueSecondary(vat.due, vat.figures)}
-                  </span>
-                  {vatChanged ? <span className="mt-0.5 block text-caption text-warning">{vatChanged}</span> : null}
-                  {vatNote ? <span className="mt-0.5 block text-caption text-warning">{vatNote}</span> : null}
-                </span>
-                <span className="shrink-0 whitespace-nowrap font-semibold tabular-nums text-ink">
-                  {vat.waiting ? <Skeleton className="h-4 w-16" /> : vatDueAmount(vat.figures)}
-                </span>
-              </Link>
-            ) : null}
-          </div>
+          {/* Each period is its own band. A deadline or an open previous month
+              sits above the month the header shows, not inside its card. */}
+          {timeBands.map((band) =>
+            band.selected ? (
+              <KotiBand key={band.id} band={band}>
+                <div className="p-4">
+                  <p className="text-headline font-semibold text-ink">{headline}</p>
+                  {events && events.total > 0 && !data.sectionErrors?.matching ? (
+                    <>
+                      <p className="mt-0.5 text-body text-ink-2">
+                        {events.done} / {events.total} tapahtumaa on kunnossa
+                      </p>
+                      <SegmentedProgress
+                        done={events.done}
+                        total={events.total}
+                        label={`${events.done} tapahtumaa ${events.total}:sta on kunnossa`}
+                        animateKey={`koti-month:${month}`}
+                        className="mt-3.5"
+                      />
+                    </>
+                  ) : null}
+                  {statementLine ? (
+                    <p className={`${events && events.total > 0 ? "mt-2" : "mt-0.5"} text-body text-ink-2`}>
+                      {statementLine}{" "}
+                      {/* F24: the file picker opens from this tap (it cannot open after a page change). */}
+                      <button
+                        type="button"
+                        onClick={requestStatementImport}
+                        className={tintedButtonClass("accent")}
+                      >
+                        Tuo tiliote
+                      </button>
+                    </p>
+                  ) : null}
+                </div>
+                {band.selectedClose ? (
+                  <CloseRow href={monthCloseHref(month)} title="Kuukauden sulkeminen" divided prominent={false} />
+                ) : null}
+                {band.vat ? renderVatRow(true, false) : null}
+              </KotiBand>
+            ) : (
+              <KotiBand key={band.id} band={band}>
+                {band.rows.map((row, index) =>
+                  row === "vat"
+                    ? renderVatRow(index > 0, index === 0)
+                    : renderPreviousClose(band, index > 0, index === 0)
+                )}
+              </KotiBand>
+            )
+          )}
 
           {/* TF-06: the first steps of a new account. */}
           {showSetup && setup ? (
