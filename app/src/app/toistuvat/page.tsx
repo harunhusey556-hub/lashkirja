@@ -474,7 +474,7 @@ export default function RecurringInvoicesPage() {
         heightClass="max-h-[90dvh]"
       >
         {selected && (
-          <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-5 py-4 sheet-safe-bottom">
+          <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-5 py-4 sheet-safe-bottom [&>*]:shrink-0">
             <KeyValueList
               rows={[
                 { label: "Asiakas", value: selected.customer.name },

@@ -151,6 +151,13 @@ describe("design system components", () => {
     expect(out).not.toContain("Avaa: Muistuta");
   });
 
+  it("KeyValueList never shrinks inside a flex column, so a scrolling sheet scrolls to its last row (F42)", () => {
+    const kv = html(createElement(KeyValueList, { rows: [{ label: "Luotu", value: "3 laskua" }] }));
+    // overflow-hidden gives the list a minimum height of 0: without shrink-0 a
+    // flex-col scroller squeezes it and clips the rows instead of scrolling.
+    expect(kv).toMatch(/<dl class="[^"]*shrink-0/);
+  });
+
   it("KeyValueList can offer Kopioi for an identifier, named for what it copies", () => {
     const kv = html(createElement(KeyValueList, {
       rows: [{ label: "Viite", value: "1 2345", copy: { text: "1 2345", what: "Viitenumero" } }],
