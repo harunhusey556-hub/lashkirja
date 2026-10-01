@@ -422,7 +422,7 @@ describe("navigation memory across sessions (F19)", () => {
     nav.consumeDirection("/dashboard");
     nav.armNavigation("/raportit", "tab");
     nav.consumeDirection("/raportit");
-    nav.recordRoute("/raportit");
+    nav.recordRoute("/raportit", "tab");
     expect(nav.currentTab()).not.toBeNull();
     return nav;
   }
