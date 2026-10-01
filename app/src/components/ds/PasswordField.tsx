@@ -48,6 +48,24 @@ export function restoreSelection(input: FocusableField | null, saved: FieldSelec
   }
 }
 
+/**
+ * Whether the input had focus when the eye was activated. A pointer click
+ * trusts the hint taken at press time, because the tap itself can blur the
+ * input first. A keyboard or assistive-technology activation sends no
+ * pointerdown, so a hint left by an earlier aborted press is stale and ignored (V50).
+ */
+export function wasInputFocused({
+  pressHint,
+  inputIsActive,
+  fromKeyboard,
+}: {
+  pressHint: boolean;
+  inputIsActive: boolean;
+  fromKeyboard: boolean;
+}): boolean {
+  return inputIsActive || (!fromKeyboard && pressHint);
+}
+
 type PasswordFieldProps = Omit<InputHTMLAttributes<HTMLInputElement>, "type" | "id"> & {
   /** Input id; also the label's `htmlFor`. */
   id: string;
@@ -109,11 +127,15 @@ export const PasswordField = forwardRef<HTMLInputElement, PasswordFieldProps>(fu
 
   useEffect(() => () => cancelAnimationFrame(frame.current), []);
 
-  const toggle = useCallback(() => {
+  const toggle = useCallback((fromKeyboard: boolean) => {
     const input = inputRef.current;
     const saved = captureSelection(
       input,
-      focusedAtPress.current || (typeof document !== "undefined" && document.activeElement === input)
+      wasInputFocused({
+        pressHint: focusedAtPress.current,
+        inputIsActive: typeof document !== "undefined" && document.activeElement === input,
+        fromKeyboard,
+      })
     );
     focusedAtPress.current = false;
     void hapticSelection();
@@ -146,13 +168,17 @@ export const PasswordField = forwardRef<HTMLInputElement, PasswordFieldProps>(fu
         />
         <button
           type="button"
-          onClick={toggle}
+          // detail is 0 for a click that came from the keyboard or assistive technology.
+          onClick={(event) => toggle(event.detail === 0)}
           // The button must not steal focus: the keyboard stays up and the
           // caret stays where it was. Only the mouse press is cancelled; the
           // pointer events stay alive so a touch tap still clicks (F07).
           onMouseDown={(event) => event.preventDefault()}
           onPointerDown={() => {
             focusedAtPress.current = document.activeElement === inputRef.current;
+          }}
+          onPointerCancel={() => {
+            focusedAtPress.current = false;
           }}
           aria-label={visible ? hideLabel : showLabel}
           className="active-press absolute right-0 top-0.5 flex h-11 w-11 items-center justify-center text-ink-2"

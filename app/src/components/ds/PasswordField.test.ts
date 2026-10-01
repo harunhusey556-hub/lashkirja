@@ -3,7 +3,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { PasswordField, captureSelection, restoreSelection } from "./PasswordField";
+import { PasswordField, captureSelection, restoreSelection, wasInputFocused } from "./PasswordField";
 
 const html = (props: Record<string, unknown>) =>
   renderToStaticMarkup(createElement(PasswordField, { id: "pw", label: "Salasana", ...props }));
@@ -66,7 +66,7 @@ describe("the eye toggle on touch (F07)", () => {
     // touch emulation. Focus is kept by the mousedown handler and by restoring it after the toggle.
     expect(source).not.toMatch(/onPointerDown={[^}]*preventDefault/);
     expect(source).not.toMatch(/onTouchStart={[^}]*preventDefault/);
-    expect(source).toMatch(/onClick={toggle}/);
+    expect(source).toContain("onClick={(event) => toggle(event.detail === 0)}");
   });
 
   function fakeInput(selection: { start: number | null; end: number | null }, value = "hemmo123") {
@@ -102,5 +102,17 @@ describe("the eye toggle on touch (F07)", () => {
     restoreSelection(input, { start: 2, end: 5, focused: false });
     expect(input.calls).toEqual([]);
     expect(() => restoreSelection(null, { start: 0, end: 0, focused: true })).not.toThrow();
+  });
+});
+
+describe("wasInputFocused (V50)", () => {
+  it("trusts the press-time hint for a pointer click, where the tap itself blurs the input", () => {
+    expect(wasInputFocused({ pressHint: true, inputIsActive: false, fromKeyboard: false })).toBe(true);
+    expect(wasInputFocused({ pressHint: false, inputIsActive: false, fromKeyboard: false })).toBe(false);
+  });
+
+  it("ignores a hint left over from an aborted press when the eye is activated by keyboard or assistive technology", () => {
+    expect(wasInputFocused({ pressHint: true, inputIsActive: false, fromKeyboard: true })).toBe(false);
+    expect(wasInputFocused({ pressHint: true, inputIsActive: true, fromKeyboard: true })).toBe(true);
   });
 });
