@@ -111,13 +111,13 @@ describe("POST /api/invoices", () => {
     const invoice = await makeInvoice({
       lines: [
         { description: "Pidennys", quantity: 2, unitPrice: 80, vatRate: 25.5 },
-        { description: "Tuote", quantity: 1, unitPrice: 20, vatRate: 14 },
+        { description: "Tuote", quantity: 1, unitPrice: 20, vatRate: 13.5 },
       ],
     });
     expect(invoice.net).toBe(180);
-    expect(invoice.vat).toBe(43.6); // 40,80 (25,5 %) + 2,80 (14 %)
-    expect(invoice.gross).toBe(223.6);
-    expect(invoice.open).toBe(223.6);
+    expect(invoice.vat).toBe(43.5); // 40,80 (25,5 %) + 2,70 (13,5 %)
+    expect(invoice.gross).toBe(223.5);
+    expect(invoice.open).toBe(223.5);
     expect(invoice.paid).toBe(0);
     expect(invoice.lines).toHaveLength(2);
     expect(invoice.lines[0]).toMatchObject({ quantity: 2, unitPrice: 80, vatRate: 25.5, net: 160 });

@@ -50,8 +50,66 @@ export function isSupportedVatRate(ratePermille: number): boolean {
   return (VAT_RATES_PERMILLE as readonly number[]).includes(ratePermille);
 }
 
+/**
+ * Plain `roundHalfAwayFromZero` of a product can return -0 (net < 0, rate 0).
+ * `+ 0` turns it into 0, so no screen prints "−0,00 €" (F128).
+ */
 export function vatForNet(netCents: number, ratePermille: number): number {
-  return roundHalfAwayFromZero((netCents * ratePermille) / 1000);
+  return roundHalfAwayFromZero((netCents * ratePermille) / 1000) + 0;
+}
+
+/**
+ * The Finnish reduced rate of 14 % became 13,5 % on 1.1.2026. Invoices dated
+ * before that keep 14 % (and their credit notes mirror it), newer ones do not
+ * get it at all, so a 14 % line can never land in the 13,5 % box of the VAT
+ * return (F44). The flat VAT_RATES_PERMILLE above stays the superset that
+ * totals accept, because old invoices must still render and reconcile.
+ */
+export const REDUCED_RATE_CHANGE_DATE = "2026-01-01";
+
+export function vatRatesForDate(issueDate: string): VatRatePermille[] {
+  return issueDate >= REDUCED_RATE_CHANGE_DATE ? [255, 135, 100, 0] : [255, 140, 100, 0];
+}
+
+/** An old 14 % line, carried onto a document with a new date, becomes 13,5 %. */
+export function adjustVatRateForDate(ratePermille: number, issueDate: string): number {
+  return ratePermille === 140 && issueDate >= REDUCED_RATE_CHANGE_DATE ? 135 : ratePermille;
+}
+
+/** "ALV 25,5 %": the Finnish comma, for selects and labels (F129). */
+export function vatRateLabel(ratePermille: number): string {
+  return `ALV ${String(ratePermille / 10).replace(".", ",")} %`;
+}
+
+/**
+ * The seller decides what VAT an invoice may carry. One rule for every path
+ * that writes lines (create, update, duplicate, recurring template and run):
+ * a seller who is not VAT registered gets 0 % on every line, whatever the
+ * client sent; a registered seller may only use a rate that is valid on the
+ * invoice date. (A credit note does not go through here: it reverses the
+ * original's lines as they were charged.)
+ */
+export function applySellerVatRules<T extends { vatRatePermille: number }>(
+  lines: T[],
+  options: { vatRegistered: boolean; issueDate: string }
+): T[] {
+  if (!options.vatRegistered) {
+    return lines.map((line) => (line.vatRatePermille === 0 ? line : { ...line, vatRatePermille: 0 }));
+  }
+  const allowed = vatRatesForDate(options.issueDate);
+  for (const line of lines) {
+    if (!(allowed as readonly number[]).includes(line.vatRatePermille)) {
+      if (line.vatRatePermille === 140 && options.issueDate >= REDUCED_RATE_CHANGE_DATE) {
+        throw new InvoiceValidationError(
+          "ALV 14 % ei ole enää käytössä 1.1.2026 alkaen. Käytä ALV 13,5 %."
+        );
+      }
+      throw new InvoiceValidationError(
+        `${vatRateLabel(line.vatRatePermille)} ei ole käytössä laskun päivälle.`
+      );
+    }
+  }
+  return lines;
 }
 
 export function lineNet(line: InvoiceLineInput): number {

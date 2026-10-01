@@ -9,10 +9,12 @@
 import { prisma } from "./db";
 import { AppError, NotFoundError, ValidationError, errorText } from "./api-errors";
 import { centsToEuros } from "./money";
-import { isoDateToUtc } from "./validation";
+import { helsinkiCalendarDate, isoDateToUtc } from "./validation";
 import { requireActiveCustomer } from "./customers";
 import { PeriodLockedError } from "./period-lock";
+import { adjustVatRateForDate } from "./invoices";
 import {
+  applyVatRules,
   createInvoice,
   toLineInputs,
   type InvoiceLinePayload,
@@ -171,9 +173,12 @@ export async function createRecurringInvoice(
 ): Promise<PublicRecurringInvoice> {
   const customer = await requireActiveCustomer(userId, input.customerId);
   const schedule = validateSchedule(input);
-  const lines = toLineInputs(input.lines);
-
   const start = firstRun(schedule);
+  // The template follows the same VAT rules as an invoice dated on its first
+  // run: 0 % for a seller who is not VAT registered, only rates valid that day
+  // otherwise. Each run applies them again, because the profile may change.
+  const lines = await applyVatRules(userId, toLineInputs(input.lines), start);
+
   // A schedule whose first run is already past its end never runs at all.
   const nextRunAt = schedule.endDate && start > schedule.endDate ? null : start;
 
@@ -296,7 +301,10 @@ export async function updateRecurringInvoice(
   }
 
   if (input.lines) {
-    const lines = toLineInputs(input.lines);
+    const ruleDate =
+      (data.nextRunAt instanceof Date ? iso(data.nextRunAt) : iso(existing.nextRunAt)) ??
+      helsinkiCalendarDate();
+    const lines = await applyVatRules(userId, toLineInputs(input.lines), ruleDate);
     await prisma.$transaction([
       prisma.recurringInvoiceLine.deleteMany({ where: { recurringInvoiceId: id } }),
       prisma.recurringInvoiceLine.createMany({
@@ -427,7 +435,9 @@ export async function runRecurringInvoices(
             quantity: line.quantityMilli / 1000,
             unit: line.unit,
             unitPrice: centsToEuros(line.unitPriceCents),
-            vatRate: line.vatRatePermille / 10,
+            // A template saved at 14 % keeps billing the same goods at 13,5 %
+            // from 1.1.2026; createInvoice forces 0 % for an unregistered seller.
+            vatRate: adjustVatRateForDate(line.vatRatePermille, issueDate) / 10,
           })),
         });
 

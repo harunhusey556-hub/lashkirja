@@ -13,7 +13,11 @@ import {
   dueDateFor,
   InvoiceValidationError,
   isSupportedVatRate,
+  adjustVatRateForDate,
+  applySellerVatRules,
   lineNet,
+  vatRateLabel,
+  vatRatesForDate,
   roundHalfAwayFromZero,
   vatForNet,
   type InvoiceLineInput,
@@ -401,5 +405,74 @@ describe("buildAging", () => {
     const viaReport = buildAgingReport(invoices, now);
     const viaGeneric = buildAging([{ dueDate: "2026-05-01", openCents: 6_000 }], now);
     expect(viaReport).toEqual(viaGeneric);
+  });
+});
+
+describe("VAT rates by invoice date (F44)", () => {
+  it("drops 14 % for invoices dated on or after 1.1.2026", () => {
+    expect(vatRatesForDate("2026-01-01")).toEqual([255, 135, 100, 0]);
+    expect(vatRatesForDate("2026-09-30")).toEqual([255, 135, 100, 0]);
+    expect(vatRatesForDate("2027-03-01")).not.toContain(140);
+  });
+
+  it("keeps 14 % for older dates and never offers 13,5 % before it existed", () => {
+    expect(vatRatesForDate("2025-12-31")).toEqual([255, 140, 100, 0]);
+    expect(vatRatesForDate("2024-09-01")).toContain(140);
+  });
+
+  it("maps an old 14 % line to 13,5 % only for new dates", () => {
+    expect(adjustVatRateForDate(140, "2026-03-01")).toBe(135);
+    expect(adjustVatRateForDate(140, "2025-06-01")).toBe(140);
+    expect(adjustVatRateForDate(255, "2026-03-01")).toBe(255);
+  });
+
+  it("labels a rate with the Finnish comma (F129)", () => {
+    expect(vatRateLabel(255)).toBe("ALV 25,5 %");
+    expect(vatRateLabel(135)).toBe("ALV 13,5 %");
+    expect(vatRateLabel(100)).toBe("ALV 10 %");
+    expect(vatRateLabel(0)).toBe("ALV 0 %");
+  });
+});
+
+describe("applySellerVatRules (F01, F44)", () => {
+  const lines = [
+    { description: "A", quantityMilli: 1000, unitPriceCents: 10_000, vatRatePermille: 255 },
+    { description: "B", quantityMilli: 1000, unitPriceCents: 1_000, vatRatePermille: 0 },
+  ];
+
+  it("forces 0 % for a seller who is not VAT registered", () => {
+    const result = applySellerVatRules(lines, { vatRegistered: false, issueDate: "2026-09-30" });
+    expect(result.map((entry) => entry.vatRatePermille)).toEqual([0, 0]);
+    expect(computeInvoiceTotals(result).vatCents).toBe(0);
+  });
+
+  it("leaves a registered seller's valid rates alone", () => {
+    const result = applySellerVatRules(lines, { vatRegistered: true, issueDate: "2026-09-30" });
+    expect(result.map((entry) => entry.vatRatePermille)).toEqual([255, 0]);
+  });
+
+  it("rejects 14 % on a registered seller's invoice dated after 1.1.2026", () => {
+    expect(() =>
+      applySellerVatRules([{ ...lines[0], vatRatePermille: 140 }], {
+        vatRegistered: true,
+        issueDate: "2026-09-30",
+      })
+    ).toThrow(/13,5/);
+  });
+
+  it("still accepts 14 % on an invoice dated in 2025", () => {
+    const result = applySellerVatRules([{ ...lines[0], vatRatePermille: 140 }], {
+      vatRegistered: true,
+      issueDate: "2025-12-31",
+    });
+    expect(result[0].vatRatePermille).toBe(140);
+  });
+
+  it("does not validate the rate of an unregistered seller against the date", () => {
+    const result = applySellerVatRules([{ ...lines[0], vatRatePermille: 140 }], {
+      vatRegistered: false,
+      issueDate: "2026-09-30",
+    });
+    expect(result[0].vatRatePermille).toBe(0);
   });
 });

@@ -34,7 +34,12 @@ export async function resetDatabase(): Promise<void> {
 }
 
 export async function createUser(
-  overrides: Partial<{ email: string; firstName: string; lastName: string }> = {}
+  overrides: Partial<{
+    email: string;
+    firstName: string;
+    lastName: string;
+    vatRegistered: boolean;
+  }> = {}
 ): Promise<TestUser> {
   const email = overrides.email ?? `user-${randomUUID()}@example.com`;
   const user = await prisma.user.create({
@@ -46,6 +51,10 @@ export async function createUser(
       firstName: overrides.firstName ?? "Testi",
       lastName: overrides.lastName ?? "Käyttäjä",
       onboarded: true,
+      // The invoice routes force 0 % VAT for a seller who is not registered, so
+      // the default test seller is a registered one; a test about the other
+      // case passes `vatRegistered: false`.
+      vatRegistered: overrides.vatRegistered ?? true,
     },
   });
   return { id: user.id, email: user.email };
