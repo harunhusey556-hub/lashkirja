@@ -34,6 +34,8 @@ describe("ReviewQueue", () => {
     expect(out).toContain("Tarkastettavat sähköpostikuitit (2)");
     expect(out).toContain("Odottavat hyväksyntää.");
     expect(out).toContain("12,50");
+    // An unknown total is counted, never added as 0,00 € (F15).
+    expect(out).toContain("1 ilman summaa");
   });
 
   it("renders an approve-all button only when onApproveAll is given", () => {
@@ -47,7 +49,11 @@ describe("ReviewQueue", () => {
         onApproveAll: () => {},
       })
     );
-    expect(withAll).toContain("Hyväksy kaikki 2 kpl");
+    // Only the ready receipt is carried; the one without amount and vendor needs completing (F15).
+    expect(withAll).toContain("Hyväksy valmiit (1)");
+    expect(withAll).toContain("1 kuitti vaatii täydennyksen.");
+    expect(withAll).not.toContain("kpl");
+    expect(withAll).not.toContain("Hyväksy silti");
 
     const withoutAll = html(
       createElement(ReviewQueue, {
@@ -59,6 +65,49 @@ describe("ReviewQueue", () => {
       })
     );
     expect(withoutAll).not.toContain("Hyväksy kaikki");
+    expect(withoutAll).not.toContain("Hyväksy valmiit");
+  });
+
+  it("offers Täydennä instead of Hyväksy for a receipt without an amount, and one rule for the bulk button", () => {
+    const out = html(
+      createElement(ReviewQueue, {
+        title: "t",
+        description: "d",
+        receipts: RECEIPTS,
+        rejectLabel: "Hylkää",
+        onReview: () => {},
+      })
+    );
+    expect(out).toContain("Täydennä");
+    expect(out).toContain("Lisää summa ja myyjä");
+    // One Hyväksy pill (the complete receipt), one Täydennä link (the incomplete one).
+    expect(out.match(/>Hyväksy</g)?.length).toBe(1);
+
+    const allReady = html(
+      createElement(ReviewQueue, {
+        title: "t",
+        description: "d",
+        receipts: [RECEIPTS[0]],
+        rejectLabel: "Hylkää",
+        onReview: () => {},
+        onApproveAll: () => {},
+      })
+    );
+    expect(allReady).toContain("Hyväksy kaikki (1)");
+
+    const noneReady = html(
+      createElement(ReviewQueue, {
+        title: "t",
+        description: "d",
+        receipts: [RECEIPTS[1]],
+        rejectLabel: "Hylkää",
+        onReview: () => {},
+        onApproveAll: () => {},
+      })
+    );
+    expect(noneReady).not.toContain("Hyväksy kaikki");
+    expect(noneReady).not.toContain("Hyväksy valmiit");
+    expect(noneReady).toContain("Yhteensä –");
   });
 
   // IA-23: the rows stay mounted inside an animated Disclosure, but while
