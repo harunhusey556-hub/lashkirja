@@ -2,11 +2,13 @@ import { describe, expect, it } from "vitest";
 import { firstInvalidKey } from "@/lib/focus-field";
 import {
   EMPTY_LINE,
+  followSellerVat,
   invoiceFieldId,
   invoiceFieldOrder,
   newInvoiceLine,
   previewTotals,
   validateInvoiceForm,
+  vatRateDateNote,
   vatRateOptions,
   type InvoiceFormValues,
 } from "./InvoiceForm";
@@ -162,5 +164,31 @@ describe("the VAT rates offered follow the invoice date (F44, F129)", () => {
     );
     expect(old.ok).toBe(true);
     expect(current.ok).toBe(true);
+  });
+});
+
+describe("vatRateDateNote (V4, R59)", () => {
+  it("says nothing for a rate that is valid on the date", () => {
+    expect(vatRateDateNote(135, "2026-03-01")).toBe("");
+    expect(vatRateDateNote(140, "2025-12-15")).toBe("");
+  });
+
+  it("calls 14 % ended from 1.1.2026 and 13,5 % not yet started before it", () => {
+    expect(vatRateDateNote(140, "2026-03-01")).toBe(" (ei enää käytössä)");
+    expect(vatRateDateNote(135, "2025-12-15")).toBe(" (ei vielä käytössä)");
+  });
+});
+
+describe("followSellerVat (V3)", () => {
+  const lines = [{ ...EMPTY_LINE, vatRate: 25.5 }, { ...EMPTY_LINE, vatRate: 10 }];
+
+  it("zeroes every line for a seller who turns out not to be registered", () => {
+    expect(followSellerVat(lines, false).map((line) => line.vatRate)).toEqual([0, 0]);
+  });
+
+  it("gives a 0 % line the default rate when the seller turns out to be registered", () => {
+    expect(followSellerVat([{ ...EMPTY_LINE, vatRate: 0 }, lines[1]], true).map((line) => line.vatRate)).toEqual([
+      25.5, 10,
+    ]);
   });
 });

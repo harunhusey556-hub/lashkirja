@@ -112,7 +112,7 @@ function toFormValues(entry: RecurringInvoice): RecurringFormValues {
 
 export default function RecurringInvoicesPage() {
   // The seller's VAT status decides whether the form offers an ALV choice (F01).
-  const { profile, loadError: profileError } = useProfile();
+  const { profile, loadError: profileError, retry: retryProfile } = useProfile();
   // The rate a run bills today: 0 % for a seller who is not VAT registered, and
   // the 13,5 % that replaced 14 % (what the run itself does), not the stored one.
   const shownVatRate = (stored: number) =>
@@ -575,7 +575,14 @@ export default function RecurringInvoicesPage() {
               Ladataan…
             </p>
           )}
-          {formFor !== null && (profile !== null || Boolean(profileError)) && (
+          {formFor !== null && profile === null && Boolean(profileError) && (
+            <ConnectionNotice
+              error={profileError}
+              fallback="Yrityksen tietojen haku epäonnistui"
+              onRetry={retryProfile}
+            />
+          )}
+          {formFor !== null && profile !== null && (
             <RecurringForm
               key={`${editing ? editing.id : "new"}:${pendingCustomer ?? ""}`}
               vatRegistered={profile?.vatRegistered ?? true}

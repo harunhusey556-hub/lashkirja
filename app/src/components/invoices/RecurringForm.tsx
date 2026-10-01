@@ -5,6 +5,7 @@ import { useEditorSession } from "@/components/form-session";
 import { ConnectionNotice } from "@/components/ScreenState";
 import { Button, controlClass } from "@/components/ui";
 import { Card } from "@/components/ds";
+import { followSellerVat, vatRateDateNote } from "./InvoiceForm";
 import { focusFirstInvalid, invalidFieldProps } from "@/lib/focus-field";
 import { parseFinnishNumber, parseMoneyInput } from "@/lib/format";
 import {
@@ -267,6 +268,12 @@ export function RecurringForm({
       : { ...start, lines: start.lines.map((line) => ({ ...line, vatRate: 0 })) };
   });
   const [values, setValues] = useState<RecurringFormValues>(baseline);
+  // The profile may arrive after the form was built (cached copy, then fresh): follow it.
+  const [seenVatRegistered, setSeenVatRegistered] = useState(vatRegistered);
+  if (seenVatRegistered !== vatRegistered) {
+    setSeenVatRegistered(vatRegistered);
+    setValues((current) => ({ ...current, lines: followSellerVat(current.lines, vatRegistered) }));
+  }
   const [errors, setErrors] = useState<Record<string, string>>({});
   // The draft survives an accidental close or an app switch (SALES-27), and
   // registers as dirty, so the sheet's swipe/backdrop close asks first.
@@ -559,9 +566,7 @@ export function RecurringForm({
                       {recurringVatOptions(line.vatRate, values).map((permille) => (
                         <option key={permille} value={permille / 10}>
                           {vatRateLabel(permille)}
-                          {vatRatesForDate(firstInvoiceDate(values)).some((rate) => rate === permille)
-                            ? ""
-                            : " (ei enää käytössä)"}
+                          {vatRateDateNote(permille, firstInvoiceDate(values))}
                         </option>
                       ))}
                     </select>

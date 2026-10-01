@@ -61,6 +61,32 @@ export function newInvoiceLine(vatRegistered = true): InvoiceFormLine {
 }
 
 /**
+ * The suffix for a rate the select still lists although it is not valid on the
+ * invoice date: a rate that has ended says so, one that has not started says
+ * so (13,5 % before 1.1.2026 is not "no longer in use").
+ */
+export function vatRateDateNote(ratePermille: number, issueDate: string): string {
+  const date = isStrictIsoDate(issueDate) ? issueDate : helsinkiCalendarDate();
+  if ((vatRatesForDate(date) as readonly number[]).includes(ratePermille)) return "";
+  if (ratePermille === 140) return " (ei enää käytössä)";
+  if (ratePermille === 135) return " (ei vielä käytössä)";
+  return " (ei käytössä tälle päivälle)";
+}
+
+/**
+ * The seller's VAT status can change after a form was built from a cached
+ * profile. Lines follow it: 0 % everywhere when not registered; when the seller
+ * turns out to be registered, a 0 % line that only the unregistered state forced
+ * goes back to the default rate, so a registered seller never issues 0 % by accident.
+ */
+export function followSellerVat<T extends { vatRate: number }>(lines: T[], vatRegistered: boolean): T[] {
+  return lines.map((line) => {
+    if (vatRegistered) return line.vatRate === 0 ? { ...line, vatRate: EMPTY_LINE.vatRate } : line;
+    return line.vatRate === 0 ? line : { ...line, vatRate: 0 };
+  });
+}
+
+/**
  * The rates the ALV select offers for an invoice dated `issueDate`, as
  * permille. The line's own rate stays in the list when it is no longer valid
  * (a 14 % draft moved into 2026), so the select shows the truth and the
@@ -258,6 +284,12 @@ export function InvoiceForm({
       : { ...start, lines: start.lines.map((line) => ({ ...line, vatRate: 0 })) };
   });
   const [values, setValues] = useState<InvoiceFormValues>(baseline);
+  // The profile may arrive after the form was built (cached copy, then fresh): follow it.
+  const [seenVatRegistered, setSeenVatRegistered] = useState(vatRegistered);
+  if (seenVatRegistered !== vatRegistered) {
+    setSeenVatRegistered(vatRegistered);
+    setValues((current) => ({ ...current, lines: followSellerVat(current.lines, vatRegistered) }));
+  }
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [saveError, setSaveError] = useState("");
   const [catalog, setCatalog] = useState<
@@ -574,9 +606,7 @@ export function InvoiceForm({
                         {vatRateOptions(line.vatRate, values.issueDate).map((permille) => (
                           <option key={permille} value={permille / 10}>
                             {vatRateLabel(permille)}
-                            {vatRatesForDate(values.issueDate).some((rate) => rate === permille)
-                              ? ""
-                              : " (ei enää käytössä)"}
+                            {vatRateDateNote(permille, values.issueDate)}
                           </option>
                         ))}
                       </select>

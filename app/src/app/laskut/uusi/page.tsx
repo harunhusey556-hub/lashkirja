@@ -110,7 +110,7 @@ function NewInvoicePage() {
   const createKey = useRef(newIdempotencyKey());
   // The seller's VAT status decides the ALV choice, so the form waits for it
   // (it is cached, so this is instant after the first visit).
-  const { profile, loadError: profileError } = useProfile();
+  const { profile, loadError: profileError, retry: retryProfile } = useProfile();
 
   useEffect(() => {
     let cancelled = false;
@@ -216,7 +216,9 @@ function NewInvoicePage() {
 
   const title = editId ? "Muokkaa laskua" : "Uusi lasku";
   const ready =
-    customers !== null && (!editId || editing !== null) && (profile !== null || Boolean(profileError));
+    customers !== null && (!editId || editing !== null) && profile !== null;
+  // Without the profile the form cannot know whether to offer an ALV choice: ask again instead of guessing.
+  const profileFailed = profile === null && Boolean(profileError);
 
   return (
     <div className="space-y-6">
@@ -227,6 +229,12 @@ function NewInvoicePage() {
           error={loadError}
           fallback={editId ? "Laskun haku epäonnistui" : "Asiakkaiden haku epäonnistui"}
           onRetry={() => setAttempt((value) => value + 1)}
+        />
+      ) : profileFailed ? (
+        <ConnectionNotice
+          error={profileError}
+          fallback="Yrityksen tietojen haku epäonnistui"
+          onRetry={retryProfile}
         />
       ) : !ready ? (
         <FormSkeleton />
