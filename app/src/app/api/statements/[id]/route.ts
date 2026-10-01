@@ -9,6 +9,7 @@ import * as path from "path";
 
 import { assertMonthOpen } from "@/lib/period-lock";
 import { withErrorHandler } from "@/lib/api-errors";
+import { removeBankRows } from "@/lib/bank-row-removal";
 const patchSchema = z
   .object({
     periodMonth: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/, "Muoto: YYYY-MM").optional(),
@@ -131,8 +132,18 @@ export const DELETE = withErrorHandler(async (
     await assertMonthOpen(session.userId, statement.periodMonth);
   }
 
-  // Transactions are removed via onDelete: Cascade
-  await prisma.statement.delete({ where: { id } });
+  // Transactions are removed via onDelete: Cascade. Their pending sale drafts
+  // go with them, and a booked income receipt of a row that paid an invoice is
+  // dropped so the sale is not counted twice (see bank-row-removal.ts).
+  const rows = await prisma.transaction.findMany({
+    where: { statementId: id },
+    select: { id: true },
+  });
+  const { removedDrafts, mergedIntoInvoice } = await removeBankRows(
+    session.userId,
+    rows.map((row) => row.id),
+    (db) => db.statement.delete({ where: { id } })
+  );
 
   // allowLegacy: statements uploaded before per-user storage landed still carry
   // a flat data/uploads/<uuid>.<ext> path.
@@ -142,5 +153,5 @@ export const DELETE = withErrorHandler(async (
     // file already gone or unreadable — DB row removal is what matters
   }
 
-  return NextResponse.json({ ok: true });
+  return NextResponse.json({ ok: true, removedDrafts, mergedIntoInvoice });
 });

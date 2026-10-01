@@ -3,6 +3,8 @@ import { guardWrite } from "@/lib/http-security";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { requireSession } from "@/lib/session";
+import { withErrorHandler } from "@/lib/api-errors";
+import { assertMonthOpen, assertPeriodOpen } from "@/lib/period-lock";
 
 const ignoreSchema = z.object({
   transactionId: z.string().min(1),
@@ -10,10 +12,10 @@ const ignoreSchema = z.object({
 });
 
 /** Mark a bank row as "ei kuittia tarvita" (e.g. pankkikulut) — or undo it. */
-export async function POST(req: NextRequest) {
+export const POST = withErrorHandler(async (req: NextRequest) => {
   const blocked = guardWrite(req);
   if (blocked) return blocked;
-  const session = await requireSession();
+  const session = await requireSession(req);
   if (!session) {
     return NextResponse.json({ error: "Ei kirjautunut" }, { status: 401 });
   }
@@ -26,6 +28,7 @@ export async function POST(req: NextRequest) {
 
   const tx = await prisma.transaction.findFirst({
     where: { id: transactionId, statement: { userId: session.userId! } },
+    include: { statement: { select: { periodMonth: true } } },
   });
   if (!tx) {
     return NextResponse.json(
@@ -40,6 +43,10 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  // Marking a row changes what the month still needs: a closed month is left alone.
+  if (tx.statement.periodMonth) await assertMonthOpen(session.userId!, tx.statement.periodMonth);
+  await assertPeriodOpen(session.userId!, [tx.date]);
+
   await prisma.transaction.update({
     where: { id: transactionId },
     data: {
@@ -51,4 +58,4 @@ export async function POST(req: NextRequest) {
   });
 
   return NextResponse.json({ ok: true });
-}
+});

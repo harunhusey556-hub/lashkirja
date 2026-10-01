@@ -6,6 +6,9 @@ import { requireSession } from "@/lib/session";
 import { runMatching } from "@/lib/matching";
 import { centsToEuros, eurosToCents } from "@/lib/money";
 import { inferTransactionType } from "@/lib/statements";
+import { withErrorHandler } from "@/lib/api-errors";
+import { assertMonthOpen, assertPeriodOpen } from "@/lib/period-lock";
+import { removeBankRows } from "@/lib/bank-row-removal";
 
 const patchSchema = z.object({
   transactionId: z.string().min(1),
@@ -28,13 +31,13 @@ async function ownedStatement(id: string, userId: string) {
   return prisma.statement.findFirst({ where: { id, userId } });
 }
 
-export async function PATCH(
+export const PATCH = withErrorHandler(async (
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
-) {
+) => {
   const blocked = guardWrite(req);
   if (blocked) return blocked;
-  const session = await requireSession();
+  const session = await requireSession(req);
   if (!session) {
     return NextResponse.json({ error: "Ei kirjautunut" }, { status: 401 });
   }
@@ -56,6 +59,21 @@ export async function PATCH(
       { status: 404 }
     );
   }
+
+  const row = await prisma.transaction.findFirst({
+    where: { id: transactionId, statementId: id },
+    select: { date: true },
+  });
+  if (!row) {
+    return NextResponse.json(
+      { error: "Tapahtumaa ei löytynyt" },
+      { status: 404 }
+    );
+  }
+  // A bank row carries its own date besides its statement's month: neither the
+  // month it is in nor the one it is moved to may be closed.
+  if (statement.periodMonth) await assertMonthOpen(session.userId!, statement.periodMonth);
+  await assertPeriodOpen(session.userId!, [row.date, fields.date || null]);
 
   const data: Record<string, unknown> = {};
   if (fields.type !== undefined) data.type = fields.type;
@@ -110,15 +128,15 @@ export async function PATCH(
       ? { ...tx, amount: centsToEuros(tx.amountCents) }
       : null,
   });
-}
+});
 
-export async function DELETE(
+export const DELETE = withErrorHandler(async (
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
-) {
+) => {
   const blocked = guardWrite(req);
   if (blocked) return blocked;
-  const session = await requireSession();
+  const session = await requireSession(req);
   if (!session) {
     return NextResponse.json({ error: "Ei kirjautunut" }, { status: 401 });
   }
@@ -140,9 +158,26 @@ export async function DELETE(
     );
   }
 
-  const result = await prisma.transaction.deleteMany({
+  const row = await prisma.transaction.findFirst({
     where: { id: parsed.data.transactionId, statementId: id },
+    select: { id: true, date: true },
   });
+  if (!row) {
+    return NextResponse.json(
+      { error: "Tapahtumaa ei löytynyt" },
+      { status: 404 }
+    );
+  }
+  if (statement.periodMonth) await assertMonthOpen(session.userId!, statement.periodMonth);
+  await assertPeriodOpen(session.userId!, [row.date]);
+
+  // The row's pending sale draft goes with it, and a booked income receipt of a
+  // row that paid an invoice is dropped so the sale is not counted twice.
+  const { result, removedDrafts, mergedIntoInvoice } = await removeBankRows(
+    session.userId!,
+    [row.id],
+    (db) => db.transaction.deleteMany({ where: { id: row.id, statementId: id } })
+  );
   if (result.count === 0) {
     return NextResponse.json(
       { error: "Tapahtumaa ei löytynyt" },
@@ -150,5 +185,5 @@ export async function DELETE(
     );
   }
 
-  return NextResponse.json({ ok: true });
-}
+  return NextResponse.json({ ok: true, removedDrafts, mergedIntoInvoice });
+});

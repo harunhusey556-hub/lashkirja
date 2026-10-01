@@ -1051,7 +1051,7 @@ export default function StatementDetailView({
       <ConfirmModal
         isOpen={confirmingDelete}
         title="Poistetaanko tiliote?"
-        description={`"${statement.fileName}" ja kaikki sen tapahtumat poistetaan pysyvästi. Tätä ei voi perua.`}
+        description={`"${statement.fileName}" ja kaikki sen tapahtumat poistetaan pysyvästi. Niistä tehdyt hyväksymättömät myyntiehdotukset poistuvat myös. Lasku jää maksetuksi, myynti ei tuplaannu. Tätä ei voi perua.`}
         confirmLabel="Poista tiliote"
         onConfirm={() => handleDelete()}
         onCancel={() => setConfirmingDelete(false)}
@@ -1060,7 +1060,7 @@ export default function StatementDetailView({
       <ConfirmModal
         isOpen={confirmingTxDelete !== null}
         title="Poistetaanko tapahtuma?"
-        description="Tapahtuma poistetaan tästä tiliotteesta pysyvästi."
+        description="Tapahtuma ja siitä tehty hyväksymätön myyntiehdotus poistetaan pysyvästi. Lasku jää maksetuksi, myynti ei tuplaannu."
         confirmLabel="Poista"
         onConfirm={() =>
           confirmingTxDelete ? deleteTransaction(confirmingTxDelete) : Promise.resolve()
