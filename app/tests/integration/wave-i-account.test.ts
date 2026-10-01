@@ -180,9 +180,16 @@ describe("wave I account", () => {
       buildRequest("POST", "/api/auth/password/forgot", { email: user.email })
     );
     expect(sent.status).toBe(200);
-    const payload = await readJson<{ token?: string; message: string }>(sent);
+    const payload = await readJson<{ token?: string; message: string; mailConfigured: boolean }>(sent);
     expect(payload.token).toBeUndefined();
-    expect(payload.message).toMatch(/tuesta/);
+    // No PLATFORM_SMTP_* in the test env: the text must not claim a send, and
+    // an unknown address gets the very same answer.
+    expect(payload.mailConfigured).toBe(false);
+    expect(payload.message).toMatch(/tukeen/);
+    expect(payload.message).not.toMatch(/matkalla|lähetettiin|Tietosuoja/);
+    expect(
+      (await readJson<{ message: string }>(missing)).message
+    ).toBe(payload.message);
     expect(await prisma.accountToken.count()).toBe(1);
 
     const { issuePasswordReset } = await import("@/lib/account-security");

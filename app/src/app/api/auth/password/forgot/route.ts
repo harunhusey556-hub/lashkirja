@@ -5,13 +5,13 @@ import { guardWrite } from "@/lib/http-security";
 import { consumeRateLimit, opaqueRateKey, requestClientKey } from "@/lib/rate-limit";
 import { issuePasswordReset, normalizeLoginEmail, sendAccountMail } from "@/lib/account-security";
 import { queueRecoveryRequest } from "@/lib/account-requests";
+import { forgotPasswordMessage } from "@/lib/account-copy";
+import { platformMailConfig } from "@/lib/mailer";
 
 const bodySchema = z.object({
   email: z.string().trim().toLowerCase().email().max(254),
 });
 
-const GENERIC =
-  "Jos tilille voidaan lähettää postia, palautuslinkki on matkalla. Muuten pyydä palautus tuesta. Pyyntö näkyy Tietosuojassa, kun kirjaudut.";
 
 function resetLink(req: NextRequest, token: string): string {
   const configured = process.env.APP_ORIGIN?.trim().replace(/\/$/, "");
@@ -46,5 +46,9 @@ export async function POST(req: NextRequest) {
     });
     if (!mailed) await queueRecoveryRequest(user.id);
   }
-  return NextResponse.json({ ok: true, message: GENERIC });
+  // One answer for every address: it depends on whether this server can send
+  // mail at all, so it neither claims a send that cannot happen nor tells
+  // which accounts exist.
+  const mailConfigured = platformMailConfig() !== null;
+  return NextResponse.json({ ok: true, mailConfigured, message: forgotPasswordMessage(mailConfigured) });
 }

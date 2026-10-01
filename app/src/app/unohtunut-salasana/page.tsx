@@ -2,20 +2,22 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { MailCheck } from "lucide-react";
+import { MailCheck, MailQuestion } from "lucide-react";
 import { BARE_CARD_CLASS, BARE_LINK_CLASS, BareFrame } from "@/components/BareFrame";
 import { apiFetch, errorMessage, isUserFacingMessage, readJson } from "@/components/clientFetch";
 import { controlClass } from "@/components/control-styles";
 import { Icon } from "@/components/ds/Icon";
 import { Button, Field } from "@/components/ui";
 import { hapticNotify } from "@/lib/haptics";
+import { contactSupportPhrase, forgotPasswordMessage } from "@/lib/account-copy";
 
-const SENT_COPY = "Jos osoitteella löytyy tili, palautuslinkki on matkalla. Tarkista myös roskaposti.";
+const SENT_COPY = forgotPasswordMessage(true);
 
 export default function ForgotPasswordPage() {
   const [email, setEmail] = useState("");
   const [sentTo, setSentTo] = useState("");
   const [sentMessage, setSentMessage] = useState("");
+  const [mailSent, setMailSent] = useState(true);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -40,9 +42,10 @@ export default function ForgotPasswordPage() {
       });
       // readJson refuses an empty or non-JSON body, so a 200 that is not the
       // API's answer counts as a failure too.
-      const body = await readJson<{ message?: string }>(response, "Pyyntö epäonnistui");
+      const body = await readJson<{ message?: string; mailConfigured?: boolean }>(response, "Pyyntö epäonnistui");
       void hapticNotify("success");
       setSentTo(address);
+      setMailSent(body.mailConfigured !== false);
       setSentMessage(body.message && isUserFacingMessage(body.message) ? body.message : SENT_COPY);
     } catch (caught: unknown) {
       void hapticNotify("error");
@@ -57,11 +60,11 @@ export default function ForgotPasswordPage() {
       <BareFrame>
         <div className={BARE_CARD_CLASS}>
           <span className="flex h-12 w-12 items-center justify-center rounded-full bg-accent-soft text-accent">
-            <Icon icon={MailCheck} size="hero" />
+            <Icon icon={mailSent ? MailCheck : MailQuestion} size="hero" />
           </span>
-          <h1 className="text-title-2 font-bold leading-tight tracking-[-0.02em] text-ink">Tarkista sähköpostisi</h1>
+          <h1 className="text-title-2 font-bold leading-tight tracking-[-0.02em] text-ink">{mailSent ? "Tarkista sähköpostisi" : "Palautuslinkkiä ei lähetetty"}</h1>
           <p className="text-body leading-relaxed text-ink-2" role="status">
-            {sentMessage} Linkki lähetettiin osoitteeseen {sentTo}.
+            {sentMessage}
           </p>
           <Button
             type="button"
@@ -88,7 +91,7 @@ export default function ForgotPasswordPage() {
         <h1 className="text-title-2 font-bold leading-tight tracking-[-0.02em] text-ink">Salasanan palautus</h1>
         <p className="text-body leading-relaxed text-ink-2">
           Kirjoita tilisi sähköpostiosoite. Jos tili löytyy, saat postiin linkin, jolla valitset uuden salasanan.
-          Jos viestiä ei tule, ota yhteyttä tukeen.
+          Jos viestiä ei tule, {contactSupportPhrase()}.
         </p>
         <Field label="Sähköposti" htmlFor="email" error={error}>
           <input

@@ -6,9 +6,15 @@
  * and `PLATFORM_SMTP_PASS` are optional). That path does not use the invoice
  * mailbox. If the platform mailbox is missing or fails, the app tries the
  * mailbox the user connected under Asetukset → Sähköpostien tuonti.
+
  * If neither sends, the link is not shown. A recovery request is stored
- * (`kind=recovery`, status pending) and the user sees it under Tietosuoja
- * after they can sign in. Support with access to this server can mint one
+ * (`kind=recovery`, status pending) for support. The reply on the screen is
+ * the same for every address and says only what is true: with no
+ * `PLATFORM_SMTP_*` it says that the link cannot be sent automatically and to
+ * contact support (the address comes from `NEXT_PUBLIC_SUPPORT_EMAIL` or
+ * `SUPPORT_EMAIL` when set); with it, it says the link is on its way if the
+ * account exists. The reply never points a signed-out user at a signed-in
+ * screen. Support with access to this server can mint one
  * link and mark the request. See `npx tsx scripts/account-requests.ts list`.
  *
  * The books are not involved. A reset replaces the password, revokes every
