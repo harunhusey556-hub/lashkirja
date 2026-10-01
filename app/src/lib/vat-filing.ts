@@ -4,8 +4,7 @@
  * and the month close say the return is done instead of guessing.
  */
 import { prisma } from "./db";
-import { computeAlvReport } from "./alv";
-import { loadAlvPeriodSources } from "./alv-period";
+import { alvReportOf, loadAlvPeriodSources } from "./alv-period";
 import { centsToEuros } from "./money";
 import { ConflictError, ValidationError } from "./api-errors";
 import { helsinkiCalendarDate, isoDateToUtc } from "./validation";
@@ -59,7 +58,7 @@ export async function getVatFiling(userId: string, period: string): Promise<VatF
 async function signedVatCents(userId: string, period: string): Promise<number> {
   const { start, end } = filingPeriodBoundsUtc(period);
   const sources = await loadAlvPeriodSources(userId, start, end);
-  const report = computeAlvReport(sources.receipts, sources.invoices);
+  const report = alvReportOf(sources);
   const cents = Math.round(report.field308.amount * 100);
   return report.field308.isRefund ? -cents : cents;
 }

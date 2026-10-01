@@ -612,8 +612,8 @@ describe("POST /api/purchase-invoices/match", () => {
   });
 });
 
-describe("payables stay out of the VAT return", () => {
-  it("does not change the ALV report, which keeps taking its numbers from receipts", async () => {
+describe("a recorded payable's VAT reaches the VAT return (F39)", () => {
+  it("adds the invoice's VAT to the deductible VAT, by invoice date", async () => {
     const { GET: alvReport } = await import("@/app/api/alv/route");
     const before = await readJson(
       await alvReport(buildRequest("GET", "/api/alv?period=2026-01", undefined, { cookie }))
@@ -624,8 +624,8 @@ describe("payables stay out of the VAT return", () => {
     const after = await readJson(
       await alvReport(buildRequest("GET", "/api/alv?period=2026-01", undefined, { cookie }))
     );
-    expect(after.field307).toEqual(before.field307);
-    expect(after.field308).toEqual(before.field308);
+    expect(after.field307.amount).toBe(before.field307.amount + 240);
+    expect(after.sources.purchaseInvoiceCount).toBe(1);
   });
 
   it("counts the linked receipt exactly once, through the receipt", async () => {

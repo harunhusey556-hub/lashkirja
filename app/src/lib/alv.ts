@@ -20,6 +20,15 @@ export interface InvoiceVatSource {
   breakdown: Array<{ ratePermille: number; netCents: number; vatCents: number }>;
 }
 
+/**
+ * A purchase invoice reduced to what the VAT return needs: its VAT, which is
+ * deductible (field 307). The loader decides which invoices count and which
+ * are already counted through a receipt (lib/alv-period.ts, F39).
+ */
+export interface PurchaseVatSource {
+  vatCents: number;
+}
+
 export interface AlvReport {
   field301: SalesField; // 25,5 % (legacy 24 %)
   field302: SalesField; // 13,5 % (legacy 14 %)
@@ -30,7 +39,14 @@ export interface AlvReport {
   /** Gross sums of receipts that had no usable VAT breakdown — need manual review. */
   review: { salesGross: number; purchasesGross: number; count: number };
   /** Where the reported sales VAT came from, so the number can be traced. */
-  sources: { receiptSalesVat: number; invoiceSalesVat: number; invoiceCount: number };
+  sources: {
+    receiptSalesVat: number;
+    invoiceSalesVat: number;
+    invoiceCount: number;
+    /** F39: deductible VAT that came from purchase invoices (included in field 307). */
+    purchaseInvoiceVat: number;
+    purchaseInvoiceCount: number;
+  };
 }
 
 export interface VatLine {
@@ -65,7 +81,8 @@ export function parseVatDetails(raw: string | null): VatLine[] | null {
  */
 export function computeAlvReport(
   receipts: ReceiptLike[],
-  invoices: InvoiceVatSource[] = []
+  invoices: InvoiceVatSource[] = [],
+  purchaseInvoices: PurchaseVatSource[] = []
 ): AlvReport {
   const salesCents: Record<301 | 302 | 303, { netSales: number; vat: number }> = {
     301: { netSales: 0, vat: 0 },
@@ -156,6 +173,13 @@ export function computeAlvReport(
     }
   }
 
+  // F39: a recorded purchase invoice's VAT is deductible like a receipt's. The
+  // loader (alv-period.ts) leaves out the ones a receipt already counts, so the
+  // same VAT is never taken twice.
+  let purchaseInvoiceVatCents = 0;
+  for (const purchase of purchaseInvoices) purchaseInvoiceVatCents += purchase.vatCents;
+  deductibleVatCents += purchaseInvoiceVatCents;
+
   // Check #1924: 308 = (301+302+303+304+305+306+318) − 307; EU fields are 0 here
   const totalSalesVatCents = salesCents[301].vat + salesCents[302].vat + salesCents[303].vat;
   const payableCents = totalSalesVatCents - deductibleVatCents;
@@ -185,6 +209,8 @@ export function computeAlvReport(
       receiptSalesVat: centsToEuros(receiptSalesVatCents),
       invoiceSalesVat: centsToEuros(invoiceSalesVatCents),
       invoiceCount: invoices.length,
+      purchaseInvoiceVat: centsToEuros(purchaseInvoiceVatCents),
+      purchaseInvoiceCount: purchaseInvoices.length,
     },
   };
 }

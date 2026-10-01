@@ -1,8 +1,7 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/db";
 import { requireSession } from "@/lib/session";
-import { computeAlvReport } from "@/lib/alv";
-import { loadAlvPeriodSources } from "@/lib/alv-period";
+import { alvReportOf, loadAlvPeriodSources } from "@/lib/alv-period";
 import { OMAVERO_FIELDS } from "@/lib/vero/omavero-fields";
 import { noStoreJson } from "@/lib/http-security";
 import { UnauthorizedError, withErrorHandler } from "@/lib/api-errors";
@@ -30,7 +29,7 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
     countPendingReceipts(userId, start, end),
   ]);
 
-  const report = computeAlvReport(sources.receipts, sources.invoices);
+  const report = alvReportOf(sources);
 
   return noStoreJson({
     period: { key: period, start: start.toISOString(), end: end.toISOString() },
@@ -46,6 +45,9 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
     sources: report.sources,
     excludedReceiptCount: sources.excludedReceiptCount,
     suspectedDuplicateCount: sources.suspectedDuplicateCount,
+    // F39: purchase invoices count as deductible VAT; these say what was left out or may be counted twice.
+    skippedPurchaseInvoiceCount: sources.skippedPurchaseInvoiceCount,
+    suspectedPurchaseDuplicateCount: sources.suspectedPurchaseDuplicateCount,
     creditedInvoiceCount: sources.creditedInvoiceCount,
     creditNoteCount: sources.creditNoteCount,
     // FP-13 / TF-11: the filed and paid state, and what is not in the figure yet.

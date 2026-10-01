@@ -129,6 +129,8 @@ describe("computeAlvReport with sales invoices", () => {
       receiptSalesVat: 0,
       invoiceSalesVat: 25.5,
       invoiceCount: 1,
+      purchaseInvoiceVat: 0,
+      purchaseInvoiceCount: 0,
     });
   });
 
@@ -213,5 +215,29 @@ describe("computeAlvReport with sales invoices", () => {
     const withEmptyArray = computeAlvReport(receipts, []);
     expect(withoutArgument).toEqual(withEmptyArray);
     expect(withoutArgument.sources.invoiceCount).toBe(0);
+  });
+});
+
+describe("computeAlvReport with purchase invoices (F39)", () => {
+  it("adds a purchase invoice's VAT to the deductible VAT (field 307)", () => {
+    const report = computeAlvReport(
+      [receipt("meno", 125.5, [{ rate: 25.5, amount: 25.5 }])],
+      [{ breakdown: [{ ratePermille: 255, netCents: 100_000, vatCents: 25_500 }] }],
+      [{ vatCents: 2_519 }]
+    );
+    expect(report.field307.amount).toBe(50.69);
+    expect(report.field308).toEqual({ amount: 204.31, isRefund: false });
+    expect(report.sources).toMatchObject({ purchaseInvoiceVat: 25.19, purchaseInvoiceCount: 1 });
+  });
+
+  it("is unchanged without purchase invoices", () => {
+    const receipts = [receipt("meno", 125.5, [{ rate: 25.5, amount: 25.5 }])];
+    expect(computeAlvReport(receipts)).toEqual(computeAlvReport(receipts, [], []));
+    expect(computeAlvReport(receipts).sources.purchaseInvoiceCount).toBe(0);
+  });
+
+  it("can turn a return into a refund", () => {
+    const report = computeAlvReport([], [], [{ vatCents: 1_000 }]);
+    expect(report.field308).toEqual({ amount: 10, isRefund: true });
   });
 });

@@ -13,6 +13,13 @@
  *   period it was issued (AVL 136 §: a credit reduces the sales of the month
  *   in which it is given). Crediting never rewrites an earlier period.
  * - Approved receipts count by their date.
+ * - A purchase invoice's VAT is deductible (field 307) in the period of its
+ *   invoice date, once it is recorded (open or paid, never cancelled) (F39).
+ *   One purchase must count once: an invoice linked to an approved receipt, or
+ *   paid from a bank row that an approved receipt documents, is counted through
+ *   that receipt and left out here. Without such evidence an invoice and a
+ *   receipt of the same amount close in date are both counted and flagged
+ *   (`suspectedPurchaseDuplicateCount`), like the income side below.
  * - A receipt drafted from, or matched to, a bank row that already settled a
  *   sales invoice is left out: that money is the invoice, not new income.
  * - A payment recorded by hand has no bank row, so the rule above cannot see
@@ -24,7 +31,7 @@
 import { prisma } from "./db";
 import { centsToEuros } from "./money";
 import { computeInvoiceTotals } from "./invoices";
-import { parseVatDetails, type InvoiceVatSource, type ReceiptLike } from "./alv";
+import { computeAlvReport, parseVatDetails, type AlvReport, type InvoiceVatSource, type PurchaseVatSource, type ReceiptLike } from "./alv";
 import type { ReportInvoice, ReportReceipt } from "./reports";
 
 /** Ordinary invoices that are part of the books: sent, paid, or later credited. */
@@ -37,6 +44,12 @@ export interface AlvPeriodSources {
   reportReceipts: ReportReceipt[];
   /** The same counted invoices and credit notes, signed, for the P&L. */
   reportInvoices: ReportInvoice[];
+  /** F39: purchase invoices whose VAT is deductible in this period, and not already counted through a receipt. */
+  purchaseInvoices: PurchaseVatSource[];
+  /** Recorded purchase invoices of the period left out because a receipt already counts that purchase. */
+  skippedPurchaseInvoiceCount: number;
+  /** Counted purchase invoices that look like a receipt that is also counted (same amount, close date). */
+  suspectedPurchaseDuplicateCount: number;
   receiptCount: number;
   /** Receipts dropped because the same bank row already settled an invoice. */
   excludedReceiptCount: number;
@@ -112,17 +125,94 @@ export async function findReceiptsWithoutVatBreakdown(userId: string, start: Dat
   );
 }
 
+/** How far apart a purchase invoice's date and a receipt's may be to look like one purchase. */
+export const PURCHASE_DUPLICATE_WINDOW_DAYS = 7;
+
+/**
+ * F39: the purchase invoices that add deductible VAT to the period, with the
+ * ones a receipt already counts taken out (evidence only), and how many look
+ * like a receipt as well (resemblance only, flagged and never removed).
+ */
+async function loadPurchaseVat(userId: string, start: Date, end: Date) {
+  const invoices = await prisma.purchaseInvoice.findMany({
+    where: { userId, issueDate: { gte: start, lt: end }, status: { in: ["open", "paid"] }, vatCents: { gt: 0 } },
+    select: {
+      id: true,
+      vatCents: true,
+      grossCents: true,
+      issueDate: true,
+      receipt: { select: { reviewStatus: true } },
+      payments: { select: { transactionId: true } },
+    },
+  });
+  if (invoices.length === 0) return { counted: [] as PurchaseVatSource[], skipped: 0, suspected: 0 };
+
+  const rowIds = invoices.flatMap((invoice) =>
+    invoice.payments.map((payment) => payment.transactionId).filter((id): id is string => id !== null)
+  );
+  const documentedRows = new Set(
+    rowIds.length === 0
+      ? []
+      : (
+          await prisma.transaction.findMany({
+            where: { id: { in: rowIds }, receipt: { is: { reviewStatus: "approved" } } },
+            select: { id: true },
+          })
+        ).map((row) => row.id)
+  );
+  const viaReceipt = (invoice: (typeof invoices)[number]) =>
+    invoice.receipt?.reviewStatus === "approved" ||
+    invoice.payments.some((payment) => payment.transactionId !== null && documentedRows.has(payment.transactionId));
+
+  const open = invoices.filter((invoice) => !viaReceipt(invoice));
+  const window = PURCHASE_DUPLICATE_WINDOW_DAYS * DAY_MS;
+  const candidates =
+    open.length === 0
+      ? []
+      : await prisma.receipt.findMany({
+          where: {
+            userId,
+            type: "meno",
+            reviewStatus: "approved",
+            totalAmountCents: { in: [...new Set(open.map((invoice) => invoice.grossCents))] },
+            date: { gte: new Date(start.getTime() - window), lt: new Date(end.getTime() + window) },
+          },
+          select: { id: true, totalAmountCents: true, date: true },
+        });
+  const usedReceipts = new Set<string>();
+  let suspected = 0;
+  for (const invoice of open) {
+    const match = candidates.find(
+      (receipt) =>
+        !usedReceipts.has(receipt.id) &&
+        receipt.totalAmountCents === invoice.grossCents &&
+        receipt.date !== null &&
+        Math.abs(receipt.date.getTime() - invoice.issueDate.getTime()) <= window
+    );
+    if (match) {
+      usedReceipts.add(match.id);
+      suspected += 1;
+    }
+  }
+  return {
+    counted: open.map((invoice) => ({ vatCents: invoice.vatCents })),
+    skipped: invoices.length - open.length,
+    suspected,
+  };
+}
+
 export async function loadAlvPeriodSources(
   userId: string,
   start: Date,
   end: Date
 ): Promise<AlvPeriodSources> {
-  const [{ receipts, counted }, invoices] = await Promise.all([
+  const [{ receipts, counted }, invoices, purchases] = await Promise.all([
     loadCountedReceipts(userId, start, end),
     prisma.salesInvoice.findMany({
       where: bookedSalesWhere(userId, start, end),
       include: { lines: true },
     }),
+    loadPurchaseVat(userId, start, end),
   ]);
 
   const bookedInvoices = invoices.map((invoice) => {
@@ -160,6 +250,9 @@ export async function loadAlvPeriodSources(
       vatCents: totals.vatCents,
       grossCents: totals.grossCents,
     })),
+    purchaseInvoices: purchases.counted,
+    skippedPurchaseInvoiceCount: purchases.skipped,
+    suspectedPurchaseDuplicateCount: purchases.suspected,
     receiptCount: counted.length,
     excludedReceiptCount: receipts.length - counted.length,
     creditedInvoiceCount: invoices.filter(
@@ -172,6 +265,11 @@ export async function loadAlvPeriodSources(
       })
     ).length,
   };
+}
+
+/** The VAT return of a period from its sources: the one place that feeds computeAlvReport (F39). */
+export function alvReportOf(sources: Pick<AlvPeriodSources, "receipts" | "invoices" | "purchaseInvoices">): AlvReport {
+  return computeAlvReport(sources.receipts, sources.invoices, sources.purchaseInvoices);
 }
 
 /** How far apart a hand-entered payment date and the bank row may be. */

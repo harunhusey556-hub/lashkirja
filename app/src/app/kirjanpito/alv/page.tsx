@@ -25,7 +25,7 @@ import {
   resolveAlvPeriod,
   type AlvChoice,
 } from "@/lib/alv-period-choice";
-import { vatPendingNote, type VatFilingRecord } from "@/lib/vat-due";
+import { alvPurchaseNote, vatPendingNote, type VatFilingRecord } from "@/lib/vat-due";
 import { useProfile } from "@/app/asetukset/useProfile";
 import { useRefetchOnReconnect } from "@/components/useRefetchOnReconnect";
 import { pageCacheFetchedAt, readPageCache, writePageCache } from "@/lib/page-cache";
@@ -50,7 +50,16 @@ interface ALVData {
   field308: { label: string; amount: number; isRefund: boolean };
   review: { salesGross: number; purchasesGross: number; count: number };
   receiptCount: number;
-  sources?: { receiptSalesVat: number; invoiceSalesVat: number; invoiceCount: number };
+  sources?: {
+    receiptSalesVat: number;
+    invoiceSalesVat: number;
+    invoiceCount: number;
+    /** F39: deductible VAT from purchase invoices, already inside field 307. */
+    purchaseInvoiceVat?: number;
+    purchaseInvoiceCount?: number;
+  };
+  skippedPurchaseInvoiceCount?: number;
+  suspectedPurchaseDuplicateCount?: number;
   excludedReceiptCount?: number;
   creditedInvoiceCount?: number;
   creditNoteCount?: number;
@@ -283,6 +292,20 @@ export default function ALVRaporttiPage() {
             </Card>
           )}
 
+          {(data.sources?.purchaseInvoiceCount ?? 0) > 0 || (data.skippedPurchaseInvoiceCount ?? 0) > 0 ? (
+            <Card className="space-y-1 text-sm text-ink">
+              <p className="font-medium">Ostolaskujen ALV</p>
+              <p className="text-caption text-ink-2">
+                {alvPurchaseNote({
+                  count: data.sources?.purchaseInvoiceCount ?? 0,
+                  vat: data.sources?.purchaseInvoiceVat ?? 0,
+                  skipped: data.skippedPurchaseInvoiceCount ?? 0,
+                  suspected: data.suspectedPurchaseDuplicateCount ?? 0,
+                })}
+              </p>
+            </Card>
+          ) : null}
+
           {data.review.count > 0 && (
             <Card className="space-y-1 text-sm text-ink">
               <p className="font-medium">{kuittiCount(data.review.count)} ilman ALV-erittelyä</p>
@@ -365,6 +388,14 @@ export default function ALVRaporttiPage() {
               href={receiptDrillHref({ month: drillScope, type: "meno" })}
               ariaLabel="Avaa ostokuitit"
             />
+            {(data.sources?.purchaseInvoiceCount ?? 0) > 0 ? (
+              <DrillRow
+                label="Ostolaskuista"
+                value={data.sources?.purchaseInvoiceVat ?? 0}
+                href="/kirjanpito/ostolaskut"
+                ariaLabel="Avaa ostolaskut"
+              />
+            ) : null}
           </Section>
         </>
       ) : null}

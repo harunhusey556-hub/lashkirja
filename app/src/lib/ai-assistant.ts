@@ -3,8 +3,7 @@ import { parseBusinessDetails, generateProfileSummary } from "./onboarding";
 import { centsToEuros } from "./money";
 import { candidatesFor, MatchTx, MatchReceipt, offerableReceiptWhere } from "./matching";
 import { askCopilot, type CopilotTurn } from "./copilot";
-import { computeAlvReport } from "./alv";
-import { loadAlvPeriodSources } from "./alv-period";
+import { alvReportOf, loadAlvPeriodSources } from "./alv-period";
 import {
   EMPTY_HONESTY,
   enforceAssistantReply,
@@ -76,7 +75,7 @@ async function currentMonthVat(userId: string, english: boolean): Promise<{ text
     const start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
     const end = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1));
     const sources = await loadAlvPeriodSources(userId, start, end);
-    const report = computeAlvReport(sources.receipts, sources.invoices);
+    const report = alvReportOf(sources);
     const month = `${start.getUTCFullYear()}-${String(start.getUTCMonth() + 1).padStart(2, "0")}`;
     return formatBookedVatAnswer({
       month,

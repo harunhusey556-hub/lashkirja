@@ -150,3 +150,31 @@ export function vatChangedSinceFiling(figures: VatDueFigures | null): boolean {
   const signed = figures.isRefund ? -figures.amount : figures.amount;
   return Math.round(signed * 100) !== Math.round(figures.filing.filedAmount * 100);
 }
+
+/**
+ * F39: the rule for purchase invoices, in the ALV notice. Their VAT is
+ * deductible by invoice date; one that a receipt already counts is left out;
+ * a receipt that looks like the same purchase is flagged, not removed.
+ */
+export function alvPurchaseNote(input: { count: number; vat: number; skipped: number; suspected: number }): string {
+  const parts: string[] = [];
+  if (input.count > 0) {
+    const invoices = input.count === 1 ? "1 ostolaskun" : `${input.count} ostolaskun`;
+    parts.push(`${invoices} ALV ${formatEur(input.vat)} on mukana vähennettävässä verossa laskun päivän mukaan.`);
+  }
+  if (input.skipped > 0) {
+    parts.push(
+      input.skipped === 1
+        ? "1 ostolasku jätettiin pois, koska siihen liitetty kuitti on jo mukana."
+        : `${input.skipped} ostolaskua jätettiin pois, koska niihin liitetty kuitti on jo mukana.`
+    );
+  }
+  if (input.suspected > 0) {
+    parts.push(
+      input.suspected === 1
+        ? "1 ostolaskulle löytyy samansuuruinen kuitti. Jos se on sama osto, hylkää kuitti tai peru lasku, niin ALV ei lasketa kahdesti."
+        : `${input.suspected} ostolaskulle löytyy samansuuruinen kuitti. Jos ne ovat samoja ostoja, hylkää kuitit tai peru laskut, niin ALV ei lasketa kahdesti.`
+    );
+  }
+  return parts.join(" ");
+}

@@ -3,8 +3,7 @@
  * the user already stored. No bank session secrets and no server paths.
  */
 import { prisma } from "./db";
-import { loadAlvPeriodSources } from "./alv-period";
-import { computeAlvReport } from "./alv";
+import { alvReportOf, loadAlvPeriodSources } from "./alv-period";
 import { buildProfitLoss, periodToEuros } from "./reports";
 import { centsToEuros } from "./money";
 import { csvMoney, toCsv, type CsvValue } from "./csv";
@@ -105,7 +104,7 @@ export async function buildPeriodPackage(
 
   // The same sources as the VAT return and /api/reports/profit-loss.
   const profit = buildProfitLoss(sources.reportReceipts, sources.reportInvoices);
-  const alv = computeAlvReport(sources.receipts, sources.invoices);
+  const alv = alvReportOf(sources);
 
   const receiptCsv = toCsv(
     ["Päivä", "Toimittaja", "Kategoria", "Tyyppi", "Summa", "Laskun numero", "Viite", "Tila", "Tiedosto"],

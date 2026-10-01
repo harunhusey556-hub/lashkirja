@@ -174,3 +174,100 @@ describe("a yearly filer has an annual view of the return (F13)", () => {
     }
   });
 });
+
+describe("a purchase invoice's VAT reaches the ALV return once, never twice (F39)", () => {
+  async function alvOf(period: string): Promise<Json> {
+    const { GET: alv } = await import("@/app/api/alv/route");
+    const response = await alv(buildRequest("GET", `/api/alv?period=${period}`, undefined, { cookie }));
+    expect(response.status).toBe(200);
+    return readJson(response);
+  }
+
+  async function purchase(overrides: Record<string, unknown> = {}) {
+    return prisma.purchaseInvoice.create({
+      data: {
+        userId: user.id,
+        supplierName: "Ripsitukku Oy",
+        issueDate: new Date(`${previous}-10T00:00:00.000Z`),
+        dueDate: new Date(`${previous}-24T00:00:00.000Z`),
+        status: "open",
+        grossCents: 12_400,
+        vatCents: 2_519,
+        netCents: 9_881,
+        ...overrides,
+      },
+    });
+  }
+
+  it("counts a recorded purchase invoice's VAT as deductible, by invoice date", async () => {
+    const before = await alvOf(previous);
+    await purchase();
+    const after = await alvOf(previous);
+    expect(after.field307.amount).toBeCloseTo(before.field307.amount + 25.19, 2);
+    expect(after.sources.purchaseInvoiceCount).toBe(1);
+    expect(after.sources.purchaseInvoiceVat).toBe(25.19);
+    // The invoice dated in another month does not move this one.
+    await purchase({ issueDate: new Date(`${older}-10T00:00:00.000Z`) });
+    expect((await alvOf(previous)).field307.amount).toBe(after.field307.amount);
+    // A paid invoice counts as well, a cancelled one never.
+    await purchase({ status: "paid", vatCents: 100 });
+    await purchase({ status: "cancelled", vatCents: 99_900 });
+    expect((await alvOf(previous)).sources.purchaseInvoiceVat).toBe(26.19);
+  });
+
+  it("leaves the invoice out when an approved receipt it is linked to already counts that purchase", async () => {
+    const receipt = await createReceipt(user.id, { date: `${previous}-10`, totalAmountCents: 12_400 });
+    await purchase({ receiptId: receipt.id });
+    const body = await alvOf(previous);
+    expect(body.sources.purchaseInvoiceCount).toBe(0);
+    expect(body.skippedPurchaseInvoiceCount).toBe(1);
+    // The receipt's own VAT (25,50 in the fixture) is the only deduction.
+    expect(body.field307.amount).toBe(25.5);
+  });
+
+  it("keeps the invoice when its linked receipt is still pending", async () => {
+    const receipt = await createReceipt(user.id, { date: `${previous}-10`, reviewStatus: "pending" });
+    await purchase({ receiptId: receipt.id });
+    const body = await alvOf(previous);
+    expect(body.sources.purchaseInvoiceCount).toBe(1);
+    expect(body.skippedPurchaseInvoiceCount).toBe(0);
+  });
+
+  it("leaves the invoice out when the bank row that paid it is documented by an approved receipt", async () => {
+    const statement = await createStatementWithTransactions(user.id, {
+      periodMonth: previous,
+      transactions: [{ date: `${previous}-12`, amountCents: -12_400, counterparty: "Ripsitukku Oy" }],
+    });
+    const row = statement.transactions[0]!;
+    const receipt = await createReceipt(user.id, { date: `${previous}-12`, totalAmountCents: 12_400 });
+    await prisma.transaction.update({ where: { id: row.id }, data: { receiptId: receipt.id, matchStatus: "confirmed" } });
+    const invoice = await purchase();
+    await prisma.purchasePayment.create({
+      data: { purchaseInvoiceId: invoice.id, transactionId: row.id, paidDate: new Date(`${previous}-12T00:00:00.000Z`), amountCents: 12_400, source: "bank" },
+    });
+    const body = await alvOf(previous);
+    expect(body.sources.purchaseInvoiceCount).toBe(0);
+    expect(body.skippedPurchaseInvoiceCount).toBe(1);
+  });
+
+  it("counts both and flags it when an unlinked receipt has the same amount close in date", async () => {
+    await createReceipt(user.id, { date: `${previous}-12`, totalAmountCents: 12_400 });
+    await purchase();
+    const body = await alvOf(previous);
+    expect(body.sources.purchaseInvoiceCount).toBe(1);
+    expect(body.suspectedPurchaseDuplicateCount).toBe(1);
+    // A receipt of another amount raises nothing.
+    await prisma.purchaseInvoice.deleteMany();
+    await purchase({ grossCents: 99_999 });
+    expect((await alvOf(previous)).suspectedPurchaseDuplicateCount).toBe(0);
+  });
+
+  it("feeds the filed snapshot, so the return and the filing agree", async () => {
+    const { PATCH: filing } = await import("@/app/api/alv/filing/route");
+    await purchase();
+    const body = await alvOf(previous);
+    const filed = await readJson(await filing(buildRequest("PATCH", "/api/alv/filing", { period: previous, filed: true }, { cookie })));
+    expect(filed.filing.filedAmount).toBe(body.field308.isRefund ? -body.field308.amount : body.field308.amount);
+    expect(body.field308.isRefund).toBe(true);
+  });
+});

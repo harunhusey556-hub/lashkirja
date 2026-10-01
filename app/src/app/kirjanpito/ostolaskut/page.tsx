@@ -65,6 +65,8 @@ interface PurchaseInvoice {
   open: number;
   category: string | null;
   notes: string | null;
+  /** The receipt that documents this purchase: its VAT counts through the receipt (F39). */
+  receiptId?: string | null;
   payments: Array<{ id: string; paidDate: string; amount: number; source: string }>;
 }
 
@@ -596,6 +598,11 @@ export default function PurchaseInvoicesPage() {
                 )}
               </div>
             </div>
+            {/* F39: the rule, where the amount is typed. */}
+            <p className="-mt-1 text-caption text-ink-2">
+              Laskun ALV on mukana ALV-ilmoituksen vähennettävässä verossa laskun päivän mukaan. Jos sama osto on myös
+              kuittina, hylkää kuitti tai peru lasku, niin ALV ei lasketa kahdesti.
+            </p>
 
             <div className="field-dates">
               <div>
@@ -711,6 +718,13 @@ export default function PurchaseInvoicesPage() {
                   : []),
               ]}
             />
+            {detailInvoice.status !== "cancelled" && detailInvoice.vat > 0 ? (
+              <p className="text-caption text-ink-2">
+                {detailInvoice.receiptId
+                  ? "Kuitti on liitetty: ALV lasketaan kuitin kautta."
+                  : "ALV on mukana ALV-ilmoituksen vähennettävässä verossa."}
+              </p>
+            ) : null}
 
             {detailInvoice.payments.length > 0 && (
               <ul className="space-y-1 text-caption text-ink-2">

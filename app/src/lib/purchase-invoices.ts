@@ -1,10 +1,14 @@
 /**
  * Purchase invoices (ostolaskut): what the business owes and when.
  *
- * Deliberately a payables tracker. The VAT return keeps taking its numbers
- * from receipts, so recording a supplier invoice here and photographing the
- * receipt for the same purchase cannot double-count each other. Link the two
- * with `receiptId` once the receipt exists.
+ * F39, the VAT rule: a recorded purchase invoice's VAT is deductible in the VAT
+ * return (field 307) in the period of its invoice date, whether it is open or
+ * paid; a cancelled one counts nothing. The return reads it through
+ * lib/alv-period.ts, which counts one purchase once: an invoice linked to an
+ * approved receipt (`receiptId`), or paid from a bank row that an approved
+ * receipt documents, is counted through the receipt and left out of the
+ * invoice side. Same amount and a close date without such a link is counted
+ * twice and flagged on the ALV page, never removed on resemblance alone.
  */
 import { prisma } from "./db";
 import { AppError, NotFoundError, ValidationError } from "./api-errors";

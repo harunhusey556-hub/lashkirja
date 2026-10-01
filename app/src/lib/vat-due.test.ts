@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { nextVatDue, vatDueFor, vatPeriodEndingIn, vatPeriodKey, vatPeriodKindOf } from "./vat-deadline";
 import {
+  alvPurchaseNote,
   vatAmountToPay,
   vatChangedNote,
   vatChangedSinceFiling,
@@ -178,5 +179,24 @@ describe("a deadline in a later year names the year (F13)", () => {
     expect(vatDueSecondary(vatDueFor({ kind: "month", year: 2026, month: 11 }), null)).toBe(
       "Marraskuu 2026 · eräpäivä 12.1.2027"
     );
+  });
+});
+
+describe("the ALV notice states the purchase invoice rule (F39)", () => {
+  const plain = (text: string) => text.replace(/ /g, " ");
+  it("says that the VAT counts, by invoice date", () => {
+    expect(plain(alvPurchaseNote({ count: 2, vat: 25.19, skipped: 0, suspected: 0 }))).toBe(
+      "2 ostolaskun ALV 25,19 € on mukana vähennettävässä verossa laskun päivän mukaan."
+    );
+  });
+
+  it("says which invoices a receipt already counts, and flags a likely double entry", () => {
+    const text = plain(alvPurchaseNote({ count: 1, vat: 5, skipped: 1, suspected: 1 }));
+    expect(text).toContain("1 ostolasku jätettiin pois, koska siihen liitetty kuitti on jo mukana.");
+    expect(text).toContain("niin ALV ei lasketa kahdesti");
+  });
+
+  it("is empty when there is nothing to say", () => {
+    expect(alvPurchaseNote({ count: 0, vat: 0, skipped: 0, suspected: 0 })).toBe("");
   });
 });

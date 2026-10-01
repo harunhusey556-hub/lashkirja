@@ -6,8 +6,7 @@ import { centsToEuros } from "@/lib/money";
 import { parseBusinessDetails, deriveVatProfile } from "@/lib/onboarding";
 import { getBankOverview } from "@/lib/bank-accounts";
 import { buildAging, buildAgingReport, openPosition, type InvoiceStatus } from "@/lib/invoices";
-import { computeAlvReport } from "@/lib/alv";
-import { loadAlvPeriodSources, type AlvPeriodSources } from "@/lib/alv-period";
+import { alvReportOf, loadAlvPeriodSources, type AlvPeriodSources } from "@/lib/alv-period";
 import { computeYearTurnover } from "@/lib/alv-threshold";
 import { buildProfitLoss } from "@/lib/reports";
 import { helsinkiMonthKey } from "@/lib/validation";
@@ -102,7 +101,7 @@ export async function GET(req: NextRequest) {
 
   let estimatedVat = 0;
   if (books) {
-    const alvReport = computeAlvReport(books.receipts, books.invoices);
+    const alvReport = alvReportOf(books);
     estimatedVat = alvReport.field308.isRefund
       ? -alvReport.field308.amount
       : alvReport.field308.amount;
