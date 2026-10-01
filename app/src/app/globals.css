@@ -1344,3 +1344,28 @@ html[data-page-hidden] *::after {
   -webkit-line-clamp: 2;
   overflow: hidden;
 }
+
+/* Charts (components/ds/charts): one grow-in on first paint, 300 ms, transform
+   and opacity only. Bars grow from their baseline; the sparkline and the month
+   bar fade. Nothing moves under reduced motion. */
+@keyframes chartGrowY {
+  from { opacity: 0; transform: scaleY(0); }
+  to { opacity: 1; transform: scaleY(1); }
+}
+
+@keyframes chartGrowX {
+  from { opacity: 0; transform: scaleX(0); }
+  to { opacity: 1; transform: scaleX(1); }
+}
+
+.chart-grow-y { animation: chartGrowY 300ms var(--ease-out) both; }
+.chart-grow-x { animation: chartGrowX 300ms var(--ease-out) both; }
+.chart-fade { animation: fadeIn 300ms var(--ease-out) both; }
+
+@media (prefers-reduced-motion: reduce) {
+  .chart-grow-y,
+  .chart-grow-x,
+  .chart-fade {
+    animation: none;
+  }
+}
