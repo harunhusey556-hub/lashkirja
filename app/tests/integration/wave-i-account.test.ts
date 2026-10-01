@@ -143,7 +143,9 @@ describe("wave I account", () => {
     expect(denied.status).toBe(401);
     expect((await prisma.user.findUniqueOrThrow({ where: { id: user.id } })).pendingEmail).toBeNull();
 
-    const pending = await requestEmail(
+    // No mail transport: the change is refused as a whole and nothing stays
+    // pending that could never be confirmed (F53).
+    const undelivered = await requestEmail(
       buildRequest(
         "POST",
         "/api/auth/email",
@@ -151,6 +153,34 @@ describe("wave I account", () => {
         { cookie }
       )
     );
+    expect(undelivered.status).toBe(503);
+    const refusal = await readJson<{ error: string; ok?: boolean }>(undelivered);
+    expect(refusal.ok).toBeUndefined();
+    expect(refusal.error).toMatch(/ei vaihdettu/);
+    expect(refusal.error).not.toMatch(/lähetyspostia/);
+    expect((await prisma.user.findUniqueOrThrow({ where: { id: user.id } })).pendingEmail).toBeNull();
+    expect(
+      await prisma.accountToken.count({ where: { userId: user.id, purpose: "email_change", usedAt: null } })
+    ).toBe(0);
+
+    process.env.PLATFORM_SMTP_HOST = "smtp.test.invalid";
+    process.env.PLATFORM_SMTP_FROM = "no-reply@test.invalid";
+    process.env.MAIL_TRANSPORT = "json";
+    let pending: Response;
+    try {
+      pending = await requestEmail(
+        buildRequest(
+          "POST",
+          "/api/auth/email",
+          { email: "uusi@example.com", currentPassword: PASSWORD },
+          { cookie }
+        )
+      );
+    } finally {
+      delete process.env.PLATFORM_SMTP_HOST;
+      delete process.env.PLATFORM_SMTP_FROM;
+      delete process.env.MAIL_TRANSPORT;
+    }
     expect(pending.status).toBe(200);
     const body = await readJson<{ pendingEmail: string; token?: string }>(pending);
     expect(body.pendingEmail).toBe("uusi@example.com");

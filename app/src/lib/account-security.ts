@@ -170,6 +170,17 @@ export async function requestEmailChange(userId: string, nextEmailRaw: string, c
   return { token: minted.token, email: nextEmail };
 }
 
+/** Undoes a requested change whose confirmation mail could not be sent: no token, no pending address. */
+export async function cancelEmailChange(userId: string) {
+  await prisma.$transaction([
+    prisma.accountToken.updateMany({
+      where: { userId, purpose: "email_change", usedAt: null },
+      data: { usedAt: new Date() },
+    }),
+    prisma.user.update({ where: { id: userId }, data: { pendingEmail: null } }),
+  ]);
+}
+
 export async function confirmEmailChange(token: string) {
   const row = await prisma.accountToken.findUnique({ where: { tokenHash: hashAccountToken(token) } });
   if (

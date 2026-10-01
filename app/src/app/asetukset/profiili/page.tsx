@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { ApiError, apiFetch, errorMessage, isUserFacingMessage, readJson } from "@/components/clientFetch";
-import { type Profile, SaveStatus, useProfile } from "../useProfile";
+import { type Profile, SaveStatus, refreshSharedProfile, useProfile } from "../useProfile";
 import { ProfileGate } from "../ProfileGate";
 import { NAME_MAX_LENGTH, type NameErrors, validateProfileNames } from "../profile-names";
 import { Card, PageTitle } from "@/components/ds";
@@ -98,6 +98,8 @@ function ProfileForm({
       });
       const data = await readJson<{ message: string }>(response, "Sähköpostin vaihto epäonnistui");
       setCurrentPassword("");
+      // The pending-address card appears at once, not after the next visit.
+      void refreshSharedProfile();
       showToast({
         tone: "success",
         text:

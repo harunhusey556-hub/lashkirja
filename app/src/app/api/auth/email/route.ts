@@ -3,7 +3,8 @@ import { z } from "zod";
 import { requireSession } from "@/lib/session";
 import { guardWrite } from "@/lib/http-security";
 import { consumeRateLimit } from "@/lib/rate-limit";
-import { AccountSecurityError, requestEmailChange, sendAccountMail } from "@/lib/account-security";
+import { AccountSecurityError, cancelEmailChange, requestEmailChange, sendAccountMail } from "@/lib/account-security";
+import { contactSupportPhrase } from "@/lib/account-copy";
 
 const bodySchema = z.object({
   email: z.string().trim().max(254),
@@ -43,13 +44,22 @@ export async function POST(req: NextRequest) {
       subject: "Vahvista LashKirjan sähköposti",
       text: `Vahvista uusi kirjautumissähköposti linkistä. Vanha osoite toimii, kunnes vahvistat:\n${confirmLink(req, pending.token)}`,
     });
+    if (!delivered) {
+      // Delivery is part of the change: nothing stays pending that no link
+      // exists for, and the answer is an error, not a success (F53).
+      await cancelEmailChange(session.userId);
+      return NextResponse.json(
+        {
+          error: `Vahvistusviestiä ei voitu lähettää, joten sähköpostia ei vaihdettu. Yritä myöhemmin uudelleen tai ${contactSupportPhrase()}.`,
+        },
+        { status: 503 }
+      );
+    }
     return NextResponse.json({
       ok: true,
       pendingEmail: pending.email,
-      delivered,
-      message: delivered
-        ? "Vahvistuslinkki lähti uuteen osoitteeseen. Nykyinen sähköposti pysyy, kunnes linkki avataan."
-        : "Uutta osoitetta ei vaihdettu. Vahvistusviestiä ei voitu lähettää, koska lähetyspostia ei ole yhdistetty. Pyydä linkki tuesta.",
+      delivered: true,
+      message: "Vahvistuslinkki lähti uuteen osoitteeseen. Nykyinen sähköposti pysyy, kunnes linkki avataan.",
     });
   } catch (error) {
     if (error instanceof AccountSecurityError) {
