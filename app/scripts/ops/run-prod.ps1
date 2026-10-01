@@ -238,6 +238,9 @@ function Start-Child($child) {
   $psi.StandardErrorEncoding = [System.Text.Encoding]::UTF8
   foreach ($key in $dotenv.Keys) { $psi.EnvironmentVariables[$key] = [string]$dotenv[$key] }
   $psi.EnvironmentVariables['NODE_ENV'] = 'production'
+  # The working directory is the instance root, not the checkout: tell the app
+  # where its own files (assets/fonts for the PDFs) are.
+  $psi.EnvironmentVariables['LASHKIRJA_APP_DIR'] = $AppDir
   $psi.EnvironmentVariables['NEXT_TELEMETRY_DISABLED'] = '1'
   $process = New-Object System.Diagnostics.Process
   $process.StartInfo = $psi

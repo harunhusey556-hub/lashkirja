@@ -20,14 +20,28 @@ export interface PdfFontFiles {
 const REGULAR = "LiberationSans-Regular.ttf";
 const BOLD = "LiberationSans-Bold.ttf";
 
+/**
+ * Where the fonts may live. The lookup must not depend on the process cwd:
+ * in production run-prod.ps1 starts web and worker with cwd C:\LashKirja while
+ * the checkout is C:\LashKirja\prod\app, so cwd-relative paths miss it.
+ * Order: LASHKIRJA_APP_DIR (set by run-prod.ps1), the module's own location
+ * (app/src/lib -> app), then cwd-relative guesses.
+ */
 function candidateDirs(): string[] {
+  const roots: string[] = [];
+  const envDir = process.env.LASHKIRJA_APP_DIR;
+  if (envDir) roots.push(envDir);
+  if (typeof __dirname === "string") {
+    roots.push(path.resolve(__dirname, "..", ".."));
+  }
   const cwd = process.cwd();
-  return [
-    path.join(cwd, "assets", "fonts"),
-    path.join(cwd, "app", "assets", "fonts"),
-    path.join(cwd, "node_modules", "pdfjs-dist", "standard_fonts"),
-    path.join(cwd, "app", "node_modules", "pdfjs-dist", "standard_fonts"),
-  ];
+  roots.push(cwd, path.join(cwd, "app"), path.join(cwd, "prod", "app"));
+  const dirs: string[] = [];
+  for (const root of roots) {
+    dirs.push(path.join(root, "assets", "fonts"));
+    dirs.push(path.join(root, "node_modules", "pdfjs-dist", "standard_fonts"));
+  }
+  return dirs;
 }
 
 let cached: PdfFontFiles | null | undefined;
@@ -42,6 +56,11 @@ export function pdfFontFiles(): PdfFontFiles | null {
       cached = { regular, bold };
       break;
     }
+  }
+  if (!cached) {
+    console.warn(
+      "[pdf] Liberation Sans fonts not found; PDFs fall back to Helvetica (set LASHKIRJA_APP_DIR to the app folder)",
+    );
   }
   return cached;
 }

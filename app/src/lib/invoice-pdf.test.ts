@@ -197,8 +197,10 @@ describe("renderInvoicePdf: credit note (F02, G01)", () => {
     expect(text).toContain("-51,40 €");
     expect(text).toContain("-13,10 €");
     expect(text).not.toContain('"');
-    // pdfkit writes an unmapped U+2212 as the hex digits 2212.
-    expect(pdf.toString("latin1")).not.toContain("<2212");
+    // pdfkit deflates its streams, so the extracted text is the only honest view.
+    // An unmapped U+2212 used to come out as a quotation mark or a replacement char.
+    expect(text).not.toContain("−");
+    expect(text).not.toContain("�");
   });
 
   it("does not present itself as payable", async () => {
@@ -256,8 +258,8 @@ describe("renderInvoicePdf: text the font may not know (F02)", () => {
     expect(text).toContain("125,50 €");
     expect(text).not.toContain("\u0007");
     expect(text).toContain("loppu");
-    // No unpaired hex digit from an unmapped code point inside a string.
-    expect(pdf.toString("latin1")).not.toMatch(/<[0-9a-f]*[0-9a-f]{1}>\s*Tj/i);
+    // An unmapped code point used to print stray hex digits (e.g. "2212") over the next column.
+    expect(text).not.toContain("�");
   });
 
   it("draws Latin Extended and Cyrillic as typed when the Unicode font is available", async () => {

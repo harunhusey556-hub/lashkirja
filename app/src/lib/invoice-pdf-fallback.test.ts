@@ -5,6 +5,7 @@ vi.mock("./pdf-fonts", () => ({ pdfFontFiles: () => null, resetPdfFontCache: () 
 
 import { renderInvoicePdf, type InvoicePdfData } from "./invoice-pdf";
 import { createReferenceNumber } from "./finnish-reference";
+import { winAnsiCanDraw } from "./pdf-text";
 
 async function extractText(pdf: Buffer): Promise<string> {
   const { PDFParse } = await import("pdf-parse");
@@ -48,9 +49,9 @@ describe("renderInvoicePdf without the Unicode font", () => {
     expect(text).toContain("Sükrü ?");
     expect(text).toContain("Lukasz ou ?");
     expect(text).toContain("100,00 €");
-    // Every string written with the built-in font is whole bytes.
-    for (const hex of pdf.toString("latin1").matchAll(/<([0-9a-fA-F]+)>\s*(?:Tj|TJ)/g)) {
-      expect(hex[1].length % 2).toBe(0);
+    // Everything that came out of the PDF is a character the built-in font draws.
+    for (const char of text) {
+      expect(winAnsiCanDraw(char.codePointAt(0)!), `U+${char.codePointAt(0)!.toString(16)}`).toBe(true);
     }
   });
 });
