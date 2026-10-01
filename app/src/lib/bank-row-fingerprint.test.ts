@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { bankRowKey, normaliseRowText, splitNewRows } from "./bank-row-fingerprint";
+import { bankRowKey, lockedRowsNotice, normaliseRowText, splitNewRows } from "./bank-row-fingerprint";
 
 const row = (date: string | null, amountCents: number, counterparty: string | null = "Spotify") => ({
   date,
@@ -77,5 +77,13 @@ describe("splitNewRows", () => {
   it("does not merge rows of different names that share date and amount", () => {
     const { fresh } = splitNewRows([row("2026-09-01", -3590, "Kauppa Oy")], [row("2026-09-01", -3590, "Toinen Oy")]);
     expect(fresh).toHaveLength(1);
+  });
+});
+
+describe("lockedRowsNotice", () => {
+  it("says nothing for no rows and speaks plain Finnish for one and many", () => {
+    expect(lockedRowsNotice(0)).toBeNull();
+    expect(lockedRowsNotice(1)).toBe("1 tapahtuma kuuluu suljettuun kuukauteen, joten sitä ei tuotu.");
+    expect(lockedRowsNotice(3)).toBe("3 tapahtumaa kuuluu suljettuun kuukauteen, joten niitä ei tuotu.");
   });
 });

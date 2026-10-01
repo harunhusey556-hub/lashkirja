@@ -7,7 +7,7 @@ import { getStatementForUser } from "@/lib/statement-api";
 import { removeUserUpload } from "@/lib/storage";
 import * as path from "path";
 
-import { assertMonthOpen } from "@/lib/period-lock";
+import { assertMonthOpen, assertPeriodOpen } from "@/lib/period-lock";
 import { withErrorHandler } from "@/lib/api-errors";
 import { removeBankRows } from "@/lib/bank-row-removal";
 const patchSchema = z
@@ -137,8 +137,14 @@ export const DELETE = withErrorHandler(async (
   // dropped so the sale is not counted twice (see bank-row-removal.ts).
   const rows = await prisma.transaction.findMany({
     where: { statementId: id },
-    select: { id: true },
+    select: { id: true, date: true },
   });
+  // The statement's own month is not the only one at stake: a file that crosses
+  // a month boundary holds rows of both, and every one of them must be open.
+  await assertPeriodOpen(
+    session.userId,
+    rows.map((row) => row.date)
+  );
   const { removedDrafts, mergedIntoInvoice } = await removeBankRows(
     session.userId,
     rows.map((row) => row.id),

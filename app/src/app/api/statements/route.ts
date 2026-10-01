@@ -26,13 +26,25 @@ import { autoGenerateIncomeReceipts } from "@/lib/income-automation";
 import { resolveAccountForImport } from "@/lib/bank-accounts";
 import { extractIbans } from "@/lib/iban";
 import { Prisma } from "@/generated/prisma/client";
-import { loadStoredRowIdentities, skippedRowsNotice, splitNewRows } from "@/lib/bank-row-fingerprint";
+import { loadStoredRowIdentities, lockedRowsNotice, skippedRowsNotice, splitNewRows } from "@/lib/bank-row-fingerprint";
 
-import { assertMonthOpen } from "@/lib/period-lock";
+import { PeriodLockedError, getLockedThrough, isMonthLocked } from "@/lib/period-lock";
+import { fallbackStatementMonth } from "@/lib/report-calendar";
 import { AppError } from "@/lib/api-errors";
 function publicTransaction<T extends { amountCents: number }>(tx: T) {
   const { amountCents, ...rest } = tx;
   return { ...rest, amount: centsToEuros(amountCents) };
+}
+
+/** Most common YYYY-MM among the rows' dates; the fallback when none has a date. */
+function dominantMonth(rows: Array<{ date: string | null }>, fallback: string): string {
+  const counts = new Map<string, number>();
+  for (const row of rows) {
+    if (!row.date) continue;
+    const month = row.date.slice(0, 7);
+    counts.set(month, (counts.get(month) || 0) + 1);
+  }
+  return [...counts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] || fallback;
 }
 
 /** Every row of the file is already stored (an overlapping or repeated export). */
@@ -126,19 +138,11 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Most common YYYY-MM among parsed dates; fall back to upload month
-    const monthCounts = new Map<string, number>();
-    for (const tx of parsedTransactions) {
-      if (tx.date) {
-        const month = tx.date.slice(0, 7);
-        monthCounts.set(month, (monthCounts.get(month) || 0) + 1);
-      }
-    }
-    const periodMonth =
-      [...monthCounts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ||
-      new Date().toISOString().slice(0, 7);
-
-    await assertMonthOpen(userId, periodMonth);
+    // The month and the lock are decided from the rows that are really
+    // stored (below), after the rows already known are taken out. For now the
+    // statement gets the month of the whole file.
+    const fallbackMonth = fallbackStatementMonth();
+    const provisionalMonth = dominantMonth(parsedTransactions, fallbackMonth);
 
     // File the upload under a bank account: an explicit choice from the form
     // wins, then an IBAN found inside the file, then the default account.
@@ -153,6 +157,8 @@ export async function POST(req: NextRequest) {
         select: { id: true },
       });
       if (!owned) {
+        // Nothing was stored for this upload: the bytes go too.
+        await removeUserUpload(userId, storageKey!).catch(() => {});
         return NextResponse.json(
           { error: "Pankkitiliä ei löytynyt" },
           { status: 404 }
@@ -163,7 +169,7 @@ export async function POST(req: NextRequest) {
       bankAccountId = await resolveAccountForImport(userId, { iban: ibanHint });
     }
 
-    const { statement, skippedDuplicates } = await prisma.$transaction(async (db) => {
+    const { statement, skippedDuplicates, heldBack } = await prisma.$transaction(async (db) => {
       // The statement is written first: that takes SQLite's write lock, so the
       // stored rows read below cannot change under a concurrent import.
       const created = await db.statement.create({
@@ -174,7 +180,7 @@ export async function POST(req: NextRequest) {
           fileType,
           filePath: storageKey!,
           checksum: fileChecksum,
-          periodMonth,
+          periodMonth: provisionalMonth,
           periodSource: "auto",
         },
       });
@@ -187,8 +193,25 @@ export async function POST(req: NextRequest) {
       const stored = await loadStoredRowIdentities(db, userId, bankAccountId, incoming, [account?.iban, ibanHint]);
       const { fresh, duplicates } = splitNewRows(incoming, stored);
       if (fresh.length === 0) throw new AllRowsKnownError(duplicates.length);
+
+      // A closed month stays closed, for every row and not only for the month
+      // the file is mostly about: rows dated in it are left out, and a file
+      // with nothing else to store is refused.
+      const lockedThrough = await getLockedThrough(userId, db);
+      const isLocked = (tx: { date: string | null }) =>
+        isMonthLocked(lockedThrough, tx.date ? tx.date.slice(0, 7) : fallbackMonth);
+      const open = fresh.filter((tx) => !isLocked(tx));
+      if (open.length === 0) {
+        const month = fresh[0].date ? fresh[0].date.slice(0, 7) : fallbackMonth;
+        throw new PeriodLockedError(month, lockedThrough!);
+      }
+      const periodMonth = dominantMonth(open, fallbackMonth);
+      const labelled =
+        periodMonth === provisionalMonth
+          ? created
+          : await db.statement.update({ where: { id: created.id }, data: { periodMonth } });
       await db.transaction.createMany({
-        data: fresh.map((tx) => ({
+        data: open.map((tx) => ({
           statementId: created.id,
           userId,
           source: "file",
@@ -203,7 +226,7 @@ export async function POST(req: NextRequest) {
           }),
         })),
       });
-      return { statement: created, skippedDuplicates: duplicates.length };
+      return { statement: labelled, skippedDuplicates: duplicates.length, heldBack: fresh.length - open.length };
     });
 
     // Fetch recent emails from connected accounts before matching so that
@@ -243,7 +266,8 @@ export async function POST(req: NextRequest) {
       transactions: transactions.map(publicTransaction),
       count: transactions.length,
       skippedDuplicates,
-      notice: skippedRowsNotice(skippedDuplicates),
+      heldBack,
+      notice: [skippedRowsNotice(skippedDuplicates), lockedRowsNotice(heldBack)].filter(Boolean).join(" ") || null,
     });
   } catch (e) {
     // A rejected or unparseable upload must not leave bytes on disk.

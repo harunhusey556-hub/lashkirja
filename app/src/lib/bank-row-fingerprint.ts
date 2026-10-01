@@ -94,6 +94,14 @@ export function skippedRowsNotice(skipped: number): string | null {
     : `${skipped} tapahtumaa oli jo tuotu aiemmin, joten ne ohitettiin.`;
 }
 
+/** One sentence for the owner about rows left out because their month is closed. */
+export function lockedRowsNotice(held: number): string | null {
+  if (held <= 0) return null;
+  return held === 1
+    ? "1 tapahtuma kuuluu suljettuun kuukauteen, joten sitä ei tuotu."
+    : `${held} tapahtumaa kuuluu suljettuun kuukauteen, joten niitä ei tuotu.`;
+}
+
 /**
  * The rows already stored for this user and bank account over the days the
  * incoming rows cover, from any statement and any source (file or bank feed).
