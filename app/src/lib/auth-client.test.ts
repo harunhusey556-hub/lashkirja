@@ -405,3 +405,43 @@ describe("sign-in flag and first-launch expiry", () => {
     expect(navigated).toEqual([{ path: "/login?error=expired", replace: true }]);
   });
 });
+
+describe("navigation memory across sessions (F19)", () => {
+  function stubLocalStorage() {
+    const data = new Map<string, string>();
+    vi.stubGlobal("localStorage", {
+      getItem: (key: string) => data.get(key) ?? null,
+      setItem: (key: string, value: string) => void data.set(key, value),
+      removeItem: (key: string) => void data.delete(key),
+    });
+  }
+
+  async function rememberRaportit() {
+    const nav = await import("./nav-direction");
+    nav.resetNavigationForTests();
+    nav.consumeDirection("/dashboard");
+    nav.armNavigation("/raportit", "tab");
+    nav.consumeDirection("/raportit");
+    nav.recordRoute("/raportit");
+    expect(nav.currentTab()).not.toBeNull();
+    return nav;
+  }
+
+  it("a logout forgets the remembered tab and back stack", async () => {
+    stubLocalStorage();
+    await signInAsDemo();
+    const nav = await rememberRaportit();
+    await signOutThisDevice();
+    expect(nav.currentTab()).toBeNull();
+    expect(nav.previousAfterLanding("/dashboard", "forward")).toBeNull();
+  });
+
+  it("an expired session forgets it too", async () => {
+    stubLocalStorage();
+    await signInAsDemo();
+    const nav = await rememberRaportit();
+    await expireSession();
+    expect(nav.currentTab()).toBeNull();
+    expect(nav.previousAfterLanding("/dashboard", "forward")).toBeNull();
+  });
+});

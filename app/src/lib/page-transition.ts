@@ -46,10 +46,13 @@ export function pageNodeFor(pathname: string | null): HTMLElement | null {
   return pageNodes.get(pathname) ?? null;
 }
 
-export function resetPageTransitionForTests(): void {
+/** Drops remembered scroll offsets and kept page nodes (end of a session). */
+export function resetPageTransition(): void {
   scrollMemory.clear();
   pageNodes.clear();
 }
+
+export const resetPageTransitionForTests = resetPageTransition;
 
 export type SnapshotMode = "push-out" | "pop-out" | "swipe-under";
 

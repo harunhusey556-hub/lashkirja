@@ -20,6 +20,8 @@ import { configureHttpCachePersistence } from "@/lib/offline/http-cache";
 import { activatePersistentCache } from "@/lib/mobile/boot";
 import { resetOfflineReceiptQueueForLogout } from "@/components/useOfflineReceiptQueue";
 import { setSignedInFlag } from "@/lib/signed-in-flag";
+import { resetNavigation } from "@/lib/nav-direction";
+import { resetPageTransition } from "@/lib/page-transition";
 
 export interface StoredAuth {
   token: string;
@@ -212,6 +214,10 @@ async function clearClientAuthState(): Promise<void> {
   await secureStore().remove(SECURE_KEYS.auth);
   clearPageCache();
   clearAllDrafts();
+  // The next sign-in in this same run starts on a clean Koti: no remembered
+  // tab, back stack, scroll offsets or kept page nodes (F19).
+  resetNavigation();
+  resetPageTransition();
   // Crypto-shred: every persisted row gone and the cache's own AES-GCM key
   // deleted, then both page-cache.ts and http-cache.ts un-configured so
   // nothing keeps writing to a store that no longer has a key.

@@ -53,7 +53,12 @@ function tabFor(pathname: string): string {
   return rootIdOf(pathname) ?? NO_TAB;
 }
 
-export function resetNavigationForTests(): void {
+/**
+ * Forgets every remembered screen, tab and back stack. Called when a session
+ * ends (logout, expiry): the next sign-in must land on a clean Koti, not on
+ * the tab and back button the previous person or session left behind.
+ */
+export function resetNavigation(): void {
   lastPathname = null;
   poppedNavigation = false;
   intents = [];
@@ -61,6 +66,8 @@ export function resetNavigationForTests(): void {
   stacks = new Map();
   activeTab = null;
 }
+
+export const resetNavigationForTests = resetNavigation;
 
 /** Where the shell back button goes when this document has no in-app history. */
 export function fallbackBackPath(pathname: string): string {
