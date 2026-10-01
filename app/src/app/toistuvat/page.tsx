@@ -31,7 +31,7 @@ import {
 import { QuickCustomerSheet, type CreatedCustomer } from "@/components/invoices/QuickCustomerSheet";
 import { useProfile } from "@/app/asetukset/useProfile";
 import { adjustVatRateForDate } from "@/lib/invoices";
-import { runPlanSummary, type RunPlan } from "./runPlan";
+import { lockedOnlyMessage, runPlanInvoiceCount, runPlanSummary, runResultSummary, type RunPlan } from "./runPlan";
 
 import { pageCacheFetchedAt, readPageCache, writePageCache } from "@/lib/page-cache";
 import { useCacheAfterBoot } from "@/components/invoices/useCacheAfterBoot";
@@ -56,6 +56,9 @@ interface RecurringInvoice {
   total: number;
   generatedCount: number;
   lastRun: { issueDate: string; status: string; invoiceId: string | null } | null;
+  // Absent in a copy cached before these existed.
+  missedRuns?: Array<{ issueDate: string; reason: "period_locked" | "failed"; note: string | null }>;
+  failedSends?: Array<{ issueDate: string; invoiceId: string; note: string | null }>;
 }
 
 /**
@@ -81,6 +84,8 @@ function rowSecondary(entry: RecurringInvoice): string {
   parts.push(INTERVAL_LABEL[entry.interval]);
   parts.push(entry.nextRunAt ? `seuraava ${formatScheduleDate(entry.nextRunAt)}` : "päättynyt");
   if (entry.autoSend) parts.push("lähetetään automaattisesti");
+  if (entry.failedSends?.length) parts.push("lähetys epäonnistui");
+  if (entry.missedRuns?.length) parts.push("lasku jäi luomatta");
   return parts.join(" · ");
 }
 
@@ -257,6 +262,11 @@ export default function RecurringInvoicesPage() {
         showToast({ text: "Yhtään laskua ei ole juuri nyt erääntynyt luotavaksi." });
         return;
       }
+      if (runPlanInvoiceCount(data.plan) === 0) {
+        // Everything due is inside a closed month: there is nothing to confirm.
+        showToast({ tone: "info", text: lockedOnlyMessage(data.plan), durationMs: 9000 });
+        return;
+      }
       setRunScope(recurringInvoiceId);
       setRunPlan(data.plan);
     } catch (error) {
@@ -278,19 +288,14 @@ export default function RecurringInvoicesPage() {
       });
       const result = await readJson<{
         generated: Array<{ invoiceNumber: number; sent: boolean; sendError: string | null }>;
-        skipped: Array<{ reason: string }>;
+        skipped: Array<{ reason: string; issueDate: string }>;
+        sendRetries?: Array<{ sent: boolean }>;
       }>(response, "Laskujen luonti epäonnistui");
       setRunPlan(null);
       setSelected(null);
-      const failedSends = result.generated.filter((entry) => entry.sendError).length;
-      void hapticNotify(failedSends ? "warning" : "success");
-      showToast({
-        tone: failedSends ? "error" : "success",
-        text:
-          (result.generated.length === 1 ? "1 lasku luotiin." : `${result.generated.length} laskua luotiin.`) +
-          (result.skipped.length ? ` ${result.skipped.length} ohitettiin.` : "") +
-          (failedSends ? ` ${failedSends} lähetys epäonnistui, laskut ovat tallessa luonnoksina.` : ""),
-      });
+      const summary = runResultSummary(result);
+      void hapticNotify(summary.tone === "success" ? "success" : "warning");
+      showToast({ tone: summary.tone, text: summary.text, durationMs: summary.durationMs });
       await load();
     } catch (error) {
       void hapticNotify("error");
@@ -357,7 +362,7 @@ export default function RecurringInvoicesPage() {
   }
 
   const editing = formFor && formFor !== "new" ? formFor : null;
-  const planCount = runPlan?.reduce((sum, entry) => sum + entry.issueDates.length, 0) ?? 0;
+  const planCount = runPlanInvoiceCount(runPlan);
 
   return (
     <>
@@ -495,6 +500,37 @@ export default function RecurringInvoicesPage() {
                 { label: "Yhteensä (veroton)", value: formatEur(selected.total) },
               ]}
             />
+            {(selected.failedSends ?? []).map((failed) => (
+              <div
+                key={failed.invoiceId}
+                role="status"
+                className="rounded-card border border-danger/30 bg-danger/10 px-4 py-3 text-body text-ink"
+              >
+                <p>
+                  Laskun {formatDate(failed.issueDate)} automaattinen lähetys epäonnistui. Lasku on tallessa
+                  luonnoksena.
+                </p>
+                <Link
+                  href={detailHref("invoice", failed.invoiceId)}
+                  className="active-press flex min-h-11 items-center font-medium text-accent"
+                >
+                  Avaa lasku ja lähetä
+                </Link>
+              </div>
+            ))}
+            {(selected.missedRuns ?? []).length > 0 && (
+              <div role="status" className="rounded-card border border-line bg-surface px-4 py-3 text-body text-ink">
+                <p>
+                  Jäi luomatta: {(selected.missedRuns ?? []).map((missed) => formatDate(missed.issueDate)).join(", ")}.{" "}
+                  {(selected.missedRuns ?? []).every((missed) => missed.reason === "period_locked")
+                    ? "Kausi on suljettu. Laskut luodaan, kun avaat kauden."
+                    : "Laskun luonti epäonnistui."}
+                </p>
+                <Link href="/kirjanpito/kaudet" className="active-press flex min-h-11 items-center font-medium text-accent">
+                  Avaa kaudet
+                </Link>
+              </div>
+            )}
             <Section title="Rivit" className="mt-0">
               {selected.lines.map((line) => (
                 <ListRow

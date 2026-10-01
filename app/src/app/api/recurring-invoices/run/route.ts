@@ -8,8 +8,10 @@ import {
   listRecurringInvoices,
   previewRunGrossCents,
   requireOwnedRecurring,
+  retryableMissedDates,
   runRecurringInvoices,
 } from "@/lib/recurring-invoices";
+import { getLockedThrough, isDateLocked } from "@/lib/period-lock";
 import { sendInvoiceByEmail } from "@/lib/invoice-mail";
 import { dueRuns, type RecurrenceInterval } from "@/lib/recurrence";
 import { centsToEuros } from "@/lib/money";
@@ -30,19 +32,34 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
     select: { vatRegistered: true },
   });
   const vatRegistered = seller?.vatRegistered ?? true;
+  const lockedThrough = await getLockedThrough(session.userId);
+  // Occurrences a closed month held back that can be made now (the month opened).
+  const reopened = await retryableMissedDates(session.userId, only ?? undefined);
   const plan = schedules
-    .filter((entry) => entry.active && entry.nextRunAt && (!only || entry.id === only))
+    .filter(
+      (entry) => entry.active && (entry.nextRunAt || reopened.has(entry.id)) && (!only || entry.id === only)
+    )
     .map((entry) => {
-      const runs = dueRuns(
-        {
-          interval: entry.interval as RecurrenceInterval,
-          anchorDay: entry.anchorDay,
-          startDate: entry.startDate.slice(0, 10),
-          endDate: entry.endDate ? entry.endDate.slice(0, 10) : null,
-        },
-        entry.nextRunAt!.slice(0, 10),
-        today
-      );
+      const due = entry.nextRunAt
+        ? dueRuns(
+            {
+              interval: entry.interval as RecurrenceInterval,
+              anchorDay: entry.anchorDay,
+              startDate: entry.startDate.slice(0, 10),
+              endDate: entry.endDate ? entry.endDate.slice(0, 10) : null,
+            },
+            entry.nextRunAt.slice(0, 10),
+            today
+          ).dates
+        : [];
+      // A date inside a closed month cannot be invoiced: the run records it as
+      // held back (and makes it once the month opens), so the preview names it
+      // instead of promising an invoice (G05, G06).
+      const lockedDates = due.filter((date) => isDateLocked(lockedThrough, date));
+      const issueDates = [...new Set([...(reopened.get(entry.id) ?? []), ...due])]
+        .filter((date) => !isDateLocked(lockedThrough, date))
+        .sort();
+      const runs = { dates: issueDates };
       return {
         recurringInvoiceId: entry.id,
         name: entry.name || entry.customer.name,
@@ -65,9 +82,10 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
           )
         ),
         issueDates: runs.dates,
+        lockedDates,
       };
     })
-    .filter((entry) => entry.issueDates.length > 0);
+    .filter((entry) => entry.issueDates.length > 0 || entry.lockedDates.length > 0);
   return noStoreJson({ plan });
 });
 
@@ -107,5 +125,6 @@ export const POST = withErrorHandler(async (req: NextRequest) => {
     })),
     skipped: result.skipped,
     truncated: result.truncated,
+    sendRetries: result.sendRetries,
   });
 });

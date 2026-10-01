@@ -218,7 +218,8 @@ describe("running a schedule", () => {
 
     const runs = await prisma.recurringInvoiceRun.findMany({ orderBy: { issueDate: "asc" } });
     expect(runs.map((entry) => entry.status)).toEqual(["skipped_locked", "created"]);
-    // The skipped occurrence is recorded, so it is not retried forever.
+    // The skipped occurrence is recorded and left alone while the month is
+    // closed (it is made once the month opens: recurring-run-recovery.test.ts).
     const again = await run("2026-02-15");
     expect(again.generated).toHaveLength(0);
     expect(again.skipped).toHaveLength(0);
@@ -244,7 +245,8 @@ describe("running a schedule", () => {
     expect(result.generated[0].sendError).toContain("SMTP down");
 
     const run0 = await prisma.recurringInvoiceRun.findFirst();
-    expect(run0?.status).toBe("created");
+    // The invoice exists, the mail did not leave: a state of its own (G07).
+    expect(run0?.status).toBe("created_send_failed");
     expect(run0?.invoiceId).not.toBeNull();
     expect(await prisma.salesInvoice.count()).toBe(1);
   });

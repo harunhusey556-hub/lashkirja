@@ -17,13 +17,19 @@ export async function GET(req: NextRequest) {
   if (!auth.ok) return auth.response;
 
   const users = await prisma.recurringInvoice.findMany({
-    where: { active: true, nextRunAt: { not: null } },
+    // Not only schedules with a run due: a month that opened again or a mail
+    // to retry belongs to a schedule that is not due.
+    where: { active: true },
     select: { userId: true },
     distinct: ["userId"],
   });
 
   let generated = 0;
   let skipped = 0;
+  let resent = 0;
+  // An invoice that was made but not mailed is not a plain success: it sits as
+  // a draft until a retry or a person sends it, so the answer says so.
+  const sendErrors: Array<{ userId: string; recurringInvoiceId: string; invoiceId: string; error: string }> = [];
   const errors: Array<{ userId: string; error: string }> = [];
 
   for (const { userId } of users) {
@@ -33,16 +39,40 @@ export async function GET(req: NextRequest) {
       });
       generated += result.generated.length;
       skipped += result.skipped.length;
+      resent += result.sendRetries.filter((retry) => retry.sent).length;
+      for (const entry of result.generated) {
+        if (entry.sendError) {
+          sendErrors.push({
+            userId,
+            recurringInvoiceId: entry.recurringInvoiceId,
+            invoiceId: entry.invoice.id,
+            error: entry.sendError,
+          });
+        }
+      }
+      for (const retry of result.sendRetries) {
+        if (!retry.sent && retry.sendError) {
+          sendErrors.push({
+            userId,
+            recurringInvoiceId: retry.recurringInvoiceId,
+            invoiceId: retry.invoiceId,
+            error: retry.sendError,
+          });
+        }
+      }
     } catch (error) {
       errors.push({ userId, error: errorText(error) });
     }
   }
 
   return NextResponse.json({
-    ok: errors.length === 0,
+    ok: errors.length === 0 && sendErrors.length === 0,
     users: users.length,
     generated,
     skipped,
+    resent,
+    sendFailed: sendErrors.length,
+    sendErrors: sendErrors.length ? sendErrors : undefined,
     errors: errors.length ? errors : undefined,
   });
 }

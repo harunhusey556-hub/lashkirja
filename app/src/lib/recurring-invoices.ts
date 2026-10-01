@@ -11,7 +11,7 @@ import { AppError, NotFoundError, ValidationError, errorText } from "./api-error
 import { centsToEuros } from "./money";
 import { isoDateToUtc } from "./validation";
 import { requireActiveCustomer } from "./customers";
-import { PeriodLockedError } from "./period-lock";
+import { getLockedThrough, isDateLocked, PeriodLockedError } from "./period-lock";
 import {
   adjustVatRateForDate,
   applySellerVatRules,
@@ -71,15 +71,37 @@ export interface PublicRecurringInvoice {
     vatRate: number;
   }>;
   total: number;
+  /** Invoices this schedule has made: skipped and failed occurrences are not counted. */
   generatedCount: number;
   lastRun: { issueDate: string; status: string; invoiceId: string | null } | null;
+  /** Occurrences that made no invoice (a closed month, a refusal), with the reason. */
+  missedRuns: MissedRun[];
+  /** Invoices made but not mailed by the automatic send; still drafts. */
+  failedSends: FailedSend[];
 }
+
+export interface MissedRun {
+  issueDate: string;
+  reason: "period_locked" | "failed";
+  note: string | null;
+}
+
+export interface FailedSend {
+  issueDate: string;
+  invoiceId: string;
+  note: string | null;
+}
+
+/** Run statuses: the invoice exists for created and created_send_failed. */
+const RUN_MADE_INVOICE = ["created", "created_send_failed"];
+/** A failed automatic send is retried by the next runs for this long; after that a person decides. */
+const SEND_RETRY_WINDOW_MS = 48 * 60 * 60 * 1000;
 
 const recurringInclude = {
   customer: { select: { id: true, name: true, email: true } },
   lines: { orderBy: { sortOrder: "asc" as const } },
   runs: { orderBy: { issueDate: "desc" as const }, take: 1 },
-  _count: { select: { runs: true } },
+  _count: { select: { runs: { where: { status: { in: RUN_MADE_INVOICE } } } } },
 };
 
 type RecurringRow = {
@@ -111,7 +133,12 @@ function iso(date: Date | null): string | null {
   return date ? date.toISOString().slice(0, 10) : null;
 }
 
-export function toPublicRecurringInvoice(row: RecurringRow): PublicRecurringInvoice {
+type RunIssues = { missedRuns: MissedRun[]; failedSends: FailedSend[] };
+
+export function toPublicRecurringInvoice(
+  row: RecurringRow,
+  issues: RunIssues = { missedRuns: [], failedSends: [] }
+): PublicRecurringInvoice {
   const total = row.lines.reduce(
     (sum, line) => sum + Math.round((line.quantityMilli * line.unitPriceCents) / 1000),
     0
@@ -146,7 +173,46 @@ export function toPublicRecurringInvoice(row: RecurringRow): PublicRecurringInvo
           invoiceId: row.runs[0].invoiceId,
         }
       : null,
+    missedRuns: issues.missedRuns,
+    failedSends: issues.failedSends,
   };
+}
+
+/** The occurrences of these schedules that need a person's attention, by schedule. */
+async function loadRunIssues(ids: string[]): Promise<Map<string, RunIssues>> {
+  const byId = new Map<string, RunIssues>();
+  if (ids.length === 0) return byId;
+  const rows = await prisma.recurringInvoiceRun.findMany({
+    where: {
+      recurringInvoiceId: { in: ids },
+      status: { in: ["skipped_locked", "failed", "created_send_failed"] },
+    },
+    orderBy: { issueDate: "asc" },
+    include: { invoice: { select: { status: true } } },
+  });
+  for (const row of rows) {
+    const entry = byId.get(row.recurringInvoiceId) ?? { missedRuns: [], failedSends: [] };
+    const issueDate = iso(row.issueDate)!;
+    if (row.status === "created_send_failed") {
+      // Once the invoice is sent or gone by hand there is nothing left to tell.
+      if (row.invoiceId && row.invoice?.status === "draft") {
+        entry.failedSends.push({ issueDate, invoiceId: row.invoiceId, note: row.note });
+      }
+    } else {
+      entry.missedRuns.push({
+        issueDate,
+        reason: row.status === "skipped_locked" ? "period_locked" : "failed",
+        note: row.note,
+      });
+    }
+    byId.set(row.recurringInvoiceId, entry);
+  }
+  return byId;
+}
+
+async function toPublicWithIssues(rows: RecurringRow[]): Promise<PublicRecurringInvoice[]> {
+  const issues = await loadRunIssues(rows.map((row) => row.id));
+  return rows.map((row) => toPublicRecurringInvoice(row, issues.get(row.id)));
 }
 
 function validateSchedule(input: {
@@ -227,7 +293,7 @@ export async function getRecurringInvoice(
     include: recurringInclude,
   });
   if (!row) throw new NotFoundError("Toistuvaa laskua ei löytynyt.");
-  return toPublicRecurringInvoice(row);
+  return (await toPublicWithIssues([row]))[0];
 }
 
 export async function listRecurringInvoices(
@@ -239,7 +305,7 @@ export async function listRecurringInvoices(
     include: recurringInclude,
     orderBy: [{ active: "desc" }, { nextRunAt: "asc" }],
   });
-  return rows.map(toPublicRecurringInvoice);
+  return toPublicWithIssues(rows);
 }
 
 export async function updateRecurringInvoice(
@@ -367,6 +433,16 @@ export interface RunResult {
     detail?: string;
   }>;
   truncated: string[];
+  /** Mails of earlier runs that were tried again, with how each went. */
+  sendRetries: SendRetry[];
+}
+
+export interface SendRetry {
+  recurringInvoiceId: string;
+  issueDate: string;
+  invoiceId: string;
+  sent: boolean;
+  sendError: string | null;
 }
 
 export interface RunOptions {
@@ -414,20 +490,44 @@ export async function runRecurringInvoices(
 ): Promise<RunResult> {
   const now = options.now ?? new Date();
   const today = now.toISOString().slice(0, 10);
+  const scope = options.recurringInvoiceId ? { id: options.recurringInvoiceId } : {};
+
+  const out: Pick<RunResult, "generated" | "skipped"> = { generated: [], skipped: [] };
+  const truncated: string[] = [];
+  const sendRetries: SendRetry[] = [];
+
+  // 1. A mail that failed in a recent run is tried again before anything new.
+  if (options.send) await retryFailedSends(userId, scope, now, options.send, sendRetries);
+
+  // 2. Occurrences a closed month held back are made as soon as the month is
+  //    open, oldest first, so the numbers follow the dates.
+  const lockedThrough = await getLockedThrough(userId);
+  const missed = await prisma.recurringInvoiceRun.findMany({
+    where: { status: "skipped_locked", recurringInvoice: { userId, active: true, ...scope } },
+    orderBy: { issueDate: "asc" },
+    include: { recurringInvoice: { include: { lines: { orderBy: { sortOrder: "asc" } } } } },
+  });
+  for (const row of missed) {
+    const issueDate = iso(row.issueDate)!;
+    if (isDateLocked(lockedThrough, issueDate)) continue;
+    // One run wins the right to make it; the loser sees count 0.
+    const claim = await prisma.recurringInvoiceRun.updateMany({
+      where: { id: row.id, status: "skipped_locked" },
+      data: { status: "created", note: null },
+    });
+    if (claim.count === 0) continue;
+    await fulfilOccurrence(userId, row.recurringInvoice, issueDate, row.id, options, out);
+  }
 
   const schedules = await prisma.recurringInvoice.findMany({
     where: {
       userId,
       active: true,
       nextRunAt: { not: null, lte: isoDateToUtc(today) },
-      ...(options.recurringInvoiceId ? { id: options.recurringInvoiceId } : {}),
+      ...scope,
     },
     include: { lines: { orderBy: { sortOrder: "asc" } } },
   });
-
-  const generated: GeneratedInvoice[] = [];
-  const skipped: RunResult["skipped"] = [];
-  const truncated: string[] = [];
 
   for (const schedule of schedules) {
     const definition: Schedule = {
@@ -450,7 +550,7 @@ export async function runRecurringInvoices(
         });
       } catch (error) {
         if ((error as { code?: string }).code === "P2002") {
-          skipped.push({
+          out.skipped.push({
             recurringInvoiceId: schedule.id,
             issueDate,
             reason: "already_generated",
@@ -459,64 +559,7 @@ export async function runRecurringInvoices(
         }
         throw error;
       }
-
-      try {
-        const invoice = await createInvoice(userId, {
-          customerId: schedule.customerId,
-          issueDate,
-          paymentTermDays: schedule.paymentTermDays,
-          notes: schedule.notes,
-          lines: schedule.lines.map((line) => ({
-            description: line.description,
-            quantity: line.quantityMilli / 1000,
-            unit: line.unit,
-            unitPrice: centsToEuros(line.unitPriceCents),
-            // A template saved at 14 % keeps billing the same goods at 13,5 %
-            // from 1.1.2026; createInvoice forces 0 % for an unregistered seller.
-            vatRate: adjustVatRateForDate(line.vatRatePermille, issueDate) / 10,
-          })),
-        });
-
-        let sent = false;
-        let sendError: string | null = null;
-        if (schedule.autoSend && options.send) {
-          try {
-            await options.send(invoice.id);
-            sent = true;
-          } catch (error) {
-            // The invoice exists; only the delivery failed.
-            sendError = errorText(error, "Lähetys epäonnistui");
-          }
-        }
-
-        await prisma.recurringInvoiceRun.update({
-          where: { id: claimed.id },
-          data: { invoiceId: invoice.id, status: "created", note: sendError },
-        });
-
-        generated.push({
-          recurringInvoiceId: schedule.id,
-          issueDate,
-          invoice,
-          sent,
-          sendError,
-        });
-      } catch (error) {
-        const locked = error instanceof PeriodLockedError;
-        await prisma.recurringInvoiceRun.update({
-          where: { id: claimed.id },
-          data: {
-            status: locked ? "skipped_locked" : "failed",
-            note: errorText(error),
-          },
-        });
-        skipped.push({
-          recurringInvoiceId: schedule.id,
-          issueDate,
-          reason: locked ? "period_locked" : "failed",
-          detail: errorText(error),
-        });
-      }
+      await fulfilOccurrence(userId, schedule, issueDate, claimed.id, options, out);
     }
 
     await prisma.recurringInvoice.update({
@@ -525,21 +568,194 @@ export async function runRecurringInvoices(
     });
   }
 
-  return { generated, skipped, truncated };
+  return { generated: out.generated, skipped: out.skipped, truncated, sendRetries };
 }
 
-/** Schedules whose next run has arrived, for a "due now" badge. */
+type ScheduleToRun = {
+  id: string;
+  customerId: string;
+  paymentTermDays: number;
+  notes: string | null;
+  autoSend: boolean;
+  lines: Array<{
+    description: string;
+    quantityMilli: number;
+    unit: string;
+    unitPriceCents: number;
+    vatRatePermille: number;
+  }>;
+};
+
+/**
+ * Makes the invoice for one claimed occurrence and records the outcome on its
+ * run row: created, created_send_failed (the invoice exists, the mail did not
+ * leave), skipped_locked (a closed month; kept so it can be made once the month
+ * opens) or failed.
+ */
+async function fulfilOccurrence(
+  userId: string,
+  schedule: ScheduleToRun,
+  issueDate: string,
+  runId: string,
+  options: RunOptions,
+  out: Pick<RunResult, "generated" | "skipped">
+): Promise<void> {
+  try {
+    const invoice = await createInvoice(userId, {
+      customerId: schedule.customerId,
+      issueDate,
+      paymentTermDays: schedule.paymentTermDays,
+      notes: schedule.notes,
+      lines: schedule.lines.map((line) => ({
+        description: line.description,
+        quantity: line.quantityMilli / 1000,
+        unit: line.unit,
+        unitPrice: centsToEuros(line.unitPriceCents),
+        // A template saved at 14 % keeps billing the same goods at 13,5 %
+        // from 1.1.2026; createInvoice forces 0 % for an unregistered seller.
+        vatRate: adjustVatRateForDate(line.vatRatePermille, issueDate) / 10,
+      })),
+    });
+
+    let sent = false;
+    let sendError: string | null = null;
+    if (schedule.autoSend && options.send) {
+      try {
+        await options.send(invoice.id);
+        sent = true;
+      } catch (error) {
+        // The invoice exists; only the delivery failed.
+        sendError = errorText(error, "Lähetys epäonnistui");
+      }
+    }
+
+    await prisma.recurringInvoiceRun.update({
+      where: { id: runId },
+      data: {
+        invoiceId: invoice.id,
+        status: sendError ? "created_send_failed" : "created",
+        note: sendError,
+      },
+    });
+
+    out.generated.push({
+      recurringInvoiceId: schedule.id,
+      issueDate,
+      invoice,
+      sent,
+      sendError,
+    });
+  } catch (error) {
+    const locked = error instanceof PeriodLockedError;
+    await prisma.recurringInvoiceRun.update({
+      where: { id: runId },
+      data: {
+        status: locked ? "skipped_locked" : "failed",
+        note: errorText(error),
+      },
+    });
+    out.skipped.push({
+      recurringInvoiceId: schedule.id,
+      issueDate,
+      reason: locked ? "period_locked" : "failed",
+      detail: errorText(error),
+    });
+  }
+}
+
+/**
+ * Tries the mail again for invoices a recent run made but could not send. Only
+ * runs younger than SEND_RETRY_WINDOW_MS and invoices that are still drafts are
+ * touched; past that a person sends it from the invoice.
+ */
+async function retryFailedSends(
+  userId: string,
+  scope: { id?: string },
+  now: Date,
+  send: (invoiceId: string) => Promise<void>,
+  out: SendRetry[]
+): Promise<void> {
+  const rows = await prisma.recurringInvoiceRun.findMany({
+    where: {
+      status: "created_send_failed",
+      invoiceId: { not: null },
+      createdAt: { gte: new Date(now.getTime() - SEND_RETRY_WINDOW_MS) },
+      invoice: { status: "draft" },
+      recurringInvoice: { userId, active: true, autoSend: true, ...scope },
+    },
+    orderBy: { issueDate: "asc" },
+    select: { id: true, recurringInvoiceId: true, issueDate: true, invoiceId: true },
+  });
+  for (const row of rows) {
+    const base = {
+      recurringInvoiceId: row.recurringInvoiceId,
+      issueDate: iso(row.issueDate)!,
+      invoiceId: row.invoiceId!,
+    };
+    try {
+      await send(row.invoiceId!);
+      await prisma.recurringInvoiceRun.updateMany({
+        where: { id: row.id, status: "created_send_failed" },
+        data: { status: "created", note: null },
+      });
+      out.push({ ...base, sent: true, sendError: null });
+    } catch (error) {
+      const sendError = errorText(error, "Lähetys epäonnistui");
+      await prisma.recurringInvoiceRun.updateMany({
+        where: { id: row.id, status: "created_send_failed" },
+        data: { note: sendError },
+      });
+      out.push({ ...base, sent: false, sendError });
+    }
+  }
+}
+
+/**
+ * Occurrences a closed month held back that can be made now: the month is open
+ * again. Keyed by schedule, dates oldest first.
+ */
+export async function retryableMissedDates(
+  userId: string,
+  recurringInvoiceId?: string
+): Promise<Map<string, string[]>> {
+  const lockedThrough = await getLockedThrough(userId);
+  const rows = await prisma.recurringInvoiceRun.findMany({
+    where: {
+      status: "skipped_locked",
+      recurringInvoice: {
+        userId,
+        active: true,
+        ...(recurringInvoiceId ? { id: recurringInvoiceId } : {}),
+      },
+    },
+    orderBy: { issueDate: "asc" },
+    select: { recurringInvoiceId: true, issueDate: true },
+  });
+  const byId = new Map<string, string[]>();
+  for (const row of rows) {
+    const issueDate = iso(row.issueDate)!;
+    if (isDateLocked(lockedThrough, issueDate)) continue;
+    byId.set(row.recurringInvoiceId, [...(byId.get(row.recurringInvoiceId) ?? []), issueDate]);
+  }
+  return byId;
+}
+
+/** Schedules with something to make now: a run that has arrived or a month that opened again. */
 export async function countDueRecurringInvoices(
   userId: string,
   now: Date = new Date()
 ): Promise<number> {
-  return prisma.recurringInvoice.count({
+  const due = await prisma.recurringInvoice.findMany({
     where: {
       userId,
       active: true,
       nextRunAt: { not: null, lte: isoDateToUtc(now.toISOString().slice(0, 10)) },
     },
+    select: { id: true },
   });
+  const ids = new Set(due.map((row) => row.id));
+  for (const id of (await retryableMissedDates(userId)).keys()) ids.add(id);
+  return ids.size;
 }
 
 /** Guard for the manual "run now" button on a single schedule. */
