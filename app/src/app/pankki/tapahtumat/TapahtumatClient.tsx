@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { ErrorState, SkeletonList } from "@/components/AsyncState";
 import { PageHeader } from "@/components/PageHeader";
+import { EmptyState } from "@/components/ScreenState";
 import { SectionTabs } from "@/components/SectionTabs";
 import StatementSummaryCards from "@/components/StatementSummaryCards";
 import {
@@ -210,11 +211,9 @@ export default function TapahtumatClient() {
         <PageHeader
           crumbs={[{ href: "/pankki", label: "Pankki" }, { label: "Tapahtumat" }]}
           backHref="/pankki"
+          description="Tapahtumat tulevat yhdistetystä pankista. Tiedoston tuonti on alla, jos tarvitset sen."
         />
         <SectionTabs items={bankTabs()} activeHref={activeBankTab("/pankki/tapahtumat")} />
-        <p className="text-sm text-warm-gray leading-relaxed">
-          Tapahtumat tulevat yhdistetystä pankista. Tiedoston tuonti on alla, jos tarvitset sen.
-        </p>
 
         <div className="flex flex-col gap-2">
           <label htmlFor="statement-search" className="text-sm font-medium text-charcoal">
@@ -363,12 +362,15 @@ export default function TapahtumatClient() {
         ) : loading ? (
           <SkeletonList rows={4} />
         ) : visibleStatements.length === 0 ? (
-          <div className="text-center py-10 space-y-2">
-            <p className="text-sm font-medium text-charcoal">Ei tiliotteita vielä</p>
-            <p className="text-sm text-warm-gray leading-relaxed">
-              Tuo tiedosto tai hae tapahtumat pankista yllä.
-            </p>
-          </div>
+          <EmptyState
+            kind={monthFilter || accountFilter || query ? "filtered" : "records"}
+            title={monthFilter || accountFilter || query ? "Ei tapahtumia näillä ehdoilla" : "Ei tapahtumia vielä"}
+            body={
+              monthFilter || accountFilter || query
+                ? "Kokeile toista kuukautta tai tyhjennä haku."
+                : "Hae ne pankista yhteenvedosta tai tuo tiliote tiedostona."
+            }
+          />
         ) : (
           <div className="space-y-4 list-stagger">
             {visibleStatements.map((s) => {

@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { LoadingState } from "@/components/AsyncState";
+import { PageHeader } from "@/components/PageHeader";
 import { ConnectionNotice, StaleBanner } from "@/components/ScreenState";
 import {
   apiFetch,
@@ -117,11 +118,7 @@ export default function ReportsPage() {
   return (
     <>
       <div className="space-y-6 pb-6">
-        <header className="space-y-2">
-          <p className="text-sm text-warm-gray leading-relaxed">
-            Tuloslaskelma kuukausittain ja tiedot ulos kirjanpitäjälle.
-          </p>
-        </header>
+        <PageHeader description="Tulos kuukausittain ja aineisto kirjanpitäjälle." />
 
         <div className="flex items-center gap-3">
           <button

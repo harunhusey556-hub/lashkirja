@@ -9,7 +9,10 @@ import ReceiptMatchPanel, {
   type BankTxMatch,
 } from "@/components/ReceiptMatchPanel";
 import { SkeletonList } from "@/components/AsyncState";
+import { PageHeader } from "@/components/PageHeader";
 import { ConnectionNotice, EmptyState, StaleBanner } from "@/components/ScreenState";
+import { StatusBadge } from "@/components/StatusBadge";
+import { receiptMatchBadge } from "@/lib/status-badge";
 import {
   apiFetch,
   errorMessage,
@@ -615,6 +618,7 @@ export default function KuititPage() {
   return (
     <>
       <div className="space-y-6">
+        <PageHeader description="Kuitit ja ostotositteet. Kuva riittää alkuun." />
         <div className="animate-in fade-in slide-in-from-top-2">
           <Link
             href="/kuitit/uusi"
@@ -1116,21 +1120,13 @@ export default function KuititPage() {
                           · {r.category ? categoryLabel(r.category) : "–"}
                         </p>
                         <div className="mt-2.5 flex items-center gap-2">
-                          <span className={`inline-flex px-2 py-0.5 rounded-full text-[11px] font-medium ${
-                            r.match.status === "linked"
-                              ? "bg-success/10 text-success"
-                              : r.match.status === "suggested" || r.match.matchCandidates?.length
-                                ? "bg-warning/10 text-warning"
-                                : "bg-warm-gray-light/30 text-warm-gray"
-                          }`}>
-                            {r.match.status === "linked"
-                              ? "Linkitetty"
-                              : r.match.status === "suggested"
-                                ? "Ehdotus"
-                                : r.match.matchCandidates?.length
-                                  ? "Ehdotuksia"
-                                  : "Ei linkitystä"}
-                          </span>
+                          {(() => {
+                            const badge = receiptMatchBadge(
+                              r.match.status,
+                              r.match.matchCandidates?.length ?? 0
+                            );
+                            return <StatusBadge tone={badge.tone}>{badge.label}</StatusBadge>;
+                          })()}
                         </div>
                       </div>
                       <div className="shrink-0 pt-0.5">

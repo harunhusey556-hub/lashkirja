@@ -9,6 +9,7 @@ import ReceiptMatchPanel, {
   type BankTxMatch,
 } from "@/components/ReceiptMatchPanel";
 import { ErrorState, LoadingState } from "@/components/AsyncState";
+import { StatusBadge } from "@/components/StatusBadge";
 import {
   ApiError,
   apiFetch,
@@ -861,15 +862,9 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
                 </button>
               )}
               {meta && meta.source !== "manual" && (
-                <span
-                  className={`text-xs px-2 py-0.5 rounded-full ${
-                    meta.source === "ai"
-                      ? "bg-success/10 text-success"
-                      : "bg-warning/10 text-warning"
-                  }`}
-                >
-                  {meta.source === "ai" ? "AI" : "OCR"}
-                </span>
+                <StatusBadge tone={meta.source === "ai" ? "accent" : "warning"}>
+                  {meta.source === "ai" ? "Tunnistettu" : "Luettu kuvasta"}
+                </StatusBadge>
               )}
             </div>
           </div>

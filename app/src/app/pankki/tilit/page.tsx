@@ -13,6 +13,8 @@ import { BalanceTable, type MonthRow } from "@/components/bank/BalanceTable";
 import { apiFetch, errorMessage, isUnauthorized, readJson, redirectToLogin } from "@/components/clientFetch";
 import { formatEur, formatMonth } from "@/lib/format";
 import { PageHeader } from "@/components/PageHeader";
+import { StatusBadge } from "@/components/StatusBadge";
+import { countLabel } from "@/lib/status-badge";
 import { SectionTabs } from "@/components/SectionTabs";
 import { activeBankTab, bankTabs } from "@/lib/navigation";
 import { maskIban } from "@/lib/iban";
@@ -241,37 +243,31 @@ export default function BankAccountsPage() {
         <PageHeader
           crumbs={[{ href: "/pankki", label: "Pankki" }, { label: "Tilit" }]}
           backHref="/pankki"
+          description="Kirjanpidon tilit ja kuukausien loppusaldot. Pankkiyhteys säädetään Asetuksissa."
+          actions={
+            formMode === "hidden" && status === "ready" ? (
+              <>
+                <Link
+                  href="/asetukset/pankkiyhteys"
+                  className="inline-flex min-h-11 items-center rounded-xl bg-charcoal px-3.5 py-2 text-sm font-medium text-white active-press"
+                >
+                  + Yhdistä
+                </Link>
+                {(overview?.accounts.length ?? 0) > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setFormMode("create")}
+                    aria-label="Lisää pankkitili"
+                    className="inline-flex min-h-11 items-center rounded-xl border border-accent/40 px-3.5 py-2 text-sm font-medium text-accent-dark active-press"
+                  >
+                    + Lisää
+                  </button>
+                )}
+              </>
+            ) : undefined
+          }
         />
         <SectionTabs items={bankTabs()} activeHref={activeBankTab("/pankki/tilit")} />
-        <header className="flex items-start justify-between gap-3">
-          <div className="space-y-2 min-w-0">
-            <p className="text-sm text-warm-gray leading-relaxed">
-              Kirjanpidon tilit ja kuukausien loppusaldot. Pankkiyhteyden asetukset ovat Asetuksissa.
-            </p>
-          </div>
-          {formMode === "hidden" && status === "ready" && (
-            <div className="flex shrink-0 gap-2">
-              <Link
-                href="/asetukset/pankkiyhteys"
-                className="mt-1 inline-flex min-h-11 items-center rounded-xl bg-charcoal px-3.5 py-2 text-sm font-medium text-white active-press"
-              >
-                + Yhdistä
-              </Link>
-              {(overview?.accounts.length ?? 0) > 0 && (
-            // Adding an account is a once-a-year action; it does not deserve a
-            // full-width button competing with the balances.
-            <button
-              type="button"
-              onClick={() => setFormMode("create")}
-              aria-label="Lisää pankkitili"
-              className="shrink-0 mt-1 px-3.5 py-2 rounded-xl border border-accent/40 text-accent-dark text-sm font-medium active-press hover:bg-blush/40 transition-colors"
-            >
-              + Lisää
-            </button>
-              )}
-            </div>
-          )}
-        </header>
 
         {loadFailure != null && status === "ready" && (
           <StaleBanner fetchedAt={pageCacheFetchedAt("bank-overview")} onRetry={() => void load()} />
@@ -408,18 +404,18 @@ export default function BankAccountsPage() {
                         </span>
                       )}
                       {account.mismatchCount > 0 && (
-                        <span className="text-[11px] px-2 py-0.5 rounded-full bg-danger/10 text-danger">
-                          {account.mismatchCount} kk ei täsmää
-                        </span>
+                        <StatusBadge tone="danger" count={account.mismatchCount}>
+                          kk ei täsmää
+                        </StatusBadge>
                       )}
                       {account.lastReconciledMonth && (
-                        <span className="text-[11px] px-2 py-0.5 rounded-full bg-success/10 text-success">
+                        <StatusBadge tone="success">
                           Täsmätty {formatMonth(account.lastReconciledMonth)}
-                        </span>
+                        </StatusBadge>
                       )}
-                      <span className="text-[11px] px-2 py-0.5 rounded-full bg-warm-gray-light/25 text-warm-gray">
-                        {account.statementCount} tiliotetta
-                      </span>
+                      <StatusBadge tone="neutral">
+                        {countLabel(account.statementCount, "tiliote", "tiliotetta")}
+                      </StatusBadge>
                     </div>
                   </button>
 

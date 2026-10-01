@@ -163,7 +163,10 @@ export default function PankkiPage() {
 
   return (
     <div className="space-y-6 pb-6">
-      <PageHeader crumbs={[{ label: "Pankki" }]} />
+      <PageHeader
+        crumbs={[{ label: "Pankki" }]}
+        description="Saldot, avoimet täsmäytykset ja viimeisimmät tapahtumat."
+      />
       <SectionTabs items={bankTabs()} activeHref={activeBankTab("/pankki")} />
 
       {connections === null && <LoadingState label="Haetaan pankkiyhteyttä…" />}
@@ -238,13 +241,17 @@ export default function PankkiPage() {
       )}
 
       <section className="grid grid-cols-2 gap-3">
-        <Link href="/pankki/taydennys" className="rounded-2xl bg-white p-4 shadow-sm active-press">
+        <Link href="/pankki/taydennys" className="warm-row surface p-4 active-press">
           <p className="text-xs text-warm-gray">Täsmäyttämättä</p>
-          <p className="mt-1 text-xl font-semibold text-charcoal">{unmatched ?? "–"}</p>
+          <p className={`mt-1 text-xl font-semibold tabular-nums ${unmatched ? "text-warning" : "text-charcoal"}`}>
+            {unmatched ?? "–"}
+          </p>
         </Link>
-        <Link href="/pankki/taydennys" className="rounded-2xl bg-white p-4 shadow-sm active-press">
+        <Link href="/pankki/taydennys" className="warm-row surface p-4 active-press">
           <p className="text-xs text-warm-gray">Tarkistettavana</p>
-          <p className="mt-1 text-xl font-semibold text-charcoal">{pending ?? "–"}</p>
+          <p className={`mt-1 text-xl font-semibold tabular-nums ${pending ? "text-accent-dark" : "text-charcoal"}`}>
+            {pending ?? "–"}
+          </p>
         </Link>
       </section>
 

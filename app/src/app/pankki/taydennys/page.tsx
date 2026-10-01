@@ -3,11 +3,14 @@
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { ErrorState, LoadingState } from "@/components/AsyncState";
+import { EmptyState } from "@/components/ScreenState";
 import { PageHeader } from "@/components/PageHeader";
 import { SectionTabs } from "@/components/SectionTabs";
 import { apiFetch, errorMessage, isUnauthorized, readJson, redirectToLogin } from "@/components/clientFetch";
 import { formatEur } from "@/lib/format";
+import { StatusBadge } from "@/components/StatusBadge";
 import { activeBankTab, bankTabs } from "@/lib/navigation";
+import { bankMatchBadge } from "@/lib/status-badge";
 
 interface UnmatchedTx {
   id: string;
@@ -67,11 +70,13 @@ export default function TaydennysPage() {
       <PageHeader
         crumbs={[{ href: "/pankki", label: "Pankki" }, { label: "Täsmäytys" }]}
         backHref="/pankki"
+        description={
+          month
+            ? `Avoimet parit kuukaudelta ${month}.`
+            : "Avoimet pankkitapahtumat ja kuitit, jotka vielä kaipaavat paria."
+        }
       />
       <SectionTabs items={bankTabs()} activeHref={activeBankTab("/pankki/taydennys")} />
-      <p className="text-sm leading-relaxed text-warm-gray">
-        Avoimet pankkitapahtumat ja kuitit{month ? ` kuukaudelta ${month}` : ""}.
-      </p>
 
       {error ? (
         <ErrorState
@@ -87,10 +92,11 @@ export default function TaydennysPage() {
       ) : loading ? (
         <LoadingState label="Haetaan täsmäytystä…" />
       ) : rows.length === 0 && receipts.length === 0 ? (
-        <section className="rounded-3xl border border-warm-gray-light/20 bg-white p-8 text-center shadow-sm">
-          <p className="text-base font-medium text-charcoal">Ei avoimia täsmäytyksiä</p>
-          <p className="mt-1 text-sm text-warm-gray">Tämän kuukauden tapahtumat on käsitelty.</p>
-        </section>
+        <EmptyState
+          kind="records"
+          title="Ei avoimia täsmäytyksiä"
+          body="Tämän kuukauden tapahtumat on käsitelty. Hyvä hetki hengähtää."
+        />
       ) : (
         <>
           <section className="space-y-3">
@@ -104,9 +110,14 @@ export default function TaydennysPage() {
                     <span className="block text-sm font-medium text-charcoal">
                       {row.counterparty || "Tapahtuma"}
                     </span>
-                    <span className="mt-0.5 block text-xs text-warm-gray">
-                      {row.date.slice(0, 10)} · {formatEur(row.amount)} ·{" "}
-                      {row.matchStatus === "suggested" ? "ehdotus" : "avaa"}
+                    <span className="mt-1 flex flex-wrap items-center gap-2 text-xs text-warm-gray">
+                      <span>
+                        {row.date.slice(0, 10)} · {formatEur(row.amount)}
+                      </span>
+                      {(() => {
+                        const badge = bankMatchBadge(row.type, row.matchStatus);
+                        return badge ? <StatusBadge tone={badge.tone}>{badge.label}</StatusBadge> : null;
+                      })()}
                     </span>
                   </li>
                 ))}

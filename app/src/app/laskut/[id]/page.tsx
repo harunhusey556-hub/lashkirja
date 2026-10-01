@@ -16,7 +16,9 @@ import { newIdempotencyKey } from "@/lib/idempotency-key";
 import { helsinkiCalendarDate } from "@/lib/validation";
 import { formatReference } from "@/lib/finnish-reference";
 import { shareContent } from "@/lib/share";
+import { StatusBadge } from "@/components/StatusBadge";
 import { Button, buttonClass, controlClass } from "@/components/ui";
+import { invoiceBadge } from "@/lib/status-badge";
 
 interface ReminderPreview {
   level: number;
@@ -88,13 +90,6 @@ interface Invoice {
   activity?: Array<{ id: string; kind: string; summary: string; createdAt: string }>;
 }
 
-const STATUS_LABEL: Record<Invoice["displayStatus"], string> = {
-  draft: "Luonnos",
-  sent: "Lähetetty",
-  overdue: "Myöhässä",
-  paid: "Maksettu",
-  credited: "Hyvitetty",
-};
 
 export default function InvoiceDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
@@ -431,9 +426,9 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
             <section className="select-text bg-white rounded-3xl border border-warm-gray-light/20 shadow-sm p-6 space-y-3">
               <div className="flex items-center justify-between">
                 <span className="text-sm text-warm-gray">Tila</span>
-                <span className="text-sm font-medium text-charcoal">
-                  {STATUS_LABEL[invoice.displayStatus]}
-                </span>
+                <StatusBadge tone={invoiceBadge(invoice.displayStatus).tone}>
+                  {invoiceBadge(invoice.displayStatus).label}
+                </StatusBadge>
               </div>
               <div className="flex items-center justify-between">
                 <span className="text-sm text-warm-gray">Laskun päivä</span>

@@ -1,7 +1,9 @@
 "use client";
 
 import { useState } from "react";
+import { StatusBadge } from "@/components/StatusBadge";
 import { formatEur, formatEurSigned, formatMonthShort, parseFinnishNumber } from "@/lib/format";
+import type { BadgeTone } from "@/lib/status-badge";
 
 export interface MonthRow {
   month: string;
@@ -17,16 +19,10 @@ export interface MonthRow {
   status: "reconciled" | "mismatch" | "unreported";
 }
 
-const STATUS_LABEL: Record<MonthRow["status"], string> = {
-  reconciled: "Täsmää",
-  mismatch: "Ero",
-  unreported: "Ei saldoa",
-};
-
-const STATUS_CLASS: Record<MonthRow["status"], string> = {
-  reconciled: "bg-success/10 text-success",
-  mismatch: "bg-danger/10 text-danger",
-  unreported: "bg-warm-gray-light/30 text-warm-gray",
+const MONTH_BADGE: Record<MonthRow["status"], { tone: BadgeTone; label: string }> = {
+  reconciled: { tone: "success", label: "Täsmää" },
+  mismatch: { tone: "danger", label: "Ero" },
+  unreported: { tone: "neutral", label: "Ei saldoa" },
 };
 
 interface Props {
@@ -88,11 +84,9 @@ export function BalanceTable({ months, busyMonth, onSave, onClear }: Props) {
                   {row.txCount} tapahtumaa · alkusaldo {formatEur(row.opening)}
                 </p>
               </div>
-              <span
-                className={`shrink-0 text-[11px] font-medium px-2.5 py-1 rounded-full ${STATUS_CLASS[row.status]}`}
-              >
-                {STATUS_LABEL[row.status]}
-              </span>
+              <StatusBadge tone={MONTH_BADGE[row.status].tone}>
+                {MONTH_BADGE[row.status].label}
+              </StatusBadge>
             </div>
 
             <div className="grid grid-cols-3 gap-2 text-xs">

@@ -97,12 +97,12 @@ const EMPTY_COPY: Record<
   { title: string; body: string }
 > = {
   records: {
-    title: "Ei tietoja vielä",
-    body: "Tämä lista on tyhjä, kunnes lisäät ensimmäisen.",
+    title: "Täällä on vielä hiljaista",
+    body: "Lisää ensimmäinen, niin lista herää eloon.",
   },
   filtered: {
-    title: "Ei osumia",
-    body: "Yksikään rivi ei vastaa nykyisiä suodattimia.",
+    title: "Ei osumia tällä haulla",
+    body: "Kokeile väljempää suodatinta tai tyhjennä haku.",
   },
   failed: {
     title: "Lataus epäonnistui",
@@ -137,7 +137,7 @@ export function EmptyState({
 }) {
   const copy = EMPTY_COPY[kind];
   return (
-    <div className="text-center py-8 space-y-3" data-empty={kind}>
+    <div className="surface px-6 py-10 text-center space-y-3" data-empty={kind}>
       <p className="text-sm font-medium text-charcoal">{title ?? copy.title}</p>
       <p className="text-sm text-warm-gray">{body ?? copy.body}</p>
       {kind === "records" && action}

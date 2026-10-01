@@ -24,7 +24,9 @@ import {
 } from "@/lib/statement-client";
 import { parseFinnishNumber } from "@/lib/format";
 import StatementSummaryCards from "@/components/StatementSummaryCards";
+import { StatusBadge } from "@/components/StatusBadge";
 import ConfirmModal from "@/components/ConfirmModal";
+import { bankMatchBadge } from "@/lib/status-badge";
 
 interface Props {
   statement: StatementData;
@@ -33,37 +35,9 @@ interface Props {
 }
 
 function MatchBadge({ t }: { t: StatementTransaction }) {
-  if (t.type === "palkka") {
-    return (
-      <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-warm-gray-light/30 text-charcoal">
-        Palkka
-      </span>
-    );
-  }
-  if (t.type === "oma_siirto") return null;
-  const base =
-    "inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium";
-  if (t.matchStatus === "confirmed")
-    return (
-      <span className={`${base} bg-success/10 text-success`}>
-        Linkitetty
-      </span>
-    );
-  if (t.matchStatus === "suggested")
-    return (
-      <span className={`${base} bg-accent/10 text-accent`}>Ehdotus</span>
-    );
-  if (t.matchStatus === "ignored")
-    return (
-      <span className={`${base} bg-warm-gray-light/30 text-warm-gray`}>
-        Ei tarvita
-      </span>
-    );
-  return (
-    <span className={`${base} bg-warm-gray-light/20 text-warm-gray`}>
-      Puuttuu
-    </span>
-  );
+  const badge = bankMatchBadge(t.type, t.matchStatus);
+  if (!badge) return null;
+  return <StatusBadge tone={badge.tone}>{badge.label}</StatusBadge>;
 }
 
 function typeLabel(type: string): string {
@@ -668,15 +642,9 @@ export default function StatementDetailView({
                   }`}
                 >
                   <span>{f.shortLabel ?? f.label}</span>
-                  <span
-                    className={`tabular-nums text-xs px-2 py-0.5 rounded-full ${
-                      active
-                        ? "bg-white/15 text-white"
-                        : "bg-white text-warm-gray"
-                    }`}
-                  >
-                    {count}
-                  </span>
+                  <StatusBadge tone={active ? "inverse" : "neutral"} count={count}>
+                    {""}
+                  </StatusBadge>
                 </button>
               );
             })}

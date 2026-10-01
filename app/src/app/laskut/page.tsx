@@ -14,7 +14,10 @@ import {
 } from "@/components/clientFetch";
 import { formatDate, formatEur } from "@/lib/format";
 
+import { PageHeader } from "@/components/PageHeader";
+import { StatusBadge } from "@/components/StatusBadge";
 import { INVOICE_LINKS, WorkspaceLinks, linksWithActive } from "@/components/WorkspaceLinks";
+import { invoiceBadge } from "@/lib/status-badge";
 import { Button, buttonClass, chipClass } from "@/components/ui";
 import { pageCacheFetchedAt, readPageCache, writePageCache } from "@/lib/page-cache";
 import { isForbidden } from "@/lib/screen-state";
@@ -38,22 +41,6 @@ interface Aging {
   overdue: number;
   overdueCount: number;
 }
-
-const STATUS_LABEL: Record<InvoiceSummary["displayStatus"], string> = {
-  draft: "Luonnos",
-  sent: "Lähetetty",
-  overdue: "Myöhässä",
-  paid: "Maksettu",
-  credited: "Hyvitetty",
-};
-
-const STATUS_CLASS: Record<InvoiceSummary["displayStatus"], string> = {
-  draft: "bg-warm-gray-light/30 text-warm-gray",
-  sent: "bg-blush text-accent-dark",
-  overdue: "bg-danger/10 text-danger",
-  paid: "bg-success/10 text-success",
-  credited: "bg-warm-gray-light/30 text-warm-gray",
-};
 
 const FILTERS = [
   { id: "all", label: "Kaikki" },
@@ -187,12 +174,8 @@ function InvoicesPageContent() {
   return (
     <>
       <div className="space-y-6 pb-6">
-        <header className="space-y-2">
-          <p className="text-sm text-warm-gray leading-relaxed">
-            Laskuta asiakkaita ja seuraa maksuja viitenumerolla.
-          </p>
-          <WorkspaceLinks items={linksWithActive(INVOICE_LINKS, "/laskut")} />
-        </header>
+        <PageHeader description="Laskuta asiakkaita ja seuraa maksuja viitenumerolla." />
+        <WorkspaceLinks items={linksWithActive(INVOICE_LINKS, "/laskut")} />
 
         {aging && (
           <section className="bg-white rounded-3xl border border-warm-gray-light/20 shadow-sm p-6 space-y-3">
@@ -277,7 +260,7 @@ function InvoicesPageContent() {
               <li key={invoice.id}>
                 <Link
                   href={`/laskut/${invoice.id}`}
-                  className="block bg-white rounded-3xl border border-warm-gray-light/20 shadow-sm p-5 space-y-2 hover:border-accent/20"
+                  className="warm-row block space-y-2 rounded-3xl border border-warm-gray-light/20 bg-white p-5 shadow-sm hover:border-accent/30 hover:shadow-md"
                 >
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
@@ -300,13 +283,9 @@ function InvoicesPageContent() {
                     </div>
                   </div>
                   <div className="flex flex-wrap items-center gap-1.5">
-                    <span
-                      className={`text-[11px] font-medium px-2.5 py-1 rounded-full ${
-                        STATUS_CLASS[invoice.displayStatus]
-                      }`}
-                    >
-                      {STATUS_LABEL[invoice.displayStatus]}
-                    </span>
+                    <StatusBadge tone={invoiceBadge(invoice.displayStatus).tone}>
+                      {invoiceBadge(invoice.displayStatus).label}
+                    </StatusBadge>
                     <span className="text-[11px] text-warm-gray">
                       Eräpäivä {formatDate(invoice.dueDate)}
                     </span>

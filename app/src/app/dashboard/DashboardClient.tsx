@@ -12,7 +12,9 @@ import {
   redirectToLogin,
 } from "@/components/clientFetch";
 
+import { StatusBadge } from "@/components/StatusBadge";
 import { formatEur } from "@/lib/format";
+import { matchingSummaryBadge, pendingReceiptCopy } from "@/lib/status-badge";
 import { alvDrillHref, receiptDrillHref, statementDrillHref } from "@/lib/report-drill";
 import { helsinkiMonthKey } from "@/lib/validation";
 import { pageCacheFetchedAt, readPageCache, writePageCache } from "@/lib/page-cache";
@@ -167,9 +169,8 @@ export default function DashboardClient({
             onRetry={() => setLoadAttempt((a) => a + 1)}
           />
         ) : data && data.pendingReceiptsCount !== undefined && data.pendingReceiptsCount > 0 && (
-          <Link href="/kuitit" className="block relative overflow-hidden group animate-in">
-            <div className="absolute inset-0 bg-gradient-to-r from-warning/20 to-warning-dark/20 animate-pulse motion-reduce:animate-none rounded-2xl" />
-            <div className="relative bg-white/80 backdrop-blur-md border border-warning/40 rounded-2xl p-4 shadow-[0_4px_20px_-4px_rgba(138,105,30,0.3)] flex items-center justify-between transition-all group-hover:shadow-[0_4px_25px_-4px_rgba(138,105,30,0.5)] group-hover:bg-white">
+          <Link href="/kuitit" className="warm-row block animate-in">
+            <div className="flex items-center justify-between gap-3 rounded-2xl border border-warning/30 bg-warning/10 p-4">
               <div className="flex items-center gap-4">
                 <div className="w-10 h-10 rounded-full bg-warning/20 flex items-center justify-center text-warning-dark">
                   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5">
@@ -180,10 +181,10 @@ export default function DashboardClient({
                 <div>
                   <h3 className="text-sm font-semibold text-charcoal">Tarkastusta odottavia kuitteja</h3>
                   <p className="text-xs text-charcoal/70">
-                    {data.isSingleVatProfile 
-                      ? `Kaikki myyntisi ovat ALV ${data.singleVatRate}% — tarkista ja hyväksy yhdellä napautuksella.`
-                      : `Sinulla on ${data.pendingReceiptsCount} tarkastamatonta kuittia/luonnosta.`
-                    }
+                    {pendingReceiptCopy(data.pendingReceiptsCount)}
+                    {data.isSingleVatProfile
+                      ? ` Kaikki myyntisi ovat ALV ${data.singleVatRate}% — tarkista ja hyväksy yhdellä napautuksella.`
+                      : ""}
                   </p>
                 </div>
               </div>
@@ -201,7 +202,7 @@ export default function DashboardClient({
             <h2 className="text-2xl sm:text-3xl font-light text-charcoal tracking-tight">
               {displayName ? getGreeting(displayName) : "\u00a0"}
             </h2>
-            <p className="text-sm text-warm-gray mt-1">Tervetuloa Lashkirjaan</p>
+            <p className="text-sm text-warm-gray mt-1">Kuukauden kirjanpito yhdellä silmäyksellä.</p>
           </div>
 
           <div className="flex items-center gap-1 self-start shrink-0 sm:self-auto bg-white p-1 rounded-xl shadow-sm border border-warm-gray-light/20">
@@ -339,8 +340,8 @@ export default function DashboardClient({
                 onRetry={() => setLoadAttempt((a) => a + 1)}
               />
             ) : data.matching && data.matching.matchable > 0 && (
-              <Link href="/pankki/taydennys" className="block mt-2 animate-in-delay-2">
-                <div className="bg-white rounded-2xl p-4 shadow-sm border border-slate-100 flex items-center justify-between hover:border-charcoal/20 transition-colors group">
+              <Link href="/pankki/taydennys" className="mt-2 block animate-in-delay-2">
+                <div className="warm-row flex items-center justify-between rounded-2xl border border-warm-gray-light/30 bg-white p-4 shadow-sm group hover:border-accent/30">
                   <div>
                     <p className="text-sm font-semibold text-charcoal">Kuittien linkitys</p>
                     <p className="text-xs text-warm-gray mt-1">
@@ -348,15 +349,15 @@ export default function DashboardClient({
                     </p>
                   </div>
                   <div className="flex items-center gap-3">
-                    {data.matching.matchable > data.matching.matched + data.matching.suggested ? (
-                      <span className="bg-accent/10 text-accent text-xs font-medium px-2.5 py-1 rounded-full">
-                        {data.matching.matchable - data.matching.matched - data.matching.suggested} puuttuu
-                      </span>
-                    ) : (
-                      <span className="bg-success/10 text-success text-xs font-medium px-2.5 py-1 rounded-full">
-                        Kaikki ok
-                      </span>
-                    )}
+                    {(() => {
+                      const badge = matchingSummaryBadge(data.matching);
+                      if (!badge) return null;
+                      return (
+                        <StatusBadge tone={badge.tone} count={badge.count}>
+                          {badge.label}
+                        </StatusBadge>
+                      );
+                    })()}
                     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4 text-warm-gray group-hover:text-charcoal transition-colors">
                       <path fillRule="evenodd" d="M8.22 5.22a.75.75 0 0 1 1.06 0l4.25 4.25a.75.75 0 0 1 0 1.06l-4.25 4.25a.75.75 0 0 1-1.06-1.06L11.94 10 8.22 6.28a.75.75 0 0 1 0-1.06Z" clipRule="evenodd" />
                     </svg>

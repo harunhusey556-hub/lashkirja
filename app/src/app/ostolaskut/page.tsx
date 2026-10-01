@@ -14,7 +14,10 @@ import {
 import { formatDate, formatEur, parseFinnishNumber } from "@/lib/format";
 import { isValidReferenceNumber, normalizeReference } from "@/lib/finnish-reference";
 
+import { PageHeader } from "@/components/PageHeader";
+import { StatusBadge } from "@/components/StatusBadge";
 import { INVOICE_LINKS, WorkspaceLinks, linksWithActive } from "@/components/WorkspaceLinks";
+import { purchaseBadge } from "@/lib/status-badge";
 import { Button, chipClass, controlClass } from "@/components/ui";
 import { pageCacheFetchedAt, readPageCache, writePageCache } from "@/lib/page-cache";
 import { isForbidden } from "@/lib/screen-state";
@@ -44,20 +47,6 @@ interface Aging {
   overdue: number;
   overdueCount: number;
 }
-
-const STATUS_LABEL: Record<PurchaseInvoice["displayStatus"], string> = {
-  open: "Avoin",
-  overdue: "Myöhässä",
-  paid: "Maksettu",
-  cancelled: "Mitätöity",
-};
-
-const STATUS_CLASS: Record<PurchaseInvoice["displayStatus"], string> = {
-  open: "bg-blush text-accent-dark",
-  overdue: "bg-danger/10 text-danger",
-  paid: "bg-success/10 text-success",
-  cancelled: "bg-warm-gray-light/30 text-warm-gray",
-};
 
 const FILTERS = [
   { id: "all", label: "Kaikki" },
@@ -279,13 +268,8 @@ export default function PurchaseInvoicesPage() {
   return (
     <>
       <div className="space-y-6 pb-6">
-        <header className="space-y-2">
-          <p className="text-sm text-warm-gray leading-relaxed">
-            Mitä olet velkaa ja milloin. ALV-raportti lasketaan edelleen kuiteista, joten sama
-            osto ei kirjaudu kahdesti.
-          </p>
-          <WorkspaceLinks items={linksWithActive(INVOICE_LINKS, "/ostolaskut")} />
-        </header>
+        <PageHeader description="Mitä olet velkaa ja milloin. Sama osto ei kirjaudu kahdesti kuitin kanssa." />
+        <WorkspaceLinks items={linksWithActive(INVOICE_LINKS, "/ostolaskut")} />
 
         {aging && (
           <section className="bg-white rounded-3xl border border-warm-gray-light/20 shadow-sm p-6 space-y-3">
@@ -509,13 +493,9 @@ export default function PurchaseInvoicesPage() {
                       )}
                     </div>
                   </div>
-                  <span
-                    className={`inline-block text-[11px] font-medium px-2.5 py-1 rounded-full ${
-                      STATUS_CLASS[invoice.displayStatus]
-                    }`}
-                  >
-                    {STATUS_LABEL[invoice.displayStatus]}
-                  </span>
+                  <StatusBadge tone={purchaseBadge(invoice.displayStatus).tone}>
+                    {purchaseBadge(invoice.displayStatus).label}
+                  </StatusBadge>
                 </button>
 
                 {expanded === invoice.id && (

@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useState } from "react";
+import { PageHeader } from "@/components/PageHeader";
 import { ConnectionNotice } from "@/components/ScreenState";
 import { leaveAfterSignOut } from "@/components/clientFetch";
 import { SettingsChevron, SettingsGroup, SettingsRow } from "@/components/SettingsList";
@@ -40,6 +41,7 @@ export default function AsetuksetPage() {
   return (
     <>
       <div className="space-y-6 list-stagger">
+        <PageHeader description="Yritys, tili ja yhteydet. Harvinaiset asetukset asuvat täällä." />
         {/* Profile header: tap through to the editable profile page. */}
         {profile ? (
           <Link

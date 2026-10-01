@@ -4,7 +4,7 @@ export const controlClass =
   "box-border block w-full min-w-0 max-w-full px-3 rounded-xl border border-warm-gray-light/60 bg-white text-sm";
 
 const CHIP_BASE =
-  "active-press inline-flex min-h-12 shrink-0 items-center justify-center rounded-full border px-4 text-sm font-medium transition-colors";
+  "active-press inline-flex min-h-12 shrink-0 items-center justify-center rounded-full border px-4 text-sm font-medium transition-colors duration-200 ease-out";
 
 export function chipClass(selected: boolean): string {
   return selected
@@ -22,5 +22,5 @@ export const BUTTON_VARIANTS = {
 export type ButtonVariant = keyof typeof BUTTON_VARIANTS;
 
 export function buttonClass(variant: ButtonVariant = "primary", extra = ""): string {
-  return `active-press inline-flex min-h-12 items-center justify-center gap-2 rounded-xl px-4 text-sm font-medium transition-colors disabled:opacity-60 ${BUTTON_VARIANTS[variant]} ${extra}`;
+  return `active-press inline-flex min-h-12 items-center justify-center gap-2 rounded-xl px-4 text-sm font-medium transition-colors duration-200 ease-out disabled:opacity-60 ${BUTTON_VARIANTS[variant]} ${extra}`;
 }

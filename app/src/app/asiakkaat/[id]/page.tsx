@@ -11,7 +11,9 @@ import {
   redirectToLogin,
 } from "@/components/clientFetch";
 import { formatDate, formatEur } from "@/lib/format";
+import { StatusBadge } from "@/components/StatusBadge";
 import { Button, controlClass } from "@/components/ui";
+import { invoiceBadge } from "@/lib/status-badge";
 
 interface CustomerDetail {
   customer: {
@@ -39,14 +41,6 @@ interface CustomerDetail {
     open: number;
   }>;
 }
-
-const STATUS_LABEL: Record<string, string> = {
-  draft: "Luonnos",
-  sent: "Lähetetty",
-  overdue: "Myöhässä",
-  paid: "Maksettu",
-  credited: "Hyvitetty",
-};
 
 export default function CustomerDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
@@ -175,8 +169,11 @@ export default function CustomerDetailPage({ params }: { params: Promise<{ id: s
                       href={`/laskut/${invoice.id}`}
                       className="flex items-center justify-between gap-3 rounded-2xl bg-white border border-warm-gray-light/20 px-4 py-3 text-sm"
                     >
-                      <span className="text-charcoal">
-                        {invoice.number} · {STATUS_LABEL[invoice.displayStatus] ?? invoice.displayStatus}
+                      <span className="flex min-w-0 items-center gap-2 text-charcoal">
+                        <span>{invoice.number}</span>
+                        <StatusBadge tone={invoiceBadge(invoice.displayStatus).tone}>
+                          {invoiceBadge(invoice.displayStatus).label}
+                        </StatusBadge>
                       </span>
                       <span className="text-warm-gray">
                         {formatDate(invoice.issueDate)} · {formatEur(invoice.open)} avoinna

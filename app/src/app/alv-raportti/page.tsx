@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { LoadingState } from "@/components/AsyncState";
+import { PageHeader } from "@/components/PageHeader";
 import { ConnectionNotice, StaleBanner } from "@/components/ScreenState";
 import {
   apiFetch,
@@ -142,11 +143,7 @@ export default function ALVRaporttiPage() {
   return (
     <>
       <div className="space-y-6">
-        <header className="space-y-2">
-          <p className="text-sm text-warm-gray leading-relaxed">
-            Kuukauden tai neljänneksen arvonlisävero.
-          </p>
-        </header>
+        <PageHeader description="Kuukauden tai neljänneksen arvonlisävero." />
 
         {data && !data.vatRegistered && (
           <div className="bg-warning/10 rounded-2xl p-4 text-sm text-charcoal">

@@ -1,14 +1,19 @@
 "use client";
 
+import type { ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { armNavigation } from "@/lib/nav-direction";
 
 export function PageHeader({
-  crumbs,
+  crumbs = [],
   backHref,
+  description,
+  actions,
 }: {
-  crumbs: Array<{ label: string; href?: string }>;
+  crumbs?: Array<{ label: string; href?: string }>;
   backHref?: string;
+  description?: string;
+  actions?: ReactNode;
 }) {
   const router = useRouter();
 
@@ -29,6 +34,7 @@ export function PageHeader({
           Takaisin
         </button>
       )}
+      {crumbs.length > 0 && (
       <nav aria-label="Murupolku" className="flex flex-wrap items-center gap-1 text-xs text-warm-gray">
         {crumbs.map((crumb, index) => (
           <span key={`${crumb.label}-${index}`} className="inline-flex items-center gap-1">
@@ -50,6 +56,9 @@ export function PageHeader({
           </span>
         ))}
       </nav>
+      )}
+      {description && <p className="text-sm leading-relaxed text-warm-gray">{description}</p>}
+      {actions && <div className="flex flex-wrap gap-2 pt-1">{actions}</div>}
     </div>
   );
 }
