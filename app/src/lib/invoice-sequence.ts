@@ -1,9 +1,10 @@
 /**
  * Per-user invoice numbers.
  *
- * The sequence only moves forward. Deleting a draft does not return its
- * number, a later calendar year does not start again at 1, and a requested
- * starting number cannot rewind past a number already handed out.
+ * The sequence moves forward. The one exception is the newest number: when the
+ * draft that holds it is deleted unsent, the number is given back, so the
+ * series stays gapless. A later calendar year does not start again at 1, and a
+ * requested starting number cannot rewind past a number already handed out.
  */
 import type { Prisma } from "@/generated/prisma/client";
 import { prisma } from "./db";
@@ -29,6 +30,19 @@ export async function allocateInvoiceNumber(db: Db, userId: string): Promise<num
     data: { nextNumber: number + 1 },
   });
   return number;
+}
+
+/**
+ * Gives `number` back when it is the newest one handed out (the cursor stands
+ * one past it). A number below the cursor stays used: later numbers exist.
+ * Returns whether the cursor moved.
+ */
+export async function releaseInvoiceNumber(db: Db, userId: string, number: number): Promise<boolean> {
+  const moved = await db.invoiceSequence.updateMany({
+    where: { userId, nextNumber: number + 1 },
+    data: { nextNumber: number },
+  });
+  return moved.count > 0;
 }
 
 /** The next number that would be used, without consuming it. */

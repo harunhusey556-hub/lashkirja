@@ -11,7 +11,7 @@ import { AppError, ConflictError, NotFoundError, ValidationError } from "./api-e
 import { expectedUpdatedAtDate, versionConflict } from "./edit-conflict";
 import { centsToEuros, eurosToCents } from "./money";
 import { formatDate, formatEur } from "./format";
-import { allocateInvoiceNumber, peekInvoiceNumber } from "./invoice-sequence";
+import { allocateInvoiceNumber, peekInvoiceNumber, releaseInvoiceNumber } from "./invoice-sequence";
 import { helsinkiCalendarDate, isoDateToUtc, periodScopeBoundsUtc } from "./validation";
 import { normalizeReference, referenceForInvoice } from "./finnish-reference";
 import {
@@ -717,7 +717,31 @@ export async function deleteInvoice(userId: string, id: string): Promise<void> {
       409
     );
   }
-  await prisma.salesInvoice.delete({ where: { id } });
+  await prisma.$transaction(async (tx) => {
+    const draft = await tx.salesInvoice.findFirst({
+      where: { id, userId },
+      select: {
+        number: true,
+        sentAt: true,
+        _count: {
+          select: {
+            emailSends: true,
+            activities: { where: { kind: { in: ["sent", "status_changed"] } } },
+          },
+        },
+      },
+    });
+    await tx.salesInvoice.delete({ where: { id } });
+    // The series has to stay gapless (Finnish bookkeeping practice), so the
+    // newest draft gives its number back. A number that was ever mailed or
+    // marked sent has left the house and is never handed out again (a draft
+    // that was sent and put back has a status change in its history); a draft
+    // in the middle keeps its number, because later numbers are already in use.
+    if (!draft) return;
+    const neverIssued =
+      !draft.sentAt && draft._count.emailSends === 0 && draft._count.activities === 0;
+    if (neverIssued) await releaseInvoiceNumber(tx, userId, draft.number);
+  });
 }
 
 /**

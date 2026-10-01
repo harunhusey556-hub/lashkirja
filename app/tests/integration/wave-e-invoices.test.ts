@@ -191,7 +191,7 @@ describe("open balance across payments", () => {
 });
 
 describe("invoice numbers", () => {
-  it("does not reuse a deleted draft, ignores year rollover, and only moves the start forward", async () => {
+  it("gives the newest deleted draft number back, ignores year rollover, and only moves the start forward", async () => {
     const first = await makeInvoice();
     expect(first.number).toBe(1);
     const removed = await deleteInvoice(
@@ -200,11 +200,12 @@ describe("invoice numbers", () => {
     );
     expect(removed.status).toBe(200);
 
+    // The series stays gapless: the newest unsent draft gave its number back.
     const second = await makeInvoice();
-    expect(second.number).toBe(2);
+    expect(second.number).toBe(1);
 
     const nextYear = await makeInvoice({ issueDate: "2027-01-04", dueDate: "2027-01-18" });
-    expect(nextYear.number).toBe(3);
+    expect(nextYear.number).toBe(2);
 
     const raised = await readJson(
       await setSequence(
