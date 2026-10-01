@@ -97,6 +97,22 @@ describe("page cache invalidation", () => {
   });
 });
 
+describe("onboarding changes what Koti, Kirjanpito and the ALV page show (F21)", () => {
+  it("drops the cached profile, dashboard and ALV figures after the onboarding write", () => {
+    writePageCache("profile", { vatRegistered: false });
+    writePageCache("dashboard:2026-10", {});
+    writePageCache("alv-summary:2026-09", {});
+    writePageCache("alv:2026-09", {});
+    writePageCache("invoices", []);
+    invalidateForMutation("/api/onboarding");
+    expect(readPageCache("profile")).toBeNull();
+    expect(readPageCache("dashboard:2026-10")).toBeNull();
+    expect(readPageCache("alv-summary:2026-09")).toBeNull();
+    expect(readPageCache("alv:2026-09")).toBeNull();
+    expect(readPageCache("invoices")).toEqual([]);
+  });
+});
+
 describe("stale banner", () => {
   it("appears only after a failed refresh of a cached copy", () => {
     const at = Date.parse("2026-09-27T08:15:00");

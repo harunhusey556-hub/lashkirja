@@ -182,6 +182,11 @@ const MUTATION_PREFIXES: Array<{ match: (path: string) => boolean; prefixes: str
     prefixes: ["bank-overview", "statements", "jobs", "dashboard:"],
   },
   {
+    // F21: onboarding changes the VAT registration and period, which Koti, Kirjanpito and the ALV page read.
+    match: (path) => path.includes("/api/onboarding"),
+    prefixes: ["profile", "dashboard:", "alv:", "alv-summary:", "report:"],
+  },
+  {
     match: (path) => path.includes("/api/customers"),
     prefixes: ["customers", "customer:", "invoices"],
   },

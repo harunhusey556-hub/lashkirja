@@ -27,6 +27,30 @@ export interface Profile {
 }
 
 /**
+ * Every mounted `useProfile` instance, so one that already holds the profile
+ * (Koti, behind the onboarding dialog) hears about a change made elsewhere (F21).
+ */
+const profileListeners = new Set<(profile: Profile) => void>();
+
+/**
+ * Fetch the profile now and hand it to every mounted screen and the page cache.
+ * Onboarding finishing is the case: the account just became VAT-registered, and
+ * the Koti page behind the dialog still holds the profile from before.
+ */
+export async function refreshSharedProfile(): Promise<boolean> {
+  try {
+    const response = await apiFetch("/api/profile");
+    const data = await readJson<{ profile: Profile }>(response, "Asetusten lataus epäonnistui");
+    if (!data.profile) return false;
+    writePageCache("profile", data.profile);
+    for (const listener of profileListeners) listener(data.profile);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * The one profile load/save used by every settings page. Saves are
  * optimistic: the UI flips immediately and rolls back on failure.
  *
@@ -44,6 +68,12 @@ export function useProfile() {
   // the network round trip (N3).
   const lateProfile = useCacheAfterBoot<Profile>("profile");
   const profile = fetchedProfile ?? lateProfile;
+  useEffect(() => {
+    profileListeners.add(setProfile);
+    return () => {
+      profileListeners.delete(setProfile);
+    };
+  }, []);
   const [saving, setSaving] = useState(false);
   const [savedMsg, setSavedMsg] = useState("");
   const [loadError, setLoadError] = useState("");

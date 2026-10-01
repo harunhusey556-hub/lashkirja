@@ -65,7 +65,8 @@ import {
   stashPendingCapture,
   type PendingCaptureKind,
 } from "@/lib/pending-capture";
-import { CAPTURE_REQUEST_EVENT } from "@/lib/capture-request";
+import { CAPTURE_REQUEST_EVENT, STATEMENT_IMPORT_REQUEST_EVENT } from "@/lib/capture-request";
+import { refreshSharedProfile } from "@/app/asetukset/useProfile";
 import { showToast } from "@/lib/toast";
 import {
   forgetScroll,
@@ -976,8 +977,14 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   });
   useEffect(() => {
     const onRequest = () => startPickRef.current("receipt");
+    // F24: "Tuo tiliote" on Koti and in the month close picks the file from the tap too.
+    const onImport = () => startPickRef.current("statement");
     window.addEventListener(CAPTURE_REQUEST_EVENT, onRequest);
-    return () => window.removeEventListener(CAPTURE_REQUEST_EVENT, onRequest);
+    window.addEventListener(STATEMENT_IMPORT_REQUEST_EVENT, onImport);
+    return () => {
+      window.removeEventListener(CAPTURE_REQUEST_EVENT, onRequest);
+      window.removeEventListener(STATEMENT_IMPORT_REQUEST_EVENT, onImport);
+    };
   }, []);
 
   function renderTab(item: NavEntry) {
@@ -1152,6 +1159,8 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
               writePageCache(ONBOARDED_CACHE_KEY, true);
               setOnboardingSnoozed(false);
               setShowOnboarding(false);
+              // F21: Koti stays mounted behind the dialog with the profile from before the answers.
+              void refreshSharedProfile();
             }}
             onSnooze={() => {
               setOnboardingSnoozed(true);
