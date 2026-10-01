@@ -308,12 +308,13 @@ export default function ReportsPage() {
           <div className={`space-y-6 ${fade}`}>
             <section className="mt-6 first:mt-0">
               <div className="mb-2 flex items-baseline justify-between gap-3 px-1 text-caption text-ink-2">
-                <h2 className="font-normal">Tulos</h2>
+                {/* F11: Koti counts gross (sis. ALV); every figure here is net, and the heading says so. */}
+                <h2 className="font-normal">Tulos ilman ALV:ta</h2>
               </div>
               <KeyValueList
                 rows={[
                   {
-                    label: "Tulos ilman ALV:ta",
+                    label: "Tulos",
                     value: (
                       <span className={report.total.profitNet < 0 ? "text-danger" : undefined}>
                         {formatEur(report.total.profitNet)}
@@ -361,7 +362,7 @@ export default function ReportsPage() {
             {report.months.length === 0 ? (
               <EmptySection title="Kuukaudet">Ei kirjauksia tälle vuodelle.</EmptySection>
             ) : (
-              <Section title="Kuukaudet">
+              <Section title="Kuukaudet, ilman ALV:ta">
                 {report.months.map((month) => {
                   // Income lives in invoices and cash-sale receipts, expenses in receipts: a month with
                   // more than one source gets labelled links instead of one wrong list (F71).
