@@ -18,7 +18,7 @@ const confirmSchema = z.object({
 export const POST = withErrorHandler(async (req: NextRequest) => {
   const blocked = guardWrite(req);
   if (blocked) return blocked;
-  const session = await requireSession();
+  const session = await requireSession(req);
   if (!session) {
     throw new AppError("Ei kirjautunut", "UNAUTHORIZED", 401);
   }

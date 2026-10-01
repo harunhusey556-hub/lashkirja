@@ -2,6 +2,7 @@
 import type { Prisma } from "@/generated/prisma/client";
 import { prisma } from "./db";
 import { centsToEuros } from "./money";
+import { assertPeriodOpen, PeriodLockedError } from "./period-lock";
 
 /**
  * Deterministic bank-transaction ↔ receipt matcher.
@@ -576,6 +577,9 @@ export async function confirmMatch(
   if (receipt.linkedTransaction && receipt.linkedTransaction.id !== tx.id) {
     throw new MatchConflictError("Kuitti on jo linkitetty toiseen tapahtumaan");
   }
+  // Confirming approves a waiting receipt, which moves its month's VAT return
+  // and report exactly as approving it from the review queue does.
+  if (receipt.reviewStatus !== "approved") await assertPeriodOpen(userId, [receipt.date], db);
 
   const write = async (client: MatchWriter) => {
     await client.automationEvent.create({
@@ -666,7 +670,13 @@ export async function confirmAllSuggestions(
   let count = 0;
   for (const tx of txs) {
     if (!tx.suggestedReceiptId) continue;
-    await confirmMatch(userId, tx.id, tx.suggestedReceiptId, true);
+    try {
+      await confirmMatch(userId, tx.id, tx.suggestedReceiptId, true);
+    } catch (error) {
+      // A receipt of a closed month stays a suggestion; the rest still go through.
+      if (error instanceof PeriodLockedError) continue;
+      throw error;
+    }
     count += 1;
   }
   return count;

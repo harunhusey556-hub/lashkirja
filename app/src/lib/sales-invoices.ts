@@ -12,7 +12,7 @@ import { expectedUpdatedAtDate, versionConflict } from "./edit-conflict";
 import { centsToEuros, eurosToCents } from "./money";
 import { formatDate, formatEur } from "./format";
 import { allocateInvoiceNumber, peekInvoiceNumber } from "./invoice-sequence";
-import { helsinkiCalendarDate, isoDateToUtc } from "./validation";
+import { helsinkiCalendarDate, isoDateToUtc, periodScopeBoundsUtc } from "./validation";
 import { normalizeReference, referenceForInvoice } from "./finnish-reference";
 import {
   adjustVatRateForDate,
@@ -142,6 +142,41 @@ export async function applyVatRules<T extends { vatRatePermille: number }>(
   } catch (error) {
     if (error instanceof InvoiceValidationError) throw new ValidationError(error.message);
     throw error;
+  }
+}
+
+/**
+ * A draft keeps the VAT it was saved with. If the seller's VAT status changed
+ * after that (corrected to "not VAT registered", or a rate that has ended), the
+ * stored lines no longer follow the rule. Sending must not bill them, and must
+ * not quietly change a document total either: it refuses and says what to do.
+ * Opening the draft and saving it applies the rule (see applyVatRules).
+ */
+export async function assertDraftVatCurrent(userId: string, invoiceId: string): Promise<void> {
+  const invoice = await prisma.salesInvoice.findFirst({
+    where: { id: invoiceId, userId },
+    select: { documentKind: true, issueDate: true, lines: { select: { vatRatePermille: true } } },
+  });
+  if (!invoice || invoice.documentKind === "credit_note") return;
+  const seller = await prisma.user.findUnique({ where: { id: userId }, select: { vatRegistered: true } });
+  if (!seller) return;
+  let current = true;
+  try {
+    const checked = applySellerVatRules(invoice.lines, {
+      vatRegistered: seller.vatRegistered,
+      issueDate: invoice.issueDate.toISOString().slice(0, 10),
+    });
+    current = checked.every((line, index) => line.vatRatePermille === invoice.lines[index].vatRatePermille);
+  } catch (error) {
+    if (!(error instanceof InvoiceValidationError)) throw error;
+    current = false;
+  }
+  if (!current) {
+    throw new AppError(
+      "Luonnoksen ALV ei vastaa yrityksen nykyisiä tietoja. Avaa luonnos ja tallenna se, niin ALV päivittyy. Sen jälkeen lasku voidaan lähettää.",
+      "DRAFT_VAT_OUTDATED",
+      409
+    );
   }
 }
 
@@ -873,6 +908,9 @@ export async function setInvoiceStatus(
   if (target === "sent" && existing.lines.length === 0) {
     throw new ValidationError("Tyhjää laskua ei voi lähettää.");
   }
+  if (target === "sent" && current === "draft") {
+    await assertDraftVatCurrent(userId, id);
+  }
   if (target === "draft" && existing.payments.length > 0) {
     throw new AppError(
       "Laskulla on maksuja, joten sitä ei voi palauttaa luonnokseksi.",
@@ -946,9 +984,10 @@ export interface RecordPaymentInput {
  * it must be positive, not dated before the invoice or in the future, and not
  * larger than the open balance. The balance is read in the same transaction as
  * the insert, after a write has taken SQLite's write lock, so two payments that
- * arrive together (two devices, two idempotency keys) cannot both fit. Rows
- * that come from the bank (`source: "bank"`) record what the bank says
- * happened and are not refused on amount or date.
+ * arrive together (two devices, two idempotency keys) cannot both fit. A
+ * payment that carries a bank row (`transactionId`, or `source: "bank"`) records
+ * what the bank says happened and is not refused on amount or date, whichever
+ * way it arrives (reference match, Koti, the invoice page).
  */
 export async function recordPayment(
   userId: string,
@@ -956,7 +995,8 @@ export async function recordPayment(
   input: RecordPaymentInput,
   db?: Prisma.TransactionClient
 ): Promise<PublicInvoice> {
-  const manual = (input.source ?? "manual") === "manual";
+  const source = input.transactionId ? "bank" : (input.source ?? "manual");
+  const manual = source === "manual";
   const amountCents = eurosToCents(input.amount);
   if (amountCents === 0 || (manual && amountCents < 0)) {
     throw new ValidationError("Maksun summan pitää olla suurempi kuin nolla.");
@@ -1039,7 +1079,7 @@ export async function recordPayment(
         transactionId: input.transactionId ?? null,
         paidDate: isoDateToUtc(input.paidDate),
         amountCents,
-        source: input.source ?? "manual",
+        source,
         note: input.note?.trim() || null,
       },
     });
@@ -1240,10 +1280,30 @@ export async function removePayment(
 
   const payment = await prisma.invoicePayment.findFirst({
     where: { id: paymentId, invoiceId },
-    select: { paidDate: true },
+    select: { paidDate: true, transactionId: true },
   });
   if (!payment) throw new NotFoundError("Maksua ei löytynyt.");
-  await assertPeriodOpen(userId, [payment.paidDate]);
+
+  // While a bank row settles the invoice, an income receipt of that same row is
+  // left out of the books (the invoice is the sale). Once the payment is gone
+  // the row settles nothing and the receipt would be counted next to the
+  // invoice. It goes back to waiting for approval, as when the link of a sale
+  // is undone, so the sale is counted once at every step.
+  const sameMoney = payment.transactionId
+    ? await prisma.receipt.findMany({
+        where: {
+          userId,
+          type: "tulo",
+          reviewStatus: "approved",
+          OR: [
+            { sourceTransactionId: payment.transactionId },
+            { linkedTransaction: { is: { id: payment.transactionId } } },
+          ],
+        },
+        select: { id: true, date: true },
+      })
+    : [];
+  await assertPeriodOpen(userId, [payment.paidDate, ...sameMoney.map((receipt) => receipt.date)]);
 
   const removed = await prisma.$transaction(async (tx) => {
     const deleted = await tx.invoicePayment.deleteMany({
@@ -1251,6 +1311,23 @@ export async function removePayment(
     });
     if (deleted.count === 0) return false;
     await recordActivity(tx, invoiceId, "payment_removed", "Maksu poistettiin.");
+
+    if (payment.transactionId && sameMoney.length > 0) {
+      await tx.receipt.updateMany({
+        where: { id: { in: sameMoney.map((receipt) => receipt.id) }, userId, reviewStatus: "approved" },
+        data: { reviewStatus: "pending" },
+      });
+      await tx.transaction.updateMany({
+        where: { id: payment.transactionId, receiptId: { in: sameMoney.map((receipt) => receipt.id) } },
+        data: {
+          receiptId: null,
+          matchStatus: "unmatched",
+          suggestedReceiptId: null,
+          matchScore: null,
+          matchReasons: null,
+        },
+      });
+    }
 
     // A write-off stays closed. A payment-only close reopens when the cover is gone.
     if (invoice.status === "paid" && !invoice.closedReason?.trim()) {
@@ -1307,11 +1384,9 @@ function invoiceScopeWhere(
   const where: Record<string, unknown> = { userId };
   if (options.customerId) where.customerId = options.customerId;
   if (options.month) {
-    const [year, month] = options.month.split("-").map(Number);
-    where.issueDate = {
-      gte: new Date(Date.UTC(year, month - 1, 1)),
-      lt: new Date(Date.UTC(year, month, 1)),
-    };
+    // A month (YYYY-MM) or a whole year (YYYY), from a yearly report figure.
+    const bounds = periodScopeBoundsUtc(options.month);
+    where.issueDate = { gte: bounds.start, lt: bounds.end };
   }
   return where;
 }

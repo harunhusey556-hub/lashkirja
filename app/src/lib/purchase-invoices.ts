@@ -9,8 +9,8 @@
 import { prisma } from "./db";
 import { AppError, NotFoundError, ValidationError } from "./api-errors";
 import { centsToEuros, eurosToCents } from "./money";
-import { formatEur } from "./format";
-import { isoDateToUtc } from "./validation";
+import { formatDate, formatEur } from "./format";
+import { helsinkiCalendarDate, isoDateToUtc } from "./validation";
 import { isValidBusinessId, isValidReferenceNumber, normalizeBusinessId, normalizeReference } from "./finnish-reference";
 import { isValidIban, normalizeIban } from "./iban";
 import { buildAging, displayStatus, openPosition, overdueBefore, type AgingReport } from "./invoices";
@@ -399,9 +399,12 @@ export interface RecordPurchasePaymentInput {
 
 /**
  * Records a payment on a payable. A payment keyed in by hand may not exceed
- * what is still owed. The balance is read in the same transaction as the
+ * what is still owed, be dated in the future or before the invoice (the same
+ * rules as a sales payment). The balance is read in the same transaction as the
  * insert, after a write has taken SQLite's write lock, so two payments that
- * arrive together cannot both fit.
+ * arrive together cannot both fit. A payment that carries a bank row
+ * (`transactionId`, or `source: "bank"`) records what the bank says happened
+ * and is not refused on amount or date.
  */
 export async function recordPurchasePayment(
   userId: string,
@@ -410,7 +413,11 @@ export async function recordPurchasePayment(
 ): Promise<PublicPurchaseInvoice> {
   const amountCents = eurosToCents(input.amount);
   if (amountCents <= 0) throw new ValidationError("Maksun summan on oltava positiivinen.");
-  const manual = (input.source ?? "manual") === "manual";
+  const source = input.transactionId ? "bank" : (input.source ?? "manual");
+  const manual = source === "manual";
+  if (manual && input.paidDate > helsinkiCalendarDate()) {
+    throw new AppError("Maksupäivä ei voi olla tulevaisuudessa.", "PAYMENT_IN_FUTURE", 422);
+  }
 
   await prisma.$transaction(async (tx) => {
     // A write comes first: it takes the write lock, so the balance read below
@@ -427,6 +434,14 @@ export async function recordPurchasePayment(
     }
 
     await assertPeriodOpen(userId, [isoDateToUtc(input.paidDate)], tx);
+
+    if (manual && isoDateToUtc(input.paidDate) < invoice.issueDate) {
+      throw new AppError(
+        `Maksupäivä (${formatDate(input.paidDate)}) on ennen ostolaskun päivää (${formatDate(invoice.issueDate.toISOString())}).`,
+        "PAYMENT_BEFORE_INVOICE",
+        422
+      );
+    }
 
     if (input.transactionId) {
       const transaction = await tx.transaction.findFirst({
@@ -466,7 +481,7 @@ export async function recordPurchasePayment(
         transactionId: input.transactionId ?? null,
         paidDate: isoDateToUtc(input.paidDate),
         amountCents,
-        source: input.source ?? "manual",
+        source,
         note: input.note?.trim() || null,
       },
     });
