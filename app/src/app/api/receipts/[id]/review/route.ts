@@ -8,7 +8,7 @@ import { serverApprovalBlock } from "@/lib/receipt-approval";
 import { assertPeriodOpen } from "@/lib/period-lock";
 
 const reviewSchema = z.object({
-  reviewStatus: z.enum(["approved", "rejected"]),
+  reviewStatus: z.enum(["approved", "rejected", "pending"]),
 });
 
 export const PATCH = withErrorHandler(
@@ -43,6 +43,13 @@ export const PATCH = withErrorHandler(
       if (incomplete) throw new AppError(incomplete, "RECEIPT_INCOMPLETE", 422);
       // Approving books the receipt into its month: a closed month must not move.
       await assertPeriodOpen(session.userId, [receipt.date]);
+    }
+
+    // Restoring a rejected receipt puts it back in the review queue (F38). It is
+    // not in the books while rejected, so no period lock applies; an approved
+    // receipt is not sent back this way.
+    if (parsed.reviewStatus === "pending" && receipt.reviewStatus === "approved") {
+      throw new AppError("Kuitti on jo hyväksytty.", "CONFLICT", 409);
     }
 
     // A receipt that is linked to a transaction is part of bookkeeping.

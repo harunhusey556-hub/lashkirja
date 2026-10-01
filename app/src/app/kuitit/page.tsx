@@ -8,6 +8,8 @@ import QueuedReceiptsCard from "@/components/QueuedReceiptsCard";
 import { useRefetchOnReconnect } from "@/components/useRefetchOnReconnect";
 import { useOfflineReceiptQueue } from "@/components/useOfflineReceiptQueue";
 import ReviewQueue from "@/components/ReviewQueue";
+import RejectedReceipts from "@/components/RejectedReceipts";
+import { showToast } from "@/lib/toast";
 import { SkeletonList } from "@/components/AsyncState";
 import { ConnectionNotice, EmptyState, StaleBanner } from "@/components/ScreenState";
 import {
@@ -144,6 +146,8 @@ export default function KuititPage() {
     () => readPageCache<SavedReceipt[]>("receipts-pending") ?? []
   );
   const [pendingTruncated, setPendingTruncated] = useState(false);
+  // Rejected receipts stay reachable: shown in a card, restorable (F38).
+  const [rejectedReceipts, setRejectedReceipts] = useState<SavedReceipt[]>([]);
   const [loadingMorePending, setLoadingMorePending] = useState(false);
   const [bulkReviewing, setBulkReviewing] = useState(false);
   const [retryApproveIds, setRetryApproveIds] = useState<string[]>([]);
@@ -306,6 +310,21 @@ export default function KuititPage() {
   }
 
   useEffect(() => {
+    let cancelled = false;
+    apiFetch("/api/receipts?reviewStatus=rejected")
+      .then((res) => readJson<{ receipts?: SavedReceipt[] }>(res, "Hylättyjen haku epäonnistui"))
+      .then((data) => {
+        if (!cancelled) setRejectedReceipts(data.receipts || []);
+      })
+      .catch(() => {
+        // The card is a convenience; the rest of the page does not wait for it.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [loadAttempt]);
+
+  useEffect(() => {
     const controller = new AbortController();
     // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional fetch-on-mount/refetch: storing the fetched counts is exactly the external-system sync this effect exists for
     void loadCounts(controller.signal);
@@ -430,7 +449,7 @@ export default function KuititPage() {
     setAppliedAdvanced(emptyAdvanced);
   }
 
-  async function handleReview(id: string, status: "approved" | "rejected") {
+  async function handleReview(id: string, status: "approved" | "rejected" | "pending") {
     setActionError("");
     try {
       const res = await apiFetch(`/api/receipts/${id}/review`, {
@@ -441,6 +460,17 @@ export default function KuititPage() {
       if (!res.ok) await readJson(res, "Päivitys epäonnistui");
       setLoadAttempt((a) => a + 1);
       void loadCounts();
+      if (status === "rejected") {
+        // Reject is never a silent delete: it can be undone here, and the receipt
+        // stays listed under Hylätyt kuitit (F38).
+        showToast({
+          tone: "info",
+          text: "Kuitti hylättiin",
+          action: { label: "Kumoa", onAction: () => void handleReview(id, "pending") },
+        });
+      } else if (status === "pending") {
+        showToast({ tone: "success", text: "Kuitti palautettiin tarkastettavaksi" });
+      }
     } catch (error: unknown) {
       if (isUnauthorized(error)) {
         redirectToLogin();
@@ -696,6 +726,8 @@ export default function KuititPage() {
             bulkBusy={bulkReviewing}
           />
         )}
+
+        <RejectedReceipts receipts={rejectedReceipts} onRestore={(id) => void handleReview(id, "pending")} />
 
         {pendingTruncated && (
           <Button
