@@ -29,6 +29,7 @@ import {
 import { Icon } from "@/components/ds/Icon";
 import { hapticNotify } from "@/lib/haptics";
 import { displayChatContent } from "@/lib/chat-legacy";
+import { awaitingFirstWord, ChatPendingReply } from "@/components/ChatPendingReply";
 import { useOverlayLock } from "@/lib/overlay-lock";
 
 interface ChatSourceLink {
@@ -90,7 +91,7 @@ const AVAILABILITY_TTL_MS = 60_000;
 
 /** The two shortcuts that always work, model or not. */
 const SHORTCUTS = [
-  { label: "Täsmäytä kuitit", message: "Täsmäytä kuitit" },
+  { label: "Kohdista kuitit", message: "Kohdista kuitit" },
   { label: "Tämän kuun ALV", message: "Mikä on tämän kuun ALV?" },
 ];
 
@@ -593,7 +594,7 @@ export function AiChatDrawer({
           message.id === msgId
             ? {
                 ...message,
-                content: "Täsmäytys hyväksytty ja kuitti yhdistetty tiliotteeseen.",
+                content: "Kohdistus hyväksytty ja kuitti yhdistetty tiliotteeseen.",
                 proposal: message.proposal ? { ...message.proposal, status: "accepted" } : null,
               }
             : message
@@ -601,7 +602,7 @@ export function AiChatDrawer({
       );
       void hapticNotify("success");
     } catch (error) {
-      setActionError(errorMessage(error, "Täsmäytys epäonnistui"));
+      setActionError(errorMessage(error, "Kohdistus epäonnistui"));
       void hapticNotify("error");
     } finally {
       setMatchBusyId(null);
@@ -988,7 +989,7 @@ export function AiChatDrawer({
             <p className="mt-4 text-headline font-semibold text-ink">Miten voin auttaa?</p>
             <p className="mt-1 max-w-xs text-caption leading-relaxed text-ink-2">
               {aiAvailable === false
-                ? "Avustaja osaa nyt täsmäyttää kuitit ja kertoa tämän kuun ALV:n. Laajemmat kysymykset tulevat käyttöön myöhemmin."
+                ? "Avustaja osaa nyt kohdistaa kuitit ja kertoa tämän kuun ALV:n. Laajemmat kysymykset tulevat käyttöön myöhemmin."
                 : "Kysy kuiteista, tapahtumista tai ALV:stä. Ehdotukset hyväksyt aina itse."}
             </p>
             <div className="mt-5 flex flex-wrap justify-center gap-2">
@@ -1070,7 +1071,7 @@ export function AiChatDrawer({
                   <div className="mt-1 w-full max-w-[90%] space-y-3 rounded-card border border-line bg-surface p-4">
                     <p className="flex items-center gap-2 text-caption font-semibold text-accent">
                       <Icon icon={Link2} size="inline" />
-                      Ehdotus täsmäytykseksi
+                      Ehdotus kohdistukseksi
                     </p>
                     <div className="space-y-1 text-caption leading-relaxed text-ink">
                       {/* A no-break space keeps "139,00 €" on one line. */}
@@ -1095,7 +1096,7 @@ export function AiChatDrawer({
               {message.proposal?.status === "accepted" && (
                 <p className="mt-1 flex items-center gap-1.5 px-1 text-caption font-medium text-success">
                   <Icon icon={Check} size="inline" />
-                  Täsmäytys hyväksytty
+                  Kohdistus hyväksytty
                 </p>
               )}
               {message.proposal?.status === "rejected" && (
@@ -1119,6 +1120,8 @@ export function AiChatDrawer({
             </div>
           );
         })}
+        {/* F60: between send and the first word the thread shows the assistant is answering. */}
+        {awaitingFirstWord(loading, messages[messages.length - 1]) && <ChatPendingReply />}
         {showJump && (
           <button
             type="button"

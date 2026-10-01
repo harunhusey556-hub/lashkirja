@@ -90,3 +90,40 @@
     transform: none !important;
   }
 }
+
+/* Typing dots while the assistant has not yet sent its first word (F60). */
+.typingDot {
+  width: 6px;
+  height: 6px;
+  border-radius: 9999px;
+  background: var(--color-ink-2);
+  animation: chatTyping 1.2s ease-in-out infinite;
+}
+
+.typingDot:nth-child(2) {
+  animation-delay: 150ms;
+}
+
+.typingDot:nth-child(3) {
+  animation-delay: 300ms;
+}
+
+@keyframes chatTyping {
+  0%,
+  60%,
+  100% {
+    transform: translateY(0);
+    opacity: 0.35;
+  }
+  30% {
+    transform: translateY(-3px);
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .typingDot {
+    animation: none !important;
+    opacity: 0.6;
+  }
+}
