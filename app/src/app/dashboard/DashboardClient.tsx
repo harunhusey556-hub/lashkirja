@@ -452,6 +452,7 @@ export default function DashboardClient() {
       case "overdue_invoice": {
         // A reminder that is certain to be refused (the last one's term still
         // runs) is not offered: the row opens the invoice, which says when.
+        // eslint-disable-next-line react-hooks/purity -- a wall-clock comparison; a stale render at worst offers the button one reload late
         const reminded = item.nextReminderAt != null && new Date(item.nextReminderAt).getTime() > Date.now();
         return {
           key: item.id,

@@ -160,6 +160,7 @@ export default function KuititPage() {
     // other filters, the show-all toggle) (V44).
     setMonthFilter(drill.month || "");
     setSearchInput("");
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- one-shot read of the report link on mount; the filter state is the target, not derived state
     setSearchQuery("");
     setShowAllReceipts(false);
     const next = {

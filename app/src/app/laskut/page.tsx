@@ -181,6 +181,7 @@ function InvoicesPageContent() {
     // when it names none) and no remembered search (V44).
     if (!statusFromUrl && !monthFilter) return;
     setSearch("");
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- a report link resets the list state when its target changes; the list state is the target, not derived state
     setQuery("");
     setFilter(
       statusFromUrl && (SALES_FILTER_IDS as readonly string[]).includes(statusFromUrl)
