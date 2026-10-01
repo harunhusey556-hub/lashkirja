@@ -20,7 +20,6 @@ export interface GreetingFacts {
   previousMonth: { month: string; open: number } | null;
 }
 
-import { MONTHS } from "./finnish-months";
 
 const NUMBER_WORDS = ["nolla", "yksi", "kaksi", "kolme", "neljä", "viisi", "kuusi", "seitsemän", "kahdeksan", "yhdeksän", "kymmenen"];
 
@@ -28,15 +27,6 @@ const NUMBER_WORDS = ["nolla", "yksi", "kaksi", "kolme", "neljä", "viisi", "kuu
 export function countThings(count: number): string {
   const word = count >= 0 && count < NUMBER_WORDS.length ? NUMBER_WORDS[count] : String(count);
   return `${word} ${count === 1 ? "asia" : "asiaa"}`;
-}
-
-function monthName(month: string): string {
-  return MONTHS[Number(month.slice(5, 7)) - 1] ?? "";
-}
-
-/** "Syyskuu" -> "Syyskuussa": every Finnish month name ends in "kuu". */
-function inMonth(name: string): string {
-  return `${name}ssa`;
 }
 
 /** Hour (0-23), day of month and the month's length, all as the clock in Helsinki shows them. */
@@ -72,14 +62,6 @@ export function kotiGreeting(facts: GreetingFacts): string | null {
     if (day === daysInMonth) {
       if (facts.blockingCount > 0) return `Kuukauden viimeinen päivä. Vielä ${countThings(facts.blockingCount)}.`;
       if (facts.hasActivity) return "Kuukauden viimeinen päivä. Kirjanpito on ajan tasalla.";
-    }
-    if (day === 1 && facts.previousMonth) {
-      const name = monthName(facts.previousMonth.month);
-      if (name) {
-        return facts.previousMonth.open > 0
-          ? `${inMonth(name)} on vielä ${countThings(facts.previousMonth.open)}.`
-          : `${name} on valmis suljettavaksi.`;
-      }
     }
   }
   if (!facts.firstName.trim()) return null;

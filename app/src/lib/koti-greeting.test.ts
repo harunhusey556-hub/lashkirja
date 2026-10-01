@@ -54,9 +54,9 @@ describe("the month sentence is said only when it is true", () => {
     expect(kotiGreeting({ ...base, now: lastDay, setupEmpty: true, hasActivity: false })).toBe("Hyvää päivää, Liisa");
   });
 
-  it("first day speaks about the month before only when it is not closed", () => {
-    expect(kotiGreeting({ ...base, now: firstDay, previousMonth: { month: "2026-10", open: 3 } })).toBe("Lokakuussa on vielä kolme asiaa.");
-    expect(kotiGreeting({ ...base, now: firstDay, previousMonth: { month: "2026-10", open: 0 } })).toBe("Lokakuu on valmis suljettavaksi.");
+  it("the first day of a month gets the ordinary greeting, never a nag about the month before", () => {
+    expect(kotiGreeting({ ...base, now: firstDay, previousMonth: { month: "2026-10", open: 3 } })).toBe("Hyvää päivää, Liisa");
+    expect(kotiGreeting({ ...base, now: firstDay, previousMonth: { month: "2026-10", open: 0 } })).toBe("Hyvää päivää, Liisa");
     expect(kotiGreeting({ ...base, now: firstDay, previousMonth: null })).toBe("Hyvää päivää, Liisa");
   });
 
