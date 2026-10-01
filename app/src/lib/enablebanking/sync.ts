@@ -27,6 +27,7 @@ import type { PsuContext } from "./client";
 import { withTrackedJob } from "../job-tracker";
 import { getLockedThrough, isDateLocked, isMonthLocked } from "../period-lock";
 import { normalizeIban } from "../iban";
+import { StoredRowPool } from "../bank-row-fingerprint";
 import { fallbackStatementMonth, statementMonthOrFallback } from "../report-calendar";
 import type { AccountSyncRow } from "../bank-sync-summary";
 
@@ -426,13 +427,20 @@ async function writeTransactions(input: {
 
 /**
  * The bank can change how it identifies a movement between two deliveries (a
- * reference that disappears or appears), which a key lookup alone reads as a
- * new row. So the rows the keys do not recognise are compared with what is
- * stored by content. A reference-less row is already stored when the database
- * holds at least as many rows with that content as this row's occurrence
- * number, and a row with a bank reference takes over the row an earlier sync
- * stored without one. Only as many rows are matched as exist, so a genuine
- * extra purchase is still new.
+ * reference that disappears, appears or is replaced by another id), and the
+ * same movements may already be stored from a tiliote file. A key lookup alone
+ * reads all of that as new rows, so the rows the keys do not recognise are
+ * compared with what the account already holds, from any statement and any
+ * source, in two passes. Rows are claimed one stored row at a time, so only as
+ * many are matched as exist and a genuine extra purchase is still new.
+ *
+ * 1. Same content (date, cents and the bank's own wording): a row with a
+ *    stable id takes over the stored row's key; a row without one is skipped.
+ * 2. Same day, cents and counterparty (what a file shares with the feed, or
+ *    what is left when a reference number vanished): a file row takes over the
+ *    bank's key, a bank row stored under a fingerprint key likewise.
+ *
+ * A stored row whose key this delivery carries itself is never claimed.
  */
 async function dropRowsAlreadyStoredByContent(
   userId: string,
@@ -444,21 +452,38 @@ async function dropRowsAlreadyStoredByContent(
   const undated = unmatched.some((row) => row.date === null);
   const from = dates.reduce((min, date) => (date < min ? date : min), dates[0] ?? "");
   const to = dates.reduce((max, date) => (date > max ? date : max), dates[0] ?? "");
+  const ibans = [...new Set(unmatched.map((row) => row.iban))];
+  // The account an IBAN belongs to: a tiliote file imported for it holds the
+  // same movements without any IBAN of its own.
+  const accounts = await prisma.bankAccount.findMany({
+    where: { userId, iban: { in: ibans } },
+    select: { id: true },
+  });
   const storedRows = await prisma.transaction.findMany({
     where: {
-      userId,
-      source: "enablebanking",
-      iban: { in: [...new Set(unmatched.map((row) => row.iban))] },
-      OR: [
-        ...(dates.length > 0
-          ? [{ date: { gte: new Date(`${from}T00:00:00.000Z`), lte: new Date(`${to}T00:00:00.000Z`) } }]
-          : []),
-        ...(undated ? [{ date: null }] : []),
+      AND: [
+        {
+          OR: [
+            { userId, iban: { in: ibans } },
+            ...(accounts.length > 0
+              ? [{ statement: { userId, bankAccountId: { in: accounts.map((account) => account.id) } } }]
+              : []),
+          ],
+        },
+        {
+          OR: [
+            ...(dates.length > 0
+              ? [{ date: { gte: new Date(`${from}T00:00:00.000Z`), lte: new Date(`${to}T00:00:00.000Z`) } }]
+              : []),
+            ...(undated ? [{ date: null }] : []),
+          ],
+        },
       ],
     },
     select: {
       id: true,
       bankRef: true,
+      source: true,
       iban: true,
       date: true,
       amountCents: true,
@@ -467,45 +492,78 @@ async function dropRowsAlreadyStoredByContent(
       counterparty: true,
     },
   });
-  const byFingerprint = new Map<string, Array<{ id: string; bankRef: string | null }>>();
-  for (const stored of storedRows) {
+  type Stored = (typeof storedRows)[number] & { day: string | null };
+  const claimable: Stored[] = storedRows
+    .filter((stored) => !(stored.bankRef && knownKeys.has(stored.bankRef)))
+    .map((stored) => ({ ...stored, day: stored.date ? stored.date.toISOString().slice(0, 10) : null }));
+
+  const byFingerprint = new Map<string, Stored[]>();
+  for (const stored of claimable) {
+    if (stored.source !== "enablebanking" || !stored.iban) continue;
     const fingerprint = contentFingerprint({
-      iban: stored.iban ?? "",
-      date: stored.date ? stored.date.toISOString().slice(0, 10) : null,
+      iban: stored.iban,
+      date: stored.day,
       amountCents: stored.amountCents,
       reference: stored.reference,
       message: stored.message,
       counterparty: stored.counterparty,
     });
     const bucket = byFingerprint.get(fingerprint) ?? [];
-    bucket.push({ id: stored.id, bankRef: stored.bankRef });
+    bucket.push(stored);
     byFingerprint.set(fingerprint, bucket);
   }
 
-  const fresh: MappedBankTransaction[] = [];
   const claimed = new Set<string>();
+  const adopt = async (stored: Stored, row: MappedBankTransaction) => {
+    claimed.add(stored.id);
+    // A row that lost its id does not replace the stored row's own key.
+    if (!row.stableRef && stored.bankRef) return;
+    if (stored.bankRef === row.bankRef && stored.iban === row.iban) return;
+    await prisma.transaction.update({
+      where: { id: stored.id },
+      data: { bankRef: row.bankRef, iban: row.iban, userId },
+    });
+  };
+
+  // Pass 1: the same content.
+  const leftOver: MappedBankTransaction[] = [];
   for (const row of unmatched) {
-    const same = byFingerprint.get(row.fingerprint) ?? [];
-    if (!row.stableRef) {
-      if (same.length >= row.occurrence) continue;
+    const same = byFingerprint.get(row.fingerprint)?.find((candidate) => !claimed.has(candidate.id));
+    if (!same) {
+      leftOver.push(row);
+      continue;
+    }
+    await adopt(same, row);
+  }
+
+  // Pass 2: the same day, cents and counterparty.
+  const pool = new StoredRowPool(
+    claimable
+      .filter((stored) => !claimed.has(stored.id))
+      .map((stored) => ({
+        date: stored.day,
+        amountCents: stored.amountCents,
+        counterparty: stored.counterparty,
+        stored,
+      }))
+  );
+  const fresh: MappedBankTransaction[] = [];
+  for (const row of leftOver) {
+    const hit = pool.take(row, (candidate) => {
+      const { stored } = candidate;
+      // Two bank rows with ids of their own are different movements unless
+      // their content says otherwise (pass 1). A bank row stored under a
+      // fingerprint key, a row stored by file and a row that lost its id may
+      // still be the same movement.
+      if (stored.source !== "enablebanking") return true;
+      if (!row.stableRef) return true;
+      return stored.bankRef !== null && isFingerprintRef(stored.bankRef);
+    });
+    if (!hit) {
       fresh.push(row);
       continue;
     }
-    // A stable reference: adopt an earlier row that was stored without one and
-    // that no row of this delivery already claims by its own key.
-    const adoptable = same.find(
-      (candidate) =>
-        candidate.bankRef !== null &&
-        isFingerprintRef(candidate.bankRef) &&
-        !knownKeys.has(candidate.bankRef) &&
-        !claimed.has(candidate.id)
-    );
-    if (!adoptable) {
-      fresh.push(row);
-      continue;
-    }
-    claimed.add(adoptable.id);
-    await prisma.transaction.update({ where: { id: adoptable.id }, data: { bankRef: row.bankRef } });
+    await adopt(hit.stored, row);
   }
   return fresh;
 }

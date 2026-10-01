@@ -144,6 +144,9 @@ export async function POST(req: NextRequest) {
     // wins, then an IBAN found inside the file, then the default account.
     const requestedAccountId = formData.get("bankAccountId");
     let bankAccountId: string | null = null;
+    // Only text formats are cheap to scan; xlsx/pdf have no IBAN hint.
+    const scannable = detected.kind === "xml" || detected.kind === "csv";
+    const ibanHint = scannable ? extractIbans(buffer.toString("utf8").slice(0, 200_000))[0] ?? null : null;
     if (typeof requestedAccountId === "string" && requestedAccountId.trim()) {
       const owned = await prisma.bankAccount.findFirst({
         where: { id: requestedAccountId.trim(), userId },
@@ -157,11 +160,6 @@ export async function POST(req: NextRequest) {
       }
       bankAccountId = owned.id;
     } else {
-      // Only text formats are cheap to scan; xlsx/pdf fall back to the default.
-      const scannable = detected.kind === "xml" || detected.kind === "csv";
-      const ibanHint = scannable
-        ? extractIbans(buffer.toString("utf8").slice(0, 200_000))[0] ?? null
-        : null;
       bankAccountId = await resolveAccountForImport(userId, { iban: ibanHint });
     }
 
@@ -183,7 +181,10 @@ export async function POST(req: NextRequest) {
       const incoming = parsedTransactions.map((tx) => ({ ...tx, amountCents: eurosToCents(tx.amount) }));
       // The file hash only catches a byte-identical file. An export that
       // overlaps an earlier one, or the bank feed, repeats rows under new ids.
-      const stored = await loadStoredRowIdentities(db, userId, bankAccountId, incoming);
+      const account = bankAccountId
+        ? await db.bankAccount.findUnique({ where: { id: bankAccountId }, select: { iban: true } })
+        : null;
+      const stored = await loadStoredRowIdentities(db, userId, bankAccountId, incoming, [account?.iban, ibanHint]);
       const { fresh, duplicates } = splitNewRows(incoming, stored);
       if (fresh.length === 0) throw new AllRowsKnownError(duplicates.length);
       await db.transaction.createMany({

@@ -41,36 +41,47 @@ export function bankRowKey(row: RowIdentity): string {
 }
 
 /**
- * Splits incoming rows into new ones and ones already stored. A stored row
+ * The stored rows of one account, to be claimed one at a time. A stored row
  * with no counterparty (the feed does not always name one) stands for any name
- * on the same day and amount; otherwise the names must agree.
+ * on the same day and amount; otherwise the names must agree. A claimed row is
+ * gone from the pool, so two genuine identical rows need two stored copies.
  */
+export class StoredRowPool<T extends RowIdentity> {
+  private readonly byDay = new Map<string, Array<{ row: T; text: string; used: boolean }>>();
+
+  constructor(existing: T[]) {
+    for (const row of existing) {
+      const key = dayKey(row);
+      const bucket = this.byDay.get(key) ?? [];
+      bucket.push({ row, text: normaliseRowText(row.counterparty), used: false });
+      this.byDay.set(key, bucket);
+    }
+  }
+
+  /** Claims the stored row this one stands for (and `accept`s), or null. */
+  take(incoming: RowIdentity, accept: (stored: T) => boolean = () => true): T | null {
+    const bucket = this.byDay.get(dayKey(incoming));
+    const text = normaliseRowText(incoming.counterparty);
+    const match =
+      bucket?.find((copy) => !copy.used && copy.text === text && accept(copy.row)) ??
+      bucket?.find((copy) => !copy.used && (copy.text === "" || text === "") && accept(copy.row));
+    if (!match) return null;
+    match.used = true;
+    return match.row;
+  }
+}
+
+/** Splits incoming rows into new ones and ones already stored. */
 export function splitNewRows<T extends RowIdentity>(
   incoming: T[],
   existing: RowIdentity[]
 ): { fresh: T[]; duplicates: T[] } {
-  const stored = new Map<string, Array<{ text: string; used: boolean }>>();
-  for (const row of existing) {
-    const key = dayKey(row);
-    const bucket = stored.get(key) ?? [];
-    bucket.push({ text: normaliseRowText(row.counterparty), used: false });
-    stored.set(key, bucket);
-  }
-
+  const pool = new StoredRowPool(existing);
   const fresh: T[] = [];
   const duplicates: T[] = [];
   for (const row of incoming) {
-    const bucket = stored.get(dayKey(row));
-    const text = normaliseRowText(row.counterparty);
-    const match =
-      bucket?.find((copy) => !copy.used && copy.text === text) ??
-      bucket?.find((copy) => !copy.used && (copy.text === "" || text === ""));
-    if (match) {
-      match.used = true;
-      duplicates.push(row);
-    } else {
-      fresh.push(row);
-    }
+    if (pool.take(row)) duplicates.push(row);
+    else fresh.push(row);
   }
   return { fresh, duplicates };
 }
@@ -86,12 +97,16 @@ export function skippedRowsNotice(skipped: number): string | null {
 /**
  * The rows already stored for this user and bank account over the days the
  * incoming rows cover, from any statement and any source (file or bank feed).
+ * `ibans` names the account's own IBAN (and the one found in the file): bank
+ * feed rows of that IBAN count too when their tiliote is not linked to any
+ * account, so a file imported after the feed still sees them.
  */
 export async function loadStoredRowIdentities(
   db: Prisma.TransactionClient,
   userId: string,
   bankAccountId: string | null,
-  incoming: RowIdentity[]
+  incoming: RowIdentity[],
+  ibans: Array<string | null | undefined> = []
 ): Promise<RowIdentity[]> {
   const dates = incoming.flatMap((row) => (row.date ? [row.date.slice(0, 10)] : []));
   const hasUndated = incoming.some((row) => !row.date);
@@ -106,8 +121,21 @@ export async function loadStoredRowIdentities(
   if (hasUndated) ranges.push({ date: null });
   if (ranges.length === 0) return [];
 
+  const feedIbans = [...new Set(ibans.filter((iban): iban is string => Boolean(iban)))];
   const rows = await db.transaction.findMany({
-    where: { statement: { userId, bankAccountId }, OR: ranges },
+    where: {
+      AND: [
+        {
+          OR: [
+            { statement: { userId, bankAccountId } },
+            ...(feedIbans.length > 0
+              ? [{ statement: { userId, bankAccountId: null }, iban: { in: feedIbans } }]
+              : []),
+          ],
+        },
+        { OR: ranges },
+      ],
+    },
     select: { date: true, amountCents: true, counterparty: true, message: true },
   });
   return rows.map((row) => ({
