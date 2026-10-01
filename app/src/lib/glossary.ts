@@ -13,9 +13,9 @@ const S = String.raw`(?<![\p{L}])`;
 const re = (source: string, flags = "iu") => new RegExp(source, flags);
 
 export const RETIRED_TERMS: RetiredTerm[] = [
-  { pattern: re(`${S}tosite`), use: "kuitti" },
+  { pattern: re(`${S}tositt?e`), use: "kuitti" },
   { pattern: re(`${S}linkit[aä]`), use: "kohdista" },
-  { pattern: re(`${S}linkit(?:t|et)`), use: "kohdistettu" },
+  { pattern: re(`linkit(?:t|et|y)`), use: "kohdistettu" },
   // "ei täsmää" (a password or a total that differs) is plain Finnish; the retired
   // senses are the receipt-matching verb and noun.
   { pattern: re(`${S}täsmäy`), use: "kohdista" },
@@ -26,12 +26,12 @@ export const RETIRED_TERMS: RetiredTerm[] = [
   { pattern: re(`${S}erääntyi`), use: "myöhässä" },
   { pattern: re(`${S}myyntisaamiset`), use: "Avoimet myyntilaskut" },
   { pattern: re(`${S}ostovelat`), use: "Avoimet ostolaskut" },
-  { pattern: re(`${S}tilitapahtumat`), use: "Pankkitapahtumat" },
+  { pattern: re(`${S}tilitapahtum`), use: "Pankkitapahtumat" },
   { pattern: re(`${S}taustatyö`), use: "Huomioitavat" },
   { pattern: re(`${S}poikkeusjono`), use: "Huomioitavat" },
   { pattern: re(`${S}lisää kuitti`), use: "Uusi kuitti" },
   { pattern: re(`${S}ota kuva`), use: "Kuvaa kuitti" },
-  { pattern: re(`${S}kirjaudu ulos`), use: "Kirjaa ulos" },
+  { pattern: re(`${S}kirjaudu(?:taan|tko|t)? ulos`), use: "Kirjaa ulos" },
   { pattern: re(`${S}virheviite`), use: "tukikoodi" },
   { pattern: re(`${S}tekoälyapuri`), use: "Avustaja" },
   { pattern: re(`${S}tekoälyavustaja`), use: "Avustaja" },

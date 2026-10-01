@@ -369,7 +369,7 @@ export default function StatementDetailView({
         failedCount?: number;
         updatedCount?: number;
         failed?: { error?: string }[];
-      }>(res, "Kuittilinkityksen päivitys epäonnistui");
+      }>(res, "Kuittien kohdistuksen päivitys epäonnistui");
       if (url.includes("batch-approve") && (data.failedCount ?? 0) > 0) {
         setActionError(
           data.failed?.[0]?.error ||
@@ -386,7 +386,7 @@ export default function StatementDetailView({
         return false;
       }
       setActionError(
-        errorMessage(error, "Kuittilinkityksen päivitys epäonnistui")
+        errorMessage(error, "Kuittien kohdistuksen päivitys epäonnistui")
       );
       return false;
     } finally {
@@ -689,7 +689,7 @@ export default function StatementDetailView({
       {regularSuggestedCount > 0 && (
         <div className="space-y-3 rounded-card border border-line bg-surface p-4">
           <div>
-            <p className="text-body font-medium text-ink">Kuittien linkitys</p>
+            <p className="text-body font-medium text-ink">Kuittien kohdistus</p>
             <p className="mt-1 text-caption text-ink-2">
               {regularSuggestedCount} valmista ehdotusta
               {missingCount > 0 && ` · ${missingCount} tapahtumaa odottaa kuittia`}
@@ -1020,7 +1020,7 @@ export default function StatementDetailView({
                             ...(t.matchStatus === "confirmed"
                               ? [
                                   {
-                                    label: "Poista linkitys",
+                                    label: "Poista kohdistus",
                                     onSelect: () =>
                                       matchAction(t.id, "/api/matching/unlink", {
                                         transactionId: t.id,

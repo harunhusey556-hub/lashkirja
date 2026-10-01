@@ -411,11 +411,11 @@ async function signOutFromProfileSheet(): Promise<boolean> {
     return false;
   }
   open.click();
-  if (!(await waitFor(() => buttonWithText(document, "Kirjaudu ulos") !== null, 5_000, "the profile sheet"))) {
+  if (!(await waitFor(() => buttonWithText(document, "Kirjaa ulos") !== null, 5_000, "the profile sheet"))) {
     return false;
   }
   await sleep(700);
-  buttonWithText(document, "Kirjaudu ulos")?.click();
+  buttonWithText(document, "Kirjaa ulos")?.click();
   return waitFor(() => Boolean(document.querySelector("#email")), 20_000, "the login form after signing out");
 }
 

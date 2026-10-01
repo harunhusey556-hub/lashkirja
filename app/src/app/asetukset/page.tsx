@@ -24,7 +24,7 @@ export default function AsetuksetPage() {
       <PageTitle title="Asetukset" />
 
       {/* A failed profile load never hides the rest: the rows do not need it,
-          and "Kirjaudu ulos" must stay reachable. */}
+          and "Kirjaa ulos" must stay reachable. */}
       {loadError && !profile && (
         <ConnectionNotice error={new Error(loadError)} fallback={loadError} onRetry={retry} compact />
       )}

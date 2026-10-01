@@ -540,7 +540,7 @@ export async function recordPurchasePayment(
       });
       if (taken) {
         throw new AppError(
-          "Tämä tilitapahtuma on jo kohdistettu ostolaskulle.",
+          "Tämä pankkitapahtuma on jo kohdistettu ostolaskulle.",
           "TRANSACTION_ALREADY_USED",
           409
         );

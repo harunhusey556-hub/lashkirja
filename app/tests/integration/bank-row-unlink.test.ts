@@ -35,7 +35,7 @@ async function saleFixture() {
   };
 }
 
-describe("F45: Poista linkitys on an approved sale leaves a row that can be approved again", () => {
+describe("F45: Poista kohdistus on an approved sale leaves a row that can be approved again", () => {
   async function approvedSaleRow() {
     const { statement } = await saleFixture();
     const row = statement.transactions[0];

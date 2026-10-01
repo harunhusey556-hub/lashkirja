@@ -278,7 +278,7 @@ export default function ALVRaporttiPage() {
                   <>
                     {" "}
                     {kuittiCount(data.excludedReceiptCount)} jätettiin pois, koska sama
-                    tilitapahtuma on jo kohdistettu laskulle.
+                    pankkitapahtuma on jo kohdistettu laskulle.
                   </>
                 ) : null}
                 {data.creditNoteCount ? (

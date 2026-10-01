@@ -64,7 +64,7 @@ export async function GET(req: NextRequest) {
       },
     });
   } catch {
-    sectionErrors.matching = "Kuittien linkitystä ei saatu ladattua.";
+    sectionErrors.matching = "Kuittien kohdistusta ei saatu ladattua.";
   }
 
   let bankIncome = 0;

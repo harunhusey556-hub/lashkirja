@@ -1333,7 +1333,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                     )}
                   </IconTile>
                   <span className="text-body font-medium text-danger">
-                    {signingOut ? "Kirjaudutaan ulos…" : "Kirjaa ulos"}
+                    {signingOut ? "Kirjataan ulos…" : "Kirjaa ulos"}
                   </span>
                 </button>
               </div>

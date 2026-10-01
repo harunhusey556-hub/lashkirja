@@ -38,7 +38,7 @@ export const POST = withErrorHandler(async (req: NextRequest) => {
   }
   if (tx.matchStatus === "confirmed") {
     return NextResponse.json(
-      { error: "Poista linkitys ensin" },
+      { error: "Poista kohdistus ensin" },
       { status: 409 }
     );
   }

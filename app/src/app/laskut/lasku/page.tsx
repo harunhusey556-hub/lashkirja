@@ -541,7 +541,7 @@ function InvoiceDetail() {
       await readJson(response, "Tallennus epäonnistui");
       showToast({
         tone: "success",
-        text: action === "link" ? "Maksu yhdistettiin tilitapahtumaan" : "Merkitty erillisiksi tuloiksi",
+        text: action === "link" ? "Maksu yhdistettiin pankkitapahtumaan" : "Merkitty erillisiksi tuloiksi",
       });
       await load();
     } catch (error) {

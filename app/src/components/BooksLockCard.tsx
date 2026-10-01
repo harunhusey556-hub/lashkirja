@@ -222,7 +222,7 @@ export default function BooksLockCard() {
             Avoinna ennen lukitusta ({formatMonth(precheck.month)})
           </p>
           <Section title="Puuttuvat kuitit">
-            <PrecheckRows items={precheck.missingDocuments} empty="Ei puuttuvia tositteita." />
+            <PrecheckRows items={precheck.missingDocuments} empty="Ei puuttuvia kuitteja." />
           </Section>
           <Section title="Kohdistamattomat tapahtumat">
             <PrecheckRows items={precheck.unmatchedTransactions} empty="Ei kohdistettavia tapahtumia." />

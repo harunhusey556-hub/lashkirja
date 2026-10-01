@@ -206,7 +206,7 @@ export async function buildPeriodPackage(
           "Tuloslaskelma ja ALV perustuvat hyväksyttyihin kuitteihin ja myyntilaskuihin laskun päivän mukaan (laskutusperuste). Luonnokset eivät ole mukana.",
           "Ostolaskun ALV on mukana vähennettävässä verossa laskun päivän mukaan. Jos sama osto on jo kuittina, ostolaskun ALV jätetään pois (csv/ostolaskut.csv kertoo jokaisesta laskusta, onko se mukana).",
           "Hyvityslasku vähentää myyntiä sillä kaudella, jolla se on annettu. Hyvitetty lasku pysyy omalla kaudellaan.",
-          "Tuloa ei lasketa kahteen kertaan: kuitti, joka on tehty laskun maksaneesta tilitapahtumasta, jätetään pois.",
+          "Tuloa ei lasketa kahteen kertaan: kuitti, joka on tehty laskun maksaneesta pankkitapahtumasta, jätetään pois.",
           "Käteisnäkymä (kohdistukset.json) käyttää tiliotteen kohdekuukautta, ei kuitin päivää.",
           "Pankin istuntotietoja ei ole tässä paketissa.",
           "",

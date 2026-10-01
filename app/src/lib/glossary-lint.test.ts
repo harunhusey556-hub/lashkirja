@@ -3,6 +3,7 @@ import * as fs from "fs";
 import * as path from "path";
 import ts from "typescript";
 import { RETIRED_TERMS } from "./glossary";
+import { LEGACY_LIMITED_NOTICE_FI, PREVIOUS_LIMITED_NOTICE_FI } from "./chat-legacy";
 
 const SRC = path.resolve(__dirname, "..");
 
@@ -10,7 +11,7 @@ function walk(dir: string, out: string[]): string[] {
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
     const full = path.join(dir, entry.name);
     if (entry.isDirectory()) {
-      if (entry.name === "node_modules" || entry.name === "ci-autopilot" || entry.name === "generated") continue;
+      if (entry.name === "node_modules" || entry.name === "generated") continue;
       walk(full, out);
     } else if (entry.name !== "glossary.ts" && /\.(ts|tsx)$/.test(entry.name) &&!/\.test\.(ts|tsx)$/.test(entry.name)) {
       out.push(full);
@@ -49,8 +50,11 @@ const ALLOWED: string[] = [
   "lib/navigation.ts:etusivu",
   // A word searched for in the subject of incoming mail, not a label.
   "lib/mail-sync.ts:tosite",
+  // The two notice texts an applied SQL migration wrote into stored rows; only these exact
+  // strings are exempt, so a new string in the file is still linted.
+  `lib/chat-legacy.ts:${LEGACY_LIMITED_NOTICE_FI}`,
+  `lib/chat-legacy.ts:${PREVIOUS_LIMITED_NOTICE_FI}`,
   // Byte-identical copies of the notice text an applied SQL migration wrote; shown through a sanitiser.
-  "lib/chat-legacy.ts:*",
 ];
 
 describe("glossary lint", () => {
@@ -79,6 +83,8 @@ describe("the retired-word patterns", () => {
       "602,40 € erääntynyt", "Myyntisaamiset", "Ostovelat", "Tilitapahtumat", "Taustatyöt", "Poikkeusjono",
       "Lisää kuitti", "Ota kuva", "Kirjaudu ulos", "Kopioi virheviite", "Muu IMAP", "Maksuaika 14 pv",
       "Hyväksy kaikki 3 kpl", "Lähetetty", "Avoimet", "Täsmää",
+      "Ei puuttuvia tositteita.", "Poista linkitys", "Linkitys epäonnistui", "Tilitapahtuma", "tilitapahtumaan",
+      "Tilitapahtumasta", "Kirjaudutaan ulos…", "Kirjaudu ulos", "Kirjaudutko ulos", "Kirjaudut ulos",
     ]) {
       expect(flagged(text), text).toBe(true);
     }

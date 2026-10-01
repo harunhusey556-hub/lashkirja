@@ -1088,7 +1088,7 @@ export async function recordPayment(
       });
       if (taken) {
         throw new AppError(
-          "Tämä tilitapahtuma on jo kohdistettu laskulle.",
+          "Tämä pankkitapahtuma on jo kohdistettu laskulle.",
           "TRANSACTION_ALREADY_USED",
           409
         );
@@ -1224,7 +1224,7 @@ export async function linkPaymentToTransaction(
   });
   if (!payment) throw new NotFoundError("Maksua ei löytynyt.");
   if (payment.transactionId) {
-    throw new AppError("Maksu on jo yhdistetty tilitapahtumaan.", "PAYMENT_ALREADY_LINKED", 409);
+    throw new AppError("Maksu on jo yhdistetty pankkitapahtumaan.", "PAYMENT_ALREADY_LINKED", 409);
   }
   const row = await prisma.transaction.findFirst({
     where: { id: transactionId, statement: { userId } },
@@ -1240,13 +1240,13 @@ export async function linkPaymentToTransaction(
   if (!row) throw new NotFoundError("Tapahtumaa ei löytynyt.");
   if (row.invoicePayment) {
     throw new AppError(
-      "Tämä tilitapahtuma on jo kohdistettu laskulle.",
+      "Tämä pankkitapahtuma on jo kohdistettu laskulle.",
       "TRANSACTION_ALREADY_USED",
       409
     );
   }
   if (row.type !== "tulo" || row.amountCents !== payment.amountCents) {
-    throw new ValidationError("Tilitapahtuman summa ei vastaa maksua.");
+    throw new ValidationError("Pankkitapahtuman summa ei vastaa maksua.");
   }
   // Linking drops the income receipt of this row from its month, so that
   // month must still be open, like the payment's own.
@@ -1267,9 +1267,9 @@ export async function linkPaymentToTransaction(
       data: { transactionId: row.id, source: "bank" },
     });
     if (updated.count === 0) {
-      throw new AppError("Maksu on jo yhdistetty tilitapahtumaan.", "PAYMENT_ALREADY_LINKED", 409);
+      throw new AppError("Maksu on jo yhdistetty pankkitapahtumaan.", "PAYMENT_ALREADY_LINKED", 409);
     }
-    await recordActivity(tx, invoiceId, "payment_linked", "Maksu yhdistettiin tilitapahtumaan.");
+    await recordActivity(tx, invoiceId, "payment_linked", "Maksu yhdistettiin pankkitapahtumaan.");
   });
   return getInvoice(userId, invoiceId);
 }

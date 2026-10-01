@@ -104,7 +104,7 @@ export default function ReceiptMatchPanel({
             disabled={busy}
             className="active-press min-h-11 inline-flex items-center px-2 -mx-2 text-caption font-medium text-accent disabled:opacity-50"
           >
-            Poista linkitys
+            Poista kohdistus
           </button>
         )}
       </div>

@@ -99,7 +99,7 @@ export async function POST(req: NextRequest) {
               resourceId: receipt.id,
               previousValue: null,
               newValue: receipt.sourceTransactionId,
-              reason: "Automaattinen linkitys epäonnistui",
+              reason: "Automaattinen kohdistus epäonnistui",
             },
           })
           .catch(() => {});

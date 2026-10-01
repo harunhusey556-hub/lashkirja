@@ -127,9 +127,9 @@ function itemRow(item: DashboardItem) {
           trailing={
             <ActionPill
               onClick={() => requestReceiptCapture({ transactionId: item.transactionId, label: item.party })}
-              ariaLabel={`Lisää kuva: ${item.party}`}
+              ariaLabel={`Kuvaa kuitti: ${item.party}`}
             >
-              Lisää kuva
+              Kuvaa kuitti
             </ActionPill>
           }
         />

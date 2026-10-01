@@ -122,7 +122,7 @@ describe("matchesSearch", () => {
   });
 });
 
-describe("V29: after Poista linkitys", () => {
+describe("V29: after Poista kohdistus", () => {
   const receipt = { id: "r1", vendor: "MobilePay", totalAmount: 125.5, date: "2026-09-20" };
 
   it("a restored sale puts the row back to the state that offers Hyväksy", () => {
@@ -138,7 +138,7 @@ describe("V29: after Poista linkitys", () => {
   });
 
   it("says in one sentence that the sale is out of the books", () => {
-    expect(unlinkMessage(true)).toBe("Linkitys poistettu. Myynti ei ole kirjanpidossa, ennen kuin hyväksyt sen uudelleen.");
-    expect(unlinkMessage(false)).toBe("Linkitys poistettu.");
+    expect(unlinkMessage(true)).toBe("Kohdistus poistettu. Myynti ei ole kirjanpidossa, ennen kuin hyväksyt sen uudelleen.");
+    expect(unlinkMessage(false)).toBe("Kohdistus poistettu.");
   });
 });

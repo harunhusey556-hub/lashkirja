@@ -373,7 +373,7 @@ export function BankRowSheet({
                   )
                 }
               >
-                Poista linkitys
+                Poista kohdistus
               </button>
             </>
           )}

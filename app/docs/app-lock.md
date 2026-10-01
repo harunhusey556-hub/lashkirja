@@ -31,7 +31,7 @@ What the lock does:
 - Hiding the app covers the screen so the app switcher is less likely to
   snapshot receipts and balances. iOS may still snapshot before the page can
   paint.
-- Kirjaudu ulos still has to succeed on the server. Clearing site data removes
+- Kirjaa ulos still has to succeed on the server. Clearing site data removes
   the code and the biometric opt-in and does not sign the user out.
 
 The device passcode is not used as a substitute for this PIN. The system

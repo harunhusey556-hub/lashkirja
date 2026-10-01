@@ -532,7 +532,7 @@ export default function DashboardClient() {
           amount: formatEur(Math.abs(item.amount)),
           amountTone: item.amount > 0 ? "positive" : "default",
           secondary: item.date ? `Kuitti puuttuu · ${formatDayMonth(item.date)}` : "Kuitti puuttuu",
-          pill: "Lisää kuva",
+          pill: "Kuvaa kuitti",
           blocking: true,
           href: "/pankki/tapahtumat?nayta=toimet",
           // FP-10: the verb is the effect. The camera opens and the photo is linked to this row.
@@ -904,7 +904,7 @@ export default function DashboardClient() {
                 {
                   key: "receipt",
                   done: setup.receipts,
-                  title: "Ota ensimmäinen kuva",
+                  title: "Kuvaa ensimmäinen kuitti",
                   secondary: "Kuitti luetaan automaattisesti",
                   onClick: () => requestReceiptCapture(),
                 },

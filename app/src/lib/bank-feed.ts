@@ -136,6 +136,6 @@ export function unlinkedRowPatch(
 /** What happened, in one sentence: an approved sale that left the books says so. */
 export function unlinkMessage(restoredSale: boolean): string {
   return restoredSale
-    ? "Linkitys poistettu. Myynti ei ole kirjanpidossa, ennen kuin hyväksyt sen uudelleen."
-    : "Linkitys poistettu.";
+    ? "Kohdistus poistettu. Myynti ei ole kirjanpidossa, ennen kuin hyväksyt sen uudelleen."
+    : "Kohdistus poistettu.";
 }

@@ -584,14 +584,14 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ transactionId, receiptId }),
       });
-      if (!res.ok) await readJson(res, "Linkitys epäonnistui");
+      if (!res.ok) await readJson(res, "Kohdistus epäonnistui");
       await reloadReceiptMatch();
     } catch (matchError: unknown) {
       if (isUnauthorized(matchError)) {
         redirectToLogin();
         return;
       }
-      setError(errorMessage(matchError, "Linkitys epäonnistui"));
+      setError(errorMessage(matchError, "Kohdistus epäonnistui"));
     } finally {
       setMatchBusy(false);
     }
@@ -607,14 +607,14 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ transactionId: linkedTx.id }),
       });
-      if (!res.ok) await readJson(res, "Linkityksen poisto epäonnistui");
+      if (!res.ok) await readJson(res, "Kohdistuksen poisto epäonnistui");
       await reloadReceiptMatch();
     } catch (unlinkError: unknown) {
       if (isUnauthorized(unlinkError)) {
         redirectToLogin();
         return;
       }
-      setError(errorMessage(unlinkError, "Linkityksen poisto epäonnistui"));
+      setError(errorMessage(unlinkError, "Kohdistuksen poisto epäonnistui"));
     } finally {
       setMatchBusy(false);
     }
@@ -905,7 +905,7 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
           }
         />
       ) : (
-        !isEdit && <PageTitle title={isNewStep2 ? "Vaihe 2: Linkitys" : "Uusi kuitti"} />
+        !isEdit && <PageTitle title={isNewStep2 ? "Vaihe 2: Kohdistus" : "Uusi kuitti"} />
       )}
 
       {showHandoff && (
