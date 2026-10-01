@@ -151,6 +151,10 @@ function buildMobileNextConfig(): NextConfig {
     trailingSlash: false,
     images: { unoptimized: true },
     distDir: ".next-mobile",
+    // The mobile build must not type-check the dev server's generated route types
+    // (.next/dev/types): the export has no route handlers, and a route that exports a
+    // test constant fails that check.
+    typescript: { tsconfigPath: "tsconfig.mobile.json" },
     env: {
       NEXT_PUBLIC_BUILD_TARGET: "mobile",
       NEXT_PUBLIC_API_BASE_URL: apiBaseUrl,
