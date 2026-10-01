@@ -6,11 +6,12 @@ import { useState } from "react";
 import Link from "next/link";
 import { formatEur } from "@/lib/statement-client";
 import { Button, buttonClass } from "@/components/ui";
-import ConfirmModal from "@/components/ConfirmModal";
 import BottomSheet from "@/components/BottomSheet";
 import { ChevronDown } from "lucide-react";
 import { ActionPill, Card, Icon, ListRow } from "@/components/ds";
 import { detailHref } from "@/lib/routes";
+import { approvalGapText, type ApprovalGap } from "@/lib/receipt-approval";
+import { queueTotalText, splitApprovable } from "@/lib/review-queue";
 
 interface ReviewQueueReceipt {
   id: string;
@@ -26,16 +27,20 @@ interface Props {
   receipts: ReviewQueueReceipt[];
   rejectLabel: string;
   onReview: (id: string, status: "approved" | "rejected") => void;
-  /** Only for homogeneous batches, where one-by-one review is pure busywork. */
-  onApproveAll?: () => void;
+  /**
+   * Only for homogeneous batches, where one-by-one review is pure busywork.
+   * Gets the ids of the receipts that are ready; incomplete ones are not offered.
+   */
+  onApproveAll?: (readyIds: string[]) => void;
   bulkBusy?: boolean;
 }
 
 const COLLAPSED_ROWS = 5;
 
-function rowSecondary(receipt: ReviewQueueReceipt): string {
+function rowSecondary(receipt: ReviewQueueReceipt, gaps: ApprovalGap[] = []): string {
   const date = receipt.date ? new Date(receipt.date).toLocaleDateString("fi-FI") : "–";
-  return `${date} · ${receipt.fileName}`;
+  const base = `${date} · ${receipt.fileName}`;
+  return gaps.length > 0 ? `${approvalGapText(gaps)} · ${base}` : base;
 }
 
 /**
@@ -57,7 +62,6 @@ export default function ReviewQueue({
 }: Props) {
   const [open, setOpen] = useState(false);
   const [showAll, setShowAll] = useState(false);
-  const [confirmBulk, setConfirmBulk] = useState(false);
   // An approved row folds out at once and stays out until the list reloads;
   // a refused approval (e.g. no amount) comes back with the reload.
   const { leaving, leave } = useLeavingRows();
@@ -68,10 +72,6 @@ export default function ReviewQueue({
     setGone(new Set());
   }
   function approve(receipt: ReviewQueueReceipt) {
-    if (receipt.totalAmount == null) {
-      onReview(receipt.id, "approved");
-      return;
-    }
     leave(receipt.id, () => {
       setGone((current) => new Set(current).add(receipt.id));
       onReview(receipt.id, "approved");
@@ -79,11 +79,12 @@ export default function ReviewQueue({
   }
   // VS-23: a row carries one action pill; "Hylkää" and the details live in the row's own sheet.
   const [sheetFor, setSheetFor] = useState<ReviewQueueReceipt | null>(null);
-  // A zero or missing total is almost always an unread receipt: approving it
-  // in bulk books nothing, so it is named before the tap (BOOKS-28).
-  const withoutTotal = receipts.filter((r) => !r.totalAmount).length;
-
-  const total = receipts.reduce((sum, r) => sum + (r.totalAmount ?? 0), 0);
+  // One approval rule for every path (receipt-approval.ts): a receipt without an
+  // amount or a vendor is completed first, so it never gets a "Hyväksy" and the
+  // bulk button only carries the ready ones (F15).
+  const { ready, incomplete } = splitApprovable(receipts);
+  const gapsById = new Map(incomplete.map((r) => [r.id, r.gaps]));
+  const sheetGaps = sheetFor ? (gapsById.get(sheetFor.id) ?? []) : [];
   const visible = showAll ? receipts : receipts.slice(0, COLLAPSED_ROWS);
   const hidden = receipts.length - visible.length;
 
@@ -100,41 +101,26 @@ export default function ReviewQueue({
             {title} ({receipts.length})
           </h2>
           <p className="mt-1 text-caption text-ink-2">{description}</p>
-          <p className="mt-1 text-caption tabular-nums text-ink-2">Yhteensä {formatEur(total)}</p>
+          <p className="mt-1 text-caption tabular-nums text-ink-2">{queueTotalText(receipts, formatEur)}</p>
         </div>
         <Icon icon={ChevronDown} className={`text-ink-2 transition-transform ${open ? "rotate-180" : ""}`} />
       </button>
 
-      {onApproveAll && (
+      {onApproveAll && ready.length > 0 && (
         <Button
           type="button"
           className="mt-3 w-full"
           busy={bulkBusy}
           busyLabel="Hyväksytään…"
-          onClick={() => (withoutTotal > 0 ? setConfirmBulk(true) : onApproveAll())}
+          onClick={() => onApproveAll(ready.map((r) => r.id))}
         >
-          Hyväksy kaikki {receipts.length} kpl
+          {incomplete.length === 0 ? `Hyväksy kaikki (${ready.length})` : `Hyväksy valmiit (${ready.length})`}
         </Button>
       )}
-      {onApproveAll && withoutTotal > 0 && (
+      {incomplete.length > 0 && (
         <p className="mt-2 text-caption text-warning" role="note">
-          {withoutTotal === 1 ? "1 kuitilta puuttuu summa." : `${withoutTotal} kuitilta puuttuu summa.`} Tarkista ennen
-          hyväksyntää.
+          {incomplete.length === 1 ? "1 kuitti vaatii täydennyksen." : `${incomplete.length} kuittia vaatii täydennyksen.`}
         </p>
-      )}
-      {onApproveAll && (
-        <ConfirmModal
-          isOpen={confirmBulk}
-          title={`Hyväksytäänkö ${receipts.length} kuittia?`}
-          description={`${withoutTotal === 1 ? "Yhdeltä kuitilta" : `${withoutTotal} kuitilta`} puuttuu summa (0,00 €). Ne kirjataan ilman summaa.`}
-          confirmLabel="Hyväksy silti"
-          isDestructive={false}
-          onConfirm={() => {
-            setConfirmBulk(false);
-            onApproveAll();
-          }}
-          onCancel={() => setConfirmBulk(false)}
-        />
       )}
 
       <Disclosure open={open}>
@@ -145,10 +131,16 @@ export default function ReviewQueue({
               <ListRow
                 title={r.vendor || "Tuntematon myyjä"}
                 amount={r.totalAmount != null ? formatEur(r.totalAmount) : "–"}
-                secondary={rowSecondary(r)}
+                secondary={rowSecondary(r, gapsById.get(r.id))}
                 onClick={() => setSheetFor(r)}
-                ariaLabel={`${r.vendor || "Tuntematon myyjä"}, ${r.totalAmount != null ? formatEur(r.totalAmount) : "ei summaa"}, ${rowSecondary(r)}`}
-                trailing={<ActionPill onClick={() => approve(r)}>Hyväksy</ActionPill>}
+                ariaLabel={`${r.vendor || "Tuntematon myyjä"}, ${r.totalAmount != null ? formatEur(r.totalAmount) : "ei summaa"}, ${rowSecondary(r, gapsById.get(r.id))}`}
+                trailing={
+                  gapsById.has(r.id) ? (
+                    <ActionPill href={detailHref("receipt", r.id)}>Täydennä</ActionPill>
+                  ) : (
+                    <ActionPill onClick={() => approve(r)}>Hyväksy</ActionPill>
+                  )
+                }
               />
               </div>
             ))}
@@ -176,19 +168,32 @@ export default function ReviewQueue({
             <p className="text-title-2 font-bold tabular-nums tracking-[-0.02em] text-ink">
               {sheetFor.totalAmount != null ? formatEur(sheetFor.totalAmount) : "–"}
             </p>
-            <Button
-              type="button"
-              className="w-full"
-              onClick={() => {
-                onReview(sheetFor.id, "approved");
-                setSheetFor(null);
-              }}
-            >
-              Hyväksy
-            </Button>
-            <Link href={detailHref("receipt", sheetFor.id)} className={buttonClass("secondary", "w-full")}>
-              Avaa kuitti
-            </Link>
+            {sheetGaps.length > 0 ? (
+              <>
+                <p className="text-caption text-warning" role="note">
+                  {approvalGapText(sheetGaps)}, ennen kuin kuitin voi hyväksyä.
+                </p>
+                <Link href={detailHref("receipt", sheetFor.id)} className={buttonClass("primary", "w-full")}>
+                  Täydennä kuitti
+                </Link>
+              </>
+            ) : (
+              <>
+                <Button
+                  type="button"
+                  className="w-full"
+                  onClick={() => {
+                    onReview(sheetFor.id, "approved");
+                    setSheetFor(null);
+                  }}
+                >
+                  Hyväksy
+                </Button>
+                <Link href={detailHref("receipt", sheetFor.id)} className={buttonClass("secondary", "w-full")}>
+                  Avaa kuitti
+                </Link>
+              </>
+            )}
             <Button
               type="button"
               variant="danger"

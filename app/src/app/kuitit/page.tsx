@@ -38,6 +38,7 @@ import { Button, buttonClass } from "@/components/ui";
 import { Check, Minus, Receipt } from "lucide-react";
 import { HeaderAddPill, PageTitle, Section, SlotSkeleton, useSkeletonFade } from "@/components/ds";
 import { batchOutcomeMessage } from "@/lib/upload-queue";
+import { approvalFailureText, retryableFailureIds } from "@/lib/review-queue";
 import { ReceiptFilters, type ReceiptAdvancedFilters } from "./ReceiptFilters";
 import { ReceiptRow } from "./ReceiptRow";
 import { BULK_BAR_SPACE_VAR, BulkBar } from "./BulkBar";
@@ -102,6 +103,10 @@ export default function KuititPage() {
   );
   const [loadError, setLoadError] = useState<{ query: string; error: unknown } | null>(null);
   const [actionError, setActionError] = useState("");
+  const actionErrorRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (actionError) actionErrorRef.current?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  }, [actionError]);
   const [loadAttempt, setLoadAttempt] = useState(0);
   // null = not known yet: the chips show no number rather than a false 0.
   const [fetchedCounts, setFetchedCounts] = useState<{ key: string; counts: ReceiptTabCounts } | null>(null);
@@ -429,13 +434,14 @@ export default function KuititPage() {
       const data = await readJson<{
         updatedCount?: number;
         failedCount?: number;
-        failed?: { id: string }[];
+        failed?: { id: string; error?: string }[];
       }>(res, "Hyväksyntä epäonnistui");
-      const failed = data.failed ?? [];
+      const failed = (data.failed ?? []).map((item) => ({ id: item.id, error: item.error ?? "" }));
       const failedCount = data.failedCount ?? failed.length;
       const updatedCount = data.updatedCount ?? Math.max(0, ids.length - failedCount);
-      setActionError(batchOutcomeMessage("Hyväksyttiin", updatedCount, failedCount));
-      setRetryApproveIds(failed.map((item) => item.id));
+      // The refusal is named (F15), and a retry is only offered when a second try can differ.
+      setActionError(approvalFailureText(updatedCount, failed));
+      setRetryApproveIds(retryableFailureIds(failed));
       setLoadAttempt((a) => a + 1);
       void loadCounts();
     } catch (error: unknown) {
@@ -613,6 +619,28 @@ export default function KuititPage() {
 
         <QueuedReceiptsCard offlineNotice={offlineCaptureNotice} />
 
+        {/* The outcome of a tap sits above the queues it came from, never below the fold (F15). */}
+        {actionError && (
+          <div
+            ref={actionErrorRef}
+            className={`space-y-2 rounded-card px-4 py-3 text-caption ${
+              actionError.includes("epäonnistui 0") || /^Hyväksyttiin d+.$/.test(actionError) ? "bg-canvas text-ink" : "bg-danger/10 text-danger"
+            }`}
+            role="status"
+          >
+            <p>{actionError}</p>
+            {retryApproveIds.length > 0 && (
+              <button
+                type="button"
+                className="min-h-11 text-body font-medium text-accent"
+                onClick={() => void handleReviewMany(retryApproveIds)}
+              >
+                Yritä epäonnistuneet uudelleen
+              </button>
+            )}
+          </div>
+        )}
+
         {emailPending.length > 0 && (
           <ReviewQueue
             title="Tarkastettavat sähköpostikuitit"
@@ -620,7 +648,7 @@ export default function KuititPage() {
             receipts={emailPending}
             rejectLabel="Hylkää (Yksityinen)"
             onReview={handleReview}
-            onApproveAll={() => void handleReviewMany(emailPending.map((r) => r.id))}
+            onApproveAll={(readyIds) => void handleReviewMany(readyIds)}
             bulkBusy={bulkReviewing}
           />
         )}
@@ -632,7 +660,7 @@ export default function KuititPage() {
             receipts={otherPending}
             rejectLabel="Hylkää"
             onReview={handleReview}
-            onApproveAll={() => void handleReviewMany(otherPending.map((r) => r.id))}
+            onApproveAll={(readyIds) => void handleReviewMany(readyIds)}
             bulkBusy={bulkReviewing}
           />
         )}
@@ -682,26 +710,6 @@ export default function KuititPage() {
           activeChips={activeChips}
           onClearAll={clearAllFilters}
         />
-        )}
-
-        {actionError && (
-          <div
-            className={`space-y-2 rounded-card px-4 py-3 text-caption ${
-              actionError.includes("epäonnistui 0") ? "bg-canvas text-ink" : "bg-danger/10 text-danger"
-            }`}
-            role="status"
-          >
-            <p>{actionError}</p>
-            {retryApproveIds.length > 0 && (
-              <button
-                type="button"
-                className="min-h-11 text-body font-medium text-accent"
-                onClick={() => void handleReviewMany(retryApproveIds)}
-              >
-                Yritä epäonnistuneet uudelleen
-              </button>
-            )}
-          </div>
         )}
 
         <div className="space-y-3">
