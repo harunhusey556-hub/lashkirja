@@ -37,8 +37,17 @@ const EMPTY: CustomerFormValues = {
   notes: "",
 };
 
+/** The term a customer gets when the field is left empty. */
+export const DEFAULT_PAYMENT_TERM_DAYS = 14;
+
+/**
+ * `blankTermDays` is what an emptied "Maksuaika" field means: the term the
+ * customer already had, or the default 14 for a new one. It is never 0 by
+ * accident, and the text is checked as typed ("1e2" or "0x10" are not days).
+ */
 export function validateCustomerForm(
-  values: CustomerFormValues
+  values: CustomerFormValues,
+  blankTermDays: number = DEFAULT_PAYMENT_TERM_DAYS
 ): { ok: true; payload: CustomerFormPayload } | { ok: false; errors: Record<string, string> } {
   const errors: Record<string, string> = {};
 
@@ -49,7 +58,8 @@ export function validateCustomerForm(
   if (values.email.trim() && !/^[^\s@]+@[^\s@.]+(\.[^\s@.]+)+$/.test(values.email.trim())) {
     errors.email = "Tarkista sähköpostiosoite.";
   }
-  const term = Number(values.defaultPaymentTermDays);
+  const termText = values.defaultPaymentTermDays.trim();
+  const term = termText === "" ? blankTermDays : /^\d{1,3}$/.test(termText) ? Number(termText) : NaN;
   if (!Number.isInteger(term) || term < 0 || term > 365) {
     errors.defaultPaymentTermDays = "Maksuaika on 0-365 päivää.";
   }
@@ -90,6 +100,12 @@ interface Props {
   draftKey?: string;
   onReload?: () => void;
   onSubmit: (payload: CustomerFormPayload) => void | Promise<void>;
+  /**
+   * Called once the save went through and the form's own draft is gone. The
+   * parent closes the sheet here, never before: a form unmounted while its
+   * draft is still stored writes the draft back (F40).
+   */
+  onSaved?: () => void;
   onCancel: () => void;
 }
 
@@ -100,12 +116,18 @@ export function CustomerForm({
   draftKey = "customer:new",
   onReload,
   onSubmit,
+  onSaved,
   onCancel,
 }: Props) {
   const [baseline] = useState<CustomerFormValues>({ ...EMPTY, ...initial });
   const [values, setValues] = useState<CustomerFormValues>(baseline);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [saveError, setSaveError] = useState("");
+  // An emptied term field keeps what the customer had (14 for a new customer).
+  const [blankTermDays] = useState(() => {
+    const had = baseline.defaultPaymentTermDays.trim();
+    return /^\d{1,3}$/.test(had) && Number(had) <= 365 ? Number(had) : DEFAULT_PAYMENT_TERM_DAYS;
+  });
   const session = useEditorSession({
     sourceId: draftKey,
     draftKey,
@@ -126,7 +148,7 @@ export function CustomerForm({
       className="space-y-4"
       onSubmit={(event) => {
         event.preventDefault();
-        const result = validateCustomerForm(values);
+        const result = validateCustomerForm(values, blankTermDays);
         if (!result.ok) {
           setErrors(result.errors);
           setSaveError("");
@@ -140,6 +162,7 @@ export function CustomerForm({
           .then(() => {
             session.clearSavedDraft();
             session.setPhase("saved");
+            onSaved?.();
           })
           .catch((error: unknown) => {
             session.setPhase("failed");
@@ -178,6 +201,7 @@ export function CustomerForm({
         <Field label="Maksuaika (pv)" htmlFor="cf-term" error={errors.defaultPaymentTermDays}>
           <input
             className={field}
+            placeholder={String(blankTermDays)}
             value={values.defaultPaymentTermDays}
             onChange={(e) => set("defaultPaymentTermDays", e.target.value)}
             inputMode="numeric"

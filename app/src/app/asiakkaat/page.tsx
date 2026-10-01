@@ -163,7 +163,6 @@ export default function CustomersPage() {
       });
       await readJson(response, "Tallennus epäonnistui");
       createKey.current = newIdempotencyKey();
-      setCreateOpen(false);
       await load();
     } catch (error) {
       if (isUnauthorized(error)) redirectToLogin();
@@ -416,6 +415,7 @@ export default function CustomersPage() {
             submitLabel="Lisää asiakas"
             busy={busy}
             onSubmit={submit}
+            onSaved={() => setCreateOpen(false)}
             onCancel={() => setCreateOpen(false)}
           />
         </div>

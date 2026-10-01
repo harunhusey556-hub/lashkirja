@@ -43,7 +43,6 @@ export function QuickCustomerSheet({
       createKey.current = newIdempotencyKey();
       showToast({ tone: "success", text: `${data.customer.name} lisättiin` });
       onCreated(data.customer);
-      onClose();
     } finally {
       setBusy(false);
     }
@@ -64,6 +63,7 @@ export function QuickCustomerSheet({
           submitLabel="Lisää asiakas"
           busy={busy}
           onSubmit={submit}
+          onSaved={onClose}
           onCancel={onClose}
         />
       </div>

@@ -203,7 +203,6 @@ function CustomerDetail() {
         }),
       });
       await readJson(response, "Tallennus epäonnistui");
-      setEditOpen(false);
       await load();
     } catch (error) {
       if (isUnauthorized(error)) redirectToLogin();
@@ -482,6 +481,7 @@ function CustomerDetail() {
                 notes: customer.notes ?? "",
               }}
               onSubmit={submitEdit}
+              onSaved={() => setEditOpen(false)}
               onCancel={() => setEditOpen(false)}
             />
           )}
