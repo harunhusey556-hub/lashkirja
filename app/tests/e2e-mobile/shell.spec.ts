@@ -227,11 +227,17 @@ async function watchEnterClass(page: Page) {
   await page.evaluate(() => {
     const w = window as unknown as { __enter: string[] };
     w.__enter = [];
-    const main = document.querySelector("main.app-main")!;
-    new MutationObserver(() => {
-      const match = main.className.match(/page-(push|pop)-in/);
-      if (match) w.__enter.push(match[0]);
-    }).observe(main, { attributes: true, attributeFilter: ["class"] });
+    // playNavTransition mounts the old page as a snapshot whose class names
+    // the transition (page-push-out, page-pop-out, page-tab-out).
+    const frame = document.querySelector(".app-frame")!;
+    new MutationObserver((records) => {
+      for (const record of records) {
+        for (const node of record.addedNodes) {
+          const match = node instanceof Element ? node.className.match(/page-(push|pop|tab)-out/) : null;
+          if (match) w.__enter.push(match[1]);
+        }
+      }
+    }).observe(frame, { childList: true });
   });
 }
 
@@ -245,14 +251,14 @@ test("direction comes from the gesture: a cross-tab link pushes and keeps its ta
   await watchEnterClass(page);
   await page.locator('main a[href^="/kuitit"]').first().click();
   await page.waitForURL("**/kuitit**");
-  await expect.poll(() => enterClasses(page)).toContain("page-push-in");
+  await expect.poll(() => enterClasses(page)).toContain("push");
   await expect(page.locator(".app-tab-bar a[aria-current=page]")).toHaveText("Raportit");
   const back = page.locator(".app-header button[aria-label^='Takaisin']");
   await expect(back).toHaveAttribute("aria-label", "Takaisin: Raportit");
   await watchEnterClass(page);
   await back.click();
   await page.waitForURL("**/raportit");
-  await expect.poll(() => enterClasses(page)).toContain("page-pop-in");
+  await expect.poll(() => enterClasses(page)).toContain("pop");
 });
 
 test("tabs remember their screen; the active tab scrolls to the top, then pops to its root (C1.5, IA-25)", async ({ page }) => {
@@ -272,4 +278,73 @@ test("tabs remember their screen; the active tab scrolls to the top, then pops t
   await expect(page).toHaveURL(/\/kuitit/);
   await page.locator(".app-tab-bar a", { hasText: "Kirjanpito" }).click();
   await page.waitForURL("**/kirjanpito");
+});
+
+type NavFrame = { path: string; tx: number; opacity: number; snaps: number; width: number };
+
+/** Logs every animation frame's <main> position, opacity and snapshot count. */
+async function logFrames(page: Page) {
+  await page.evaluate(() => {
+    const w = window as unknown as { __nav: NavFrame[]; __navStop?: boolean };
+    w.__nav = [];
+    w.__navStop = false;
+    const tick = () => {
+      const main = document.querySelector<HTMLElement>("main.app-main")!;
+      const style = getComputedStyle(main);
+      w.__nav.push({
+        path: location.pathname,
+        tx: style.transform === "none" ? 0 : new DOMMatrix(style.transform).m41,
+        opacity: Number(style.opacity),
+        snaps: document.querySelectorAll(".page-snapshot").length,
+        width: main.offsetWidth,
+      });
+      if (!w.__navStop) requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+  });
+}
+
+const framesOn = (page: Page, prefix: string) =>
+  page.evaluate((p) => {
+    const w = window as unknown as { __nav: NavFrame[]; __navStop?: boolean };
+    w.__navStop = true;
+    return w.__nav.filter((frame) => frame.path.startsWith(p));
+  }, prefix);
+
+test("a push starts from the old page in place and slides, and a tab switch never dims the new page (OWN-17, OWN-19)", async ({
+  page,
+}) => {
+  await page.goto("/kirjanpito");
+  await settled(page);
+  // Warm the target once, so the measured push is the cached, everyday case.
+  await page.locator('main a[href^="/kirjanpito/alv"]').first().tap();
+  await page.waitForURL("**/kirjanpito/alv**");
+  await settled(page);
+  await page.locator(".app-header button[aria-label^='Takaisin']").tap();
+  await page.waitForURL(/\/kirjanpito$/);
+  await settled(page);
+
+  await logFrames(page);
+  await page.locator('main a[href^="/kirjanpito/alv"]').first().tap();
+  await page.waitForURL("**/kirjanpito/alv**");
+  await page.waitForTimeout(900);
+  const push = await framesOn(page, "/kirjanpito/alv");
+  // The commit frame: the old page still covers the screen and the new one
+  // waits off-screen right (before batch 3 it was already ~30 % in).
+  expect(push[0].snaps).toBe(1);
+  expect(push[0].tx).toBeGreaterThanOrEqual(push[0].width * 0.95);
+  // Then it travels over several frames, with no jump-cut, and ends clean.
+  expect(push.filter((frame) => frame.tx > 1).length).toBeGreaterThanOrEqual(4);
+  for (let i = 1; i < push.length; i++) expect(push[i - 1].tx - push[i].tx).toBeLessThan(push[0].width * 0.6);
+  expect(push.at(-1)).toMatchObject({ tx: 0, snaps: 0, opacity: 1 });
+
+  await logFrames(page);
+  await page.locator(".app-tab-bar a", { hasText: "Myynti" }).tap();
+  await page.waitForURL("**/laskut");
+  await page.waitForTimeout(600);
+  const tab = await framesOn(page, "/laskut");
+  // The old tab crossfades out above the new one; the new page is never dimmed.
+  expect(tab[0].snaps).toBe(1);
+  for (const frame of tab) expect(frame.opacity).toBe(1);
+  expect(tab.at(-1)).toMatchObject({ tx: 0, snaps: 0 });
 });

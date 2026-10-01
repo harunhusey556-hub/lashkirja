@@ -1149,7 +1149,7 @@ function InvoiceDetail() {
             <button
               type="button"
               disabled={refreshFailed}
-              className="active-press flex min-h-12 w-full items-center justify-center text-body font-semibold text-accent disabled:opacity-50"
+              className="active-press flex min-h-12 w-full items-center justify-center rounded-card bg-accent-soft text-body font-semibold text-accent disabled:opacity-50"
               onClick={() => openPaymentSheet()}
             >
               Kirjaa maksu
@@ -1158,7 +1158,7 @@ function InvoiceDetail() {
           {invoice.status === "draft" && (
             <button
               type="button"
-              className="active-press flex min-h-12 w-full items-center justify-center text-body font-semibold text-accent"
+              className="active-press flex min-h-12 w-full items-center justify-center rounded-card bg-accent-soft text-body font-semibold text-accent"
               onClick={() => router.push(`/laskut/uusi?edit=${encodeURIComponent(invoice.id)}`)}
             >
               Muokkaa

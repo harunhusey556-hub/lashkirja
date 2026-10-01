@@ -73,10 +73,11 @@ import {
   keepPageNode,
   mountSnapshot,
   pageNodeFor,
+  playNavTransition,
   prefersReducedMotion,
   recalledScroll,
   rememberScroll,
-  removeSnapshotAfter,
+  UNDER_SHIFT,
 } from "@/lib/page-transition";
 import {
   avatarRoot,
@@ -132,10 +133,6 @@ function writeStoredInitial(value: string | null): void {
 
 const noSubscribe = () => () => {};
 
-/** Push/pop duration (--dur-push) plus a margin for the snapshot fallback timer. */
-const PUSH_FALLBACK_MS = 360;
-/** `.page-tab-in` runs 160 ms; the class is dropped a little after. */
-const TAB_SETTLE_MS = 220;
 /** Longest the native splash waits for the first page to have real content. */
 const SPLASH_MAX_WAIT_MS = 350;
 
@@ -305,7 +302,11 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const direction = navFrame.path === pathname ? navFrame.direction : "none";
   // The highlighted tab is the tab the current stack belongs to, not the
   // path's own root: a cross-tab push keeps its origin tab lit (IA-07).
-  const activeTabId = typeof window === "undefined" ? rootIdOf(pathname) : tabAfterLanding(pathname, direction);
+  const landedTabId = typeof window === "undefined" ? rootIdOf(pathname) : tabAfterLanding(pathname, direction);
+  // OWN-19: the tapped tab lights up on the tap, as on iOS, not only once the
+  // new screen has loaded. Dropped as soon as any navigation lands.
+  const [pendingTab, setPendingTab] = useState<{ id: string; from: string } | null>(null);
+  const activeTabId = pendingTab && pendingTab.from === pathname ? pendingTab.id : landedTabId;
   // SHELL-31: the back button returns to the real previous screen when there
   // is one, so the label names that screen, not the logical parent.
   const previousScreen = typeof window === "undefined" ? null : previousAfterLanding(pathname, direction);
@@ -455,50 +456,20 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       return;
     }
 
-    // Tab switches (100+/day) get no slide (SHELL-06), only a 160 ms settle
-    // from 0.55 opacity so the new tab does not snap in (owner report
-    // 2026-09-30). The first render does not animate.
-    if (direction === "tab") {
-      main.classList.remove("page-tab-in");
-      void main.offsetWidth;
-      main.classList.add("page-tab-in");
-      const clearTab = () => main.classList.remove("page-tab-in");
-      const tabTimer = window.setTimeout(clearTab, TAB_SETTLE_MS);
-      return () => {
-        window.clearTimeout(tabTimer);
-        clearTab();
-      };
-    }
-    if (direction !== "forward" && direction !== "back") return;
-
-    const enterClass = direction === "forward" ? "page-push-in" : "page-pop-in";
-    main.classList.remove("page-push-in", "page-pop-in");
-    void main.offsetWidth;
-    main.classList.add(enterClass);
-    const clearEnter = () => main.classList.remove(enterClass);
-    const onEnd = (event: AnimationEvent) => {
-      if (event.target === main) clearEnter();
-    };
-    main.addEventListener("animationend", onEnd, { once: true });
-    const enterTimer = window.setTimeout(clearEnter, PUSH_FALLBACK_MS);
-
-    let removeSnapshot: (() => void) | null = null;
-    if (oldPage && !prefersReducedMotion()) {
-      const snap = mountSnapshot(
-        main,
-        oldPage,
-        oldScroll,
-        direction === "forward" ? "push-out" : "pop-out",
-        oldPaddingTop
-      );
-      if (snap) removeSnapshot = removeSnapshotAfter(snap, PUSH_FALLBACK_MS);
-    }
-    return () => {
-      window.clearTimeout(enterTimer);
-      main.removeEventListener("animationend", onEnd);
-      clearEnter();
-      removeSnapshot?.();
-    };
+    // Push/pop slide with both pages present; tab switches (100+/day) get no
+    // slide (SHELL-06), only a quick crossfade of the old page over the new
+    // one, which never dims the new page (OWN-17). The motion starts on the
+    // frame after this commit is painted (see playNavTransition). The first
+    // render does not animate.
+    if (direction !== "forward" && direction !== "back" && direction !== "tab") return;
+    return playNavTransition({
+      main,
+      oldPage,
+      oldScroll,
+      oldPaddingTop,
+      kind: direction === "forward" ? "push" : direction === "back" ? "pop" : "tab",
+      newPage: pageNodeRef.current,
+    });
   }, [pathname, direction]);
 
   useEffect(() => {
@@ -678,7 +649,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       dx = Math.max(0, moveX);
       main.style.transform = `translateX(${dx}px)`;
       const progress = Math.min(1, dx / Math.max(main.offsetWidth, 1));
-      if (under) under.style.transform = `translateX(${-28 * (1 - progress)}%)`;
+      if (under) under.style.transform = `translateX(${-30 * (1 - progress)}%)`;
       moveBar(progress);
     };
 
@@ -743,7 +714,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         main.style.transform = "translateX(0)";
         if (under) {
           under.style.transition = `transform ${EDGE_FINISH_MS}ms ${curve}`;
-          under.style.transform = "translateX(-28%)";
+          under.style.transform = `translateX(${UNDER_SHIFT})`;
         }
         moveBar(0, `transform ${EDGE_FINISH_MS}ms ${curve}`);
         const leaving = under;
@@ -913,6 +884,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   function goToRoot(event: { preventDefault: () => void; currentTarget?: EventTarget | null }, tab: NavEntry) {
     setAddOpenOn(null);
     setProfileOpenOn(null);
+    if (tab.id !== activeTabId && !anyFormDirty()) setPendingTab({ id: tab.id, from: pathname });
     handleTabClick(event, tab, {
       pathname,
       activeTab: activeTabId,

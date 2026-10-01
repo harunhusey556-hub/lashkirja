@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { Plus } from "lucide-react";
 import { Icon } from "./Icon";
+import { hapticImpact } from "@/lib/haptics";
 
 // VS-03, R16, R19: the one header action. A 36px ink pill (44px hit area from the `before` layer) with a
 // plus and the object's own label: "Uusi lasku", "Uusi kuitti", "Uusi asiakas", "Uusi toistuva lasku",
@@ -18,13 +19,20 @@ export function HeaderAddPill({ label, href, onClick }: { label: string; href?: 
   );
   if (href) {
     return (
-      <Link href={href} className={PILL}>
+      <Link href={href} className={PILL} onClick={() => void hapticImpact("light")}>
         {content}
       </Link>
     );
   }
   return (
-    <button type="button" onClick={onClick} className={PILL}>
+    <button
+      type="button"
+      onClick={() => {
+        void hapticImpact("light");
+        onClick?.();
+      }}
+      className={PILL}
+    >
       {content}
     </button>
   );

@@ -1,0 +1,9 @@
+{
+  "compilerOptions": {
+    "baseUrl": ".",
+    "paths": {
+      "@playwright/test": ["./pw-shim.ts"],
+      "@/*": ["../../../../../app/src/*"]
+    }
+  }
+}

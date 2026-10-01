@@ -16,7 +16,8 @@ export const BUTTON_VARIANTS = {
   primary: "bg-ink text-canvas",
   secondary: "bg-surface text-ink border border-line",
   danger: "bg-surface text-danger border border-danger/30",
-  ghost: "bg-transparent text-accent",
+  // OWN-20: a tinted fill, not bare text, so it reads and presses as a button.
+  ghost: "bg-accent-soft text-accent",
 } as const;
 
 export type ButtonVariant = keyof typeof BUTTON_VARIANTS;

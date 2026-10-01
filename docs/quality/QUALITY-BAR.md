@@ -20,7 +20,7 @@ LashKirja must feel like a native iOS app: clean, calm, fast and predictable. Ea
 
 ## N: Navigation and transitions
 - N1: Every function has one home, reachable in ≤2 taps from its tab.
-- N2: Push/pop transitions between a list and its detail (slide, ≤300 ms, ease-out); tab switches with no flash of blank or of the old page.
+- N2: Push/pop transitions between a list and its detail: the new page slides in over the old one, which shifts left ~30 % and dims (pop is the reverse), on a critically damped spring of 350–450 ms that starts on the frame after the new page is painted (no skipped start, no jump-cut). Tab switches never slide: a ≤200 ms crossfade of the old page over the new one, never a dimmed or blank frame. Reduced motion turns all of them into that crossfade.
 - N3: No text or content flicker on navigation: the previous content stays until the next is ready, and cached content renders on first paint.
 - N4: Every sheet, drawer, modal and menu opens and closes with motion (sheet: slide up with a spring-like curve; drawer: slide; fade the backdrop). Nothing pops in or out abruptly.
 - N5: Sheets can be dismissed by swiping down and by tapping the backdrop, unless there are unsaved changes.
