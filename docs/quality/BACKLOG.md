@@ -29,6 +29,19 @@ The Bar column cites the QUALITY-BAR item.
 | OWN-14 | P0 | A2 | "Bank connection doesn't work." The production server has no Enable Banking credentials: `ENABLEBANKING_APP_ID` is empty, there is no key file, and `ENABLED=false`. The UI states this honestly. It needs the owner's credentials. | done 2026-09-29: production Enable Banking app "Lashkirja v2" (401e705c), server enabled, 42 Finnish banks listed; next: the owner taps Yhdistä pankki on the phone and links S-Pankki |
 | OWN-15 | P1 | S1, S2, N1 | "Interaction rules must be the same on every page: in the main menu you cannot push the page up and down, but on some pages you can. It is a small detail, but you feel restricted." Cause candidates: the `data-fit="snug"` mode makes some pages `overflow:hidden` (no bounce) while others scroll and bounce. Needs one rule for all pages, and a professional UI/UX review of consistency. | done in code (batch 2, commit 535ddf7: every screen always rubber-bands); needs the owner's device check |
 
+## Owner reports, 2026-10-01 (device test of the latest IPA)
+
+| ID | Sev | Bar | Report (owner's words, translated) | Status |
+|---|---|---|---|---|
+| OWN-16 | P1 | N2, L1 | "It doesn't feel like an app." | open |
+| OWN-17 | P1 | N3 | "The screen flashes when the page changes." | open |
+| OWN-18 | P0 | A2 | "The bank is connected, but the home page says 'Yhdistä pankki' / no connected bank." Cause, confirmed on prod.db: an Enable Banking consent writes `ConnectedAccount` rows (1 in scope, with a balance, active S-Pankki connection), while Koti (`api/dashboard` -> `getBankOverview`, and `setup.bank`) only reads `BankAccount` (0 rows). | open |
+| OWN-19 | P1 | N2, N4 | "Page transition animations are not good enough for a phone app; they don't give enough feedback." | open |
+| OWN-20 | P1 | T2 | "Some buttons have no background and don't give the press animation feedback." | open |
+| OWN-21 | P1 | F | "The app needs passkey." | open |
+| OWN-22 | P2 | V | "Cool charts on the home page would look good." | open |
+| OWN-23 | P1 | V, L1 | "Bring the front end forward in general": more visual presence and polish. | open |
+
 ## Audit findings
 
 (Added by the auditors in batch 1.)
