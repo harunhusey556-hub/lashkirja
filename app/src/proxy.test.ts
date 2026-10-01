@@ -257,6 +257,10 @@ describe("proxy matcher config", () => {
     { url: "http://127.0.0.1/icons/icon-192.png", matched: false },
     { url: "http://127.0.0.1/manifest.json", matched: false },
     { url: "http://127.0.0.1/manifest.jsonfoo", matched: true },
+    // OWN-21: Apple's anonymous fetch must never be redirected to /login.
+    { url: "http://127.0.0.1/.well-known/apple-app-site-association", matched: false },
+    { url: "http://127.0.0.1/.well-known/apple-app-site-associationx", matched: true },
+    { url: "http://127.0.0.1/.well-known/other", matched: true },
   ];
 
   it("the OLD matcher let an API upload file skip the gate (documents the bug, not the fix)", () => {

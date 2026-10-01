@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { AlertCircle, Check, Info } from "lucide-react";
+import { AlertCircle, Check, Info, KeyRound } from "lucide-react";
 import { controlClass } from "@/components/control-styles";
 import { AppMark } from "@/components/AppMark";
 import { BareFrame } from "@/components/BareFrame";
@@ -13,12 +13,23 @@ import { Button, Field } from "@/components/ui";
 import { Icon } from "@/components/ds/Icon";
 import { PasswordField } from "@/components/ds/PasswordField";
 import { hapticNotify } from "@/lib/haptics";
+import { showToast } from "@/lib/toast";
 import { appNavigate } from "@/lib/app-nav";
 import { getAccessToken, signIn } from "@/lib/auth-client";
 import { IS_MOBILE_BUILD } from "@/lib/build-target";
 import { bootMobile } from "@/lib/mobile/boot";
 import { markFirstScreen } from "@/lib/splash";
 import { CLOSED_LOGIN_MESSAGE } from "@/lib/account-copy";
+import {
+  cancelPasskeyAutofill,
+  createPasskey,
+  listPasskeys,
+  passkeyAutofillSupported,
+  passkeyFailureMessage,
+  passkeysAvailable,
+  signInWithPasskey,
+} from "@/lib/passkey-client";
+import { markPasskeyOfferSeen, passkeyOfferSeen } from "@/lib/passkey-offer";
 
 const SHOW_DEMO_LOGIN = !IS_MOBILE_BUILD && process.env.NEXT_PUBLIC_SHOW_DEMO_LOGIN === "true";
 
@@ -88,7 +99,14 @@ export default function LoginForm() {
   // the very first render (a server redirect landed here), so deriving the
   // initial notice belongs in useState's initializer, not in a setState call
   // inside a useEffect body (which would just be an avoidable second render).
-  const [phase, setPhase] = useState<"idle" | "submitting" | "success">("idle");
+  const [phase, setPhase] = useState<"idle" | "submitting" | "success" | "offer">("idle");
+  // OWN-21: false until the server and the device both say yes, so the
+  // passkey button only ever appears (never appears and then fails).
+  const [passkeyReady, setPasskeyReady] = useState(false);
+  const [passkeyBusy, setPasskeyBusy] = useState(false);
+  const [offerBusy, setOfferBusy] = useState(false);
+  const [offerMessage, setOfferMessage] = useState("");
+  const passkeyBusyRef = useRef(false);
   const [notice, setNotice] = useState<Notice>(() => {
     const errorCode = searchParams.get("error");
     if (!errorCode) return null;
@@ -154,6 +172,104 @@ export default function LoginForm() {
     };
   }, []);
 
+  // OWN-21: show the passkey button only when this server and this device
+  // support it. In a browser that offers it, also start an AutoFill-assisted
+  // request so a saved passkey appears in the email field's suggestions.
+  useEffect(() => {
+    let cancelled = false;
+    void passkeysAvailable().then(async (ready) => {
+      if (cancelled) return;
+      setPasskeyReady(ready);
+      if (!ready || !(await passkeyAutofillSupported()) || cancelled) return;
+      const result = await signInWithPasskey({ autofill: true });
+      if (cancelled) return;
+      if (result.ok) {
+        finishPasskeySignIn();
+        return;
+      }
+      const message = passkeyFailureMessage(result.reason, "sign-in", result.message);
+      if (message && result.reason !== "unsupported" && result.reason !== "not-configured") {
+        setNotice({ tone: "danger", message });
+      }
+    });
+    return () => {
+      cancelled = true;
+      cancelPasskeyAutofill();
+    };
+    // finishPasskeySignIn only reads refs/props stable for the page's life.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  function finishPasskeySignIn() {
+    void hapticNotify("success");
+    setPhase("success");
+    router.push(next || "/dashboard");
+  }
+
+  async function handlePasskeySignIn() {
+    if (passkeyBusyRef.current || submittingRef.current) return;
+    passkeyBusyRef.current = true;
+    setPasskeyBusy(true);
+    setNotice(null);
+    setInvalid(false);
+    // A button-started request replaces any pending AutoFill one.
+    cancelPasskeyAutofill();
+    const result = await signInWithPasskey();
+    passkeyBusyRef.current = false;
+    setPasskeyBusy(false);
+    if (result.ok) {
+      finishPasskeySignIn();
+      return;
+    }
+    const message = passkeyFailureMessage(result.reason, "sign-in", result.message);
+    if (!message) return; // Cancelled in the system sheet: nothing to say.
+    void hapticNotify("error");
+    setNotice({ tone: result.reason === "unsupported" || result.reason === "not-configured" ? "info" : "danger", message });
+    if (result.reason === "unsupported" || result.reason === "not-configured") setPasskeyReady(false);
+  }
+
+  /**
+   * After a password sign-in: offer a passkey once, when this device can make
+   * one and the account has none yet. Any doubt (offline, slow, error) skips
+   * the offer and goes straight on, so it can never block signing in.
+   */
+  async function shouldOfferPasskey(email: string): Promise<boolean> {
+    if (!passkeyReady || !email || passkeyOfferSeen(email)) return false;
+    try {
+      const rows = await Promise.race([
+        listPasskeys(),
+        new Promise<null>((resolve) => setTimeout(() => resolve(null), 2500)),
+      ]);
+      return Array.isArray(rows) && rows.length === 0;
+    } catch {
+      return false;
+    }
+  }
+
+  function leaveAfterSignIn() {
+    setPhase("success");
+    router.push(next || "/dashboard");
+  }
+
+  async function createOfferedPasskey() {
+    if (offerBusy) return;
+    setOfferBusy(true);
+    setOfferMessage("");
+    const result = await createPasskey();
+    setOfferBusy(false);
+    if (result.ok) {
+      void hapticNotify("success");
+      showToast({ tone: "success", text: "Pääsyavain luotu. Voit kirjautua sillä ensi kerralla.", haptic: false });
+      leaveAfterSignIn();
+      return;
+    }
+    const message = passkeyFailureMessage(result.reason, "create", result.message);
+    if (message) {
+      void hapticNotify("error");
+      setOfferMessage(message);
+    }
+  }
+
   function clearNoticeOnEdit() {
     if (!notice && !invalid) return;
     setNotice(null);
@@ -184,8 +300,12 @@ export default function LoginForm() {
 
       if (result.ok) {
         void hapticNotify("success");
-        setPhase("success");
-        router.push(next || "/dashboard");
+        if (await shouldOfferPasskey(email)) {
+          markPasskeyOfferSeen(email);
+          setPhase("offer");
+          return;
+        }
+        leaveAfterSignIn();
         return;
       }
 
@@ -247,6 +367,65 @@ export default function LoginForm() {
           <p className="mt-2 text-body text-ink-2">Kirjanpito yksinkertaisesti</p>
         </div>
 
+        {phase === "offer" ? (
+          // OWN-21: one-time offer after a password sign-in. The session is
+          // already in place; both choices continue into the app.
+          <section
+            aria-labelledby="passkey-offer-title"
+            className="space-y-5 rounded-card border border-line bg-surface p-8 text-center"
+          >
+            <span className="mx-auto flex size-14 items-center justify-center rounded-card bg-canvas text-ink">
+              <Icon icon={KeyRound} size="hero" />
+            </span>
+            <div className="space-y-2">
+              <h2 id="passkey-offer-title" className="text-headline font-semibold text-ink">
+                Kirjaudu jatkossa pääsyavaimella
+              </h2>
+              <p className="text-body leading-relaxed text-ink-2">
+                Pääsyavain avaa LashKirjan Face ID:llä tai Touch ID:llä ilman salasanaa. Salasana toimii edelleen.
+              </p>
+            </div>
+            {offerMessage && <LoginNotice id="passkey-offer-notice" tone="danger" message={offerMessage} />}
+            <div className="space-y-2">
+              <Button
+                type="button"
+                className="w-full"
+                busy={offerBusy}
+                busyLabel="Luodaan…"
+                onClick={() => void createOfferedPasskey()}
+              >
+                Luo pääsyavain
+              </Button>
+              <Button type="button" variant="ghost" className="w-full" disabled={offerBusy} onClick={leaveAfterSignIn}>
+                Ei nyt
+              </Button>
+            </div>
+          </section>
+        ) : (
+        <>
+        {passkeyReady && (
+          <div className="mb-5 space-y-5">
+            <Button
+              type="button"
+              className="w-full"
+              busy={passkeyBusy}
+              busyLabel="Odotetaan pääsyavainta…"
+              disabled={phase !== "idle"}
+              onClick={() => void handlePasskeySignIn()}
+            >
+              <span className="inline-flex items-center gap-2">
+                <Icon icon={KeyRound} size="inline" />
+                Kirjaudu pääsyavaimella
+              </span>
+            </Button>
+            <div className="flex items-center gap-3 text-caption text-ink-2" aria-hidden="true">
+              <span className="h-px flex-1 bg-line" />
+              tai salasanalla
+              <span className="h-px flex-1 bg-line" />
+            </div>
+          </div>
+        )}
+
         {/* action/method kept as a no-JS fallback: with JS disabled (or if
             fetch throws before it can run), the browser still POSTs here
             natively and the route's existing 303-redirect branch handles it. */}
@@ -268,7 +447,9 @@ export default function LoginForm() {
               name="email"
               type="email"
               inputMode="email"
-              autoComplete="username"
+              // "webauthn" lets a browser list saved passkeys in this field's
+              // AutoFill (OWN-21). The app's WebView keeps plain "username".
+              autoComplete={IS_MOBILE_BUILD ? "username" : "username webauthn"}
               autoCapitalize="none"
               autoCorrect="off"
               spellCheck={false}
@@ -297,7 +478,15 @@ export default function LoginForm() {
 
           {notice && <LoginNotice id={noticeId} tone={notice.tone} message={notice.message} />}
 
-          <Button type="submit" busy={phase === "submitting"} busyLabel="Kirjaudutaan…" className="w-full">
+          <Button
+            type="submit"
+            // One primary per screen: with a passkey offered, it is the primary.
+            variant={passkeyReady ? "secondary" : "primary"}
+            busy={phase === "submitting"}
+            busyLabel="Kirjaudutaan…"
+            disabled={passkeyBusy}
+            className="w-full"
+          >
             {phase === "success" ? (
               <span className="inline-flex items-center gap-2">
                 <Icon icon={Check} size="inline" />
@@ -314,6 +503,8 @@ export default function LoginForm() {
             Unohditko salasanan?
           </Link>
         </form>
+        </>
+        )}
 
         {SHOW_DEMO_LOGIN && (
           <p className="mt-6 text-center text-xs text-ink-2">

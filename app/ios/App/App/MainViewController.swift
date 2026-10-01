@@ -145,6 +145,10 @@ class MainViewController: CAPBridgeViewController {
     override func capacitorDidLoad() {
         super.capacitorDidLoad()
 
+        // OWN-21: the app-target passkey plugin (PasskeyPlugin.swift). Local
+        // plugins are not discovered from capacitor.config, so register it here.
+        bridge?.registerPluginInstance(LashKirjaPasskeyPlugin())
+
         // First, and independent of the delegate wrap below: if Capacitor's
         // internals change shape and the guard bails out, the splash must
         // still never be able to cover the app forever.

@@ -57,6 +57,7 @@ export const NAV: readonly NavEntry[] = [
   { id: "asetukset-turvallisuus", kind: "settings", label: "Turvallisuus", path: "/asetukset/turvallisuus", parent: "asetukset" },
   { id: "asetukset-lukitus", kind: "settings", label: "Näytön lukitus", path: "/asetukset/turvallisuus/lukitus", parent: "asetukset-tili" },
   { id: "asetukset-biometria", kind: "settings", label: "Face ID", path: "/asetukset/turvallisuus/biometria", parent: "asetukset-tili" },
+  { id: "asetukset-paasyavaimet", kind: "settings", label: "Pääsyavaimet", path: "/asetukset/turvallisuus/paasyavaimet", parent: "asetukset-tili" },
   { id: "asetukset-tietosuoja", kind: "settings", label: "Tietosuoja", path: "/asetukset/tietosuoja", parent: "asetukset" },
   { id: "asetukset-sahkoposti", kind: "settings", label: "Sähköpostien tuonti", path: "/asetukset/sahkoposti", parent: "asetukset" },
   { id: "asetukset-ohje", kind: "settings", label: "Ohje ja tuki", path: "/asetukset/ohje", parent: "asetukset" },

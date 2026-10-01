@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- OWN-21 passkeys. The host must equal the server's WEBAUTHN_RP_ID, and
+	     https://<host>/.well-known/apple-app-site-association must list
+	     <APPLE_TEAM_ID>.fi.tiyouba.lashkirja. build-ipa.yml rewrites the host
+	     from its api_base_url input. See docs/PASSKEY.md. -->
+	<key>com.apple.developer.associated-domains</key>
+	<array>
+		<string>webcredentials:desktop-7gu8ukj.tail42feb1.ts.net</string>
+	</array>
+</dict>
+</plist>

@@ -68,6 +68,7 @@ model User {
   conversations Conversation[]
   authSessions    AuthSession[]
   accountTokens   AccountToken[]
+  passkeys        PasskeyCredential[]
   accountRequests AccountRequest[]
   vatFilings      VatFiling[]
 }
@@ -84,6 +85,40 @@ model AuthSession {
   revokedAt  DateTime?
 
   @@index([userId, revokedAt])
+}
+
+/// A WebAuthn passkey: an additional way to sign in. The password stays as
+/// the fallback. `id` is the base64url credential id the authenticator chose.
+model PasskeyCredential {
+  id         String    @id
+  userId     String
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// COSE public key bytes as returned by registration.
+  publicKey  Bytes
+  /// Signature counter (uint32). Apple passkeys always report 0.
+  counter    BigInt    @default(0)
+  /// JSON array of transport hints ("internal", "hybrid", ...), or null.
+  transports String?
+  deviceName String
+  createdAt  DateTime  @default(now())
+  lastUsedAt DateTime?
+
+  @@index([userId])
+}
+
+/// A WebAuthn ceremony challenge. Single use: verify deletes the row before
+/// checking the response, so a replay finds nothing.
+model PasskeyChallenge {
+  id        String   @id @default(uuid())
+  /// "register" | "authenticate"
+  purpose   String
+  challenge String
+  /// Set for registration (the signed-in user); null for usernameless sign-in.
+  userId    String?
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([expiresAt])
 }
 
 /// One-time secret for a password reset or an email change. Only the hash is stored.
