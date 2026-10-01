@@ -6,20 +6,17 @@
  * so the figure stays reconstructible months later.
  */
 import { prisma } from "./db";
-import { formatDate } from "./format";
 import { AppError, NotFoundError, ValidationError } from "./api-errors";
 import { centsToEuros } from "./money";
 import { buildReminderTotals, daysLate } from "./late-interest";
 import { addDaysUtc, openPosition } from "./invoices";
-import { helsinkiCalendarDate } from "./validation";
 import { buildInvoicePdfData, getInvoice, type PublicInvoice } from "./sales-invoices";
 import { renderReminderPdf, type ReminderPdfData } from "./invoice-pdf";
+import { nextReminderWait, reminderWaitMessage } from "./reminder-schedule";
+import { pendingReminderAt } from "./reminder-waits";
 
 /** Days the customer is given to pay a reminder. */
 export const REMINDER_TERM_DAYS = 7;
-
-/** A new reminder for the same invoice waits this long after the previous one. */
-export const REMINDER_COOLDOWN_MS = 24 * 60 * 60 * 1000;
 
 /**
  * A reminder row is written before its mail goes out and has no recipient
@@ -40,6 +37,12 @@ export interface ReminderPreview {
   dueDate: string;
   recipient: string | null;
   previousReminders: Array<{ level: number; sentAt: string; total: number }>;
+  /**
+   * Set while a new reminder is certain to be refused: the first moment it is
+   * accepted, and the sentence that says why. Screens hide the action until then.
+   */
+  nextReminderAt: string | null;
+  nextReminderNote: string | null;
 }
 
 async function loadSettings(userId: string) {
@@ -92,6 +95,10 @@ export async function previewReminder(
     feeCents: settings.reminderFeeCents,
   });
 
+  const latest = reminders.length > 0 ? reminders[reminders.length - 1] : null;
+  const wait = latest ? nextReminderWait(latest) : null;
+  const waiting = wait !== null && wait.at.getTime() > now.getTime();
+
   return {
     invoice,
     level: reminders.length + 1,
@@ -108,6 +115,8 @@ export async function previewReminder(
       sentAt: reminder.sentAt.toISOString(),
       total: centsToEuros(reminder.totalCents),
     })),
+    nextReminderAt: waiting ? wait.at.toISOString() : null,
+    nextReminderNote: waiting && latest ? reminderWaitMessage(latest) : null,
   };
 }
 
@@ -152,14 +161,6 @@ export async function renderReminder(
   return { buffer: await renderReminderPdf(pdf), preview };
 }
 
-function cooldownMessage(sentAt: Date): string {
-  const again = new Date(sentAt.getTime() + REMINDER_COOLDOWN_MS);
-  return (
-    `Muistutus lähetettiin jo ${formatDate(helsinkiCalendarDate(sentAt))}. ` +
-    `Seuraava voidaan lähettää vasta ${formatDate(helsinkiCalendarDate(again))}.`
-  );
-}
-
 /**
  * Claims the next reminder slot of an invoice before anything is mailed.
  *
@@ -196,7 +197,7 @@ export async function reserveReminder(
 
     const existing = await tx.invoiceReminder.findMany({
       where: { invoiceId },
-      select: { sentTo: true, sentAt: true },
+      select: { sentTo: true, sentAt: true, dueDate: true },
     });
     if (existing.some((row) => row.sentTo === null)) {
       throw new AppError(
@@ -205,12 +206,14 @@ export async function reserveReminder(
         409
       );
     }
-    const latest = existing.reduce<Date | null>(
-      (best, row) => (best === null || row.sentAt > best ? row.sentAt : best),
+    const latest = existing.reduce<(typeof existing)[number] | null>(
+      (best, row) => (best === null || row.sentAt > best.sentAt ? row : best),
       null
     );
-    if (latest && now.getTime() - latest.getTime() < REMINDER_COOLDOWN_MS) {
-      throw new AppError(cooldownMessage(latest), "REMINDER_TOO_SOON", 409);
+    // The previous reminder gave the customer a term to pay: a new one (with
+    // another fee) waits for its end, and never less than 24 hours.
+    if (latest && nextReminderWait(latest).at.getTime() > now.getTime()) {
+      throw new AppError(reminderWaitMessage(latest), "REMINDER_TOO_SOON", 409);
     }
 
     return tx.invoiceReminder.create({
@@ -254,6 +257,8 @@ export interface OverdueSummary {
   open: number;
   reminderCount: number;
   lastReminderAt: string | null;
+  /** While a new reminder is certain to be refused: when it is accepted. */
+  nextReminderAt: string | null;
 }
 
 /** Everything that is overdue, worst first: the reminder work list. */
@@ -291,6 +296,7 @@ export async function listOverdueInvoices(
         open: centsToEuros(position.collectible ? position.openCents : 0),
         reminderCount: invoice._count.reminders,
         lastReminderAt: invoice.reminders[0]?.sentAt.toISOString() ?? null,
+        nextReminderAt: pendingReminderAt(invoice.reminders[0], now),
       };
     })
     .filter((invoice) => invoice.daysLate > 0 && invoice.open > 0)

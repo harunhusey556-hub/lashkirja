@@ -5,6 +5,7 @@ import { noStoreJson, rejectCrossSite, rejectOversizedContentLength } from "@/li
 import { UnauthorizedError, withErrorHandler } from "@/lib/api-errors";
 import { hashIdempotencyPayload, idempotencyKeyFrom, withIdempotency } from "@/lib/idempotency";
 import { createInvoice, listInvoices } from "@/lib/sales-invoices";
+import { reminderWaitsFor } from "@/lib/reminder-waits";
 import { isoDateSchema, moneySchema, periodScopeSchema } from "@/lib/validation";
 
 const lineSchema = z.object({
@@ -41,7 +42,19 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
     month: rawMonth ? periodScopeSchema.parse(rawMonth) : undefined,
     search: params.get("search")?.slice(0, 80) || undefined,
   });
-  return noStoreJson(result);
+  // An overdue invoice that was reminded lately cannot be reminded again yet:
+  // the list hides "Muistuta" for it instead of offering a refused action.
+  const waits = await reminderWaitsFor(
+    session.userId,
+    result.invoices.filter((invoice) => invoice.displayStatus === "overdue").map((invoice) => invoice.id)
+  );
+  return noStoreJson({
+    ...result,
+    invoices: result.invoices.map((invoice) => ({
+      ...invoice,
+      nextReminderAt: waits.get(invoice.id) ?? null,
+    })),
+  });
 });
 
 export const POST = withErrorHandler(async (req: NextRequest) => {

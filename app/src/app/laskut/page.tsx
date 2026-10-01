@@ -61,6 +61,8 @@ interface InvoiceSummary {
   dueDate: string;
   gross: number;
   open: number;
+  /** Set while a new reminder is certain to be refused: when it is accepted. */
+  nextReminderAt?: string | null;
   customer: { id: string; name: string };
 }
 
@@ -100,6 +102,10 @@ function rowTrailing(invoice: InvoiceSummary) {
     return <StatusTag tone="neutral">Hyvityslasku</StatusTag>;
   }
   if (invoice.displayStatus === "overdue") {
+    // Reminded lately: a new reminder would be refused, so no "Muistuta".
+    if (invoice.nextReminderAt && new Date(invoice.nextReminderAt).getTime() > Date.now()) {
+      return <StatusTag tone="neutral">Muistutettu</StatusTag>;
+    }
     return (
       <ActionPill href={detailHref("invoice", invoice.id)} ariaLabel={`Muistuta: ${invoice.customer.name}`}>
         Muistuta

@@ -19,6 +19,7 @@ import { openPosition } from "@/lib/invoices";
 import { parseVatDetails } from "@/lib/alv";
 import { findPaymentReceiptDuplicates } from "@/lib/alv-period";
 import { matchInvoicePaymentsFromBank } from "@/lib/sales-invoices";
+import { reminderWaitsFor } from "@/lib/reminder-waits";
 import { helsinkiCalendarDate, isoDateToUtc } from "@/lib/validation";
 import { openMonthRowsWhere } from "@/lib/month-rows";
 import { approvalGaps, type ApprovalGap } from "@/lib/receipt-approval";
@@ -39,6 +40,8 @@ export type DashboardItem =
       amount: number;
       dueDate: string;
       daysLate: number;
+      /** Set while a new reminder is certain to be refused: when it is accepted. */
+      nextReminderAt: string | null;
     }
   | {
       id: string;
@@ -259,6 +262,11 @@ export async function buildDashboardItems(
   const paidOnStatement = new Set(
     [...(matchRun.preview ?? []), ...matchRun.suggestions].map((entry) => entry.invoiceId)
   );
+  const reminderWaits = await reminderWaitsFor(
+    userId,
+    overdueRows.map((invoice) => invoice.id),
+    now
+  );
   const overdue = overdueRows
     .filter((invoice) => !paidOnStatement.has(invoice.id))
     .map((invoice) => {
@@ -282,6 +290,7 @@ export async function buildDashboardItems(
       amount: centsToEuros(position.openCents),
       dueDate: iso(invoice.dueDate)!,
       daysLate: Math.round((today.getTime() - invoice.dueDate.getTime()) / 86_400_000),
+      nextReminderAt: reminderWaits.get(invoice.id) ?? null,
     }));
 
   const pending = pendingRows.map((receipt): DashboardItem => {

@@ -449,18 +449,24 @@ export default function DashboardClient() {
 
   function itemTask(item: DashboardItem): Task {
     switch (item.kind) {
-      case "overdue_invoice":
+      case "overdue_invoice": {
+        // A reminder that is certain to be refused (the last one's term still
+        // runs) is not offered: the row opens the invoice, which says when.
+        const reminded = item.nextReminderAt != null && new Date(item.nextReminderAt).getTime() > Date.now();
         return {
           key: item.id,
           icon: BellRing,
           title: item.party,
           amount: formatEur(item.amount),
-          secondary: `Lasku ${item.number} · myöhässä ${plural(item.daysLate, "päivä", "päivää")}`,
-          pill: "Muistuta",
+          secondary: `Lasku ${item.number} · myöhässä ${plural(item.daysLate, "päivä", "päivää")}${reminded ? " · muistutettu" : ""}`,
+          pill: reminded ? "Avaa" : "Muistuta",
           blocking: false,
           href: detailHref("invoice", item.invoiceId),
-          onAction: () => setRemindTarget({ invoiceId: item.invoiceId, customerId: item.customerId }),
+          onAction: reminded
+            ? undefined
+            : () => setRemindTarget({ invoiceId: item.invoiceId, customerId: item.customerId }),
         };
+      }
       case "pending_receipt": {
         // FP-6: a receipt without an amount or a vendor is never one-tap approved.
         const gaps = item.gaps ?? [];

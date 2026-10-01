@@ -10,6 +10,7 @@ import { formatEur } from "@/lib/format";
 import { detailHref } from "@/lib/routes";
 import { showToast } from "@/lib/toast";
 import { hapticNotify } from "@/lib/haptics";
+import { reminderWaitNote } from "@/lib/reminder-schedule";
 
 export interface ReminderPreview {
   level: number;
@@ -21,6 +22,9 @@ export interface ReminderPreview {
   dueDate: string;
   recipient: string | null;
   previousReminders: Array<{ level: number; sentAt: string; total: number }>;
+  /** Set while a new reminder is certain to be refused: when it is accepted, and why. */
+  nextReminderAt?: string | null;
+  nextReminderNote?: string | null;
 }
 
 /**
@@ -75,6 +79,9 @@ export function ReminderSheet({
   }, [isOpen, selfLoads, invoiceId, attempt]);
 
   const reminder = selfLoads ? (loaded?.id === invoiceId ? loaded.preview : null) : preview;
+  // A reminder that is certain to be refused is not offered: the sheet says
+  // why and when instead of letting the tap fail.
+  const waitNote = reminderWaitNote(reminder);
 
   function close() {
     setError("");
@@ -182,6 +189,11 @@ export function ReminderSheet({
                 </Link>
               </div>
             )}
+            {waitNote && (
+              <p className="text-caption text-ink-2" role="status">
+                {waitNote}
+              </p>
+            )}
             {error && (
               <p className="text-caption text-danger" role="alert">
                 {error}
@@ -191,8 +203,10 @@ export function ReminderSheet({
               <Button
                 type="button"
                 className="flex-1"
-                disabled={!reminder.recipient}
-                disabledReason={!reminder.recipient ? "Sähköpostiosoite puuttuu." : undefined}
+                disabled={!reminder.recipient || waitNote !== null}
+                disabledReason={
+                  waitNote ?? (!reminder.recipient ? "Sähköpostiosoite puuttuu." : undefined)
+                }
                 busy={sending}
                 busyLabel="Lähetetään…"
                 onClick={() => void send()}

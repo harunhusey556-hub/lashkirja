@@ -48,6 +48,7 @@ import { useCacheAfterBoot } from "@/components/invoices/useCacheAfterBoot";
 import { showToast } from "@/lib/toast";
 import { hapticNotify } from "@/lib/haptics";
 import { ReminderSheet, type ReminderPreview } from "@/components/invoices/ReminderSheet";
+import { reminderWaitNote } from "@/lib/reminder-schedule";
 
 /** A hand-recorded payment that an income receipt from a bank row seems to count again. */
 interface PaymentDuplicate {
@@ -757,6 +758,9 @@ function InvoiceDetail() {
     return null;
   })();
 
+  // A new reminder is certain to be refused while the last one's term runs.
+  const reminderWait = reminderWaitNote(reminder);
+
   const menuItems = invoice
     ? [
         ...(invoice.status === "draft"
@@ -1065,6 +1069,11 @@ function InvoiceDetail() {
                   >
                     Avaa muistutus
                   </AuthedFileLink>
+                  {reminderWait && (
+                    <p className="text-caption text-ink-2" role="status">
+                      {reminderWait}
+                    </p>
+                  )}
                   {reminder.previousReminders.length > 0 && (
                     <ul className="space-y-1 text-caption text-ink-2">
                       {reminder.previousReminders.map((previous) => (
@@ -1119,8 +1128,16 @@ function InvoiceDetail() {
             className="w-full"
             busy={primary.busy}
             busyLabel={primary.busyLabel}
-            disabled={busy || (refreshFailed && primary.kind !== "send")}
-            disabledReason={refreshFailed ? "Lasku ei ole ajan tasalla. Päivitä ensin." : undefined}
+            disabled={
+              busy || (refreshFailed && primary.kind !== "send") || (primary.kind === "remind" && reminderWait !== null)
+            }
+            disabledReason={
+              refreshFailed
+                ? "Lasku ei ole ajan tasalla. Päivitä ensin."
+                : primary.kind === "remind"
+                  ? (reminderWait ? "Uusi muistutus ei ole vielä mahdollinen" : undefined)
+                  : undefined
+            }
             onClick={
               primary.kind === "send"
                 ? () => void openReview()

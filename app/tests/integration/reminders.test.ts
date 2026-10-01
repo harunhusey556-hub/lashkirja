@@ -302,7 +302,10 @@ describe("POST /api/invoices/[id]/reminders", () => {
     // The first one has run its course: its own 7 day term and the cooldown are over.
     await prisma.invoiceReminder.updateMany({
       where: { invoiceId: invoice.id },
-      data: { sentAt: new Date(Date.now() - 8 * 24 * 60 * 60 * 1000) },
+      data: {
+        sentAt: new Date(Date.now() - 8 * 24 * 60 * 60 * 1000),
+        dueDate: new Date(Date.now() - 24 * 60 * 60 * 1000),
+      },
     });
     const second = await readJson(
       await sendReminder(
@@ -345,11 +348,64 @@ describe("POST /api/invoices/[id]/reminders", () => {
     expect(repeat.status).toBe(409);
     const error = (await readJson(repeat)).error;
     expect(error.code).toBe("REMINDER_TOO_SOON");
+    // The first reminder gives the customer 7 days: the message names the end
+    // of that term and the day a new reminder may go, not a 24 hour window.
     expect(error.message).toMatch(
-      /^Muistutus lähetettiin jo \d+\.\d+\.\d{4}\. Seuraava voidaan lähettää vasta \d+\.\d+\.\d{4}\.$/
+      /^Edellisessä muistutuksessa asiakkaalla on maksuaikaa \d+\.\d+\.\d{4} asti\. Uuden muistutuksen voi lähettää \d+\.\d+\.\d{4} alkaen\.$/
     );
     expect(mail.sent).toBe(1);
     expect(await prisma.invoiceReminder.count({ where: { invoiceId: invoice.id } })).toBe(1);
+  });
+
+  it("V34: refuses a second reminder 25 hours later while the first one's 7 day term still runs", async () => {
+    const invoice = await makeSentInvoice();
+    const post = () =>
+      sendReminder(
+        buildRequest("POST", `/api/invoices/${invoice.id}/reminders`, {}, { cookie }),
+        routeContext({ id: invoice.id })
+      );
+    expect((await post()).status).toBe(201);
+    await prisma.invoiceReminder.updateMany({
+      where: { invoiceId: invoice.id },
+      data: { sentAt: new Date(Date.now() - 25 * 60 * 60 * 1000) },
+    });
+
+    const again = await post();
+    expect(again.status).toBe(409);
+    expect((await readJson(again)).error.code).toBe("REMINDER_TOO_SOON");
+    expect(mail.sent).toBe(1);
+    expect(await prisma.invoiceReminder.count({ where: { invoiceId: invoice.id } })).toBe(1);
+  });
+
+  it("V35: the preview says a new reminder is not possible yet, and when it is", async () => {
+    const invoice = await makeSentInvoice();
+    const fresh = await readJson(
+      await reminderPreview(
+        buildRequest("GET", `/api/invoices/${invoice.id}/reminders`, undefined, { cookie }),
+        routeContext({ id: invoice.id })
+      )
+    );
+    expect(fresh.reminder.nextReminderAt).toBeNull();
+
+    await sendReminder(
+      buildRequest("POST", `/api/invoices/${invoice.id}/reminders`, {}, { cookie }),
+      routeContext({ id: invoice.id })
+    );
+    const waiting = await readJson(
+      await reminderPreview(
+        buildRequest("GET", `/api/invoices/${invoice.id}/reminders`, undefined, { cookie }),
+        routeContext({ id: invoice.id })
+      )
+    );
+    const stored = await prisma.invoiceReminder.findFirstOrThrow({ where: { invoiceId: invoice.id } });
+    expect(new Date(waiting.reminder.nextReminderAt).getTime()).toBeGreaterThan(stored.dueDate.getTime());
+    expect(waiting.reminder.nextReminderNote).toMatch(/maksuaikaa .* asti/);
+
+    // The same fact on the Laskut list and the overdue work list.
+    const overdue = await readJson(
+      await overdueList(buildRequest("GET", "/api/invoices/overdue", undefined, { cookie }))
+    );
+    expect(overdue.invoices[0].nextReminderAt).toBe(waiting.reminder.nextReminderAt);
   });
 
   it("frees the slot again when the mail could not be sent", async () => {
