@@ -16,7 +16,7 @@ import { sanitizeText } from "@/lib/sanitizer";
 
 import { assertPeriodOpen } from "@/lib/period-lock";
 import { parseVatDetails } from "@/lib/alv";
-import { vatLinesProblem } from "@/lib/receipt-vat";
+import { sameVatLines, vatLinesProblem } from "@/lib/receipt-vat";
 import { expectedUpdatedAtDate, versionConflict } from "@/lib/edit-conflict";
 const patchSchema = z.object({
   vendor: z.string().trim().max(300).nullish(),
@@ -157,20 +157,21 @@ export const PATCH = withErrorHandler(async (
   // The VAT that would be stored (the sent one, or the stored one when only the
   // total changes) must fit the total that would be stored: same rule as save.
   if (body.vatDetails !== undefined || body.totalAmount !== undefined) {
-    const vatLines =
-      body.vatDetails !== undefined
-        ? (body.vatDetails ?? [])
-        : (parseVatDetails(owned.vatDetails) ?? []).map((line) => ({
-            rate: line.rate,
-            amount: centsToEuros(line.amountCents),
-          }));
+    const storedLines = (parseVatDetails(owned.vatDetails) ?? []).map((line) => ({
+      rate: line.rate,
+      amount: centsToEuros(line.amountCents),
+    }));
+    const vatLines = body.vatDetails !== undefined ? (body.vatDetails ?? []) : storedLines;
     const totalAmount =
       body.totalAmount !== undefined
         ? body.totalAmount
         : owned.totalAmountCents == null
           ? null
           : centsToEuros(owned.totalAmountCents);
-    const vatProblem = vatLinesProblem(vatLines, totalAmount, body.vatDetails !== undefined);
+    // Lines sent back exactly as stored are not a change: an old off-list rate must not
+    // block an edit of something else (R61). Any changed line is held to the save rule.
+    const vatChanged = body.vatDetails !== undefined && !sameVatLines(vatLines, storedLines);
+    const vatProblem = vatLinesProblem(vatLines, totalAmount, vatChanged);
     if (vatProblem) throw new ValidationError(vatProblem);
   }
 

@@ -115,7 +115,9 @@ export const POST = withErrorHandler(async (req: NextRequest) => {
           filePath: upload.storageKey,
           fileName: upload.originalName,
           source: upload.extractionSource || "manual",
-          confidence: upload.confidence,
+          // Typed in by hand (nothing could be read): no recognition score, so the editor
+          // never marks the user's own fields as uncertain (V11).
+          confidence: upload.extractionSource === "manual" ? null : upload.confidence,
           rawText: upload.rawText,
         },
       });

@@ -97,6 +97,8 @@ describe("F04: a photo without readable text is not a dead end", () => {
     const receipt = await prisma.receipt.findFirstOrThrow({ where: { uploadId: uploaded.uploadId } });
     expect(receipt.fileName).toBe("kuitti.jpg");
     expect(receipt.source).toBe("manual");
+    // Typed in by hand, so no recognition score: the editor must not mark its fields as uncertain (V11).
+    expect(receipt.confidence).toBeNull();
   });
 
   it("answers the same photo again with done and the same empty form instead of a new job", async () => {

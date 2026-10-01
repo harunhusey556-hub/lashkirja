@@ -114,6 +114,20 @@ export function vatMismatchHint(rows: VatRow[], totalText: string): string | nul
   return `ALV ei vastaa summaa ja ALV-%:a, odotettu ${expectedText} €.`;
 }
 
+/** True when two lists of VAT lines are the same in rate and cents, in order. */
+export function sameVatLines(
+  a: Array<{ rate: number; amount: number }>,
+  b: Array<{ rate: number; amount: number }>
+): boolean {
+  return (
+    a.length === b.length &&
+    a.every(
+      (line, index) =>
+        line.rate === b[index].rate && eurosToCents(line.amount) === eurosToCents(b[index].amount)
+    )
+  );
+}
+
 export const VAT_TOO_LARGE_MESSAGE = "ALV-summa ei voi olla suurempi kuin kuitin summa.";
 
 /**
