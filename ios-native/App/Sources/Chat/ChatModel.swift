@@ -31,8 +31,9 @@ final class ChatModel {
 
     init(app: AppModel) { self.app = app }
 
-    /// Free text needs the model; the shortcuts work without it.
-    var canType: Bool { aiAvailable != false && cooldownUntil == nil }
+    /// As in the web drawer, typing stays on when the AI is unavailable (the server still answers
+    /// what it can without it); only a rate-limit cooldown turns it off.
+    var canType: Bool { cooldownUntil == nil }
     var canSendShortcut: Bool { cooldownUntil == nil }
 
     func loadStatus() async {

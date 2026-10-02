@@ -16,6 +16,7 @@ struct InvoiceFormView: View {
     @State private var failure: String?
     @State private var key = UUID().uuidString
     @State private var loaded = false
+    @State private var sellerRegistered = true
     @State private var catalog: [CatalogItem] = []
     @State private var productNotice: String?
 
@@ -38,12 +39,12 @@ struct InvoiceFormView: View {
                 }
                 Section {
                     ForEach($draft.lines) { $line in
-                        LineEditor(line: $line, catalog: catalog, issueDate: APIDate.dayString(issueDate)) { saved in
+                        LineEditor(line: $line, catalog: catalog, issueDate: APIDate.dayString(issueDate), showsVat: sellerRegistered) { saved in
                             Task { await saveProduct(saved) }
                         }
                     }
                     .onDelete { draft.lines.remove(atOffsets: $0) }
-                    Button { withAnimation { draft.lines.append(.init()) } } label: { Label("Lisää rivi", systemImage: "plus") }
+                    Button { withAnimation { draft.lines.append(.new(sellerRegistered: sellerRegistered)) } } label: { Label("Lisää rivi", systemImage: "plus") }
                 } header: {
                     Text("Rivit")
                 } footer: {
@@ -104,6 +105,7 @@ struct InvoiceFormView: View {
         if let list: CustomerList = try? await app.api.get("/api/customers") { customers = list.customers.filter { $0.archivedAt == nil } }
         // The form works without the catalog; the product picker just stays hidden.
         if let list: CatalogList = try? await app.api.get("/api/catalog") { catalog = list.items }
+        if let profile: ProfileResponse = try? await app.api.get("/api/profile") { sellerRegistered = profile.profile.vatRegistered }
         if let existing {
             draft.customerId = existing.customer.id
             draft.issueDate = existing.issueDate
@@ -115,8 +117,9 @@ struct InvoiceFormView: View {
             draft.lines = existing.lines.map { .init(description: $0.description, quantity: $0.quantity, unit: $0.unit, unitPrice: $0.unitPrice, vatRate: $0.vatRate) }
         } else {
             if let presetCustomerId { draft.customerId = presetCustomerId }
-            if draft.lines.isEmpty { draft.lines = [.init()] }
+            if draft.lines.isEmpty { draft.lines = [.new(sellerRegistered: sellerRegistered)] }
         }
+        draft.followSellerVat(registered: sellerRegistered)
     }
 
     /// "Tallenna tuotteeksi": the line becomes a catalog product for later invoices.
@@ -149,6 +152,7 @@ struct InvoiceFormView: View {
 
     private func save() async {
         draft.issueDate = APIDate.dayString(issueDate)
+        draft.followSellerVat(registered: sellerRegistered)
         if let problem = draft.validationError { failure = problem; Haptics.error(); return }
         busy = true
         failure = nil
@@ -173,6 +177,8 @@ struct LineEditor: View {
     @Binding var line: InvoiceDraft.Line
     var catalog: [CatalogItem] = []
     var issueDate: String = APIDate.dayString(Date())
+    /// Off for a seller outside the VAT register: every line is 0 % and the rate is not offered.
+    var showsVat = true
     var onSaveProduct: ((InvoiceDraft.Line) -> Void)? = nil
     @State private var priceText = ""
     @State private var quantityText = ""
@@ -203,12 +209,14 @@ struct LineEditor: View {
                 TextField("À-hinta €", text: $priceText).keyboardType(.decimalPad)
                     .onChange(of: priceText) { _, t in line.unitPrice = Money.parse(t) ?? 0 }
             }
-            Picker("ALV", selection: $line.vatRate) {
-                ForEach(Self.rates, id: \.self) { rate in
-                    Text("\(Self.text(rate)) %").tag(rate)
+            if showsVat {
+                Picker("ALV", selection: $line.vatRate) {
+                    ForEach(Self.rates, id: \.self) { rate in
+                        Text("\(Self.text(rate)) %").tag(rate)
+                    }
                 }
+                .pickerStyle(.segmented)
             }
-            .pickerStyle(.segmented)
             if let onSaveProduct {
                 Button { onSaveProduct(line) } label: {
                     Label("Tallenna tuotteeksi", systemImage: "square.and.arrow.down").font(.footnote)

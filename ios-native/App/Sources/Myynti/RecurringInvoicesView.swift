@@ -361,6 +361,7 @@ struct RecurringFormSheet: View {
     @State private var busy = false
     @State private var failure: String?
     @State private var loaded = false
+    @State private var sellerRegistered = true
 
     var body: some View {
         NavigationStack {
@@ -391,10 +392,10 @@ struct RecurringFormSheet: View {
                 }
                 Section("Rivit") {
                     ForEach($draft.lines) { $line in
-                        LineEditor(line: $line, catalog: catalog, issueDate: APIDate.dayString(startDate))
+                        LineEditor(line: $line, catalog: catalog, issueDate: APIDate.dayString(startDate), showsVat: sellerRegistered)
                     }
                     .onDelete { draft.lines.remove(atOffsets: $0) }
-                    Button { withAnimation { draft.lines.append(.init()) } } label: { Label("Lisää rivi", systemImage: "plus") }
+                    Button { withAnimation { draft.lines.append(.new(sellerRegistered: sellerRegistered)) } } label: { Label("Lisää rivi", systemImage: "plus") }
                 }
                 if let failure { Section { Text(failure).foregroundStyle(Theme.danger) } }
             }
@@ -433,10 +434,13 @@ struct RecurringFormSheet: View {
             customers = list.customers.filter { $0.archivedAt == nil || $0.id == draft.customerId }
         }
         if let list: CatalogList = try? await app.api.get("/api/catalog") { catalog = list.items }
+        if let profile: ProfileResponse = try? await app.api.get("/api/profile") { sellerRegistered = profile.profile.vatRegistered }
+        draft.lines.followSellerVat(registered: sellerRegistered)
     }
 
     private func save() async {
         draft.startDate = APIDate.dayString(startDate)
+        draft.lines.followSellerVat(registered: sellerRegistered)
         draft.endDate = hasEnd ? APIDate.dayString(endDate) : nil
         if let problem = draft.validationError { failure = problem; Haptics.error(); return }
         busy = true

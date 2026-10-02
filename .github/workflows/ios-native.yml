@@ -25,7 +25,12 @@ jobs:
           swift-version: "6.1"
       - name: swift test
         working-directory: ios-native/LashKirjaCore
-        run: swift test 2>&1 | tee test.log; exit ${PIPESTATUS[0]}
+        run: |
+          swift test 2>&1 | tee test.log
+          status=${PIPESTATUS[0]}
+          # Compile errors and failed expectations become annotations, readable without a log download.
+          grep -E "error:|✘" test.log | sed -E 's/\x1b\[[0-9;]*m//g' | sort -u | head -40 | while IFS= read -r line; do echo "::error::${line}"; done
+          exit $status
 
   ios-build:
     name: iOS build and tests

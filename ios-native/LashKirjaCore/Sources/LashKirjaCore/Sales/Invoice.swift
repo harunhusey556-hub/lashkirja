@@ -198,3 +198,26 @@ public struct InvoiceDraft: Encodable, Sendable, Equatable {
         return output
     }
 }
+
+extension InvoiceDraft.Line {
+    /// A new line at the seller's rate: 0 % for a seller outside the VAT register.
+    public static func new(sellerRegistered: Bool) -> InvoiceDraft.Line {
+        sellerRegistered ? .init() : .init(vatRate: 0)
+    }
+}
+
+extension InvoiceDraft {
+    /// A seller outside the VAT register charges no VAT, whatever a line holds (the server applies
+    /// the same rule; this keeps the preview honest). A registered seller's lines are left as typed.
+    public mutating func followSellerVat(registered: Bool) {
+        lines.followSellerVat(registered: registered)
+    }
+}
+
+extension Array where Element == InvoiceDraft.Line {
+    /// The same rule for any list of lines (recurring invoices use them too).
+    public mutating func followSellerVat(registered: Bool) {
+        guard !registered else { return }
+        for index in indices where self[index].vatRate != 0 { self[index].vatRate = 0 }
+    }
+}
