@@ -3,7 +3,7 @@ import PackageDescription
 
 let package = Package(
     name: "LashKirjaCore",
-    platforms: [.iOS(.v17), .macOS(.v14)],
+    platforms: [.iOS(.v18), .macOS(.v15)],
     products: [.library(name: "LashKirjaCore", targets: ["LashKirjaCore"])],
     targets: [
         .target(name: "LashKirjaCore", swiftSettings: [.swiftLanguageMode(.v5)]),

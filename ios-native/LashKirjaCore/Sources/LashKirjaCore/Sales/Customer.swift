@@ -1,0 +1,83 @@
+import Foundation
+
+public struct Customer: Decodable, Sendable, Identifiable, Hashable {
+    public let id: String
+    public let name: String
+    public let businessId: String?
+    public let contactPerson: String?
+    public let email: String?
+    public let phone: String?
+    public let addressStreet: String?
+    public let addressPostalCode: String?
+    public let addressCity: String?
+    public let country: String?
+    public let defaultPaymentTermDays: Int
+    public let notes: String?
+    public let archivedAt: String?
+    public let updatedAt: String
+    public let invoiceCount: Int?
+    public let openInvoiceCount: Int?
+    public let openBalance: Decimal?
+    public let invoicedTotal: Decimal?
+    public let lastInvoiceDate: String?
+
+    public var address: String? {
+        let city = [addressPostalCode, addressCity].compactMap { $0 }.joined(separator: " ")
+        let parts = [addressStreet, city.isEmpty ? nil : city].compactMap { $0 }
+        return parts.isEmpty ? nil : parts.joined(separator: ", ")
+    }
+}
+
+public struct CustomerList: Decodable, Sendable { public let customers: [Customer] }
+public struct CustomerResponse: Decodable, Sendable { public let customer: Customer }
+
+/// `POST /api/customers` / `PATCH /api/customers/{id}`: empty fields are left out.
+public struct CustomerDraft: Encodable, Sendable, Equatable {
+    public var name = ""
+    public var businessId = ""
+    public var contactPerson = ""
+    public var email = ""
+    public var phone = ""
+    public var addressStreet = ""
+    public var addressPostalCode = ""
+    public var addressCity = ""
+    public var defaultPaymentTermDays = 14
+    public var notes = ""
+
+    public init() {}
+
+    public init(_ c: Customer) {
+        name = c.name
+        businessId = c.businessId ?? ""
+        contactPerson = c.contactPerson ?? ""
+        email = c.email ?? ""
+        phone = c.phone ?? ""
+        addressStreet = c.addressStreet ?? ""
+        addressPostalCode = c.addressPostalCode ?? ""
+        addressCity = c.addressCity ?? ""
+        defaultPaymentTermDays = c.defaultPaymentTermDays
+        notes = c.notes ?? ""
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case name, businessId, contactPerson, email, phone, addressStreet, addressPostalCode, addressCity, defaultPaymentTermDays, notes
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        func put(_ value: String, _ key: CodingKeys) throws {
+            let t = value.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !t.isEmpty { try c.encode(t, forKey: key) }
+        }
+        try c.encode(name.trimmingCharacters(in: .whitespacesAndNewlines), forKey: .name)
+        try put(businessId, .businessId)
+        try put(contactPerson, .contactPerson)
+        try put(email, .email)
+        try put(phone, .phone)
+        try put(addressStreet, .addressStreet)
+        try put(addressPostalCode, .addressPostalCode)
+        try put(addressCity, .addressCity)
+        try c.encode(defaultPaymentTermDays, forKey: .defaultPaymentTermDays)
+        try put(notes, .notes)
+    }
+}

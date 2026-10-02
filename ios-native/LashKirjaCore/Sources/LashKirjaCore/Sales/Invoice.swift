@@ -1,0 +1,167 @@
+import Foundation
+
+public enum InvoiceStatus: String, Codable, Sendable, CaseIterable {
+    case draft, sent, overdue, paid, credited
+
+    public var label: String {
+        switch self {
+        case .draft: "Luonnos"
+        case .sent: "Odottaa maksua"
+        case .overdue: "Myöhässä"
+        case .paid: "Maksettu"
+        case .credited: "Hyvitetty"
+        }
+    }
+}
+
+public struct Invoice: Decodable, Sendable, Identifiable, Hashable {
+    public struct Line: Decodable, Sendable, Identifiable, Hashable {
+        public let id: String
+        public let description: String
+        public let quantity: Decimal
+        public let unit: String
+        public let unitPrice: Decimal
+        public let vatRate: Decimal
+        public let net: Decimal
+    }
+    public struct Payment: Decodable, Sendable, Identifiable, Hashable {
+        public let id: String
+        public let paidDate: String
+        public let amount: Decimal
+        public let source: String
+        public let transactionId: String?
+        public let note: String?
+    }
+    public struct Send: Decodable, Sendable, Identifiable, Hashable {
+        public let id: String
+        public let toAddress: String
+        public let status: String
+        public let error: String?
+        public let createdAt: String
+    }
+    public struct Activity: Decodable, Sendable, Identifiable, Hashable {
+        public let id: String
+        public let kind: String
+        public let summary: String
+        public let createdAt: String
+    }
+    public struct Party: Decodable, Sendable, Hashable {
+        public let id: String
+        public let name: String
+        public let email: String?
+        public let businessId: String?
+    }
+    public struct Ref: Decodable, Sendable, Hashable { public let id: String; public let number: Int }
+
+    public let id: String
+    public let number: Int
+    public let reference: String
+    public let status: String
+    public let displayStatus: InvoiceStatus
+    public let issueDate: String
+    public let dueDate: String
+    public let sentAt: String?
+    public let paidAt: String?
+    public let notes: String?
+    public let currency: String
+    public let net: Decimal
+    public let vat: Decimal
+    public let gross: Decimal
+    public let paid: Decimal
+    public let open: Decimal
+    public let closedReason: String?
+    public let updatedAt: String
+    public let documentKind: String
+    public let creditsInvoice: Ref?
+    public let customer: Party
+    public let lines: [Line]
+    public let payments: [Payment]
+    public let sends: [Send]
+    public let activity: [Activity]
+
+    public var isCreditNote: Bool { documentKind == "credit_note" }
+}
+
+public struct InvoiceList: Decodable, Sendable {
+    public struct Aging: Decodable, Sendable {
+        public let totalOpen: Decimal
+        public let overdue: Decimal
+        public let overdueCount: Int
+    }
+    public let invoices: [Invoice]
+    public let aging: Aging
+}
+
+public struct InvoiceDetailResponse: Decodable, Sendable { public let invoice: Invoice }
+public struct InvoiceResponse: Decodable, Sendable { public let invoice: Invoice }
+public struct InvoiceCounts: Decodable, Sendable { public let counts: [String: Int] }
+
+/// The body of `POST /api/invoices` (strict on the server: only these keys).
+public struct InvoiceDraft: Encodable, Sendable, Equatable {
+    public struct Line: Codable, Sendable, Equatable, Identifiable {
+        public var id = UUID()
+        public var description: String
+        public var quantity: Decimal
+        public var unit: String
+        public var unitPrice: Decimal
+        public var vatRate: Decimal
+
+        public init(description: String = "", quantity: Decimal = 1, unit: String = "kpl", unitPrice: Decimal = 0, vatRate: Decimal = Decimal(string: "25.5")!) {
+            self.description = description
+            self.quantity = quantity
+            self.unit = unit
+            self.unitPrice = unitPrice
+            self.vatRate = vatRate
+        }
+
+        enum CodingKeys: String, CodingKey { case description, quantity, unit, unitPrice, vatRate }
+    }
+
+    public var customerId: String
+    public var issueDate: String
+    public var paymentTermDays: Int
+    public var notes: String = ""
+    public var lines: [Line] = []
+
+    public init(customerId: String, issueDate: String, paymentTermDays: Int) {
+        self.customerId = customerId
+        self.issueDate = issueDate
+        self.paymentTermDays = paymentTermDays
+    }
+
+    enum CodingKeys: String, CodingKey { case customerId, issueDate, paymentTermDays, notes, lines }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(customerId, forKey: .customerId)
+        try c.encode(issueDate, forKey: .issueDate)
+        try c.encode(paymentTermDays, forKey: .paymentTermDays)
+        let trimmed = notes.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmed.isEmpty { try c.encode(trimmed, forKey: .notes) }
+        try c.encode(lines, forKey: .lines)
+    }
+
+    /// Totals as the server computes them: net summed per VAT rate, VAT rounded once per rate.
+    public var totals: (net: Decimal, vat: Decimal, gross: Decimal) {
+        var netByRate: [Decimal: Decimal] = [:]
+        for line in lines { netByRate[line.vatRate, default: 0] += Self.round2(line.quantity * line.unitPrice) }
+        let net = netByRate.values.reduce(0, +)
+        let vat = netByRate.reduce(Decimal(0)) { $0 + Self.round2($1.value * $1.key / 100) }
+        return (net, vat, net + vat)
+    }
+
+    public var validationError: String? {
+        if customerId.isEmpty { return "Valitse asiakas." }
+        if lines.isEmpty { return "Lisää vähintään yksi rivi." }
+        if lines.contains(where: { $0.description.trimmingCharacters(in: .whitespaces).isEmpty }) { return "Jokaisella rivillä tarvitaan kuvaus." }
+        if lines.contains(where: { $0.quantity <= 0 }) { return "Määrän on oltava suurempi kuin nolla." }
+        return nil
+    }
+
+    static func round2(_ value: Decimal) -> Decimal {
+        var input = value
+        var output = Decimal()
+        NSDecimalRound(&output, &input, 2, .plain)
+        return output
+    }
+}
