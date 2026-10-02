@@ -2,6 +2,7 @@ import { enableBankingStatus } from "../src/lib/enablebanking/signing";
 import { syncDueBankConnections } from "../src/lib/enablebanking/sync";
 import { listSyncableImapAccounts, syncImapAccount } from "../src/lib/mail-sync";
 import { drainPendingDocumentJobs } from "../src/lib/document-jobs";
+import { runDueRecurringPurchases } from "../src/lib/recurring-purchases";
 
 const SYNC_INTERVAL_MS = 10 * 60 * 1000; // 10 minutes
 
@@ -15,6 +16,19 @@ async function runBankSyncCycle() {
     );
   } catch (error) {
     console.error(`[${new Date().toISOString()}] Bank sync cycle failed`, error);
+  }
+}
+
+/** Toistuvat ostolaskut: idempotent per period, so the hourly cron running it too is harmless. */
+async function runRecurringPurchaseCycle() {
+  try {
+    const result = await runDueRecurringPurchases();
+    if (result.users === 0) return;
+    console.log(
+      `[${new Date().toISOString()}] Recurring purchases users=${result.users} created=${result.created} skipped=${result.skipped} periodLocked=${result.periodLocked.length} failed=${result.failed.length} errors=${result.errors.length}`
+    );
+  } catch (error) {
+    console.error(`[${new Date().toISOString()}] Recurring purchase cycle failed`, error);
   }
 }
 
@@ -48,6 +62,7 @@ async function main() {
   // Run immediately on start
   await runSyncCycle();
   await runBankSyncCycle();
+  await runRecurringPurchaseCycle();
   await drainPendingDocumentJobs().catch((error) =>
     console.error(`[${new Date().toISOString()}] Document jobs failed`, error)
   );
@@ -56,6 +71,7 @@ async function main() {
   setInterval(async () => {
     await runSyncCycle();
     await runBankSyncCycle();
+    await runRecurringPurchaseCycle();
     await drainPendingDocumentJobs().catch((error) =>
       console.error(`[${new Date().toISOString()}] Document jobs failed`, error)
     );

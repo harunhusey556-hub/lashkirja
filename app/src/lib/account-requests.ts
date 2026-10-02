@@ -186,6 +186,7 @@ export async function buildAccountCopyZip(userId: string): Promise<Buffer> {
     bankConnections,
     vatFilings,
     recurring,
+    recurringPurchases,
     catalog,
     mailboxes,
     conversations,
@@ -209,6 +210,7 @@ export async function buildAccountCopyZip(userId: string): Promise<Buffer> {
     }),
     prisma.vatFiling.findMany({ ...byUser }),
     prisma.recurringInvoice.findMany({ ...byUser, include: { lines: true, runs: true } }),
+    prisma.recurringPurchase.findMany({ ...byUser, include: { runs: true } }),
     prisma.catalogItem.findMany({ ...byUser }),
     prisma.imapAccount.findMany({ ...byUser, omit: { encryptedPass: true } }),
     prisma.conversation.findMany({
@@ -230,6 +232,7 @@ export async function buildAccountCopyZip(userId: string): Promise<Buffer> {
     ["pankkiyhteydet.json", bankConnections],
     ["alv-ilmoitukset.json", vatFilings],
     ["toistuvat-laskut.json", recurring],
+    ["toistuvat-ostolaskut.json", recurringPurchases],
     ["tuotteet.json", catalog],
     ["postilaatikko.json", mailboxes],
     ["avustaja.json", conversations],
@@ -380,6 +383,7 @@ export async function completeAccountClose(id: string, options: { bankClient?: E
     }),
     // A closed account bills no one: its schedules stop with it.
     prisma.recurringInvoice.updateMany({ where: { userId: row.userId }, data: { active: false } }),
+    prisma.recurringPurchase.updateMany({ where: { userId: row.userId }, data: { active: false } }),
     prisma.user.update({
       where: { id: row.userId },
       data: { accessDisabledAt: now, phone: null, businessDetails: null, pendingEmail: null },

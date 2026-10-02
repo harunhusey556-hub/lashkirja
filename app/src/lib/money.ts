@@ -29,3 +29,12 @@ export function isCentAmount(value: number): boolean {
     return false;
   }
 }
+
+/**
+ * The VAT inside a gross amount at `ratePercent`, in whole cents (integer
+ * maths, no float drift). One formula for the receipt form, purchase invoices
+ * and recurring purchase templates.
+ */
+export function vatCentsInGrossCents(grossCents: number, ratePercent: number): number {
+  return Math.round((grossCents * ratePercent) / (100 + ratePercent));
+}

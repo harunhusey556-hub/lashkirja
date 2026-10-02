@@ -59,6 +59,7 @@ model User {
   salesInvoices SalesInvoice[]
   purchaseInvoices PurchaseInvoice[]
   recurringInvoices RecurringInvoice[]
+  recurringPurchases RecurringPurchase[]
   idempotencyRecords IdempotencyRecord[]
   invoiceSequence InvoiceSequence?
   catalogItems    CatalogItem[]
@@ -689,13 +690,18 @@ model PurchaseInvoice {
   // The receipt that documents this purchase, once it exists.
   receiptId          String?   @unique
   receipt            Receipt?  @relation(fields: [receiptId], references: [id], onDelete: SetNull)
+  /// The recurring template (toistuva ostolasku) that created this invoice.
+  recurringPurchaseId String?
+  recurringPurchase   RecurringPurchase? @relation(fields: [recurringPurchaseId], references: [id], onDelete: SetNull)
   createdAt          DateTime  @default(now())
   updatedAt          DateTime  @updatedAt
 
-  payments PurchasePayment[]
+  payments     PurchasePayment[]
+  recurringRun RecurringPurchaseRun?
 
   @@index([userId, status, dueDate])
   @@index([userId, issueDate])
+  @@index([recurringPurchaseId])
 }
 
 model PurchasePayment {
@@ -826,6 +832,54 @@ model RecurringInvoiceRun {
 
   @@unique([recurringInvoiceId, issueDate])
   @@index([recurringInvoiceId, createdAt])
+}
+
+/// A routine expense (rent, a subscription) that becomes a purchase invoice
+/// every period. Amounts follow the purchase invoice rules: VAT is derived from
+/// the gross amount and the rate.
+model RecurringPurchase {
+  id                 String    @id @default(uuid())
+  userId             String
+  user               User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  supplierName       String
+  supplierBusinessId String?
+  supplierIban       String?
+  reference          String?
+  category           String?
+  notes              String?
+  grossCents         Int
+  vatRate            Float // 0 | 10 | 13.5 | 14 | 25.5
+  interval           String // "monthly" | "quarterly" | "yearly"
+  dayOfMonth         Int // 1-28, the issue day
+  dueDays            Int // 0-90, due date = issue date + dueDays
+  startDate          DateTime
+  endDate            DateTime?
+  active             Boolean   @default(true)
+  /// Next issue date owed.
+  nextRunDate        DateTime
+  lastRunAt          DateTime?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  runs     RecurringPurchaseRun[]
+  invoices PurchaseInvoice[]
+
+  @@index([userId, active, nextRunDate])
+}
+
+/// One period of a recurring purchase. The unique key is what keeps a period
+/// from being created twice.
+model RecurringPurchaseRun {
+  id                  String            @id @default(uuid())
+  recurringPurchaseId String
+  recurringPurchase   RecurringPurchase @relation(fields: [recurringPurchaseId], references: [id], onDelete: Cascade)
+  periodKey           String // "YYYY-MM" of the issue date
+  /// Null once the invoice is deleted: the period still counts as run.
+  purchaseInvoiceId   String?           @unique
+  purchaseInvoice     PurchaseInvoice?  @relation(fields: [purchaseInvoiceId], references: [id], onDelete: SetNull)
+  createdAt           DateTime          @default(now())
+
+  @@unique([recurringPurchaseId, periodKey])
 }
 
 /// Replay of a create that the client already sent. The key is per user and

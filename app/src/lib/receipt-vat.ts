@@ -4,7 +4,7 @@
  */
 import { RATE_TO_FIELD } from "./vero/omavero-fields";
 import { parseMoneyInput } from "./format";
-import { eurosToCents } from "./money";
+import { eurosToCents, vatCentsInGrossCents } from "./money";
 
 /** Default rate of a fresh VAT row; the editor shows it and computes from it. */
 export const DEFAULT_VAT_RATE = "25.5";
@@ -47,7 +47,7 @@ export function moneyField(value: number | null | undefined): string {
 
 /** The VAT inside a gross amount, in whole cents (integer maths, no float drift). */
 function vatCentsInGross(grossEuros: number, rate: number): number {
-  return Math.round((eurosToCents(grossEuros) * rate) / (100 + rate));
+  return vatCentsInGrossCents(eurosToCents(grossEuros), rate);
 }
 
 /** VAT of the typed total at the chosen rate as Finnish field text; null when it cannot be told. */

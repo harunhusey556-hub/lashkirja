@@ -15,7 +15,7 @@
 import type { Prisma } from "@/generated/prisma/client";
 import { prisma } from "./db";
 import { AppError, NotFoundError, ValidationError } from "./api-errors";
-import { centsToEuros, eurosToCents } from "./money";
+import { centsToEuros, eurosToCents, vatCentsInGrossCents } from "./money";
 import { formatDate, formatEur } from "./format";
 import { helsinkiCalendarDate, isoDateToUtc } from "./validation";
 import { isValidBusinessId, isValidReferenceNumber, normalizeBusinessId, normalizeReference } from "./finnish-reference";
@@ -38,6 +38,8 @@ export interface PurchaseInvoiceInput {
   category?: string | null;
   notes?: string | null;
   receiptId?: string | null;
+  /** Set by a recurring purchase run (lib/recurring-purchases.ts), never by a client. */
+  recurringPurchaseId?: string | null;
 }
 
 export interface PublicPurchaseInvoice {
@@ -61,6 +63,8 @@ export interface PublicPurchaseInvoice {
   notes: string | null;
   paidAt: string | null;
   receiptId: string | null;
+  /** The recurring template that created this invoice ("Toistuva"), if any. */
+  recurringPurchaseId: string | null;
   payments: Array<{
     id: string;
     paidDate: string;
@@ -89,6 +93,7 @@ type PurchaseRow = {
   paidAt: Date | null;
   closedReason: string | null;
   receiptId: string | null;
+  recurringPurchaseId: string | null;
   payments: Array<{
     id: string;
     paidDate: Date;
@@ -141,6 +146,7 @@ export function toPublicPurchaseInvoice(
     notes: invoice.notes,
     paidAt: invoice.paidAt ? invoice.paidAt.toISOString() : null,
     receiptId: invoice.receiptId,
+    recurringPurchaseId: invoice.recurringPurchaseId,
     payments: invoice.payments.map((payment) => ({
       id: payment.id,
       paidDate: payment.paidDate.toISOString().slice(0, 10),
@@ -152,7 +158,8 @@ export function toPublicPurchaseInvoice(
   };
 }
 
-function prepareReference(value: string | null | undefined): string | null {
+/** A supplier's viitenumero, normalized; refused when its check digit is wrong. */
+export function prepareReference(value: string | null | undefined): string | null {
   if (!value) return null;
   const normalized = normalizeReference(value);
   if (!normalized) return null;
@@ -162,7 +169,8 @@ function prepareReference(value: string | null | undefined): string | null {
   return normalized;
 }
 
-function prepareSupplier(input: Pick<PurchaseInvoiceInput, "supplierBusinessId" | "supplierIban">) {
+/** The supplier's Y-tunnus and IBAN, normalized; refused when either is not valid. */
+export function prepareSupplier(input: Pick<PurchaseInvoiceInput, "supplierBusinessId" | "supplierIban">) {
   let businessId: string | null = null;
   if (input.supplierBusinessId?.trim()) {
     if (!isValidBusinessId(input.supplierBusinessId)) {
@@ -183,7 +191,8 @@ function prepareSupplier(input: Pick<PurchaseInvoiceInput, "supplierBusinessId" 
   return { businessId, iban };
 }
 
-function amounts(gross: number, vat: number | undefined) {
+/** Gross, VAT and net in cents; net is what the gross leaves after VAT. */
+export function purchaseAmounts(gross: number, vat: number | undefined) {
   const grossCents = eurosToCents(gross);
   if (grossCents <= 0) throw new ValidationError("Laskun summan on oltava positiivinen.");
   const vatCents = vat === undefined ? 0 : eurosToCents(vat);
@@ -192,6 +201,16 @@ function amounts(gross: number, vat: number | undefined) {
     throw new ValidationError("ALV ei voi olla suurempi kuin laskun loppusumma.");
   }
   return { grossCents, vatCents, netCents: grossCents - vatCents };
+}
+
+/**
+ * The same amounts when only the gross and the VAT rate are known: the VAT
+ * inside the gross, rounded to the cent, exactly as the purchase form derives it.
+ */
+export function purchaseAmountsFromRate(gross: number, vatRate: number) {
+  const grossCents = eurosToCents(gross);
+  if (grossCents <= 0) throw new ValidationError("Laskun summan on oltava positiivinen.");
+  return purchaseAmounts(gross, centsToEuros(vatCentsInGrossCents(grossCents, vatRate)));
 }
 
 async function assertReceiptAvailable(
@@ -235,7 +254,7 @@ export async function createPurchaseInvoice(
   await assertPeriodOpen(userId, [issueDate], db ?? prisma);
 
   const { businessId, iban } = prepareSupplier(input);
-  const { grossCents, vatCents, netCents } = amounts(input.gross, input.vat);
+  const { grossCents, vatCents, netCents } = purchaseAmounts(input.gross, input.vat);
   if (input.receiptId) await assertReceiptAvailable(userId, input.receiptId, undefined, db ?? prisma);
 
   const created = await (db ?? prisma).purchaseInvoice.create({
@@ -254,6 +273,7 @@ export async function createPurchaseInvoice(
       category: input.category?.trim() || null,
       notes: input.notes?.trim() || null,
       receiptId: input.receiptId ?? null,
+      recurringPurchaseId: input.recurringPurchaseId ?? null,
     },
     include: purchaseInclude,
   });
@@ -311,7 +331,7 @@ export async function updatePurchaseInvoice(
   }
 
   if (input.gross !== undefined || input.vat !== undefined) {
-    const { grossCents, vatCents, netCents } = amounts(
+    const { grossCents, vatCents, netCents } = purchaseAmounts(
       input.gross ?? centsToEuros(existing.grossCents),
       input.vat ?? centsToEuros(existing.vatCents)
     );

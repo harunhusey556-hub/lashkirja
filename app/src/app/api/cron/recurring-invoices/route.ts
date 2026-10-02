@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { checkCronAuth } from "@/lib/cron-auth";
 import { runRecurringInvoices } from "@/lib/recurring-invoices";
+import { runDueRecurringPurchases, type DueRecurringPurchasesSummary } from "@/lib/recurring-purchases";
 import { sendInvoiceByEmail } from "@/lib/invoice-mail";
 import { errorText } from "@/lib/api-errors";
 
@@ -9,8 +10,9 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
 /**
- * Generates due recurring invoices for every user. One user's failure must not
- * stop the others, so each is caught and reported separately.
+ * Generates due recurring invoices for every user, then the due recurring
+ * purchase invoices (toistuvat ostolaskut). One user's failure must not stop
+ * the others, so each is caught and reported separately.
  */
 export async function GET(req: NextRequest) {
   const auth = checkCronAuth(req);
@@ -65,8 +67,16 @@ export async function GET(req: NextRequest) {
     }
   }
 
+  let purchases: DueRecurringPurchasesSummary | { error: string };
+  try {
+    purchases = await runDueRecurringPurchases();
+  } catch (error) {
+    purchases = { error: errorText(error) };
+  }
+  const purchasesOk = !("error" in purchases) && purchases.errors.length === 0 && purchases.failed.length === 0;
+
   return NextResponse.json({
-    ok: errors.length === 0 && sendErrors.length === 0,
+    ok: errors.length === 0 && sendErrors.length === 0 && purchasesOk,
     users: users.length,
     generated,
     skipped,
@@ -74,5 +84,6 @@ export async function GET(req: NextRequest) {
     sendFailed: sendErrors.length,
     sendErrors: sendErrors.length ? sendErrors : undefined,
     errors: errors.length ? errors : undefined,
+    purchases,
   });
 }
