@@ -390,6 +390,7 @@ private struct ConversationsSheet: View {
             }
             .searchable(text: $search, prompt: "Hae keskusteluja")
             .navigationTitle("Keskustelut")
+            .refreshable { await load() }
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) { Button("Valmis") { dismiss() } }

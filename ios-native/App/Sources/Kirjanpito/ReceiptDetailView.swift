@@ -69,6 +69,7 @@ struct ReceiptDetailView: View {
         .scrollContentBackground(.hidden)
         .background(Theme.canvas)
         .navigationTitle("Kuitti")
+        .refreshable { await load() }
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             if state.value != nil {

@@ -197,6 +197,7 @@ struct CustomerDetailView: View {
         .scrollContentBackground(.hidden)
         .background(Theme.canvas)
         .navigationTitle(state.value?.customer.name ?? "Asiakas")
+        .refreshable { await load() }
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             if state.value != nil {
