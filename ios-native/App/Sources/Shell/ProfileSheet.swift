@@ -19,7 +19,7 @@ struct ProfileSheet: View {
                     }
                 }
                 Section {
-                    NavigationLink(value: Route.placeholder("Asetukset")) { Label("Asetukset", systemImage: "gearshape") }
+                    NavigationLink(value: Route.settings) { Label("Asetukset", systemImage: "gearshape") }
                 }
                 Section {
                     Button(role: .destructive) { confirmLogout = true } label: {

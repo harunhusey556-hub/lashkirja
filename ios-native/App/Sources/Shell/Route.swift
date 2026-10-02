@@ -35,6 +35,7 @@ enum Route: Hashable {
     case bankFeed
     case bankAccounts
     case alv(String)
+    case settings
 }
 
 extension View {
@@ -50,6 +51,7 @@ extension View {
             case .bankFeed: BankFeedView()
             case .bankAccounts: BankAccountsView()
             case .alv(let period): AlvView(period: period)
+            case .settings: SettingsView()
             }
         }
     }

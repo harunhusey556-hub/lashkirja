@@ -12,6 +12,7 @@ struct RootView: View {
                 LoginView(notice: notice)
             case .signedIn:
                 MainTabView()
+                    .overlay { if AppLock.shared.isLocked { LockScreen().transition(.opacity) } }
             }
         }
         .animation(.default, value: app.phase)

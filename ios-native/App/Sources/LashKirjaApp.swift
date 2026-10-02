@@ -22,6 +22,7 @@ struct LashKirjaApp: App {
                 .task { await app.start() }
                 .onChange(of: scenePhase) { _, phase in
                     if phase == .active { Task { await app.foreground() } }
+                    if phase == .background { AppLock.shared.lockIfEnabled() }
                 }
         }
     }
