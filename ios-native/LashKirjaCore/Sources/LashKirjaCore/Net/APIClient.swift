@@ -43,6 +43,19 @@ public actor APIClient {
         try await perform(method, path, query: [:], body: body, contentType: contentType, idempotencyKey: idempotencyKey)
     }
 
+    /// A write with a given bearer token (sign-out after the store is cleared).
+    public func sendWithToken<T: Decodable>(_ method: String, _ path: String, token: String) async throws -> T {
+        var request = URLRequest(url: url(path, query: [:]))
+        request.httpMethod = method
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        let response: HTTPResponse
+        do { response = try await transport.send(request) }
+        catch { throw LKError(status: 0, code: "NETWORK", message: LKError.unreachable) }
+        guard (200..<300).contains(response.status) else { throw APIErrorDecoder.decode(status: response.status, data: response.body) }
+        return try decode(response)
+    }
+
     private func decode<T: Decodable>(_ response: HTTPResponse) throws -> T {
         do { return try JSONDecoder().decode(T.self, from: response.body) }
         catch { throw LKError(status: response.status, code: "DECODE", message: "Palvelimen vastausta ei voitu lukea.") }
