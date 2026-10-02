@@ -24,7 +24,9 @@ final class DocumentCache {
 
     func file(_ app: AppModel, path: String, query: [String: String] = [:], fileName: String, key: String?) async throws -> URL {
         let id = id(path, query, key)
-        if let url = memory[id], FileManager.default.fileExists(atPath: url.path) { return url }
+        // Only a keyed document (a stored receipt, an invoice version) is reused; an export or a
+        // reminder PDF is built from today's data, so every open asks the server again.
+        if key != nil, let url = memory[id], FileManager.default.fileExists(atPath: url.path) { return url }
         let dir = folder.appendingPathComponent(id, isDirectory: true)
         if key != nil, let kept = try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil).first {
             memory[id] = kept
@@ -44,7 +46,7 @@ final class DocumentCache {
         inFlight[id] = task
         defer { inFlight[id] = nil }
         let url = try await task.value
-        memory[id] = url
+        if key != nil { memory[id] = url }
         return url
     }
 

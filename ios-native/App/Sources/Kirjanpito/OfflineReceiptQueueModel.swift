@@ -205,6 +205,9 @@ final class OfflineReceiptQueueModel {
         }
         let outcome = OfflineReceiptRules.afterSend(item, status: status, serverError: serverError, jobId: jobId,
                                                     deviceOffline: !Connectivity.shared.online, now: Date())
+        // Signed out (or another owner signed in) while this was on its way: its file is already
+        // gone, so writing the record back would leave a ghost row.
+        guard userId == item.userId else { return }
         if outcome.paused { paused = true }
         try? store.save(outcome.item)
     }

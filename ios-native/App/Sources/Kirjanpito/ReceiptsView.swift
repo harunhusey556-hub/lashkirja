@@ -39,10 +39,15 @@ struct ReceiptsView: View {
     /// Month, tab, category, source and sort are kept between visits (as the purchase invoices' filter).
     private static let filterKey = "kuitit.filter"
 
+    /// Opened from a figure (a report, ALV, Koti) the list shows exactly those rows and leaves the
+    /// owner's remembered Kuitit filters alone; opened plainly, it restores and keeps them.
+    private let remembers: Bool
+
     /// With a month or a tab the screen opens on exactly that; otherwise on the filters of the last visit.
-    init(month: String = "", tab: ReceiptTab = .all, category: String = "") {
+    init(month: String = "", tab: ReceiptTab = .all, category: String = "", drilled: Bool = false) {
         var initial: ReceiptListQuery
-        if !month.isEmpty || tab != .all || !category.isEmpty {
+        remembers = !drilled
+        if drilled || !month.isEmpty || tab != .all || !category.isEmpty {
             initial = ReceiptListQuery()
             initial.month = month
             initial.tab = tab
@@ -163,7 +168,7 @@ struct ReceiptsView: View {
             query.search = searchText
         }
         .onChange(of: query) { _, next in
-            UserDefaults.standard.set(next.remembered, forKey: Self.filterKey)
+            if remembers { UserDefaults.standard.set(next.remembered, forKey: Self.filterKey) }
             limit.reset()
         }
         .animation(.snappy, value: pending.map(\.id))

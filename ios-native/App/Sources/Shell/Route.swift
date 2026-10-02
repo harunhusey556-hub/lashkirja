@@ -185,7 +185,7 @@ struct RouteScreen: View {
         case .emailImport:
             // A connected or removed mailbox changes the profile other screens read from AppModel.
             EmailImportView { app.profileChanged($0) }
-        case .receiptsFiltered(let month, let tab): ReceiptsView(month: month, tab: ReceiptTab(rawValue: tab) ?? .all)
+        case .receiptsFiltered(let month, let tab): ReceiptsView(month: month, tab: ReceiptTab(rawValue: tab) ?? .all, drilled: true)
         case .bankFeedFiltered(let month, let onlyOpen, let focus): BankFeedView(month: month, onlyOpen: onlyOpen, focusTransactionId: focus)
         case .newInvoice: MyyntiView(openNewInvoice: true)
         case .reports: RaportitView()
@@ -193,7 +193,7 @@ struct RouteScreen: View {
         case .statements: StatementsView()
         case .monthClose(let month): PeriodsView(month: month)
         case .receiptsCategory(let period, let tab, let category):
-            ReceiptsView(month: period, tab: ReceiptTab(rawValue: tab) ?? .all, category: category)
+            ReceiptsView(month: period, tab: ReceiptTab(rawValue: tab) ?? .all, category: category, drilled: true)
         case .emailInbox: EmailInboxView()
         case .bankHub: BankHubView()
         case .invoicesFiltered(let month, let status, let customerId):
