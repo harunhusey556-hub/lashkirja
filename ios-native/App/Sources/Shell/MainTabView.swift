@@ -33,6 +33,7 @@ struct MainTabView: View {
         switch item {
         case .koti: KotiView()
         case .myynti: MyyntiView()
+        case .kirjanpito: KirjanpitoView()
         default: PlaceholderScreen(title: item.title)
         }
     }

@@ -30,6 +30,11 @@ enum Route: Hashable {
     case invoice(String)
     case customers
     case customer(String)
+    case receipts
+    case receipt(String)
+    case bankFeed
+    case bankAccounts
+    case alv(String)
 }
 
 extension View {
@@ -40,6 +45,11 @@ extension View {
             case .invoice(let id): InvoiceDetailView(invoiceId: id)
             case .customers: CustomersView()
             case .customer(let id): CustomerDetailView(customerId: id)
+            case .receipts: ReceiptsView()
+            case .receipt(let id): ReceiptDetailView(receiptId: id)
+            case .bankFeed: BankFeedView()
+            case .bankAccounts: BankAccountsView()
+            case .alv(let period): AlvView(period: period)
             }
         }
     }
