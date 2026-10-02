@@ -44,14 +44,14 @@ private struct KotiContent: View {
             LoadState(state: model.state, retry: model.load) { dashboard in
                 let sections = KotiLayout.sections(.init(dashboard: dashboard, atCurrentMonth: model.atCurrentMonth,
                                                          hasTasks: !model.visibleItems.isEmpty, failedJobs: model.failedJobs))
-                VStack(alignment: .leading, spacing: 16) {
+                VStack(alignment: .leading, spacing: 12) {
                     header(dashboard)
                     ForEach(sections, id: \.self) { section in
                         sectionView(section, dashboard)
                     }
                 }
-                .padding(.horizontal, 20)
-                .padding(.bottom, 24)
+                .padding(.horizontal, 16)
+                .padding(.bottom, 20)
             }
         }
         .background(Theme.canvas)

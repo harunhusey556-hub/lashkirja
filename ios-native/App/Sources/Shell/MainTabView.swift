@@ -35,6 +35,9 @@ struct MainTabView: View {
                 Color.clear
             }
         }
+        // Denser lists everywhere: less gap between sections and lower rows, so more fits on a phone.
+        .listSectionSpacing(.compact)
+        .environment(\.defaultMinListRowHeight, 40)
         .sheet(isPresented: $showAdd) { AddSheet() }
         .sheet(isPresented: $showSettings) { SettingsSheet().presentationDetents([.large]) }
         .sheet(isPresented: $showAssistant) { AssistantView() }

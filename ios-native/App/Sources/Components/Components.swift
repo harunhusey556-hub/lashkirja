@@ -5,8 +5,8 @@ import LashKirjaCore
 struct Card<Content: View>: View {
     @ViewBuilder var content: Content
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) { content }
-            .padding(16)
+        VStack(alignment: .leading, spacing: 8) { content }
+            .padding(14)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
     }
