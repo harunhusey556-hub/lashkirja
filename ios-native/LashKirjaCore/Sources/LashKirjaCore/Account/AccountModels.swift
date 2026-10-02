@@ -61,6 +61,10 @@ public enum PasswordReset {
         public var password: String?
         public var `repeat`: String?
         public var isValid: Bool { password == nil && self.repeat == nil }
+        public init(password: String? = nil, repeat again: String? = nil) {
+            self.password = password
+            self.repeat = again
+        }
     }
 
     /// The reset form's own checks, before anything is sent.
