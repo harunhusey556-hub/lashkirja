@@ -5,7 +5,8 @@ import LashKirjaCore
 @MainActor
 @Observable
 final class ChatModel {
-    private let app: AppModel
+    /// Unowned: the app model keeps this one (`AppModel.chat`).
+    private unowned let app: AppModel
     var conversationId: String?
     var title = "Avustaja"
     private(set) var messages: [ChatMessage] = []
@@ -30,6 +31,13 @@ final class ChatModel {
     }()
 
     init(app: AppModel) { self.app = app }
+
+    /// Opening the sheet again: the same conversation, refreshed unless it is new or still streaming.
+    func reopen() async {
+        async let status: Void = loadStatus()
+        if conversationId != nil && !streaming { await loadLatest() }
+        await status
+    }
 
     /// As in the web drawer, typing stays on when the AI is unavailable (the server still answers
     /// what it can without it); only a rate-limit cooldown turns it off.

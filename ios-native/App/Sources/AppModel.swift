@@ -17,6 +17,9 @@ final class AppModel {
     /// The owner's profile, loaded once and kept: forms and the ALV screen read VAT settings from
     /// it instead of asking the server each time. Settings screens hand back what they save.
     private(set) var profile: Profile?
+    /// The assistant's conversation outlives its sheet: closing with "Valmis" and opening again
+    /// returns to the same conversation (a new, still empty one included), not the latest stored one.
+    var chat: ChatModel?
     let auth: AuthService
     let api: APIClient
 
@@ -60,6 +63,7 @@ final class AppModel {
         // The lock belongs to the signed-in owner; the next account sets its own.
         AppLock.shared.disable()
         profile = nil
+        chat = nil
         phase = .signedOut(notice: nil)
         let auth = self.auth
         Task { await auth.logout() }
@@ -77,6 +81,7 @@ final class AppModel {
 
     private func signedOut(notice: String?) {
         profile = nil
+        chat = nil
         phase = .signedOut(notice: notice)
     }
 }

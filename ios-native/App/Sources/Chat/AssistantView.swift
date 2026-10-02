@@ -34,14 +34,19 @@ struct AssistantView: View {
             }
         }
         .task {
-            if model == nil {
-                let m = ChatModel(app: app)
-                model = m
-                // Status and history load side by side.
-                async let status: Void = m.loadStatus()
-                await m.loadLatest()
-                await status
+            guard model == nil else { return }
+            if let existing = app.chat {
+                model = existing
+                await existing.reopen()
+                return
             }
+            let m = ChatModel(app: app)
+            app.chat = m
+            model = m
+            // Status and history load side by side.
+            async let status: Void = m.loadStatus()
+            await m.loadLatest()
+            await status
         }
     }
 
