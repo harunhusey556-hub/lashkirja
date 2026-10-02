@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 import LashKirjaCore
 
 struct CustomersView: View {
@@ -6,9 +7,12 @@ struct CustomersView: View {
     @State private var state: Loadable<[Customer]> = .idle
     @State private var search = ""
     @State private var showNew = false
+    @State private var showImport = false
+    @State private var notice: String?
 
     var body: some View {
         List {
+            if let notice { Section { Text(notice).font(.subheadline) } }
             if let customers = state.value {
                 let rows = customers.filter { search.isEmpty || $0.name.localizedCaseInsensitiveContains(search) }
                 if rows.isEmpty { Text("Ei asiakkaita.").foregroundStyle(Theme.ink2) }
@@ -29,8 +33,22 @@ struct CustomersView: View {
         .background(Theme.canvas)
         .searchable(text: $search, prompt: "Hae asiakasta")
         .navigationTitle("Asiakkaat")
-        .toolbar { ToolbarItem(placement: .topBarTrailing) { Button { showNew = true } label: { Image(systemName: "plus") }.accessibilityLabel("Uusi asiakas") } }
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Menu {
+                    Button { showNew = true } label: { Label("Uusi asiakas", systemImage: "person.badge.plus") }
+                    Button { showImport = true } label: { Label("Tuo CSV", systemImage: "square.and.arrow.down") }
+                } label: { Image(systemName: "plus") }
+                .accessibilityLabel("Lisää asiakkaita")
+            }
+        }
         .sheet(isPresented: $showNew) { CustomerFormSheet(existing: nil) { _ in Task { await load() } } }
+        .sheet(isPresented: $showImport) {
+            CustomerImportSheet { created in
+                notice = CustomerImportResult.createdText(created)
+                Task { await load() }
+            }
+        }
         .refreshable { await load() }
         .task { await load() }
     }
@@ -56,6 +74,9 @@ struct CustomerDetailView: View {
     @State private var showNewInvoice = false
     @State private var confirmDelete = false
     @State private var failure: String?
+    @State private var notice: String?
+    @State private var showMerge = false
+    @State private var others: [Customer] = []
 
     var body: some View {
         List {
@@ -95,6 +116,7 @@ struct CustomerDetailView: View {
                 }
                 if let notes = c.notes { Section("Muistiinpanot") { Text(notes) } }
                 if let failure { Text(failure).foregroundStyle(Theme.danger) }
+                if let notice { Text(notice).foregroundStyle(Theme.success) }
             } else {
                 LoadState(state: state, retry: load) { (_: CustomerDetail) in EmptyView() }.listRowBackground(Color.clear)
             }
@@ -108,6 +130,12 @@ struct CustomerDetailView: View {
                 ToolbarItem(placement: .topBarTrailing) {
                     Menu {
                         Button { showEdit = true } label: { Label("Muokkaa", systemImage: "pencil") }
+                        if let businessId = state.value?.customer.businessId {
+                            Button { UIPasteboard.general.string = businessId } label: { Label("Kopioi Y-tunnus", systemImage: "doc.on.doc") }
+                        }
+                        if !others.isEmpty {
+                            Button { showMerge = true } label: { Label("Yhdistä kaksoiskappale", systemImage: "arrow.triangle.merge") }
+                        }
                         Button(role: .destructive) { confirmDelete = true } label: { Label("Poista", systemImage: "trash") }
                     } label: { Image(systemName: "ellipsis.circle") }
                 }
@@ -117,6 +145,13 @@ struct CustomerDetailView: View {
             if let c = state.value?.customer { CustomerFormSheet(existing: c) { _ in } }
         }
         .sheet(isPresented: $showNewInvoice, onDismiss: { Task { await load() } }) { InvoiceFormView(existing: nil, presetCustomerId: customerId) }
+        .sheet(isPresented: $showMerge) {
+            CustomerMergeSheet(keepId: customerId, others: others) {
+                notice = "Asiakkaat yhdistettiin. Kaksoiskappale arkistoitiin."
+                app.dataVersion += 1
+                Task { await load() }
+            }
+        }
         .confirmationDialog("Poistetaanko asiakas?", isPresented: $confirmDelete, titleVisibility: .visible) {
             Button("Poista", role: .destructive) { Task { await delete() } }
         }
@@ -127,6 +162,10 @@ struct CustomerDetailView: View {
         if state.value == nil { state = .loading }
         do {
             state = .loaded(try await app.api.get("/api/customers/\(customerId)"))
+            // Merge candidates: every other customer still in use.
+            if let list: CustomerList = try? await app.api.get("/api/customers") {
+                others = list.customers.filter { $0.id != customerId && $0.archivedAt == nil }
+            }
         } catch is CancellationError {
         } catch {
             if state.value == nil { state = .failed(error.userMessage) }
@@ -209,6 +248,164 @@ struct CustomerFormSheet: View {
             dismiss()
         } catch {
             failure = error.userMessage
+        }
+    }
+}
+
+/// CSV import: check the file first (`/api/customers/import`), then import the valid rows.
+struct CustomerImportSheet: View {
+    @Environment(AppModel.self) private var app
+    @Environment(\.dismiss) private var dismiss
+    let onImported: (Int) -> Void
+    @State private var csv = ""
+    @State private var result: CustomerImportResult?
+    @State private var picking = false
+    @State private var busy = false
+    @State private var failure: String?
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    Button { picking = true } label: { Label("Valitse tiedosto", systemImage: "doc") }
+                    TextField("CSV-tiedosto", text: $csv, axis: .vertical)
+                        .lineLimit(4...10)
+                        .font(.footnote.monospaced())
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .onChange(of: csv) { _, _ in result = nil }
+                } footer: {
+                    Text("Valitse CSV-tiedosto tai liitä sen sisältö. Ensimmäinen rivi on otsikko. Erotin voi olla pilkku tai puolipiste.")
+                }
+                Section {
+                    Button { Task { await check() } } label: { Text("Tarkista") }
+                        .disabled(busy || csv.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    Button { Task { await commit() } } label: {
+                        Text(commitLabel)
+                    }
+                    .disabled(busy || (result?.validCount ?? 0) == 0)
+                }
+                if let failure { Section { Text(failure).foregroundStyle(Theme.danger) } }
+                if let result {
+                    Section {
+                        ForEach(result.rows) { row in
+                            Text(row.text).font(.caption).foregroundStyle(row.isValid ? Theme.ink : Theme.danger)
+                        }
+                    } header: {
+                        Text(result.statusText)
+                    }
+                }
+            }
+            .navigationTitle("Tuo asiakkaita")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Peruuta") { dismiss() } }
+                if busy { ToolbarItem(placement: .confirmationAction) { ProgressView() } }
+            }
+            .fileImporter(isPresented: $picking, allowedContentTypes: [.commaSeparatedText, .plainText, .text, .data]) { picked in
+                if case .success(let url) = picked { read(url) }
+            }
+            .interactiveDismissDisabled(busy)
+        }
+    }
+
+    private var commitLabel: String {
+        if let count = result?.validCount, count > 0 { return "Tuo \(count) kelvollista" }
+        return "Tuo kelvolliset"
+    }
+
+    private func read(_ url: URL) {
+        let scoped = url.startAccessingSecurityScopedResource()
+        defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+        guard let data = try? Data(contentsOf: url), let text = CustomerImportRequest.text(from: data) else {
+            failure = "Tiedostoa ei voitu lukea."
+            return
+        }
+        failure = nil
+        csv = text
+        Task { await check() }
+    }
+
+    private func check() async {
+        if let problem = CustomerImportRequest.sizeError(csv) { failure = problem; return }
+        busy = true
+        failure = nil
+        defer { busy = false }
+        do {
+            let checked: CustomerImportResult = try await app.api.send("POST", "/api/customers/import", body: CustomerImportRequest(csv: csv, commit: false))
+            result = checked
+        } catch {
+            failure = error.userMessage
+            Haptics.error()
+        }
+    }
+
+    private func commit() async {
+        busy = true
+        failure = nil
+        defer { busy = false }
+        do {
+            let done: CustomerImportResult = try await app.api.send("POST", "/api/customers/import", body: CustomerImportRequest(csv: csv, commit: true))
+            Haptics.success()
+            app.dataVersion += 1
+            onImported(done.created)
+            dismiss()
+        } catch {
+            failure = error.userMessage
+            Haptics.error()
+        }
+    }
+}
+
+/// "Yhdistä kaksoiskappale": the other customer's invoices and schedules move here; it is archived.
+struct CustomerMergeSheet: View {
+    @Environment(AppModel.self) private var app
+    @Environment(\.dismiss) private var dismiss
+    let keepId: String
+    let others: [Customer]
+    let onMerged: () -> Void
+    @State private var mergeId = ""
+    @State private var busy = false
+    @State private var failure: String?
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    Picker("Yhdistettävä asiakas", selection: $mergeId) {
+                        Text("Valitse asiakas").tag("")
+                        ForEach(others) { Text($0.name).tag($0.id) }
+                    }
+                } footer: {
+                    Text("Laskut ja toistuvat laskut siirtyvät tälle asiakkaalle. Toinen asiakas arkistoidaan.")
+                }
+                if let failure { Section { Text(failure).foregroundStyle(Theme.danger) } }
+            }
+            .navigationTitle("Yhdistä kaksoiskappale")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Peruuta") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Yhdistä tähän") { Task { await merge() } }.disabled(busy || mergeId.isEmpty)
+                }
+            }
+            .interactiveDismissDisabled(busy)
+        }
+        .presentationDetents([.medium])
+    }
+
+    private func merge() async {
+        busy = true
+        failure = nil
+        defer { busy = false }
+        do {
+            let _: Ignored = try await app.api.send("POST", "/api/customers/merge", body: CustomerMergeRequest(keepId: keepId, mergeId: mergeId))
+            Haptics.success()
+            onMerged()
+            dismiss()
+        } catch {
+            failure = error.userMessage
+            Haptics.error()
         }
     }
 }

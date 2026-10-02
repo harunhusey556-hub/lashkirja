@@ -37,6 +37,7 @@ struct AssistantView: View {
             if model == nil {
                 let m = ChatModel(app: app)
                 model = m
+                await m.loadStatus()
                 await m.loadLatest()
             }
         }
@@ -49,11 +50,18 @@ struct AssistantView: View {
                     if model.messages.isEmpty {
                         VStack(spacing: 8) {
                             Image(systemName: "sparkles").font(.largeTitle).foregroundStyle(Theme.accent)
-                            Text("Kysy kirjanpidostasi").font(.headline)
-                            Text("Esimerkiksi: \"Paljonko ALV:ta maksan tässä kuussa?\"").font(.subheadline).foregroundStyle(Theme.ink2)
+                            Text("Miten voin auttaa?").font(.headline).foregroundStyle(Theme.ink)
+                            Text(AssistantCooldown.intro(available: model.aiAvailable))
+                                .font(.subheadline)
+                                .foregroundStyle(Theme.ink2)
+                                .multilineTextAlignment(.center)
+                            shortcuts(model).padding(.top, 8)
                         }
                         .frame(maxWidth: .infinity)
                         .padding(.top, 60)
+                    } else if model.aiAvailable == false, !model.streaming, model.messages.last?.role == "assistant" {
+                        // Limited mode: the shortcuts that still work stay at hand after each reply.
+                        shortcuts(model)
                     }
                     ForEach(model.messages) { message in
                         Bubble(message: message, streaming: model.streaming && message.id == model.messages.last?.id)
@@ -80,9 +88,49 @@ struct AssistantView: View {
         }
     }
 
+    private func shortcuts(_ model: ChatModel) -> some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(AssistantCooldown.shortcuts) { shortcut in
+                    Button { model.send(shortcut.message) } label: {
+                        Text(shortcut.label)
+                            .font(.subheadline.weight(.medium))
+                            .padding(.horizontal, 14)
+                            .frame(minHeight: 36)
+                            .background(Theme.accentSoft, in: Capsule())
+                            .foregroundStyle(Theme.accentDark)
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(model.streaming || !model.canSendShortcut)
+                }
+            }
+        }
+    }
+
     private func composer(_ model: ChatModel) -> some View {
+        VStack(spacing: 6) {
+            if model.cooldownUntil != nil {
+                Label(AssistantCooldown.cooldownNote, systemImage: "hourglass")
+                    .font(.footnote)
+                    .foregroundStyle(Theme.warning)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            } else if model.aiAvailable == false {
+                Label(AssistantCooldown.unavailableNote, systemImage: "sparkles")
+                    .font(.footnote)
+                    .foregroundStyle(Theme.ink2)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            composerRow(model)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(.bar)
+    }
+
+    private func composerRow(_ model: ChatModel) -> some View {
         HStack(alignment: .bottom, spacing: 8) {
-            TextField("Kirjoita viesti…", text: $input, axis: .vertical)
+            TextField(model.canType ? "Kirjoita viesti…" : "Kirjoittaminen ei ole nyt käytössä", text: $input, axis: .vertical)
+                .disabled(!model.canType && !model.streaming)
                 .lineLimit(1...5)
                 .focused($focused)
                 .padding(.horizontal, 14)
@@ -96,14 +144,11 @@ struct AssistantView: View {
                     .font(.system(size: 16, weight: .bold))
                     .foregroundStyle(Theme.onInk)
                     .frame(width: 40, height: 40)
-                    .background(model.streaming || !input.trimmingCharacters(in: .whitespaces).isEmpty ? Theme.ink : Theme.ink2.opacity(0.5), in: Circle())
+                    .background(model.streaming || (model.canType && !input.trimmingCharacters(in: .whitespaces).isEmpty) ? Theme.ink : Theme.ink2.opacity(0.5), in: Circle())
             }
-            .disabled(!model.streaming && input.trimmingCharacters(in: .whitespaces).isEmpty)
+            .disabled(!model.streaming && (input.trimmingCharacters(in: .whitespaces).isEmpty || !model.canType))
             .accessibilityLabel(model.streaming ? "Pysäytä" : "Lähetä")
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .background(.bar)
     }
 }
 

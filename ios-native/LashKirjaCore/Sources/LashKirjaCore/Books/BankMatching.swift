@@ -1,0 +1,101 @@
+import Foundation
+
+/// One receipt the matcher offers for a bank row (`/api/matching/candidates`,
+/// and the statement GET's inline `matchCandidates`).
+public struct BankMatchCandidate: Decodable, Sendable, Hashable {
+    public struct Receipt: Decodable, Sendable, Hashable, Identifiable {
+        public let id: String
+        public let vendor: String?
+        public let date: String?
+        public let totalAmount: Decimal?
+
+        public init(id: String, vendor: String?, date: String?, totalAmount: Decimal?) {
+            self.id = id
+            self.vendor = vendor
+            self.date = date
+            self.totalAmount = totalAmount
+        }
+    }
+
+    public let score: Double
+    public let reasons: [String]?
+    public let receipt: Receipt?
+
+    /// "87 %" as the web shows it.
+    public var percent: Int { Int((score * 100).rounded()) }
+}
+
+public struct BankMatchCandidates: Decodable, Sendable {
+    public let candidates: [BankMatchCandidate]
+    /// Candidates whose receipt still exists.
+    public var usable: [BankMatchCandidate] { candidates.filter { $0.receipt != nil } }
+}
+
+public enum BankMatchText {
+    /// "K-Market · 12,50 € · 1.10.2026", the web's receiptLabel.
+    public static func receiptLabel(_ r: BankMatchCandidate.Receipt) -> String {
+        var parts = [r.vendor.flatMap { $0.isEmpty ? nil : $0 } ?? "Kuitti"]
+        if let amount = r.totalAmount { parts.append(Money.format(amount)) }
+        if let date = r.date { parts.append(APIDate.displayDay(date)) }
+        return parts.joined(separator: " · ")
+    }
+}
+
+/// `POST /api/matching/run`.
+public struct BankMatchRunResult: Decodable, Sendable {
+    public let autoConfirmed: Int?
+    public let suggested: Int?
+    public let draftsCreated: Int?
+
+    /// What the web says after "Etsi kuitteja uudelleen"; nil when nothing changed.
+    public var summary: String? {
+        var parts: [String] = []
+        if let n = autoConfirmed, n > 0 { parts.append("\(n) kohdistettu automaattisesti") }
+        if let n = suggested, n > 0 { parts.append("\(n) ehdotusta odottaa") }
+        if let n = draftsCreated, n > 0 { parts.append(n == 1 ? "1 uusi myyntiehdotus odottaa" : "\(n) uutta myyntiehdotusta odottaa") }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    }
+}
+
+/// `POST /api/matching/confirm-all` body; a missing scope is left out (the schema is strict).
+public struct BankConfirmAllRequest: Encodable, Sendable {
+    public let statementId: String?
+    public let periodMonth: String?
+
+    public init(statementId: String? = nil, periodMonth: String? = nil) {
+        self.statementId = statementId
+        self.periodMonth = periodMonth
+    }
+}
+
+public struct BankConfirmAllResult: Decodable, Sendable {
+    public let confirmed: Int?
+    public var message: String? {
+        guard let n = confirmed, n > 0 else { return nil }
+        return "\(n) kuittia kohdistettu"
+    }
+}
+
+extension BankFeed {
+    /// The months offered in the feed's month picker, newest first.
+    public static func monthChoices(current: String = MonthKey.current(), count: Int = 12) -> [String] {
+        (0..<max(count, 0)).map { MonthKey.shift(current, by: -$0) }
+    }
+
+    /// The `GET /api/statements` query: `month` only when one is chosen.
+    public static func query(month: String?) -> [String: String] {
+        guard let month, !month.isEmpty else { return [:] }
+        return ["month": month]
+    }
+
+    /// Kuitti suggestions that "Kohdista kaikki" would link (sales are approved one by one).
+    public static func confirmableSuggestions(_ rows: [BankTransaction]) -> Int {
+        rows.filter { state(of: $0) == .suggested }.count
+    }
+
+    /// Whether "Etsi kuitti" makes sense for a row: open, and not a transfer or salary.
+    public static func canSearchReceipts(_ row: BankTransaction) -> Bool {
+        if row.type == "oma_siirto" || row.type == "palkka" { return false }
+        return row.matchStatus == "unmatched" || row.matchStatus == "suggested"
+    }
+}

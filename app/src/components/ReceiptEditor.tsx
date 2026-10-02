@@ -380,6 +380,7 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
     if (!formReady) return;
     const vendor = formData.vendor.trim();
     if (!vendor) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- an emptied vendor has no rule; the server lookup below is the external sync this effect exists for
       setVendorRuleActive(false);
       return;
     }

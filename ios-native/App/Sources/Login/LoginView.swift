@@ -10,6 +10,14 @@ struct LoginView: View {
     @State private var failure: String?
     @FocusState private var focus: Field?
     private enum Field { case email, password }
+    /// The recovery sheet, opened from the link below or from a `lashkirja://…?token=…` link.
+    @State private var recovery: Recovery?
+
+    struct Recovery: Identifiable {
+        let id = UUID()
+        let step: PasswordRecoveryView.Step
+        let link: String
+    }
 
     var body: some View {
         ScrollView {
@@ -61,6 +69,12 @@ struct LoginView: View {
                     }
                     .buttonStyle(.primary)
                     .disabled(busy || email.isEmpty || password.isEmpty)
+                    Button("Unohditko salasanan?") {
+                        recovery = Recovery(step: .request, link: "")
+                    }
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(Theme.accent)
+                    .frame(maxWidth: .infinity, minHeight: 44)
                 }
                 .padding(20)
                 .background(Theme.surface, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
@@ -69,6 +83,15 @@ struct LoginView: View {
         }
         .scrollDismissesKeyboard(.interactively)
         .background(Theme.canvas.ignoresSafeArea())
+        .sheet(item: $recovery) { r in
+            PasswordRecoveryView(step: r.step, email: email, link: r.link)
+        }
+        .onOpenURL { url in
+            // A reset link handed to the app (lashkirja://palauta-salasana?token=…).
+            if PasswordReset.token(from: url.absoluteString) != nil {
+                recovery = Recovery(step: .reset, link: url.absoluteString)
+            }
+        }
     }
 
     private func submit() async {

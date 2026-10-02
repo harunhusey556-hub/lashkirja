@@ -29,6 +29,8 @@ public struct BankTransaction: Decodable, Sendable, Identifiable, Hashable {
     public let paidInvoice: InvoiceBrief?
     public let receipt: ReceiptBrief?
     public let suggestedReceipt: ReceiptBrief?
+    /// Up to three scored receipts for an unmatched row (the statement GET adds them).
+    public let matchCandidates: [BankMatchCandidate]?
 
     public var title: String {
         if let c = counterparty, !c.isEmpty { return c }
@@ -40,10 +42,17 @@ public struct Statement: Decodable, Sendable, Identifiable, Hashable {
     public struct Totals: Decodable, Sendable, Hashable {
         public let income: Decimal
         public let expenses: Decimal
+        public let transfers: Decimal?
         public let net: Decimal
         public let txCount: Int
     }
-    public struct Account: Decodable, Sendable, Hashable { public let id: String; public let name: String }
+    public struct Account: Decodable, Sendable, Hashable {
+        public let id: String
+        public let name: String
+        public let bankName: String?
+        public let iban: String?
+        public let currency: String?
+    }
 
     public let id: String
     public let fileName: String

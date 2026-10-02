@@ -1,6 +1,7 @@
 import SwiftUI
 import PhotosUI
 import UIKit
+import ImageIO
 import LashKirjaCore
 
 /// Kuvaa kuitti: camera (or photo library) → upload → the server reads it →
@@ -53,7 +54,7 @@ struct CaptureFlow: View {
             .fullScreenCover(isPresented: $showCamera) {
                 CameraPicker { image in
                     showCamera = false
-                    if let image { Task { await upload(image) } }
+                    if let image { Task { await upload { ReceiptImageEncoder.jpeg(from: image) } } }
                 }
                 .ignoresSafeArea()
             }
@@ -62,18 +63,22 @@ struct CaptureFlow: View {
                 // Cleared so that picking the same photo again after a failure still fires.
                 photo = nil
                 Task {
-                    if let data = try? await item.loadTransferable(type: Data.self), let image = UIImage(data: data) {
-                        await upload(image)
+                    if let data = try? await item.loadTransferable(type: Data.self) {
+                        await upload { ReceiptImageEncoder.jpeg(fromData: data) }
                     }
                 }
             }
         }
     }
 
-    private func upload(_ image: UIImage) async {
-        guard let jpeg = image.jpegData(compressionQuality: 0.8) else { return }
+    /// `encode` runs off the main actor: decoding and scaling a 12–48 MP photo is heavy.
+    private func upload(_ encode: @escaping @Sendable () -> Data?) async {
         step = .uploading
         progress = "Ladataan…"
+        guard let jpeg = await Task.detached(priority: .userInitiated, operation: encode).value else {
+            step = .failed("Kuvaa ei voitu lukea.")
+            return
+        }
         var form = Multipart()
         form.addFile("file", filename: "kuitti.jpg", mimeType: "image/jpeg", data: jpeg)
         do {
@@ -111,6 +116,7 @@ struct ReceiptEditor: View {
     @State private var failure: String?
     @State private var duplicate = false
     @State private var savedId: String?
+    @State private var customCategory = false
 
     var body: some View {
         Form {
@@ -122,9 +128,11 @@ struct ReceiptEditor: View {
             Section {
                 TextField("Myyjä", text: $draft.vendor)
                 TextField("Summa €", text: $amountText).keyboardType(.decimalPad)
-                    .onChange(of: amountText) { _, t in draft.totalAmount = Money.parse(t) }
+                    .onChange(of: amountText) { _, t in draft.totalAmount = ReceiptAmount.parse(t) }
                 DatePicker("Päivä", selection: $date, displayedComponents: .date)
-                TextField("Luokka", text: $draft.category)
+            }
+            Section("Kategoria") {
+                ReceiptCategoryField(category: $draft.category, custom: $customCategory)
             }
             if !draft.vatDetails.isEmpty {
                 Section("ALV") {
@@ -152,6 +160,7 @@ struct ReceiptEditor: View {
         .onAppear {
             if let amount = draft.totalAmount { amountText = NSDecimalNumber(decimal: amount).stringValue.replacingOccurrences(of: ".", with: ",") }
             if let d = APIDate.day(draft.date) { date = d }
+            customCategory = !draft.category.isEmpty && !ReceiptCategory.isKnown(draft.category)
         }
     }
 
@@ -185,6 +194,46 @@ struct ReceiptEditor: View {
             failure = error.userMessage
             Haptics.error()
         }
+    }
+}
+
+/// Receipt photos as the upload sends them: at most `CaptureImageSizing.maxSide`
+/// pixels on the longest side, JPEG. Called off the main actor.
+enum ReceiptImageEncoder {
+    /// Photo library data: ImageIO decodes straight at the target size, never the full bitmap.
+    static func jpeg(fromData data: Data) -> Data? {
+        guard let source = CGImageSourceCreateWithData(data as CFData, [kCGImageSourceShouldCache: false] as CFDictionary) else { return nil }
+        var longest = CaptureImageSizing.maxSide
+        if let props = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
+           let w = props[kCGImagePropertyPixelWidth] as? Double, let h = props[kCGImagePropertyPixelHeight] as? Double {
+            longest = min(CaptureImageSizing.maxSide, max(w, h))
+        }
+        let options: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceShouldCacheImmediately: true,
+            kCGImageSourceThumbnailMaxPixelSize: Int(longest),
+        ]
+        guard let image = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else { return nil }
+        return UIImage(cgImage: image).jpegData(compressionQuality: CaptureImageSizing.jpegQuality)
+    }
+
+    /// A camera photo: drawn once at the target size (orientation applied), then JPEG.
+    static func jpeg(from image: UIImage) -> Data? {
+        let width = Double(image.size.width * image.scale)
+        let height = Double(image.size.height * image.scale)
+        guard CaptureImageSizing.needsResize(width: width, height: height) else {
+            return image.jpegData(compressionQuality: CaptureImageSizing.jpegQuality)
+        }
+        let target = CaptureImageSizing.targetSize(width: width, height: height)
+        let size = CGSize(width: target.width, height: target.height)
+        let format = UIGraphicsImageRendererFormat.default()
+        format.scale = 1
+        format.opaque = true
+        let scaled = UIGraphicsImageRenderer(size: size, format: format).image { _ in
+            image.draw(in: CGRect(origin: .zero, size: size))
+        }
+        return scaled.jpegData(compressionQuality: CaptureImageSizing.jpegQuality)
     }
 }
 

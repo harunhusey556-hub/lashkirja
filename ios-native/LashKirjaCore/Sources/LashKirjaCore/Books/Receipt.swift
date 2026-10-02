@@ -1,15 +1,26 @@
 import Foundation
 
 public struct Receipt: Decodable, Sendable, Identifiable, Hashable {
-    public struct LinkedTransaction: Decodable, Sendable, Hashable {
+    /// A bank row as the receipt routes show it: the link, the suggestion or a candidate.
+    public struct LinkedTransaction: Decodable, Sendable, Hashable, Identifiable {
         public let id: String
         public let date: String?
         public let counterparty: String?
         public let amount: Decimal
+        public let matchScore: Double?
+        public let matchReasons: [String]?
+        /// Only on a suggestion or a candidate.
+        public let score: Double?
+        public let reasons: [String]?
+
+        public var bestScore: Double? { score ?? matchScore }
+        public var bestReasons: [String]? { reasons ?? matchReasons }
     }
     public struct Match: Decodable, Sendable, Hashable {
         public let status: String?
         public let suggestedTransaction: LinkedTransaction?
+        /// Scored on the detail GET only; the list sends an empty list.
+        public let matchCandidates: [LinkedTransaction]?
     }
 
     public let id: String
@@ -82,6 +93,34 @@ public struct ReceiptList: Decodable, Sendable {
 }
 
 public struct ReceiptResponse: Decodable, Sendable { public let receipt: Receipt }
+
+/// `POST /api/receipts/batch-delete`: answers 200 with the ids that went and the ones refused.
+public struct BatchDeleteResult: Decodable, Sendable {
+    public struct Failure: Decodable, Sendable { public let id: String; public let error: String? }
+    public let succeeded: [String]?
+    public let failed: [Failure]?
+
+    public var failedIds: [String] { (failed ?? []).map(\.id) }
+
+    /// "Poistettiin 2 kuittia." / "Poistettiin 1 kuitti. 1 epäonnistui: …"
+    public var message: String {
+        let done = succeeded?.count ?? 0
+        var text = "Poistettiin \(done) \(done == 1 ? "kuitti" : "kuittia")."
+        let refused = failed ?? []
+        if !refused.isEmpty {
+            text += " \(refused.count) epäonnistui"
+            if let reason = refused.first?.error, !reason.isEmpty { text += ": \(reason)" }
+        }
+        return text
+    }
+}
+
+/// `GET /api/vendor-rules?vendor=`: the active category rule of a vendor, if any.
+public struct VendorRuleResponse: Decodable, Sendable {
+    public struct Rule: Decodable, Sendable { public let vendor: String?; public let category: String?; public let active: Bool? }
+    public let rule: Rule?
+    public var isActive: Bool { rule?.active == true }
+}
 
 public struct ReceiptCounts: Decodable, Sendable {
     public struct Counts: Decodable, Sendable { public let all: Int; public let tulo: Int; public let meno: Int; public let linked: Int; public let unlinked: Int }

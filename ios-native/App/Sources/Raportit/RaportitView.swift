@@ -7,6 +7,9 @@ struct RaportitView: View {
     @State private var year = Int(MonthKey.current().prefix(4)) ?? 2026
     @State private var state: Loadable<ProfitLoss> = .idle
     @State private var export: ExportKind?
+    /// The accountant package's period: "YYYY-MM", "YYYY-Qn" or "YYYY" (SALES-21).
+    @State private var packageChoice = MonthKey.shift(MonthKey.current(), by: -1)
+    @State private var showPackage = false
 
     struct ExportKind: Identifiable { let type: String; let title: String; var id: String { type } }
     private let exports = [
@@ -60,6 +63,18 @@ struct RaportitView: View {
                 LoadState(state: state, retry: load) { (_: ProfitLoss) in EmptyView() }.listRowBackground(Color.clear)
             }
             Section {
+                Picker("Kausi", selection: Binding(get: { packagePeriod }, set: { packageChoice = $0 })) {
+                    ForEach(packageOptions, id: \.key) { option in
+                        Text(option.title).tag(option.key)
+                    }
+                }
+                Button { showPackage = true } label: { Label("Lataa zip", systemImage: "archivebox") }
+            } header: {
+                Text("Kirjanpitopaketti")
+            } footer: {
+                Text("Zip kuukaudelta, neljännekseltä tai koko vuodelta: tuloslaskelma, ALV, CSV, kohdistukset ja kuitit.")
+            }
+            Section {
                 ForEach(exports) { kind in
                     Button { export = kind } label: { Label(kind.title, systemImage: "square.and.arrow.up") }
                 }
@@ -70,9 +85,29 @@ struct RaportitView: View {
         .navigationTitle("Raportit")
         .refreshable { await load() }
         .task(id: year) { await load() }
+        .sheet(isPresented: $showPackage) {
+            DocumentPreviewSheet(path: "/api/export/package", query: ["month": packagePeriod], fileName: "kirjanpito-\(packagePeriod).zip")
+        }
         .sheet(item: $export) { kind in
             DocumentPreviewSheet(path: "/api/export", query: ["type": kind.type, "year": String(year)], fileName: "\(kind.type)-\(year).csv")
         }
+    }
+
+    /// The chosen period when it belongs to the year on screen, else that year's January (as on the web).
+    private var packagePeriod: String {
+        packageChoice.hasPrefix(String(year)) ? packageChoice : "\(year)-01"
+    }
+
+    private struct PackageOption: Hashable { let key: String; let title: String }
+
+    private var packageOptions: [PackageOption] {
+        let y = String(year)
+        let months = (1...12).map { m -> PackageOption in
+            let mm = String(format: "%02d", m)
+            return PackageOption(key: "\(y)-\(mm)", title: "\(mm)/\(y)")
+        }
+        let quarters = (1...4).map { q in PackageOption(key: "\(y)-Q\(q)", title: "Q\(q)/\(y)") }
+        return months + quarters + [PackageOption(key: y, title: "Koko vuosi \(y)")]
     }
 
     private func categories(_ rows: [ProfitLoss.Category]) -> some View {

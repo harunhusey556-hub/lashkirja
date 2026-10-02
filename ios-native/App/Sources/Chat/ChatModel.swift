@@ -14,8 +14,50 @@ final class ChatModel {
     private var task: Task<Void, Never>?
     /// The reply the live stream writes into; a stopped or superseded stream no longer matches.
     private var liveReplyId: String?
+    /// `GET /api/ai/status`: nil until known (behave as available, as the web drawer does).
+    private(set) var aiAvailable: Bool?
+    /// After a 429 ("Liian monta viestiä"), sending stays off until this moment.
+    private(set) var cooldownUntil: Date?
+    private var cooldownTask: Task<Void, Never>?
+
+    /// One cookie-less session for every streamed reply: a new session per message
+    /// leaked the session and paid a TLS handshake each time.
+    private static let streamSession: URLSession = {
+        let config = URLSessionConfiguration.ephemeral
+        config.httpShouldSetCookies = false
+        config.httpCookieAcceptPolicy = .never
+        return URLSession(configuration: config)
+    }()
 
     init(app: AppModel) { self.app = app }
+
+    /// Free text needs the model; the shortcuts work without it.
+    var canType: Bool { aiAvailable != false && cooldownUntil == nil }
+    var canSendShortcut: Bool { cooldownUntil == nil }
+
+    func loadStatus() async {
+        do {
+            let status: AssistantStatus = try await app.api.get("/api/ai/status")
+            aiAvailable = status.available
+        } catch {
+            // Unknown: behave as available; a failed question still explains itself.
+        }
+    }
+
+    private func startCooldown(retryAfter: String?) {
+        let until = AssistantCooldown.until(retryAfter: retryAfter)
+        cooldownUntil = until
+        cooldownTask?.cancel()
+        cooldownTask = Task { [weak self] in
+            let wait = max(0, until.timeIntervalSinceNow)
+            try? await Task.sleep(nanoseconds: UInt64(wait * 1_000_000_000))
+            guard !Task.isCancelled, let self else { return }
+            if let current = self.cooldownUntil, current <= Date() {
+                self.cooldownUntil = nil
+                if self.failure == AssistantCooldown.rateLimitedMessage { self.failure = nil }
+            }
+        }
+    }
 
     func loadLatest() async {
         do {
@@ -48,7 +90,7 @@ final class ChatModel {
 
     func send(_ text: String) {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty, !streaming else { return }
+        guard !trimmed.isEmpty, !streaming, cooldownUntil == nil else { return }
         failure = nil
         messages.append(ChatMessage(id: UUID().uuidString, role: "user", content: trimmed))
         let replyId = UUID().uuidString
@@ -83,12 +125,13 @@ final class ChatModel {
             if let token = await app.auth.currentToken() { request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
             request.httpBody = try JSONEncoder().encode(Body(message: text, clientId: UUID().uuidString, conversationId: conversationId))
             request.timeoutInterval = 120
-            let config = URLSessionConfiguration.ephemeral
-            config.httpShouldSetCookies = false
-            let (bytes, response) = try await URLSession(configuration: config).bytes(for: request)
+            let (bytes, response) = try await Self.streamSession.bytes(for: request)
             if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
                 var data = Data()
                 for try await byte in bytes { data.append(byte) }
+                if http.statusCode == 429, liveReplyId == replyId {
+                    startCooldown(retryAfter: http.value(forHTTPHeaderField: "Retry-After"))
+                }
                 throw APIErrorDecoder.decode(status: http.statusCode, data: data)
             }
             for try await line in bytes.lines {

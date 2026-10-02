@@ -10,6 +10,12 @@ struct ReceiptDetailView: View {
     @State private var editing = false
     @State private var confirmDelete = false
     @State private var failure: String?
+    @State private var matchBusy = false
+    @State private var ruleActive = false
+    @State private var ruleBusy = false
+    @State private var toast: Toast?
+    @State private var toastAction: (() async -> Void)?
+    @State private var toastTask: Task<Void, Never>?
 
     var body: some View {
         List {
@@ -25,20 +31,22 @@ struct ReceiptDetailView: View {
                 }
                 Section {
                     if let date = r.date { LabeledContent("Päivä", value: APIDate.displayDay(date)) }
-                    if let category = r.category { LabeledContent("Luokka", value: category) }
-                    if let reference = r.reference { LabeledContent("Viite", value: reference) }
-                    if let status = r.reviewStatus { LabeledContent("Tila", value: status == "approved" ? "Hyväksytty" : status == "rejected" ? "Hylätty" : "Odottaa") }
-                    if let notes = r.notes, !notes.isEmpty { LabeledContent("Muistiinpano", value: notes) }
-                }
-                if let tx = r.linkedTransaction {
-                    Section("Pankkitapahtuma") {
-                        LabeledContent(tx.counterparty ?? "Tapahtuma") { MoneyText(amount: tx.amount) }
+                    if let category = r.category, !category.isEmpty { LabeledContent("Kategoria", value: ReceiptCategory.label(for: category)) }
+                    if let reference = r.reference, !reference.isEmpty { LabeledContent("Viitenumero", value: reference) }
+                    if let number = r.invoiceNumber, !number.isEmpty { LabeledContent("Laskun numero", value: number) }
+                    ForEach(Array((r.vatDetails ?? []).enumerated()), id: \.offset) { _, row in
+                        LabeledContent("ALV \(ReceiptVat.rateLabel(row.rate))") { MoneyText(amount: row.amount) }
                     }
+                    if let status = r.reviewStatus { LabeledContent("Tila", value: status == "approved" ? "Hyväksytty" : status == "rejected" ? "Hylätty" : "Odottaa") }
+                    if let notes = r.notes, !notes.isEmpty { LabeledContent("Selite", value: notes) }
                 }
+                vendorRuleSection(r)
+                matchSection(r)
                 Section {
                     if r.fileName != nil {
                         Button { showFile = true } label: { Label("Näytä kuitti", systemImage: "doc.viewfinder") }
                     }
+                    Button { editing = true } label: { Label("Muokkaa", systemImage: "pencil") }
                     if r.reviewStatus == "pending" {
                         Button { Task { await review("approved") } } label: { Label("Hyväksy", systemImage: "checkmark.circle") }
                         Button(role: .destructive) { Task { await review("rejected") } } label: { Label("Hylkää", systemImage: "xmark.circle") }
@@ -57,26 +65,244 @@ struct ReceiptDetailView: View {
             if state.value != nil {
                 ToolbarItem(placement: .topBarTrailing) {
                     Menu {
+                        Button { editing = true } label: { Label("Muokkaa", systemImage: "pencil") }
                         Button(role: .destructive) { confirmDelete = true } label: { Label("Poista kuitti", systemImage: "trash") }
                     } label: { Image(systemName: "ellipsis.circle") }
                 }
             }
         }
+        .overlay(alignment: .bottom) {
+            if let toast {
+                ToastView(toast: toast) { runToastAction() }.padding(.bottom, 8)
+            }
+        }
         .sheet(isPresented: $showFile) { DocumentPreviewSheet(path: "/api/receipts/\(receiptId)/file", fileName: state.value?.fileName ?? "kuitti") }
+        .sheet(isPresented: $editing) {
+            if let r = state.value {
+                ReceiptEditSheet(receipt: r) { saved, categoryChanged in
+                    Task { await afterSave(saved, categoryChanged: categoryChanged) }
+                }
+            }
+        }
         .confirmationDialog("Poistetaanko kuitti?", isPresented: $confirmDelete, titleVisibility: .visible) {
             Button("Poista", role: .destructive) { Task { await delete() } }
         }
         .task { await load() }
+        .onDisappear { toastTask?.cancel() }
     }
+
+    // MARK: Vendor rule
+
+    @ViewBuilder private func vendorRuleSection(_ r: Receipt) -> some View {
+        if let vendor = r.vendor, !vendor.isEmpty, let category = r.category, !category.isEmpty {
+            Section {
+                if ruleActive {
+                    Button { Task { await undoRule(vendor: vendor) } } label: { Label("Kumoa sääntö", systemImage: "arrow.uturn.backward") }
+                        .disabled(ruleBusy)
+                } else {
+                    Button { Task { await saveRule(vendor: vendor, category: category) } } label: {
+                        Label("Käytä tälle myyjälle myöhemmin", systemImage: "wand.and.stars")
+                    }
+                    .disabled(ruleBusy)
+                }
+            } footer: {
+                let label = ReceiptCategory.label(for: category)
+                Text(ruleActive
+                     ? String("Uudet kuitit myyjältä \(vendor) saavat kategorian \(label).")
+                     : String("Muistaa kategorian \(label) myyjälle \(vendor)."))
+            }
+        }
+    }
+
+    private func loadRule(vendor: String?) async {
+        guard let vendor, !vendor.trimmingCharacters(in: .whitespaces).isEmpty else { ruleActive = false; return }
+        if let response: VendorRuleResponse = try? await app.api.get("/api/vendor-rules", query: ["vendor": vendor]) {
+            ruleActive = response.isActive
+        }
+    }
+
+    @discardableResult
+    private func saveRule(vendor: String, category: String) async -> Bool {
+        struct Body: Encodable { let vendor: String; let category: String }
+        ruleBusy = true
+        defer { ruleBusy = false }
+        do {
+            let _: Ignored = try await app.api.send("POST", "/api/vendor-rules", body: Body(vendor: vendor, category: category))
+            ruleActive = true
+            Haptics.success()
+            return true
+        } catch is CancellationError {
+            return false
+        } catch {
+            failure = error.userMessage
+            Haptics.error()
+            return false
+        }
+    }
+
+    private func undoRule(vendor: String) async {
+        struct Body: Encodable { let vendor: String }
+        ruleBusy = true
+        defer { ruleBusy = false }
+        do {
+            let _: Ignored = try await app.api.send("POST", "/api/vendor-rules/undo", body: Body(vendor: vendor))
+            ruleActive = false
+            Haptics.success()
+            showToast("Sääntö kumottu.", action: nil, run: nil)
+        } catch is CancellationError {
+        } catch {
+            failure = error.userMessage
+            Haptics.error()
+        }
+    }
+
+    // MARK: Matching
+
+    @ViewBuilder private func matchSection(_ r: Receipt) -> some View {
+        Section {
+            if let tx = r.linkedTransaction {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(ReceiptMatchText.isStrong(score: tx.bestScore, reasons: tx.bestReasons) ? "Kohdistettu, varma osuma" : "Kohdistettu pankkitapahtumaan")
+                        .font(.caption.weight(.semibold)).foregroundStyle(Theme.success)
+                    transactionLine(tx)
+                    let reasons = ReceiptMatchText.reasons(tx.bestReasons)
+                    if !reasons.isEmpty { Text("Peruste: \(reasons)").font(.caption).foregroundStyle(Theme.ink2) }
+                }
+                Button(role: .destructive) { Task { await unlink(tx.id) } } label: { Label("Poista kohdistus", systemImage: "xmark.circle") }
+                    .disabled(matchBusy)
+            } else if let suggested = r.match?.suggestedTransaction {
+                Button { Task { await confirm(suggested.id) } } label: {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(ReceiptMatchText.isStrong(score: suggested.bestScore, reasons: suggested.bestReasons) ? "Ehdotettu tapahtuma, varma osuma" : "Ehdotettu pankkitapahtuma")
+                            .font(.caption.weight(.semibold)).foregroundStyle(Theme.accent)
+                        transactionLine(suggested)
+                        matchDetail(suggested)
+                        Text("Napauta kohdistaaksesi").font(.caption.weight(.medium)).foregroundStyle(Theme.success)
+                    }
+                }
+                .foregroundStyle(Theme.ink)
+                .disabled(matchBusy)
+            } else if let candidates = r.match?.matchCandidates, !candidates.isEmpty {
+                ForEach(candidates) { tx in
+                    Button { Task { await confirm(tx.id) } } label: {
+                        VStack(alignment: .leading, spacing: 2) {
+                            transactionLine(tx)
+                            matchDetail(tx)
+                        }
+                    }
+                    .foregroundStyle(Theme.ink)
+                    .disabled(matchBusy)
+                }
+            } else {
+                Text("Sopivaa pankkitapahtumaa ei löytynyt.").foregroundStyle(Theme.ink2)
+            }
+        } header: {
+            Text("Pankkitapahtuma")
+        } footer: {
+            if r.linkedTransaction == nil, r.match?.suggestedTransaction == nil, r.match?.matchCandidates?.isEmpty == false {
+                Text("Mahdolliset pankkitapahtumat. Napauta kohdistaaksesi.")
+            }
+        }
+    }
+
+    private func transactionLine(_ tx: Receipt.LinkedTransaction) -> some View {
+        HStack {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(tx.counterparty ?? "Pankkitapahtuma").lineLimit(1)
+                if let date = tx.date { Text(APIDate.displayDay(date)).font(.caption).foregroundStyle(Theme.ink2) }
+            }
+            Spacer()
+            MoneyText(amount: tx.amount).font(.subheadline.weight(.semibold))
+        }
+    }
+
+    @ViewBuilder private func matchDetail(_ tx: Receipt.LinkedTransaction) -> some View {
+        let reasons = ReceiptMatchText.reasons(tx.bestReasons)
+        let percent = ReceiptMatchText.percent(tx.bestScore)
+        Text(reasons.isEmpty ? percent : "\(reasons) · \(percent)").font(.caption).foregroundStyle(Theme.ink2)
+    }
+
+    private func confirm(_ transactionId: String) async {
+        struct Body: Encodable { let transactionId: String; let receiptId: String }
+        matchBusy = true
+        failure = nil
+        defer { matchBusy = false }
+        do {
+            let _: Ignored = try await app.api.send("POST", "/api/matching/confirm", body: Body(transactionId: transactionId, receiptId: receiptId))
+            Haptics.success()
+            app.dataVersion += 1
+            await load()
+        } catch is CancellationError {
+        } catch {
+            failure = error.userMessage
+            Haptics.error()
+        }
+    }
+
+    private func unlink(_ transactionId: String) async {
+        struct Body: Encodable { let transactionId: String }
+        matchBusy = true
+        failure = nil
+        defer { matchBusy = false }
+        do {
+            let _: Ignored = try await app.api.send("POST", "/api/matching/unlink", body: Body(transactionId: transactionId))
+            Haptics.success()
+            app.dataVersion += 1
+            await load()
+        } catch is CancellationError {
+        } catch {
+            failure = error.userMessage
+            Haptics.error()
+        }
+    }
+
+    // MARK: Toast
+
+    private func showToast(_ text: String, action: String?, run: (() async -> Void)?) {
+        toastTask?.cancel()
+        toastAction = run
+        withAnimation(.snappy) { toast = Toast(text: text, actionLabel: action) }
+        toastTask = Task {
+            try? await Task.sleep(nanoseconds: 5_000_000_000)
+            guard !Task.isCancelled else { return }
+            withAnimation { toast = nil }
+            toastAction = nil
+        }
+    }
+
+    private func runToastAction() {
+        let action = toastAction
+        toastTask?.cancel()
+        toastAction = nil
+        withAnimation { toast = nil }
+        if let action { Task { await action() } }
+    }
+
+    // MARK: Load and save
 
     private func load() async {
         if state.value == nil { state = .loading }
         do {
             let r: ReceiptResponse = try await app.api.get("/api/receipts/\(receiptId)")
             state = .loaded(r.receipt)
+            await loadRule(vendor: r.receipt.vendor)
         } catch is CancellationError {
         } catch {
-            if state.value == nil { state = .failed(error.userMessage) }
+            if state.value == nil { state = .failed(error.userMessage) } else { failure = error.userMessage }
+        }
+    }
+
+    /// After an edit: reload (matching ran again on the server), and when the
+    /// category changed offer to remember it for the vendor, with undo.
+    private func afterSave(_ saved: Receipt, categoryChanged: Bool) async {
+        app.dataVersion += 1
+        failure = nil
+        await load()
+        guard categoryChanged, let vendor = saved.vendor, !vendor.isEmpty,
+              let category = saved.category, !category.isEmpty, !ruleActive else { return }
+        showToast("Käytetäänkö kategoriaa \(ReceiptCategory.label(for: category)) myyjälle \(vendor) myöhemmin?", action: "Muista") {
+            guard await saveRule(vendor: vendor, category: category) else { return }
+            showToast("Sääntö tallennettu.", action: "Kumoa") { await undoRule(vendor: vendor) }
         }
     }
 
@@ -85,6 +311,7 @@ struct ReceiptDetailView: View {
         do {
             let _: Ignored = try await app.api.send("PATCH", "/api/receipts/\(receiptId)/review", body: Body(reviewStatus: status))
             Haptics.success()
+            app.dataVersion += 1
             await load()
         } catch {
             failure = error.userMessage
@@ -95,9 +322,230 @@ struct ReceiptDetailView: View {
         do {
             let _: Ignored = try await app.api.send("DELETE", "/api/receipts/\(receiptId)", body: Optional<EmptyBody>.none)
             Haptics.success()
+            app.dataVersion += 1
             dismiss()
         } catch {
             failure = error.userMessage
         }
+    }
+}
+
+/// Muokkaa kuittia: every field of the web editor, saved with `PATCH
+/// /api/receipts/[id]` carrying only the changed fields and the version that
+/// was opened, so a newer save elsewhere is never overwritten.
+struct ReceiptEditSheet: View {
+    @Environment(AppModel.self) private var app
+    @Environment(\.dismiss) private var dismiss
+    @State private var receipt: Receipt
+    @State private var baseline: ReceiptForm
+    @State private var form: ReceiptForm
+    @State private var errors: [String: String] = [:]
+    @State private var failure: ReceiptSaveFailure?
+    @State private var busy = false
+    @State private var customCategory: Bool
+    let saved: (Receipt, Bool) -> Void
+
+    init(receipt: Receipt, saved: @escaping (Receipt, Bool) -> Void) {
+        let form = ReceiptForm(receipt: receipt)
+        _receipt = State(initialValue: receipt)
+        _baseline = State(initialValue: form)
+        _form = State(initialValue: form)
+        _customCategory = State(initialValue: !form.category.isEmpty && !form.isKnownCategory)
+        self.saved = saved
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    Picker("Tyyppi", selection: $form.type) {
+                        Text("Meno").tag("meno")
+                        Text("Tulo").tag("tulo")
+                    }
+                    .pickerStyle(.segmented)
+                    .listRowBackground(Color.clear)
+                    .listRowInsets(EdgeInsets())
+                }
+                Section {
+                    TextField("Myyjä", text: $form.vendor).textContentType(.organizationName)
+                    fieldError("vendor")
+                    DatePicker("Päivä", selection: dateBinding, displayedComponents: .date)
+                    fieldError("date")
+                    TextField("Summa €", text: Binding(get: { form.totalText }, set: { form.setTotal($0) }))
+                        .keyboardType(.decimalPad)
+                    fieldError("totalAmount")
+                } header: {
+                    Text("Kuitin tiedot")
+                }
+                Section {
+                    ReceiptCategoryField(category: $form.category, custom: $customCategory)
+                    fieldError("category")
+                } header: {
+                    Text("Kategoria")
+                }
+                vatSection
+                Section {
+                    TextField("Viitenumero", text: $form.reference)
+                    fieldError("reference")
+                    TextField("Laskun numero", text: $form.invoiceNumber)
+                    fieldError("invoiceNumber")
+                    TextField("Selite", text: $form.notes, axis: .vertical)
+                    fieldError("notes")
+                } header: {
+                    Text("Lisätiedot")
+                }
+                if let failure {
+                    Section {
+                        Text(failure.message).foregroundStyle(Theme.danger)
+                        if case .versionConflict = failure {
+                            Button { Task { await reload() } } label: { Label("Lataa uudelleen", systemImage: "arrow.clockwise") }
+                                .disabled(busy)
+                        }
+                    }
+                }
+            }
+            .scrollContentBackground(.hidden)
+            .background(Theme.canvas)
+            .navigationTitle("Muokkaa kuittia")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Peruuta") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) {
+                    if busy { ProgressView() } else { Button("Tallenna") { Task { await save() } }.bold() }
+                }
+            }
+            .interactiveDismissDisabled(busy)
+            .onAppear {
+                if form.date.isEmpty { form.date = APIDate.dayString(Date()) }
+            }
+        }
+    }
+
+    private var dateBinding: Binding<Date> {
+        Binding(get: { APIDate.day(form.date) ?? Date() }, set: { form.date = APIDate.dayString($0) })
+    }
+
+    @ViewBuilder private func fieldError(_ key: String) -> some View {
+        if let message = errors[key] {
+            Text(message).font(.caption).foregroundStyle(Theme.danger)
+        }
+    }
+
+    private var vatSection: some View {
+        Section {
+            if form.vatRows.isEmpty {
+                Text("Ei ALV-erittelyä").foregroundStyle(Theme.ink2)
+            }
+            ForEach(Array(form.vatRows.enumerated()), id: \.element.id) { index, row in
+                HStack {
+                    Picker("ALV", selection: Binding(get: { row.rate }, set: { form.setRate($0, at: index) })) {
+                        ForEach(ReceiptVat.rateChoices(forDate: form.date, including: row.rate), id: \.self) { rate in
+                            Text(ReceiptVat.rateLabel(rate)).tag(rate)
+                        }
+                    }
+                    .labelsHidden()
+                    .pickerStyle(.menu)
+                    .fixedSize()
+                    TextField("ALV €", text: Binding(get: { row.amountText }, set: { form.setVatAmount($0, at: index) }))
+                        .keyboardType(.decimalPad)
+                        .multilineTextAlignment(.trailing)
+                    Button(role: .destructive) { form.removeVatRow(at: index) } label: { Image(systemName: "minus.circle") }
+                        .buttonStyle(.borderless)
+                        .accessibilityLabel("Poista ALV-rivi")
+                }
+                fieldError("vat-\(index)")
+            }
+            Button { form.addVatRow() } label: { Label("Lisää ALV-rivi", systemImage: "plus.circle") }
+        } header: {
+            Text("ALV")
+        } footer: {
+            if form.vatRows.count == 1 && form.vatRows[0].auto {
+                Text("ALV lasketaan summasta ja ALV-kannasta.")
+            }
+        }
+    }
+
+    private func save() async {
+        failure = nil
+        switch form.makePatch(baseline: baseline, expectedUpdatedAt: receipt.updatedAt) {
+        case .unchanged:
+            dismiss()
+        case .invalid(let found):
+            errors = found
+            Haptics.error()
+        case .patch(let patch):
+            errors = [:]
+            busy = true
+            defer { busy = false }
+            do {
+                let response: ReceiptResponse = try await app.api.send("PATCH", "/api/receipts/\(receipt.id)", body: patch)
+                Haptics.success()
+                saved(response.receipt, patch.changes("category"))
+                dismiss()
+            } catch is CancellationError {
+            } catch let error as LKError {
+                let kind = ReceiptSaveFailure(error)
+                if case .fields(let named, _) = kind { errors = named }
+                failure = kind
+                Haptics.error()
+            } catch {
+                failure = .other(error.userMessage)
+                Haptics.error()
+            }
+        }
+    }
+
+    /// After a version conflict: the newest copy replaces the form (as the web's "Lataa uudelleen").
+    private func reload() async {
+        busy = true
+        defer { busy = false }
+        do {
+            let fresh: ReceiptResponse = try await app.api.get("/api/receipts/\(receipt.id)")
+            let next = ReceiptForm(receipt: fresh.receipt)
+            receipt = fresh.receipt
+            baseline = next
+            form = next
+            customCategory = !next.category.isEmpty && !next.isKnownCategory
+            errors = [:]
+            failure = nil
+        } catch is CancellationError {
+        } catch {
+            failure = .other(error.userMessage)
+        }
+    }
+}
+
+/// The category of a receipt: one of the known categories, or "Muu kategoria…" typed by hand.
+struct ReceiptCategoryField: View {
+    @Binding var category: String
+    @Binding var custom: Bool
+
+    var body: some View {
+        Picker("Kategoria", selection: pickerBinding) {
+            Text("Valitse").tag("")
+            ForEach(ReceiptCategory.all) { item in Text(item.label).tag(item.id) }
+            Text("Muu kategoria…").tag(Self.customTag)
+        }
+        .pickerStyle(.menu)
+        if custom {
+            TextField("Oma kategoria", text: $category)
+        }
+    }
+
+    private static let customTag = "\u{1}custom"
+
+    private var pickerBinding: Binding<String> {
+        Binding(
+            get: { custom ? Self.customTag : (ReceiptCategory.isKnown(category) ? category : "") },
+            set: { value in
+                if value == Self.customTag {
+                    custom = true
+                    if ReceiptCategory.isKnown(category) { category = "" }
+                } else {
+                    custom = false
+                    category = value
+                }
+            }
+        )
     }
 }

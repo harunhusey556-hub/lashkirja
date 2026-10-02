@@ -16,6 +16,8 @@ struct InvoiceFormView: View {
     @State private var failure: String?
     @State private var key = UUID().uuidString
     @State private var loaded = false
+    @State private var catalog: [CatalogItem] = []
+    @State private var productNotice: String?
 
     var body: some View {
         NavigationStack {
@@ -34,10 +36,36 @@ struct InvoiceFormView: View {
                     DatePicker("Laskun päivä", selection: $issueDate, displayedComponents: .date)
                     Stepper("Maksuaika \(draft.paymentTermDays) pv", value: $draft.paymentTermDays, in: 0...365, step: 7)
                 }
-                Section("Rivit") {
-                    ForEach($draft.lines) { $line in LineEditor(line: $line) }
-                        .onDelete { draft.lines.remove(atOffsets: $0) }
+                Section {
+                    ForEach($draft.lines) { $line in
+                        LineEditor(line: $line, catalog: catalog, issueDate: APIDate.dayString(issueDate)) { saved in
+                            Task { await saveProduct(saved) }
+                        }
+                    }
+                    .onDelete { draft.lines.remove(atOffsets: $0) }
                     Button { withAnimation { draft.lines.append(.init()) } } label: { Label("Lisää rivi", systemImage: "plus") }
+                } header: {
+                    Text("Rivit")
+                } footer: {
+                    if let productNotice { Text(productNotice) }
+                }
+                if !catalog.isEmpty {
+                    Section {
+                        DisclosureGroup("Tallennetut tuotteet (\(catalog.count))") {
+                            ForEach(catalog) { item in
+                                HStack {
+                                    Text(item.name)
+                                    Spacer()
+                                    MoneyText(amount: item.unitPrice).foregroundStyle(Theme.ink2)
+                                }
+                                .swipeActions {
+                                    Button("Poista", role: .destructive) { Task { await deleteProduct(item) } }
+                                }
+                            }
+                        }
+                    } footer: {
+                        Text("Pyyhkäise tuotetta vasemmalle poistaaksesi sen valikosta. Laskut, joilla sitä on käytetty, eivät muutu.")
+                    }
                 }
                 Section {
                     let t = draft.totals
@@ -74,6 +102,8 @@ struct InvoiceFormView: View {
         guard !loaded else { return }
         loaded = true
         if let list: CustomerList = try? await app.api.get("/api/customers") { customers = list.customers.filter { $0.archivedAt == nil } }
+        // The form works without the catalog; the product picker just stays hidden.
+        if let list: CatalogList = try? await app.api.get("/api/catalog") { catalog = list.items }
         if let existing {
             draft.customerId = existing.customer.id
             draft.issueDate = existing.issueDate
@@ -86,6 +116,34 @@ struct InvoiceFormView: View {
         } else {
             if let presetCustomerId { draft.customerId = presetCustomerId }
             if draft.lines.isEmpty { draft.lines = [.init()] }
+        }
+    }
+
+    /// "Tallenna tuotteeksi": the line becomes a catalog product for later invoices.
+    private func saveProduct(_ line: InvoiceDraft.Line) async {
+        let product = CatalogItemDraft(line: line)
+        if let problem = product.validationError { productNotice = problem; Haptics.error(); return }
+        do {
+            let response: CatalogItemResponse = try await app.api.send("POST", "/api/catalog", body: product)
+            catalog = (catalog + [response.item]).sorted { $0.name.localizedCompare($1.name) == .orderedAscending }
+            productNotice = "Tuote \(response.item.name) tallennettiin."
+            Haptics.success()
+        } catch {
+            productNotice = error.userMessage
+            Haptics.error()
+        }
+    }
+
+    /// Archived on the server: gone from the picker, existing invoice lines are untouched.
+    private func deleteProduct(_ item: CatalogItem) async {
+        do {
+            let _: Ignored = try await app.api.send("DELETE", "/api/catalog/\(item.id)", body: Optional<EmptyBody>.none)
+            withAnimation { catalog.removeAll { $0.id == item.id } }
+            productNotice = "Tuote \(item.name) poistettiin valikosta."
+            Haptics.success()
+        } catch {
+            productNotice = error.userMessage
+            Haptics.error()
         }
     }
 
@@ -110,15 +168,33 @@ struct InvoiceFormView: View {
     }
 }
 
-private struct LineEditor: View {
+/// One invoice line. Shared by the invoice and the recurring invoice forms.
+struct LineEditor: View {
     @Binding var line: InvoiceDraft.Line
+    var catalog: [CatalogItem] = []
+    var issueDate: String = APIDate.dayString(Date())
+    var onSaveProduct: ((InvoiceDraft.Line) -> Void)? = nil
     @State private var priceText = ""
     @State private var quantityText = ""
     // An emptied or unreadable field counts as 0, never as the value typed before it.
-    private static let rates: [Decimal] = [Decimal(string: "25.5")!, 14, Decimal(string: "13.5")!, 10, 0]
+    static let rates: [Decimal] = [Decimal(string: "25.5")!, 14, Decimal(string: "13.5")!, 10, 0]
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
+            if !catalog.isEmpty {
+                Menu {
+                    ForEach(catalog) { item in
+                        Button("\(item.name) · \(Money.format(item.unitPrice))") {
+                            line.apply(item, issueDate: issueDate)
+                            Haptics.selection()
+                        }
+                    }
+                } label: {
+                    Label("Valitse tuote", systemImage: "shippingbox")
+                }
+                .menuStyle(.button)
+                .buttonStyle(.borderless)
+            }
             TextField("Kuvaus", text: $line.description)
             HStack {
                 TextField("Määrä", text: $quantityText).keyboardType(.decimalPad).frame(maxWidth: 70)
@@ -129,14 +205,31 @@ private struct LineEditor: View {
             }
             Picker("ALV", selection: $line.vatRate) {
                 ForEach(Self.rates, id: \.self) { rate in
-                    Text("\(NSDecimalNumber(decimal: rate).stringValue.replacingOccurrences(of: ".", with: ",")) %").tag(rate)
+                    Text("\(Self.text(rate)) %").tag(rate)
                 }
             }
             .pickerStyle(.segmented)
+            if let onSaveProduct {
+                Button { onSaveProduct(line) } label: {
+                    Label("Tallenna tuotteeksi", systemImage: "square.and.arrow.down").font(.footnote)
+                }
+                .buttonStyle(.borderless)
+            }
         }
         .onAppear {
-            if quantityText.isEmpty { quantityText = NSDecimalNumber(decimal: line.quantity).stringValue.replacingOccurrences(of: ".", with: ",") }
-            if priceText.isEmpty && line.unitPrice != 0 { priceText = NSDecimalNumber(decimal: line.unitPrice).stringValue.replacingOccurrences(of: ".", with: ",") }
+            if quantityText.isEmpty { quantityText = Self.text(line.quantity) }
+            if priceText.isEmpty && line.unitPrice != 0 { priceText = Self.text(line.unitPrice) }
         }
+        // A product picked from the catalog changes the line from outside the text fields.
+        .onChange(of: line.unitPrice) { _, value in
+            if (Money.parse(priceText) ?? 0) != value { priceText = Self.text(value) }
+        }
+        .onChange(of: line.quantity) { _, value in
+            if (Money.parse(quantityText) ?? 0) != value { quantityText = Self.text(value) }
+        }
+    }
+
+    static func text(_ value: Decimal) -> String {
+        NSDecimalNumber(decimal: value).stringValue.replacingOccurrences(of: ".", with: ",")
     }
 }

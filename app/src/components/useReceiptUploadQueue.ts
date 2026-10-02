@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 import {
   ApiError,
   apiFetch,
@@ -101,15 +101,15 @@ export function useReceiptUploadQueue(
 ) {
   const [rows, setRows] = useState<InternalRow[]>([]);
   const rowsRef = useRef<InternalRow[]>([]);
-  // Both callbacks kept on one ref (one "always latest" assignment, not
-  // two) so this doesn't add a second react-hooks/refs lint error next to
-  // the pre-existing one this idiom already carries elsewhere in the file.
+  // Both callbacks kept on one ref, refreshed after each render.
   const callbacksRef = useRef({ onReady, onNetworkFailure });
   const draining = useRef(false);
   const cancelAll = useRef(false);
   const applied = useRef(false);
   const cancelListeners = useRef(new Map<string, () => void>());
-  callbacksRef.current = { onReady, onNetworkFailure };
+  useLayoutEffect(() => {
+    callbacksRef.current = { onReady, onNetworkFailure };
+  });
 
   function commit(next: InternalRow[]) {
     rowsRef.current = next;

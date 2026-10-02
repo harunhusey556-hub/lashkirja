@@ -120,7 +120,12 @@ public struct InvoiceList: Decodable, Sendable {
     public let aging: Aging
 }
 
-public struct InvoiceDetailResponse: Decodable, Sendable { public let invoice: Invoice }
+/// `GET /api/invoices/{id}`: the invoice, plus hand-recorded payments that an
+/// income receipt from a bank row seems to count a second time.
+public struct InvoiceDetailResponse: Decodable, Sendable {
+    public let invoice: Invoice
+    public let paymentDuplicates: [PaymentDuplicate]?
+}
 public struct InvoiceResponse: Decodable, Sendable { public let invoice: Invoice }
 public struct InvoiceCounts: Decodable, Sendable { public let counts: [String: Int] }
 

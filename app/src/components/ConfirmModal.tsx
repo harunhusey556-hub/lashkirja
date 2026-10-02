@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { useFocusTrap } from "@/components/useFocusTrap";
 import { CONFIRM_FAILED, settleConfirm } from "@/lib/confirm-action";
 import { isUserFacingMessage } from "@/components/clientFetch";
@@ -89,7 +89,9 @@ export default function ConfirmModal({
   useOverlayLock(isOpen);
 
   const cancelRef = useRef(onCancel);
-  cancelRef.current = onCancel;
+  useLayoutEffect(() => {
+    cancelRef.current = onCancel;
+  });
 
   useEffect(() => {
     if (!isOpen) return;

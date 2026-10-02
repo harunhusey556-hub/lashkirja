@@ -46,12 +46,15 @@ struct KirjanpitoView: View {
         .task(id: app.dataVersion) { await load() }
     }
 
+    /// The three hub figures load side by side; the pending figure is a count query, not the receipt list.
     private func load() async {
-        if let c: ReceiptCounts = try? await app.api.get("/api/receipts/counts") { counts = c.counts }
-        if let p: ReceiptList = try? await app.api.get("/api/receipts", query: ["reviewStatus": "pending"]) { pending = p.count ?? p.receipts.count }
-        if let s: StatementList = try? await app.api.get("/api/statements") {
-            openRows = BankFeed.months(s.statements).reduce(0) { $0 + $1.open }
-        }
+        let api = app.api
+        async let all: ReceiptCounts? = try? api.get("/api/receipts/counts")
+        async let waiting: ReceiptCounts? = try? api.get("/api/receipts/counts", query: ["reviewStatus": "pending"])
+        async let statements: StatementList? = try? api.get("/api/statements")
+        if let c = await all { counts = c.counts }
+        if let p = await waiting { pending = p.counts.all }
+        if let s = await statements { openRows = BankFeed.months(s.statements).reduce(0) { $0 + $1.open } }
     }
 }
 

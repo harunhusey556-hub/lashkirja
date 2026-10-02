@@ -8,9 +8,17 @@ public struct BankAccount: Decodable, Sendable, Identifiable, Hashable {
     public let currency: String?
     public let balance: Decimal?
     public let archivedAt: String?
+    public let bic: String?
+    public let openingBalance: Decimal?
+    public let openingDate: String?
+    public let isDefault: Bool?
+    public let statementCount: Int?
+    public let mismatchCount: Int?
+    public let lastReconciledMonth: String?
 
     enum CodingKeys: String, CodingKey {
         case id, name, bankName, iban, currency, archivedAt
+        case bic, openingBalance, openingDate, isDefault, statementCount, mismatchCount, lastReconciledMonth
         case balance = "currentBalance"
     }
 }
@@ -19,6 +27,7 @@ public struct BankAccountsOverview: Decodable, Sendable {
     public let accounts: [BankAccount]
     public let totalBalance: Decimal
     public let needsAttention: Int
+    public let archivedCount: Int?
 }
 
 public struct BankConnection: Decodable, Sendable, Identifiable, Hashable {

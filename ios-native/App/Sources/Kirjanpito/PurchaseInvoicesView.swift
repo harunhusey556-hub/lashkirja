@@ -1,13 +1,622 @@
 import SwiftUI
 import LashKirjaCore
 
-// STUB: replaced by the feature implementation.
+/// Ostolaskut: what the business owes and when (web `/kirjanpito/ostolaskut`).
 struct PurchaseInvoicesView: View {
-    var body: some View { ContentUnavailableView("Ostolaskut", systemImage: "hammer") }
+    @Environment(AppModel.self) private var app
+    @AppStorage("ostolaskut.filter") private var filterRaw = PurchaseFilter.all.rawValue
+    @State private var state: Loadable<PurchaseInvoiceList> = .idle
+    @State private var counts: PurchaseStatusCounts?
+    @State private var message: String?
+    @State private var failure: String?
+    @State private var busy = false
+    @State private var showNew = false
+    @State private var payTarget: PurchaseInvoice?
+    @State private var deleteTarget: PurchaseInvoice?
+
+    private var filter: PurchaseFilter { PurchaseFilter(rawValue: filterRaw) ?? .all }
+
+    var body: some View {
+        List {
+            if let list = state.value {
+                content(list)
+            } else {
+                LoadState(state: state, retry: load) { (_: PurchaseInvoiceList) in EmptyView() }
+                    .listRowBackground(Color.clear)
+            }
+        }
+        .scrollContentBackground(.hidden)
+        .background(Theme.canvas)
+        .navigationTitle("Ostolaskut")
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button { showNew = true } label: { Image(systemName: "plus") }
+                    .accessibilityLabel("Uusi ostolasku")
+            }
+        }
+        .refreshable { await load() }
+        .task(id: "\(filterRaw)|\(app.dataVersion)") { await load() }
+        .disabled(busy)
+        .sheet(isPresented: $showNew) { PurchaseInvoiceFormView(existing: nil) }
+        .sheet(item: $payTarget) { invoice in PurchasePaymentSheet(invoice: invoice) }
+        .confirmationDialog(
+            "Poistetaanko ostolasku?",
+            isPresented: Binding(get: { deleteTarget != nil }, set: { if !$0 { deleteTarget = nil } }),
+            titleVisibility: .visible,
+            presenting: deleteTarget
+        ) { invoice in
+            Button("Poista", role: .destructive) { Task { await delete(invoice) } }
+        } message: { invoice in
+            Text("\(invoice.supplierName) · \(Money.format(invoice.gross))")
+        }
+        .animation(.snappy, value: filterRaw)
+    }
+
+    @ViewBuilder
+    private func content(_ list: PurchaseInvoiceList) -> some View {
+        let groups = PurchaseFilter.groups(list.invoices, filter: filter)
+        let visibleCount = groups.reduce(0) { $0 + $1.items.count }
+        let noPurchases = visibleCount == 0 && filter == .all
+
+        if !noPurchases {
+            if let aging = list.aging {
+                Section { summary(aging) }
+            }
+            Section {
+                Button { Task { await runBankMatch() } } label: {
+                    Label("Kohdista maksut", systemImage: "arrow.left.arrow.right")
+                }
+            } footer: {
+                Text("Kohdistaa pankin lähtevät maksut ostolaskuihin viitenumerolla.")
+            }
+        }
+
+        if let message {
+            Section {
+                Text(message).font(.subheadline).foregroundStyle(Theme.ink)
+            }
+            .listRowBackground(Theme.accentSoft)
+        }
+        if let failure {
+            Section { Text(failure).font(.subheadline).foregroundStyle(Theme.danger) }
+        }
+
+        if !noPurchases {
+            Section {
+                chips.listRowBackground(Color.clear).listRowInsets(EdgeInsets())
+            }
+        }
+
+        ForEach(groups) { group in
+            Section(group.label) {
+                ForEach(group.items) { invoice in row(invoice) }
+            }
+        }
+
+        if visibleCount == 0 {
+            Section {
+                if filter == .all {
+                    ContentUnavailableView {
+                        Label("Ei ostolaskuja vielä", systemImage: "doc.text")
+                    } description: {
+                        Text("Tähän ilmestyvät saamasi ostolaskut ja niiden eräpäivät.")
+                    } actions: {
+                        Button("Uusi ostolasku") { showNew = true }.buttonStyle(.primary)
+                    }
+                } else {
+                    ContentUnavailableView {
+                        Label("Ei ostolaskuja tällä suodattimella", systemImage: "line.3.horizontal.decrease.circle")
+                    } description: {
+                        Text("Kokeile toista suodatinta.")
+                    } actions: {
+                        Button("Tyhjennä suodatin") { filterRaw = PurchaseFilter.all.rawValue }
+                    }
+                }
+            }
+            .listRowBackground(Color.clear)
+        }
+
+        if list.invoices.count == PurchaseInvoiceList.limit {
+            Section {
+                Text("Näytetään \(PurchaseInvoiceList.limit) vanhinta erääntyvää laskua. Valitse suodatin nähdäksesi kaikki.")
+                    .font(.caption).foregroundStyle(Theme.ink2)
+            }
+            .listRowBackground(Color.clear)
+        }
+    }
+
+    private func row(_ invoice: PurchaseInvoice) -> some View {
+        NavigationLink(value: Route.purchaseInvoice(invoice.id)) {
+            PurchaseInvoiceRow(invoice: invoice)
+        }
+        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+            if invoice.canDelete {
+                Button(role: .destructive) { deleteTarget = invoice } label: { Label("Poista", systemImage: "trash") }
+            }
+        }
+        .swipeActions(edge: .leading) {
+            if invoice.canRecordPayment {
+                Button { payTarget = invoice } label: { Label("Kirjaa maksu", systemImage: "eurosign.circle") }
+                    .tint(Theme.successFill)
+            }
+        }
+    }
+
+    private var chips: some View {
+        let items: [PurchaseFilter.Chip] = counts.map { PurchaseFilter.chips($0) } ?? []
+        let fallback: [PurchaseFilter] = [.all, .overdue, .open, .paid]
+        return ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                if items.isEmpty {
+                    ForEach(fallback) { option in chip(option, label: option.label) }
+                } else {
+                    ForEach(items) { item in chip(item.filter, label: "\(item.label) \(item.count)") }
+                }
+            }
+            .padding(.vertical, 4)
+        }
+    }
+
+    private func chip(_ option: PurchaseFilter, label: String) -> some View {
+        let selected = option == filter
+        return Button {
+            Haptics.selection()
+            filterRaw = option.rawValue
+        } label: {
+            Text(label)
+                .font(.subheadline.weight(selected ? .semibold : .regular))
+                .foregroundStyle(selected ? Theme.onInk : Theme.ink)
+                .padding(.horizontal, 14)
+                .frame(minHeight: 36)
+                .background(selected ? Theme.ink : Theme.surface, in: Capsule())
+                .overlay(Capsule().stroke(Theme.line, lineWidth: selected ? 0 : 1))
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(selected ? .isSelected : [])
+    }
+
+    private func summary(_ aging: PurchaseInvoiceList.Aging) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .firstTextBaseline) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Avoinna").font(.caption).foregroundStyle(Theme.ink2)
+                    MoneyText(amount: aging.totalOpen).font(.title2.weight(.semibold))
+                }
+                Spacer()
+                if aging.overdueCount > 0 {
+                    VStack(alignment: .trailing, spacing: 4) {
+                        Text("Myöhässä").font(.caption).foregroundStyle(Theme.danger)
+                        MoneyText(amount: aging.overdue).font(.subheadline.weight(.semibold)).foregroundStyle(Theme.danger)
+                    }
+                }
+            }
+            HStack(spacing: 0) {
+                ForEach(PurchaseInvoiceList.Aging.overdueBuckets, id: \.self) { bucket in
+                    VStack(spacing: 2) {
+                        Text("\(bucket) pv").font(.caption2).foregroundStyle(Theme.ink2)
+                        MoneyText(amount: aging.bucket(bucket)).font(.caption.weight(.medium)).foregroundStyle(Theme.ink)
+                    }
+                    .frame(maxWidth: .infinity)
+                }
+            }
+        }
+        .padding(.vertical, 4)
+    }
+
+    private func load() async {
+        if state.value == nil { state = .loading }
+        var query: [String: String] = [:]
+        if let status = filter.queryValue { query["status"] = status }
+        do {
+            let list: PurchaseInvoiceList = try await app.api.get("/api/purchase-invoices", query: query)
+            state = .loaded(list)
+            failure = nil
+        } catch is CancellationError {
+            return
+        } catch {
+            if state.value == nil { state = .failed(error.userMessage) } else { failure = error.userMessage }
+        }
+        if let response: PurchaseInvoiceCountsResponse = try? await app.api.get("/api/purchase-invoices/counts") {
+            counts = response.counts
+        }
+    }
+
+    private func runBankMatch() async {
+        busy = true
+        message = nil
+        failure = nil
+        defer { busy = false }
+        do {
+            let result: PurchaseMatchResult = try await app.api.send("POST", "/api/purchase-invoices/match", body: EmptyBody())
+            Haptics.success()
+            withAnimation { message = result.summary }
+            if !result.applied.isEmpty { app.dataVersion += 1 }
+        } catch is CancellationError {
+        } catch {
+            Haptics.error()
+            failure = error.userMessage
+        }
+    }
+
+    private func delete(_ invoice: PurchaseInvoice) async {
+        busy = true
+        failure = nil
+        defer { busy = false }
+        do {
+            let _: Ignored = try await app.api.send("DELETE", "/api/purchase-invoices/\(invoice.id)", body: Optional<EmptyBody>.none)
+            Haptics.success()
+            app.dataVersion += 1
+        } catch is CancellationError {
+        } catch {
+            Haptics.error()
+            failure = error.userMessage
+        }
+    }
 }
 
-// STUB: replaced by the feature implementation.
+/// One purchase invoice: amounts, receipt link, payments and the status actions.
 struct PurchaseInvoiceDetailView: View {
     let purchaseInvoiceId: String
-    var body: some View { ContentUnavailableView("Ostolasku", systemImage: "hammer") }
+
+    @Environment(AppModel.self) private var app
+    @Environment(\.dismiss) private var dismiss
+    @State private var state: Loadable<PurchaseInvoice> = .idle
+    @State private var links: PurchaseReceiptLinks?
+    @State private var sheet: SheetKind?
+    @State private var confirm: ConfirmKind?
+    @State private var busy = false
+    @State private var failure: String?
+
+    enum SheetKind: String, Identifiable {
+        case edit, payment, markPaid
+        var id: String { rawValue }
+    }
+
+    enum ConfirmKind: Identifiable {
+        case delete, cancel, reopen, markPaid
+        case removePayment(PurchaseInvoice.Payment)
+
+        var id: String {
+            switch self {
+            case .delete: "delete"
+            case .cancel: "cancel"
+            case .reopen: "reopen"
+            case .markPaid: "markPaid"
+            case .removePayment(let payment): "payment-\(payment.id)"
+            }
+        }
+    }
+
+    var body: some View {
+        List {
+            if let invoice = state.value {
+                Section {
+                    header(invoice).listRowBackground(Color.clear).listRowInsets(EdgeInsets())
+                }
+                if let failure {
+                    Section { Text(failure).font(.footnote).foregroundStyle(Theme.danger) }
+                }
+                details(invoice)
+                receiptSection(invoice)
+                paymentsSection(invoice)
+                if let notes = invoice.notes, !notes.isEmpty {
+                    Section("Lisätiedot") { Text(notes) }
+                }
+                if let reason = invoice.closedReason, !reason.isEmpty {
+                    Section("Perustelu") { Text(reason) }
+                }
+                if invoice.canDelete {
+                    Section {
+                        Button(role: .destructive) { confirm = .delete } label: {
+                            Label("Poista ostolasku", systemImage: "trash")
+                        }
+                    }
+                }
+            } else {
+                LoadState(state: state, retry: load) { (_: PurchaseInvoice) in EmptyView() }
+                    .listRowBackground(Color.clear)
+            }
+        }
+        .scrollContentBackground(.hidden)
+        .background(Theme.canvas)
+        .navigationTitle(state.value?.supplierName ?? "Ostolasku")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            if let invoice = state.value {
+                ToolbarItem(placement: .topBarTrailing) { actions(invoice) }
+            }
+        }
+        .refreshable { await load() }
+        .task { await load() }
+        .disabled(busy)
+        .sheet(item: $sheet) { kind in
+            if let invoice = state.value {
+                switch kind {
+                case .edit: PurchaseInvoiceFormView(existing: invoice) { updated in apply(updated) }
+                case .payment: PurchasePaymentSheet(invoice: invoice) { updated in apply(updated) }
+                case .markPaid: PurchaseMarkPaidSheet(invoice: invoice) { updated in apply(updated) }
+                }
+            }
+        }
+        .confirmationDialog(
+            confirmTitle,
+            isPresented: Binding(get: { confirm != nil }, set: { if !$0 { confirm = nil } }),
+            titleVisibility: .visible,
+            presenting: confirm
+        ) { kind in
+            switch kind {
+            case .delete:
+                Button("Poista", role: .destructive) { Task { await deleteInvoice() } }
+            case .cancel:
+                Button("Mitätöi", role: .destructive) { Task { await setStatus(PurchaseStatusChange(status: .cancelled)) } }
+            case .reopen:
+                Button("Palauta avoimeksi") { Task { await setStatus(PurchaseStatusChange(status: .open)) } }
+            case .markPaid:
+                Button("Merkitse maksetuksi") { Task { await setStatus(PurchaseStatusChange(status: .paid)) } }
+            case .removePayment(let payment):
+                Button("Poista maksu", role: .destructive) { Task { await removePayment(payment) } }
+            }
+        } message: { kind in
+            Text(confirmMessage(kind))
+        }
+    }
+
+    // MARK: Sections
+
+    private func header(_ invoice: PurchaseInvoice) -> some View {
+        VStack(spacing: 6) {
+            MoneyText(amount: invoice.gross).font(.system(size: 36, weight: .bold, design: .rounded))
+            Text(invoice.supplierName).font(.headline).foregroundStyle(Theme.ink)
+            PurchaseStatusBadge(status: invoice.displayStatus)
+            if invoice.open > 0 && invoice.paid > 0 {
+                Text("Avoinna \(Money.format(invoice.open))").font(.caption).foregroundStyle(Theme.ink2)
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 12)
+    }
+
+    @ViewBuilder
+    private func details(_ invoice: PurchaseInvoice) -> some View {
+        Section {
+            LabeledContent("Laskun päivä", value: APIDate.displayDay(invoice.issueDate))
+            LabeledContent("Eräpäivä", value: APIDate.displayDay(invoice.dueDate))
+            if let number = invoice.invoiceNumber, !number.isEmpty {
+                LabeledContent("Laskun numero", value: number)
+            }
+            if let reference = invoice.reference, !reference.isEmpty {
+                LabeledContent("Viite", value: reference)
+                    .contextMenu {
+                        Button { UIPasteboard.general.string = reference } label: {
+                            Label("Kopioi viitenumero", systemImage: "doc.on.doc")
+                        }
+                    }
+            }
+            if let businessId = invoice.supplierBusinessId, !businessId.isEmpty {
+                LabeledContent("Y-tunnus", value: businessId)
+            }
+            if let iban = invoice.supplierIban, !iban.isEmpty {
+                LabeledContent("IBAN", value: iban)
+            }
+            if let category = invoice.category, !category.isEmpty {
+                LabeledContent("Kategoria", value: category)
+            }
+        }
+        Section {
+            LabeledContent("Veroton") { MoneyText(amount: invoice.net) }
+            LabeledContent("ALV") { MoneyText(amount: invoice.vat) }
+            LabeledContent("Yhteensä") { MoneyText(amount: invoice.gross).fontWeight(.semibold) }
+            if !invoice.payments.isEmpty {
+                LabeledContent("Maksettu") { MoneyText(amount: invoice.paid) }
+            }
+            if invoice.status == .open {
+                LabeledContent("Avoinna") { MoneyText(amount: invoice.open).fontWeight(.semibold) }
+            }
+        } footer: {
+            if invoice.status != .cancelled && invoice.vat > 0 {
+                Text(invoice.receiptId != nil
+                     ? "Kuitti on liitetty: ALV lasketaan kuitin kautta, kun kuitti on hyväksytty ja siinä on ALV-erittely."
+                     : "ALV on mukana ALV-ilmoituksen vähennettävässä verossa.")
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func receiptSection(_ invoice: PurchaseInvoice) -> some View {
+        if invoice.status != .cancelled, let links {
+            if let linked = links.linked {
+                Section("Liitetty kuitti") {
+                    NavigationLink(value: Route.receipt(linked.id)) {
+                        Label(linked.text, systemImage: "doc.text.image")
+                    }
+                    Button("Poista liitos", role: .destructive) { Task { await setReceipt(nil) } }
+                }
+            } else if !links.candidates.isEmpty {
+                Section {
+                    ForEach(links.candidates) { receipt in
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(receipt.text).font(.subheadline).lineLimit(2)
+                                if receipt.sameAmount {
+                                    Text("Sama summa").font(.caption).foregroundStyle(Theme.success)
+                                }
+                            }
+                            Spacer()
+                            Button("Liitä kuitti") { Task { await setReceipt(receipt.id) } }
+                                .buttonStyle(.bordered)
+                                .tint(Theme.accent)
+                                .accessibilityLabel("Liitä kuitti \(receipt.text)")
+                        }
+                    }
+                } header: {
+                    Text("Kuitti")
+                } footer: {
+                    Text("Onko tämä osto jo kuittina? Liitä kuitti, niin ALV ei lasketa kahdesti.")
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func paymentsSection(_ invoice: PurchaseInvoice) -> some View {
+        Section {
+            if invoice.payments.isEmpty {
+                Text("Ei maksuja.").foregroundStyle(Theme.ink2)
+            }
+            ForEach(invoice.payments) { payment in
+                HStack {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(APIDate.displayDay(payment.paidDate))
+                        let detail = [payment.isFromBank ? "pankista" : nil, payment.note].compactMap { $0 }.joined(separator: " · ")
+                        if !detail.isEmpty {
+                            Text(detail).font(.caption).foregroundStyle(Theme.ink2)
+                        }
+                    }
+                    Spacer()
+                    MoneyText(amount: payment.amount)
+                }
+                .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                    Button(role: .destructive) { confirm = .removePayment(payment) } label: {
+                        Label("Poista maksu", systemImage: "trash")
+                    }
+                }
+            }
+            if invoice.canRecordPayment {
+                Button { sheet = .payment } label: { Label("Kirjaa maksu", systemImage: "eurosign.circle") }
+            }
+        } header: {
+            Text("Maksut")
+        } footer: {
+            if !invoice.payments.isEmpty {
+                Text("Pyyhkäise maksua vasemmalle poistaaksesi sen.")
+            }
+        }
+    }
+
+    private func actions(_ invoice: PurchaseInvoice) -> some View {
+        Menu {
+            Button { sheet = .edit } label: { Label("Muokkaa", systemImage: "pencil") }
+            if invoice.canRecordPayment {
+                Button { sheet = .payment } label: { Label("Kirjaa maksu", systemImage: "eurosign.circle") }
+            }
+            if invoice.canMarkPaid {
+                Button {
+                    if invoice.markPaidNeedsReason { sheet = .markPaid } else { confirm = .markPaid }
+                } label: {
+                    Label("Merkitse maksetuksi", systemImage: "checkmark.circle")
+                }
+            }
+            if let reference = invoice.reference, !reference.isEmpty {
+                Button { UIPasteboard.general.string = reference } label: {
+                    Label("Kopioi viitenumero", systemImage: "doc.on.doc")
+                }
+            }
+            if invoice.canReopen {
+                Button { confirm = .reopen } label: { Label("Palauta avoimeksi", systemImage: "arrow.uturn.backward") }
+            }
+            if invoice.canCancel {
+                Button(role: .destructive) { confirm = .cancel } label: { Label("Mitätöi", systemImage: "xmark.circle") }
+            }
+            if invoice.canDelete {
+                Button(role: .destructive) { confirm = .delete } label: { Label("Poista ostolasku", systemImage: "trash") }
+            }
+        } label: {
+            Image(systemName: "ellipsis.circle")
+        }
+        .accessibilityLabel("Toiminnot")
+    }
+
+    private var confirmTitle: String {
+        switch confirm {
+        case .delete: "Poistetaanko ostolasku?"
+        case .cancel: "Mitätöidäänkö ostolasku?"
+        case .reopen: "Palautetaanko ostolasku avoimeksi?"
+        case .markPaid: "Merkitäänkö ostolasku maksetuksi?"
+        case .removePayment: "Poistetaanko maksu?"
+        case nil: ""
+        }
+    }
+
+    private func confirmMessage(_ kind: ConfirmKind) -> String {
+        guard let invoice = state.value else { return "" }
+        switch kind {
+        case .delete: return "\(invoice.supplierName) · \(Money.format(invoice.gross))"
+        case .cancel: return "Mitätöity lasku ei ole enää avoinna eikä mukana ALV-laskelmassa."
+        case .reopen: return "Lasku palaa odottamaan maksua."
+        case .markPaid: return "Kirjatut maksut kattavat laskun summan."
+        case .removePayment(let payment):
+            return "\(Money.format(payment.amount)) poistetaan ostolaskulta. Ostolasku palaa avoimeksi, jos se ei ole sen jälkeen kokonaan maksettu."
+        }
+    }
+
+    // MARK: Actions
+
+    private func apply(_ invoice: PurchaseInvoice) {
+        state = .loaded(invoice)
+        Task { await loadLinks() }
+    }
+
+    private func load() async {
+        if state.value == nil { state = .loading }
+        do {
+            let response: PurchaseInvoiceResponse = try await app.api.get("/api/purchase-invoices/\(purchaseInvoiceId)")
+            state = .loaded(response.invoice)
+        } catch is CancellationError {
+            return
+        } catch {
+            if state.value == nil { state = .failed(error.userMessage) } else { failure = error.userMessage }
+            return
+        }
+        await loadLinks()
+    }
+
+    /// The receipt link is a convenience: the screen works without it.
+    private func loadLinks() async {
+        let result: PurchaseReceiptLinks? = try? await app.api.get("/api/purchase-invoices/\(purchaseInvoiceId)/receipts")
+        links = result
+    }
+
+    private func run(_ work: () async throws -> Void) async {
+        busy = true
+        failure = nil
+        defer { busy = false }
+        do {
+            try await work()
+            Haptics.success()
+            app.dataVersion += 1
+        } catch is CancellationError {
+        } catch {
+            failure = error.userMessage
+            Haptics.error()
+        }
+    }
+
+    private func setStatus(_ change: PurchaseStatusChange) async {
+        await run {
+            let response: PurchaseInvoiceResponse = try await app.api.send("PATCH", "/api/purchase-invoices/\(purchaseInvoiceId)", body: change)
+            state = .loaded(response.invoice)
+        }
+    }
+
+    private func setReceipt(_ receiptId: String?) async {
+        await run {
+            let response: PurchaseInvoiceResponse = try await app.api.send("PATCH", "/api/purchase-invoices/\(purchaseInvoiceId)", body: PurchaseReceiptLink(receiptId: receiptId))
+            state = .loaded(response.invoice)
+        }
+        await loadLinks()
+    }
+
+    private func removePayment(_ payment: PurchaseInvoice.Payment) async {
+        await run {
+            let response: PurchaseInvoiceResponse = try await app.api.send("DELETE", "/api/purchase-invoices/\(purchaseInvoiceId)/payments", query: ["paymentId": payment.id], body: Optional<EmptyBody>.none)
+            state = .loaded(response.invoice)
+        }
+    }
+
+    private func deleteInvoice() async {
+        await run {
+            let _: Ignored = try await app.api.send("DELETE", "/api/purchase-invoices/\(purchaseInvoiceId)", body: Optional<EmptyBody>.none)
+            dismiss()
+        }
+    }
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { ApiError } from "@/components/clientFetch";
 import { clearDraft, currentDraftOwner, readDraft, saveDraft, subscribeDraftOwner } from "@/lib/draft-store";
 import { registerDirtySource, requestLeave } from "@/lib/form-guard";
@@ -32,18 +32,33 @@ export function useEditorSession<T>(options: {
   const valueKey = JSON.stringify(options.value);
   const dirty = active && valueKey !== baselineKey;
   const dirtyRef = useRef(dirty);
-  dirtyRef.current = dirty;
   const onRestore = useRef(options.onRestore);
-  onRestore.current = options.onRestore;
   const restored = useRef<string | null>(null);
   const skipSave = useRef(false);
   const valueRef = useRef(options.value);
-  valueRef.current = options.value;
   const draftKeyRef = useRef(options.draftKey);
-  draftKeyRef.current = options.draftKey;
+  // Latest values for the listeners and cleanups below. Layout effects run before
+  // the passive effects of the same commit, so those always read this render's values.
+  useLayoutEffect(() => {
+    dirtyRef.current = dirty;
+    onRestore.current = options.onRestore;
+    valueRef.current = options.value;
+    draftKeyRef.current = options.draftKey;
+  });
   const [notice, setNotice] = useState("");
-  const [phase, setPhase] = useState<SavePhase>("clean");
+  const [phase, setPhase] = useState<SavePhase>(dirty ? "dirty" : "clean");
+  const [phaseDirty, setPhaseDirty] = useState(dirty);
   const [ownerTick, setOwnerTick] = useState(0);
+  // The save phase follows the dirty flag; adjusted while rendering instead of in an effect.
+  if (phaseDirty !== dirty) {
+    setPhaseDirty(dirty);
+    setPhase((current) => {
+      if (current === "saving" || current === "failed") return current;
+      if (dirty) return "dirty";
+      if (current === "saved") return "saved";
+      return "clean";
+    });
+  }
 
   useEffect(() => subscribeDraftOwner(() => setOwnerTick((tick) => tick + 1)), []);
 
@@ -62,6 +77,7 @@ export function useEditorSession<T>(options: {
     if (!draft || JSON.stringify(draft.value) === baselineKey) return;
     onRestore.current(draft.value);
     const when = new Date(draft.savedAt).toLocaleString("fi-FI", { timeZone: "Europe/Helsinki" });
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- one-shot restore from localStorage (an external store) for this owner and key
     setNotice(`Luonnos palautettiin. Tallennettu ${when}.`);
   }, [active, options.draftKey, baselineKey, ownerTick]);
 
@@ -109,15 +125,6 @@ export function useEditorSession<T>(options: {
       window.removeEventListener("pagehide", persist);
     };
   }, []);
-
-  useEffect(() => {
-    setPhase((current) => {
-      if (current === "saving" || current === "failed") return current;
-      if (dirty) return "dirty";
-      if (current === "saved") return "saved";
-      return "clean";
-    });
-  }, [dirty]);
 
   function clearSavedDraft() {
     skipSave.current = true;
