@@ -125,7 +125,7 @@ struct RaportitView: View {
                 }
             }
             Section {
-                categories(Array(rows.prefix(categoryLimit.visible(rows.count))))
+                categories(Array(rows.prefix(categoryLimit.visible(rows.count))), kind: kind)
                 ShowMoreButton(limit: $categoryLimit, total: rows.count)
             } header: {
                 // With the picker above, its label already names the list.
@@ -134,14 +134,24 @@ struct RaportitView: View {
         }
     }
 
-    private func categories(_ rows: [ProfitLoss.Category]) -> some View {
+    /// Each category opens the receipts (or invoices) that make it up, for the year on screen.
+    private func categories(_ rows: [ProfitLoss.Category], kind: ReportCategoryKind) -> some View {
         ForEach(rows) { row in
-            LabeledContent { MoneyText(amount: row.net) } label: {
-                VStack(alignment: .leading) {
-                    Text(row.category)
-                    Text("\(row.count) kpl").font(.caption).foregroundStyle(Theme.ink2)
+            NavigationLink(value: drillRoute(ReportDrill.target(kind: kind, category: row.category, year: String(year)))) {
+                LabeledContent { MoneyText(amount: row.net) } label: {
+                    VStack(alignment: .leading) {
+                        Text(row.category)
+                        Text("\(row.count) kpl").font(.caption).foregroundStyle(Theme.ink2)
+                    }
                 }
             }
+        }
+    }
+
+    private func drillRoute(_ drill: ReportDrill) -> Route {
+        switch drill {
+        case .receipts(let period, let tab, let category): .receiptsCategory(period: period, tab: tab, category: category)
+        case .invoices: .invoices
         }
     }
 

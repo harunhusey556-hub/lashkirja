@@ -36,12 +36,13 @@ struct ReceiptsView: View {
     private static let filterKey = "kuitit.filter"
 
     /// With a month or a tab the screen opens on exactly that; otherwise on the filters of the last visit.
-    init(month: String = "", tab: ReceiptTab = .all) {
+    init(month: String = "", tab: ReceiptTab = .all, category: String = "") {
         var initial: ReceiptListQuery
-        if !month.isEmpty || tab != .all {
+        if !month.isEmpty || tab != .all || !category.isEmpty {
             initial = ReceiptListQuery()
             initial.month = month
             initial.tab = tab
+            initial.category = category
         } else {
             initial = ReceiptListQuery(remembered: UserDefaults.standard.string(forKey: Self.filterKey) ?? "")
         }
