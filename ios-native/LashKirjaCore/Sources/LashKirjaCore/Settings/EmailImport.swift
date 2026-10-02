@@ -4,9 +4,12 @@ import Foundation
 public struct ImapAccount: Codable, Sendable, Equatable, Identifiable {
     public let id: String
     public let email: String
-    public init(id: String, email: String) {
+    /// When the server last read the mailbox (its background run or "Tarkista nyt"); older servers omit it.
+    public let lastCheckedAt: String?
+    public init(id: String, email: String, lastCheckedAt: String? = nil) {
         self.id = id
         self.email = email
+        self.lastCheckedAt = lastCheckedAt
     }
 }
 

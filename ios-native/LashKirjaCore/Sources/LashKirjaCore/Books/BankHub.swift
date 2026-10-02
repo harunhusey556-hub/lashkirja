@@ -87,22 +87,26 @@ public enum BankHub {
         public init() {}
     }
 
-    /// The recent-rows filter chips: by direction of money, as the row's sign shows it.
+    /// The recent-rows filter chips, by row type as the month totals split it: salaries and own
+    /// transfers are neither expenses nor income. A row of another type goes by its sign.
     public enum Filter: String, CaseIterable, Identifiable, Sendable {
-        case all, expenses, income
+        case all, expenses, income, transfers
         public var id: String { rawValue }
         public var title: String {
             switch self {
             case .all: "Kaikki"
             case .expenses: "Menot"
             case .income: "Tulot"
+            case .transfers: "Siirrot ja palkat"
             }
         }
         public func matches(_ row: BankTransaction) -> Bool {
+            let transfer = row.type == "oma_siirto" || row.type == "palkka"
             switch self {
-            case .all: true
-            case .expenses: row.amount < 0
-            case .income: row.amount > 0
+            case .all: return true
+            case .transfers: return transfer
+            case .expenses: return !transfer && row.type != "tulo" && (row.type == "meno" || row.amount < 0)
+            case .income: return !transfer && row.type != "meno" && (row.type == "tulo" || row.amount > 0)
             }
         }
     }

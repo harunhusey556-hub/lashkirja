@@ -48,6 +48,13 @@ public enum APIDate {
         return with("d.M.yyyy 'klo' H.mm") { $0.string(from: date) }
     }
 
+    /// A server timestamp as a date (with or without fractions).
+    public static func instant(_ iso: String) -> Date? {
+        lock.lock()
+        defer { lock.unlock() }
+        return isoFractional.date(from: iso) ?? isoPlain.date(from: iso)
+    }
+
     nonisolated(unsafe) private static let isoFractional: ISO8601DateFormatter = {
         let f = ISO8601DateFormatter()
         f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]

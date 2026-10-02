@@ -268,13 +268,14 @@ async function syncImapAccountUntracked(accountId: string) {
       }
     }
 
-    // Update lastSyncAt
-    if (maxInternalDate > 0) {
-      await prisma.imapAccount.update({
-        where: { id: account.id },
-        data: { lastSyncAt: new Date(maxInternalDate) },
-      });
-    }
+    // lastSyncAt is the newest mail read (the next run starts there); lastCheckedAt is this run.
+    await prisma.imapAccount.update({
+      where: { id: account.id },
+      data: {
+        lastCheckedAt: new Date(),
+        ...(maxInternalDate > 0 ? { lastSyncAt: new Date(maxInternalDate) } : {}),
+      },
+    });
 
     if (processedCount > 0) {
       try {

@@ -77,7 +77,7 @@ export async function GET(req: NextRequest) {
       vatPeriod: true,
       ...SELLER_SELECT,
       imapAccounts: {
-        select: { id: true, email: true }
+        select: { id: true, email: true, lastCheckedAt: true }
       }
     },
   });
@@ -149,7 +149,7 @@ export async function PATCH(req: NextRequest) {
       vatPeriod: true,
       ...SELLER_SELECT,
       // The same shape as GET: a client that keeps the answer keeps its mailboxes.
-      imapAccounts: { select: { id: true, email: true } },
+      imapAccounts: { select: { id: true, email: true, lastCheckedAt: true } },
     },
   });
 

@@ -380,6 +380,8 @@ model ImapAccount {
   tls            Boolean   @default(true)
   encryptedPass  String
   lastSyncAt     DateTime? 
+  /// When the mailbox was last read, by "Tarkista nyt" or the background run; lastSyncAt is the newest mail seen.
+  lastCheckedAt  DateTime?
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
 }

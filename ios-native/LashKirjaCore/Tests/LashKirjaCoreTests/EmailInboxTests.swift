@@ -49,3 +49,14 @@ import Foundation
     #expect(EmailInboxText.checked(morning, now: morning.addingTimeInterval(3600)) == "Tarkistettu tänään klo 9.05")
     #expect(EmailInboxText.checked(morning, now: morning.addingTimeInterval(86_400)) == "Tarkistettu 2.10.2026 klo 9.05")
 }
+
+@Test func emailInboxLastCheckIsTheNewestOfServerAndDevice() throws {
+    let json = #"[{"id":"a","email":"a@x.fi","lastCheckedAt":"2026-10-02T18:30:00.000Z"},{"id":"b","email":"b@x.fi","lastCheckedAt":null},{"id":"c","email":"c@x.fi"}]"#
+    let accounts = try JSONDecoder().decode([ImapAccount].self, from: Data(json.utf8))
+    let server = Date(timeIntervalSince1970: 1_790_965_800) // 2026-10-02T18:30:00Z
+    #expect(EmailInboxText.lastCheck(accounts, device: nil) == server)
+    // A later "Tarkista nyt" on this phone wins; an older one does not.
+    #expect(EmailInboxText.lastCheck(accounts, device: server.addingTimeInterval(60)) == server.addingTimeInterval(60))
+    #expect(EmailInboxText.lastCheck(accounts, device: server.addingTimeInterval(-60)) == server)
+    #expect(EmailInboxText.lastCheck([], device: nil) == nil)
+}

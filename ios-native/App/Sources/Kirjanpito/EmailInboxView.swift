@@ -29,8 +29,8 @@ struct EmailInboxView: View {
     @State private var toastAction: (() async -> Void)?
     @State private var toastTask: Task<Void, Never>?
 
-    /// The server does not send when it last read the mailbox, so the last "Tarkista nyt" on this
-    /// device is kept instead.
+    /// The last "Tarkista nyt" on this device; the server's own check time (profile imapAccounts)
+    /// is shown when it is newer, and stands in for a server that does not send one yet.
     private static let checkedKey = "sahkoposti.checkedAt"
 
     init() {
@@ -141,10 +141,10 @@ struct EmailInboxView: View {
                         HStack {
                             VStack(alignment: .leading, spacing: 2) {
                                 Label(checking ? String("Tarkistetaan…") : String("Tarkista nyt"), systemImage: "arrow.clockwise")
-                                if let checkedAt, !checking {
+                                if let lastCheck = EmailInboxText.lastCheck(mailboxes, device: checkedAt), !checking {
                                     // "juuri nyt" turns into a time while the screen stays open.
                                     TimelineView(.everyMinute) { context in
-                                        Text(EmailInboxText.checked(checkedAt, now: context.date)).font(.caption).foregroundStyle(Theme.ink2)
+                                        Text(EmailInboxText.checked(lastCheck, now: context.date)).font(.caption).foregroundStyle(Theme.ink2)
                                     }
                                 }
                             }

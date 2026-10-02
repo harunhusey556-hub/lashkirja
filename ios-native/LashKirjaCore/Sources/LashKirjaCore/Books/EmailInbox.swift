@@ -81,6 +81,13 @@ public struct EmailArchiveResult: Decodable, Sendable {
 
 /// The words of the Sähköposti screen.
 public enum EmailInboxText {
+    /// The newest check of any mailbox: the server's own runs, or a "Tarkista nyt" on this device
+    /// (kept locally for a server that does not send the time yet).
+    public static func lastCheck(_ accounts: [ImapAccount], device: Date?) -> Date? {
+        let server = accounts.compactMap { $0.lastCheckedAt.flatMap(APIDate.instant) }.max()
+        return [server, device].compactMap { $0 }.max()
+    }
+
     /// After "Tarkista nyt". `bills` is the server's count (only what reads as a bill);
     /// `archived` is how much the archive grew meanwhile, when both counts loaded.
     public static func syncNotice(bills: Int, archived: Int?) -> String {

@@ -48,7 +48,6 @@ private func list(_ statements: [(month: String?, account: String?, rows: [Strin
     #expect(BankHub.recent(statements, filter: .expenses).map(\.id) == ["mid", "old"])
     #expect(BankHub.recent(statements, filter: .income).map(\.id) == ["new", "undated"])
     #expect(BankHub.recent(statements, filter: .all, limit: 2).count == 2)
-    #expect(BankHub.Filter.allCases.map(\.title) == ["Kaikki", "Menot", "Tulot"])
 }
 
 @Test func bankHubMonthStepperStopsAtDataAndToday() throws {
@@ -111,4 +110,20 @@ private func list(_ statements: [(month: String?, account: String?, rows: [Strin
     let withOctober = try list([("2026-10", nil, [row("c", "2026-10-01", -5)])])
     #expect(BankHub.startMonth(withOctober, current: "2026-10") == "2026-10")
     #expect(BankHub.startMonth([], current: "2026-10") == "2026-10")
+}
+
+@Test func bankHubChipsFollowTheRowTypeLikeTheMonthTotals() throws {
+    let statements = try list([
+        ("2026-10", nil, [
+            row("rent", "2026-10-01", -800),
+            row("sale", "2026-10-02", 120, type: "tulo"),
+            row("salary", "2026-10-03", -2000, type: "palkka"),
+            row("own", "2026-10-04", 500, type: "oma_siirto"),
+        ]),
+    ])
+    // A salary or a transfer is neither an expense nor income: it has its own chip.
+    #expect(BankHub.recent(statements, filter: .expenses).map(\.id) == ["rent"])
+    #expect(BankHub.recent(statements, filter: .income).map(\.id) == ["sale"])
+    #expect(BankHub.recent(statements, filter: .transfers).map(\.id) == ["own", "salary"])
+    #expect(BankHub.Filter.allCases.map(\.title) == ["Kaikki", "Menot", "Tulot", "Siirrot ja palkat"])
 }
