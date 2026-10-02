@@ -1,4 +1,5 @@
 import SwiftUI
+import LashKirjaCore
 
 struct MainTabView: View {
     @State private var tab: AppTab = .koti
@@ -49,7 +50,7 @@ struct MainTabView: View {
             guard let pending else { return }
             app.pendingRoute = nil
             tab = pending.tab
-            paths[pending.tab, default: []].append(pending.route)
+            paths[pending.tab] = NavigationStackRule.collapse((paths[pending.tab] ?? []) + [pending.route])
         }
         .task {
             struct State_: Decodable { let onboarded: Bool }
@@ -68,7 +69,8 @@ struct MainTabView: View {
     }
 
     private func path(_ item: AppTab) -> Binding<[Route]> {
-        Binding(get: { paths[item] ?? [] }, set: { paths[item] = $0 })
+        // A link to a screen already open further back returns to it instead of stacking a copy.
+        Binding(get: { paths[item] ?? [] }, set: { paths[item] = NavigationStackRule.collapse($0) })
     }
 
     /// "Lisää" is an action, not a place: it opens the add sheet and stays on the current tab.
