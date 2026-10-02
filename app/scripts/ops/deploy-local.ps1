@@ -15,7 +15,10 @@
     7. keep the previous build as .next.prev, then next build into a fresh .next
     8. prisma migrate deploy against C:\LashKirja\data\prod.db
     9. start the supervisor (the "LashKirja prod" Scheduled Task when registered)
-   10. poll http://127.0.0.1:3300/api/health for up to 60 s
+   10. poll http://127.0.0.1:3300/api/health for up to 60 s. The app counts
+       as up when the database and disk checks pass: a 503 caused only by
+       the bank-job or mail checks (a user's failed bank sync in the last
+       24 h, say) is logged as degraded, not treated as a failed deploy.
 
   The build now runs BEFORE migrate deploy (reordered from the original
   install/generate/backup/migrate/build sequence). `next build` only needs
@@ -119,6 +122,22 @@ function Get-HealthToken {
   return ''
 }
 
+# The JSON body of a failed health request, under Windows PowerShell 5.1
+# (WebException with a response stream) and PowerShell 7 (ErrorDetails).
+function Get-HealthErrorBody($ErrorRecord) {
+  try {
+    $text = $null
+    if ($ErrorRecord.ErrorDetails -and $ErrorRecord.ErrorDetails.Message) {
+      $text = $ErrorRecord.ErrorDetails.Message
+    } elseif ($ErrorRecord.Exception.Response -and ($ErrorRecord.Exception.Response | Get-Member -Name GetResponseStream)) {
+      $reader = New-Object System.IO.StreamReader($ErrorRecord.Exception.Response.GetResponseStream())
+      try { $text = $reader.ReadToEnd() } finally { $reader.Dispose() }
+    }
+    if ($text) { return ($text | ConvertFrom-Json) }
+  } catch {}
+  return $null
+}
+
 function Test-Health([int]$TimeoutSeconds) {
   $token = Get-HealthToken
   $headers = @{}
@@ -133,6 +152,17 @@ function Test-Health([int]$TimeoutSeconds) {
     } catch {
       $status = $_.Exception.Response.StatusCode.value__
       $last = if ($status) { "HTTP $status" } else { 'unreachable' }
+      # 503 with the database and disk fine means the app serves; only the
+      # bank-job or mail checks are red (a user's failed bank sync keeps
+      # bankJobs red for 24 h). That must not roll a good deploy back.
+      if ($status -eq 503) {
+        $body = Get-HealthErrorBody $_
+        if ($body -and $body.checks -and $body.checks.db.ok -and $body.checks.disk.ok) {
+          $red = @('bankJobs', 'mail') | Where-Object { -not $body.checks.$_.ok }
+          Log ("health: HTTP 503 but db and disk are ok; serving, degraded: " + ($red -join ', '))
+          return $true
+        }
+      }
     }
     Start-Sleep -Seconds 2
   }
@@ -206,10 +236,21 @@ function Restore-PredeployDb([string]$ZipPath) {
     if (-not (Test-Path -LiteralPath $restoredDb)) { throw 'zip has no prod.db' }
     $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $restoredDb).Hash.ToLowerInvariant()
     if ($hash -ne $dbLine.Substring(3)) { throw 'restored database sha256 does not match MANIFEST.txt' }
+    $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
     if (Test-Path -LiteralPath $dbPath) {
-      $quarantine = "$dbPath.post-migrate-failure-{0}" -f (Get-Date -Format 'yyyyMMdd-HHmmss')
+      $quarantine = "$dbPath.post-migrate-failure-$stamp"
       Move-Item -LiteralPath $dbPath -Destination $quarantine -Force
       Log "kept the migrated (failed) database at $quarantine"
+    }
+    # The migrated database's write-ahead log and shared-memory index belong
+    # to it, not to the backup: left beside the restored file, SQLite replays
+    # them into it and reports SQLITE_CORRUPT. They go with the quarantined copy.
+    foreach ($suffix in @('-wal', '-shm', '-journal')) {
+      $side = "$dbPath$suffix"
+      if (Test-Path -LiteralPath $side) {
+        Move-Item -LiteralPath $side -Destination "$dbPath.post-migrate-failure-$stamp$suffix" -Force
+        Log "moved $side aside with the failed database"
+      }
     }
     Copy-Item -LiteralPath $restoredDb -Destination $dbPath -Force
     Log "restored data\prod.db from predeploy backup $ZipPath"
