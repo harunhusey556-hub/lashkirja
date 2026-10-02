@@ -9,7 +9,7 @@ public actor AuthService: TokenProvider {
     private var client: APIClient?
     private var cached: StoredToken?
 
-    public init(store: TokenStore, now: @escaping @Sendable () -> Date = Date.init) {
+    public init(store: TokenStore, now: @escaping @Sendable () -> Date = { Date() }) {
         self.store = store
         self.now = now
     }

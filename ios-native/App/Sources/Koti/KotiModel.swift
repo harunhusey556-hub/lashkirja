@@ -96,7 +96,7 @@ final class KotiModel {
         toastTask = Task { [weak self] in
             try? await Task.sleep(nanoseconds: 4_000_000_000)
             guard !Task.isCancelled else { return }
-            await self?.flushPending()
+            self?.flushPending()
         }
     }
 
