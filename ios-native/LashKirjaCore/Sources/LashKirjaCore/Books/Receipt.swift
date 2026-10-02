@@ -130,7 +130,16 @@ public struct ReceiptCounts: Decodable, Sendable {
 /// `POST /api/receipts/batch-approve` answers 200 even when some receipts were refused.
 public struct BatchApproveResult: Decodable, Sendable {
     public struct Failure: Decodable, Sendable { public let id: String; public let error: String? }
-    public let succeeded: Int?
+    /// The approved receipt ids.
+    public let succeeded: [String]?
     public let failed: [Failure]?
+    public let autoLinkedCount: Int?
+    public var approvedCount: Int { succeeded?.count ?? 0 }
     public var firstError: String? { failed?.first.map { $0.error ?? "Hyväksyntä epäonnistui." } }
+}
+
+extension Receipt {
+    /// Whether `/api/receipts/[id]/file` has something to show. A sale drafted from a bank row
+    /// (`auto_income`) is stored with a placeholder name and no upload behind it.
+    public var hasOriginalFile: Bool { fileName != nil && source != "auto_income" }
 }

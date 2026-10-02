@@ -96,8 +96,12 @@ private struct Thing: Decodable {}
 
 // I3: a 200 batch-approve with failures is reported.
 @Test func batchApproveFailures() throws {
-    let r = try JSONDecoder().decode(BatchApproveResult.self, from: Data(#"{"succeeded":0,"failed":[{"id":"r1","error":"Kuitilta puuttuu summa."}]}"#.utf8))
+    // The route's real answer: `succeeded` is the list of approved ids, not a count.
+    let r = try JSONDecoder().decode(BatchApproveResult.self, from: Data(#"{"ok":true,"succeeded":[],"failed":[{"id":"r1","error":"Kuitilta puuttuu summa."}],"updatedCount":0,"failedCount":1,"autoLinkedCount":0}"#.utf8))
     #expect(r.firstError == "Kuitilta puuttuu summa.")
-    let ok = try JSONDecoder().decode(BatchApproveResult.self, from: Data(#"{"succeeded":2,"failed":[]}"#.utf8))
+    #expect(r.approvedCount == 0)
+    let ok = try JSONDecoder().decode(BatchApproveResult.self, from: Data(#"{"ok":true,"succeeded":["r1","r2"],"failed":[],"updatedCount":2,"failedCount":0,"autoLinkedCount":1}"#.utf8))
     #expect(ok.firstError == nil)
+    #expect(ok.succeeded == ["r1", "r2"])
+    #expect(ok.approvedCount == 2)
 }

@@ -35,3 +35,16 @@ import Foundation
 @Test func sourceTitlesMatchTheWeb() {
     #expect(ReceiptSourceFilter.allCases.map(\.title) == ["Kaikki", "AI", "OCR", "Manuaalinen"])
 }
+
+@Test func onlyReceiptsWithAnUploadOfferTheirFile() throws {
+    func receipt(_ source: String, _ fileName: String?) throws -> Receipt {
+        let name = fileName.map { "\"\($0)\"" } ?? "null"
+        let json = #"{"receipt":{"id":"r1","source":"\#(source)","fileName":\#(name),"vatDetails":null,"createdAt":"2026-10-02T09:00:00.000Z","updatedAt":"2026-10-02T09:00:00.000Z"}}"#
+        return try JSONDecoder().decode(ReceiptResponse.self, from: Data(json.utf8)).receipt
+    }
+    // A sale drafted from a bank row is stored with a placeholder name and no file behind it.
+    #expect(try !receipt("auto_income", "Myyntitosite_luonnos.txt").hasOriginalFile)
+    #expect(try receipt("ai", "kuitti.jpg").hasOriginalFile)
+    #expect(try receipt("email_sync", "lasku.pdf").hasOriginalFile)
+    #expect(try !receipt("manual", nil).hasOriginalFile)
+}

@@ -43,7 +43,7 @@ struct ReceiptDetailView: View {
                 vendorRuleSection(r)
                 matchSection(r)
                 Section {
-                    if r.fileName != nil {
+                    if r.hasOriginalFile {
                         Button { showFile = true } label: { Label("Näytä kuitti", systemImage: "doc.viewfinder") }
                     }
                     Button { editing = true } label: { Label("Muokkaa", systemImage: "pencil") }
