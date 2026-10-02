@@ -59,6 +59,10 @@ enum Route: Hashable {
     case statements
     /// Kuukauden sulku opened on one month (from Koti's status card).
     case monthClose(String)
+    /// Sähköposti: what mail sync brought in, the bills and the archived non-bills.
+    case emailInbox
+    /// Pankki: balances, the month's money in and out, and the bank rows in one place.
+    case bankHub
 }
 
 extension Route {
@@ -156,6 +160,8 @@ struct RouteScreen: View {
         case .invoices: MyyntiView()
         case .statements: StatementsView()
         case .monthClose(let month): PeriodsView(month: month)
+        case .emailInbox: EmailInboxView()
+        case .bankHub: BankHubView()
         }
     }
 }

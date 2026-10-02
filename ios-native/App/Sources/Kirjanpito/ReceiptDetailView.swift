@@ -55,6 +55,11 @@ struct ReceiptDetailView: View {
                         Button(role: .destructive) { Task { await review("rejected") } } label: { Label("Hylkää", systemImage: "xmark.circle") }
                             .disabled(reviewBusy)
                     }
+                    if r.reviewStatus == "rejected" {
+                        // Archived (an e-mail attachment that did not read as a bill, or rejected by hand): back to review.
+                        Button { Task { await review("pending") } } label: { Label("Palauta tarkistettavaksi", systemImage: "arrow.uturn.backward.circle") }
+                            .disabled(reviewBusy)
+                    }
                 }
                 if let failure { Text(failure).foregroundStyle(Theme.danger) }
             } else {

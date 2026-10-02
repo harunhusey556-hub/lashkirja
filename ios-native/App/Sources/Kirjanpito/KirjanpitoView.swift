@@ -11,6 +11,14 @@ struct KirjanpitoView: View {
 
     var body: some View {
         List {
+            Section("Saapuneet") {
+                NavigationLink(value: Route.bankHub) {
+                    HubRow(title: "Pankki", subtitle: "Saldot, tulot ja menot yhdellä silmäyksellä", symbol: "building.columns.fill")
+                }
+                NavigationLink(value: Route.emailInbox) {
+                    HubRow(title: "Sähköposti", subtitle: "Sähköpostista haetut laskut ja arkisto", symbol: "envelope")
+                }
+            }
             Section("Joka viikko") {
                 NavigationLink(value: Route.receipts) {
                     HubRow(title: "Kuitit", subtitle: counts.map { "\($0.all) kuittia" + (pending > 0 ? " · \(pending) odottaa" : "") } ?? "Kaikki kuitit ja niiden tila", symbol: "doc.text")

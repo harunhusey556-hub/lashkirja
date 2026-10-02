@@ -47,7 +47,7 @@ private struct KotiContent: View {
                         SetupCard(setup: setup, capture: { captureFor = CaptureTarget(transactionId: nil) })
                     }
                     if let bank = dashboard.bank, bank.accountCount > 0 {
-                        NavigationLink(value: Route.bankAccounts) {
+                        NavigationLink(value: Route.bankHub) {
                             BankCard(bank: bank, trend: dashboard.bankTrend).contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
