@@ -34,6 +34,7 @@ struct MainTabView: View {
         case .koti: KotiView()
         case .myynti: MyyntiView()
         case .kirjanpito: KirjanpitoView()
+        case .raportit: RaportitView()
         default: PlaceholderScreen(title: item.title)
         }
     }

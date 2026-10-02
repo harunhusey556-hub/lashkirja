@@ -7,6 +7,7 @@ import LashKirjaCore
 struct DocumentPreviewSheet: View {
     @Environment(AppModel.self) private var app
     let path: String
+    var query: [String: String] = [:]
     let fileName: String
     @State private var url: URL?
     @State private var failure: String?
@@ -33,7 +34,7 @@ struct DocumentPreviewSheet: View {
 
     private func load() async {
         do {
-            let response = try await app.api.raw("GET", path, body: nil, contentType: nil)
+            let response = try await app.api.raw("GET", path, query: query, body: nil, contentType: nil)
             let file = FileManager.default.temporaryDirectory.appendingPathComponent(fileName)
             try response.body.write(to: file, options: .atomic)
             url = file
