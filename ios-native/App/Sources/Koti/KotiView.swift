@@ -113,8 +113,22 @@ private struct KotiContent: View {
 
     private func moneyCards(_ d: Dashboard) -> some View {
         HStack(spacing: 12) {
-            MoneyCard(title: "Myynti \(MonthKey.name(d.month).lowercased())", amount: d.income, tint: Theme.success)
-            MoneyCard(title: "Kulut", amount: d.expenses, tint: Theme.accent)
+            ForEach([MoneyTrend.Metric.income, .expenses], id: \.self) { metric in
+                let income = metric == .income
+                let amount = income ? d.income : d.expenses
+                // As on the web: the card opens the month's sales or costs, from the books' basis.
+                let route: Route = d.source == "tiliote"
+                    ? .bankFeedFiltered(month: d.month, onlyOpen: false, focus: nil)
+                    : .receiptsFiltered(month: d.month, tab: income ? "tulo" : "meno")
+                NavigationLink(value: route) {
+                    MoneyCard(title: income ? "Myynti \(MonthKey.name(d.month).lowercased())" : "Kulut",
+                              amount: amount,
+                              tint: income ? Theme.success : Theme.accent,
+                              trend: MoneyTrend.make(rows: d.cashflow, month: d.month, source: d.source, metric: metric, value: amount),
+                              income: income)
+                }
+                .buttonStyle(.plain)
+            }
         }
     }
 
@@ -164,16 +178,58 @@ private struct MoneyCard: View {
     let title: String
     let amount: Decimal
     let tint: Color
+    let trend: MoneyTrend
+    let income: Bool
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text(title).font(.caption).foregroundStyle(Theme.ink2)
+            HStack(alignment: .center, spacing: 8) {
+                Text(title).font(.caption).foregroundStyle(Theme.ink2).lineLimit(1)
+                Spacer(minLength: 4)
+                if !trend.points.isEmpty {
+                    Sparkline(values: trend.points, tint: tint)
+                        .frame(width: 36, height: 18)
+                        .accessibilityLabel("\(income ? "Tulot" : "Menot"), viimeiset \(trend.points.count) kuukautta")
+                }
+            }
             MoneyText(amount: amount).font(.title3.weight(.semibold)).foregroundStyle(Theme.ink)
                 .minimumScaleFactor(0.7).lineLimit(1)
-            Capsule().fill(tint.opacity(0.7)).frame(width: 28, height: 3)
+            if let percent = trend.percent {
+                Text("\(percent > 0 ? "+" : "")\(percent) % vs. \(MonthKey.name(trend.previousMonth).lowercased())")
+                    .font(.caption)
+                    .foregroundStyle(income ? Theme.success : Theme.ink2)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+            }
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
+    }
+}
+
+/// A quiet trend line with its last point marked (the web's Sparkline): direction, not values.
+private struct Sparkline: View {
+    let values: [Double]
+    let tint: Color
+    var body: some View {
+        GeometryReader { proxy in
+            if let geometry = MoneyTrend.geometry(values) {
+                let size = proxy.size
+                let points = geometry.points.map { CGPoint(x: $0.x * size.width, y: $0.y * size.height) }
+                ZStack(alignment: .topLeading) {
+                    Path { path in
+                        guard let first = points.first else { return }
+                        path.move(to: first)
+                        for point in points.dropFirst() { path.addLine(to: point) }
+                    }
+                    .stroke(tint, style: StrokeStyle(lineWidth: 1.5, lineCap: .round, lineJoin: .round))
+                    if let last = points.last {
+                        Circle().fill(tint).frame(width: 7, height: 7).position(last)
+                    }
+                }
+            }
+        }
+        .accessibilityElement()
     }
 }
 

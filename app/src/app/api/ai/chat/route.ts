@@ -1,3 +1,4 @@
+import { replyLooksLikeCode } from "@/lib/chat-scope";
 import { randomUUID } from "crypto";
 import { guardWrite } from "@/lib/http-security";
 import { NextRequest, NextResponse } from "next/server";
@@ -273,6 +274,8 @@ export async function POST(req: NextRequest) {
 
     const encoderStream = new ReadableStream({
       async start(controller) {
+        let streamed = "";
+        let codeSeen = false;
         controller.enqueue(sse({ conversationId: conversation.id, userMessageId: userRow.id }));
         try {
           const result = await runAssistantTurn({
@@ -284,7 +287,12 @@ export async function POST(req: NextRequest) {
             failureNotice: providerFailedNotice(prepared.english),
             honesty: prepared.honesty,
             sources: prepared.sources,
-            onDelta: (delta) => controller.enqueue(sse({ delta })),
+            // Once the reply turns into code it is no longer streamed; the final guard replaces it.
+            onDelta: (delta) => {
+              streamed += delta;
+              if (!codeSeen && replyLooksLikeCode(streamed)) codeSeen = true;
+              if (!codeSeen) controller.enqueue(sse({ delta }));
+            },
             // Copilot, then LLM_BASE_URL's model once Copilot's quota is spent.
             stream: (signal) => streamChat(prepared.systemPrompt, prepared.userMessage, signal, prior),
           });

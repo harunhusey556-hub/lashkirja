@@ -18,6 +18,7 @@ import {
 } from "./chat-honesty";
 import { receiptDrillHref, statementDrillHref } from "./report-drill";
 import type { ChatSource, ContextTurn } from "./chat-turn";
+import { offTopicRequest, scopeLanguage, scopeRefusal, SCOPE_RULE } from "./chat-scope";
 import {
   asksAboutProfile,
   asksVatThisMonth,
@@ -162,6 +163,11 @@ export async function prepareChat(
 
   if (isGreeting(userMessage)) {
     return { kind: "local", reply: greetingReply(english) };
+  }
+
+  // Code, web pages and creative writing are not bookkeeping: answered here, the model is not asked.
+  if (offTopicRequest(userMessage)) {
+    return { kind: "local", reply: scopeRefusal(scopeLanguage(userMessage, replyLanguage(userMessage))), sources: suggestedChatActions(userMessage) };
   }
 
   const isMatchIntent = isMatchRequest(userMessage);
@@ -409,6 +415,7 @@ export async function prepareChat(
     english
       ? "You are LashKirja's bookkeeping assistant. Reply in the user's language, briefly."
       : "Olet LashKirjan kirjanpitoavustaja. Vastaa käyttäjän kielellä, lyhyesti.",
+    SCOPE_RULE,
     `Application guide (use these real destinations; offer a short next step):
 ${APP_GUIDE}`,
     `Current authenticated user context, read on this turn:
@@ -437,6 +444,7 @@ ${JSON.stringify(context)}`,
     english,
     sources: [...(vatAnswer?.sources ?? []), ...actions],
     honesty: {
+      language: replyLanguage(userMessage),
       performedActions: [],
       allowedAmounts: [...contextAmounts, ...vatFigureAmounts(userVat), ...recentInvoices.filter(invoice => invoice.currency === "EUR").map(invoice => (invoice.grossCents / 100).toFixed(2)), ...(vatAnswer?.amount ? [vatAnswer.amount] : [])],
       allowedRecordIds: [...recentReceipts.map(receipt => receipt.id), ...recentInvoices.map(invoice => invoice.id)],

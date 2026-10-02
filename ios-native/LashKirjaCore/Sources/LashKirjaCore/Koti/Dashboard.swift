@@ -82,13 +82,16 @@ public struct Dashboard: Decodable, Sendable {
         public let month: String
         public let income: Decimal
         public let expenses: Decimal
+        /// "tiliote" or "kuitit": which basis the month's figures come from.
+        public let source: String?
         public var id: String { month }
-        enum CodingKeys: String, CodingKey { case month, income, expenses }
+        enum CodingKeys: String, CodingKey { case month, income, expenses, source }
         public init(from decoder: Decoder) throws {
             let c = try decoder.container(keyedBy: CodingKeys.self)
             month = try c.decode(String.self, forKey: .month)
             income = try c.decodeMoney(.income)
             expenses = try c.decodeMoney(.expenses)
+            source = try c.decodeIfPresent(String.self, forKey: .source)
         }
     }
     public struct OpenTotals: Decodable, Sendable {

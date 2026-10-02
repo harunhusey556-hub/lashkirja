@@ -2,12 +2,15 @@ import { CHAT_DESTINATIONS } from "./chat-app";
 import { alvDrillHref } from "./report-drill";
 import { MONTHS } from "./finnish-months";
 import type { ChatSource, ChatTurnStatus } from "./chat-turn";
+import { replyLooksLikeCode, scopeRefusal } from "./chat-scope";
 
 export interface HonestyContext {
   performedActions: readonly string[];
   allowedAmounts: readonly string[];
   allowedRecordIds: readonly string[];
   allowedHrefs: readonly string[];
+  /** The reply's language, for a refusal written in it. */
+  language?: "fi" | "en" | "tr";
 }
 
 export const EMPTY_HONESTY: HonestyContext = {
@@ -129,7 +132,11 @@ function sourceIsAllowed(href: string, allowed: readonly string[]): boolean {
 export function enforceAssistantReply(
   text: string,
   ctx: HonestyContext = EMPTY_HONESTY
-): { text: string; rejected: boolean; reason: "unperformed" | "amount" | "record" | "source" | null } {
+): { text: string; rejected: boolean; reason: "unperformed" | "amount" | "record" | "source" | "scope" | null } {
+  // The prompt forbids code; a reply that still carries it is not shown.
+  if (replyLooksLikeCode(text)) {
+    return { text: scopeRefusal(ctx.language ?? "fi"), rejected: true, reason: "scope" };
+  }
   if (replyClaimsUnperformedAction(text) && ctx.performedActions.length === 0) {
     return { text: HONESTY_REFUSAL, rejected: true, reason: "unperformed" };
   }
