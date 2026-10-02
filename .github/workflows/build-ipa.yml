@@ -91,6 +91,7 @@ jobs:
           API_BASE_URL: ${{ inputs.api_base_url }}
         run: |
           npx cap sync ios
+          npx tsx scripts/assert-ios-web-assets.ts
           if grep -q '"url"' ios/App/App/capacitor.config.json; then
             echo "capacitor.config.json still has a server.url key; the bundled build must not load a remote WebView server"
             exit 1
@@ -187,18 +188,15 @@ jobs:
           else
             echo "Passkey entitlement not embedded (default; see docs/PASSKEY.md)"
           fi
+          npx tsx scripts/assert-ios-web-assets.ts --public-dir Payload/App.app/public
           zip -qry LashKirja-unsigned.ipa Payload
           rm -rf Payload
-          # A remote-URL shell was about 1 MB; the bundled UI must be
-          # noticeably larger, or the export did not actually land in the IPA.
+          # Report compression size; content/hash verification above proves
+          # completeness. A small compressed IPA is not a missing-UI signal.
           size_bytes=$(stat -f%z LashKirja-unsigned.ipa)
           size_human=$(du -h LashKirja-unsigned.ipa | cut -f1)
           echo "Size: $size_human ($size_bytes bytes)"
-          min_bytes=$((2 * 1024 * 1024))
-          if [[ "$size_bytes" -lt "$min_bytes" ]]; then
-            echo "IPA is smaller than 2 MB; the bundled UI export is probably missing"
-            exit 1
-          fi
+
 
       - name: Upload unsigned IPA
         uses: actions/upload-artifact@v4

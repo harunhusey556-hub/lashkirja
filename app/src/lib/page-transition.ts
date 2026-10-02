@@ -159,6 +159,8 @@ export function playNavTransition(options: {
   newPage?: Element | null;
   /** Where the old page's <main> started, when the header row came or went with the change. */
   oldTop?: number;
+  /** Header animations join the page clock after layer preparation. */
+  companionAnimations?: Animation[];
 }): () => void {
   const { main, oldPage, oldScroll, oldPaddingTop, kind, oldTop } = options;
   if (typeof main.animate !== "function") return () => {};
@@ -191,13 +193,16 @@ export function playNavTransition(options: {
     scrim.style.opacity = "1";
     main.parentElement?.appendChild(scrim);
   }
-  const previousWillChange = main.style.willChange;
+  // A route can interrupt a cancelling gesture. Its layer hint belongs to
+  // that gesture, so restoring it after the new transition would leak it.
+  const previousWillChange = main.dataset.swiping ? "" : main.style.willChange;
+  if (main.dataset.swiping) main.style.transition = "";
   main.style.willChange = "transform";
   snap.style.willChange = "transform";
   main.dataset.navMoving = kind;
   main.style.transform = mainFrom;
   main.style.zIndex = covers ? "1" : "";
-  const animations: Animation[] = [];
+  const animations: Animation[] = [...(options.companionAnimations ?? [])];
   let raf = 0;
   let timer = 0;
   let done = false;
@@ -232,7 +237,7 @@ export function playNavTransition(options: {
       if (typeof startedAt === "number") animation.startTime = startedAt;
     }
     main.style.transform = "";
-    animations[0].finished.then(cleanup, cleanup);
+    Promise.all(animations.map((animation) => animation.finished)).then(cleanup, cleanup);
   };
   // One paint prepares/rasterizes both isolated layers before the spring
   // starts. Route mounting and the first moving frame no longer compete.

@@ -59,6 +59,7 @@ export class VelocityTracker {
   /** px/ms over the window; positive = increasing value. 0 when unknown. */
   velocity(): number {
     const now = this.now();
+    if (!this.samples.length || now - this.samples[this.samples.length - 1].t > VELOCITY_WINDOW_MS) return 0;
     const recent = this.samples.filter((sample) => now - sample.t <= VELOCITY_WINDOW_MS);
     const window = recent.length >= 2 ? recent : this.samples.slice(-2);
     if (window.length < 2) return 0;
@@ -78,10 +79,23 @@ export function rubberBand(overshoot: number, limit: number = LIFT_LIMIT): numbe
 
 /** Edge swipe back: does the release commit? */
 export function edgeSwipeCommits(dx: number, width: number, velocity: number): boolean {
-  return dx > width * EDGE_COMMIT_RATIO || (dx > EDGE_FLICK_MIN && velocity > EDGE_FLICK_VELOCITY);
+  const projected = dx + velocity * 100;
+  return projected > width * EDGE_COMMIT_RATIO || (dx > EDGE_FLICK_MIN && velocity > EDGE_FLICK_VELOCITY);
 }
 
 /** Sheet / full-screen modal drag down: does the release dismiss? */
 export function sheetDragCommits(dy: number, height: number, velocity: number): boolean {
   return dy > 0 && (dy > height * SHEET_COMMIT_RATIO || (dy > SHEET_FLICK_DISTANCE && velocity > SHEET_FLICK_VELOCITY));
+}
+
+/** Release keeps the finger velocity, with a bounded deceleration to rest. */
+export function edgeReleaseTiming(dx: number, width: number, velocity: number, commit: boolean): { duration: number; easing: string } {
+  const distance = Math.max(1, commit ? width - dx : dx);
+  const towardTarget = Math.max(0, commit ? velocity : -velocity);
+  const duration = Math.round(Math.min(320, Math.max(120, distance / Math.max(0.8, towardTarget))));
+  // The first Bezier slope matches release speed; a held drag begins at
+  // rest. Clamp to a monotone curve so neither page overshoots its bound.
+  const slope = Math.min(3, towardTarget * duration / distance);
+  const firstY = Math.min(0.9, slope * 0.3);
+  return { duration, easing: `cubic-bezier(0.3, ${firstY}, 0.25, 1)` };
 }

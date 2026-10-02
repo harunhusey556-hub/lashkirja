@@ -36,6 +36,7 @@ echo "Building the mobile static export..."
 npm run build:mobile -- --api-base-url "$API_BASE_URL"
 echo "Syncing Capacitor iOS project..."
 npx cap sync ios
+npx tsx scripts/assert-ios-web-assets.ts
 npx tsx scripts/patch-ios-url-scheme.ts
 
 # Capacitor SPM ships ios/App/App.xcodeproj. App.xcworkspace exists only after CocoaPods.
@@ -46,6 +47,8 @@ xcodebuild \
   -configuration "$CONFIGURATION" \
   -archivePath "$ARCHIVE_PATH" \
   archive
+
+npx tsx scripts/assert-ios-web-assets.ts --public-dir "$ARCHIVE_PATH/Products/Applications/App.app/public"
 
 mkdir -p "$EXPORT_PATH"
 

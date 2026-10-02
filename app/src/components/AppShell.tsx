@@ -56,7 +56,7 @@ import {
   type NavDirection,
 } from "@/lib/nav-direction";
 import { hapticImpact, hapticSelection } from "@/lib/haptics";
-import { EDGE_FINISH_MS, EDGE_ZONE, edgeSwipeCommits, VelocityTracker } from "@/lib/gesture";
+import { EDGE_ZONE, edgeSwipeCommits, edgeReleaseTiming, VelocityTracker } from "@/lib/gesture";
 import { anyFormDirty, requestLeave } from "@/lib/form-guard";
 import { keepPendingTab, PENDING_TAB_TIMEOUT_MS, type PendingTab } from "@/lib/pending-tab";
 import { UnsavedChangesHost } from "@/components/UnsavedChangesHost";
@@ -258,10 +258,15 @@ function headerRowHandoff(main: HTMLElement, from: string, to: string, kind: "pu
 
   return {
     oldTop,
-    play(): () => void {
+    play(): { animations: Animation[]; cleanup: () => void } {
       const timing = { duration: navDurationMs(), easing: navEasing() };
       const animations: Animation[] = [];
       let ghost: HTMLElement | null = null;
+      const rowBackground = row.style.backgroundColor;
+      // Root titles live in <main> higher than a drill-in header. The
+      // incoming row must carry an opaque surface, otherwise the old title
+      // remains visible through its transparent pixels during the slide.
+      row.style.backgroundColor = getComputedStyle(frame).backgroundColor;
       // The old row leaves (a detail had one).
       if (!fromInline && previous) {
         ghost = previous.node;
@@ -277,13 +282,14 @@ function headerRowHandoff(main: HTMLElement, from: string, to: string, kind: "pu
           display: "grid",
           zIndex: "45",
           pointerEvents: "none",
+          backgroundColor: getComputedStyle(frame).backgroundColor,
         });
         frame.appendChild(ghost);
         const out = toInline ? "translate3d(100%, 0, 0)" : kind === "push" ? "translate3d(-24%, 0, 0)" : "translate3d(24%, 0, 0)";
         const leaving = ghost.animate(
           [
             { transform: "translate3d(0, 0, 0)", opacity: 1 },
-            { transform: out, opacity: 0 },
+            { transform: out, opacity: toInline ? 1 : 0 },
           ],
           { ...timing, duration: toInline ? timing.duration : timing.duration * 0.6, fill: "forwards" }
         );
@@ -297,17 +303,20 @@ function headerRowHandoff(main: HTMLElement, from: string, to: string, kind: "pu
         animations.push(
           row.animate(
             [
-              { transform: from, opacity: 0 },
+              { transform: from, opacity: fromInline ? 1 : 0 },
               { transform: "translate3d(0, 0, 0)", opacity: 1 },
             ],
             timing
           )
         );
       }
-      return () => {
+      for (const animation of animations) { animation.pause(); animation.currentTime = 0; }
+      Promise.all(animations.map((animation) => animation.finished)).then(() => { row.style.backgroundColor = rowBackground; }, () => {});
+      return { animations, cleanup: () => {
         animations.forEach((animation) => animation.cancel());
         ghost?.remove();
-      };
+        row.style.backgroundColor = rowBackground;
+      } };
     },
   };
 }
@@ -589,7 +598,8 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     const presents = direction === "tab" && pathname === avatarPath && rootIdOf(from) !== rootIdOf(avatarPath);
     const kind = direction === "forward" ? "push" : direction === "back" ? "pop" : presents ? "present" : "tab";
     const headerMotion =
-      kind === "push" || kind === "pop" ? headerRowHandoff(main, from, pathname, kind, lastHeaderRow.current) : null;
+      !prefersReducedMotion() && (kind === "push" || kind === "pop") ? headerRowHandoff(main, from, pathname, kind, lastHeaderRow.current) : null;
+    const rowMotion = headerMotion?.play();
     const stopPage = playNavTransition({
       main,
       oldPage,
@@ -598,11 +608,11 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       kind,
       newPage: pageNodeRef.current,
       oldTop: headerMotion?.oldTop,
+      companionAnimations: rowMotion?.animations,
     });
-    const stopRow = headerMotion?.play();
     return () => {
       stopPage();
-      stopRow?.();
+      rowMotion?.cleanup();
     };
   }, [pathname, direction]);
 
@@ -724,6 +734,9 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     let tracking = false;
     let decided = false;
     let under: HTMLElement | null = null;
+    let width = 1;
+    let moveRaf = 0;
+    let cancelSettlement: (() => void) | null = null;
 
     // Back to a root that has no header row (Kirjanpito, Koti, ...): the row
     // leaves with the page instead of vanishing after the swipe.
@@ -828,6 +841,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       dx = 0;
       startX = touch.clientX;
       startY = touch.clientY;
+      width = Math.max(main.clientWidth, 1);
       tracker.reset(touch.clientX);
     };
 
@@ -860,98 +874,101 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       event.preventDefault();
       tracker.add(touch.clientX);
       dx = Math.max(0, moveX);
-      main.style.transform = `translateX(${dx}px)`;
-      moveCap(`translateX(${dx}px)`);
-      const progress = Math.min(1, dx / Math.max(main.offsetWidth, 1));
-      if (under) under.style.transform = `translateX(${-30 * (1 - progress)}%)`;
+      dx = Math.min(width, dx);
+      if (!moveRaf) moveRaf = requestAnimationFrame(drawDrag);
+    };
+
+    const drawDrag = () => {
+      moveRaf = 0;
+      const progress = dx / width;
+      main.style.transform = `translate3d(${dx}px, 0, 0)`;
+      moveCap(`translate3d(${dx}px, 0, 0)`);
+      if (under) under.style.transform = `translate3d(${-30 * (1 - progress)}%, 0, 0)`;
       moveBar(progress);
       moveRow(progress);
     };
 
-    const onTouchEnd = () => {
+    const resetSwipe = () => {
+      clearInline();
+      clearBar();
+      dropUnder();
+      main.style.position = "";
+      main.style.zIndex = "";
+      swipeLock.current = false;
+    };
+
+    const onTouchEnd = (event: TouchEvent) => {
       if (!tracking) return;
       tracking = false;
       if (!decided) return;
-      const commit = edgeSwipeCommits(dx, window.innerWidth, tracker.velocity());
-      const reduceMotion = prefersReducedMotion();
-
-      if (commit) {
-        const go = () => {
-          swipeLock.current = true;
+      cancelAnimationFrame(moveRaf);
+      drawDrag();
+      const velocity = tracker.velocity();
+      // OS interruptions must return to this page, never approve a back.
+      const commit = event.type !== "touchcancel" && edgeSwipeCommits(dx, width, velocity);
+      if (commit && anyFormDirty()) {
+        resetSwipe();
+        requestLeave(() => performInAppBack(pathname, router, back?.href));
+        return;
+      }
+      const navigate = () => performInAppBack(pathname, router, back?.href);
+      if (prefersReducedMotion()) {
+        resetSwipe();
+        if (commit) navigate();
+        return;
+      }
+      swipeLock.current = true;
+      const timing = { ...edgeReleaseTiming(dx, width, velocity, commit), fill: "both" as const };
+      const animations: Animation[] = [];
+      const animateTo = (node: HTMLElement | null, target: Keyframe) => {
+        if (!node) return;
+        const style = getComputedStyle(node);
+        animations.push(node.animate([
+          { transform: style.transform, opacity: style.opacity }, target,
+        ], timing));
+      };
+      animateTo(main, { transform: commit ? "translate3d(100%, 0, 0)" : "translate3d(0, 0, 0)" });
+      animateTo(cap, { transform: commit ? "translate3d(100%, 0, 0)" : "translate3d(0, 0, 0)" });
+      animateTo(under, { transform: commit ? "translate3d(0, 0, 0)" : `translate3d(${UNDER_SHIFT}, 0, 0)` });
+      if (barFollows) animateTo(tabBar, { transform: commit ? "translateY(0)" : "translateY(100%)" });
+      if (rowLeaves) animateTo(headerRow, { transform: commit ? "translateX(100%)" : "translateX(0)", opacity: commit ? 0 : 1 });
+      const startedAt = document.timeline.currentTime;
+      for (const animation of animations) if (typeof startedAt === "number") animation.startTime = startedAt;
+      let done = false;
+      let fallback = 0;
+      const cancel = () => {
+        if (done) return;
+        done = true;
+        window.clearTimeout(fallback);
+        animations.forEach((animation) => animation.cancel());
+      };
+      cancelSettlement = cancel;
+      const finish = () => {
+        if (done) return;
+        if (commit) {
+          // Preserve the settled visual until React lands, even on a slow
+          // route. Removing fill before landing would flash the old page.
+          main.style.transform = "translate3d(100%, 0, 0)";
+          moveCap("translate3d(100%, 0, 0)");
+          if (under) under.style.transform = "translate3d(0, 0, 0)";
+          moveBar(1);
+          moveRow(1);
           const landedUnder = under;
           under = null;
-          // The next landing is already in place: no pop animation, just
-          // swap the live page in and drop the preview underneath.
           swipeHandoffRef.current = () => {
-            clearInline();
-            clearBar();
-            main.style.position = "";
-            main.style.zIndex = "";
+            resetSwipe();
             landedUnder?.remove();
           };
-          const navigate = () => {
-            performInAppBack(pathname, router, back?.href);
-          };
-          if (reduceMotion) {
-            clearInline();
-            navigate();
-            return;
-          }
-          const curve = "var(--ease-drawer)";
-          main.style.transition = `transform ${EDGE_FINISH_MS}ms ${curve}`;
-          main.style.transform = "translateX(100%)";
-          moveCap("translateX(100%)", `transform ${EDGE_FINISH_MS}ms ${curve}`);
-          moveBar(1, `transform ${EDGE_FINISH_MS}ms ${curve}`);
-          moveRow(1, `transform ${EDGE_FINISH_MS}ms ${curve}, opacity ${EDGE_FINISH_MS}ms ${curve}`);
-          if (landedUnder) {
-            landedUnder.style.transition = `transform ${EDGE_FINISH_MS}ms ${curve}`;
-            landedUnder.style.transform = "translateX(0)";
-          } else {
-            main.style.transition = `transform ${EDGE_FINISH_MS}ms ${curve}, opacity ${EDGE_FINISH_MS}ms ${curve}`;
-            main.style.opacity = "0.4";
-          }
-          window.setTimeout(navigate, 190);
-        };
-        if (anyFormDirty()) {
-          clearInline();
-          clearBar();
-          dropUnder();
-          // The swipe set position/z-index on <main> for the page underneath.
-          // Left in place, a cancelled prompt keeps <main> a stacking context,
-          // and a sheet opened later is trapped under the header and banner.
-          main.style.position = "";
-          main.style.zIndex = "";
-          requestLeave(go);
-          return;
+          cancel();
+          navigate();
+        } else {
+          cancel();
+          resetSwipe();
         }
-        go();
-      } else {
-        const curve = "var(--ease-drawer)";
-        main.style.transition = `transform ${EDGE_FINISH_MS}ms ${curve}`;
-        main.style.transform = "translateX(0)";
-        moveCap("translateX(0)", `transform ${EDGE_FINISH_MS}ms ${curve}`);
-        if (under) {
-          under.style.transition = `transform ${EDGE_FINISH_MS}ms ${curve}`;
-          under.style.transform = `translateX(${UNDER_SHIFT})`;
-        }
-        moveBar(0, `transform ${EDGE_FINISH_MS}ms ${curve}`);
-        moveRow(0, `transform ${EDGE_FINISH_MS}ms ${curve}, opacity ${EDGE_FINISH_MS}ms ${curve}`);
-        const leaving = under;
-        under = null;
-        window.setTimeout(() => {
-          leaving?.remove();
-          clearBar();
-          delete main.dataset.swiping;
-          main.style.willChange = "";
-          clearRow();
-          dropCap();
-          // A link tapped right after the cancel may already be pushing.
-          if (main.dataset.navMoving) return;
-          clearInline();
-          main.style.position = "";
-          main.style.zIndex = "";
-        }, 220);
-      }
+      };
+      // Land on the actual compositor finish, not a guessed 190 ms timer.
+      Promise.all(animations.map((animation) => animation.finished)).then(finish, () => {});
+      fallback = window.setTimeout(finish, timing.duration + 500);
     };
 
     // The swipe may start anywhere at the left edge, the header strip included.
@@ -969,7 +986,14 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         surface.removeEventListener("touchend", onTouchEnd);
         surface.removeEventListener("touchcancel", onTouchEnd);
       }
+      cancelAnimationFrame(moveRaf);
+      cancelSettlement?.();
       dropUnder();
+      dropCap();
+      clearRow();
+      clearBar();
+      delete main.dataset.swiping;
+      main.style.position = "";
       // A push/pop started by the landing's layout effect runs before this
       // cleanup; clearing its z-index here put the old page over the new one.
       if (!swipeHandoffRef.current && !main.dataset.navMoving) {
