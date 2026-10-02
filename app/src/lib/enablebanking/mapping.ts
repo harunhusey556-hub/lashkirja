@@ -106,6 +106,14 @@ export interface PublicBankConnection {
   lastSyncAt: string | null;
   lastSuccessAt: string | null;
   lastError: string | null;
+  /**
+   * "YYYY-MM-DD": the day the owner chose to fetch from, or, when nothing was
+   * chosen (all the bank allows), the earliest day fetched for the accounts in
+   * the books. Null when neither is known yet.
+   */
+  historyFrom: string | null;
+  /** How many days back the bank gives transactions, when known. */
+  historyLimitDays: number | null;
   accounts: PublicBankAccount[];
 }
 
@@ -354,6 +362,8 @@ export function toPublicConnection(row: {
   lastSyncAt: Date | null;
   lastSuccessAt: Date | null;
   lastError: string | null;
+  historyFrom?: string | null;
+  historyLimitDays?: number | null;
   accounts: Array<{
     id: string;
     iban: string;
@@ -362,8 +372,13 @@ export function toPublicConnection(row: {
     inScope: boolean;
     balanceCents: number | null;
     balanceAt: Date | null;
+    historyFrom?: string | null;
   }>;
 }): PublicBankConnection {
+  const fetchedFrom = row.accounts
+    .filter((account) => account.inScope && account.historyFrom)
+    .map((account) => account.historyFrom as string)
+    .sort()[0];
   return {
     id: row.id,
     aspspName: row.aspspName,
@@ -375,6 +390,8 @@ export function toPublicConnection(row: {
     lastSyncAt: row.lastSyncAt?.toISOString() ?? null,
     lastSuccessAt: row.lastSuccessAt?.toISOString() ?? null,
     lastError: row.lastError,
+    historyFrom: row.historyFrom ?? fetchedFrom ?? null,
+    historyLimitDays: row.historyLimitDays ?? null,
     accounts: row.accounts.map((account) => ({
       id: account.id,
       iban: formatIbanDisplay(account.iban),

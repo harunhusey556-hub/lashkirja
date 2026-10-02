@@ -234,10 +234,49 @@ export async function completeBankConsent(
   }
 }
 
-export async function setAccountScope(
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/** True for a real calendar day written "YYYY-MM-DD". */
+export function isCalendarDay(value: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const parsed = new Date(`${value}T00:00:00.000Z`);
+  return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
+}
+
+/** "13 kuukauden", or days for a limit shorter than two months. */
+function historyLimitText(days: number): string {
+  const months = Math.round(days / 30.44);
+  return months >= 2 ? `${months} kuukauden` : `${days} päivän`;
+}
+
+/**
+ * Why the bank cannot give history from `day`, in one Finnish sentence, or
+ * null when it can (as far as is known). Today counts in UTC, as the sync does.
+ */
+export function historyFromProblem(day: string, limitDays: number | null, now = new Date()): string | null {
+  if (!isCalendarDay(day)) return "Tarkista alkupäivä.";
+  const today = now.toISOString().slice(0, 10);
+  if (day > today) return "Alkupäivä ei voi olla tulevaisuudessa.";
+  if (limitDays != null && limitDays > 0) {
+    const oldest = new Date(now.getTime() - limitDays * DAY_MS).toISOString().slice(0, 10);
+    if (day < oldest) return `Pankki antaa tapahtumat enintään ${historyLimitText(limitDays)} ajalta.`;
+  }
+  return null;
+}
+
+/**
+ * The owner's choices on a connection: which accounts are in the books and
+ * from which day history is fetched. Everything is checked before anything is
+ * written, so a refused day leaves the account choices as they were too.
+ *
+ * An earlier day than before is fetched by the next sync (only the window the
+ * accounts still lack). A later day deletes nothing; it only moves where an
+ * account added later starts.
+ */
+export async function updateBankConnection(
   userId: string,
   connectionId: string,
-  accounts: Array<{ id: string; inScope: boolean }>
+  input: { accounts?: Array<{ id: string; inScope: boolean }>; historyFrom?: string }
 ): Promise<PublicBankConnection> {
   const connection = await prisma.bankConnection.findFirst({
     where: { id: connectionId, userId },
@@ -246,18 +285,26 @@ export async function setAccountScope(
   if (!connection || connection.status === "revoked") {
     throw new EnableBankingError("Pankkiyhteyttä ei löytynyt.", 404, "NOT_FOUND");
   }
+  const accounts = input.accounts ?? [];
   const allowed = new Set(connection.accounts.map((account) => account.id));
   if (accounts.some((account) => !allowed.has(account.id))) {
     throw new EnableBankingError("Tiliä ei löytynyt tältä yhteydeltä.", 404, "NOT_FOUND");
   }
-  await prisma.$transaction(
-    accounts.map((account) =>
+  if (input.historyFrom !== undefined) {
+    const problem = historyFromProblem(input.historyFrom, connection.historyLimitDays);
+    if (problem) throw new EnableBankingError(problem, 400, "INVALID_HISTORY_FROM");
+  }
+  await prisma.$transaction([
+    ...accounts.map((account) =>
       prisma.connectedAccount.update({
         where: { id: account.id },
         data: { inScope: account.inScope },
       })
-    )
-  );
+    ),
+    ...(input.historyFrom !== undefined
+      ? [prisma.bankConnection.update({ where: { id: connection.id }, data: { historyFrom: input.historyFrom } })]
+      : []),
+  ]);
   const fresh = await prisma.bankConnection.findUniqueOrThrow({
     where: { id: connection.id },
     include: connectionInclude,

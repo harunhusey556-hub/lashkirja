@@ -8,6 +8,7 @@ import {
   EnableBankingClient,
   EnableBankingError,
   collectAccountTransactions,
+  collectBackfillTransactions,
   isTerminalSessionError,
   publicBankError,
   sessionTerminalStatus,
@@ -32,6 +33,7 @@ import { CONSENT_REVOKED_MESSAGE, EXPIRED_CONNECTION_MESSAGE } from "../bank-con
 import { StoredRowPool } from "../bank-row-fingerprint";
 import { fallbackStatementMonth, statementMonthOrFallback } from "../report-calendar";
 import {
+  LOCKED_HISTORY_NOTICE,
   PARTIAL_PULL_NOTICE,
   SHORTENED_NOTICE_START,
   heldBackNotice,
@@ -164,6 +166,12 @@ async function syncBankConnectionUntracked(
 
   const firstSync = connection.lastSuccessAt == null;
   const dateFrom = connection.lastSuccessAt ? overlapDateFrom(connection.lastSuccessAt) : undefined;
+  const today = new Date().toISOString().slice(0, 10);
+  // A backfill never reads into a closed month (see backfillWindow).
+  const openFrom = firstDayAfterMonth(await getLockedThrough(userId));
+  /** The bank's limit, learned when it refused an older start this sync. */
+  let learnedLimitDays: number | null = null;
+  let lockedHistory = false;
   let imported = 0;
   let skipped = 0;
   const statementIds = new Set<string>();
@@ -186,23 +194,67 @@ async function syncBankConnectionUntracked(
 
   for (const account of inScope) {
     try {
-      const { transactions, truncated, shortenedFrom } = await collectAccountTransactions(client, {
+      const pulled = await collectAccountTransactions(client, {
         accountUid: account.providerAccountUid,
         firstSync,
         dateFrom,
         historyFrom: connection.historyFrom ?? undefined,
         psuHeaders,
       });
-      const mapped = withOccurrenceRefs(
-        transactions
-          .map((tx) => mapBookedTransaction(tx, account.iban))
-          .filter((tx): tx is MappedBankTransaction => tx !== null)
-      );
+      let { truncated, shortenedFrom } = pulled;
+      const mapped = mapRows(pulled.transactions, account.iban);
       const written = await writeTransactions({
         userId,
         aspspName: connection.aspspName,
         rows: mapped,
       });
+      if (firstSync && connection.historyFrom && shortenedFrom) {
+        learnedLimitDays = minLimit(learnedLimitDays, daysBetween(shortenedFrom, today));
+      }
+
+      // How far back this account's history now reaches, and the older window
+      // the owner asked for since (an earlier historyFrom, or an account added
+      // to the books after the first sync).
+      let historyFrom: string | null = null;
+      if (firstSync) {
+        if (!truncated) historyFrom = connection.historyFrom ?? earliestDay(mapped) ?? today;
+      } else {
+        const covered = account.historyFrom ?? (await earliestImportedDay(userId, account.iban)) ?? dateFrom ?? today;
+        const window = backfillWindow(connection.historyFrom, covered, openFrom);
+        if (window.locked) lockedHistory = true;
+        historyFrom = account.historyFrom ? null : covered;
+        if (window.from) {
+          const older = await collectBackfillTransactions(client, {
+            accountUid: account.providerAccountUid,
+            dateFrom: window.from,
+            dateTo: covered,
+            psuHeaders,
+          });
+          const olderWritten = await writeTransactions({
+            userId,
+            aspspName: connection.aspspName,
+            rows: mapRows(older.transactions, account.iban),
+          });
+          addWritten(written, olderWritten);
+          if (older.truncated) {
+            // Read again next time; nothing is marked as fetched yet.
+            truncated = true;
+            historyFrom = null;
+          } else {
+            // Also when the bank gave less: the refused start is not asked again.
+            historyFrom = window.from;
+          }
+          if (older.shortenedFrom) {
+            shortenedFrom = older.shortenedFrom;
+            if (older.shortenedFrom < covered) {
+              learnedLimitDays = minLimit(learnedLimitDays, daysBetween(older.shortenedFrom, today));
+            }
+          }
+        }
+      }
+      if (historyFrom && historyFrom !== account.historyFrom) {
+        await prisma.connectedAccount.update({ where: { id: account.id }, data: { historyFrom } });
+      }
       imported += written.imported;
       skipped += written.skipped;
       heldBack += written.heldBack;
@@ -210,8 +262,7 @@ async function syncBankConnectionUntracked(
         earliestHeld = written.earliestHeld;
       }
       if (shortenedFrom) {
-        const since = new Date(`${shortenedFrom}T00:00:00.000Z`).getTime();
-        const days = Math.max(1, Math.round((Date.now() - since) / DAY_MS));
+        const days = Math.max(1, daysBetween(shortenedFrom, today));
         shortenedDays = shortenedDays === null ? days : Math.min(shortenedDays, days);
       }
       for (const id of written.statementIds) statementIds.add(id);
@@ -275,9 +326,13 @@ async function syncBankConnectionUntracked(
   //   (never the open-ended first sync again, which a wedge of held rows used
   //   to cause) and the held rows are read again until their month is reopened;
   // - a window the bank shortened is said, and kept as a note on later syncs,
-  //   because the older history can only come from a tiliote file.
+  //   because the older history can only come from a tiliote file;
+  // - history the owner asked for from a closed month is not read at all (the
+  //   books of that month are final); it is said on every sync, like held-back
+  //   rows, and read by the first sync after the month is reopened.
   const notices: string[] = [];
   if (heldBack > 0) notices.push(heldBackNotice(heldBack));
+  if (lockedHistory) notices.push(LOCKED_HISTORY_NOTICE);
   if (truncatedAccounts > 0) notices.push(PARTIAL_PULL_NOTICE);
   if (shortenedDays !== null) notices.push(shortenedNotice(shortenedDays));
   const notice = notices.length > 0 ? notices.join(" ") : null;
@@ -297,6 +352,13 @@ async function syncBankConnectionUntracked(
     await prisma.bankConnection.update({
       where: { id: connection.id },
       data: { lastError: failures[0] ?? notice },
+    });
+  }
+
+  if (learnedLimitDays !== null) {
+    await prisma.bankConnection.update({
+      where: { id: connection.id },
+      data: { historyLimitDays: learnedLimitDays },
     });
   }
 
@@ -381,6 +443,82 @@ export async function syncDueBankConnections(now = new Date()): Promise<{
   }
 
   return { processed, imported, skipped, errors };
+}
+
+function mapRows(transactions: Parameters<typeof mapBookedTransaction>[0][], iban: string): MappedBankTransaction[] {
+  return withOccurrenceRefs(
+    transactions
+      .map((tx) => mapBookedTransaction(tx, iban))
+      .filter((tx): tx is MappedBankTransaction => tx !== null)
+  );
+}
+
+type Written = Awaited<ReturnType<typeof writeTransactions>>;
+
+function addWritten(total: Written, more: Written) {
+  total.imported += more.imported;
+  total.skipped += more.skipped;
+  total.heldBack += more.heldBack;
+  if (more.earliestHeld && (!total.earliestHeld || more.earliestHeld < total.earliestHeld)) {
+    total.earliestHeld = more.earliestHeld;
+  }
+  total.statementIds.push(...more.statementIds);
+}
+
+/** Whole days from one "YYYY-MM-DD" to another. */
+function daysBetween(from: string, to: string): number {
+  return Math.round(
+    (new Date(`${to}T00:00:00.000Z`).getTime() - new Date(`${from}T00:00:00.000Z`).getTime()) / DAY_MS
+  );
+}
+
+function minLimit(current: number | null, days: number): number {
+  return current === null ? days : Math.min(current, days);
+}
+
+function earliestDay(rows: MappedBankTransaction[]): string | null {
+  return rows.reduce<string | null>((min, row) => (row.date && (!min || row.date < min) ? row.date : min), null);
+}
+
+/** "2026-05" (books closed through May) -> "2026-06-01", the first open day. */
+export function firstDayAfterMonth(lockedThrough: string | null): string | null {
+  const match = lockedThrough?.match(/^(\d{4})-(\d{2})$/);
+  if (!match) return null;
+  return new Date(Date.UTC(Number(match[1]), Number(match[2]), 1)).toISOString().slice(0, 10);
+}
+
+/**
+ * The older window an account still lacks: from the owner's day to the
+ * earliest day already read (inclusive; the overlap is deduplicated).
+ *
+ * Closed months are left out, not fetched: a backfill reaches only into
+ * months that are open, so no row lands in finished books and no row is held
+ * back (which would pull the incremental watermark back to that old month).
+ * The account then counts as read from the first open day only, so reopening
+ * the month makes the next sync read the rest. `locked` says that part waits.
+ */
+export function backfillWindow(
+  wanted: string | null,
+  covered: string,
+  openFrom: string | null
+): { from: string | null; locked: boolean } {
+  if (!wanted || wanted >= covered) return { from: null, locked: false };
+  const locked = openFrom !== null && openFrom > wanted;
+  const from = locked ? openFrom : wanted;
+  return { from: from < covered ? from : null, locked };
+}
+
+/**
+ * The earliest day the books hold from the bank feed for this IBAN: where an
+ * account synced before its own history day was recorded has read from.
+ */
+async function earliestImportedDay(userId: string, iban: string): Promise<string | null> {
+  const first = await prisma.transaction.findFirst({
+    where: { userId, iban, source: "enablebanking", date: { not: null } },
+    orderBy: { date: "asc" },
+    select: { date: true },
+  });
+  return first?.date ? first.date.toISOString().slice(0, 10) : null;
 }
 
 async function writeTransactions(input: {

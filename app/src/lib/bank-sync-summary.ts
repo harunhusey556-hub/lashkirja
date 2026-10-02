@@ -51,6 +51,14 @@ export function shortenedNotice(days: number): string {
   return `${SHORTENED_NOTICE_START} ${days} päivän ajalta, vanhemmat voit tuoda tiliotteena.`;
 }
 
+/**
+ * The owner asked for history from a closed month: the open months were
+ * fetched, the closed ones are not written into finished books. Starts like
+ * the held-back notice, so it reads (and is recognised) as the same kind.
+ */
+export const LOCKED_HISTORY_NOTICE =
+  "Kuukausi on lukittu, joten sitä vanhempia tapahtumia ei haettu. Ne haetaan, kun avaat kuukauden.";
+
 const NOTICE_START = [
   "Kuukausi on lukittu, joten",
   "Kaikkia tapahtumia ei saatu haettua kerralla.",

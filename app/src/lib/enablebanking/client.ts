@@ -308,6 +308,47 @@ export async function collectAccountTransactions(
     : new EnableBankingError("Tapahtumia ei voitu hakea.", 502);
 }
 
+/**
+ * The older window an account still lacks after the owner moved "Mistä
+ * lähtien" back: [dateFrom, dateTo], both inclusive (the end day overlaps what
+ * is stored and is deduplicated on write). A bank that refuses the start is
+ * asked again over its usual shorter windows, never older than dateFrom; the
+ * answer then carries `shortenedFrom`, the day the window that worked began
+ * (dateTo when nothing older than the stored history was given).
+ */
+export async function collectBackfillTransactions(
+  fetcher: TransactionPageFetcher,
+  params: {
+    accountUid: string;
+    dateFrom: string;
+    dateTo: string;
+    psuHeaders?: Record<string, string>;
+    now?: Date;
+    budgetMs?: number;
+  }
+): Promise<PulledTransactions> {
+  const now = params.now ?? new Date();
+  try {
+    return await pullPages(fetcher, params, { dateFrom: params.dateFrom, dateTo: params.dateTo }, params.budgetMs);
+  } catch (error) {
+    if (isTerminalSessionError(error)) throw error;
+    if (!isWrongTransactionsPeriod(error)) throw error;
+  }
+  for (const days of FALLBACK_WINDOWS_DAYS) {
+    const dateFrom = new Date(now.getTime() - days * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    if (dateFrom <= params.dateFrom) continue;
+    if (dateFrom >= params.dateTo) break;
+    try {
+      const pulled = await pullPages(fetcher, params, { dateFrom, dateTo: params.dateTo }, params.budgetMs);
+      return { ...pulled, shortenedFrom: dateFrom };
+    } catch (error) {
+      if (isTerminalSessionError(error)) throw error;
+      if (!isWrongTransactionsPeriod(error)) throw error;
+    }
+  }
+  return { transactions: [], truncated: false, shortenedFrom: params.dateTo };
+}
+
 async function pullPages(
   fetcher: TransactionPageFetcher,
   params: {

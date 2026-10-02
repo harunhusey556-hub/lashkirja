@@ -212,6 +212,62 @@ describe("session accounts", () => {
   });
 });
 
+describe("public connection: history window", () => {
+  const base = {
+    id: "c1",
+    aspspName: "Holvi",
+    aspspCountry: "FI",
+    aspspLogo: null,
+    psuType: "business",
+    status: "active",
+    validUntil: null,
+    lastSyncAt: null,
+    lastSuccessAt: null,
+    lastError: null,
+  };
+  const account = {
+    id: "a1",
+    iban: "FI2112345600000785",
+    label: null,
+    currency: "EUR",
+    inScope: true,
+    balanceCents: null,
+    balanceAt: null,
+  };
+
+  it("exposes the chosen day and the bank's limit", () => {
+    const pub = toPublicConnection({
+      ...base,
+      historyFrom: "2026-01-01",
+      historyLimitDays: 395,
+      accounts: [{ ...account, historyFrom: "2025-12-01" }],
+    });
+    expect(pub.historyFrom).toBe("2026-01-01");
+    expect(pub.historyLimitDays).toBe(395);
+  });
+
+  it("without a chosen day, says the earliest day fetched for the books' accounts", () => {
+    const pub = toPublicConnection({
+      ...base,
+      historyFrom: null,
+      historyLimitDays: null,
+      accounts: [
+        { ...account, historyFrom: "2025-06-01" },
+        { ...account, id: "a2", historyFrom: "2025-03-01" },
+        { ...account, id: "a3", inScope: false, historyFrom: "2024-01-01" },
+      ],
+    });
+    expect(pub.historyFrom).toBe("2025-03-01");
+    expect(pub.historyLimitDays).toBeNull();
+  });
+
+  it("nothing chosen and nothing fetched is null", () => {
+    const pub = toPublicConnection({ ...base, accounts: [account] });
+    expect(pub.historyFrom).toBeNull();
+    expect(pub.historyLimitDays).toBeNull();
+  });
+});
+
 describe("balances and amounts", () => {
   it("prefers the booked balance and rounds bank decimals", () => {
     expect(decimalToCents("1.235")).toBe(124);

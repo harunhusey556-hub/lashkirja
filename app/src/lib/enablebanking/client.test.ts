@@ -6,6 +6,7 @@ import {
   MAX_TRANSACTION_PAGES,
   buildPsuHeaders,
   collectAccountTransactions,
+  collectBackfillTransactions,
   publicBankError,
   type TransactionPageFetcher,
 } from "./client";
@@ -365,5 +366,77 @@ describe("R65: a pull has a time budget", () => {
     expect(result.truncated).toBe(true);
     expect(calls).toBe(1);
     expect(result.transactions).toHaveLength(1);
+  });
+});
+
+describe("collectBackfillTransactions: the older window after the owner moved historyFrom back", () => {
+  const now = new Date("2026-10-03T12:00:00.000Z");
+
+  it("asks for exactly the window, no strategy", async () => {
+    const queries: Array<{ dateFrom?: string; dateTo?: string; strategy?: string }> = [];
+    const fetcher: TransactionPageFetcher = {
+      async getAccountTransactions(query) {
+        queries.push(query);
+        return { transactions: [booked], continuationKey: null };
+      },
+    };
+    const pulled = await collectBackfillTransactions(fetcher, {
+      accountUid: "acc-1",
+      dateFrom: "2026-01-01",
+      dateTo: "2026-06-01",
+      now,
+    });
+    expect(queries).toEqual([
+      expect.objectContaining({ dateFrom: "2026-01-01", dateTo: "2026-06-01", strategy: undefined }),
+    ]);
+    expect(pulled).toEqual({ transactions: [booked], truncated: false });
+  });
+
+  it("a refused start falls back to the longest window the bank gives, inside the asked window", async () => {
+    const queries: string[] = [];
+    const fetcher: TransactionPageFetcher = {
+      async getAccountTransactions(query) {
+        queries.push(query.dateFrom ?? "");
+        if ((query.dateFrom ?? "") < "2025-09-01") {
+          throw new EnableBankingError("period", 400, "WRONG_TRANSACTIONS_PERIOD");
+        }
+        return { transactions: [booked], continuationKey: null };
+      },
+    };
+    const pulled = await collectBackfillTransactions(fetcher, {
+      accountUid: "acc-1",
+      dateFrom: "2024-01-01",
+      dateTo: "2026-06-01",
+      now,
+    });
+    expect(queries).toEqual(["2024-01-01", "2025-10-03"]);
+    expect(pulled.shortenedFrom).toBe("2025-10-03");
+    expect(pulled.transactions).toHaveLength(1);
+  });
+
+  it("a bank that gives nothing older than the window's end answers empty and shortened", async () => {
+    const fetcher: TransactionPageFetcher = {
+      async getAccountTransactions() {
+        throw new EnableBankingError("period", 400, "WRONG_TRANSACTIONS_PERIOD");
+      },
+    };
+    const pulled = await collectBackfillTransactions(fetcher, {
+      accountUid: "acc-1",
+      dateFrom: "2024-01-01",
+      dateTo: "2026-06-01",
+      now,
+    });
+    expect(pulled).toEqual({ transactions: [], truncated: false, shortenedFrom: "2026-06-01" });
+  });
+
+  it("other errors are not swallowed", async () => {
+    const fetcher: TransactionPageFetcher = {
+      async getAccountTransactions() {
+        throw new EnableBankingError("expired", 401, "EXPIRED_SESSION");
+      },
+    };
+    await expect(
+      collectBackfillTransactions(fetcher, { accountUid: "acc-1", dateFrom: "2024-01-01", dateTo: "2026-06-01", now })
+    ).rejects.toMatchObject({ code: "EXPIRED_SESSION" });
   });
 });

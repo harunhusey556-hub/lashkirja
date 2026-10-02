@@ -452,6 +452,10 @@ model BankConnection {
   lastError          String?
   /// "YYYY-MM-DD": the first sync fetches from this day. Null = all the bank allows.
   historyFrom        String?
+  /// How far back, in days, the bank gives transactions, when known. Enable
+  /// Banking's ASPSP data does not say, so it is learned when the bank refuses
+  /// an older start and answers a shorter window. Null = unknown.
+  historyLimitDays   Int?
   createdAt          DateTime           @default(now())
   updatedAt          DateTime           @updatedAt
   accounts           ConnectedAccount[]
@@ -476,6 +480,10 @@ model ConnectedAccount {
   inScope            Boolean        @default(false)
   balanceCents       Int?
   balanceAt          DateTime?
+  /// "YYYY-MM-DD": the earliest day this account's history has been asked
+  /// from (and answered). A connection historyFrom before it makes the next
+  /// sync read the older window. Null = not recorded yet.
+  historyFrom        String?
   createdAt          DateTime       @default(now())
   updatedAt          DateTime       @updatedAt
 

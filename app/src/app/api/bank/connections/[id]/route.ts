@@ -1,7 +1,7 @@
 import { NextRequest } from "next/server";
 import { z } from "zod";
 import { psuContextFromHeaders } from "@/lib/enablebanking/client";
-import { revokeBankConnection, setAccountScope } from "@/lib/enablebanking/connect";
+import { revokeBankConnection, updateBankConnection } from "@/lib/enablebanking/connect";
 import { respondToBankError } from "@/lib/enablebanking/respond";
 import { enableBankingStatus, loadEnableBankingConfig } from "@/lib/enablebanking/signing";
 import { noStoreJson, rejectCrossSite, rejectOversizedContentLength } from "@/lib/http-security";
@@ -9,17 +9,26 @@ import { requireSession } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
 
-const scopeSchema = z.object({
-  accounts: z
-    .array(
-      z.object({
-        id: z.string().uuid(),
-        inScope: z.boolean(),
-      })
-    )
-    .min(1)
-    .max(100),
-});
+/**
+ * Either or both: which accounts are in the books, and from which day history
+ * is fetched ("YYYY-MM-DD"). The day's own checks (not in the future, not
+ * beyond the bank's limit) answer in Finnish from updateBankConnection.
+ */
+const updateSchema = z
+  .object({
+    accounts: z
+      .array(
+        z.object({
+          id: z.string().uuid(),
+          inScope: z.boolean(),
+        })
+      )
+      .min(1)
+      .max(100)
+      .optional(),
+    historyFrom: z.string().trim().max(10).optional(),
+  })
+  .refine((value) => value.accounts !== undefined || value.historyFrom !== undefined);
 
 export async function PATCH(
   req: NextRequest,
@@ -35,8 +44,8 @@ export async function PATCH(
 
   try {
     const { id } = await params;
-    const input = scopeSchema.parse(await req.json());
-    const connection = await setAccountScope(session.userId, id, input.accounts);
+    const input = updateSchema.parse(await req.json());
+    const connection = await updateBankConnection(session.userId, id, input);
     return noStoreJson({ connection });
   } catch (error) {
     return respondToBankError(error);
