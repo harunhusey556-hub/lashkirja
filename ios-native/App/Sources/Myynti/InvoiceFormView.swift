@@ -36,6 +36,19 @@ struct InvoiceFormView: View {
                         Button("Aloita tyhjästä", role: .destructive) { startOver() }
                     }
                 }
+                // F22: what a send will need, said before the invoice exists. Never blocks a draft.
+                if existing == nil, let note = SellerPreflight.note(profile: app.profile) {
+                    Section {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(note.title).font(.subheadline.weight(.semibold)).foregroundStyle(Theme.ink)
+                            Text(note.body).font(.caption).foregroundStyle(Theme.ink2)
+                        }
+                        NavigationLink { SellerDetailsScreen() } label: {
+                            Text("Täydennä tiedot").foregroundStyle(Theme.accentDark)
+                        }
+                    }
+                    .listRowBackground(Theme.warning.opacity(0.10))
+                }
                 Section("Asiakas") {
                     Picker("Asiakas", selection: Binding(get: { draft.customerId }, set: { pickCustomer($0) })) {
                         Text("Valitse asiakas").tag("")
@@ -344,5 +357,50 @@ struct LineEditor: View {
 
     static func text(_ value: Decimal) -> String {
         NSDecimalNumber(decimal: value).stringValue.replacingOccurrences(of: ".", with: ",")
+    }
+}
+
+/// "Laskuttajan tiedot" opened straight from a sales screen (the send check, a new invoice):
+/// the same form as in Asetukset, saved into the profile the other screens read.
+struct SellerDetailsScreen: View {
+    @Environment(AppModel.self) private var app
+    @State private var profile: Profile?
+    @State private var failure: String?
+
+    var body: some View {
+        Group {
+            if let profile {
+                ProfileForm(original: profile, section: .seller) { saved in
+                    var merged = saved
+                    if merged.imapAccounts == nil { merged.imapAccounts = profile.imapAccounts }
+                    app.profileChanged(merged)
+                }
+            } else if let failure {
+                ContentUnavailableView {
+                    Label(failure, systemImage: "exclamationmark.triangle")
+                } actions: {
+                    Button("Yritä uudelleen") { Task { await load() } }.buttonStyle(.primary)
+                }
+            } else {
+                ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        }
+        .background(Theme.canvas)
+        .navigationTitle("Laskuttajan tiedot")
+        .navigationBarTitleDisplayMode(.inline)
+        .task { if profile == nil { await load() } }
+    }
+
+    /// Fresh from the server: the form saves only what changed against what it opened with.
+    private func load() async {
+        failure = nil
+        do {
+            let response: ProfileResponse = try await app.api.get("/api/profile")
+            profile = response.profile
+            app.profileChanged(response.profile)
+        } catch is CancellationError {
+        } catch {
+            failure = error.userMessage
+        }
     }
 }

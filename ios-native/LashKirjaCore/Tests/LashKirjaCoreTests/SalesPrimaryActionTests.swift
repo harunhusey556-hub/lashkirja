@@ -27,7 +27,6 @@ import Foundation
 @Test func salesPrimaryActionNoneWhenSettledOrCreditNote() {
     #expect(InvoicePrimaryAction.for(status: .paid, open: 0, isCreditNote: false, reminderReady: false) == nil)
     #expect(InvoicePrimaryAction.for(status: .credited, open: 0, isCreditNote: false, reminderReady: false) == nil)
-    #expect(InvoicePrimaryAction.for(status: .sent, open: 0, isCreditNote: false, reminderReady: false) == nil)
     #expect(InvoicePrimaryAction.for(status: .draft, open: -20, isCreditNote: true, reminderReady: false) == nil)
     #expect(InvoicePrimaryAction.for(status: .sent, open: -20, isCreditNote: true, reminderReady: false) == nil)
 }

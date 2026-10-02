@@ -16,6 +16,11 @@ struct InvoiceDetailView: View {
     @State private var reminder: ReminderPreview?
     @State private var reminderFailed = false
     @State private var notice: String?
+    /// A send that left but was not recorded: said in the warning colour, not as a success.
+    @State private var warning: String?
+    @State private var toast: Toast?
+    @State private var toastAction: (() async -> Void)?
+    @State private var toastTask: Task<Void, Never>?
     /// The version whose PDF was already fetched ahead, so a reload does not fetch it again.
     @State private var prefetchedKey: String?
     @State private var lineLimit = ShowMore()
@@ -23,7 +28,7 @@ struct InvoiceDetailView: View {
     /// The history is secondary on this long screen: five events, then more on request.
     @State private var activityLimit = ShowMore(step: 5)
 
-    enum SheetKind: Identifiable { case payment, send, pdf, edit, reminder, reminderPdf; var id: Self { self } }
+    enum SheetKind: Identifiable { case payment, send, pdf, edit, reminder, reminderPdf, close; var id: Self { self } }
     enum ConfirmKind: Identifiable { case delete, credit, markSent; var id: Self { self } }
 
     var body: some View {
@@ -41,11 +46,13 @@ struct InvoiceDetailView: View {
                     }
                 }
                 if let failure { Section { Text(failure).foregroundStyle(Theme.danger).font(.footnote) } }
+                if let warning { Section { Text(warning).foregroundStyle(Theme.warning).font(.footnote) } }
                 if let notice { Section { Text(notice).foregroundStyle(Theme.success).font(.footnote) } }
                 Section {
                     LabeledContent("Päivätty", value: APIDate.displayDay(invoice.issueDate))
                     LabeledContent("Eräpäivä", value: APIDate.displayDay(invoice.dueDate))
                     LabeledContent("Viite", value: invoice.reference)
+                    if let reason = invoice.closedReason, !reason.isEmpty { LabeledContent("Suljettu", value: reason) }
                     NavigationLink(value: Route.customer(invoice.customer.id)) {
                         LabeledContent("Asiakas", value: invoice.customer.name)
                     }
@@ -118,6 +125,12 @@ struct InvoiceDetailView: View {
         .navigationTitle(state.value.map { $0.isCreditNote ? "Hyvityslasku \($0.number)" : "Lasku \($0.number)" } ?? "Lasku")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar { if let invoice = state.value { ToolbarItem(placement: .topBarTrailing) { actions(invoice) } } }
+        .overlay(alignment: .bottom) {
+            if let toast {
+                ToastView(toast: toast) { runToastAction() }.padding(.bottom, 8)
+            }
+        }
+        .onDisappear { toastTask?.cancel() }
         .refreshable { await load() }
         .task { await load() }
         .disabled(busy)
@@ -125,7 +138,10 @@ struct InvoiceDetailView: View {
             if let invoice = state.value {
                 switch kind {
                 case .payment: PaymentSheet(invoice: invoice)
-                case .send: SendInvoiceSheet(invoice: invoice)
+                case .send: SendInvoiceSheet(invoice: invoice) { result in
+                    if result.isWarning { warning = result.message; notice = nil } else { notice = result.message; warning = nil }
+                }
+                case .close: CloseReasonSheet { reason in Task { await setStatus(.close(reason: reason)) } }
                 case .pdf: DocumentPreviewSheet(path: "/api/invoices/\(invoice.id)/pdf", fileName: "Lasku-\(invoice.number).pdf", cacheKey: invoice.updatedAt)
                 case .edit: InvoiceFormView(existing: invoice)
                 case .reminder:
@@ -141,7 +157,7 @@ struct InvoiceDetailView: View {
             switch confirm {
             case .delete: Button("Poista luonnos", role: .destructive) { Task { await deleteDraft() } }
             case .credit: Button("Luo hyvityslasku") { Task { await credit() } }
-            case .markSent: Button("Merkitse lähetetyksi") { Task { await setStatus("sent") } }
+            case .markSent: Button("Merkitse lähetetyksi") { Task { await setStatus(.markSent) } }
             case nil: EmptyView()
             }
         }
@@ -181,6 +197,7 @@ struct InvoiceDetailView: View {
         case .send: sheet = .send
         case .reminder: sheet = .reminder
         case .payment: sheet = .payment
+        case .markPaid: Task { await markPaid() }
         }
     }
 
@@ -190,7 +207,8 @@ struct InvoiceDetailView: View {
                 Button { sheet = .edit } label: { Label("Muokkaa", systemImage: "pencil") }
             }
             Button { sheet = .pdf } label: { Label("Avaa PDF", systemImage: "doc.richtext") }
-            if invoice.customer.email != nil && !invoice.isCreditNote && primaryAction(invoice) != .send {
+            // The send check says what is missing, so the item shows without an address too (as on the web).
+            if invoice.status != "credited" && primaryAction(invoice) != .send {
                 Button { sheet = .send } label: { Label("Lähetä sähköpostilla", systemImage: "paperplane") }
             }
             if invoice.displayStatus == .overdue && reminder != nil && primaryAction(invoice) != .reminder {
@@ -203,6 +221,9 @@ struct InvoiceDetailView: View {
             }
             if invoice.displayStatus != .draft && invoice.displayStatus != .credited && !invoice.isCreditNote {
                 Button { confirm = .credit } label: { Label("Hyvitä", systemImage: "arrow.uturn.backward") }
+            }
+            if InvoiceStatusChange.canClose(status: invoice.status, open: invoice.open, isCreditNote: invoice.isCreditNote) {
+                Button { sheet = .close } label: { Label("Sulje perustelulla", systemImage: "checkmark.seal") }
             }
             if invoice.displayStatus == .draft {
                 Button(role: .destructive) { confirm = .delete } label: { Label("Poista luonnos", systemImage: "trash") }
@@ -240,12 +261,43 @@ struct InvoiceDetailView: View {
         catch { failure = error.userMessage; Haptics.error() }
     }
 
-    private func setStatus(_ status: String) async {
-        struct Body: Encodable { let status: String }
+    @discardableResult
+    private func setStatus(_ change: InvoiceStatusChange) async -> Bool {
+        var done = false
         await run {
-            let r: InvoiceResponse = try await app.api.send("POST", "/api/invoices/\(invoiceId)/status", body: Body(status: status))
+            let r: InvoiceResponse = try await app.api.send("POST", "/api/invoices/\(invoiceId)/status", body: change)
             state = .loaded(r.invoice)
+            done = true
         }
+        return done
+    }
+
+    /// Reversible, so no dialog: done at once, with "Kumoa" for a few seconds (web T4).
+    private func markPaid() async {
+        guard await setStatus(.markPaid) else { return }
+        showToast(InvoiceStatusChange.markedPaidText, action: "Kumoa") {
+            if await setStatus(.reopen) { showToast(InvoiceStatusChange.reopenedText, action: nil, run: nil) }
+        }
+    }
+
+    private func showToast(_ text: String, action: String?, run: (() async -> Void)?) {
+        toastTask?.cancel()
+        toastAction = run
+        withAnimation(.snappy) { toast = Toast(text: text, actionLabel: action) }
+        toastTask = Task {
+            try? await Task.sleep(nanoseconds: 5_000_000_000)
+            guard !Task.isCancelled else { return }
+            withAnimation { toast = nil }
+            toastAction = nil
+        }
+    }
+
+    private func runToastAction() {
+        let action = toastAction
+        toastTask?.cancel()
+        toastAction = nil
+        withAnimation { toast = nil }
+        if let action { Task { await action() } }
     }
 
     private func credit() async {
@@ -535,12 +587,14 @@ struct ReminderSheet: View {
     }
 }
 
+/// "Lähetä lasku": the server checks the send first (recipient, sum, due date, IBAN, attachment)
+/// and names what blocks it, with the place to fix it; the send itself goes to the customer's address.
 struct SendInvoiceSheet: View {
     @Environment(AppModel.self) private var app
     @Environment(\.dismiss) private var dismiss
     let invoice: Invoice
-    @State private var to = ""
-    @State private var message = ""
+    let onSent: (InvoiceSendResult) -> Void
+    @State private var check: Loadable<InvoiceSendPreview> = .idle
     @State private var busy = false
     @State private var failure: String?
     @State private var key = UUID().uuidString
@@ -548,37 +602,151 @@ struct SendInvoiceSheet: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section("Vastaanottaja") {
-                    TextField("Sähköposti", text: $to).keyboardType(.emailAddress).textInputAutocapitalization(.never)
+                if let preview = check.value {
+                    Section {
+                        LabeledContent("Vastaanottaja", value: preview.recipient ?? "–")
+                        LabeledContent("Summa") { MoneyText(amount: preview.gross) }
+                        if preview.showsDueDate, let due = preview.dueDate {
+                            LabeledContent("Eräpäivä", value: APIDate.displayDay(due))
+                        }
+                        if preview.showsIban {
+                            LabeledContent("Tilinumero") {
+                                HStack(spacing: 8) {
+                                    Text(preview.iban ?? "–").textSelection(.enabled)
+                                    if let iban = preview.iban {
+                                        Button { UIPasteboard.general.string = iban; Haptics.selection() } label: {
+                                            Image(systemName: "doc.on.doc")
+                                        }
+                                        .buttonStyle(.borderless)
+                                        .accessibilityLabel("Kopioi IBAN")
+                                    }
+                                }
+                            }
+                        }
+                        LabeledContent("Liite", value: preview.attachment)
+                    }
+                    if let blocked = preview.blockedReason {
+                        Section {
+                            Text(blocked).foregroundStyle(Theme.danger)
+                            if let fix = preview.fix {
+                                fixLink(fix)
+                                if let note = fix.note { Text(note).font(.caption).foregroundStyle(Theme.ink2) }
+                            }
+                        }
+                    }
+                    if let failure { Section { Text(failure).foregroundStyle(Theme.danger) } }
+                    Section {
+                        Button { Task { await send() } } label: {
+                            HStack {
+                                Spacer()
+                                if busy { ProgressView() } else { Text("Lähetä") }
+                                Spacer()
+                            }
+                        }
+                        .buttonStyle(.primary)
+                        .disabled(busy || !preview.canSend)
+                        .listRowBackground(Color.clear)
+                        .listRowInsets(EdgeInsets())
+                    }
+                } else {
+                    LoadState(state: check, retry: loadCheck) { (_: InvoiceSendPreview) in EmptyView() }
+                        .listRowBackground(Color.clear)
                 }
-                Section("Viesti (valinnainen)") {
-                    TextField("Viesti", text: $message, axis: .vertical).lineLimit(3...8)
-                }
-                if let failure { Text(failure).foregroundStyle(Theme.danger) }
             }
-            .navigationTitle("Lähetä lasku \(invoice.number)")
+            .navigationTitle(invoice.isCreditNote ? "Lähetä hyvityslasku" : "Lähetä lasku")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Peruuta") { dismiss() } }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Lähetä") { Task { await send() } }.disabled(busy || to.isEmpty)
-                }
+                ToolbarItem(placement: .cancellationAction) { Button("Peruuta") { dismiss() }.disabled(busy) }
             }
-            .onAppear { to = invoice.customer.email ?? "" }
+            // Back from a fix (seller details, the customer's e-mail, the mailbox): the check runs again.
+            .onAppear { Task { await loadCheck() } }
+            .appDestinations()
+            .interactiveDismissDisabled(busy)
+        }
+    }
+
+    @ViewBuilder
+    private func fixLink(_ fix: InvoiceSendFix) -> some View {
+        let label = Label(fix.title, systemImage: "arrow.right.circle").foregroundStyle(Theme.accentDark)
+        switch fix {
+        case .sellerDetails: NavigationLink { SellerDetailsScreen() } label: { label }
+        case .customerEmail: NavigationLink(value: Route.customer(invoice.customer.id)) { label }
+        case .connectMailbox: NavigationLink(value: Route.emailImport) { label }
+        case .openPeriod(let month): NavigationLink(value: Route.monthClose(month)) { label }
+        }
+    }
+
+    private func loadCheck() async {
+        if check.value == nil { check = .loading }
+        do {
+            let response: InvoiceSendPreviewResponse = try await app.api.get("/api/invoices/\(invoice.id)/send")
+            check = .loaded(response.preview)
+            // A fresh check is a new send, unless a lost answer left it open whether the last one went.
+            if failure == nil { key = UUID().uuidString }
+        } catch is CancellationError {
+        } catch {
+            if check.value == nil { check = .failed(error.userMessage) } else { failure = error.userMessage }
         }
     }
 
     private func send() async {
-        struct Body: Encodable { let to: String; let message: String? }
         busy = true
+        failure = nil
         defer { busy = false }
         do {
-            let _: Ignored = try await app.api.send("POST", "/api/invoices/\(invoice.id)/send",
-                body: Body(to: to.trimmingCharacters(in: .whitespaces), message: message.isEmpty ? nil : message), idempotencyKey: key)
-            Haptics.success()
+            // The web sends `{}`: the address is the customer's, as the check showed.
+            let result: InvoiceSendResult = try await app.api.send("POST", "/api/invoices/\(invoice.id)/send", body: EmptyBody(), idempotencyKey: key)
+            if result.isWarning { Haptics.error() } else { Haptics.success() }
+            onSent(result)
             dismiss()
         } catch {
-            failure = error.userMessage
+            failure = InvoiceSendResult.failureMessage(error)
+            Haptics.error()
         }
+    }
+}
+
+/// "Sulje perustelulla": the open remainder is written off with a reason (cash, a credit loss).
+struct CloseReasonSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    let onClose: (String) -> Void
+    @State private var reason = ""
+    @State private var problem: String?
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    TextField("Esim. käteinen tai luottotappio", text: $reason)
+                        .textInputAutocapitalization(.sentences)
+                        .submitLabel(.done)
+                        .onSubmit(close)
+                } header: {
+                    Text("Perustelu")
+                } footer: {
+                    if let problem { Text(problem).foregroundStyle(Theme.danger) }
+                }
+                Section {
+                    Button(action: close) { Text("Sulje perustelulla").frame(maxWidth: .infinity) }
+                        .buttonStyle(.primary)
+                        .listRowBackground(Color.clear)
+                        .listRowInsets(EdgeInsets())
+                }
+            }
+            .navigationTitle("Sulje perustelulla")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Peruuta") { dismiss() } } }
+        }
+        .presentationDetents([.medium])
+    }
+
+    private func close() {
+        if let error = InvoiceStatusChange.closeReasonError(reason) {
+            problem = error
+            Haptics.error()
+            return
+        }
+        onClose(reason)
+        dismiss()
     }
 }

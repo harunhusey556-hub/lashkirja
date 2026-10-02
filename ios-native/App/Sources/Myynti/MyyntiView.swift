@@ -13,6 +13,10 @@ struct MyyntiView: View {
     @State private var counts: [String: Int]?
     @State private var filter: SalesFilter
     @State private var search = ""
+    /// The search as sent to the server: settles 250 ms after the last keystroke (as on the web).
+    @State private var query = ""
+    /// A days-late figure narrows the late invoices to its bucket (on top of the Myöhässä chip).
+    @State private var lateBucket: AgingBucket?
     @State private var showNew = false
     @State private var showMatch = false
     @State private var notice: String?
@@ -37,8 +41,16 @@ struct MyyntiView: View {
         List {
             if let list = state.value {
                 Section {
-                    summary(list.aging)
-                        .listRowBackground(Theme.surface)
+                    ReceivablesCard(aging: list.aging, filter: filter, lateBucket: lateBucket) { segment in
+                        filter = filter == segment ? .all : segment
+                        lateBucket = nil
+                        Haptics.selection()
+                    } onBucket: { bucket in
+                        lateBucket = lateBucket == bucket ? nil : bucket
+                        if lateBucket != nil { filter = .overdue }
+                        Haptics.selection()
+                    }
+                    .listRowBackground(Theme.surface)
                 }
                 if let notice {
                     Section {
@@ -76,7 +88,21 @@ struct MyyntiView: View {
                     }
                     ShowMoreButton(limit: $limit, total: rows.count)
                 } header: {
-                    if !rows.isEmpty { Text("\(rows.count) laskua") }
+                    HStack {
+                        if !rows.isEmpty { Text("\(rows.count) laskua") }
+                        Spacer()
+                        if let lateBucket {
+                            Button { self.lateBucket = nil } label: {
+                                Label("\(lateBucket.label) myöhässä", systemImage: "xmark.circle.fill")
+                            }
+                            .buttonStyle(.borderless)
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(Theme.danger)
+                            .accessibilityHint("Näytä kaikki myöhässä olevat")
+                        }
+                    }
+                } footer: {
+                    if let note = SalesListQuery.limitNote(rowCount: list.invoices.count) { Text(note) }
                 }
                 if scope.isEmpty {
                     Section("Muut") {
@@ -122,17 +148,29 @@ struct MyyntiView: View {
             openedNew = true
             showNew = true
         }
-        .task(id: app.dataVersion) {
-            guard state.value == nil || gate.isDue(version: app.dataVersion) else { return }
+        .task(id: "\(app.dataVersion)|\(listKey)") {
+            guard state.value == nil || gate.isDue(key: listKey, version: app.dataVersion) else { return }
             // Marked only after a load that finished: a cancelled one must not count as fresh.
-            let version = app.dataVersion
+            let version = app.dataVersion, key = listKey
             await load()
-            if !Task.isCancelled { gate.mark(version: version) }
+            if !Task.isCancelled { gate.mark(key: key, version: version) }
+        }
+        .task(id: search) {
+            let text = search.trimmingCharacters(in: .whitespaces)
+            // Cleared at once; typed text waits for a pause, one request per pause.
+            if !text.isEmpty { try? await Task.sleep(nanoseconds: 250_000_000) }
+            guard !Task.isCancelled else { return }
+            query = text
         }
         .animation(.snappy, value: filter)
+        .animation(.snappy, value: lateBucket)
         // Another chip or search shows a different list: it opens on its first rows again.
-        .onChange(of: filter) { _, _ in limit.reset() }
+        .onChange(of: filter) { _, new in
+            limit.reset()
+            if new != .overdue { lateBucket = nil }
+        }
         .onChange(of: search) { _, _ in limit.reset() }
+        .onChange(of: lateBucket) { _, _ in limit.reset() }
     }
 
     private func openCreated() {
@@ -208,54 +246,24 @@ struct MyyntiView: View {
         }
     }
 
-    private func visible(_ invoices: [Invoice]) -> [Invoice] {
-        let needle = search.trimmingCharacters(in: .whitespaces).lowercased()
-        return invoices.filter { invoice in
-            !app.removedIds.contains(invoice.id) && filter.matches(invoice) && (needle.isEmpty
-                || invoice.customer.name.lowercased().contains(needle)
-                || String(invoice.number) == needle
-                || invoice.reference.contains(needle))
-        }
-    }
+    /// What the list asks the server for besides the scope: the chip and the settled search.
+    private var listKey: String { "\(filter.rawValue)|\(query)" }
 
-    private func summary(_ aging: InvoiceList.Aging) -> some View {
-        HStack {
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Saatavat, avoinna").font(.caption).foregroundStyle(Theme.ink2)
-                MoneyText(amount: aging.totalOpen).font(.title2.weight(.semibold))
-            }
-            Spacer()
-            if aging.overdueCount > 0 {
-                // The late figure narrows the list to the late invoices (the web's receivables bar does the same).
-                Button {
-                    filter = filter == .overdue ? .all : .overdue
-                    Haptics.selection()
-                } label: {
-                    VStack(alignment: .trailing, spacing: 4) {
-                        Text("Myöhässä \(aging.overdueCount)").font(.caption).foregroundStyle(Theme.danger)
-                        HStack(spacing: 4) {
-                            MoneyText(amount: aging.overdue).font(.subheadline.weight(.semibold)).foregroundStyle(Theme.danger)
-                            Image(systemName: filter == .overdue ? "xmark.circle.fill" : "chevron.right")
-                                .font(.caption.weight(.semibold))
-                                .foregroundStyle(Theme.danger)
-                                .accessibilityHidden(true)
-                        }
-                    }
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.borderless)
-                .accessibilityLabel("Myöhässä \(aging.overdueCount) laskua, \(Money.format(aging.overdue))")
-                .accessibilityHint(filter == .overdue ? "Näytä kaikki laskut" : "Näytä myöhässä olevat laskut")
-            }
+    /// The server already filtered by status and search; the chip's own rule still applies while a
+    /// new chip's rows are on their way (and keeps "Odottaa maksua" free of late ones, as on the web).
+    private func visible(_ invoices: [Invoice]) -> [Invoice] {
+        let today = APIDate.dayString(Date())
+        return invoices.filter { invoice in
+            !app.removedIds.contains(invoice.id) && filter.matches(invoice)
+                && (lateBucket == nil || AgingBucket.of(dueDate: invoice.dueDate, today: today) == lateBucket)
         }
-        .padding(.vertical, 4)
     }
 
     private func load() async {
         if state.value == nil { state = .loading }
         // The list and the chip counts are independent: one round trip instead of two.
         async let fresh = loadCounts()
-        do { state = .loaded(try await app.api.get("/api/invoices", query: scope.query)) }
+        do { state = .loaded(try await app.api.get("/api/invoices", query: SalesListQuery.query(scope: scope, filter: filter, search: query))) }
         catch is CancellationError {}
         catch { if state.value == nil { state = .failed(error.userMessage) } }
         if let fresh = await fresh { counts = fresh }
@@ -270,6 +278,137 @@ struct MyyntiView: View {
         } catch {
             return nil
         }
+    }
+}
+
+/// "Saatavat, avoinna": the paid / waiting / late bar (web `receivablesSegments`), each part opening
+/// its chip, and under "Erittely" the late money by days late, each figure narrowing the late list.
+private struct ReceivablesCard: View {
+    let aging: InvoiceList.Aging
+    let filter: SalesFilter
+    let lateBucket: AgingBucket?
+    let onSegment: (SalesFilter) -> Void
+    let onBucket: (AgingBucket) -> Void
+    @State private var open = false
+
+    var body: some View {
+        let segments = aging.segments
+        let buckets = aging.lateBuckets
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Saatavat, avoinna").font(.caption).foregroundStyle(Theme.ink2)
+                    MoneyText(amount: aging.totalOpen).font(.title2.weight(.semibold))
+                }
+                Spacer()
+                if !buckets.isEmpty {
+                    Button { withAnimation(.snappy) { open.toggle() } } label: {
+                        HStack(spacing: 4) {
+                            Text("Erittely")
+                            Image(systemName: "chevron.down").rotationEffect(.degrees(open ? 180 : 0))
+                        }
+                        .font(.caption)
+                        .foregroundStyle(Theme.ink2)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.borderless)
+                    .accessibilityLabel(open ? "Piilota erittely" : "Näytä erittely päivien mukaan")
+                }
+            }
+            bar(segments)
+            legend(segments)
+            if open && !buckets.isEmpty {
+                Divider()
+                HStack(spacing: 0) {
+                    ForEach(buckets) { bucket in bucketButton(bucket) }
+                }
+            }
+        }
+        .padding(.vertical, 4)
+    }
+
+    private func color(_ tone: ReceivablesSegment.Tone) -> Color {
+        switch tone {
+        case .success: Theme.success
+        case .neutral: Theme.ink2.opacity(0.45)
+        case .danger: Theme.danger
+        }
+    }
+
+    /// A segment other than the chosen chip fades, so the bar shows what the list below is.
+    private func dimmed(_ segment: ReceivablesSegment) -> Bool {
+        filter != .all && filter != segment.filter
+    }
+
+    @ViewBuilder
+    private func bar(_ segments: [ReceivablesSegment]) -> some View {
+        let total = segments.reduce(Decimal(0)) { $0 + max(0, $1.amount) }
+        if total <= 0 {
+            Text("Ei avoimia laskuja.").font(.caption).foregroundStyle(Theme.ink2)
+        } else {
+            GeometryReader { geo in
+                let shown = segments.filter { $0.amount > 0 }
+                let gaps = CGFloat(max(0, shown.count - 1)) * 2
+                HStack(spacing: 2) {
+                    ForEach(shown) { segment in
+                        let share = CGFloat(NSDecimalNumber(decimal: segment.amount / total).doubleValue)
+                        Button { onSegment(segment.filter) } label: {
+                            Rectangle().fill(color(segment.tone)).opacity(dimmed(segment) ? 0.3 : 1)
+                        }
+                        .buttonStyle(.plain)
+                        .frame(width: max(4, (geo.size.width - gaps) * share))
+                        .accessibilityLabel("\(segment.label) \(Money.format(segment.amount))")
+                    }
+                }
+                .clipShape(Capsule())
+            }
+            .frame(height: 10)
+        }
+    }
+
+    private func legend(_ segments: [ReceivablesSegment]) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            ForEach(segments) { segment in
+                Button { onSegment(segment.filter) } label: {
+                    VStack(alignment: .leading, spacing: 2) {
+                        HStack(spacing: 4) {
+                            Circle().fill(color(segment.tone)).frame(width: 7, height: 7)
+                            Text(segment.label).lineLimit(1).minimumScaleFactor(0.8)
+                        }
+                        .font(.caption2)
+                        .foregroundStyle(Theme.ink2)
+                        MoneyText(amount: segment.amount)
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(segment.tone == .danger && segment.amount > 0 ? Theme.danger : Theme.ink)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .opacity(dimmed(segment) ? 0.5 : 1)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.borderless)
+                .accessibilityAddTraits(filter == segment.filter ? .isSelected : [])
+                .accessibilityHint(filter == segment.filter ? "Näytä kaikki laskut" : "Näytä nämä laskut")
+            }
+        }
+    }
+
+    private func bucketButton(_ bucket: ReceivablesLateBucket) -> some View {
+        let selected = lateBucket == bucket.bucket
+        return Button { onBucket(bucket.bucket) } label: {
+            VStack(spacing: 2) {
+                Text(bucket.label).font(.caption2).foregroundStyle(selected ? Theme.danger : Theme.ink2)
+                MoneyText(amount: bucket.amount).font(.caption.weight(.medium)).foregroundStyle(Theme.ink)
+                    .lineLimit(1).minimumScaleFactor(0.7)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 6)
+            .background(selected ? Theme.danger.opacity(0.1) : .clear, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.borderless)
+        .disabled(bucket.count == 0 && !selected)
+        .accessibilityLabel("\(bucket.label) myöhässä, \(bucket.count) laskua, \(Money.format(bucket.amount))")
+        .accessibilityAddTraits(selected ? .isSelected : [])
     }
 }
 

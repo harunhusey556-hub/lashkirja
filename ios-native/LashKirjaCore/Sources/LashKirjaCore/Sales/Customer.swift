@@ -21,6 +21,8 @@ public struct Customer: Decodable, Sendable, Identifiable, Hashable {
     public let invoicedTotal: Decimal?
     public let lastInvoiceDate: String?
 
+    public var isArchived: Bool { archivedAt != nil }
+
     public var address: String? {
         let city = [addressPostalCode, addressCity].compactMap { $0 }.joined(separator: " ")
         let parts = [addressStreet, city.isEmpty ? nil : city].compactMap { $0 }
@@ -106,4 +108,6 @@ public struct CustomerDetail: Decodable, Sendable {
     public let openInvoiceCount: Int
     public let invoicedTotal: Decimal
     public let invoices: [InvoiceSummary]
+    /// Recurring invoices on this customer: a delete archives it and pauses them.
+    public let recurringCount: Int?
 }

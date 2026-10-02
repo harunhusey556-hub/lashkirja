@@ -2,31 +2,54 @@ import SwiftUI
 import UniformTypeIdentifiers
 import LashKirjaCore
 
+/// A message for Asiakkaat from a customer screen that closed itself ("Asiakas poistettiin.").
+@MainActor enum CustomerFlash {
+    static var pending: String?
+}
+
 struct CustomersView: View {
     @Environment(AppModel.self) private var app
     @State private var state: Loadable<[Customer]> = .idle
+    @State private var gate = ReloadGate()
     @State private var search = ""
     @State private var showNew = false
     @State private var showImport = false
     @State private var notice: String?
     @State private var limit = ShowMore()
+    /// "Myös arkistoidut": the archived customers are listed too, marked as such.
+    @State private var includeArchived = false
 
     var body: some View {
         List {
             if let notice { Section { Text(notice).font(.subheadline) } }
+            Section {
+                HStack(spacing: 8) {
+                    SectionChip(title: "Aktiiviset", selected: !includeArchived) { includeArchived = false }
+                    SectionChip(title: "Myös arkistoidut", selected: includeArchived) { includeArchived = true }
+                }
+                .listRowBackground(Color.clear)
+                .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 4, trailing: 0))
+                .listRowSeparator(.hidden)
+            }
             if let customers = state.value {
                 let rows = customers.filter { !app.removedIds.contains($0.id) && (search.isEmpty || $0.name.localizedCaseInsensitiveContains(search)) }
-                if rows.isEmpty { Text("Ei asiakkaita.").foregroundStyle(Theme.ink2) }
-                ForEach(rows.prefix(limit.visible(rows.count))) { customer in
-                    NavigationLink(value: Route.customer(customer.id)) {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(customer.name)
-                            Text([customer.businessId, "Maksuaika \(customer.defaultPaymentTermDays) pv"].compactMap { $0 }.joined(separator: " · "))
-                                .font(.caption).foregroundStyle(Theme.ink2)
+                Section {
+                    if rows.isEmpty { Text(search.isEmpty ? "Ei asiakkaita." : "Ei osumia.").foregroundStyle(Theme.ink2) }
+                    ForEach(rows.prefix(limit.visible(rows.count))) { customer in
+                        NavigationLink(value: Route.customer(customer.id)) {
+                            HStack {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(customer.name)
+                                    Text([customer.businessId, "Maksuaika \(customer.defaultPaymentTermDays) pv"].compactMap { $0 }.joined(separator: " · "))
+                                        .font(.caption).foregroundStyle(Theme.ink2)
+                                }
+                                Spacer()
+                                if customer.isArchived { ArchivedBadge() }
+                            }
                         }
                     }
+                    ShowMoreButton(limit: $limit, total: rows.count)
                 }
-                ShowMoreButton(limit: $limit, total: rows.count)
             } else {
                 LoadState(state: state, retry: load) { (_: [Customer]) in EmptyView() }.listRowBackground(Color.clear)
             }
@@ -35,6 +58,7 @@ struct CustomersView: View {
         .background(Theme.canvas)
         .searchable(text: $search, prompt: "Hae asiakasta")
         .onChange(of: search) { _, _ in limit.reset() }
+        .onChange(of: includeArchived) { _, _ in limit.reset() }
         .navigationTitle("Asiakkaat")
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
@@ -53,18 +77,42 @@ struct CustomersView: View {
             }
         }
         .refreshable { await load() }
-        .task { await load() }
+        .onAppear {
+            if let flash = CustomerFlash.pending {
+                CustomerFlash.pending = nil
+                notice = flash
+            }
+        }
+        // A customer archived, restored or deleted elsewhere moves between the two lists.
+        .task(id: "\(app.dataVersion)|\(includeArchived)") {
+            let key = includeArchived ? "all" : "active"
+            guard state.value == nil || gate.isDue(key: key, version: app.dataVersion) else { return }
+            let version = app.dataVersion
+            await load()
+            if !Task.isCancelled { gate.mark(key: key, version: version) }
+        }
     }
 
     private func load() async {
         if state.value == nil { state = .loading }
+        let archived = includeArchived
         do {
-            let list: CustomerList = try await app.api.get("/api/customers")
-            state = .loaded(list.customers.filter { $0.archivedAt == nil })
+            let list: CustomerList = try await app.api.get("/api/customers", query: CustomerArchive.listQuery(includeArchived: archived))
+            state = .loaded(archived ? list.customers : list.customers.filter { !$0.isArchived })
         } catch is CancellationError {
         } catch {
             if state.value == nil { state = .failed(error.userMessage) }
         }
+    }
+}
+
+struct ArchivedBadge: View {
+    var body: some View {
+        Text("Arkistoitu")
+            .font(.caption2.weight(.semibold))
+            .padding(.horizontal, 8).padding(.vertical, 3)
+            .background(Theme.ink2.opacity(0.12), in: Capsule())
+            .foregroundStyle(Theme.ink2)
     }
 }
 
@@ -76,6 +124,7 @@ struct CustomerDetailView: View {
     @State private var showEdit = false
     @State private var showNewInvoice = false
     @State private var confirmDelete = false
+    @State private var busy = false
     @State private var failure: String?
     @State private var notice: String?
     @State private var showMerge = false
@@ -89,11 +138,25 @@ struct CustomerDetailView: View {
         List {
             if let detail = state.value {
                 let c = detail.customer
+                if c.isArchived {
+                    Section {
+                        HStack {
+                            ArchivedBadge()
+                            Spacer()
+                            Button("Palauta arkistosta") { Task { await restore() } }
+                                .buttonStyle(.borderless)
+                                .foregroundStyle(Theme.accentDark)
+                        }
+                    }
+                }
+                if let notice { Section { Text(notice).font(.subheadline).foregroundStyle(Theme.ink) } }
+                if let failure { Section { Text(failure).foregroundStyle(Theme.danger) } }
                 Section {
                     if let contact = c.contactPerson { LabeledContent("Yhteyshenkilö", value: contact) }
-                    if let email = c.email { LabeledContent("Sähköposti", value: email) }
-                    if let phone = c.phone { LabeledContent("Puhelin", value: phone) }
-                    if let address = c.address { LabeledContent("Osoite", value: address) }
+                    // Mail, phone and address open Mail, the phone and Maps (web ContactLink).
+                    if let email = c.email { contactRow("Sähköposti", email, CustomerContact.mail(email)) }
+                    if let phone = c.phone { contactRow("Puhelin", phone, CustomerContact.phone(phone)) }
+                    if let address = c.address { contactRow("Osoite", address, CustomerContact.maps(address)) }
                     if let id = c.businessId { LabeledContent("Y-tunnus", value: id) }
                     LabeledContent("Maksuaika", value: "\(c.defaultPaymentTermDays) pv")
                 }
@@ -127,8 +190,6 @@ struct CustomerDetailView: View {
                     }
                 }
                 if let notes = c.notes { Section("Muistiinpanot") { Text(notes) } }
-                if let failure { Text(failure).foregroundStyle(Theme.danger) }
-                if let notice { Text(notice).foregroundStyle(Theme.success) }
             } else {
                 LoadState(state: state, retry: load) { (_: CustomerDetail) in EmptyView() }.listRowBackground(Color.clear)
             }
@@ -148,7 +209,11 @@ struct CustomerDetailView: View {
                         if !others.isEmpty {
                             Button { showMerge = true } label: { Label("Yhdistä kaksoiskappale", systemImage: "arrow.triangle.merge") }
                         }
-                        Button(role: .destructive) { confirmDelete = true } label: { Label("Poista", systemImage: "trash") }
+                        if state.value?.customer.isArchived == true {
+                            Button { Task { await restore() } } label: { Label("Palauta arkistosta", systemImage: "arrow.uturn.backward") }
+                        } else {
+                            Button(role: .destructive) { confirmDelete = true } label: { Label("Poista", systemImage: "trash") }
+                        }
                     } label: { Image(systemName: "ellipsis.circle") }
                 }
             }
@@ -174,7 +239,12 @@ struct CustomerDetailView: View {
         }
         .confirmationDialog("Poistetaanko asiakas?", isPresented: $confirmDelete, titleVisibility: .visible) {
             Button("Poista", role: .destructive) { Task { await delete() } }
+        } message: {
+            if let detail = state.value {
+                Text(CustomerArchive.deleteNote(name: detail.customer.name, invoiceCount: detail.invoices.count, recurringCount: detail.recurringCount ?? 0))
+            }
         }
+        .disabled(busy)
         .task { await load() }
     }
 
@@ -192,12 +262,56 @@ struct CustomerDetailView: View {
         }
     }
 
-    private func delete() async {
-        let api = app.api, id = customerId
-        app.removeInBackground([id]) {
-            let _: Ignored = try await api.send("DELETE", "/api/customers/\(id)", body: Optional<EmptyBody>.none)
+    @ViewBuilder
+    private func contactRow(_ title: String, _ value: String, _ url: URL?) -> some View {
+        if let url {
+            Link(destination: url) {
+                LabeledContent(title) { Text(value).foregroundStyle(Theme.accentDark).multilineTextAlignment(.trailing) }
+            }
+            .foregroundStyle(Theme.ink)
+        } else {
+            LabeledContent(title, value: value)
         }
-        dismiss()
+    }
+
+    /// Not optimistic: the reply says whether the customer was deleted or archived (it has invoices
+    /// or recurring invoices), and an archived one stays on screen with "Palauta arkistosta".
+    private func delete() async {
+        busy = true
+        failure = nil
+        notice = nil
+        defer { busy = false }
+        do {
+            let result: CustomerRemoval = try await app.api.send("DELETE", "/api/customers/\(customerId)", body: Optional<EmptyBody>.none)
+            Haptics.success()
+            if result.archived {
+                notice = result.message
+                await load()
+            } else {
+                app.hide([customerId])
+                CustomerFlash.pending = result.message
+                dismiss()
+            }
+        } catch {
+            failure = error.userMessage
+            Haptics.error()
+        }
+    }
+
+    private func restore() async {
+        busy = true
+        failure = nil
+        notice = nil
+        defer { busy = false }
+        do {
+            let _: CustomerResponse = try await app.api.send("PATCH", "/api/customers/\(customerId)", body: CustomerArchive.Restore())
+            Haptics.success()
+            notice = CustomerArchive.restoredText
+            await load()
+        } catch {
+            failure = error.userMessage
+            Haptics.error()
+        }
     }
 }
 

@@ -112,9 +112,17 @@ public struct InvoicePatch: Encodable, Sendable {
 
 public struct InvoiceList: Decodable, Sendable {
     public struct Aging: Decodable, Sendable {
+        public struct Bucket: Decodable, Sendable, Hashable {
+            public let count: Int
+            public let openCents: Int
+        }
         public let totalOpen: Decimal
         public let overdue: Decimal
         public let overdueCount: Int
+        /// Open money by days late ("not_due", "1-30", "31-60", "61-90", "90+"); see `Receivables.swift`.
+        public let buckets: [String: Bucket]?
+        /// Money received on invoices in the last 90 days, for the "Saatavat" bar.
+        public let paidRecentCents: Int?
     }
     public let invoices: [Invoice]
     public let aging: Aging
