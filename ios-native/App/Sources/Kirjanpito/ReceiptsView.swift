@@ -27,6 +27,9 @@ struct ReceiptsView: View {
     @State private var selected: Set<String> = []
     @State private var deleteIds: [String] = []
     @State private var confirmDelete = false
+    /// The review queue shows its first rows only, so the receipts below stay in reach.
+    @State private var showAllPending = false
+    private static let pendingPreview = 3
 
     /// Month, tab, category, source and sort are kept between visits (as the purchase invoices' filter).
     private static let filterKey = "kuitit.filter"
@@ -53,7 +56,7 @@ struct ReceiptsView: View {
         List {
             if !pending.isEmpty && !selecting {
                 Section {
-                    ForEach(pending) { receipt in
+                    ForEach(showAllPending ? pending : Array(pending.prefix(Self.pendingPreview))) { receipt in
                         NavigationLink(value: Route.receipt(receipt.id)) {
                             HStack(spacing: 10) {
                                 ReceiptRow(receipt: receipt)
@@ -74,12 +77,21 @@ struct ReceiptsView: View {
                                     .disabled(busy)
                             }
                     }
+                    if pending.count > Self.pendingPreview {
+                        Button {
+                            withAnimation(.snappy) { showAllPending.toggle() }
+                        } label: {
+                            Label(showAllPending ? String("Näytä vähemmän") : String("Näytä kaikki (\(pending.count))"),
+                                  systemImage: showAllPending ? "chevron.up" : "chevron.down")
+                        }
+                        .foregroundStyle(Theme.ink)
+                    }
                     Button { Task { await review(pending.map(\.id)) } } label: {
                         Label("Hyväksy kaikki (\(pending.count))", systemImage: "checkmark.circle")
                     }
                     .disabled(busy)
                 } header: {
-                    Text("Odottaa hyväksyntää")
+                    Text("Odottaa hyväksyntää · \(pending.count)")
                 }
             }
             if let failure { Text(failure).foregroundStyle(Theme.danger) }
