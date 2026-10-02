@@ -33,14 +33,14 @@ public actor APIClient {
         return try decode(response)
     }
 
-    public func send<T: Decodable, B: Encodable>(_ method: String, _ path: String, body: B?, idempotencyKey: String? = nil) async throws -> T {
+    public func send<T: Decodable, B: Encodable>(_ method: String, _ path: String, query: [String: String] = [:], body: B?, idempotencyKey: String? = nil) async throws -> T {
         let data = try body.map { try JSONEncoder().encode($0) }
-        let response = try await perform(method, path, query: [:], body: data, contentType: data == nil ? nil : "application/json", idempotencyKey: idempotencyKey)
+        let response = try await perform(method, path, query: query, body: data, contentType: data == nil ? nil : "application/json", idempotencyKey: idempotencyKey)
         return try decode(response)
     }
 
-    public func raw(_ method: String, _ path: String, body: Data?, contentType: String?, idempotencyKey: String? = nil) async throws -> HTTPResponse {
-        try await perform(method, path, query: [:], body: body, contentType: contentType, idempotencyKey: idempotencyKey)
+    public func raw(_ method: String, _ path: String, query: [String: String] = [:], body: Data?, contentType: String?, idempotencyKey: String? = nil) async throws -> HTTPResponse {
+        try await perform(method, path, query: query, body: body, contentType: contentType, idempotencyKey: idempotencyKey)
     }
 
     /// A write with a given bearer token (sign-out after the store is cleared).
@@ -65,7 +65,9 @@ public actor APIClient {
     }
 
     private func decode<T: Decodable>(_ response: HTTPResponse) throws -> T {
-        do { return try JSONDecoder().decode(T.self, from: response.body) }
+        // A 204 (or any empty body) reads as an empty object.
+        let body = response.body.isEmpty ? Data("{}".utf8) : response.body
+        do { return try JSONDecoder().decode(T.self, from: body) }
         catch { throw LKError(status: response.status, code: "DECODE", message: "Palvelimen vastausta ei voitu lukea.") }
     }
 

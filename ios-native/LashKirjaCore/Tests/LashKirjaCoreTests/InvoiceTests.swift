@@ -71,3 +71,11 @@ private func fixture(_ name: String) throws -> Data {
     let counts = try JSONDecoder().decode(InvoiceCounts.self, from: fixture("invoice-counts.json"))
     #expect(counts.counts["draft"] == 1)
 }
+
+@Test func decodesRealCustomerDetail() throws {
+    let detail = try JSONDecoder().decode(CustomerDetail.self, from: fixture("customer-detail.json"))
+    #expect(detail.customer.name == "Testi Asiakas Oy")
+    #expect(detail.openBalance == Decimal(string: "101.7"))
+    #expect(detail.invoicedTotal == Decimal(string: "201.7"))
+    #expect(detail.invoices.first?.displayStatus == .sent)
+}

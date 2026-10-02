@@ -79,3 +79,17 @@ actor Flag { var value = false; func set() { value = true } }
     let c = APIClient(baseURL: base, transport: t, tokens: FixedToken(value: nil), sleep: noSleep)
     await #expect(throws: LKError.self) { let _: Me = try await c.get("/x") }
 }
+
+@Test func writeWithQuery() async throws {
+    let t = FakeTransport([ok(#"{"ok":true}"#)])
+    let c = APIClient(baseURL: base, transport: t, tokens: FixedToken(value: nil), sleep: noSleep)
+    let _: Ignored = try await c.send("DELETE", "/api/invoices/i1/payments", query: ["paymentId": "p 1"], body: Optional<EmptyBody>.none)
+    #expect(t.requests[0].url?.absoluteString == "https://example.test/api/invoices/i1/payments?paymentId=p%201")
+    #expect(t.requests[0].httpMethod == "DELETE")
+}
+
+@Test func emptyBodyDecodesAsIgnored() async throws {
+    let t = FakeTransport([HTTPResponse(status: 204, headers: ["x-lashkirja-api-version": "1"], body: Data())])
+    let c = APIClient(baseURL: base, transport: t, tokens: FixedToken(value: nil), sleep: noSleep)
+    let _: Ignored = try await c.send("DELETE", "/x", body: Optional<EmptyBody>.none)
+}

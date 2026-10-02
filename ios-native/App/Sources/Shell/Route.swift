@@ -24,9 +24,12 @@ enum AppTab: Hashable, CaseIterable {
     }
 }
 
-/// Every pushed screen. Plan 1 has placeholders only; each later plan adds its cases.
+/// Every pushed screen.
 enum Route: Hashable {
     case placeholder(String)
+    case invoice(String)
+    case customers
+    case customer(String)
 }
 
 extension View {
@@ -34,6 +37,9 @@ extension View {
         navigationDestination(for: Route.self) { route in
             switch route {
             case .placeholder(let title): PlaceholderScreen(title: title)
+            case .invoice(let id): InvoiceDetailView(invoiceId: id)
+            case .customers: CustomersView()
+            case .customer(let id): CustomerDetailView(customerId: id)
             }
         }
     }

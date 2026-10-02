@@ -81,3 +81,21 @@ public struct CustomerDraft: Encodable, Sendable, Equatable {
         try put(notes, .notes)
     }
 }
+
+/// `GET /api/customers/{id}`: the customer plus its invoice totals and invoices.
+public struct CustomerDetail: Decodable, Sendable {
+    public struct InvoiceSummary: Decodable, Sendable, Identifiable, Hashable {
+        public let id: String
+        public let number: Int
+        public let displayStatus: InvoiceStatus
+        public let issueDate: String
+        public let dueDate: String
+        public let gross: Decimal
+        public let open: Decimal
+    }
+    public let customer: Customer
+    public let openBalance: Decimal
+    public let openInvoiceCount: Int
+    public let invoicedTotal: Decimal
+    public let invoices: [InvoiceSummary]
+}

@@ -32,6 +32,7 @@ struct MainTabView: View {
     @ViewBuilder private func root(_ item: AppTab) -> some View {
         switch item {
         case .koti: KotiView()
+        case .myynti: MyyntiView()
         default: PlaceholderScreen(title: item.title)
         }
     }
