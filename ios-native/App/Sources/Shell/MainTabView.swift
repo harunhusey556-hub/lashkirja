@@ -5,6 +5,8 @@ struct MainTabView: View {
     @State private var showAdd = false
     @State private var showProfile = false
     @State private var showAssistant = false
+    @State private var showOnboarding = false
+    @Environment(AppModel.self) private var app
 
     var body: some View {
         TabView(selection: Binding(get: { tab }, set: select)) {
@@ -31,6 +33,12 @@ struct MainTabView: View {
         .sheet(isPresented: $showAdd) { AddSheet().presentationDetents([.medium]) }
         .sheet(isPresented: $showProfile) { ProfileSheet().presentationDetents([.medium, .large]) }
         .sheet(isPresented: $showAssistant) { AssistantView() }
+        .fullScreenCover(isPresented: $showOnboarding) { OnboardingView { showOnboarding = false } }
+        .overlay(alignment: .top) { OfflineBanner() }
+        .task {
+            struct State_: Decodable { let onboarded: Bool }
+            if let state: State_ = try? await app.api.get("/api/onboarding"), !state.onboarded { showOnboarding = true }
+        }
     }
 
     @ViewBuilder private func root(_ item: AppTab) -> some View {
