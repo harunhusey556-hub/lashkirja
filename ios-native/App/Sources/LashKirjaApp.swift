@@ -19,6 +19,7 @@ struct LashKirjaApp: App {
             RootView()
                 .environment(app)
                 .tint(Theme.accent)
+                .preferredColorScheme(.light)
                 .task { await app.start() }
                 .onChange(of: scenePhase) { _, phase in
                     if phase == .active { Task { await app.foreground() } }
