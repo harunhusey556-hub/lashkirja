@@ -1,0 +1,28 @@
+name: iOS native
+
+on:
+  push:
+    branches: [native]
+    paths: ["ios-native/**", ".github/workflows/ios-native.yml"]
+  workflow_dispatch:
+    inputs:
+      api_base_url:
+        description: "HTTPS API base URL baked into the app"
+        required: false
+        default: "https://desktop-7gu8ukj.tail42feb1.ts.net:8443"
+
+permissions:
+  contents: read
+
+jobs:
+  core-linux:
+    name: Core tests (Linux)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: swift-actions/setup-swift@v2
+        with:
+          swift-version: "6.1"
+      - name: swift test
+        working-directory: ios-native/LashKirjaCore
+        run: swift test 2>&1 | tee test.log; exit ${PIPESTATUS[0]}
