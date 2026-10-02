@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
-import { z } from "zod";
 import { listBankConnections, startBankConsent } from "@/lib/enablebanking/connect";
+import { startSchema } from "@/lib/enablebanking/start-input";
 import { respondToBankError } from "@/lib/enablebanking/respond";
 import { enableBankingStatus, loadEnableBankingConfig } from "@/lib/enablebanking/signing";
 import { BANK_NOT_CONFIGURED_MESSAGE, logBankSetupGap } from "@/lib/enablebanking/public-status";
@@ -9,26 +9,6 @@ import { consumeRateLimit } from "@/lib/rate-limit";
 import { requireSession } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
-
-const startSchema = z.object({
-  aspspName: z.string().trim().min(1).max(120),
-  aspspCountry: z
-    .string()
-    .trim()
-    .toUpperCase()
-    .regex(/^[A-Z]{2}$/)
-    .default("FI"),
-  psuType: z.enum(["personal", "business"]),
-  client: z.enum(["web", "app"]).optional().default("web"),
-  /** First sync starts here ("Mistä lähtien haetaan?"); omitted = all the bank allows. */
-  historyFrom: z
-    .string()
-    .regex(/^\d{4}-\d{2}-\d{2}$/)
-    .refine((value) => !Number.isNaN(Date.parse(`${value}T00:00:00Z`)) && value <= new Date().toISOString().slice(0, 10), {
-      message: "Virheellinen päivä",
-    })
-    .optional(),
-});
 
 export async function GET(req: NextRequest) {
   const session = await requireSession(req);
