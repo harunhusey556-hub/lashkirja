@@ -19,6 +19,7 @@ import { useLeavingRows } from "@/components/useLeavingRows";
 import BankConnectCard from "@/components/BankConnectCard";
 import { BankLogo } from "@/components/bank/BankPickerSheet";
 import { BankRowSheet } from "@/components/bank/BankRowSheet";
+import { focusRowId } from "@/lib/bank-feed-focus";
 import { useBankConnections } from "@/components/bank/useBankConnections";
 import { useStatementUpload } from "@/components/bank/useStatementUpload";
 import { accountSubline, type BankConnectionSummary } from "@/lib/bank-status";
@@ -328,6 +329,14 @@ export default function TapahtumatClient() {
     ? connectedNote ?? "Pankki on yhdistetty. Tapahtumat ilmestyvät tänne, kun pankki antaa ne."
     : "Yhdistä pankki, niin tapahtumat ilmestyvät tänne ja kohdistuvat kuitteihin.";
   const sheetRow = sheetRowId ? rows.find((row) => row.id === sheetRowId) ?? null : null;
+  const focusParam = searchParams.get("rivi");
+  const focusOpened = useRef(false);
+  useEffect(() => {
+    const id = focusRowId(focusParam, rows, focusOpened.current);
+    if (!id) return;
+    focusOpened.current = true;
+    setSheetRowId(id);
+  }, [focusParam, rows]);
 
   return (
     <div className="space-y-5">
