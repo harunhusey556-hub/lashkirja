@@ -4,6 +4,8 @@ import Foundation
 /// right under the month's status; what needs doing follows, then the month's figures and the
 /// open invoices, and the history last.
 public enum KotiSection: Hashable, Sendable {
+    /// "Viimeistele yritysprofiili": the onboarding was skipped and is still open.
+    case onboarding
     /// The month's checklist and the VAT estimate.
     case status
     /// Parts of the dashboard that did not load, with one retry.
@@ -20,6 +22,8 @@ public enum KotiSection: Hashable, Sendable {
     case money
     /// Pankkitilit (without the balance card), Avoimet myyntilaskut and ostolaskut.
     case positions
+    /// ALV-raja lähestyy / ylittynyt, outside the VAT register only.
+    case vatThreshold
     /// Tulot ja menot, 6 kk.
     case cashflow
     /// Hoidettu automaattisesti: this week, so only on the current month.
@@ -40,10 +44,12 @@ public enum KotiLayout {
         public var hasPositions: Bool
         public var cashflowMoved: Bool
         public var handled: Bool
+        public var onboardingOpen: Bool
+        public var vatThreshold: Bool
 
         public init(atCurrentMonth: Bool = true, brandNew: Bool = false, setupOpen: Bool = false, partialFailure: Bool = false,
                     balanceCard: Bool = false, hasTasks: Bool = false, failedJobs: Bool = false, hasPositions: Bool = false,
-                    cashflowMoved: Bool = false, handled: Bool = false) {
+                    cashflowMoved: Bool = false, handled: Bool = false, onboardingOpen: Bool = false, vatThreshold: Bool = false) {
             self.atCurrentMonth = atCurrentMonth
             self.brandNew = brandNew
             self.setupOpen = setupOpen
@@ -54,9 +60,11 @@ public enum KotiLayout {
             self.hasPositions = hasPositions
             self.cashflowMoved = cashflowMoved
             self.handled = handled
+            self.onboardingOpen = onboardingOpen
+            self.vatThreshold = vatThreshold
         }
 
-        public init(dashboard d: Dashboard, atCurrentMonth: Bool, hasTasks: Bool, failedJobs: Int) {
+        public init(dashboard d: Dashboard, atCurrentMonth: Bool, hasTasks: Bool, failedJobs: Int, onboardingOpen: Bool = false) {
             let setup = d.setup
             self.init(
                 atCurrentMonth: atCurrentMonth,
@@ -68,7 +76,9 @@ public enum KotiLayout {
                 failedJobs: failedJobs > 0,
                 hasPositions: !Koti.positionRows(d).isEmpty,
                 cashflowMoved: d.cashflow.contains { $0.income != 0 || $0.expenses != 0 },
-                handled: (d.handled?.count ?? 0) > 0
+                handled: (d.handled?.count ?? 0) > 0,
+                onboardingOpen: onboardingOpen,
+                vatThreshold: Koti.vatThreshold(d) != nil
             )
         }
     }
@@ -76,6 +86,8 @@ public enum KotiLayout {
     public static func sections(_ input: Input) -> [KotiSection] {
         let setup = input.atCurrentMonth && input.setupOpen
         var sections: [KotiSection] = []
+        // As on the web, the skipped onboarding waits at the top of Koti.
+        if input.onboardingOpen { sections.append(.onboarding) }
         // A brand-new account has no money to show yet: getting started is the whole page.
         if setup && input.brandNew { sections.append(.setup) }
         sections.append(.status)
@@ -85,6 +97,7 @@ public enum KotiLayout {
         if input.failedJobs { sections.append(.failedJobs) }
         sections.append(.money)
         if input.hasPositions { sections.append(.positions) }
+        if input.vatThreshold { sections.append(.vatThreshold) }
         if setup && !input.brandNew { sections.append(.setup) }
         if input.cashflowMoved { sections.append(.cashflow) }
         if input.handled && input.atCurrentMonth { sections.append(.handled) }

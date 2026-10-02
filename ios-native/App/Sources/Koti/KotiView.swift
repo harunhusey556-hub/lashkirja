@@ -17,7 +17,10 @@ struct KotiView: View {
             }
         }
         .task(id: app.dataVersion) {
-            if model == nil { model = KotiModel(api: app.api) }
+            if model == nil {
+                let app = self.app
+                model = KotiModel(api: app.api, profile: { await app.cachedProfile() })
+            }
             guard model?.state.value == nil || gate.isDue(version: app.dataVersion) else { return }
             // Marked only after a load that finished: a cancelled one must not count as fresh.
             let version = app.dataVersion
@@ -30,20 +33,31 @@ struct KotiView: View {
 /// Koti, top to bottom (`KotiLayout.sections`): the month's status, Rahatilanne, what needs
 /// doing, the month's sales and costs, open invoices, the six-month history.
 private struct KotiContent: View {
+    @Environment(AppModel.self) private var app
     @Bindable var model: KotiModel
     /// The bank row a receipt is being photographed for.
     @State private var captureFor: CaptureTarget?
+    /// Täydennä: the pending receipt whose gaps the approval sheet asks for.
+    @State private var approvalTarget: DashboardItem?
+    /// "Avaa kuitti" from the approval sheet: pushed once the sheet has closed.
+    @State private var openAfterApproval: String?
+    /// Muistuta: the invoice and its reminder preview, once both have loaded.
+    @State private var remindTarget: RemindTarget?
+    /// The task row whose reminder is loading (its pill shows a spinner).
+    @State private var remindLoading: String?
     /// Koti is a dashboard: five tasks, the rest on request, so the cards below stay in reach.
     @State private var taskLimit = ShowMore(step: 5)
     @Environment(\.dynamicTypeSize) private var typeSize
 
     struct CaptureTarget: Identifiable { let id = UUID(); let transactionId: String? }
+    struct RemindTarget: Identifiable { let invoice: Invoice; let preview: ReminderPreview; var id: String { invoice.id } }
 
     var body: some View {
         ScrollView {
             LoadState(state: model.state, retry: model.load) { dashboard in
                 let sections = KotiLayout.sections(.init(dashboard: dashboard, atCurrentMonth: model.atCurrentMonth,
-                                                         hasTasks: !model.visibleItems.isEmpty, failedJobs: model.failedJobs))
+                                                         hasTasks: !model.visibleItems.isEmpty, failedJobs: model.failedJobs,
+                                                         onboardingOpen: OnboardingGate.shared.isSnoozed))
                 VStack(alignment: .leading, spacing: 12) {
                     header(dashboard)
                     ForEach(sections, id: \.self) { section in
@@ -60,6 +74,16 @@ private struct KotiContent: View {
         .onChange(of: model.month) { _, _ in taskLimit.reset() }
         .fullScreenCover(item: $captureFor, onDismiss: { Task { await model.load() } }) { target in
             CaptureFlow(transactionId: target.transactionId)
+        }
+        .sheet(item: $approvalTarget, onDismiss: {
+            guard let id = openAfterApproval else { return }
+            openAfterApproval = nil
+            app.pendingRoute = PendingRoute(tab: .koti, route: .receipt(id))
+        }) { item in
+            KotiApprovalSheet(item: item, approve: { model.approve(item) }, openReceipt: { openAfterApproval = item.receiptId })
+        }
+        .sheet(item: $remindTarget) { target in
+            ReminderSheet(invoice: target.invoice, preview: target.preview) { message in model.say(message) }
         }
         .overlay(alignment: .bottom) {
             if let toast = model.toast {
@@ -80,6 +104,10 @@ private struct KotiContent: View {
 
     @ViewBuilder private func sectionView(_ section: KotiSection, _ d: Dashboard) -> some View {
         switch section {
+        case .onboarding:
+            OnboardingResumeCard { OnboardingGate.shared.resume() }
+        case .vatThreshold:
+            if let notice = Koti.vatThreshold(d) { VatThresholdCard(notice: notice) }
         case .status:
             statusCard(d)
         case .partialFailure:
@@ -153,20 +181,37 @@ private struct KotiContent: View {
                 }
                 .buttonStyle(.plain)
             }
-            if let vat = d.estimatedVat, d.vat?.registered == true {
+            if let due = model.vatDue {
                 Divider()
-                NavigationLink(value: Route.alv(d.month)) {
-                    HStack(spacing: 8) {
-                        Text(Koti.vatLine(isRefund: d.isRefund)).font(.subheadline).foregroundStyle(Theme.ink2)
-                        Spacer(minLength: 8)
-                        MoneyText(amount: vat).font(.subheadline.weight(.semibold)).foregroundStyle(Theme.ink)
-                        Chevron()
-                    }
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
+                vatDueRow(due, figures: model.vatFigures)
             }
         }
+    }
+
+    /// ALV-ilmoitus (web FP-4): the return due, its deadline and state, and the period's figure.
+    /// Opens the ALV screen on that period.
+    private func vatDueRow(_ due: KotiVatDue, figures: VatDueFigures?) -> some View {
+        let secondary = Koti.vatDueSecondary(due, figures)
+        return NavigationLink(value: Route.alv(due.lastMonth)) {
+            HStack(spacing: 8) {
+                Image(systemName: "percent").foregroundStyle(Theme.ink2).accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(Koti.vatDueTitle).font(.subheadline).foregroundStyle(Theme.ink)
+                    Text(secondary).font(.caption).foregroundStyle(Theme.ink2)
+                    ForEach(Koti.vatDueNotes(figures), id: \.self) { note in
+                        Text(note).font(.caption).foregroundStyle(Theme.warning)
+                    }
+                }
+                Spacer(minLength: 8)
+                if let figures {
+                    MoneyText(amount: figures.amount).font(.subheadline.weight(.semibold)).foregroundStyle(Theme.ink)
+                }
+                Chevron()
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityElement(children: .combine)
     }
 
     /// Shown only while an import or a fetch has failed; the queue has the reason and the retry.
@@ -238,7 +283,11 @@ private struct KotiContent: View {
     /// A row opens what it is about (the receipt, the bank row, the invoice); its pill
     /// (Hyväksy, Kohdista, Kuvaa kuitti) stays its own button inside the link.
     @ViewBuilder private func taskRow(_ item: DashboardItem) -> some View {
-        let row = TaskRow(item: item, approve: { model.approve(item) }, confirm: { model.confirmMatch(item) }, capture: { captureFor = CaptureTarget(transactionId: item.transactionId) })
+        let row = TaskRow(item: item, busy: remindLoading == item.id,
+                          approve: { model.approve(item) }, complete: { approvalTarget = item },
+                          confirm: { model.confirmMatch(item) },
+                          capture: { captureFor = CaptureTarget(transactionId: item.transactionId) },
+                          remind: { openReminder(item) })
         if let route = Route.forItem(item, month: model.month) {
             NavigationLink(value: route) {
                 row.contentShape(Rectangle())
@@ -246,6 +295,27 @@ private struct KotiContent: View {
             .buttonStyle(.plain)
         } else {
             row
+        }
+    }
+
+    /// Muistuta (web ReminderSheet): the invoice and its reminder preview load together, then the
+    /// sheet opens; a failure is said in the toast and the row stays.
+    private func openReminder(_ item: DashboardItem) {
+        guard let invoiceId = item.invoiceId, remindLoading == nil else { return }
+        let api = app.api
+        remindLoading = item.id
+        Task {
+            defer { remindLoading = nil }
+            do {
+                async let detail: InvoiceDetailResponse = api.get("/api/invoices/\(invoiceId)")
+                async let preview: ReminderPreviewResponse = api.get("/api/invoices/\(invoiceId)/reminders")
+                let (invoice, reminder) = try await (detail.invoice, preview.reminder)
+                remindTarget = RemindTarget(invoice: invoice, preview: reminder)
+            } catch is CancellationError {
+            } catch {
+                model.say(error.userMessage)
+                Haptics.error()
+            }
         }
     }
 
@@ -376,9 +446,12 @@ private struct Sparkline: View {
 
 private struct TaskRow: View {
     let item: DashboardItem
+    let busy: Bool
     let approve: () -> Void
+    let complete: () -> Void
     let confirm: () -> Void
     let capture: () -> Void
+    let remind: () -> Void
 
     var body: some View {
         HStack(spacing: 12) {
@@ -402,30 +475,47 @@ private struct TaskRow: View {
     }
 
     @ViewBuilder private var actionButton: some View {
-        switch item.kind {
-        case .pendingReceipt where item.gaps.isEmpty:
-            pill("Hyväksy", action: approve)
-        case .invoiceMatch:
-            pill("Kohdista", action: confirm)
-        case .missingReceipt:
+        let action = Koti.taskAction(item)
+        switch action {
+        case .approve:
+            pill(action, run: approve)
+        case .complete:
+            pill(action, run: complete)
+        case .match:
+            pill(action, run: confirm)
+        case .remind:
+            pill(action, run: remind)
+        case .capture:
             Button(action: capture) {
-                Text("Kuvaa kuitti").font(.caption.bold()).padding(.horizontal, 10).padding(.vertical, 5)
+                Text(action.label ?? "").font(.caption.bold()).padding(.horizontal, 10).padding(.vertical, 5)
             }
             .buttonStyle(.plain)
             .background(Theme.ink, in: Capsule())
             .foregroundStyle(Theme.onInk)
-        default:
+        case .open(let label):
+            // Not a button: the tap goes through to the row's link, which opens the item.
+            pillLabel(label).allowsHitTesting(false)
+        case .none:
             EmptyView()
         }
     }
 
-    private func pill(_ title: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Text(title).font(.caption.bold()).padding(.horizontal, 12).padding(.vertical, 5)
+    private func pill(_ action: Koti.TaskAction, run: @escaping () -> Void) -> some View {
+        Button(action: run) {
+            ZStack {
+                pillLabel(action.label ?? "").opacity(busy ? 0 : 1)
+                if busy { ProgressView().controlSize(.mini) }
+            }
         }
         .buttonStyle(.plain)
-        .background(Theme.accentSoft, in: Capsule())
-        .foregroundStyle(Theme.accentDark)
+        .disabled(busy)
+        .accessibilityLabel("\(action.label ?? ""): \(item.party)")
+    }
+
+    private func pillLabel(_ title: String) -> some View {
+        Text(title).font(.caption.bold()).padding(.horizontal, 12).padding(.vertical, 5)
+            .background(Theme.accentSoft, in: Capsule())
+            .foregroundStyle(Theme.accentDark)
     }
 
     private var symbol: String {
@@ -452,11 +542,9 @@ private struct TaskRow: View {
     private var subtitle: String {
         let day = (item.date ?? item.dueDate ?? item.paidDate ?? item.issueDate).map(APIDate.displayDay)
         switch item.kind {
-        case .pendingReceipt:
-            let rate = item.vatRate.map { "ALV \(NSDecimalNumber(decimal: $0).stringValue.replacingOccurrences(of: ".", with: ",")) %" }
-            return [item.category, rate].compactMap { $0 }.joined(separator: " · ")
+        case .pendingReceipt: return Koti.pendingSubtitle(item)
         case .missingReceipt: return ["Kuitti puuttuu", day].compactMap { $0 }.joined(separator: " · ")
-        case .overdueInvoice: return "Lasku \(item.number ?? 0) · \(item.daysLate ?? 0) pv myöhässä"
+        case .overdueInvoice: return Koti.overdueSubtitle(item)
         case .invoiceMatch: return "Maksu laskulle \(item.number ?? 0)"
         case .receiptMatch: return "Kuittiehdotus · \(day ?? "")"
         case .vatGap: return "ALV puuttuu"
@@ -799,5 +887,59 @@ private struct PartialFailureNotice: View {
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
+    }
+}
+
+/// The onboarding was skipped with "Ohita nyt" (web OnboardingResumeCard): one tap reopens the
+/// questions where they were left.
+private struct OnboardingResumeCard: View {
+    let resume: () -> Void
+
+    var body: some View {
+        Button(action: resume) {
+            HStack(spacing: 12) {
+                RowIcon(symbol: "sparkles", tint: Theme.accent)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(OnboardingResume.title).font(.body.weight(.semibold)).foregroundStyle(Theme.ink)
+                    Text(OnboardingResume.detail).font(.caption).foregroundStyle(Theme.ink2)
+                }
+                Spacer(minLength: 8)
+                Chevron()
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+/// ALV-raja lähestyy / ylittynyt (web :1118-1137), outside the VAT register only. Opens the
+/// company settings, where ALV-rekisterissä is switched on once registered in OmaVero.
+private struct VatThresholdCard: View {
+    let notice: Koti.VatThresholdNotice
+
+    var body: some View {
+        let tint = notice.exceeded ? Theme.danger : Theme.warning
+        NavigationLink(value: Route.settings) {
+            HStack(alignment: .top, spacing: 12) {
+                Image(systemName: "exclamationmark.triangle").foregroundStyle(tint).accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(notice.title).font(.subheadline.weight(.semibold)).foregroundStyle(notice.exceeded ? Theme.danger : Theme.ink)
+                    Text(notice.body).font(.caption).foregroundStyle(Theme.ink2)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: 8)
+                Chevron()
+            }
+            .padding(14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(tint.opacity(0.1), in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous).stroke(tint.opacity(0.3)))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityElement(children: .combine)
     }
 }

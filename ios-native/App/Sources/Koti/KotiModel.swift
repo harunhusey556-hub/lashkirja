@@ -6,6 +6,8 @@ import LashKirjaCore
 @Observable
 final class KotiModel {
     private let api: APIClient
+    /// The owner's profile, kept by AppModel: its ALV-verokausi picks the return the status card names.
+    private let profile: () async -> Profile?
     var month: String = MonthKey.current()
     private(set) var state: Loadable<Dashboard> = .idle
     /// Rows the owner just acted on: gone from the list at once, back if undone or failed,
@@ -13,6 +15,9 @@ final class KotiModel {
     private(set) var hidden = KotiHiddenRows()
     /// Failed imports and fetches: Koti shows a "Tuonnit ja virheet" row only while there are some.
     private(set) var failedJobs = 0
+    /// The ALV-ilmoitus row: the return due and, once `/api/alv` answers, its figures.
+    private(set) var vatDue: KotiVatDue?
+    private(set) var vatFigures: VatDueFigures?
     /// Only the latest load writes the screen: stepping months quickly, an older month's
     /// slower answer is dropped.
     private var loads = LoadGeneration()
@@ -20,7 +25,10 @@ final class KotiModel {
     private var pendingCommit: (() async -> Void)?
     private var toastTask: Task<Void, Never>?
 
-    init(api: APIClient) { self.api = api }
+    init(api: APIClient, profile: @escaping () async -> Profile?) {
+        self.api = api
+        self.profile = profile
+    }
 
     var visibleItems: [DashboardItem] { state.value?.items.filter { !hidden.contains($0.id) } ?? [] }
     var atCurrentMonth: Bool { month >= MonthKey.current() }
@@ -38,11 +46,39 @@ final class KotiModel {
             hidden.reloaded(present: dashboard.items.map(\.id), loadGeneration: generation)
             state = .loaded(dashboard)
             if let jobs = await jobsList, loads.isCurrent(generation) { failedJobs = JobsQueue.failedCount(jobs.jobs) }
+            await loadVatDue(dashboard, generation: generation)
         } catch is CancellationError {
             return
         } catch {
             guard loads.isCurrent(generation), month == self.month else { return }
             if state.value == nil { state = .failed(error.userMessage) }
+        }
+    }
+
+    /// The status card's ALV-ilmoitus row (web `useVatDue`): the period from the profile's
+    /// verokausi, the figures from `/api/alv`. A failed fetch keeps the row without its state.
+    private func loadVatDue(_ dashboard: Dashboard, generation: Int) async {
+        let profile = await self.profile()
+        let registered = dashboard.vat?.registered ?? profile?.vatRegistered ?? false
+        let due = Koti.vatDue(registered: registered, atCurrentMonth: dashboard.month >= MonthKey.current(),
+                              month: dashboard.month, today: APIDate.dayString(Date()), kind: profile?.vatPeriod)
+        guard loads.isCurrent(generation) else { return }
+        if due?.key != vatDue?.key { vatFigures = nil }
+        vatDue = due
+        guard let due else { return }
+        let figures: VatDueFigures? = try? await api.get("/api/alv", query: ["period": due.key])
+        guard loads.isCurrent(generation), vatDue?.key == due.key, let figures else { return }
+        vatFigures = figures
+    }
+
+    /// A passing message (a reminder sent, a failure) without an undo.
+    func say(_ text: String) {
+        flushPending()
+        withAnimation(.snappy) { toast = Toast(text: text, actionLabel: nil) }
+        toastTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 4_000_000_000)
+            guard !Task.isCancelled else { return }
+            withAnimation { self?.toast = nil }
         }
     }
 

@@ -179,10 +179,12 @@ public struct DashboardItem: Decodable, Sendable, Identifiable, Equatable {
     public let vatRate: Decimal?
     public let gaps: [String]
     public let fromBank: Bool
+    /// An overdue invoice whose last reminder's term still runs: when a new one is accepted.
+    public let nextReminderAt: String?
 
     enum CodingKeys: String, CodingKey {
         case id, kind, party, amount, date, dueDate, paidDate, issueDate, invoiceId, customerId, receiptId, transactionId
-        case number, daysLate, type, category, vatRate, gaps, fromBank
+        case number, daysLate, type, category, vatRate, gaps, fromBank, nextReminderAt
     }
 
     public init(from decoder: Decoder) throws {
@@ -206,5 +208,6 @@ public struct DashboardItem: Decodable, Sendable, Identifiable, Equatable {
         vatRate = try c.decodeMoneyIfPresent(.vatRate)
         gaps = try c.decodeIfPresent([String].self, forKey: .gaps) ?? []
         fromBank = try c.decodeIfPresent(Bool.self, forKey: .fromBank) ?? false
+        nextReminderAt = try c.decodeIfPresent(String.self, forKey: .nextReminderAt)
     }
 }
