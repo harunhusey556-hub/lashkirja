@@ -1866,4 +1866,7 @@ git push && scripts/ci-status.sh
 
 ## Plan 1 result
 
-(Filled in after Task 10.)
+Plan 1 tasks 1–9 done; CI green at 1f2f896 (skeleton) and the App target
+compiles on macos-26. Plans 2–8 were then executed from the roadmap and the
+inventory (ledger ruling), with two whole-branch reviews (opus) and their
+Critical/Important findings fixed. Task 10 (owner on device) is the hand-off.
