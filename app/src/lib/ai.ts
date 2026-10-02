@@ -151,6 +151,16 @@ export async function extractReceipt(
   mimeType = converted.mimeType;
 
   try {
+    // A photo is read by the model from the image itself; local OCR is only the fallback.
+    if (isCloudAiEnabled() && process.env.LLM_API_KEY && mimeType.startsWith("image/")) {
+      try {
+        const result = await extractWithAIFromImage(filePath, process.env.LLM_API_KEY, profileContext, vendorPriors);
+        return enrichExtractedReceipt({ ...result, rawText: "" });
+      } catch (error) {
+        console.warn("Receipt photo extraction failed; trying OCR:", error instanceof Error ? error.message : "UnknownError");
+      }
+    }
+
     const rawText = await extractDocumentText(filePath, mimeType);
 
     if (isCloudAiEnabled()) {
@@ -352,7 +362,41 @@ async function extractWithAIFromText(
   const promptText = buildExtractionPrompt(profileContext || null, vendorPriors || "");
     
   const content = `${promptText}\n\nKuitin/laskun teksti:\n${boundedLLMText(docText)}`;
+  return postExtraction(baseUrl, model, apiKey, content);
+}
 
+/** Longest side of a photo sent to the model: enough to read a till slip, small to send. */
+const VISION_MAX_SIDE = 1600;
+
+/**
+ * A photo goes to the model as an image (OpenAI-compatible `image_url`, which Gemini accepts),
+ * so reading it needs no local OCR: before this, a photo without tesseract on the server was
+ * saved with every field empty. Turned upright by its EXIF, scaled down and sent as JPEG.
+ */
+async function extractWithAIFromImage(
+  filePath: string,
+  apiKey: string,
+  profileContext?: string,
+  vendorPriors?: string
+): Promise<ExtractedReceipt> {
+  const sharp = (await import("sharp")).default;
+  const jpeg = await sharp(fs.readFileSync(filePath), { failOn: "none" })
+    .rotate()
+    .resize({ width: VISION_MAX_SIDE, height: VISION_MAX_SIDE, fit: "inside", withoutEnlargement: true })
+    .jpeg({ quality: 80 })
+    .toBuffer();
+  const baseUrl = process.env.LLM_BASE_URL || "https://api.openai.com/v1";
+  const model = process.env.LLM_MODEL || "gpt-4o-mini";
+  const promptText = buildExtractionPrompt(profileContext || null, vendorPriors || "");
+  return postExtraction(baseUrl, model, apiKey, [
+    { type: "text", text: `${promptText}\n\nKuitti tai lasku on liitteenä kuvana.` },
+    { type: "image_url", image_url: { url: `data:image/jpeg;base64,${jpeg.toString("base64")}` } },
+  ]);
+}
+
+type ExtractionContent = string | Array<{ type: "text"; text: string } | { type: "image_url"; image_url: { url: string } }>;
+
+async function postExtraction(baseUrl: string, model: string, apiKey: string, content: ExtractionContent): Promise<ExtractedReceipt> {
   const response = await fetchWithTimeout(`${baseUrl}/chat/completions`, {
     method: "POST",
     headers: {
