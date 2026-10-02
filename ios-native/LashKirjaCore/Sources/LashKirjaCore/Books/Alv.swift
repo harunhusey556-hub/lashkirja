@@ -31,6 +31,21 @@ public struct AlvReport: Decodable, Sendable {
         public let purchaseInvoiceCount: Int?
     }
 
+    /// Receipts with no VAT breakdown, left out of the fields (web "N kuittia ilman ALV-erittelyä").
+    public struct Review: Decodable, Sendable {
+        public let salesGross: Decimal
+        public let purchasesGross: Decimal
+        public let count: Int
+
+        enum CodingKeys: String, CodingKey { case salesGross, purchasesGross, count }
+        public init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            salesGross = try c.decodeMoneyIfPresent(.salesGross) ?? 0
+            purchasesGross = try c.decodeMoneyIfPresent(.purchasesGross) ?? 0
+            count = try c.decodeIfPresent(Int.self, forKey: .count) ?? 0
+        }
+    }
+
     public let period: Period
     public let vatRegistered: Bool
     public let field301: SalesField
@@ -44,4 +59,12 @@ public struct AlvReport: Decodable, Sendable {
     public let filing: Filing?
     public let basis: String?
     public let sources: Sources?
+    public let review: Review?
+    /// Income receipts left out because their bank row is already matched to an invoice.
+    public let excludedReceiptCount: Int?
+    public let creditNoteCount: Int?
+    /// F39: purchase invoices left out, flagged as possible duplicates, or counted because the linked receipt cannot be.
+    public let skippedPurchaseInvoiceCount: Int?
+    public let suspectedPurchaseDuplicateCount: Int?
+    public let purchaseReceiptUnusableCount: Int?
 }

@@ -25,6 +25,12 @@ struct PeriodsView: View {
     /// The precheck list on screen (Puuttuvat kuitit / Kohdistamattomat / Luonnoslaskut).
     @State private var precheckKind: String?
     @State private var precheckLimit = ShowMore()
+    /// The bank row a receipt is being photographed for (a row's "Kuvaa kuitti").
+    @State private var captureFor: CaptureTarget?
+    /// A row's "Täydennä": the receipt to complete, pushed over this screen.
+    @State private var pushed: Route?
+
+    struct CaptureTarget: Identifiable { let id = UUID(); let transactionId: String? }
 
     struct PendingLock: Identifiable {
         let id = UUID()
@@ -59,6 +65,10 @@ struct PeriodsView: View {
         }
         .task(id: "\(month)|\(app.dataVersion)") { await loadMonth() }
         .task(id: app.dataVersion) { await loadLock() }
+        .fullScreenCover(item: $captureFor, onDismiss: { Task { await loadMonth() } }) { target in
+            CaptureFlow(transactionId: target.transactionId)
+        }
+        .navigationDestination(item: $pushed) { route in RouteScreen(route: route) }
         .alert(closeTitle, isPresented: $confirmClose) {
             Button("Merkitse valmiiksi") { Task { await closeMonth() } }
             Button("Peru", role: .cancel) {}
@@ -253,9 +263,12 @@ struct PeriodsView: View {
                 Text(PeriodClose.secondary(item)).font(.caption).foregroundStyle(Theme.ink2)
             }
             Spacer(minLength: 8)
-            if let amount = item.amount {
-                MoneyText(amount: item.kind == .missingReceipt || item.kind == .receiptMatch ? abs(amount) : amount)
-                    .font(.subheadline)
+            VStack(alignment: .trailing, spacing: 6) {
+                if let amount = item.amount {
+                    MoneyText(amount: item.kind == .missingReceipt || item.kind == .receiptMatch ? abs(amount) : amount)
+                        .font(.subheadline)
+                }
+                rowAction(item)
             }
         }
         if let route = route(for: item) {
@@ -263,6 +276,31 @@ struct PeriodsView: View {
         } else {
             content
         }
+    }
+
+    /// The row's own action, as on the web: photograph the missing receipt, or complete the
+    /// receipt's VAT breakdown. Borderless, so it is its own tap target inside the row's link.
+    @ViewBuilder private func rowAction(_ item: DashboardItem) -> some View {
+        switch item.kind {
+        case .missingReceipt where item.transactionId != nil:
+            pill("Kuvaa kuitti", label: "Kuvaa kuitti: \(item.party)") { captureFor = CaptureTarget(transactionId: item.transactionId) }
+        case .vatGap:
+            if let id = item.receiptId {
+                pill("Täydennä", label: "Täydennä: \(item.party)") { pushed = .receipt(id) }
+            }
+        default:
+            EmptyView()
+        }
+    }
+
+    private func pill(_ title: String, label: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(title).font(.caption.bold()).padding(.horizontal, 10).padding(.vertical, 5)
+                .foregroundStyle(Theme.onInk)
+                .background(Theme.ink, in: Capsule())
+        }
+        .buttonStyle(.borderless)
+        .accessibilityLabel(label)
     }
 
     /// The row's own screen: a missing receipt opens that bank row, not the whole feed.

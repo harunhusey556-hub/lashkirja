@@ -49,6 +49,15 @@ struct RaportitView: View {
                         LabeledContent("Menot") { MoneyText(amount: report.total.expenseNet) }
                     }
                     LabeledContent("Tulos") { MoneyText(amount: report.total.profitNet).fontWeight(.semibold) }
+                    // What the figures may be missing; the list has no filter for either, so the rows
+                    // open the year's receipts (undated ones the whole list).
+                    ForEach(ReportDrill.dataQuality(missingVat: report.total.missingVatCount, undated: report.undatedCount, year: yearKey), id: \.self) { row in
+                        NavigationLink(value: Route.forDrill(row.drill)) {
+                            LabeledContent(row.title) {
+                                Text("\(row.count)").monospacedDigit().foregroundStyle(Theme.warning)
+                            }
+                        }
+                    }
                 }
                 monthSection(report.filledMonths(year: yearKey))
                 categorySection(report.total)
