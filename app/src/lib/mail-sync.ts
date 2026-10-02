@@ -12,6 +12,7 @@ import * as os from "os";
 
 import { createHash } from "crypto";
 import { withTrackedJob } from "./job-tracker";
+import { ARCHIVED_NOTE, isTooSmallToBeABill, looksLikeBill } from "./mail-classify";
 // We only process attachments that are likely to be receipts.
 const VALID_EXTENSIONS = [".pdf", ".jpg", ".jpeg", ".png", ".heic"];
 
@@ -169,6 +170,7 @@ async function syncImapAccountUntracked(accountId: string) {
           const ext = path.extname(filename).toLowerCase();
           
           if (!VALID_EXTENSIONS.includes(ext) && ext !== ".html") return;
+          if (isTooSmallToBeABill(mimeType, contentBuffer.length)) return;
 
           // Skip if we already processed this exact attachment (based on checksum/content)
           const checksum = createHash("sha256").update(contentBuffer).digest("hex");
@@ -186,6 +188,7 @@ async function syncImapAccountUntracked(accountId: string) {
           try {
             // 1) Run extraction
             const extraction = await extractReceipt(tempPath, mimeType, profileContext, vendorPriors);
+            const isBill = looksLikeBill(extraction);
             
             const { storageKey, absolutePath } = await writePrivateUpload(
               account.userId,
@@ -224,19 +227,21 @@ async function syncImapAccountUntracked(accountId: string) {
                 totalAmountCents: extraction.totalAmount ? Math.round(extraction.totalAmount * 100) : null,
                 vatDetails: extraction.vatDetails.length ? JSON.stringify(extraction.vatDetails) : null,
                 category: extraction.category,
-                notes: extraction.notes || `Haettu sähköpostista (${account.email})`,
+                notes: isBill
+                  ? extraction.notes || `Haettu sähköpostista (${account.email})`
+                  : `${ARCHIVED_NOTE} Haettu sähköpostista (${account.email})`,
                 reference: extraction.reference,
                 invoiceNumber: extraction.invoiceNumber,
                 type: extraction.type,
                 filePath: storageKey,
                 fileName: filename,
                 source: "email_sync",
-                reviewStatus: "pending",
+                reviewStatus: isBill ? "pending" : "rejected",
                 confidence: extraction.confidence,
                 rawText: extraction.rawText,
               }
             });
-            processedCount++;
+            if (isBill) processedCount++;
           } catch (error) {
             console.error("Failed to process email attachment:", error);
           } finally {

@@ -40,7 +40,9 @@ export function buildReceiptWhere(userId: string, input: ReceiptWhereInput): Pri
     where.date = { gte: bounds.start, lt: bounds.end };
   }
   if (input.category) where.category = input.category.slice(0, 100);
-  if (input.source === "ai" || input.source === "ocr" || input.source === "manual") where.source = input.source;
+  if (input.source === "ai" || input.source === "ocr" || input.source === "manual" || input.source === "email_sync") {
+    where.source = input.source;
+  }
 
   const amountFilter: { gte?: number; lte?: number } = {};
   try {
