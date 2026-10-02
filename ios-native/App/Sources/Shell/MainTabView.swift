@@ -13,24 +13,26 @@ struct MainTabView: View {
     var body: some View {
         TabView(selection: Binding(get: { tab }, set: select)) {
             ForEach([AppTab.koti, .myynti, .kirjanpito, .raportit], id: \.self) { item in
-                NavigationStack(path: path(item)) {
-                    root(item)
-                        .toolbar {
-                            ToolbarItemGroup(placement: .topBarTrailing) {
-                                Button { showAssistant = true } label: { Image(systemName: "bubble.left") }
-                                    .accessibilityLabel("Avustaja")
-                                Button { showSettings = true } label: { Image(systemName: "person.crop.circle") }
-                                    .accessibilityLabel("Asetukset")
+                Tab(item.title, systemImage: item.symbol, value: item) {
+                    NavigationStack(path: path(item)) {
+                        root(item)
+                            .toolbar {
+                                ToolbarItemGroup(placement: .topBarTrailing) {
+                                    Button { showAssistant = true } label: { Image(systemName: "bubble.left") }
+                                        .accessibilityLabel("Avustaja")
+                                    Button { showSettings = true } label: { Image(systemName: "person.crop.circle") }
+                                        .accessibilityLabel("Asetukset")
+                                }
                             }
-                        }
-                        .appDestinations()
+                            .appDestinations()
+                    }
                 }
-                .tabItem { Label(item.title, systemImage: item.symbol) }
-                .tag(item)
             }
-            Color.clear
-                .tabItem { Label(AppTab.add.title, systemImage: AppTab.add.symbol) }
-                .tag(AppTab.add)
+            // The search role sets "+" apart from the other tabs: on iOS 26 it is its own round
+            // button beside the bar. Selecting it never switches tab (see `select`).
+            Tab(AppTab.add.title, systemImage: AppTab.add.symbol, value: AppTab.add, role: .search) {
+                Color.clear
+            }
         }
         .sheet(isPresented: $showAdd) { AddSheet() }
         .sheet(isPresented: $showSettings) { SettingsSheet().presentationDetents([.large]) }
