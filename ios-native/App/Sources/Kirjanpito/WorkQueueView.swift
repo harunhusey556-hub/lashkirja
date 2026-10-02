@@ -21,6 +21,7 @@ struct WorkQueueView: View {
     var body: some View {
         List {
             if let data = state.value {
+                failuresSection(JobsQueue.listedFailures(data.jobs))
                 jobsSection(JobsQueue.visibleJobs(data.jobs))
                 itemsSections(data.items)
             } else {
@@ -51,6 +52,45 @@ struct WorkQueueView: View {
     }
 
     private var hasActiveJob: Bool { state.value?.jobs.contains(where: \.isActive) ?? false }
+
+    /// Bank and mail runs that failed and are still wrong, first, each with what happened and the
+    /// way to fix it; Koti's "Tuonnit ja virheet" count leads here.
+    @ViewBuilder private func failuresSection(_ failures: [BackgroundJob]) -> some View {
+        if !failures.isEmpty {
+            Section {
+                ForEach(failures) { job in
+                    let help = JobsQueue.help(for: job)
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack(spacing: 8) {
+                            Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(Theme.danger)
+                            Text(job.kindLabel).font(.subheadline.weight(.semibold)).foregroundStyle(Theme.ink)
+                            Spacer(minLength: 8)
+                            Text(APIDate.timestamp(job.createdAt)).font(.caption).foregroundStyle(Theme.ink2)
+                        }
+                        Text(help.explanation).font(.subheadline).foregroundStyle(Theme.ink)
+                        if let title = help.actionTitle, let route = route(for: help.action) {
+                            NavigationLink(value: route) {
+                                Text(title).font(.subheadline.weight(.semibold)).foregroundStyle(Theme.accent)
+                            }
+                        }
+                    }
+                    .padding(.vertical, 4)
+                }
+            } header: {
+                Text("Epäonnistuneet")
+            } footer: {
+                Text("Kun seuraava haku onnistuu, virhe poistuu tästä itsestään.")
+            }
+        }
+    }
+
+    private func route(for action: JobsQueue.FailureAction) -> Route? {
+        switch action {
+        case .chooseAccounts, .bankConnection: .bankAccounts
+        case .emailSettings: .emailImport
+        case .none: nil
+        }
+    }
 
     @ViewBuilder private func jobsSection(_ jobs: [BackgroundJob]) -> some View {
         Section {

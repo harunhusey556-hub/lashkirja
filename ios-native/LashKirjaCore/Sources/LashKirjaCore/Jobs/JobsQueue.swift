@@ -10,8 +10,10 @@ public struct BackgroundJob: Decodable, Sendable, Identifiable, Hashable {
     public let error: String?
     public let progressLabel: String?
     public let createdAt: String
+    /// What the job worked on (a bank connection, a mailbox); a later success for it closes a failure.
+    public let resourceId: String?
 
-    enum CodingKeys: String, CodingKey { case id, kind, status, title, detail, error, progressLabel, createdAt }
+    enum CodingKeys: String, CodingKey { case id, kind, status, title, detail, error, progressLabel, createdAt, resourceId }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -23,6 +25,7 @@ public struct BackgroundJob: Decodable, Sendable, Identifiable, Hashable {
         error = try c.decodeIfPresent(String.self, forKey: .error)
         progressLabel = try c.decodeIfPresent(String.self, forKey: .progressLabel)
         createdAt = try c.decodeIfPresent(String.self, forKey: .createdAt) ?? ""
+        resourceId = try c.decodeIfPresent(String.self, forKey: .resourceId)
     }
 
     public var isActive: Bool { status == "pending" || status == "running" }
@@ -148,5 +151,60 @@ public enum JobsQueue {
 
     public static func filter(_ items: [WorkQueueItem], kind: String) -> [WorkQueueItem] {
         kind == "all" ? items : items.filter { $0.kind == kind }
+    }
+}
+
+/// Failed jobs as the owner should see them: still open, explained, with the way to fix them.
+extension JobsQueue {
+    public enum FailureAction: Equatable, Sendable {
+        case chooseAccounts, bankConnection, emailSettings, none
+    }
+
+    public struct FailureHelp: Equatable, Sendable {
+        public let explanation: String
+        public let action: FailureAction
+        public let actionTitle: String?
+    }
+
+    /// Failures not yet put right: one followed by a finished run of the same kind on the same
+    /// resource (the next bank sync went through) is over. Jobs come newest first.
+    public static func openFailures(_ jobs: [BackgroundJob]) -> [BackgroundJob] {
+        jobs.enumerated().compactMap { index, job in
+            guard job.status == "failed" else { return nil }
+            // Without a resource (each receipt read is its own file) nothing later closes it.
+            guard let resource = job.resourceId else { return job }
+            let fixedLater = jobs[..<index].contains { later in
+                later.kind == job.kind && later.resourceId == resource && later.status == "done"
+            }
+            return fixedLater ? nil : job
+        }
+    }
+
+    /// The failures listed on "Tuonnit ja virheet": a failed receipt read is left to Korjattavat,
+    /// where it has its retry, so it is not shown twice.
+    public static func listedFailures(_ jobs: [BackgroundJob]) -> [BackgroundJob] {
+        openFailures(jobs).filter { $0.kind != "document_analysis" }
+    }
+
+    public static func help(for job: BackgroundJob) -> FailureHelp {
+        let error = job.error ?? ""
+        let lower = error.lowercased()
+        switch job.kind {
+        case "bank_sync":
+            if lower.contains("valitse ainakin yksi tili") {
+                return FailureHelp(
+                    explanation: "Pankki on yhdistetty, mutta yhtään tiliä ei ole valittu kirjanpitoon, joten tapahtumia ei haettu.",
+                    action: .chooseAccounts, actionTitle: "Valitse tilit")
+            }
+            return FailureHelp(
+                explanation: error.isEmpty ? "Tapahtumien haku pankista epäonnistui." : error,
+                action: .bankConnection, actionTitle: "Avaa pankkiyhteys")
+        case "email_scan":
+            return FailureHelp(
+                explanation: error.isEmpty ? "Sähköpostin tarkistus epäonnistui." : error,
+                action: .emailSettings, actionTitle: "Sähköpostiasetukset")
+        default:
+            return FailureHelp(explanation: error.isEmpty ? "Työ epäonnistui." : error, action: .none, actionTitle: nil)
+        }
     }
 }

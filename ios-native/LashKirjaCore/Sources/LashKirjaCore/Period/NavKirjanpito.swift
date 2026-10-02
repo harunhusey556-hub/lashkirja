@@ -3,7 +3,8 @@ import Foundation
 extension JobsQueue {
     /// Failed background jobs (a read, a bank fetch, an email check) still on the list.
     public static func failedCount(_ jobs: [BackgroundJob]) -> Int {
-        jobs.filter { $0.status == "failed" }.count
+        // Only what is still wrong: a failure the next run put right does not count.
+        openFailures(jobs).count
     }
 
     /// Koti's "Tuonnit ja virheet" row: "1 tuonti tai haku epäonnistui".
