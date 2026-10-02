@@ -1,0 +1,54 @@
+name: LashKirja
+options:
+  bundleIdPrefix: fi.tiyouba
+  deploymentTarget: { iOS: "17.0" }
+  createIntermediateGroups: true
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    MARKETING_VERSION: "1.0.0"
+    CURRENT_PROJECT_VERSION: "1"
+    API_BASE_URL: "https://desktop-7gu8ukj.tail42feb1.ts.net:8443"
+    TARGETED_DEVICE_FAMILY: "1"
+    CODE_SIGNING_ALLOWED: "NO"
+    CODE_SIGNING_REQUIRED: "NO"
+    CODE_SIGN_IDENTITY: ""
+packages:
+  LashKirjaCore:
+    path: ../LashKirjaCore
+targets:
+  LashKirja:
+    type: application
+    platform: iOS
+    sources: [Sources]
+    info:
+      path: Config/Info.plist
+      properties:
+        CFBundleDisplayName: LashKirja
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        LKAPIBaseURL: $(API_BASE_URL)
+        UILaunchScreen: {}
+        UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
+        ITSAppUsesNonExemptEncryption: false
+        NSCameraUsageDescription: "Kameralla kuvaat kuitit kirjanpitoon."
+        NSPhotoLibraryUsageDescription: "Valitse kuitin kuva kirjastosta."
+        NSFaceIDUsageDescription: "Face ID avaa sovelluksen lukituksen."
+        CFBundleURLTypes:
+          - CFBundleURLName: fi.tiyouba.lashkirja
+            CFBundleURLSchemes: [lashkirja]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: fi.tiyouba.lashkirja
+    dependencies:
+      - package: LashKirjaCore
+  LashKirjaAppTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources: [Tests/LashKirjaAppTests]
+    dependencies:
+      - target: LashKirja
+schemes:
+  LashKirja:
+    build: { targets: { LashKirja: all } }
+    test: { targets: [LashKirjaAppTests] }

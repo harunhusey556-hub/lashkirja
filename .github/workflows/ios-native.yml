@@ -26,3 +26,55 @@ jobs:
       - name: swift test
         working-directory: ios-native/LashKirjaCore
         run: swift test 2>&1 | tee test.log; exit ${PIPESTATUS[0]}
+
+  ios-build:
+    name: iOS build and tests
+    runs-on: macos-26
+    needs: core-linux
+    steps:
+      - uses: actions/checkout@v4
+      - name: Tools
+        run: |
+          brew install xcodegen xcbeautify
+          xcodebuild -version
+      - name: Generate project
+        working-directory: ios-native/App
+        run: xcodegen generate
+      - name: Build and test (simulator)
+        working-directory: ios-native/App
+        run: |
+          set -o pipefail
+          DEST=$(xcrun simctl list devices available -j | python3 -c 'import sys,json
+          d=json.load(sys.stdin)["devices"]
+          ids=[x["udid"] for k,v in sorted(d.items(), reverse=True) if "iOS" in k for x in v if x["name"].startswith("iPhone")]
+          print(ids[0] if ids else "")')
+          echo "Simulator: $DEST"
+          xcodebuild test -project LashKirja.xcodeproj -scheme LashKirja \
+            -destination "id=$DEST" -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO | xcbeautify --renderer github-actions
+
+  ipa:
+    name: Unsigned IPA
+    runs-on: macos-26
+    needs: ios-build
+    steps:
+      - uses: actions/checkout@v4
+      - run: brew install xcodegen xcbeautify
+      - name: Archive
+        working-directory: ios-native/App
+        env:
+          API_URL: ${{ inputs.api_base_url || 'https://desktop-7gu8ukj.tail42feb1.ts.net:8443' }}
+        run: |
+          set -o pipefail
+          xcodegen generate
+          xcodebuild -project LashKirja.xcodeproj -scheme LashKirja -configuration Release \
+            -sdk iphoneos -destination 'generic/platform=iOS' -derivedDataPath build \
+            API_BASE_URL="$API_URL" CURRENT_PROJECT_VERSION=${{ github.run_number }} \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" build | xcbeautify --renderer github-actions
+          mkdir -p Payload && cp -R build/Build/Products/Release-iphoneos/LashKirja.app Payload/
+          zip -qry LashKirja-native-unsigned.ipa Payload
+      - uses: actions/upload-artifact@v4
+        with:
+          name: LashKirja-native-unsigned-ipa
+          path: ios-native/App/LashKirja-native-unsigned.ipa
+          retention-days: 30
