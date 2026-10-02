@@ -39,11 +39,11 @@ struct MyyntiView: View {
                     shortcuts
                         .listRowBackground(Color.clear)
                         .listRowInsets(EdgeInsets())
-                }
-                Section {
+                        .listRowSeparator(.hidden)
                     chips
                         .listRowBackground(Color.clear)
-                        .listRowInsets(EdgeInsets())
+                        .listRowInsets(EdgeInsets(top: 12, leading: 0, bottom: 0, trailing: 0))
+                        .listRowSeparator(.hidden)
                 }
                 let rows = visible(list.invoices)
                 Section {
@@ -115,31 +115,35 @@ struct MyyntiView: View {
         openedInvoiceId = id
     }
 
+    /// Two tiles as wide as the cards around them, so they read as places to go, not filters.
     private var shortcuts: some View {
-        // Scrolls sideways instead of wrapping at large text sizes: it stays one line.
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
-                shortcutButton("Asiakkaat", symbol: "person.2", target: .customers)
-                shortcutButton("Toistuvat laskut", symbol: "repeat", target: .recurring)
-            }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 4)
+        HStack(spacing: 10) {
+            shortcutTile("Asiakkaat", symbol: "person.2", target: .customers)
+            shortcutTile("Toistuvat laskut", symbol: "repeat", target: .recurring)
         }
     }
 
-    private func shortcutButton(_ title: String, symbol: String, target: Shortcut) -> some View {
+    private func shortcutTile(_ title: String, symbol: String, target: Shortcut) -> some View {
         Button { shortcut = target } label: {
-            HStack(spacing: 6) {
-                Image(systemName: symbol).foregroundStyle(Theme.accent)
-                Text(title).lineLimit(1)
-                Image(systemName: "chevron.right").font(.caption2.weight(.semibold)).foregroundStyle(Theme.ink2)
+            HStack(spacing: 10) {
+                Image(systemName: symbol)
+                    .font(.body.weight(.semibold))
+                    .foregroundStyle(Theme.accent)
+                    .frame(width: 24)
+                Text(title)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(Theme.ink)
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.85)
+                    .multilineTextAlignment(.leading)
+                Spacer(minLength: 0)
+                Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(Theme.ink2)
             }
-            .font(.subheadline)
-            .foregroundStyle(Theme.ink)
             .padding(.horizontal, 14)
-            .padding(.vertical, 8)
-            .background(Theme.surface, in: Capsule())
-            .overlay(Capsule().stroke(Theme.line, lineWidth: 1))
+            .padding(.vertical, 16)
+            .frame(maxWidth: .infinity, minHeight: 60, alignment: .leading)
+            .background(Theme.surface, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
         }
         .buttonStyle(.plain)
     }
@@ -170,7 +174,6 @@ struct MyyntiView: View {
                     .accessibilityAddTraits(selected ? .isSelected : [])
                 }
             }
-            .padding(.horizontal, 16)
             .padding(.vertical, 4)
         }
         // A chip whose status vanished (credited after a refresh) falls back to "Kaikki".
