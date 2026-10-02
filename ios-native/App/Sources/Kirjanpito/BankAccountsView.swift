@@ -16,9 +16,21 @@ struct BankAccountsView: View {
     @State private var detail: BankAccount?
     @State private var adding = false
     @State private var disconnecting: BankConnection?
+    @State private var scoping: BankConnection?
+    @State private var widening: BankConnection?
+    /// The connection the picker just made ("" when the server did not say which), asked about once the list reloads.
+    @State private var justConnected: String?
+    /// The scope sheet opens by itself at most once per visit, so closing it is respected.
+    @State private var askedScope = false
 
     var body: some View {
         List {
+            // First, so a tap on Koti's or the hub's "valitse tilit" notice lands on the button.
+            if let connections {
+                ForEach(BankScope.unscoped(connections.connections)) { connection in
+                    Section { unscopedCard(connection) }
+                }
+            }
             if let overview {
                 Section {
                     LabeledContent("Saldo yhteensä") { MoneyText(amount: overview.totalBalance).fontWeight(.semibold) }
@@ -79,8 +91,12 @@ struct BankAccountsView: View {
                         }
                         .contextMenu {
                             Button { Task { await sync(connection) } } label: { Label("Päivitä", systemImage: "arrow.clockwise") }
+                            if !BankScope.accounts(connection).isEmpty {
+                                Button { scoping = connection } label: { Label("Valitse tilit", systemImage: "checklist") }
+                            }
                             Button(role: .destructive) { disconnecting = connection } label: { Label("Katkaise yhteys", systemImage: "xmark.circle") }
                         }
+                        connectionControls(connection)
                     }
                     if connections.enabled && connections.ready {
                         Button { showPicker = true } label: { Label("Yhdistä pankki", systemImage: "plus.circle") }
@@ -104,7 +120,15 @@ struct BankAccountsView: View {
         .scrollContentBackground(.hidden)
         .background(Theme.canvas)
         .navigationTitle("Pankkiyhteys ja tilit")
-        .sheet(isPresented: $showPicker, onDismiss: { Task { await load() } }) { BankPickerSheet() }
+        .sheet(isPresented: $showPicker, onDismiss: { Task { await afterConnect() } }) {
+            BankPickerSheet { connection in justConnected = connection?.id ?? "" }
+        }
+        .sheet(item: $scoping, onDismiss: { Task { await load() } }) { connection in
+            BankScopeSheet(connection: connection) { message in notice = message }
+        }
+        .sheet(item: $widening, onDismiss: { Task { await load() } }) { connection in
+            BankHistorySheet(connection: connection) { message in notice = message }
+        }
         .sheet(isPresented: $adding) {
             BankAccountFormSheet(account: nil) { message in Task { await changed(message) } }
         }
@@ -122,7 +146,79 @@ struct BankAccountsView: View {
             Text("Suostumus pankissa suljetaan. Jo haetut tiliotteet säilyvät.")
         }
         .refreshable { await load() }
-        .task(id: showArchived) { await load() }
+        .task(id: showArchived) {
+            await load()
+            askScopeOnce()
+        }
+    }
+
+    /// The warning the owner could not act on before: a connection with no account in the books.
+    private func unscopedCard(_ connection: BankConnection) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Label("Valitse kirjanpitoon kuuluvat tilit", systemImage: "exclamationmark.triangle.fill")
+                .font(.headline)
+                .foregroundStyle(Theme.warning)
+            Text("\(connection.aspspName) on yhdistetty, mutta yhtään tiliä ei ole valittu kirjanpitoon. Tapahtumia ei haeta ennen kuin valitset tilit.")
+                .font(.subheadline)
+                .foregroundStyle(Theme.ink)
+            Button("Valitse tilit") { scoping = connection }
+                .buttonStyle(.primary)
+        }
+        .padding(.vertical, 6)
+        .listRowBackground(Theme.accentSoft)
+    }
+
+    /// Under each connection: which accounts the books use, and how far back rows are fetched.
+    @ViewBuilder private func connectionControls(_ connection: BankConnection) -> some View {
+        if !BankScope.accounts(connection).isEmpty && connection.status != "revoked" {
+            Button { scoping = connection } label: {
+                HStack {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Valitse tilit").foregroundStyle(Theme.ink)
+                        Text(BankScope.summary(connection))
+                            .font(.caption)
+                            .foregroundStyle(BankScope.isUnscoped(connection) ? Theme.warning : Theme.ink2)
+                    }
+                    Spacer()
+                    Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(Theme.ink2)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+        }
+        if connection.reportsHistory {
+            VStack(alignment: .leading, spacing: 6) {
+                Text(BankHistory.rangeLabel(connection.historyFrom)).font(.subheadline).foregroundStyle(Theme.ink2)
+                if BankHistory.canFetchOlder(connection) {
+                    Button { widening = connection } label: {
+                        Label("Hae vanhempia tapahtumia", systemImage: "clock.arrow.circlepath")
+                    }
+                    .buttonStyle(.borderless)
+                    .disabled(BankScope.inScopeIDs(connection).isEmpty)
+                    if BankScope.inScopeIDs(connection).isEmpty {
+                        Text("Valitse ensin tilit, joilta tapahtumat haetaan.").font(.caption).foregroundStyle(Theme.ink2)
+                    }
+                }
+            }
+        }
+    }
+
+    /// Opens the scope sheet once per visit when a connection has no account in the books.
+    private func askScopeOnce() {
+        guard !askedScope, let connections, !showPicker, scoping == nil, widening == nil, detail == nil, !adding else { return }
+        askedScope = true
+        scoping = BankScope.unscoped(connections.connections).first
+    }
+
+    /// New accounts never join the books by themselves: ask right after the bank consent.
+    private func afterConnect() async {
+        await load()
+        guard let id = justConnected else { return }
+        justConnected = nil
+        askedScope = true
+        let list = connections?.connections ?? []
+        let fresh = list.first { $0.id == id } ?? list.first(where: BankScope.isUnscoped)
+        if let fresh, BankScope.shouldAskAfterConnect(fresh) { scoping = fresh }
     }
 
     private func status(_ c: BankConnection) -> String {
@@ -162,8 +258,10 @@ struct BankAccountsView: View {
         syncing = c.id
         defer { syncing = nil }
         do {
-            let _: Ignored = try await app.api.send("POST", "/api/bank/connections/\(c.id)/sync", body: EmptyBody())
+            let result: BankSyncResult = try await app.api.send("POST", "/api/bank/connections/\(c.id)/sync", body: EmptyBody())
             Haptics.success()
+            notice = result.summary
+            failure = nil
             app.dataVersion += 1
             await load()
         } catch {
@@ -547,16 +645,21 @@ struct BankBalanceRow: View {
     }
 }
 
-/// Bank selection and the Enable Banking consent in a system auth session.
+/// Bank selection, "Mistä lähtien haetaan?", and the Enable Banking consent in a system auth session.
 struct BankPickerSheet: View {
     @Environment(AppModel.self) private var app
     @Environment(\.dismiss) private var dismiss
     @Environment(\.webAuthenticationSession) private var webAuth
+    /// After the bank's consent went through, with the new connection when the server returned it.
+    var onConnected: (BankConnection?) -> Void = { _ in }
     @State private var psuType = "personal"
     @State private var banks: Loadable<[Aspsp]> = .idle
     @State private var search = ""
+    @State private var chosen: Aspsp?
+    @State private var historyKey = BankHistory.defaultKey
     @State private var connecting: String?
     @State private var failure: String?
+    @State private var connectFailure: String?
 
     var body: some View {
         NavigationStack {
@@ -570,12 +673,17 @@ struct BankPickerSheet: View {
                 if let failure { Text(failure).foregroundStyle(Theme.danger) }
                 if let list = banks.value {
                     ForEach(list.filter { BankSearch.matches($0.name, search) }) { bank in
-                        Button { Task { await connect(bank) } } label: {
+                        Button {
+                            Haptics.selection()
+                            historyKey = BankHistory.defaultKey
+                            connectFailure = nil
+                            chosen = bank
+                        } label: {
                             HStack {
                                 BankLogo(name: bank.name, logo: bank.logo)
                                 Text(bank.name).foregroundStyle(Theme.ink)
                                 Spacer()
-                                if connecting == bank.name { ProgressView() } else { Image(systemName: "chevron.right").foregroundStyle(Theme.ink2) }
+                                Image(systemName: "chevron.right").foregroundStyle(Theme.ink2)
                             }
                         }
                         .disabled(connecting != nil)
@@ -588,8 +696,64 @@ struct BankPickerSheet: View {
             .navigationTitle("Yhdistä pankki")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Peruuta") { dismiss() } } }
+            .navigationDestination(item: $chosen) { bank in historyStep(bank) }
             .task(id: psuType) { await load() }
         }
+        .interactiveDismissDisabled(connecting != nil)
+    }
+
+    /// The web's "Mistä lähtien haetaan?" step: the first fetch used to pull the bank's whole history.
+    private func historyStep(_ bank: Aspsp) -> some View {
+        List {
+            Section {
+                ForEach(BankHistory.connectChoices()) { choice in
+                    Button {
+                        Haptics.selection()
+                        historyKey = choice.key
+                    } label: {
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(choice.label).foregroundStyle(Theme.ink)
+                                if let hint = choice.hint { Text(hint).font(.caption).foregroundStyle(Theme.ink2) }
+                            }
+                            Spacer()
+                            Image(systemName: historyKey == choice.key ? "largecircle.fill.circle" : "circle")
+                                .foregroundStyle(historyKey == choice.key ? Theme.ink : Theme.line)
+                        }
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityAddTraits(historyKey == choice.key ? .isSelected : [])
+                }
+            } header: {
+                HStack(spacing: 10) {
+                    BankLogo(name: bank.name, logo: bank.logo)
+                    Text("Mistä lähtien haetaan?").font(.headline).foregroundStyle(Theme.ink).textCase(nil)
+                }
+                .padding(.bottom, 4)
+            } footer: {
+                Text("Vanhempia tapahtumia voi hakea myöhemmin kohdasta Pankkiyhteys ja tilit tai tuoda tiliotetiedostona.")
+            }
+            .disabled(connecting != nil)
+            Section {
+                if let connectFailure { Text(connectFailure).foregroundStyle(Theme.danger) }
+                Button { Task { await connect(bank) } } label: {
+                    HStack(spacing: 8) {
+                        if connecting != nil { ProgressView().tint(Theme.onInk) }
+                        Text(connecting != nil ? "Avataan pankkia…" : "Jatka pankkiin")
+                    }
+                }
+                .buttonStyle(.primary)
+                .frame(maxWidth: .infinity)
+                .disabled(connecting != nil)
+            }
+            .listRowBackground(Color.clear)
+        }
+        .scrollContentBackground(.hidden)
+        .background(Theme.canvas)
+        .navigationTitle(bank.name)
+        .navigationBarTitleDisplayMode(.inline)
+        .navigationBarBackButtonHidden(connecting != nil)
     }
 
     private func load() async {
@@ -604,33 +768,53 @@ struct BankPickerSheet: View {
     }
 
     private func connect(_ bank: Aspsp) async {
-        struct Start: Encodable { let aspspName: String; let aspspCountry = "FI"; let psuType: String; let client = "app" }
+        struct Start: Encodable {
+            let aspspName: String
+            let aspspCountry = "FI"
+            let psuType: String
+            let client = "app"
+            /// Omitted for "everything the bank allows".
+            let historyFrom: String?
+        }
         struct Started: Decodable { let url: String }
         struct Callback: Encodable { let code: String; let state: String }
+        /// The connection is only a hint for the scope sheet: a shape it cannot read never fails the consent.
+        struct Completed: Decodable {
+            let connection: BankConnection?
+            enum CodingKeys: String, CodingKey { case connection }
+            init(from decoder: Decoder) throws {
+                connection = try? decoder.container(keyedBy: CodingKeys.self).decodeIfPresent(BankConnection.self, forKey: .connection)
+            }
+        }
+        guard connecting == nil else { return }
+        let historyFrom = BankHistory.connectChoices().first { $0.key == historyKey }?.from
         connecting = bank.name
-        failure = nil
+        connectFailure = nil
         defer { connecting = nil }
         do {
-            let started: Started = try await app.api.send("POST", "/api/bank/connections", body: Start(aspspName: bank.name, psuType: psuType))
+            let started: Started = try await app.api.send("POST", "/api/bank/connections",
+                                                          body: Start(aspspName: bank.name, psuType: psuType, historyFrom: historyFrom))
             guard let url = URL(string: started.url) else { return }
             let callback = try await webAuth.authenticate(using: url, callbackURLScheme: "lashkirja", preferredBrowserSession: .shared)
             let items = URLComponents(url: callback, resolvingAgainstBaseURL: false)?.queryItems ?? []
             if let error = items.first(where: { $0.name == "error" })?.value {
-                failure = error == "access_denied" || error == "cancelled" ? "Yhdistäminen peruttiin." : "Pankki palautti virheen: \(error)"
+                connectFailure = error == "access_denied" || error == "cancelled" ? "Yhdistäminen peruttiin." : "Pankki palautti virheen: \(error)"
                 return
             }
             guard let code = items.first(where: { $0.name == "code" })?.value, let state = items.first(where: { $0.name == "state" })?.value else {
-                failure = "Pankin paluuosoitteesta puuttui tunniste."
+                connectFailure = "Pankin paluuosoitteesta puuttui tunniste."
                 return
             }
-            let _: Ignored = try await app.api.send("POST", "/api/bank/connections/callback", body: Callback(code: code, state: state))
+            let completed: Completed = try await app.api.send("POST", "/api/bank/connections/callback", body: Callback(code: code, state: state))
             Haptics.success()
+            app.dataVersion += 1
+            onConnected(completed.connection)
             dismiss()
         } catch let error as ASWebAuthenticationSessionError where error.code == .canceledLogin {
-            failure = nil
+            connectFailure = nil
         } catch is CancellationError {
         } catch {
-            failure = error.userMessage
+            connectFailure = error.userMessage
         }
     }
 }

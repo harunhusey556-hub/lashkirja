@@ -11,6 +11,7 @@ struct EmailInboxView: View {
     @State private var total = 0
     @State private var truncated = false
     @State private var loadingMore = false
+    @State private var limit = ShowMore()
     @State private var counts = EmailInboxCounts()
     /// nil until the profile has answered: "no mailbox" is shown only when it is known.
     @State private var mailboxes: [ImapAccount]?
@@ -61,17 +62,11 @@ struct EmailInboxView: View {
                         if rows.isEmpty {
                             Text(folder.emptyText).foregroundStyle(Theme.ink2)
                         }
-                        ForEach(rows) { receipt in row(receipt) }
-                        if truncated {
-                            Button { Task { await loadMore() } } label: {
-                                HStack {
-                                    Text(loadingMore ? String("Ladataan…") : String("Lataa lisää (\(rows.count) / \(total))"))
-                                    Spacer()
-                                    if loadingMore { ProgressView() }
-                                }
-                            }
-                            .disabled(loadingMore)
-                            .onAppear { Task { await loadMore() } }
+                        ForEach(rows.prefix(limit.visible(rows.count))) { receipt in row(receipt) }
+                        // Ten at a time; the next server page is asked for only by the button, never on scroll.
+                        PagedShowMoreButton(limit: $limit, loaded: rows.count, total: total, serverHasMore: truncated, loading: loadingMore) {
+                            await loadMore()
+                            return (receipts.value ?? []).filter { !app.removedIds.contains($0.id) }.count
                         }
                     }
                 } else {
@@ -264,6 +259,7 @@ struct EmailInboxView: View {
         receipts = .idle
         total = 0
         truncated = false
+        limit.reset()
         folder = next
     }
 

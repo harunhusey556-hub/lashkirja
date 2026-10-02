@@ -10,6 +10,9 @@ struct RaportitView: View {
     /// The accountant package's period: "YYYY-MM", "YYYY-Qn" or "YYYY" (SALES-21).
     @State private var packageChoice = MonthKey.shift(MonthKey.current(), by: -1)
     @State private var showPackage = false
+    /// Tulot or Menot by category: one list at a time instead of two stacked (nil = the default).
+    @State private var categoryChoice: ReportCategoryKind?
+    @State private var categoryLimit = ShowMore()
 
     struct ExportKind: Identifiable { let type: String; let title: String; var id: String { type } }
     private let exports = [
@@ -53,12 +56,7 @@ struct RaportitView: View {
                     .frame(height: 180)
                     .padding(.vertical, 6)
                 }
-                if !report.total.incomeByCategory.isEmpty {
-                    Section("Tulot luokittain") { categories(report.total.incomeByCategory) }
-                }
-                if !report.total.expenseByCategory.isEmpty {
-                    Section("Menot luokittain") { categories(report.total.expenseByCategory) }
-                }
+                categorySection(report.total)
             } else {
                 LoadState(state: state, retry: load) { (_: ProfitLoss) in EmptyView() }.listRowBackground(Color.clear)
             }
@@ -85,6 +83,7 @@ struct RaportitView: View {
         .navigationTitle("Raportit")
         .refreshable { await load() }
         .task(id: year) { await load() }
+        .onChange(of: year) { _, _ in categoryLimit.reset() }
         .sheet(isPresented: $showPackage) {
             DocumentPreviewSheet(path: "/api/export/package", query: ["month": packagePeriod], fileName: "kirjanpito-\(packagePeriod).zip")
         }
@@ -108,6 +107,31 @@ struct RaportitView: View {
         }
         let quarters = (1...4).map { q in PackageOption(key: "\(y)-Q\(q)", title: "Q\(q)/\(y)") }
         return months + quarters + [PackageOption(key: y, title: "Koko vuosi \(y)")]
+    }
+
+    @ViewBuilder
+    private func categorySection(_ total: ProfitLoss.Period) -> some View {
+        let kinds = ReportCategoryKind.available(total)
+        if let kind = ReportCategoryKind.resolve(categoryChoice, in: total) {
+            let rows = kind.rows(total)
+            if kinds.count > 1 {
+                Section("Luokittain") {
+                    Picker("Luokittain", selection: Binding(get: { kind }, set: { categoryChoice = $0; categoryLimit.reset() })) {
+                        ForEach(kinds) { Text($0.title).tag($0) }
+                    }
+                    .pickerStyle(.segmented)
+                    .listRowBackground(Color.clear)
+                    .listRowInsets(EdgeInsets())
+                }
+            }
+            Section {
+                categories(Array(rows.prefix(categoryLimit.visible(rows.count))))
+                ShowMoreButton(limit: $categoryLimit, total: rows.count)
+            } header: {
+                // With the picker above, its label already names the list.
+                if kinds.count == 1 { Text("\(kind.title) luokittain") }
+            }
+        }
     }
 
     private func categories(_ rows: [ProfitLoss.Category]) -> some View {

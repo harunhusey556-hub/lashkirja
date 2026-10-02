@@ -33,6 +33,8 @@ private struct KotiContent: View {
     @Bindable var model: KotiModel
     /// The bank row a receipt is being photographed for.
     @State private var captureFor: CaptureTarget?
+    /// Koti is a dashboard: five tasks, the rest on request, so the cards below stay in reach.
+    @State private var taskLimit = ShowMore(step: 5)
     @Environment(\.dynamicTypeSize) private var typeSize
 
     struct CaptureTarget: Identifiable { let id = UUID(); let transactionId: String? }
@@ -54,6 +56,8 @@ private struct KotiContent: View {
         }
         .background(Theme.canvas)
         .refreshable { await model.load() }
+        // Another month has its own tasks: back to the first five.
+        .onChange(of: model.month) { _, _ in taskLimit.reset() }
         .fullScreenCover(item: $captureFor, onDismiss: { Task { await model.load() } }) { target in
             CaptureFlow(transactionId: target.transactionId)
         }
@@ -195,11 +199,20 @@ private struct KotiContent: View {
     private var tasks: some View {
         VStack(alignment: .leading, spacing: 8) {
             SectionHeader(title: "Tarvitaan sinulta")
+            let items = model.visibleItems
             VStack(spacing: 0) {
-                ForEach(Array(model.visibleItems.enumerated()), id: \.element.id) { index, item in
+                ForEach(Array(items.prefix(taskLimit.visible(items.count)).enumerated()), id: \.element.id) { index, item in
                     if index > 0 { Divider().padding(.leading, 60) }
                     taskRow(item)
                         .transition(.asymmetric(insertion: .opacity, removal: .move(edge: .leading).combined(with: .opacity)))
+                }
+                if taskLimit.buttonTitle(total: items.count) != nil {
+                    Divider().padding(.leading, 16)
+                    ShowMoreButton(limit: $taskLimit, total: items.count)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 12)
+                        .contentShape(Rectangle())
+                        .buttonStyle(.plain)
                 }
             }
             .background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))

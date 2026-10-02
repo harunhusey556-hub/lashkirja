@@ -8,6 +8,7 @@ struct StatementDetailView: View {
     let statementId: String
     @State private var state: Loadable<Statement> = .idle
     @State private var onlyOpen = false
+    @State private var limit = ShowMore()
     @State private var selected: BankTransaction?
     @State private var editing: BankTransaction?
     @State private var deletingRow: BankTransaction?
@@ -171,7 +172,7 @@ struct StatementDetailView: View {
         }
 
         Section {
-            Picker("Näytä", selection: $onlyOpen) {
+            Picker("Näytä", selection: Binding(get: { onlyOpen }, set: { onlyOpen = $0; limit.reset() })) {
                 Text("Kaikki").tag(false)
                 Text("Vaatii toimia").tag(true)
             }
@@ -186,7 +187,7 @@ struct StatementDetailView: View {
             } else if shown.isEmpty {
                 Text("Kaikilla tapahtumilla on kuitti tai merkintä").foregroundStyle(Theme.ink2)
             }
-            ForEach(shown) { row in
+            ForEach(shown.prefix(limit.visible(shown.count))) { row in
                 Button { selected = row } label: { BankRow(row: row) }
                     .buttonStyle(.plain)
                     .swipeActions(edge: .trailing) {
@@ -195,6 +196,7 @@ struct StatementDetailView: View {
                             .tint(Theme.neutralFill)
                     }
             }
+            ShowMoreButton(limit: $limit, total: shown.count)
         } header: {
             HStack {
                 Text("Tapahtumat")

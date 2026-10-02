@@ -12,6 +12,7 @@ struct PrivacyView: View {
     @State private var busy: AccountRequestBody.Kind?
     @State private var confirmClose = false
     @State private var download: AccountRequest?
+    @State private var requestLimit = ShowMore()
 
     var body: some View {
         List {
@@ -104,7 +105,7 @@ struct PrivacyView: View {
         case .loaded(let rows):
             if !rows.isEmpty {
             Section {
-                ForEach(rows) { request in
+                ForEach(rows.prefix(requestLimit.visible(rows.count))) { request in
                     HStack(spacing: 12) {
                         VStack(alignment: .leading, spacing: 2) {
                             Text(request.kindLabel).foregroundStyle(Theme.ink)
@@ -123,6 +124,7 @@ struct PrivacyView: View {
                         }
                     }
                 }
+                ShowMoreButton(limit: $requestLimit, total: rows.count)
             } header: {
                 Text("Pyynnöt")
             }

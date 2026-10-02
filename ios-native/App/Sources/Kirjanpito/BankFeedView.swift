@@ -22,6 +22,9 @@ struct BankFeedView: View {
     /// so it lands on this tab's stack and Back returns to the feed.
     @State private var openAfterSheet: Route?
     @State private var pushed: Route?
+    /// The month group on screen (one at a time); nil follows `GroupChoice` (the newest month).
+    @State private var shownMonth: String?
+    @State private var limit = ShowMore()
 
     /// `month` opens the feed on that month, `onlyOpen` on "Vaatii toimia" (web `?nayta=toimet`),
     /// and `focusTransactionId` opens that row's sheet once it is found.
@@ -37,7 +40,7 @@ struct BankFeedView: View {
     var body: some View {
         List {
             Section {
-                Picker("Näytä", selection: $onlyOpen) {
+                Picker("Näytä", selection: Binding(get: { onlyOpen }, set: { onlyOpen = $0; limit.reset() })) {
                     Text("Kaikki").tag(false)
                     Text("Vaatii toimia").tag(true)
                 }
@@ -45,19 +48,11 @@ struct BankFeedView: View {
                 .listRowBackground(Color.clear)
                 .listRowInsets(EdgeInsets())
             }
-            Section {
-                if let month {
-                    Button { self.month = nil } label: {
+            // Tiliotteet stays in the toolbar; the row here only repeated it.
+            if let month {
+                Section {
+                    Button { showAllMonths() } label: {
                         Label("\(StatementText.month(month)) · näytä kaikki kuukaudet", systemImage: "xmark.circle")
-                    }
-                }
-                NavigationLink(value: Route.statements) {
-                    HStack {
-                        Label("Tiliotteet", systemImage: "doc.plaintext").foregroundStyle(Theme.ink)
-                        Spacer()
-                        if month == nil && !statements.isEmpty {
-                            Text("\(statements.count)").foregroundStyle(Theme.ink2)
-                        }
                     }
                 }
             }
@@ -86,21 +81,41 @@ struct BankFeedView: View {
                         Button("Yhdistä pankki") { pushed = .bankAccounts }.buttonStyle(.borderless)
                     }
                 }
-                ForEach(months) { group in
-                    let rows = group.rows.filter { (!onlyOpen || BankFeed.needsAction($0)) && (search.isEmpty || $0.title.localizedCaseInsensitiveContains(search)) }
-                    if !rows.isEmpty {
+                // One month at a time, picked from a chip row, instead of every month stacked.
+                let groups = visibleGroups(months)
+                if let key = GroupChoice.pick(shownMonth, available: groups.map(\.month)),
+                   let group = groups.first(where: { $0.month == key }) {
+                    if groups.count > 1 {
                         Section {
-                            ForEach(rows) { row in
-                                Button { selected = row } label: { BankRow(row: row) }.buttonStyle(.plain)
+                            ScrollView(.horizontal, showsIndicators: false) {
+                                HStack(spacing: 8) {
+                                    ForEach(groups) { option in
+                                        SectionChip(title: monthTitle(option.month), count: option.rows.count, selected: option.month == key) {
+                                            shownMonth = option.month
+                                            limit.reset()
+                                        }
+                                    }
+                                }
+                                .padding(.vertical, 4)
                             }
-                        } header: {
-                            HStack {
-                                Text(group.month.isEmpty ? "Päiväämättömät" : MonthKey.title(group.month, currentYear: String(MonthKey.current().prefix(4))))
-                                Spacer()
-                                if group.open > 0 { Text("\(group.open) avoinna").foregroundStyle(Theme.accent) }
-                            }
+                            .listRowBackground(Color.clear)
+                            .listRowInsets(EdgeInsets())
                         }
                     }
+                    Section {
+                        ForEach(group.rows.prefix(limit.visible(group.rows.count))) { row in
+                            Button { selected = row } label: { BankRow(row: row) }.buttonStyle(.plain)
+                        }
+                        ShowMoreButton(limit: $limit, total: group.rows.count)
+                    } header: {
+                        HStack {
+                            Text(monthTitle(group.month))
+                            Spacer()
+                            if group.open > 0 { Text("\(group.open) avoinna").foregroundStyle(Theme.accent) }
+                        }
+                    }
+                } else if !months.isEmpty {
+                    Text(search.isEmpty ? "Kaikilla tapahtumilla on kuitti tai merkintä." : "Ei osumia.").foregroundStyle(Theme.ink2)
                 }
             } else {
                 LoadState(state: state, retry: load) { (_: [BankFeed.Month]) in EmptyView() }.listRowBackground(Color.clear)
@@ -108,12 +123,12 @@ struct BankFeedView: View {
         }
         .scrollContentBackground(.hidden)
         .background(Theme.canvas)
-        .searchable(text: $search, prompt: "Hae…")
+        .searchable(text: Binding(get: { search }, set: { search = $0; limit.reset() }), prompt: "Hae…")
         .navigationTitle("Pankkitapahtumat")
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Menu {
-                    Picker("Kuukausi", selection: $month) {
+                    Picker("Kuukausi", selection: Binding(get: { month }, set: { month = $0; limit.reset() })) {
                         Text("Kaikki kuukaudet").tag(String?.none)
                         ForEach(BankFeed.monthChoices(), id: \.self) { key in
                             Text(StatementText.month(key)).tag(String?.some(key))
@@ -168,6 +183,21 @@ struct BankFeedView: View {
         .animation(.snappy, value: onlyOpen)
     }
 
+    /// The month groups with the rows the filter and search leave, empty months dropped.
+    private func visibleGroups(_ months: [BankFeed.Month]) -> [BankFeed.Month] {
+        BankFeed.shownMonths(months, onlyOpen: onlyOpen, search: search)
+    }
+
+    private func monthTitle(_ key: String) -> String {
+        key.isEmpty ? "Päiväämättömät" : MonthKey.title(key, currentYear: String(MonthKey.current().prefix(4)))
+    }
+
+    private func showAllMonths() {
+        month = nil
+        shownMonth = nil
+        limit.reset()
+    }
+
     private func load() async {
         if state.value == nil { state = .loading }
         // A slow answer for a month the owner already left must not replace the newer one.
@@ -190,6 +220,7 @@ struct BankFeedView: View {
         guard let id = pendingFocus else { return }
         if let row = statements.flatMap({ $0.transactions }).first(where: { $0.id == id }) {
             pendingFocus = nil
+            reveal(row)
             selected = row
         } else if month != nil {
             // Not in this month: look in every month (the month change reloads).
@@ -197,6 +228,20 @@ struct BankFeedView: View {
         } else {
             pendingFocus = nil
         }
+    }
+
+    /// The focused row stays visible under its sheet: its month's chip, the filter let go if it hides
+    /// the row, and the list opened down to it.
+    private func reveal(_ row: BankTransaction) {
+        guard let months = state.value,
+              let group = months.first(where: { $0.rows.contains(where: { $0.id == row.id }) }) else { return }
+        if onlyOpen && !BankFeed.needsAction(row) { onlyOpen = false }
+        if !search.isEmpty && !row.title.localizedCaseInsensitiveContains(search) { search = "" }
+        shownMonth = group.month
+        let rows = visibleGroups(months).first(where: { $0.month == group.month })?.rows ?? []
+        var next = ShowMore()
+        if let index = rows.firstIndex(where: { $0.id == row.id }) { next.expand(toInclude: index, total: rows.count) }
+        limit = next
     }
 
     private func confirmAll() async {

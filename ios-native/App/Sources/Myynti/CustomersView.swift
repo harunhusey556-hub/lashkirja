@@ -9,6 +9,7 @@ struct CustomersView: View {
     @State private var showNew = false
     @State private var showImport = false
     @State private var notice: String?
+    @State private var limit = ShowMore()
 
     var body: some View {
         List {
@@ -16,7 +17,7 @@ struct CustomersView: View {
             if let customers = state.value {
                 let rows = customers.filter { !app.removedIds.contains($0.id) && (search.isEmpty || $0.name.localizedCaseInsensitiveContains(search)) }
                 if rows.isEmpty { Text("Ei asiakkaita.").foregroundStyle(Theme.ink2) }
-                ForEach(rows) { customer in
+                ForEach(rows.prefix(limit.visible(rows.count))) { customer in
                     NavigationLink(value: Route.customer(customer.id)) {
                         VStack(alignment: .leading, spacing: 2) {
                             Text(customer.name)
@@ -25,6 +26,7 @@ struct CustomersView: View {
                         }
                     }
                 }
+                ShowMoreButton(limit: $limit, total: rows.count)
             } else {
                 LoadState(state: state, retry: load) { (_: [Customer]) in EmptyView() }.listRowBackground(Color.clear)
             }
@@ -32,6 +34,7 @@ struct CustomersView: View {
         .scrollContentBackground(.hidden)
         .background(Theme.canvas)
         .searchable(text: $search, prompt: "Hae asiakasta")
+        .onChange(of: search) { _, _ in limit.reset() }
         .navigationTitle("Asiakkaat")
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
@@ -80,6 +83,7 @@ struct CustomerDetailView: View {
     /// A just-created invoice, opened when the form's sheet has closed.
     @State private var createdId: String?
     @State private var openedInvoiceId: String?
+    @State private var invoiceLimit = ShowMore()
 
     var body: some View {
         List {
@@ -100,7 +104,7 @@ struct CustomerDetailView: View {
                 }
                 if !detail.invoices.isEmpty {
                     Section("Laskut") {
-                        ForEach(detail.invoices) { invoice in
+                        ForEach(detail.invoices.prefix(invoiceLimit.visible(detail.invoices.count))) { invoice in
                             NavigationLink(value: Route.invoice(invoice.id)) {
                                 HStack {
                                     VStack(alignment: .leading) {
@@ -115,6 +119,7 @@ struct CustomerDetailView: View {
                                 }
                             }
                         }
+                        ShowMoreButton(limit: $invoiceLimit, total: detail.invoices.count)
                     }
                 }
                 if let notes = c.notes { Section("Muistiinpanot") { Text(notes) } }
@@ -292,6 +297,7 @@ struct CustomerImportSheet: View {
     /// One key per checked file: a retried "Tuo" (lost answer, second tap) gets the first
     /// import's answer back from the server instead of creating every customer twice.
     @State private var commitKey = UUID().uuidString
+    @State private var rowLimit = ShowMore()
 
     var body: some View {
         NavigationStack {
@@ -303,7 +309,7 @@ struct CustomerImportSheet: View {
                         .font(.footnote.monospaced())
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
-                        .onChange(of: csv) { _, _ in result = nil }
+                        .onChange(of: csv) { _, _ in result = nil; rowLimit.reset() }
                 } footer: {
                     Text("Valitse CSV-tiedosto tai liitä sen sisältö. Ensimmäinen rivi on otsikko. Erotin voi olla pilkku tai puolipiste.")
                 }
@@ -317,10 +323,13 @@ struct CustomerImportSheet: View {
                 }
                 if let failure { Section { Text(failure).foregroundStyle(Theme.danger) } }
                 if let result {
+                    // Rows to fix first: a long file opens on its first rows only.
+                    let rows = result.rows.filter { !$0.isValid } + result.rows.filter(\.isValid)
                     Section {
-                        ForEach(result.rows) { row in
+                        ForEach(rows.prefix(rowLimit.visible(rows.count))) { row in
                             Text(row.text).font(.caption).foregroundStyle(row.isValid ? Theme.ink : Theme.danger)
                         }
+                        ShowMoreButton(limit: $rowLimit, total: rows.count)
                     } header: {
                         Text(result.statusText)
                     }

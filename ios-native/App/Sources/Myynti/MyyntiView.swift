@@ -19,6 +19,7 @@ struct MyyntiView: View {
     @State private var createdId: String?
     @State private var openedInvoiceId: String?
     @State private var shortcut: Shortcut?
+    @State private var limit = ShowMore()
 
     /// Asiakkaat and Toistuvat laskut, one compact line under the summary.
     enum Shortcut: Hashable { case customers, recurring }
@@ -51,9 +52,10 @@ struct MyyntiView: View {
                         Text(search.isEmpty ? "Ei laskuja tässä näkymässä." : "Ei osumia.")
                             .foregroundStyle(Theme.ink2)
                     }
-                    ForEach(rows) { invoice in
+                    ForEach(rows.prefix(limit.visible(rows.count))) { invoice in
                         NavigationLink(value: Route.invoice(invoice.id)) { InvoiceRow(invoice: invoice) }
                     }
+                    ShowMoreButton(limit: $limit, total: rows.count)
                 } header: {
                     if !rows.isEmpty { Text("\(rows.count) laskua") }
                 }
@@ -107,6 +109,9 @@ struct MyyntiView: View {
             if !Task.isCancelled { gate.mark(version: version) }
         }
         .animation(.snappy, value: filter)
+        // Another chip or search shows a different list: it opens on its first rows again.
+        .onChange(of: filter) { _, _ in limit.reset() }
+        .onChange(of: search) { _, _ in limit.reset() }
     }
 
     private func openCreated() {
@@ -238,6 +243,7 @@ struct BankMatchSheet: View {
     @State private var state: Loadable<BankMatchPreview> = .idle
     @State private var busy = false
     @State private var failure: String?
+    @State private var limit = ShowMore()
 
     var body: some View {
         NavigationStack {
@@ -245,13 +251,14 @@ struct BankMatchSheet: View {
                 if let preview = state.value {
                     Section {
                         Text(preview.headline)
-                        ForEach(preview.rows) { row in
+                        ForEach(preview.rows.prefix(limit.visible(preview.rows.count))) { row in
                             HStack {
                                 Text("Lasku \(row.invoiceNumber), \(row.customerName)").lineLimit(2)
                                 Spacer()
                                 MoneyText(amount: row.amount)
                             }
                         }
+                        ShowMoreButton(limit: $limit, total: preview.rows.count)
                     } footer: {
                         VStack(alignment: .leading, spacing: 6) {
                             if let locked = preview.lockedText { Text(locked) }

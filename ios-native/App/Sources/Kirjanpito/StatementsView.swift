@@ -8,7 +8,7 @@ struct StatementsView: View {
     @Environment(AppModel.self) private var app
     @State private var statements: Loadable<[Statement]> = .idle
     @State private var accounts: [BankAccount] = []
-    @State private var showAll = false
+    @State private var limit = ShowMore()
     @State private var importing = false
     @State private var uploading = false
     @State private var uploadMessage: String?
@@ -54,12 +54,10 @@ struct StatementsView: View {
                     if list.isEmpty {
                         Text("Ei vielä tiliotteita. Tuo tiliote tai yhdistä pankki.").foregroundStyle(Theme.ink2)
                     }
-                    ForEach(StatementFiles.visible(list, showAll: showAll)) { statement in
+                    ForEach(list.prefix(limit.visible(list.count))) { statement in
                         NavigationLink(value: Route.statement(statement.id)) { StatementFileRow(statement: statement) }
                     }
-                    if let label = StatementFiles.toggleLabel(count: list.count, showAll: showAll) {
-                        Button(label) { withAnimation { showAll.toggle() } }
-                    }
+                    ShowMoreButton(limit: $limit, total: list.count)
                 } header: {
                     Text("Tiedostot")
                 }

@@ -18,6 +18,10 @@ struct InvoiceDetailView: View {
     @State private var notice: String?
     /// The version whose PDF was already fetched ahead, so a reload does not fetch it again.
     @State private var prefetchedKey: String?
+    @State private var lineLimit = ShowMore()
+    @State private var paymentLimit = ShowMore()
+    /// The history is secondary on this long screen: five events, then more on request.
+    @State private var activityLimit = ShowMore(step: 5)
 
     enum SheetKind: Identifiable { case payment, send, pdf, edit, reminder, reminderPdf; var id: Self { self } }
     enum ConfirmKind: Identifiable { case delete, credit, markSent; var id: Self { self } }
@@ -47,7 +51,7 @@ struct InvoiceDetailView: View {
                     }
                 }
                 Section("Rivit") {
-                    ForEach(invoice.lines) { line in
+                    ForEach(invoice.lines.prefix(lineLimit.visible(invoice.lines.count))) { line in
                         VStack(alignment: .leading, spacing: 2) {
                             HStack {
                                 Text(line.description)
@@ -58,6 +62,7 @@ struct InvoiceDetailView: View {
                                 .font(.caption).foregroundStyle(Theme.ink2)
                         }
                     }
+                    ShowMoreButton(limit: $lineLimit, total: invoice.lines.count)
                     LabeledContent("Veroton") { MoneyText(amount: invoice.net) }
                     LabeledContent("ALV") { MoneyText(amount: invoice.vat) }
                     LabeledContent("Yhteensä") { MoneyText(amount: invoice.gross).fontWeight(.semibold) }
@@ -66,7 +71,7 @@ struct InvoiceDetailView: View {
                     if invoice.payments.isEmpty {
                         Text("Ei maksuja.").foregroundStyle(Theme.ink2)
                     }
-                    ForEach(invoice.payments) { payment in
+                    ForEach(invoice.payments.prefix(paymentLimit.visible(invoice.payments.count))) { payment in
                         HStack {
                             VStack(alignment: .leading) {
                                 Text(APIDate.displayDay(payment.paidDate))
@@ -79,6 +84,7 @@ struct InvoiceDetailView: View {
                             Button("Poista", role: .destructive) { Task { await deletePayment(payment) } }
                         }
                     }
+                    ShowMoreButton(limit: $paymentLimit, total: invoice.payments.count)
                     if invoice.open > 0 && invoice.displayStatus != .draft && primaryAction(invoice) != .payment {
                         Button { sheet = .payment } label: { Label("Kirjaa maksu", systemImage: "eurosign.circle") }
                     }
@@ -93,12 +99,14 @@ struct InvoiceDetailView: View {
                 }
                 if !invoice.activity.isEmpty {
                     Section("Historia") {
-                        ForEach(invoice.activity) { item in
+                        // Newest first: the server sends the oldest first, and only the first rows show.
+                        ForEach(Array(invoice.activity.reversed()).prefix(activityLimit.visible(invoice.activity.count))) { item in
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(item.summary).font(.subheadline)
                                 Text(Self.timestamp(item.createdAt)).font(.caption).foregroundStyle(Theme.ink2)
                             }
                         }
+                        ShowMoreButton(limit: $activityLimit, total: invoice.activity.count)
                     }
                 }
             } else {

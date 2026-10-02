@@ -19,6 +19,12 @@ struct PeriodsView: View {
     @State private var lockError: String?
     @State private var lockNote: String?
     @State private var pendingLock: PendingLock?
+    /// The checklist step whose rows are on screen (one at a time); nil = the first one still open.
+    @State private var stepKey: String?
+    @State private var stepLimit = ShowMore()
+    /// The precheck list on screen (Puuttuvat kuitit / Kohdistamattomat / Luonnoslaskut).
+    @State private var precheckKind: String?
+    @State private var precheckLimit = ShowMore()
 
     struct PendingLock: Identifiable {
         let id = UUID()
@@ -74,17 +80,43 @@ struct PeriodsView: View {
     private var monthPicker: some View {
         Section {
             HStack {
-                Button { month = MonthKey.shift(month, by: -1) } label: { Image(systemName: "chevron.left") }
+                Button { changeMonth(by: -1) } label: { Image(systemName: "chevron.left") }
                     .accessibilityLabel("Edellinen kuukausi")
                 Spacer()
                 Text("\(MonthKey.name(month)) \(String(month.prefix(4)))").font(.headline)
                 Spacer()
-                Button { month = MonthKey.shift(month, by: 1) } label: { Image(systemName: "chevron.right") }
+                Button { changeMonth(by: 1) } label: { Image(systemName: "chevron.right") }
                     .disabled(month >= MonthKey.current())
                     .accessibilityLabel("Seuraava kuukausi")
             }
             .buttonStyle(.borderless)
         }
+    }
+
+    private func changeMonth(by delta: Int) {
+        month = MonthKey.shift(month, by: delta)
+        stepKey = nil
+        stepLimit.reset()
+    }
+
+    /// A row of chips that shows one list at a time.
+    private struct ChipOption: Identifiable {
+        let id: String
+        let title: String
+        let count: Int
+    }
+
+    private func chipRow(_ options: [ChipOption], selected: String, pick: @escaping (String) -> Void) -> some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(options) { option in
+                    SectionChip(title: option.title, count: option.count, selected: option.id == selected) { pick(option.id) }
+                }
+            }
+            .padding(.vertical, 4)
+        }
+        .listRowBackground(Color.clear)
+        .listRowInsets(EdgeInsets())
     }
 
     private func facts(_ data: PeriodMonthStatus) -> PeriodClose.Facts {
@@ -112,25 +144,46 @@ struct PeriodsView: View {
                 Text(PeriodClose.subtitle(f)).font(.subheadline).foregroundStyle(Theme.ink2)
             }
         }
-        ForEach(PeriodClose.steps(data)) { step in
-            Section {
+        // The steps as one short checklist; the rows of one step at a time below it, picked by chip,
+        // instead of every step's rows stacked.
+        let steps = PeriodClose.steps(data)
+        Section {
+            ForEach(steps) { step in
                 Label {
-                    Text(step.text).foregroundStyle(Theme.ink)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(step.title).foregroundStyle(Theme.ink)
+                        Text(step.text).font(.caption).foregroundStyle(Theme.ink2)
+                    }
                 } icon: {
                     Image(systemName: step.state == .done ? "checkmark.circle.fill" : step.state == .none ? "circle.dashed" : "circle")
                         .foregroundStyle(step.state == .done ? Theme.success : Theme.ink2)
                 }
-                ForEach(step.items) { item in
-                    itemRow(item)
-                }
-                if step.key == "bank" && !data.hasStatement {
-                    NavigationLink(value: Route.statements) {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("Tuo kuukauden tiliote").foregroundStyle(Theme.ink)
-                            Text("Ilman tiliotetta puuttuvia kuitteja ei näe").font(.caption).foregroundStyle(Theme.ink2)
-                        }
+            }
+            if !data.hasStatement && steps.contains(where: { $0.key == "bank" }) {
+                NavigationLink(value: Route.statements) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Tuo kuukauden tiliote").foregroundStyle(Theme.ink)
+                        Text("Ilman tiliotetta puuttuvia kuitteja ei näe").font(.caption).foregroundStyle(Theme.ink2)
                     }
                 }
+            }
+        } header: {
+            Text("Tarkistuslista")
+        }
+        let withRows = steps.filter { !$0.items.isEmpty }
+        if let key = GroupChoice.pick(stepKey, available: withRows.map(\.key), preferred: withRows.first(where: { $0.state == .open })?.key),
+           let step = withRows.first(where: { $0.key == key }) {
+            Section {
+                if withRows.count > 1 {
+                    chipRow(withRows.map { ChipOption(id: $0.key, title: $0.title, count: $0.items.count) }, selected: key) { picked in
+                        stepKey = picked
+                        stepLimit.reset()
+                    }
+                }
+                ForEach(step.items.prefix(stepLimit.visible(step.items.count))) { item in
+                    itemRow(item)
+                }
+                ShowMoreButton(limit: $stepLimit, total: step.items.count)
             } header: {
                 Text(step.title)
             }
@@ -321,10 +374,7 @@ struct PeriodsView: View {
                 }
             }
             if let precheck, precheck.count > 0 {
-                precheckSection("Puuttuvat kuitit", precheck.missingDocuments, empty: "Ei puuttuvia kuitteja.",
-                                header: "Avoinna ennen lukitusta (\(PeriodLock.formatMonth(precheck.month)))")
-                precheckSection("Kohdistamattomat tapahtumat", precheck.unmatchedTransactions, empty: "Ei kohdistettavia tapahtumia.", header: nil)
-                precheckSection("Luonnoslaskut", precheck.draftInvoices, empty: "Ei luonnoslaskuja.", header: nil)
+                precheckSection(precheck)
             }
         case .failed(let message):
             Section {
@@ -343,26 +393,42 @@ struct PeriodsView: View {
         }
     }
 
-    private func precheckSection(_ title: String, _ items: [PeriodPrecheck.Item], empty: String, header: String?) -> some View {
-        Section {
-            if items.isEmpty {
-                Text(empty).foregroundStyle(Theme.ink2)
-            }
-            ForEach(items) { item in
-                let label = VStack(alignment: .leading, spacing: 2) {
-                    Text(item.title).foregroundStyle(Theme.ink)
-                    Text(item.detail).font(.caption).foregroundStyle(Theme.ink2)
+    /// What is still open before the lock, one list at a time (only the lists that have rows).
+    @ViewBuilder private func precheckSection(_ precheck: PeriodPrecheck) -> some View {
+        let all: [(key: String, title: String, items: [PeriodPrecheck.Item])] = [
+            ("missing", "Puuttuvat kuitit", precheck.missingDocuments),
+            ("unmatched", "Kohdistamattomat tapahtumat", precheck.unmatchedTransactions),
+            ("drafts", "Luonnoslaskut", precheck.draftInvoices),
+        ]
+        let lists = all.filter { !$0.items.isEmpty }
+        if let key = GroupChoice.pick(precheckKind, available: lists.map { $0.key }),
+           let list = lists.first(where: { $0.key == key }) {
+            let items = list.items
+            Section {
+                if lists.count > 1 {
+                    chipRow(lists.map { ChipOption(id: $0.key, title: $0.title, count: $0.items.count) }, selected: key) { picked in
+                        precheckKind = picked
+                        precheckLimit.reset()
+                    }
                 }
-                if let route = Route.fromHref(item.href) {
-                    NavigationLink(value: route) { label }
-                } else {
-                    label
+                ForEach(items.prefix(precheckLimit.visible(items.count))) { item in
+                    let label = VStack(alignment: .leading, spacing: 2) {
+                        Text(item.title).foregroundStyle(Theme.ink)
+                        Text(item.detail).font(.caption).foregroundStyle(Theme.ink2)
+                    }
+                    if let route = Route.fromHref(item.href) {
+                        NavigationLink(value: route) { label }
+                    } else {
+                        label
+                    }
                 }
-            }
-        } header: {
-            VStack(alignment: .leading, spacing: 4) {
-                if let header { Text(header).font(.subheadline.weight(.semibold)).foregroundStyle(Theme.ink).textCase(nil) }
-                Text(title)
+                ShowMoreButton(limit: $precheckLimit, total: items.count)
+            } header: {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Avoinna ennen lukitusta (\(PeriodLock.formatMonth(precheck.month)))")
+                        .font(.subheadline.weight(.semibold)).foregroundStyle(Theme.ink).textCase(nil)
+                    Text(list.title)
+                }
             }
         }
     }
@@ -385,6 +451,8 @@ struct PeriodsView: View {
         do {
             let listed: PeriodPrecheck = try await app.api.get("/api/period-lock/precheck", query: ["month": selected])
             precheck = listed
+            precheckKind = nil
+            precheckLimit.reset()
             if listed.count == 0 { ask(month: selected, reopen: false, current: current) }
         } catch is CancellationError {
         } catch {

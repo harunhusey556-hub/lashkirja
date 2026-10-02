@@ -15,6 +15,7 @@ struct PurchaseInvoicesView: View {
     @State private var showNew = false
     @State private var payTarget: PurchaseInvoice?
     @State private var deleteTarget: PurchaseInvoice?
+    @State private var limit = ShowMore()
 
     private var filter: PurchaseFilter { PurchaseFilter(rawValue: filterRaw) ?? .all }
 
@@ -62,8 +63,9 @@ struct PurchaseInvoicesView: View {
 
     @ViewBuilder
     private func content(_ list: PurchaseInvoiceList) -> some View {
-        let groups = PurchaseFilter.groups(list.invoices.filter { !app.removedIds.contains($0.id) }, filter: filter)
-        let visibleCount = groups.reduce(0) { $0 + $1.items.count }
+        // One list, status by status (Myöhässä first): a status chip narrows it instead of stacked sections.
+        let rows = PurchaseFilter.groups(list.invoices.filter { !app.removedIds.contains($0.id) }, filter: filter).flatMap(\.items)
+        let visibleCount = rows.count
         let noPurchases = visibleCount == 0 && filter == .all
 
         if !noPurchases {
@@ -95,9 +97,12 @@ struct PurchaseInvoicesView: View {
             }
         }
 
-        ForEach(groups) { group in
-            Section(group.label) {
-                ForEach(group.items) { invoice in row(invoice) }
+        if !rows.isEmpty {
+            Section {
+                ForEach(rows.prefix(limit.visible(rows.count))) { invoice in row(invoice) }
+                ShowMoreButton(limit: $limit, total: rows.count)
+            } header: {
+                Text("\(filter.label) · \(rows.count)")
             }
         }
 
@@ -117,7 +122,10 @@ struct PurchaseInvoicesView: View {
                     } description: {
                         Text("Kokeile toista suodatinta.")
                     } actions: {
-                        Button("Tyhjennä suodatin") { filterRaw = PurchaseFilter.all.rawValue }
+                        Button("Tyhjennä suodatin") {
+                            filterRaw = PurchaseFilter.all.rawValue
+                            limit.reset()
+                        }
                     }
                 }
             }
@@ -170,6 +178,7 @@ struct PurchaseInvoicesView: View {
         return Button {
             Haptics.selection()
             filterRaw = option.rawValue
+            limit.reset()
         } label: {
             Text(label)
                 .font(.subheadline.weight(selected ? .semibold : .regular))

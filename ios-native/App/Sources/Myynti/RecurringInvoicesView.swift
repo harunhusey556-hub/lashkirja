@@ -13,6 +13,7 @@ struct RecurringInvoicesView: View {
     @State private var showNew = false
     @State private var notice: String?
     @State private var runner = RecurringRunner()
+    @State private var limit = ShowMore()
 
     var body: some View {
         List {
@@ -57,10 +58,11 @@ struct RecurringInvoicesView: View {
                         }
                         .padding(.vertical, 4)
                     }
-                    ForEach(list.recurring) { entry in
+                    ForEach(list.recurring.prefix(limit.visible(list.recurring.count))) { entry in
                         Button { selected = entry } label: { row(entry) }
                             .foregroundStyle(Theme.ink)
                     }
+                    ShowMoreButton(limit: $limit, total: list.recurring.count)
                 }
             } else {
                 LoadState(state: state, retry: load) { (_: RecurringList) in EmptyView() }
@@ -79,6 +81,7 @@ struct RecurringInvoicesView: View {
         .refreshable { await load() }
         // Every accepted write bumps dataVersion: a change made on the pushed detail shows here on Back.
         .task(id: "\(showInactive)|\(app.dataVersion)") { await load() }
+        .onChange(of: showInactive) { _, _ in limit.reset() }
         .sheet(isPresented: $showNew) {
             RecurringFormSheet(existing: nil) { message in
                 notice = message
@@ -224,6 +227,7 @@ struct RecurringDetailView: View {
     @State private var editing = false
     @State private var confirmDelete = false
     @State private var runner = RecurringRunner()
+    @State private var lineLimit = ShowMore()
 
     var body: some View {
         List {
@@ -252,7 +256,7 @@ struct RecurringDetailView: View {
                 }
             }
             Section("Rivit") {
-                ForEach(current.lines) { line in
+                ForEach(current.lines.prefix(lineLimit.visible(current.lines.count))) { line in
                     VStack(alignment: .leading, spacing: 2) {
                         HStack {
                             Text(line.description)
@@ -263,6 +267,7 @@ struct RecurringDetailView: View {
                             .font(.caption).foregroundStyle(Theme.ink2)
                     }
                 }
+                ShowMoreButton(limit: $lineLimit, total: current.lines.count)
             }
             if let last = current.lastRun, let invoiceId = last.invoiceId {
                 Section {

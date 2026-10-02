@@ -11,20 +11,17 @@ struct KirjanpitoView: View {
 
     var body: some View {
         List {
-            Section("Saapuneet") {
-                NavigationLink(value: Route.bankHub) {
-                    HubRow(title: "Pankki", subtitle: "Saldot, tulot ja menot yhdellä silmäyksellä", symbol: "building.columns.fill")
-                }
-                NavigationLink(value: Route.emailInbox) {
-                    HubRow(title: "Sähköposti", subtitle: "Sähköpostista haetut laskut ja arkisto", symbol: "envelope")
-                }
-            }
+            // Two sections. Pankkitapahtumat, Tiliotteet and Pankkiyhteys open from the Pankki hub
+            // (Vaatii toimia, Viimeisimmät, Tiliotteet, Pankkiyhteys); its row carries the open count.
             Section("Joka viikko") {
+                NavigationLink(value: Route.bankHub) {
+                    HubRow(title: "Pankki", subtitle: openRows > 0 ? "\(openRows) tapahtumaa vaatii toimia" : "Tapahtumat, saldot ja tiliotteet", symbol: "building.columns.fill")
+                }
                 NavigationLink(value: Route.receipts) {
                     HubRow(title: "Kuitit", subtitle: counts.map { "\($0.all) kuittia" + (pending > 0 ? " · \(pending) odottaa" : "") } ?? "Kaikki kuitit ja niiden tila", symbol: "doc.text")
                 }
-                NavigationLink(value: Route.bankFeed) {
-                    HubRow(title: "Pankkitapahtumat", subtitle: openRows > 0 ? "\(openRows) tapahtumaa vaatii toimia" : "Kohdista kuitit ja maksut", symbol: "list.bullet.rectangle")
+                NavigationLink(value: Route.emailInbox) {
+                    HubRow(title: "Sähköposti", subtitle: "Sähköpostista haetut laskut ja arkisto", symbol: "envelope")
                 }
                 NavigationLink(value: Route.purchaseInvoices) {
                     HubRow(title: "Ostolaskut", subtitle: "Saapuneet laskut ja niiden maksut", symbol: "tray.full")
@@ -36,14 +33,6 @@ struct KirjanpitoView: View {
                 }
                 NavigationLink(value: Route.alv("")) {
                     HubRow(title: "ALV-ilmoitus", subtitle: "Kauden arvonlisävero", symbol: "percent")
-                }
-            }
-            Section("Pankki ja tiliotteet") {
-                NavigationLink(value: Route.statements) {
-                    HubRow(title: "Tiliotteet", subtitle: "Tuo tiliote ja selaa tiedostoja", symbol: "doc.plaintext")
-                }
-                NavigationLink(value: Route.bankAccounts) {
-                    HubRow(title: "Pankkiyhteys ja tilit", subtitle: "Tilit, saldot ja pankkiyhteys", symbol: "building.columns")
                 }
             }
         }
@@ -93,5 +82,35 @@ struct HubRow: View {
             }
         }
         .padding(.vertical, 2)
+    }
+}
+
+/// One chip of a "one group at a time" row (months, statuses, checklist steps), styled as Myynti's chips.
+struct SectionChip: View {
+    let title: String
+    var count: Int? = nil
+    let selected: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button {
+            action()
+            Haptics.selection()
+        } label: {
+            HStack(spacing: 4) {
+                Text(title)
+                if let count {
+                    Text("\(count)").monospacedDigit().foregroundStyle(selected ? Theme.onInk.opacity(0.8) : Theme.ink2)
+                }
+            }
+            .font(.subheadline.weight(selected ? .semibold : .regular))
+            .foregroundStyle(selected ? Theme.onInk : Theme.ink)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 8)
+            .background(selected ? Theme.ink : Theme.surface, in: Capsule())
+            .overlay(Capsule().stroke(Theme.line, lineWidth: selected ? 0 : 1))
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(selected ? .isSelected : [])
     }
 }

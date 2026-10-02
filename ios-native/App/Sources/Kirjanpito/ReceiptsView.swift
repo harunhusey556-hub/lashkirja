@@ -30,6 +30,7 @@ struct ReceiptsView: View {
     /// The review queue shows its first rows only, so the receipts below stay in reach.
     @State private var showAllPending = false
     private static let pendingPreview = 3
+    @State private var limit = ShowMore()
 
     /// Month, tab, category, source and sort are kept between visits (as the purchase invoices' filter).
     private static let filterKey = "kuitit.filter"
@@ -106,22 +107,17 @@ struct ReceiptsView: View {
             .listRowBackground(Color.clear)
             .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 4, trailing: 0))
 
-            if let all = receipts.value?.filter({ !app.removedIds.contains($0.id) }) {
+            if receipts.value != nil {
+                let all = shownReceipts
                 Section {
                     if all.isEmpty {
                         Text(query.isFiltered ? "Ei hakua vastaavia kuitteja." : "Ei kuitteja.").foregroundStyle(Theme.ink2)
                     }
-                    ForEach(all) { receipt in row(receipt) }
-                    if truncated {
-                        Button { Task { await loadMore() } } label: {
-                            HStack {
-                                Text(loadingMore ? String("Ladataan…") : String("Lataa lisää (\(all.count) / \(total))"))
-                                Spacer()
-                                if loadingMore { ProgressView() }
-                            }
-                        }
-                        .disabled(loadingMore)
-                        .onAppear { Task { await loadMore() } }
+                    ForEach(all.prefix(limit.visible(all.count))) { receipt in row(receipt) }
+                    // Ten at a time; the next server page is asked for only by the button, never on scroll.
+                    PagedShowMoreButton(limit: $limit, loaded: all.count, total: total, serverHasMore: truncated, loading: loadingMore) {
+                        await loadMore()
+                        return shownReceipts.count
                     }
                 } header: {
                     if !all.isEmpty { Text("\(total) kuittia") }
@@ -184,11 +180,15 @@ struct ReceiptsView: View {
         }
         .onChange(of: query) { _, next in
             UserDefaults.standard.set(next.remembered, forKey: Self.filterKey)
+            limit.reset()
         }
         .animation(.snappy, value: pending.map(\.id))
     }
 
     // MARK: Pieces
+
+    /// The loaded rows minus the ones deleted a moment ago (`app.removedIds`).
+    private var shownReceipts: [Receipt] { (receipts.value ?? []).filter { !app.removedIds.contains($0.id) } }
 
     @ViewBuilder private func row(_ receipt: Receipt) -> some View {
         if selecting {
@@ -500,6 +500,50 @@ struct ReceiptRow: View {
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(receipt.isIncome ? Theme.success : Theme.ink)
             }
+        }
+    }
+}
+
+/// The "Näytä enemmän" row of a list the server pages (`PagedShowMore`): reveals ten loaded rows,
+/// and asks for the next page only once every loaded row is on screen. `fetch` returns the new row count.
+struct PagedShowMoreButton: View {
+    @Binding var limit: ShowMore
+    let loaded: Int
+    let total: Int
+    let serverHasMore: Bool
+    let loading: Bool
+    let fetch: () async -> Int
+
+    var body: some View {
+        if let title = PagedShowMore.title(limit, loaded: loaded, total: total, serverHasMore: serverHasMore, loading: loading) {
+            Button {
+                Haptics.selection()
+                switch PagedShowMore.step(limit, loaded: loaded, serverHasMore: serverHasMore) {
+                case .fetch:
+                    let before = loaded
+                    Task {
+                        let after = await fetch()
+                        withAnimation(.snappy) { PagedShowMore.revealFetched(&limit, before: before, after: after) }
+                    }
+                case .reveal, .fold:
+                    withAnimation(.snappy) { limit.more(total: loaded) }
+                case nil:
+                    break
+                }
+            } label: {
+                HStack {
+                    Text(title).font(.subheadline.weight(.semibold))
+                    Spacer()
+                    if loading {
+                        ProgressView()
+                    } else {
+                        Image(systemName: limit.visible(loaded) >= loaded && !serverHasMore ? "chevron.up" : "chevron.down")
+                            .font(.caption.weight(.semibold))
+                    }
+                }
+                .foregroundStyle(Theme.accent)
+            }
+            .disabled(loading)
         }
     }
 }

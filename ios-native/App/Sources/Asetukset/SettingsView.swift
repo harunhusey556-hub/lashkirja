@@ -254,11 +254,12 @@ struct DevicesView: View {
     @Environment(AppModel.self) private var app
     @State private var sessions: Loadable<[DeviceSession]> = .idle
     @State private var failure: String?
+    @State private var limit = ShowMore()
 
     var body: some View {
         List {
             if let list = sessions.value {
-                ForEach(list) { s in
+                ForEach(list.prefix(limit.visible(list.count))) { s in
                     VStack(alignment: .leading, spacing: 2) {
                         Text(s.label + (s.current ? " (tämä laite)" : ""))
                         Text("Käytetty \(InvoiceDetailView.timestamp(s.lastSeenAt ?? s.createdAt))").font(.caption).foregroundStyle(Theme.ink2)
@@ -267,6 +268,7 @@ struct DevicesView: View {
                         if !s.current { Button("Kirjaa ulos", role: .destructive) { Task { await signOut(id: s.id) } } }
                     }
                 }
+                ShowMoreButton(limit: $limit, total: list.count)
                 if list.count > 1 {
                     Button(role: .destructive) { Task { await signOutOthers() } } label: { Text("Kirjaa ulos kaikki muut laitteet") }
                 }
@@ -281,7 +283,7 @@ struct DevicesView: View {
     }
 
     private func load() async {
-        do { sessions = .loaded((try await app.api.get("/api/auth/sessions") as DeviceSessions).sessions) }
+        do { sessions = .loaded(DeviceSession.currentFirst((try await app.api.get("/api/auth/sessions") as DeviceSessions).sessions)) }
         catch is CancellationError {}
         catch { sessions = .failed(error.userMessage) }
     }

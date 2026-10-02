@@ -333,6 +333,10 @@ private struct ConversationsSheet: View {
     /// Only the latest list load may write the list: a swipe's reload and the search's
     /// reload no longer overlap and put back a row that was just removed.
     @State private var listLoads = LoadGeneration()
+    @State private var limit = ShowMore()
+    /// The server has older conversations than those loaded (it sends 50 at a time).
+    @State private var hasMore = false
+    @State private var fetchingMore = false
 
     var body: some View {
         NavigationStack {
@@ -343,7 +347,7 @@ private struct ConversationsSheet: View {
                 }
                 .pickerStyle(.segmented)
                 .listRowBackground(Color.clear)
-                ForEach(conversations) { c in
+                ForEach(conversations.prefix(limit.visible(conversations.count))) { c in
                     Button {
                         Task { await model.open(c); dismiss() }
                     } label: {
@@ -357,6 +361,12 @@ private struct ConversationsSheet: View {
                         Button(archived ? "Palauta" : "Arkistoi") { act(c, archived: !archived) }.tint(Theme.accentFill)
                         Button("Nimeä") { renaming = c; newTitle = c.title }.tint(Theme.neutralFill)
                     }
+                }
+                // Its own section: a button row coming and going beside rows being swiped
+                // away would upset the list's row count mid-animation (see the overlay below).
+                if let title = PagedShowMore.title(limit, loaded: conversations.count, total: conversations.count,
+                                                   serverHasMore: hasMore, loading: fetchingMore) {
+                    Section { moreButton(title) }
                 }
             }
             // The empty state is not a row: a row that comes and goes beside the swiped
@@ -387,6 +397,8 @@ private struct ConversationsSheet: View {
                     Button { model.startNew(); dismiss() } label: { Image(systemName: "square.and.pencil") }.accessibilityLabel("Uusi keskustelu")
                 }
             }
+            .onChange(of: archived) { _, _ in limit.reset() }
+            .onChange(of: search) { _, _ in limit.reset() }
             .task(id: "\(archived)|\(search)") {
                 // Typing settles before the server is asked (one request, not one per letter).
                 if !search.isEmpty { try? await Task.sleep(nanoseconds: 300_000_000) }
@@ -401,15 +413,37 @@ private struct ConversationsSheet: View {
         }
     }
 
+    private func moreButton(_ title: String) -> some View {
+        Button {
+            switch PagedShowMore.step(limit, loaded: conversations.count, serverHasMore: hasMore) {
+            case .fetch: Task { await loadOlder() }
+            case .reveal, .fold: withAnimation(.snappy) { limit.more(total: conversations.count) }
+            case nil: break
+            }
+            Haptics.selection()
+        } label: {
+            HStack {
+                Text(title).font(.subheadline.weight(.semibold))
+                Spacer()
+                if fetchingMore {
+                    ProgressView()
+                } else {
+                    Image(systemName: PagedShowMore.step(limit, loaded: conversations.count, serverHasMore: hasMore) == .fold ? "chevron.up" : "chevron.down").font(.caption.weight(.semibold))
+                }
+            }
+            .foregroundStyle(Theme.accent)
+        }
+        .disabled(fetchingMore)
+    }
+
     private func load() async {
         let generation = listLoads.next()
-        var query: [String: String] = [:]
-        if archived { query["archived"] = "1" }
-        if !search.isEmpty { query["q"] = search }
+        let query = ConversationPaging.query(archived: archived, search: search) ?? [:]
         do {
             let list: ConversationList = try await app.api.get("/api/ai/conversations", query: query)
             guard listLoads.isCurrent(generation) else { return }
             conversations = list.conversations.uniquedById()
+            hasMore = list.hasMore
             failure = nil
             loaded = true
         } catch is CancellationError {
@@ -417,6 +451,30 @@ private struct ConversationsSheet: View {
             guard listLoads.isCurrent(generation) else { return }
             failure = error.userMessage
             loaded = true
+        }
+    }
+
+    /// The next server page, asked for only by "Näytä enemmän" once every loaded row shows.
+    private func loadOlder() async {
+        guard !fetchingMore, let query = ConversationPaging.query(archived: archived, search: search, after: conversations.last) else {
+            hasMore = false
+            return
+        }
+        let generation = listLoads.next()
+        fetchingMore = true
+        defer { fetchingMore = false }
+        do {
+            let page: ConversationList = try await app.api.get("/api/ai/conversations", query: query)
+            guard listLoads.isCurrent(generation) else { return }
+            let before = conversations.count
+            conversations = (conversations + page.conversations).uniquedById()
+            hasMore = page.hasMore
+            withAnimation(.snappy) { PagedShowMore.revealFetched(&limit, before: before, after: conversations.count) }
+            failure = nil
+        } catch is CancellationError {
+        } catch {
+            guard listLoads.isCurrent(generation) else { return }
+            failure = error.userMessage
         }
     }
 

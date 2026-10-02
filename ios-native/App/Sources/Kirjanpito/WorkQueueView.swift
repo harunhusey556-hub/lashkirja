@@ -8,6 +8,8 @@ struct WorkQueueView: View {
     /// Coming back to the screen does not ask the server again unless something changed.
     @State private var gate = ReloadGate()
     @State private var filter = "all"
+    @State private var limit = ShowMore()
+    @State private var jobsLimit = ShowMore()
     @State private var retrying: String?
     @State private var note: (text: String, failed: Bool)?
 
@@ -57,7 +59,7 @@ struct WorkQueueView: View {
                     .font(.subheadline)
                     .foregroundStyle(Theme.ink2)
             }
-            ForEach(jobs) { job in
+            ForEach(jobs.prefix(jobsLimit.visible(jobs.count))) { job in
                 HStack(spacing: 12) {
                     VStack(alignment: .leading, spacing: 2) {
                         Text(job.title).foregroundStyle(Theme.ink)
@@ -73,6 +75,7 @@ struct WorkQueueView: View {
                         .foregroundStyle(tone(job.status))
                 }
             }
+            ShowMoreButton(limit: $jobsLimit, total: jobs.count)
         } header: {
             Text("Tuonnit ja haut")
         } footer: {
@@ -94,7 +97,10 @@ struct WorkQueueView: View {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 8) {
                         ForEach(JobsQueue.chips(items, selected: filter)) { chip in
-                            Button { filter = chip.id } label: {
+                            Button {
+                                filter = chip.id
+                                limit.reset()
+                            } label: {
                                 Text("\(chip.label) \(chip.count)")
                                     .font(.subheadline.weight(.medium))
                                     .padding(.horizontal, 12)
@@ -117,9 +123,10 @@ struct WorkQueueView: View {
                 if visible.isEmpty {
                     Text("Ei korjattavaa.").foregroundStyle(Theme.ink2)
                 }
-                ForEach(visible) { item in
+                ForEach(visible.prefix(limit.visible(visible.count))) { item in
                     row(item)
                 }
+                ShowMoreButton(limit: $limit, total: visible.count)
             } footer: {
                 if let note { Text(note.text).foregroundStyle(note.failed ? Theme.danger : Theme.success) }
             }
