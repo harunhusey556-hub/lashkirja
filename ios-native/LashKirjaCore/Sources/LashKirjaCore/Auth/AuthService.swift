@@ -35,6 +35,20 @@ public actor AuthService: TokenProvider {
         return response.user
     }
 
+    /// The challenge for a usernameless passkey sign-in.
+    public func passkeyOptions() async throws -> PasskeySignInStart {
+        guard let client else { throw LKError(status: 0, message: LKError.unreachable) }
+        return try await client.send("POST", "/api/auth/passkey/authenticate/options", body: EmptyBody())
+    }
+
+    /// The server checks the assertion and issues the same bearer session a password sign-in gets.
+    public func passkeySignIn(_ verify: PasskeySignInVerify) async throws -> AuthUser {
+        guard let client else { throw LKError(status: 0, message: LKError.unreachable) }
+        let response: TokenResponse = try await client.send("POST", "/api/auth/passkey/authenticate/verify", body: verify)
+        await keep(response)
+        return response.user
+    }
+
     /// A stored, unexpired token: the signed-in user without a network call.
     public func restore() async -> AuthUser? {
         guard let stored = await store.load() else { return nil }

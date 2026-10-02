@@ -122,6 +122,9 @@ struct ProfileForm: View {
     let section: Section_
     let onSaved: (Profile) -> Void
     @State private var edited: Profile?
+    /// Perintä fields as typed; checked on save, like the web form.
+    @State private var collection: CollectionFields?
+    @State private var showCollectionErrors = false
     @State private var busy = false
     @State private var failure: String?
 
@@ -166,6 +169,7 @@ struct ProfileForm: View {
                         TextField("BIC", text: binding.invoiceBic.orEmpty).textInputAutocapitalization(.characters).autocorrectionDisabled()
                         TextField("Maksuehdot laskulla", text: binding.invoiceTerms.orEmpty, axis: .vertical)
                     }
+                    if let fields = Binding($collection) { collectionSection(fields) }
                 }
             }
             if let failure { Text(failure).foregroundStyle(Theme.danger) }
@@ -173,7 +177,32 @@ struct ProfileForm: View {
         .navigationTitle(title)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Tallenna") { Task { await save() } }.disabled(busy) } }
-        .onAppear { if edited == nil { edited = original } }
+        .onAppear {
+            if edited == nil { edited = original }
+            if collection == nil { collection = CollectionFields(profile: original) }
+        }
+    }
+
+    /// "Perintä" (SellerProfileCard.tsx): late interest % per year and the reminder fee.
+    private func collectionSection(_ fields: Binding<CollectionFields>) -> some View {
+        Section {
+            LabeledContent("Viivästyskorko % / v") {
+                TextField("11,5", text: fields.interest).keyboardType(.decimalPad).multilineTextAlignment(.trailing)
+            }
+            if showCollectionErrors, let problem = fields.wrappedValue.interestError {
+                Text(problem).font(.footnote).foregroundStyle(Theme.danger)
+            }
+            LabeledContent("Muistutusmaksu (€)") {
+                TextField("5,00", text: fields.fee).keyboardType(.decimalPad).multilineTextAlignment(.trailing)
+            }
+            if showCollectionErrors, let problem = fields.wrappedValue.feeError {
+                Text(problem).font(.footnote).foregroundStyle(Theme.danger)
+            }
+        } header: {
+            Text("Perintä")
+        } footer: {
+            Text(CollectionFields.interestHint)
+        }
     }
 
     private var title: String {
@@ -181,7 +210,15 @@ struct ProfileForm: View {
     }
 
     private func save() async {
-        guard let edited else { return }
+        guard var edited else { return }
+        if section == .seller, let collection {
+            guard collection.isValid else {
+                showCollectionErrors = true
+                Haptics.error()
+                return
+            }
+            collection.apply(to: &edited, from: original)
+        }
         let patch = ProfilePatch(from: original, to: edited)
         if patch.isEmpty { dismiss(); return }
         busy = true

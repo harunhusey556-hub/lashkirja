@@ -68,6 +68,10 @@ public struct ProfilePatch: Encodable {
         text("invoiceBic", old.invoiceBic, new.invoiceBic)
         text("invoiceTerms", old.invoiceTerms, new.invoiceTerms)
         if old.lateInterestPercent != new.lateInterestPercent { values["lateInterestPercent"] = .number(new.lateInterestPercent) }
+        // The server takes the fee in euros (`reminderFee`) and stores cents itself.
+        if old.reminderFeeCents != new.reminderFeeCents, let cents = new.reminderFeeCents {
+            values["reminderFee"] = .number(Decimal(cents) / 100)
+        }
     }
 
     struct Key: CodingKey {

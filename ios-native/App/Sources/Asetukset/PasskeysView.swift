@@ -173,10 +173,6 @@ private struct CreatePasskeySheet: View {
     @State private var passwordError: String?
     @State private var message: String?
     @State private var busy = false
-    @State private var ceremony: PasskeyCeremony?
-
-    private struct OptionsBody: Encodable { let currentPassword: String }
-    private struct Created: Decodable { let passkey: Passkey }
 
     var body: some View {
         NavigationStack {
@@ -215,12 +211,6 @@ private struct CreatePasskeySheet: View {
         .interactiveDismissDisabled(busy)
     }
 
-    private func fail(_ reason: PasskeyFailure, _ serverMessage: String? = nil) {
-        guard let text = reason.message(serverMessage: serverMessage) else { return }
-        Haptics.error()
-        if reason == .password { passwordError = text } else { message = text }
-    }
-
     private func create() async {
         guard !busy else { return }
         guard !password.isEmpty else {
@@ -231,19 +221,56 @@ private struct CreatePasskeySheet: View {
         busy = true
         passwordError = nil
         message = nil
-        defer { busy = false; ceremony = nil }
+        defer { busy = false }
+        switch await PasskeyRegistration.create(api: app.api, password: password) {
+        case .success(let created):
+            Haptics.success()
+            password = ""
+            onCreated(created)
+            dismiss()
+        case .failure(let problem):
+            guard let text = problem.text else { return }
+            Haptics.error()
+            if problem.isPassword { passwordError = text } else { message = text }
+        }
+    }
+}
 
+/// Creating a passkey: the options (they need the current password), the system sheet, then
+/// the server's check. Used by Pääsyavaimet and by the offer after a password sign-in.
+enum PasskeyRegistration {
+    struct Problem: Error {
+        let reason: PasskeyFailure
+        /// Nil when nothing is shown (the owner cancelled the system sheet).
+        let text: String?
+        var isPassword: Bool { reason == .password }
+
+        init(_ reason: PasskeyFailure, _ serverMessage: String? = nil) {
+            self.reason = reason
+            text = reason.message(serverMessage: serverMessage)
+        }
+
+        /// The verify step's refusal is shown in the server's words.
+        init(verifyMessage: String) {
+            reason = .failed
+            text = verifyMessage
+        }
+    }
+
+    private struct OptionsBody: Encodable { let currentPassword: String }
+    private struct Created: Decodable { let passkey: Passkey }
+
+    @MainActor
+    static func create(api: APIClient, password: String) async -> Result<Passkey, Problem> {
         let start: PasskeyRegistrationStart
         do {
-            start = try await app.api.send("POST", "/api/auth/passkey/register/options", body: OptionsBody(currentPassword: password))
+            start = try await api.send("POST", "/api/auth/passkey/register/options", body: OptionsBody(currentPassword: password))
         } catch is CancellationError {
-            return
+            return .failure(Problem(.cancelled))
         } catch let error as LKError {
-            fail(PasskeyFailure.from(status: error.status), error.message)
-            return
+            return .failure(Problem(PasskeyFailure.from(status: error.status), error.message))
         } catch {
-            fail(.failed)
-            return
+            return .failure(Problem(.failed))
         }
 
         let provider = ASAuthorizationPlatformPublicKeyCredentialProvider(relyingPartyIdentifier: start.rpId)
@@ -254,24 +281,18 @@ private struct CreatePasskeySheet: View {
             request.excludedCredentials = start.excludedCredentialIds.map { ASAuthorizationPlatformPublicKeyCredentialDescriptor(credentialID: $0) }
         }
 
-        let runner = PasskeyCeremony(anchor: Self.anchor())
-        ceremony = runner
+        let runner = PasskeyCeremony(anchor: PasskeyCeremony.keyWindow())
         let registration: ASAuthorizationPlatformPublicKeyCredentialRegistration
         do {
             let authorization = try await runner.perform(request)
             guard let credential = authorization.credential as? ASAuthorizationPlatformPublicKeyCredentialRegistration else {
-                fail(.failed)
-                return
+                return .failure(Problem(.failed))
             }
             registration = credential
         } catch {
-            fail(PasskeyCeremony.failure(error))
-            return
+            return .failure(Problem(PasskeyCeremony.failure(error)))
         }
-        guard let attestation = registration.rawAttestationObject else {
-            fail(.failed)
-            return
-        }
+        guard let attestation = registration.rawAttestationObject else { return .failure(Problem(.failed)) }
 
         let verify = PasskeyRegistrationVerify(
             challengeId: start.challengeId,
@@ -279,24 +300,15 @@ private struct CreatePasskeySheet: View {
             clientDataJSON: registration.rawClientDataJSON,
             attestationObject: attestation)
         do {
-            let created: Created = try await app.api.send("POST", "/api/auth/passkey/register/verify", body: verify)
-            Haptics.success()
-            password = ""
-            onCreated(created.passkey)
-            dismiss()
+            let created: Created = try await api.send("POST", "/api/auth/passkey/register/verify", body: verify)
+            return .success(created.passkey)
         } catch is CancellationError {
+            return .failure(Problem(.cancelled))
         } catch let error as LKError {
-            Haptics.error()
-            message = error.message
+            return .failure(Problem(verifyMessage: error.message))
         } catch {
-            fail(.failed)
+            return .failure(Problem(.failed))
         }
-    }
-
-    /// The window the system sheet attaches to.
-    private static func anchor() -> ASPresentationAnchor {
-        let windows = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.flatMap { $0.windows }
-        return windows.first(where: { $0.isKeyWindow }) ?? windows.first ?? ASPresentationAnchor()
     }
 }
 
@@ -324,6 +336,13 @@ final class PasskeyCeremony: NSObject, ASAuthorizationControllerDelegate, ASAuth
     }
 
     func presentationAnchor(for controller: ASAuthorizationController) -> ASPresentationAnchor { anchor }
+
+    /// The window the system sheet attaches to.
+    @MainActor
+    static func keyWindow() -> ASPresentationAnchor {
+        let windows = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.flatMap { $0.windows }
+        return windows.first(where: { $0.isKeyWindow }) ?? windows.first ?? ASPresentationAnchor()
+    }
 
     func authorizationController(controller: ASAuthorizationController, didCompleteWithAuthorization authorization: ASAuthorization) {
         continuation?.resume(returning: authorization)

@@ -6,7 +6,6 @@ struct MainTabView: View {
     @State private var showAdd = false
     @State private var showSettings = false
     @State private var showAssistant = false
-    @State private var showOnboarding = false
     /// Each tab's pushed screens, so a screen can be opened from outside its tab (AppModel.pendingRoute).
     @State private var paths: [AppTab: [Route]] = [:]
     @Environment(AppModel.self) private var app
@@ -41,7 +40,8 @@ struct MainTabView: View {
         .sheet(isPresented: $showAdd) { AddSheet() }
         .sheet(isPresented: $showSettings) { SettingsSheet().presentationDetents([.large]) }
         .sheet(isPresented: $showAssistant) { AssistantView() }
-        .fullScreenCover(isPresented: $showOnboarding) { OnboardingView { showOnboarding = false } }
+        // Skipping ("Ohita nyt") keeps them away for a day; Koti then offers to resume them.
+        .fullScreenCover(isPresented: Bindable(OnboardingGate.shared).isPresented) { OnboardingView() }
         .overlay(alignment: .top) { OfflineBanner() }
         .alert("Poisto epäonnistui", isPresented: Binding(get: { app.removalFailure != nil }, set: { if !$0 { app.removalFailure = nil } })) {
             Button("OK", role: .cancel) {}
@@ -55,10 +55,7 @@ struct MainTabView: View {
             tab = pending.tab
             paths[pending.tab] = NavigationStackRule.collapse((paths[pending.tab] ?? []) + [pending.route])
         }
-        .task {
-            struct State_: Decodable { let onboarded: Bool }
-            if let state: State_ = try? await app.api.get("/api/onboarding"), !state.onboarded { showOnboarding = true }
-        }
+        .task { await OnboardingGate.shared.check(app) }
     }
 
     @ViewBuilder private func root(_ item: AppTab) -> some View {
