@@ -23,9 +23,12 @@ public enum APIDate {
     public static func dayString(_ d: Date) -> String { formatter("yyyy-MM-dd").string(from: d) }
     public static func month(_ d: Date) -> String { formatter("yyyy-MM").string(from: d) }
 
-    /// "2.10.2026", the Finnish short date.
+    /// "2.10.2026", the Finnish short date. Takes "YYYY-MM-DD" or an ISO timestamp.
     public static func displayDay(_ s: String) -> String {
-        guard let d = day(s) else { return s }
+        guard let d = day(String(s.prefix(10))) else { return s }
         return formatter("d.M.yyyy").string(from: d)
     }
+
+    /// "2026-10" from a day or a timestamp.
+    public static func monthOf(_ s: String) -> String { String(s.prefix(7)) }
 }
