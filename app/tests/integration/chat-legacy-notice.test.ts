@@ -72,7 +72,10 @@ describe("legacy Rajattu tila notice in stored chat history", () => {
       createdAt: new Date(Date.UTC(2026, 8, 1, 10)),
       id: "zzzz",
     });
-    expect(turns.length).toBe(3);
+    // The question and its reply. The notice-only row answers no question, and only answered
+    // exchanges reach the model (chat-store: "Only answered exchanges"), so it is left out.
+    expect(turns.map((turn) => turn.role)).toEqual(["user", "assistant"]);
+    expect(turns[1].content).toBe(VAT_TAIL);
     for (const turn of turns) expect(turn.content).not.toMatch(FORBIDDEN);
   });
 
