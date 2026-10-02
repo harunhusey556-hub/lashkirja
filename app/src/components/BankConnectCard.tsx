@@ -1,5 +1,6 @@
 "use client";
 
+import { AnimatedRows } from "@/components/AnimatedRows";
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { ChevronRight, Landmark } from "lucide-react";
@@ -377,7 +378,7 @@ export default function BankConnectCard({
           </Link>
         ) : (
           <>
-            {connections.map((connection) => (
+            <AnimatedRows rows={connections.map((connection) => ({ key: connection.id, node: (
               <ConnectionBlock
                 key={connection.id}
                 connection={connection}
@@ -388,7 +389,7 @@ export default function BankConnectCard({
                 onDisconnect={() => setDisconnectId(connection.id)}
                 onToggleAccount={(account) => void toggleAccount(connection.id, account)}
               />
-            ))}
+            ) }))} />
             <Button type="button" variant="secondary" className="w-full" onClick={() => sheets.openPicker()}>
               Yhdistä toinen pankki
             </Button>

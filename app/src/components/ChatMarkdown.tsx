@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { humanizeScreenPaths } from "@/lib/chat-honesty";
 import { Fragment, type ReactNode } from "react";
 
 /**
@@ -6,7 +7,8 @@ import { Fragment, type ReactNode } from "react";
  * code. Text is React children, never raw HTML.
  */
 export function ChatMarkdown({ text, allowedHrefs }: { text: string; allowedHrefs?: readonly string[] }) {
-  const blocks = parseBlocks(text);
+  // A screen named by its address ("/laskut/uusi") reads as its name.
+  const blocks = parseBlocks(humanizeScreenPaths(text));
   return (
     <div className="max-w-full space-y-2 break-words [overflow-wrap:anywhere]">
       {blocks.map((block, index) => (

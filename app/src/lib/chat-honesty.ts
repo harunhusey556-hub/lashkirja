@@ -78,6 +78,23 @@ function labelForHref(href: string): string | null {
   return SOURCE_RULES.find((rule) => path === rule.prefix)?.label ?? null;
 }
 
+/**
+ * A reply that names a screen by its address ("[/laskut/uusi](/laskut/uusi)",
+ * "täällä: /kuitit") shows the screen's name instead, as a link.
+ */
+export function humanizeScreenPaths(text: string): string {
+  const named = (href: string) => labelForHref(href);
+  return text
+    .replace(/\[(\/[^\]\s]*)\]\((\/[^)\s]+)\)/g, (whole, _label: string, href: string) => {
+      const label = named(href);
+      return label ? `[${label}](${href})` : whole;
+    })
+    .replace(/(^|[\s:]|(?<!\])\()(\/[a-z][a-z0-9/_-]*(?:\?[^\s).,;]*)?)(?=$|[\s).,;:!?])/g, (whole, lead: string, href: string) => {
+      const label = named(href);
+      return label ? `${lead}[${label}](${href})` : whole;
+    });
+}
+
 /** Internal book links cited in a reply, in first-seen order. */
 export function sourcesFromText(text: string): ChatSource[] {
   const found: ChatSource[] = [];

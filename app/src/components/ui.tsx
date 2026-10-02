@@ -58,24 +58,34 @@ export function Button({
       title={showReason ? disabledReason : props.title}
       className={buttonClass(variant, className)}
     >
-      {isBusy && (
-        <span
-          className="h-4 w-4 rounded-full border-2 border-current border-t-transparent animate-spin motion-reduce:animate-none"
-          aria-hidden
-        />
-      )}
-      {isBusy && busyLabel ? (
-        busyLabel
-      ) : showReason ? (
-        <span className="flex flex-col items-center leading-tight">
-          <span>{children}</span>
-          <span id={reasonId} className="text-micro font-normal opacity-80">
-            {disabledReason}
-          </span>
+      {/* The label and the busy state share one grid cell, and the one not
+          shown keeps its room: the button never changes width mid-save. */}
+      <span className="grid place-items-center">
+        <span className={`col-start-1 row-start-1 inline-flex items-center justify-center gap-2 ${isBusy ? "invisible" : ""}`}>
+          {showReason ? (
+            <span className="flex flex-col items-center leading-tight">
+              <span>{children}</span>
+              <span id={reasonId} className="text-micro font-normal opacity-80">
+                {disabledReason}
+              </span>
+            </span>
+          ) : (
+            children
+          )}
         </span>
-      ) : (
-        children
-      )}
+        {busyLabel || isBusy ? (
+          <span
+            aria-hidden={!isBusy || undefined}
+            className={`col-start-1 row-start-1 inline-flex items-center justify-center gap-2 ${isBusy ? "" : "invisible"}`}
+          >
+            <span
+              className="h-4 w-4 shrink-0 rounded-full border-2 border-current border-t-transparent animate-spin motion-reduce:animate-none"
+              aria-hidden
+            />
+            {busyLabel}
+          </span>
+        ) : null}
+      </span>
     </button>
   );
 }

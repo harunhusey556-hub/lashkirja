@@ -224,6 +224,8 @@ describe("conversation list past the first page", () => {
           userId: user.id,
           title: `Vanha ${String(i).padStart(2, "0")}`,
           updatedAt: new Date(start + i * 60_000),
+          // Listed only once used: an empty conversation is left out.
+          messages: { create: { userId: user.id, role: "user", content: "kysymys" } },
         },
       });
     }
@@ -256,5 +258,14 @@ describe("conversation list past the first page", () => {
       buildRequest("GET", "/api/ai/conversations?beforeId=abc", undefined, { cookie })
     );
     expect(half.status).toBe(400);
+  });
+
+  it("leaves out a conversation that was opened but never used", async () => {
+    const cookie = await loginAs(user.email);
+    const empty = await prisma.conversation.create({ data: { userId: user.id, title: "Tyhjä keskustelu" } });
+    const list = await readJson<{ conversations: Array<{ id: string }> }>(
+      await listConversations(buildRequest("GET", "/api/ai/conversations", undefined, { cookie }))
+    );
+    expect(list.conversations.map((row) => row.id)).not.toContain(empty.id);
   });
 });

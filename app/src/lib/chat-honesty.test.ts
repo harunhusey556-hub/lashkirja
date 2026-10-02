@@ -13,6 +13,7 @@ import {
   guardStreamReply,
   sourcesFromText,
 } from "./chat-honesty";
+import { humanizeScreenPaths } from "./chat-honesty";
 import { settleChatStream } from "./chat-turn";
 
 describe("chat honesty", () => {
@@ -154,5 +155,15 @@ describe("chat honesty", () => {
     const result = enforceAssistantReply("[ALV](/alv-raportti?period=1999-01)", ctx);
     expect(result.rejected).toBe(true);
     expect(result.reason).toBe("source");
+  });
+});
+
+describe("screen paths in replies", () => {
+  it("names a screen instead of showing its address", () => {
+    expect(humanizeScreenPaths("Luo lasku täällä: [/laskut/uusi](/laskut/uusi)")).toBe("Luo lasku täällä: [Uusi lasku](/laskut/uusi)");
+    expect(humanizeScreenPaths("create one here: /laskut/uusi")).toBe("create one here: [Uusi lasku](/laskut/uusi)");
+    expect(humanizeScreenPaths("Katso /kuitit.")).toBe("Katso [Kuitit](/kuitit).");
+    expect(humanizeScreenPaths("[Kuitit](/kuitit) ja 1/2 kpl")).toBe("[Kuitit](/kuitit) ja 1/2 kpl");
+    expect(humanizeScreenPaths("polku /tuntematon")).toBe("polku /tuntematon");
   });
 });

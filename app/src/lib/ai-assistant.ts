@@ -1,4 +1,4 @@
-import { describeVatFigures, userVatFigures, vatFigureAmounts } from "./chat-vat-math";
+import { describeVatFigures, userVatFigures, vatArithmeticReply, vatFigureAmounts } from "./chat-vat-math";
 import { parseChatSearch, searchChatRecords, CHAT_SEARCH_LIMIT } from "./chat-search";
 import { enableBankingStatus } from "./enablebanking/signing";
 import { APP_GUIDE, CHAT_DESTINATIONS, asksToConnectBank, suggestedChatActions } from "./chat-app";
@@ -28,6 +28,7 @@ import {
   matchStatusReply,
   providerFailedNotice,
   prefersEnglish,
+  replyLanguage,
 } from "./chat-policy";
 
 export interface ChatMatchProposal {
@@ -319,7 +320,10 @@ export async function prepareChat(
   }
 
   // Whole-word intents only (F58): a substring such as "alv" in "palvelun" is not a question about VAT.
-  const asksVat = asksVatThisMonth(userMessage);
+  // The user's own figures ("45 € sis. alv 25,5 %") make it arithmetic, not
+  // a question about the books: no booked-VAT answer or ALV-ilmoitus chip then.
+  const userVat = userVatFigures(userMessage);
+  const asksVat = asksVatThisMonth(userMessage) && userVat.length === 0;
   const asksProfile = asksAboutProfile(userMessage);
   const vatRegistered = Boolean(user?.vatRegistered);
   const vatAnswer = asksVat ? await currentMonthVat(userId, english, vatRegistered) : null;
@@ -331,6 +335,16 @@ export async function prepareChat(
   // calm sentence that says what does work (OWN-09, F58). General advice such as
   // what a business may deduct is not an answer from the books, so it is not given.
   if (!assistantAvailable()) {
+    // VAT arithmetic on the user's figures needs no model: the server's own
+    // sums are the answer.
+    if (userVat.length > 0) {
+      const reply = vatArithmeticReply(userVat, english);
+      return {
+        kind: "local",
+        reply,
+        honesty: { performedActions: [], allowedAmounts: vatFigureAmounts(userVat), allowedRecordIds: [], allowedHrefs: [] },
+      };
+    }
     if (asksVat) {
       if (!vatAnswer) {
         return { kind: "local", limited: true, reply: providerFailedNotice(english) };
@@ -380,7 +394,6 @@ export async function prepareChat(
   const actions = suggestedChatActions(userMessage);
   const recordSources = recentReceipts.map(receipt => ({ label: receipt.vendor || "Kuitti", href: `/kuitit/kuitti?id=${receipt.id}` }));
   const invoiceSources = recentInvoices.map(invoice => ({ label: `Lasku ${invoice.number}`, href: `/laskut/lasku?id=${invoice.id}` }));
-  const userVat = userVatFigures(userMessage);
   const contextAmounts = recentReceipts.flatMap(receipt => receipt.totalAmountCents === null ? [] : [(receipt.totalAmountCents / 100).toFixed(2)]);
   const context = {
     search: { filters: search.filter, invoiceMatches: search.invoiceMatches, receiptMatches: search.receiptMatches, truncated: search.truncated, limit: CHAT_SEARCH_LIMIT, dateField: "invoice issue date / receipt date", untilExclusive: true },
@@ -406,10 +419,13 @@ ${JSON.stringify(context)}`,
     asksProfile ? `Profile: ${profileSummary}` : `Business form: ${who}.`,
     vatLine ? `Use this calculated figure, do not invent another: ${vatLine}` : "",
     userVat.length > 0
-      ? `VAT arithmetic on the user's own figures, calculated by the server. Quote these exact results, never compute other euro amounts:\n${describeVatFigures(userVat)}`
+      ? `VAT arithmetic on the user's own figures, calculated by the server. Quote these exact results and never compute other euro amounts. Pick the reading that matches the user's words: "sis.", "sisältäen", "incl.", "dahil" mean the price includes VAT; "+ alv", "veroton", "excl.", "hariç" mean it does not. Name the VAT rate the user gave; never write "alv 0 %" unless the user did.\n${describeVatFigures(userVat)}`
       : "",
     "When you cite an amount from the books, name the screen by its Finnish name (ALV-ilmoitus, Raportit, Kuitit, Laskut), never by an address or path. Write euro amounts in Finnish form, for example 12,50 €.",
     prior.length > 0 ? "Use the earlier turns. Answer the latest question." : "",
+    // Stated outright: the rest of this prompt is Finnish, and a bare "reply
+    // in the user's language" lost to it (English and Turkish got Finnish).
+    { fi: "Vastaa suomeksi.", en: "Reply in English.", tr: "Türkçe yanıt ver." }[replyLanguage(userMessage)],
   ]
     .filter(Boolean)
     .join("\n");

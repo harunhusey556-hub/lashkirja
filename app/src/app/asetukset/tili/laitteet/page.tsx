@@ -1,5 +1,6 @@
 "use client";
 
+import { AnimatedRows } from "@/components/AnimatedRows";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import ConfirmModal from "@/components/ConfirmModal";
 import { ErrorState } from "@/components/AsyncState";
@@ -148,9 +149,9 @@ export default function LaitteetPage() {
             <Button type="button" variant="secondary" className="w-full" onClick={() => setPending({ kind: "others" })}>
               Kirjaa muut laitteet ulos ({others.length})
             </Button>
-            <ul className="divide-y divide-line">
-              {visibleOthers.map((row) => (
-                <li key={row.id} className="flex items-center gap-3 py-3">
+            <div role="list" className="divide-y divide-line">
+              <AnimatedRows rows={visibleOthers.map((row) => ({ key: row.id, node: (
+                <div role="listitem" key={row.id} className="flex items-center gap-3 py-3">
                   <span className="min-w-0 flex-1">
                     <span className="block clamp-lines [overflow-wrap:anywhere] text-body text-ink">{row.label}</span>
                     <span className="block text-caption text-ink-2">{formatLastSeen(row.lastSeenAt)}</span>
@@ -163,9 +164,9 @@ export default function LaitteetPage() {
                   >
                     Kirjaa ulos
                   </button>
-                </li>
-              ))}
-            </ul>
+                </div>
+              ) }))} />
+            </div>
             {others.length > VISIBLE_OTHERS && (
               <button
                 type="button"

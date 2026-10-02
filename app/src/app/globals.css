@@ -423,11 +423,11 @@ button:disabled {
 
 /* Pull to refresh (ds/PullToRefresh, C1.6). The band sits before the page;
    at rest it is 0 px tall and its spinner waits above it, revealed only by
-   the pull. While refreshing the band holds 48 px open. */
+   the pull. While refreshing, band and page sit 48 px down by transform. */
 .ptr-indicator {
   position: relative;
+  height: 0;
   overflow: visible;
-  transition: height 200ms var(--ease-drawer);
 }
 
 .ptr-spinner {
@@ -454,10 +454,6 @@ button:disabled {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .ptr-indicator {
-    transition: none;
-  }
-
   .ptr-indicator[data-refreshing="true"] .ptr-spinner {
     animation-duration: 2.4s;
   }

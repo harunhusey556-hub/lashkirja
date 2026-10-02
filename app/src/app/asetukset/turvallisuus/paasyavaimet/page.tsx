@@ -1,5 +1,6 @@
 "use client";
 
+import { AnimatedRows } from "@/components/AnimatedRows";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { KeyRound } from "lucide-react";
 import BottomSheet from "@/components/BottomSheet";
@@ -174,10 +175,9 @@ export default function PaasyavaimetPage() {
         </p>
 
         {rows.length > 0 ? (
-          <ul className="divide-y divide-line" aria-label="Tallennetut pääsyavaimet">
-            {rows.map((row) =>
-              editing?.id === row.id ? (
-                <li key={row.id} className="space-y-2 py-3">
+          <div role="list" className="divide-y divide-line" aria-label="Tallennetut pääsyavaimet">
+            <AnimatedRows rows={rows.map((row) => ({ key: row.id, node: (editing?.id === row.id ? (
+                <div role="listitem" key={row.id} className="space-y-2 py-3">
                   <label htmlFor="passkey-name" className="block text-caption text-ink-2">
                     Pääsyavaimen nimi
                   </label>
@@ -215,9 +215,9 @@ export default function PaasyavaimetPage() {
                       Peru
                     </Button>
                   </div>
-                </li>
+                </div>
               ) : (
-                <li key={row.id} className="flex items-start gap-3 pt-3 pb-1">
+                <div role="listitem" key={row.id} className="flex items-start gap-3 pt-3 pb-1">
                   <Icon icon={KeyRound} size="row" className="mt-0.5 shrink-0 text-ink-2" />
                   <div className="min-w-0 flex-1">
                     <span className="block clamp-lines [overflow-wrap:anywhere] text-body text-ink">{row.deviceName}</span>
@@ -241,10 +241,9 @@ export default function PaasyavaimetPage() {
                       </button>
                     </div>
                   </div>
-                </li>
-              )
-            )}
-          </ul>
+                </div>
+              )) }))} />
+          </div>
         ) : (
           <p className="py-1 text-body text-ink-2">Ei pääsyavaimia vielä.</p>
         )}

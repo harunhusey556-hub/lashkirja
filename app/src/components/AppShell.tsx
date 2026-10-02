@@ -213,71 +213,100 @@ const INLINE_HEADER_ROOTS = ["/dashboard", "/kirjanpito", "/laskut", "/raportit"
 
 const isInlineHeaderPath = (path: string) => INLINE_HEADER_ROOTS.includes(path.split("?")[0]);
 
+/** The header row as it was last drawn, and where, for the next navigation. */
+type HeaderRowShot = { node: HTMLElement; top: number; left: number; width: number; height: number };
+
+/** A copy of the visible header row and its frame position (transforms ignored). */
+function shootHeaderRow(frame: HTMLElement | null): HeaderRowShot | null {
+  const header = frame?.querySelector<HTMLElement>(".app-header");
+  const row = header?.querySelector<HTMLElement>(".app-header-row");
+  if (!header || !row || row.offsetParent === null || row.offsetHeight === 0) return null;
+  return {
+    node: row.cloneNode(true) as HTMLElement,
+    top: header.offsetTop + row.offsetTop,
+    left: header.offsetLeft + row.offsetLeft,
+    width: row.offsetWidth,
+    height: row.offsetHeight,
+  };
+}
+
 /**
- * A push or pop between a root (title in the page, no header row) and a
- * detail (header row with Back). The row came or went in the same commit, so
- * the old page would be drawn one row too high or too low and the row would
- * pop. This measures where the old page's <main> started (by putting the old
- * header mode back for one layout read) and moves the row with the pages:
- * in from the right on a push, out to the right on a pop, as iOS does.
+ * The header row through a push or pop. By the time this runs the row
+ * already shows the new screen, so the old one would pop: here the old row
+ * (the copy taken after the last commit) leaves and the new one arrives, as
+ * on iOS. Root to detail: the row slides in. Detail to root: the old row
+ * rides out to the right. Detail to detail: old and new cross-fade with a
+ * short shift. A root has no row, so the old page's <main> started higher or
+ * lower; `oldTop` puts the outgoing page back where it was.
  */
-function headerRowHandoff(main: HTMLElement, from: string, to: string) {
+function headerRowHandoff(main: HTMLElement, from: string, to: string, kind: "push" | "pop", previous: HeaderRowShot | null) {
   const fromInline = isInlineHeaderPath(from);
-  if (fromInline === isInlineHeaderPath(to)) return null;
+  const toInline = isInlineHeaderPath(to);
+  if (fromInline && toInline) return null;
   const frame = main.parentElement;
   const row = frame?.querySelector<HTMLElement>(".app-header .app-header-row") ?? null;
   if (!frame || !row || typeof row.animate !== "function") return null;
-  const now = frame.dataset.inlineHeader;
-  if (fromInline) frame.dataset.inlineHeader = "true";
-  else delete frame.dataset.inlineHeader;
-  const oldTop = main.offsetTop;
-  const frameBox = frame.getBoundingClientRect();
-  const rowBox = row.getBoundingClientRect();
-  // Leaving a detail: its row, as it was, rides out on the old page.
-  const ghost = fromInline ? null : (row.cloneNode(true) as HTMLElement);
-  if (now === undefined) delete frame.dataset.inlineHeader;
-  else frame.dataset.inlineHeader = now;
+  let oldTop: number | undefined;
+  if (fromInline !== toInline) {
+    const now = frame.dataset.inlineHeader;
+    if (fromInline) frame.dataset.inlineHeader = "true";
+    else delete frame.dataset.inlineHeader;
+    oldTop = main.offsetTop;
+    if (now === undefined) delete frame.dataset.inlineHeader;
+    else frame.dataset.inlineHeader = now;
+  }
 
   return {
     oldTop,
-    play(direction: "in" | "out"): () => void {
+    play(): () => void {
       const timing = { duration: navDurationMs(), easing: navEasing() };
-      if (direction === "in") {
-        const animation = row.animate(
+      const animations: Animation[] = [];
+      let ghost: HTMLElement | null = null;
+      // The old row leaves (a detail had one).
+      if (!fromInline && previous) {
+        ghost = previous.node;
+        ghost.setAttribute("aria-hidden", "true");
+        ghost.inert = true;
+        Object.assign(ghost.style, {
+          position: "absolute",
+          top: `${previous.top}px`,
+          left: `${previous.left}px`,
+          width: `${previous.width}px`,
+          height: `${previous.height}px`,
+          margin: "0",
+          display: "grid",
+          zIndex: "45",
+          pointerEvents: "none",
+        });
+        frame.appendChild(ghost);
+        const out = toInline ? "translate3d(100%, 0, 0)" : kind === "push" ? "translate3d(-24%, 0, 0)" : "translate3d(24%, 0, 0)";
+        const leaving = ghost.animate(
           [
-            { transform: "translate3d(100%, 0, 0)", opacity: 0 },
             { transform: "translate3d(0, 0, 0)", opacity: 1 },
+            { transform: out, opacity: 0 },
           ],
-          timing
+          { ...timing, duration: toInline ? timing.duration : timing.duration * 0.6, fill: "forwards" }
         );
-        return () => animation.cancel();
+        const drop = () => ghost?.remove();
+        leaving.onfinish = drop;
+        animations.push(leaving);
       }
-      if (!ghost) return () => {};
-      ghost.setAttribute("aria-hidden", "true");
-      ghost.inert = true;
-      Object.assign(ghost.style, {
-        position: "absolute",
-        top: `${rowBox.top - frameBox.top}px`,
-        left: `${rowBox.left - frameBox.left}px`,
-        width: `${rowBox.width}px`,
-        height: `${rowBox.height}px`,
-        display: "grid",
-        zIndex: "45",
-        pointerEvents: "none",
-      });
-      frame.appendChild(ghost);
-      const animation = ghost.animate(
-        [
-          { transform: "translate3d(0, 0, 0)", opacity: 1 },
-          { transform: "translate3d(100%, 0, 0)", opacity: 0 },
-        ],
-        { ...timing, fill: "forwards" }
-      );
-      const drop = () => ghost.remove();
-      animation.onfinish = drop;
+      // The new row arrives (the new screen is a detail).
+      if (!toInline) {
+        const from = fromInline ? "translate3d(100%, 0, 0)" : kind === "push" ? "translate3d(24%, 0, 0)" : "translate3d(-24%, 0, 0)";
+        animations.push(
+          row.animate(
+            [
+              { transform: from, opacity: 0 },
+              { transform: "translate3d(0, 0, 0)", opacity: 1 },
+            ],
+            timing
+          )
+        );
+      }
       return () => {
-        animation.cancel();
-        drop();
+        animations.forEach((animation) => animation.cancel());
+        ghost?.remove();
       };
     },
   };
@@ -371,6 +400,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const navEntry = matchNav(pathname);
   const isDetail = navEntry?.kind === "detail";
   const mainRef = useRef<HTMLElement>(null);
+  const lastHeaderRow = useRef<HeaderRowShot | null>(null);
   const swipeLock = useRef(false);
   // Adjusting state during render is how a new pathname picks its enter
   // direction before paint. The server skips this so the first HTML matches
@@ -558,7 +588,8 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     const avatarPath = avatarRoot().path;
     const presents = direction === "tab" && pathname === avatarPath && rootIdOf(from) !== rootIdOf(avatarPath);
     const kind = direction === "forward" ? "push" : direction === "back" ? "pop" : presents ? "present" : "tab";
-    const headerMotion = kind === "push" || kind === "pop" ? headerRowHandoff(main, from, pathname) : null;
+    const headerMotion =
+      kind === "push" || kind === "pop" ? headerRowHandoff(main, from, pathname, kind, lastHeaderRow.current) : null;
     const stopPage = playNavTransition({
       main,
       oldPage,
@@ -568,7 +599,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       newPage: pageNodeRef.current,
       oldTop: headerMotion?.oldTop,
     });
-    const stopRow = headerMotion?.play(kind === "push" ? "in" : "out");
+    const stopRow = headerMotion?.play();
     return () => {
       stopPage();
       stopRow?.();
@@ -579,6 +610,12 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     document.dispatchEvent(new Event("lashkirja-dismiss-press"));
     bumpNavEpoch();
   }, [pathname, direction]);
+
+  // After every commit (declared after the navigation effect, so that one
+  // still reads the previous screen's copy): the header row as drawn now.
+  useLayoutEffect(() => {
+    lastHeaderRow.current = shootHeaderRow(mainRef.current?.parentElement ?? null);
+  });
 
   // AX-04, R2: every screen has its own document title ("Kuitit · LashKirja"),
   // which the route announcer reads. Kept against a later metadata write.

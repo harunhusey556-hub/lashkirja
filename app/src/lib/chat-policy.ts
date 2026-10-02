@@ -24,6 +24,17 @@ export function prefersEnglish(text: string): boolean {
   return hits >= 2 && hits / words.length >= 0.34;
 }
 
+const TURKISH_HINTS = new Set(["ve", "ile", "ne", "nedir", "nasıl", "kaç", "kdv", "dahil", "hariç", "fiyat", "fiyatı", "ise", "mi", "mı", "için", "fatura", "tutar", "bu", "bir"]);
+
+/** The reply's language: Finnish by default, English or Turkish when the message is clearly in it. */
+export function replyLanguage(text: string): "fi" | "en" | "tr" {
+  const lower = text.toLocaleLowerCase("tr");
+  const words = lower.match(/[\p{L}']+/gu) ?? [];
+  const turkish = words.filter((word) => TURKISH_HINTS.has(word)).length;
+  if (/[ğış]/.test(lower) ? turkish >= 1 : turkish >= 2) return "tr";
+  return prefersEnglish(text) ? "en" : "fi";
+}
+
 export function isGreeting(text: string): boolean {
   const normalized = text.trim().toLowerCase().replace(/[!?.]+$/g, "");
   return /^(hei|moi|terve|moikka|hello|hi|hey|good morning|good afternoon)$/.test(normalized);

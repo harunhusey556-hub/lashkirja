@@ -59,6 +59,9 @@ export async function listConversations(input: {
       userId: input.userId,
       deletedAt: null,
       archivedAt: input.archived ? { not: null } : null,
+      // An opened but never used "Uusi keskustelu" is not a conversation yet;
+      // listing them filled the menu with empty rows.
+      messages: { some: {} },
       ...(query
         ? {
             OR: [

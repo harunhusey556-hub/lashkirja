@@ -175,6 +175,27 @@ export function PullToRefresh({ onRefresh, disabled = false }: { onRefresh: () =
     };
   }, [disabled]);
 
+  // While it refreshes, the spinner and the page sit HOLD px down, by
+  // transform only: the old 0 to 48 px height change re-laid out the whole
+  // page on every frame, which stuttered on the iPhone.
+  useEffect(() => {
+    const page = markerRef.current?.closest<HTMLElement>(".app-page");
+    const indicator = indicatorRef.current;
+    if (!page || !indicator) return;
+    const reduce = typeof window.matchMedia === "function" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const transition = reduce ? "none" : "transform 220ms var(--ease-drawer)";
+    const offset = refreshing ? `translateY(${HOLD}px)` : "";
+    for (const el of [page, indicator]) {
+      el.style.transition = transition;
+      el.style.transform = offset;
+    }
+    if (refreshing) return;
+    const timer = window.setTimeout(() => {
+      for (const el of [page, indicator]) el.style.transition = "";
+    }, 240);
+    return () => window.clearTimeout(timer);
+  }, [refreshing, host]);
+
   return (
     <>
       <span ref={markerRef} hidden />
@@ -184,7 +205,6 @@ export function PullToRefresh({ onRefresh, disabled = false }: { onRefresh: () =
               ref={indicatorRef}
               className="ptr-indicator"
               data-refreshing={refreshing ? "true" : "false"}
-              style={{ height: refreshing ? HOLD : 0 }}
             >
               <span className="ptr-spinner" aria-hidden />
               {refreshing ? <span className="sr-only" role="status">Päivitetään…</span> : null}

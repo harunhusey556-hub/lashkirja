@@ -31,7 +31,7 @@ import {
   X,
 } from "lucide-react";
 import { Icon } from "@/components/ds/Icon";
-import { ActionList, SearchField, Reveal } from "@/components/ds";
+import { ActionList, SearchField, Reveal, useSkeletonFade } from "@/components/ds";
 import BottomSheet from "@/components/BottomSheet";
 import { hapticNotify } from "@/lib/haptics";
 import { displayChatContent } from "@/lib/chat-legacy";
@@ -143,6 +143,8 @@ export function AiChatDrawer({
   const [conversations, setConversations] = useState<ConversationItem[]>([]);
   const [conversationsHasMore, setConversationsHasMore] = useState(false);
   const [loadingConversations, setLoadingConversations] = useState(false);
+  // The list fades in over its skeleton instead of replacing it in one frame.
+  const listFade = useSkeletonFade(loadingConversations && conversations.length === 0);
   const [conversationQuery, setConversationQuery] = useState("");
   const [showArchived, setShowArchived] = useState(false);
   const [renamingId, setRenamingId] = useState<string | null>(null);
@@ -906,7 +908,7 @@ export function AiChatDrawer({
           )}
           {loadingConversations && conversations.length === 0 && <SkeletonList rows={3} label="Ladataan keskusteluja" />}
           {conversations.length > 0 && (
-            <div className="overflow-hidden rounded-[20px] bg-surface shadow-[0_1px_2px_rgb(38_34_31/0.06)]">
+            <div className={`overflow-hidden rounded-[20px] bg-surface shadow-[0_1px_2px_rgb(38_34_31/0.06)] ${listFade}`}>
               <AnimatedRows rows={conversations.map((conversation, index) => ({ key: conversation.id, node: (() => {
                 const open = conversation.id === conversationId;
                 return (

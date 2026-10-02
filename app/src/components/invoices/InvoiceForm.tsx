@@ -1,5 +1,7 @@
 "use client";
 
+import { useLineKeys } from "./useLineKeys";
+import { AnimatedRows } from "@/components/AnimatedRows";
 import { CustomSelect } from "@/components/CustomSelect";
 
 import { useEffect, useMemo, useState } from "react";
@@ -287,6 +289,7 @@ export function InvoiceForm({
       : { ...start, lines: start.lines.map((line) => ({ ...line, vatRate: 0 })) };
   });
   const [values, setValues] = useState<InvoiceFormValues>(baseline);
+  const lineKeys = useLineKeys(values.lines.length);
   // The profile may arrive after the form was built (cached copy, then fresh): follow it.
   const [seenVatRegistered, setSeenVatRegistered] = useState(vatRegistered);
   if (seenVatRegistered !== vatRegistered) {
@@ -494,7 +497,7 @@ export function InvoiceForm({
           </p>
         )}
         <div className="space-y-3">
-          {values.lines.map((line, index) => (
+          <AnimatedRows rows={values.lines.map((line, index) => ({ key: lineKeys.keys[index] ?? String(index), node: (
             <Card key={index} className="space-y-3">
               {catalog.length > 0 && (
                 <Field label="Tuote" htmlFor={`if-line-${index}-product`} optional>
@@ -628,29 +631,31 @@ export function InvoiceForm({
                     type="button"
                     variant="danger"
                     className="shrink-0"
-                    onClick={() =>
+                    onClick={() => {
+                      lineKeys.remove(index);
                       setValues((current) => ({
                         ...current,
                         lines: current.lines.filter((_, i) => i !== index),
-                      }))
-                    }
+                      }));
+                    }}
                   >
                     Poista
                   </Button>
                 )}
               </div>
             </Card>
-          ))}
+          ) }))} />
 
           <button
             type="button"
             className={compactActionClass}
-            onClick={() =>
+            onClick={() => {
+              lineKeys.add();
               setValues((current) => ({
                 ...current,
                 lines: [...current.lines, newInvoiceLine(vatRegistered)],
-              }))
-            }
+              }));
+            }}
           >
             + Lisää rivi
           </button>
