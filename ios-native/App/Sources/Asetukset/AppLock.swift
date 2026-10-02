@@ -140,7 +140,7 @@ struct LockScreen: View {
                 .background(Theme.surface, in: RoundedRectangle(cornerRadius: 12))
                 .focused($focused)
                 .onSubmit { attempt() }
-            Button("Avaa") { attempt() }.buttonStyle(.borderedProminent).tint(Theme.ink)
+            Button("Avaa") { attempt() }.buttonStyle(.primary)
             if wrong {
                 Text(lock.waitUntil.map { $0 > Date() ? "Väärä PIN. Odota hetki ennen uutta yritystä." : "Väärä PIN" } ?? "Väärä PIN")
                     .foregroundStyle(Theme.danger).font(.footnote)

@@ -31,8 +31,6 @@ targets:
         UILaunchScreen: {}
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
         UIRequiresFullScreen: true
-        # The palette in Theme.swift is light only; dark mode would mix it with dark system colours.
-        UIUserInterfaceStyle: Light
         ITSAppUsesNonExemptEncryption: false
         NSCameraUsageDescription: "Kameralla kuvaat kuitit kirjanpitoon."
         NSPhotoLibraryUsageDescription: "Valitse kuitin kuva kirjastosta."

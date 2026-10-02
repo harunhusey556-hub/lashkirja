@@ -29,8 +29,7 @@ struct LoadState<Value, Content: View>: View {
                 Text(message)
             } actions: {
                 Button("Yritä uudelleen") { Task { await retry() } }
-                    .buttonStyle(.borderedProminent)
-                    .tint(Theme.ink)
+                    .buttonStyle(.primary)
             }
         case .loaded(let value):
             content(value)
@@ -73,7 +72,7 @@ struct ToastView: View {
                 Button(label, action: action).font(.subheadline.bold())
             }
         }
-        .foregroundStyle(.white)
+        .foregroundStyle(Theme.onInk)
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
         .background(Theme.ink.opacity(0.94), in: RoundedRectangle(cornerRadius: 16, style: .continuous))

@@ -18,6 +18,8 @@ public struct Profile: Codable, Sendable, Equatable {
     public var invoiceTerms: String?
     public var lateInterestPercent: Decimal?
     public var reminderFeeCents: Int?
+    /// Mailboxes the server reads receipts from (`/api/integrations/imap`); read only here.
+    public var imapAccounts: [ImapAccount]?
 }
 
 public struct ProfileResponse: Decodable, Sendable { public let profile: Profile }

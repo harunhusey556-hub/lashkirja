@@ -185,7 +185,7 @@ private struct TaskRow: View {
         case .missingReceipt:
             Label("Kuvaa kuitti", systemImage: "camera").labelStyle(.titleOnly).font(.caption.bold())
                 .padding(.horizontal, 10).padding(.vertical, 5)
-                .background(Theme.ink, in: Capsule()).foregroundStyle(.white)
+                .background(Theme.ink, in: Capsule()).foregroundStyle(Theme.onInk)
         default:
             EmptyView()
         }

@@ -23,7 +23,7 @@ struct OfflineBanner: View {
         if !connectivity.online {
             Label("Ei verkkoyhteyttä", systemImage: "wifi.slash")
                 .font(.footnote.weight(.semibold))
-                .foregroundStyle(.white)
+                .foregroundStyle(Theme.onInk)
                 .padding(.horizontal, 14).padding(.vertical, 8)
                 .background(Theme.ink.opacity(0.9), in: Capsule())
                 .padding(.top, 4)

@@ -54,14 +54,12 @@ struct LoginView: View {
                     } label: {
                         ZStack {
                             Text("Kirjaudu sisään").opacity(busy ? 0 : 1)
-                            if busy { ProgressView().tint(.white) }
+                            if busy { ProgressView().tint(Theme.onInk) }
                         }
                         .font(.headline)
                         .frame(maxWidth: .infinity, minHeight: 50)
                     }
-                    .buttonStyle(.borderedProminent)
-                    .tint(Theme.ink)
-                    .clipShape(Capsule())
+                    .buttonStyle(.primary)
                     .disabled(busy || email.isEmpty || password.isEmpty)
                 }
                 .padding(20)

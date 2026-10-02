@@ -9,16 +9,21 @@ struct SettingsView: View {
         List {
             if let profile {
                 Section {
-                    NavigationLink { ProfileForm(original: profile, section: .person) { self.profile = $0 } } label: {
+                    NavigationLink { ProfileForm(original: profile, section: .person) { saved($0) } } label: {
                         SettingRow(title: [profile.firstName, profile.lastName].compactMap { $0 }.joined(separator: " "), subtitle: profile.email, symbol: "person.crop.circle")
                     }
                 }
                 Section("Yritys") {
-                    NavigationLink { ProfileForm(original: profile, section: .company) { self.profile = $0 } } label: {
+                    NavigationLink { ProfileForm(original: profile, section: .company) { saved($0) } } label: {
                         SettingRow(title: "Yritysmuoto ja ALV", subtitle: entityLabel(profile.entityType) + (profile.vatRegistered ? " · ALV-rekisterissä" : ""), symbol: "building.2")
                     }
-                    NavigationLink { ProfileForm(original: profile, section: .seller) { self.profile = $0 } } label: {
+                    NavigationLink { ProfileForm(original: profile, section: .seller) { saved($0) } } label: {
                         SettingRow(title: "Laskuttajan tiedot", subtitle: profile.invoiceIban == nil ? "Täydennä tilinumero laskuille" : (profile.businessName ?? "Nimi, Y-tunnus ja IBAN"), symbol: "doc.text")
+                    }
+                }
+                Section("Kuitit") {
+                    NavigationLink { EmailImportView { self.profile = $0 } } label: {
+                        SettingRow(title: "Sähköpostien tuonti", subtitle: mailSubtitle(profile.imapAccounts ?? []), symbol: "envelope")
                     }
                 }
             } else {
@@ -37,6 +42,21 @@ struct SettingsView: View {
         .scrollContentBackground(.hidden)
         .background(Theme.canvas)
         .navigationTitle("Asetukset")
+    }
+
+    /// PATCH /api/profile answers without the mailboxes; keep the ones already loaded.
+    private func saved(_ new: Profile) {
+        var merged = new
+        if merged.imapAccounts == nil { merged.imapAccounts = profile?.imapAccounts }
+        profile = merged
+    }
+
+    private func mailSubtitle(_ accounts: [ImapAccount]) -> String {
+        switch accounts.count {
+        case 0: "Yhdistä Gmail tai muu sähköposti"
+        case 1: accounts[0].email
+        default: "\(accounts.count) tiliä yhdistetty"
+        }
     }
 
     private func entityLabel(_ type: String) -> String {

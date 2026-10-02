@@ -43,35 +43,37 @@ struct AssistantView: View {
     }
 
     private func conversation(_ model: ChatModel) -> some View {
-        VStack(spacing: 0) {
-            ScrollViewReader { proxy in
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 14) {
-                        if model.messages.isEmpty {
-                            VStack(spacing: 8) {
-                                Image(systemName: "sparkles").font(.largeTitle).foregroundStyle(Theme.accent)
-                                Text("Kysy kirjanpidostasi").font(.headline)
-                                Text("Esimerkiksi: \"Paljonko ALV:ta maksan tässä kuussa?\"").font(.subheadline).foregroundStyle(Theme.ink2)
-                            }
-                            .frame(maxWidth: .infinity)
-                            .padding(.top, 60)
+        ScrollViewReader { proxy in
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 14) {
+                    if model.messages.isEmpty {
+                        VStack(spacing: 8) {
+                            Image(systemName: "sparkles").font(.largeTitle).foregroundStyle(Theme.accent)
+                            Text("Kysy kirjanpidostasi").font(.headline)
+                            Text("Esimerkiksi: \"Paljonko ALV:ta maksan tässä kuussa?\"").font(.subheadline).foregroundStyle(Theme.ink2)
                         }
-                        ForEach(model.messages) { message in
-                            Bubble(message: message, streaming: model.streaming && message.id == model.messages.last?.id)
-                                .id(message.id)
-                        }
-                        if let failure = model.failure {
-                            Text(failure).font(.footnote).foregroundStyle(Theme.danger)
-                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.top, 60)
                     }
-                    .padding(16)
+                    ForEach(model.messages) { message in
+                        Bubble(message: message, streaming: model.streaming && message.id == model.messages.last?.id)
+                            .id(message.id)
+                    }
+                    if let failure = model.failure {
+                        Text(failure).font(.footnote).foregroundStyle(Theme.danger)
+                    }
                 }
-                .scrollDismissesKeyboard(.interactively)
-                .onChange(of: model.messages.last?.content) { _, _ in
-                    if let last = model.messages.last { withAnimation(.snappy) { proxy.scrollTo(last.id, anchor: .bottom) } }
-                }
+                .padding(16)
             }
-            composer(model)
+            .scrollDismissesKeyboard(.interactively)
+            // An inset rides on top of the keyboard; a composer stacked under the scroll view was left
+            // behind it when the field took focus back after returning from a source page.
+            .safeAreaInset(edge: .bottom, spacing: 0) { composer(model) }
+            .onChange(of: model.messages.last?.content) { _, _ in
+                if let last = model.messages.last { withAnimation(.snappy) { proxy.scrollTo(last.id, anchor: .bottom) } }
+            }
+            // Opening a source page drops the focus, so coming back does not pop the keyboard up.
+            .onDisappear { focused = false }
         }
     }
 
@@ -89,7 +91,7 @@ struct AssistantView: View {
             } label: {
                 Image(systemName: model.streaming ? "stop.fill" : "arrow.up")
                     .font(.system(size: 16, weight: .bold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(Theme.onInk)
                     .frame(width: 40, height: 40)
                     .background(model.streaming || !input.trimmingCharacters(in: .whitespaces).isEmpty ? Theme.ink : Theme.ink2.opacity(0.5), in: Circle())
             }
@@ -120,7 +122,7 @@ private struct Bubble: View {
             .padding(.horizontal, 14)
             .padding(.vertical, 10)
             .background(mine ? Theme.ink : Theme.surface, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-            .foregroundStyle(mine ? .white : Theme.ink)
+            .foregroundStyle(mine ? Theme.onInk : Theme.ink)
             if !message.sources.isEmpty {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack {

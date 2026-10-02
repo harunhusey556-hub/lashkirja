@@ -27,7 +27,7 @@ struct CaptureFlow: View {
                         Text("Kuvaa kuitti tai valitse kuva").font(.headline)
                         if UIImagePickerController.isSourceTypeAvailable(.camera) {
                             Button { showCamera = true } label: { Label("Avaa kamera", systemImage: "camera").frame(maxWidth: .infinity, minHeight: 44) }
-                                .buttonStyle(.borderedProminent).tint(Theme.ink)
+                                .buttonStyle(.primary)
                         }
                         PhotosPicker(selection: $photo, matching: .images) {
                             Label("Valitse kirjastosta", systemImage: "photo").frame(maxWidth: .infinity, minHeight: 44)
@@ -142,7 +142,7 @@ struct ReceiptEditor: View {
                 Button { Task { await save() } } label: {
                     Text("Tallenna kuitti").frame(maxWidth: .infinity, minHeight: 44).font(.headline)
                 }
-                .buttonStyle(.borderedProminent).tint(Theme.ink)
+                .buttonStyle(.primary)
                 .disabled(busy)
                 .listRowBackground(Color.clear)
             }

@@ -39,7 +39,7 @@ struct OnboardingView: View {
                 if let failure { Text(failure).foregroundStyle(Theme.danger) }
                 Section {
                     Button { Task { await save() } } label: { Text("Aloita").frame(maxWidth: .infinity, minHeight: 44).font(.headline) }
-                        .buttonStyle(.borderedProminent).tint(Theme.ink).disabled(busy)
+                        .buttonStyle(.primary).disabled(busy)
                         .listRowBackground(Color.clear)
                 }
             }
