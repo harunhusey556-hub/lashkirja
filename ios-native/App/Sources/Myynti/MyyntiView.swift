@@ -40,6 +40,7 @@ struct MyyntiView: View {
                 }
                 Section {
                     NavigationLink(value: Route.customers) { Label("Asiakkaat", systemImage: "person.2") }
+                    NavigationLink(value: Route.recurringInvoices) { Label("Toistuvat laskut", systemImage: "repeat") }
                 }
                 Section {
                     Picker("Näytä", selection: $filter) {

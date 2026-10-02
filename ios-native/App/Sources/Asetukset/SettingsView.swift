@@ -38,8 +38,14 @@ struct SettingsView: View {
             }
             Section("Tili ja turvallisuus") {
                 NavigationLink { PasswordView() } label: { SettingRow(title: "Vaihda salasana", subtitle: nil, symbol: "key") }
+                NavigationLink(value: Route.changeEmail) { SettingRow(title: "Vaihda sähköposti", subtitle: nil, symbol: "at") }
+                NavigationLink(value: Route.passkeys) { SettingRow(title: "Pääsyavaimet", subtitle: "Kirjaudu Face ID:llä ilman salasanaa", symbol: "person.badge.key") }
                 NavigationLink { DevicesView() } label: { SettingRow(title: "Laitteet", subtitle: "Kirjautuneet laitteet", symbol: "iphone") }
                 NavigationLink { AppLockSettingsView() } label: { SettingRow(title: "Sovelluslukitus", subtitle: lockEnabled ? "Käytössä" : "Ei käytössä", symbol: "lock") }
+            }
+            Section("Tietosuoja ja ohje") {
+                NavigationLink(value: Route.privacy) { SettingRow(title: "Tietosuoja", subtitle: "Tietojen vienti ja tilin sulkeminen", symbol: "hand.raised") }
+                NavigationLink(value: Route.help) { SettingRow(title: "Ohje", subtitle: "Näin sovellus toimii", symbol: "questionmark.circle") }
             }
             Section {
                 LabeledContent("Versio", value: "\(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "") (\(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? ""))")

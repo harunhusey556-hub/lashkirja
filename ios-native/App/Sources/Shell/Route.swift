@@ -37,6 +37,17 @@ enum Route: Hashable {
     case bankAccounts
     case alv(String)
     case settings
+    case purchaseInvoices
+    case purchaseInvoice(String)
+    case statement(String)
+    case recurringInvoices
+    case periods
+    case workQueue
+    case privacy
+    case help
+    case passkeys
+    case changeEmail
+    case emailImport
 }
 
 extension Route {
@@ -55,6 +66,14 @@ extension Route {
         case "/laskut/lasku": return id.map(Route.invoice)
         case "/asiakkaat": return .customers
         case "/asetukset", "/asetukset/laskutus": return .settings
+        case "/kirjanpito/ostolaskut": return id.map(Route.purchaseInvoice) ?? .purchaseInvoices
+        case "/pankki/tapahtumat/tiliote": return id.map(Route.statement)
+        case "/toistuvat": return .recurringInvoices
+        case "/kirjanpito/kaudet", "/kirjanpito/kuukausi": return .periods
+        case "/tyot": return .workQueue
+        case "/asetukset/tietosuoja": return .privacy
+        case "/asetukset/ohje": return .help
+        case "/asetukset/sahkoposti": return .emailImport
         default: return nil
         }
     }
@@ -74,6 +93,17 @@ extension View {
             case .bankAccounts: BankAccountsView()
             case .alv(let period): AlvView(period: period)
             case .settings: SettingsView()
+            case .purchaseInvoices: PurchaseInvoicesView()
+            case .purchaseInvoice(let id): PurchaseInvoiceDetailView(purchaseInvoiceId: id)
+            case .statement(let id): StatementDetailView(statementId: id)
+            case .recurringInvoices: RecurringInvoicesView()
+            case .periods: PeriodsView()
+            case .workQueue: WorkQueueView()
+            case .privacy: PrivacyView()
+            case .help: HelpView()
+            case .passkeys: PasskeysView()
+            case .changeEmail: ChangeEmailView()
+            case .emailImport: EmailImportView { _ in }
             }
         }
     }

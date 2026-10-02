@@ -17,6 +17,11 @@ struct KirjanpitoView: View {
                     HubRow(title: "Pankki", subtitle: openRows > 0 ? "\(openRows) tapahtumaa vaatii toimia" : "Tiliotteet ja pankin tapahtumat", symbol: "list.bullet.rectangle")
                 }
             }
+            Section("Ostot") {
+                NavigationLink(value: Route.purchaseInvoices) {
+                    HubRow(title: "Ostolaskut", subtitle: "Saapuneet laskut ja niiden maksut", symbol: "tray.full")
+                }
+            }
             Section("Pankki") {
                 NavigationLink(value: Route.bankAccounts) {
                     HubRow(title: "Pankkiyhteys ja tilit", subtitle: "Tilit, saldot ja pankkiyhteys", symbol: "building.columns")
@@ -25,6 +30,12 @@ struct KirjanpitoView: View {
             Section("Ilmoitukset ja kaudet") {
                 NavigationLink(value: Route.alv("")) {
                     HubRow(title: "ALV-ilmoitus", subtitle: "Kuukauden arvonlisävero", symbol: "percent")
+                }
+                NavigationLink(value: Route.periods) {
+                    HubRow(title: "Kaudet ja kuukauden sulku", subtitle: "Tarkista ja lukitse valmiit kaudet", symbol: "lock.rectangle.stack")
+                }
+                NavigationLink(value: Route.workQueue) {
+                    HubRow(title: "Työt", subtitle: "Taustalla käsiteltävät tiedostot", symbol: "gearshape.2")
                 }
             }
         }
