@@ -42,6 +42,20 @@ public enum ReceiptSort: String, CaseIterable, Sendable, Identifiable {
     }
 }
 
+/// The web's Lähde filter (`receipt-filters.ts`).
+public enum ReceiptSourceFilter: String, CaseIterable, Sendable, Identifiable {
+    case all = "", ai, ocr, manual
+    public var id: String { rawValue }
+    public var title: String {
+        switch self {
+        case .all: "Kaikki"
+        case .ai: "AI"
+        case .ocr: "OCR"
+        case .manual: "Manuaalinen"
+        }
+    }
+}
+
 /// The filters of the kuitit list as `GET /api/receipts` and `/api/receipts/counts` read them.
 public struct ReceiptListQuery: Sendable, Equatable, Hashable {
     public var search = ""
@@ -51,8 +65,34 @@ public struct ReceiptListQuery: Sendable, Equatable, Hashable {
     /// A category id, or empty for all.
     public var category = ""
     public var sort: ReceiptSort = .dateDesc
+    public var source: ReceiptSourceFilter = .all
+    /// Euros as typed ("12,50"); empty for no limit.
+    public var minAmount = ""
+    public var maxAmount = ""
 
     public init() {}
+
+    private static func amount(_ text: String) -> Decimal?? {
+        let clean = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if clean.isEmpty { return .some(nil) }
+        guard let value = ReceiptAmount.parse(clean), value >= 0 else { return nil }
+        return .some(value)
+    }
+
+    /// The server's own refusals (`Virheellinen summa`, `Summarajaus on virheellinen`), checked first.
+    public var amountError: String? {
+        guard let min = Self.amount(minAmount), let max = Self.amount(maxAmount) else { return "Virheellinen summa" }
+        if let min, let max, min > max { return "Summarajaus on virheellinen" }
+        return nil
+    }
+
+    /// "12,50–1 000 €", as the web's filter chip.
+    public var amountLabel: String? {
+        guard !minAmount.isEmpty || !maxAmount.isEmpty else { return nil }
+        let min = minAmount.trimmingCharacters(in: .whitespaces)
+        let max = maxAmount.trimmingCharacters(in: .whitespaces)
+        return "\(min.isEmpty ? "0" : min)–\(max.isEmpty ? "∞" : max) €"
+    }
 
     private var trimmedSearch: String { String(search.trimmingCharacters(in: .whitespacesAndNewlines).prefix(100)) }
 
@@ -62,6 +102,10 @@ public struct ReceiptListQuery: Sendable, Equatable, Hashable {
         if !trimmedSearch.isEmpty { q["q"] = trimmedSearch }
         if !month.isEmpty { q["month"] = month }
         if !category.isEmpty { q["category"] = category }
+        if source != .all { q["source"] = source.rawValue }
+        // Sent as plain numbers: the server reads Number(...), which a comma would break.
+        if case let value?? = Self.amount(minAmount) { q["minAmount"] = NSDecimalNumber(decimal: value).stringValue }
+        if case let value?? = Self.amount(maxAmount) { q["maxAmount"] = NSDecimalNumber(decimal: value).stringValue }
         return q
     }
 
@@ -79,7 +123,10 @@ public struct ReceiptListQuery: Sendable, Equatable, Hashable {
     }
 
     /// True when anything narrows the list (the empty text then says "no matches", not "no receipts").
-    public var isFiltered: Bool { !trimmedSearch.isEmpty || !month.isEmpty || !category.isEmpty || tab != .all }
+    public var isFiltered: Bool {
+        !trimmedSearch.isEmpty || !month.isEmpty || !category.isEmpty || tab != .all
+            || source != .all || !minAmount.isEmpty || !maxAmount.isEmpty
+    }
 }
 
 public enum ReceiptPaging {

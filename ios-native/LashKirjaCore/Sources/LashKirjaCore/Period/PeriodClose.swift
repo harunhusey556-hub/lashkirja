@@ -159,12 +159,34 @@ public enum PeriodClose {
         }
     }
 
-    /// The VAT step from the return's filing marks.
-    public static func vat(filedAt: String?, paidAt: String?, amount: Decimal, isRefund: Bool) -> Vat {
+    /// The VAT step from the return's filing marks (lib/vat-due.ts). `filedAmount` is field 308 as
+    /// it was filed, signed (negative = refund): once filed, it decides what is owed, and a live figure
+    /// that moved away from it means the return may need correcting, so the step is not done (F66).
+    public static func vat(filedAt: String?, paidAt: String?, filedAmount: Decimal? = nil, amount: Decimal, isRefund: Bool) -> Vat {
         let state: VatState = paidAt != nil ? .paid : filedAt != nil ? .filed : .open
-        let nothingToPay = isRefund || amount <= 0
-        let done = state == .paid || (state == .filed && nothingToPay)
-        return Vat(state: state, done: done, changedSinceFiling: false, nothingToPay: nothingToPay)
+        let filed = filedAt != nil ? filedAmount : nil
+        let nothingToPay = filed.map { $0 <= 0 } ?? (isRefund || amount <= 0)
+        let changed = changedSinceFiling(filed: filed, amount: amount, isRefund: isRefund)
+        let done = !changed && (state == .paid || (state == .filed && nothingToPay))
+        return Vat(state: state, done: done, changedSinceFiling: changed, nothingToPay: nothingToPay)
+    }
+
+    static func changedSinceFiling(filed: Decimal?, amount: Decimal, isRefund: Bool) -> Bool {
+        guard let filed else { return false }
+        return cents(isRefund ? -amount : amount) != cents(filed)
+    }
+
+    private static func cents(_ value: Decimal) -> Decimal {
+        var scaled = value * 100
+        var rounded = Decimal()
+        NSDecimalRound(&rounded, &scaled, 0, .plain)
+        return rounded
+    }
+
+    /// "Luvut ovat muuttuneet ilmoituksen jälkeen: ilmoitettu 159,38 €, nyt 170,00 €."
+    public static func vatChangedNote(filedAmount: Decimal, amount: Decimal, isRefund: Bool) -> String {
+        func signed(_ value: Decimal) -> String { value < 0 ? "palautus \(Money.format(-value))" : Money.format(value) }
+        return "Luvut ovat muuttuneet ilmoituksen jälkeen: ilmoitettu \(signed(filedAmount)), nyt \(signed(isRefund ? -amount : amount))."
     }
 
     /// The VAT period key that ends with `month`, or nil when the month closes none.

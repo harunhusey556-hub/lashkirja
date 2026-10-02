@@ -15,6 +15,9 @@ struct ReceiptsView: View {
     @State private var counts: ReceiptCounts.Counts?
     @State private var pending: [Receipt] = []
     @State private var query = ReceiptListQuery()
+    @State private var editingAmount = false
+    @State private var minDraft = ""
+    @State private var maxDraft = ""
     @State private var searchText = ""
     @State private var busy = false
     @State private var failure: String?
@@ -54,7 +57,7 @@ struct ReceiptsView: View {
             if let notice { Text(notice).foregroundStyle(Theme.ink2) }
             Section {
                 tabChips
-                if query.isFiltered && (!query.month.isEmpty || !query.category.isEmpty) {
+                if query.isFiltered && (!query.month.isEmpty || !query.category.isEmpty || query.source != .all || query.amountLabel != nil) {
                     activeFilters
                 }
             }
@@ -115,6 +118,14 @@ struct ReceiptsView: View {
             Button("Poista", role: .destructive) { Task { await delete(deleteIds) } }
         }
         .fullScreenCover(isPresented: $capture, onDismiss: { Task { await load() } }) { CaptureFlow(transactionId: nil) }
+        .alert("Summarajaus", isPresented: $editingAmount) {
+            TextField("Vähintään €", text: $minDraft).keyboardType(.decimalPad)
+            TextField("Enintään €", text: $maxDraft).keyboardType(.decimalPad)
+            Button("Käytä") { applyAmount() }
+            Button("Peru", role: .cancel) {}
+        } message: {
+            Text("Jätä kenttä tyhjäksi, jos rajaa ei tarvita.")
+        }
         .refreshable { await load() }
         .task(id: ReloadKey(query: query, version: app.dataVersion)) {
             guard receipts.value == nil || gate.isDue(key: String(describing: query), version: app.dataVersion) else { return }
@@ -191,6 +202,15 @@ struct ReceiptsView: View {
                 if !query.category.isEmpty {
                     filterChip(ReceiptCategory.label(for: query.category)) { query.category = "" }
                 }
+                if query.source != .all {
+                    filterChip(query.source.title) { query.source = .all }
+                }
+                if let amount = query.amountLabel {
+                    filterChip(amount) {
+                        query.minAmount = ""
+                        query.maxAmount = ""
+                    }
+                }
             }
             .padding(.horizontal, 16)
         }
@@ -210,6 +230,20 @@ struct ReceiptsView: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel("Poista suodatin \(title)")
+    }
+
+    /// Checked before it reaches the list: the server would refuse the same range.
+    private func applyAmount() {
+        var next = query
+        next.minAmount = minDraft
+        next.maxAmount = maxDraft
+        if let problem = next.amountError {
+            failure = problem
+            Haptics.error()
+            return
+        }
+        failure = nil
+        query = next
     }
 
     /// The last 24 months, newest first.
@@ -239,19 +273,33 @@ struct ReceiptsView: View {
                         ForEach(ReceiptCategory.all) { category in Text(category.label).tag(category.id) }
                     }
                     .pickerStyle(.menu)
+                    Picker("Lähde", selection: $query.source) {
+                        ForEach(ReceiptSourceFilter.allCases) { source in Text(source.title).tag(source) }
+                    }
+                    .pickerStyle(.menu)
+                    Button {
+                        minDraft = query.minAmount
+                        maxDraft = query.maxAmount
+                        editingAmount = true
+                    } label: {
+                        Label(query.amountLabel.map { "Summa: \($0)" } ?? "Summa…", systemImage: "eurosign")
+                    }
                     Picker("Järjestys", selection: $query.sort) {
                         ForEach(ReceiptSort.allCases) { sort in Text(sort.title).tag(sort) }
                     }
                     .pickerStyle(.menu)
-                    if !query.month.isEmpty || !query.category.isEmpty || query.sort != .dateDesc {
+                    if !query.month.isEmpty || !query.category.isEmpty || query.source != .all || query.amountLabel != nil || query.sort != .dateDesc {
                         Button("Tyhjennä suodattimet") {
                             query.month = ""
                             query.category = ""
+                            query.source = .all
+                            query.minAmount = ""
+                            query.maxAmount = ""
                             query.sort = .dateDesc
                         }
                     }
                 } label: {
-                    Image(systemName: query.month.isEmpty && query.category.isEmpty
+                    Image(systemName: query.month.isEmpty && query.category.isEmpty && query.source == .all && query.amountLabel == nil
                           ? "line.3.horizontal.decrease.circle" : "line.3.horizontal.decrease.circle.fill")
                 }
                 .accessibilityLabel("Suodata kuitteja")

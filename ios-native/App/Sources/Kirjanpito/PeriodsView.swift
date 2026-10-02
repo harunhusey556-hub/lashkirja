@@ -143,6 +143,13 @@ struct PeriodsView: View {
                         }
                     }
                 }
+                if f.vat?.changedSinceFiling == true, let report = vat?.report, let filed = report.filing?.filedAmount {
+                    // F66: the figures moved after filing; the return may need correcting.
+                    Label(PeriodClose.vatChangedNote(filedAmount: filed, amount: report.field308.amount, isRefund: report.field308.isRefund),
+                          systemImage: "exclamationmark.triangle")
+                        .font(.footnote)
+                        .foregroundStyle(Theme.warning)
+                }
             } header: {
                 Text("ALV")
             } footer: {
@@ -232,6 +239,7 @@ struct PeriodsView: View {
             if data.vatRegistered, let period = PeriodClose.vatPeriodEnding(in: key, kind: data.vatPeriod) {
                 if let report: AlvReport = try? await app.api.get("/api/alv", query: ["period": period]) {
                     let facts = PeriodClose.vat(filedAt: report.filing?.filedAt, paidAt: report.filing?.paidAt,
+                                                filedAmount: report.filing?.filedAmount,
                                                 amount: report.field308.amount, isRefund: report.field308.isRefund)
                     vat = (period, facts, report)
                 }

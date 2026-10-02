@@ -47,6 +47,17 @@ struct AlvView: View {
                 } footer: {
                     Text("Sovellus ei lähetä ilmoitusta OmaVeroon; merkitse se tehdyksi täällä.")
                 }
+                if let filing = r.filing, filing.filedAt != nil, let filed = filing.filedAmount,
+                   PeriodClose.vat(filedAt: filing.filedAt, paidAt: filing.paidAt, filedAmount: filed,
+                                   amount: r.field308.amount, isRefund: r.field308.isRefund).changedSinceFiling {
+                    Section {
+                        Label(PeriodClose.vatChangedNote(filedAmount: filed, amount: r.field308.amount, isRefund: r.field308.isRefund)
+                              + " Tarkista, pitääkö ilmoitusta korjata OmaVerossa.",
+                              systemImage: "exclamationmark.triangle")
+                            .font(.subheadline)
+                            .foregroundStyle(Theme.warning)
+                    }
+                }
                 if let failure { Text(failure).foregroundStyle(Theme.danger) }
             } else {
                 LoadState(state: state, retry: load) { (_: AlvReport) in EmptyView() }.listRowBackground(Color.clear)
