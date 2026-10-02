@@ -17,8 +17,8 @@ export default function GlobalError({
           justifyContent: "center",
           padding: "1rem",
           boxSizing: "border-box",
-          background: "#f6f3ef",
-          color: "#26221f",
+          background: "#f7f3ef",
+          color: "#1a1a1a",
           fontFamily: "system-ui, sans-serif",
         }}
       >
@@ -32,9 +32,9 @@ export default function GlobalError({
               minHeight: "48px",
               padding: "0 1.25rem",
               border: 0,
-              borderRadius: "14px",
-              background: "#26221f",
-              color: "#f6f3ef",
+              borderRadius: "999px",
+              background: "#1a1a1a",
+              color: "#f7f3ef",
               fontWeight: 600,
               cursor: "pointer",
             }}

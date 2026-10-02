@@ -340,7 +340,7 @@ export default function ReceiptPreview({
                   setZoom((current) => nextZoom(current));
                   setPan({ x: 0, y: 0 });
                 }}
-                className="min-h-11 px-3 rounded-lg bg-white/15 text-white text-sm hover:bg-white/25 transition-colors"
+                className="min-h-11 px-3 rounded-full bg-white/15 text-white text-sm hover:bg-white/25 transition-colors"
               >
                 Suurenna
               </button>
@@ -348,7 +348,7 @@ export default function ReceiptPreview({
                 type="button"
                 data-testid="preview-rotate"
                 onClick={() => setRotation((current) => nextRotation(current))}
-                className="min-h-11 px-3 rounded-lg bg-white/15 text-white text-sm hover:bg-white/25 transition-colors"
+                className="min-h-11 px-3 rounded-full bg-white/15 text-white text-sm hover:bg-white/25 transition-colors"
               >
                 Kierrä
               </button>

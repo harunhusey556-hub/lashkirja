@@ -4,12 +4,12 @@ import { Fragment, type ReactNode } from "react";
  * Markdown for assistant replies: headings, lists, bold, italic, links, and
  * code. Text is React children, never raw HTML.
  */
-export function ChatMarkdown({ text }: { text: string }) {
+export function ChatMarkdown({ text, allowedHrefs }: { text: string; allowedHrefs?: readonly string[] }) {
   const blocks = parseBlocks(text);
   return (
     <div className="max-w-full space-y-2 break-words [overflow-wrap:anywhere]">
       {blocks.map((block, index) => (
-        <Fragment key={index}>{renderBlock(block)}</Fragment>
+        <Fragment key={index}>{renderBlock(block, allowedHrefs)}</Fragment>
       ))}
     </div>
   );
@@ -140,7 +140,7 @@ export function parseBlocks(text: string): Block[] {
   return blocks;
 }
 
-function renderBlock(block: Block): ReactNode {
+function renderBlock(block: Block, allowedHrefs?: readonly string[]): ReactNode {
   if (block.type === "pre") {
     return (
       <pre className="max-w-full overflow-x-auto rounded-xl bg-black/5 p-3 text-xs">
@@ -156,7 +156,7 @@ function renderBlock(block: Block): ReactNode {
             <tr>
               {block.headers.map((cell, index) => (
                 <th key={index} className="border-b border-black/10 px-2 py-1 font-medium">
-                  {renderInline(cell)}
+                  {renderInline(cell, allowedHrefs)}
                 </th>
               ))}
             </tr>
@@ -166,7 +166,7 @@ function renderBlock(block: Block): ReactNode {
               <tr key={rowIndex}>
                 {row.map((cell, index) => (
                   <td key={index} className="border-b border-black/5 px-2 py-1 align-top">
-                    {renderInline(cell)}
+                    {renderInline(cell, allowedHrefs)}
                   </td>
                 ))}
               </tr>
@@ -179,7 +179,7 @@ function renderBlock(block: Block): ReactNode {
   if (block.type === "h") {
     const className =
       block.level === 1 ? "text-base font-semibold" : "text-sm font-semibold";
-    return <p className={className}>{renderInline(block.text)}</p>;
+    return <p className={className}>{renderInline(block.text, allowedHrefs)}</p>;
   }
   if (block.type === "ul" || block.type === "ol") {
     const Tag = block.type === "ul" ? "ul" : "ol";
@@ -187,13 +187,13 @@ function renderBlock(block: Block): ReactNode {
       <Tag className={block.type === "ul" ? "list-disc space-y-1 pl-4" : "list-decimal space-y-1 pl-4"}>
         {block.items.map((item, index) => (
           <li key={index} className={item.depth > 0 ? "ml-4" : undefined}>
-            {renderInline(item.text)}
+            {renderInline(item.text, allowedHrefs)}
           </li>
         ))}
       </Tag>
     );
   }
-  if (block.type === "p") return <p>{renderInline(block.text)}</p>;
+  if (block.type === "p") return <p>{renderInline(block.text, allowedHrefs)}</p>;
   return null;
 }
 
@@ -208,7 +208,7 @@ function safeUrl(url: string): string | null {
   return null;
 }
 
-function renderInline(text: string): ReactNode[] {
+function renderInline(text: string, allowedHrefs?: readonly string[]): ReactNode[] {
   const nodes: ReactNode[] = [];
   const pattern = /(\[[^\]]+\]\([^)\s]+\)|\*\*[^*]+\*\*|`[^`]+`|\*[^*\n]+\*|_[^_\n]+_)/g;
   let last = 0;
@@ -219,7 +219,7 @@ function renderInline(text: string): ReactNode[] {
     const token = match[0];
     if (token.startsWith("[")) {
       const link = /^\[([^\]]+)\]\(([^)\s]+)\)$/.exec(token);
-      const href = link ? safeUrl(link[2]) : null;
+      const href = link && (allowedHrefs === undefined || allowedHrefs.includes(link[2])) ? safeUrl(link[2]) : null;
       nodes.push(
         href ? (
           <a key={key++} href={href} className="underline break-all">

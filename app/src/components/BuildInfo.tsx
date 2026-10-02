@@ -54,20 +54,22 @@ export function BuildInfo() {
   // SHELL-27 / AUTH-19: the user sees the version only. Host, cache mode and
   // build notes are for support, behind "Tekniset tiedot".
   return (
-    <div className="space-y-1 pb-2 text-center text-xs text-ink-2">
-      <p>
-        LashKirja {appVersion}
-        {native ? ` (${native})` : ""}
-      </p>
-      <button
-        type="button"
-        aria-expanded={showDetails}
-        aria-controls="build-info-details"
-        onClick={() => setShowDetails((value) => !value)}
-        className={tintedButtonClass("neutral", "mx-auto")}
-      >
-        {showDetails ? "Piilota tekniset tiedot" : "Tekniset tiedot"}
-      </button>
+    <div className="space-y-1 border-t border-line pt-3 text-xs text-ink-2">
+      <div className="flex items-center justify-between gap-3">
+        <p>
+          LashKirja {appVersion}
+          {native ? ` (${native})` : ""}
+        </p>
+        <button
+          type="button"
+          aria-expanded={showDetails}
+          aria-controls="build-info-details"
+          onClick={() => setShowDetails((value) => !value)}
+          className={tintedButtonClass("neutral", "shrink-0")}
+        >
+          {showDetails ? "Piilota tiedot" : "Tekniset tiedot"}
+        </button>
+      </div>
       <Disclosure open={showDetails}>
         <div id="build-info-details" className="space-y-1">
           {IS_MOBILE_BUILD ? (
@@ -85,7 +87,7 @@ export function BuildInfo() {
             </>
           )}
           {!IS_MOBILE_BUILD && envName === "kehitys" && (
-            <p className="mx-auto max-w-sm leading-relaxed">
+            <p className="leading-relaxed">
               Yhteys on kehityspalvelimeen. Nextin punainen Issue-merkki kuuluu next dev
               -tilaan, eikä sitä piiloteta. Asennettu IPA ei vaihda osoitetta itse:
               tuotantoon tarvitaan uusi build, jonka osoitteessa ajetaan next start.

@@ -1,5 +1,7 @@
 "use client";
 
+import { CustomSelect } from "@/components/CustomSelect";
+
 import { Suspense, useCallback, useEffect, useState } from "react";
 import { copyToClipboard } from "@/lib/clipboard";
 import Link from "next/link";
@@ -508,7 +510,7 @@ function CustomerDetail() {
           <p className="text-caption text-ink-2">
             Laskut ja toistuvat laskut siirtyvät tälle asiakkaalle. Toinen asiakas arkistoidaan.
           </p>
-          <select
+          <CustomSelect
             aria-label="Yhdistettävä asiakas"
             className={`${controlClass} min-h-12`}
             value={mergeId}
@@ -520,7 +522,7 @@ function CustomerDetail() {
                 {other.name}
               </option>
             ))}
-          </select>
+          </CustomSelect>
           {mergeError && (
             <p className="text-caption text-danger" role="alert">
               {mergeError}

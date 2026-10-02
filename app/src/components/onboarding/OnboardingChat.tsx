@@ -510,7 +510,7 @@ export function OnboardingChat({
   return (
     <div
       ref={surfaceRef}
-      className={`${styles.surface} ${surfaceMotion}`}
+      className={`stitch-page ${styles.surface} ${surfaceMotion}`}
       data-overlay-root={isOpen ? "" : undefined}
       role="dialog"
       aria-modal="true"

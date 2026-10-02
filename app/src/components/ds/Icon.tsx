@@ -42,12 +42,13 @@ export function Icon({
   );
 }
 
-/** The 36px rounded leading tile used by `ListRow`, the Lisää sheet and the profile sheet. */
+/** The shared 40px circular leading tile used by `ListRow`, the Lisää sheet and the profile sheet. */
 export function IconTile({ children, tone = "default" }: { children: ReactNode; tone?: "default" | "danger" }) {
   return (
     <span
       aria-hidden
-      className={`pointer-events-none flex h-9 w-9 shrink-0 items-center justify-center rounded-[10px] bg-canvas ${
+      data-icon-tone={tone}
+      className={`icon-tile pointer-events-none flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-canvas ${
         tone === "danger" ? "text-danger" : "text-ink-2"
       }`}
     >

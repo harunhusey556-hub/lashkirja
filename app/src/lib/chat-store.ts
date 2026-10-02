@@ -151,7 +151,6 @@ export async function priorContextTurns(
     where: {
       userId,
       conversationId,
-      status: "complete",
       content: { not: "" },
       OR: [
         { createdAt: { lt: before.createdAt } },
@@ -160,11 +159,17 @@ export async function priorContextTurns(
     },
     orderBy: [{ createdAt: "desc" }, { id: "desc" }],
     take: 12,
-    select: { role: true, content: true },
+    select: { role: true, content: true, status: true },
   });
-  return rows
-    .reverse()
-    .filter((row) => row.role === "user" || row.role === "assistant")
+  const ordered = rows.reverse().filter((row) => row.role === "user" || row.role === "assistant");
+  // Only answered exchanges: a question whose reply failed or was refused would
+  // otherwise reach the model as still open, and it answers every one again.
+  return ordered
+    .filter((row, index) => {
+      if (row.role === "assistant") return row.status === "complete" && ordered[index - 1]?.role === "user";
+      const next = ordered[index + 1];
+      return next?.role === "assistant" && next.status === "complete";
+    })
     // The model must not see (and echo) the pre-OWN-09 "Rajattu tila" notice either.
     .map((row) => ({ role: row.role as "user" | "assistant", content: displayChatContent(row.role, row.content) }));
 }
@@ -330,6 +335,7 @@ export async function runAssistantTurn(input: {
   local?: { content: string; proposalData?: string | null; sources?: ChatSource[]; limited?: boolean };
   failureNotice?: string;
   honesty?: HonestyContext;
+  sources?: ChatSource[];
   stream?: (signal: AbortSignal) => AsyncGenerator<string>;
   onDelta?: (delta: string) => void;
 }): Promise<{
@@ -432,7 +438,7 @@ export async function runAssistantTurn(input: {
     content = input.failureNotice;
     limited = true;
   }
-  const sources = settled.rejected ? [] : mergeSources(undefined, content);
+  const sources = settled.rejected ? [] : mergeSources(input.sources, content);
   const saved = await finishAssistantReply({
     messageId: claim.messageId,
     owner: input.owner,

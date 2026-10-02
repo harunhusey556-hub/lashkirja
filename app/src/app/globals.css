@@ -33,8 +33,9 @@
   --color-accent-soft: #f3e6e3;
   --radius-card: 14px;
 
-  /* AX-21, R20: 56 px of bar plus the home-indicator inset (90 at 34). */
-  --app-tab-height: 3.5rem;
+  /* AX-21, R20: the floating tab capsule (64 px) plus its 12 px lift, above
+     the home-indicator inset. Overlays (toasts, bulk bar) sit above this. */
+  --app-tab-height: 4.75rem;
 
   /* Type scale (findings-vs 2.2, AX R18). rem on a 16 px base, times
      --text-scale, which boot.ts sets from the iOS text-size setting
@@ -511,6 +512,12 @@ button:disabled {
   box-shadow: -8px 0 24px rgb(38 34 31 / 0.1);
 }
 
+/* Present (Asetukset from the avatar): the page rises like an iOS sheet,
+   its top edge lifted by the same soft shadow. */
+.app-main[data-nav-moving="present"] {
+  box-shadow: 0 -8px 24px rgb(38 34 31 / 0.1);
+}
+
 .page-snapshot-scrim {
   position: absolute;
   inset: 0;
@@ -586,13 +593,118 @@ button:disabled {
   opacity: 1;
 }
 
+/* The tab bar floats over the page (iOS 26): content scrolls on under the
+   glass, and <main> pads its end so the last row clears the capsule. Only
+   the capsule and "+" take touches; the strip around them passes through. */
 .app-tab-bar {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  padding-right: max(1rem, env(safe-area-inset-right, 0px));
+  padding-bottom: calc(max(var(--safe-bottom) - 12px, 0px) + 12px);
+  padding-left: max(1rem, env(safe-area-inset-left, 0px));
+  pointer-events: none;
+}
+
+.app-tab-bar > * > * {
+  pointer-events: auto;
+}
+
+.app-frame[data-overlay="open"] > .app-tab-bar > * > * {
+  pointer-events: none;
+}
+
+@media (max-width: 767.98px) {
+  .app-frame:not([data-tabs="hidden"]) > .app-main {
+    padding-bottom: calc(var(--app-tab-height) + var(--safe-bottom) + 0.5rem);
+  }
+}
+
+.tab-capsule {
+  --tab-pad: 4px;
+  /* The capsule owns horizontal drags (the lens slide); nothing scrolls under it. */
+  touch-action: none;
   position: relative;
-  flex: none;
-  padding-right: env(safe-area-inset-right, 0px);
-  padding-bottom: var(--safe-bottom);
-  padding-left: env(safe-area-inset-left, 0px);
-  height: calc(var(--app-tab-height) + var(--safe-bottom));
+  display: flex;
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 64px;
+  padding: var(--tab-pad);
+  border-radius: 9999px;
+  background: color-mix(in srgb, var(--color-surface) 72%, transparent);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  backdrop-filter: blur(20px) saturate(180%);
+  border: 0.5px solid rgb(255 255 255 / 0.7);
+  box-shadow:
+    0 8px 28px rgb(38 34 31 / 0.12),
+    0 1px 3px rgb(38 34 31 / 0.06),
+    inset 0 1px 0 rgb(255 255 255 / 0.6);
+}
+
+.tab-plus {
+  width: 64px;
+  height: 64px;
+  box-shadow: 0 8px 24px rgb(38 34 31 / 0.22), 0 1px 3px rgb(38 34 31 / 0.12);
+}
+
+/* The selection lens: one pill that slides between the tabs on a spring
+   (a slight overshoot), and stretches while it travels. */
+.tab-lens {
+  position: absolute;
+  top: var(--tab-pad);
+  bottom: var(--tab-pad);
+  left: var(--tab-pad);
+  width: calc((100% - 2 * var(--tab-pad)) / var(--tab-count));
+  transform: translateX(calc(100% * var(--tab-index)));
+  transition:
+    transform 420ms cubic-bezier(0.34, 1.36, 0.64, 1),
+    opacity 200ms var(--ease-out);
+  opacity: 0;
+  pointer-events: none;
+}
+
+.tab-lens[data-visible],
+.tab-capsule[data-pressing] .tab-lens {
+  opacity: 1;
+}
+
+/* Held: the lens sits under the finger (--tab-drag-x, set by AppShell).
+   It springs there on a press, and tracks the finger 1:1 once it slides. */
+.tab-capsule[data-pressing] .tab-lens {
+  transform: translateX(var(--tab-drag-x, 0px));
+}
+
+.tab-capsule[data-dragging] .tab-lens {
+  transition: opacity 200ms var(--ease-out);
+}
+
+/* The press itself: the lens swells past the capsule and lifts; letting go
+   it springs back with a small overshoot (the re-tap feedback). */
+.tab-capsule[data-pressing] .tab-lens-body {
+  scale: 1.16 1.14;
+  box-shadow: 0 4px 16px rgb(38 34 31 / 0.14);
+}
+
+.tab-lens-body {
+  display: block;
+  height: 100%;
+  border-radius: 9999px;
+  background: color-mix(in srgb, var(--color-accent-soft) 85%, rgb(38 34 31 / 0.06));
+  animation: tabLensStretch 420ms cubic-bezier(0.3, 0.7, 0.2, 1);
+  transition:
+    scale 420ms cubic-bezier(0.34, 1.56, 0.64, 1),
+    box-shadow 240ms var(--ease-out);
+}
+
+@keyframes tabLensStretch {
+  0% { transform: scale(1, 1); }
+  35% { transform: scale(1.14, 0.92); }
+  100% { transform: scale(1, 1); }
+}
+
+.tab-item {
+  border-radius: 9999px;
 }
 
 /* C5/C6 (IA-08): the tab bar never rides on the keyboard. It leaves the flow
@@ -1238,6 +1350,19 @@ body.signing-out {
     opacity: 0.7;
   }
 
+  .tab-lens {
+    transition: opacity 120ms linear;
+  }
+
+  .tab-lens-body {
+    animation: none;
+    transition: box-shadow 120ms linear;
+  }
+
+  .tab-capsule[data-pressing] .tab-lens-body {
+    scale: none;
+  }
+
   .app-tab-bar,
   .app-frame[data-tabs="hidden"] > .app-tab-bar {
     transition: opacity 120ms linear, visibility 0s linear 120ms !important;
@@ -1274,6 +1399,12 @@ body.signing-out {
 }
 
 @media (prefers-reduced-transparency: reduce) {
+  .tab-capsule {
+    background: var(--color-surface);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+
   [class*="backdrop-blur"] {
     -webkit-backdrop-filter: none !important;
     backdrop-filter: none !important;
@@ -1393,3 +1524,151 @@ html[data-page-hidden] *::after {
     animation: none;
   }
 }
+
+/* Shared Kirjanpito design: page and modal surfaces; the footer retains its own tokens. */
+.shell-chat-icon { box-shadow: 0 3px 14px rgb(28 25 23 / 6%); color: #2c2926; }
+.shell-profile-icon { background: #c98b86; box-shadow: 0 2px 6px rgb(28 25 23 / 5%); }
+.app-frame[data-inline-header="true"] > .app-header { background: transparent; }
+.app-frame[data-inline-header="true"] > .app-header .app-header-row,
+.app-frame[data-inline-header="true"] > .app-header .app-header-title { display: none; }
+.page-title:has(.page-title-actions) > div:first-child { flex-basis: 55%; }
+.page-title-accessory { display: flex; justify-content: flex-end; }
+.app-frame[data-design="stitch"] { background: radial-gradient(ellipse at 85% 0%, #c98b862e, transparent 52%), #f7f3ef; }
+.stitch-page {
+  --color-canvas: #f7f3ef;
+  --color-ink: #1a1a1a;
+  --color-success: #1f4d3a;
+  --color-success-dark: #163b2c;
+  --color-ink-2: #716b65;
+  --color-surface: #fff;
+  --color-line: #eee8e2;
+  --color-accent-soft: #f7ebea;
+  --radius-card: 24px;
+}
+.stitch-page .page-title h1 { font-size: calc(34px * var(--text-scale, 1)); font-weight: 600; }
+.stitch-page section > .divide-y,
+.stitch-page :is(div, section, dl, fieldset).rounded-card.bg-surface,
+.stitch-page .ui-card,
+.stitch-page .stitch-card { border: 0; border-radius: 24px; background: #fff; box-shadow: 0 8px 24px -4px rgb(28 25 23 / 5%), 0 2px 8px -1px rgb(28 25 23 / 2%); }
+.stitch-page section h2 { font-weight: 500; }
+.stitch-page .icon-tile { border-radius: 50%; background: #f0ece6; color: #5f5851; }
+.stitch-page [data-tone="green"] [data-testid="list-row"] > .icon-tile,
+.stitch-page [data-testid="list-row"]:has(.text-success) > .icon-tile { background: #e8efea; color: #1f4d3a; }
+.stitch-page [data-testid="bank-connect-row"] > .icon-tile { background: #f7ebea; color: #a46660; }
+.stitch-page .clamp-lines { -webkit-line-clamp: unset; overflow: visible; }
+.bookkeeping-progress { position: relative; width: 78px; height: 78px; flex: none; color: #1f4d3a; }
+.bookkeeping-progress svg { width: 100%; height: 100%; }
+.bookkeeping-progress > span { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: var(--text-body); font-weight: 600; font-variant-numeric: tabular-nums; }
+.bookkeeping-progress > span > svg { width: 28px; height: 28px; }
+.stitch-status { display: flex; align-items: center; gap: 16px; padding: 16px 20px; background: linear-gradient(130deg, #f2f8f5, #fff) !important; }
+.stitch-hero { padding: 20px; }
+.stitch-hero-main { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.stitch-hero.is-complete { background: linear-gradient(145deg, #f2f8f5, #fff); }
+.stitch-hero.is-complete .stitch-hero-main { flex-direction: column-reverse; text-align: center; padding: 4px 0; }
+.stitch-hero.is-complete .bookkeeping-progress { width: 84px; height: 84px; }
+.stitch-money-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+.stitch-money-card { padding: 16px; min-width: 0; }
+.stitch-money-card .money { font-size: calc(20px * var(--text-scale, 1)); font-weight: 600; font-variant-numeric: tabular-nums; }
+.stitch-money-card .money small { font-size: var(--text-caption); font-weight: 400; color: #7a7570; }
+.stitch-automation { display: flex; align-items: center; gap: 14px; padding: 20px; border-radius: 24px; background: linear-gradient(135deg, #1f4d3a, #142e23); color: white; box-shadow: 0 10px 25px -5px rgb(31 77 58 / 20%); }
+.stitch-automation-icon { display: flex; align-items: center; justify-content: center; width: 40px; height: 40px; flex: none; border-radius: 50%; background: #ffffff18; }
+.stitch-sync { display: flex; justify-content: center; align-items: center; gap: 8px; color: #7a7570; font-size: var(--text-caption); }
+.stitch-sync::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: #1f4d3a; }
+@media (max-width: 359px) {
+  .stitch-page .page-title h1 { font-size: calc(30px * var(--text-scale, 1)); }
+  .stitch-money-card { padding: 12px; }
+}
+.app-frame[data-design="stitch"] > .app-main { background: transparent; padding-left: max(20px, env(safe-area-inset-left, 0px)); padding-right: max(20px, env(safe-area-inset-right, 0px)); padding-top: 22px; }
+.app-frame[data-design="stitch"] .app-page { padding: 0; }
+.koti-month-stepper { display: flex; height: 32px; overflow: hidden; border-radius: 999px; background: #ffffffb3; }
+.koti-month-stepper button { width: 36px; height: 32px; }
+.koti-heading .page-title { margin-bottom: 0; }
+.page-title-actions { align-self: flex-start; padding-top: 2px; }
+.stitch-money-card .font-medium { font-size: calc(12px * var(--text-scale, 1)); }
+.stitch-page [data-tone="rose"] [data-testid="list-row"] > .icon-tile { background: #f7ebea; color: #a46660; }
+
+.stitch-page .icon-tile { width: 40px; height: 40px; }
+.stitch-page [data-tone="green"] button[aria-label^="Kuvaa kuitti:"] { background: #1a1a1a; color: white; }
+
+/* Cards have depth; fields keep their own outline, focus ring and compact radius. */
+.stitch-page :is(input:not([type="checkbox"]):not([type="radio"]), select, textarea).rounded-card { border-radius: 14px; }
+.stitch-page .ui-summary-card { background: linear-gradient(135deg, #fff, #f5f9f6); }
+.stitch-page .icon-tile:has(.lucide-receipt-euro, .lucide-arrow-left-right, .lucide-circle-check, .text-success) { background: #e8efea; color: #1f4d3a; }
+.stitch-page .icon-tile:has(.lucide-mail, .lucide-landmark),
+.stitch-page .icon-tile[data-icon-tone="danger"] { background: #f7ebea; }
+.stitch-page .icon-tile[data-icon-tone="danger"] { color: var(--color-danger); }
+.app-frame[data-design="stitch"] > .app-header { background: transparent; }
+.app-frame[data-design="stitch"] > .app-header[data-collapsed="true"] { background: rgb(247 243 239 / 94%); backdrop-filter: blur(16px); }
+.bare-frame { background: radial-gradient(ellipse at 85% 0%, #c98b862e, transparent 52%), #f7f3ef; }
+.sheet-panel.stitch-page { background: linear-gradient(160deg, #f8efec, #f7f3ef 38%); border-top-left-radius: 32px; border-top-right-radius: 32px; }
+.sheet-panel.stitch-page [id][tabindex="-1"] { font-weight: 600; }
+.assistant-surface.stitch-page { background: radial-gradient(ellipse at 85% 0%, #c98b862e, transparent 52%), #f7f3ef; }
+.assistant-surface > .app-header { background: rgb(247 243 239 / 80%); backdrop-filter: blur(16px); }
+.stitch-page .line-clamp-2 { -webkit-line-clamp: unset; overflow: visible; }
+.stitch-page form.rounded-card.bg-surface { border: 0; box-shadow: 0 8px 24px -4px rgb(28 25 23 / 5%), 0 2px 8px -1px rgb(28 25 23 / 2%); }
+
+/* Sliding pages need opaque surfaces so outgoing text cannot show through. */
+.app-frame[data-design="stitch"] > .app-main[data-nav-moving="push"],
+.app-frame[data-design="stitch"] > .app-main[data-nav-moving="present"],
+.app-frame[data-design="stitch"] > .page-snapshot {
+  background: radial-gradient(ellipse at 85% 0%, #c98b862e, transparent 52%), #f7f3ef;
+}
+
+.compact-form-action { position: relative; min-height: 36px; width: fit-content; background: rgb(31 77 58 / 5%); white-space: nowrap; }
+.compact-form-action::before { content: ""; position: absolute; inset: -4px 0; }
+.compact-form-action:focus-visible { outline: 2px solid var(--color-success); outline-offset: 3px; }
+
+.custom-select-trigger { display: flex; align-items: center; justify-content: space-between; gap: 12px; text-align: left; cursor: pointer; }
+.custom-select-trigger > svg { flex: none; color: #716b65; transition: transform 150ms ease; }
+.custom-select-trigger[aria-expanded="true"] > svg { transform: rotate(180deg); }
+.custom-select-trigger:disabled { opacity: .6; cursor: default; }
+.custom-select-trigger:focus-visible { outline: 2px solid #1f4d3a; outline-offset: 2px; }
+.custom-select-menu { position: fixed; z-index: 10000; overflow-y: auto; overscroll-behavior: contain; padding: 6px; border: 1px solid #eee8e2; border-radius: 18px; background: #fff; color: #1a1a1a; box-shadow: 0 12px 36px rgb(28 25 23 / 14%); font-size: var(--text-body); }
+.custom-select-option { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 44px; padding: 10px 12px; border-radius: 12px; cursor: pointer; overflow-wrap: anywhere; }
+.custom-select-option.is-active { background: #f0f5f1; }
+.custom-select-option[aria-selected="true"] { color: #1f4d3a; font-weight: 500; }
+.custom-select-option[aria-disabled="true"] { opacity: .45; cursor: default; }
+.custom-select-option > svg { flex: none; }
+
+/* Compact selected labels stay readable even in narrow ALV and filter fields. */
+.custom-select-trigger { font-size: calc(15px * var(--text-scale, 1)); gap: 6px; padding-left: 10px; padding-right: 10px; border-radius: 14px; }
+.custom-select-trigger > span { white-space: normal; overflow-wrap: anywhere; overflow: visible; text-overflow: clip; line-height: 1.35; padding-block: 8px; }
+.custom-select-menu { font-size: calc(15px * var(--text-scale, 1)); }
+
+/* Shared action geometry and keyboard feedback across pages and overlays. */
+.ds-button { border-radius: 999px; min-width: 0; text-align: center; }
+.ds-tinted-button { position: relative; min-height: 36px; gap: 6px; text-align: center; }
+.ds-tinted-button::before { content: ""; position: absolute; inset: -4px 0; }
+:is(.ds-button, .ds-tinted-button, .compact-form-action):focus-visible { outline: 2px solid var(--color-success); outline-offset: 3px; }
+@media (hover: hover) {
+  .compact-form-action:hover { background: rgb(31 77 58 / 9%); }
+}
+
+/* Isolate outgoing layers; transform motion needs no per-frame layout/paint. */
+.page-snapshot { contain: layout paint; }
+.app-frame[data-design="stitch"] > .app-main[data-nav-moving="pop"] { background: radial-gradient(ellipse at 85% 0%, #c98b862e, transparent 52%), #f7f3ef; }
+
+/* Outgoing snapshots are frozen; pulse/fade/bar animations must not repaint
+   those retained trees while the compositor is sliding the page layers. */
+.page-snapshot *, .page-snapshot *::before, .page-snapshot *::after { animation-play-state: paused !important; transition: none !important; }
+.app-main[data-nav-moving] .skeleton,
+.app-main[data-nav-moving] .animate-pulse { animation-play-state: paused; }
+
+/* Settings use a quieter density; form targets and explanatory text stay readable. */
+.settings-page .page-title h1 { font-size: calc(28px * var(--text-scale, 1)); line-height: 1.2; letter-spacing: -.025em; }
+.settings-page .page-title { margin-bottom: 18px; }
+.settings-page .space-y-6 > :not(:last-child) { --tw-space-y-reverse: 0; margin-block-end: 18px; }
+.settings-page .settings-group > h2 { margin-bottom: 6px; }
+.settings-page .settings-row { min-height: 56px; gap: 10px; padding: 10px 14px; }
+.settings-page .settings-row .icon-tile { width: 36px; height: 36px; }
+.settings-page .settings-row-title { font-size: calc(14px * var(--text-scale, 1)); line-height: 1.4; }
+.settings-page .settings-row-hint { font-size: calc(12px * var(--text-scale, 1)); line-height: 1.4; overflow-wrap: anywhere; }
+.settings-page .settings-profile-summary { padding: 14px 16px; }
+.settings-page .ui-card > p.text-caption { line-height: 1.5; }
+.settings-page :is(input, textarea) { font-size: var(--text-input); }
+@media (max-width: 359px) {
+  .settings-page .page-title h1 { font-size: calc(26px * var(--text-scale, 1)); }
+}
+
+.chat-action-chip { box-shadow: 0 2px 8px rgb(31 77 58 / 8%); text-align: left; white-space: normal; }
+.assistant-surface .chat-action-chip:focus-visible { outline: 2px solid #1f4d3a; outline-offset: 3px; }

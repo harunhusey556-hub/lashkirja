@@ -14,6 +14,41 @@ export const COPILOT_HEADERS = {
 
 let copilotSession: { token: string; expiresAt: number; baseUrl: string } | null = null;
 
+/** A provider answered with an HTTP error; `status` tells a quota refusal from an outage. */
+export class ProviderHttpError extends Error {
+  constructor(
+    message: string,
+    readonly status: number
+  ) {
+    super(message);
+    this.name = "ProviderHttpError";
+  }
+}
+
+/**
+ * Copilot Free runs out mid-month and then refuses every call (402/403/429)
+ * until the quota resets. After such a refusal Copilot is skipped for an
+ * hour, so each chat turn or receipt goes straight to the next provider
+ * instead of paying a failed round trip first.
+ */
+const COPILOT_QUOTA_STATUSES = new Set([402, 403, 429]);
+const COPILOT_PAUSE_MS = 60 * 60 * 1000;
+let copilotPausedUntil = 0;
+
+export function copilotPaused(now = Date.now()): boolean {
+  return now < copilotPausedUntil;
+}
+
+export function noteCopilotFailure(error: unknown, now = Date.now()): void {
+  if (error instanceof ProviderHttpError && COPILOT_QUOTA_STATUSES.has(error.status)) {
+    copilotPausedUntil = now + COPILOT_PAUSE_MS;
+  }
+}
+
+export function resetCopilotPauseForTests(): void {
+  copilotPausedUntil = 0;
+}
+
 export async function fetchWithTimeout(
   input: string,
   init: RequestInit,
@@ -51,7 +86,7 @@ export async function getCopilotSessionToken(ghToken: string): Promise<{ token: 
     },
   });
   if (!res.ok) {
-    throw new Error(`Copilot token exchange failed: ${res.status}`);
+    throw new ProviderHttpError(`Copilot token exchange failed: ${res.status}`, res.status);
   }
   const data = await res.json();
   const sessionToken = data.token as string;
@@ -93,7 +128,7 @@ export async function askCopilot(
   );
 
   if (!response.ok) {
-    throw new Error(`Copilot API error: ${response.status}`);
+    throw new ProviderHttpError(`Copilot API error: ${response.status}`, response.status);
   }
 
   const data = await response.json();
@@ -134,9 +169,14 @@ export async function* askCopilotStream(
     }),
   });
   if (!response.ok || !response.body) {
-    throw new Error(`Copilot stream failed: ${response.status}`);
+    throw new ProviderHttpError(`Copilot stream failed: ${response.status}`, response.status);
   }
-  const reader = response.body.getReader();
+  yield* readChatCompletionStream(response.body);
+}
+
+/** Content deltas from an OpenAI-style `chat/completions` SSE body. */
+export async function* readChatCompletionStream(body: ReadableStream<Uint8Array>): AsyncGenerator<string> {
+  const reader = body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
   while (true) {

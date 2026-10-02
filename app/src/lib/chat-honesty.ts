@@ -1,3 +1,4 @@
+import { CHAT_DESTINATIONS } from "./chat-app";
 import { alvDrillHref } from "./report-drill";
 import { MONTHS } from "./finnish-months";
 import type { ChatSource, ChatTurnStatus } from "./chat-turn";
@@ -30,7 +31,7 @@ const KNOWN_SCREENS = new Set([
 const RECORD_ID_SOURCE = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
 
 const UNPERFORMED_ACTION =
-  /olen yhdistänyt|yhdistin kuitin|hyväksyin täsmäytyksen|muutin kirjanpidon|lähetin laskun|kirjasin maksun|i (?:have )?matched your|i updated your books|i sent the invoice/i;
+  /olen yhdistänyt|yhdistin kuitin|hyväksyin täsmäytyksen|muutin kirjanpidon|lähetin laskun|kirjasin maksun|i (?:have )?matched your|i updated your books|i sent the invoice|i (?:have )?connected your bank|yhdistin pank|pankkiyhteys on nyt yhdistetty|bankan[ıi]z[ıi] ba[ğg]lad[ıi]m|faturan[ıi]z[ıi] g[öo]nderdim/i;
 
 /** A reply that says the bot already changed the books, when it did not. */
 export function replyClaimsUnperformedAction(text: string): boolean {
@@ -69,6 +70,7 @@ const SOURCE_RULES: Array<{ prefix: string; label: string }> = [
   { prefix: "/laskut", label: "Laskut" },
   { prefix: "/pankki/tapahtumat", label: "Pankki" },
   { prefix: "/tiliotteet", label: "Tiliotteet" },
+  ...CHAT_DESTINATIONS.map(item => ({ prefix: item.href.split("?")[0], label: item.label })),
 ];
 
 function labelForHref(href: string): string | null {
@@ -122,6 +124,10 @@ export function enforceAssistantReply(
   const citedIds = [...text.matchAll(new RegExp(RECORD_ID_SOURCE, "gi"))].map((match) => match[0].toLowerCase());
   if (citedIds.some((id) => !allowedIds.has(id))) {
     return { text: HONESTY_REFUSAL, rejected: true, reason: "record" };
+  }
+  const links = [...text.matchAll(/\[[^\]]*\]\(([^)\s]+)\)/g)].map(match => match[1]);
+  if (links.some(href => !href.startsWith("/") || href.startsWith("//") || !sourceIsAllowed(href, ctx.allowedHrefs))) {
+    return { text: HONESTY_REFUSAL, rejected: true, reason: "source" };
   }
   if (sourcesFromText(text).some((source) => !sourceIsAllowed(source.href, ctx.allowedHrefs))) {
     return { text: HONESTY_REFUSAL, rejected: true, reason: "source" };

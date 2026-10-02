@@ -1,7 +1,9 @@
 "use client";
 
+import { ProgressRing } from "@/components/ds/ProgressRing";
+import { helsinkiMonthKey } from "@/lib/validation";
 import { PullToRefresh } from "@/components/ds/PullToRefresh";
-import { Inbox, Lock, LockKeyhole, Percent, ReceiptEuro } from "lucide-react";
+import { Inbox, ListChecks, LockKeyhole, Percent, ReceiptEuro } from "lucide-react";
 import { Icon, PageTitle, Section, ListRow, SlotSkeleton } from "@/components/ds";
 import { apiFetch, readJson } from "@/components/clientFetch";
 import { MONTHS } from "@/lib/finnish-months";
@@ -10,13 +12,14 @@ import { useVatDue } from "@/components/useVatDue";
 import { useProfile } from "@/app/asetukset/useProfile";
 import { BankConnectRowView } from "@/components/BankConnectCard";
 import { useBankConnections } from "@/components/bank/useBankConnections";
-import { ConnectionNotice } from "@/components/ScreenState";
+import { pageCacheFetchedAt } from "@/lib/page-cache";
+import { ConnectionNotice, StaleBanner } from "@/components/ScreenState";
 import { firstHubFailure } from "@/lib/hub-failure";
 import { useCachedResource } from "@/components/useCachedResource";
 import { PERIOD_LOCK_KEY, PURCHASE_COUNTS_KEY } from "@/lib/cached-resource";
 
 /**
- * Phase 1 hub, restyled: one place for everything bookkeeping. Phase 3
+ * Bookkeeping hub: one place for everything bookkeeping. Phase 3
  * replaces the first section with the single transaction list (spec §3.2) -
  * for now it stays a set of plain links, same as before.
  *
@@ -51,17 +54,34 @@ export default function KirjanpitoPage() {
     return readJson<{ lockedThrough: string | null }>(response, "");
   });
   const bank = useBankConnections();
+  const month = helsinkiMonthKey();
+  const overview = useCachedResource<{
+    events?: { done: number; total: number };
+    matching: { matched: number; matchable: number };
+    sectionErrors?: Record<string, string>;
+  }>(`dashboard:${month}`, async (signal) => {
+    const response = await apiFetch(`/api/dashboard?month=${month}`, { credentials: "include", signal });
+    return readJson(response, "Kirjanpidon tilaa ei saatu haettua");
+  });
+  const events = overview.value?.events ?? (overview.value ? {
+    done: overview.value.matching.matched, total: overview.value.matching.matchable,
+  } : null);
+  const statusError = overview.value?.sectionErrors?.matching;
+  const openEvents = events && !statusError ? Math.max(0, events.total - events.done) : 0;
 
   // One failure card with one retry when a value failed and nothing is cached
   // in its place (F34). The link rows stay: they are navigation and still work.
   const failure = firstHubFailure([
+    { failed: overview.failed || Boolean(statusError), empty: overview.value === null || Boolean(statusError), error: overview.error || statusError },
     { failed: purchases.failed, empty: purchases.value === null, error: purchases.error },
     { failed: lock.failed, empty: lock.value === null, error: lock.error },
     { failed: bank.error !== null, empty: bank.data === null, error: bank.error },
     { failed: vat.failed, empty: vat.figures === null },
     { failed: Boolean(loadError), empty: profile === null },
   ]);
+  const stale = !failure && (overview.failed || purchases.failed || lock.failed || Boolean(bank.error) || vat.failed || Boolean(loadError));
   const reloadAll = () => {
+    overview.reload();
     vat.reload();
     purchases.reload();
     lock.reload();
@@ -75,8 +95,8 @@ export default function KirjanpitoPage() {
 
   const purchasesValue = purchases.value
     ? purchases.value.open + purchases.value.overdue === 1
-      ? "1 avoin"
-      : `${purchases.value.open + purchases.value.overdue} avointa`
+      ? "1 avoinna"
+      : `${purchases.value.open + purchases.value.overdue} avoinna`
     : undefined;
 
   const lockedThrough = lock.value?.lockedThrough;
@@ -84,7 +104,7 @@ export default function KirjanpitoPage() {
     lockedThrough === undefined
       ? undefined
       : lockedThrough === null
-        ? "Ei suljettu"
+        ? "Ei lukittu"
         : `${MONTHS[Number(lockedThrough.slice(5, 7)) - 1]} asti`;
 
   // ALV row. The profile decides whether the row has a figure at all, so until
@@ -93,7 +113,7 @@ export default function KirjanpitoPage() {
   const alvHref = vat.due?.queryKey ? `/kirjanpito/alv?period=${vat.due.queryKey}` : "/kirjanpito/alv";
 
   return (
-    <div className="space-y-6">
+    <div className="stitch-page space-y-6">
       {/* C1.6 (IA-24): pull to refresh runs the same reload as Yritä uudelleen. */}
       <PullToRefresh onRefresh={reloadAll} />
       <PageTitle title="Kirjanpito" />
@@ -102,25 +122,37 @@ export default function KirjanpitoPage() {
         <ConnectionNotice error={failure.error} fallback="Kirjanpidon tietoja ei saatu haettua" onRetry={reloadAll} />
       )}
 
-      {/* Owner report 2026-09-30: one row per thing. Pankki holds every bank row,
-          the connection and the tiliote files; Täsmäytys is its "Vaatii toimia". */}
-      <Section>
+      {stale ? <StaleBanner fetchedAt={overview.failed ? pageCacheFetchedAt(`dashboard:${month}`) : null} onRetry={reloadAll} /> : null}
+
+      <div className="stitch-card stitch-status">
+        {events && !statusError ? (
+          <>
+            <ProgressRing done={events.done} total={events.total} />
+            <p className="text-body font-medium text-ink">{events.total > 0 ? `${events.done} / ${events.total} tapahtumaa kunnossa` : "Ei tapahtumia tässä kuussa"}</p>
+          </>
+        ) : overview.failed || statusError ? (
+          <p className="text-body text-ink-2">Tilaa ei saatu haettua</p>
+        ) : <SlotSkeleton width={220} height={48} />}
+      </div>
+
+      <Section title="Tapahtumat ja kuitit">
+        <div data-tone="green"><ListRow href="/kuitit" leading={<Icon icon={ReceiptEuro} />} chevron title="Kuitit" secondary="Kaikki kuitit ja niiden tila" /></div>
+        {/* One row for the bank's transactions. A separate "Täsmäytys" row opened
+            the same list with its "Vaatii toimia" chip on, which looked identical
+            until there were rows; the open count now leads straight to that view. */}
         <ListRow
-          href="/kuitit"
-          leading={<Icon icon={ReceiptEuro} />}
+          href={openEvents > 0 ? "/pankki/tapahtumat?nayta=toimet" : "/pankki/tapahtumat"}
+          leading={<Icon icon={ListChecks} />}
           chevron
-          title="Kuitit"
-          secondary="Kaikki kuitit ja niiden tila"
+          title="Tapahtumat"
+          secondary={openEvents > 0 ? `${openEvents} odottaa kohdistusta tässä kuussa` : "Tiliotteet ja pankin tapahtumat"}
         />
+      </Section>
+
+      <Section title="Pankki">
+        {/* One row for the bank: it used to sit beside a "Pankkitilit" row, and
+            both opened a screen led by the same "connect your bank" card. */}
         <BankConnectRowView data={bank.data} error={bank.error} quietError />
-        <ListRow
-          href="/kirjanpito/ostolaskut"
-          leading={<Icon icon={Inbox} />}
-          chevron
-          title="Ostolaskut"
-          amount={pending(purchases) ? <SlotSkeleton width={64} /> : purchasesValue}
-          amountTone="muted"
-        />
       </Section>
 
       <Section title="Ilmoitukset ja kaudet">
@@ -132,13 +164,7 @@ export default function KirjanpitoPage() {
           amount={alvWaiting ? <SlotSkeleton width={56} /> : (vatDueAmount(vat.figures) ?? undefined)}
           secondary={alvWaiting ? <SlotSkeleton width={176} height={11} tone="soft" /> : vat.due ? vatDueSecondary(vat.due, vat.figures) : undefined}
         />
-        {/* TF-07 / FP-13: the month has a finish line. */}
-        <ListRow
-          href="/kirjanpito/kuukausi"
-          leading={<Icon icon={Lock} />}
-          chevron
-          title="Kuukauden sulkeminen"
-        />
+        <ListRow href="/kirjanpito/ostolaskut" leading={<Icon icon={Inbox} />} chevron title="Ostolaskut" amount={pending(purchases) ? <SlotSkeleton width={64} /> : purchasesValue} amountTone="muted" />
         {/* F67: locked months and reopening have their own row, so the lock error can point here. */}
         <ListRow
           href="/kirjanpito/kaudet"

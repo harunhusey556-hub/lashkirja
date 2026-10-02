@@ -4,7 +4,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { requireSession } from "@/lib/session";
 import { prepareChat, type ChatMatchProposal } from "@/lib/ai-assistant";
-import { askCopilotStream } from "@/lib/copilot";
+import { streamChat } from "@/lib/chat-provider";
 import { providerFailedNotice } from "@/lib/chat-policy";
 import { displayChatContent } from "@/lib/chat-legacy";
 import { errorText } from "@/lib/api-errors";
@@ -271,7 +271,6 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    const token = process.env.COPILOT_GITHUB_TOKEN;
     const encoderStream = new ReadableStream({
       async start(controller) {
         controller.enqueue(sse({ conversationId: conversation.id, userMessageId: userRow.id }));
@@ -284,12 +283,10 @@ export async function POST(req: NextRequest) {
             signal: req.signal,
             failureNotice: providerFailedNotice(prepared.english),
             honesty: prepared.honesty,
+            sources: prepared.sources,
             onDelta: (delta) => controller.enqueue(sse({ delta })),
-            stream: token
-              ? (signal) => askCopilotStream(prepared.systemPrompt, prepared.userMessage, token, signal, prior)
-              : async function* () {
-                  throw new Error("provider missing");
-                },
+            // Copilot, then LLM_BASE_URL's model once Copilot's quota is spent.
+            stream: (signal) => streamChat(prepared.systemPrompt, prepared.userMessage, signal, prior),
           });
           const row = await prisma.chatMessage.findUnique({ where: { id: result.messageId } });
           const mapped = row ? mapMessage(row) : null;

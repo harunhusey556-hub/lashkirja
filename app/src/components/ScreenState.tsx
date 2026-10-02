@@ -228,7 +228,7 @@ export function FullScreenNotice({
   tone?: "accent" | "danger";
 }) {
   return (
-    <main className="flex min-h-dvh items-center justify-center bg-canvas px-4">
+    <main className="stitch-page flex min-h-dvh items-center justify-center bg-canvas px-4">
       <NoticeCard icon={icon} title={title} body={body} tone={tone}>
         {href && actionLabel ? (
           <Link href={href} className={`mt-5 w-full ${buttonClass("primary")}`}>

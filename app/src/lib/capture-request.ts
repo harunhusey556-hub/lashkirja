@@ -37,3 +37,11 @@ export function requestStatementImport(): void {
   if (typeof window === "undefined") return;
   window.dispatchEvent(new CustomEvent(STATEMENT_IMPORT_REQUEST_EVENT));
 }
+
+/** Retain the explicitly chosen bank row through both camera and fallback routes. */
+export function captureReceiptHref(request?: CaptureRequest, fromCamera = true): string {
+  const query = new URLSearchParams();
+  if (fromCamera) query.set("from", "camera");
+  if (request?.transactionId) query.set("transactionId", request.transactionId);
+  return `/kuitit/uusi${query.size ? `?${query}` : ""}`;
+}

@@ -1,5 +1,7 @@
 "use client";
 
+import { CustomSelect } from "@/components/CustomSelect";
+
 import { Field, controlClass } from "@/components/ui";
 import { Switch } from "@/components/ds/Switch";
 import { Card, FilterChips, PageTitle } from "@/components/ds";
@@ -76,13 +78,13 @@ export default function YritysPage() {
             </div>
 
             {loaded.vatRegistered && (
-              // VS-17: the one select pattern, the native <select> in `controlClass`.
+              // VS-17: the one select pattern, the native <CustomSelect> in `controlClass`.
               <Field
                 label="ALV-verokausi"
                 htmlFor="vat-period"
                 hint={VAT_PERIOD_OPTIONS.find((option) => option.value === loaded.vatPeriod)?.description}
               >
-                <select
+                <CustomSelect
                   className={controlClass}
                   value={loaded.vatPeriod}
                   disabled={saving}
@@ -94,7 +96,7 @@ export default function YritysPage() {
                       {option.label}
                     </option>
                   ))}
-                </select>
+                </CustomSelect>
               </Field>
             )}
 

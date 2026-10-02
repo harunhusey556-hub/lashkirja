@@ -142,8 +142,9 @@ export default function TietosuojaPage() {
           <div>
             <h2 className="text-body font-medium text-ink">Pyyntö tuelle</h2>
             <p className="mt-1 text-caption text-ink-2">
+              {/* What closing removes and keeps is in the confirm dialog below, read before anything is sent. */}
               Nykyinen salasana vahvistaa, että pyyntö tulee sinulta. Tuki käsittelee pyynnön ja ilmoittaa sinulle
-              sähköpostilla. Kun tili suljetaan, kirjautuminen estetään. {CLOSE_PURGE_COPY} {CLOSE_RETENTION_COPY}
+              sähköpostilla.
             </p>
           </div>
           {requestsFailed && (

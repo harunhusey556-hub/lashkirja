@@ -32,8 +32,8 @@ export default function AsetuksetPage() {
       {/* Profile summary: tap through to the editable profile page. */}
       {profile ? (
         <Link href="/asetukset/profiili" className="active-press block">
-          <Card className="flex items-center gap-4">
-            <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-accent-soft text-lg font-semibold text-accent">
+          <Card className="settings-profile-summary flex items-center gap-3">
+            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-accent-soft text-lg font-semibold text-accent">
               {(profile.firstName?.[0] || "?").toUpperCase()}
             </span>
             <span className="min-w-0 flex-1">
@@ -46,7 +46,7 @@ export default function AsetuksetPage() {
           </Card>
         </Link>
       ) : loadError ? null : (
-        <Card className="flex items-center gap-4">
+        <Card className="settings-profile-summary flex items-center gap-3">
           <Skeleton className="h-12 w-12 shrink-0" radius="full" />
           <div className="flex-1 space-y-2">
             <Skeleton className="h-4 w-32" />
@@ -60,7 +60,7 @@ export default function AsetuksetPage() {
           href="/asetukset/yritys"
           icon={BriefcaseBusiness}
           label="Yritysmuoto & ALV"
-          hint="Yritysmuoto, ALV ja verokausi"
+          hint="Rekisteröinti ja verokausi"
         />
         <SettingsRow
           href="/asetukset/laskutus"

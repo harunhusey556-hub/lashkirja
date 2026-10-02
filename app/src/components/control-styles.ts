@@ -23,7 +23,7 @@ export const BUTTON_VARIANTS = {
 export type ButtonVariant = keyof typeof BUTTON_VARIANTS;
 
 export function buttonClass(variant: ButtonVariant = "primary", extra = ""): string {
-  return `active-press inline-flex min-h-12 items-center justify-center gap-2 rounded-card px-4 text-body font-semibold disabled:opacity-60 ${BUTTON_VARIANTS[variant]} ${extra}`;
+  return `ds-button active-press inline-flex min-h-12 items-center justify-center gap-2 rounded-card px-4 text-body font-semibold disabled:opacity-60 ${BUTTON_VARIANTS[variant]} ${extra}`;
 }
 
 /**
@@ -40,5 +40,8 @@ export const TINTED_BUTTON_TONES = {
 export type TintedButtonTone = keyof typeof TINTED_BUTTON_TONES;
 
 export function tintedButtonClass(tone: TintedButtonTone = "accent", extra = ""): string {
-  return `active-press inline-flex min-h-11 items-center justify-center rounded-full px-3.5 text-caption font-medium disabled:opacity-60 ${TINTED_BUTTON_TONES[tone]} ${extra}`.trim();
+  return `ds-tinted-button active-press inline-flex min-h-9 items-center justify-center rounded-full px-3 text-caption font-medium disabled:opacity-60 ${TINTED_BUTTON_TONES[tone]} ${extra}`.trim();
 }
+
+/** Quiet, content-width actions inside forms. */
+export const compactActionClass = "compact-form-action active-press inline-flex items-center justify-center gap-1.5 rounded-full px-2.5 text-caption font-medium text-success disabled:opacity-60";

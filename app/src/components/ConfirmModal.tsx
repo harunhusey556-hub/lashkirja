@@ -125,6 +125,8 @@ export default function ConfirmModal({
       className={`overlay-root fixed inset-0 z-[80] flex items-center justify-center px-4 ${
         closing ? "pointer-events-none" : "pointer-events-auto"
       }`}
+      // A dialog animating out no longer counts as open (overlay-lock.ts).
+      data-closing={closing || undefined}
     >
       {/* Backdrop. An alert is never dismissed by tapping outside it (C3,
           IA-21): the choice is Peruuta or the action. */}

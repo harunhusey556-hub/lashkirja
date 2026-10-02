@@ -7,7 +7,7 @@ import { apiFetch, errorMessage, readJson } from "@/components/clientFetch";
 import { type Profile, useProfile } from "../useProfile";
 import { ProfileGate } from "../ProfileGate";
 import { Plus } from "lucide-react";
-import { Card, Icon, PageTitle } from "@/components/ds";
+import { Card, Icon, ListRow, PageTitle } from "@/components/ds";
 import { PasswordField } from "@/components/ds/PasswordField";
 import { controlClass, tintedButtonClass } from "@/components/control-styles";
 import { Button, Field, FormError } from "@/components/ui";
@@ -214,7 +214,7 @@ function ImapCard({
 
   return (
     <>
-      <Card className="space-y-6">
+      <Card className="space-y-4">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div className="min-w-0">
             <h2 className="text-body font-medium text-ink">Sähköpostiautomaatio</h2>
@@ -282,7 +282,7 @@ function ImapCard({
               Lisää toinen sähköpostitili
             </button>
           ) : (
-            <div className="space-y-6">
+            <div className="space-y-3">
               <div className="flex items-center justify-between">
                 <h3 className="text-caption text-ink-2">
                   {profile.imapAccounts.length > 0 ? "Lisää uusi sähköpostitili" : "Yhdistä sähköpostitili"}
@@ -299,23 +299,18 @@ function ImapCard({
               </div>
 
               {!selectedProvider ? (
-                <div className="grid grid-cols-2 gap-3">
+                // One column of equal rows: a 2x2 grid wrapped "Outlook / Hotmail"
+                // on narrow screens and left the tiles uneven.
+                <div className="divide-y divide-line overflow-hidden rounded-card border border-line">
                   {(
                     [
-                      ["gmail", "Gmail"],
-                      ["outlook", "Outlook / Hotmail"],
-                      ["icloud", "iCloud"],
-                      ["other", "Muu sähköposti"],
+                      ["gmail", "Gmail", "Google-tili"],
+                      ["outlook", "Outlook / Hotmail", "Microsoft-tili"],
+                      ["icloud", "iCloud", "Apple-tili"],
+                      ["other", "Muu sähköposti", "Oma sähköpostipalvelin"],
                     ] as const
-                  ).map(([value, label]) => (
-                    <button
-                      key={value}
-                      type="button"
-                      onClick={() => handleProviderSelect(value)}
-                      className="active-press touch-target flex flex-col items-center justify-center rounded-card border border-line p-4"
-                    >
-                      <span className="text-body font-medium text-ink">{label}</span>
-                    </button>
+                  ).map(([value, label, hint]) => (
+                    <ListRow key={value} title={label} secondary={hint} chevron onClick={() => handleProviderSelect(value)} />
                   ))}
                 </div>
               ) : (

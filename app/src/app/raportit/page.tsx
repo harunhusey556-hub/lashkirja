@@ -1,5 +1,7 @@
 "use client";
 
+import { CustomSelect } from "@/components/CustomSelect";
+
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { ConnectionNotice, EmptySection, StaleBanner } from "@/components/ScreenState";
@@ -519,7 +521,7 @@ export default function ReportsPage() {
                 </p>
               </div>
               <div className="flex gap-2">
-                <select
+                <CustomSelect
                   aria-label="Paketin kausi"
                   className={`${controlClass} min-w-0 flex-1`}
                   value={packagePeriod}
@@ -543,7 +545,7 @@ export default function ReportsPage() {
                     ))}
                   </optgroup>
                   <option value={String(year)}>{`Koko vuosi ${year}`}</option>
-                </select>
+                </CustomSelect>
                 <AuthedFileLink
                   href={`/api/export/package?month=${packagePeriod}`}
                   fallbackName={`kirjanpito-${packagePeriod}.zip`}

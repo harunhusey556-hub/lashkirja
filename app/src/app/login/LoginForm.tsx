@@ -31,8 +31,6 @@ import {
 } from "@/lib/passkey-client";
 import { markPasskeyOfferSeen, passkeyOfferSeen } from "@/lib/passkey-offer";
 
-const SHOW_DEMO_LOGIN = !IS_MOBILE_BUILD && process.env.NEXT_PUBLIC_SHOW_DEMO_LOGIN === "true";
-
 type Tone = "danger" | "info";
 type Notice = { tone: Tone; message: string } | null;
 
@@ -512,11 +510,6 @@ export default function LoginForm() {
         </>
         )}
 
-        {SHOW_DEMO_LOGIN && (
-          <p className="mt-6 text-center text-xs text-ink-2">
-            Demo: demo@lashkirja.fi / demo123
-          </p>
-        )}
       </div>
     </BareFrame>
   );

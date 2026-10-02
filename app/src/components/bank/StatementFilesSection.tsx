@@ -1,5 +1,7 @@
 "use client";
 
+import { CustomSelect } from "@/components/CustomSelect";
+
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { apiFetch, isUnauthorized, readJson, redirectToLogin } from "@/components/clientFetch";
@@ -65,7 +67,7 @@ export function StatementFilesSection() {
             <label htmlFor="statement-target-account" className="mb-1.5 block text-caption font-normal text-ink-2">
               Pankkitili
             </label>
-            <select
+            <CustomSelect
               id="statement-target-account"
               value={uploader.targetAccountId}
               onChange={(e) => uploader.setTargetAccountId(e.target.value)}
@@ -78,7 +80,7 @@ export function StatementFilesSection() {
                   {account.bankName ? ` · ${account.bankName}` : ""}
                 </option>
               ))}
-            </select>
+            </CustomSelect>
           </div>
         )}
         <Button

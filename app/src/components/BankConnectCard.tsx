@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { ChevronRight, Landmark } from "lucide-react";
 import ConfirmModal from "@/components/ConfirmModal";
@@ -86,8 +86,10 @@ export function BankConnectRowView({
 }) {
   const sheets = useConnectSheets();
   const state = data ? bankState(data) : null;
+  // The one bank row on Kirjanpito: it opens the screen of the same name
+  // (connection, accounts and tiliotteet). Transactions have their own row.
+  const displayTitle = "Pankkiyhteys ja tilit";
   const line = state ? state.line : error && !quietError ? "Tilaa ei saatu haettua" : " ";
-  const title = "Pankki";
 
   const pill =
     "active-press relative z-10 inline-flex min-h-9 shrink-0 items-center rounded-full bg-ink px-3.5 text-caption font-semibold text-canvas before:absolute before:inset-x-0 before:-inset-y-1 before:content-['']";
@@ -96,21 +98,21 @@ export function BankConnectRowView({
     <>
       <div data-testid="bank-connect-row" className="relative flex min-h-16 w-full items-center gap-3 px-4 py-3 text-left">
         <Link
-          href="/pankki/tapahtumat"
-          aria-label={typeof line === "string" && line.trim() ? `${title}, ${line}` : title}
+          href="/kirjanpito/pankkitilit"
+          aria-label={typeof line === "string" && line.trim() ? `${displayTitle}, ${line}` : displayTitle}
           className="row-link active-press absolute inset-0"
         />
         <IconTile>
           <Icon icon={Landmark} />
         </IconTile>
         <span className="pointer-events-none min-w-0 flex-1">
-          <span className="block truncate text-body font-medium text-ink">{title}</span>
+          <span className="block truncate text-body font-medium text-ink">{displayTitle}</span>
           <span className={`mt-0.5 block text-caption ${state?.kind === "attention" ? "text-warning" : "text-ink-2"}`}>
             {line}
           </span>
         </span>
-        {state?.kind === "none" ? (
-          <button type="button" onClick={() => sheets.openPicker()} className={pill}>
+        {state?.kind === "none" || state?.kind === "unconfigured" ? (
+          <button type="button" onClick={() => state?.kind === "unconfigured" ? sheets.openSetup() : sheets.openPicker()} className={pill}>
             Yhdistä
           </button>
         ) : (
@@ -119,6 +121,7 @@ export function BankConnectRowView({
           </span>
         )}
       </div>
+      <BankSetupSheet isOpen={sheets.setupOpen} onClose={sheets.closeSetup} />
       <BankPickerSheet isOpen={sheets.picker.open} onClose={sheets.closePicker} preferredPsu={sheets.picker.psu} />
     </>
   );
@@ -169,6 +172,18 @@ export default function BankConnectCard({
 
   const state = bank.data ? bankState(bank.data) : null;
   const connections = bank.data?.connections ?? [];
+  const openedFromChat = useRef(false);
+  useEffect(() => {
+    if (variant !== "full" || !state || openedFromChat.current) return;
+    const url = new URL(window.location.href);
+    if (url.searchParams.get("connect") !== "1") return;
+    openedFromChat.current = true;
+    url.searchParams.delete("connect");
+    window.history.replaceState(window.history.state, "", url.pathname + url.search);
+    if (state.kind === "unconfigured") sheets.openSetup();
+    else sheets.openPicker();
+  }, [variant, state, sheets]);
+
 
   if (variant === "compact" && (state?.kind === "connected" || (!state && !bank.loading))) return null;
   if (variant === "compact" && bank.loading) return null;

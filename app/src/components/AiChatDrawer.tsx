@@ -1,5 +1,7 @@
 "use client";
 
+import Link from "next/link";
+
 import { useEffect, useRef, useState } from "react";
 import styles from "./AiChatDrawer.module.css";
 import { ChatMatchProposal } from "@/lib/ai-assistant";
@@ -13,12 +15,13 @@ import { Skeleton } from "@/components/ds/Skeleton";
 import { useFocusTrap } from "@/components/useFocusTrap";
 import { useSheetDrag } from "@/components/useSheetDrag";
 import {
-  Archive,
   ArrowDown,
   ArrowUp,
   Check,
   Copy,
+  Ellipsis,
   Link2,
+  MessageCircle,
   MessagesSquare,
   Plus,
   RotateCcw,
@@ -27,12 +30,15 @@ import {
   X,
 } from "lucide-react";
 import { Icon } from "@/components/ds/Icon";
+import { SearchField } from "@/components/ds";
+import BottomSheet from "@/components/BottomSheet";
 import { hapticNotify } from "@/lib/haptics";
 import { displayChatContent } from "@/lib/chat-legacy";
 import { awaitingFirstWord, ChatPendingReply } from "@/components/ChatPendingReply";
 import { useOverlayLock } from "@/lib/overlay-lock";
 
 interface ChatSourceLink {
+  kind?: "action";
   label: string;
   href: string;
 }
@@ -42,6 +48,21 @@ interface ConversationItem {
   title: string;
   archivedAt?: string | null;
   updatedAt?: string;
+}
+
+/** "Tänään klo 3.30", "Eilen klo 18.05", "28.9." or "28.9.2025": when a conversation last moved. */
+export function conversationTime(iso: string | undefined, now = new Date()): string {
+  const time = iso ? new Date(iso) : null;
+  if (!time || Number.isNaN(time.getTime())) return "";
+  const zone = "Europe/Helsinki";
+  const day = (date: Date) => date.toLocaleDateString("fi-FI", { timeZone: zone });
+  const clock = time.toLocaleTimeString("fi-FI", { timeZone: zone, hour: "numeric", minute: "2-digit" });
+  if (day(time) === day(now)) return `Tänään klo ${clock}`;
+  if (day(time) === day(new Date(now.getTime() - 86_400_000))) return `Eilen klo ${clock}`;
+  const sameYear =
+    time.toLocaleDateString("fi-FI", { timeZone: zone, year: "numeric" }) ===
+    now.toLocaleDateString("fi-FI", { timeZone: zone, year: "numeric" });
+  return time.toLocaleDateString("fi-FI", { timeZone: zone, day: "numeric", month: "numeric", ...(sameYear ? {} : { year: "numeric" }) });
 }
 
 interface ChatMessageItem {
@@ -89,8 +110,9 @@ let cachedAvailability: boolean | null = null;
 let availabilityCheckedAt = 0;
 const AVAILABILITY_TTL_MS = 60_000;
 
-/** The two shortcuts that always work, model or not. */
+/** The shortcuts that always work, model or not. */
 const SHORTCUTS = [
+  { label: "Yhdistä pankki", message: "Mistä voin yhdistää pankkini?" },
   { label: "Kohdista kuitit", message: "Kohdista kuitit" },
   { label: "Tämän kuun ALV", message: "Mikä on tämän kuun ALV?" },
 ];
@@ -123,6 +145,10 @@ export function AiChatDrawer({
   const [conversationQuery, setConversationQuery] = useState("");
   const [showArchived, setShowArchived] = useState(false);
   const [renamingId, setRenamingId] = useState<string | null>(null);
+  // The conversation whose "…" sheet is open. One sheet at the drawer's root:
+  // a sheet inside each row was painted under the later rows' "…" buttons.
+  const [actionsFor, setActionsFor] = useState<ConversationItem | null>(null);
+  const listSeq = useRef(0);
   const [renameValue, setRenameValue] = useState("");
   const [removedConversation, setRemovedConversation] = useState<ConversationItem | null>(null);
   // Failures of the conversation menu's own actions (list, new, rename, archive, delete, undo)
@@ -255,6 +281,9 @@ export function AiChatDrawer({
     archived = showArchived,
     before?: { updatedAt: string; id: string }
   ) {
+    // Only the latest request may fill the list: a slower earlier one (the
+    // active list, an older search) used to land last and overwrite it.
+    const seq = ++listSeq.current;
     setLoadingConversations(true);
     try {
       const params = new URLSearchParams();
@@ -269,11 +298,12 @@ export function AiChatDrawer({
         response,
         "Keskustelulistan lataus epäonnistui"
       );
+      if (seq !== listSeq.current) return;
       const page = data.conversations ?? [];
       setConversations((current) => (before ? [...current, ...page] : page));
       setConversationsHasMore(Boolean(data.hasMore));
     } finally {
-      setLoadingConversations(false);
+      if (seq === listSeq.current) setLoadingConversations(false);
     }
   }
 
@@ -628,6 +658,18 @@ export function AiChatDrawer({
     }
   }
 
+  // Search as you type: one request once the typing pauses, only while the menu is open.
+  const searchSettled = useRef(conversationQuery);
+  useEffect(() => {
+    if (!menuOpen || searchSettled.current === conversationQuery) return;
+    const timer = window.setTimeout(() => {
+      searchSettled.current = conversationQuery;
+      refreshConversations(conversationQuery, showArchived);
+    }, 250);
+    return () => window.clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- refreshConversations reads the latest state; only the query triggers a search
+  }, [conversationQuery, menuOpen]);
+
   /** Runs one conversation-menu action; a failure lands in the menu's own alert. */
   async function runMenuAction(action: () => Promise<void>, fallback: string) {
     setMenuError("");
@@ -728,7 +770,7 @@ export function AiChatDrawer({
   return (
     <div
       ref={panelRef}
-      className={`absolute inset-0 z-[70] flex flex-col bg-canvas shadow-2xl ${
+      className={`stitch-page assistant-surface absolute inset-0 z-[70] flex flex-col bg-canvas shadow-2xl ${
         closing ? "animate-sheet-out pointer-events-none" : "animate-sheet"
       }`}
       data-overlay-root={open ? "" : undefined}
@@ -778,46 +820,50 @@ export function AiChatDrawer({
       </header>
       {/* Conversation menu: stays mounted and drops down over the thread (SHELL-10). */}
       <div className={styles.menu} data-open={menuOpen ? "true" : undefined} inert={!menuOpen}>
+        {/* Dims the thread under the open menu; a tap outside closes it. */}
+        <div aria-hidden className={styles.menuScrim} onClick={() => setMenuOpen(false)} />
         <div className={styles.menuInner}>
-        <div className="max-h-[50dvh] space-y-3 overflow-y-auto overscroll-contain border-b border-line bg-canvas px-4 py-3 *:mx-auto *:max-w-[40rem]">
-          <form
-            className="flex gap-2"
-            onSubmit={(event) => {
-              event.preventDefault();
-              refreshConversations(conversationQuery, showArchived);
-            }}
-          >
-            <input
-              value={conversationQuery}
-              onChange={(event) => setConversationQuery(event.target.value)}
-              aria-label="Hae keskusteluja"
-              placeholder="Hae keskusteluja"
-              className={`${controlClass} flex-1`}
-            />
-            <Button type="submit" variant="secondary">
-              Hae
-            </Button>
-          </form>
-          <div className="overflow-hidden rounded-card border border-line bg-surface divide-y divide-line">
+        <div className="max-h-[74dvh] space-y-3 overflow-y-auto overscroll-contain px-4 pb-4 pt-3 *:mx-auto *:max-w-[40rem]">
+          {/* Filters as you type (debounced below); no separate search button. */}
+          <SearchField
+            label="Hae keskusteluja"
+            placeholder="Hae keskusteluja"
+            value={conversationQuery}
+            onChange={setConversationQuery}
+          />
+          <div className="flex items-center gap-2">
+            {/* iOS segmented control: one thumb slides between the two lists. */}
+            <div role="radiogroup" aria-label="Näytä keskustelut" className={styles.segmented} data-index={showArchived ? 1 : 0}>
+              <span aria-hidden className={styles.segmentThumb} />
+              {(
+                [
+                  { archived: false, label: "Aktiiviset" },
+                  { archived: true, label: "Arkisto" },
+                ] as const
+              ).map((option) => (
+                <button
+                  key={option.label}
+                  type="button"
+                  role="radio"
+                  aria-checked={showArchived === option.archived}
+                  className={styles.segment}
+                  onClick={() => {
+                    if (option.archived === showArchived) return;
+                    setShowArchived(option.archived);
+                    refreshConversations(conversationQuery, option.archived);
+                  }}
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>
             <button
               type="button"
-              className="active-press flex min-h-12 w-full items-center gap-3 px-4 text-left text-body font-medium text-ink"
+              aria-label="Uusi keskustelu"
+              className="active-press flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-ink text-canvas"
               onClick={() => void runMenuAction(startNewConversation, "Keskustelun luonti epäonnistui")}
             >
-              <Icon icon={Plus} className="text-ink-2" />
-              Uusi keskustelu
-            </button>
-            <button
-              type="button"
-              className="active-press flex min-h-12 w-full items-center gap-3 px-4 text-left text-body font-medium text-ink"
-              onClick={() => {
-                const next = !showArchived;
-                setShowArchived(next);
-                refreshConversations(conversationQuery, next);
-              }}
-            >
-              <Icon icon={showArchived ? MessagesSquare : Archive} className="text-ink-2" />
-              {showArchived ? "Näytä aktiiviset" : "Näytä arkisto"}
+              <Icon icon={Plus} strokeWidth={2.25} />
             </button>
           </div>
           {menuError && (
@@ -840,78 +886,86 @@ export function AiChatDrawer({
               </button>
             </div>
           )}
-          {conversations.length === 0 && !loadingConversations && <EmptyNote>Ei keskusteluja vielä.</EmptyNote>}
+          {conversations.length === 0 && !loadingConversations && (
+            <EmptyNote>
+              {conversationQuery.trim() ? "Ei osumia." : showArchived ? "Arkisto on tyhjä." : "Ei keskusteluja vielä."}
+            </EmptyNote>
+          )}
           {loadingConversations && conversations.length === 0 && <SkeletonList rows={3} label="Ladataan keskusteluja" />}
           {conversations.length > 0 && (
-            <div className="overflow-hidden rounded-card border border-line bg-surface divide-y divide-line">
-              {conversations.map((conversation) => (
-                <div
-                  key={conversation.id}
-                  className={`px-4 py-1 ${conversation.id === conversationId ? "bg-accent-soft/60" : ""}`}
-                >
-                  {renamingId === conversation.id ? (
-                    <form
-                      className="flex gap-2 py-2"
-                      onSubmit={(event) => {
-                        event.preventDefault();
-                        void runMenuAction(() => renameConversation(conversation), "Nimen tallennus epäonnistui");
-                      }}
-                    >
-                      <input
-                        value={renameValue}
-                        onChange={(event) => setRenameValue(event.target.value)}
-                        aria-label="Keskustelun nimi"
-                        className={`${controlClass} flex-1`}
-                      />
-                      <Button type="submit" variant="secondary">
-                        Tallenna
-                      </Button>
-                    </form>
-                  ) : (
-                    <button
-                      type="button"
-                      className="active-press block min-h-11 w-full truncate pt-2 text-left text-body font-medium text-ink"
-                      onClick={() => {
-                        setConversationId(conversation.id);
-                        setConversationTitle(conversation.title);
-                        setMessages([]);
-                        setHasMore(false);
-                        setHistoryLoaded(false);
-                        setHistoryError(null);
-                        setMenuOpen(false);
-                      }}
-                    >
-                      {conversation.title}
-                    </button>
-                  )}
-                  <div className="-mt-1 flex flex-wrap gap-x-4">
-                    <button
-                      type="button"
-                      className={`${smallAction} bg-accent-soft text-accent`}
-                      onClick={() => {
-                        setRenamingId(conversation.id);
-                        setRenameValue(conversation.title);
-                      }}
-                    >
-                      Nimeä
-                    </button>
-                    <button
-                      type="button"
-                      className={`${smallAction} bg-ink/5 text-ink-2`}
-                      onClick={() => void runMenuAction(() => toggleArchive(conversation), "Arkistointi epäonnistui")}
-                    >
-                      {conversation.archivedAt ? "Palauta" : "Arkistoi"}
-                    </button>
-                    <button
-                      type="button"
-                      className={`${smallAction} bg-danger/10 text-danger`}
-                      onClick={() => void runMenuAction(() => removeConversation(conversation), "Poisto epäonnistui")}
-                    >
-                      Poista
-                    </button>
+            <div className="overflow-hidden rounded-[20px] bg-surface shadow-[0_1px_2px_rgb(38_34_31/0.06)]">
+              {conversations.map((conversation, index) => {
+                const open = conversation.id === conversationId;
+                return (
+                  <div key={conversation.id} className={`relative ${open ? "bg-accent-soft/50" : ""}`}>
+                    {/* Inset hairline, starting under the text like an iOS list. */}
+                    {index > 0 && <span aria-hidden className="absolute left-[3.75rem] right-0 top-0 h-px bg-line" />}
+                    {renamingId === conversation.id ? (
+                      <form
+                        className="flex gap-2 px-3 py-2.5"
+                        onSubmit={(event) => {
+                          event.preventDefault();
+                          void runMenuAction(() => renameConversation(conversation), "Nimen tallennus epäonnistui");
+                        }}
+                      >
+                        <input
+                          value={renameValue}
+                          onChange={(event) => setRenameValue(event.target.value)}
+                          aria-label="Keskustelun nimi"
+                          className={`${controlClass} flex-1`}
+                        />
+                        <Button type="submit" variant="secondary">
+                          Tallenna
+                        </Button>
+                      </form>
+                    ) : (
+                      // One row per conversation: the row opens it; rename, archive and
+                      // delete wait behind "…" instead of three buttons on every row.
+                      <div className="flex min-h-[3.75rem] items-center gap-3 py-2 pl-3 pr-1">
+                        <button
+                          type="button"
+                          aria-label={`Avaa keskustelu: ${conversation.title}`}
+                          aria-current={open || undefined}
+                          className="active-press absolute inset-0"
+                          onClick={() => {
+                            setConversationId(conversation.id);
+                            setConversationTitle(conversation.title);
+                            setMessages([]);
+                            setHasMore(false);
+                            setHistoryLoaded(false);
+                            setHistoryError(null);
+                            setMenuOpen(false);
+                          }}
+                        />
+                        <span
+                          aria-hidden
+                          className={`pointer-events-none flex h-9 w-9 shrink-0 items-center justify-center rounded-full ${
+                            open ? "bg-accent text-canvas" : "bg-accent-soft text-accent"
+                          }`}
+                        >
+                          <Icon icon={MessageCircle} size="row" strokeWidth={2} />
+                        </span>
+                        <span aria-hidden className="pointer-events-none min-w-0 flex-1">
+                          <span className="block truncate text-body font-medium text-ink">{conversation.title}</span>
+                          <span className="block truncate text-caption text-ink-2">
+                            {open ? "Avoinna · " : ""}
+                            {conversationTime(conversation.updatedAt)}
+                          </span>
+                        </span>
+                        <button
+                          type="button"
+                          aria-label={`Toiminnot: ${conversation.title}`}
+                          aria-haspopup="dialog"
+                          onClick={() => setActionsFor(conversation)}
+                          className="active-press relative z-10 flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-ink-2"
+                        >
+                          <Icon icon={Ellipsis} strokeWidth={2.25} />
+                        </button>
+                      </div>
+                    )}
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
           {conversationsHasMore && (
@@ -989,8 +1043,8 @@ export function AiChatDrawer({
             <p className="mt-4 text-headline font-semibold text-ink">Miten voin auttaa?</p>
             <p className="mt-1 max-w-xs text-caption leading-relaxed text-ink-2">
               {aiAvailable === false
-                ? "Avustaja osaa nyt kohdistaa kuitit ja kertoa tämän kuun ALV:n. Laajemmat kysymykset tulevat käyttöön myöhemmin."
-                : "Kysy kuiteista, tapahtumista tai ALV:stä. Ehdotukset hyväksyt aina itse."}
+                ? "Voin opastaa sovelluksessa, avata pankin yhdistämisen ja auttaa kuittien kohdistamisessa sekä ALV:ssa."
+                : "Autan tilisi tietojen ja kirjanpidon perusteella. Kysy tai avaa seuraava vaihe suoraan vastauksen painikkeesta."}
             </p>
             <div className="mt-5 flex flex-wrap justify-center gap-2">
               {SHORTCUTS.map((shortcut) => (
@@ -1022,7 +1076,7 @@ export function AiChatDrawer({
                 }`}
               >
                 {message.role === "assistant" ? (
-                  <ChatMarkdown text={displayChatContent(message.role, message.content)} />
+                  <ChatMarkdown text={displayChatContent(message.role, message.content)} allowedHrefs={message.sources?.map(source => source.href) ?? []} />
                 ) : (
                   message.content
                 )}
@@ -1032,16 +1086,17 @@ export function AiChatDrawer({
               ) : null}
               {/* Sources and the message actions share one quiet row under the bubble. */}
               {message.role === "assistant" && (message.content || (message.sources && message.sources.length > 0)) && (
-                <div className="flex max-w-[85%] flex-wrap items-center gap-x-4 px-1">
+                <div className="flex max-w-[95%] flex-wrap items-center gap-2 px-1 pt-2">
                   {message.sources?.map((source) => (
-                    <a
+                    <Link
+                      onClick={onClose}
                       key={source.href}
                       href={source.href}
-                      className="active-press inline-flex min-h-11 items-center gap-1.5 rounded-full bg-accent-soft px-3.5 text-caption font-medium text-accent"
+                      className={`chat-action-chip active-press inline-flex min-h-11 items-center gap-2 rounded-full px-3.5 text-caption font-medium ${source.kind === "action" ? "bg-success text-white" : "bg-accent-soft text-accent"}`}
                     >
                       <Icon icon={Link2} size="inline" />
                       {source.label}
-                    </a>
+                    </Link>
                   ))}
                   {message.content && (
                     <button
@@ -1195,6 +1250,54 @@ export function AiChatDrawer({
           </div>
         </div>
       </form>
+
+      <BottomSheet
+        isOpen={actionsFor !== null}
+        onClose={() => setActionsFor(null)}
+        title={actionsFor?.title ?? "Toiminnot"}
+        heightClass="max-h-[70dvh]"
+      >
+        <div className="px-4 py-2 sheet-safe-bottom">
+          <div className="overflow-hidden rounded-card border border-line bg-surface divide-y divide-line">
+            {(actionsFor
+              ? [
+                  {
+                    label: "Nimeä uudelleen",
+                    run: (c: ConversationItem) => {
+                      setRenamingId(c.id);
+                      setRenameValue(c.title);
+                    },
+                  },
+                  {
+                    label: actionsFor.archivedAt ? "Palauta arkistosta" : "Arkistoi",
+                    run: (c: ConversationItem) => void runMenuAction(() => toggleArchive(c), "Arkistointi epäonnistui"),
+                  },
+                  {
+                    label: "Poista",
+                    danger: true,
+                    run: (c: ConversationItem) => void runMenuAction(() => removeConversation(c), "Poisto epäonnistui"),
+                  },
+                ]
+              : []
+            ).map((item) => (
+              <button
+                key={item.label}
+                type="button"
+                onClick={() => {
+                  const target = actionsFor;
+                  setActionsFor(null);
+                  if (target) item.run(target);
+                }}
+                className={`active-press flex min-h-12 w-full items-center px-4 text-left text-body ${
+                  "danger" in item && item.danger ? "text-danger" : "text-ink"
+                }`}
+              >
+                {item.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      </BottomSheet>
     </div>
   );
 }

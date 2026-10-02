@@ -6,7 +6,7 @@ import { CopyButton } from "./CopyButton";
  */
 export function KeyValueList({ rows }: { rows: { label: string; value: ReactNode; copy?: { text: string; what: string } }[] }) {
   return (
-    <dl className="shrink-0 overflow-hidden rounded-card border border-line bg-surface divide-y divide-line">
+    <dl className="ui-card shrink-0 overflow-hidden rounded-card border border-line bg-surface divide-y divide-line">
       {rows.map((row) => (
         // Label and value share a line while they fit; at a large text size the
         // value wraps under the label, right-aligned (AX-02). Values are

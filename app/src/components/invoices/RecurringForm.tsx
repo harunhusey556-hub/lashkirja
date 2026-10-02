@@ -1,5 +1,6 @@
 "use client";
 
+import { CustomSelect } from "@/components/CustomSelect";
 import { useState } from "react";
 import { useEditorSession } from "@/components/form-session";
 import { ConnectionNotice } from "@/components/ScreenState";
@@ -16,7 +17,7 @@ import {
 } from "@/lib/invoices";
 import { firstRun, RECURRENCE_INTERVALS, type RecurrenceInterval } from "@/lib/recurrence";
 import { helsinkiCalendarDate, isStrictIsoDate } from "@/lib/validation";
-import { tintedButtonClass } from "@/components/control-styles";
+import { compactActionClass } from "@/components/control-styles";
 
 export const INTERVAL_LABEL: Record<RecurrenceInterval, string> = {
   monthly: "Kuukausittain",
@@ -367,13 +368,13 @@ export function RecurringForm({
             <button
               type="button"
               onClick={onAddCustomer}
-              className={tintedButtonClass("accent")}
+              className={compactActionClass}
             >
-              Uusi asiakas
+              + Uusi asiakas
             </button>
           ) : null}
         </div>
-        <select
+        <CustomSelect
           className={field}
           value={values.customerId}
           onChange={(e) => pickCustomer(e.target.value)}
@@ -386,7 +387,7 @@ export function RecurringForm({
               {customer.name}
             </option>
           ))}
-        </select>
+        </CustomSelect>
         {errorText("customerId", "ri-customer")}
       </div>
 
@@ -408,7 +409,7 @@ export function RecurringForm({
       <div className="field-grid">
         <div>
           <label className={label} htmlFor="ri-interval">Toistoväli</label>
-          <select
+          <CustomSelect
             id="ri-interval"
             className={field}
             value={values.interval}
@@ -421,7 +422,7 @@ export function RecurringForm({
                 {INTERVAL_LABEL[interval]}
               </option>
             ))}
-          </select>
+          </CustomSelect>
         </div>
         <div>
           <label className={label} htmlFor="ri-anchor">Laskutuspäivä</label>
@@ -557,7 +558,7 @@ export function RecurringForm({
                 {vatRegistered ? (
                   <>
                     <label className={lineLabel} htmlFor={`ri-line-${index}-vat`}>ALV</label>
-                    <select
+                    <CustomSelect
                       aria-label={`Rivin ${index + 1} ALV`}
                       className={field}
                       value={line.vatRate}
@@ -565,12 +566,12 @@ export function RecurringForm({
                       {...invalidFieldProps(`ri-line-${index}-vat`, errors[`line-${index}-vatRate`])}
                     >
                       {recurringVatOptions(line.vatRate, values).map((permille) => (
-                        <option key={permille} value={permille / 10}>
+                        <option key={permille} value={permille / 10} data-short-label={vatRateLabel(permille)}>
                           {vatRateLabel(permille)}
                           {vatRateDateNote(permille, firstInvoiceDate(values))}
                         </option>
                       ))}
-                    </select>
+                    </CustomSelect>
                     {errorText(`line-${index}-vatRate`, `ri-line-${index}-vat`)}
                   </>
                 ) : null}
@@ -593,10 +594,9 @@ export function RecurringForm({
             </div>
           </Card>
         ))}
-        <Button
+        <button
           type="button"
-          variant="secondary"
-          className="w-full"
+          className={compactActionClass}
           onClick={() =>
             setValues((current) => ({
               ...current,
@@ -604,8 +604,8 @@ export function RecurringForm({
             }))
           }
         >
-          Lisää rivi
-        </Button>
+          + Lisää rivi
+        </button>
         {errors.lines && (
           <p className="text-caption text-danger" role="alert">
             {errors.lines}

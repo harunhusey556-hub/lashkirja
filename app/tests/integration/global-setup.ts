@@ -12,6 +12,9 @@ export default function setup() {
   fs.mkdirSync(tmpDir, { recursive: true });
 
   const templatePath = path.join(tmpDir, "template.db");
+  // Initialise the SQLite file before migration; some schema-engine builds
+  // cannot create a missing database and return an empty error instead.
+  fs.closeSync(fs.openSync(templatePath, "a"));
   execFileSync("npx", ["prisma", "migrate", "deploy"], {
     cwd: path.resolve(__dirname, "../.."),
     env: { ...process.env, DATABASE_URL: `file:${templatePath}` },

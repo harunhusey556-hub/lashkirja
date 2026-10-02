@@ -1,5 +1,7 @@
 "use client";
 
+import { CustomSelect } from "@/components/CustomSelect";
+
 import { Disclosure } from "@/components/ds/Disclosure";
 import { Button, controlClass } from "@/components/ui";
 import { ChevronDown, SlidersHorizontal } from "lucide-react";
@@ -116,7 +118,7 @@ export function ReceiptFilters({
               <div className="field-grid">
                 <div>
                   <label htmlFor="receipt-type-filter" className={selectLabel}>Tyyppi</label>
-                  <select
+                  <CustomSelect
                     id="receipt-type-filter"
                     value={advanced.type}
                     onChange={(e) => onAdvancedChange({ ...advanced, type: e.target.value })}
@@ -125,11 +127,11 @@ export function ReceiptFilters({
                     <option value="">Kaikki</option>
                     <option value="meno">Meno</option>
                     <option value="tulo">Tulo</option>
-                  </select>
+                  </CustomSelect>
                 </div>
                 <div>
                   <label htmlFor="receipt-category-filter" className={selectLabel}>Kategoria</label>
-                  <select
+                  <CustomSelect
                     id="receipt-category-filter"
                     value={advanced.category}
                     onChange={(e) => onAdvancedChange({ ...advanced, category: e.target.value })}
@@ -139,14 +141,14 @@ export function ReceiptFilters({
                     {RECEIPT_CATEGORIES.map((c) => (
                       <option key={c.id} value={c.id}>{c.label}</option>
                     ))}
-                  </select>
+                  </CustomSelect>
                 </div>
               </div>
 
               <div className="field-grid">
                 <div>
                   <label htmlFor="receipt-source-filter" className={selectLabel}>Lähde</label>
-                  <select
+                  <CustomSelect
                     id="receipt-source-filter"
                     value={advanced.source}
                     onChange={(e) => onAdvancedChange({ ...advanced, source: e.target.value })}
@@ -156,11 +158,11 @@ export function ReceiptFilters({
                     <option value="ai">AI</option>
                     <option value="ocr">OCR</option>
                     <option value="manual">Manuaalinen</option>
-                  </select>
+                  </CustomSelect>
                 </div>
                 <div>
                   <label htmlFor="receipt-sort-filter" className={selectLabel}>Järjestys</label>
-                  <select
+                  <CustomSelect
                     id="receipt-sort-filter"
                     value={advanced.sort}
                     onChange={(e) => onAdvancedChange({ ...advanced, sort: e.target.value })}
@@ -171,7 +173,7 @@ export function ReceiptFilters({
                     <option value="amount_desc">Summa (suurin)</option>
                     <option value="amount_asc">Summa (pienin)</option>
                     <option value="created_desc">Lisätty (uusin)</option>
-                  </select>
+                  </CustomSelect>
                 </div>
               </div>
 

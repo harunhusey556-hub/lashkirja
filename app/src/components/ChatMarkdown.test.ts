@@ -70,3 +70,12 @@ describe("parseBlocks", () => {
     expect(html).not.toContain("<script");
   });
 });
+
+it('keeps unvalidated streamed links non-interactive',()=>{
+ const html=renderToStaticMarkup(createElement(ChatMarkdown,{text:'[Sign in](https://evil.example) [Other account](/kuitit/kuitti?id=foreign)',allowedHrefs:[]}));
+ expect(html).not.toContain('<a ');
+});
+it('enables only links from server-validated message sources',()=>{
+ const html=renderToStaticMarkup(createElement(ChatMarkdown,{text:'[Settings](/asetukset) [Bad](https://evil.example)',allowedHrefs:['/asetukset']}));
+ expect(html).toContain('href="/asetukset"');expect(html).not.toContain('href="https://');
+});

@@ -25,16 +25,20 @@ type Pending = { kind: "one"; id: string } | { kind: "others" } | null;
 
 function formatLastSeen(iso: string): string {
   const time = new Date(iso).getTime();
-  if (!Number.isFinite(time)) return "Viimeksi käytetty tuntematon aika sitten";
+  if (!Number.isFinite(time)) return "Käyttöaika tuntematon";
+  const yearOf = (value: number) =>
+    new Date(value).toLocaleString("fi-FI", { timeZone: "Europe/Helsinki", year: "numeric" });
+  // The year only when it is not this one: the full stamp wrapped to two
+  // lines beside the "Kirjaa ulos" pill on a phone.
   const date = new Date(time).toLocaleString("fi-FI", {
     timeZone: "Europe/Helsinki",
     day: "numeric",
     month: "numeric",
-    year: "numeric",
+    ...(yearOf(time) === yearOf(Date.now()) ? {} : { year: "numeric" }),
     hour: "2-digit",
     minute: "2-digit",
   });
-  return `Viimeksi käytetty ${date}`;
+  return `Käytetty ${date}`;
 }
 
 export default function LaitteetPage() {

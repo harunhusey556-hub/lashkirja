@@ -1,5 +1,7 @@
 "use client";
 
+import { CustomSelect } from "@/components/CustomSelect";
+
 import { useEffect, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { SectionSkeleton } from "@/components/books/Skeletons";
@@ -216,7 +218,7 @@ export default function ALVRaporttiPage() {
         onChange={(value) => pickPeriod(alvKeyForKind(value, now))}
       />
 
-      <select
+      <CustomSelect
         aria-label={PERIOD_SELECT_LABEL[periodKind]}
         value={period}
         onChange={(e) => pickPeriod(e.target.value)}
@@ -227,7 +229,7 @@ export default function ALVRaporttiPage() {
             {o.label}
           </option>
         ))}
-      </select>
+      </CustomSelect>
 
       {loadError != null && data ? (
         <StaleBanner

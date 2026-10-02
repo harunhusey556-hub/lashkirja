@@ -81,6 +81,7 @@ export function Button({
 
 export function Field({
   label,
+  action,
   htmlFor,
   hint,
   error,
@@ -88,6 +89,7 @@ export function Field({
   children,
 }: {
   label: string;
+  action?: ReactNode;
   htmlFor: string;
   hint?: string;
   error?: string;
@@ -102,10 +104,19 @@ export function Field({
     : children;
   return (
     <div>
+      {action ? (
+        <div className="mb-1.5 flex items-center justify-between gap-2">
+          <label htmlFor={htmlFor} className="text-caption font-normal text-ink-2">
+            {label}{optional ? " (valinnainen)" : null}
+          </label>
+          {action}
+        </div>
+      ) : (
       <label htmlFor={htmlFor} className="mb-1.5 block text-caption font-normal text-ink-2">
         {label}
         {optional ? " (valinnainen)" : null}
       </label>
+      )}
       {control}
       {hint && !error && (
         <p id={hintId} className="mt-1.5 text-caption text-ink-2">

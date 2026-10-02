@@ -44,7 +44,12 @@ function releaseInert(): void {
 
 function applyInert(): void {
   releaseInert();
-  const roots = Array.from(document.querySelectorAll<HTMLElement>(OVERLAY_SELECTOR));
+  // A closing overlay is still in the DOM for its exit animation. Counting it
+  // would inert its siblings (a sheet's host drawer menu) once it has gone,
+  // and nothing recomputes after its node is removed.
+  const roots = Array.from(document.querySelectorAll<HTMLElement>(OVERLAY_SELECTOR)).filter(
+    (root) => !root.hasAttribute("data-closing")
+  );
   if (roots.length === 0) return;
   const keep = new Set<Element>();
   for (const root of roots) {

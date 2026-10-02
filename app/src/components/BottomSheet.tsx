@@ -308,7 +308,10 @@ export default function BottomSheet({
   // inside `.app-main`, which useOverlayLock makes pointer-events:none;
   // this class opts the sheet back in (see globals.css).
   return (
-    <div className={`overlay-root sheet-overlay fixed inset-x-0 z-[60] ${closing ? "pointer-events-none" : ""}`}>
+    <div
+      className={`overlay-root sheet-overlay fixed inset-x-0 z-[60] ${closing ? "pointer-events-none" : ""}`}
+      // A sheet animating out no longer counts as open (overlay-lock.ts).
+      data-closing={closing || undefined}>
       <div
         ref={backdropRef}
         className={`absolute inset-0 bg-ink/40 backdrop-blur-[2px] ${
@@ -330,7 +333,7 @@ export default function BottomSheet({
         }`}
       >
         <div className="sheet-bleed" aria-hidden />
-        <div className={`sheet-panel relative flex flex-col overflow-hidden rounded-t-3xl bg-canvas ${heightClass}`}>
+        <div className={`sheet-panel stitch-page relative flex flex-col overflow-hidden rounded-t-3xl bg-canvas ${heightClass}`}>
           <div ref={dragRegionRef} className="shrink-0">
             <div className="sheet-handle" aria-hidden />
 

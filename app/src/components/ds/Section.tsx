@@ -1,7 +1,6 @@
 import type { ReactNode } from "react";
 
-// Section already renders one bordered, rounded card around its children below — never nest Card or
-// SummaryCard inside it, or you get a card-in-card.
+// Section owns the shared grouped-card surface; avoid nesting another card inside it.
 export function Section({ title, count, action, children, className = "" }: {
   title?: string; count?: number; action?: ReactNode; children: ReactNode; className?: string;
 }) {
@@ -14,7 +13,7 @@ export function Section({ title, count, action, children, className = "" }: {
           {aside}
         </div>
       ) : null}
-      <div className="overflow-hidden rounded-card border border-line bg-surface divide-y divide-line">{children}</div>
+      <div className="ui-card overflow-hidden rounded-card border border-line bg-surface divide-y divide-line">{children}</div>
     </section>
   );
 }

@@ -20,6 +20,7 @@ export type StreamEndReason =
   | "provider_error";
 
 export interface ChatSource {
+  kind?: "action";
   label: string;
   href: string;
 }

@@ -1,5 +1,7 @@
 "use client";
 
+import { CustomSelect } from "@/components/CustomSelect";
+
 import { useEffect, useMemo, useState } from "react";
 import { useEditorSession } from "@/components/form-session";
 import { Button, controlClass, Field, SavePhaseNote } from "@/components/ui";
@@ -16,7 +18,7 @@ import {
   vatRatesForDate,
 } from "@/lib/invoices";
 import { helsinkiCalendarDate, isStrictIsoDate } from "@/lib/validation";
-import { tintedButtonClass } from "@/components/control-styles";
+import { compactActionClass } from "@/components/control-styles";
 
 export interface InvoiceFormLine {
   description: string;
@@ -427,8 +429,17 @@ export function InvoiceForm({
             label="Asiakas"
             htmlFor="if-customer"
             error={errors.customerId}
+            action={onAddCustomer ? (
+              <button
+                type="button"
+                onClick={onAddCustomer}
+                className={compactActionClass}
+              >
+                + Uusi asiakas
+              </button>
+            ) : null}
           >
-            <select
+            <CustomSelect
               className={field}
               value={values.customerId}
               onChange={(e) => pickCustomer(e.target.value)}
@@ -441,17 +452,8 @@ export function InvoiceForm({
                   {customer.name}
                 </option>
               ))}
-            </select>
+            </CustomSelect>
           </Field>
-          {onAddCustomer ? (
-            <button
-              type="button"
-              onClick={onAddCustomer}
-              className={tintedButtonClass("accent", "mt-1")}
-            >
-              Uusi asiakas
-            </button>
-          ) : null}
         </div>
 
         <div className="field-dates px-4 py-3">
@@ -496,7 +498,7 @@ export function InvoiceForm({
             <Card key={index} className="space-y-3">
               {catalog.length > 0 && (
                 <Field label="Tuote" htmlFor={`if-line-${index}-product`} optional>
-                  <select
+                  <CustomSelect
                     className={field}
                     value=""
                     autoComplete="off"
@@ -519,7 +521,7 @@ export function InvoiceForm({
                         {item.name}
                       </option>
                     ))}
-                  </select>
+                  </CustomSelect>
                 </Field>
               )}
               <Field
@@ -589,7 +591,7 @@ export function InvoiceForm({
                   />
                 </Field>
               </div>
-              <div className="flex items-end gap-2">
+              <div className="flex flex-wrap items-end gap-2">
                 <div className="min-w-0 flex-1">
                   {vatRegistered ? (
                     <Field
@@ -597,7 +599,7 @@ export function InvoiceForm({
                       htmlFor={`if-line-${index}-vat`}
                       error={errors[`line-${index}-vatRate`]}
                     >
-                      <select
+                      <CustomSelect
                         aria-label={`Rivin ${index + 1} ALV`}
                         className={field}
                         value={line.vatRate}
@@ -605,23 +607,22 @@ export function InvoiceForm({
                         onChange={(e) => setLine(index, { vatRate: Number(e.target.value) })}
                       >
                         {vatRateOptions(line.vatRate, values.issueDate).map((permille) => (
-                          <option key={permille} value={permille / 10}>
+                          <option key={permille} value={permille / 10} data-short-label={vatRateLabel(permille)}>
                             {vatRateLabel(permille)}
                             {vatRateDateNote(permille, values.issueDate)}
                           </option>
                         ))}
-                      </select>
+                      </CustomSelect>
                     </Field>
                   ) : null}
                 </div>
-                <Button
+                <button
                   type="button"
-                  variant="secondary"
-                  className="shrink-0"
+                  className={compactActionClass}
                   onClick={() => void saveLineAsProduct(index)}
                 >
                   Tallenna tuotteeksi
-                </Button>
+                </button>
                 {values.lines.length > 1 && (
                   <Button
                     type="button"
@@ -641,10 +642,9 @@ export function InvoiceForm({
             </Card>
           ))}
 
-          <Button
+          <button
             type="button"
-            variant="secondary"
-            className="w-full"
+            className={compactActionClass}
             onClick={() =>
               setValues((current) => ({
                 ...current,
@@ -652,8 +652,8 @@ export function InvoiceForm({
               }))
             }
           >
-            Lisää rivi
-          </Button>
+            + Lisää rivi
+          </button>
           {errors.lines && <p className="text-caption text-danger">{errors.lines}</p>}
         </div>
       </div>

@@ -25,7 +25,10 @@
   transform: translateY(-8px);
   visibility: hidden;
   pointer-events: none;
-  box-shadow: 0 12px 24px -12px rgb(0 0 0 / 0.18);
+  overflow: hidden;
+  border-radius: 0 0 28px 28px;
+  background: var(--color-canvas);
+  box-shadow: 0 18px 40px -16px rgb(38 34 31 / 0.28), 0 1px 0 rgb(38 34 31 / 0.04);
   transition:
     transform 180ms var(--ease-out),
     opacity 180ms var(--ease-out),
@@ -125,5 +128,77 @@
   .typingDot {
     animation: none !important;
     opacity: 0.6;
+  }
+}
+
+/* Dims the thread while the menu is open. Tall enough to cover the drawer below. */
+.menuScrim {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 100dvh;
+  background: rgb(38 34 31 / 0.18);
+  opacity: 0;
+  visibility: hidden;
+  transition:
+    opacity 180ms var(--ease-out),
+    visibility 0s linear 180ms;
+}
+
+.menu[data-open="true"] > .menuScrim {
+  opacity: 1;
+  visibility: visible;
+  transition:
+    opacity 240ms var(--ease-out),
+    visibility 0s;
+}
+
+/* iOS segmented control: a grey track, a white thumb that springs across. */
+.segmented {
+  position: relative;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 44px;
+  padding: 3px;
+  border-radius: 9999px;
+  background: rgb(38 34 31 / 0.07);
+}
+
+.segmentThumb {
+  position: absolute;
+  top: 3px;
+  bottom: 3px;
+  left: 3px;
+  width: calc(50% - 3px);
+  border-radius: 9999px;
+  background: var(--color-surface);
+  box-shadow: 0 2px 6px rgb(38 34 31 / 0.12), 0 0 0 0.5px rgb(38 34 31 / 0.04);
+  transition: transform 380ms cubic-bezier(0.34, 1.36, 0.64, 1);
+}
+
+.segmented[data-index="1"] > .segmentThumb {
+  transform: translateX(100%);
+}
+
+.segment {
+  position: relative;
+  z-index: 1;
+  border-radius: 9999px;
+  font-size: var(--text-caption, 0.875rem);
+  font-weight: 600;
+  color: var(--color-ink-2);
+  transition: color 200ms var(--ease-out);
+}
+
+.segment[aria-checked="true"] {
+  color: var(--color-ink);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .segmentThumb {
+    transition: none;
   }
 }

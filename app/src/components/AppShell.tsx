@@ -14,7 +14,7 @@ import {
   House,
   LogOut,
   Mail,
-  MessageSquareText,
+  MessageCircle,
   Plus,
   Settings,
   type LucideIcon,
@@ -28,6 +28,8 @@ import { isOnboardingSnoozed } from "@/lib/onboarding-gate";
 import { AiChatDrawer } from "@/components/AiChatDrawer";
 import { ToastHost } from "@/components/ToastHost";
 import { useSignOut } from "@/components/useSignOut";
+
+import { PageHeaderActionsContext } from "@/components/PageHeaderActions";
 
 import BottomSheet from "@/components/BottomSheet";
 import { AppLock } from "@/components/AppLock";
@@ -53,7 +55,7 @@ import {
   updateCurrentHref,
   type NavDirection,
 } from "@/lib/nav-direction";
-import { hapticImpact } from "@/lib/haptics";
+import { hapticImpact, hapticSelection } from "@/lib/haptics";
 import { EDGE_FINISH_MS, EDGE_ZONE, edgeSwipeCommits, VelocityTracker } from "@/lib/gesture";
 import { anyFormDirty, requestLeave } from "@/lib/form-guard";
 import { keepPendingTab, PENDING_TAB_TIMEOUT_MS, type PendingTab } from "@/lib/pending-tab";
@@ -66,7 +68,7 @@ import {
   stashPendingCapture,
   type PendingCaptureKind,
 } from "@/lib/pending-capture";
-import { CAPTURE_REQUEST_EVENT, STATEMENT_IMPORT_REQUEST_EVENT } from "@/lib/capture-request";
+import { CAPTURE_REQUEST_EVENT, STATEMENT_IMPORT_REQUEST_EVENT, captureReceiptHref, type CaptureRequest } from "@/lib/capture-request";
 import { refreshSharedProfile } from "@/app/asetukset/useProfile";
 import { showToast } from "@/lib/toast";
 import {
@@ -264,6 +266,11 @@ function handleTabClick(
   if (isLink) go();
   else requestAnimationFrame(go);
 }
+
+/** Mirrors .tab-capsule's --tab-pad in globals.css. */
+const TAB_CAPSULE_PAD = 4;
+/** A press becomes a slide once the finger travels this far (px). */
+const TAB_DRAG_SLOP = 6;
 
 export default function AppShell({ children }: { children: React.ReactNode }) {
   const { status: sessionStatus, user } = useSession();
@@ -465,18 +472,18 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       return;
     }
 
-    // Push/pop slide with both pages present; tab switches (100+/day) get no
-    // slide (SHELL-06), only a quick crossfade of the old page over the new
-    // one, which never dims the new page (OWN-17). The motion starts on the
-    // frame after this commit is painted (see playNavTransition). The first
-    // render does not animate.
+    // Full push/pop motion uses prepared compositor layers.
+    // Tab switches fade the new page in without blending outgoing text.
+    // Asetukset, opened from the avatar, rises like an iOS account sheet.
     if (direction !== "forward" && direction !== "back" && direction !== "tab") return;
+    const avatarPath = avatarRoot().path;
+    const presents = direction === "tab" && pathname === avatarPath && rootIdOf(from) !== rootIdOf(avatarPath);
     return playNavTransition({
       main,
       oldPage,
       oldScroll,
       oldPaddingTop,
-      kind: direction === "forward" ? "push" : direction === "back" ? "pop" : "tab",
+      kind: direction === "forward" ? "push" : direction === "back" ? "pop" : presents ? "present" : "tab",
       newPage: pageNodeRef.current,
     });
   }, [pathname, direction]);
@@ -510,6 +517,11 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     const focusHeading = () => {
       const main = mainRef.current;
       if (!main) return;
+      // Focus paints the heading outline; keep it out of the moving frames.
+      if (main.dataset.navMoving) {
+        if (tries++ < 60) raf = requestAnimationFrame(focusHeading);
+        return;
+      }
       const active = document.activeElement;
       if (active instanceof HTMLElement && active !== document.body && main.contains(active)) return;
       if (document.querySelector('[aria-modal="true"]')) return;
@@ -616,6 +628,9 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
     const onTouchStart = (event: TouchEvent) => {
       if (swipeLock.current) return;
+      // Mid push/pop, WAAPI owns <main>'s transform and the parent page node
+      // is inside the outgoing snapshot; a swipe would fight both.
+      if (main.dataset.navMoving) return;
       if (event.touches.length !== 1) return;
       const touch = event.touches[0];
       if (touch.clientX > EDGE_ZONE) return;
@@ -729,11 +744,13 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         const leaving = under;
         under = null;
         window.setTimeout(() => {
-          clearInline();
+          leaving?.remove();
           clearBar();
+          // A link tapped right after the cancel may already be pushing.
+          if (main.dataset.navMoving) return;
+          clearInline();
           main.style.position = "";
           main.style.zIndex = "";
-          leaving?.remove();
         }, 220);
       }
     };
@@ -754,7 +771,9 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         surface.removeEventListener("touchcancel", onTouchEnd);
       }
       dropUnder();
-      if (!swipeHandoffRef.current) {
+      // A push/pop started by the landing's layout effect runs before this
+      // cleanup; clearing its z-index here put the old page over the new one.
+      if (!swipeHandoffRef.current && !main.dataset.navMoving) {
         clearBar();
         clearInline();
         main.style.position = "";
@@ -915,15 +934,18 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   // is the user gesture a hidden file input needs.
   const cameraInputRef = useRef<HTMLInputElement>(null);
   const statementInputRef = useRef<HTMLInputElement>(null);
+  const captureRequestRef = useRef<CaptureRequest | undefined>(undefined);
 
   function handOver(kind: PendingCaptureKind, files: File[]) {
     if (files.length === 0) return;
     stashPendingCapture(kind, files);
-    goForward(PENDING_CAPTURE_ROUTES[kind]);
+    const href = kind === "receipt" ? captureReceiptHref(captureRequestRef.current) : PENDING_CAPTURE_ROUTES[kind];
+    captureRequestRef.current = undefined;
+    goForward(href);
   }
 
   async function pickFromSheet(kind: PendingCaptureKind, fromGesture: boolean) {
-    const fallbackRoute = kind === "receipt" ? "/kuitit/uusi" : "/pankki/tapahtumat";
+    const fallbackRoute = kind === "receipt" ? captureReceiptHref(captureRequestRef.current, false) : "/pankki/tapahtumat";
     if (isNativeShell()) {
       const picked = kind === "receipt" ? await captureWithCamera() : await chooseDocuments(STATEMENT_FILE_TYPES);
       if (picked.kind === "files") handOver(kind, picked.files);
@@ -940,7 +962,8 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     goForward(fallbackRoute);
   }
 
-  function startPick(kind: PendingCaptureKind) {
+  function startPick(kind: PendingCaptureKind, request?: CaptureRequest) {
+    captureRequestRef.current = kind === "receipt" ? request : undefined;
     setAddOpenOn(null);
     if (anyFormDirty()) {
       requestLeave(() => void pickFromSheet(kind, false));
@@ -957,7 +980,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     startPickRef.current = startPick;
   });
   useEffect(() => {
-    const onRequest = () => startPickRef.current("receipt");
+    const onRequest = (event: Event) => startPickRef.current("receipt", (event as CustomEvent<CaptureRequest>).detail);
     // F24: "Tuo tiliote" on Koti and in the month close picks the file from the tap too.
     const onImport = () => startPickRef.current("statement");
     window.addEventListener(CAPTURE_REQUEST_EVENT, onRequest);
@@ -968,6 +991,78 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     };
   }, []);
 
+  const activeTabIndex = tabRoots().findIndex((item) => item.id === activeTabId);
+
+  // iOS 26 tab capsule: a press grows the lens under the finger, and a held
+  // press slides it from tab to tab (a selection tick per tab); letting go
+  // opens the tab under the finger. A plain tap still clicks the tab's link.
+  const capsuleRef = useRef<HTMLDivElement>(null);
+  const tabPress = useRef<{ pointerId: number; startX: number; index: number; dragging: boolean } | null>(null);
+  const swallowTabClick = useRef(false);
+
+  function tabSlot(clientX: number) {
+    const capsule = capsuleRef.current;
+    if (!capsule) return null;
+    const rect = capsule.getBoundingClientRect();
+    const count = tabRoots().length;
+    const width = (rect.width - 2 * TAB_CAPSULE_PAD) / count;
+    const x = clientX - rect.left - TAB_CAPSULE_PAD;
+    const index = Math.min(count - 1, Math.max(0, Math.floor(x / width)));
+    // The lens centres on the finger, but never leaves the track.
+    const offset = Math.min((count - 1) * width, Math.max(0, x - width / 2));
+    return { capsule, index, offset };
+  }
+
+  function onTabPointerDown(event: React.PointerEvent<HTMLDivElement>) {
+    if (!event.isPrimary || event.button !== 0) return;
+    const slot = tabSlot(event.clientX);
+    if (!slot) return;
+    tabPress.current = { pointerId: event.pointerId, startX: event.clientX, index: slot.index, dragging: false };
+    // A press lands the lens on the pressed tab; it follows the finger only once it moves.
+    const width = (slot.capsule.getBoundingClientRect().width - 2 * TAB_CAPSULE_PAD) / tabRoots().length;
+    slot.capsule.style.setProperty("--tab-drag-x", `${slot.index * width}px`);
+    slot.capsule.dataset.pressing = "";
+  }
+
+  function onTabPointerMove(event: React.PointerEvent<HTMLDivElement>) {
+    const press = tabPress.current;
+    if (!press || press.pointerId !== event.pointerId) return;
+    if (!press.dragging) {
+      if (Math.abs(event.clientX - press.startX) < TAB_DRAG_SLOP) return;
+      press.dragging = true;
+      event.currentTarget.setPointerCapture(event.pointerId);
+      event.currentTarget.dataset.dragging = "";
+    }
+    const slot = tabSlot(event.clientX);
+    if (!slot) return;
+    slot.capsule.style.setProperty("--tab-drag-x", `${slot.offset}px`);
+    if (slot.index !== press.index) {
+      press.index = slot.index;
+      void hapticSelection();
+    }
+  }
+
+  function endTabPress(event: React.PointerEvent<HTMLDivElement>, commit: boolean) {
+    const press = tabPress.current;
+    if (!press || press.pointerId !== event.pointerId) return;
+    tabPress.current = null;
+    const capsule = event.currentTarget;
+    // Next frame: a tap's own click (fired after pointerup) has moved the
+    // selection by then, so the lens springs straight to the new tab.
+    requestAnimationFrame(() => {
+      delete capsule.dataset.pressing;
+      delete capsule.dataset.dragging;
+    });
+    if (!press.dragging || !commit) return;
+    // After a slide the click lands on the capsule, not a link: open the tab here.
+    swallowTabClick.current = true;
+    window.setTimeout(() => {
+      swallowTabClick.current = false;
+    }, 0);
+    const tab = tabRoots()[press.index];
+    if (tab) goToRoot({ preventDefault: () => {} }, tab);
+  }
+
   function renderTab(item: NavEntry) {
     const active = activeTabId === item.id;
     return (
@@ -976,22 +1071,53 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         href={item.path}
         prefetch
         onClick={(event) => goToRoot(event, item)}
-        className={`flex min-w-0 flex-1 flex-col items-center justify-center gap-1 touch-target transition-colors active-press ${
-          active ? "text-accent" : "text-ink-2"
+        onPointerEnter={() => router.prefetch(tabTarget(item.id) ?? item.path)}
+        onFocus={() => router.prefetch(tabTarget(item.id) ?? item.path)}
+        className={`tab-item relative z-[1] flex min-w-0 flex-1 flex-col items-center justify-center gap-0.5 transition-colors active-press ${
+          active ? "text-accent" : "text-ink"
         }`}
         aria-current={active ? "page" : undefined}
       >
-        <Icon icon={rootIcon(item.id)} size="tab" />
-        <span
-          className={`max-w-full truncate text-tab leading-tight ${active ? "font-semibold" : "font-medium"}`}
-        >
-          {item.label}
-        </span>
+        <Icon icon={rootIcon(item.id)} size="hero" strokeWidth={active ? 2.25 : 1.75} />
+        {/* Icon-only bar: the name stays for VoiceOver and the link's text. */}
+        <span className="sr-only">{item.label}</span>
       </Link>
     );
   }
 
   const backName = backLabel ?? back?.label ?? null;
+
+  const inlineRootHeader = ["/dashboard", "/kirjanpito", "/laskut", "/raportit", "/asetukset"].includes(pathname);
+  const headerActions = (
+          sessionStatus !== "signed-out" ? (
+            <div className="flex items-center gap-1 justify-self-end">
+              <button
+                type="button"
+                onClick={() => setChatOpenOn(pathname)}
+                aria-label="Avustaja"
+                className="header-circle active-press flex h-11 w-11 items-center justify-center"
+              >
+                <span className="shell-chat-icon flex h-10 w-10 items-center justify-center rounded-full bg-white text-ink">
+                  <Icon icon={MessageCircle} />
+                </span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setProfileOpenOn((open) => (open === pathname ? null : pathname))}
+                aria-label="Profiili, asetukset ja uloskirjautuminen"
+                aria-haspopup="dialog"
+                className="header-circle active-press flex h-11 w-11 items-center justify-center"
+              >
+                {/* A stable tile: the initial fills it in, a person glyph never swaps for it (VS-33). */}
+                <span className="shell-profile-icon flex h-10 w-10 items-center justify-center rounded-full text-body font-medium text-white">
+                  {initials}
+                </span>
+              </button>
+            </div>
+          ) : (
+            <div className="w-11" aria-hidden />
+          )
+  );
 
   return (
     <AppLock>
@@ -1016,12 +1142,14 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         <nav aria-label="Päävalikko" className="flex flex-1 flex-col gap-0.5 px-3">
           {tabRoots().map((item) => {
             const active = activeTabId === item.id;
-            return (
+              return (
               <Link
                 key={item.id}
                 href={item.path}
                 prefetch
                 onClick={(event) => goToRoot(event, item)}
+        onPointerEnter={() => router.prefetch(tabTarget(item.id) ?? item.path)}
+        onFocus={() => router.prefetch(tabTarget(item.id) ?? item.path)}
                 aria-current={active ? "page" : undefined}
                 className={`flex min-h-12 items-center gap-3 rounded-card px-3 text-left text-body active-press ${
                   active ? "bg-accent-soft font-semibold text-accent" : "font-medium text-ink"
@@ -1052,7 +1180,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         </div>
       </aside>
     )}
-    <div className="app-frame" data-tabs={isDetail ? "hidden" : undefined}>
+    <div className="app-frame" data-design="stitch" data-inline-header={inlineRootHeader || undefined} data-tabs={isDetail ? "hidden" : undefined}>
       <UnsavedChangesHost />
       <header
         ref={headerRef}
@@ -1079,34 +1207,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
             )}
           </div>
 
-          {sessionStatus !== "signed-out" ? (
-            <div className="flex items-center gap-1 justify-self-end">
-              <button
-                type="button"
-                onClick={() => setChatOpenOn(pathname)}
-                aria-label="Avustaja"
-                className="header-circle active-press flex h-11 w-11 items-center justify-center"
-              >
-                <span className="flex h-9 w-9 items-center justify-center rounded-full border border-line bg-surface text-ink">
-                  <Icon icon={MessageSquareText} />
-                </span>
-              </button>
-              <button
-                type="button"
-                onClick={() => setProfileOpenOn((open) => (open === pathname ? null : pathname))}
-                aria-label="Profiili, asetukset ja uloskirjautuminen"
-                aria-haspopup="dialog"
-                className="header-circle active-press flex h-11 w-11 items-center justify-center"
-              >
-                {/* A stable tile: the initial fills it in, a person glyph never swaps for it (VS-33). */}
-                <span className="flex h-9 w-9 items-center justify-center rounded-full border border-accent-soft bg-accent-soft text-body font-semibold text-accent">
-                  {initials}
-                </span>
-              </button>
-            </div>
-          ) : (
-            <div className="w-11" aria-hidden />
-          )}
+          {!inlineRootHeader ? headerActions : null}
         </div>
       </header>
 
@@ -1119,7 +1220,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         ref={mainRef}
         className="app-main mx-auto w-full max-w-lg flex-1 md:max-w-3xl"
       >
-        <div key={pathname} ref={setPageNode} className="app-page">
+        <div key={pathname} ref={setPageNode} className={`app-page stitch-page${pathname.startsWith("/asetukset") ? " settings-page" : ""}`}>
           {/* Page fetches start in parallel with the session check -- there
               is no "checking session" gate. Only an actual sign-out (a
               confirmed 401, or mobile finding no stored token) blanks this;
@@ -1127,7 +1228,9 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
           {onboardingSnoozed && !showOnboarding && pathname === "/dashboard" && (
             <OnboardingResumeCard onResume={() => setShowOnboarding(true)} />
           )}
-          {sessionStatus === "signed-out" ? null : children}
+          <PageHeaderActionsContext.Provider value={inlineRootHeader ? headerActions : null}>
+            {sessionStatus === "signed-out" ? null : children}
+          </PageHeaderActionsContext.Provider>
         </div>
       </main>
 
@@ -1150,32 +1253,50 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
           />
 
           {/* Stays mounted on detail routes and slides away (SHELL-13). */}
+          {/* A floating glass capsule (iOS 26): the four tabs share one track with a
+              sliding selection lens; the primary "+" floats beside it on its own. */}
           <nav
-            className="app-tab-bar z-50 border-t border-line bg-surface"
+            className="app-tab-bar z-50"
             aria-label="Päävalikko"
             aria-hidden={isDetail || undefined}
             inert={isDetail}
             onContextMenu={(event) => event.preventDefault()}
           >
-            <div className="mx-auto flex h-[var(--app-tab-height)] max-w-lg items-stretch">
-              {tabRoots().slice(0, 2).map((item) => renderTab(item))}
-              {/* The primary control (OWN-03): 60 px, raised above the bar. */}
-              <div className="flex w-[76px] flex-none items-center justify-center">
-                <button
-                  type="button"
-                  onClick={() => {
-                    void hapticImpact("light");
-                    setAddOpenOn(pathname);
-                  }}
-                  aria-label="Lisää"
-                  aria-haspopup="dialog"
-                  aria-expanded={addOpen}
-                  className="tab-plus flex h-[60px] w-[60px] -translate-y-2.5 items-center justify-center rounded-full bg-ink text-canvas"
-                >
-                  <Icon icon={Plus} size="hero" strokeWidth={2} />
-                </button>
+            <div className="mx-auto flex max-w-lg items-center gap-3">
+              <div
+                ref={capsuleRef}
+                className="tab-capsule"
+                style={{ "--tab-count": tabRoots().length, "--tab-index": Math.max(activeTabIndex, 0) } as React.CSSProperties}
+                onPointerDown={onTabPointerDown}
+                onPointerMove={onTabPointerMove}
+                onPointerUp={(event) => endTabPress(event, true)}
+                onPointerCancel={(event) => endTabPress(event, false)}
+                onClickCapture={(event) => {
+                  if (!swallowTabClick.current) return;
+                  event.preventDefault();
+                  event.stopPropagation();
+                }}
+              >
+                {/* Keyed on the tab, so each move replays the lens's stretch. */}
+                <span aria-hidden className="tab-lens" data-visible={activeTabIndex >= 0 || undefined}>
+                  <span key={activeTabIndex} className="tab-lens-body" />
+                </span>
+                {tabRoots().map((item) => renderTab(item))}
               </div>
-              {tabRoots().slice(2).map((item) => renderTab(item))}
+              {/* The primary control (OWN-03), the same height as the capsule. */}
+              <button
+                type="button"
+                onClick={() => {
+                  void hapticImpact("light");
+                  setAddOpenOn(pathname);
+                }}
+                aria-label="Lisää"
+                aria-haspopup="dialog"
+                aria-expanded={addOpen}
+                className="tab-plus flex flex-none items-center justify-center rounded-full bg-ink text-canvas"
+              >
+                <Icon icon={Plus} size="hero" strokeWidth={2} />
+              </button>
             </div>
           </nav>
 

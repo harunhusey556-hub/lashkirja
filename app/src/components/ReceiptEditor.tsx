@@ -1,5 +1,7 @@
 "use client";
 
+import { CustomSelect } from "@/components/CustomSelect";
+
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -31,6 +33,7 @@ import {
 } from "@/components/clientFetch";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { useEditorSession } from "@/components/form-session";
+import { showToast } from "@/lib/toast";
 import { detailHref } from "@/lib/routes";
 import { Button, FormError, SavePhaseNote, buttonClass, chipClass, controlClass } from "@/components/ui";
 import { Check, X } from "lucide-react";
@@ -162,6 +165,7 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const isNewStep2 = searchParams.get("new") === "true";
+  const captureTransactionId = isEdit ? null : searchParams.get("transactionId");
   const fileInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
   const photoInputRef = useRef<HTMLInputElement>(null);
@@ -738,6 +742,23 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
       setBaseline(formData);
       if (data.receipt?.updatedAt) setUpdatedAt(String(data.receipt.updatedAt));
 
+      if (!isEdit && data.receipt && captureTransactionId) {
+        try {
+          const matchResponse = await apiFetch("/api/matching/confirm", {
+            method: "POST", credentials: "include",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ transactionId: captureTransactionId, receiptId: data.receipt.id }),
+          });
+          await readJson(matchResponse, "Kohdistus epäonnistui");
+        } catch (matchError) {
+          if (isUnauthorized(matchError)) { redirectToLogin(); return; }
+          // Saving succeeded. Never leave a new-receipt form that can create a duplicate.
+          showToast({ tone: "error", text: `Kuitti tallennettiin, mutta kohdistus ei onnistunut. ${errorMessage(matchError, "Tarkista kohdistus kuitin sivulla.")}` });
+        }
+        router.push(detailHref("receipt", data.receipt.id as string, { new: "true" }));
+        return;
+      }
+
       if (!isEdit && data.receipt && data.receipt.match) {
         const matchStatus = data.receipt.match.status;
         const candidates = data.receipt.match.matchCandidates;
@@ -1179,7 +1200,7 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
                           <label htmlFor={`receipt-vat-rate-${index}`} className={LABEL_CLASS}>
                             ALV-%
                           </label>
-                          <select
+                          <CustomSelect
                             id={`receipt-vat-rate-${index}`}
                             value={detail.rate}
                             autoComplete="off"
@@ -1213,7 +1234,7 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
                                 {rate.replace(".", ",")} %
                               </option>
                             ))}
-                          </select>
+                          </CustomSelect>
                         </div>
                         <div>
                           <label htmlFor={`receipt-vat-amount-${index}`} className={LABEL_CLASS}>
@@ -1377,7 +1398,7 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
                 <p className={LABEL_CLASS} id="receipt-category-label">Kategoria</p>
                 {(formData.category || useCustomCategory) ? (
                   <div className="space-y-3">
-                    <select
+                    <CustomSelect
                       id="receipt-category"
                       aria-labelledby="receipt-category-label"
                       className={controlClass}
@@ -1399,7 +1420,7 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
                         </option>
                       ))}
                       <option value="custom">Muu kategoria…</option>
-                    </select>
+                    </CustomSelect>
                     {useCustomCategory && (
                       <div>
                         <label htmlFor="receipt-custom-category" className={LABEL_CLASS}>

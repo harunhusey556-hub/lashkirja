@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { apiFetch, errorMessage, fieldErrorsFromApi, readJson } from "@/components/clientFetch";
 import { ErrorState } from "@/components/AsyncState";
 import { BottomActions, Card, Skeleton, SkeletonCard, SkeletonGroup, useSkeletonFade } from "@/components/ds";
@@ -15,6 +15,9 @@ import { parseFinnishNumber } from "@/lib/format";
 import { showToast } from "@/lib/toast";
 import { SELLER_LIMITS } from "@/lib/seller-limits";
 import { sellerBlankedErrors, sellerSavedText, sellerUnchanged } from "@/lib/seller-form";
+
+import { whenNavigationSettles } from "@/lib/page-transition";
+import { readPageCache, writePageCache } from "@/lib/page-cache";
 
 interface SellerProfile {
   lateInterestPercent: number | null;
@@ -94,6 +97,17 @@ function fromProfile(profile: Partial<SellerProfile>): Values {
   };
 }
 
+/** A titled card of fields: the long form reads as three short ones. */
+function FormGroup({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <section>
+      {/* The same heading inset as SettingsGroup, so the page lines up with Asetukset. */}
+      <h2 className="mb-2 px-1 text-caption font-normal text-ink-2">{label}</h2>
+      <Card className="space-y-3">{children}</Card>
+    </section>
+  );
+}
+
 function SellerSkeleton() {
   return (
     <SkeletonGroup label="Ladataan laskuttajan tietoja">
@@ -119,10 +133,12 @@ function SellerSkeleton() {
  * form would send nulls and wipe the seller data.
  */
 export default function SellerProfileCard() {
-  const [values, setValues] = useState<Values>(EMPTY);
-  const [baseline, setBaseline] = useState<Values>(EMPTY);
+  const [cachedProfile] = useState(() => readPageCache<Partial<SellerProfile>>("profile"));
+  const edited = useRef(false);
+  const [values, setValues] = useState<Values>(() => cachedProfile ? fromProfile(cachedProfile) : EMPTY);
+  const [baseline, setBaseline] = useState<Values>(() => cachedProfile ? fromProfile(cachedProfile) : EMPTY);
   const [errors, setErrors] = useState<Record<string, string>>({});
-  const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
+  const [status, setStatus] = useState<"loading" | "ready" | "error">(cachedProfile ? "ready" : "loading");
   const [loadFailure, setLoadFailure] = useState<unknown>(null);
   const [formError, setFormError] = useState("");
   const [saving, setSaving] = useState(false);
@@ -139,20 +155,26 @@ export default function SellerProfileCard() {
   });
 
   const load = useCallback(async () => {
-    setStatus("loading");
+    if (!cachedProfile) setStatus("loading");
     setLoadFailure(null);
     try {
       const response = await apiFetch("/api/profile", { credentials: "include" });
       const data = await readJson<{ profile: Partial<SellerProfile> }>(response, "Profiilin haku epäonnistui");
+      writePageCache("profile", data.profile);
+      // Avoid replacing/rasterizing the whole form during a page slide.
+      // The existing cached form remains usable while the refresh waits.
+      await whenNavigationSettles();
+      if (edited.current) return;
       const loaded = fromProfile(data.profile);
       setValues(loaded);
       setBaseline(loaded);
       setStatus("ready");
     } catch (error) {
       setLoadFailure(error);
-      setStatus("error");
+      if (!cachedProfile) setStatus("error");
+      else setFormError("Tietojen päivitys epäonnistui. Tarkista yhteys ennen tallentamista.");
     }
-  }, []);
+  }, [cachedProfile]);
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional fetch-on-mount: flipping to a loading state and storing the response is exactly the external-system sync this effect exists for
@@ -160,6 +182,7 @@ export default function SellerProfileCard() {
   }, [load]);
 
   function set<K extends keyof Values>(key: K, value: string) {
+    edited.current = true;
     setValues((current) => ({ ...current, [key]: value }));
     if (errors[key]) setErrors((current) => ({ ...current, [key]: "" }));
   }
@@ -220,7 +243,8 @@ export default function SellerProfileCard() {
           reminderFee: fee,
         }),
       });
-      await readJson(response, "Tallennus epäonnistui");
+      const saved = await readJson<{ profile: Partial<SellerProfile> }>(response, "Tallennus epäonnistui");
+      if (saved.profile) writePageCache("profile", saved.profile);
       setBaseline(values);
       showToast({ tone: "success", text: sellerSavedText(values) });
     } catch (error) {
@@ -247,8 +271,8 @@ export default function SellerProfileCard() {
 
   return (
     // VS-02, R18: a long form saves from the sticky bar, which sits at the same place on every screen.
-    <form onSubmit={save} className={`space-y-4 ${fade}`.trim()} noValidate>
-      <Card className="space-y-4">
+    <form onSubmit={save} className={`space-y-5 ${fade}`.trim()} noValidate>
+      <FormGroup label="Yritys">
         <Field label="Toiminimi tai yrityksen nimi" htmlFor="sp-name" error={errors.businessName}>
           <input
             id="sp-name"
@@ -347,13 +371,10 @@ export default function SellerProfileCard() {
             />
           </Field>
         </div>
+      </FormGroup>
 
-        <Field
-          label="Tilinumero (IBAN)"
-          htmlFor="sp-iban"
-          error={errors.invoiceIban}
-          hint="IBAN tarvitaan myös laskun viivakoodiin."
-        >
+      <FormGroup label="Maksutiedot">
+        <Field label="Tilinumero (IBAN)" htmlFor="sp-iban" error={errors.invoiceIban}>
           <input
             id="sp-iban"
             name="invoiceIban"
@@ -390,15 +411,12 @@ export default function SellerProfileCard() {
             placeholder="Esim. NDEAFIHH"
           />
         </Field>
+      </FormGroup>
 
-        <div className="field-grid">
-          <Field
-            label="Viivästyskorko (% / v)"
-            htmlFor="sp-interest"
-            optional
-            error={errors.lateInterestPercent}
-            hint="Suomen Pankin viitekorko + 7 (kuluttaja) tai + 8 (yritys) prosenttiyksikköä. Tyhjä = korkoa ei peritä."
-          >
+      <FormGroup label="Perintä">
+        {/* items-end: a label that wraps to two lines must not push its input below its neighbour's. */}
+        <div className="field-grid items-end">
+          <Field label="Viivästyskorko % / v" htmlFor="sp-interest" optional error={errors.lateInterestPercent}>
             <input
               id="sp-interest"
               name="lateInterestPercent"
@@ -424,20 +442,25 @@ export default function SellerProfileCard() {
             />
           </Field>
         </div>
+        {/* The interest rule spans the row: under its own narrow column it ran five lines. */}
+        {!errors.lateInterestPercent && (
+          <p className="-mt-1 text-caption text-ink-2">
+            Tyhjä korko = korkoa ei peritä. Tavallisesti viitekorko + 8 %-yks. (kuluttajalle + 7).
+          </p>
+        )}
 
         <Field label="Laskun ehdot" htmlFor="sp-terms" optional error={errors.invoiceTerms}>
           <textarea
             id="sp-terms"
             name="invoiceTerms"
             maxLength={SELLER_LIMITS.invoiceTerms}
-            className={`${controlClass} min-h-24${errors.invoiceTerms ? " !border-danger" : ""}`}
+            className={`${controlClass} min-h-20${errors.invoiceTerms ? " !border-danger" : ""}`}
             value={values.invoiceTerms}
             onChange={(e) => set("invoiceTerms", e.target.value)}
             placeholder="Esim. Viivästyskorko 8 %. Huomautusaika 8 päivää."
           />
         </Field>
-
-      </Card>
+      </FormGroup>
 
       <BottomActions>
         {/* Inside the sticky bar, so a refusal is visible where the person tapped (F14). */}

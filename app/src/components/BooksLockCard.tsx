@@ -1,5 +1,7 @@
 "use client";
 
+import { CustomSelect } from "@/components/CustomSelect";
+
 import { useState } from "react";
 import ConfirmModal from "@/components/ConfirmModal";
 import { apiFetch, errorMessage, isUnauthorized, readJson, redirectToLogin } from "@/components/clientFetch";
@@ -168,7 +170,7 @@ export default function BooksLockCard() {
             </div>
 
             <div className="flex flex-wrap gap-2">
-              <select
+              <CustomSelect
                 aria-label="Lukitse kaudet tähän kuukauteen asti"
                 className={`min-w-[12rem] flex-1 ${controlClass}`}
                 value={choice ?? lockedThrough ?? ""}
@@ -184,7 +186,7 @@ export default function BooksLockCard() {
                     {formatMonth(option)}
                   </option>
                 ))}
-              </select>
+              </CustomSelect>
               <Button
                 type="button"
                 onClick={() => void requestLock()}

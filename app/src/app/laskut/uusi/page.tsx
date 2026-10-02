@@ -234,6 +234,7 @@ function NewInvoicePage() {
           <p className="mt-0.5 text-caption text-ink-2">{sellerNote.body}</p>
           <Link
             href="/asetukset/laskutus"
+            prefetch={true}
             className="relative mt-1 inline-block font-medium text-accent before:absolute before:inset-x-0 before:-inset-y-3 before:content-['']"
           >
             Täydennä tiedot

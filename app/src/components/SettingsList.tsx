@@ -19,7 +19,7 @@ export function SettingsGroup({
   children: React.ReactNode;
 }) {
   return (
-    <section>
+    <section className="settings-group">
       {/* px-1: the same inset as ds `Section` headings, so every group heading in the app lines up. */}
       {/* h2: the groups sit directly under the page's h1 (AX-11, R1). */}
       <h2 className="mb-2 px-1 text-caption font-normal text-ink-2">{label}</h2>
@@ -44,15 +44,15 @@ export function SettingsRow({
 }) {
   return (
     // A full-width row tints when pressed; it never scales (C7, IA-15).
-    <Link href={href} className="press-row flex min-h-16 items-center gap-3 px-4 py-3 touch-target">
+    <Link prefetch={true} href={href} className="settings-row press-row flex min-h-16 items-center gap-3 px-4 py-3 touch-target">
       {icon ? (
         <IconTile>
           <Icon icon={icon} />
         </IconTile>
       ) : null}
       <span className="min-w-0 flex-1">
-        <span className="block text-body font-medium text-ink">{label}</span>
-        {hint && <span className="mt-0.5 line-clamp-2 block text-caption text-ink-2">{hint}</span>}
+        <span className="settings-row-title block text-body font-medium text-ink">{label}</span>
+        {hint && <span className="settings-row-hint mt-0.5 block text-caption text-ink-2">{hint}</span>}
       </span>
       <SettingsChevron />
     </Link>

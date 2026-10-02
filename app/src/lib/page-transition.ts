@@ -69,22 +69,24 @@ export function mountSnapshot(
 ): HTMLElement | null {
   const frame = main.parentElement;
   if (!frame) return null;
+  // Batch every geometry read before appending anything to the live DOM.
   const style = getComputedStyle(main);
+  const geometry = { top: main.offsetTop, left: main.offsetLeft, width: main.offsetWidth, height: main.offsetHeight, paddingTop: paddingTop ?? style.paddingTop, paddingRight: style.paddingRight, paddingLeft: style.paddingLeft };
   const snap = document.createElement("div");
   snap.className = `page-snapshot page-${mode}`;
   snap.setAttribute("aria-hidden", "true");
   snap.inert = true;
-  snap.style.top = `${main.offsetTop}px`;
-  snap.style.left = `${main.offsetLeft}px`;
-  snap.style.width = `${main.offsetWidth}px`;
-  snap.style.height = `${main.offsetHeight}px`;
+  snap.style.top = `${geometry.top}px`;
+  snap.style.left = `${geometry.left}px`;
+  snap.style.width = `${geometry.width}px`;
+  snap.style.height = `${geometry.height}px`;
   snap.style.right = "auto";
   snap.style.bottom = "auto";
 
   const inner = document.createElement("div");
-  inner.style.paddingTop = paddingTop ?? style.paddingTop;
-  inner.style.paddingRight = style.paddingRight;
-  inner.style.paddingLeft = style.paddingLeft;
+  inner.style.paddingTop = geometry.paddingTop;
+  inner.style.paddingRight = geometry.paddingRight;
+  inner.style.paddingLeft = geometry.paddingLeft;
   inner.style.transform = `translateY(${-scrollTop}px)`;
   page.classList.remove("page-push-in", "page-pop-in");
   inner.appendChild(page);
@@ -111,27 +113,13 @@ export function removeSnapshotAfter(snap: HTMLElement, ms: number): () => void {
   return remove;
 }
 
-/**
- * Batch 3 (OWN-17/19): the push/pop/tab transition, driven by the Web
- * Animations API instead of CSS classes added in the commit.
- *
- * Root cause of the "flash" (evidence: .superpowers/quality/batch-3/laneB):
- * the CSS keyframes started in the same frame as the new page's first,
- * heaviest render, so the first frame the user saw was already 30 % into a
- * front-loaded curve (push: the page jumped ~50 % of the screen between two
- * frames), and a tab switch painted the whole new page at 55 % opacity for a
- * frame (a dim blink). Here the old page stays fully in place for the commit
- * frame, and the motion starts on the next frame, after that paint, from
- * zero velocity on a critically damped spring (--ease-nav, --dur-push).
- */
-export type NavTransitionKind = "push" | "pop" | "tab";
+/** Full spatial navigation, with compositor layers prepared before motion. */
+export type NavTransitionKind = "push" | "pop" | "tab" | "present";
 
 /** Parallax of the page underneath a push/pop (iOS shifts it ~30 %). */
 export const UNDER_SHIFT = "-30%";
-/** Tab crossfade and the reduced-motion replacement for every transition. */
-export const FADE_MS = 180;
-/** Longest the push waits for the incoming page to replace its skeleton. */
-const CONTENT_WAIT_MS = 80;
+/** Tab fade-in and the reduced-motion replacement for every transition. */
+export const FADE_MS = 200;
 
 function cssVar(name: string, fallback: string): string {
   if (typeof document === "undefined") return fallback;
@@ -154,25 +142,6 @@ export function navEasing(): string {
   return cssVar("--ease-nav", "cubic-bezier(0.3, 0.6, 0.15, 1)");
 }
 
-function hasSkeleton(page: Element | null): boolean {
-  return Boolean(page?.querySelector('.skeleton, .animate-pulse, [aria-busy="true"]'));
-}
-
-/** A dimming layer exactly over `main` (the page underneath a pop). */
-function mountScrim(main: HTMLElement): HTMLElement | null {
-  const frame = main.parentElement;
-  if (!frame) return null;
-  const scrim = document.createElement("div");
-  scrim.className = "page-scrim";
-  scrim.setAttribute("aria-hidden", "true");
-  scrim.style.top = `${main.offsetTop}px`;
-  scrim.style.left = `${main.offsetLeft}px`;
-  scrim.style.width = `${main.offsetWidth}px`;
-  scrim.style.height = `${main.offsetHeight}px`;
-  frame.appendChild(scrim);
-  return scrim;
-}
-
 /**
  * Plays one navigation transition. Call it in the layout effect of the
  * landing (before the commit is painted) with the detached old page; it
@@ -186,87 +155,104 @@ export function playNavTransition(options: {
   kind: NavTransitionKind;
   newPage?: Element | null;
 }): () => void {
-  const { main, oldPage, oldScroll, oldPaddingTop, newPage } = options;
-  const reduced = prefersReducedMotion();
-  const kind: NavTransitionKind = reduced ? "tab" : options.kind;
-  const canAnimate = typeof main.animate === "function";
-  if (!oldPage || !canAnimate) return () => {};
-
-  const mode: SnapshotMode = kind === "push" ? "push-out" : kind === "pop" ? "pop-out" : "tab-out";
-  const snap = mountSnapshot(main, oldPage, oldScroll, mode, oldPaddingTop);
+  const { main, oldPage, oldScroll, oldPaddingTop, kind } = options;
+  if (typeof main.animate !== "function") return () => {};
+  if (kind === "tab" || prefersReducedMotion() || !oldPage) return playFadeIn(main);
+  // Read tokens before inserting the snapshot; no layout reads during motion.
+  const duration = navDurationMs();
+  const easing = navEasing();
+  // Present (the avatar's Asetukset): the new page rises like an iOS sheet
+  // over the old one, which stays put and dims.
+  const covers = kind === "push" || kind === "present";
+  const mainFrom =
+    kind === "push" ? "translate3d(100%, 0, 0)" : kind === "present" ? "translate3d(0, 100%, 0)" : `translate3d(${UNDER_SHIFT}, 0, 0)`;
+  const snapTo =
+    kind === "push" ? `translate3d(${UNDER_SHIFT}, 0, 0)` : kind === "present" ? "translate3d(0, 0, 0)" : "translate3d(100%, 0, 0)";
+  const snap = mountSnapshot(main, oldPage, oldScroll, covers ? "push-out" : "pop-out", oldPaddingTop);
   if (!snap) return () => {};
-
-  let scrim: HTMLElement | null = null;
-  let snapScrim: HTMLElement | null = null;
-  // The commit frame: the old page covers the new one exactly where it was.
-  if (kind === "push") {
-    main.style.transform = "translateX(100%)";
-    main.style.zIndex = "1";
-    main.dataset.navMoving = "push";
-    snapScrim = document.createElement("div");
-    snapScrim.className = "page-snapshot-scrim";
-    snap.appendChild(snapScrim);
-  } else if (kind === "pop") {
-    main.style.transform = `translateX(${UNDER_SHIFT})`;
-    scrim = mountScrim(main);
-    if (scrim) scrim.style.opacity = "1";
+  const scrim = document.createElement("div");
+  scrim.setAttribute("aria-hidden", "true");
+  scrim.className = covers ? "page-snapshot-scrim" : "page-scrim";
+  if (covers) snap.appendChild(scrim);
+  else {
+    scrim.style.top = snap.style.top;
+    scrim.style.left = snap.style.left;
+    scrim.style.width = snap.style.width;
+    scrim.style.height = snap.style.height;
+    scrim.style.opacity = "1";
+    main.parentElement?.appendChild(scrim);
   }
-
+  const previousWillChange = main.style.willChange;
+  main.style.willChange = "transform";
+  snap.style.willChange = "transform";
+  main.dataset.navMoving = kind;
+  main.style.transform = mainFrom;
+  main.style.zIndex = covers ? "1" : "";
   const animations: Animation[] = [];
   let raf = 0;
-  let safety = 0;
+  let timer = 0;
   let done = false;
   const cleanup = () => {
     if (done) return;
     done = true;
     cancelAnimationFrame(raf);
-    window.clearTimeout(safety);
+    window.clearTimeout(timer);
     for (const animation of animations) animation.cancel();
     main.style.transform = "";
     main.style.zIndex = "";
+    main.style.willChange = previousWillChange;
     delete main.dataset.navMoving;
     snap.remove();
-    scrim?.remove();
+    scrim.remove();
+    main.dispatchEvent(new Event("lashkirja-nav-settled"));
   };
+    const timing: KeyframeAnimationOptions = { duration, easing, fill: "both" };
+    animations.push(main.animate([{ transform: mainFrom }, { transform: "translate3d(0, 0, 0)" }], timing));
+    animations.push(snap.animate([{ transform: "translate3d(0, 0, 0)" }, { transform: snapTo }], timing));
+    animations.push(scrim.animate(covers ? [{ opacity: 0 }, { opacity: 1 }] : [{ opacity: 1 }, { opacity: 0 }], timing));
 
+  // Construct and rasterize paused animations before starting their clocks.
+  // Creating a moving animation during its first frame made a busy form
+  // jump ahead while the browser was still preparing its layers.
+  for (const animation of animations) { animation.pause(); animation.currentTime = 0; }
   const start = () => {
     if (done) return;
-    const duration = kind === "tab" ? (reduced ? FADE_MS - 40 : FADE_MS) : navDurationMs();
-    const easing = kind === "tab" ? "cubic-bezier(0.23, 1, 0.32, 1)" : navEasing();
-    const timing: KeyframeAnimationOptions = { duration, easing, fill: "both" };
-    if (kind === "push") {
-      animations.push(main.animate([{ transform: "translateX(100%)" }, { transform: "translateX(0)" }], timing));
-      animations.push(snap.animate([{ transform: "translateX(0)" }, { transform: `translateX(${UNDER_SHIFT})` }], timing));
-      if (snapScrim) animations.push(snapScrim.animate([{ opacity: 0 }, { opacity: 1 }], timing));
-    } else if (kind === "pop") {
-      animations.push(main.animate([{ transform: `translateX(${UNDER_SHIFT})` }, { transform: "translateX(0)" }], timing));
-      animations.push(snap.animate([{ transform: "translateX(0)" }, { transform: "translateX(100%)" }], timing));
-      if (scrim) animations.push(scrim.animate([{ opacity: 1 }, { opacity: 0 }], timing));
-    } else {
-      animations.push(snap.animate([{ opacity: 1 }, { opacity: 0 }], timing));
+    const startedAt = document.timeline.currentTime;
+    for (const animation of animations) {
+      animation.play();
+      if (typeof startedAt === "number") animation.startTime = startedAt;
     }
-    // The animations own the start values now; nothing inline may outlive them.
     main.style.transform = "";
-    if (scrim) scrim.style.opacity = "";
-    const lead = animations[0];
-    lead.finished.then(cleanup, () => {});
-    // Safety net: never leave an overlay if `finished` never settles.
-    safety = window.setTimeout(cleanup, duration + 250);
+    animations[0].finished.then(cleanup, cleanup);
   };
+  // One paint prepares/rasterizes both isolated layers before the spring
+  // starts. Route mounting and the first moving frame no longer compete.
+  raf = requestAnimationFrame(() => { raf = requestAnimationFrame(start); });
+  timer = window.setTimeout(cleanup, duration + 500);
+  return cleanup;
+}
 
-  // Start on the frame after the commit frame was painted. A push waits a
-  // few frames (CONTENT_WAIT_MS at most) for a cached page to replace its
-  // skeleton, so the page slides in whole instead of popping in after.
-  const committedAt = performance.now();
-  const next = () => {
-    raf = 0;
-    if (kind === "push" && hasSkeleton(newPage ?? null) && performance.now() - committedAt < CONTENT_WAIT_MS) {
-      raf = requestAnimationFrame(next);
-      return;
-    }
-    start();
+/**
+ * Tab switch: the old page is gone at once and the new one fades in. Only
+ * the incoming page moves, so two pages' text never blend (iOS swaps tabs
+ * outright; this only takes the edge off the cut).
+ */
+function playFadeIn(main: HTMLElement): () => void {
+  main.dataset.navMoving = "fade";
+  const animation = main.animate([{ opacity: 0 }, { opacity: 1 }], {
+    duration: FADE_MS,
+    easing: "cubic-bezier(0.2, 0, 0, 1)",
+    fill: "backwards",
+  });
+  let done = false;
+  const cleanup = () => {
+    if (done) return;
+    done = true;
+    animation.cancel();
+    delete main.dataset.navMoving;
+    main.dispatchEvent(new Event("lashkirja-nav-settled"));
   };
-  raf = requestAnimationFrame(next);
+  animation.finished.then(cleanup, cleanup);
   return cleanup;
 }
 
@@ -274,4 +260,19 @@ export function prefersReducedMotion(): boolean {
   return typeof window !== "undefined" && typeof window.matchMedia === "function"
     ? window.matchMedia("(prefers-reduced-motion: reduce)").matches
     : false;
+}
+
+/** Await layer teardown, including the preparation frames before WAAPI starts. */
+export function whenNavigationSettles(): Promise<void> {
+  const main = document.querySelector<HTMLElement>(".app-main[data-nav-moving]");
+  if (!main) return Promise.resolve();
+  return new Promise(resolve => {
+    const finish = () => {
+      window.clearTimeout(timer);
+      main.removeEventListener("lashkirja-nav-settled", finish);
+      resolve();
+    };
+    const timer = window.setTimeout(finish, 1000);
+    main.addEventListener("lashkirja-nav-settled", finish);
+  });
 }

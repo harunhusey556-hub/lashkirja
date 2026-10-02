@@ -26,6 +26,7 @@ import {
   FileText,
   Landmark,
   Percent,
+  Sparkles,
   Tag,
   Wallet,
   type LucideIcon,
@@ -39,10 +40,11 @@ import {
   Skeleton,
   SkeletonCard,
   SkeletonGroup,
-  SummaryCard,
   useSkeletonFade,
 } from "@/components/ds";
-import { SegmentedProgress } from "@/components/ds/charts";
+import { ProgressRing } from "@/components/ds/ProgressRing";
+import { KotiMoneyCards } from "./KotiMoneyCards";
+import { monthIsComplete, type TrendMonth } from "@/lib/koti-design";
 
 import { formatDayMonth, formatEur } from "@/lib/format";
 import { detailHref } from "@/lib/routes";
@@ -60,7 +62,6 @@ import {
   kotiHeadline,
   kotiMonthHasActivity,
   kotiResultBasis,
-  kotiResultLabel,
   kotiStatementLine,
   parseKotiMonth,
   rememberKotiMonth,
@@ -68,7 +69,7 @@ import {
 import { kotiGreeting } from "@/lib/koti-greeting";
 import { kotiBankRow, kotiBankState, type KotiBank } from "@/lib/koti-bank";
 import { BalanceTrendCard, type BalanceTrendPoint } from "@/components/charts/BalanceTrendCard";
-import { CashflowCard, type CashflowRow } from "@/components/charts/CashflowCard";
+import { CashflowCard } from "@/components/charts/CashflowCard";
 import { handledDetail, handledHref, handledTitle, type Handled } from "@/lib/koti-handled";
 import { useVatDue } from "@/components/useVatDue";
 import { approvalGapText } from "@/lib/receipt-approval";
@@ -119,7 +120,7 @@ interface DashboardData {
   /** OWN-22: monthly closing balance of the counted accounts; null under two months. */
   bankTrend?: { points: BalanceTrendPoint[] } | null;
   /** OWN-22: the last six months' income and expenses (Koti's month rule). */
-  cashflow?: CashflowRow[] | null;
+  cashflow?: TrendMonth[] | null;
   receivables?: Position;
   payables?: Position;
   isSingleVatProfile?: boolean;
@@ -199,7 +200,7 @@ function MonthStepper({ month, onChange }: { month: string; onChange: (next: str
   const button =
     "active-press flex h-11 w-11 items-center justify-center text-ink disabled:text-ink-2/40";
   return (
-    <div className="flex h-11 items-center overflow-hidden rounded-full border border-line bg-surface">
+    <div className="koti-month-stepper">
       <button
         type="button"
         aria-label="Edellinen kuukausi"
@@ -231,17 +232,14 @@ function MonthStepper({ month, onChange }: { month: string; onChange: (next: str
  */
 export function KotiFallback() {
   return (
-    <div className="space-y-6">
-      <PageTitle
-        title={" "}
-        subtitle={
-          <>
-            <span className="block min-h-[22px]" />
-            <span className="block min-h-[20px]" />
-          </>
-        }
-        action={<MonthStepper month={currentMonth()} onChange={() => {}} />}
-      />
+    <div className="stitch-page space-y-6">
+      <div className="koti-heading">
+        <div className="mb-1 flex items-center justify-between gap-3 px-1">
+          <span className="text-caption"> </span>
+          <MonthStepper month={currentMonth()} onChange={() => {}} />
+        </div>
+        <PageTitle title=" " subtitle={<span className="block min-h-[22px]" />} />
+      </div>
       <KotiSkeleton />
     </div>
   );
@@ -763,8 +761,19 @@ export default function DashboardClient() {
   // OWN-22: a connected bank with a known balance gets the balance card (its
   // link replaces the Pankkitilit row); every other state keeps the row and its pill.
   const showBalanceCard = Boolean(data?.bank && kotiBankState(data.bank) === "connected" && bankRow.amount !== undefined);
+  // Rahatilanne shows only real positions: no bank yet and nothing open left
+  // two empty rows that repeated the Käyttöönotto list and the "+" button.
+  const showBankRow = !showBalanceCard && kotiBankState(data?.bank) !== "none";
+  const openReceivables = data?.receivables?.totalOpen ?? 0;
+  const hasPosition = showBalanceCard || showBankRow || openReceivables > 0 || (data?.payables?.totalOpen ?? 0) > 0;
   const matching = data?.matching;
   const events = data?.events ?? (matching ? { done: matching.matched, total: matching.matchable } : null);
+  const complete = events ? monthIsComplete({
+    ...events, blocking: blockingCount, otherOpen: otherTasks.length > 0 || otherMore.length > 0,
+    hasErrors: Boolean(refreshFailed || Object.keys(data?.sectionErrors ?? {}).length), hasStatement,
+  }) : false;
+  const fetchedAt = pageCacheFetchedAt(`dashboard:${month}`);
+  const freshMinutes = fetchedAt ? Math.max(0, Math.floor((now.getTime() - fetchedAt) / 60_000)) : null;
   const documentsBasis = data?.source !== "tiliote";
   const tulotHref = !data
     ? "/raportit"
@@ -791,7 +800,7 @@ export default function DashboardClient() {
 
   function renderTask(task: Task) {
     return (
-      <div key={task.key} className={leaving.has(task.key) ? "row-leave" : undefined}>
+      <div key={task.key} data-tone={task.icon === Camera ? "green" : task.icon === Tag ? "rose" : undefined} className={leaving.has(task.key) ? "row-leave" : undefined}>
       <ListRow
         href={task.onRowClick ? undefined : task.href}
         onClick={task.onRowClick}
@@ -834,22 +843,16 @@ export default function DashboardClient() {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="stitch-page space-y-6">
       {/* C1.6 (IA-24): pull to refresh runs the same reload as Yritä uudelleen. */}
       <PullToRefresh onRefresh={retry} />
-      <PageTitle
-        title={title}
-        subtitle={subtitle}
-        action={
-          <MonthStepper
-            month={month}
-            onChange={(next) => {
-              setRefreshFailed(null);
-              setMonth(next);
-            }}
-          />
-        }
-      />
+      <div className="koti-heading">
+        <div className="mb-1 flex items-center justify-between gap-3 px-1">
+          <p className="text-caption font-medium text-ink-2">{atCurrent ? greeting || " " : " "}</p>
+          <MonthStepper month={month} onChange={(next) => { setRefreshFailed(null); setMonth(next); }} />
+        </div>
+        <PageTitle title={title} subtitle={atCurrent ? profile?.businessName || undefined : subtitle} />
+      </div>
 
       {refreshFailed && data ? (
         <StaleBanner fetchedAt={pageCacheFetchedAt(`dashboard:${month}`)} onRetry={retry} />
@@ -865,22 +868,21 @@ export default function DashboardClient() {
       ) : (
         <div className={`space-y-6 ${fade}`}>
           {/* Month status: what is still open, how much of the bank is in order, VAT. */}
-          <div className="rounded-card border border-line bg-surface p-4">
-            <p className="text-headline font-semibold text-ink">{headline}</p>
+          <div className={`stitch-card stitch-hero ${complete ? "is-complete" : ""}`}>
+            <div className="stitch-hero-main">
+            <div>
+            <p className="text-headline font-semibold text-ink">{complete ? "Kaikki kunnossa 🌿" : headline}</p>
             {events && events.total > 0 && !data.sectionErrors?.matching ? (
               <>
                 <p className="mt-0.5 text-body text-ink-2">
                   {events.done} / {events.total} tapahtumaa on kunnossa
                 </p>
-                <SegmentedProgress
-                  done={events.done}
-                  total={events.total}
-                  label={`${events.done} tapahtumaa ${events.total}:sta on kunnossa`}
-                  animateKey={`koti-month:${month}`}
-                  className="mt-3.5"
-                />
+
               </>
             ) : null}
+            </div>
+            {events && events.total > 0 && !data.sectionErrors?.matching ? <ProgressRing done={events.done} total={events.total} complete={complete} /> : null}
+            </div>
             {statementLine ? (
               <p className={`${events && events.total > 0 ? "mt-2" : "mt-0.5"} text-body text-ink-2`}>
                 {statementLine}{" "}
@@ -943,9 +945,15 @@ export default function DashboardClient() {
             ) : null}
           </div>
 
-          {/* TF-06: the first steps of a new account. */}
+          <section>
+            <KotiMoneyCards month={month} income={data.income} expenses={data.expenses} source={data.source} rows={data.cashflow} incomeHref={tulotHref} expensesHref={menotHref} vatRegistered={data.vat.registered} />
+            <p className="mt-2 px-1 text-caption text-ink-2">{kotiResultBasis(documentsBasis ? "kuitit" : "tiliote", data.vat.registered)}</p>
+          </section>
+
+          {/* TF-06: the first steps of a new account. Not titled "Aloitetaan":
+              that is already the headline above it in this state. */}
           {showSetup && setup ? (
-            <Section title="Aloitetaan">
+            <Section title="Käyttöönotto">
               <p className="px-4 py-3 text-caption text-ink-2">
                 Kolme askelta, niin kirjanpitosi on käyttövalmis.
               </p>
@@ -990,7 +998,7 @@ export default function DashboardClient() {
           <PartialFailureNotice messages={Object.values(data.sectionErrors ?? {})} onRetry={retry} />
 
           {blockingTasks.length > 0 || blockingMore.length > 0 ? (
-            <Section title={atCurrent ? "Ennen kuun loppua" : "Kesken"}>
+            <Section title={atCurrent ? "Tarvitaan sinulta" : "Kesken"}>
               {blockingTasks.map(renderTask)}
               {blockingMore.map(renderMore)}
             </Section>
@@ -1004,37 +1012,24 @@ export default function DashboardClient() {
             </Section>
           ) : null}
 
+          {complete ? <div className="stitch-card flex flex-col items-center gap-2 p-5 text-center">
+            <Icon icon={CircleCheck} className="text-success" size="hero" />
+            <p className="text-body font-semibold">Ei avoimia tehtäviä</p>
+            {data.hasImap && data.bank?.state === "connected" ? <p className="text-caption text-ink-2">Saapuvat kuitit ja pankkitapahtumat haetaan automaattisesti.</p> : null}
+          </div> : null}
+
           {/* What the app did for the owner this week; no card when it did nothing (real records only). */}
           {atCurrent && data.handled && data.handled.count > 0 ? (
-            <Section title="Hoidettu automaattisesti">
-              <ListRow
-                href={handledHref(data.handled.parts)}
-                chevron
-                title={handledTitle(data.handled.count)}
-                secondary={handledDetail(data.handled.parts)}
-                secondaryLines="all"
-              />
-            </Section>
+            <Link href={handledHref(data.handled.parts)} className="stitch-automation active-press">
+              <span className="stitch-automation-icon"><Icon icon={Sparkles} /></span>
+              <span className="min-w-0 flex-1">
+                <span className="block text-micro font-semibold tracking-wider text-white/70">HOIDETTU AUTOMAATTISESTI</span>
+                <span className="mt-1 block text-body font-semibold">{handledTitle(data.handled.count)}</span>
+                <span className="mt-1 block text-caption text-white/75">{handledDetail(data.handled.parts)}</span>
+              </span>
+              <Icon icon={ChevronRight} className="text-white/60" />
+            </Link>
           ) : null}
-
-          <section>
-            {/* One heading line: the basis belongs to the section, not to the Menot card below it. */}
-            <h2 className="mb-2 px-1 text-caption font-normal text-ink-2">
-              Kuukauden tulos
-              {/* AX-11: VoiceOver joined the two parts ("tuloslaskujen") when the separator was its only gap. */}
-              <span aria-hidden> · </span>
-              <span className="sr-only">, </span>
-              <span>{kotiResultBasis(documentsBasis ? "kuitit" : "tiliote", data.vat.registered)}</span>
-            </h2>
-            <div className="grid grid-cols-2 gap-3">
-              <Link href={tulotHref} aria-label={kotiResultLabel("Tulot", formatEur(data.income), data.vat.registered)} className="active-press block">
-                <SummaryCard label="Tulot" value={formatEur(data.income)} />
-              </Link>
-              <Link href={menotHref} aria-label={kotiResultLabel("Menot", formatEur(data.expenses), data.vat.registered)} className="active-press block">
-                <SummaryCard label="Menot" value={formatEur(data.expenses)} />
-              </Link>
-            </div>
-          </section>
 
           <CashflowCard
             rows={data.cashflow}
@@ -1045,7 +1040,7 @@ export default function DashboardClient() {
             }}
           />
 
-          {data.sectionErrors?.position ? null : (
+          {data.sectionErrors?.position || !hasPosition ? null : (
             // F26: the balances and receivables are as of today, whichever month is shown.
             <section>
               <h2 className="mb-2 px-1 text-caption font-normal text-ink-2">{atCurrent ? "Rahatilanne" : "Rahatilanne tänään"}</h2>
@@ -1060,7 +1055,7 @@ export default function DashboardClient() {
                 </div>
               ) : null}
             <Section>
-              {showBalanceCard ? null : (
+              {showBankRow ? (
               <ListRow
                 href="/kirjanpito/pankkitilit"
                 leading={<Icon icon={Landmark} />}
@@ -1069,14 +1064,17 @@ export default function DashboardClient() {
                 secondary={bankRow.warn ? <span className="text-warning">{bankRow.secondary}</span> : bankRow.secondary}
                 ariaLabel={bankRow.ariaLabel}
                 trailing={
-                  bankRow.pill ? (
+                  // Only a bank that needs reconnecting keeps its button: a fresh
+                  // account connects from the Käyttöönotto list instead.
+                  bankRow.pill && bankRow.warn ? (
                     <ActionPill href="/kirjanpito/pankkitilit" ariaLabel={bankRow.pill.ariaLabel}>
                       {bankRow.pill.label}
                     </ActionPill>
                   ) : undefined
                 }
               />
-              )}
+              ) : null}
+              {openReceivables > 0 ? (
               <ListRow
                 href="/laskut"
                 leading={<Icon icon={Wallet} />}
@@ -1088,12 +1086,8 @@ export default function DashboardClient() {
                     : "Ei myöhässä olevia"
                 }
                 ariaLabel={`Avoimet myyntilaskut, ${formatEur(data.receivables?.totalOpen ?? 0)}`}
-                trailing={
-                  <ActionPill href="/laskut/uusi" ariaLabel="Uusi lasku">
-                    Uusi lasku
-                  </ActionPill>
-                }
               />
+              ) : null}
               {data.payables && data.payables.totalOpen > 0 ? (
                 <ListRow
                   href="/kirjanpito/ostolaskut"
@@ -1132,6 +1126,9 @@ export default function DashboardClient() {
               </p>
             </div>
           ) : null}
+
+          {/* Last on the page, as iOS Mail's "Updated just now". */}
+          {!refreshFailed && freshMinutes !== null ? <p className="stitch-sync" role="status">{freshMinutes === 0 ? "Tiedot päivitetty juuri nyt" : `Tiedot päivitetty ${freshMinutes} min sitten`}</p> : null}
         </div>
       )}
       <ReceiptApprovalSheet

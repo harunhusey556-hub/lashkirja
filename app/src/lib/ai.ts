@@ -142,9 +142,15 @@ export async function extractReceipt(
       const tryLLM = apiKey
         ? () => extractWithAIFromText(rawText, apiKey, profileContext, vendorPriors)
         : null;
-      const tryCopilot = copilotToken
-        ? () => extractWithCopilotFromText(rawText, copilotToken, profileContext, vendorPriors)
-        : null;
+      // A Copilot quota refusal pauses it (copilot.ts): the next path is tried directly.
+      const tryCopilot =
+        copilotToken && !copilotPaused()
+          ? () =>
+              extractWithCopilotFromText(rawText, copilotToken, profileContext, vendorPriors).catch((error: unknown) => {
+                noteCopilotFailure(error);
+                throw error;
+              })
+          : null;
       const attempts = (isPdf ? [tryCopilot, tryLLM] : [tryLLM, tryCopilot]).filter(
         (fn): fn is () => Promise<ExtractedReceipt> => fn !== null
       );
@@ -214,7 +220,10 @@ function detectReceiptMime(filePath: string, claimedMime: string): string {
 import {
   getCopilotSessionToken,
   COPILOT_HEADERS,
+  copilotPaused,
   fetchWithTimeout,
+  noteCopilotFailure,
+  ProviderHttpError,
 } from "./copilot";
 
 function boundedLLMText(text: string): string {
@@ -268,7 +277,7 @@ async function extractWithCopilotFromText(
   );
 
   if (!response.ok) {
-    throw new Error(`Copilot API error: ${response.status}`);
+    throw new ProviderHttpError(`Copilot API error: ${response.status}`, response.status);
   }
 
   const data = await response.json();

@@ -1,5 +1,7 @@
 "use client";
 
+import { CustomSelect } from "@/components/CustomSelect";
+
 import { useCallback, useState } from "react";
 import {
   apiFetch,
@@ -823,7 +825,7 @@ export default function StatementDetailView({
                           <label htmlFor={`transaction-${t.id}-type`} className={LABEL_CLASS}>
                             Tyyppi
                           </label>
-                          <select
+                          <CustomSelect
                             id={`transaction-${t.id}-type`}
                             value={txForm.type}
                             onChange={(e) => setTxForm({ ...txForm, type: e.target.value })}
@@ -833,7 +835,7 @@ export default function StatementDetailView({
                             <option value="tulo">Tulo</option>
                             <option value="palkka">Palkka</option>
                             <option value="oma_siirto">Oma siirto</option>
-                          </select>
+                          </CustomSelect>
                         </div>
                         <div className="flex gap-2">
                           <Button
