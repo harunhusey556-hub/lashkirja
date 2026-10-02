@@ -139,8 +139,10 @@ struct BankFeedView: View {
         .refreshable { await load() }
         .task(id: loadKey) {
             guard state.value == nil || gate.isDue(key: month ?? "", version: app.dataVersion) else { return }
-            gate.mark(key: month ?? "", version: app.dataVersion)
+            // Marked only after a load that finished: a cancelled one must not count as fresh.
+            let version = app.dataVersion
             await load()
+            if !Task.isCancelled { gate.mark(key: month ?? "", version: version) }
         }
         .animation(.snappy, value: onlyOpen)
     }

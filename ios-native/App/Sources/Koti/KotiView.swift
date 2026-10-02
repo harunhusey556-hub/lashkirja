@@ -19,8 +19,10 @@ struct KotiView: View {
         .task(id: app.dataVersion) {
             if model == nil { model = KotiModel(api: app.api) }
             guard model?.state.value == nil || gate.isDue(version: app.dataVersion) else { return }
-            gate.mark(version: app.dataVersion)
+            // Marked only after a load that finished: a cancelled one must not count as fresh.
+            let version = app.dataVersion
             await model?.load()
+            if !Task.isCancelled { gate.mark(version: version) }
         }
     }
 }

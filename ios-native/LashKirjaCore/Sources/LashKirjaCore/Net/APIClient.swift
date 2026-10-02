@@ -17,6 +17,9 @@ public actor APIClient {
     private let tokens: TokenProvider
     private let sleep: @Sendable (UInt64) async -> Void
     public private(set) var onUnauthorized: (@Sendable () async -> Void)?
+    /// Told the path of every write the server accepted, so the app can mark what it shows as
+    /// out of date without each screen remembering to.
+    public private(set) var onWrite: (@Sendable (String) async -> Void)?
 
     public init(baseURL: URL, transport: HTTPTransport, tokens: TokenProvider,
                 sleep: @escaping @Sendable (UInt64) async -> Void = { try? await Task.sleep(nanoseconds: $0) }) {
@@ -27,6 +30,7 @@ public actor APIClient {
     }
 
     public func setOnUnauthorized(_ handler: (@Sendable () async -> Void)?) { onUnauthorized = handler }
+    public func setOnWrite(_ handler: (@Sendable (String) async -> Void)?) { onWrite = handler }
 
     public func get<T: Decodable>(_ path: String, query: [String: String] = [:]) async throws -> T {
         let response = try await perform("GET", path, query: query, body: nil, contentType: nil, idempotencyKey: nil)
@@ -96,7 +100,10 @@ public actor APIClient {
             do { response = try await transport.send(request) }
             catch let error as LKError { throw error }
             catch { throw Self.transportError(error) }
-            if (200..<300).contains(response.status) { return response }
+            if (200..<300).contains(response.status) {
+                if method != "GET", let onWrite { await onWrite(path) }
+                return response
+            }
             let gateway = [502, 503, 504].contains(response.status) && !response.fromApp
             if gateway && attempt < attempts - 1 {
                 last = response

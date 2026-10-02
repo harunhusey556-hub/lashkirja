@@ -32,8 +32,10 @@ struct WorkQueueView: View {
         .refreshable { await load() }
         .task(id: app.dataVersion) {
             guard state.value == nil || gate.isDue(version: app.dataVersion) else { return }
-            gate.mark(version: app.dataVersion)
+            // Marked only after a load that finished: a cancelled one must not count as fresh.
+            let version = app.dataVersion
             await load()
+            if !Task.isCancelled { gate.mark(version: version) }
         }
         // Poll only while a job is running (BOOKS-16); the task ends when the screen goes.
         .task(id: hasActiveJob) {

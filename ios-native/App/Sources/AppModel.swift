@@ -31,6 +31,13 @@ final class AppModel {
 
     func start() async {
         await auth.bind(api)
+        // Every write the server accepts marks what the screens show as out of date, so a list
+        // reloads when the owner comes back to it after acting on a detail screen or a sheet.
+        // Sign-in and chat housekeeping change no bookkeeping data.
+        await api.setOnWrite { [weak self] path in
+            guard !path.hasPrefix("/api/auth"), !path.hasPrefix("/api/ai/") else { return }
+            await MainActor.run { self?.dataVersion += 1 }
+        }
         let auth = self.auth
         await api.setOnUnauthorized { [weak self] in
             let had = await auth.handleUnauthorized()

@@ -129,8 +129,10 @@ struct ReceiptsView: View {
         .refreshable { await load() }
         .task(id: ReloadKey(query: query, version: app.dataVersion)) {
             guard receipts.value == nil || gate.isDue(key: String(describing: query), version: app.dataVersion) else { return }
-            gate.mark(key: String(describing: query), version: app.dataVersion)
+            // Marked only after a load that finished: a cancelled one must not count as fresh.
+            let version = app.dataVersion
             await load()
+            if !Task.isCancelled { gate.mark(key: String(describing: query), version: version) }
         }
         .task(id: searchText) {
             // Typing settles before the list is asked again.

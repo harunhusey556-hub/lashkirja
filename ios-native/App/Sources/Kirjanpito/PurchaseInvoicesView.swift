@@ -39,8 +39,10 @@ struct PurchaseInvoicesView: View {
         .refreshable { await load() }
         .task(id: "\(filterRaw)|\(app.dataVersion)") {
             guard state.value == nil || gate.isDue(key: filterRaw, version: app.dataVersion) else { return }
-            gate.mark(key: filterRaw, version: app.dataVersion)
+            // Marked only after a load that finished: a cancelled one must not count as fresh.
+            let version = app.dataVersion
             await load()
+            if !Task.isCancelled { gate.mark(key: filterRaw, version: version) }
         }
         .disabled(busy)
         .sheet(isPresented: $showNew) { PurchaseInvoiceFormView(existing: nil) }
