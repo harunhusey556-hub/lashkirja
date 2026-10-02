@@ -9,6 +9,10 @@ struct PurchaseInvoicesView: View {
     /// Coming back to the screen does not ask the server again unless something changed.
     @State private var gate = ReloadGate()
     @State private var counts: PurchaseStatusCounts?
+    /// Invoice id → its recurring template, for the "Toistuva" tag.
+    @State private var recurringIds: [String: String] = [:]
+    /// Running recurring templates; nil until known, or while the server lacks the feature.
+    @State private var recurringCount: Int?
     @State private var message: String?
     @State private var failure: String?
     @State private var busy = false
@@ -39,6 +43,10 @@ struct PurchaseInvoicesView: View {
         .background(Theme.canvas)
         .navigationTitle("Ostolaskut")
         .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                NavigationLink(value: Route.recurringPurchases) { Image(systemName: "repeat") }
+                    .accessibilityLabel(RecurringPurchaseText.title)
+            }
             ToolbarItem(placement: .topBarTrailing) {
                 Button { showNew = true } label: { Image(systemName: "plus") }
                     .accessibilityLabel("Uusi ostolasku")
@@ -74,6 +82,18 @@ struct PurchaseInvoicesView: View {
         let rows = PurchaseFilter.groups(list.invoices.filter { !app.removedIds.contains($0.id) }, filter: filter).flatMap(\.items)
         let visibleCount = rows.count
         let noPurchases = visibleCount == 0 && filter == .all
+
+        if let recurringCount {
+            Section {
+                NavigationLink(value: Route.recurringPurchases) {
+                    HStack {
+                        Label(RecurringPurchaseText.title, systemImage: "repeat")
+                        Spacer()
+                        Text(RecurringPurchaseText.countLabel(recurringCount)).font(.subheadline).foregroundStyle(Theme.ink2)
+                    }
+                }
+            }
+        }
 
         if !noPurchases {
             if let aging = list.aging {
@@ -149,7 +169,7 @@ struct PurchaseInvoicesView: View {
 
     private func row(_ invoice: PurchaseInvoice) -> some View {
         NavigationLink(value: Route.purchaseInvoice(invoice.id)) {
-            PurchaseInvoiceRow(invoice: invoice)
+            PurchaseInvoiceRow(invoice: invoice, recurring: recurringIds[invoice.id] != nil)
         }
         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
             if invoice.canDelete {
@@ -254,9 +274,12 @@ struct PurchaseInvoicesView: View {
         // Counts load alongside the list (one round trip instead of two).
         let api = app.api
         async let freshCounts: PurchaseInvoiceCountsResponse? = try? api.get("/api/purchase-invoices/counts")
+        // Optional: a server without recurring purchases (404) simply hides the row.
+        async let recurring: RecurringPurchaseList? = try? api.get("/api/recurring-purchases")
         do {
-            let list: PurchaseInvoiceList = try await app.api.get("/api/purchase-invoices", query: query)
-            state = .loaded(list)
+            let tagged: PurchaseInvoiceTaggedList = try await app.api.get("/api/purchase-invoices", query: query)
+            state = .loaded(tagged.list)
+            recurringIds = tagged.recurringIds
             failure = nil
         } catch is CancellationError {
             return
@@ -266,6 +289,7 @@ struct PurchaseInvoicesView: View {
         if let response = await freshCounts {
             counts = response.counts
         }
+        recurringCount = await recurring.map { $0.activeCount }
     }
 
     private func runBankMatch() async {
@@ -304,13 +328,17 @@ struct PurchaseInvoiceDetailView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var state: Loadable<PurchaseInvoice> = .idle
     @State private var links: PurchaseReceiptLinks?
+    /// The recurring template that made this invoice, when one did.
+    @State private var recurringPurchaseId: String?
+    @State private var openTemplate: String?
+    @State private var notice: String?
     @State private var sheet: SheetKind?
     @State private var confirm: ConfirmKind?
     @State private var busy = false
     @State private var failure: String?
 
     enum SheetKind: String, Identifiable {
-        case edit, payment, markPaid
+        case edit, payment, markPaid, makeRecurring
         var id: String { rawValue }
     }
 
@@ -337,6 +365,10 @@ struct PurchaseInvoiceDetailView: View {
                 }
                 if let failure {
                     Section { Text(failure).font(.footnote).foregroundStyle(Theme.danger) }
+                }
+                if let notice {
+                    Section { Text(notice).font(.subheadline) }
+                        .listRowBackground(Theme.accentSoft)
                 }
                 details(invoice)
                 receiptSection(invoice)
@@ -371,12 +403,19 @@ struct PurchaseInvoiceDetailView: View {
         .refreshable { await load() }
         .task { await load() }
         .disabled(busy)
+        .navigationDestination(item: $openTemplate) { id in RecurringPurchaseDetailView(recurringId: id) }
         .sheet(item: $sheet) { kind in
             if let invoice = state.value {
                 switch kind {
                 case .edit: PurchaseInvoiceFormView(existing: invoice) { updated in apply(updated) }
                 case .payment: PurchasePaymentSheet(invoice: invoice) { updated in apply(updated) }
                 case .markPaid: PurchaseMarkPaidSheet(invoice: invoice) { updated in apply(updated) }
+                case .makeRecurring:
+                    RecurringPurchaseFormSheet(existing: nil, prefill: RecurringPurchaseForm(from: invoice)) { message in
+                        notice = message
+                        // The invoice now belongs to the template: show its tag.
+                        Task { await load() }
+                    }
                 }
             }
         }
@@ -409,7 +448,17 @@ struct PurchaseInvoiceDetailView: View {
         VStack(spacing: 6) {
             MoneyText(amount: invoice.gross).font(.system(size: 36, weight: .bold, design: .rounded))
             Text(invoice.supplierName).font(.headline).foregroundStyle(Theme.ink)
-            PurchaseStatusBadge(status: invoice.displayStatus)
+            HStack(spacing: 6) {
+                PurchaseStatusBadge(status: invoice.displayStatus)
+                if let recurringPurchaseId {
+                    Button { openTemplate = recurringPurchaseId } label: {
+                        RecurringBadge(chevron: true)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Toistuva ostolasku")
+                    .accessibilityHint("Avaa toistuva ostolasku")
+                }
+            }
             if invoice.open > 0 && invoice.paid > 0 {
                 Text("Avoinna \(Money.format(invoice.open))").font(.caption).foregroundStyle(Theme.ink2)
             }
@@ -553,6 +602,11 @@ struct PurchaseInvoiceDetailView: View {
                     Label("Kopioi viitenumero", systemImage: "doc.on.doc")
                 }
             }
+            if let recurringPurchaseId {
+                Button { openTemplate = recurringPurchaseId } label: { Label("Avaa toistuva ostolasku", systemImage: "repeat") }
+            } else if invoice.status != .cancelled {
+                Button { sheet = .makeRecurring } label: { Label("Tee toistuvaksi", systemImage: "repeat") }
+            }
             if invoice.canReopen {
                 Button { confirm = .reopen } label: { Label("Palauta avoimeksi", systemImage: "arrow.uturn.backward") }
             }
@@ -601,8 +655,9 @@ struct PurchaseInvoiceDetailView: View {
     private func load() async {
         if state.value == nil { state = .loading }
         do {
-            let response: PurchaseInvoiceResponse = try await app.api.get("/api/purchase-invoices/\(purchaseInvoiceId)")
+            let response: PurchaseInvoiceTaggedResponse = try await app.api.get("/api/purchase-invoices/\(purchaseInvoiceId)")
             state = .loaded(response.invoice)
+            recurringPurchaseId = response.recurringPurchaseId
         } catch is CancellationError {
             return
         } catch {

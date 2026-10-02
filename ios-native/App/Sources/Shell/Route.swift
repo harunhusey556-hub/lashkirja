@@ -71,6 +71,8 @@ enum Route: Hashable {
     case invoicesFiltered(month: String, status: String, customerId: String)
     /// Ostolaskut opened on one status chip, without changing the chip the owner last chose.
     case purchaseInvoicesFiltered(status: String)
+    /// Toistuvat ostolaskut: rent and other routine bills made into purchase invoices each period.
+    case recurringPurchases
 }
 
 extension Route {
@@ -205,6 +207,7 @@ struct RouteScreen: View {
         case .invoicesFiltered(let month, let status, let customerId):
             MyyntiView(scope: InvoiceScope(month: month, customerId: customerId), status: SalesFilter(rawValue: status) ?? .all)
         case .purchaseInvoicesFiltered(let status): PurchaseInvoicesView(status: PurchaseFilter(rawValue: status))
+        case .recurringPurchases: RecurringPurchasesView()
         }
     }
 }

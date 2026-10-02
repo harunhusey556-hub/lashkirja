@@ -344,8 +344,27 @@ struct PurchaseStatusBadge: View {
     }
 }
 
+/// "Toistuva": the invoice was made by a recurring template.
+struct RecurringBadge: View {
+    var chevron = false
+
+    var body: some View {
+        HStack(spacing: 3) {
+            Image(systemName: "repeat").imageScale(.small)
+            Text("Toistuva")
+            if chevron { Image(systemName: "chevron.right").imageScale(.small) }
+        }
+        .font(.caption2.weight(.semibold))
+        .padding(.horizontal, 8)
+        .padding(.vertical, 3)
+        .background(Theme.accent.opacity(0.12), in: Capsule())
+        .foregroundStyle(Theme.accent)
+    }
+}
+
 struct PurchaseInvoiceRow: View {
     let invoice: PurchaseInvoice
+    var recurring = false
 
     var body: some View {
         HStack(alignment: .firstTextBaseline) {
@@ -356,7 +375,10 @@ struct PurchaseInvoiceRow: View {
             Spacer()
             VStack(alignment: .trailing, spacing: 3) {
                 MoneyText(amount: invoice.gross).font(.subheadline.weight(.semibold))
-                PurchaseStatusBadge(status: invoice.displayStatus)
+                HStack(spacing: 4) {
+                    if recurring { RecurringBadge() }
+                    PurchaseStatusBadge(status: invoice.displayStatus)
+                }
             }
         }
         .padding(.vertical, 2)
