@@ -5,7 +5,6 @@ afterEach(() => vi.unstubAllGlobals());
 
 describe("navigation content handoff", () => {
   it.each([
-    { kind: "tab" as const, reduced: false },
     { kind: "push" as const, reduced: true },
     { kind: "pop" as const, reduced: true },
   ])("does not remount outgoing text for $kind (reduced=$reduced)", ({ kind, reduced }) => {
@@ -23,6 +22,17 @@ describe("navigation content handoff", () => {
     // The fade's own compositing layer is dropped with it.
     expect(main.style.willChange || "").toBe("");
   });
+});
+
+it("cuts a tab switch without animating the page", () => {
+  vi.stubGlobal("window", { matchMedia: () => ({ matches: false }) });
+  const animate = vi.fn();
+  const parentElement = { appendChild: vi.fn() };
+  const main = { animate, parentElement, dataset: {}, style: {}, dispatchEvent: vi.fn() } as unknown as HTMLElement;
+  playNavTransition({ main, oldPage: {} as HTMLElement, oldScroll: 0, kind: "tab" })();
+  expect(animate).not.toHaveBeenCalled();
+  expect(parentElement.appendChild).not.toHaveBeenCalled();
+  expect(main.dataset.navMoving).toBeUndefined();
 });
 
 it("holds a form refresh until prepared navigation layers are removed", async () => {

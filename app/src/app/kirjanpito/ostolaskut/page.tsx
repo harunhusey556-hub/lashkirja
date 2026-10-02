@@ -1,6 +1,8 @@
 "use client";
 
+import { AnimatedRows } from "@/components/AnimatedRows";
 import { PullToRefresh } from "@/components/ds/PullToRefresh";
+import { Reveal } from "@/components/ds/Reveal";
 import { useCallback, useEffect, useState } from "react";
 import { SkeletonList } from "@/components/AsyncState";
 import { ConnectionNotice, EmptyState, StaleBanner } from "@/components/ScreenState";
@@ -529,11 +531,11 @@ export default function PurchaseInvoicesPage() {
           </Button>
         )}
 
-        {message && (
+        <Reveal show={Boolean(message)}>{message ? (
           <p className="rounded-card bg-accent-soft px-4 py-3 text-sm text-ink" role="status">
             {message}
           </p>
-        )}
+        ) : null}</Reveal>
 
         {!noPurchases && (
           <FilterChips label="Suodata ostolaskut" items={filterChips} value={filter} onChange={setFilter} />
@@ -558,7 +560,7 @@ export default function PurchaseInvoicesPage() {
           <div className={readyFade || undefined}>
             {groups.map((group) => (
               <Section key={group.id} title={group.label}>
-                {group.items.map((invoice) => (
+                <AnimatedRows rows={group.items.map((invoice) => ({ key: invoice.id, node: (
                   <ListRow
                     key={invoice.id}
                     onClick={() => openDetail(invoice)}
@@ -571,7 +573,7 @@ export default function PurchaseInvoicesPage() {
                       </StatusTag>
                     }
                   />
-                ))}
+                ) }))} />
               </Section>
             ))}
 

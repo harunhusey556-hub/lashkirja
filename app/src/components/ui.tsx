@@ -4,6 +4,7 @@ import { cloneElement, isValidElement, useId, type ButtonHTMLAttributes, type Re
 import { buttonClass, type ButtonVariant } from "@/components/control-styles";
 import { invalidFieldProps } from "@/lib/focus-field";
 import { hapticImpact, type HapticImpactStyle } from "@/lib/haptics";
+import { Reveal } from "@/components/ds/Reveal";
 
 export { buttonClass, chipClass, controlClass } from "@/components/control-styles";
 
@@ -118,26 +119,29 @@ export function Field({
       </label>
       )}
       {control}
-      {hint && !error && (
-        <p id={hintId} className="mt-1.5 text-caption text-ink-2">
-          {hint}
-        </p>
-      )}
-      {error && (
-        <p id={`${htmlFor}-error`} className="mt-1.5 text-caption text-danger" role="alert">
-          {error}
-        </p>
-      )}
+      {/* The line under a field unfolds instead of pushing the form down in one frame. */}
+      <Reveal show={Boolean(error || hint)}>
+        {error ? (
+          <p id={`${htmlFor}-error`} className="mt-1.5 text-caption text-danger" role="alert">
+            {error}
+          </p>
+        ) : (
+          <p id={hintId} className="mt-1.5 text-caption text-ink-2">
+            {hint}
+          </p>
+        )}
+      </Reveal>
     </div>
   );
 }
 
 export function FormError({ message, className = "" }: { message: string; className?: string }) {
-  if (!message) return null;
   return (
-    <p className={`text-caption text-danger ${className}`} role="alert">
-      {message}
-    </p>
+    <Reveal show={Boolean(message)}>
+      <p className={`text-caption text-danger ${className}`} role="alert">
+        {message}
+      </p>
+    </Reveal>
   );
 }
 
@@ -148,6 +152,16 @@ export function SavePhaseNote({
   phase: "clean" | "dirty" | "saving" | "saved" | "failed";
   error?: string;
 }) {
+  // One line that changes its words in place; it only unfolds and folds when
+  // the form goes from clean to edited and back.
+  return (
+    <Reveal show={phase !== "clean"}>
+      <SavePhaseText phase={phase} error={error} />
+    </Reveal>
+  );
+}
+
+function SavePhaseText({ phase, error }: { phase: "clean" | "dirty" | "saving" | "saved" | "failed"; error: string }) {
   if (phase === "saving") {
     return (
       <p className="text-caption text-ink-2" role="status">
@@ -163,7 +177,11 @@ export function SavePhaseNote({
     );
   }
   if (phase === "failed") {
-    return <FormError message={error || "Tallennus epäonnistui"} />;
+    return (
+      <p className="text-caption text-danger" role="alert">
+        {error || "Tallennus epäonnistui"}
+      </p>
+    );
   }
   if (phase === "dirty") {
     return (
@@ -176,10 +194,11 @@ export function SavePhaseNote({
 }
 
 export function SavedNote({ message, className = "" }: { message: string; className?: string }) {
-  if (!message) return null;
   return (
-    <p className={`text-caption text-success ${className}`} role="status">
-      {message}
-    </p>
+    <Reveal show={Boolean(message)}>
+      <p className={`text-caption text-success ${className}`} role="status">
+        {message}
+      </p>
+    </Reveal>
   );
 }

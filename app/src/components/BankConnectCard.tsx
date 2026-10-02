@@ -8,7 +8,7 @@ import { apiFetch, errorMessage, isUnauthorized, readJson, redirectToLogin } fro
 import { ConnectionNotice } from "@/components/ScreenState";
 import { Button } from "@/components/ui";
 import { buttonClass, tintedButtonClass } from "@/components/control-styles";
-import { Icon, IconTile } from "@/components/ds";
+import { Icon, IconTile, Reveal } from "@/components/ds";
 import { Skeleton } from "@/components/ds/Skeleton";
 import BankPickerSheet, { BankLogo } from "@/components/bank/BankPickerSheet";
 import BankSetupSheet from "@/components/bank/BankSetupSheet";
@@ -395,7 +395,7 @@ export default function BankConnectCard({
           </>
         )}
 
-        {variant === "full" && message && (
+        <Reveal show={Boolean(variant === "full" && message)}>{variant === "full" && message ? (
           <div className="space-y-2" role={messageTone === "err" ? "alert" : "status"}>
             <p
               className={`text-sm leading-relaxed ${
@@ -422,7 +422,7 @@ export default function BankConnectCard({
               </Link>
             )}
           </div>
-        )}
+        ) : null}</Reveal>
       </div>
 
       <BankPickerSheet isOpen={sheets.picker.open} onClose={sheets.closePicker} preferredPsu={sheets.picker.psu} />

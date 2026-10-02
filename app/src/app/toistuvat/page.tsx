@@ -1,5 +1,6 @@
 "use client";
 
+import { AnimatedRows } from "@/components/AnimatedRows";
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { SkeletonList } from "@/components/AsyncState";
@@ -429,7 +430,7 @@ export default function RecurringInvoicesPage() {
 
         {status === "ready" && recurring.length > 0 && (
           <Section>
-            {recurring.map((entry) => (
+            <AnimatedRows rows={recurring.map((entry) => ({ key: entry.id, node: (
               <ListRow
                 key={entry.id}
                 onClick={() => setSelected(entry)}
@@ -442,7 +443,7 @@ export default function RecurringInvoicesPage() {
                   entry.active ? undefined : <StatusTag tone="neutral">Pysäytetty</StatusTag>
                 }
               />
-            ))}
+            ) }))} />
           </Section>
         )}
 

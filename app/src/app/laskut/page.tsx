@@ -1,5 +1,6 @@
 "use client";
 
+import { AnimatedRows } from "@/components/AnimatedRows";
 import { Disclosure } from "@/components/ds/Disclosure";
 import { PullToRefresh } from "@/components/ds/PullToRefresh";
 import { Suspense, useCallback, useEffect, useState } from "react";
@@ -470,7 +471,7 @@ function InvoicesPageContent() {
         <div className={readyFade || undefined}>
           {groups.map((group) => (
             <Section key={group.id} title={group.label}>
-              {group.items.map((invoice) => (
+              <AnimatedRows rows={group.items.map((invoice) => ({ key: invoice.id, node: (
                 <ListRow
                   key={invoice.id}
                   href={detailHref("invoice", invoice.id)}
@@ -479,7 +480,7 @@ function InvoicesPageContent() {
                   secondary={rowSecondary(invoice)}
                   trailing={rowTrailing(invoice)}
                 />
-              ))}
+              ) }))} />
             </Section>
           ))}
 

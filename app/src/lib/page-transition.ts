@@ -65,7 +65,9 @@ export function mountSnapshot(
   page: HTMLElement,
   scrollTop: number,
   mode: SnapshotMode,
-  paddingTop?: string
+  paddingTop?: string,
+  /** Where the page's <main> will start, when that differs from now (a root without a header row). */
+  topOverride?: number
 ): HTMLElement | null {
   const frame = main.parentElement;
   if (!frame) return null;
@@ -76,10 +78,11 @@ export function mountSnapshot(
   snap.className = `page-snapshot page-${mode}`;
   snap.setAttribute("aria-hidden", "true");
   snap.inert = true;
-  snap.style.top = `${geometry.top}px`;
+  const top = topOverride ?? geometry.top;
+  snap.style.top = `${top}px`;
   snap.style.left = `${geometry.left}px`;
   snap.style.width = `${geometry.width}px`;
-  snap.style.height = `${geometry.height}px`;
+  snap.style.height = `${geometry.height + geometry.top - top}px`;
   snap.style.right = "auto";
   snap.style.bottom = "auto";
 
@@ -154,10 +157,16 @@ export function playNavTransition(options: {
   oldPaddingTop?: string;
   kind: NavTransitionKind;
   newPage?: Element | null;
+  /** Where the old page's <main> started, when the header row came or went with the change. */
+  oldTop?: number;
 }): () => void {
-  const { main, oldPage, oldScroll, oldPaddingTop, kind } = options;
+  const { main, oldPage, oldScroll, oldPaddingTop, kind, oldTop } = options;
   if (typeof main.animate !== "function") return () => {};
-  if (kind === "tab" || prefersReducedMotion() || !oldPage) return playFadeIn(main);
+  // A tab switch cuts, as iOS does; the tab bar's lens carries the motion.
+  // Fading the whole page in from 0 flashed the screen and the glass tab bar
+  // re-sampled it every frame, which read as a flicker on the phone.
+  if (kind === "tab") return () => {};
+  if (prefersReducedMotion() || !oldPage) return playFadeIn(main);
   // Read tokens before inserting the snapshot; no layout reads during motion.
   const duration = navDurationMs();
   const easing = navEasing();
@@ -168,7 +177,7 @@ export function playNavTransition(options: {
     kind === "push" ? "translate3d(100%, 0, 0)" : kind === "present" ? "translate3d(0, 100%, 0)" : `translate3d(${UNDER_SHIFT}, 0, 0)`;
   const snapTo =
     kind === "push" ? `translate3d(${UNDER_SHIFT}, 0, 0)` : kind === "present" ? "translate3d(0, 0, 0)" : "translate3d(100%, 0, 0)";
-  const snap = mountSnapshot(main, oldPage, oldScroll, covers ? "push-out" : "pop-out", oldPaddingTop);
+  const snap = mountSnapshot(main, oldPage, oldScroll, covers ? "push-out" : "pop-out", oldPaddingTop, oldTop);
   if (!snap) return () => {};
   const scrim = document.createElement("div");
   scrim.setAttribute("aria-hidden", "true");

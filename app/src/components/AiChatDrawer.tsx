@@ -1,5 +1,6 @@
 "use client";
 
+import { AnimatedRows } from "@/components/AnimatedRows";
 import Link from "next/link";
 
 import { useEffect, useRef, useState } from "react";
@@ -30,7 +31,7 @@ import {
   X,
 } from "lucide-react";
 import { Icon } from "@/components/ds/Icon";
-import { ActionList, SearchField } from "@/components/ds";
+import { ActionList, SearchField, Reveal } from "@/components/ds";
 import BottomSheet from "@/components/BottomSheet";
 import { hapticNotify } from "@/lib/haptics";
 import { displayChatContent } from "@/lib/chat-legacy";
@@ -878,12 +879,12 @@ export function AiChatDrawer({
               <Icon icon={Plus} strokeWidth={2.25} />
             </button>
           </div>
-          {menuError && (
+          <Reveal show={Boolean(menuError)}>{menuError ? (
             <p className="rounded-card border border-danger/30 bg-danger/10 px-4 py-3 text-sm text-danger" role="alert">
               {menuError}
             </p>
-          )}
-          {removedConversation && (
+          ) : null}</Reveal>
+          <Reveal show={Boolean(removedConversation)}>{removedConversation ? (
             <div className="flex items-center justify-between gap-2 rounded-card border border-line bg-surface px-4 text-body text-ink">
               <span>Keskustelu poistettu</span>
               <button
@@ -897,7 +898,7 @@ export function AiChatDrawer({
                 Kumoa
               </button>
             </div>
-          )}
+          ) : null}</Reveal>
           {conversations.length === 0 && !loadingConversations && (
             <EmptyNote>
               {conversationQuery.trim() ? "Ei osumia." : showArchived ? "Arkisto on tyhjä." : "Ei keskusteluja vielä."}
@@ -906,7 +907,7 @@ export function AiChatDrawer({
           {loadingConversations && conversations.length === 0 && <SkeletonList rows={3} label="Ladataan keskusteluja" />}
           {conversations.length > 0 && (
             <div className="overflow-hidden rounded-[20px] bg-surface shadow-[0_1px_2px_rgb(38_34_31/0.06)]">
-              {conversations.map((conversation, index) => {
+              <AnimatedRows rows={conversations.map((conversation, index) => ({ key: conversation.id, node: (() => {
                 const open = conversation.id === conversationId;
                 return (
                   <div key={conversation.id} className={`relative ${open ? "bg-accent-soft/50" : ""}`}>
@@ -977,7 +978,7 @@ export function AiChatDrawer({
                     )}
                   </div>
                 );
-              })}
+              })() }))} />
             </div>
           )}
           {conversationsHasMore && (

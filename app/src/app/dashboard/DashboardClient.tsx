@@ -74,7 +74,7 @@ import { handledDetail, handledHref, handledTitle, type Handled } from "@/lib/ko
 import { useVatDue } from "@/components/useVatDue";
 import { approvalGapText } from "@/lib/receipt-approval";
 import { requestReceiptCapture, requestStatementImport } from "@/lib/capture-request";
-import { useLeavingRows } from "@/components/useLeavingRows";
+import { AnimatedRows } from "@/components/AnimatedRows";
 import { armNavigation } from "@/lib/nav-direction";
 import { ReceiptApprovalSheet, type ApprovalSheetReceipt } from "@/components/ReceiptApprovalSheet";
 import type { DashboardItem as ServerDashboardItem, DashboardItemKind } from "@/app/api/dashboard/items";
@@ -353,8 +353,6 @@ export default function DashboardClient() {
   const [loadAttempt, setLoadAttempt] = useState(0);
   // Items acted on in place: hidden at once, back if the action is undone or fails.
   const [hiddenItems, setHiddenItems] = useState<ReadonlySet<string>>(() => new Set());
-  // A done task folds out of the list before it is hidden (owner report 2026-09-30).
-  const { leaving, leave } = useLeavingRows();
   const [busyItem, setBusyItem] = useState<string | null>(null);
   const [remindTarget, setRemindTarget] = useState<{ invoiceId: string; customerId: string } | null>(null);
   // TF-03: the row body of a pending receipt opens the approval sheet in place.
@@ -398,7 +396,7 @@ export default function DashboardClient() {
    * Closing the app meanwhile leaves the receipt pending, never half-done.
    */
   function approveReceipt(item: { id: string; receiptId: string; party: string }) {
-    leave(item.id, () => hideItem(item.id, true));
+    hideItem(item.id, true);
     showToast({
       tone: "success",
       text: `${item.party} hyväksyttiin`,
@@ -445,7 +443,7 @@ export default function DashboardClient() {
       const paymentId = result.invoice.payments.find(
         (payment) => payment.transactionId === item.transactionId
       )?.id;
-      leave(item.id, () => hideItem(item.id, true));
+      hideItem(item.id, true);
       showToast({
         tone: "success",
         text: `Maksu kirjattiin laskulle ${item.number}`,
@@ -807,7 +805,7 @@ export default function DashboardClient() {
 
   function renderTask(task: Task) {
     return (
-      <div key={task.key} data-tone={task.icon === Camera ? "green" : task.icon === Tag ? "rose" : undefined} className={leaving.has(task.key) ? "row-leave" : undefined}>
+      <div key={task.key} data-tone={task.icon === Camera ? "green" : task.icon === Tag ? "rose" : undefined}>
       <ListRow
         href={task.onRowClick ? undefined : task.href}
         onClick={task.onRowClick}
@@ -1009,7 +1007,8 @@ export default function DashboardClient() {
 
           {blockingTasks.length > 0 || blockingMore.length > 0 ? (
             <Section title={atCurrent ? "Tarvitaan sinulta" : "Kesken"}>
-              {blockingTasks.map(renderTask)}
+              {/* Done, undone or replaced by the next one: rows fold and unfold, never pop. */}
+              <AnimatedRows rows={blockingTasks.map((task) => ({ key: task.key, node: renderTask(task) }))} />
               {blockingMore.map(renderMore)}
             </Section>
           ) : null}
@@ -1017,7 +1016,7 @@ export default function DashboardClient() {
           {/* Not bookkeeping left undone: money to chase and account checks (FP-2). */}
           {otherTasks.length > 0 || otherMore.length > 0 ? (
             <Section title="Muut">
-              {otherTasks.map(renderTask)}
+              <AnimatedRows rows={otherTasks.map((task) => ({ key: task.key, node: renderTask(task) }))} />
               {otherMore.map(renderMore)}
             </Section>
           ) : null}

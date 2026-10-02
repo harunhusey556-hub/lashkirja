@@ -75,6 +75,8 @@ import {
   forgetScroll,
   keepPageNode,
   mountSnapshot,
+  navDurationMs,
+  navEasing,
   pageNodeFor,
   playNavTransition,
   prefersReducedMotion,
@@ -206,6 +208,81 @@ async function warmTabCaches(sequential: boolean) {
  * href; otherwise (a remembered screen, a `<button>`) this pushes. A dirty
  * form intercepts and goes through the unsaved-changes prompt first.
  */
+/** Top-level screens that draw their title and actions inside the page, with no header row. */
+const INLINE_HEADER_ROOTS = ["/dashboard", "/kirjanpito", "/laskut", "/raportit", "/asetukset"];
+
+const isInlineHeaderPath = (path: string) => INLINE_HEADER_ROOTS.includes(path.split("?")[0]);
+
+/**
+ * A push or pop between a root (title in the page, no header row) and a
+ * detail (header row with Back). The row came or went in the same commit, so
+ * the old page would be drawn one row too high or too low and the row would
+ * pop. This measures where the old page's <main> started (by putting the old
+ * header mode back for one layout read) and moves the row with the pages:
+ * in from the right on a push, out to the right on a pop, as iOS does.
+ */
+function headerRowHandoff(main: HTMLElement, from: string, to: string) {
+  const fromInline = isInlineHeaderPath(from);
+  if (fromInline === isInlineHeaderPath(to)) return null;
+  const frame = main.parentElement;
+  const row = frame?.querySelector<HTMLElement>(".app-header .app-header-row") ?? null;
+  if (!frame || !row || typeof row.animate !== "function") return null;
+  const now = frame.dataset.inlineHeader;
+  if (fromInline) frame.dataset.inlineHeader = "true";
+  else delete frame.dataset.inlineHeader;
+  const oldTop = main.offsetTop;
+  const frameBox = frame.getBoundingClientRect();
+  const rowBox = row.getBoundingClientRect();
+  // Leaving a detail: its row, as it was, rides out on the old page.
+  const ghost = fromInline ? null : (row.cloneNode(true) as HTMLElement);
+  if (now === undefined) delete frame.dataset.inlineHeader;
+  else frame.dataset.inlineHeader = now;
+
+  return {
+    oldTop,
+    play(direction: "in" | "out"): () => void {
+      const timing = { duration: navDurationMs(), easing: navEasing() };
+      if (direction === "in") {
+        const animation = row.animate(
+          [
+            { transform: "translate3d(100%, 0, 0)", opacity: 0 },
+            { transform: "translate3d(0, 0, 0)", opacity: 1 },
+          ],
+          timing
+        );
+        return () => animation.cancel();
+      }
+      if (!ghost) return () => {};
+      ghost.setAttribute("aria-hidden", "true");
+      ghost.inert = true;
+      Object.assign(ghost.style, {
+        position: "absolute",
+        top: `${rowBox.top - frameBox.top}px`,
+        left: `${rowBox.left - frameBox.left}px`,
+        width: `${rowBox.width}px`,
+        height: `${rowBox.height}px`,
+        display: "grid",
+        zIndex: "45",
+        pointerEvents: "none",
+      });
+      frame.appendChild(ghost);
+      const animation = ghost.animate(
+        [
+          { transform: "translate3d(0, 0, 0)", opacity: 1 },
+          { transform: "translate3d(100%, 0, 0)", opacity: 0 },
+        ],
+        { ...timing, fill: "forwards" }
+      );
+      const drop = () => ghost.remove();
+      animation.onfinish = drop;
+      return () => {
+        animation.cancel();
+        drop();
+      };
+    },
+  };
+}
+
 function handleTabClick(
   event: { preventDefault: () => void; currentTarget?: EventTarget | null },
   tab: { id: string; path: string },
@@ -480,14 +557,22 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     if (direction !== "forward" && direction !== "back" && direction !== "tab") return;
     const avatarPath = avatarRoot().path;
     const presents = direction === "tab" && pathname === avatarPath && rootIdOf(from) !== rootIdOf(avatarPath);
-    return playNavTransition({
+    const kind = direction === "forward" ? "push" : direction === "back" ? "pop" : presents ? "present" : "tab";
+    const headerMotion = kind === "push" || kind === "pop" ? headerRowHandoff(main, from, pathname) : null;
+    const stopPage = playNavTransition({
       main,
       oldPage,
       oldScroll,
       oldPaddingTop,
-      kind: direction === "forward" ? "push" : direction === "back" ? "pop" : presents ? "present" : "tab",
+      kind,
       newPage: pageNodeRef.current,
+      oldTop: headerMotion?.oldTop,
     });
+    const stopRow = headerMotion?.play(kind === "push" ? "in" : "out");
+    return () => {
+      stopPage();
+      stopRow?.();
+    };
   }, [pathname, direction]);
 
   useEffect(() => {
@@ -603,12 +688,70 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     let decided = false;
     let under: HTMLElement | null = null;
 
+    // Back to a root that has no header row (Kirjanpito, Koti, ...): the row
+    // leaves with the page instead of vanishing after the swipe.
+    const headerRow = header?.querySelector<HTMLElement>(".app-header-row") ?? null;
+    const rowLeaves = Boolean(headerRow && parentPath && INLINE_HEADER_ROOTS.includes(parentPath.split("?")[0]));
+    const moveRow = (progress: number, transition = "none") => {
+      if (!rowLeaves || !headerRow) return;
+      headerRow.style.transition = transition;
+      headerRow.style.transform = `translateX(${progress * 100}%)`;
+      headerRow.style.opacity = String(Math.max(0, 1 - progress * 1.6));
+    };
+    const clearRow = () => {
+      if (!headerRow) return;
+      headerRow.style.transition = "";
+      headerRow.style.transform = "";
+      headerRow.style.opacity = "";
+    };
+    /** Where <main> starts once the header row is gone: measured, not guessed. */
+    const rootMainTop = () => {
+      const frame = main.parentElement;
+      if (!rowLeaves || !frame) return undefined;
+      const had = frame.dataset.inlineHeader;
+      frame.dataset.inlineHeader = "true";
+      const top = main.offsetTop;
+      if (had === undefined) delete frame.dataset.inlineHeader;
+      else frame.dataset.inlineHeader = had;
+      return top;
+    };
+
+    // The strip above <main> (behind the header row) belongs to the sliding
+    // page too: without it the frame's own background stayed put there.
+    let cap: HTMLElement | null = null;
+    const mountCap = () => {
+      const frame = main.parentElement;
+      if (!frame || main.offsetTop <= 0) return;
+      const look = getComputedStyle(frame);
+      cap = document.createElement("div");
+      cap.className = "swipe-cap";
+      cap.setAttribute("aria-hidden", "true");
+      cap.style.height = `${main.offsetTop}px`;
+      cap.style.width = `${main.offsetWidth}px`;
+      cap.style.left = `${main.offsetLeft}px`;
+      cap.style.backgroundColor = look.backgroundColor;
+      cap.style.backgroundImage = look.backgroundImage;
+      cap.style.backgroundSize = `${frame.offsetWidth}px ${frame.offsetHeight}px`;
+      frame.insertBefore(cap, main);
+    };
+    const moveCap = (transform: string, transition = "none") => {
+      if (!cap) return;
+      cap.style.transition = transition;
+      cap.style.transform = transform;
+    };
+    const dropCap = () => {
+      cap?.remove();
+      cap = null;
+    };
+
     const clearInline = () => {
       main.style.transform = "";
       main.style.transition = "";
       main.style.opacity = "";
       main.style.willChange = "";
       delete main.dataset.swiping;
+      clearRow();
+      dropCap();
     };
 
     const clearBar = () => {
@@ -670,9 +813,10 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         // the stitch design, and the parent page underneath showed through.
         main.dataset.swiping = "true";
         main.style.willChange = "transform";
+        mountCap();
         const parentPage = pageNodeFor(inAppPrevious(pathname));
         if (parentPage && !prefersReducedMotion()) {
-          under = mountSnapshot(main, parentPage, recalledScroll(inAppPrevious(pathname) ?? ""), "swipe-under");
+          under = mountSnapshot(main, parentPage, recalledScroll(inAppPrevious(pathname) ?? ""), "swipe-under", undefined, rootMainTop());
           if (under) under.style.transition = "none";
         }
       }
@@ -680,9 +824,11 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       tracker.add(touch.clientX);
       dx = Math.max(0, moveX);
       main.style.transform = `translateX(${dx}px)`;
+      moveCap(`translateX(${dx}px)`);
       const progress = Math.min(1, dx / Math.max(main.offsetWidth, 1));
       if (under) under.style.transform = `translateX(${-30 * (1 - progress)}%)`;
       moveBar(progress);
+      moveRow(progress);
     };
 
     const onTouchEnd = () => {
@@ -717,7 +863,9 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
           const curve = "var(--ease-drawer)";
           main.style.transition = `transform ${EDGE_FINISH_MS}ms ${curve}`;
           main.style.transform = "translateX(100%)";
+          moveCap("translateX(100%)", `transform ${EDGE_FINISH_MS}ms ${curve}`);
           moveBar(1, `transform ${EDGE_FINISH_MS}ms ${curve}`);
+          moveRow(1, `transform ${EDGE_FINISH_MS}ms ${curve}, opacity ${EDGE_FINISH_MS}ms ${curve}`);
           if (landedUnder) {
             landedUnder.style.transition = `transform ${EDGE_FINISH_MS}ms ${curve}`;
             landedUnder.style.transform = "translateX(0)";
@@ -744,11 +892,13 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         const curve = "var(--ease-drawer)";
         main.style.transition = `transform ${EDGE_FINISH_MS}ms ${curve}`;
         main.style.transform = "translateX(0)";
+        moveCap("translateX(0)", `transform ${EDGE_FINISH_MS}ms ${curve}`);
         if (under) {
           under.style.transition = `transform ${EDGE_FINISH_MS}ms ${curve}`;
           under.style.transform = `translateX(${UNDER_SHIFT})`;
         }
         moveBar(0, `transform ${EDGE_FINISH_MS}ms ${curve}`);
+        moveRow(0, `transform ${EDGE_FINISH_MS}ms ${curve}, opacity ${EDGE_FINISH_MS}ms ${curve}`);
         const leaving = under;
         under = null;
         window.setTimeout(() => {
@@ -756,6 +906,8 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
           clearBar();
           delete main.dataset.swiping;
           main.style.willChange = "";
+          clearRow();
+          dropCap();
           // A link tapped right after the cancel may already be pushing.
           if (main.dataset.navMoving) return;
           clearInline();
@@ -931,10 +1083,12 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   function goToRoot(event: { preventDefault: () => void; currentTarget?: EventTarget | null }, tab: NavEntry) {
     setAddOpenOn(null);
     setProfileOpenOn(null);
-    if (tab.id !== activeTabId && !anyFormDirty()) setPendingTab({ id: tab.id, from: pathname });
+    if (tab.id !== landedTabId && !anyFormDirty()) setPendingTab({ id: tab.id, from: pathname });
+    // The tab the screen is on, not the pending highlight: a release already
+    // marks the new tab pending, and its click must still open that tab.
     handleTabClick(event, tab, {
       pathname,
-      activeTab: activeTabId,
+      activeTab: landedTabId,
       main: mainRef.current,
       router,
       refresh: () => setTabEpoch((value) => value + 1),
@@ -1066,8 +1220,13 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     if (!press || press.pointerId !== event.pointerId) return;
     tabPress.current = null;
     const capsule = event.currentTarget;
-    // Next frame: a tap's own click (fired after pointerup) has moved the
-    // selection by then, so the lens springs straight to the new tab.
+    // Select the released tab now. iOS fires the tap's click a frame or more
+    // after pointerup; until then the lens sprang back to the old tab and then
+    // out again to the new one, which read as a tremble.
+    const released = tabRoots()[press.index];
+    if (commit && released && released.id !== landedTabId && !anyFormDirty()) {
+      setPendingTab({ id: released.id, from: pathname });
+    }
     requestAnimationFrame(() => {
       delete capsule.dataset.pressing;
       delete capsule.dataset.dragging;
@@ -1106,7 +1265,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
   const backName = backLabel ?? back?.label ?? null;
 
-  const inlineRootHeader = ["/dashboard", "/kirjanpito", "/laskut", "/raportit", "/asetukset"].includes(pathname);
+  const inlineRootHeader = INLINE_HEADER_ROOTS.includes(pathname);
   const headerActions = (
           sessionStatus !== "signed-out" ? (
             <div className="flex items-center gap-1 justify-self-end">

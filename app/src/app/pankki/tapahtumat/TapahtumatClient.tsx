@@ -263,7 +263,7 @@ export default function TapahtumatClient() {
     if (value) next.set(key, value);
     else next.delete(key);
     const queryString = next.toString();
-    router.replace(queryString ? `/pankki/tapahtumat?${queryString}` : "/pankki/tapahtumat");
+    router.replace(queryString ? `/pankki/tapahtumat?${queryString}` : "/pankki/tapahtumat", { scroll: false });
   }
 
   /**
@@ -467,6 +467,7 @@ export default function TapahtumatClient() {
                   group.rows.map((row) => (
                     <div
                       key={row.id}
+                      data-leave-key={row.id}
                       className={
                         [
                           leaving.has(row.id) ? "row-leave" : "",

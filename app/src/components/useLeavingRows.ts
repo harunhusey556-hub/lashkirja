@@ -6,8 +6,9 @@ import { useCallback, useEffect, useRef, useState } from "react";
 export const ROW_EXIT_MS = 240;
 
 /**
- * Rows on their way out of a list. `leave(id, done)` renders the row with
- * `.row-leave` (fade and fold) and calls `done` when the animation is over,
+ * Rows on their way out of a list. `leave(id, done)` folds the row marked
+ * `data-leave-key={id}` and renders it with `.row-leave` (no taps), then calls
+ * `done` when the animation is over,
  * where the caller removes the row for real. `delay` lets a closing sheet get
  * out of the way first, so the owner sees the row go.
  */
@@ -32,6 +33,25 @@ export function useLeavingRows() {
     (id: string, done: () => void, delay = 0) => {
       const start = () => {
         setLeaving((current) => new Set(current).add(id));
+        // The fold runs on the row's pixel height (WAAPI): WebKit steps the
+        // old grid-template-rows animation, so on the iPhone rows just vanished.
+        const row =
+          typeof document !== "undefined"
+            ? document.querySelector<HTMLElement>(`[data-leave-key="${CSS.escape(id)}"]`)
+            : null;
+        const reduce = typeof window.matchMedia === "function" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+        if (row && typeof row.animate === "function") {
+          row.style.overflow = "hidden";
+          row.animate(
+            reduce
+              ? [{ opacity: 1 }, { opacity: 0 }]
+              : [
+                  { height: `${row.offsetHeight}px`, opacity: 1 },
+                  { height: "0px", opacity: 0 },
+                ],
+            { duration: ROW_EXIT_MS, easing: "cubic-bezier(0.2, 0, 0, 1)", fill: "forwards" }
+          );
+        }
         later(() => {
           setLeaving((current) => {
             const next = new Set(current);

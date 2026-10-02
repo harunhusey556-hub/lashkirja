@@ -397,24 +397,21 @@ button:disabled {
   min-height: calc(100% + 1px);
 }
 
-/* Inline disclosure (ds/Disclosure, IA-23): height and opacity, 200 ms. */
+/* Inline disclosure (ds/Disclosure, IA-23). The resting states only; the
+   height change itself is a WAAPI animation in Disclosure.tsx. */
 .disclosure {
-  display: grid;
-  grid-template-rows: 0fr;
+  /* Its own block context: the focus-ring room (margin -4px below) never
+   collapses through it, so open and animating heights are the same box. */
+  display: flow-root;
+  height: 0;
   opacity: 0;
-  transition:
-    grid-template-rows 200ms var(--ease-out),
-    opacity 200ms var(--ease-out);
+  overflow: hidden;
 }
 
 .disclosure[data-open="true"] {
-  grid-template-rows: 1fr;
+  height: auto;
   opacity: 1;
-}
-
-.disclosure-inner {
-  min-height: 0;
-  overflow: hidden;
+  overflow: visible;
 }
 
 /* Room for focus rings while open (the clip would cut them). */
@@ -423,11 +420,6 @@ button:disabled {
   margin: -4px;
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .disclosure {
-    transition: opacity 120ms linear;
-  }
-}
 
 /* Pull to refresh (ds/PullToRefresh, C1.6). The band sits before the page;
    at rest it is 0 px tall and its spinner waits above it, revealed only by
@@ -638,7 +630,8 @@ button:disabled {
   height: 64px;
   padding: var(--tab-pad);
   border-radius: 9999px;
-  background: color-mix(in srgb, var(--color-surface) 72%, transparent);
+  /* Mostly opaque: a page swapping underneath must not change its colour. */
+  background: color-mix(in srgb, var(--color-surface) 90%, transparent);
   -webkit-backdrop-filter: blur(20px) saturate(180%);
   backdrop-filter: blur(20px) saturate(180%);
   border: 0.5px solid rgb(255 255 255 / 0.7);
@@ -663,8 +656,10 @@ button:disabled {
   left: var(--tab-pad);
   width: calc((100% - 2 * var(--tab-pad)) / var(--tab-count));
   transform: translateX(calc(100% * var(--tab-index)));
+  /* A short, nearly critically damped spring: a big overshoot over a one-tab
+     move looked like a wobble. */
   transition:
-    transform 420ms cubic-bezier(0.34, 1.36, 0.64, 1),
+    transform 340ms cubic-bezier(0.25, 1.1, 0.4, 1),
     opacity 200ms var(--ease-out);
   opacity: 0;
   pointer-events: none;
@@ -688,7 +683,7 @@ button:disabled {
 /* The press itself: the lens swells past the capsule and lifts; letting go
    it springs back with a small overshoot (the re-tap feedback). */
 .tab-capsule[data-pressing] .tab-lens-body {
-  scale: 1.16 1.14;
+  scale: 1.1 1.08;
 }
 
 .tab-lens-body {
@@ -696,7 +691,7 @@ button:disabled {
   height: 100%;
   border-radius: 9999px;
   background: color-mix(in srgb, var(--color-accent-soft) 85%, rgb(38 34 31 / 0.06));
-  transition: scale 420ms cubic-bezier(0.34, 1.56, 0.64, 1);
+  transition: scale 300ms cubic-bezier(0.25, 1.2, 0.4, 1);
   will-change: scale;
 }
 
@@ -792,24 +787,10 @@ html[data-keyboard="open"] .app-tab-bar {
 /* A row whose task is done leaves its list: it fades and folds its height so
    the rows below slide up instead of jumping (owner report 2026-09-30). The
    caller removes the row when the animation ends (ROW_EXIT_MS). */
-@keyframes rowLeave {
-  from {
-    opacity: 1;
-    grid-template-rows: 1fr;
-  }
-  to {
-    opacity: 0;
-    grid-template-rows: 0fr;
-  }
-}
+/* A row on its way out (useLeavingRows): the fold itself is a WAAPI height
+   animation; this only stops taps on it. */
 .row-leave {
-  display: grid;
-  animation: rowLeave var(--dur-exit) var(--ease-out) forwards;
   pointer-events: none;
-}
-.row-leave > * {
-  min-height: 0;
-  overflow: hidden;
 }
 
 /* A row that stays but just got done (e.g. "Kunnossa"): a brief success tint. */
@@ -1310,10 +1291,6 @@ body.signing-out {
     transform: none !important;
   }
 
-  .row-leave {
-    animation: fadeOut 120ms linear forwards !important;
-  }
-
   .row-done {
     animation: none !important;
   }
@@ -1595,7 +1572,21 @@ html[data-page-hidden] *::after {
 .stitch-page .icon-tile[data-icon-tone="danger"] { background: #f7ebea; }
 .stitch-page .icon-tile[data-icon-tone="danger"] { color: var(--color-danger); }
 .app-frame[data-design="stitch"] > .app-header { background: transparent; }
-.app-frame[data-design="stitch"] > .app-header[data-collapsed="true"] { background: rgb(247 243 239 / 94%); backdrop-filter: blur(16px); }
+/* The bar behind the header fades in as the title scrolls under it, instead
+   of the background and blur switching on in one frame. */
+.app-frame[data-design="stitch"] > .app-header::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background: rgb(247 243 239 / 94%);
+  -webkit-backdrop-filter: blur(16px);
+  backdrop-filter: blur(16px);
+  opacity: 0;
+  transition: opacity 180ms var(--ease-out);
+  pointer-events: none;
+}
+.app-frame[data-design="stitch"] > .app-header[data-collapsed="true"]::before { opacity: 1; }
 .bare-frame { background: radial-gradient(ellipse at 85% 0%, #c98b862e, transparent 52%), #f7f3ef; }
 .sheet-panel.stitch-page { background: linear-gradient(160deg, #f8efec, #f7f3ef 38%); border-top-left-radius: 32px; border-top-right-radius: 32px; }
 .sheet-panel.stitch-page [id][tabindex="-1"] { font-weight: 600; }
@@ -1687,4 +1678,24 @@ button.chart-hit:focus-visible {
 }
 @media (hover: none) {
   button.chart-hit:focus-visible { outline: none; }
+}
+
+/* Tabs: the lens is the press feedback. The generic press dimmed the icon to
+   45 % and back, which blinked on every tap. */
+.app-tab-bar .tab-item[data-pressed="true"],
+.app-tab-bar .tab-item[data-pressed="true"] > svg {
+  opacity: 1 !important;
+  transform: none !important;
+}
+
+/* The header strip of a page being swiped back: slides with <main>, above
+   the parent page underneath and below the header row. */
+.swipe-cap {
+  position: absolute;
+  top: 0;
+  z-index: 1;
+  pointer-events: none;
+  background-repeat: no-repeat;
+  background-position: 0 0;
+  box-shadow: -8px 0 24px rgb(38 34 31 / 0.12);
 }

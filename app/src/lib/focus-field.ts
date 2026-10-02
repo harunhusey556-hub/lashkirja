@@ -25,7 +25,7 @@ export function focusFirstInvalid(
     // Centred, so the field is not left behind the sticky save bar (F37);
     // preventScroll stops focus() from jumping first.
     element.focus({ preventScroll: true });
-    element.scrollIntoView({ block: "center" });
+    element.scrollIntoView({ block: "center", behavior: smoothScroll() });
   }
   return key;
 }
@@ -49,4 +49,13 @@ export function invalidFieldProps(id: string, error?: string, hintId?: string) {
     props["aria-describedby"] = hintId;
   }
   return props;
+}
+
+/** Smooth unless the owner asked for less motion: a jump to a field reads as a glitch. */
+export function smoothScroll(): ScrollBehavior {
+  return typeof window !== "undefined" &&
+    typeof window.matchMedia === "function" &&
+    window.matchMedia("(prefers-reduced-motion: reduce)").matches
+    ? "auto"
+    : "smooth";
 }

@@ -58,7 +58,7 @@ describe("focusFirstInvalid", () => {
       const key = focusFirstInvalid({ notes: "x", vendor: "y" }, ["vendor", "notes"], (k) => `receipt-${k}`);
       expect(key).toBe("vendor");
       expect(element.focus).toHaveBeenCalledWith({ preventScroll: true });
-      expect(element.scrollIntoView).toHaveBeenCalledWith({ block: "center" });
+      expect(element.scrollIntoView).toHaveBeenCalledWith({ block: "center", behavior: expect.stringMatching(/^(smooth|auto)$/) });
     } finally {
       vi.unstubAllGlobals();
     }

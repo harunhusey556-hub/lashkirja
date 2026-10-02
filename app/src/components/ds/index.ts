@@ -18,6 +18,7 @@ export * from "./PasswordField";
 export * from "./Switch";
 export * from "./PullToRefresh";
 export * from "./Disclosure";
+export * from "./Reveal";
 export * from "./HeaderAddPill";
 export * from "./SearchField";
 export * from "./charts";

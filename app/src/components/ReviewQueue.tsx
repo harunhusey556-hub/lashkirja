@@ -127,7 +127,7 @@ export default function ReviewQueue({
         <div className="mt-3 -mx-4 border-t border-line">
           <div className="divide-y divide-line">
             {visible.filter((r) => !gone.has(r.id)).map((r) => (
-              <div key={r.id} className={leaving.has(r.id) ? "row-leave" : undefined}>
+              <div key={r.id} data-leave-key={r.id} className={leaving.has(r.id) ? "row-leave" : undefined}>
               <ListRow
                 title={r.vendor || "Tuntematon myyjä"}
                 amount={r.totalAmount != null ? formatEur(r.totalAmount) : "–"}

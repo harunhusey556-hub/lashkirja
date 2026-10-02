@@ -17,7 +17,7 @@ import {
 } from "@/components/clientFetch";
 import { Users } from "lucide-react";
 import { formatEur } from "@/lib/format";
-import { Card, FilterChips, HeaderAddPill, ListRow, PageTitle, SearchField, Section, StatusTag, SummaryCard } from "@/components/ds";
+import { Card, FilterChips, HeaderAddPill, ListRow, PageTitle, SearchField, Section, StatusTag, SummaryCard, Reveal } from "@/components/ds";
 
 import { Button, buttonClass, controlClass } from "@/components/ui";
 import { showToast } from "@/lib/toast";
@@ -259,11 +259,11 @@ export default function CustomersPage() {
         />
       )}
 
-      {message && (
+      <Reveal show={Boolean(message)}>{message ? (
         <p className="rounded-card bg-accent-soft px-4 py-3 text-caption text-ink" role="status">
           {message}
         </p>
-      )}
+      ) : null}</Reveal>
 
       {!hideTools && (
         <>

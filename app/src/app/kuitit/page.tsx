@@ -1,5 +1,6 @@
 "use client";
 
+import { AnimatedRows } from "@/components/AnimatedRows";
 import { PullToRefresh } from "@/components/ds/PullToRefresh";
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -41,7 +42,7 @@ import {
 } from "@/lib/receipt-tabs";
 import { Button, buttonClass } from "@/components/ui";
 import { Check, Minus, Receipt } from "lucide-react";
-import { HeaderAddPill, PageTitle, Section, SlotSkeleton, useSkeletonFade } from "@/components/ds";
+import { HeaderAddPill, PageTitle, Section, SlotSkeleton, useSkeletonFade, Reveal } from "@/components/ds";
 import { batchOutcomeMessage } from "@/lib/upload-queue";
 import {
   approvalFailureText,
@@ -687,7 +688,7 @@ export default function KuititPage() {
         <QueuedReceiptsCard offlineNotice={offlineCaptureNotice} />
 
         {/* The outcome of a tap sits above the queues it came from, never below the fold (F15). */}
-        {actionError && (
+        <Reveal show={Boolean(actionError)}>{actionError ? (
           <div
             ref={actionErrorRef}
             className={`space-y-2 rounded-card px-4 py-3 text-caption ${
@@ -706,7 +707,7 @@ export default function KuititPage() {
               </button>
             )}
           </div>
-        )}
+        ) : null}</Reveal>
 
         {emailPending.length > 0 && (
           <ReviewQueue
@@ -870,14 +871,14 @@ export default function KuititPage() {
           ) : (
             <div className={`space-y-3 ${listFade}`}>
               <Section>
-                {visibleReceipts.map((r) => (
+                <AnimatedRows rows={visibleReceipts.map((r) => ({ key: r.id, node: (
                   <ReceiptRow
                     key={r.id}
                     receipt={r}
                     selected={selectedIds.has(r.id)}
                     onToggleSelect={() => toggleSelection(r.id)}
                   />
-                ))}
+                ) }))} />
               </Section>
               {receipts.length > RECENT_LIMIT && (
                 <Button

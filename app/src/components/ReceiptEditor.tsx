@@ -54,7 +54,7 @@ import {
   vatRowsFromSaved,
   type VatRow,
 } from "@/lib/receipt-vat";
-import { focusFirstInvalid } from "@/lib/focus-field";
+import { focusFirstInvalid, smoothScroll } from "@/lib/focus-field";
 import {
   captureWithCamera,
   chooseDocuments,
@@ -217,7 +217,7 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
 
   // A refused save lands in view above the save bar, not off screen (F37).
   useEffect(() => {
-    if (session.phase === "failed") saveNoteRef.current?.scrollIntoView({ block: "center" });
+    if (session.phase === "failed") saveNoteRef.current?.scrollIntoView({ block: "center", behavior: smoothScroll() });
   }, [session.phase]);
 
   const connectivity = useConnectivity();
@@ -988,7 +988,7 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
           {isEdit && (
             <div
               ref={matchPanelRef}
-              className={isNewStep2 ? "rounded-card ring-2 ring-accent ring-offset-2 transition-all duration-500" : ""}
+              className={isNewStep2 ? "rounded-card ring-2 ring-accent ring-offset-2 transition-[box-shadow] duration-500" : ""}
             >
               <Section title="Pankkitapahtuma">
                 <ErrorBoundary>

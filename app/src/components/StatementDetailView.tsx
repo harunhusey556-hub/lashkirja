@@ -1,5 +1,6 @@
 "use client";
 
+import { AnimatedRows } from "@/components/AnimatedRows";
 import { CustomSelect } from "@/components/CustomSelect";
 
 import { useCallback, useState } from "react";
@@ -709,7 +710,7 @@ export default function StatementDetailView({
               : "Ei tapahtumia tässä suodattimessa"}
           </p>
         ) : (
-          filteredTransactions.map((t) => {
+          <AnimatedRows rows={filteredTransactions.map((t) => ({ key: t.id, node: (() => {
             const statusKey = statementTxStatusKey(t);
             const status = statusKey ? STATEMENT_TX_STATUS[statusKey] : null;
             const canQuickLink = t.matchStatus === "suggested" && t.suggestedReceipt?.source !== "auto_income";
@@ -1043,7 +1044,7 @@ export default function StatementDetailView({
                 )}
               </div>
             );
-          })
+          })() }))} />
         )}
       </Section>
 
