@@ -244,7 +244,9 @@ export async function GET(req: NextRequest) {
 
   let where: Prisma.ReceiptWhereInput;
   try {
-    where = buildReceiptWhere(session.userId!, { reviewStatus, month, q, category, source, minAmount, maxAmount });
+    where = buildReceiptWhere(session.userId!, {
+      reviewStatus, month, q, category, source, minAmount, maxAmount, vat: url.searchParams.get("vat"),
+    });
     where = await withReceiptSearch(where, q);
   } catch (error) {
     if (error instanceof ReceiptFilterError) return noStoreJson({ error: error.message }, { status: 400 });

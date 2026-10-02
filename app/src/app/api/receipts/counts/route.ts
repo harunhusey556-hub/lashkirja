@@ -30,6 +30,7 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
       source: params.get("source"),
       minAmount: params.get("minAmount"),
       maxAmount: params.get("maxAmount"),
+      vat: params.get("vat"),
     });
     base = await withReceiptSearch(base, params.get("q"));
   } catch (error) {

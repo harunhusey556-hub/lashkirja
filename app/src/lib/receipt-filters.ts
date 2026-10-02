@@ -12,6 +12,8 @@ export interface ReceiptWhereInput {
   source?: string | null;
   minAmount?: string | null;
   maxAmount?: string | null;
+  /** "missing": only receipts with no VAT breakdown (Raportit's "Ilman ALV-erittelyä"). */
+  vat?: string | null;
 }
 
 export class ReceiptFilterError extends Error {}
@@ -55,6 +57,10 @@ export function buildReceiptWhere(userId: string, input: ReceiptWhereInput): Pri
     throw new ReceiptFilterError("Summarajaus on virheellinen");
   }
   if (Object.keys(amountFilter).length > 0) where.totalAmountCents = amountFilter;
+  // The same rule as the report's missingVatCount (parseVatDetails): no lines stored at all.
+  if (input.vat === "missing") {
+    where.AND = [{ OR: [{ vatDetails: null }, { vatDetails: "" }, { vatDetails: "[]" }] }];
+  }
 
   return where;
 }

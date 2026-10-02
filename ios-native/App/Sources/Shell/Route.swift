@@ -61,6 +61,8 @@ enum Route: Hashable {
     case monthClose(String)
     /// Kuitit of one report category: a year or month, Tulot/Menot and the category ("" = all).
     case receiptsCategory(period: String, tab: String, category: String)
+    /// Kuitit of a year or month without a VAT breakdown (Raportit's "Ilman ALV-erittelyä").
+    case receiptsMissingVat(period: String)
     /// Sähköposti: what mail sync brought in, the bills and the archived non-bills.
     case emailInbox
     /// Pankki: balances, the month's money in and out, and the bank rows in one place.
@@ -134,6 +136,8 @@ extension Route {
         switch drill {
         case .receipts(let period, let tab, let category):
             .receiptsCategory(period: period, tab: tab, category: category)
+        case .receiptsMissingVat(let period):
+            .receiptsMissingVat(period: period)
         case .invoices(let period, let status):
             .invoicesFiltered(month: period, status: status.rawValue, customerId: "")
         case .bankFeed(let month):
@@ -194,6 +198,8 @@ struct RouteScreen: View {
         case .monthClose(let month): PeriodsView(month: month)
         case .receiptsCategory(let period, let tab, let category):
             ReceiptsView(month: period, tab: ReceiptTab(rawValue: tab) ?? .all, category: category, drilled: true)
+        case .receiptsMissingVat(let period):
+            ReceiptsView(month: period, missingVat: true, drilled: true)
         case .emailInbox: EmailInboxView()
         case .bankHub: BankHubView()
         case .invoicesFiltered(let month, let status, let customerId):

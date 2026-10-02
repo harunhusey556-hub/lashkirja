@@ -116,3 +116,15 @@ private func alv(_ sources: String) throws -> AlvReport {
     #expect(Koti.previousMonthLine(.init(month: "2026-08", open: 1)) == "Elokuu: 1 asia kesken")
     #expect(Koti.previousMonthLine(.init(month: "2026-08", open: 0)) == "Elokuu on valmis suljettavaksi")
 }
+
+@Test func receiptsWithoutVatAreAskedFromTheServer() {
+    var query = ReceiptListQuery()
+    query.month = "2026"
+    query.missingVat = true
+    #expect(query.countsQuery()["vat"] == "missing")
+    #expect(query.listQuery()["vat"] == "missing")
+    #expect(query.isFiltered)
+    // A drill-only narrowing: never stored as the owner's remembered Kuitit filters.
+    #expect(!query.remembered.contains("vat"))
+    #expect(ReportDrill.receiptsMissingVat(period: "2026").label == "Kuitit")
+}

@@ -6,6 +6,8 @@ import Foundation
 public enum ReportDrill: Hashable, Sendable {
     /// Kuitit of a year or month ("" = any), Tulot or Menot ("" = both), one category ("" = all).
     case receipts(period: String, tab: String, category: String)
+    /// Kuitit of a year or month that have no VAT breakdown.
+    case receiptsMissingVat(period: String)
     /// Myyntilaskut of a year or month ("" = any) on one status chip.
     case invoices(period: String, status: SalesFilter)
     /// Pankkitapahtumat of one month.
@@ -16,6 +18,7 @@ public enum ReportDrill: Hashable, Sendable {
     public var label: String {
         switch self {
         case .receipts(_, let tab, _): tab == "tulo" ? "Tulokuitit" : tab == "meno" ? "Menokuitit" : "Kuitit"
+        case .receiptsMissingVat: "Kuitit"
         case .invoices(_, let status): status == .credited ? "Hyvityslaskut" : "Laskut"
         case .bankFeed: "Pankkitapahtumat"
         case .purchaseInvoices: "Ostolaskut"

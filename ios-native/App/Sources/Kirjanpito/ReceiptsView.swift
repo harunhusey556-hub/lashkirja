@@ -44,7 +44,7 @@ struct ReceiptsView: View {
     private let remembers: Bool
 
     /// With a month or a tab the screen opens on exactly that; otherwise on the filters of the last visit.
-    init(month: String = "", tab: ReceiptTab = .all, category: String = "", drilled: Bool = false) {
+    init(month: String = "", tab: ReceiptTab = .all, category: String = "", missingVat: Bool = false, drilled: Bool = false) {
         var initial: ReceiptListQuery
         remembers = !drilled
         if drilled || !month.isEmpty || tab != .all || !category.isEmpty {
@@ -52,6 +52,7 @@ struct ReceiptsView: View {
             initial.month = month
             initial.tab = tab
             initial.category = category
+            initial.missingVat = missingVat
         } else {
             initial = ReceiptListQuery(remembered: UserDefaults.standard.string(forKey: Self.filterKey) ?? "")
         }
@@ -89,7 +90,7 @@ struct ReceiptsView: View {
             if let notice { Text(notice).foregroundStyle(Theme.ink2) }
             Section {
                 tabChips
-                if query.isFiltered && (!query.month.isEmpty || !query.category.isEmpty || query.source != .all || query.amountLabel != nil) {
+                if query.isFiltered && (!query.month.isEmpty || !query.category.isEmpty || query.source != .all || query.amountLabel != nil || query.missingVat) {
                     activeFilters
                 }
             }
@@ -235,6 +236,9 @@ struct ReceiptsView: View {
     private var activeFilters: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 8) {
+                if query.missingVat {
+                    filterChip("Ilman ALV-erittelyä") { query.missingVat = false }
+                }
                 if !query.month.isEmpty {
                     filterChip(MonthKey.title(query.month, currentYear: String(MonthKey.current().prefix(4)))) { query.month = "" }
                 }

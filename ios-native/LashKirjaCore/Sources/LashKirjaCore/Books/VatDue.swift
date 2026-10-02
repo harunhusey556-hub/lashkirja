@@ -360,7 +360,7 @@ extension ReportDrill {
     public static func dataQuality(missingVat: Int?, undated: Int?, year: String) -> [QualityRow] {
         var rows: [QualityRow] = []
         if let missingVat, missingVat > 0 {
-            rows.append(QualityRow(title: "Ilman ALV-erittelyä", count: missingVat, drill: .receipts(period: year, tab: "", category: "")))
+            rows.append(QualityRow(title: "Ilman ALV-erittelyä", count: missingVat, drill: .receiptsMissingVat(period: year)))
         }
         if let undated, undated > 0 {
             rows.append(QualityRow(title: "Ilman päivää", count: undated, drill: .receipts(period: "", tab: "", category: "")))

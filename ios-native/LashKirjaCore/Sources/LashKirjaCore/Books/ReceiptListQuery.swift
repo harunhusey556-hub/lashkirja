@@ -69,6 +69,8 @@ public struct ReceiptListQuery: Sendable, Equatable, Hashable {
     /// Euros as typed ("12,50"); empty for no limit.
     public var minAmount = ""
     public var maxAmount = ""
+    /// Only receipts with no VAT breakdown (Raportit's "Ilman ALV-erittelyä"); never remembered.
+    public var missingVat = false
 
     public init() {}
 
@@ -106,6 +108,7 @@ public struct ReceiptListQuery: Sendable, Equatable, Hashable {
         // Sent as plain numbers: the server reads Number(...), which a comma would break.
         if case let value?? = Self.amount(minAmount) { q["minAmount"] = NSDecimalNumber(decimal: value).stringValue }
         if case let value?? = Self.amount(maxAmount) { q["maxAmount"] = NSDecimalNumber(decimal: value).stringValue }
+        if missingVat { q["vat"] = "missing" }
         return q
     }
 
@@ -125,7 +128,7 @@ public struct ReceiptListQuery: Sendable, Equatable, Hashable {
     /// True when anything narrows the list (the empty text then says "no matches", not "no receipts").
     public var isFiltered: Bool {
         !trimmedSearch.isEmpty || !month.isEmpty || !category.isEmpty || tab != .all
-            || source != .all || !minAmount.isEmpty || !maxAmount.isEmpty
+            || source != .all || !minAmount.isEmpty || !maxAmount.isEmpty || missingVat
     }
 }
 

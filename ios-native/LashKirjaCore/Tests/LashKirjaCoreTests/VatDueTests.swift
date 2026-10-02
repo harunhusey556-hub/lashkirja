@@ -167,7 +167,7 @@ import Foundation
 
 @Test func dataQualityRowsLinkToTheYearsReceipts() {
     #expect(ReportDrill.dataQuality(missingVat: 2, undated: 0, year: "2026")
-            == [.init(title: "Ilman ALV-erittelyä", count: 2, drill: .receipts(period: "2026", tab: "", category: ""))])
+            == [.init(title: "Ilman ALV-erittelyä", count: 2, drill: .receiptsMissingVat(period: "2026"))])
     // Undated receipts are in no year: they open the whole list.
     #expect(ReportDrill.dataQuality(missingVat: 0, undated: 1, year: "2026")
             == [.init(title: "Ilman päivää", count: 1, drill: .receipts(period: "", tab: "", category: ""))])
