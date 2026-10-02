@@ -67,3 +67,9 @@ private func fixture(_ name: String) throws -> Data {
     #expect(BankSearch.matches("S-Pankki", "spankki"))
     #expect(BankSearch.matches("Nordea", " "))
 }
+
+@Test func decodesRealReceiptDetailWithStringVat() throws {
+    let r = try JSONDecoder().decode(ReceiptResponse.self, from: fixture("receipt-detail.json")).receipt
+    #expect(r.vatDetails == [VatDetail(rate: Decimal(string: "25.5")!, amount: Decimal(string: "1.73")!)])
+    #expect(r.notes?.hasPrefix("MobilePay") == true)
+}

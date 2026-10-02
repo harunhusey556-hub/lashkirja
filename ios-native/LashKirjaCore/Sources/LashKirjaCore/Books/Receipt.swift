@@ -31,6 +31,40 @@ public struct Receipt: Decodable, Sendable, Identifiable, Hashable {
     public let linkedTransaction: LinkedTransaction?
     public let match: Match?
 
+    enum CodingKeys: String, CodingKey {
+        case id, vendor, date, category, type, reference, invoiceNumber, fileName, source, confidence
+        case createdAt, updatedAt, totalAmount, reviewStatus, notes, vatDetails, linkedTransaction, match
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        vendor = try c.decodeIfPresent(String.self, forKey: .vendor)
+        date = try c.decodeIfPresent(String.self, forKey: .date)
+        category = try c.decodeIfPresent(String.self, forKey: .category)
+        type = try c.decodeIfPresent(String.self, forKey: .type) ?? "meno"
+        reference = try c.decodeIfPresent(String.self, forKey: .reference)
+        invoiceNumber = try c.decodeIfPresent(String.self, forKey: .invoiceNumber)
+        fileName = try c.decodeIfPresent(String.self, forKey: .fileName)
+        source = try c.decodeIfPresent(String.self, forKey: .source)
+        confidence = try c.decodeIfPresent(Double.self, forKey: .confidence)
+        createdAt = try c.decode(String.self, forKey: .createdAt)
+        updatedAt = try c.decode(String.self, forKey: .updatedAt)
+        totalAmount = try c.decodeIfPresent(Decimal.self, forKey: .totalAmount)
+        reviewStatus = try c.decodeIfPresent(String.self, forKey: .reviewStatus)
+        notes = try c.decodeIfPresent(String.self, forKey: .notes)
+        // The server stores VAT rows as a JSON string; older/other routes send an array.
+        if let rows = try? c.decodeIfPresent([VatDetail].self, forKey: .vatDetails) {
+            vatDetails = rows
+        } else if let text = try? c.decodeIfPresent(String.self, forKey: .vatDetails) {
+            vatDetails = try? JSONDecoder().decode([VatDetail].self, from: Data(text.utf8))
+        } else {
+            vatDetails = nil
+        }
+        linkedTransaction = try c.decodeIfPresent(LinkedTransaction.self, forKey: .linkedTransaction)
+        match = try c.decodeIfPresent(Match.self, forKey: .match)
+    }
+
     public var isIncome: Bool { type == "tulo" }
     public var title: String { vendor?.isEmpty == false ? vendor! : "Tuntematon myyjä" }
 }
