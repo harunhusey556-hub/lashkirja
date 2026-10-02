@@ -2,7 +2,8 @@
 # Usage: scripts/ci-wait.sh [sha]  — wait until the "iOS native" run for sha (default HEAD) completes, then print ci-status.
 # Polls every 2 minutes: the public API allows 60 requests per hour without a token.
 set -uo pipefail
-SHA=${1:-$(git rev-parse HEAD)}
+# head_sha only matches a full SHA, so a short one is expanded first.
+SHA=$(git rev-parse "${1:-HEAD}")
 API=https://api.github.com/repos/harunhusey556-hub/lashkirja
 for _ in $(seq 1 60); do
   state=$(curl -fsS "$API/actions/runs?head_sha=$SHA&per_page=10" 2>/dev/null | python3 -c 'import sys,json
