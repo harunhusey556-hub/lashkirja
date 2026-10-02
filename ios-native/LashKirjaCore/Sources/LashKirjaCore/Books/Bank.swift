@@ -70,7 +70,10 @@ public struct BankConnection: Decodable, Sendable, Identifiable, Hashable {
     public let psuType: String?
     public let status: String
     public let validUntil: String?
+    /// The last attempt, failed or not.
     public let lastSyncAt: String?
+    /// The last fetch that went through; a failed attempt never moves it.
+    public let lastSuccessAt: String?
     public let lastError: String?
     public let accounts: [Account]?
     /// "YYYY-MM-DD": the earliest day fetched or asked for; nil = all the bank allows.
@@ -82,7 +85,7 @@ public struct BankConnection: Decodable, Sendable, Identifiable, Hashable {
     public let reportsHistory: Bool
 
     enum CodingKeys: String, CodingKey {
-        case id, aspspName, aspspLogo, psuType, status, validUntil, lastSyncAt, lastError, accounts, historyFrom, historyLimitDays
+        case id, aspspName, aspspLogo, psuType, status, validUntil, lastSyncAt, lastSuccessAt, lastError, accounts, historyFrom, historyLimitDays
     }
 
     public init(from decoder: Decoder) throws {
@@ -94,6 +97,7 @@ public struct BankConnection: Decodable, Sendable, Identifiable, Hashable {
         status = try c.decode(String.self, forKey: .status)
         validUntil = try c.decodeIfPresent(String.self, forKey: .validUntil)
         lastSyncAt = try c.decodeIfPresent(String.self, forKey: .lastSyncAt)
+        lastSuccessAt = try c.decodeIfPresent(String.self, forKey: .lastSuccessAt)
         lastError = try c.decodeIfPresent(String.self, forKey: .lastError)
         accounts = try c.decodeIfPresent([Account].self, forKey: .accounts)
         historyFrom = try c.decodeIfPresent(String.self, forKey: .historyFrom)
@@ -102,15 +106,18 @@ public struct BankConnection: Decodable, Sendable, Identifiable, Hashable {
     }
 
     public init(id: String, aspspName: String, status: String = "active", accounts: [Account]?,
-                historyFrom: String? = nil, historyLimitDays: Int? = nil, reportsHistory: Bool = true) {
+                historyFrom: String? = nil, historyLimitDays: Int? = nil, reportsHistory: Bool = true,
+                validUntil: String? = nil, lastSyncAt: String? = nil, lastSuccessAt: String? = nil,
+                lastError: String? = nil, psuType: String? = nil) {
         self.id = id
         self.aspspName = aspspName
         self.aspspLogo = nil
-        self.psuType = nil
+        self.psuType = psuType
         self.status = status
-        self.validUntil = nil
-        self.lastSyncAt = nil
-        self.lastError = nil
+        self.validUntil = validUntil
+        self.lastSyncAt = lastSyncAt
+        self.lastSuccessAt = lastSuccessAt
+        self.lastError = lastError
         self.accounts = accounts
         self.historyFrom = historyFrom
         self.historyLimitDays = historyLimitDays

@@ -25,6 +25,9 @@ struct BankFeedView: View {
     /// The month group on screen (one at a time); nil follows `GroupChoice` (the newest month).
     @State private var shownMonth: String?
     @State private var limit = ShowMore()
+    /// The bank connections, for "Päivitä" in the menu and the reconnect line.
+    @State private var bankLinks: [BankConnection] = []
+    @State private var syncingBank: String?
 
     /// `month` opens the feed on that month, `onlyOpen` on "Vaatii toimia" (web `?nayta=toimet`),
     /// and `focusTransactionId` opens that row's sheet once it is found.
@@ -55,6 +58,18 @@ struct BankFeedView: View {
                         Label("\(StatementText.month(month)) · näytä kaikki kuukaudet", systemImage: "xmark.circle")
                     }
                 }
+            }
+            if let ended = bankLinks.first(where: { BankConsent.reconnect($0) != nil }) {
+                // The web's compact card on Tapahtumat: one line that leads to "Vahvista uudelleen".
+                Button { pushed = .bankAccounts } label: {
+                    Label("\(ended.aspspName): vaatii uuden vahvistuksen", systemImage: "exclamationmark.triangle.fill")
+                        .font(.subheadline)
+                        .foregroundStyle(Theme.warning)
+                }
+            }
+            if syncingBank != nil {
+                HStack(spacing: 8) { ProgressView(); Text("Haetaan tapahtumia pankista…").foregroundStyle(Theme.ink2) }
+                    .font(.footnote)
             }
             if let notice { Text(notice).font(.footnote).foregroundStyle(noticeFailed ? Theme.danger : Theme.success) }
             if confirmable > 0 {
@@ -141,6 +156,13 @@ struct BankFeedView: View {
             }
             ToolbarItem(placement: .topBarTrailing) {
                 Menu {
+                    // Web Tapahtumat: a refresh per connected bank.
+                    ForEach(BankConsent.syncable(bankLinks)) { connection in
+                        Button { Task { await syncBank(connection) } } label: {
+                            Label("Päivitä \(connection.aspspName)", systemImage: "arrow.clockwise")
+                        }
+                        .disabled(syncingBank != nil)
+                    }
                     Button { importing = true } label: { Label("Tuo tiliote", systemImage: "square.and.arrow.down") }
                     Button { Task { await rerunMatching() } } label: { Label("Etsi kuitteja uudelleen", systemImage: "arrow.triangle.2.circlepath") }
                         .disabled(bulkBusy)
@@ -172,12 +194,16 @@ struct BankFeedView: View {
             BankRowSheet(row: row, onOpen: { openAfterSheet = $0 })
         }
         .navigationDestination(item: $pushed) { route in RouteScreen(route: route) }
-        .refreshable { await load() }
+        .refreshable {
+            await load()
+            await loadBankLinks()
+        }
         .task(id: loadKey) {
             guard state.value == nil || gate.isDue(key: month ?? "", version: app.dataVersion) else { return }
             // Marked only after a load that finished: a cancelled one must not count as fresh.
             let version = app.dataVersion
             await load()
+            await loadBankLinks()
             if !Task.isCancelled { gate.mark(key: month ?? "", version: version) }
         }
         .animation(.snappy, value: onlyOpen)
@@ -242,6 +268,34 @@ struct BankFeedView: View {
         var next = ShowMore()
         if let index = rows.firstIndex(where: { $0.id == row.id }) { next.expand(toInclude: index, total: rows.count) }
         limit = next
+    }
+
+    /// Best effort: without the connections the menu simply has no "Päivitä".
+    private func loadBankLinks() async {
+        guard let list: BankConnections = try? await app.api.get("/api/bank/connections") else { return }
+        bankLinks = list.connections
+    }
+
+    /// `POST /api/bank/connections/[id]/sync`, told as "Haettiin N tapahtumaa."
+    private func syncBank(_ connection: BankConnection) async {
+        guard syncingBank == nil else { return }
+        syncingBank = connection.id
+        notice = nil
+        defer { syncingBank = nil }
+        do {
+            let result: BankSyncResult = try await app.api.send("POST", "/api/bank/connections/\(connection.id)/sync", body: EmptyBody())
+            notice = result.summary
+            noticeFailed = false
+            Haptics.success()
+            app.dataVersion += 1
+        } catch is CancellationError {
+        } catch {
+            notice = error.userMessage
+            noticeFailed = true
+            Haptics.error()
+            // A sync that failed may have ended the consent: the reconnect line shows it.
+            await loadBankLinks()
+        }
     }
 
     private func confirmAll() async {

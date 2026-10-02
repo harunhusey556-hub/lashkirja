@@ -18,6 +18,8 @@ struct BankAccountsView: View {
     @State private var disconnecting: BankConnection?
     @State private var scoping: BankConnection?
     @State private var widening: BankConnection?
+    /// The ended consent "Vahvista uudelleen" renews: the picker opens on its account type and bank.
+    @State private var reconnecting: BankConnection?
     /// The connection the picker just made ("" when the server did not say which), asked about once the list reloads.
     @State private var justConnected: String?
     /// The scope sheet opens by itself at most once per visit, so closing it is respected.
@@ -76,25 +78,29 @@ struct BankAccountsView: View {
                         Text(connections.message ?? "Pankkiyhteys ei ole käytössä.").foregroundStyle(Theme.ink2)
                     }
                     ForEach(connections.connections) { connection in
-                        HStack {
-                            BankLogo(name: connection.aspspName, logo: connection.aspspLogo)
-                            VStack(alignment: .leading) {
-                                Text(connection.aspspName)
-                                Text(status(connection)).font(.caption).foregroundStyle(Theme.ink2)
-                            }
-                            Spacer()
-                            if syncing == connection.id { ProgressView() }
-                        }
+                        let canSync = BankConsent.canSync(connection)
+                        connectionHeader(connection)
                         .swipeActions {
                             Button("Katkaise", role: .destructive) { disconnecting = connection }
-                            Button("Päivitä") { Task { await sync(connection) } }.tint(Theme.accentFill)
+                            if canSync { Button("Päivitä") { Task { await sync(connection) } }.tint(Theme.accentFill) }
                         }
                         .contextMenu {
-                            Button { Task { await sync(connection) } } label: { Label("Päivitä", systemImage: "arrow.clockwise") }
+                            if canSync {
+                                Button { Task { await sync(connection) } } label: { Label("Päivitä", systemImage: "arrow.clockwise") }
+                            }
+                            if BankConsent.reconnect(connection) != nil {
+                                Button { reconnect(connection) } label: { Label("Vahvista uudelleen", systemImage: "arrow.triangle.2.circlepath") }
+                            }
                             if !BankScope.accounts(connection).isEmpty {
                                 Button { scoping = connection } label: { Label("Valitse tilit", systemImage: "checklist") }
                             }
                             Button(role: .destructive) { disconnecting = connection } label: { Label("Katkaise yhteys", systemImage: "xmark.circle") }
+                        }
+                        if let card = BankConsent.reconnect(connection) {
+                            reconnectCard(connection, card)
+                        } else if let problem = BankConsent.activeError(connection) {
+                            // A notice (something waits) is a calm note; only a failure is an alarm.
+                            Text(problem.text).font(.caption).foregroundStyle(problem.isNotice ? Theme.ink2 : Theme.danger)
                         }
                         connectionControls(connection)
                     }
@@ -120,8 +126,13 @@ struct BankAccountsView: View {
         .scrollContentBackground(.hidden)
         .background(Theme.canvas)
         .navigationTitle("Pankkiyhteys ja tilit")
-        .sheet(isPresented: $showPicker, onDismiss: { Task { await afterConnect() } }) {
-            BankPickerSheet { connection in justConnected = connection?.id ?? "" }
+        .sheet(isPresented: $showPicker, onDismiss: {
+            reconnecting = nil
+            Task { await afterConnect() }
+        }) {
+            BankPickerSheet(preferredPsu: reconnecting?.psuType, bankName: reconnecting?.aspspName) { connection in
+                justConnected = connection?.id ?? ""
+            }
         }
         .sheet(item: $scoping, onDismiss: { Task { await load() } }) { connection in
             BankScopeSheet(connection: connection) { message in notice = message }
@@ -221,10 +232,45 @@ struct BankAccountsView: View {
         if let fresh, BankScope.shouldAskAfterConnect(fresh) { scoping = fresh }
     }
 
-    private func status(_ c: BankConnection) -> String {
-        if let error = c.lastError, !error.isEmpty { return error }
-        if let last = c.lastSyncAt { return "Haettu \(InvoiceDetailView.timestamp(last))" }
-        return c.status == "active" ? "Yhdistetty" : c.status
+    /// Bank, state and account type, the last fetch that went through, and how long the consent lasts.
+    private func connectionHeader(_ connection: BankConnection) -> some View {
+        HStack {
+            BankLogo(name: connection.aspspName, logo: connection.aspspLogo)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(connection.aspspName)
+                Text(BankConsent.statusLabel(connection)).font(.caption).foregroundStyle(Theme.ink2)
+                Text(BankConsent.lastSuccessLine(connection)).font(.caption).foregroundStyle(Theme.ink2)
+                if let validity = BankConsent.validity(connection) {
+                    Text(validity.text).font(.caption).foregroundStyle(validity.warning ? Theme.warning : Theme.ink2)
+                }
+            }
+            Spacer()
+            if syncing == connection.id { ProgressView() }
+        }
+    }
+
+    /// The web's "Yhteys pitää vahvistaa uudelleen" / "Pankki on peruuttanut luvan" card.
+    private func reconnectCard(_ connection: BankConnection, _ card: BankConsent.Reconnect) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Label(card.title, systemImage: "exclamationmark.triangle.fill")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(Theme.warning)
+            Text(card.body).font(.subheadline).foregroundStyle(Theme.ink)
+            Text(card.accountsLine).font(.caption).foregroundStyle(Theme.ink2)
+            Button("Vahvista uudelleen") { reconnect(connection) }
+                .buttonStyle(.primary)
+                .padding(.top, 2)
+        }
+        .padding(.vertical, 4)
+        .listRowBackground(Theme.accentSoft)
+    }
+
+    /// The web reconnects through the same picker and POST: the server retires the ended
+    /// connection of that bank once the new consent is in, and keeps its chosen accounts.
+    private func reconnect(_ connection: BankConnection) {
+        Haptics.selection()
+        reconnecting = connection
+        showPicker = true
     }
 
     private func load() async {
@@ -651,10 +697,18 @@ struct BankPickerSheet: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.webAuthenticationSession) private var webAuth
     /// After the bank's consent went through, with the new connection when the server returned it.
-    var onConnected: (BankConnection?) -> Void = { _ in }
-    @State private var psuType = "personal"
+    var onConnected: (BankConnection?) -> Void
+    @State private var psuType: String
     @State private var banks: Loadable<[Aspsp]> = .idle
-    @State private var search = ""
+    @State private var search: String
+
+    /// A reconnect keeps the connection's own account type (web `preferredPsu`) and starts the
+    /// search on its bank, since only the same bank retires the ended connection.
+    init(preferredPsu: String? = nil, bankName: String? = nil, onConnected: @escaping (BankConnection?) -> Void = { _ in }) {
+        self.onConnected = onConnected
+        _psuType = State(initialValue: preferredPsu == "business" ? "business" : "personal")
+        _search = State(initialValue: bankName ?? "")
+    }
     @State private var chosen: Aspsp?
     @State private var historyKey = BankHistory.defaultKey
     @State private var connecting: String?
