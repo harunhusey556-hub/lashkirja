@@ -4,6 +4,8 @@ import LashKirjaCore
 struct MyyntiView: View {
     @Environment(AppModel.self) private var app
     @State private var state: Loadable<InvoiceList> = .idle
+    /// Coming back to the screen does not ask the server again unless something changed.
+    @State private var gate = ReloadGate()
     @State private var counts: [String: Int]?
     @State private var filter: SalesFilter = .all
     @State private var search = ""
@@ -75,7 +77,11 @@ struct MyyntiView: View {
                 app.dataVersion += 1
             }
         }
-        .task(id: app.dataVersion) { await load() }
+        .task(id: app.dataVersion) {
+            guard state.value == nil || gate.isDue(version: app.dataVersion) else { return }
+            gate.mark(version: app.dataVersion)
+            await load()
+        }
         .animation(.snappy, value: filter)
     }
 
@@ -143,10 +149,12 @@ struct MyyntiView: View {
 
     private func load() async {
         if state.value == nil { state = .loading }
+        // The list and the chip counts are independent: one round trip instead of two.
+        async let fresh = loadCounts()
         do { state = .loaded(try await app.api.get("/api/invoices")) }
         catch is CancellationError {}
         catch { if state.value == nil { state = .failed(error.userMessage) } }
-        if let fresh = await loadCounts() { counts = fresh }
+        if let fresh = await fresh { counts = fresh }
     }
 
     /// Per-status counts for the chips; counted by the server, so the list's row cap cannot skew them.

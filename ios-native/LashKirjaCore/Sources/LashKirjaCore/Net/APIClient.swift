@@ -116,3 +116,11 @@ public actor APIClient {
         throw APIErrorDecoder.decode(status: last?.status ?? 0, data: last?.body ?? Data())
     }
 }
+
+extension Result where Failure == Error {
+    /// The outcome of an async call as a value, so two calls can run side by side (`async let`)
+    /// and each failure still be handled on its own.
+    public init(asyncCatching body: () async throws -> Success) async {
+        do { self = .success(try await body()) } catch { self = .failure(error) }
+    }
+}

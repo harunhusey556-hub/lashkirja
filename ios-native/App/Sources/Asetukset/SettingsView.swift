@@ -24,7 +24,7 @@ struct SettingsView: View {
                     }
                 }
                 Section("Kuitit") {
-                    NavigationLink { EmailImportView { self.profile = $0 } } label: {
+                    NavigationLink { EmailImportView { self.profile = $0; app.profileChanged($0) } } label: {
                         SettingRow(title: "Sähköpostien tuonti", subtitle: mailSubtitle(profile.imapAccounts ?? []), symbol: "envelope")
                     }
                 }
@@ -61,7 +61,10 @@ struct SettingsView: View {
 
     private func loadProfile() async {
         profileFailure = nil
-        do { profile = (try await app.api.get("/api/profile") as ProfileResponse).profile }
+        do {
+            profile = (try await app.api.get("/api/profile") as ProfileResponse).profile
+            app.profileChanged(profile)
+        }
         catch is CancellationError {}
         catch { profileFailure = error.userMessage }
     }
@@ -71,6 +74,7 @@ struct SettingsView: View {
         var merged = new
         if merged.imapAccounts == nil { merged.imapAccounts = profile?.imapAccounts }
         profile = merged
+        app.profileChanged(merged)
     }
 
     private func mailSubtitle(_ accounts: [ImapAccount]) -> String {

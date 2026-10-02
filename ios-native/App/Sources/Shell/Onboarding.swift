@@ -61,6 +61,7 @@ struct OnboardingView: View {
         do {
             let _: Ignored = try await app.api.send("POST", "/api/onboarding", body: Body(entityType: entityType, vatRegistered: vatRegistered, vatPeriod: vatPeriod))
             Haptics.success()
+            app.profileChanged(nil)
             done()
         } catch {
             failure = error.userMessage

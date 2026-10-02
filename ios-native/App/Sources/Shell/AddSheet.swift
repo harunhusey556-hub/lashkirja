@@ -25,8 +25,9 @@ struct AddSheet: View {
             }
             .navigationTitle("Lisää")
             .navigationBarTitleDisplayMode(.inline)
-            .fullScreenCover(isPresented: $capture, onDismiss: { dismiss() }) { CaptureFlow(transactionId: nil) }
-            .sheet(isPresented: $newInvoice, onDismiss: { dismiss() }) { InvoiceFormView(existing: nil) }
+            // Screens reload only when something was actually added (AppModel.dataVersion).
+            .fullScreenCover(isPresented: $capture, onDismiss: { app.dataVersion += 1; dismiss() }) { CaptureFlow(transactionId: nil) }
+            .sheet(isPresented: $newInvoice, onDismiss: { app.dataVersion += 1; dismiss() }) { InvoiceFormView(existing: nil) }
             .fileImporter(isPresented: $importing, allowedContentTypes: [.commaSeparatedText, .plainText, .xml, .pdf, .spreadsheet, .data]) { result in
                 if case .success(let url) = result { Task { await upload(url) } }
             }
@@ -45,6 +46,7 @@ struct AddSheet: View {
             struct Result: Decodable { let count: Int? }
             let response = try await app.api.raw("POST", "/api/statements", body: form.finalize(), contentType: form.contentType)
             notice = "Tuotiin \((try? JSONDecoder().decode(Result.self, from: response.body))?.count ?? 0) tapahtumaa."
+            app.dataVersion += 1
             Haptics.success()
         } catch {
             notice = error.userMessage
@@ -58,6 +60,7 @@ struct AddSheet: View {
         do {
             let r: Result = try await app.api.send("POST", "/api/integrations/imap/sync", body: EmptyBody())
             notice = "Haettiin \(r.count ?? 0) kuittia sähköpostista."
+            if (r.count ?? 0) > 0 { app.dataVersion += 1 }
             Haptics.success()
         } catch let error as LKError where error.status == 404 {
             notice = "Sähköpostia ei ole yhdistetty. Yhdistä se kohdassa Asetukset › Sähköpostien tuonti."

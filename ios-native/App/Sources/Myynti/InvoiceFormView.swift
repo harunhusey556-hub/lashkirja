@@ -102,10 +102,15 @@ struct InvoiceFormView: View {
     private func prepare() async {
         guard !loaded else { return }
         loaded = true
-        if let list: CustomerList = try? await app.api.get("/api/customers") { customers = list.customers.filter { $0.archivedAt == nil } }
+        // Customers, catalog and profile load side by side: the form is ready after one round trip.
+        let api = app.api
+        async let customerList: CustomerList? = try? api.get("/api/customers")
+        async let catalogList: CatalogList? = try? api.get("/api/catalog")
+        async let profile = app.cachedProfile()
+        if let list = await customerList { customers = list.customers.filter { $0.archivedAt == nil } }
         // The form works without the catalog; the product picker just stays hidden.
-        if let list: CatalogList = try? await app.api.get("/api/catalog") { catalog = list.items }
-        if let profile: ProfileResponse = try? await app.api.get("/api/profile") { sellerRegistered = profile.profile.vatRegistered }
+        if let list = await catalogList { catalog = list.items }
+        if let profile = await profile { sellerRegistered = profile.vatRegistered }
         if let existing {
             draft.customerId = existing.customer.id
             draft.issueDate = existing.issueDate

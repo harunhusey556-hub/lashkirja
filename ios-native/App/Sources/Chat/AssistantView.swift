@@ -37,8 +37,10 @@ struct AssistantView: View {
             if model == nil {
                 let m = ChatModel(app: app)
                 model = m
-                await m.loadStatus()
+                // Status and history load side by side.
+                async let status: Void = m.loadStatus()
                 await m.loadLatest()
+                await status
             }
         }
     }
@@ -65,6 +67,7 @@ struct AssistantView: View {
                     }
                     ForEach(model.messages) { message in
                         Bubble(message: message, streaming: model.streaming && message.id == model.messages.last?.id)
+                            .equatable()
                             .id(message.id)
                     }
                     if let failure = model.failure {
@@ -80,8 +83,10 @@ struct AssistantView: View {
             // An inset rides on top of the keyboard; a composer stacked under the scroll view was left
             // behind it when the field took focus back after returning from a source page.
             .safeAreaInset(edge: .bottom, spacing: 0) { composer(model) }
-            .onChange(of: model.messages.last?.content) { _, _ in
-                if let last = model.messages.last { withAnimation(.snappy) { proxy.scrollTo(last.id, anchor: .bottom) } }
+            // A new message scrolls into view; a growing reply stays in view through the
+            // bottom anchor above, without an animation per update.
+            .onChange(of: model.messages.count) { _, _ in
+                if let last = model.messages.last { proxy.scrollTo(last.id, anchor: .bottom) }
             }
             // Opening a source page drops the focus, so coming back does not pop the keyboard up.
             .onDisappear { focused = false }
@@ -152,7 +157,8 @@ struct AssistantView: View {
     }
 }
 
-private struct Bubble: View {
+/// Equatable: while a reply streams, the earlier bubbles are not rebuilt (or their markdown re-parsed).
+private struct Bubble: View, Equatable {
     let message: ChatMessage
     let streaming: Bool
 
@@ -163,7 +169,8 @@ private struct Bubble: View {
                 if message.content.isEmpty && streaming {
                     ProgressView().padding(.vertical, 4)
                 } else {
-                    Text(markdown(message.content))
+                    // Plain text while the reply grows; markdown once it is complete.
+                    Text(streaming ? AttributedString(message.content) : markdown(message.content))
                         .textSelection(.enabled)
                 }
             }
@@ -251,7 +258,12 @@ private struct ConversationsSheet: View {
                     Button { model.startNew(); dismiss() } label: { Image(systemName: "square.and.pencil") }.accessibilityLabel("Uusi keskustelu")
                 }
             }
-            .task(id: "\(archived)|\(search)") { await load() }
+            .task(id: "\(archived)|\(search)") {
+                // Typing settles before the server is asked (one request, not one per letter).
+                if !search.isEmpty { try? await Task.sleep(nanoseconds: 300_000_000) }
+                guard !Task.isCancelled else { return }
+                await load()
+            }
             .alert("Nimeä keskustelu", isPresented: Binding(get: { renaming != nil }, set: { if !$0 { renaming = nil } })) {
                 TextField("Nimi", text: $newTitle)
                 Button("Tallenna") { if let c = renaming { Task { await patch(c, title: newTitle) } } }

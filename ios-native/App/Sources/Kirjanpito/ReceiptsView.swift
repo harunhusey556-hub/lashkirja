@@ -7,6 +7,8 @@ import LashKirjaCore
 struct ReceiptsView: View {
     @Environment(AppModel.self) private var app
     @State private var receipts: Loadable<[Receipt]> = .idle
+    /// Coming back to the screen does not ask the server again unless something changed.
+    @State private var gate = ReloadGate()
     @State private var total = 0
     @State private var truncated = false
     @State private var loadingMore = false
@@ -114,7 +116,11 @@ struct ReceiptsView: View {
         }
         .fullScreenCover(isPresented: $capture, onDismiss: { Task { await load() } }) { CaptureFlow(transactionId: nil) }
         .refreshable { await load() }
-        .task(id: ReloadKey(query: query, version: app.dataVersion)) { await load() }
+        .task(id: ReloadKey(query: query, version: app.dataVersion)) {
+            guard receipts.value == nil || gate.isDue(key: String(describing: query), version: app.dataVersion) else { return }
+            gate.mark(key: String(describing: query), version: app.dataVersion)
+            await load()
+        }
         .task(id: searchText) {
             // Typing settles before the list is asked again.
             try? await Task.sleep(nanoseconds: 350_000_000)

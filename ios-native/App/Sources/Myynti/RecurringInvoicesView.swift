@@ -430,11 +430,15 @@ struct RecurringFormSheet: View {
                 endDate = date
             }
         }
-        if let list: CustomerList = try? await app.api.get("/api/customers") {
+        let api = app.api
+        async let customerList: CustomerList? = try? api.get("/api/customers")
+        async let catalogList: CatalogList? = try? api.get("/api/catalog")
+        async let profile = app.cachedProfile()
+        if let list = await customerList {
             customers = list.customers.filter { $0.archivedAt == nil || $0.id == draft.customerId }
         }
-        if let list: CatalogList = try? await app.api.get("/api/catalog") { catalog = list.items }
-        if let profile: ProfileResponse = try? await app.api.get("/api/profile") { sellerRegistered = profile.profile.vatRegistered }
+        if let list = await catalogList { catalog = list.items }
+        if let profile = await profile { sellerRegistered = profile.vatRegistered }
         draft.lines.followSellerVat(registered: sellerRegistered)
     }
 

@@ -5,6 +5,8 @@ import LashKirjaCore
 struct BankFeedView: View {
     @Environment(AppModel.self) private var app
     @State private var state: Loadable<[BankFeed.Month]> = .idle
+    /// Coming back to the screen does not ask the server again unless something changed.
+    @State private var gate = ReloadGate()
     @State private var statements: [Statement] = []
     @State private var onlyOpen = false
     @State private var search = ""
@@ -135,7 +137,11 @@ struct BankFeedView: View {
         }
         .sheet(item: $selected, onDismiss: { Task { await load() } }) { row in BankRowSheet(row: row) }
         .refreshable { await load() }
-        .task(id: loadKey) { await load() }
+        .task(id: loadKey) {
+            guard state.value == nil || gate.isDue(key: month ?? "", version: app.dataVersion) else { return }
+            gate.mark(key: month ?? "", version: app.dataVersion)
+            await load()
+        }
         .animation(.snappy, value: onlyOpen)
     }
 

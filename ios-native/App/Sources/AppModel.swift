@@ -14,6 +14,9 @@ final class AppModel {
     private(set) var phase: Phase = .launching
     /// Bumped after a change made outside a screen (the "+" sheet), so that screen reloads.
     var dataVersion = 0
+    /// The owner's profile, loaded once and kept: forms and the ALV screen read VAT settings from
+    /// it instead of asking the server each time. Settings screens hand back what they save.
+    private(set) var profile: Profile?
     let auth: AuthService
     let api: APIClient
 
@@ -56,6 +59,7 @@ final class AppModel {
     func logout() async {
         // The lock belongs to the signed-in owner; the next account sets its own.
         AppLock.shared.disable()
+        profile = nil
         phase = .signedOut(notice: nil)
         let auth = self.auth
         Task { await auth.logout() }
@@ -63,7 +67,16 @@ final class AppModel {
 
     func foreground() async { await auth.refreshIfDue() }
 
+    func cachedProfile() async -> Profile? {
+        if let profile { return profile }
+        if let response: ProfileResponse = try? await api.get("/api/profile") { profile = response.profile }
+        return profile
+    }
+
+    func profileChanged(_ new: Profile?) { profile = new }
+
     private func signedOut(notice: String?) {
+        profile = nil
         phase = .signedOut(notice: notice)
     }
 }

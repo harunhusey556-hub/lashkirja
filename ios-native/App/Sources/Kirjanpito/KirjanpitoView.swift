@@ -6,6 +6,8 @@ struct KirjanpitoView: View {
     @State private var counts: ReceiptCounts.Counts?
     @State private var pending = 0
     @State private var openRows = 0
+    /// Coming back to the screen does not ask the server again unless something changed.
+    @State private var gate = ReloadGate()
 
     var body: some View {
         List {
@@ -43,7 +45,11 @@ struct KirjanpitoView: View {
         .background(Theme.canvas)
         .navigationTitle("Kirjanpito")
         .refreshable { await load() }
-        .task(id: app.dataVersion) { await load() }
+        .task(id: app.dataVersion) {
+            guard counts == nil || gate.isDue(version: app.dataVersion) else { return }
+            gate.mark(version: app.dataVersion)
+            await load()
+        }
     }
 
     /// The three hub figures load side by side; the pending figure is a count query, not the receipt list.
@@ -51,10 +57,15 @@ struct KirjanpitoView: View {
         let api = app.api
         async let all: ReceiptCounts? = try? api.get("/api/receipts/counts")
         async let waiting: ReceiptCounts? = try? api.get("/api/receipts/counts", query: ["reviewStatus": "pending"])
-        async let statements: StatementList? = try? api.get("/api/statements")
+        async let open: StatementOpenCount? = try? api.get("/api/statements/counts")
         if let c = await all { counts = c.counts }
         if let p = await waiting { pending = p.counts.all }
-        if let s = await statements { openRows = BankFeed.months(s.statements).reduce(0) { $0 + $1.open } }
+        if let o = await open {
+            openRows = o.open
+        } else if let s: StatementList = try? await api.get("/api/statements") {
+            // A server without the count route: the full feed, as before.
+            openRows = BankFeed.months(s.statements).reduce(0) { $0 + $1.open }
+        }
     }
 }
 

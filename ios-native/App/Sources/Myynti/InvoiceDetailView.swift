@@ -330,15 +330,7 @@ struct InvoiceDetailView: View {
         NSDecimalNumber(decimal: value).stringValue.replacingOccurrences(of: ".", with: ",")
     }
 
-    static func timestamp(_ iso: String) -> String {
-        let parser = ISO8601DateFormatter()
-        parser.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        guard let date = parser.date(from: iso) else { return iso }
-        let f = DateFormatter()
-        f.locale = Locale(identifier: "fi_FI")
-        f.dateFormat = "d.M.yyyy 'klo' H.mm"
-        return f.string(from: date)
-    }
+    static func timestamp(_ iso: String) -> String { APIDate.timestamp(iso) }
 }
 
 struct PaymentSheet: View {

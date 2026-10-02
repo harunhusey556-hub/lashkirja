@@ -125,12 +125,21 @@ struct BankAccountsView: View {
 
     private func load() async {
         var problem: String?
-        do { overview = try await app.api.get("/api/bank-accounts", query: showArchived ? ["includeArchived": "1"] : [:]) }
-        catch is CancellationError { return }
-        catch { problem = error.userMessage }
-        do { connections = try await app.api.get("/api/bank/connections") }
-        catch is CancellationError { return }
-        catch { problem = problem ?? error.userMessage }
+        // Accounts and connections load side by side.
+        let api = app.api
+        let query = showArchived ? ["includeArchived": "1"] : [String: String]()
+        async let accountsResult = Result<BankAccountsOverview, Error>(asyncCatching: { try await api.get("/api/bank-accounts", query: query) })
+        async let connectionsResult = Result<BankConnections, Error>(asyncCatching: { try await api.get("/api/bank/connections") })
+        let (accounts, links) = await (accountsResult, connectionsResult)
+        if Task.isCancelled { return }
+        switch accounts {
+        case .success(let value): overview = value
+        case .failure(let error): problem = error.userMessage
+        }
+        switch links {
+        case .success(let value): connections = value
+        case .failure(let error): problem = problem ?? error.userMessage
+        }
         loadFailed = connections == nil && problem != nil
         failure = problem
     }

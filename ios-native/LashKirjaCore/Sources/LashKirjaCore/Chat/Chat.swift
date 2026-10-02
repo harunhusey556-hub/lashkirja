@@ -77,15 +77,18 @@ public enum ChatEvent: Equatable, Sendable {
         let id: String?
     }
 
+    /// One decoder for every event of every stream (decoding is thread-safe; building one is not free).
+    nonisolated(unsafe) private static let decoder = JSONDecoder()
+
     public static func parse(_ json: String) throws -> ChatEvent? {
         let data = Data(json.utf8)
-        let raw = try JSONDecoder().decode(Raw.self, from: data)
+        let raw = try decoder.decode(Raw.self, from: data)
         if let delta = raw.delta { return .delta(delta) }
         if raw.done != nil || raw.incomplete != nil {
             if raw.id == nil || (raw.incomplete == true && raw.error != nil && raw.status != "incomplete") {
                 return .failed(raw.error ?? "Vastaus jäi kesken.")
             }
-            var message = try JSONDecoder().decode(ChatMessage.self, from: data)
+            var message = try decoder.decode(ChatMessage.self, from: data)
             if message.content.isEmpty, let error = raw.error { message.content = error }
             return .finished(message)
         }

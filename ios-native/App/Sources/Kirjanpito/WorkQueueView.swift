@@ -5,6 +5,8 @@ import LashKirjaCore
 struct WorkQueueView: View {
     @Environment(AppModel.self) private var app
     @State private var state: Loadable<Snapshot> = .idle
+    /// Coming back to the screen does not ask the server again unless something changed.
+    @State private var gate = ReloadGate()
     @State private var filter = "all"
     @State private var retrying: String?
     @State private var note: (text: String, failed: Bool)?
@@ -28,7 +30,11 @@ struct WorkQueueView: View {
         .background(Theme.canvas)
         .navigationTitle("Huomioitavat")
         .refreshable { await load() }
-        .task(id: app.dataVersion) { await load() }
+        .task(id: app.dataVersion) {
+            guard state.value == nil || gate.isDue(version: app.dataVersion) else { return }
+            gate.mark(version: app.dataVersion)
+            await load()
+        }
         // Poll only while a job is running (BOOKS-16); the task ends when the screen goes.
         .task(id: hasActiveJob) {
             guard hasActiveJob else { return }

@@ -58,8 +58,7 @@ struct AlvView: View {
         .refreshable { await load() }
         .task(id: period) {
             if kind == nil {
-                let profile: ProfileResponse? = try? await app.api.get("/api/profile")
-                kind = profile?.profile.vatPeriod ?? "month"
+                kind = await app.cachedProfile()?.vatPeriod ?? "month"
                 // No period given: the latest one that can be filed.
                 if period.isEmpty || period.count == 7 && kind != "month" {
                     period = period.isEmpty ? VatPeriod.previous(MonthKey.current(), kind: kind) : VatPeriod.key(for: period, kind: kind)

@@ -6,6 +6,8 @@ struct PurchaseInvoicesView: View {
     @Environment(AppModel.self) private var app
     @AppStorage("ostolaskut.filter") private var filterRaw = PurchaseFilter.all.rawValue
     @State private var state: Loadable<PurchaseInvoiceList> = .idle
+    /// Coming back to the screen does not ask the server again unless something changed.
+    @State private var gate = ReloadGate()
     @State private var counts: PurchaseStatusCounts?
     @State private var message: String?
     @State private var failure: String?
@@ -35,7 +37,11 @@ struct PurchaseInvoicesView: View {
             }
         }
         .refreshable { await load() }
-        .task(id: "\(filterRaw)|\(app.dataVersion)") { await load() }
+        .task(id: "\(filterRaw)|\(app.dataVersion)") {
+            guard state.value == nil || gate.isDue(key: filterRaw, version: app.dataVersion) else { return }
+            gate.mark(key: filterRaw, version: app.dataVersion)
+            await load()
+        }
         .disabled(busy)
         .sheet(isPresented: $showNew) { PurchaseInvoiceFormView(existing: nil) }
         .sheet(item: $payTarget) { invoice in PurchasePaymentSheet(invoice: invoice) }
@@ -207,6 +213,9 @@ struct PurchaseInvoicesView: View {
         if state.value == nil { state = .loading }
         var query: [String: String] = [:]
         if let status = filter.queryValue { query["status"] = status }
+        // Counts load alongside the list (one round trip instead of two).
+        let api = app.api
+        async let freshCounts: PurchaseInvoiceCountsResponse? = try? api.get("/api/purchase-invoices/counts")
         do {
             let list: PurchaseInvoiceList = try await app.api.get("/api/purchase-invoices", query: query)
             state = .loaded(list)
@@ -216,7 +225,7 @@ struct PurchaseInvoicesView: View {
         } catch {
             if state.value == nil { state = .failed(error.userMessage) } else { failure = error.userMessage }
         }
-        if let response: PurchaseInvoiceCountsResponse = try? await app.api.get("/api/purchase-invoices/counts") {
+        if let response = await freshCounts {
             counts = response.counts
         }
     }

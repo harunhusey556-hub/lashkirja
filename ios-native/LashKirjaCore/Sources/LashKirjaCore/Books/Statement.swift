@@ -132,3 +132,6 @@ public enum BankFeed {
         }
     }
 }
+
+/// `GET /api/statements/counts`: bank rows that still need the owner.
+public struct StatementOpenCount: Decodable, Sendable { public let open: Int }

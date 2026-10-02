@@ -5,6 +5,8 @@ import LashKirjaCore
 struct KotiView: View {
     @Environment(AppModel.self) private var app
     @State private var model: KotiModel?
+    /// Coming back to the tab does not ask the server again unless something changed.
+    @State private var gate = ReloadGate()
 
     var body: some View {
         Group {
@@ -16,6 +18,8 @@ struct KotiView: View {
         }
         .task(id: app.dataVersion) {
             if model == nil { model = KotiModel(api: app.api) }
+            guard model?.state.value == nil || gate.isDue(version: app.dataVersion) else { return }
+            gate.mark(version: app.dataVersion)
             await model?.load()
         }
     }

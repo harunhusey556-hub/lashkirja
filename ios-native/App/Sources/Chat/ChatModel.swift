@@ -135,16 +135,35 @@ final class ChatModel {
                 }
                 throw APIErrorDecoder.decode(status: http.statusCode, data: data)
             }
+            // Pieces are gathered and shown about every 60 ms: one update per token re-rendered
+            // the whole reply many times a second.
+            var pending = ""
+            var lastFlush = ContinuousClock.now
+            func flush() {
+                if !pending.isEmpty {
+                    let piece = pending
+                    pending = ""
+                    update(replyId) { $0.content += piece }
+                }
+                lastFlush = .now
+            }
+            defer { if liveReplyId == replyId { flush() } }
             for try await line in bytes.lines {
                 guard line.hasPrefix("data:") else { continue }
                 let payload = line.dropFirst(5).trimmingCharacters(in: .whitespaces)
                 guard let event = try? ChatEvent.parse(payload) else { continue }
                 guard liveReplyId == replyId else { return }
+                if case .delta(let piece) = event {
+                    pending += piece
+                    if ContinuousClock.now - lastFlush > .milliseconds(60) { flush() }
+                    continue
+                }
+                flush()
                 switch event {
                 case .started(let id):
                     conversationId = id
-                case .delta(let piece):
-                    update(replyId) { $0.content += piece }
+                case .delta:
+                    break
                 case .finished(let message):
                     update(replyId) { $0 = message }
                 case .failed(let message):
