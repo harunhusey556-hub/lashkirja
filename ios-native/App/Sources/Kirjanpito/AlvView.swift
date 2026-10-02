@@ -4,6 +4,7 @@ import LashKirjaCore
 struct AlvView: View {
     @Environment(AppModel.self) private var app
     @State var period: String
+    @State private var kind: String?
     @State private var state: Loadable<AlvReport> = .idle
     @State private var failure: String?
 
@@ -13,9 +14,10 @@ struct AlvView: View {
                 HStack {
                     Button { Task { await step(-1) } } label: { Image(systemName: "chevron.left") }
                     Spacer()
-                    Text(MonthKey.title(period, currentYear: String(MonthKey.current().prefix(4)))).font(.headline)
+                    Text(VatPeriod.title(period)).font(.headline)
                     Spacer()
-                    Button { Task { await step(1) } } label: { Image(systemName: "chevron.right") }.disabled(period >= MonthKey.current())
+                    Button { Task { await step(1) } } label: { Image(systemName: "chevron.right") }
+                        .disabled(period >= VatPeriod.key(for: MonthKey.current(), kind: kind))
                 }
                 .buttonStyle(.borderless)
             }
@@ -51,7 +53,18 @@ struct AlvView: View {
         .background(Theme.canvas)
         .navigationTitle("ALV-ilmoitus")
         .refreshable { await load() }
-        .task { await load() }
+        .task(id: period) {
+            if kind == nil {
+                let profile: ProfileResponse? = try? await app.api.get("/api/profile")
+                kind = profile?.profile.vatPeriod ?? "month"
+                // No period given: the latest one that can be filed.
+                if period.isEmpty || period.count == 7 && kind != "month" {
+                    period = period.isEmpty ? VatPeriod.previous(MonthKey.current(), kind: kind) : VatPeriod.key(for: period, kind: kind)
+                    return
+                }
+            }
+            await load()
+        }
     }
 
     private func field(_ f: AlvReport.SalesField) -> some View {
@@ -66,9 +79,8 @@ struct AlvView: View {
     }
 
     private func step(_ delta: Int) async {
-        period = MonthKey.shift(period, by: delta)
         state = .loading
-        await load()
+        period = VatPeriod.shift(period, by: delta)
     }
 
     private func load() async {

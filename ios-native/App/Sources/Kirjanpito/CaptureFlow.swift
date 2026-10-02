@@ -108,6 +108,7 @@ struct ReceiptEditor: View {
     @State private var busy = false
     @State private var failure: String?
     @State private var duplicate = false
+    @State private var savedId: String?
 
     var body: some View {
         Form {
@@ -161,13 +162,21 @@ struct ReceiptEditor: View {
         failure = nil
         defer { busy = false }
         do {
-            let saved: Saved = try await app.api.send("POST", "/api/receipts/save", body: draft)
+            // A retry after a failed match only repeats the match, never the save.
+            let receiptId: String
+            if let savedId {
+                receiptId = savedId
+            } else {
+                let saved: Saved = try await app.api.send("POST", "/api/receipts/save", body: draft)
+                receiptId = saved.receipt.id
+                savedId = receiptId
+            }
             if let transactionId {
-                let _: Ignored = try await app.api.send("POST", "/api/matching/confirm", body: Match(transactionId: transactionId, receiptId: saved.receipt.id))
+                let _: Ignored = try await app.api.send("POST", "/api/matching/confirm", body: Match(transactionId: transactionId, receiptId: receiptId))
             }
             Haptics.success()
             done()
-        } catch let error as LKError where error.status == 409 {
+        } catch let error as LKError where error.isDuplicate && savedId == nil {
             duplicate = true
             failure = error.message
         } catch {

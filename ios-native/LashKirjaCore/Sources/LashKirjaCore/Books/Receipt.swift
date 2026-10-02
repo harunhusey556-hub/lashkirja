@@ -87,3 +87,11 @@ public struct ReceiptCounts: Decodable, Sendable {
     public struct Counts: Decodable, Sendable { public let all: Int; public let tulo: Int; public let meno: Int; public let linked: Int; public let unlinked: Int }
     public let counts: Counts
 }
+
+/// `POST /api/receipts/batch-approve` answers 200 even when some receipts were refused.
+public struct BatchApproveResult: Decodable, Sendable {
+    public struct Failure: Decodable, Sendable { public let id: String; public let error: String? }
+    public let succeeded: Int?
+    public let failed: [Failure]?
+    public var firstError: String? { failed?.first.map { $0.error ?? "Hyväksyntä epäonnistui." } }
+}

@@ -185,7 +185,12 @@ struct CustomerFormSheet: View {
                     Button("Tallenna") { Task { await save() } }.disabled(busy || draft.name.trimmingCharacters(in: .whitespaces).isEmpty)
                 }
             }
-            .onAppear { if let existing { draft = CustomerDraft(existing) } }
+            .onAppear {
+                if let existing {
+                    draft = CustomerDraft(existing)
+                    draft.clearsEmptyFields = true
+                }
+            }
         }
     }
 

@@ -95,7 +95,13 @@ struct ReceiptsView: View {
         failure = nil
         defer { busy = false }
         do {
-            let _: Ignored = try await app.api.send("POST", "/api/receipts/batch-approve", body: Body(receiptIds: ids))
+            let result: BatchApproveResult = try await app.api.send("POST", "/api/receipts/batch-approve", body: Body(receiptIds: ids))
+            if let problem = result.firstError {
+                failure = problem
+                Haptics.error()
+                await load()
+                return
+            }
             Haptics.success()
             withAnimation { pending.removeAll { ids.contains($0.id) } }
             await load()

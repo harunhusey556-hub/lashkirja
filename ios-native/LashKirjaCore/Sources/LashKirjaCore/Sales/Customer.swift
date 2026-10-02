@@ -43,6 +43,8 @@ public struct CustomerDraft: Encodable, Sendable, Equatable {
     public var addressCity = ""
     public var defaultPaymentTermDays = 14
     public var notes = ""
+    /// A PATCH sends emptied fields as null so they are cleared; a POST leaves them out.
+    public var clearsEmptyFields = false
 
     public init() {}
 
@@ -59,6 +61,12 @@ public struct CustomerDraft: Encodable, Sendable, Equatable {
         notes = c.notes ?? ""
     }
 
+    public static func == (a: CustomerDraft, b: CustomerDraft) -> Bool {
+        a.name == b.name && a.businessId == b.businessId && a.contactPerson == b.contactPerson && a.email == b.email
+            && a.phone == b.phone && a.addressStreet == b.addressStreet && a.addressPostalCode == b.addressPostalCode
+            && a.addressCity == b.addressCity && a.defaultPaymentTermDays == b.defaultPaymentTermDays && a.notes == b.notes
+    }
+
     enum CodingKeys: String, CodingKey {
         case name, businessId, contactPerson, email, phone, addressStreet, addressPostalCode, addressCity, defaultPaymentTermDays, notes
     }
@@ -67,7 +75,7 @@ public struct CustomerDraft: Encodable, Sendable, Equatable {
         var c = encoder.container(keyedBy: CodingKeys.self)
         func put(_ value: String, _ key: CodingKeys) throws {
             let t = value.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !t.isEmpty { try c.encode(t, forKey: key) }
+            if !t.isEmpty { try c.encode(t, forKey: key) } else if clearsEmptyFields { try c.encodeNil(forKey: key) }
         }
         try c.encode(name.trimmingCharacters(in: .whitespacesAndNewlines), forKey: .name)
         try put(businessId, .businessId)

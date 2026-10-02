@@ -53,6 +53,8 @@ export const GET = withErrorHandler(async (
       vendor: true,
       date: true,
       totalAmountCents: true,
+      // The native app shows Hyväksy / Hylkää from it.
+      reviewStatus: true,
       vatDetails: true,
       category: true,
       notes: true,

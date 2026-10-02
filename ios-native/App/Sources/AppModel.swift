@@ -52,6 +52,8 @@ final class AppModel {
     /// Signed out at once; the server revoke runs behind (it may take the full
     /// timeout when the server is unreachable, and then retries next launch).
     func logout() async {
+        // The lock belongs to the signed-in owner; the next account sets its own.
+        AppLock.shared.disable()
         phase = .signedOut(notice: nil)
         let auth = self.auth
         Task { await auth.logout() }

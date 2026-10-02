@@ -14,6 +14,16 @@ public struct LKError: Error, Equatable, Sendable {
         self.fields = fields
     }
 
+    /// The server's "same receipt already saved" 409 (details.isDuplicate).
+    public var isDuplicate: Bool { fields["isDuplicate"] == "true" }
+
+    /// A 401 that means the session is gone (not, say, a wrong current password).
+    public var endsSession: Bool {
+        guard status == 401 else { return false }
+        if code == "UNAUTHORIZED" { return true }
+        return ["Ei kirjautunut", "Unauthorized", "Kirjautuminen vaaditaan", LKError.unreachable].contains(message)
+    }
+
     public static let unreachable = "Palvelimeen ei saada yhteyttä. Yritä hetken päästä uudelleen."
     public static func offline() -> LKError { LKError(status: 0, code: "OFFLINE", message: "Ei verkkoyhteyttä.") }
 }
@@ -23,9 +33,20 @@ public enum APIErrorDecoder {
     private struct Nested: Decodable {
         struct Body: Decodable {
             struct Detail: Decodable { let field: String?; let message: String }
+            struct Flags: Decodable { let isDuplicate: Bool? }
             let code: String?
             let message: String
             let details: [Detail]?
+            let flags: Flags?
+            enum CodingKeys: String, CodingKey { case code, message, details }
+            init(from decoder: Decoder) throws {
+                let c = try decoder.container(keyedBy: CodingKeys.self)
+                code = try c.decodeIfPresent(String.self, forKey: .code)
+                message = try c.decode(String.self, forKey: .message)
+                // `details` is a field list for validation errors, an object elsewhere (409 duplicate).
+                details = try? c.decodeIfPresent([Detail].self, forKey: .details)
+                flags = try? c.decodeIfPresent(Flags.self, forKey: .details)
+            }
         }
         let error: Body
     }
@@ -41,6 +62,7 @@ public enum APIErrorDecoder {
             for detail in nested.error.details ?? [] {
                 if let field = detail.field { fields[field] = detail.message }
             }
+            if nested.error.flags?.isDuplicate == true { fields["isDuplicate"] = "true" }
             return LKError(status: status, code: nested.error.code, message: nested.error.message, fields: fields)
         }
         return LKError(status: status, message: LKError.unreachable)

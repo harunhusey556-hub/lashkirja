@@ -195,7 +195,10 @@ struct BankRowSheet: View {
     private func approveSale() async {
         guard let id = row.suggestedReceiptId else { return }
         struct Body: Encodable { let receiptIds: [String] }
-        await run { let _: Ignored = try await app.api.send("POST", "/api/receipts/batch-approve", body: Body(receiptIds: [id])) }
+        await run {
+            let result: BatchApproveResult = try await app.api.send("POST", "/api/receipts/batch-approve", body: Body(receiptIds: [id]))
+            if let problem = result.firstError { throw LKError(status: 200, message: problem) }
+        }
     }
 
     private func confirm(_ receiptId: String) async {

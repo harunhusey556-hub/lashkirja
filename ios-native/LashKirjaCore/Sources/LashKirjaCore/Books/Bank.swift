@@ -8,6 +8,11 @@ public struct BankAccount: Decodable, Sendable, Identifiable, Hashable {
     public let currency: String?
     public let balance: Decimal?
     public let archivedAt: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id, name, bankName, iban, currency, archivedAt
+        case balance = "currentBalance"
+    }
 }
 
 public struct BankAccountsOverview: Decodable, Sendable {

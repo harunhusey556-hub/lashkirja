@@ -274,6 +274,7 @@ export async function GET(req: NextRequest) {
         vendor: true,
         date: true,
         totalAmountCents: true,
+        reviewStatus: true,
         category: true,
         type: true,
         reference: true,

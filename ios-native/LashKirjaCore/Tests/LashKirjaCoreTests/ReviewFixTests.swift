@@ -32,7 +32,7 @@ final class SwapTransport: HTTPTransport, @unchecked Sendable {
     init(_ token: SwitchableToken) { self.token = token }
     func send(_ request: URLRequest) async throws -> HTTPResponse {
         await token.set("NEW") // the owner signed in again while the old request was in flight
-        return HTTPResponse(status: 401, headers: apiHeader, body: Data(#"{"error":"x"}"#.utf8))
+        return HTTPResponse(status: 401, headers: apiHeader, body: Data(#"{"error":"Ei kirjautunut"}"#.utf8))
     }
 }
 

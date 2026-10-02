@@ -106,11 +106,12 @@ public actor APIClient {
             // Only a request that carried the session that is still current
             // ends it: a wrong password (no token) or a stale request from a
             // previous sign-in must not sign the owner out.
-            if response.status == 401, let sentToken, let handler = onUnauthorized,
+            let failure = APIErrorDecoder.decode(status: response.status, data: response.body)
+            if failure.endsSession, let sentToken, let handler = onUnauthorized,
                await tokens.currentToken() == sentToken {
                 await handler()
             }
-            throw APIErrorDecoder.decode(status: response.status, data: response.body)
+            throw failure
         }
         throw APIErrorDecoder.decode(status: last?.status ?? 0, data: last?.body ?? Data())
     }

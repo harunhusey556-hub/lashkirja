@@ -23,7 +23,7 @@ struct KirjanpitoView: View {
                 }
             }
             Section("Ilmoitukset ja kaudet") {
-                NavigationLink(value: Route.alv(MonthKey.current())) {
+                NavigationLink(value: Route.alv("")) {
                     HubRow(title: "ALV-ilmoitus", subtitle: "Kuukauden arvonlisävero", symbol: "percent")
                 }
             }
@@ -37,7 +37,7 @@ struct KirjanpitoView: View {
 
     private func load() async {
         if let c: ReceiptCounts = try? await app.api.get("/api/receipts/counts") { counts = c.counts }
-        if let p: ReceiptList = try? await app.api.get("/api/receipts", query: ["reviewStatus": "pending"]) { pending = p.receipts.count }
+        if let p: ReceiptList = try? await app.api.get("/api/receipts", query: ["reviewStatus": "pending"]) { pending = p.count ?? p.receipts.count }
         if let s: StatementList = try? await app.api.get("/api/statements") {
             openRows = BankFeed.months(s.statements).reduce(0) { $0 + $1.open }
         }

@@ -97,7 +97,7 @@ struct InvoiceFormView: View {
         defer { busy = false }
         do {
             if let existing {
-                let _: InvoiceResponse = try await app.api.send("PATCH", "/api/invoices/\(existing.id)", body: draft)
+                let _: InvoiceResponse = try await app.api.send("PATCH", "/api/invoices/\(existing.id)", body: InvoicePatch(draft: draft, expectedUpdatedAt: existing.updatedAt))
             } else {
                 let _: InvoiceResponse = try await app.api.send("POST", "/api/invoices", body: draft, idempotencyKey: key)
             }

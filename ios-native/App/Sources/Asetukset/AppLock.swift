@@ -18,9 +18,10 @@ final class AppLock {
     private let service = "fi.tiyouba.lashkirja.lock"
     private static let rounds = 100_000
 
-    /// A cold start opens locked when a PIN is set.
+    /// A cold start opens locked when the lock is on. The flag is not a secret:
+    /// a PIN that cannot be read still means locked (fail closed).
     private init() {
-        isLocked = read("pin") != nil
+        isLocked = UserDefaults.standard.bool(forKey: "lock.enabled") || read("pin") != nil
         if let state = read("backoff").flatMap({ try? JSONDecoder().decode(Backoff.self, from: $0) }) {
             failures = state.failures
             waitUntil = state.waitUntil
@@ -29,7 +30,7 @@ final class AppLock {
 
     private struct Backoff: Codable { let failures: Int; let waitUntil: Date? }
 
-    var isEnabled: Bool { read("pin") != nil }
+    var isEnabled: Bool { UserDefaults.standard.bool(forKey: "lock.enabled") || read("pin") != nil }
     var biometricsEnabled: Bool {
         get { UserDefaults.standard.bool(forKey: "lock.biometrics") }
         set { UserDefaults.standard.set(newValue, forKey: "lock.biometrics") }
@@ -43,11 +44,13 @@ final class AppLock {
     func setPIN(_ pin: String) -> Bool {
         let salt = (0..<16).map { _ in String(format: "%02x", UInt8.random(in: 0...255)) }.joined()
         guard write("pin", Data("\(salt):\(Self.hash(salt: salt, pin: pin))".utf8)) else { return false }
+        UserDefaults.standard.set(true, forKey: "lock.enabled")
         resetBackoff()
         return true
     }
 
     func disable() {
+        UserDefaults.standard.set(false, forKey: "lock.enabled")
         delete("pin")
         delete("backoff")
         biometricsEnabled = false

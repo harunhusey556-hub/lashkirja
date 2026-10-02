@@ -50,8 +50,9 @@ public struct ProfilePatch: Encodable {
             let normalized = (clean?.isEmpty ?? true) ? nil : clean
             if normalized != a { values[key] = .text(normalized) }
         }
-        text("firstName", old.firstName, new.firstName)
-        text("lastName", old.lastName, new.lastName)
+        // Names cannot be null on the server: an emptied name is left unchanged.
+        if let first = new.firstName?.trimmingCharacters(in: .whitespacesAndNewlines), !first.isEmpty, first != old.firstName { values["firstName"] = .text(first) }
+        if let last = new.lastName?.trimmingCharacters(in: .whitespacesAndNewlines), !last.isEmpty, last != old.lastName { values["lastName"] = .text(last) }
         if old.entityType != new.entityType { values["entityType"] = .text(new.entityType) }
         if old.vatRegistered != new.vatRegistered { values["vatRegistered"] = .flag(new.vatRegistered) }
         if old.vatPeriod != new.vatPeriod, let period = new.vatPeriod { values["vatPeriod"] = .text(period) }
@@ -65,7 +66,6 @@ public struct ProfilePatch: Encodable {
         text("invoiceBic", old.invoiceBic, new.invoiceBic)
         text("invoiceTerms", old.invoiceTerms, new.invoiceTerms)
         if old.lateInterestPercent != new.lateInterestPercent { values["lateInterestPercent"] = .number(new.lateInterestPercent) }
-        if old.reminderFeeCents != new.reminderFeeCents { values["reminderFeeCents"] = .integer(new.reminderFeeCents) }
     }
 
     struct Key: CodingKey {

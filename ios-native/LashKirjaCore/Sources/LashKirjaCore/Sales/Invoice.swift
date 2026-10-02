@@ -82,6 +82,34 @@ public struct Invoice: Decodable, Sendable, Identifiable, Hashable {
     public var isCreditNote: Bool { documentKind == "credit_note" }
 }
 
+/// `PATCH /api/invoices/{id}` for a draft: the server wants the version it
+/// is replacing (`expectedUpdatedAt`) and a due date, not a payment term.
+public struct InvoicePatch: Encodable, Sendable {
+    public let draft: InvoiceDraft
+    public let expectedUpdatedAt: String
+
+    public init(draft: InvoiceDraft, expectedUpdatedAt: String) {
+        self.draft = draft
+        self.expectedUpdatedAt = expectedUpdatedAt
+    }
+
+    enum CodingKeys: String, CodingKey { case customerId, issueDate, dueDate, notes, lines, expectedUpdatedAt }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(draft.customerId, forKey: .customerId)
+        try c.encode(draft.issueDate, forKey: .issueDate)
+        if let issue = APIDate.day(draft.issueDate),
+           let due = Calendar(identifier: .gregorian).date(byAdding: .day, value: draft.paymentTermDays, to: issue) {
+            try c.encode(APIDate.dayString(due), forKey: .dueDate)
+        }
+        let notes = draft.notes.trimmingCharacters(in: .whitespacesAndNewlines)
+        if notes.isEmpty { try c.encodeNil(forKey: .notes) } else { try c.encode(notes, forKey: .notes) }
+        try c.encode(draft.lines, forKey: .lines)
+        try c.encode(expectedUpdatedAt, forKey: .expectedUpdatedAt)
+    }
+}
+
 public struct InvoiceList: Decodable, Sendable {
     public struct Aging: Decodable, Sendable {
         public let totalOpen: Decimal
