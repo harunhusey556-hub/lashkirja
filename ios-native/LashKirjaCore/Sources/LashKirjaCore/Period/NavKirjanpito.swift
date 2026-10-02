@@ -2,9 +2,10 @@ import Foundation
 
 extension JobsQueue {
     /// Failed background jobs (a read, a bank fetch, an email check) still on the list.
-    public static func failedCount(_ jobs: [BackgroundJob]) -> Int {
+    public static func failedCount(_ jobs: [BackgroundJob], connections: [ConnectionState]? = nil,
+                                   dismissedLocally: Set<String> = []) -> Int {
         // Only what is still wrong: a failure the next run put right does not count.
-        openFailures(jobs).count
+        openFailures(jobs, connections: connections, dismissedLocally: dismissedLocally).count
     }
 
     /// Koti's "Tuonnit ja virheet" row: "1 tuonti tai haku epäonnistui".

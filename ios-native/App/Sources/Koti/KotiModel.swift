@@ -40,12 +40,15 @@ final class KotiModel {
         // The job list loads beside the dashboard; it only decides whether the failures row shows.
         let api = self.api
         async let jobsList: JobsList? = try? api.get("/api/jobs")
+        async let connections = JobDismissals.connections(api: api)
         do {
             let dashboard: Dashboard = try await api.get("/api/dashboard", query: ["month": month])
             guard loads.isCurrent(generation), month == self.month else { return }
             hidden.reloaded(present: dashboard.items.map(\.id), loadGeneration: generation)
             state = .loaded(dashboard)
-            if let jobs = await jobsList, loads.isCurrent(generation) { failedJobs = JobsQueue.failedCount(jobs.jobs) }
+            if let jobs = await jobsList, loads.isCurrent(generation) {
+                failedJobs = JobsQueue.failedCount(jobs.jobs, connections: await connections, dismissedLocally: JobDismissals.ids)
+            }
             await loadVatDue(dashboard, generation: generation)
         } catch is CancellationError {
             return

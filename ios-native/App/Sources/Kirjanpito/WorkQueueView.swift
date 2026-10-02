@@ -16,12 +16,15 @@ struct WorkQueueView: View {
     struct Snapshot {
         var jobs: [BackgroundJob]
         var items: [WorkQueueItem]
+        /// nil when the bank connections did not load: then no bank failure is guessed away.
+        var connections: [JobsQueue.ConnectionState]?
     }
+    @State private var dismissing: String?
 
     var body: some View {
         List {
             if let data = state.value {
-                failuresSection(JobsQueue.listedFailures(data.jobs))
+                failuresSection(JobsQueue.listedFailures(data.jobs, connections: data.connections, dismissedLocally: JobDismissals.ids))
                 jobsSection(JobsQueue.visibleJobs(data.jobs))
                 itemsSections(data.items)
             } else {
@@ -68,10 +71,22 @@ struct WorkQueueView: View {
                             Text(APIDate.timestamp(job.createdAt)).font(.caption).foregroundStyle(Theme.ink2)
                         }
                         Text(help.explanation).font(.subheadline).foregroundStyle(Theme.ink)
-                        if let title = help.actionTitle, let route = route(for: help.action) {
-                            NavigationLink(value: route) {
-                                Text(title).font(.subheadline.weight(.semibold)).foregroundStyle(Theme.accent)
+                        HStack(spacing: 16) {
+                            if let title = help.actionTitle, let route = route(for: help.action) {
+                                NavigationLink(value: route) {
+                                    Text(title).font(.subheadline.weight(.semibold)).foregroundStyle(Theme.accent)
+                                }
                             }
+                            Spacer(minLength: 0)
+                            Button {
+                                Task { await dismiss(job) }
+                            } label: {
+                                if dismissing == job.id { ProgressView().controlSize(.small) } else { Text("Kuittaa").font(.subheadline) }
+                            }
+                            .buttonStyle(.borderless)
+                            .foregroundStyle(Theme.ink2)
+                            .disabled(dismissing != nil)
+                            .accessibilityLabel("Kuittaa virhe: \(job.kindLabel)")
                         }
                     }
                     .padding(.vertical, 4)
@@ -79,7 +94,7 @@ struct WorkQueueView: View {
             } header: {
                 Text("Epäonnistuneet")
             } footer: {
-                Text("Kun seuraava haku onnistuu, virhe poistuu tästä itsestään.")
+                Text("Virhe poistuu itsestään, kun seuraava haku onnistuu. Jos asia on jo hoidettu, kuittaa se.")
             }
         }
     }
@@ -217,12 +232,28 @@ struct WorkQueueView: View {
             let api = app.api
             async let jobs: JobsList = api.get("/api/jobs")
             async let queue: WorkQueueList = api.get("/api/work-queue")
-            let snapshot = Snapshot(jobs: try await jobs.jobs, items: try await queue.items)
+            async let connections = JobDismissals.connections(api: api)
+            let snapshot = Snapshot(jobs: try await jobs.jobs, items: try await queue.items, connections: await connections)
             state = .loaded(snapshot)
         } catch is CancellationError {
         } catch {
             // "Not loaded" is not "empty" (BOOKS-16): a loaded list stays, with the error below it.
             if state.value == nil { state = .failed(error.userMessage) } else { note = (error.userMessage, true) }
+        }
+    }
+
+    private func dismiss(_ job: BackgroundJob) async {
+        guard dismissing == nil else { return }
+        dismissing = job.id
+        defer { dismissing = nil }
+        do {
+            try await JobDismissals.dismiss(job.id, api: app.api)
+            Haptics.success()
+            await load()
+        } catch is CancellationError {
+        } catch {
+            note = (error.userMessage, true)
+            Haptics.error()
         }
     }
 

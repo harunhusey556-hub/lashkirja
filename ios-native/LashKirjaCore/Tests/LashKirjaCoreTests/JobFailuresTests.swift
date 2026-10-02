@@ -41,3 +41,37 @@ private func jobs(_ rows: [(id: String, kind: String, status: String, resource: 
     // A failed read has its retry in Korjattavat; it is not listed twice.
     #expect(JobsQueue.listedFailures(list).map(\.id) == ["b", "m"])
 }
+
+@Test func aBankFailureClosesWhenItsConnectionIsGoneOrHasFetchedSince() throws {
+    let list = try jobs([
+        ("gone", "bank_sync", "failed", "old-connection", "Valitse ainakin yksi tili ennen hakua."),
+        ("fixed", "bank_sync", "failed", "c1", "Valitse ainakin yksi tili ennen hakua."),
+        ("still", "bank_sync", "failed", "c2", "Valitse ainakin yksi tili ennen hakua."),
+    ])
+    // Failures were at 2026-10-02T21:40Z; c1 fetched after that, c2 only before.
+    let connections = [
+        JobsQueue.ConnectionState(id: "c1", lastSuccessAt: "2026-10-03T08:00:00.000Z"),
+        JobsQueue.ConnectionState(id: "c2", lastSuccessAt: "2026-10-01T08:00:00.000Z"),
+    ]
+    #expect(JobsQueue.openFailures(list, connections: connections).map(\.id) == ["still"])
+    // Without the connection list (it failed to load) nothing is guessed away.
+    #expect(JobsQueue.openFailures(list, connections: nil).map(\.id) == ["gone", "fixed", "still"])
+}
+
+@Test func aDismissedFailureIsNoLongerOpen() throws {
+    let list = try jobs([
+        ("a", "bank_sync", "dismissed", "c1", "x"),
+        ("b", "email_scan", "failed", "i1", "x"),
+    ])
+    #expect(JobsQueue.openFailures(list).map(\.id) == ["b"])
+    #expect(JobsQueue.openFailures(list, dismissedLocally: ["b"]).isEmpty)
+}
+
+@Test func connectionStatesComeFromTheConnectionList() throws {
+    let json = #"{"enabled":true,"ready":true,"connections":[{"id":"c1","aspspName":"Nordea","aspspCountry":"FI","psuType":"business","status":"active","lastSuccessAt":"2026-10-03T08:00:00.000Z","accounts":[]},{"id":"c0","aspspName":"Nordea","aspspCountry":"FI","psuType":"business","status":"revoked","accounts":[]}]}"#
+    let list = try JSONDecoder().decode(BankConnections.self, from: Data(json.utf8))
+    #expect(JobsQueue.connectionStates(list) == [
+        JobsQueue.ConnectionState(id: "c1", lastSuccessAt: "2026-10-03T08:00:00.000Z"),
+        JobsQueue.ConnectionState(id: "c0", lastSuccessAt: nil, retired: true),
+    ])
+}

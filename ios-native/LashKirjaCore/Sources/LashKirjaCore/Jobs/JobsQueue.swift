@@ -166,24 +166,52 @@ extension JobsQueue {
         public let actionTitle: String?
     }
 
-    /// Failures not yet put right: one followed by a finished run of the same kind on the same
-    /// resource (the next bank sync went through) is over. Jobs come newest first.
-    public static func openFailures(_ jobs: [BackgroundJob]) -> [BackgroundJob] {
+    /// What Koti and "Tuonnit ja virheet" know of a bank connection, to tell a stale failure.
+    public struct ConnectionState: Equatable, Sendable {
+        public let id: String
+        public let lastSuccessAt: String?
+        /// Revoked or replaced: nothing will ever sync it again.
+        public let retired: Bool
+        public init(id: String, lastSuccessAt: String?, retired: Bool = false) {
+            self.id = id
+            self.lastSuccessAt = lastSuccessAt
+            self.retired = retired
+        }
+    }
+
+    /// The connection states from `GET /api/bank/connections`; a revoked one is retired.
+    public static func connectionStates(_ list: BankConnections) -> [ConnectionState] {
+        list.connections.map { ConnectionState(id: $0.id, lastSuccessAt: $0.lastSuccessAt, retired: $0.status == "revoked") }
+    }
+
+    /// Failures not yet put right. A failure is over when the owner dismissed it ("Kuittaa"),
+    /// when a later run of the same kind on the same resource finished, or, for a bank sync,
+    /// when its connection is gone (reconnected under a new id, removed) or has fetched since.
+    /// Without the connection list (`nil`, it failed to load) nothing is guessed away.
+    public static func openFailures(_ jobs: [BackgroundJob], connections: [ConnectionState]? = nil,
+                                    dismissedLocally: Set<String> = []) -> [BackgroundJob] {
         jobs.enumerated().compactMap { index, job in
-            guard job.status == "failed" else { return nil }
+            guard job.status == "failed", !dismissedLocally.contains(job.id) else { return nil }
             // Without a resource (each receipt read is its own file) nothing later closes it.
             guard let resource = job.resourceId else { return job }
             let fixedLater = jobs[..<index].contains { later in
                 later.kind == job.kind && later.resourceId == resource && later.status == "done"
             }
-            return fixedLater ? nil : job
+            if fixedLater { return nil }
+            if job.kind == "bank_sync", let connections {
+                guard let connection = connections.first(where: { $0.id == resource }), !connection.retired else { return nil }
+                if let success = connection.lastSuccessAt.flatMap(APIDate.instant),
+                   let failed = APIDate.instant(job.createdAt), success > failed { return nil }
+            }
+            return job
         }
     }
 
     /// The failures listed on "Tuonnit ja virheet": a failed receipt read is left to Korjattavat,
     /// where it has its retry, so it is not shown twice.
-    public static func listedFailures(_ jobs: [BackgroundJob]) -> [BackgroundJob] {
-        openFailures(jobs).filter { $0.kind != "document_analysis" }
+    public static func listedFailures(_ jobs: [BackgroundJob], connections: [ConnectionState]? = nil,
+                                      dismissedLocally: Set<String> = []) -> [BackgroundJob] {
+        openFailures(jobs, connections: connections, dismissedLocally: dismissedLocally).filter { $0.kind != "document_analysis" }
     }
 
     public static func help(for job: BackgroundJob) -> FailureHelp {
