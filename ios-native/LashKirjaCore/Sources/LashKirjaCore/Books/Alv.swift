@@ -22,6 +22,15 @@ public struct AlvReport: Decodable, Sendable {
         }
     }
 
+    /// Where the reported VAT came from, so a field can open its documents (web FP-12).
+    public struct Sources: Decodable, Sendable {
+        public let receiptSalesVat: Decimal?
+        public let invoiceSalesVat: Decimal?
+        public let invoiceCount: Int?
+        public let purchaseInvoiceVat: Decimal?
+        public let purchaseInvoiceCount: Int?
+    }
+
     public let period: Period
     public let vatRegistered: Bool
     public let field301: SalesField
@@ -34,4 +43,5 @@ public struct AlvReport: Decodable, Sendable {
     public let pendingReceiptCount: Int?
     public let filing: Filing?
     public let basis: String?
+    public let sources: Sources?
 }

@@ -13,6 +13,8 @@ struct RaportitView: View {
     /// Tulot or Menot by category: one list at a time instead of two stacked (nil = the default).
     @State private var categoryChoice: ReportCategoryKind?
     @State private var categoryLimit = ShowMore()
+    /// The month picked on the chart; nil = the latest month with figures.
+    @State private var selectedMonth: String?
 
     struct ExportKind: Identifiable { let type: String; let title: String; var id: String { type } }
     private let exports = [
@@ -38,24 +40,17 @@ struct RaportitView: View {
                 .buttonStyle(.borderless)
             }
             if let report = state.value {
+                let yearKey = String(year)
                 Section("Tulos ilman ALV:ta") {
-                    LabeledContent("Tulot") { MoneyText(amount: report.total.incomeNet) }
-                    LabeledContent("Menot") { MoneyText(amount: report.total.expenseNet) }
+                    drillFigure(ReportDrill.incomeTargets(report.total, key: yearKey)) {
+                        LabeledContent("Tulot") { MoneyText(amount: report.total.incomeNet) }
+                    }
+                    drillFigure([ReportDrill.expenseTarget(report.total, key: yearKey)].compactMap { $0 }) {
+                        LabeledContent("Menot") { MoneyText(amount: report.total.expenseNet) }
+                    }
                     LabeledContent("Tulos") { MoneyText(amount: report.total.profitNet).fontWeight(.semibold) }
                 }
-                Section("Kuukausittain") {
-                    Chart(report.filledMonths(year: String(year))) { m in
-                        BarMark(x: .value("Kuukausi", MonthKey.short(m.month ?? "")), y: .value("Tulot", NSDecimalNumber(decimal: m.incomeNet).doubleValue))
-                            .foregroundStyle(Theme.success)
-                            .position(by: .value("Laji", "Tulot"))
-                        BarMark(x: .value("Kuukausi", MonthKey.short(m.month ?? "")), y: .value("Menot", NSDecimalNumber(decimal: m.expenseNet).doubleValue))
-                            .foregroundStyle(Theme.ink2.opacity(0.7))
-                            .position(by: .value("Laji", "Menot"))
-                    }
-                    .chartForegroundStyleScale(["Tulot": Theme.success, "Menot": Theme.ink2.opacity(0.7)])
-                    .frame(height: 180)
-                    .padding(.vertical, 6)
-                }
+                monthSection(report.filledMonths(year: yearKey))
                 categorySection(report.total)
             } else {
                 LoadState(state: state, retry: load) { (_: ProfitLoss) in EmptyView() }.listRowBackground(Color.clear)
@@ -137,7 +132,7 @@ struct RaportitView: View {
     /// Each category opens the receipts (or invoices) that make it up, for the year on screen.
     private func categories(_ rows: [ProfitLoss.Category], kind: ReportCategoryKind) -> some View {
         ForEach(rows) { row in
-            NavigationLink(value: drillRoute(ReportDrill.target(kind: kind, category: row.category, year: String(year)))) {
+            NavigationLink(value: Route.forDrill(ReportDrill.target(kind: kind, category: row.category, year: String(year)))) {
                 LabeledContent { MoneyText(amount: row.net) } label: {
                     VStack(alignment: .leading) {
                         Text(row.category)
@@ -148,16 +143,111 @@ struct RaportitView: View {
         }
     }
 
-    private func drillRoute(_ drill: ReportDrill) -> Route {
-        switch drill {
-        case .receipts(let period, let tab, let category): .receiptsCategory(period: period, tab: tab, category: category)
-        case .invoices: .invoices
+    /// A figure that opens the rows it is made of (web `DrillFigure`): with one list behind it the
+    /// figure is the link; with two (invoices and receipts) it stays plain and each list gets a
+    /// labelled row under it; with none it is plain text, never a link to an empty list.
+    @ViewBuilder
+    private func drillFigure<Content: View>(_ targets: [ReportDrill], @ViewBuilder content: () -> Content) -> some View {
+        if targets.count == 1, let only = targets.first {
+            NavigationLink(value: Route.forDrill(only)) { content() }
+        } else {
+            content()
+            ForEach(targets, id: \.self) { target in
+                NavigationLink(value: Route.forDrill(target)) {
+                    Text("Avaa \(target.label.lowercased())")
+                        .font(.subheadline)
+                        .foregroundStyle(Theme.accentDark)
+                        .padding(.leading, 12)
+                }
+            }
         }
+    }
+
+    /// The year's months as bars; a tap picks a month, and the row under the chart opens the
+    /// invoices and receipts its result is made of (web `SelectedMonthRow`).
+    @ViewBuilder
+    private func monthSection(_ months: [ProfitLoss.Period]) -> some View {
+        let key = selectedMonth.flatMap { picked in months.contains { $0.month == picked } ? picked : nil }
+            ?? ReportDrill.defaultMonth(months)
+        let picked = months.first { $0.month == key }
+        Section {
+            Chart(months) { m in
+                let on = m.month == key
+                BarMark(x: .value("Kuukausi", m.month ?? ""), y: .value("Tulot", NSDecimalNumber(decimal: m.incomeNet).doubleValue))
+                    .foregroundStyle(Theme.success.opacity(on ? 1 : 0.45))
+                    .position(by: .value("Laji", "Tulot"))
+                    .cornerRadius(2)
+                BarMark(x: .value("Kuukausi", m.month ?? ""), y: .value("Menot", NSDecimalNumber(decimal: m.expenseNet).doubleValue))
+                    .foregroundStyle(Theme.ink2.opacity(on ? 0.9 : 0.35))
+                    .position(by: .value("Laji", "Menot"))
+                    .cornerRadius(2)
+            }
+            .chartXAxis {
+                AxisMarks { value in
+                    AxisValueLabel {
+                        if let month = value.as(String.self) {
+                            Text(MonthKey.short(month))
+                                .fontWeight(month == key ? .semibold : .regular)
+                                .foregroundStyle(month == key ? Theme.ink : Theme.ink2)
+                        }
+                    }
+                }
+            }
+            .chartYAxis { AxisMarks(values: .automatic(desiredCount: 3)) }
+            // A tap, not a drag, so the list still scrolls over the chart (as Koti's cash-flow card).
+            .chartOverlay { proxy in
+                GeometryReader { geometry in
+                    Rectangle().fill(.clear).contentShape(Rectangle())
+                        .onTapGesture { location in
+                            guard let plot = proxy.plotFrame else { return }
+                            let x = location.x - geometry[plot].origin.x
+                            if let month = proxy.value(atX: x, as: String.self) {
+                                selectedMonth = month
+                                Haptics.selection()
+                            }
+                        }
+                }
+            }
+            .frame(height: 180)
+            .padding(.vertical, 6)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(chartSummary(picked))
+            .accessibilityHint("Pyyhkäise ylös tai alas vaihtaaksesi kuukautta")
+            .accessibilityAdjustableAction { direction in
+                guard let key else { return }
+                let step = direction == .increment ? 1 : -1
+                if let month = Koti.adjacentMonth(months.compactMap(\.month), from: key, step: step) { selectedMonth = month }
+            }
+            if let picked, let month = picked.month {
+                drillFigure(ReportDrill.monthTargets(picked)) {
+                    LabeledContent {
+                        MoneyText(amount: picked.profitNet).fontWeight(.semibold)
+                    } label: {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(MonthKey.name(month))
+                            Text("Tulot \(Money.format(picked.incomeNet)) · Menot \(Money.format(picked.expenseNet))")
+                                .font(.caption).foregroundStyle(Theme.ink2)
+                        }
+                    }
+                }
+            }
+        } header: {
+            Text("Kuukausittain")
+        } footer: {
+            Text("Napauta pylvästä nähdäksesi kuukauden tuloksen.")
+        }
+    }
+
+    private func chartSummary(_ picked: ProfitLoss.Period?) -> String {
+        let head = "Tulot ja menot kuukausittain."
+        guard let picked, let month = picked.month else { return head }
+        return "\(head) \(MonthKey.name(month)): tulot \(Money.format(picked.incomeNet)), menot \(Money.format(picked.expenseNet))."
     }
 
     /// The year's `.task(id:)` loads it and cancels a slower load of the previous year.
     private func setYear(_ next: Int) {
         year = next
+        selectedMonth = nil
         state = .loading
     }
 

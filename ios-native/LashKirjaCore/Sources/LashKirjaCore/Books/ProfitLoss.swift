@@ -23,11 +23,13 @@ public struct ProfitLoss: Decodable, Sendable {
         public let expenseByCategory: [Category]
         public let receiptCount: Int
         public let invoiceCount: Int
+        /// Credit notes sit in the invoice list too; nil from a server that does not count them.
+        public let creditNoteCount: Int?
         public var id: String { month ?? "total" }
 
         static func empty(_ month: String) -> Period {
             Period(month: month, incomeNet: 0, incomeVat: 0, incomeGross: 0, expenseNet: 0, expenseVat: 0, expenseGross: 0,
-                   profitNet: 0, incomeByCategory: [], expenseByCategory: [], receiptCount: 0, invoiceCount: 0)
+                   profitNet: 0, incomeByCategory: [], expenseByCategory: [], receiptCount: 0, invoiceCount: 0, creditNoteCount: 0)
         }
     }
 

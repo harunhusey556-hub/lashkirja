@@ -73,7 +73,7 @@ public struct ChatDestination: Equatable, Sendable, Identifiable {
 
     static func info(_ link: AppLink) -> (title: String, detail: String, symbol: String) {
         switch link {
-        case .receipts(let month, let type):
+        case .receipts(let month, let type, _):
             var detail = month.isEmpty ? "Ladatut kuitit ja niiden tiedot" : monthLabel(month)
             if type == "tulo" { detail += " · tulot" }
             if type == "meno" { detail += " · menot" }
@@ -87,6 +87,8 @@ public struct ChatDestination: Equatable, Sendable, Identifiable {
         case .bankAccounts: return ("Pankkitilit", "Pankkitilit ja pankkiyhteys", "building.columns")
         case .alv(let period): return ("ALV-ilmoitus", period.map { "Kausi \(monthLabel($0))" } ?? "ALV-laskelma ja ilmoitus", "percent")
         case .invoices: return ("Laskut", "Myyntilaskut ja niiden tila", "doc.text")
+        case .invoicesFiltered(let month, _, _):
+            return ("Laskut", month.isEmpty ? "Myyntilaskut ja niiden tila" : monthLabel(month), "doc.text")
         case .invoice: return ("Lasku", "Laskun tiedot", "doc.text")
         case .newInvoice: return ("Uusi lasku", "Luo ja lähetä myyntilasku", "square.and.pencil")
         case .customers: return ("Asiakkaat", "Asiakasrekisteri", "person.2")

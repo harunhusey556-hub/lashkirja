@@ -16,8 +16,15 @@ struct PurchaseInvoicesView: View {
     @State private var payTarget: PurchaseInvoice?
     @State private var deleteTarget: PurchaseInvoice?
     @State private var limit = ShowMore()
+    /// A link's chip (a VAT figure opens every status); the owner's own pick replaces it.
+    /// Kept apart from `filterRaw` so a link never overwrites the chip remembered between visits.
+    @State private var linked: PurchaseFilter?
 
-    private var filter: PurchaseFilter { PurchaseFilter(rawValue: filterRaw) ?? .all }
+    init(status: PurchaseFilter? = nil) {
+        _linked = State(initialValue: status)
+    }
+
+    private var filter: PurchaseFilter { linked ?? PurchaseFilter(rawValue: filterRaw) ?? .all }
 
     var body: some View {
         List {
@@ -38,12 +45,12 @@ struct PurchaseInvoicesView: View {
             }
         }
         .refreshable { await load() }
-        .task(id: "\(filterRaw)|\(app.dataVersion)") {
-            guard state.value == nil || gate.isDue(key: filterRaw, version: app.dataVersion) else { return }
+        .task(id: "\(filter.rawValue)|\(app.dataVersion)") {
+            guard state.value == nil || gate.isDue(key: filter.rawValue, version: app.dataVersion) else { return }
             // Marked only after a load that finished: a cancelled one must not count as fresh.
             let version = app.dataVersion
             await load()
-            if !Task.isCancelled { gate.mark(key: filterRaw, version: version) }
+            if !Task.isCancelled { gate.mark(key: filter.rawValue, version: version) }
         }
         .disabled(busy)
         .sheet(isPresented: $showNew) { PurchaseInvoiceFormView(existing: nil) }
@@ -58,7 +65,7 @@ struct PurchaseInvoicesView: View {
         } message: { invoice in
             Text("\(invoice.supplierName) · \(Money.format(invoice.gross))")
         }
-        .animation(.snappy, value: filterRaw)
+        .animation(.snappy, value: filter)
     }
 
     @ViewBuilder
@@ -123,8 +130,7 @@ struct PurchaseInvoicesView: View {
                         Text("Kokeile toista suodatinta.")
                     } actions: {
                         Button("Tyhjennä suodatin") {
-                            filterRaw = PurchaseFilter.all.rawValue
-                            limit.reset()
+                            pick(.all)
                         }
                     }
                 }
@@ -177,8 +183,7 @@ struct PurchaseInvoicesView: View {
         let selected = option == filter
         return Button {
             Haptics.selection()
-            filterRaw = option.rawValue
-            limit.reset()
+            pick(option)
         } label: {
             Text(label)
                 .font(.subheadline.weight(selected ? .semibold : .regular))
@@ -192,6 +197,12 @@ struct PurchaseInvoicesView: View {
         .accessibilityAddTraits(selected ? .isSelected : [])
     }
 
+    private func pick(_ option: PurchaseFilter) {
+        linked = nil
+        filterRaw = option.rawValue
+        limit.reset()
+    }
+
     private func summary(_ aging: PurchaseInvoiceList.Aging) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .firstTextBaseline) {
@@ -201,10 +212,26 @@ struct PurchaseInvoicesView: View {
                 }
                 Spacer()
                 if aging.overdueCount > 0 {
-                    VStack(alignment: .trailing, spacing: 4) {
-                        Text("Myöhässä").font(.caption).foregroundStyle(Theme.danger)
-                        MoneyText(amount: aging.overdue).font(.subheadline.weight(.semibold)).foregroundStyle(Theme.danger)
+                    // The late figure narrows the list to the late bills; a second tap shows them all again.
+                    Button {
+                        Haptics.selection()
+                        pick(filter == .overdue ? .all : .overdue)
+                    } label: {
+                        VStack(alignment: .trailing, spacing: 4) {
+                            Text("Myöhässä").font(.caption).foregroundStyle(Theme.danger)
+                            HStack(spacing: 4) {
+                                MoneyText(amount: aging.overdue).font(.subheadline.weight(.semibold)).foregroundStyle(Theme.danger)
+                                Image(systemName: filter == .overdue ? "xmark.circle.fill" : "chevron.right")
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(Theme.danger)
+                                    .accessibilityHidden(true)
+                            }
+                        }
+                        .contentShape(Rectangle())
                     }
+                    .buttonStyle(.borderless)
+                    .accessibilityLabel("Myöhässä \(aging.overdueCount) ostolaskua, \(Money.format(aging.overdue))")
+                    .accessibilityHint(filter == .overdue ? "Näytä kaikki ostolaskut" : "Näytä myöhässä olevat ostolaskut")
                 }
             }
             HStack(spacing: 0) {

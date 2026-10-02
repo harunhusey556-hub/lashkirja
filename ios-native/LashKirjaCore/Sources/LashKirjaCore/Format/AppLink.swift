@@ -3,13 +3,16 @@ import Foundation
 /// A web path from an assistant reply or a server item, read the way the web app routes it,
 /// filters included (`/kuitit?month=…&type=tulo`, `/pankki/tapahtumat?nayta=toimet`).
 public enum AppLink: Equatable, Sendable {
-    case receipts(month: String, type: String)
+    /// A report link may name one category (`/kuitit?month=2026&type=meno&category=tarvikkeet`).
+    case receipts(month: String, type: String, category: String = "")
     case receipt(String)
     case bankFeed(month: String?, onlyOpen: Bool, transactionId: String?)
     case statement(String)
     case bankAccounts
     case alv(String?)
     case invoices
+    /// Myyntilaskut of a period, a status chip or one customer (`/laskut?month=…&status=…&customerId=…`).
+    case invoicesFiltered(month: String, status: String, customerId: String)
     case invoice(String)
     case newInvoice
     case customers
@@ -48,7 +51,7 @@ public enum AppLink: Equatable, Sendable {
         let id = params["id"].flatMap { $0.isEmpty ? nil : $0 }
         let month = params["month"].flatMap { $0.isEmpty ? nil : $0 }
         switch path {
-        case "/kuitit": return .receipts(month: month ?? "", type: params["type"] ?? "")
+        case "/kuitit": return .receipts(month: month ?? "", type: params["type"] ?? "", category: params["category"] ?? "")
         case "/kuitit/kuitti": return id.map(AppLink.receipt)
         case "/pankki/tapahtumat":
             return .bankFeed(month: month, onlyOpen: params["nayta"] == "toimet", transactionId: params["rivi"])
@@ -58,7 +61,12 @@ public enum AppLink: Equatable, Sendable {
         case "/kirjanpito/alv": return .alv(params["period"])
         // The pre-restructure ALV path, still cited by older replies.
         case "/alv-raportti": return .alv(params["period"] ?? month)
-        case "/laskut": return .invoices
+        case "/laskut":
+            let status = params["status"] ?? ""
+            let customerId = params["customerId"] ?? ""
+            return month == nil && status.isEmpty && customerId.isEmpty
+                ? .invoices
+                : .invoicesFiltered(month: month ?? "", status: status, customerId: customerId)
         case "/laskut/lasku": return id.map(AppLink.invoice)
         case "/laskut/uusi": return .newInvoice
         case "/asiakkaat": return .customers

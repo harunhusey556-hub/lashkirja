@@ -5,11 +5,13 @@ struct MyyntiView: View {
     @Environment(AppModel.self) private var app
     /// Opens the new-invoice form once on appear (the assistant's "/laskut/uusi" link).
     var openNewInvoice = false
+    /// A report link's period or customer (`/laskut?month=…`); empty for the Myynti tab itself.
+    var scope = InvoiceScope()
     @State private var state: Loadable<InvoiceList> = .idle
     /// Coming back to the screen does not ask the server again unless something changed.
     @State private var gate = ReloadGate()
     @State private var counts: [String: Int]?
-    @State private var filter: SalesFilter = .all
+    @State private var filter: SalesFilter
     @State private var search = ""
     @State private var showNew = false
     @State private var showMatch = false
@@ -24,6 +26,13 @@ struct MyyntiView: View {
     /// Asiakkaat and Toistuvat laskut, one compact line under the summary.
     enum Shortcut: Hashable { case customers, recurring }
 
+    /// A link opens exactly the list it names: its status chip, or Kaikki when it names none.
+    init(openNewInvoice: Bool = false, scope: InvoiceScope = InvoiceScope(), status: SalesFilter = .all) {
+        self.openNewInvoice = openNewInvoice
+        self.scope = scope
+        _filter = State(initialValue: status)
+    }
+
     var body: some View {
         List {
             if let list = state.value {
@@ -37,10 +46,20 @@ struct MyyntiView: View {
                     }
                 }
                 Section {
-                    shortcuts
-                        .listRowBackground(Color.clear)
-                        .listRowInsets(EdgeInsets())
-                        .listRowSeparator(.hidden)
+                    // A drilled list is about its rows; the registers stay on the Myynti tab.
+                    if let title = scope.title {
+                        Label(title, systemImage: "line.3.horizontal.decrease.circle")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(Theme.ink)
+                            .listRowBackground(Color.clear)
+                            .listRowInsets(EdgeInsets(top: 0, leading: 4, bottom: 0, trailing: 0))
+                            .listRowSeparator(.hidden)
+                    } else {
+                        shortcuts
+                            .listRowBackground(Color.clear)
+                            .listRowInsets(EdgeInsets())
+                            .listRowSeparator(.hidden)
+                    }
                     chips
                         .listRowBackground(Color.clear)
                         .listRowInsets(EdgeInsets(top: 12, leading: 0, bottom: 0, trailing: 0))
@@ -59,14 +78,16 @@ struct MyyntiView: View {
                 } header: {
                     if !rows.isEmpty { Text("\(rows.count) laskua") }
                 }
-                Section("Muut") {
-                    Button { showMatch = true } label: {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Label("Hae asiakkaiden maksut pankista", systemImage: "building.columns")
-                            Text("Kirjaa maksut viitenumeron mukaan").font(.caption).foregroundStyle(Theme.ink2)
+                if scope.isEmpty {
+                    Section("Muut") {
+                        Button { showMatch = true } label: {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Label("Hae asiakkaiden maksut pankista", systemImage: "building.columns")
+                                Text("Kirjaa maksut viitenumeron mukaan").font(.caption).foregroundStyle(Theme.ink2)
+                            }
                         }
+                        .foregroundStyle(Theme.ink)
                     }
-                    .foregroundStyle(Theme.ink)
                 }
             } else {
                 LoadState(state: state, retry: load) { (_: InvoiceList) in EmptyView() }
@@ -77,7 +98,7 @@ struct MyyntiView: View {
         .background(Theme.canvas)
         .searchable(text: $search, prompt: "Hae asiakasta tai numeroa")
         .refreshable { await load() }
-        .navigationTitle("Myynti")
+        .navigationTitle(scope.isEmpty ? "Myynti" : "Laskut")
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Button { showNew = true } label: { Label("Uusi lasku", systemImage: "plus") }
@@ -205,10 +226,26 @@ struct MyyntiView: View {
             }
             Spacer()
             if aging.overdueCount > 0 {
-                VStack(alignment: .trailing, spacing: 4) {
-                    Text("Myöhässä \(aging.overdueCount)").font(.caption).foregroundStyle(Theme.danger)
-                    MoneyText(amount: aging.overdue).font(.subheadline.weight(.semibold)).foregroundStyle(Theme.danger)
+                // The late figure narrows the list to the late invoices (the web's receivables bar does the same).
+                Button {
+                    filter = filter == .overdue ? .all : .overdue
+                    Haptics.selection()
+                } label: {
+                    VStack(alignment: .trailing, spacing: 4) {
+                        Text("Myöhässä \(aging.overdueCount)").font(.caption).foregroundStyle(Theme.danger)
+                        HStack(spacing: 4) {
+                            MoneyText(amount: aging.overdue).font(.subheadline.weight(.semibold)).foregroundStyle(Theme.danger)
+                            Image(systemName: filter == .overdue ? "xmark.circle.fill" : "chevron.right")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(Theme.danger)
+                                .accessibilityHidden(true)
+                        }
+                    }
+                    .contentShape(Rectangle())
                 }
+                .buttonStyle(.borderless)
+                .accessibilityLabel("Myöhässä \(aging.overdueCount) laskua, \(Money.format(aging.overdue))")
+                .accessibilityHint(filter == .overdue ? "Näytä kaikki laskut" : "Näytä myöhässä olevat laskut")
             }
         }
         .padding(.vertical, 4)
@@ -218,7 +255,7 @@ struct MyyntiView: View {
         if state.value == nil { state = .loading }
         // The list and the chip counts are independent: one round trip instead of two.
         async let fresh = loadCounts()
-        do { state = .loaded(try await app.api.get("/api/invoices")) }
+        do { state = .loaded(try await app.api.get("/api/invoices", query: scope.query)) }
         catch is CancellationError {}
         catch { if state.value == nil { state = .failed(error.userMessage) } }
         if let fresh = await fresh { counts = fresh }
@@ -227,7 +264,8 @@ struct MyyntiView: View {
     /// Per-status counts for the chips; counted by the server, so the list's row cap cannot skew them.
     private func loadCounts() async -> [String: Int]? {
         do {
-            let response: InvoiceCounts = try await app.api.get("/api/invoices/counts")
+            // Scoped like the list (period, customer), never by status.
+            let response: InvoiceCounts = try await app.api.get("/api/invoices/counts", query: scope.query)
             return response.counts
         } catch {
             return nil

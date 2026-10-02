@@ -8,7 +8,7 @@ private func category(_ name: String) -> ProfitLoss.Category {
 private func period(income: [String], expense: [String]) -> ProfitLoss.Period {
     ProfitLoss.Period(month: nil, incomeNet: 0, incomeVat: 0, incomeGross: 0, expenseNet: 0, expenseVat: 0, expenseGross: 0,
                       profitNet: 0, incomeByCategory: income.map(category), expenseByCategory: expense.map(category),
-                      receiptCount: 0, invoiceCount: 0)
+                      receiptCount: 0, invoiceCount: 0, creditNoteCount: 0)
 }
 
 @Test func reportCategoriesOpenOnExpensesAndKeepTheChoice() {

@@ -32,14 +32,33 @@ struct AlvView: View {
                     }
                     .padding(.vertical, 4)
                 }
+                // FP-12: 301 and 307 open the documents they are made of; 302, 303 and 309 have no list of
+                // their own (the lists do not filter by VAT rate), as on the web.
                 Section("Myynti") {
-                    field(r.field301)
+                    NavigationLink(value: Route.forDrill(ReportDrill.alvSales(r, period: period))) { field(r.field301) }
+                    if let receipts = ReportDrill.alvReceiptSales(r, period: period) {
+                        NavigationLink(value: Route.forDrill(receipts)) {
+                            LabeledContent("Myyntikuiteista") { MoneyText(amount: r.sources?.receiptSalesVat ?? 0) }.font(.subheadline)
+                        }
+                    }
                     field(r.field302)
                     field(r.field303)
                     LabeledContent(r.field309.label) { MoneyText(amount: r.field309.turnover) }.font(.subheadline)
                 }
-                Section("Ostot") {
-                    LabeledContent(r.field307.label) { MoneyText(amount: r.field307.amount) }.font(.subheadline)
+                Section {
+                    NavigationLink(value: Route.forDrill(ReportDrill.alvDeductible(period: period))) {
+                        LabeledContent(r.field307.label) { MoneyText(amount: r.field307.amount) }.font(.subheadline)
+                    }
+                    if let purchases = ReportDrill.alvPurchases(r) {
+                        NavigationLink(value: Route.forDrill(purchases)) {
+                            LabeledContent("Ostolaskuista") { MoneyText(amount: r.sources?.purchaseInvoiceVat ?? 0) }.font(.subheadline)
+                        }
+                    }
+                } header: {
+                    Text("Ostot")
+                } footer: {
+                    // A quarter has no list filter of its own: say so before the list opens unfiltered.
+                    if ReportDrill.alvScope(period).isEmpty { Text("Neljännesvuoden kuitit ja laskut avautuvat koko listana.") }
                 }
                 Section {
                     Toggle("Ilmoitettu OmaVerossa", isOn: Binding(get: { pendingFiled ?? (r.filing?.filedAt != nil) }, set: { v in pendingFiled = v; Task { await setFiling(filed: v, paid: nil); pendingFiled = nil } }))

@@ -137,9 +137,11 @@ struct BankHubView: View {
             }
             // Own transfers and salaries are outside Tulot and Menot, as on the tiliote.
             if totals.transfers != 0 {
-                LabeledContent("Siirrot ja palkat") { MoneyText(amount: totals.transfers, signed: true) }
-                    .font(.subheadline)
-                    .foregroundStyle(Theme.ink2)
+                NavigationLink(value: Route.bankFeedFiltered(month: month, onlyOpen: false, focus: nil)) {
+                    LabeledContent("Siirrot ja palkat") { MoneyText(amount: totals.transfers, signed: true) }
+                        .font(.subheadline)
+                        .foregroundStyle(Theme.ink2)
+                }
             }
         } header: {
             Text("Kuukausi")

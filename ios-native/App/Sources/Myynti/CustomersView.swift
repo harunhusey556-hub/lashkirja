@@ -120,6 +120,10 @@ struct CustomerDetailView: View {
                             }
                         }
                         ShowMoreButton(limit: $invoiceLimit, total: detail.invoices.count)
+                        // The customer's invoices on Myynti's status chips (web "Näytä kaikki").
+                        NavigationLink(value: Route.invoicesFiltered(month: "", status: "", customerId: c.id)) {
+                            Text("Näytä tilan mukaan").foregroundStyle(Theme.accentDark)
+                        }
                     }
                 }
                 if let notes = c.notes { Section("Muistiinpanot") { Text(notes) } }

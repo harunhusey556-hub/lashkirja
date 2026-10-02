@@ -110,6 +110,13 @@ public enum Koti {
         hasBalanceCard ? "Avoimet laskut" : positionTitle(atCurrentMonth: atCurrentMonth)
     }
 
+    /// Last month stays on Koti until it is closed (web FP-3): "Elokuu: 3 asiaa kesken".
+    public static func previousMonthLine(_ previous: Dashboard.PreviousMonth) -> String {
+        let name = MonthKey.name(previous.month)
+        guard previous.open > 0 else { return "\(name) on valmis suljettavaksi" }
+        return "\(name): \(previous.open) \(previous.open == 1 ? "asia" : "asiaa") kesken"
+    }
+
     // MARK: Hoidettu automaattisesti (web `lib/koti-handled.ts`)
 
     public enum HandledTarget: Equatable, Sendable { case receipts, bankFeed, recurringInvoices }

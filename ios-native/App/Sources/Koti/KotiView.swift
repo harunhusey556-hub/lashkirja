@@ -137,6 +137,22 @@ private struct KotiContent: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            if model.atCurrentMonth, let previous = d.previousMonth {
+                Divider()
+                NavigationLink(value: Route.monthClose(previous.month)) {
+                    HStack(spacing: 8) {
+                        Image(systemName: "calendar.badge.checkmark").foregroundStyle(Theme.ink2).accessibilityHidden(true)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(Koti.previousMonthLine(previous)).font(.subheadline).foregroundStyle(Theme.ink)
+                            Text("Kuukauden sulkeminen").font(.caption).foregroundStyle(Theme.ink2)
+                        }
+                        Spacer(minLength: 8)
+                        Chevron()
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
             if let vat = d.estimatedVat, d.vat?.registered == true {
                 Divider()
                 NavigationLink(value: Route.alv(d.month)) {
@@ -180,10 +196,9 @@ private struct KotiContent: View {
             ForEach([MoneyTrend.Metric.income, .expenses], id: \.self) { metric in
                 let income = metric == .income
                 let amount = income ? d.income : d.expenses
-                // As on the web: the card opens the month's sales or costs, from the books' basis.
-                let route: Route = d.source == "tiliote"
-                    ? .bankFeedFiltered(month: d.month, onlyOpen: false, focus: nil)
-                    : .receiptsFiltered(month: d.month, tab: income ? "tulo" : "meno")
+                // As on the web: the card opens the month's sales (its invoices when it has any) or
+                // costs, from the books' basis.
+                let route = Route.forDrill(.koti(income: income, source: d.source, invoiceCount: d.invoiceCount, month: d.month))
                 NavigationLink(value: route) {
                     MoneyCard(title: income ? "Myynti \(MonthKey.name(d.month).lowercased())" : "Kulut",
                               amount: amount,
@@ -255,7 +270,8 @@ private struct KotiContent: View {
         switch row.kind {
         case .bank: row.fixesBank ? Route.bankAccounts : Route.bankHub
         case .receivables: .invoices
-        case .payables: .purchaseInvoices
+        // Every status, not the chip left on last time: the open total must not open the paid bills.
+        case .payables: .purchaseInvoicesFiltered(status: PurchaseFilter.all.rawValue)
         }
     }
 }

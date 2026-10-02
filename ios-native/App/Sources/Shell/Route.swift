@@ -65,6 +65,10 @@ enum Route: Hashable {
     case emailInbox
     /// Pankki: balances, the month's money in and out, and the bank rows in one place.
     case bankHub
+    /// Myynti opened on a period ("YYYY" / "YYYY-MM", "" = any), a status chip ("" = Kaikki) or one customer.
+    case invoicesFiltered(month: String, status: String, customerId: String)
+    /// Ostolaskut opened on one status chip, without changing the chip the owner last chose.
+    case purchaseInvoicesFiltered(status: String)
 }
 
 extension Route {
@@ -73,7 +77,8 @@ extension Route {
     static func fromHref(_ href: String) -> Route? {
         guard let link = AppLink.parse(href) else { return nil }
         switch link {
-        case .receipts(let month, let type):
+        case .receipts(let month, let type, let category):
+            if !category.isEmpty { return .receiptsCategory(period: month, tab: type, category: category) }
             return month.isEmpty && type.isEmpty ? .receipts : .receiptsFiltered(month: month, tab: type)
         case .receipt(let id): return .receipt(id)
         case .bankFeed(let month, let onlyOpen, let row):
@@ -82,6 +87,8 @@ extension Route {
         case .bankAccounts: return .bankAccounts
         case .alv(let period): return .alv(period ?? MonthKey.current())
         case .invoices: return .invoices
+        case .invoicesFiltered(let month, let status, let customerId):
+            return .invoicesFiltered(month: month, status: status, customerId: customerId)
         case .invoice(let id): return .invoice(id)
         case .newInvoice: return .newInvoice
         case .customers: return .customers
@@ -117,6 +124,23 @@ extension Route {
             return item.invoiceId.map(Route.invoice)
         case .unknown:
             return nil
+        }
+    }
+}
+
+extension Route {
+    /// The list behind a report figure (Raportit, Koti's cards, the ALV fields).
+    static func forDrill(_ drill: ReportDrill) -> Route {
+        switch drill {
+        case .receipts(let period, let tab, let category):
+            .receiptsCategory(period: period, tab: tab, category: category)
+        case .invoices(let period, let status):
+            .invoicesFiltered(month: period, status: status.rawValue, customerId: "")
+        case .bankFeed(let month):
+            .bankFeedFiltered(month: month, onlyOpen: false, focus: nil)
+        case .purchaseInvoices:
+            // Every status: the VAT figure counts paid and open purchase invoices alike.
+            .purchaseInvoicesFiltered(status: PurchaseFilter.all.rawValue)
         }
     }
 }
@@ -172,6 +196,9 @@ struct RouteScreen: View {
             ReceiptsView(month: period, tab: ReceiptTab(rawValue: tab) ?? .all, category: category)
         case .emailInbox: EmailInboxView()
         case .bankHub: BankHubView()
+        case .invoicesFiltered(let month, let status, let customerId):
+            MyyntiView(scope: InvoiceScope(month: month, customerId: customerId), status: SalesFilter(rawValue: status) ?? .all)
+        case .purchaseInvoicesFiltered(let status): PurchaseInvoicesView(status: PurchaseFilter(rawValue: status))
         }
     }
 }
