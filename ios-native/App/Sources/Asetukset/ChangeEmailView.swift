@@ -166,6 +166,12 @@ struct ChangeEmailView: View {
             confirmNote = (answer.email.map { "Sähköposti vaihdettu. Kirjaudu jatkossa osoitteella \($0)." } ?? "Sähköposti vaihdettu.", false)
             app.dataVersion += 1
             await load()
+            // The profile sheet and the cached profile show the new address at once.
+            if let email = answer.email ?? profile.value?.email {
+                app.emailChanged(to: email)
+            } else {
+                app.profileChanged(nil)
+            }
         } catch is CancellationError {
         } catch {
             Haptics.error()

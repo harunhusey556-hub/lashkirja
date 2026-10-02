@@ -39,11 +39,28 @@ final class AppLock {
 
     func lockIfEnabled() { if isEnabled { isLocked = true } }
 
+    /// The account the lock was set up for (a user id, not a secret).
+    private var owner: String? { UserDefaults.standard.string(forKey: "lock.owner") }
+
+    /// A lock from before owners were recorded: it belongs to the account whose session
+    /// is still stored on this device.
+    func adoptOwnerIfUnknown(_ userId: String) {
+        guard isEnabled, owner == nil else { return }
+        UserDefaults.standard.set(userId, forKey: "lock.owner")
+    }
+
+    /// Signing in as another account (or with the owner unknown) turns the lock off.
+    func keepOnly(for userId: String) {
+        guard isEnabled, !AppLockPolicy.keepsLock(owner: owner, signingIn: userId) else { return }
+        disable()
+    }
+
     /// True only when the PIN is stored: the caller shows an error otherwise.
     @discardableResult
-    func setPIN(_ pin: String) -> Bool {
+    func setPIN(_ pin: String, owner: String?) -> Bool {
         let salt = (0..<16).map { _ in String(format: "%02x", UInt8.random(in: 0...255)) }.joined()
         guard write("pin", Data("\(salt):\(Self.hash(salt: salt, pin: pin))".utf8)) else { return false }
+        UserDefaults.standard.set(owner, forKey: "lock.owner")
         UserDefaults.standard.set(true, forKey: "lock.enabled")
         resetBackoff()
         return true
@@ -51,6 +68,7 @@ final class AppLock {
 
     func disable() {
         UserDefaults.standard.set(false, forKey: "lock.enabled")
+        UserDefaults.standard.removeObject(forKey: "lock.owner")
         delete("pin")
         delete("backoff")
         biometricsEnabled = false
@@ -172,6 +190,7 @@ struct LockScreen: View {
 }
 
 struct AppLockSettingsView: View {
+    @Environment(AppModel.self) private var app
     @State private var lock = AppLock.shared
     @State private var newPin = ""
     @State private var confirmPin = ""
@@ -195,7 +214,7 @@ struct AppLockSettingsView: View {
                     Button("Ota lukitus käyttöön") {
                         guard AppLockPolicy.acceptable(newPin) else { message = "PIN on 4–8 numeroa."; return }
                         guard newPin == confirmPin else { message = "PIN-koodit eivät täsmää."; return }
-                        guard lock.setPIN(newPin) else { message = "Lukituksen tallennus epäonnistui. Yritä uudelleen."; return }
+                        guard lock.setPIN(newPin, owner: signedInUserId) else { message = "Lukituksen tallennus epäonnistui. Yritä uudelleen."; return }
                         enabled = true
                         message = nil
                         Haptics.success()
@@ -205,5 +224,10 @@ struct AppLockSettingsView: View {
             if let message { Text(message).foregroundStyle(Theme.danger) }
         }
         .navigationTitle("Sovelluslukitus")
+    }
+
+    private var signedInUserId: String? {
+        if case .signedIn(let user) = app.phase { return user.userId }
+        return nil
     }
 }

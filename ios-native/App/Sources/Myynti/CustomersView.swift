@@ -77,6 +77,9 @@ struct CustomerDetailView: View {
     @State private var notice: String?
     @State private var showMerge = false
     @State private var others: [Customer] = []
+    /// A just-created invoice, opened when the form's sheet has closed.
+    @State private var createdId: String?
+    @State private var openedInvoiceId: String?
 
     var body: some View {
         List {
@@ -144,11 +147,19 @@ struct CustomerDetailView: View {
         .sheet(isPresented: $showEdit, onDismiss: { Task { await load() } }) {
             if let c = state.value?.customer { CustomerFormSheet(existing: c) { _ in } }
         }
-        .sheet(isPresented: $showNewInvoice, onDismiss: { Task { await load() } }) { InvoiceFormView(existing: nil, presetCustomerId: customerId) }
+        .sheet(isPresented: $showNewInvoice, onDismiss: {
+            Task { await load() }
+            if let id = createdId {
+                createdId = nil
+                openedInvoiceId = id
+            }
+        }) {
+            InvoiceFormView(existing: nil, presetCustomerId: customerId, onCreated: { id in createdId = id })
+        }
+        .navigationDestination(item: $openedInvoiceId) { id in InvoiceDetailView(invoiceId: id) }
         .sheet(isPresented: $showMerge) {
             CustomerMergeSheet(keepId: customerId, others: others) {
                 notice = "Asiakkaat yhdistettiin. Kaksoiskappale arkistoitiin."
-                app.dataVersion += 1
                 Task { await load() }
             }
         }
@@ -192,6 +203,11 @@ struct CustomerFormSheet: View {
     @State private var busy = false
     @State private var failure: String?
     @State private var key = UUID().uuidString
+    /// The form as it opened; anything else is an unsaved change.
+    @State private var baseline: CustomerDraft?
+    @State private var confirmDiscard = false
+
+    private var dirty: Bool { baseline.map { $0 != draft } ?? false }
 
     var body: some View {
         NavigationStack {
@@ -219,17 +235,29 @@ struct CustomerFormSheet: View {
             .navigationTitle(existing == nil ? "Uusi asiakas" : "Muokkaa asiakasta")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Peruuta") { dismiss() } }
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Peruuta") { if dirty { confirmDiscard = true } else { dismiss() } }.disabled(busy)
+                }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Tallenna") { Task { await save() } }.disabled(busy || draft.name.trimmingCharacters(in: .whitespaces).isEmpty)
                 }
             }
+            .confirmationDialog("Hylätäänkö muutokset?", isPresented: $confirmDiscard, titleVisibility: .visible) {
+                Button("Hylkää muutokset", role: .destructive) { dismiss() }
+                Button("Jatka muokkausta", role: .cancel) {}
+            } message: {
+                Text("Muutoksia ei ole tallennettu.")
+            }
             .onAppear {
+                // Once: a second onAppear must not overwrite what the owner has typed.
+                guard baseline == nil else { return }
                 if let existing {
                     draft = CustomerDraft(existing)
                     draft.clearsEmptyFields = true
                 }
+                baseline = draft
             }
+            .interactiveDismissDisabled(busy || dirty)
         }
     }
 
@@ -244,6 +272,7 @@ struct CustomerFormSheet: View {
                 r = try await app.api.send("POST", "/api/customers", body: draft, idempotencyKey: key)
             }
             Haptics.success()
+            baseline = draft
             onSaved(r.customer)
             dismiss()
         } catch {
@@ -262,6 +291,9 @@ struct CustomerImportSheet: View {
     @State private var picking = false
     @State private var busy = false
     @State private var failure: String?
+    /// One key per checked file: a retried "Tuo" (lost answer, second tap) gets the first
+    /// import's answer back from the server instead of creating every customer twice.
+    @State private var commitKey = UUID().uuidString
 
     var body: some View {
         NavigationStack {
@@ -334,6 +366,7 @@ struct CustomerImportSheet: View {
         do {
             let checked: CustomerImportResult = try await app.api.send("POST", "/api/customers/import", body: CustomerImportRequest(csv: csv, commit: false))
             result = checked
+            commitKey = UUID().uuidString
         } catch {
             failure = error.userMessage
             Haptics.error()
@@ -345,9 +378,8 @@ struct CustomerImportSheet: View {
         failure = nil
         defer { busy = false }
         do {
-            let done: CustomerImportResult = try await app.api.send("POST", "/api/customers/import", body: CustomerImportRequest(csv: csv, commit: true))
+            let done: CustomerImportResult = try await app.api.send("POST", "/api/customers/import", body: CustomerImportRequest(csv: csv, commit: true), idempotencyKey: commitKey)
             Haptics.success()
-            app.dataVersion += 1
             onImported(done.created)
             dismiss()
         } catch {

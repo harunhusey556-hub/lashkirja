@@ -8,8 +8,12 @@ final class KotiModel {
     private let api: APIClient
     var month: String = MonthKey.current()
     private(set) var state: Loadable<Dashboard> = .idle
-    /// Rows the owner just acted on: gone from the list at once, back if undone or failed.
-    private(set) var hidden: Set<String> = []
+    /// Rows the owner just acted on: gone from the list at once, back if undone or failed,
+    /// and not brought back by a reload while the action is still waiting or on its way.
+    private(set) var hidden = KotiHiddenRows()
+    /// Only the latest load writes the screen: stepping months quickly, an older month's
+    /// slower answer is dropped.
+    private var loads = LoadGeneration()
     var toast: Toast?
     private var pendingCommit: (() async -> Void)?
     private var toastTask: Task<Void, Never>?
@@ -20,14 +24,18 @@ final class KotiModel {
     var atCurrentMonth: Bool { month >= MonthKey.current() }
 
     func load() async {
+        let generation = loads.next()
+        let month = self.month
         if state.value == nil { state = .loading }
         do {
             let dashboard: Dashboard = try await api.get("/api/dashboard", query: ["month": month])
+            guard loads.isCurrent(generation), month == self.month else { return }
+            hidden.reloaded(present: dashboard.items.map(\.id), loadGeneration: generation)
             state = .loaded(dashboard)
-            hidden.removeAll()
         } catch is CancellationError {
             return
         } catch {
+            guard loads.isCurrent(generation), month == self.month else { return }
             if state.value == nil { state = .failed(error.userMessage) }
         }
     }
@@ -69,25 +77,31 @@ final class KotiModel {
     func undo() {
         toastTask?.cancel()
         pendingCommit = nil
-        if let id = undoItemId { withAnimation { _ = hidden.remove(id) } }
+        if let id = undoItemId { withAnimation { hidden.unhide(id) } }
+        undoItemId = nil
         withAnimation { toast = nil }
     }
 
     private var undoItemId: String?
 
     private func hide(_ id: String) {
-        withAnimation(.snappy) { _ = hidden.insert(id) }
+        withAnimation(.snappy) { hidden.hide(id) }
     }
 
     private func offerUndo(_ text: String, itemId: String, commit: @escaping () async throws -> Void) {
         flushPending()
         undoItemId = itemId
         pendingCommit = { [weak self] in
-            do { try await commit() }
-            catch {
+            do {
+                try await commit()
                 await MainActor.run {
                     guard let self else { return }
-                    withAnimation { _ = self.hidden.remove(itemId) }
+                    self.hidden.settled(itemId, loadGeneration: self.loads.current)
+                }
+            } catch {
+                await MainActor.run {
+                    guard let self else { return }
+                    withAnimation { self.hidden.unhide(itemId) }
                     self.toast = Toast(text: error.userMessage, actionLabel: nil)
                 }
             }

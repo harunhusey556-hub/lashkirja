@@ -188,6 +188,10 @@ public struct InvoiceDraft: Encodable, Sendable, Equatable {
         if lines.isEmpty { return "Lisää vähintään yksi rivi." }
         if lines.contains(where: { $0.description.trimmingCharacters(in: .whitespaces).isEmpty }) { return "Jokaisella rivillä tarvitaan kuvaus." }
         if lines.contains(where: { $0.quantity <= 0 }) { return "Määrän on oltava suurempi kuin nolla." }
+        // The server refuses a rate that is not valid on the invoice date (a 14 % line in 2026).
+        if APIDate.day(issueDate) != nil, let note = lines.lazy.compactMap({ SalesVat.dateNote($0.vatRate, issueDate: self.issueDate) }).first {
+            return note
+        }
         return nil
     }
 

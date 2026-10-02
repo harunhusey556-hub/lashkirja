@@ -11,30 +11,49 @@ struct AddSheet: View {
     @State private var importing = false
     @State private var notice: String?
     @State private var busy = false
+    /// The invoice just made with "Uusi lasku": opened in Myynti once the sheets are gone.
+    @State private var createdInvoiceId: String?
 
     var body: some View {
         NavigationStack {
             List {
                 Button { capture = true } label: { Label("Kuvaa kuitti", systemImage: "camera") }
                 Button { importing = true } label: { Label("Tuo tiliote", systemImage: "square.and.arrow.down") }
+                    .disabled(busy)
                 Button { newInvoice = true } label: { Label("Uusi lasku", systemImage: "doc.badge.plus") }
                 Button { Task { await fetchEmail() } } label: {
                     HStack { Label("Hae sähköpostista", systemImage: "envelope"); if busy { Spacer(); ProgressView() } }
                 }
+                .disabled(busy)
                 if let notice { Text(notice).font(.footnote).foregroundStyle(Theme.ink2) }
             }
             .navigationTitle("Lisää")
             .navigationBarTitleDisplayMode(.inline)
-            // Screens reload only when something was actually added (AppModel.dataVersion).
-            .fullScreenCover(isPresented: $capture, onDismiss: { app.dataVersion += 1; dismiss() }) { CaptureFlow(transactionId: nil) }
-            .sheet(isPresented: $newInvoice, onDismiss: { app.dataVersion += 1; dismiss() }) { InvoiceFormView(existing: nil) }
+            // Screens reload when something was actually saved: every accepted write bumps
+            // AppModel.dataVersion, so a cancelled flow reloads nothing.
+            .fullScreenCover(isPresented: $capture, onDismiss: { dismiss() }) { CaptureFlow(transactionId: nil) }
+            .sheet(isPresented: $newInvoice, onDismiss: openCreatedInvoice) {
+                InvoiceFormView(existing: nil, onCreated: { id in createdInvoiceId = id })
+            }
+            // A swipe down during an upload would lose its result.
+            .interactiveDismissDisabled(busy)
             .fileImporter(isPresented: $importing, allowedContentTypes: [.commaSeparatedText, .plainText, .xml, .pdf, .spreadsheet, .data]) { result in
                 if case .success(let url) = result { Task { await upload(url) } }
             }
         }
     }
 
+    /// As on the web, a new invoice opens once made: the Myynti tab, then the invoice.
+    private func openCreatedInvoice() {
+        if let id = createdInvoiceId {
+            createdInvoiceId = nil
+            app.pendingRoute = PendingRoute(tab: .myynti, route: .invoice(id))
+        }
+        dismiss()
+    }
+
     private func upload(_ url: URL) async {
+        guard !busy else { return }
         guard url.startAccessingSecurityScopedResource() else { return }
         defer { url.stopAccessingSecurityScopedResource() }
         guard let data = try? Data(contentsOf: url) else { notice = "Tiedostoa ei voitu lukea."; return }
@@ -46,7 +65,6 @@ struct AddSheet: View {
             struct Result: Decodable { let count: Int? }
             let response = try await app.api.raw("POST", "/api/statements", body: form.finalize(), contentType: form.contentType)
             notice = "Tuotiin \((try? JSONDecoder().decode(Result.self, from: response.body))?.count ?? 0) tapahtumaa."
-            app.dataVersion += 1
             Haptics.success()
         } catch {
             notice = error.userMessage
@@ -55,12 +73,12 @@ struct AddSheet: View {
 
     private func fetchEmail() async {
         struct Result: Decodable { let count: Int? }
+        guard !busy else { return }
         busy = true
         defer { busy = false }
         do {
             let r: Result = try await app.api.send("POST", "/api/integrations/imap/sync", body: EmptyBody())
             notice = "Haettiin \(r.count ?? 0) kuittia sähköpostista."
-            if (r.count ?? 0) > 0 { app.dataVersion += 1 }
             Haptics.success()
         } catch let error as LKError where error.status == 404 {
             notice = "Sähköpostia ei ole yhdistetty. Yhdistä se kohdassa Asetukset › Sähköpostien tuonti."

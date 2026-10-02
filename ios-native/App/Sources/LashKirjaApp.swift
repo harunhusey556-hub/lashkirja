@@ -22,8 +22,14 @@ struct LashKirjaApp: App {
                 .task { await app.start() }
                 .onChange(of: scenePhase) { _, phase in
                     if phase == .active { Task { await app.foreground() } }
-                    if phase == .background { AppLock.shared.lockIfEnabled() }
+                    if phase == .background {
+                        app.background()
+                        AppLock.shared.lockIfEnabled()
+                    }
                 }
+                // Links reach the app whatever screen is showing; the sign-in screen takes a
+                // reset link from AppModel when it appears.
+                .onOpenURL { url in app.handle(url: url) }
         }
     }
 }

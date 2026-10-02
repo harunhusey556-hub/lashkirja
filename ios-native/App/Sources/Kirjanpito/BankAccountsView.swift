@@ -1,5 +1,6 @@
 import SwiftUI
 import AuthenticationServices
+import UniformTypeIdentifiers
 import LashKirjaCore
 
 struct BankAccountsView: View {
@@ -15,6 +16,16 @@ struct BankAccountsView: View {
     @State private var detail: BankAccount?
     @State private var adding = false
     @State private var disconnecting: BankConnection?
+    @State private var statements: [Statement]?
+    @State private var showAllStatements = false
+    @State private var importing = false
+    @State private var uploading = false
+    @State private var uploadMessage: String?
+    @State private var uploadFailed = false
+    /// "" = Tunnista automaattisesti.
+    @State private var targetAccountId = ""
+    @State private var targetChosen = false
+    @State private var openedStatement: String?
 
     var body: some View {
         List {
@@ -90,6 +101,7 @@ struct BankAccountsView: View {
                     ProgressView()
                 }
             }
+            statementSection
             if let notice { Text(notice).foregroundStyle(Theme.success) }
             if let failure { Text(failure).foregroundStyle(Theme.danger) }
         }
@@ -113,8 +125,89 @@ struct BankAccountsView: View {
         } message: { _ in
             Text("Suostumus pankissa suljetaan. Jo haetut tiliotteet säilyvät.")
         }
+        .fileImporter(isPresented: $importing, allowedContentTypes: [.commaSeparatedText, .plainText, .xml, .pdf, .spreadsheet, .data]) { result in
+            if case .success(let url) = result { Task { await upload(url) } }
+        }
+        .navigationDestination(item: $openedStatement) { id in StatementDetailView(statementId: id) }
         .refreshable { await load() }
         .task(id: showArchived) { await load() }
+    }
+
+    // MARK: Tiliotteet
+
+    /// Accounts a tiliote can be imported to: the ones in use.
+    private var importAccounts: [BankAccount] {
+        (overview?.accounts ?? []).filter { $0.archivedAt == nil }
+    }
+
+    @ViewBuilder private var statementSection: some View {
+        Section {
+            Text("Tuo tiliote tiedostona (PDF, XML, XLSX tai CSV), jos pankkia ei ole yhdistetty tai tarvitset vanhempia tapahtumia.")
+                .font(.caption)
+                .foregroundStyle(Theme.ink2)
+            if !importAccounts.isEmpty {
+                Picker("Pankkitili", selection: Binding(get: { targetAccountId }, set: { targetAccountId = $0; targetChosen = true })) {
+                    Text("Tunnista automaattisesti").tag("")
+                    ForEach(importAccounts) { account in
+                        Text(account.bankName.map { "\(account.name) · \($0)" } ?? account.name).tag(account.id)
+                    }
+                }
+                .pickerStyle(.menu)
+            }
+            Button { importing = true } label: {
+                if uploading {
+                    HStack(spacing: 8) { ProgressView(); Text("Käsitellään…") }
+                } else {
+                    Label("Tuo tiliote", systemImage: "square.and.arrow.down")
+                }
+            }
+            .disabled(uploading)
+            if let uploadMessage {
+                Text(uploadMessage).font(.caption).foregroundStyle(uploadFailed ? Theme.danger : Theme.ink2)
+            }
+            if let statements {
+                ForEach(StatementFiles.visible(statements, showAll: showAllStatements)) { statement in
+                    NavigationLink(value: Route.statement(statement.id)) { StatementFileRow(statement: statement) }
+                }
+                if let label = StatementFiles.toggleLabel(count: statements.count, showAll: showAllStatements) {
+                    Button(label) { withAnimation { showAllStatements.toggle() } }
+                }
+            }
+        } header: {
+            Text("Tiliotteet")
+        }
+    }
+
+    private func upload(_ url: URL) async {
+        guard !uploading else { return }
+        guard url.startAccessingSecurityScopedResource() else { return }
+        defer { url.stopAccessingSecurityScopedResource() }
+        guard let data = try? Data(contentsOf: url) else {
+            uploadMessage = "Tiedostoa ei voitu lukea."
+            uploadFailed = true
+            return
+        }
+        var form = Multipart()
+        form.addFile("file", filename: url.lastPathComponent.replacingOccurrences(of: "\"", with: ""), mimeType: "application/octet-stream", data: data)
+        if !targetAccountId.isEmpty { form.addField("bankAccountId", targetAccountId) }
+        uploading = true
+        uploadFailed = false
+        uploadMessage = "Käsitellään tiliotetta…"
+        defer { uploading = false }
+        do {
+            let response = try await app.api.raw("POST", "/api/statements", body: form.finalize(), contentType: form.contentType)
+            let result = try? JSONDecoder().decode(StatementUploadResult.self, from: response.body)
+            uploadMessage = result?.message ?? "Tiliote tuotiin."
+            Haptics.success()
+            await load()
+            if let id = result?.statementId { openedStatement = id }
+        } catch is CancellationError {
+            uploadMessage = nil
+        } catch {
+            uploadMessage = error.userMessage
+            uploadFailed = true
+            Haptics.error()
+        }
     }
 
     private func status(_ c: BankConnection) -> String {
@@ -130,11 +223,22 @@ struct BankAccountsView: View {
         let query = showArchived ? ["includeArchived": "1"] : [String: String]()
         async let accountsResult = Result<BankAccountsOverview, Error>(asyncCatching: { try await api.get("/api/bank-accounts", query: query) })
         async let connectionsResult = Result<BankConnections, Error>(asyncCatching: { try await api.get("/api/bank/connections") })
-        let (accounts, links) = await (accountsResult, connectionsResult)
+        async let statementsResult = Result<StatementList, Error>(asyncCatching: { try await api.get("/api/statements") })
+        let (accounts, links, files) = await (accountsResult, connectionsResult, statementsResult)
         if Task.isCancelled { return }
         switch accounts {
-        case .success(let value): overview = value
+        case .success(let value):
+            overview = value
+            // Keep what was picked; only fill the default in until then.
+            let usable = value.accounts.filter { $0.archivedAt == nil }
+            if !targetChosen || !usable.contains(where: { $0.id == targetAccountId }) {
+                targetAccountId = usable.first(where: { $0.isDefault == true })?.id ?? ""
+            }
         case .failure(let error): problem = error.userMessage
+        }
+        switch files {
+        case .success(let value): statements = value.statements
+        case .failure(let error): problem = problem ?? error.userMessage
         }
         switch links {
         case .success(let value): connections = value
@@ -178,6 +282,35 @@ struct BankAccountsView: View {
     }
 }
 
+/// One tiliote file: title, month · account · rows, and the net amount.
+struct StatementFileRow: View {
+    let statement: Statement
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline) {
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 6) {
+                    Text(StatementText.title(statement)).foregroundStyle(Theme.ink).lineLimit(1)
+                    if StatementFiles.isBankFeed(statement) {
+                        Text("Pankki")
+                            .font(.caption2.weight(.semibold))
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(Theme.ink2.opacity(0.12), in: Capsule())
+                            .foregroundStyle(Theme.ink2)
+                    }
+                }
+                Text(StatementFiles.secondary(statement)).font(.caption).foregroundStyle(Theme.ink2).lineLimit(2)
+            }
+            Spacer()
+            let net = StatementFiles.net(statement)
+            MoneyText(amount: net, signed: true)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(net >= 0 ? Theme.success : Theme.ink)
+        }
+    }
+}
+
 /// Add or edit a ledger bank account (`POST /api/bank-accounts`, `PATCH /api/bank-accounts/[id]`).
 struct BankAccountFormSheet: View {
     @Environment(AppModel.self) private var app
@@ -191,6 +324,14 @@ struct BankAccountFormSheet: View {
     @State private var busy = false
     @State private var failure: String?
     @State private var filled = false
+    @State private var openedDraft: BankAccountDraft?
+    @State private var openedDate = Date()
+    @State private var confirmDiscard = false
+
+    private var dirty: Bool {
+        guard let openedDraft else { return false }
+        return draft != openedDraft || !Calendar.current.isDate(date, inSameDayAs: openedDate)
+    }
 
     var body: some View {
         NavigationStack {
@@ -223,12 +364,15 @@ struct BankAccountFormSheet: View {
             .navigationTitle(account == nil ? "Uusi pankkitili" : "Muokkaa tiliä")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Peruuta") { dismiss() } }
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Peruuta") { if dirty { confirmDiscard = true } else { dismiss() } }
+                }
                 ToolbarItem(placement: .confirmationAction) {
                     Button(account == nil ? "Lisää tili" : "Tallenna") { Task { await save() } }.disabled(busy)
                 }
             }
             .onAppear(perform: fill)
+            .discardGuard(dirty: dirty, busy: busy, asking: $confirmDiscard) { dismiss() }
         }
     }
 
@@ -241,6 +385,8 @@ struct BankAccountFormSheet: View {
         filled = true
         if let account { draft = BankAccountDraft(account: account) }
         date = APIDate.day(draft.openingDate) ?? Date()
+        openedDraft = draft
+        openedDate = date
     }
 
     private func save() async {
@@ -261,6 +407,7 @@ struct BankAccountFormSheet: View {
             Haptics.error()
             return
         }
+        guard !busy else { return }
         busy = true
         failure = nil
         defer { busy = false }

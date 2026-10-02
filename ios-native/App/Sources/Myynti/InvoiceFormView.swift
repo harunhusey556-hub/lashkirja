@@ -7,6 +7,9 @@ struct InvoiceFormView: View {
     @Environment(\.dismiss) private var dismiss
     let existing: Invoice?
     var presetCustomerId: String? = nil
+    /// Called with the new invoice's id after a create, before the sheet closes: the presenter
+    /// opens the invoice once the sheet is gone (the web replaces the form with the invoice).
+    var onCreated: ((String) -> Void)? = nil
 
     @State private var draft = InvoiceDraft(customerId: "", issueDate: APIDate.dayString(Date()), paymentTermDays: 14)
     @State private var issueDate = Date()
@@ -19,17 +22,24 @@ struct InvoiceFormView: View {
     @State private var sellerRegistered = true
     @State private var catalog: [CatalogItem] = []
     @State private var productNotice: String?
+    /// The form as it was when it opened; anything else is an unsaved change.
+    @State private var baseline: InvoiceDraft?
+    @State private var restored = false
+    @State private var confirmDiscard = false
 
     var body: some View {
         NavigationStack {
             Form {
+                if restored {
+                    Section {
+                        Text("Palautettiin tallentamaton luonnos.")
+                        Button("Aloita tyhjästä", role: .destructive) { startOver() }
+                    }
+                }
                 Section("Asiakas") {
-                    Picker("Asiakas", selection: $draft.customerId) {
+                    Picker("Asiakas", selection: Binding(get: { draft.customerId }, set: { pickCustomer($0) })) {
                         Text("Valitse asiakas").tag("")
                         ForEach(customers) { Text($0.name).tag($0.id) }
-                    }
-                    .onChange(of: draft.customerId) { _, id in
-                        if existing == nil, let c = customers.first(where: { $0.id == id }) { draft.paymentTermDays = c.defaultPaymentTermDays }
                     }
                     Button { showNewCustomer = true } label: { Label("Uusi asiakas", systemImage: "person.badge.plus") }
                 }
@@ -82,10 +92,25 @@ struct InvoiceFormView: View {
             .navigationTitle(existing == nil ? "Uusi lasku" : "Muokkaa laskua")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Peruuta") { dismiss() } }
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Peruuta") { if dirty { confirmDiscard = true } else { dismiss() } }.disabled(busy)
+                }
                 ToolbarItem(placement: .confirmationAction) {
                     Button(existing == nil ? "Luo lasku" : "Tallenna") { Task { await save() } }.disabled(busy)
                 }
+            }
+            .confirmationDialog("Hylätäänkö muutokset?", isPresented: $confirmDiscard, titleVisibility: .visible) {
+                Button("Hylkää muutokset", role: .destructive) {
+                    if existing == nil, let owner { SalesDraftStore.shared.clear(owner: owner) }
+                    dismiss()
+                }
+                if existing == nil {
+                    // Kept in memory: "Uusi lasku" opens with it again.
+                    Button("Säilytä luonnos ja sulje") { dismiss() }
+                }
+                Button("Jatka muokkausta", role: .cancel) {}
+            } message: {
+                Text(existing == nil ? "Laskua ei ole vielä luotu." : "Muutoksia ei ole tallennettu.")
             }
             .sheet(isPresented: $showNewCustomer) {
                 CustomerFormSheet(existing: nil) { created in
@@ -94,9 +119,55 @@ struct InvoiceFormView: View {
                     draft.paymentTermDays = created.defaultPaymentTermDays
                 }
             }
+            // A date moved into 2026 turns old 14 % lines into 13,5 % (as the web form does).
+            .onChange(of: issueDate) { _, date in
+                draft.lines.adjustVatRates(issueDate: APIDate.dayString(date))
+            }
+            .onChange(of: snapshot) { _, current in keepDraft(current) }
             .task { await prepare() }
-            .interactiveDismissDisabled(busy)
+            .interactiveDismissDisabled(busy || dirty)
         }
+    }
+
+    /// The draft with the picked date, as it would be sent.
+    private var snapshot: InvoiceDraft {
+        var current = draft
+        current.issueDate = APIDate.dayString(issueDate)
+        return current
+    }
+
+    private var dirty: Bool {
+        guard let baseline else { return false }
+        return snapshot != baseline
+    }
+
+    private var owner: String? {
+        if case .signedIn(let user) = app.phase { return user.userId }
+        return nil
+    }
+
+    /// Picking a customer on a new invoice brings that customer's payment term along.
+    private func pickCustomer(_ id: String) {
+        draft.customerId = id
+        if existing == nil, let c = customers.first(where: { $0.id == id }) { draft.paymentTermDays = c.defaultPaymentTermDays }
+    }
+
+    /// A new invoice the owner has typed into is kept in memory until it is created or discarded.
+    private func keepDraft(_ current: InvoiceDraft) {
+        guard existing == nil, let baseline, let owner, !busy else { return }
+        if SalesDraftStore.worthKeeping(current, baseline: baseline) {
+            SalesDraftStore.shared.keep(current, owner: owner)
+        } else {
+            SalesDraftStore.shared.clear(owner: owner)
+        }
+    }
+
+    private func startOver() {
+        guard let baseline else { return }
+        draft = baseline
+        issueDate = APIDate.day(baseline.issueDate) ?? Date()
+        restored = false
+        if let owner { SalesDraftStore.shared.clear(owner: owner) }
     }
 
     private func prepare() async {
@@ -121,13 +192,35 @@ struct InvoiceFormView: View {
             draft.notes = existing.notes ?? ""
             draft.lines = existing.lines.map { .init(description: $0.description, quantity: $0.quantity, unit: $0.unit, unitPrice: $0.unitPrice, vatRate: $0.vatRate) }
         } else {
-            if let presetCustomerId { draft.customerId = presetCustomerId }
+            if let presetCustomerId { pickCustomer(presetCustomerId) }
             if draft.lines.isEmpty { draft.lines = [.new(sellerRegistered: sellerRegistered)] }
         }
         draft.followSellerVat(registered: sellerRegistered)
+        // What the date change below would do anyway, done before the baseline so it does not
+        // count as the owner's change (a 14 % draft line dated in 2026 can only be 13,5 %).
+        draft.lines.adjustVatRates(issueDate: APIDate.dayString(issueDate))
+        baseline = snapshot
+        restoreKeptDraft()
     }
 
-    /// "Tallenna tuotteeksi": the line becomes a catalog product for later invoices.
+    /// "Uusi lasku" again after closing an unsaved one: the owner continues where they left off.
+    /// Not when the form was opened for another customer than the kept draft's.
+    private func restoreKeptDraft() {
+        guard existing == nil, let owner, let kept = SalesDraftStore.shared.entry(owner: owner) else { return }
+        if let presetCustomerId, kept.draft.customerId != presetCustomerId { return }
+        var restoredDraft = kept.draft
+        // The VAT status may have changed since; the kept customer may since have been archived.
+        restoredDraft.followSellerVat(registered: sellerRegistered)
+        if !restoredDraft.customerId.isEmpty, !customers.contains(where: { $0.id == restoredDraft.customerId }) {
+            restoredDraft.customerId = baseline?.customerId ?? ""
+        }
+        draft = restoredDraft
+        issueDate = APIDate.day(restoredDraft.issueDate) ?? Date()
+        draft.lines.adjustVatRates(issueDate: APIDate.dayString(issueDate))
+        restored = true
+    }
+
+/// "Tallenna tuotteeksi": the line becomes a catalog product for later invoices.
     private func saveProduct(_ line: InvoiceDraft.Line) async {
         let product = CatalogItemDraft(line: line)
         if let problem = product.validationError { productNotice = problem; Haptics.error(); return }
@@ -166,8 +259,12 @@ struct InvoiceFormView: View {
             if let existing {
                 let _: InvoiceResponse = try await app.api.send("PATCH", "/api/invoices/\(existing.id)", body: InvoicePatch(draft: draft, expectedUpdatedAt: existing.updatedAt))
             } else {
-                let _: InvoiceResponse = try await app.api.send("POST", "/api/invoices", body: draft, idempotencyKey: key)
+                let response: InvoiceResponse = try await app.api.send("POST", "/api/invoices", body: draft, idempotencyKey: key)
+                if let owner { SalesDraftStore.shared.clear(owner: owner) }
+                onCreated?(response.invoice.id)
             }
+            // Saved: nothing left to lose, so the sheet may close without asking.
+            baseline = snapshot
             Haptics.success()
             dismiss()
         } catch {
@@ -187,8 +284,6 @@ struct LineEditor: View {
     var onSaveProduct: ((InvoiceDraft.Line) -> Void)? = nil
     @State private var priceText = ""
     @State private var quantityText = ""
-    // An emptied or unreadable field counts as 0, never as the value typed before it.
-    static let rates: [Decimal] = [Decimal(string: "25.5")!, 14, Decimal(string: "13.5")!, 10, 0]
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -215,12 +310,17 @@ struct LineEditor: View {
                     .onChange(of: priceText) { _, t in line.unitPrice = Money.parse(t) ?? 0 }
             }
             if showsVat {
+                // The rates valid on the invoice date (web `vatRateOptions`), plus the line's own
+                // rate when it is no longer one of them, with the reason underneath.
                 Picker("ALV", selection: $line.vatRate) {
-                    ForEach(Self.rates, id: \.self) { rate in
+                    ForEach(SalesVat.rateOptions(current: line.vatRate, issueDate: issueDate), id: \.self) { rate in
                         Text("\(Self.text(rate)) %").tag(rate)
                     }
                 }
                 .pickerStyle(.segmented)
+                if let note = SalesVat.dateNote(line.vatRate, issueDate: issueDate) {
+                    Text(note).font(.caption).foregroundStyle(Theme.danger)
+                }
             }
             if let onSaveProduct {
                 Button { onSaveProduct(line) } label: {

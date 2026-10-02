@@ -16,6 +16,8 @@ struct InvoiceDetailView: View {
     @State private var reminder: ReminderPreview?
     @State private var reminderFailed = false
     @State private var notice: String?
+    /// The version whose PDF was already fetched ahead, so a reload does not fetch it again.
+    @State private var prefetchedKey: String?
 
     enum SheetKind: Identifiable { case payment, send, pdf, edit, reminder, reminderPdf; var id: Self { self } }
     enum ConfirmKind: Identifiable { case delete, credit, markSent; var id: Self { self } }
@@ -106,7 +108,7 @@ struct InvoiceDetailView: View {
                 switch kind {
                 case .payment: PaymentSheet(invoice: invoice)
                 case .send: SendInvoiceSheet(invoice: invoice)
-                case .pdf: DocumentPreviewSheet(path: "/api/invoices/\(invoice.id)/pdf", fileName: "Lasku-\(invoice.number).pdf")
+                case .pdf: DocumentPreviewSheet(path: "/api/invoices/\(invoice.id)/pdf", fileName: "Lasku-\(invoice.number).pdf", cacheKey: invoice.updatedAt)
                 case .edit: InvoiceFormView(existing: invoice)
                 case .reminder:
                     if let reminder {
@@ -185,6 +187,7 @@ struct InvoiceDetailView: View {
             let response: InvoiceDetailResponse = try await app.api.get("/api/invoices/\(invoiceId)")
             state = .loaded(response.invoice)
             duplicates = response.paymentDuplicates ?? []
+            prefetchPdf(response.invoice)
             if response.invoice.displayStatus == .overdue {
                 await loadReminder()
             } else {
@@ -243,6 +246,14 @@ struct InvoiceDetailView: View {
     }
 
     /// Only an overdue invoice has a reminder preview; a failure leaves a retry, not a dead button.
+    /// The PDF starts downloading while the owner reads the screen, so "PDF" opens at once.
+    /// Never for a draft: serving a draft's PDF marks it as having left the app on the server.
+    private func prefetchPdf(_ invoice: Invoice) {
+        guard invoice.status != "draft", invoice.displayStatus != .draft, prefetchedKey != invoice.updatedAt else { return }
+        prefetchedKey = invoice.updatedAt
+        DocumentCache.shared.prefetch(app, path: "/api/invoices/\(invoice.id)/pdf", fileName: "Lasku-\(invoice.number).pdf", key: invoice.updatedAt)
+    }
+
     private func loadReminder() async {
         do {
             let response: ReminderPreviewResponse = try await app.api.get("/api/invoices/\(invoiceId)/reminders")

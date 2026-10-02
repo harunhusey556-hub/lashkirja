@@ -8,14 +8,24 @@ struct BankFeedView: View {
     /// Coming back to the screen does not ask the server again unless something changed.
     @State private var gate = ReloadGate()
     @State private var statements: [Statement] = []
-    @State private var onlyOpen = false
+    @State private var onlyOpen: Bool
     @State private var search = ""
     @State private var month: String?
     @State private var selected: BankTransaction?
+    /// A row to open once after loading (from a Koti/Työjono task).
+    @State private var pendingFocus: String?
     @State private var importing = false
     @State private var notice: String?
     @State private var noticeFailed = false
     @State private var bulkBusy = false
+
+    /// `month` opens the feed on that month, `onlyOpen` on "Vaatii toimia" (web `?nayta=toimet`),
+    /// and `focusTransactionId` opens that row's sheet once it is found.
+    init(month: String? = nil, onlyOpen: Bool = false, focusTransactionId: String? = nil) {
+        _month = State(initialValue: month.flatMap { $0.isEmpty ? nil : $0 })
+        _onlyOpen = State(initialValue: onlyOpen)
+        _pendingFocus = State(initialValue: focusTransactionId.flatMap { $0.isEmpty ? nil : $0 })
+    }
 
     private var loadKey: String { "\(app.dataVersion)|\(month ?? "")" }
     private var confirmable: Int { BankFeed.confirmableSuggestions(statements.flatMap(\.transactions)) }
@@ -149,13 +159,32 @@ struct BankFeedView: View {
 
     private func load() async {
         if state.value == nil { state = .loading }
+        // A slow answer for a month the owner already left must not replace the newer one.
+        let requested = month
         do {
-            let list: StatementList = try await app.api.get("/api/statements", query: BankFeed.query(month: month))
+            let list: StatementList = try await app.api.get("/api/statements", query: BankFeed.query(month: requested))
+            guard requested == month else { return }
             statements = list.statements
             state = .loaded(BankFeed.months(list.statements))
+            openPendingFocus()
         } catch is CancellationError {
         } catch {
+            guard requested == month else { return }
             if state.value == nil { state = .failed(error.userMessage) }
+        }
+    }
+
+    /// Opens the asked-for row once: from the loaded months, else from all months.
+    private func openPendingFocus() {
+        guard let id = pendingFocus else { return }
+        if let row = statements.flatMap({ $0.transactions }).first(where: { $0.id == id }) {
+            pendingFocus = nil
+            selected = row
+        } else if month != nil {
+            // Not in this month: look in every month (the month change reloads).
+            month = nil
+        } else {
+            pendingFocus = nil
         }
     }
 
@@ -240,13 +269,21 @@ struct BankRow: View {
 struct BankRowSheet: View {
     @Environment(AppModel.self) private var app
     @Environment(\.dismiss) private var dismiss
-    let row: BankTransaction
+    @State private var row: BankTransaction
     /// Off when the sheet is opened from the tiliote itself.
-    var showStatementLink = true
+    let showStatementLink: Bool
     @State private var busy = false
     @State private var failure: String?
     @State private var capture = false
+    @State private var captured = false
     @State private var candidates: Loadable<[BankMatchCandidate]> = .idle
+    /// The data version the row was read at; a newer one re-reads it.
+    @State private var seenVersion: Int?
+
+    init(row: BankTransaction, showStatementLink: Bool = true) {
+        _row = State(initialValue: row)
+        self.showStatementLink = showStatementLink
+    }
 
     var body: some View {
         NavigationStack {
@@ -275,9 +312,39 @@ struct BankRowSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Valmis") { dismiss() } } }
             .disabled(busy)
-            .fullScreenCover(isPresented: $capture, onDismiss: { dismiss() }) { CaptureFlow(transactionId: row.id) }
+            // Only a saved receipt closes the row; a cancelled camera returns to it.
+            .fullScreenCover(isPresented: $capture, onDismiss: { if captured { dismiss() } }) {
+                CaptureFlow(transactionId: row.id, onSaved: { captured = true })
+            }
+            .task(id: app.dataVersion) { await refreshRow() }
         }
         .presentationDetents([.medium, .large])
+    }
+
+    /// Something changed elsewhere (e.g. the kuitti was unlinked from a pushed screen):
+    /// the row is read again; a row that no longer exists closes the sheet.
+    private func refreshRow() async {
+        let version = app.dataVersion
+        guard let seen = seenVersion else { seenVersion = version; return }
+        guard seen != version, !busy else { return }
+        do {
+            let response: StatementResponse = try await app.api.get("/api/statements/\(row.statementId)")
+            guard !Task.isCancelled else { return }
+            seenVersion = version
+            if let fresh = response.statement.transactions.first(where: { $0.id == row.id }) {
+                if fresh != row {
+                    row = fresh
+                    candidates = .idle
+                }
+            } else {
+                dismiss()
+            }
+        } catch is CancellationError {
+        } catch let error as LKError where error.status == 404 {
+            dismiss()
+        } catch {
+            // Keep the copy on screen; the next change tries again.
+        }
     }
 
     @ViewBuilder private var actions: some View {

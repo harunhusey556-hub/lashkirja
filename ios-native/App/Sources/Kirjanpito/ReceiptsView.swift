@@ -14,7 +14,7 @@ struct ReceiptsView: View {
     @State private var loadingMore = false
     @State private var counts: ReceiptCounts.Counts?
     @State private var pending: [Receipt] = []
-    @State private var query = ReceiptListQuery()
+    @State private var query: ReceiptListQuery
     @State private var editingAmount = false
     @State private var minDraft = ""
     @State private var maxDraft = ""
@@ -28,6 +28,22 @@ struct ReceiptsView: View {
     @State private var deleteIds: [String] = []
     @State private var confirmDelete = false
 
+    /// Month, tab, category, source and sort are kept between visits (as the purchase invoices' filter).
+    private static let filterKey = "kuitit.filter"
+
+    /// With a month or a tab the screen opens on exactly that; otherwise on the filters of the last visit.
+    init(month: String = "", tab: ReceiptTab = .all) {
+        var initial: ReceiptListQuery
+        if !month.isEmpty || tab != .all {
+            initial = ReceiptListQuery()
+            initial.month = month
+            initial.tab = tab
+        } else {
+            initial = ReceiptListQuery(remembered: UserDefaults.standard.string(forKey: Self.filterKey) ?? "")
+        }
+        _query = State(initialValue: initial)
+    }
+
     private struct ReloadKey: Hashable {
         let query: ReceiptListQuery
         let version: Int
@@ -40,7 +56,9 @@ struct ReceiptsView: View {
                     ForEach(pending) { receipt in
                         NavigationLink(value: Route.receipt(receipt.id)) { ReceiptRow(receipt: receipt) }
                             .swipeActions(edge: .trailing) {
-                                Button("Hyväksy") { Task { await review([receipt.id]) } }.tint(Theme.successFill)
+                                Button("Hyväksy") { Task { await review([receipt.id]) } }
+                                    .tint(Theme.successFill)
+                                    .disabled(busy)
                             }
                     }
                     Button { Task { await review(pending.map(\.id)) } } label: {
@@ -139,6 +157,9 @@ struct ReceiptsView: View {
             try? await Task.sleep(nanoseconds: 350_000_000)
             guard !Task.isCancelled, searchText != query.search else { return }
             query.search = searchText
+        }
+        .onChange(of: query) { _, next in
+            UserDefaults.standard.set(next.remembered, forKey: Self.filterKey)
         }
         .animation(.snappy, value: pending.map(\.id))
     }
@@ -318,12 +339,18 @@ struct ReceiptsView: View {
     private func load() async {
         if receipts.value == nil { receipts = .loading }
         let api = app.api
-        let listQuery = query.listQuery()
-        let countsQuery = query.countsQuery()
+        // A slow answer for filters the owner already changed must not replace the newer list.
+        let asked = query
+        let listQuery = asked.listQuery()
+        let countsQuery = asked.countsQuery()
         async let countsResponse: ReceiptCounts? = try? api.get("/api/receipts/counts", query: countsQuery)
         async let queue: ReceiptList? = try? api.get("/api/receipts", query: ["reviewStatus": "pending"])
         do {
             let list: ReceiptList = try await api.get("/api/receipts", query: listQuery)
+            guard asked == query else {
+                if let q = await queue { pending = q.receipts }
+                return
+            }
             receipts = .loaded(list.receipts)
             total = list.count ?? list.receipts.count
             truncated = list.truncated ?? false
@@ -333,9 +360,10 @@ struct ReceiptsView: View {
         } catch is CancellationError {
             return
         } catch {
+            guard asked == query else { return }
             if receipts.value == nil { receipts = .failed(error.userMessage) } else { failure = error.userMessage }
         }
-        if let c = await countsResponse { counts = c.counts }
+        if let c = await countsResponse, asked == query { counts = c.counts }
         if let q = await queue { pending = q.receipts }
     }
 
@@ -361,6 +389,7 @@ struct ReceiptsView: View {
 
     private func review(_ ids: [String]) async {
         struct Body: Encodable { let receiptIds: [String] }
+        guard !busy else { return }
         busy = true
         failure = nil
         defer { busy = false }

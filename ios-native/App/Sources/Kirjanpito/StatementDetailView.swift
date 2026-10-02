@@ -320,6 +320,24 @@ struct StatementRowEditSheet: View {
     @State private var message = ""
     @State private var busy = false
     @State private var failure: String?
+    @State private var opened: Fields?
+    @State private var confirmDiscard = false
+
+    /// The editable fields, to tell whether anything was changed since opening.
+    private struct Fields: Equatable {
+        let counterparty: String
+        let hasDate: Bool
+        let day: String
+        let amount: String
+        let type: String
+        let message: String
+    }
+
+    private var current: Fields {
+        Fields(counterparty: counterparty, hasDate: hasDate, day: hasDate ? APIDate.dayString(date) : "", amount: amount, type: type, message: message)
+    }
+
+    private var dirty: Bool { opened.map { $0 != current } ?? false }
 
     var body: some View {
         NavigationStack {
@@ -344,7 +362,9 @@ struct StatementRowEditSheet: View {
             .navigationTitle("Muokkaa tapahtumaa")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Peruuta") { dismiss() } }
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Peruuta") { if dirty { confirmDiscard = true } else { dismiss() } }
+                }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Tallenna") { Task { await save() } }.disabled(busy || Money.parse(amount) == nil)
                 }
@@ -352,9 +372,12 @@ struct StatementRowEditSheet: View {
             .onAppear(perform: fill)
         }
         .presentationDetents([.medium, .large])
+        .discardGuard(dirty: dirty, busy: busy, asking: $confirmDiscard) { dismiss() }
     }
 
     private func fill() {
+        guard opened == nil else { return }
+        defer { opened = current }
         counterparty = row.counterparty ?? ""
         if let day = row.date.flatMap({ APIDate.day(String($0.prefix(10))) }) { date = day } else { hasDate = false }
         amount = Money.format(row.amount).replacingOccurrences(of: "\u{00A0}€", with: "")
@@ -363,6 +386,7 @@ struct StatementRowEditSheet: View {
     }
 
     private func save() async {
+        guard !busy else { return }
         busy = true
         failure = nil
         defer { busy = false }

@@ -375,7 +375,12 @@ async function extractWithAI(
   return extractWithAIFromText(docText, apiKey);
 }
 
-function normalizeAIResult(
+/** Whole cents: /api/receipts/save refuses an amount with more than two decimals. */
+function toCents(value: number): number {
+  return Math.round(value * 100) / 100;
+}
+
+export function normalizeAIResult(
   value: unknown,
   provenance: "openai-compatible" | "github-copilot"
 ): ExtractedReceipt {
@@ -392,7 +397,7 @@ function normalizeAIResult(
       ? parsed.date
       : null;
   const total = Number(parsed.totalAmount);
-  const totalAmount = Number.isFinite(total) && total >= 0 ? total : null;
+  const totalAmount = Number.isFinite(total) && total >= 0 ? toCents(total) : null;
   const allowedRates = new Set([0, 10, 13.5, 14, 24, 25.5]);
   const vatDetails = (Array.isArray(parsed.vatDetails) ? parsed.vatDetails : [])
     .map((line) => {
@@ -400,7 +405,7 @@ function normalizeAIResult(
       const rate = Number((line as Record<string, unknown>).rate);
       const amount = Number((line as Record<string, unknown>).amount);
       if (!allowedRates.has(rate) || !Number.isFinite(amount) || amount < 0) return null;
-      return { rate, amount };
+      return { rate, amount: toCents(amount) };
     })
     .filter((line): line is { rate: number; amount: number } => line !== null);
   return {

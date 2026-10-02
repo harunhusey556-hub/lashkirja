@@ -68,6 +68,7 @@ struct AlvView: View {
         .navigationTitle("ALV-ilmoitus")
         .refreshable { await load() }
         .task(id: period) {
+            failure = nil
             if kind == nil {
                 kind = await app.cachedProfile()?.vatPeriod ?? "month"
                 // No period given: the latest one that can be filed.
@@ -93,6 +94,7 @@ struct AlvView: View {
 
     private func step(_ delta: Int) async {
         state = .loading
+        failure = nil
         period = VatPeriod.shift(period, by: delta)
     }
 
@@ -107,7 +109,9 @@ struct AlvView: View {
         do {
             let _: Ignored = try await app.api.send("PATCH", "/api/alv/filing", body: Body(period: period, filed: filed, paid: paid))
             Haptics.success()
+            failure = nil
             await load()
+        } catch is CancellationError {
         } catch {
             failure = error.userMessage
             Haptics.error()

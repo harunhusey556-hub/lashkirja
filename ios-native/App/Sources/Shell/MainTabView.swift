@@ -6,12 +6,14 @@ struct MainTabView: View {
     @State private var showProfile = false
     @State private var showAssistant = false
     @State private var showOnboarding = false
+    /// Each tab's pushed screens, so a screen can be opened from outside its tab (AppModel.pendingRoute).
+    @State private var paths: [AppTab: [Route]] = [:]
     @Environment(AppModel.self) private var app
 
     var body: some View {
         TabView(selection: Binding(get: { tab }, set: select)) {
             ForEach([AppTab.koti, .myynti, .kirjanpito, .raportit], id: \.self) { item in
-                NavigationStack {
+                NavigationStack(path: path(item)) {
                     root(item)
                         .toolbar {
                             ToolbarItemGroup(placement: .topBarTrailing) {
@@ -35,6 +37,13 @@ struct MainTabView: View {
         .sheet(isPresented: $showAssistant) { AssistantView() }
         .fullScreenCover(isPresented: $showOnboarding) { OnboardingView { showOnboarding = false } }
         .overlay(alignment: .top) { OfflineBanner() }
+        // A screen asked for from elsewhere (a new invoice made from "+"): its tab, then the screen.
+        .onChange(of: app.pendingRoute, initial: true) { _, pending in
+            guard let pending else { return }
+            app.pendingRoute = nil
+            tab = pending.tab
+            paths[pending.tab, default: []].append(pending.route)
+        }
         .task {
             struct State_: Decodable { let onboarded: Bool }
             if let state: State_ = try? await app.api.get("/api/onboarding"), !state.onboarded { showOnboarding = true }
@@ -49,6 +58,10 @@ struct MainTabView: View {
         case .raportit: RaportitView()
         default: PlaceholderScreen(title: item.title)
         }
+    }
+
+    private func path(_ item: AppTab) -> Binding<[Route]> {
+        Binding(get: { paths[item] ?? [] }, set: { paths[item] = $0 })
     }
 
     /// "Lisää" is an action, not a place: it opens the add sheet and stays on the current tab.

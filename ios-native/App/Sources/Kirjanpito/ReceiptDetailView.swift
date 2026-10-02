@@ -11,6 +11,8 @@ struct ReceiptDetailView: View {
     @State private var confirmDelete = false
     @State private var failure: String?
     @State private var matchBusy = false
+    @State private var reviewBusy = false
+    @State private var prefetched = false
     @State private var ruleActive = false
     @State private var ruleBusy = false
     @State private var toast: Toast?
@@ -49,7 +51,9 @@ struct ReceiptDetailView: View {
                     Button { editing = true } label: { Label("Muokkaa", systemImage: "pencil") }
                     if r.reviewStatus == "pending" {
                         Button { Task { await review("approved") } } label: { Label("Hyväksy", systemImage: "checkmark.circle") }
+                            .disabled(reviewBusy)
                         Button(role: .destructive) { Task { await review("rejected") } } label: { Label("Hylkää", systemImage: "xmark.circle") }
+                            .disabled(reviewBusy)
                     }
                 }
                 if let failure { Text(failure).foregroundStyle(Theme.danger) }
@@ -76,7 +80,9 @@ struct ReceiptDetailView: View {
                 ToastView(toast: toast) { runToastAction() }.padding(.bottom, 8)
             }
         }
-        .sheet(isPresented: $showFile) { DocumentPreviewSheet(path: "/api/receipts/\(receiptId)/file", fileName: state.value?.fileName ?? "kuitti") }
+        .sheet(isPresented: $showFile) {
+            DocumentPreviewSheet(path: "/api/receipts/\(receiptId)/file", query: Self.fileQuery, fileName: state.value?.fileName ?? "kuitti", cacheKey: Self.fileCacheKey)
+        }
         .sheet(isPresented: $editing) {
             if let r = state.value {
                 ReceiptEditSheet(receipt: r) { saved, categoryChanged in
@@ -280,11 +286,20 @@ struct ReceiptDetailView: View {
 
     // MARK: Load and save
 
+    /// The stored file of a receipt never changes, so one key serves every visit.
+    /// `preview=1` makes the server send a large photo as a ≤1600 px JPEG.
+    private static let fileCacheKey = "receipt-file-preview"
+    private static let fileQuery = ["preview": "1"]
+
     private func load() async {
         if state.value == nil { state = .loading }
         do {
             let r: ReceiptResponse = try await app.api.get("/api/receipts/\(receiptId)")
             state = .loaded(r.receipt)
+            if r.receipt.hasOriginalFile && !prefetched {
+                prefetched = true
+                DocumentCache.shared.prefetch(app, path: "/api/receipts/\(receiptId)/file", query: Self.fileQuery, fileName: r.receipt.fileName ?? "kuitti", key: Self.fileCacheKey)
+            }
             await loadRule(vendor: r.receipt.vendor)
         } catch is CancellationError {
         } catch {
@@ -308,13 +323,18 @@ struct ReceiptDetailView: View {
 
     private func review(_ status: String) async {
         struct Body: Encodable { let reviewStatus: String }
+        guard !reviewBusy else { return }
+        reviewBusy = true
+        failure = nil
+        defer { reviewBusy = false }
         do {
             let _: Ignored = try await app.api.send("PATCH", "/api/receipts/\(receiptId)/review", body: Body(reviewStatus: status))
             Haptics.success()
-            app.dataVersion += 1
             await load()
+        } catch is CancellationError {
         } catch {
             failure = error.userMessage
+            Haptics.error()
         }
     }
 
@@ -343,6 +363,7 @@ struct ReceiptEditSheet: View {
     @State private var failure: ReceiptSaveFailure?
     @State private var busy = false
     @State private var customCategory: Bool
+    @State private var confirmDiscard = false
     let saved: (Receipt, Bool) -> Void
 
     init(receipt: Receipt, saved: @escaping (Receipt, Bool) -> Void) {
@@ -409,12 +430,14 @@ struct ReceiptEditSheet: View {
             .navigationTitle("Muokkaa kuittia")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Peruuta") { dismiss() } }
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Peruuta") { if dirty { confirmDiscard = true } else { dismiss() } }
+                }
                 ToolbarItem(placement: .confirmationAction) {
                     if busy { ProgressView() } else { Button("Tallenna") { Task { await save() } }.bold() }
                 }
             }
-            .interactiveDismissDisabled(busy)
+            .discardGuard(dirty: dirty, busy: busy, asking: $confirmDiscard) { dismiss() }
             .onAppear {
                 if form.date.isEmpty { form.date = APIDate.dayString(Date()) }
             }
@@ -422,7 +445,14 @@ struct ReceiptEditSheet: View {
     }
 
     private var dateBinding: Binding<Date> {
-        Binding(get: { APIDate.day(form.date) ?? Date() }, set: { form.date = APIDate.dayString($0) })
+        Binding(get: { APIDate.day(form.date) ?? Date() }, set: { form.setDate(APIDate.dayString($0)) })
+    }
+
+    /// Anything typed that a save would send. The date filled in on open does not count.
+    private var dirty: Bool {
+        var opened = baseline
+        if opened.date.isEmpty { opened.date = form.date }
+        return form != opened
     }
 
     @ViewBuilder private func fieldError(_ key: String) -> some View {

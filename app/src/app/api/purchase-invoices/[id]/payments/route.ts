@@ -3,6 +3,7 @@ import { z } from "zod";
 import { requireSession } from "@/lib/session";
 import { noStoreJson, rejectCrossSite, rejectOversizedContentLength } from "@/lib/http-security";
 import { UnauthorizedError, ValidationError, withErrorHandler } from "@/lib/api-errors";
+import { hashIdempotencyPayload, idempotencyKeyFrom, withIdempotency } from "@/lib/idempotency";
 import { recordPurchasePayment, removePurchasePayment } from "@/lib/purchase-invoices";
 import { isoDateSchema, moneySchema } from "@/lib/validation";
 
@@ -25,12 +26,19 @@ export const POST = withErrorHandler(async (req: NextRequest, context: RouteCont
   if (oversized) return oversized;
 
   const { id } = await context.params;
-  const invoice = await recordPurchasePayment(
+  const input = bodySchema.parse(await req.json());
+  // The app sends an Idempotency-Key: a retried "Merkitse maksetuksi" does not record the payment twice.
+  const result = await withIdempotency(
     session.userId,
-    id,
-    bodySchema.parse(await req.json())
+    "purchase-invoice.payment",
+    idempotencyKeyFrom(req),
+    async (tx) => ({
+      status: 201,
+      body: { invoice: await recordPurchasePayment(session.userId, id, input, tx ?? undefined) },
+    }),
+    hashIdempotencyPayload({ id, ...input })
   );
-  return noStoreJson({ invoice }, { status: 201 });
+  return noStoreJson(result.body, { status: result.status });
 });
 
 export const DELETE = withErrorHandler(async (req: NextRequest, context: RouteContext) => {

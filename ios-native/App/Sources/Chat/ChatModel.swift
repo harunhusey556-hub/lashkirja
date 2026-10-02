@@ -12,6 +12,10 @@ final class ChatModel {
     private(set) var messages: [ChatMessage] = []
     private(set) var streaming = false
     var failure: String?
+    /// The composer's draft: kept here so closing the sheet does not lose it.
+    var input = ""
+    /// Bumped by open, startNew and send: a history load that started before them is stale.
+    private var loads = LoadGeneration()
     private var task: Task<Void, Never>?
     /// The reply the live stream writes into; a stopped or superseded stream no longer matches.
     private var liveReplyId: String?
@@ -68,22 +72,36 @@ final class ChatModel {
         }
     }
 
+    /// A slow answer is dropped when the owner has since sent a message, started a new
+    /// conversation or opened another one, and while a reply is streaming.
     func loadLatest() async {
+        let generation = loads.current
         do {
             var query: [String: String] = [:]
             if let conversationId { query["conversationId"] = conversationId }
             let history: ChatHistory = try await app.api.get("/api/ai/chat", query: query)
-            messages = history.messages
+            guard loads.isCurrent(generation), !streaming else { return }
+            messages = history.messages.uniquedById()
             conversationId = history.conversation?.id
             title = history.conversation?.title ?? "Avustaja"
         } catch is CancellationError {
         } catch {
+            guard loads.isCurrent(generation), !streaming else { return }
             failure = error.userMessage
         }
     }
 
+    /// A conversation was renamed in the list: the open one shows its new name.
+    func renamed(_ id: String, to newTitle: String) {
+        let trimmed = newTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard conversationId == id, !trimmed.isEmpty else { return }
+        title = trimmed
+    }
+
     func open(_ conversation: Conversation) async {
         stop()
+        loads.next()
+        failure = nil
         conversationId = conversation.id
         title = conversation.title
         messages = []
@@ -92,6 +110,8 @@ final class ChatModel {
 
     func startNew() {
         stop()
+        loads.next()
+        failure = nil
         conversationId = nil
         title = "Uusi keskustelu"
         messages = []
@@ -100,6 +120,7 @@ final class ChatModel {
     func send(_ text: String) {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, !streaming, cooldownUntil == nil else { return }
+        loads.next()
         failure = nil
         messages.append(ChatMessage(id: UUID().uuidString, role: "user", content: trimmed))
         let replyId = UUID().uuidString
@@ -173,6 +194,9 @@ final class ChatModel {
                 case .delta:
                     break
                 case .finished(let message):
+                    // The stored reply takes the placeholder's place; its id must not be
+                    // in the list twice (the lazy stack's rows are keyed by id).
+                    messages.removeAll { $0.id == message.id && $0.id != replyId }
                     update(replyId) { $0 = message }
                 case .failed(let message):
                     failure = message

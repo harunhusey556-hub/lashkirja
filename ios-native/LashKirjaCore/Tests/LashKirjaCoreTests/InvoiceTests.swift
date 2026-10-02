@@ -54,7 +54,7 @@ private func fixture(_ name: String) throws -> Data {
 @Test func draftEncodesStrictBody() throws {
     var draft = InvoiceDraft(customerId: "c1", issueDate: "2026-10-02", paymentTermDays: 14)
     draft.notes = "  "
-    draft.lines = [InvoiceDraft.Line(description: "Huolto", quantity: 1, unit: "kpl", unitPrice: 10, vatRate: 24)]
+    draft.lines = [InvoiceDraft.Line(description: "Huolto", quantity: 1, unit: "kpl", unitPrice: 10, vatRate: Decimal(string: "25.5")!)]
     let json = try JSONSerialization.jsonObject(with: JSONEncoder().encode(draft)) as! [String: Any]
     #expect(Set(json.keys) == ["customerId", "issueDate", "paymentTermDays", "lines"])
     #expect(draft.validationError == nil)

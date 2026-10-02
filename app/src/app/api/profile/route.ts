@@ -148,6 +148,8 @@ export async function PATCH(req: NextRequest) {
       vatRegistered: true,
       vatPeriod: true,
       ...SELLER_SELECT,
+      // The same shape as GET: a client that keeps the answer keeps its mailboxes.
+      imapAccounts: { select: { id: true, email: true } },
     },
   });
 

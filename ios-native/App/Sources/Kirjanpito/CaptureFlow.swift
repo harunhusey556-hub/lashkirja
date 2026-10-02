@@ -11,12 +11,24 @@ struct CaptureFlow: View {
     @Environment(AppModel.self) private var app
     @Environment(\.dismiss) private var dismiss
     let transactionId: String?
+    /// Called once the receipt is saved (and matched), just before the flow closes.
+    /// Not called when the flow is cancelled.
+    var onSaved: (() -> Void)? = nil
 
     enum Step { case pick, uploading, edit(ReceiptDraft), failed(String) }
     @State private var step: Step = .pick
     @State private var showCamera = UIImagePickerController.isSourceTypeAvailable(.camera)
     @State private var photo: PhotosPickerItem?
     @State private var progress = "Ladataan…"
+    @State private var confirmDiscard = false
+
+    /// A receipt that is being read or was read but not saved is work the owner would lose.
+    private var unsaved: Bool {
+        switch step {
+        case .uploading, .edit: true
+        case .pick, .failed: false
+        }
+    }
 
     var body: some View {
         NavigationStack {
@@ -39,7 +51,10 @@ struct CaptureFlow: View {
                 case .uploading:
                     ProgressView(progress)
                 case .edit(let draft):
-                    ReceiptEditor(draft: draft, transactionId: transactionId) { dismiss() }
+                    ReceiptEditor(draft: draft, transactionId: transactionId) {
+                        onSaved?()
+                        dismiss()
+                    }
                 case .failed(let message):
                     ContentUnavailableView {
                         Label("Kuitin luku epäonnistui", systemImage: "exclamationmark.triangle")
@@ -50,7 +65,12 @@ struct CaptureFlow: View {
             }
             .navigationTitle("Uusi kuitti")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Peruuta") { dismiss() } } }
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Peruuta") { if unsaved { confirmDiscard = true } else { dismiss() } }
+                }
+            }
+            .discardGuard(dirty: unsaved, busy: false, asking: $confirmDiscard) { dismiss() }
             .fullScreenCover(isPresented: $showCamera) {
                 CameraPicker { image in
                     showCamera = false
@@ -105,51 +125,77 @@ struct CaptureFlow: View {
     }
 }
 
+/// The fields of a receipt that was just read, as the web editor shows a new
+/// receipt: editable VAT rows that follow the total (and, while nobody chose
+/// the rate, the date).
 struct ReceiptEditor: View {
     @Environment(AppModel.self) private var app
-    @State var draft: ReceiptDraft
+    let uploadId: String
     let transactionId: String?
     let done: () -> Void
-    @State private var amountText = ""
-    @State private var date = Date()
+    @State private var form: ReceiptForm
+    @State private var errors: [String: String] = [:]
     @State private var busy = false
     @State private var failure: String?
     @State private var duplicate = false
     @State private var savedId: String?
-    @State private var customCategory = false
+    @State private var customCategory: Bool
+
+    init(draft: ReceiptDraft, transactionId: String?, done: @escaping () -> Void) {
+        let form = ReceiptForm(draft: draft)
+        uploadId = draft.uploadId
+        self.transactionId = transactionId
+        self.done = done
+        _form = State(initialValue: form)
+        _customCategory = State(initialValue: !form.category.isEmpty && !form.isKnownCategory)
+    }
 
     var body: some View {
         Form {
-            Picker("Laji", selection: $draft.type) {
-                Text("Meno").tag("meno")
-                Text("Tulo").tag("tulo")
-            }
-            .pickerStyle(.segmented)
             Section {
-                TextField("Myyjä", text: $draft.vendor)
-                TextField("Summa €", text: $amountText).keyboardType(.decimalPad)
-                    .onChange(of: amountText) { _, t in draft.totalAmount = ReceiptAmount.parse(t) }
-                DatePicker("Päivä", selection: $date, displayedComponents: .date)
-            }
-            Section("Kategoria") {
-                ReceiptCategoryField(category: $draft.category, custom: $customCategory)
-            }
-            if !draft.vatDetails.isEmpty {
-                Section("ALV") {
-                    ForEach(draft.vatDetails, id: \.self) { row in
-                        LabeledContent("ALV \(NSDecimalNumber(decimal: row.rate).stringValue.replacingOccurrences(of: ".", with: ",")) %") { MoneyText(amount: row.amount) }
-                    }
+                Picker("Laji", selection: $form.type) {
+                    Text("Meno").tag("meno")
+                    Text("Tulo").tag("tulo")
                 }
+                .pickerStyle(.segmented)
+                .listRowBackground(Color.clear)
+                .listRowInsets(EdgeInsets())
             }
-            Section { TextField("Muistiinpano", text: $draft.notes, axis: .vertical) }
+            Section {
+                TextField("Myyjä", text: $form.vendor).textContentType(.organizationName)
+                fieldError("vendor")
+                DatePicker("Päivä", selection: dateBinding, displayedComponents: .date)
+                fieldError("date")
+                TextField("Summa €", text: Binding(get: { form.totalText }, set: { form.setTotal($0) }))
+                    .keyboardType(.decimalPad)
+                fieldError("totalAmount")
+            }
+            Section {
+                ReceiptCategoryField(category: $form.category, custom: $customCategory)
+                fieldError("category")
+            } header: {
+                Text("Kategoria")
+            }
+            vatSection
+            Section {
+                TextField("Viitenumero", text: $form.reference)
+                fieldError("reference")
+                TextField("Laskun numero", text: $form.invoiceNumber)
+                fieldError("invoiceNumber")
+                TextField("Muistiinpano", text: $form.notes, axis: .vertical)
+                fieldError("notes")
+            } header: {
+                Text("Lisätiedot")
+            }
             if let failure { Section { Text(failure).foregroundStyle(Theme.danger) } }
             if duplicate {
                 Section {
-                    Button("Tallenna silti") { draft.forceDuplicate = true; Task { await save() } }
+                    Button("Tallenna silti") { Task { await save(forceDuplicate: true) } }
+                        .disabled(busy)
                 } footer: { Text("Sama kuitti on jo tallennettu.") }
             }
             Section {
-                Button { Task { await save() } } label: {
+                Button { Task { await save(forceDuplicate: false) } } label: {
                     Text("Tallenna kuitti").frame(maxWidth: .infinity, minHeight: 44).font(.headline)
                 }
                 .buttonStyle(.primary)
@@ -158,35 +204,93 @@ struct ReceiptEditor: View {
             }
         }
         .onAppear {
-            if let amount = draft.totalAmount { amountText = NSDecimalNumber(decimal: amount).stringValue.replacingOccurrences(of: ".", with: ",") }
-            if let d = APIDate.day(draft.date) { date = d }
-            customCategory = !draft.category.isEmpty && !ReceiptCategory.isKnown(draft.category)
+            if form.date.isEmpty { form.setDate(APIDate.dayString(Date())) }
         }
     }
 
-    private func save() async {
-        draft.date = APIDate.dayString(date)
-        if let problem = draft.validationError { failure = problem; Haptics.error(); return }
+    private var dateBinding: Binding<Date> {
+        Binding(get: { APIDate.day(form.date) ?? Date() }, set: { form.setDate(APIDate.dayString($0)) })
+    }
+
+    @ViewBuilder private func fieldError(_ key: String) -> some View {
+        if let message = errors[key] {
+            Text(message).font(.caption).foregroundStyle(Theme.danger)
+        }
+    }
+
+    private var vatSection: some View {
+        Section {
+            if form.vatRows.isEmpty {
+                Text("Ei ALV-erittelyä").foregroundStyle(Theme.ink2)
+            }
+            ForEach(Array(form.vatRows.enumerated()), id: \.element.id) { index, row in
+                HStack {
+                    Picker("ALV", selection: Binding(get: { row.rate }, set: { form.setRate($0, at: index) })) {
+                        ForEach(ReceiptVat.rateChoices(forDate: form.date, including: row.rate), id: \.self) { rate in
+                            Text(ReceiptVat.rateLabel(rate)).tag(rate)
+                        }
+                    }
+                    .labelsHidden()
+                    .pickerStyle(.menu)
+                    .fixedSize()
+                    TextField("ALV €", text: Binding(get: { row.amountText }, set: { form.setVatAmount($0, at: index) }))
+                        .keyboardType(.decimalPad)
+                        .multilineTextAlignment(.trailing)
+                    Button(role: .destructive) { form.removeVatRow(at: index) } label: { Image(systemName: "minus.circle") }
+                        .buttonStyle(.borderless)
+                        .accessibilityLabel("Poista ALV-rivi")
+                }
+                fieldError("vat-\(index)")
+            }
+            Button { form.addVatRow() } label: { Label("Lisää ALV-rivi", systemImage: "plus.circle") }
+        } header: {
+            Text("ALV")
+        } footer: {
+            if form.vatRows.count == 1 && form.vatRows[0].auto {
+                Text("ALV lasketaan summasta ja ALV-kannasta.")
+            }
+        }
+    }
+
+    private func save(forceDuplicate: Bool) async {
+        guard !busy else { return }
         struct Saved: Decodable { struct R: Decodable { let id: String }; let receipt: R }
         struct Match: Encodable { let transactionId: String; let receiptId: String }
+        // A retry after a failed match only repeats the match, never the save.
+        var request: ReceiptDraft?
+        if savedId == nil {
+            switch form.makeDraft(uploadId: uploadId, forceDuplicate: forceDuplicate) {
+            case .invalid(let found):
+                errors = found
+                failure = nil
+                Haptics.error()
+                return
+            case .draft(let draft):
+                request = draft
+            }
+        }
+        errors = [:]
         busy = true
         failure = nil
         defer { busy = false }
         do {
-            // A retry after a failed match only repeats the match, never the save.
             let receiptId: String
             if let savedId {
                 receiptId = savedId
-            } else {
-                let saved: Saved = try await app.api.send("POST", "/api/receipts/save", body: draft)
+            } else if let request {
+                let saved: Saved = try await app.api.send("POST", "/api/receipts/save", body: request)
                 receiptId = saved.receipt.id
                 savedId = receiptId
+                duplicate = false
+            } else {
+                return
             }
             if let transactionId {
                 let _: Ignored = try await app.api.send("POST", "/api/matching/confirm", body: Match(transactionId: transactionId, receiptId: receiptId))
             }
             Haptics.success()
             done()
+        } catch is CancellationError {
         } catch let error as LKError where error.isDuplicate && savedId == nil {
             duplicate = true
             failure = error.message

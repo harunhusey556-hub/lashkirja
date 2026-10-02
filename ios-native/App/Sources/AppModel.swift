@@ -20,6 +20,14 @@ final class AppModel {
     /// The assistant's conversation outlives its sheet: closing with "Valmis" and opening again
     /// returns to the same conversation (a new, still empty one included), not the latest stored one.
     var chat: ChatModel?
+    /// A screen to open from outside its tab (a new invoice made from "+"): MainTabView
+    /// switches to the tab, pushes the route and clears this.
+    var pendingRoute: PendingRoute?
+    /// A password reset link handed to the app (`lashkirja://…?token=…`), waiting for the
+    /// sign-in screen to open the reset form with it.
+    var pendingResetLink: String?
+    /// When the app went to the background: coming back after a while reloads the screens.
+    private var backgroundedAt: Date?
     let auth: AuthService
     let api: APIClient
 
@@ -43,11 +51,15 @@ final class AppModel {
             let had = await auth.handleUnauthorized()
             await self?.signedOut(notice: had ? "Istunto vanheni. Kirjaudu uudelleen." : nil)
         }
-        await auth.revokePending()
+        // The revoke of an earlier sign-out is a network call: it must not hold up opening the app.
+        Task { await auth.revokePending() }
         guard let user = await auth.restore() else {
             phase = .signedOut(notice: nil)
             return
         }
+        // A lock set up before its owner was recorded belongs to this session's account.
+        AppLock.shared.adoptOwnerIfUnknown(user.userId)
+        AppLock.shared.keepOnly(for: user.userId)
         phase = .signedIn(user)
         await auth.refreshIfDue()
         // A refused refresh already signed out (with the notice): stop here.
@@ -59,6 +71,9 @@ final class AppModel {
 
     func login(email: String, password: String) async throws {
         let user = try await auth.login(email: email, password: password)
+        // After an expired session someone else may sign in: they are not locked behind the
+        // previous owner's PIN (the same policy as signing out).
+        AppLock.shared.keepOnly(for: user.userId)
         Haptics.success()
         phase = .signedIn(user)
         Task { await auth.revokePending() }
@@ -69,6 +84,7 @@ final class AppModel {
     func logout() async {
         // The lock belongs to the signed-in owner; the next account sets its own.
         AppLock.shared.disable()
+        DocumentCache.shared.clear()
         profile = nil
         chat = nil
         phase = .signedOut(notice: nil)
@@ -76,7 +92,32 @@ final class AppModel {
         Task { await auth.logout() }
     }
 
-    func foreground() async { await auth.refreshIfDue() }
+    func background() {
+        backgroundedAt = Date()
+    }
+
+    func foreground() async {
+        // Back after more than five minutes: what the screens show may be out of date.
+        if ForegroundRefresh.isStale(backgroundedAt: backgroundedAt, now: Date()), case .signedIn = phase {
+            dataVersion += 1
+        }
+        backgroundedAt = nil
+        await auth.refreshIfDue()
+    }
+
+    /// A `lashkirja://` link opened the app; a reset link waits for the sign-in screen.
+    func handle(url: URL) {
+        let link = url.absoluteString
+        if PasswordReset.token(from: link) != nil { pendingResetLink = link }
+    }
+
+    /// The sign-in email was changed and confirmed: the profile and the signed-in user show it.
+    func emailChanged(to email: String) {
+        if case .signedIn(let user) = phase {
+            phase = .signedIn(AuthUser(userId: user.userId, email: email, firstName: user.firstName))
+        }
+        profileChanged(nil)
+    }
 
     func cachedProfile() async -> Profile? {
         if let profile { return profile }
@@ -87,6 +128,7 @@ final class AppModel {
     func profileChanged(_ new: Profile?) { profile = new }
 
     private func signedOut(notice: String?) {
+        DocumentCache.shared.clear()
         profile = nil
         chat = nil
         phase = .signedOut(notice: notice)
@@ -94,3 +136,8 @@ final class AppModel {
 }
 
 struct MeResponse: Decodable { let user: AuthUser }
+
+struct PendingRoute: Equatable {
+    let tab: AppTab
+    let route: Route
+}

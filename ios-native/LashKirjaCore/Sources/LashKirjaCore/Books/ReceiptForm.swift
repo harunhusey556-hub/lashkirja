@@ -112,18 +112,29 @@ public enum ReceiptVat {
 }
 
 /// One VAT row of the form. `auto` means the amount follows the total and the rate.
+/// `defaulted` means the rate is only the default of the receipt date: nobody
+/// chose it, so it moves with the date (web `VatRow.defaulted`).
 public struct ReceiptVatRow: Sendable, Equatable, Identifiable {
     public let id: UUID
     public var rate: Decimal
     public var amountText: String
     public var auto: Bool
+    public var defaulted: Bool
 
-    public init(rate: Decimal, amountText: String, auto: Bool) {
+    public init(rate: Decimal, amountText: String, auto: Bool, defaulted: Bool = false) {
         id = UUID()
         self.rate = rate
         self.amountText = amountText
         self.auto = auto
+        self.defaulted = defaulted
     }
+}
+
+/// What "Tallenna kuitti" of a new receipt sends, or why it cannot.
+public enum ReceiptDraftOutcome: Sendable, Equatable {
+    /// Field key ("vendor", "totalAmount", "vat-0", …) to its Finnish message.
+    case invalid([String: String])
+    case draft(ReceiptDraft)
 }
 
 /// `PATCH /api/receipts/[id]`: only the changed fields, plus the version that was edited.
@@ -207,6 +218,30 @@ public struct ReceiptForm: Sendable, Equatable {
         vatRows = rows
     }
 
+    /// A NEW receipt as the document analysis read it (web `newReceiptVatRows`):
+    /// the VAT that was read, else one row at the general rate of the date that
+    /// follows the total and the date.
+    public init(draft d: ReceiptDraft) {
+        vendor = d.vendor
+        date = d.date
+        totalText = d.totalAmount.map(ReceiptAmount.field) ?? ""
+        category = d.category
+        type = d.type == "tulo" ? "tulo" : "meno"
+        notes = d.notes
+        reference = d.reference
+        invoiceNumber = d.invoiceNumber
+        var rows = d.vatDetails.map { ReceiptVatRow(rate: $0.rate, amountText: ReceiptAmount.field($0.amount), auto: false) }
+        if rows.count == 1, let total = d.totalAmount,
+           ReceiptAmount.parse(rows[0].amountText) == ReceiptVat.vatInGross(total, rate: rows[0].rate) {
+            rows[0].auto = true
+        }
+        vatRows = rows
+        if rows.isEmpty {
+            let rate = ReceiptVat.defaultRate(forDate: d.date)
+            vatRows = [ReceiptVatRow(rate: rate, amountText: autoAmount(rate), auto: true, defaulted: true)]
+        }
+    }
+
     public var isKnownCategory: Bool { ReceiptCategory.isKnown(category) }
 
     // MARK: VAT rows
@@ -222,17 +257,35 @@ public struct ReceiptForm: Sendable, Equatable {
         if vatRows.count == 1, vatRows[0].auto { vatRows[0].amountText = autoAmount(vatRows[0].rate) }
     }
 
-    /// The user typed a VAT amount: the row stops following the total.
+    /// The user typed a VAT amount: the row stops following the total. Emptied, it follows again.
     public mutating func setVatAmount(_ text: String, at index: Int) {
         guard vatRows.indices.contains(index) else { return }
         vatRows[index].amountText = text
-        vatRows[index].auto = false
+        vatRows[index].auto = text.trimmingCharacters(in: .whitespaces).isEmpty
     }
 
+    /// A rate picked by hand is no longer the default of the date. Picking the
+    /// rate of a single row asks for the VAT of the total (web editor, F03).
     public mutating func setRate(_ rate: Decimal, at index: Int) {
         guard vatRows.indices.contains(index) else { return }
         vatRows[index].rate = rate
-        if vatRows[index].auto { vatRows[index].amountText = autoAmount(rate) }
+        vatRows[index].defaulted = false
+        if vatRows.count == 1, let total = ReceiptAmount.parse(totalText), total >= 0 {
+            vatRows[index].amountText = autoAmount(rate)
+            vatRows[index].auto = true
+        } else if vatRows[index].auto {
+            vatRows[index].amountText = autoAmount(rate)
+        }
+    }
+
+    /// The date changed: a single row whose rate nobody chose follows it (web `followDateRate`).
+    public mutating func setDate(_ text: String) {
+        date = text
+        guard vatRows.count == 1, vatRows[0].defaulted, vatRows[0].auto else { return }
+        let rate = ReceiptVat.defaultRate(forDate: text)
+        guard rate != vatRows[0].rate else { return }
+        vatRows[0].rate = rate
+        vatRows[0].amountText = autoAmount(rate)
     }
 
     /// "Lisää ALV-rivi": the first row computes from the total, a further row starts blank.
@@ -256,6 +309,42 @@ public struct ReceiptForm: Sendable, Equatable {
         return zip(vatRows, baseline.vatRows).contains { row, other in
             row.rate != other.rate || ReceiptAmount.parse(row.amountText) != ReceiptAmount.parse(other.amountText)
         }
+    }
+
+    // MARK: New receipt
+
+    /// The body of `POST /api/receipts/save` for this form, checked as the web
+    /// editor checks a new receipt (`validateReceiptFields` + `vatPayload`).
+    public func makeDraft(uploadId: String, forceDuplicate: Bool = false) -> ReceiptDraftOutcome {
+        var errors = fieldErrors()
+        var lines: [VatDetail] = []
+        var vatOK = true
+        for (i, row) in vatRows.enumerated() {
+            if Self.trimmed(row.amountText).isEmpty { errors["vat-\(i)"] = ReceiptVat.missingMessage; vatOK = false; continue }
+            guard let amount = ReceiptAmount.parse(row.amountText), amount >= 0 else {
+                errors["vat-\(i)"] = ReceiptVat.invalidMessage; vatOK = false; continue
+            }
+            if !ReceiptVat.isSupported(row.rate) { errors["vat-\(i)"] = ReceiptVat.unsupportedMessage(row.rate) }
+            lines.append(VatDetail(rate: row.rate, amount: ReceiptAmount.rounded(amount, 2)))
+        }
+        let total = ReceiptAmount.parse(totalText)
+        if vatOK, let total, errors["vat-0"] == nil {
+            let vatCents = lines.reduce(Decimal(0)) { $0 + ReceiptAmount.cents($1.amount) }
+            if vatCents > ReceiptAmount.cents(total) { errors["vat-0"] = ReceiptVat.tooLargeMessage }
+        }
+        if !errors.isEmpty { return .invalid(errors) }
+        var draft = ReceiptDraft(uploadId: uploadId)
+        draft.vendor = Self.trimmed(vendor)
+        draft.date = date
+        draft.totalAmount = total.map { ReceiptAmount.rounded($0, 2) }
+        draft.vatDetails = lines
+        draft.category = Self.trimmed(category)
+        draft.notes = notes
+        draft.type = type
+        draft.reference = reference
+        draft.invoiceNumber = invoiceNumber
+        draft.forceDuplicate = forceDuplicate
+        return .draft(draft)
     }
 
     // MARK: Patch

@@ -14,6 +14,10 @@ struct PurchaseInvoiceFormView: View {
     @State private var busy = false
     @State private var key = UUID().uuidString
     @State private var prepared = false
+    @State private var baseline: PurchaseInvoiceForm?
+    @State private var confirmDiscard = false
+
+    private var dirty: Bool { baseline.map { $0 != form } ?? false }
 
     var body: some View {
         NavigationStack {
@@ -90,17 +94,20 @@ struct PurchaseInvoiceFormView: View {
             .navigationTitle(existing == nil ? "Uusi ostolasku" : "Muokkaa ostolaskua")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Peruuta") { dismiss() } }
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Peruuta") { if dirty { confirmDiscard = true } else { dismiss() } }
+                }
                 ToolbarItem(placement: .confirmationAction) {
                     Button(existing == nil ? "Lisää" : "Tallenna") { Task { await save() } }
                         .disabled(busy)
                 }
             }
-            .interactiveDismissDisabled(busy)
+            .discardGuard(dirty: dirty, busy: busy, asking: $confirmDiscard) { dismiss() }
             .onAppear {
                 guard !prepared else { return }
                 prepared = true
                 if let existing { form = PurchaseInvoiceForm(editing: existing) }
+                baseline = form
             }
         }
     }
@@ -120,6 +127,7 @@ struct PurchaseInvoiceFormView: View {
     }
 
     private func save() async {
+        guard !busy else { return }
         let validation = form.validate()
         errors = validation.errors
         failure = nil
@@ -179,6 +187,10 @@ struct PurchasePaymentSheet: View {
     @State private var busy = false
     @State private var failure: String?
     @State private var key = UUID().uuidString
+    @State private var prefilled = ""
+    @State private var confirmDiscard = false
+
+    private var dirty: Bool { amountText != prefilled || !note.trimmingCharacters(in: .whitespaces).isEmpty }
 
     var body: some View {
         NavigationStack {
@@ -203,7 +215,9 @@ struct PurchasePaymentSheet: View {
             .navigationTitle("Kirjaa maksu")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Peruuta") { dismiss() } }
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Peruuta") { if dirty { confirmDiscard = true } else { dismiss() } }
+                }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Merkitse maksetuksi") { Task { await save() } }.disabled(busy)
                 }
@@ -211,11 +225,12 @@ struct PurchasePaymentSheet: View {
             .onAppear {
                 if amountText.isEmpty && invoice.open > 0 {
                     amountText = PurchaseInvoiceForm.amountText(invoice.open)
+                    prefilled = amountText
                 }
             }
         }
         .presentationDetents([.medium, .large])
-        .interactiveDismissDisabled(busy)
+        .discardGuard(dirty: dirty, busy: busy, asking: $confirmDiscard) { dismiss() }
     }
 
     private func save() async {
@@ -224,7 +239,7 @@ struct PurchasePaymentSheet: View {
             Haptics.error()
             return
         }
-        guard let amount = Money.parse(amountText) else { return }
+        guard !busy, let amount = Money.parse(amountText) else { return }
         busy = true
         failure = nil
         defer { busy = false }
@@ -253,6 +268,9 @@ struct PurchaseMarkPaidSheet: View {
     @State private var reason = ""
     @State private var busy = false
     @State private var failure: String?
+    @State private var confirmDiscard = false
+
+    private var dirty: Bool { !reason.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
 
     var body: some View {
         NavigationStack {
@@ -272,7 +290,9 @@ struct PurchaseMarkPaidSheet: View {
             .navigationTitle("Merkitse maksetuksi")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Peruuta") { dismiss() } }
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Peruuta") { if dirty { confirmDiscard = true } else { dismiss() } }
+                }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Tallenna") { Task { await save() } }
                         .disabled(busy || !PurchaseStatusChange.reasonIsLongEnough(reason))
@@ -280,7 +300,7 @@ struct PurchaseMarkPaidSheet: View {
             }
         }
         .presentationDetents([.medium])
-        .interactiveDismissDisabled(busy)
+        .discardGuard(dirty: dirty, busy: busy, asking: $confirmDiscard) { dismiss() }
     }
 
     private func save() async {

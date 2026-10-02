@@ -124,12 +124,26 @@ private struct KotiContent: View {
             VStack(spacing: 0) {
                 ForEach(Array(model.visibleItems.enumerated()), id: \.element.id) { index, item in
                     if index > 0 { Divider().padding(.leading, 60) }
-                    TaskRow(item: item, approve: { model.approve(item) }, confirm: { model.confirmMatch(item) }, capture: { captureFor = CaptureTarget(transactionId: item.transactionId) })
+                    taskRow(item)
                         .transition(.asymmetric(insertion: .opacity, removal: .move(edge: .leading).combined(with: .opacity)))
                 }
             }
             .background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
             .animation(.snappy, value: model.visibleItems)
+        }
+    }
+
+    /// A row opens what it is about (the receipt, the bank row, the invoice); its pill
+    /// (Hyväksy, Kohdista, Kuvaa kuitti) stays its own button inside the link.
+    @ViewBuilder private func taskRow(_ item: DashboardItem) -> some View {
+        let row = TaskRow(item: item, approve: { model.approve(item) }, confirm: { model.confirmMatch(item) }, capture: { captureFor = CaptureTarget(transactionId: item.transactionId) })
+        if let route = Route.forItem(item, month: model.month) {
+            NavigationLink(value: route) {
+                row.contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+        } else {
+            row
         }
     }
 }

@@ -4,6 +4,7 @@ import { prisma } from "@/lib/db";
 import { requireSession } from "@/lib/session";
 import { inlineContentDisposition, readUserUpload } from "@/lib/storage";
 import { noStoreJson } from "@/lib/http-security";
+import { receiptPreview } from "@/lib/receipt-preview";
 
 const MIME: Record<string, string> = {
   ".pdf": "application/pdf",
@@ -36,8 +37,12 @@ export async function GET(
   if (!receipt?.filePath) return noStoreJson({ error: "Kuittia ei löytynyt" }, { status: 404 });
 
   try {
-    const buffer = await readUserUpload(session.userId!, receipt.filePath, true);
-    const contentType = receipt.upload?.mimeType || MIME[path.extname(receipt.filePath).toLowerCase()] || "application/octet-stream";
+    const original = await readUserUpload(session.userId!, receipt.filePath, true);
+    const originalType = receipt.upload?.mimeType || MIME[path.extname(receipt.filePath).toLowerCase()] || "application/octet-stream";
+    // ?preview=1: the app's viewer gets a 1600 px copy of a large photo instead of the original.
+    const preview = req.nextUrl.searchParams.get("preview") === "1" ? await receiptPreview(original, originalType) : null;
+    const buffer = preview?.body ?? original;
+    const contentType = preview?.contentType ?? originalType;
     return new NextResponse(buffer as unknown as BodyInit, {
       headers: {
         "Content-Type": contentType,

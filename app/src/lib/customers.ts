@@ -463,7 +463,8 @@ export interface CustomerImportResult {
 export async function importCustomers(
   userId: string,
   csv: string,
-  commit: boolean
+  commit: boolean,
+  db: Writer = prisma
 ): Promise<CustomerImportResult> {
   let rows: CustomerCsvRow[];
   try {
@@ -478,12 +479,16 @@ export async function importCustomers(
   for (const row of rows) {
     if (row.errors.length > 0 || !row.name) continue;
     try {
-      await createCustomer(userId, {
-        name: row.name,
-        email: row.email,
-        phone: row.phone,
-        businessId: row.businessId,
-      });
+      await createCustomer(
+        userId,
+        {
+          name: row.name,
+          email: row.email,
+          phone: row.phone,
+          businessId: row.businessId,
+        },
+        db
+      );
       created += 1;
     } catch (error) {
       row.errors.push(error instanceof Error ? error.message : "Riviä ei voitu tallentaa.");

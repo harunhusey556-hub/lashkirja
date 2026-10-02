@@ -116,7 +116,8 @@ struct PeriodsView: View {
                     itemRow(item)
                 }
                 if step.key == "bank" && !data.hasStatement {
-                    NavigationLink(value: Route.bankFeed) {
+                    // Tiliotteet (import and files) live on the bank accounts screen.
+                    NavigationLink(value: Route.bankAccounts) {
                         VStack(alignment: .leading, spacing: 2) {
                             Text("Tuo kuukauden tiliote").foregroundStyle(Theme.ink)
                             Text("Ilman tiliotetta puuttuvia kuitteja ei näe").font(.caption).foregroundStyle(Theme.ink2)
@@ -204,13 +205,9 @@ struct PeriodsView: View {
         }
     }
 
+    /// The row's own screen: a missing receipt opens that bank row, not the whole feed.
     private func route(for item: DashboardItem) -> Route? {
-        switch item.kind {
-        case .pendingReceipt, .vatGap: item.receiptId.map(Route.receipt)
-        case .missingReceipt, .receiptMatch: .bankFeed
-        case .invoiceMatch, .paymentDuplicate, .draftInvoice, .overdueInvoice: item.invoiceId.map(Route.invoice)
-        case .unknown: nil
-        }
+        Route.forItem(item, month: status.value?.month)
     }
 
     private func vatLine(_ vat: PeriodClose.Vat?) -> String {

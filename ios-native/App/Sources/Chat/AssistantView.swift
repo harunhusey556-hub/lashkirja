@@ -5,7 +5,6 @@ struct AssistantView: View {
     @Environment(AppModel.self) private var app
     @Environment(\.dismiss) private var dismiss
     @State private var model: ChatModel?
-    @State private var input = ""
     @State private var showConversations = false
     @FocusState private var focused: Bool
 
@@ -139,7 +138,7 @@ struct AssistantView: View {
 
     private func composerRow(_ model: ChatModel) -> some View {
         HStack(alignment: .bottom, spacing: 8) {
-            TextField(model.canType ? "Kirjoita viesti…" : "Kirjoittaminen ei ole nyt käytössä", text: $input, axis: .vertical)
+            TextField(model.canType ? "Kirjoita viesti…" : "Kirjoittaminen ei ole nyt käytössä", text: Binding(get: { model.input }, set: { model.input = $0 }), axis: .vertical)
                 .disabled(!model.canType && !model.streaming)
                 .lineLimit(1...5)
                 .focused($focused)
@@ -148,15 +147,15 @@ struct AssistantView: View {
                 .background(Theme.surface, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
                 .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous).stroke(focused ? Theme.ink2.opacity(0.4) : Theme.line))
             Button {
-                if model.streaming { model.stop() } else { model.send(input); input = "" }
+                if model.streaming { model.stop() } else { model.send(model.input); model.input = "" }
             } label: {
                 Image(systemName: model.streaming ? "stop.fill" : "arrow.up")
                     .font(.system(size: 16, weight: .bold))
                     .foregroundStyle(Theme.onInk)
                     .frame(width: 40, height: 40)
-                    .background(model.streaming || (model.canType && !input.trimmingCharacters(in: .whitespaces).isEmpty) ? Theme.ink : Theme.ink2.opacity(0.5), in: Circle())
+                    .background(model.streaming || (model.canType && !model.input.trimmingCharacters(in: .whitespaces).isEmpty) ? Theme.ink : Theme.ink2.opacity(0.5), in: Circle())
             }
-            .disabled(!model.streaming && (input.trimmingCharacters(in: .whitespaces).isEmpty || !model.canType))
+            .disabled(!model.streaming && (model.input.trimmingCharacters(in: .whitespaces).isEmpty || !model.canType))
             .accessibilityLabel(model.streaming ? "Pysäytä" : "Lähetä")
         }
     }
@@ -219,6 +218,9 @@ private struct ConversationsSheet: View {
     @State private var newTitle = ""
     @State private var loaded = false
     @State private var failure: String?
+    /// Only the latest list load may write the list: a swipe's reload and the search's
+    /// reload no longer overlap and put back a row that was just removed.
+    @State private var listLoads = LoadGeneration()
 
     var body: some View {
         NavigationStack {
@@ -229,15 +231,6 @@ private struct ConversationsSheet: View {
                 }
                 .pickerStyle(.segmented)
                 .listRowBackground(Color.clear)
-                if let failure {
-                    Text(failure).font(.footnote).foregroundStyle(Theme.danger)
-                }
-                if loaded && conversations.isEmpty && failure == nil {
-                    Text(search.isEmpty ? (archived ? "Arkisto on tyhjä." : "Ei vielä keskusteluja.") : "Ei osumia.")
-                        .foregroundStyle(Theme.ink2)
-                        .frame(maxWidth: .infinity)
-                        .listRowBackground(Color.clear)
-                }
                 ForEach(conversations) { c in
                     Button {
                         Task { await model.open(c); dismiss() }
@@ -248,10 +241,29 @@ private struct ConversationsSheet: View {
                         }
                     }
                     .swipeActions {
-                        Button("Poista", role: .destructive) { Task { await patch(c, deleted: true) } }
-                        Button(archived ? "Palauta" : "Arkistoi") { Task { await patch(c, archived: !archived) } }.tint(Theme.accentFill)
+                        Button("Poista", role: .destructive) { act(c, deleted: true) }
+                        Button(archived ? "Palauta" : "Arkistoi") { act(c, archived: !archived) }.tint(Theme.accentFill)
                         Button("Nimeä") { renaming = c; newTitle = c.title }.tint(Theme.neutralFill)
                     }
+                }
+            }
+            // The empty state is not a row: a row that comes and goes beside the swiped
+            // rows upset the list's row count while a swipe removal was animating.
+            .overlay {
+                if loaded && conversations.isEmpty && failure == nil {
+                    Text(search.isEmpty ? (archived ? "Arkisto on tyhjä." : "Ei vielä keskusteluja.") : "Ei osumia.")
+                        .foregroundStyle(Theme.ink2)
+                        .allowsHitTesting(false)
+                }
+            }
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                if let failure {
+                    Text(failure)
+                        .font(.footnote)
+                        .foregroundStyle(Theme.danger)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(12)
+                        .background(.bar)
                 }
             }
             .searchable(text: $search, prompt: "Hae keskusteluja")
@@ -271,36 +283,57 @@ private struct ConversationsSheet: View {
             }
             .alert("Nimeä keskustelu", isPresented: Binding(get: { renaming != nil }, set: { if !$0 { renaming = nil } })) {
                 TextField("Nimi", text: $newTitle)
-                Button("Tallenna") { if let c = renaming { Task { await patch(c, title: newTitle) } } }
+                Button("Tallenna") { if let c = renaming { act(c, title: newTitle) } }
                 Button("Peruuta", role: .cancel) {}
             }
         }
     }
 
     private func load() async {
+        let generation = listLoads.next()
         var query: [String: String] = [:]
         if archived { query["archived"] = "1" }
         if !search.isEmpty { query["q"] = search }
         do {
             let list: ConversationList = try await app.api.get("/api/ai/conversations", query: query)
-            withAnimation { conversations = list.conversations }
+            guard listLoads.isCurrent(generation) else { return }
+            conversations = list.conversations.uniquedById()
             failure = nil
             loaded = true
         } catch is CancellationError {
         } catch {
+            guard listLoads.isCurrent(generation) else { return }
             failure = error.userMessage
             loaded = true
         }
     }
 
-    private func patch(_ c: Conversation, title: String? = nil, archived: Bool? = nil, deleted: Bool? = nil) async {
+    /// A swipe removes the row at once, in the same update as the swipe (the list animates
+    /// the destructive swipe out and must find the row gone); the request follows.
+    private func act(_ c: Conversation, title: String? = nil, archived: Bool? = nil, deleted: Bool? = nil) {
+        let removes = deleted == true || archived != nil
+        let index = conversations.firstIndex { $0.id == c.id }
+        if removes {
+            conversations.removeAll { $0.id == c.id }
+            // A load already on its way would bring the row back.
+            listLoads.next()
+        }
+        Task { await patch(c, at: index, removes: removes, title: title, archived: archived, deleted: deleted) }
+    }
+
+    private func patch(_ c: Conversation, at index: Int?, removes: Bool, title: String?, archived: Bool?, deleted: Bool?) async {
         struct Body: Encodable { let id: String; let title: String?; let archived: Bool?; let deleted: Bool? }
         do {
             let _: Ignored = try await app.api.send("PATCH", "/api/ai/conversations", body: Body(id: c.id, title: title, archived: archived, deleted: deleted))
             Haptics.success()
-            if deleted == true || archived != nil, model.conversationId == c.id { model.startNew() }
+            if removes, model.conversationId == c.id { model.startNew() }
+            if let title { model.renamed(c.id, to: title) }
             await load()
         } catch {
+            // Failed: the row comes back where it was.
+            if removes, !conversations.contains(where: { $0.id == c.id }) {
+                conversations.insert(c, at: min(index ?? 0, conversations.count))
+            }
             failure = error.userMessage
             Haptics.error()
         }

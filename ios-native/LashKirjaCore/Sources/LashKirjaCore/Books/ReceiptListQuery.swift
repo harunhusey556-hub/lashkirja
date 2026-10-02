@@ -158,3 +158,37 @@ public enum ReceiptMatchText {
     /// "90 %"
     public static func percent(_ score: Double?) -> String { "\(Int(((score ?? 0) * 100).rounded())) %" }
 }
+
+// MARK: Kept between visits
+
+extension ReceiptListQuery {
+    /// Month, tab, category, source and sort as one stored string (search and
+    /// amount limits are not kept). Empty when nothing differs from the defaults.
+    public var remembered: String {
+        var items: [(String, String)] = []
+        if !month.isEmpty { items.append(("month", month)) }
+        if tab != .all { items.append(("tab", tab.rawValue)) }
+        if !category.isEmpty { items.append(("category", category)) }
+        if source != .all { items.append(("source", source.rawValue)) }
+        if sort != .dateDesc { items.append(("sort", sort.rawValue)) }
+        return items.map { "\($0.0)=\($0.1.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? "")" }.joined(separator: "&")
+    }
+
+    /// The filters stored by `remembered`; anything unknown keeps its default.
+    public init(remembered: String) {
+        self.init()
+        for pair in remembered.split(separator: "&") {
+            let parts = pair.split(separator: "=", maxSplits: 1)
+            guard parts.count == 2, let value = String(parts[1]).removingPercentEncoding else { continue }
+            switch String(parts[0]) {
+            case "month":
+                if value.range(of: #"^\d{4}-(0[1-9]|1[0-2])$"#, options: .regularExpression) != nil { month = value }
+            case "tab": tab = ReceiptTab(rawValue: value) ?? .all
+            case "category": category = value
+            case "source": source = ReceiptSourceFilter(rawValue: value) ?? .all
+            case "sort": sort = ReceiptSort(rawValue: value) ?? .dateDesc
+            default: break
+            }
+        }
+    }
+}

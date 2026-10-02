@@ -48,33 +48,62 @@ enum Route: Hashable {
     case passkeys
     case changeEmail
     case emailImport
+    /// Kuitit opened on a month and tab (`/kuitit?month=…&type=…`).
+    case receiptsFiltered(month: String, tab: String)
+    /// Pankki on a month, only rows needing action, or with one row's sheet open.
+    case bankFeedFiltered(month: String?, onlyOpen: Bool, focus: String?)
+    case newInvoice
+    case reports
+    case invoices
 }
 
 extension Route {
-    /// An in-app link from an assistant reply ("/kuitit", "/laskut/lasku?id=…").
+    /// An in-app link from an assistant reply or a server item ("/kuitit?month=…", "/laskut/lasku?id=…"),
+    /// read by `AppLink` so the filters the web puts in the link are kept.
     static func fromHref(_ href: String) -> Route? {
-        let parts = href.split(separator: "?", maxSplits: 1)
-        let path = String(parts.first ?? "")
-        let query = parts.count > 1 ? String(parts[1]) : ""
-        let id = query.split(separator: "&").first { $0.hasPrefix("id=") }.map { String($0.dropFirst(3)) }
-        switch path {
-        case "/kuitit": return .receipts
-        case "/kuitit/kuitti": return id.map(Route.receipt)
-        case "/pankki/tapahtumat": return .bankFeed
-        case "/kirjanpito/pankkitilit": return .bankAccounts
-        case "/kirjanpito/alv": return .alv(query.split(separator: "&").first { $0.hasPrefix("period=") }.map { String($0.dropFirst(7)) } ?? MonthKey.current())
-        case "/laskut/lasku": return id.map(Route.invoice)
-        case "/asiakkaat": return .customers
-        case "/asetukset", "/asetukset/laskutus": return .settings
-        case "/kirjanpito/ostolaskut": return id.map(Route.purchaseInvoice) ?? .purchaseInvoices
-        case "/pankki/tapahtumat/tiliote": return id.map(Route.statement)
-        case "/toistuvat": return .recurringInvoices
-        case "/kirjanpito/kaudet", "/kirjanpito/kuukausi": return .periods
-        case "/tyot": return .workQueue
-        case "/asetukset/tietosuoja": return .privacy
-        case "/asetukset/ohje": return .help
-        case "/asetukset/sahkoposti": return .emailImport
-        default: return nil
+        guard let link = AppLink.parse(href) else { return nil }
+        switch link {
+        case .receipts(let month, let type):
+            return month.isEmpty && type.isEmpty ? .receipts : .receiptsFiltered(month: month, tab: type)
+        case .receipt(let id): return .receipt(id)
+        case .bankFeed(let month, let onlyOpen, let row):
+            return month == nil && !onlyOpen && row == nil ? .bankFeed : .bankFeedFiltered(month: month, onlyOpen: onlyOpen, focus: row)
+        case .statement(let id): return .statement(id)
+        case .bankAccounts: return .bankAccounts
+        case .alv(let period): return .alv(period ?? MonthKey.current())
+        case .invoices: return .invoices
+        case .invoice(let id): return .invoice(id)
+        case .newInvoice: return .newInvoice
+        case .customers: return .customers
+        case .customer(let id): return .customer(id)
+        case .purchaseInvoices: return .purchaseInvoices
+        case .purchaseInvoice(let id): return .purchaseInvoice(id)
+        case .recurringInvoices: return .recurringInvoices
+        case .periods: return .periods
+        case .workQueue: return .workQueue
+        case .reports: return .reports
+        case .settings: return .settings
+        case .privacy: return .privacy
+        case .help: return .help
+        case .emailImport: return .emailImport
+        }
+    }
+}
+
+extension Route {
+    /// Where a "Tarvitaan sinulta" / month-close row leads, one rule for Koti and Kaudet:
+    /// a receipt row to its receipt, a bank row to that row's sheet (the web sends it to the
+    /// action list), an invoice row to the invoice.
+    static func forItem(_ item: DashboardItem, month: String? = nil) -> Route? {
+        switch item.kind {
+        case .pendingReceipt, .vatGap:
+            return item.receiptId.map(Route.receipt)
+        case .missingReceipt, .receiptMatch:
+            return .bankFeedFiltered(month: month, onlyOpen: true, focus: item.transactionId)
+        case .invoiceMatch, .paymentDuplicate, .draftInvoice, .overdueInvoice:
+            return item.invoiceId.map(Route.invoice)
+        case .unknown:
+            return nil
         }
     }
 }
@@ -104,6 +133,11 @@ extension View {
             case .passkeys: PasskeysView()
             case .changeEmail: ChangeEmailView()
             case .emailImport: EmailImportView { _ in }
+            case .receiptsFiltered(let month, let tab): ReceiptsView(month: month, tab: ReceiptTab(rawValue: tab) ?? .all)
+            case .bankFeedFiltered(let month, let onlyOpen, let focus): BankFeedView(month: month, onlyOpen: onlyOpen, focusTransactionId: focus)
+            case .newInvoice: MyyntiView(openNewInvoice: true)
+            case .reports: RaportitView()
+            case .invoices: MyyntiView()
             }
         }
     }

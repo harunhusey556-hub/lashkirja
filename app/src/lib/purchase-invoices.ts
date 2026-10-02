@@ -12,6 +12,7 @@
  * The owner settles a flagged pair by linking the receipt here, never by
  * rejecting or cancelling.
  */
+import type { Prisma } from "@/generated/prisma/client";
 import { prisma } from "./db";
 import { AppError, NotFoundError, ValidationError } from "./api-errors";
 import { centsToEuros, eurosToCents } from "./money";
@@ -196,14 +197,15 @@ function amounts(gross: number, vat: number | undefined) {
 async function assertReceiptAvailable(
   userId: string,
   receiptId: string,
-  exceptInvoiceId?: string
+  exceptInvoiceId?: string,
+  db: Prisma.TransactionClient | typeof prisma = prisma
 ): Promise<void> {
-  const receipt = await prisma.receipt.findFirst({
+  const receipt = await db.receipt.findFirst({
     where: { id: receiptId, userId },
     select: { id: true },
   });
   if (!receipt) throw new NotFoundError("Kuittia ei löytynyt.");
-  const taken = await prisma.purchaseInvoice.findFirst({
+  const taken = await db.purchaseInvoice.findFirst({
     where: { receiptId, ...(exceptInvoiceId ? { id: { not: exceptInvoiceId } } : {}) },
     select: { id: true },
   });
@@ -212,9 +214,14 @@ async function assertReceiptAvailable(
   }
 }
 
+/**
+ * `db` is the transaction of an idempotent request (lib/idempotency.ts): every
+ * read and write then goes through it, so SQLite never waits on itself.
+ */
 export async function createPurchaseInvoice(
   userId: string,
-  input: PurchaseInvoiceInput
+  input: PurchaseInvoiceInput,
+  db?: Prisma.TransactionClient
 ): Promise<PublicPurchaseInvoice> {
   const supplierName = input.supplierName.trim();
   if (!supplierName) throw new ValidationError("Toimittajan nimi puuttuu.");
@@ -225,13 +232,13 @@ export async function createPurchaseInvoice(
     throw new ValidationError("Eräpäivä ei voi olla ennen laskun päivää.");
   }
 
-  await assertPeriodOpen(userId, [issueDate]);
+  await assertPeriodOpen(userId, [issueDate], db ?? prisma);
 
   const { businessId, iban } = prepareSupplier(input);
   const { grossCents, vatCents, netCents } = amounts(input.gross, input.vat);
-  if (input.receiptId) await assertReceiptAvailable(userId, input.receiptId);
+  if (input.receiptId) await assertReceiptAvailable(userId, input.receiptId, undefined, db ?? prisma);
 
-  const created = await prisma.purchaseInvoice.create({
+  const created = await (db ?? prisma).purchaseInvoice.create({
     data: {
       userId,
       supplierName,
@@ -385,9 +392,10 @@ export async function deletePurchaseInvoice(userId: string, id: string): Promise
 
 export async function getPurchaseInvoice(
   userId: string,
-  id: string
+  id: string,
+  db: Prisma.TransactionClient | typeof prisma = prisma
 ): Promise<PublicPurchaseInvoice> {
-  const invoice = await prisma.purchaseInvoice.findFirst({
+  const invoice = await db.purchaseInvoice.findFirst({
     where: { id, userId },
     include: purchaseInclude,
   });
@@ -491,10 +499,12 @@ export interface RecordPurchasePaymentInput {
  * (`transactionId`, or `source: "bank"`) records what the bank says happened
  * and is not refused on amount or date.
  */
+/** `db`: the transaction of an idempotent request; without it the payment opens its own. */
 export async function recordPurchasePayment(
   userId: string,
   invoiceId: string,
-  input: RecordPurchasePaymentInput
+  input: RecordPurchasePaymentInput,
+  db?: Prisma.TransactionClient
 ): Promise<PublicPurchaseInvoice> {
   const amountCents = eurosToCents(input.amount);
   if (amountCents <= 0) throw new ValidationError("Maksun summan on oltava positiivinen.");
@@ -504,7 +514,7 @@ export async function recordPurchasePayment(
     throw new AppError("Maksupäivä ei voi olla tulevaisuudessa.", "PAYMENT_IN_FUTURE", 422);
   }
 
-  await prisma.$transaction(async (tx) => {
+  const write = async (tx: Prisma.TransactionClient) => {
     // A write comes first: it takes the write lock, so the balance read below
     // is still true when this transaction commits.
     await tx.$executeRaw`UPDATE "PurchaseInvoice" SET "grossCents" = "grossCents" WHERE "id" = ${invoiceId} AND "userId" = ${userId}`;
@@ -577,8 +587,13 @@ export async function recordPurchasePayment(
         data: { status: "paid", paidAt: isoDateToUtc(input.paidDate) },
       });
     }
-  });
+  };
 
+  if (db) {
+    await write(db);
+    return getPurchaseInvoice(userId, invoiceId, db);
+  }
+  await prisma.$transaction(write);
   return getPurchaseInvoice(userId, invoiceId);
 }
 

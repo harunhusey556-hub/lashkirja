@@ -3,6 +3,7 @@ import { z } from "zod";
 import { requireSession } from "@/lib/session";
 import { noStoreJson, rejectCrossSite, rejectOversizedContentLength } from "@/lib/http-security";
 import { UnauthorizedError, withErrorHandler } from "@/lib/api-errors";
+import { hashIdempotencyPayload, idempotencyKeyFrom, withIdempotency } from "@/lib/idempotency";
 import { createPurchaseInvoice, listPurchaseInvoices } from "@/lib/purchase-invoices";
 import { isoDateSchema, monthSchema, moneySchema, nonnegativeMoneySchema } from "@/lib/validation";
 
@@ -46,9 +47,17 @@ export const POST = withErrorHandler(async (req: NextRequest) => {
   const oversized = rejectOversizedContentLength(req);
   if (oversized) return oversized;
 
-  const invoice = await createPurchaseInvoice(
+  const input = createSchema.parse(await req.json());
+  // The app sends an Idempotency-Key: a retried "Lisää" returns the first invoice instead of a second one.
+  const result = await withIdempotency(
     session.userId,
-    createSchema.parse(await req.json())
+    "purchase-invoice.create",
+    idempotencyKeyFrom(req),
+    async (tx) => ({
+      status: 201,
+      body: { invoice: await createPurchaseInvoice(session.userId, input, tx ?? undefined) },
+    }),
+    hashIdempotencyPayload(input)
   );
-  return noStoreJson({ invoice }, { status: 201 });
+  return noStoreJson(result.body, { status: result.status });
 });

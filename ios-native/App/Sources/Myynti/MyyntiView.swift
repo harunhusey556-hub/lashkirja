@@ -3,6 +3,8 @@ import LashKirjaCore
 
 struct MyyntiView: View {
     @Environment(AppModel.self) private var app
+    /// Opens the new-invoice form once on appear (the assistant's "/laskut/uusi" link).
+    var openNewInvoice = false
     @State private var state: Loadable<InvoiceList> = .idle
     /// Coming back to the screen does not ask the server again unless something changed.
     @State private var gate = ReloadGate()
@@ -12,6 +14,10 @@ struct MyyntiView: View {
     @State private var showNew = false
     @State private var showMatch = false
     @State private var notice: String?
+    @State private var openedNew = false
+    /// A just-created invoice, opened when the form's sheet has closed.
+    @State private var createdId: String?
+    @State private var openedInvoiceId: String?
 
     var body: some View {
         List {
@@ -68,14 +74,17 @@ struct MyyntiView: View {
                 Button { showNew = true } label: { Label("Uusi lasku", systemImage: "plus") }
             }
         }
-        .sheet(isPresented: $showNew, onDismiss: { Task { await load() } }) {
-            InvoiceFormView(existing: nil)
+        .sheet(isPresented: $showNew, onDismiss: openCreated) {
+            InvoiceFormView(existing: nil, onCreated: { id in createdId = id })
         }
         .sheet(isPresented: $showMatch) {
-            BankMatchSheet { message in
-                notice = message
-                app.dataVersion += 1
-            }
+            BankMatchSheet { message in notice = message }
+        }
+        .navigationDestination(item: $openedInvoiceId) { id in InvoiceDetailView(invoiceId: id) }
+        .onAppear {
+            guard openNewInvoice, !openedNew else { return }
+            openedNew = true
+            showNew = true
         }
         .task(id: app.dataVersion) {
             guard state.value == nil || gate.isDue(version: app.dataVersion) else { return }
@@ -85,6 +94,12 @@ struct MyyntiView: View {
             if !Task.isCancelled { gate.mark(version: version) }
         }
         .animation(.snappy, value: filter)
+    }
+
+    private func openCreated() {
+        guard let id = createdId else { return }
+        createdId = nil
+        openedInvoiceId = id
     }
 
     private var chips: some View {

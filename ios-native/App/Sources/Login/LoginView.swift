@@ -86,11 +86,12 @@ struct LoginView: View {
         .sheet(item: $recovery) { r in
             PasswordRecoveryView(step: r.step, email: email, link: r.link)
         }
-        .onOpenURL { url in
-            // A reset link handed to the app (lashkirja://palauta-salasana?token=…).
-            if PasswordReset.token(from: url.absoluteString) != nil {
-                recovery = Recovery(step: .reset, link: url.absoluteString)
-            }
+        // A reset link handed to the app (lashkirja://palauta-salasana?token=…), caught at the
+        // root so it also arrives when the link opened the app before this screen showed.
+        .onChange(of: app.pendingResetLink, initial: true) { _, link in
+            guard let link else { return }
+            app.pendingResetLink = nil
+            recovery = Recovery(step: .reset, link: link)
         }
     }
 
