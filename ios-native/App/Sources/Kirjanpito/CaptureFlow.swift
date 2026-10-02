@@ -59,6 +59,8 @@ struct CaptureFlow: View {
             }
             .onChange(of: photo) { _, item in
                 guard let item else { return }
+                // Cleared so that picking the same photo again after a failure still fires.
+                photo = nil
                 Task {
                     if let data = try? await item.loadTransferable(type: Data.self), let image = UIImage(data: data) {
                         await upload(image)

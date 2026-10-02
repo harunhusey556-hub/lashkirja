@@ -4,6 +4,8 @@ import LashKirjaCore
 struct SettingsView: View {
     @Environment(AppModel.self) private var app
     @State private var profile: Profile?
+    @State private var profileFailure: String?
+    @State private var lockEnabled = AppLock.shared.isEnabled
 
     var body: some View {
         List {
@@ -26,13 +28,18 @@ struct SettingsView: View {
                         SettingRow(title: "Sähköpostien tuonti", subtitle: mailSubtitle(profile.imapAccounts ?? []), symbol: "envelope")
                     }
                 }
+            } else if let profileFailure {
+                Section {
+                    Text(profileFailure).foregroundStyle(Theme.danger)
+                    Button("Yritä uudelleen") { Task { await loadProfile() } }
+                }
             } else {
-                ProgressView().task { profile = (try? await app.api.get("/api/profile") as ProfileResponse)?.profile }
+                ProgressView().task { await loadProfile() }
             }
             Section("Tili ja turvallisuus") {
                 NavigationLink { PasswordView() } label: { SettingRow(title: "Vaihda salasana", subtitle: nil, symbol: "key") }
                 NavigationLink { DevicesView() } label: { SettingRow(title: "Laitteet", subtitle: "Kirjautuneet laitteet", symbol: "iphone") }
-                NavigationLink { AppLockSettingsView() } label: { SettingRow(title: "Sovelluslukitus", subtitle: AppLock.shared.isEnabled ? "Käytössä" : "Ei käytössä", symbol: "lock") }
+                NavigationLink { AppLockSettingsView() } label: { SettingRow(title: "Sovelluslukitus", subtitle: lockEnabled ? "Käytössä" : "Ei käytössä", symbol: "lock") }
             }
             Section {
                 LabeledContent("Versio", value: "\(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "") (\(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? ""))")
@@ -42,6 +49,15 @@ struct SettingsView: View {
         .scrollContentBackground(.hidden)
         .background(Theme.canvas)
         .navigationTitle("Asetukset")
+        // The lock lives outside SwiftUI state; read it again when coming back from its screen.
+        .onAppear { lockEnabled = AppLock.shared.isEnabled }
+    }
+
+    private func loadProfile() async {
+        profileFailure = nil
+        do { profile = (try await app.api.get("/api/profile") as ProfileResponse).profile }
+        catch is CancellationError {}
+        catch { profileFailure = error.userMessage }
     }
 
     /// PATCH /api/profile answers without the mailboxes; keep the ones already loaded.

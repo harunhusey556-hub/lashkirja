@@ -12,6 +12,8 @@ final class AppModel {
     }
 
     private(set) var phase: Phase = .launching
+    /// Bumped after a change made outside a screen (the "+" sheet), so that screen reloads.
+    var dataVersion = 0
     let auth: AuthService
     let api: APIClient
 

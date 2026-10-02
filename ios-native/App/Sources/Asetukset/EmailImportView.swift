@@ -4,7 +4,6 @@ import LashKirjaCore
 /// Sähköpostien tuonti: the mailboxes the server reads receipts from, as on the web settings page.
 struct EmailImportView: View {
     @Environment(AppModel.self) private var app
-    @Environment(\.openURL) private var openURL
     let onChange: (Profile) -> Void
     @State private var accounts: Loadable<[ImapAccount]> = .idle
     @State private var adding = false
@@ -23,7 +22,7 @@ struct EmailImportView: View {
             }
             if let list = accounts.value {
                 if !list.isEmpty {
-                    Section("Yhdistetyt tilit") {
+                    Section {
                         ForEach(list) { account in
                             HStack(spacing: 12) {
                                 Image(systemName: "envelope.fill").foregroundStyle(Theme.success).frame(width: 28)
@@ -45,6 +44,8 @@ struct EmailImportView: View {
                             }
                         }
                         .disabled(syncing)
+                    } header: {
+                        Text("Yhdistetyt tilit")
                     } footer: {
                         if let note { Text(note.text).foregroundStyle(note.failed ? Theme.danger : Theme.success) }
                     }
@@ -216,7 +217,11 @@ private struct ConnectMailboxSheet: View {
             port = "993"
             failure = nil
         }
-        focusedField = true
+        // The field only exists after this update; focus it once it is on screen.
+        Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(350))
+            focusedField = true
+        }
     }
 
     private func connect() async {

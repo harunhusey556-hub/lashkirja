@@ -77,7 +77,7 @@ struct MyyntiView: View {
         .sheet(isPresented: $showNew, onDismiss: { Task { await load() } }) {
             InvoiceFormView(existing: nil)
         }
-        .task { await load() }
+        .task(id: app.dataVersion) { await load() }
         .animation(.snappy, value: filter)
     }
 

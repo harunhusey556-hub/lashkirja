@@ -10,6 +10,7 @@ struct BankFeedView: View {
     @State private var selected: BankTransaction?
     @State private var importing = false
     @State private var notice: String?
+    @State private var noticeFailed = false
 
     var body: some View {
         List {
@@ -22,7 +23,7 @@ struct BankFeedView: View {
                 .listRowBackground(Color.clear)
                 .listRowInsets(EdgeInsets())
             }
-            if let notice { Text(notice).font(.footnote).foregroundStyle(Theme.success) }
+            if let notice { Text(notice).font(.footnote).foregroundStyle(noticeFailed ? Theme.danger : Theme.success) }
             if let months = state.value {
                 if months.isEmpty {
                     ContentUnavailableView {
@@ -61,7 +62,7 @@ struct BankFeedView: View {
         }
         .sheet(item: $selected, onDismiss: { Task { await load() } }) { row in BankRowSheet(row: row) }
         .refreshable { await load() }
-        .task { await load() }
+        .task(id: app.dataVersion) { await load() }
         .animation(.snappy, value: onlyOpen)
     }
 
@@ -79,7 +80,7 @@ struct BankFeedView: View {
     private func upload(_ url: URL) async {
         guard url.startAccessingSecurityScopedResource() else { return }
         defer { url.stopAccessingSecurityScopedResource() }
-        guard let data = try? Data(contentsOf: url) else { return }
+        guard let data = try? Data(contentsOf: url) else { notice = "Tiedostoa ei voitu lukea."; noticeFailed = true; return }
         var form = Multipart()
         let name = url.lastPathComponent.replacingOccurrences(of: "\"", with: "")
         form.addFile("file", filename: name, mimeType: "application/octet-stream", data: data)
@@ -88,10 +89,13 @@ struct BankFeedView: View {
             let response = try await app.api.raw("POST", "/api/statements", body: form.finalize(), contentType: form.contentType)
             let result = try? JSONDecoder().decode(Result.self, from: response.body)
             notice = "Tuotiin \(result?.count ?? 0) tapahtumaa."
+            noticeFailed = false
             Haptics.success()
             await load()
         } catch {
             notice = error.userMessage
+            noticeFailed = true
+            Haptics.error()
         }
     }
 }

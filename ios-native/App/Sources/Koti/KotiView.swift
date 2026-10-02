@@ -14,7 +14,7 @@ struct KotiView: View {
                 ProgressView()
             }
         }
-        .task {
+        .task(id: app.dataVersion) {
             if model == nil { model = KotiModel(api: app.api) }
             await model?.load()
         }
@@ -23,6 +23,10 @@ struct KotiView: View {
 
 private struct KotiContent: View {
     @Bindable var model: KotiModel
+    /// The bank row a receipt is being photographed for.
+    @State private var captureFor: CaptureTarget?
+
+    struct CaptureTarget: Identifiable { let id = UUID(); let transactionId: String? }
 
     var body: some View {
         ScrollView {
@@ -45,6 +49,9 @@ private struct KotiContent: View {
         }
         .background(Theme.canvas)
         .refreshable { await model.load() }
+        .fullScreenCover(item: $captureFor, onDismiss: { Task { await model.load() } }) { target in
+            CaptureFlow(transactionId: target.transactionId)
+        }
         .overlay(alignment: .bottom) {
             if let toast = model.toast {
                 ToastView(toast: toast) { model.undo() }.padding(.bottom, 8)
@@ -111,7 +118,7 @@ private struct KotiContent: View {
             VStack(spacing: 0) {
                 ForEach(Array(model.visibleItems.enumerated()), id: \.element.id) { index, item in
                     if index > 0 { Divider().padding(.leading, 60) }
-                    TaskRow(item: item, approve: { model.approve(item) }, confirm: { model.confirmMatch(item) })
+                    TaskRow(item: item, approve: { model.approve(item) }, confirm: { model.confirmMatch(item) }, capture: { captureFor = CaptureTarget(transactionId: item.transactionId) })
                         .transition(.asymmetric(insertion: .opacity, removal: .move(edge: .leading).combined(with: .opacity)))
                 }
             }
@@ -154,6 +161,7 @@ private struct TaskRow: View {
     let item: DashboardItem
     let approve: () -> Void
     let confirm: () -> Void
+    let capture: () -> Void
 
     var body: some View {
         HStack(spacing: 12) {
@@ -183,9 +191,12 @@ private struct TaskRow: View {
         case .invoiceMatch:
             pill("Kohdista", action: confirm)
         case .missingReceipt:
-            Label("Kuvaa kuitti", systemImage: "camera").labelStyle(.titleOnly).font(.caption.bold())
-                .padding(.horizontal, 10).padding(.vertical, 5)
-                .background(Theme.ink, in: Capsule()).foregroundStyle(Theme.onInk)
+            Button(action: capture) {
+                Text("Kuvaa kuitti").font(.caption.bold()).padding(.horizontal, 10).padding(.vertical, 5)
+            }
+            .buttonStyle(.plain)
+            .background(Theme.ink, in: Capsule())
+            .foregroundStyle(Theme.onInk)
         default:
             EmptyView()
         }

@@ -116,7 +116,7 @@ struct CustomerDetailView: View {
         .sheet(isPresented: $showEdit, onDismiss: { Task { await load() } }) {
             if let c = state.value?.customer { CustomerFormSheet(existing: c) { _ in } }
         }
-        .sheet(isPresented: $showNewInvoice) { InvoiceFormView(existing: nil, presetCustomerId: customerId) }
+        .sheet(isPresented: $showNewInvoice, onDismiss: { Task { await load() } }) { InvoiceFormView(existing: nil, presetCustomerId: customerId) }
         .confirmationDialog("Poistetaanko asiakas?", isPresented: $confirmDelete, titleVisibility: .visible) {
             Button("Poista", role: .destructive) { Task { await delete() } }
         }

@@ -60,7 +60,7 @@ struct AddSheet: View {
             notice = "Haettiin \(r.count ?? 0) kuittia sähköpostista."
             Haptics.success()
         } catch let error as LKError where error.status == 404 {
-            notice = "Sähköpostia ei ole yhdistetty. Yhdistä se web-sovelluksen asetuksista."
+            notice = "Sähköpostia ei ole yhdistetty. Yhdistä se kohdassa Asetukset › Sähköpostien tuonti."
         } catch {
             notice = error.userMessage
         }

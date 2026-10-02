@@ -9,6 +9,7 @@ struct BankAccountsView: View {
     @State private var showPicker = false
     @State private var failure: String?
     @State private var syncing: String?
+    @State private var loadFailed = false
 
     var body: some View {
         List {
@@ -49,12 +50,14 @@ struct BankAccountsView: View {
                             }
                         }
                         .swipeActions {
-                            Button("Päivitä") { Task { await sync(connection) } }.tint(Theme.accent)
+                            Button("Päivitä") { Task { await sync(connection) } }.tint(Theme.accentFill)
                         }
                     }
                     if connections.enabled && connections.ready {
                         Button { showPicker = true } label: { Label("Yhdistä pankki", systemImage: "plus.circle") }
                     }
+                } else if loadFailed {
+                    Button("Yritä uudelleen") { Task { await load() } }
                 } else {
                     ProgressView()
                 }
@@ -76,8 +79,15 @@ struct BankAccountsView: View {
     }
 
     private func load() async {
-        overview = try? await app.api.get("/api/bank-accounts")
-        connections = try? await app.api.get("/api/bank/connections")
+        var problem: String?
+        do { overview = try await app.api.get("/api/bank-accounts") }
+        catch is CancellationError { return }
+        catch { problem = error.userMessage }
+        do { connections = try await app.api.get("/api/bank/connections") }
+        catch is CancellationError { return }
+        catch { problem = problem ?? error.userMessage }
+        loadFailed = connections == nil && problem != nil
+        failure = problem
     }
 
     private func sync(_ c: BankConnection) async {
@@ -197,7 +207,7 @@ struct BankLogo: View {
             }
         }
         .frame(width: 36, height: 36)
-        .background(Theme.surface, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+        .background(image == nil ? Theme.surface : Color.white, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous).stroke(Theme.line))
         .task(id: logo) {
             guard let logo, image == nil else { return }

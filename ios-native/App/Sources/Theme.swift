@@ -17,6 +17,11 @@ enum Theme {
     static let success = Color(light: 0x477455, dark: 0x7DB38E)
     static let warning = Color(light: 0x8A691E, dark: 0xD9B45A)
     static let danger = Color(light: 0xA83232, dark: 0xEF6F6C)
+    /// Fills under white system labels (swipe actions, the app mark): the light values in both
+    /// appearances, since the dark-mode accent and success are too pale for white text.
+    static let accentFill = Color(hex: 0x9A5650)
+    static let successFill = Color(hex: 0x477455)
+    static let neutralFill = Color(hex: 0x6A645F)
     static let cardRadius: CGFloat = 14
 }
 

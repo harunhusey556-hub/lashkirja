@@ -66,6 +66,9 @@ struct AssistantView: View {
                 .padding(16)
             }
             .scrollDismissesKeyboard(.interactively)
+            // Open on the latest message, and keep it in view when the keyboard shrinks the scroll view.
+            .defaultScrollAnchor(.bottom, for: .initialOffset)
+            .defaultScrollAnchor(.bottom, for: .sizeChanges)
             // An inset rides on top of the keyboard; a composer stacked under the scroll view was left
             // behind it when the field took focus back after returning from a source page.
             .safeAreaInset(edge: .bottom, spacing: 0) { composer(model) }
@@ -157,6 +160,8 @@ private struct ConversationsSheet: View {
     @State private var archived = false
     @State private var renaming: Conversation?
     @State private var newTitle = ""
+    @State private var loaded = false
+    @State private var failure: String?
 
     var body: some View {
         NavigationStack {
@@ -167,6 +172,15 @@ private struct ConversationsSheet: View {
                 }
                 .pickerStyle(.segmented)
                 .listRowBackground(Color.clear)
+                if let failure {
+                    Text(failure).font(.footnote).foregroundStyle(Theme.danger)
+                }
+                if loaded && conversations.isEmpty && failure == nil {
+                    Text(search.isEmpty ? (archived ? "Arkisto on tyhjä." : "Ei vielä keskusteluja.") : "Ei osumia.")
+                        .foregroundStyle(Theme.ink2)
+                        .frame(maxWidth: .infinity)
+                        .listRowBackground(Color.clear)
+                }
                 ForEach(conversations) { c in
                     Button {
                         Task { await model.open(c); dismiss() }
@@ -178,8 +192,8 @@ private struct ConversationsSheet: View {
                     }
                     .swipeActions {
                         Button("Poista", role: .destructive) { Task { await patch(c, deleted: true) } }
-                        Button(archived ? "Palauta" : "Arkistoi") { Task { await patch(c, archived: !archived) } }.tint(Theme.accent)
-                        Button("Nimeä") { renaming = c; newTitle = c.title }.tint(Theme.ink2)
+                        Button(archived ? "Palauta" : "Arkistoi") { Task { await patch(c, archived: !archived) } }.tint(Theme.accentFill)
+                        Button("Nimeä") { renaming = c; newTitle = c.title }.tint(Theme.neutralFill)
                     }
                 }
             }
@@ -205,17 +219,28 @@ private struct ConversationsSheet: View {
         var query: [String: String] = [:]
         if archived { query["archived"] = "1" }
         if !search.isEmpty { query["q"] = search }
-        if let list: ConversationList = try? await app.api.get("/api/ai/conversations", query: query) {
+        do {
+            let list: ConversationList = try await app.api.get("/api/ai/conversations", query: query)
             withAnimation { conversations = list.conversations }
+            failure = nil
+            loaded = true
+        } catch is CancellationError {
+        } catch {
+            failure = error.userMessage
+            loaded = true
         }
     }
 
     private func patch(_ c: Conversation, title: String? = nil, archived: Bool? = nil, deleted: Bool? = nil) async {
         struct Body: Encodable { let id: String; let title: String?; let archived: Bool?; let deleted: Bool? }
-        if (try? await app.api.send("PATCH", "/api/ai/conversations", body: Body(id: c.id, title: title, archived: archived, deleted: deleted)) as Ignored) != nil {
+        do {
+            let _: Ignored = try await app.api.send("PATCH", "/api/ai/conversations", body: Body(id: c.id, title: title, archived: archived, deleted: deleted))
             Haptics.success()
             if deleted == true || archived != nil, model.conversationId == c.id { model.startNew() }
             await load()
+        } catch {
+            failure = error.userMessage
+            Haptics.error()
         }
     }
 }

@@ -30,7 +30,7 @@ struct MainTabView: View {
                 .tabItem { Label(AppTab.add.title, systemImage: AppTab.add.symbol) }
                 .tag(AppTab.add)
         }
-        .sheet(isPresented: $showAdd) { AddSheet().presentationDetents([.medium]) }
+        .sheet(isPresented: $showAdd, onDismiss: { app.dataVersion += 1 }) { AddSheet().presentationDetents([.medium]) }
         .sheet(isPresented: $showProfile) { ProfileSheet().presentationDetents([.medium, .large]) }
         .sheet(isPresented: $showAssistant) { AssistantView() }
         .fullScreenCover(isPresented: $showOnboarding) { OnboardingView { showOnboarding = false } }

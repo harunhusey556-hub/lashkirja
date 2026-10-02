@@ -32,7 +32,7 @@ struct KirjanpitoView: View {
         .background(Theme.canvas)
         .navigationTitle("Kirjanpito")
         .refreshable { await load() }
-        .task { await load() }
+        .task(id: app.dataVersion) { await load() }
     }
 
     private func load() async {

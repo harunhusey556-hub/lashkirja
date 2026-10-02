@@ -26,7 +26,7 @@ struct ReceiptsView: View {
                             NavigationLink(value: Route.receipt(receipt.id)) { ReceiptRow(receipt: receipt) }
                         }
                         .swipeActions(edge: .trailing) {
-                            Button("Hyväksy") { Task { await review([receipt.id]) } }.tint(Theme.success)
+                            Button("Hyväksy") { Task { await review([receipt.id]) } }.tint(Theme.successFill)
                         }
                     }
                     Button { Task { await review(pending.map(\.id)) } } label: {
@@ -65,7 +65,7 @@ struct ReceiptsView: View {
         .toolbar { ToolbarItem(placement: .topBarTrailing) { Button { capture = true } label: { Image(systemName: "camera") }.accessibilityLabel("Kuvaa kuitti") } }
         .fullScreenCover(isPresented: $capture, onDismiss: { Task { await load() } }) { CaptureFlow(transactionId: nil) }
         .refreshable { await load() }
-        .task { await load() }
+        .task(id: app.dataVersion) { await load() }
         .animation(.snappy, value: pending.map(\.id))
     }
 

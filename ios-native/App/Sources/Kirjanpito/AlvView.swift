@@ -7,6 +7,9 @@ struct AlvView: View {
     @State private var kind: String?
     @State private var state: Loadable<AlvReport> = .idle
     @State private var failure: String?
+    /// The switch position while its save is in flight, so it does not snap back and flip again.
+    @State private var pendingFiled: Bool?
+    @State private var pendingPaid: Bool?
 
     var body: some View {
         List {
@@ -39,8 +42,8 @@ struct AlvView: View {
                     LabeledContent(r.field307.label) { MoneyText(amount: r.field307.amount) }.font(.subheadline)
                 }
                 Section {
-                    Toggle("Ilmoitettu OmaVerossa", isOn: Binding(get: { r.filing?.filedAt != nil }, set: { v in Task { await setFiling(filed: v, paid: nil) } }))
-                    Toggle("Maksettu", isOn: Binding(get: { r.filing?.paidAt != nil }, set: { v in Task { await setFiling(filed: nil, paid: v) } }))
+                    Toggle("Ilmoitettu OmaVerossa", isOn: Binding(get: { pendingFiled ?? (r.filing?.filedAt != nil) }, set: { v in pendingFiled = v; Task { await setFiling(filed: v, paid: nil); pendingFiled = nil } }))
+                    Toggle("Maksettu", isOn: Binding(get: { pendingPaid ?? (r.filing?.paidAt != nil) }, set: { v in pendingPaid = v; Task { await setFiling(filed: nil, paid: v); pendingPaid = nil } }))
                 } footer: {
                     Text("Sovellus ei lähetä ilmoitusta OmaVeroon; merkitse se tehdyksi täällä.")
                 }
@@ -97,6 +100,7 @@ struct AlvView: View {
             await load()
         } catch {
             failure = error.userMessage
+            Haptics.error()
         }
     }
 }

@@ -22,11 +22,11 @@ struct RaportitView: View {
         List {
             Section {
                 HStack {
-                    Button { Task { await setYear(year - 1) } } label: { Image(systemName: "chevron.left") }
+                    Button { setYear(year - 1) } label: { Image(systemName: "chevron.left") }
                     Spacer()
                     Text(String(year)).font(.headline).monospacedDigit()
                     Spacer()
-                    Button { Task { await setYear(year + 1) } } label: { Image(systemName: "chevron.right") }
+                    Button { setYear(year + 1) } label: { Image(systemName: "chevron.right") }
                         .disabled(year >= Int(MonthKey.current().prefix(4)) ?? year)
                 }
                 .buttonStyle(.borderless)
@@ -69,7 +69,7 @@ struct RaportitView: View {
         .background(Theme.canvas)
         .navigationTitle("Raportit")
         .refreshable { await load() }
-        .task { await load() }
+        .task(id: year) { await load() }
         .sheet(item: $export) { kind in
             DocumentPreviewSheet(path: "/api/export", query: ["type": kind.type, "year": String(year)], fileName: "\(kind.type)-\(year).csv")
         }
@@ -86,14 +86,18 @@ struct RaportitView: View {
         }
     }
 
-    private func setYear(_ next: Int) async {
+    /// The year's `.task(id:)` loads it and cancels a slower load of the previous year.
+    private func setYear(_ next: Int) {
         year = next
         state = .loading
-        await load()
     }
 
     private func load() async {
-        do { state = .loaded(try await app.api.get("/api/reports/profit-loss", query: ["from": "\(year)-01", "to": "\(year)-12"])) }
+        do {
+            let report: ProfitLoss = try await app.api.get("/api/reports/profit-loss", query: ["from": "\(year)-01", "to": "\(year)-12"])
+            try Task.checkCancellation()
+            state = .loaded(report)
+        }
         catch is CancellationError {}
         catch { state = .failed(error.userMessage) }
     }

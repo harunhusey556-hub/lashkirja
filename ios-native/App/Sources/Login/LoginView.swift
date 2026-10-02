@@ -19,7 +19,7 @@ struct LoginView: View {
                         .font(.system(size: 34, weight: .semibold))
                         .foregroundStyle(.white)
                         .frame(width: 64, height: 64)
-                        .background(Theme.accent, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                        .background(Theme.accentFill, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
                     Text("LashKirja").font(.largeTitle.bold()).foregroundStyle(Theme.ink)
                     Text("Kirjanpito yksinkertaisesti").font(.subheadline).foregroundStyle(Theme.ink2)
                 }

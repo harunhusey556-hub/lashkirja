@@ -12,6 +12,8 @@ final class ChatModel {
     private(set) var streaming = false
     var failure: String?
     private var task: Task<Void, Never>?
+    /// The reply the live stream writes into; a stopped or superseded stream no longer matches.
+    private var liveReplyId: String?
 
     init(app: AppModel) { self.app = app }
 
@@ -30,6 +32,7 @@ final class ChatModel {
     }
 
     func open(_ conversation: Conversation) async {
+        stop()
         conversationId = conversation.id
         title = conversation.title
         messages = []
@@ -37,6 +40,7 @@ final class ChatModel {
     }
 
     func startNew() {
+        stop()
         conversationId = nil
         title = "Uusi keskustelu"
         messages = []
@@ -50,16 +54,26 @@ final class ChatModel {
         let replyId = UUID().uuidString
         messages.append(ChatMessage(id: replyId, role: "assistant", content: ""))
         streaming = true
+        liveReplyId = replyId
         task = Task { await stream(trimmed, replyId: replyId) }
     }
 
     func stop() {
         task?.cancel()
+        task = nil
+        // Stopped before the first word: no empty bubble is left behind.
+        if let id = liveReplyId { messages.removeAll { $0.id == id && $0.content.isEmpty } }
+        liveReplyId = nil
         streaming = false
     }
 
     private func stream(_ text: String, replyId: String) async {
-        defer { streaming = false }
+        defer {
+            if liveReplyId == replyId {
+                liveReplyId = nil
+                streaming = false
+            }
+        }
         struct Body: Encodable { let message: String; let stream = true; let clientId: String; let conversationId: String? }
         do {
             var request = URLRequest(url: AppConfig.apiBaseURL.appendingPathComponent("/api/ai/chat"))
@@ -81,6 +95,7 @@ final class ChatModel {
                 guard line.hasPrefix("data:") else { continue }
                 let payload = line.dropFirst(5).trimmingCharacters(in: .whitespaces)
                 guard let event = try? ChatEvent.parse(payload) else { continue }
+                guard liveReplyId == replyId else { return }
                 switch event {
                 case .started(let id):
                     conversationId = id
@@ -96,6 +111,7 @@ final class ChatModel {
         } catch is CancellationError {
         } catch let error as URLError where error.code == .cancelled {
         } catch {
+            guard liveReplyId == replyId else { return }
             failure = error.userMessage
             messages.removeAll { $0.id == replyId && $0.content.isEmpty }
         }

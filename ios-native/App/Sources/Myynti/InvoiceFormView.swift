@@ -114,6 +114,7 @@ private struct LineEditor: View {
     @Binding var line: InvoiceDraft.Line
     @State private var priceText = ""
     @State private var quantityText = ""
+    // An emptied or unreadable field counts as 0, never as the value typed before it.
     private static let rates: [Decimal] = [Decimal(string: "25.5")!, 14, Decimal(string: "13.5")!, 10, 0]
 
     var body: some View {
@@ -121,10 +122,10 @@ private struct LineEditor: View {
             TextField("Kuvaus", text: $line.description)
             HStack {
                 TextField("Määrä", text: $quantityText).keyboardType(.decimalPad).frame(maxWidth: 70)
-                    .onChange(of: quantityText) { _, t in if let v = Money.parse(t) { line.quantity = v } }
+                    .onChange(of: quantityText) { _, t in line.quantity = Money.parse(t) ?? 0 }
                 TextField("Yksikkö", text: $line.unit).frame(maxWidth: 70)
                 TextField("À-hinta €", text: $priceText).keyboardType(.decimalPad)
-                    .onChange(of: priceText) { _, t in if let v = Money.parse(t) { line.unitPrice = v } }
+                    .onChange(of: priceText) { _, t in line.unitPrice = Money.parse(t) ?? 0 }
             }
             Picker("ALV", selection: $line.vatRate) {
                 ForEach(Self.rates, id: \.self) { rate in
