@@ -9,7 +9,7 @@ struct MainTabView: View {
         TabView(selection: Binding(get: { tab }, set: select)) {
             ForEach([AppTab.koti, .myynti, .kirjanpito, .raportit], id: \.self) { item in
                 NavigationStack {
-                    PlaceholderScreen(title: item.title)
+                    root(item)
                         .toolbar {
                             ToolbarItem(placement: .topBarTrailing) {
                                 Button { showProfile = true } label: { Image(systemName: "person.crop.circle") }
@@ -27,6 +27,13 @@ struct MainTabView: View {
         }
         .sheet(isPresented: $showAdd) { AddSheet().presentationDetents([.medium]) }
         .sheet(isPresented: $showProfile) { ProfileSheet().presentationDetents([.medium, .large]) }
+    }
+
+    @ViewBuilder private func root(_ item: AppTab) -> some View {
+        switch item {
+        case .koti: KotiView()
+        default: PlaceholderScreen(title: item.title)
+        }
     }
 
     /// "Lisää" is an action, not a place: it opens the add sheet and stays on the current tab.
