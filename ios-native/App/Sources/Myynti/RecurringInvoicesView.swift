@@ -7,6 +7,8 @@ struct RecurringInvoicesView: View {
     @Environment(AppModel.self) private var app
     @State private var state: Loadable<RecurringList> = .idle
     @State private var showInactive = false
+    /// The pushed schedule. Kept apart from the rows, so a reload that drops its row
+    /// (paused while only active ones show) does not pop the screen.
     @State private var selected: RecurringInvoice?
     @State private var showNew = false
     @State private var notice: String?
@@ -75,18 +77,16 @@ struct RecurringInvoicesView: View {
             }
         }
         .refreshable { await load() }
-        .task(id: showInactive) { await load() }
+        // Every accepted write bumps dataVersion: a change made on the pushed detail shows here on Back.
+        .task(id: "\(showInactive)|\(app.dataVersion)") { await load() }
         .sheet(isPresented: $showNew) {
             RecurringFormSheet(existing: nil) { message in
                 notice = message
                 Task { await load() }
             }
         }
-        // Closing the detail reloads: a failed auto-send fixed from there changes the row.
-        .sheet(item: $selected, onDismiss: { Task { await load() } }) { entry in
-            RecurringDetailSheet(entry: entry) { message in
-                notice = message
-            }
+        .navigationDestination(item: $selected) { entry in
+            RecurringDetailView(entry: entry) { message in notice = message }
         }
         .recurringRunConfirmation(runner: runner) { message in
             notice = message
@@ -111,6 +111,7 @@ struct RecurringInvoicesView: View {
                         .foregroundStyle(Theme.ink2)
                 }
             }
+            Image(systemName: "chevron.right").font(.footnote.weight(.semibold)).foregroundStyle(Theme.ink2)
         }
         .padding(.vertical, 2)
         .contentShape(Rectangle())
@@ -209,14 +210,14 @@ extension View {
     }
 }
 
-/// Everything about one schedule, with its actions.
-struct RecurringDetailSheet: View {
+/// Everything about one schedule, with its actions; pushed from the list, so Back works as anywhere.
+struct RecurringDetailView: View {
     @Environment(AppModel.self) private var app
     @Environment(\.dismiss) private var dismiss
     let entry: RecurringInvoice
     let onChanged: (String) -> Void
     /// The schedule as the server has it now: fixing a failed auto-send (opening the invoice and
-    /// sending it from here) changes what this sheet should show.
+    /// sending it from here) changes what this screen should show.
     @State private var fresh: RecurringInvoice?
     @State private var busy = false
     @State private var failure: String?
@@ -225,96 +226,90 @@ struct RecurringDetailSheet: View {
     @State private var runner = RecurringRunner()
 
     var body: some View {
-        NavigationStack {
-            List {
+        List {
+            Section {
+                LabeledContent("Asiakas", value: current.customer.name)
+                LabeledContent("Toistoväli", value: current.interval.label)
+                LabeledContent("Laskutuspäivä", value: "\(current.anchorDay).")
+                LabeledContent("Seuraava", value: current.nextRunAt.map { RecurringInvoice.scheduleDate($0, today: APIDate.dayString(Date())) } ?? "Päättynyt")
+                LabeledContent("Alkaa", value: APIDate.displayDay(current.startDate))
+                if let end = current.endDate { LabeledContent("Päättyy", value: APIDate.displayDay(end)) }
+                LabeledContent("Maksuaika", value: "\(current.paymentTermDays) pv")
+                LabeledContent("Lähetys", value: current.autoSend ? "Sähköpostilla automaattisesti" : "Jää luonnokseksi")
+                LabeledContent("Luotu", value: "\(current.generatedCount) laskua")
+                LabeledContent("Yhteensä (veroton)") { MoneyText(amount: current.total) }
+            }
+            ForEach(current.failedSends, id: \.invoiceId) { failed in
                 Section {
-                    LabeledContent("Asiakas", value: current.customer.name)
-                    LabeledContent("Toistoväli", value: current.interval.label)
-                    LabeledContent("Laskutuspäivä", value: "\(current.anchorDay).")
-                    LabeledContent("Seuraava", value: current.nextRunAt.map { RecurringInvoice.scheduleDate($0, today: APIDate.dayString(Date())) } ?? "Päättynyt")
-                    LabeledContent("Alkaa", value: APIDate.displayDay(current.startDate))
-                    if let end = current.endDate { LabeledContent("Päättyy", value: APIDate.displayDay(end)) }
-                    LabeledContent("Maksuaika", value: "\(current.paymentTermDays) pv")
-                    LabeledContent("Lähetys", value: current.autoSend ? "Sähköpostilla automaattisesti" : "Jää luonnokseksi")
-                    LabeledContent("Luotu", value: "\(current.generatedCount) laskua")
-                    LabeledContent("Yhteensä (veroton)") { MoneyText(amount: current.total) }
+                    Text("Laskun \(APIDate.displayDay(failed.issueDate)) automaattinen lähetys epäonnistui. Lasku on tallessa luonnoksena.")
+                    NavigationLink(value: Route.invoice(failed.invoiceId)) { Text("Avaa lasku ja lähetä") }
                 }
-                ForEach(current.failedSends, id: \.invoiceId) { failed in
-                    Section {
-                        Text("Laskun \(APIDate.displayDay(failed.issueDate)) automaattinen lähetys epäonnistui. Lasku on tallessa luonnoksena.")
-                        NavigationLink(value: Route.invoice(failed.invoiceId)) { Text("Avaa lasku ja lähetä") }
-                    }
-                }
-                if let missed = current.missedText {
-                    Section {
-                        Text(missed)
-                        NavigationLink(value: Route.periods) { Text("Avaa kaudet") }
-                    }
-                }
-                Section("Rivit") {
-                    ForEach(current.lines) { line in
-                        VStack(alignment: .leading, spacing: 2) {
-                            HStack {
-                                Text(line.description)
-                                Spacer()
-                                MoneyText(amount: line.quantity * line.unitPrice)
-                            }
-                            Text("\(InvoiceDetailView.number(line.quantity)) \(line.unit) × \(Money.format(line.unitPrice)) · ALV \(InvoiceDetailView.number(SalesVat.adjustedRate(line.vatRate, issueDate: APIDate.dayString(Date())))) %")
-                                .font(.caption).foregroundStyle(Theme.ink2)
-                        }
-                    }
-                }
-                if let last = current.lastRun, let invoiceId = last.invoiceId {
-                    Section {
-                        NavigationLink(value: Route.invoice(invoiceId)) {
-                            Text("Avaa viimeisin lasku (\(APIDate.displayDay(last.issueDate)))")
-                        }
-                    }
-                }
-                if let failure { Section { Text(failure).foregroundStyle(Theme.danger) } }
+            }
+            if let missed = current.missedText {
                 Section {
-                    if current.isDue(today: APIDate.dayString(Date())) {
-                        Button {
-                            Task { await runner.preview(app: app, scope: current.id) }
-                        } label: {
-                            Label(runner.checking ? "Tarkistetaan…" : "Luo lasku nyt", systemImage: "bolt")
+                    Text(missed)
+                    NavigationLink(value: Route.periods) { Text("Kuukauden sulku") }
+                }
+            }
+            Section("Rivit") {
+                ForEach(current.lines) { line in
+                    VStack(alignment: .leading, spacing: 2) {
+                        HStack {
+                            Text(line.description)
+                            Spacer()
+                            MoneyText(amount: line.quantity * line.unitPrice)
                         }
-                        .disabled(busy || runner.checking || runner.running)
+                        Text("\(InvoiceDetailView.number(line.quantity)) \(line.unit) × \(Money.format(line.unitPrice)) · ALV \(InvoiceDetailView.number(SalesVat.adjustedRate(line.vatRate, issueDate: APIDate.dayString(Date())))) %")
+                            .font(.caption).foregroundStyle(Theme.ink2)
                     }
-                    Button { editing = true } label: { Label("Muokkaa", systemImage: "pencil") }
-                    Button { Task { await toggleActive() } } label: {
-                        Label(current.active ? "Pysäytä" : "Jatka", systemImage: current.active ? "pause.circle" : "play.circle")
-                    }
-                    Button(role: .destructive) { confirmDelete = true } label: { Label("Poista", systemImage: "trash") }
-                }
-                .disabled(busy)
-            }
-            .scrollContentBackground(.hidden)
-            .background(Theme.canvas)
-            .navigationTitle(current.title)
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Sulje") { dismiss() } }
-            }
-            .appDestinations()
-            .sheet(isPresented: $editing) {
-                RecurringFormSheet(existing: current) { message in
-                    onChanged(message)
-                    dismiss()
                 }
             }
-            .confirmationDialog("Poistetaanko toistuva lasku?", isPresented: $confirmDelete, titleVisibility: .visible) {
-                Button("Poista", role: .destructive) { Task { await remove() } }
-            } message: {
-                Text("\(current.title). Jo luodut laskut säilyvät.")
+            if let last = current.lastRun, let invoiceId = last.invoiceId {
+                Section {
+                    NavigationLink(value: Route.invoice(invoiceId)) {
+                        Text("Avaa viimeisin lasku (\(APIDate.displayDay(last.issueDate)))")
+                    }
+                }
             }
-            .recurringRunConfirmation(runner: runner) { message in
-                onChanged(message)
-                dismiss()
+            if let failure { Section { Text(failure).foregroundStyle(Theme.danger) } }
+            Section {
+                if current.isDue(today: APIDate.dayString(Date())) {
+                    Button {
+                        Task { await runner.preview(app: app, scope: current.id) }
+                    } label: {
+                        Label(runner.checking ? "Tarkistetaan…" : "Luo lasku nyt", systemImage: "bolt")
+                    }
+                    .disabled(busy || runner.checking || runner.running)
+                }
+                Button { editing = true } label: { Label("Muokkaa", systemImage: "pencil") }
+                Button { Task { await toggleActive() } } label: {
+                    Label(current.active ? "Pysäytä" : "Jatka", systemImage: current.active ? "pause.circle" : "play.circle")
+                }
+                Button(role: .destructive) { confirmDelete = true } label: { Label("Poista", systemImage: "trash") }
             }
-            // Every accepted write bumps dataVersion (a send from the invoice pushed above included).
-            .task(id: app.dataVersion) { await refresh() }
+            .disabled(busy)
         }
+        .scrollContentBackground(.hidden)
+        .background(Theme.canvas)
+        .navigationTitle(current.title)
+        .navigationBarTitleDisplayMode(.inline)
+        // After an edit the screen stays: the refresh below shows the saved schedule.
+        .sheet(isPresented: $editing) {
+            RecurringFormSheet(existing: current) { message in
+                onChanged(message)
+            }
+        }
+        .confirmationDialog("Poistetaanko toistuva lasku?", isPresented: $confirmDelete, titleVisibility: .visible) {
+            Button("Poista", role: .destructive) { Task { await remove() } }
+        } message: {
+            Text("\(current.title). Jo luodut laskut säilyvät.")
+        }
+        .recurringRunConfirmation(runner: runner) { message in
+            onChanged(message)
+            dismiss()
+        }
+        // Every accepted write bumps dataVersion (a send from the invoice pushed above included).
+        .task(id: app.dataVersion) { await refresh() }
     }
 
     private var current: RecurringInvoice { fresh ?? entry }
@@ -336,8 +331,8 @@ struct RecurringDetailSheet: View {
         do {
             let response: RecurringResponse = try await app.api.send("PATCH", "/api/recurring-invoices/\(current.id)", body: RecurringActivePatch(active: !current.active))
             Haptics.success()
+            fresh = response.recurring
             onChanged(response.recurring.active ? "Toistuva lasku jatkuu" : "Toistuva lasku pysäytettiin")
-            dismiss()
         } catch {
             failure = error.userMessage
             Haptics.error()

@@ -3,7 +3,7 @@ import SwiftUI
 struct MainTabView: View {
     @State private var tab: AppTab = .koti
     @State private var showAdd = false
-    @State private var showProfile = false
+    @State private var showSettings = false
     @State private var showAssistant = false
     @State private var showOnboarding = false
     /// Each tab's pushed screens, so a screen can be opened from outside its tab (AppModel.pendingRoute).
@@ -19,8 +19,8 @@ struct MainTabView: View {
                             ToolbarItemGroup(placement: .topBarTrailing) {
                                 Button { showAssistant = true } label: { Image(systemName: "bubble.left") }
                                     .accessibilityLabel("Avustaja")
-                                Button { showProfile = true } label: { Image(systemName: "person.crop.circle") }
-                                    .accessibilityLabel("Profiili")
+                                Button { showSettings = true } label: { Image(systemName: "person.crop.circle") }
+                                    .accessibilityLabel("Asetukset")
                             }
                         }
                         .appDestinations()
@@ -32,8 +32,8 @@ struct MainTabView: View {
                 .tabItem { Label(AppTab.add.title, systemImage: AppTab.add.symbol) }
                 .tag(AppTab.add)
         }
-        .sheet(isPresented: $showAdd) { AddSheet().presentationDetents([.medium]) }
-        .sheet(isPresented: $showProfile) { ProfileSheet().presentationDetents([.medium, .large]) }
+        .sheet(isPresented: $showAdd) { AddSheet() }
+        .sheet(isPresented: $showSettings) { SettingsSheet().presentationDetents([.large]) }
         .sheet(isPresented: $showAssistant) { AssistantView() }
         .fullScreenCover(isPresented: $showOnboarding) { OnboardingView { showOnboarding = false } }
         .overlay(alignment: .top) { OfflineBanner() }

@@ -16,16 +16,6 @@ struct BankAccountsView: View {
     @State private var detail: BankAccount?
     @State private var adding = false
     @State private var disconnecting: BankConnection?
-    @State private var statements: [Statement]?
-    @State private var showAllStatements = false
-    @State private var importing = false
-    @State private var uploading = false
-    @State private var uploadMessage: String?
-    @State private var uploadFailed = false
-    /// "" = Tunnista automaattisesti.
-    @State private var targetAccountId = ""
-    @State private var targetChosen = false
-    @State private var openedStatement: String?
 
     var body: some View {
         List {
@@ -101,7 +91,13 @@ struct BankAccountsView: View {
                     ProgressView()
                 }
             }
-            statementSection
+            Section {
+                NavigationLink(value: Route.statements) {
+                    Label("Tiliotteet", systemImage: "doc.plaintext")
+                }
+            } footer: {
+                Text("Tuo tiliote tiedostona ja selaa tuotuja tiedostoja.")
+            }
             if let notice { Text(notice).foregroundStyle(Theme.success) }
             if let failure { Text(failure).foregroundStyle(Theme.danger) }
         }
@@ -125,89 +121,8 @@ struct BankAccountsView: View {
         } message: { _ in
             Text("Suostumus pankissa suljetaan. Jo haetut tiliotteet säilyvät.")
         }
-        .fileImporter(isPresented: $importing, allowedContentTypes: [.commaSeparatedText, .plainText, .xml, .pdf, .spreadsheet, .data]) { result in
-            if case .success(let url) = result { Task { await upload(url) } }
-        }
-        .navigationDestination(item: $openedStatement) { id in StatementDetailView(statementId: id) }
         .refreshable { await load() }
         .task(id: showArchived) { await load() }
-    }
-
-    // MARK: Tiliotteet
-
-    /// Accounts a tiliote can be imported to: the ones in use.
-    private var importAccounts: [BankAccount] {
-        (overview?.accounts ?? []).filter { $0.archivedAt == nil }
-    }
-
-    @ViewBuilder private var statementSection: some View {
-        Section {
-            Text("Tuo tiliote tiedostona (PDF, XML, XLSX tai CSV), jos pankkia ei ole yhdistetty tai tarvitset vanhempia tapahtumia.")
-                .font(.caption)
-                .foregroundStyle(Theme.ink2)
-            if !importAccounts.isEmpty {
-                Picker("Pankkitili", selection: Binding(get: { targetAccountId }, set: { targetAccountId = $0; targetChosen = true })) {
-                    Text("Tunnista automaattisesti").tag("")
-                    ForEach(importAccounts) { account in
-                        Text(account.bankName.map { "\(account.name) · \($0)" } ?? account.name).tag(account.id)
-                    }
-                }
-                .pickerStyle(.menu)
-            }
-            Button { importing = true } label: {
-                if uploading {
-                    HStack(spacing: 8) { ProgressView(); Text("Käsitellään…") }
-                } else {
-                    Label("Tuo tiliote", systemImage: "square.and.arrow.down")
-                }
-            }
-            .disabled(uploading)
-            if let uploadMessage {
-                Text(uploadMessage).font(.caption).foregroundStyle(uploadFailed ? Theme.danger : Theme.ink2)
-            }
-            if let statements {
-                ForEach(StatementFiles.visible(statements, showAll: showAllStatements)) { statement in
-                    NavigationLink(value: Route.statement(statement.id)) { StatementFileRow(statement: statement) }
-                }
-                if let label = StatementFiles.toggleLabel(count: statements.count, showAll: showAllStatements) {
-                    Button(label) { withAnimation { showAllStatements.toggle() } }
-                }
-            }
-        } header: {
-            Text("Tiliotteet")
-        }
-    }
-
-    private func upload(_ url: URL) async {
-        guard !uploading else { return }
-        guard url.startAccessingSecurityScopedResource() else { return }
-        defer { url.stopAccessingSecurityScopedResource() }
-        guard let data = try? Data(contentsOf: url) else {
-            uploadMessage = "Tiedostoa ei voitu lukea."
-            uploadFailed = true
-            return
-        }
-        var form = Multipart()
-        form.addFile("file", filename: url.lastPathComponent.replacingOccurrences(of: "\"", with: ""), mimeType: "application/octet-stream", data: data)
-        if !targetAccountId.isEmpty { form.addField("bankAccountId", targetAccountId) }
-        uploading = true
-        uploadFailed = false
-        uploadMessage = "Käsitellään tiliotetta…"
-        defer { uploading = false }
-        do {
-            let response = try await app.api.raw("POST", "/api/statements", body: form.finalize(), contentType: form.contentType)
-            let result = try? JSONDecoder().decode(StatementUploadResult.self, from: response.body)
-            uploadMessage = result?.message ?? "Tiliote tuotiin."
-            Haptics.success()
-            await load()
-            if let id = result?.statementId { openedStatement = id }
-        } catch is CancellationError {
-            uploadMessage = nil
-        } catch {
-            uploadMessage = error.userMessage
-            uploadFailed = true
-            Haptics.error()
-        }
     }
 
     private func status(_ c: BankConnection) -> String {
@@ -223,22 +138,11 @@ struct BankAccountsView: View {
         let query = showArchived ? ["includeArchived": "1"] : [String: String]()
         async let accountsResult = Result<BankAccountsOverview, Error>(asyncCatching: { try await api.get("/api/bank-accounts", query: query) })
         async let connectionsResult = Result<BankConnections, Error>(asyncCatching: { try await api.get("/api/bank/connections") })
-        async let statementsResult = Result<StatementList, Error>(asyncCatching: { try await api.get("/api/statements") })
-        let (accounts, links, files) = await (accountsResult, connectionsResult, statementsResult)
+        let (accounts, links) = await (accountsResult, connectionsResult)
         if Task.isCancelled { return }
         switch accounts {
-        case .success(let value):
-            overview = value
-            // Keep what was picked; only fill the default in until then.
-            let usable = value.accounts.filter { $0.archivedAt == nil }
-            if !targetChosen || !usable.contains(where: { $0.id == targetAccountId }) {
-                targetAccountId = usable.first(where: { $0.isDefault == true })?.id ?? ""
-            }
+        case .success(let value): overview = value
         case .failure(let error): problem = error.userMessage
-        }
-        switch files {
-        case .success(let value): statements = value.statements
-        case .failure(let error): problem = problem ?? error.userMessage
         }
         switch links {
         case .success(let value): connections = value

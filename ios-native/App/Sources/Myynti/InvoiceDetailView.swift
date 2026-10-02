@@ -26,6 +26,16 @@ struct InvoiceDetailView: View {
         List {
             if let invoice = state.value {
                 Section { header(invoice).listRowBackground(Color.clear).listRowInsets(EdgeInsets()) }
+                if let main = primaryAction(invoice) {
+                    Section {
+                        Button { perform(main) } label: {
+                            Label(main.title, systemImage: main.symbol).frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.primary)
+                        .listRowBackground(Color.clear)
+                        .listRowInsets(EdgeInsets())
+                    }
+                }
                 if let failure { Section { Text(failure).foregroundStyle(Theme.danger).font(.footnote) } }
                 if let notice { Section { Text(notice).foregroundStyle(Theme.success).font(.footnote) } }
                 Section {
@@ -69,7 +79,7 @@ struct InvoiceDetailView: View {
                             Button("Poista", role: .destructive) { Task { await deletePayment(payment) } }
                         }
                     }
-                    if invoice.open > 0 && invoice.displayStatus != .draft {
+                    if invoice.open > 0 && invoice.displayStatus != .draft && primaryAction(invoice) != .payment {
                         Button { sheet = .payment } label: { Label("Kirjaa maksu", systemImage: "eurosign.circle") }
                     }
                 }
@@ -152,16 +162,30 @@ struct InvoiceDetailView: View {
         .padding(.vertical, 12)
     }
 
+    /// The invoice's next step as one visible button; the rarer actions stay in the ⋯ menu.
+    private func primaryAction(_ invoice: Invoice) -> InvoicePrimaryAction? {
+        InvoicePrimaryAction.for(status: invoice.displayStatus, open: invoice.open, isCreditNote: invoice.isCreditNote,
+                                 reminderReady: reminder != nil && reminder?.waitNote() == nil)
+    }
+
+    private func perform(_ action: InvoicePrimaryAction) {
+        switch action {
+        case .send: sheet = .send
+        case .reminder: sheet = .reminder
+        case .payment: sheet = .payment
+        }
+    }
+
     private func actions(_ invoice: Invoice) -> some View {
         Menu {
             if invoice.displayStatus == .draft {
                 Button { sheet = .edit } label: { Label("Muokkaa", systemImage: "pencil") }
             }
             Button { sheet = .pdf } label: { Label("Avaa PDF", systemImage: "doc.richtext") }
-            if invoice.customer.email != nil && !invoice.isCreditNote {
+            if invoice.customer.email != nil && !invoice.isCreditNote && primaryAction(invoice) != .send {
                 Button { sheet = .send } label: { Label("Lähetä sähköpostilla", systemImage: "paperplane") }
             }
-            if invoice.displayStatus == .overdue && reminder != nil {
+            if invoice.displayStatus == .overdue && reminder != nil && primaryAction(invoice) != .reminder {
                 Button { sheet = .reminder } label: { Label("Lähetä maksumuistutus", systemImage: "bell") }
             }
             Button { UIPasteboard.general.string = invoice.reference } label: { Label("Kopioi viitenumero", systemImage: "doc.on.doc") }

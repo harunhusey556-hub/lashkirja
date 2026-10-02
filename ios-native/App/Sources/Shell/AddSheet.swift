@@ -13,6 +13,12 @@ struct AddSheet: View {
     @State private var busy = false
     /// The invoice just made with "Uusi lasku": opened in Myynti once the sheets are gone.
     @State private var createdInvoiceId: String?
+    /// Whether a mailbox is connected; nil while unknown (then "Hae sähköpostista" is offered and a 404 tells).
+    @State private var hasMailbox: Bool?
+    /// The server answered that no mailbox is connected: the notice links to connecting one.
+    @State private var mailboxMissing = false
+    @State private var showEmailImport = false
+    @State private var detent: PresentationDetent = .medium
 
     var body: some View {
         NavigationStack {
@@ -21,14 +27,37 @@ struct AddSheet: View {
                 Button { importing = true } label: { Label("Tuo tiliote", systemImage: "square.and.arrow.down") }
                     .disabled(busy)
                 Button { newInvoice = true } label: { Label("Uusi lasku", systemImage: "doc.badge.plus") }
-                Button { Task { await fetchEmail() } } label: {
-                    HStack { Label("Hae sähköpostista", systemImage: "envelope"); if busy { Spacer(); ProgressView() } }
+                if hasMailbox == false {
+                    Button { openEmailImport() } label: { Label("Yhdistä sähköposti", systemImage: "envelope.badge") }
+                        .disabled(busy)
+                } else {
+                    Button { Task { await fetchEmail() } } label: {
+                        HStack { Label("Hae sähköpostista", systemImage: "envelope"); if busy { Spacer(); ProgressView() } }
+                    }
+                    .disabled(busy)
                 }
-                .disabled(busy)
-                if let notice { Text(notice).font(.footnote).foregroundStyle(Theme.ink2) }
+                if mailboxMissing {
+                    Button { openEmailImport() } label: {
+                        Text("Sähköpostia ei ole yhdistetty. Yhdistä se tästä ›").font(.footnote).foregroundStyle(Theme.accentDark)
+                    }
+                } else if let notice {
+                    Text(notice).font(.footnote).foregroundStyle(Theme.ink2)
+                }
             }
             .navigationTitle("Lisää")
             .navigationBarTitleDisplayMode(.inline)
+            // Connecting a mailbox opens here, so Back returns to these actions.
+            .navigationDestination(isPresented: $showEmailImport) {
+                EmailImportView { profile in
+                    app.profileChanged(profile)
+                    hasMailbox = !(profile.imapAccounts ?? []).isEmpty
+                    if hasMailbox == true { mailboxMissing = false }
+                }
+            }
+            .task {
+                guard hasMailbox == nil, let profile = await app.cachedProfile(), let accounts = profile.imapAccounts else { return }
+                hasMailbox = !accounts.isEmpty
+            }
             // Screens reload when something was actually saved: every accepted write bumps
             // AppModel.dataVersion, so a cancelled flow reloads nothing.
             .fullScreenCover(isPresented: $capture, onDismiss: { dismiss() }) { CaptureFlow(transactionId: nil) }
@@ -41,6 +70,13 @@ struct AddSheet: View {
                 if case .success(let url) = result { Task { await upload(url) } }
             }
         }
+        .presentationDetents([.medium, .large], selection: $detent)
+    }
+
+    /// The mailbox screen needs room: the sheet grows to full height for it.
+    private func openEmailImport() {
+        detent = .large
+        showEmailImport = true
     }
 
     /// As on the web, a new invoice opens once made: the Myynti tab, then the invoice.
@@ -60,6 +96,7 @@ struct AddSheet: View {
         var form = Multipart()
         form.addFile("file", filename: url.lastPathComponent.replacingOccurrences(of: "\"", with: ""), mimeType: "application/octet-stream", data: data)
         busy = true
+        mailboxMissing = false
         defer { busy = false }
         do {
             struct Result: Decodable { let count: Int? }
@@ -81,7 +118,8 @@ struct AddSheet: View {
             notice = "Haettiin \(r.count ?? 0) kuittia sähköpostista."
             Haptics.success()
         } catch let error as LKError where error.status == 404 {
-            notice = "Sähköpostia ei ole yhdistetty. Yhdistä se kohdassa Asetukset › Sähköpostien tuonti."
+            hasMailbox = false
+            mailboxMissing = true
         } catch {
             notice = error.userMessage
         }

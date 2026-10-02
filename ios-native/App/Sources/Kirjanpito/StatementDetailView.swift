@@ -16,6 +16,9 @@ struct StatementDetailView: View {
     @State private var failure: String?
     @State private var locked = false
     @State private var status: String?
+    /// A screen the row sheet asked for, pushed once the sheet has closed.
+    @State private var openAfterSheet: Route?
+    @State private var pushed: Route?
 
     var body: some View {
         List {
@@ -61,9 +64,17 @@ struct StatementDetailView: View {
         } message: { row in
             Text(StatementText.deleteRowDescription(row))
         }
-        .sheet(item: $selected, onDismiss: { Task { await load() } }) { row in
-            BankRowSheet(row: row, showStatementLink: false)
+        .sheet(item: $selected, onDismiss: {
+            // "Avaa kuitti/lasku" in the sheet: pushed here once it has closed, so Back returns to the tiliote.
+            if let route = openAfterSheet {
+                openAfterSheet = nil
+                pushed = route
+            }
+            Task { await load() }
+        }) { row in
+            BankRowSheet(row: row, showStatementLink: false, onOpen: { openAfterSheet = $0 })
         }
+        .navigationDestination(item: $pushed) { route in RouteScreen(route: route) }
         .sheet(item: $editing) { row in
             StatementRowEditSheet(statementId: statementId, row: row) { Task { await changed() } }
         }
@@ -123,7 +134,7 @@ struct StatementDetailView: View {
             Section {
                 Text(failure).foregroundStyle(Theme.danger)
                 if locked {
-                    NavigationLink(value: Route.periods) { Label("Suljetut kaudet", systemImage: "lock") }
+                    NavigationLink(value: Route.periods) { Label("Kuukauden sulku", systemImage: "lock") }
                 }
             }
         }
@@ -151,7 +162,7 @@ struct StatementDetailView: View {
                     Text("Kuittien kohdistus").font(.body.weight(.medium)).foregroundStyle(Theme.ink)
                     Text(missing > 0 ? "\(suggestions) valmista ehdotusta · \(missing) tapahtumaa odottaa kuittia" : "\(suggestions) valmista ehdotusta")
                         .font(.caption).foregroundStyle(Theme.ink2)
-                    Button("Kohdista kaikki (\(suggestions))") { Task { await confirmAll() } }
+                    Button(BankFeed.confirmAllLabel(suggestions)) { Task { await confirmAll() } }
                         .buttonStyle(.primary)
                         .disabled(busy)
                 }

@@ -72,7 +72,7 @@ struct RaportitView: View {
             } header: {
                 Text("Kirjanpitopaketti")
             } footer: {
-                Text("Zip kuukaudelta, neljännekseltä tai koko vuodelta: tuloslaskelma, ALV, CSV, kohdistukset ja kuitit.")
+                Text("Lähetä kirjanpitäjälle kuun sulun jälkeen. Zip kuukaudelta, neljännekseltä tai koko vuodelta: tuloslaskelma, ALV, CSV, kohdistukset ja kuitit.")
             }
             Section {
                 ForEach(exports) { kind in

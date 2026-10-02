@@ -72,7 +72,7 @@ struct PurchaseInvoicesView: View {
             }
             Section {
                 Button { Task { await runBankMatch() } } label: {
-                    Label("Kohdista maksut", systemImage: "arrow.left.arrow.right")
+                    Label("Hae ostolaskujen maksut pankista", systemImage: "arrow.left.arrow.right")
                 }
             } footer: {
                 Text("Kohdistaa pankin lähtevät maksut ostolaskuihin viitenumerolla.")

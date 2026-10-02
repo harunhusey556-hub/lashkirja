@@ -18,6 +18,10 @@ struct BankFeedView: View {
     @State private var notice: String?
     @State private var noticeFailed = false
     @State private var bulkBusy = false
+    /// A screen the row sheet asked for ("Avaa kuitti"): pushed here once the sheet has closed,
+    /// so it lands on this tab's stack and Back returns to the feed.
+    @State private var openAfterSheet: Route?
+    @State private var pushed: Route?
 
     /// `month` opens the feed on that month, `onlyOpen` on "Vaatii toimia" (web `?nayta=toimet`),
     /// and `focusTransactionId` opens that row's sheet once it is found.
@@ -41,25 +45,20 @@ struct BankFeedView: View {
                 .listRowBackground(Color.clear)
                 .listRowInsets(EdgeInsets())
             }
-            if let month {
-                Section {
+            Section {
+                if let month {
                     Button { self.month = nil } label: {
                         Label("\(StatementText.month(month)) · näytä kaikki kuukaudet", systemImage: "xmark.circle")
                     }
-                    ForEach(statements) { statement in
-                        NavigationLink(value: Route.statement(statement.id)) {
-                            HStack {
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(StatementText.title(statement)).foregroundStyle(Theme.ink)
-                                    Text(statement.bankAccount?.name ?? statement.fileName).font(.caption).foregroundStyle(Theme.ink2)
-                                }
-                                Spacer()
-                                Text("\(statement.transactions.count) tapahtumaa").font(.caption).foregroundStyle(Theme.ink2)
-                            }
+                }
+                NavigationLink(value: Route.statements) {
+                    HStack {
+                        Label("Tiliotteet", systemImage: "doc.plaintext").foregroundStyle(Theme.ink)
+                        Spacer()
+                        if month == nil && !statements.isEmpty {
+                            Text("\(statements.count)").foregroundStyle(Theme.ink2)
                         }
                     }
-                } header: {
-                    Text("Tiliotteet")
                 }
             }
             if let notice { Text(notice).font(.footnote).foregroundStyle(noticeFailed ? Theme.danger : Theme.success) }
@@ -69,7 +68,7 @@ struct BankFeedView: View {
                         Text("Kuittien kohdistus").font(.body.weight(.medium)).foregroundStyle(Theme.ink)
                         Text("\(confirmable) valmista ehdotusta").font(.caption).foregroundStyle(Theme.ink2)
                         Button { Task { await confirmAll() } } label: {
-                            if bulkBusy { ProgressView() } else { Text("Kohdista kaikki (\(confirmable))") }
+                            if bulkBusy { ProgressView() } else { Text(BankFeed.confirmAllLabel(confirmable)) }
                         }
                         .buttonStyle(.primary)
                         .disabled(bulkBusy)
@@ -82,7 +81,9 @@ struct BankFeedView: View {
                     ContentUnavailableView {
                         Label(month == nil ? "Ei pankkitapahtumia vielä" : "Ei tapahtumia tässä kuussa", systemImage: "building.columns")
                     } description: { Text("Tuo tiliote tai yhdistä pankki.") } actions: {
-                        Button("Tuo tiliote") { importing = true }
+                        // Borderless: two buttons in one list row each keep their own tap.
+                        Button("Tuo tiliote") { importing = true }.buttonStyle(.borderless)
+                        Button("Yhdistä pankki") { pushed = .bankAccounts }.buttonStyle(.borderless)
                     }
                 }
                 ForEach(months) { group in
@@ -108,7 +109,7 @@ struct BankFeedView: View {
         .scrollContentBackground(.hidden)
         .background(Theme.canvas)
         .searchable(text: $search, prompt: "Hae…")
-        .navigationTitle("Pankki")
+        .navigationTitle("Pankkitapahtumat")
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Menu {
@@ -129,23 +130,33 @@ struct BankFeedView: View {
                     Button { Task { await rerunMatching() } } label: { Label("Etsi kuitteja uudelleen", systemImage: "arrow.triangle.2.circlepath") }
                         .disabled(bulkBusy)
                     if confirmable > 0 {
-                        Button { Task { await confirmAll() } } label: { Label("Kohdista kaikki (\(confirmable))", systemImage: "link") }
+                        Button { Task { await confirmAll() } } label: { Label(BankFeed.confirmAllLabel(confirmable), systemImage: "link") }
                             .disabled(bulkBusy)
                     }
+                    Button { pushed = .bankAccounts } label: { Label("Pankkiyhteys ja tilit", systemImage: "building.columns") }
                 } label: {
                     Image(systemName: "ellipsis.circle")
                 }
                 .accessibilityLabel("Toiminnot")
             }
             ToolbarItem(placement: .topBarTrailing) {
-                NavigationLink(value: Route.bankAccounts) { Image(systemName: "gearshape") }
-                    .accessibilityLabel("Pankkiyhteys ja tilit")
+                NavigationLink(value: Route.statements) { Image(systemName: "doc.plaintext") }
+                    .accessibilityLabel("Tiliotteet")
             }
         }
         .fileImporter(isPresented: $importing, allowedContentTypes: [.commaSeparatedText, .plainText, .xml, .pdf, .spreadsheet, .data]) { result in
             if case .success(let url) = result { Task { await upload(url) } }
         }
-        .sheet(item: $selected, onDismiss: { Task { await load() } }) { row in BankRowSheet(row: row) }
+        .sheet(item: $selected, onDismiss: {
+            if let route = openAfterSheet {
+                openAfterSheet = nil
+                pushed = route
+            }
+            Task { await load() }
+        }) { row in
+            BankRowSheet(row: row, onOpen: { openAfterSheet = $0 })
+        }
+        .navigationDestination(item: $pushed) { route in RouteScreen(route: route) }
         .refreshable { await load() }
         .task(id: loadKey) {
             guard state.value == nil || gate.isDue(key: month ?? "", version: app.dataVersion) else { return }
@@ -272,6 +283,9 @@ struct BankRowSheet: View {
     @State private var row: BankTransaction
     /// Off when the sheet is opened from the tiliote itself.
     let showStatementLink: Bool
+    /// "Avaa tiliote/kuitti/lasku": handed to the screen under the sheet, which pushes it after
+    /// the sheet closes. Without it the screen opens inside the sheet.
+    let onOpen: ((Route) -> Void)?
     @State private var busy = false
     @State private var failure: String?
     @State private var capture = false
@@ -280,9 +294,10 @@ struct BankRowSheet: View {
     /// The data version the row was read at; a newer one re-reads it.
     @State private var seenVersion: Int?
 
-    init(row: BankTransaction, showStatementLink: Bool = true) {
+    init(row: BankTransaction, showStatementLink: Bool = true, onOpen: ((Route) -> Void)? = nil) {
         _row = State(initialValue: row)
         self.showStatementLink = showStatementLink
+        self.onOpen = onOpen
     }
 
     var body: some View {
@@ -303,7 +318,7 @@ struct BankRowSheet: View {
                 if searchable { candidateSection }
                 if showStatementLink {
                     Section {
-                        NavigationLink(value: Route.statement(row.statementId)) { Label("Avaa tiliote", systemImage: "doc.plaintext") }
+                        openLink(.statement(row.statementId), "Avaa tiliote", symbol: "doc.plaintext")
                     }
                 }
             }
@@ -365,19 +380,32 @@ struct BankRowSheet: View {
             Button { Task { await ignore(true) } } label: { Label(row.amount > 0 ? "Ei vaadi kuittia" : "Kuittia ei tarvita", systemImage: "nosign") }
         case .linked:
             if let receipt = row.receipt {
-                NavigationLink(value: Route.receipt(receipt.id)) { Label("Avaa kuitti", systemImage: "doc.text") }
+                openLink(.receipt(receipt.id), "Avaa kuitti", symbol: "doc.text")
             }
             Button(role: .destructive) { Task { await unlink() } } label: { Label("Poista kohdistus", systemImage: "link.badge.plus") }
         case .ignored:
             Button { Task { await ignore(false) } } label: { Label("Palauta", systemImage: "arrow.uturn.backward") }
         case .invoice:
             if let invoice = row.paidInvoice {
-                NavigationLink(value: Route.invoice(invoice.id)) { Label("Avaa lasku \(invoice.number)", systemImage: "doc.text") }
+                openLink(.invoice(invoice.id), "Avaa lasku \(invoice.number)", symbol: "doc.text")
             } else {
                 Text("Tämä maksu on kirjattu laskulle.").foregroundStyle(Theme.ink2)
             }
         case .transfer:
             Text("Oma siirto tai palkka. Tämä ei tarvitse kuittia.").foregroundStyle(Theme.ink2)
+        }
+    }
+
+    @ViewBuilder private func openLink(_ route: Route, _ title: String, symbol: String) -> some View {
+        if let onOpen {
+            Button {
+                onOpen(route)
+                dismiss()
+            } label: {
+                Label(title, systemImage: symbol)
+            }
+        } else {
+            NavigationLink(value: route) { Label(title, systemImage: symbol) }
         }
     }
 

@@ -42,10 +42,16 @@ private struct KotiContent: View {
                     statusCard(dashboard)
                     moneyCards(dashboard)
                     if !model.visibleItems.isEmpty { tasks }
+                    if model.failedJobs > 0 { failedJobsRow }
                     if model.atCurrentMonth, let setup = dashboard.setup, setup.empty || !setup.receipts || !setup.bank {
-                        SetupCard(setup: setup)
+                        SetupCard(setup: setup, capture: { captureFor = CaptureTarget(transactionId: nil) })
                     }
-                    if let bank = dashboard.bank, bank.accountCount > 0 { BankCard(bank: bank, trend: dashboard.bankTrend) }
+                    if let bank = dashboard.bank, bank.accountCount > 0 {
+                        NavigationLink(value: Route.bankAccounts) {
+                            BankCard(bank: bank, trend: dashboard.bankTrend).contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                    }
                     if dashboard.cashflow.contains(where: { $0.income != 0 || $0.expenses != 0 }) { CashflowCard(months: dashboard.cashflow, selected: dashboard.month) }
                     if let handled = dashboard.handled { HandledCard(handled: handled) }
                 }
@@ -86,29 +92,64 @@ private struct KotiContent: View {
         let done = d.events?.done ?? d.matching.matched
         let total = d.events?.total ?? d.matching.matchable
         return Card {
-            HStack(alignment: .center, spacing: 16) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(Koti.headline(blocking: blocking)).font(.headline).foregroundStyle(Theme.ink)
-                    if total > 0 {
-                        Text("\(done) / \(total) tapahtumaa on kunnossa").font(.subheadline).foregroundStyle(Theme.ink2)
-                    }
-                }
-                Spacer()
-                ProgressRing(progress: total > 0 ? Double(done) / Double(total) : 1)
-                    .frame(width: 52, height: 52)
-            }
-            if let vat = d.estimatedVat, d.vat?.registered == true {
-                Divider()
-                HStack {
-                    VStack(alignment: .leading) {
-                        Text("ALV-arvio").font(.subheadline).foregroundStyle(Theme.ink)
-                        Text(d.isRefund == true ? "palautusta" : "maksettavaa").font(.caption).foregroundStyle(Theme.ink2)
+            // The month's checklist: what is still open and the close itself.
+            NavigationLink(value: Route.monthClose(d.month)) {
+                HStack(alignment: .center, spacing: 16) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(Koti.headline(blocking: blocking)).font(.headline).foregroundStyle(Theme.ink)
+                        if total > 0 {
+                            Text("\(done) / \(total) tapahtumaa on kunnossa").font(.subheadline).foregroundStyle(Theme.ink2)
+                        }
                     }
                     Spacer()
-                    MoneyText(amount: vat).font(.headline)
+                    ProgressRing(progress: total > 0 ? Double(done) / Double(total) : 1)
+                        .frame(width: 52, height: 52)
+                    Chevron()
                 }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            if let vat = d.estimatedVat, d.vat?.registered == true {
+                Divider()
+                NavigationLink(value: Route.alv(d.month)) {
+                    HStack {
+                        VStack(alignment: .leading) {
+                            Text("ALV-arvio").font(.subheadline).foregroundStyle(Theme.ink)
+                            Text(d.isRefund == true ? "palautusta" : "maksettavaa").font(.caption).foregroundStyle(Theme.ink2)
+                        }
+                        Spacer()
+                        MoneyText(amount: vat).font(.headline).foregroundStyle(Theme.ink)
+                        Chevron()
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
             }
         }
+    }
+
+    /// Shown only while an import or a fetch has failed; the queue has the reason and the retry.
+    private var failedJobsRow: some View {
+        NavigationLink(value: Route.workQueue) {
+            HStack(spacing: 12) {
+                Image(systemName: "exclamationmark.triangle")
+                    .font(.system(size: 15, weight: .medium))
+                    .foregroundStyle(Theme.danger)
+                    .frame(width: 36, height: 36)
+                    .background(Theme.danger.opacity(0.12), in: Circle())
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Tuonnit ja virheet").font(.body).foregroundStyle(Theme.ink)
+                    Text(JobsQueue.failedSummary(model.failedJobs)).font(.caption).foregroundStyle(Theme.ink2)
+                }
+                Spacer(minLength: 8)
+                Chevron()
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 
     private func moneyCards(_ d: Dashboard) -> some View {
@@ -326,20 +367,52 @@ private struct TaskRow: View {
     }
 }
 
+/// Each open step leads to where it is done: the camera, the bank connection, the seller details.
 private struct SetupCard: View {
     let setup: Dashboard.Setup
+    let capture: () -> Void
     var body: some View {
         Card {
             Text("Käyttöönotto").font(.headline)
-            step("Kuvaa ensimmäinen kuitti", done: setup.receipts)
-            step("Yhdistä pankki", done: setup.bank)
-            step("Täydennä laskuttajan tiedot", done: setup.seller)
+            if setup.receipts {
+                step("Kuvaa ensimmäinen kuitti", done: true)
+            } else {
+                Button(action: capture) { step("Kuvaa ensimmäinen kuitti", done: false) }
+                    .buttonStyle(.plain)
+            }
+            if setup.bank {
+                step("Yhdistä pankki", done: true)
+            } else {
+                NavigationLink(value: Route.bankAccounts) { step("Yhdistä pankki", done: false) }
+                    .buttonStyle(.plain)
+            }
+            if setup.seller {
+                step("Täydennä laskuttajan tiedot", done: true)
+            } else {
+                NavigationLink(value: Route.settings) { step("Täydennä laskuttajan tiedot", done: false) }
+                    .buttonStyle(.plain)
+            }
         }
     }
     private func step(_ title: String, done: Bool) -> some View {
-        Label(title, systemImage: done ? "checkmark.circle.fill" : "circle")
-            .foregroundStyle(done ? Theme.success : Theme.ink)
-            .font(.subheadline)
+        HStack {
+            Label(title, systemImage: done ? "checkmark.circle.fill" : "circle")
+                .foregroundStyle(done ? Theme.success : Theme.ink)
+                .font(.subheadline)
+            Spacer()
+            if !done { Chevron() }
+        }
+        .contentShape(Rectangle())
+    }
+}
+
+/// The quiet "opens something" mark on a tappable card row.
+private struct Chevron: View {
+    var body: some View {
+        Image(systemName: "chevron.right")
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(Theme.ink2)
+            .accessibilityHidden(true)
     }
 }
 
@@ -355,6 +428,7 @@ private struct BankCard: View {
                 }
                 Spacer()
                 Text("\(bank.accountCount) tiliä").font(.caption).foregroundStyle(Theme.ink2)
+                Chevron()
             }
             if let points = trend?.points, points.count > 1 {
                 Chart(points) { point in

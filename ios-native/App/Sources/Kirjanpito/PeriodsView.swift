@@ -5,7 +5,7 @@ import LashKirjaCore
 /// one month's checklist with its close action, and the lock over all months.
 struct PeriodsView: View {
     @Environment(AppModel.self) private var app
-    @State private var month = PeriodClose.defaultMonth(current: MonthKey.current())
+    @State private var month: String
     @State private var status: Loadable<PeriodMonthStatus> = .idle
     @State private var vat: (key: String, facts: PeriodClose.Vat, report: AlvReport)?
     @State private var confirmClose = false
@@ -28,6 +28,11 @@ struct PeriodsView: View {
         let confirmation: PeriodLock.Confirmation
     }
 
+    /// `month` opens the checklist on that month (Koti's status card); none opens on last month.
+    init(month: String? = nil) {
+        _month = State(initialValue: PeriodClose.startMonth(month, current: MonthKey.current()))
+    }
+
     var body: some View {
         List {
             monthPicker
@@ -41,7 +46,7 @@ struct PeriodsView: View {
         }
         .scrollContentBackground(.hidden)
         .background(Theme.canvas)
-        .navigationTitle("Kaudet")
+        .navigationTitle("Kuukauden sulku")
         .refreshable {
             await loadMonth()
             await loadLock()
@@ -100,6 +105,9 @@ struct PeriodsView: View {
                 }
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 8)
+                NavigationLink(value: Route.reports) {
+                    Label("Lataa kirjanpitopaketti", systemImage: "arrow.down.doc")
+                }
             } else {
                 Text(PeriodClose.subtitle(f)).font(.subheadline).foregroundStyle(Theme.ink2)
             }
@@ -116,8 +124,7 @@ struct PeriodsView: View {
                     itemRow(item)
                 }
                 if step.key == "bank" && !data.hasStatement {
-                    // Tiliotteet (import and files) live on the bank accounts screen.
-                    NavigationLink(value: Route.bankAccounts) {
+                    NavigationLink(value: Route.statements) {
                         VStack(alignment: .leading, spacing: 2) {
                             Text("Tuo kuukauden tiliote").foregroundStyle(Theme.ink)
                             Text("Ilman tiliotetta puuttuvia kuitteja ei näe").font(.caption).foregroundStyle(Theme.ink2)

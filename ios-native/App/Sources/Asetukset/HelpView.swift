@@ -3,7 +3,7 @@ import UIKit
 import LashKirjaCore
 
 /// Ohje ja tuki (/asetukset/ohje): how the app works, a problem report with a
-/// support code, the build, and the way to Huomioitavat.
+/// support code, the build, and the way to Tuonnit ja virheet.
 struct HelpView: View {
     @State private var reference = HelpContent.reference(build: HelpView.build)
     @State private var copied = false
@@ -57,7 +57,7 @@ struct HelpView: View {
             Section {
                 NavigationLink(value: Route.workQueue) {
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("Huomioitavat").foregroundStyle(Theme.ink)
+                        Text("Tuonnit ja virheet").foregroundStyle(Theme.ink)
                         Text("Tuonnit, haut ja niiden virheet").font(.caption).foregroundStyle(Theme.ink2)
                     }
                 }

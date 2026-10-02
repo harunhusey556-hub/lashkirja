@@ -1,7 +1,7 @@
 import SwiftUI
 import LashKirjaCore
 
-/// Huomioitavat (/tyot): background jobs and the exception queue, with a retry for failed reads.
+/// Tuonnit ja virheet (/tyot): background jobs and the exception queue, with a retry for failed reads.
 struct WorkQueueView: View {
     @Environment(AppModel.self) private var app
     @State private var state: Loadable<Snapshot> = .idle
@@ -28,7 +28,7 @@ struct WorkQueueView: View {
         }
         .scrollContentBackground(.hidden)
         .background(Theme.canvas)
-        .navigationTitle("Huomioitavat")
+        .navigationTitle("Tuonnit ja virheet")
         .refreshable { await load() }
         .task(id: app.dataVersion) {
             guard state.value == nil || gate.isDue(version: app.dataVersion) else { return }
@@ -74,7 +74,7 @@ struct WorkQueueView: View {
                 }
             }
         } header: {
-            Text("Työt")
+            Text("Tuonnit ja haut")
         } footer: {
             Text("Tuonnit, haut ja niiden virheet.")
         }

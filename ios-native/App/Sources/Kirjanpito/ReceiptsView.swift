@@ -54,7 +54,20 @@ struct ReceiptsView: View {
             if !pending.isEmpty && !selecting {
                 Section {
                     ForEach(pending) { receipt in
-                        NavigationLink(value: Route.receipt(receipt.id)) { ReceiptRow(receipt: receipt) }
+                        NavigationLink(value: Route.receipt(receipt.id)) {
+                            HStack(spacing: 10) {
+                                ReceiptRow(receipt: receipt)
+                                // Its own button: a tap on the pill approves, the rest of the row opens the receipt.
+                                Button { Task { await review([receipt.id]) } } label: {
+                                    Text("Hyväksy").font(.caption.bold()).padding(.horizontal, 12).padding(.vertical, 5)
+                                        .background(Theme.accentSoft, in: Capsule())
+                                        .foregroundStyle(Theme.accentDark)
+                                }
+                                .buttonStyle(.borderless)
+                                .disabled(busy)
+                                .accessibilityLabel("Hyväksy \(receipt.title)")
+                            }
+                        }
                             .swipeActions(edge: .trailing) {
                                 Button("Hyväksy") { Task { await review([receipt.id]) } }
                                     .tint(Theme.successFill)
@@ -67,8 +80,6 @@ struct ReceiptsView: View {
                     .disabled(busy)
                 } header: {
                     Text("Odottaa hyväksyntää")
-                } footer: {
-                    Text("Pyyhkäise vasemmalle hyväksyäksesi yhden.")
                 }
             }
             if let failure { Text(failure).foregroundStyle(Theme.danger) }

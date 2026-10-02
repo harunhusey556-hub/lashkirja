@@ -55,6 +55,10 @@ enum Route: Hashable {
     case newInvoice
     case reports
     case invoices
+    /// Tiliotteet: import a file and browse the statement files, newest first.
+    case statements
+    /// Kuukauden sulku opened on one month (from Koti's status card).
+    case monthClose(String)
 }
 
 extension Route {
@@ -91,7 +95,7 @@ extension Route {
 }
 
 extension Route {
-    /// Where a "Tarvitaan sinulta" / month-close row leads, one rule for Koti and Kaudet:
+    /// Where a "Tarvitaan sinulta" / month-close row leads, one rule for Koti and Kuukauden sulku:
     /// a receipt row to its receipt, a bank row to that row's sheet (the web sends it to the
     /// action list), an invoice row to the invoice.
     static func forItem(_ item: DashboardItem, month: String? = nil) -> Route? {
@@ -110,35 +114,48 @@ extension Route {
 
 extension View {
     func appDestinations() -> some View {
-        navigationDestination(for: Route.self) { route in
-            switch route {
-            case .placeholder(let title): PlaceholderScreen(title: title)
-            case .invoice(let id): InvoiceDetailView(invoiceId: id)
-            case .customers: CustomersView()
-            case .customer(let id): CustomerDetailView(customerId: id)
-            case .receipts: ReceiptsView()
-            case .receipt(let id): ReceiptDetailView(receiptId: id)
-            case .bankFeed: BankFeedView()
-            case .bankAccounts: BankAccountsView()
-            case .alv(let period): AlvView(period: period)
-            case .settings: SettingsView()
-            case .purchaseInvoices: PurchaseInvoicesView()
-            case .purchaseInvoice(let id): PurchaseInvoiceDetailView(purchaseInvoiceId: id)
-            case .statement(let id): StatementDetailView(statementId: id)
-            case .recurringInvoices: RecurringInvoicesView()
-            case .periods: PeriodsView()
-            case .workQueue: WorkQueueView()
-            case .privacy: PrivacyView()
-            case .help: HelpView()
-            case .passkeys: PasskeysView()
-            case .changeEmail: ChangeEmailView()
-            case .emailImport: EmailImportView { _ in }
-            case .receiptsFiltered(let month, let tab): ReceiptsView(month: month, tab: ReceiptTab(rawValue: tab) ?? .all)
-            case .bankFeedFiltered(let month, let onlyOpen, let focus): BankFeedView(month: month, onlyOpen: onlyOpen, focusTransactionId: focus)
-            case .newInvoice: MyyntiView(openNewInvoice: true)
-            case .reports: RaportitView()
-            case .invoices: MyyntiView()
-            }
+        navigationDestination(for: Route.self) { route in RouteScreen(route: route) }
+    }
+}
+
+/// The screen a route opens; also used by `navigationDestination(item:)` where a sheet hands a
+/// route back to the screen under it (BankRowSheet's "Avaa kuitti").
+struct RouteScreen: View {
+    @Environment(AppModel.self) private var app
+    let route: Route
+
+    var body: some View {
+        switch route {
+        case .placeholder(let title): PlaceholderScreen(title: title)
+        case .invoice(let id): InvoiceDetailView(invoiceId: id)
+        case .customers: CustomersView()
+        case .customer(let id): CustomerDetailView(customerId: id)
+        case .receipts: ReceiptsView()
+        case .receipt(let id): ReceiptDetailView(receiptId: id)
+        case .bankFeed: BankFeedView()
+        case .bankAccounts: BankAccountsView()
+        case .alv(let period): AlvView(period: period)
+        case .settings: SettingsView()
+        case .purchaseInvoices: PurchaseInvoicesView()
+        case .purchaseInvoice(let id): PurchaseInvoiceDetailView(purchaseInvoiceId: id)
+        case .statement(let id): StatementDetailView(statementId: id)
+        case .recurringInvoices: RecurringInvoicesView()
+        case .periods: PeriodsView()
+        case .workQueue: WorkQueueView()
+        case .privacy: PrivacyView()
+        case .help: HelpView()
+        case .passkeys: PasskeysView()
+        case .changeEmail: ChangeEmailView()
+        case .emailImport:
+            // A connected or removed mailbox changes the profile other screens read from AppModel.
+            EmailImportView { app.profileChanged($0) }
+        case .receiptsFiltered(let month, let tab): ReceiptsView(month: month, tab: ReceiptTab(rawValue: tab) ?? .all)
+        case .bankFeedFiltered(let month, let onlyOpen, let focus): BankFeedView(month: month, onlyOpen: onlyOpen, focusTransactionId: focus)
+        case .newInvoice: MyyntiView(openNewInvoice: true)
+        case .reports: RaportitView()
+        case .invoices: MyyntiView()
+        case .statements: StatementsView()
+        case .monthClose(let month): PeriodsView(month: month)
         }
     }
 }

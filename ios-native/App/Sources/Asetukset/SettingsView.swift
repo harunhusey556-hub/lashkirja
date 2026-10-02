@@ -6,6 +6,7 @@ struct SettingsView: View {
     @State private var profile: Profile?
     @State private var profileFailure: String?
     @State private var lockEnabled = AppLock.shared.isEnabled
+    @State private var confirmLogout = false
 
     var body: some View {
         List {
@@ -50,13 +51,21 @@ struct SettingsView: View {
             Section {
                 LabeledContent("Versio", value: "\(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "") (\(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? ""))")
                 LabeledContent("Palvelin", value: AppConfig.apiBaseURL.host ?? "")
-            } header: { Text("Ohje") }
+            } header: { Text("Tietoja") }
+            Section {
+                Button(role: .destructive) { confirmLogout = true } label: {
+                    Label("Kirjaudu ulos", systemImage: "rectangle.portrait.and.arrow.right")
+                }
+            }
         }
         .scrollContentBackground(.hidden)
         .background(Theme.canvas)
         .navigationTitle("Asetukset")
         // The lock lives outside SwiftUI state; read it again when coming back from its screen.
         .onAppear { lockEnabled = AppLock.shared.isEnabled }
+        .confirmationDialog("Kirjaudutaanko ulos?", isPresented: $confirmLogout, titleVisibility: .visible) {
+            Button("Kirjaudu ulos", role: .destructive) { Task { await app.logout() } }
+        }
     }
 
     private func loadProfile() async {

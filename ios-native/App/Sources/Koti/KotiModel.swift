@@ -11,6 +11,8 @@ final class KotiModel {
     /// Rows the owner just acted on: gone from the list at once, back if undone or failed,
     /// and not brought back by a reload while the action is still waiting or on its way.
     private(set) var hidden = KotiHiddenRows()
+    /// Failed imports and fetches: Koti shows a "Tuonnit ja virheet" row only while there are some.
+    private(set) var failedJobs = 0
     /// Only the latest load writes the screen: stepping months quickly, an older month's
     /// slower answer is dropped.
     private var loads = LoadGeneration()
@@ -27,11 +29,15 @@ final class KotiModel {
         let generation = loads.next()
         let month = self.month
         if state.value == nil { state = .loading }
+        // The job list loads beside the dashboard; it only decides whether the failures row shows.
+        let api = self.api
+        async let jobsList: JobsList? = try? api.get("/api/jobs")
         do {
             let dashboard: Dashboard = try await api.get("/api/dashboard", query: ["month": month])
             guard loads.isCurrent(generation), month == self.month else { return }
             hidden.reloaded(present: dashboard.items.map(\.id), loadGeneration: generation)
             state = .loaded(dashboard)
+            if let jobs = await jobsList, loads.isCurrent(generation) { failedJobs = JobsQueue.failedCount(jobs.jobs) }
         } catch is CancellationError {
             return
         } catch {

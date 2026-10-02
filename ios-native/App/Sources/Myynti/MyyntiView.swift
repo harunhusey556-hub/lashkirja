@@ -18,6 +18,10 @@ struct MyyntiView: View {
     /// A just-created invoice, opened when the form's sheet has closed.
     @State private var createdId: String?
     @State private var openedInvoiceId: String?
+    @State private var shortcut: Shortcut?
+
+    /// Asiakkaat and Toistuvat laskut, one compact line under the summary.
+    enum Shortcut: Hashable { case customers, recurring }
 
     var body: some View {
         List {
@@ -32,15 +36,9 @@ struct MyyntiView: View {
                     }
                 }
                 Section {
-                    NavigationLink(value: Route.customers) { Label("Asiakkaat", systemImage: "person.2") }
-                    NavigationLink(value: Route.recurringInvoices) { Label("Toistuvat laskut", systemImage: "repeat") }
-                    Button { showMatch = true } label: {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Label("Kohdista pankkimaksut", systemImage: "building.columns")
-                            Text("Kirjaa maksut viitenumeron mukaan").font(.caption).foregroundStyle(Theme.ink2)
-                        }
-                    }
-                    .foregroundStyle(Theme.ink)
+                    shortcuts
+                        .listRowBackground(Color.clear)
+                        .listRowInsets(EdgeInsets())
                 }
                 Section {
                     chips
@@ -59,6 +57,15 @@ struct MyyntiView: View {
                 } header: {
                     if !rows.isEmpty { Text("\(rows.count) laskua") }
                 }
+                Section("Muut") {
+                    Button { showMatch = true } label: {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Label("Hae asiakkaiden maksut pankista", systemImage: "building.columns")
+                            Text("Kirjaa maksut viitenumeron mukaan").font(.caption).foregroundStyle(Theme.ink2)
+                        }
+                    }
+                    .foregroundStyle(Theme.ink)
+                }
             } else {
                 LoadState(state: state, retry: load) { (_: InvoiceList) in EmptyView() }
                     .listRowBackground(Color.clear)
@@ -70,7 +77,7 @@ struct MyyntiView: View {
         .refreshable { await load() }
         .navigationTitle("Myynti")
         .toolbar {
-            ToolbarItem(placement: .topBarLeading) {
+            ToolbarItem(placement: .topBarTrailing) {
                 Button { showNew = true } label: { Label("Uusi lasku", systemImage: "plus") }
             }
         }
@@ -81,6 +88,12 @@ struct MyyntiView: View {
             BankMatchSheet { message in notice = message }
         }
         .navigationDestination(item: $openedInvoiceId) { id in InvoiceDetailView(invoiceId: id) }
+        .navigationDestination(item: $shortcut) { target in
+            switch target {
+            case .customers: CustomersView()
+            case .recurring: RecurringInvoicesView()
+            }
+        }
         .onAppear {
             guard openNewInvoice, !openedNew else { return }
             openedNew = true
@@ -100,6 +113,35 @@ struct MyyntiView: View {
         guard let id = createdId else { return }
         createdId = nil
         openedInvoiceId = id
+    }
+
+    private var shortcuts: some View {
+        // Scrolls sideways instead of wrapping at large text sizes: it stays one line.
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                shortcutButton("Asiakkaat", symbol: "person.2", target: .customers)
+                shortcutButton("Toistuvat laskut", symbol: "repeat", target: .recurring)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 4)
+        }
+    }
+
+    private func shortcutButton(_ title: String, symbol: String, target: Shortcut) -> some View {
+        Button { shortcut = target } label: {
+            HStack(spacing: 6) {
+                Image(systemName: symbol).foregroundStyle(Theme.accent)
+                Text(title).lineLimit(1)
+                Image(systemName: "chevron.right").font(.caption2.weight(.semibold)).foregroundStyle(Theme.ink2)
+            }
+            .font(.subheadline)
+            .foregroundStyle(Theme.ink)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 8)
+            .background(Theme.surface, in: Capsule())
+            .overlay(Capsule().stroke(Theme.line, lineWidth: 1))
+        }
+        .buttonStyle(.plain)
     }
 
     private var chips: some View {
@@ -219,7 +261,7 @@ struct BankMatchSheet: View {
                             Button { Task { await run() } } label: {
                                 HStack {
                                     Spacer()
-                                    if busy { ProgressView() } else { Text("Kohdista") }
+                                    if busy { ProgressView() } else { Text("Kirjaa maksut") }
                                     Spacer()
                                 }
                             }
@@ -235,7 +277,7 @@ struct BankMatchSheet: View {
             }
             .scrollContentBackground(.hidden)
             .background(Theme.canvas)
-            .navigationTitle("Kohdista pankkimaksut")
+            .navigationTitle("Maksut pankista")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
