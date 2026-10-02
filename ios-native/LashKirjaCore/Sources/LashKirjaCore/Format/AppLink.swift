@@ -24,6 +24,12 @@ public enum AppLink: Equatable, Sendable {
     case privacy
     case help
     case emailImport
+    /// Pankki: balances and recent rows (`/pankki`).
+    case bankHub
+    /// Tiliotteet: statement files (`/tiliotteet`, `/pankki/tiliotteet`).
+    case statements
+    /// Sähköposti: what mail sync brought in.
+    case emailInbox
 
     public static func parse(_ href: String) -> AppLink? {
         guard href.hasPrefix("/") else { return nil }
@@ -50,6 +56,8 @@ public enum AppLink: Equatable, Sendable {
         case "/pankki/tapahtumat/tiliote": return id.map(AppLink.statement)
         case "/kirjanpito/pankkitilit": return .bankAccounts
         case "/kirjanpito/alv": return .alv(params["period"])
+        // The pre-restructure ALV path, still cited by older replies.
+        case "/alv-raportti": return .alv(params["period"] ?? month)
         case "/laskut": return .invoices
         case "/laskut/lasku": return id.map(AppLink.invoice)
         case "/laskut/uusi": return .newInvoice
@@ -64,6 +72,9 @@ public enum AppLink: Equatable, Sendable {
         case "/asetukset/tietosuoja": return .privacy
         case "/asetukset/ohje": return .help
         case "/asetukset/sahkoposti": return .emailImport
+        case "/pankki": return .bankHub
+        case "/tiliotteet", "/pankki/tiliotteet": return .statements
+        case "/sahkoposti": return .emailInbox
         default: return nil
         }
     }

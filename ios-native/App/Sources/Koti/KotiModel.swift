@@ -54,6 +54,14 @@ final class KotiModel {
         await load()
     }
 
+    /// A bar of Tulot ja menot: that month on Koti (the chart's months end at the current one).
+    func show(month next: String) async {
+        guard next != month, next <= MonthKey.current() else { return }
+        month = next
+        Haptics.selection()
+        await load()
+    }
+
     /// Hyväksy: the row leaves at once; the approval is sent when the toast
     /// closes without "Kumoa" (the web app's undo pattern).
     func approve(_ item: DashboardItem) {

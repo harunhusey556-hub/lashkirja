@@ -67,6 +67,32 @@ export type PreparedChat =
       honesty: HonestyContext;
     };
 
+/**
+ * One bank row and one receipt as the chat offers them: the summaries the
+ * proposal card shows. Shared by the "kohdista" chat turn and a receipt
+ * sent to the chat (chat-receipt.ts), so both read alike.
+ */
+export function buildMatchProposal(
+  tx: { id: string; date: Date | null; counterparty: string | null; message: string | null; amountCents: number },
+  receipt: { id: string; vendor: string | null; totalAmountCents: number | null; fileName: string },
+  candidate: { score: number; reasons: string[] }
+): ChatMatchProposal {
+  const txDateStr = tx.date ? new Date(tx.date).toLocaleDateString("fi-FI") : "";
+  const txVendor = tx.counterparty || tx.message || "Tuntematon siirto";
+  const txAmt = centsToEuros(tx.amountCents).toFixed(2);
+  const rVendor = receipt.vendor || receipt.fileName;
+  const rAmt = receipt.totalAmountCents ? centsToEuros(receipt.totalAmountCents).toFixed(2) : "?";
+  return {
+    type: "match_proposal",
+    transactionId: tx.id,
+    receiptId: receipt.id,
+    txSummary: `${txVendor} — ${txAmt} € (${txDateStr})`,
+    receiptSummary: `${rVendor} — ${rAmt} € (${receipt.fileName})`,
+    confidenceScore: candidate.score,
+    reasons: candidate.reasons,
+  };
+}
+
 /** A language model is configured, so free-form questions can be answered. */
 export function assistantAvailable(): boolean {
   return chatProviderConfigured();
@@ -250,26 +276,9 @@ export async function prepareChat(
           const rawTx = unmatchedTxs.find((t) => t.id === candidate.transactionId);
 
           if (rawTx && rawReceipt) {
-            const txDateStr = rawTx.date ? new Date(rawTx.date).toLocaleDateString("fi-FI") : "";
-            const txVendor = rawTx.counterparty || rawTx.message || "Tuntematon siirto";
-            const txAmt = centsToEuros(rawTx.amountCents).toFixed(2);
-
-            const rVendor = rawReceipt.vendor || rawReceipt.fileName;
-            const rAmt = rawReceipt.totalAmountCents
-              ? centsToEuros(rawReceipt.totalAmountCents).toFixed(2)
-              : "?";
-
             const txMonth = monthKey(rawTx.date);
             const receiptMonth = monthKey(rawReceipt.date);
-            bestProposal = {
-              type: "match_proposal",
-              transactionId: rawTx.id,
-              receiptId: rawReceipt.id,
-              txSummary: `${txVendor} — ${txAmt} € (${txDateStr})`,
-              receiptSummary: `${rVendor} — ${rAmt} € (${rawReceipt.fileName})`,
-              confidenceScore: candidate.score,
-              reasons: candidate.reasons,
-            };
+            bestProposal = buildMatchProposal(rawTx, rawReceipt, candidate);
             const proposalSources: ChatSource[] = [];
             if (txMonth) proposalSources.push({ label: "Tiliotteet", href: statementDrillHref(txMonth) });
             if (receiptMonth) {

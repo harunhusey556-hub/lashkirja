@@ -6,6 +6,46 @@ public struct ChatSource: Codable, Sendable, Hashable {
     public let kind: String?
 }
 
+/// A receipt-to-bank-row match the assistant offers (`proposal` on an assistant message);
+/// the owner accepts or rejects it with `PATCH /api/ai/chat`.
+public struct ChatMatchProposal: Decodable, Sendable, Hashable {
+    public let transactionId: String
+    public let receiptId: String
+    public let txSummary: String
+    public let receiptSummary: String
+    public let confidenceScore: Double?
+    public let reasons: [String]
+    /// "accepted" or "rejected" once decided; nil while open.
+    public var status: String?
+
+    public init(transactionId: String, receiptId: String, txSummary: String, receiptSummary: String, confidenceScore: Double? = nil, reasons: [String] = [], status: String? = nil) {
+        self.transactionId = transactionId
+        self.receiptId = receiptId
+        self.txSummary = txSummary
+        self.receiptSummary = receiptSummary
+        self.confidenceScore = confidenceScore
+        self.reasons = reasons
+        self.status = status
+    }
+
+    enum CodingKeys: String, CodingKey { case type, transactionId, receiptId, txSummary, receiptSummary, confidenceScore, reasons, status }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        let type = try c.decodeIfPresent(String.self, forKey: .type)
+        guard type == nil || type == "match_proposal" else {
+            throw DecodingError.dataCorruptedError(forKey: .type, in: c, debugDescription: "not a match proposal")
+        }
+        transactionId = try c.decodeIfPresent(String.self, forKey: .transactionId) ?? ""
+        receiptId = try c.decodeIfPresent(String.self, forKey: .receiptId) ?? ""
+        txSummary = try c.decodeIfPresent(String.self, forKey: .txSummary) ?? ""
+        receiptSummary = try c.decodeIfPresent(String.self, forKey: .receiptSummary) ?? ""
+        confidenceScore = try? c.decodeIfPresent(Double.self, forKey: .confidenceScore)
+        reasons = (try? c.decodeIfPresent([String].self, forKey: .reasons)) ?? []
+        status = try? c.decodeIfPresent(String.self, forKey: .status)
+    }
+}
+
 public struct ChatMessage: Decodable, Sendable, Identifiable, Hashable {
     public let id: String
     public let role: String
@@ -14,8 +54,10 @@ public struct ChatMessage: Decodable, Sendable, Identifiable, Hashable {
     public let limited: Bool?
     public let sources: [ChatSource]
     public let createdAt: String?
+    /// Var: deciding sets its status at once, before the server answers.
+    public var proposal: ChatMatchProposal?
 
-    public init(id: String, role: String, content: String, status: String? = nil, limited: Bool? = nil, sources: [ChatSource] = [], createdAt: String? = nil) {
+    public init(id: String, role: String, content: String, status: String? = nil, limited: Bool? = nil, sources: [ChatSource] = [], createdAt: String? = nil, proposal: ChatMatchProposal? = nil) {
         self.id = id
         self.role = role
         self.content = content
@@ -23,9 +65,10 @@ public struct ChatMessage: Decodable, Sendable, Identifiable, Hashable {
         self.limited = limited
         self.sources = sources
         self.createdAt = createdAt
+        self.proposal = proposal
     }
 
-    enum CodingKeys: String, CodingKey { case id, role, content, status, limited, sources, createdAt }
+    enum CodingKeys: String, CodingKey { case id, role, content, status, limited, sources, createdAt, proposal }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -36,7 +79,17 @@ public struct ChatMessage: Decodable, Sendable, Identifiable, Hashable {
         limited = try c.decodeIfPresent(Bool.self, forKey: .limited)
         sources = try c.decodeIfPresent([ChatSource].self, forKey: .sources) ?? []
         createdAt = try c.decodeIfPresent(String.self, forKey: .createdAt)
+        // A proposal the app cannot read is left out rather than losing the whole message.
+        proposal = (try? c.decodeIfPresent(ChatMatchProposal.self, forKey: .proposal)) ?? nil
     }
+}
+
+/// `POST /api/ai/chat/receipt`: the stored "Kuitti: …" message and the assistant's answer to it.
+public struct ChatReceiptResponse: Decodable, Sendable {
+    public let conversationId: String
+    public let receiptId: String?
+    public let userMessage: ChatMessage
+    public let assistantMessage: ChatMessage
 }
 
 public struct ChatHistory: Decodable, Sendable {

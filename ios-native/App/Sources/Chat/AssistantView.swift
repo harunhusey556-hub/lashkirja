@@ -1,4 +1,6 @@
 import SwiftUI
+import PhotosUI
+import UniformTypeIdentifiers
 import LashKirjaCore
 
 struct AssistantView: View {
@@ -6,10 +8,17 @@ struct AssistantView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var model: ChatModel?
     @State private var showConversations = false
+    @State private var path: [Route] = []
+    @State private var showCamera = false
+    @State private var showPhotos = false
+    @State private var photo: PhotosPickerItem?
+    @State private var importingFile = false
+    /// A picked photo or file is being scaled and read before it shows in the conversation.
+    @State private var preparing = false
     @FocusState private var focused: Bool
 
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $path) {
             Group {
                 if let model {
                     conversation(model)
@@ -30,6 +39,28 @@ struct AssistantView: View {
             .appDestinations()
             .sheet(isPresented: $showConversations) {
                 if let model { ConversationsSheet(model: model) }
+            }
+            .fullScreenCover(isPresented: $showCamera) {
+                CameraPicker { image in
+                    showCamera = false
+                    if let image { prepare { await ChatReceiptPrep.camera(image) } }
+                }
+                .ignoresSafeArea()
+            }
+            .photosPicker(isPresented: $showPhotos, selection: $photo, matching: .images)
+            .onChange(of: photo) { _, item in
+                guard let item else { return }
+                // Cleared so that picking the same photo again after a failure still fires.
+                photo = nil
+                prepare {
+                    guard let data = try? await item.loadTransferable(type: Data.self) else {
+                        return .failure(LKError(status: 0, message: ChatReceiptFile.unreadableMessage))
+                    }
+                    return await ChatReceiptPrep.library(data)
+                }
+            }
+            .fileImporter(isPresented: $importingFile, allowedContentTypes: [.pdf, .image]) { result in
+                if case .success(let url) = result { prepare { await ChatReceiptPrep.file(url) } }
             }
         }
         .task {
@@ -70,8 +101,7 @@ struct AssistantView: View {
                         shortcuts(model)
                     }
                     ForEach(model.messages) { message in
-                        Bubble(message: message, streaming: model.streaming && message.id == model.messages.last?.id)
-                            .equatable()
+                        MessageRow(message: message, streaming: model.streaming && message.id == model.messages.last?.id, model: model)
                             .id(message.id)
                     }
                     if let failure = model.failure {
@@ -79,6 +109,9 @@ struct AssistantView: View {
                     }
                 }
                 .padding(16)
+                // Links in a reply's text: an in-app path opens its screen here, a web address
+                // goes to the system. Set on the content only, so pushed screens keep the default.
+                .environment(\.openURL, OpenURLAction { url in openLink(url) })
             }
             .scrollDismissesKeyboard(.interactively)
             // Open on the latest message, and keep it in view when the keyboard shrinks the scroll view.
@@ -95,6 +128,57 @@ struct AssistantView: View {
             // Opening a source page drops the focus, so coming back does not pop the keyboard up.
             .onDisappear { focused = false }
         }
+    }
+
+    private func openLink(_ url: URL) -> OpenURLAction.Result {
+        guard let href = ChatInlineLink.inAppHref(url) else { return .systemAction }
+        // An in-app path this app has no screen for does nothing rather than reaching the system.
+        if let route = Route.fromHref(href) {
+            focused = false
+            path.append(route)
+        }
+        return .handled
+    }
+
+    /// Runs the picked photo or file through `make` and sends it; a file that cannot be sent says why.
+    private func prepare(_ make: @escaping () async -> ChatReceiptPrep.Prepared) {
+        guard let model else { return }
+        preparing = true
+        Task {
+            let result = await make()
+            preparing = false
+            switch result {
+            case .success(let upload):
+                model.sendReceipt(upload)
+            case .failure(let error):
+                model.failure = error.message
+                Haptics.error()
+            }
+        }
+    }
+
+    private func attachMenu(_ model: ChatModel) -> some View {
+        Menu {
+            if UIImagePickerController.isSourceTypeAvailable(.camera) {
+                Button { showCamera = true } label: { Label("Ota kuva", systemImage: "camera") }
+            }
+            Button { showPhotos = true } label: { Label("Valitse kuva", systemImage: "photo.on.rectangle") }
+            Button { importingFile = true } label: { Label("Valitse tiedosto", systemImage: "doc") }
+        } label: {
+            Group {
+                if preparing {
+                    ProgressView()
+                } else {
+                    Image(systemName: "paperclip").font(.system(size: 17, weight: .semibold))
+                }
+            }
+            .foregroundStyle(Theme.ink)
+            .frame(width: 40, height: 40)
+            .background(Theme.surface, in: Circle())
+            .overlay(Circle().stroke(Theme.line))
+        }
+        .disabled(!model.canAttach || preparing)
+        .accessibilityLabel("Lähetä kuitti")
     }
 
     private func shortcuts(_ model: ChatModel) -> some View {
@@ -138,6 +222,7 @@ struct AssistantView: View {
 
     private func composerRow(_ model: ChatModel) -> some View {
         HStack(alignment: .bottom, spacing: 8) {
+            attachMenu(model)
             TextField(model.canType ? "Kirjoita viesti…" : "Kirjoittaminen ei ole nyt käytössä", text: Binding(get: { model.input }, set: { model.input = $0 }), axis: .vertical)
                 .disabled(!model.canType && !model.streaming)
                 .lineLimit(1...5)
@@ -153,10 +238,41 @@ struct AssistantView: View {
                     .font(.system(size: 16, weight: .bold))
                     .foregroundStyle(Theme.onInk)
                     .frame(width: 40, height: 40)
-                    .background(model.streaming || (model.canType && !model.input.trimmingCharacters(in: .whitespaces).isEmpty) ? Theme.ink : Theme.ink2.opacity(0.5), in: Circle())
+                    .background(model.streaming || (model.canType && !model.receiptBusy && !model.input.trimmingCharacters(in: .whitespaces).isEmpty) ? Theme.ink : Theme.ink2.opacity(0.5), in: Circle())
             }
-            .disabled(!model.streaming && (model.input.trimmingCharacters(in: .whitespaces).isEmpty || !model.canType))
+            .disabled(!model.streaming && (model.input.trimmingCharacters(in: .whitespaces).isEmpty || !model.canType || model.receiptBusy))
             .accessibilityLabel(model.streaming ? "Pysäytä" : "Lähetä")
+        }
+    }
+}
+
+/// One message with what hangs under it: a match proposal and the screens the reply points to.
+private struct MessageRow: View {
+    let message: ChatMessage
+    let streaming: Bool
+    let model: ChatModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Bubble(
+                message: message,
+                streaming: streaming,
+                attachment: model.attachments[message.id],
+                retry: { model.retryReceipt(message.id) },
+                discard: { model.discardReceipt(message.id) }
+            )
+            .equatable()
+            if !streaming && message.role == "assistant" {
+                if let proposal = message.proposal, ChatProposalCard.isShown(proposal) {
+                    ChatProposalCardView(
+                        proposal: proposal,
+                        saving: model.decisions[message.id],
+                        error: model.decisionErrors[message.id]
+                    ) { model.decide(message.id, $0) }
+                }
+                let cards = ChatDestination.cards(message.sources)
+                if !cards.isEmpty { ChatDestinationCards(cards: cards, model: model) }
+            }
         }
     }
 }
@@ -165,11 +281,20 @@ struct AssistantView: View {
 private struct Bubble: View, Equatable {
     let message: ChatMessage
     let streaming: Bool
+    let attachment: ChatAttachment?
+    let retry: () -> Void
+    let discard: () -> Void
+
+    /// The actions only reach the model; what is shown is the message and its attachment.
+    static func == (a: Bubble, b: Bubble) -> Bool {
+        a.message == b.message && a.streaming == b.streaming && a.attachment == b.attachment
+    }
 
     var body: some View {
         let mine = message.role == "user"
-        VStack(alignment: mine ? .trailing : .leading, spacing: 8) {
-            Group {
+        VStack(alignment: mine ? .trailing : .leading, spacing: 6) {
+            VStack(alignment: .leading, spacing: 8) {
+                if let attachment { ChatAttachmentPreview(attachment: attachment) }
                 if message.content.isEmpty && streaming {
                     ProgressView().padding(.vertical, 4)
                 } else {
@@ -182,21 +307,8 @@ private struct Bubble: View, Equatable {
             .padding(.vertical, 10)
             .background(mine ? Theme.ink : Theme.surface, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
             .foregroundStyle(mine ? Theme.onInk : Theme.ink)
-            if !message.sources.isEmpty {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack {
-                        ForEach(message.sources, id: \.href) { source in
-                            if let route = Route.fromHref(source.href) {
-                                NavigationLink(value: route) {
-                                    Label(source.label, systemImage: "link").font(.caption.weight(.semibold))
-                                        .padding(.horizontal, 10).padding(.vertical, 6)
-                                        .background(Theme.accentSoft, in: Capsule())
-                                        .foregroundStyle(Theme.accentDark)
-                                }
-                            }
-                        }
-                    }
-                }
+            if let attachment, attachment.phase != .sent {
+                ChatAttachmentStatus(phase: attachment.phase, retry: retry, discard: discard)
             }
         }
         .frame(maxWidth: .infinity, alignment: mine ? .trailing : .leading)

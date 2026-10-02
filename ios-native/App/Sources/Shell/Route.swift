@@ -94,6 +94,9 @@ extension Route {
         case .privacy: return .privacy
         case .help: return .help
         case .emailImport: return .emailImport
+        case .bankHub: return .bankHub
+        case .statements: return .statements
+        case .emailInbox: return .emailInbox
         }
     }
 }

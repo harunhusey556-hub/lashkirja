@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 import Observation
 import LashKirjaCore
 
@@ -24,6 +25,22 @@ final class ChatModel {
     /// After a 429 ("Liian monta viestiä"), sending stays off until this moment.
     private(set) var cooldownUntil: Date?
     private var cooldownTask: Task<Void, Never>?
+    /// Proposal decisions on their way to the server, by assistant message id.
+    private(set) var decisions: [String: ChatProposalDecision] = [:]
+    /// A decision the server refused, shown in that message's card.
+    private(set) var decisionErrors: [String: String] = [:]
+    /// Receipts sent in this conversation, by the id of the user message showing them: the
+    /// local bubble while it uploads, then the server's message (keeping the thumbnail).
+    private(set) var attachments: [String: ChatAttachment] = [:]
+    /// The files of receipts not yet stored, kept for "Yritä uudelleen".
+    private var pendingReceipts: [String: ChatReceiptUpload] = [:]
+    private var uploadTasks: [String: Task<Void, Never>] = [:]
+    /// The live bank card's figures (`GET /api/bank-accounts`), loaded when a card first shows.
+    private(set) var bank: ChatBankSummary?
+    private(set) var bankFailed = false
+    private var bankLoading = false
+    /// `AppModel.dataVersion` the bank figures were read at: a write since then reloads them.
+    private var bankVersion: Int?
 
     /// One cookie-less session for every streamed reply: a new session per message
     /// leaked the session and paid a TLS handshake each time.
@@ -39,14 +56,18 @@ final class ChatModel {
     /// Opening the sheet again: the same conversation, refreshed unless it is new or still streaming.
     func reopen() async {
         async let status: Void = loadStatus()
-        if conversationId != nil && !streaming { await loadLatest() }
+        // A receipt still uploading (or waiting for a retry) lives only here: a reload would drop it.
+        if conversationId != nil && !streaming && pendingReceipts.isEmpty { await loadLatest() }
         await status
     }
 
     /// As in the web drawer, typing stays on when the AI is unavailable (the server still answers
     /// what it can without it); only a rate-limit cooldown turns it off.
     var canType: Bool { cooldownUntil == nil }
-    var canSendShortcut: Bool { cooldownUntil == nil }
+    var canSendShortcut: Bool { cooldownUntil == nil && !receiptBusy }
+    /// A receipt is being sent or read: its answer is appended last, so no other message goes out meanwhile.
+    var receiptBusy: Bool { attachments.values.contains { $0.phase.isBusy } }
+    var canAttach: Bool { !streaming && cooldownUntil == nil && !receiptBusy }
 
     func loadStatus() async {
         do {
@@ -80,7 +101,7 @@ final class ChatModel {
             var query: [String: String] = [:]
             if let conversationId { query["conversationId"] = conversationId }
             let history: ChatHistory = try await app.api.get("/api/ai/chat", query: query)
-            guard loads.isCurrent(generation), !streaming else { return }
+            guard loads.isCurrent(generation), !streaming, pendingReceipts.isEmpty else { return }
             messages = history.messages.uniquedById()
             conversationId = history.conversation?.id
             title = history.conversation?.title ?? "Avustaja"
@@ -100,6 +121,7 @@ final class ChatModel {
 
     func open(_ conversation: Conversation) async {
         stop()
+        dropPendingReceipts()
         loads.next()
         failure = nil
         conversationId = conversation.id
@@ -110,6 +132,7 @@ final class ChatModel {
 
     func startNew() {
         stop()
+        dropPendingReceipts()
         loads.next()
         failure = nil
         conversationId = nil
@@ -119,7 +142,7 @@ final class ChatModel {
 
     func send(_ text: String) {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty, !streaming, cooldownUntil == nil else { return }
+        guard !trimmed.isEmpty, !streaming, cooldownUntil == nil, !receiptBusy else { return }
         loads.next()
         failure = nil
         messages.append(ChatMessage(id: UUID().uuidString, role: "user", content: trimmed))
@@ -212,8 +235,192 @@ final class ChatModel {
         }
     }
 
+    // MARK: Match proposal
+
+    /// Accepts or rejects a reply's match proposal. The card reads as decided at once; the
+    /// server's copy of the message replaces it, or a refusal puts the buttons back with the reason.
+    func decide(_ id: String, _ decision: ChatProposalDecision) {
+        guard let message = messages.first(where: { $0.id == id }),
+              ChatProposalCard.canDecide(message.proposal, saving: decisions[id]) else { return }
+        let previous = message.proposal?.status
+        decisionErrors[id] = nil
+        decisions[id] = decision
+        update(id) { $0 = ChatProposalCard.decided($0, decision) }
+        Task {
+            defer { decisions[id] = nil }
+            do {
+                let updated: ChatMessage = try await app.api.send("PATCH", "/api/ai/chat", body: ChatDecisionRequest(id: id, decision: decision))
+                if updated.id == id { update(id) { $0 = updated } }
+                // Accepting links the receipt to the bank row (and may approve the receipt); the
+                // write filter skips /api/ai/, so the lists are told here.
+                if decision == .accepted { app.dataVersion += 1 }
+                Haptics.success()
+            } catch {
+                update(id) { $0 = ChatProposalCard.reverted($0, to: previous) }
+                if !(error is CancellationError) {
+                    decisionErrors[id] = error.userMessage
+                    Haptics.error()
+                }
+            }
+        }
+    }
+
+    // MARK: Bank card
+
+    func loadBank() async {
+        let version = app.dataVersion
+        guard !bankLoading, bankVersion != version else { return }
+        bankLoading = true
+        defer { bankLoading = false }
+        do {
+            let position: BankHubPosition = try await app.api.get("/api/bank-accounts")
+            bank = ChatBankSummary(position)
+            bankFailed = false
+            bankVersion = version
+        } catch is CancellationError {
+        } catch {
+            bankFailed = true
+            bankVersion = version
+        }
+    }
+
+    // MARK: Receipt in chat
+
+    /// Shows the receipt as the owner's message at once and sends it; the server's reading of it
+    /// comes back as the assistant's reply (with a match proposal when a bank row fits).
+    func sendReceipt(_ file: ChatReceiptUpload) {
+        guard canAttach else {
+            // A reply started while the file was being prepared: say so rather than drop it quietly.
+            failure = "Odota, että vastaus valmistuu, ja lähetä kuitti sitten uudelleen."
+            return
+        }
+        loads.next()
+        failure = nil
+        let localId = "receipt-\(file.clientId)"
+        messages.append(ChatMessage(id: localId, role: "user", content: ChatReceiptFile.content(file.name)))
+        attachments[localId] = ChatAttachment(name: file.name, thumbnail: file.thumbnail, isPDF: file.isPDF, phase: .sending(0))
+        pendingReceipts[localId] = file
+        startUpload(localId)
+    }
+
+    /// Sends a failed receipt again with the same client id: the server answers a repeat once.
+    func retryReceipt(_ localId: String) {
+        guard pendingReceipts[localId] != nil, attachments[localId]?.phase.canRetry == true, !streaming else { return }
+        attachments[localId]?.phase = .sending(0)
+        startUpload(localId)
+    }
+
+    func discardReceipt(_ localId: String) {
+        guard pendingReceipts[localId] != nil, attachments[localId]?.phase.isBusy != true else { return }
+        pendingReceipts[localId] = nil
+        attachments[localId] = nil
+        messages.removeAll { $0.id == localId }
+    }
+
+    private func dropPendingReceipts() {
+        uploadTasks.values.forEach { $0.cancel() }
+        uploadTasks = [:]
+        pendingReceipts = [:]
+        attachments = attachments.filter { $0.value.phase == .sent }
+    }
+
+    private func startUpload(_ localId: String) {
+        guard let file = pendingReceipts[localId] else { return }
+        uploadTasks[localId]?.cancel()
+        uploadTasks[localId] = Task { await upload(file, localId: localId) }
+    }
+
+    private func uploadProgress(_ localId: String, _ fraction: Double) {
+        guard let phase = attachments[localId]?.phase, phase.isBusy, phase != .reading else { return }
+        attachments[localId]?.phase = .progress(fraction)
+    }
+
+    private func upload(_ file: ChatReceiptUpload, localId: String) async {
+        var form = Multipart()
+        form.addFile("file", filename: file.name, mimeType: file.mimeType, data: file.data)
+        if let conversationId { form.addField("conversationId", conversationId) }
+        form.addField("clientId", file.clientId)
+        do {
+            // Its own request, not `app.api`: reading the receipt can take longer than the
+            // API client's 25 s timeout, and the bytes sent drive the bubble's progress.
+            var request = URLRequest(url: AppConfig.apiBaseURL.appendingPathComponent("/api/ai/chat/receipt"))
+            request.httpMethod = "POST"
+            request.setValue(form.contentType, forHTTPHeaderField: "Content-Type")
+            request.setValue("application/json", forHTTPHeaderField: "Accept")
+            if let token = await app.auth.currentToken() { request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
+            request.timeoutInterval = 120
+            let progress = UploadProgress { [weak self] fraction in
+                Task { @MainActor in self?.uploadProgress(localId, fraction) }
+            }
+            let (data, response) = try await Self.streamSession.upload(for: request, from: form.finalize(), delegate: progress)
+            if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
+                throw ChatReceiptFile.failure(status: http.statusCode, data: data)
+            }
+            guard let result = try? JSONDecoder().decode(ChatReceiptResponse.self, from: data) else {
+                throw LKError(status: 200, code: "DECODE", message: "Palvelimen vastausta ei voitu lukea.")
+            }
+            uploadTasks[localId] = nil
+            // Another conversation was opened meanwhile: the receipt is stored, its bubble is gone.
+            guard let index = messages.firstIndex(where: { $0.id == localId }) else { return }
+            if conversationId == nil { title = result.userMessage.content }
+            conversationId = result.conversationId
+            messages[index] = result.userMessage
+            messages.removeAll { $0.id == result.assistantMessage.id }
+            messages.append(result.assistantMessage)
+            messages = messages.uniquedById()
+            attachments[localId] = nil
+            attachments[result.userMessage.id] = ChatAttachment(name: file.name, thumbnail: file.thumbnail, isPDF: file.isPDF, phase: .sent)
+            pendingReceipts[localId] = nil
+            // The receipt is now in Kuitit; the write filter skips /api/ai/.
+            app.dataVersion += 1
+            Haptics.success()
+        } catch is CancellationError {
+        } catch let error as URLError where error.code == .cancelled {
+        } catch {
+            uploadTasks[localId] = nil
+            guard attachments[localId] != nil else { return }
+            attachments[localId]?.phase = .failed(error.userMessage)
+            Haptics.error()
+        }
+    }
+
     private func update(_ id: String, _ change: (inout ChatMessage) -> Void) {
         guard let index = messages.firstIndex(where: { $0.id == id }) else { return }
         change(&messages[index])
+    }
+}
+
+/// A receipt picked in the chat, ready to send.
+struct ChatReceiptUpload: @unchecked Sendable {
+    let name: String
+    let mimeType: String
+    let data: Data
+    let thumbnail: UIImage?
+    /// The user message's client id; a retry repeats it so the server stores the receipt once.
+    let clientId: String
+    var isPDF: Bool { mimeType == "application/pdf" }
+}
+
+/// What the owner's receipt bubble shows besides its text.
+struct ChatAttachment: Equatable {
+    let name: String
+    let thumbnail: UIImage?
+    let isPDF: Bool
+    var phase: ChatReceiptPhase
+
+    static func == (a: ChatAttachment, b: ChatAttachment) -> Bool {
+        a.name == b.name && a.isPDF == b.isPDF && a.phase == b.phase && a.thumbnail === b.thumbnail
+    }
+}
+
+/// Reports the bytes of one upload sent so far.
+private final class UploadProgress: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
+    private let report: @Sendable (Double) -> Void
+
+    init(report: @escaping @Sendable (Double) -> Void) { self.report = report }
+
+    func urlSession(_ session: URLSession, task: URLSessionTask, didSendBodyData bytesSent: Int64, totalBytesSent: Int64, totalBytesExpectedToSend: Int64) {
+        guard totalBytesExpectedToSend > 0 else { return }
+        report(Double(totalBytesSent) / Double(totalBytesExpectedToSend))
     }
 }

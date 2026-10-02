@@ -27,33 +27,26 @@ struct KotiView: View {
     }
 }
 
+/// Koti, top to bottom (`KotiLayout.sections`): the month's status, Rahatilanne, what needs
+/// doing, the month's sales and costs, open invoices, the six-month history.
 private struct KotiContent: View {
     @Bindable var model: KotiModel
     /// The bank row a receipt is being photographed for.
     @State private var captureFor: CaptureTarget?
+    @Environment(\.dynamicTypeSize) private var typeSize
 
     struct CaptureTarget: Identifiable { let id = UUID(); let transactionId: String? }
 
     var body: some View {
         ScrollView {
             LoadState(state: model.state, retry: model.load) { dashboard in
-                VStack(alignment: .leading, spacing: 20) {
+                let sections = KotiLayout.sections(.init(dashboard: dashboard, atCurrentMonth: model.atCurrentMonth,
+                                                         hasTasks: !model.visibleItems.isEmpty, failedJobs: model.failedJobs))
+                VStack(alignment: .leading, spacing: 16) {
                     header(dashboard)
-                    statusCard(dashboard)
-                    moneyCards(dashboard)
-                    if !model.visibleItems.isEmpty { tasks }
-                    if model.failedJobs > 0 { failedJobsRow }
-                    if model.atCurrentMonth, let setup = dashboard.setup, setup.empty || !setup.receipts || !setup.bank {
-                        SetupCard(setup: setup, capture: { captureFor = CaptureTarget(transactionId: nil) })
+                    ForEach(sections, id: \.self) { section in
+                        sectionView(section, dashboard)
                     }
-                    if let bank = dashboard.bank, bank.accountCount > 0 {
-                        NavigationLink(value: Route.bankHub) {
-                            BankCard(bank: bank, trend: dashboard.bankTrend).contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain)
-                    }
-                    if dashboard.cashflow.contains(where: { $0.income != 0 || $0.expenses != 0 }) { CashflowCard(months: dashboard.cashflow, selected: dashboard.month) }
-                    if let handled = dashboard.handled { HandledCard(handled: handled) }
                 }
                 .padding(.horizontal, 20)
                 .padding(.bottom, 24)
@@ -81,29 +74,60 @@ private struct KotiContent: View {
         }
     }
 
+    @ViewBuilder private func sectionView(_ section: KotiSection, _ d: Dashboard) -> some View {
+        switch section {
+        case .status:
+            statusCard(d)
+        case .partialFailure:
+            PartialFailureNotice(messages: Koti.failedSections(d.sectionErrors)) { await model.load() }
+        case .setup:
+            if let setup = d.setup {
+                SetupCard(setup: setup, capture: { captureFor = CaptureTarget(transactionId: nil) })
+            }
+        case .balance:
+            if let bank = d.bank {
+                BalanceCard(bank: bank, trend: BalanceTrend(d.bankTrend),
+                            title: Koti.positionTitle(atCurrentMonth: model.atCurrentMonth))
+            }
+        case .tasks:
+            tasks
+        case .failedJobs:
+            failedJobsRow
+        case .money:
+            moneyCards(d)
+        case .positions:
+            positions(Koti.positionRows(d),
+                      title: Koti.positionsTitle(hasBalanceCard: Koti.showsBalanceCard(d.bank), atCurrentMonth: model.atCurrentMonth))
+        case .cashflow:
+            CashflowCard(months: d.cashflow, selected: d.month) { month in Task { await model.show(month: month) } }
+        case .handled:
+            if let handled = d.handled { HandledCard(handled: handled) }
+        }
+    }
+
     private func header(_ d: Dashboard) -> some View {
         Text(d.firstName.map { "Hyvää päivää, \($0)" } ?? "Hyvää päivää")
             .font(.subheadline)
             .foregroundStyle(Theme.ink2)
     }
 
+    /// The month's checklist, and the VAT estimate as one line under it.
     private func statusCard(_ d: Dashboard) -> some View {
         let blocking = max(0, (d.blockingTotal ?? 0) - (d.items.count - model.visibleItems.count))
         let done = d.events?.done ?? d.matching.matched
         let total = d.events?.total ?? d.matching.matchable
         return Card {
-            // The month's checklist: what is still open and the close itself.
             NavigationLink(value: Route.monthClose(d.month)) {
-                HStack(alignment: .center, spacing: 16) {
-                    VStack(alignment: .leading, spacing: 4) {
+                HStack(alignment: .center, spacing: 14) {
+                    ProgressRing(progress: total > 0 ? Double(done) / Double(total) : 1)
+                        .frame(width: 44, height: 44)
+                    VStack(alignment: .leading, spacing: 2) {
                         Text(Koti.headline(blocking: blocking)).font(.headline).foregroundStyle(Theme.ink)
                         if total > 0 {
-                            Text("\(done) / \(total) tapahtumaa on kunnossa").font(.subheadline).foregroundStyle(Theme.ink2)
+                            Text("\(done) / \(total) tapahtumaa on kunnossa").font(.caption).foregroundStyle(Theme.ink2)
                         }
                     }
-                    Spacer()
-                    ProgressRing(progress: total > 0 ? Double(done) / Double(total) : 1)
-                        .frame(width: 52, height: 52)
+                    Spacer(minLength: 8)
                     Chevron()
                 }
                 .contentShape(Rectangle())
@@ -112,13 +136,10 @@ private struct KotiContent: View {
             if let vat = d.estimatedVat, d.vat?.registered == true {
                 Divider()
                 NavigationLink(value: Route.alv(d.month)) {
-                    HStack {
-                        VStack(alignment: .leading) {
-                            Text("ALV-arvio").font(.subheadline).foregroundStyle(Theme.ink)
-                            Text(d.isRefund == true ? "palautusta" : "maksettavaa").font(.caption).foregroundStyle(Theme.ink2)
-                        }
-                        Spacer()
-                        MoneyText(amount: vat).font(.headline).foregroundStyle(Theme.ink)
+                    HStack(spacing: 8) {
+                        Text(Koti.vatLine(isRefund: d.isRefund)).font(.subheadline).foregroundStyle(Theme.ink2)
+                        Spacer(minLength: 8)
+                        MoneyText(amount: vat).font(.subheadline.weight(.semibold)).foregroundStyle(Theme.ink)
                         Chevron()
                     }
                     .contentShape(Rectangle())
@@ -132,11 +153,7 @@ private struct KotiContent: View {
     private var failedJobsRow: some View {
         NavigationLink(value: Route.workQueue) {
             HStack(spacing: 12) {
-                Image(systemName: "exclamationmark.triangle")
-                    .font(.system(size: 15, weight: .medium))
-                    .foregroundStyle(Theme.danger)
-                    .frame(width: 36, height: 36)
-                    .background(Theme.danger.opacity(0.12), in: Circle())
+                RowIcon(symbol: "exclamationmark.triangle", tint: Theme.danger)
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Tuonnit ja virheet").font(.body).foregroundStyle(Theme.ink)
                     Text(JobsQueue.failedSummary(model.failedJobs)).font(.caption).foregroundStyle(Theme.ink2)
@@ -152,8 +169,10 @@ private struct KotiContent: View {
         .buttonStyle(.plain)
     }
 
+    /// Myynti and Kulut side by side; stacked at the largest text sizes so the figures fit.
     private func moneyCards(_ d: Dashboard) -> some View {
-        HStack(spacing: 12) {
+        let layout = typeSize.isAccessibilitySize ? AnyLayout(VStackLayout(spacing: 12)) : AnyLayout(HStackLayout(spacing: 12))
+        return layout {
             ForEach([MoneyTrend.Metric.income, .expenses], id: \.self) { metric in
                 let income = metric == .income
                 let amount = income ? d.income : d.expenses
@@ -175,7 +194,7 @@ private struct KotiContent: View {
 
     private var tasks: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Tarvitaan sinulta").font(.footnote.weight(.semibold)).foregroundStyle(Theme.ink2).padding(.leading, 4)
+            SectionHeader(title: "Tarvitaan sinulta")
             VStack(spacing: 0) {
                 ForEach(Array(model.visibleItems.enumerated()), id: \.element.id) { index, item in
                     if index > 0 { Divider().padding(.leading, 60) }
@@ -201,6 +220,57 @@ private struct KotiContent: View {
             row
         }
     }
+
+    /// Pankkitilit (when there is no balance card), Avoimet myyntilaskut and ostolaskut.
+    private func positions(_ rows: [Koti.PositionRow], title: String) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            SectionHeader(title: title)
+            VStack(spacing: 0) {
+                ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
+                    if index > 0 { Divider().padding(.leading, 60) }
+                    NavigationLink(value: route(row)) {
+                        PositionRowView(row: row).contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
+        }
+    }
+
+    private func route(_ row: Koti.PositionRow) -> Route {
+        switch row.kind {
+        case .bank: row.fixesBank ? Route.bankAccounts : Route.bankHub
+        case .receivables: .invoices
+        case .payables: .purchaseInvoices
+        }
+    }
+}
+
+/// The small grey heading over a group of rows.
+private struct SectionHeader: View {
+    let title: String
+    var body: some View {
+        Text(title)
+            .font(.footnote.weight(.semibold))
+            .foregroundStyle(Theme.ink2)
+            .padding(.leading, 4)
+            .accessibilityAddTraits(.isHeader)
+    }
+}
+
+/// The round tinted icon that starts a list row.
+private struct RowIcon: View {
+    let symbol: String
+    let tint: Color
+    var body: some View {
+        Image(systemName: symbol)
+            .font(.system(size: 15, weight: .medium))
+            .foregroundStyle(tint)
+            .frame(width: 36, height: 36)
+            .background(tint.opacity(0.12), in: Circle())
+            .accessibilityHidden(true)
+    }
 }
 
 struct ProgressRing: View {
@@ -210,6 +280,7 @@ struct ProgressRing: View {
             Circle().stroke(Theme.line, lineWidth: 5)
             Circle().trim(from: 0, to: progress).stroke(Theme.success, style: StrokeStyle(lineWidth: 5, lineCap: .round)).rotationEffect(.degrees(-90))
             Text("\(Int((progress * 100).rounded())) %").font(.caption2.weight(.semibold)).monospacedDigit()
+                .minimumScaleFactor(0.6).lineLimit(1)
         }
         .animation(.snappy, value: progress)
     }
@@ -416,65 +487,288 @@ private struct Chevron: View {
     }
 }
 
-private struct BankCard: View {
+
+/// Rahatilanne (web `BalanceTrendCard`): today's balance as the hero figure, the change since
+/// last month, and the month-end line. Dragging across the line reads a month (the figure and
+/// its words follow the finger); letting go returns to today. The heading part opens the bank.
+private struct BalanceCard: View {
     let bank: Dashboard.BankSummary
-    let trend: Dashboard.BankTrend?
+    let trend: BalanceTrend
+    let title: String
+    /// The month being read on the line; nil shows today.
+    @State private var selected: String?
+
     var body: some View {
-        Card {
-            HStack {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Rahatilanne").font(.subheadline).foregroundStyle(Theme.ink2)
-                    MoneyText(amount: bank.totalBalance).font(.title2.weight(.semibold))
+        VStack(alignment: .leading, spacing: 14) {
+            // Only the heading is the link: a drag on the chart must never open the bank.
+            NavigationLink(value: Route.bankHub) {
+                heading.contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("\(title). \(trend.accessibilitySummary(total: bank.totalBalance))")
+            .accessibilityHint("Avaa pankin")
+            if trend.canDraw, let domain = trend.yDomain {
+                chart(domain)
+            } else {
+                VStack(alignment: .leading, spacing: 8) {
+                    Rectangle().fill(Theme.line).frame(height: 1)
+                    Text(BalanceTrend.emptyText).font(.caption).foregroundStyle(Theme.ink2)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
-                Spacer()
-                Text("\(bank.accountCount) tiliä").font(.caption).foregroundStyle(Theme.ink2)
+            }
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
+        .onChange(of: trend) { selected = nil }
+    }
+
+    private var heading: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 8) {
+                Text(title).font(.subheadline.weight(.semibold)).foregroundStyle(Theme.ink)
+                Spacer(minLength: 8)
                 Chevron()
             }
-            if let points = trend?.points, points.count > 1 {
-                Chart(points) { point in
-                    LineMark(x: .value("Kuukausi", MonthKey.short(point.month)), y: .value("Saldo", NSDecimalNumber(decimal: point.balance).doubleValue))
-                        .interpolationMethod(.monotone)
-                        .foregroundStyle(Theme.accent)
-                    AreaMark(x: .value("Kuukausi", MonthKey.short(point.month)), y: .value("Saldo", NSDecimalNumber(decimal: point.balance).doubleValue))
-                        .interpolationMethod(.monotone)
-                        .foregroundStyle(Theme.accent.opacity(0.12))
+            Text(trend.caption(selected: selected, accountCount: bank.accountCount, currentMonth: MonthKey.current()))
+                .font(.caption).foregroundStyle(Theme.ink2)
+            MoneyText(amount: trend.hero(selected: selected, total: bank.totalBalance))
+                .font(.largeTitle.weight(.bold))
+                .foregroundStyle(Theme.ink)
+                .lineLimit(1)
+                .minimumScaleFactor(0.5)
+            if let line = trend.changeLine(selected: selected) {
+                let direction = trend.direction(selected: selected)
+                HStack(spacing: 4) {
+                    Image(systemName: symbol(direction)).font(.caption.weight(.semibold)).accessibilityHidden(true)
+                    Text(line).font(.caption).monospacedDigit()
                 }
-                .chartYAxis(.hidden)
-                .frame(height: 90)
+                .foregroundStyle(direction == .up ? Theme.success : Theme.ink2)
             }
+        }
+    }
+
+    private func chart(_ domain: ClosedRange<Double>) -> some View {
+        let marked = trend.points.first { $0.month == selected } ?? trend.points.last
+        return Chart {
+            ForEach(trend.points) { point in
+                AreaMark(x: .value("Kuukausi", point.month),
+                         yStart: .value("Pohja", domain.lowerBound),
+                         yEnd: .value("Saldo", point.value))
+                    .interpolationMethod(.monotone)
+                    .foregroundStyle(LinearGradient(colors: [Theme.accent.opacity(0.22), Theme.accent.opacity(0)],
+                                                    startPoint: .top, endPoint: .bottom))
+                LineMark(x: .value("Kuukausi", point.month), y: .value("Saldo", point.value))
+                    .interpolationMethod(.monotone)
+                    .foregroundStyle(Theme.accent)
+                    .lineStyle(StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round))
+            }
+            if let selected {
+                RuleMark(x: .value("Kuukausi", selected))
+                    .foregroundStyle(Theme.ink2)
+                    .lineStyle(StrokeStyle(lineWidth: 1, dash: [2, 3]))
+            }
+            if let marked {
+                // The point being read (or today's): a dot with a surface ring.
+                PointMark(x: .value("Kuukausi", marked.month), y: .value("Saldo", marked.value))
+                    .symbol {
+                        Circle().fill(Theme.accent).frame(width: 10, height: 10)
+                            .overlay(Circle().stroke(Theme.surface, lineWidth: 2))
+                    }
+            }
+        }
+        .chartYScale(domain: domain)
+        .chartYAxis(.hidden)
+        .chartXAxis {
+            AxisMarks { value in
+                AxisValueLabel {
+                    if let month = value.as(String.self) {
+                        Text(MonthKey.short(month))
+                            .fontWeight(month == selected ? .semibold : .regular)
+                            .foregroundStyle(month == selected ? Theme.ink : Theme.ink2)
+                    }
+                }
+            }
+        }
+        .chartXSelection(value: $selected)
+        .sensoryFeedback(.selection, trigger: selected)
+        .frame(height: 140)
+        // The heading reads the whole line out; the drag is a visual extra.
+        .accessibilityHidden(true)
+    }
+
+    private func symbol(_ direction: BalanceTrend.Direction?) -> String {
+        switch direction {
+        case .up: "arrow.up.right"
+        case .down: "arrow.down.right"
+        case .flat, nil: "minus"
         }
     }
 }
 
+/// One row under Rahatilanne: what it is, how much, and what is late (in the danger colour).
+private struct PositionRowView: View {
+    let row: Koti.PositionRow
+
+    var body: some View {
+        HStack(spacing: 12) {
+            RowIcon(symbol: symbol, tint: row.tone == .danger ? Theme.danger : row.tone == .warning ? Theme.warning : Theme.accent)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(row.title).font(.body).foregroundStyle(Theme.ink)
+                Text(row.secondary)
+                    .font(.caption)
+                    .foregroundStyle(row.tone == .danger ? Theme.danger : row.tone == .warning ? Theme.warning : Theme.ink2)
+            }
+            Spacer(minLength: 8)
+            if let amount = row.amount {
+                MoneyText(amount: amount).font(.subheadline.weight(.semibold)).foregroundStyle(Theme.ink)
+                    .lineLimit(1).minimumScaleFactor(0.8)
+            }
+            Chevron()
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(row.accessibilityLabel)
+        .accessibilityAddTraits(.isButton)
+    }
+
+    private var symbol: String {
+        switch row.kind {
+        case .bank: "building.columns"
+        case .receivables: "arrow.down.circle"
+        case .payables: "doc.text"
+        }
+    }
+}
+
+/// Tulot ja menot over the six months up to this one. Tapping a bar opens that month on Koti
+/// (the month's own cards lead on to the rows); VoiceOver swipes up and down for the same.
 private struct CashflowCard: View {
     let months: [Dashboard.CashflowMonth]
     let selected: String
+    let select: (String) -> Void
+
     var body: some View {
         Card {
-            Text("Tulot ja menot, 6 kk").font(.subheadline).foregroundStyle(Theme.ink2)
+            HStack(spacing: 12) {
+                Text("Tulot ja menot, 6 kk").font(.subheadline.weight(.semibold)).foregroundStyle(Theme.ink)
+                Spacer(minLength: 8)
+                legend("Tulot", Theme.success)
+                legend("Menot", Theme.ink2)
+            }
             Chart {
                 ForEach(months) { m in
-                    BarMark(x: .value("Kuukausi", MonthKey.short(m.month)), y: .value("Tulot", NSDecimalNumber(decimal: m.income).doubleValue))
-                        .foregroundStyle(Theme.success.opacity(m.month == selected ? 1 : 0.55))
+                    BarMark(x: .value("Kuukausi", m.month), y: .value("Tulot", NSDecimalNumber(decimal: m.income).doubleValue))
+                        .foregroundStyle(Theme.success.opacity(m.month == selected ? 1 : 0.45))
                         .position(by: .value("Laji", "Tulot"))
-                    BarMark(x: .value("Kuukausi", MonthKey.short(m.month)), y: .value("Menot", NSDecimalNumber(decimal: m.expenses).doubleValue))
-                        .foregroundStyle(Theme.ink2.opacity(m.month == selected ? 0.9 : 0.4))
+                        .cornerRadius(2)
+                    BarMark(x: .value("Kuukausi", m.month), y: .value("Menot", NSDecimalNumber(decimal: m.expenses).doubleValue))
+                        .foregroundStyle(Theme.ink2.opacity(m.month == selected ? 0.9 : 0.35))
                         .position(by: .value("Laji", "Menot"))
+                        .cornerRadius(2)
                 }
             }
-            .frame(height: 140)
+            .chartXAxis {
+                AxisMarks { value in
+                    AxisValueLabel {
+                        if let month = value.as(String.self) {
+                            Text(MonthKey.short(month))
+                                .fontWeight(month == selected ? .semibold : .regular)
+                                .foregroundStyle(month == selected ? Theme.ink : Theme.ink2)
+                        }
+                    }
+                }
+            }
+            .chartYAxis { AxisMarks(values: .automatic(desiredCount: 3)) }
+            .chartOverlay { proxy in
+                GeometryReader { geometry in
+                    Rectangle().fill(.clear).contentShape(Rectangle())
+                        .onTapGesture { location in
+                            guard let plot = proxy.plotFrame else { return }
+                            let x = location.x - geometry[plot].origin.x
+                            if let month = proxy.value(atX: x, as: String.self) { select(month) }
+                        }
+                }
+            }
+            .frame(height: 150)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(Koti.cashflowSummary(months, selected: selected))
+            .accessibilityHint("Pyyhkäise ylös tai alas vaihtaaksesi kuukautta")
+            .accessibilityAdjustableAction { direction in
+                let step = direction == .increment ? 1 : -1
+                if let month = Koti.adjacentMonth(months.map(\.month), from: selected, step: step) { select(month) }
+            }
+        }
+    }
+
+    private func legend(_ title: String, _ tint: Color) -> some View {
+        HStack(spacing: 4) {
+            Circle().fill(tint).frame(width: 7, height: 7)
+            Text(title).font(.caption).foregroundStyle(Theme.ink2)
+        }
+        .accessibilityHidden(true)
+    }
+}
+
+/// What the app did for the owner this week; opens the list holding the biggest part.
+private struct HandledCard: View {
+    let handled: Dashboard.Handled
+
+    var body: some View {
+        NavigationLink(value: route) {
+            HStack(spacing: 12) {
+                RowIcon(symbol: "sparkles", tint: Theme.success)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Hoidettu automaattisesti").font(.caption.weight(.semibold)).foregroundStyle(Theme.ink2)
+                    Text(Koti.handledTitle(count: handled.count)).font(.subheadline.weight(.semibold)).foregroundStyle(Theme.ink)
+                    Text(Koti.handledDetail(labels: handled.parts.map(\.label))).font(.caption).foregroundStyle(Theme.ink2)
+                }
+                Spacer(minLength: 8)
+                Chevron()
+            }
+            .padding(14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var route: Route {
+        switch Koti.handledTarget(firstKind: handled.parts.first?.kind) {
+        case .receipts: .receipts
+        case .bankFeed: .bankFeed
+        case .recurringInvoices: .recurringInvoices
         }
     }
 }
 
-private struct HandledCard: View {
-    let handled: Dashboard.Handled
+/// One card for every part of the dashboard that did not load, with one retry (web VS-31).
+private struct PartialFailureNotice: View {
+    let messages: [String]
+    let retry: () async -> Void
+
     var body: some View {
-        Card {
-            Label("Hoidettu automaattisesti", systemImage: "sparkles").font(.subheadline.weight(.semibold))
-            ForEach(handled.parts, id: \.kind) { part in
-                Text("\(part.count) \(part.label)").font(.caption).foregroundStyle(Theme.ink2)
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: "exclamationmark.triangle")
+                .foregroundStyle(Theme.warning)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Osa tiedoista jäi lataamatta").font(.subheadline.weight(.semibold)).foregroundStyle(Theme.ink)
+                ForEach(messages, id: \.self) { message in
+                    Text(message).font(.caption).foregroundStyle(Theme.ink2)
+                }
+                Button("Yritä uudelleen") { Task { await retry() } }
+                    .font(.caption.bold())
+                    .foregroundStyle(Theme.accentDark)
+                    .padding(.top, 2)
             }
+            Spacer(minLength: 0)
         }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
     }
 }

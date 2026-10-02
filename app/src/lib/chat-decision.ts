@@ -1,5 +1,9 @@
 import { prisma } from "./db";
 import { confirmMatch, MatchConflictError, MatchNotFoundError, runMatching } from "./matching";
+import { PeriodLockedError } from "./period-lock";
+import { serverApprovalBlock } from "./receipt-approval";
+
+export const INCOMPLETE_RECEIPT_MESSAGE = "Täydennä kuitin tiedot ennen kohdistusta.";
 
 export class ChatDecisionError extends Error {
   status: number;
@@ -30,7 +34,8 @@ function readProposal(raw: string | null): MatchProposal {
 
 /**
  * The match write and the chat decision commit together. A failure in either
- * leaves both unchanged.
+ * leaves both unchanged. Accepting also approves a pending receipt (in the
+ * same transaction); an incomplete one is refused with 422.
  */
 export async function decideChatProposal(
   input: { userId: string; messageId: string; decision: "accepted" | "rejected" },
@@ -53,6 +58,15 @@ export async function decideChatProposal(
   try {
     await prisma.$transaction(async (tx) => {
       if (input.decision === "accepted") {
+        // Accepting approves a waiting receipt (confirmMatch), and only a
+        // complete one may be approved: no amount or no date is not bookable.
+        const receipt = await tx.receipt.findFirst({
+          where: { id: proposal.receiptId, userId: input.userId },
+          select: { reviewStatus: true, totalAmountCents: true, date: true },
+        });
+        if (receipt?.reviewStatus === "pending" && (serverApprovalBlock(receipt) || !receipt.date)) {
+          throw new ChatDecisionError(INCOMPLETE_RECEIPT_MESSAGE, 422);
+        }
         const bankRow = await tx.transaction.findFirst({
           where: { id: proposal.transactionId, statement: { userId: input.userId } },
           select: { suggestedReceiptId: true },
@@ -100,6 +114,7 @@ export async function decideChatProposal(
   } catch (error) {
     if (error instanceof MatchNotFoundError) throw new ChatDecisionError("Ei löytynyt", 404);
     if (error instanceof MatchConflictError) throw new ChatDecisionError(error.message, 409);
+    if (error instanceof PeriodLockedError) throw new ChatDecisionError(error.message, error.statusCode);
     if (error instanceof ChatDecisionError) throw error;
     throw error;
   }
