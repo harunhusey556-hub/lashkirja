@@ -138,6 +138,8 @@ body {
   flex-direction: column;
   width: 100%;
   overflow: hidden;
+  /* clip, not hidden: a clipped box cannot be scrolled by a focus reveal. */
+  overflow: clip;
   background: var(--color-canvas);
   --app-sidebar-width: 0px;
 }
@@ -343,20 +345,24 @@ label {
   }
 }
 
-input:focus,
-select:focus,
-textarea:focus {
-  outline: 2px solid var(--color-accent);
-  outline-offset: 1px;
-}
+/* Layered, so a field that draws its own focus (outline-none on a field inside
+   a rounded wrapper, like the chat composer) is not boxed by a square ring. */
+@layer base {
+  input:focus,
+  select:focus,
+  textarea:focus {
+    outline: 2px solid var(--color-accent);
+    outline-offset: 1px;
+  }
 
-button:focus-visible,
-a:focus-visible,
-input:focus-visible,
-select:focus-visible,
-textarea:focus-visible {
-  outline: 2px solid var(--color-accent-dark);
-  outline-offset: 2px;
+  button:focus-visible,
+  a:focus-visible,
+  input:focus-visible,
+  select:focus-visible,
+  textarea:focus-visible {
+    outline: 2px solid var(--color-accent-dark);
+    outline-offset: 2px;
+  }
 }
 
 button:disabled {
@@ -683,7 +689,6 @@ button:disabled {
    it springs back with a small overshoot (the re-tap feedback). */
 .tab-capsule[data-pressing] .tab-lens-body {
   scale: 1.16 1.14;
-  box-shadow: 0 4px 16px rgb(38 34 31 / 0.14);
 }
 
 .tab-lens-body {
@@ -691,16 +696,8 @@ button:disabled {
   height: 100%;
   border-radius: 9999px;
   background: color-mix(in srgb, var(--color-accent-soft) 85%, rgb(38 34 31 / 0.06));
-  animation: tabLensStretch 420ms cubic-bezier(0.3, 0.7, 0.2, 1);
-  transition:
-    scale 420ms cubic-bezier(0.34, 1.56, 0.64, 1),
-    box-shadow 240ms var(--ease-out);
-}
-
-@keyframes tabLensStretch {
-  0% { transform: scale(1, 1); }
-  35% { transform: scale(1.14, 0.92); }
-  100% { transform: scale(1, 1); }
+  transition: scale 420ms cubic-bezier(0.34, 1.56, 0.64, 1);
+  will-change: scale;
 }
 
 .tab-item {
@@ -1610,6 +1607,7 @@ html[data-page-hidden] *::after {
 /* Sliding pages need opaque surfaces so outgoing text cannot show through. */
 .app-frame[data-design="stitch"] > .app-main[data-nav-moving="push"],
 .app-frame[data-design="stitch"] > .app-main[data-nav-moving="present"],
+.app-frame[data-design="stitch"] > .app-main[data-swiping],
 .app-frame[data-design="stitch"] > .page-snapshot {
   background: radial-gradient(ellipse at 85% 0%, #c98b862e, transparent 52%), #f7f3ef;
 }
@@ -1672,3 +1670,21 @@ html[data-page-hidden] *::after {
 
 .chat-action-chip { box-shadow: 0 2px 8px rgb(31 77 58 / 8%); text-align: left; white-space: normal; }
 .assistant-surface .chat-action-chip:focus-visible { outline: 2px solid #1f4d3a; outline-offset: 3px; }
+
+/* The page under a back swipe casts the iOS edge shadow on the one beneath. */
+.app-main[data-swiping] { box-shadow: -8px 0 24px rgb(38 34 31 / 0.12); }
+
+/* Chart columns: the tinted column marks the selection. A tap draws no
+   ring; a keyboard ring sits inside the column and follows its corners. */
+button.chart-hit,
+button.chart-hit[aria-pressed="true"]:not([data-pressed="true"]) {
+  box-shadow: none;
+}
+button.chart-hit:focus-visible {
+  outline: 2px solid var(--color-accent-dark);
+  outline-offset: -2px;
+  box-shadow: none;
+}
+@media (hover: none) {
+  button.chart-hit:focus-visible { outline: none; }
+}

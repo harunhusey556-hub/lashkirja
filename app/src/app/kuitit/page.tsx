@@ -650,6 +650,9 @@ export default function KuititPage() {
 
   // Split the review queue by where the document came from.
   const emailPending = pendingReceipts.filter((r) => r.source === "email_sync");
+  // Sales drafted from bank rows (MobilePay settlements and the like). Koti
+  // shows three; this is the whole queue, so they can be approved here too.
+  const bankSalesPending = pendingReceipts.filter((r) => r.source === "auto_income");
   const otherPending = pendingReceipts.filter(
     (r) => r.source !== "email_sync" && r.source !== "auto_income"
   );
@@ -711,6 +714,18 @@ export default function KuititPage() {
             description="Sähköpostista tuodut kuitit odottavat hyväksyntää ennen kirjanpitoon siirtymistä."
             receipts={emailPending}
             rejectLabel="Hylkää (Yksityinen)"
+            onReview={handleReview}
+            onApproveAll={(readyIds) => void handleReviewMany(readyIds)}
+            bulkBusy={bulkReviewing}
+          />
+        )}
+
+        {bankSalesPending.length > 0 && (
+          <ReviewQueue
+            title="Myynnit pankista"
+            description="Tiliotteen tuloista tehdyt myyntikirjaukset odottavat hyväksyntää."
+            receipts={bankSalesPending}
+            rejectLabel="Hylkää"
             onReview={handleReview}
             onApproveAll={(readyIds) => void handleReviewMany(readyIds)}
             bulkBusy={bulkReviewing}

@@ -12,6 +12,7 @@ export * from "./KeyValueList";
 export * from "./Timeline";
 export * from "./BottomActions";
 export * from "./MoreMenu";
+export * from "./ActionList";
 export * from "./Skeleton";
 export * from "./PasswordField";
 export * from "./Switch";

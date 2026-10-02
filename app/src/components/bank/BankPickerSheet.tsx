@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useId, useMemo, useState } from "react";
+import { useDeferredValue, useEffect, useId, useMemo, useState } from "react";
 import { ChevronRight, Landmark, Search } from "lucide-react";
 import BottomSheet from "@/components/BottomSheet";
 import { Icon } from "@/components/ds";
@@ -10,6 +10,7 @@ import { ConnectionNotice, EmptyState } from "@/components/ScreenState";
 import { apiFetch, errorMessage, isUnauthorized, readJson, redirectToLogin } from "@/components/clientFetch";
 import { useProfile } from "@/app/asetukset/useProfile";
 import { leaveForBank } from "@/lib/open-bank-auth";
+import { bankMatches } from "@/lib/bank-search";
 import { IS_MOBILE_BUILD } from "@/lib/build-target";
 import { hapticSelection } from "@/lib/haptics";
 import { tintedButtonClass } from "@/components/control-styles";
@@ -116,11 +117,12 @@ export default function BankPickerSheet({
   }, [isOpen, psuType, attempt]);
 
   const list = banks?.psu === psuType ? banks.list : null;
+  // Deferred: typing stays instant while the list settles a beat behind it.
+  const deferredQuery = useDeferredValue(query);
   const visible = useMemo(() => {
     if (!list) return null;
-    const needle = query.trim().toLocaleLowerCase("fi");
-    return needle ? list.filter((bank) => bank.name.toLocaleLowerCase("fi").includes(needle)) : list;
-  }, [list, query]);
+    return list.filter((bank) => bankMatches(bank.name, deferredQuery));
+  }, [list, deferredQuery]);
 
   async function connect(bank: Aspsp) {
     if (busyBank) return;
@@ -266,6 +268,9 @@ export default function BankPickerSheet({
             placeholder="Hae pankkia"
             enterKeyHint="search"
             autoComplete="off"
+            autoCorrect="off"
+            autoCapitalize="off"
+            spellCheck={false}
             className="box-border block min-h-12 w-full rounded-card border border-line bg-surface pl-9 pr-3 text-input text-ink"
           />
         </label>
@@ -353,16 +358,49 @@ export default function BankPickerSheet({
   );
 }
 
+// One download per logo for the whole session, shared by every BankLogo.
+const logoUrls = new Map<string, Promise<string | null>>();
+
+/**
+ * Enable Banking's logo, fetched through /api/bank/logo and shown as a blob:
+ * URL. The app's CSP allows no remote images, which is why the picker
+ * showed only initials.
+ */
+function loadLogo(src: string): Promise<string | null> {
+  let pending = logoUrls.get(src);
+  if (!pending) {
+    pending = apiFetch(`/api/bank/logo?src=${encodeURIComponent(src)}`)
+      .then(async (response) => (response.ok ? URL.createObjectURL(await response.blob()) : null))
+      .catch(() => null);
+    logoUrls.set(src, pending);
+    void pending.then((url) => {
+      if (!url) logoUrls.delete(src);
+    });
+  }
+  return pending;
+}
+
 /** The bank's logo, or its initial on a tile when the logo is missing or fails. */
 export function BankLogo({ name, logo, size = "md" }: { name: string; logo: string | null; size?: "md" | "lg" }) {
   const [failed, setFailed] = useState(false);
+  const [loaded, setLoaded] = useState<{ src: string; url: string | null } | null>(null);
   const box = size === "lg" ? "h-10 w-10" : "h-9 w-9";
-  if (logo && !failed) {
+  useEffect(() => {
+    if (!logo) return;
+    let live = true;
+    void loadLogo(logo).then((url) => {
+      if (live) setLoaded({ src: logo, url });
+    });
+    return () => {
+      live = false;
+    };
+  }, [logo]);
+  const url = loaded && loaded.src === logo ? loaded.url : null;
+  if (url && !failed) {
     return (
-      // Logos are hosted by Enable Banking, one URL per bank.
       // eslint-disable-next-line @next/next/no-img-element
       <img
-        src={logo}
+        src={url}
         alt=""
         onError={() => setFailed(true)}
         className={`${box} shrink-0 rounded-[10px] border border-line bg-surface object-contain p-1`}

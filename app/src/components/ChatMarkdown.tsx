@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { Fragment, type ReactNode } from "react";
 
 /**
@@ -221,12 +222,18 @@ function renderInline(text: string, allowedHrefs?: readonly string[]): ReactNode
       const link = /^\[([^\]]+)\]\(([^)\s]+)\)$/.exec(token);
       const href = link && (allowedHrefs === undefined || allowedHrefs.includes(link[2])) ? safeUrl(link[2]) : null;
       nodes.push(
-        href ? (
-          <a key={key++} href={href} className="underline break-all">
+        !href ? (
+          // A link the reply may not make (not among its sources) keeps its words, not its syntax.
+          (link?.[1] ?? token)
+        ) : href.startsWith("/") ? (
+          // In-app: a client navigation, not a full reload of the app.
+          <Link key={key++} href={href} className="underline break-all">
+            {link?.[1]}
+          </Link>
+        ) : (
+          <a key={key++} href={href} target="_blank" rel="noopener noreferrer" className="underline break-all">
             {link?.[1]}
           </a>
-        ) : (
-          token
         )
       );
     } else if (token.startsWith("**")) {

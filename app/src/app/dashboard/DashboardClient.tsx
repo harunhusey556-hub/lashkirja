@@ -662,10 +662,17 @@ export default function DashboardClient() {
 
   // Cached copy (warmed post-login or left by an earlier visit) paints in the
   // first frame; the fetch above replaces it silently when it lands.
-  const data =
+  const fresh =
     result?.month === month
       ? result.data
       : readPageCache<DashboardData>(`dashboard:${month}`);
+  // Another month picked on the chart or stepper: the last month stays on
+  // screen, dimmed, until the new one lands. Swapping the page for the
+  // skeleton shrank it and threw the reader back to the top.
+  const [lastShown, setLastShown] = useState<DashboardData | null>(null);
+  if (fresh && fresh !== lastShown) setLastShown(fresh);
+  const switching = !fresh && !refreshFailed && lastShown !== null;
+  const data = fresh ?? (switching ? lastShown : null);
   const fade = useSkeletonFade(!data && !refreshFailed);
   const displayName = data?.firstName || firstName;
   const retry = () => setLoadAttempt((a) => a + 1);
@@ -866,7 +873,10 @@ export default function DashboardClient() {
       ) : !data ? (
         <KotiSkeleton />
       ) : (
-        <div className={`space-y-6 ${fade}`}>
+        <div
+          className={`space-y-6 ${fade} transition-opacity duration-200 ${switching ? "pointer-events-none opacity-50" : ""}`}
+          aria-busy={switching || undefined}
+        >
           {/* Month status: what is still open, how much of the bank is in order, VAT. */}
           <div className={`stitch-card stitch-hero ${complete ? "is-complete" : ""}`}>
             <div className="stitch-hero-main">

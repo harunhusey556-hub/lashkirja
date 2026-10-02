@@ -126,7 +126,7 @@ export function BarChart({ items, selectedKey, onSelect, emptyText, animateKey, 
                 <div key={item.key} className="relative h-full min-w-0 flex-1">
                   {item.key === selected?.key ? (
                     <div
-                      className="absolute inset-x-0 rounded-md border-[1.5px] border-accent"
+                      className="absolute inset-x-0.5 rounded-[10px] bg-accent/10"
                       style={{ top: -2, height: BAR_PLOT_HEIGHT + BAR_LABEL_HEIGHT - 2 }}
                     />
                   ) : null}
@@ -161,7 +161,7 @@ export function BarChart({ items, selectedKey, onSelect, emptyText, animateKey, 
                 aria-pressed={item.key === selected?.key}
                 aria-label={monthSummary({ label: item.title ?? item.label, income: item.income, expense: item.expense })}
                 onClick={(event) => { if (event.detail === 0) onSelect?.(item.key); }}
-                className="min-w-0 flex-1 rounded-md"
+                className="chart-hit min-w-0 flex-1 rounded-[10px]"
               />
             ))}
           </div>

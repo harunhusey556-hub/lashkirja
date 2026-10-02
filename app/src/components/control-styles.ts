@@ -40,7 +40,7 @@ export const TINTED_BUTTON_TONES = {
 export type TintedButtonTone = keyof typeof TINTED_BUTTON_TONES;
 
 export function tintedButtonClass(tone: TintedButtonTone = "accent", extra = ""): string {
-  return `ds-tinted-button active-press inline-flex min-h-9 items-center justify-center rounded-full px-3 text-caption font-medium disabled:opacity-60 ${TINTED_BUTTON_TONES[tone]} ${extra}`.trim();
+  return `ds-tinted-button active-press inline-flex min-h-9 items-center justify-center gap-1.5 rounded-full px-3 text-caption font-medium disabled:opacity-60 ${TINTED_BUTTON_TONES[tone]} ${extra}`.trim();
 }
 
 /** Quiet, content-width actions inside forms. */

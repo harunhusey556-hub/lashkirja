@@ -30,7 +30,7 @@ import {
   X,
 } from "lucide-react";
 import { Icon } from "@/components/ds/Icon";
-import { SearchField } from "@/components/ds";
+import { ActionList, SearchField } from "@/components/ds";
 import BottomSheet from "@/components/BottomSheet";
 import { hapticNotify } from "@/lib/haptics";
 import { displayChatContent } from "@/lib/chat-legacy";
@@ -332,6 +332,18 @@ export function AiChatDrawer({
       setShowJump(true);
     }
   }, [messages, loading, open]);
+
+  // The keyboard shrinks the thread from below; a reader at the latest
+  // message keeps seeing it instead of the top of the backlog.
+  useEffect(() => {
+    const el = scrollerRef.current;
+    if (!el || !open || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(() => {
+      if (stickRef.current) el.scrollTop = el.scrollHeight;
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [open]);
 
   function onScroll() {
     const el = scrollerRef.current;
@@ -770,7 +782,7 @@ export function AiChatDrawer({
   return (
     <div
       ref={panelRef}
-      className={`stitch-page assistant-surface absolute inset-0 z-[70] flex flex-col bg-canvas shadow-2xl ${
+      className={`stitch-page assistant-surface absolute inset-0 z-[70] flex flex-col overflow-clip bg-canvas shadow-2xl ${
         closing ? "animate-sheet-out pointer-events-none" : "animate-sheet"
       }`}
       data-overlay-root={open ? "" : undefined}
@@ -1214,7 +1226,7 @@ export function AiChatDrawer({
             </Button>
           )}
           {/* One rounded field with the send/stop control inside it, as in native messaging apps. */}
-          <div className="flex items-end gap-1 rounded-[24px] border border-line bg-surface py-0.5 pl-4 pr-0.5 focus-within:border-ink-2/60">
+          <div className="flex items-end gap-1 rounded-[24px] border border-line bg-surface py-0.5 pl-4 pr-0.5 transition-[border-color,box-shadow] focus-within:border-ink-2/50 focus-within:shadow-[0_0_0_3px_rgb(154_86_80/0.12)]">
             <textarea
               value={input}
               rows={1}
@@ -1258,44 +1270,34 @@ export function AiChatDrawer({
         heightClass="max-h-[70dvh]"
       >
         <div className="px-4 py-2 sheet-safe-bottom">
-          <div className="overflow-hidden rounded-card border border-line bg-surface divide-y divide-line">
-            {(actionsFor
-              ? [
-                  {
-                    label: "Nimeä uudelleen",
-                    run: (c: ConversationItem) => {
-                      setRenamingId(c.id);
-                      setRenameValue(c.title);
+          <ActionList
+            items={
+              actionsFor
+                ? [
+                    {
+                      label: "Nimeä uudelleen",
+                      onSelect: () => {
+                        setRenamingId(actionsFor.id);
+                        setRenameValue(actionsFor.title);
+                      },
                     },
-                  },
-                  {
-                    label: actionsFor.archivedAt ? "Palauta arkistosta" : "Arkistoi",
-                    run: (c: ConversationItem) => void runMenuAction(() => toggleArchive(c), "Arkistointi epäonnistui"),
-                  },
-                  {
-                    label: "Poista",
-                    danger: true,
-                    run: (c: ConversationItem) => void runMenuAction(() => removeConversation(c), "Poisto epäonnistui"),
-                  },
-                ]
-              : []
-            ).map((item) => (
-              <button
-                key={item.label}
-                type="button"
-                onClick={() => {
-                  const target = actionsFor;
-                  setActionsFor(null);
-                  if (target) item.run(target);
-                }}
-                className={`active-press flex min-h-12 w-full items-center px-4 text-left text-body ${
-                  "danger" in item && item.danger ? "text-danger" : "text-ink"
-                }`}
-              >
-                {item.label}
-              </button>
-            ))}
-          </div>
+                    {
+                      label: actionsFor.archivedAt ? "Palauta arkistosta" : "Arkistoi",
+                      onSelect: () => void runMenuAction(() => toggleArchive(actionsFor), "Arkistointi epäonnistui"),
+                    },
+                    {
+                      label: "Poista",
+                      tone: "danger",
+                      onSelect: () => void runMenuAction(() => removeConversation(actionsFor), "Poisto epäonnistui"),
+                    },
+                  ]
+                : []
+            }
+            onPick={(item) => {
+              setActionsFor(null);
+              item.onSelect();
+            }}
+          />
         </div>
       </BottomSheet>
     </div>

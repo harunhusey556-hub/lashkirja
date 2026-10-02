@@ -12,7 +12,7 @@ describe("navigation content handoff", () => {
     vi.stubGlobal("window", { matchMedia: () => ({ matches: reduced }) });
     const animate = vi.fn(() => ({ finished: new Promise(() => {}), cancel: vi.fn() }));
     const parentElement = { appendChild: vi.fn() };
-    const main = { animate, parentElement, dataset: {}, dispatchEvent: vi.fn() } as unknown as HTMLElement;
+    const main = { animate, parentElement, dataset: {}, style: {} as CSSStyleDeclaration, dispatchEvent: vi.fn() } as unknown as HTMLElement;
     const cancel = playNavTransition({ main, oldPage: {} as HTMLElement, oldScroll: 120, kind });
     // Only the incoming page fades in: the old page is never shown again.
     expect(parentElement.appendChild).not.toHaveBeenCalled();
@@ -20,6 +20,8 @@ describe("navigation content handoff", () => {
     expect(animate.mock.calls[0]).toEqual([[{ opacity: 0 }, { opacity: 1 }], expect.anything()]);
     cancel();
     expect(main.dataset.navMoving).toBeUndefined();
+    // The fade's own compositing layer is dropped with it.
+    expect(main.style.willChange || "").toBe("");
   });
 });
 

@@ -4,7 +4,8 @@ import { useState } from "react";
 import Link from "next/link";
 import BottomSheet from "@/components/BottomSheet";
 import { Button, buttonClass } from "@/components/ui";
-import { KeyValueList } from "@/components/ds";
+import { Icon, KeyValueList } from "@/components/ds";
+import { Ban, Camera, Check, FileText, Landmark, Link2, ReceiptText, RotateCcw, Unlink, X } from "lucide-react";
 import { apiFetch, errorMessage, isUnauthorized, readJson, redirectToLogin } from "@/components/clientFetch";
 import { formatDate, formatEur, formatEurSigned } from "@/lib/format";
 import { receiptLabel, type StatementTransaction } from "@/lib/statement-client";
@@ -13,7 +14,6 @@ import { detailHref } from "@/lib/routes";
 import { requestReceiptCapture } from "@/lib/capture-request";
 import { hapticImpact, hapticNotify } from "@/lib/haptics";
 import { showToast } from "@/lib/toast";
-import { tintedButtonClass } from "@/components/control-styles";
 
 type Action =
   | { url: "/api/receipts/batch-approve"; body: { receiptIds: string[] } }
@@ -43,8 +43,10 @@ function linkedPatch(row: FeedRow): Partial<StatementTransaction> {
   };
 }
 
+// Secondary decisions: full width like the primary button above them, so a
+// sheet's actions read as one stack instead of pills scattered around it.
 const QUIET_LINK =
-  "active-press mx-auto flex min-h-11 items-center justify-center rounded-full bg-ink/5 px-3.5 text-caption font-medium text-ink-2 disabled:opacity-50";
+  "active-press flex min-h-12 w-full items-center justify-center gap-2 rounded-full bg-ink/5 px-4 text-body font-medium text-ink disabled:opacity-50";
 
 /**
  * One bank row, one decision. The sheet shows only what this row needs:
@@ -189,6 +191,7 @@ export function BankRowSheet({
                   )
                 }
               >
+                <Icon icon={Check} size="row" />
                 Hyväksy
               </Button>
               <button
@@ -206,6 +209,7 @@ export function BankRowSheet({
                   )
                 }
               >
+                <Icon icon={Ban} size="row" />
                 Ei ole myyntiä
               </button>
             </>
@@ -231,6 +235,7 @@ export function BankRowSheet({
                   )
                 }
               >
+                <Icon icon={Link2} size="row" />
                 Kohdista kuitti
               </Button>
               <button
@@ -248,6 +253,7 @@ export function BankRowSheet({
                   )
                 }
               >
+                <Icon icon={X} size="row" />
                 Väärä kuitti
               </button>
             </>
@@ -300,6 +306,7 @@ export function BankRowSheet({
                     requestReceiptCapture({ transactionId: row.id, label: row.counterparty ?? undefined });
                   }}
                 >
+                  <Icon icon={Camera} size="row" />
                   Kuvaa kuitti
                 </Button>
               )}
@@ -309,6 +316,7 @@ export function BankRowSheet({
                 disabled={busy !== null}
                 onClick={() => void ignoreWithUndo(row)}
               >
+                <Icon icon={Ban} size="row" />
                 {income ? "Ei vaadi kuittia" : "Kuittia ei tarvita"}
               </button>
             </>
@@ -337,6 +345,7 @@ export function BankRowSheet({
                   onClick={onClose}
                   className={buttonClass("secondary", "w-full")}
                 >
+                  <Icon icon={FileText} size="row" />
                   Avaa lasku
                 </Link>
               ) : row.settlesPurchase ? (
@@ -358,6 +367,7 @@ export function BankRowSheet({
                   onClick={onClose}
                   className={buttonClass("secondary", "w-full")}
                 >
+                  <Icon icon={ReceiptText} size="row" />
                   Avaa kuitti
                 </Link>
               )}
@@ -374,6 +384,7 @@ export function BankRowSheet({
                   )
                 }
               >
+                <Icon icon={Unlink} size="row" />
                 Poista kohdistus
               </button>
             </>
@@ -396,6 +407,7 @@ export function BankRowSheet({
                   )
                 }
               >
+                <Icon icon={RotateCcw} size="row" />
                 Palauta
               </Button>
             </>
@@ -413,11 +425,13 @@ export function BankRowSheet({
             </p>
           )}
 
+          {/* Navigation, not a decision: a quiet link centred under the stack. */}
           <Link
             href={detailHref("statement", row.statementId)}
             onClick={onClose}
-            className={tintedButtonClass("neutral", "mx-auto")}
+            className="active-press mx-auto flex min-h-11 w-fit items-center justify-center gap-1.5 px-3 text-caption font-medium text-accent"
           >
+            <Icon icon={Landmark} size="row" />
             Avaa tiliote
           </Link>
         </div>

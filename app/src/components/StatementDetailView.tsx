@@ -33,7 +33,7 @@ import { Button, controlClass } from "@/components/ui";
 import { showToast } from "@/lib/toast";
 import { hapticImpact } from "@/lib/haptics";
 import { deleteRowDescription, deleteStatementDescription, type DeleteFacts } from "@/lib/statement-delete-copy";
-import { ActionPill, DetailHero, FilterChips, ListRow, MoreMenu, Section, StatusTag } from "@/components/ds";
+import { ActionList, ActionPill, DetailHero, FilterChips, ListRow, MoreMenu, Section, StatusTag, type ActionItem } from "@/components/ds";
 import { tintedButtonClass } from "@/components/control-styles";
 
 const LABEL_CLASS = "mb-1.5 block text-caption font-normal text-ink-2";
@@ -66,26 +66,8 @@ function txSecondary(t: StatementTransaction): string {
 }
 
 /** The actions of one bank line, listed in its own panel (VS-23): never a per-row "···". */
-function RowActionList({ items }: {
-  items: { label: string; onSelect: () => void; tone?: "danger"; disabled?: boolean }[];
-}) {
-  return (
-    <div className="overflow-hidden rounded-card border border-line bg-surface divide-y divide-line">
-      {items.map((item) => (
-        <button
-          key={item.label}
-          type="button"
-          disabled={item.disabled}
-          onClick={item.onSelect}
-          className={`active-press flex min-h-12 w-full items-center px-4 text-left text-body disabled:opacity-50 ${
-            item.tone === "danger" ? "text-danger" : "text-ink"
-          }`}
-        >
-          {item.label}
-        </button>
-      ))}
-    </div>
-  );
+function RowActionList({ items }: { items: ActionItem[] }) {
+  return <ActionList items={items} />;
 }
 
 export default function StatementDetailView({

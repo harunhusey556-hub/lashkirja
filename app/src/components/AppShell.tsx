@@ -462,8 +462,10 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     const target = direction === "forward" ? 0 : recalledScroll(pathname);
     if (direction === "forward") forgetScroll(pathname);
     main.scrollTop = target;
+    // A tab lands where it can at once: re-applying the offset while the new
+    // page streams in moved it under the fade, which read as a tremble.
     pendingScrollRef.current =
-      main.scrollTop < target - 1 ? { top: target, until: performance.now() + 2000 } : null;
+      direction !== "tab" && main.scrollTop < target - 1 ? { top: target, until: performance.now() + 2000 } : null;
 
     const handoff = swipeHandoffRef.current;
     swipeHandoffRef.current = null;
@@ -605,6 +607,8 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       main.style.transform = "";
       main.style.transition = "";
       main.style.opacity = "";
+      main.style.willChange = "";
+      delete main.dataset.swiping;
     };
 
     const clearBar = () => {
@@ -662,6 +666,10 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         main.style.transition = "none";
         main.style.position = "relative";
         main.style.zIndex = "1";
+        // An opaque, shadowed page while it slides: <main> is transparent in
+        // the stitch design, and the parent page underneath showed through.
+        main.dataset.swiping = "true";
+        main.style.willChange = "transform";
         const parentPage = pageNodeFor(inAppPrevious(pathname));
         if (parentPage && !prefersReducedMotion()) {
           under = mountSnapshot(main, parentPage, recalledScroll(inAppPrevious(pathname) ?? ""), "swipe-under");
@@ -746,6 +754,8 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         window.setTimeout(() => {
           leaving?.remove();
           clearBar();
+          delete main.dataset.swiping;
+          main.style.willChange = "";
           // A link tapped right after the cancel may already be pushing.
           if (main.dataset.navMoving) return;
           clearInline();
@@ -795,7 +805,16 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         const active = document.activeElement;
         if (!(active instanceof HTMLElement)) return;
         if (!["INPUT", "TEXTAREA", "SELECT"].includes(active.tagName)) return;
-        active.scrollIntoView({ block: "nearest", behavior: "auto" });
+        // Only the nearest real scroller moves. scrollIntoView also scrolled
+        // the clipped frame and drawer, which then stayed shifted up with the
+        // header gone once the keyboard settled.
+        let scroller = active.parentElement;
+        while (scroller && !/(auto|scroll)/.test(getComputedStyle(scroller).overflowY)) scroller = scroller.parentElement;
+        if (!scroller) return;
+        const box = scroller.getBoundingClientRect();
+        const field = active.getBoundingClientRect();
+        if (field.bottom > box.bottom) scroller.scrollTop += field.bottom - box.bottom + 8;
+        else if (field.top < box.top) scroller.scrollTop -= box.top - field.top + 8;
       });
     };
     vv.addEventListener("resize", reveal);
@@ -1277,9 +1296,8 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                   event.stopPropagation();
                 }}
               >
-                {/* Keyed on the tab, so each move replays the lens's stretch. */}
-                <span aria-hidden className="tab-lens" data-visible={activeTabIndex >= 0 || undefined}>
-                  <span key={activeTabIndex} className="tab-lens-body" />
+                                <span aria-hidden className="tab-lens" data-visible={activeTabIndex >= 0 || undefined}>
+                  <span className="tab-lens-body" />
                 </span>
                 {tabRoots().map((item) => renderTab(item))}
               </div>

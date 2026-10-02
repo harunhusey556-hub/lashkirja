@@ -239,6 +239,9 @@ export function playNavTransition(options: {
  */
 function playFadeIn(main: HTMLElement): () => void {
   main.dataset.navMoving = "fade";
+  // Its own layer for the fade, so the glass tab bar above samples a
+  // composited surface instead of repainting the page every frame.
+  main.style.willChange = "opacity";
   const animation = main.animate([{ opacity: 0 }, { opacity: 1 }], {
     duration: FADE_MS,
     easing: "cubic-bezier(0.2, 0, 0, 1)",
@@ -249,6 +252,7 @@ function playFadeIn(main: HTMLElement): () => void {
     if (done) return;
     done = true;
     animation.cancel();
+    main.style.willChange = "";
     delete main.dataset.navMoving;
     main.dispatchEvent(new Event("lashkirja-nav-settled"));
   };
