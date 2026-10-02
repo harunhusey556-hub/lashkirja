@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { buildReceiptWhere } from "./receipt-filters";
-import { isTooSmallToBeABill, looksLikeBill } from "./mail-classify";
+import { isMarketingMail, isTooSmallToBeABill, looksLikeBill } from "./mail-classify";
 
 const base = {
   vendor: "Telia",
@@ -50,5 +50,36 @@ describe("isTooSmallToBeABill", () => {
 describe("receipt list source filter", () => {
   it("narrows to receipts read from email", () => {
     expect(buildReceiptWhere("u1", { source: "email_sync" }).source).toBe("email_sync");
+  });
+});
+
+describe("looksLikeBill and the AI's document type", () => {
+  it("archives what the AI read as marketing or something else, amount or not", () => {
+    expect(looksLikeBill({ ...base, documentType: "marketing" })).toBe(false);
+    expect(looksLikeBill({ ...base, documentType: "other" })).toBe(false);
+    expect(looksLikeBill({ ...base, documentType: "receipt" })).toBe(true);
+    expect(looksLikeBill({ ...base, documentType: "invoice" })).toBe(true);
+  });
+
+  it("archives when the AI's note says it is marketing", () => {
+    expect(looksLikeBill({ ...base, notes: "Tämä on markkinointiviesti, ei kuitti." })).toBe(false);
+    expect(looksLikeBill({ ...base, notes: "Uutiskirje" })).toBe(false);
+    expect(looksLikeBill({ ...base, notes: "Kategoria epävarma" })).toBe(true);
+  });
+});
+
+describe("isMarketingMail", () => {
+  it("treats a newsletter without a bill attachment as marketing", () => {
+    expect(isMarketingMail({ listUnsubscribe: true, hasBillAttachment: false, subject: "Syksyn tarjoukset -30 %" })).toBe(true);
+  });
+
+  it("keeps an order confirmation or receipt even from a mailing system", () => {
+    expect(isMarketingMail({ listUnsubscribe: true, hasBillAttachment: false, subject: "Kuitti tilauksestasi 12345" })).toBe(false);
+    expect(isMarketingMail({ listUnsubscribe: true, hasBillAttachment: false, subject: "Your receipt from Apple" })).toBe(false);
+    expect(isMarketingMail({ listUnsubscribe: true, hasBillAttachment: true, subject: "Uutiskirje" })).toBe(false);
+  });
+
+  it("does not judge a mail without a mailing-list header", () => {
+    expect(isMarketingMail({ listUnsubscribe: false, hasBillAttachment: false, subject: "Tarjous" })).toBe(false);
   });
 });

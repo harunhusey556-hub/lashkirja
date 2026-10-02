@@ -17,9 +17,9 @@ beforeEach(async () => {
   cookie = await sessionCookie(user);
 });
 
-async function emailReceipt(totalAmountCents: number | null, reviewStatus = "pending") {
+async function emailReceipt(totalAmountCents: number | null, reviewStatus = "pending", notes: string | null = null) {
   const receipt = await createReceipt(user.id, { totalAmountCents, reviewStatus });
-  return prisma.receipt.update({ where: { id: receipt.id }, data: { source: "email_sync" } });
+  return prisma.receipt.update({ where: { id: receipt.id }, data: { source: "email_sync", notes } });
 }
 
 describe("POST /api/integrations/imap/archive", () => {
@@ -40,6 +40,16 @@ describe("POST /api/integrations/imap/archive", () => {
     expect(await status(bill.id)).toBe("pending");
     expect(await status(approved.id)).toBe("approved");
     expect(await status(manual.id)).toBe("pending");
+  });
+
+  it("also archives pending e-mail receipts the AI noted as marketing", async () => {
+    const advert = await emailReceipt(1_990, "pending", "Tämä on markkinointiviesti, ei kuitti.");
+    const bill = await emailReceipt(1_990, "pending", "Kategoria epävarma");
+
+    const response = await archiveNonBills(buildRequest("POST", "/api/integrations/imap/archive", {}, { cookie }));
+    expect(await readJson(response)).toEqual({ archived: 1 });
+    expect((await prisma.receipt.findUniqueOrThrow({ where: { id: advert.id } })).reviewStatus).toBe("rejected");
+    expect((await prisma.receipt.findUniqueOrThrow({ where: { id: bill.id } })).reviewStatus).toBe("pending");
   });
 
   it("never touches another owner's receipts", async () => {

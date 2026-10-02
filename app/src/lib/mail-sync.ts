@@ -12,7 +12,7 @@ import * as os from "os";
 
 import { createHash } from "crypto";
 import { withTrackedJob } from "./job-tracker";
-import { ARCHIVED_NOTE, isTooSmallToBeABill, looksLikeBill } from "./mail-classify";
+import { ARCHIVED_NOTE, isMarketingMail, isTooSmallToBeABill, looksLikeBill } from "./mail-classify";
 // We only process attachments that are likely to be receipts.
 const VALID_EXTENSIONS = [".pdf", ".jpg", ".jpeg", ".png", ".heic"];
 
@@ -51,6 +51,16 @@ function hasLikelyAttachment(part: BodyStructureNode | null | undefined): boolea
     }
   }
   return false;
+}
+
+/** A PDF, or a part sent as an attachment: what a bill arrives as (inline logos do not count). */
+function hasBillAttachment(part: BodyStructureNode | null | undefined): boolean {
+  if (!part) return false;
+  const disposition =
+    typeof part.disposition === "string" ? part.disposition.toLowerCase() : (part.disposition?.value || "").toLowerCase();
+  if (disposition === "attachment") return true;
+  if ((part.type || "").toLowerCase() === "application/pdf") return true;
+  return (part.childNodes ?? []).some((child) => hasBillAttachment(child));
 }
 
 function isBodyOnlyReceipt(envelope: { subject?: string } | null | undefined): boolean {
@@ -129,6 +139,7 @@ async function syncImapAccountUntracked(accountId: string) {
       bodyStructure: true,
       envelope: true,
       internalDate: true,
+      headers: ["list-unsubscribe"],
     });
 
     let maxInternalDate = account.lastSyncAt ? account.lastSyncAt.getTime() : 0;
@@ -140,6 +151,17 @@ async function syncImapAccountUntracked(accountId: string) {
       const msgDate = dateObj.getTime();
       if (msgDate > maxInternalDate) {
         maxInternalDate = msgDate;
+      }
+
+      // A mailing-list mail with no bill attached and no bill in its subject is marketing: it is
+      // not downloaded or sent to the AI at all.
+      const listUnsubscribe = Boolean(msg.headers && msg.headers.toString().toLowerCase().includes("list-unsubscribe"));
+      if (isMarketingMail({
+        listUnsubscribe,
+        hasBillAttachment: hasBillAttachment(msg.bodyStructure),
+        subject: msg.envelope?.subject ?? "",
+      })) {
+        continue;
       }
 
       if (hasLikelyAttachment(msg.bodyStructure)) {

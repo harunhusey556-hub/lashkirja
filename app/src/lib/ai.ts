@@ -31,6 +31,22 @@ export interface ExtractedReceipt {
   rawText?: string;
   /** Nothing could be read from the file: the form opens empty for manual entry (F04). */
   unreadable?: boolean;
+  /** What the AI took the document to be; mail sync archives marketing and other non-bills. */
+  documentType?: DocumentType | null;
+}
+
+export type DocumentType = "receipt" | "invoice" | "marketing" | "other";
+
+const DOCUMENT_TYPES: Record<string, DocumentType> = {
+  kuitti: "receipt", receipt: "receipt", tilausvahvistus: "receipt",
+  lasku: "invoice", invoice: "invoice",
+  markkinointi: "marketing", marketing: "marketing", mainos: "marketing", uutiskirje: "marketing",
+  muu: "other", other: "other",
+};
+
+function normalizeDocumentType(value: unknown): DocumentType | null {
+  if (typeof value !== "string") return null;
+  return DOCUMENT_TYPES[value.trim().toLocaleLowerCase("fi-FI")] ?? null;
 }
 
 export class ReceiptExtractionError extends Error {
@@ -93,8 +109,11 @@ Palauta VAIN validi JSON seuraavalla rakenteella (ei muuta tekstiä):
   "notes": "valinnainen selite jos kategoria epävarma tai tarvitaan lisätieto",
   "type": "meno",
   "reference": "maksun viitenumero (esim. 1009 tai RF-viite), EI viitteenne/viitteemme",
-  "invoiceNumber": "laskun numero"
+  "invoiceNumber": "laskun numero",
+  "documentType": "kuitti"
 }
+
+documentType: "kuitti" (ostokuitti tai maksukuitti), "lasku" (maksettava lasku), "markkinointi" (mainos, tarjous, uutiskirje, kampanja — vaikka siinä näkyisi hintoja) tai "muu" (esim. toimitusilmoitus, tiedote, salasanaviesti). Vain kuitti ja lasku ovat kirjanpidon tositteita.
 
 Kategoriat (käytä TARKALLEEN näitä id-arvoja category-kentässä):
 ${categoriesForAiPrompt()}${priorsHint}
@@ -421,6 +440,7 @@ export function normalizeAIResult(
     source: "ai",
     provenance,
     confidence: 0.85,
+    documentType: normalizeDocumentType(parsed.documentType),
   };
 }
 

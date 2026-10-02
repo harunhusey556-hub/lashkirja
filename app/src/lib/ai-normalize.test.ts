@@ -11,3 +11,17 @@ describe("the AI's amounts are whole cents", () => {
     expect(result.vatDetails).toEqual([{ rate: 14, amount: 1.52 }, { rate: 25.5, amount: 0 }]);
   });
 });
+
+describe("normalizeAIResult documentType", () => {
+  it("keeps the kind of document the AI recognised", () => {
+    expect(normalizeAIResult({ documentType: "markkinointi" }, "openai-compatible").documentType).toBe("marketing");
+    expect(normalizeAIResult({ documentType: "kuitti" }, "openai-compatible").documentType).toBe("receipt");
+    expect(normalizeAIResult({ documentType: "lasku" }, "openai-compatible").documentType).toBe("invoice");
+    expect(normalizeAIResult({ documentType: "muu" }, "openai-compatible").documentType).toBe("other");
+  });
+
+  it("is null when the AI said nothing usable", () => {
+    expect(normalizeAIResult({}, "openai-compatible").documentType).toBeNull();
+    expect(normalizeAIResult({ documentType: "??" }, "openai-compatible").documentType).toBeNull();
+  });
+});
