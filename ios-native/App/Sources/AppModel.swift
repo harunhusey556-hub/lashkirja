@@ -28,24 +28,33 @@ final class AppModel {
             let had = await auth.handleUnauthorized()
             await self?.signedOut(notice: had ? "Istunto vanheni. Kirjaudu uudelleen." : nil)
         }
+        await auth.revokePending()
         guard let user = await auth.restore() else {
             phase = .signedOut(notice: nil)
             return
         }
         phase = .signedIn(user)
         await auth.refreshIfDue()
-        if let me: MeResponse = try? await api.get("/api/auth/me") { phase = .signedIn(me.user) }
+        // A refused refresh already signed out (with the notice): stop here.
+        guard await auth.currentToken() != nil else { return }
+        if let me: MeResponse = try? await api.get("/api/auth/me"), case .signedIn = phase {
+            phase = .signedIn(me.user)
+        }
     }
 
     func login(email: String, password: String) async throws {
         let user = try await auth.login(email: email, password: password)
         Haptics.success()
         phase = .signedIn(user)
+        Task { await auth.revokePending() }
     }
 
+    /// Signed out at once; the server revoke runs behind (it may take the full
+    /// timeout when the server is unreachable, and then retries next launch).
     func logout() async {
-        await auth.logout()
         phase = .signedOut(notice: nil)
+        let auth = self.auth
+        Task { await auth.logout() }
     }
 
     func foreground() async { await auth.refreshIfDue() }

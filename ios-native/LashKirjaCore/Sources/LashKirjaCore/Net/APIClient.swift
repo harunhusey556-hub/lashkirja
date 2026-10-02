@@ -51,9 +51,17 @@ public actor APIClient {
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         let response: HTTPResponse
         do { response = try await transport.send(request) }
-        catch { throw LKError(status: 0, code: "NETWORK", message: LKError.unreachable) }
+        catch { throw Self.transportError(error) }
         guard (200..<300).contains(response.status) else { throw APIErrorDecoder.decode(status: response.status, data: response.body) }
         return try decode(response)
+    }
+
+    /// A cancelled request (the screen went away) stays a cancellation, so
+    /// views can ignore it instead of showing "no connection".
+    static func transportError(_ error: Error) -> Error {
+        if error is CancellationError { return error }
+        if let url = error as? URLError, url.code == .cancelled { return CancellationError() }
+        return LKError(status: 0, code: "NETWORK", message: LKError.unreachable)
     }
 
     private func decode<T: Decodable>(_ response: HTTPResponse) throws -> T {
@@ -75,7 +83,8 @@ public actor APIClient {
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         if let contentType { request.setValue(contentType, forHTTPHeaderField: "Content-Type") }
         if let idempotencyKey { request.setValue(idempotencyKey, forHTTPHeaderField: "Idempotency-Key") }
-        if let token = await tokens.currentToken() { request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
+        let sentToken = await tokens.currentToken()
+        if let sentToken { request.setValue("Bearer \(sentToken)", forHTTPHeaderField: "Authorization") }
         request.httpBody = body
 
         let attempts = method == "GET" ? 3 : 1
@@ -84,7 +93,7 @@ public actor APIClient {
             let response: HTTPResponse
             do { response = try await transport.send(request) }
             catch let error as LKError { throw error }
-            catch { throw LKError(status: 0, code: "NETWORK", message: LKError.unreachable) }
+            catch { throw Self.transportError(error) }
             if (200..<300).contains(response.status) { return response }
             let gateway = [502, 503, 504].contains(response.status) && !response.fromApp
             if gateway && attempt < attempts - 1 {
@@ -92,7 +101,13 @@ public actor APIClient {
                 await sleep(UInt64(500_000_000) << UInt64(attempt))
                 continue
             }
-            if response.status == 401, let handler = onUnauthorized { await handler() }
+            // Only a request that carried the session that is still current
+            // ends it: a wrong password (no token) or a stale request from a
+            // previous sign-in must not sign the owner out.
+            if response.status == 401, let sentToken, let handler = onUnauthorized,
+               await tokens.currentToken() == sentToken {
+                await handler()
+            }
             throw APIErrorDecoder.decode(status: response.status, data: response.body)
         }
         throw APIErrorDecoder.decode(status: last?.status ?? 0, data: last?.body ?? Data())

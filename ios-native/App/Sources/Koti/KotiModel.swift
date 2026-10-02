@@ -25,6 +25,8 @@ final class KotiModel {
             let dashboard: Dashboard = try await api.get("/api/dashboard", query: ["month": month])
             state = .loaded(dashboard)
             hidden.removeAll()
+        } catch is CancellationError {
+            return
         } catch {
             if state.value == nil { state = .failed(error.userMessage) }
         }

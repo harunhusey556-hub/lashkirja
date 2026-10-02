@@ -74,6 +74,19 @@ public actor AuthService: TokenProvider {
         }
     }
 
+    /// A sign-out made offline: revoke that token on the server now.
+    public func revokePending() async {
+        guard let client, let token = await store.loadPendingRevoke() else { return }
+        do {
+            let _: [String: Bool] = try await client.sendWithToken("POST", "/api/auth/logout", token: token)
+            await store.savePendingRevoke(nil)
+        } catch let error as LKError where error.status == 401 {
+            await store.savePendingRevoke(nil) // already invalid on the server
+        } catch {
+            // Still offline: try again next launch.
+        }
+    }
+
     /// Called on any 401: drop the session. True when one existed.
     public func handleUnauthorized() async -> Bool {
         let had = await store.load() != nil

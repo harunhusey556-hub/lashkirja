@@ -7,7 +7,8 @@ public enum Money {
     public static func format(_ amount: Decimal, signed: Bool = false) -> String {
         var value = amount
         var rounded = Decimal()
-        NSDecimalRound(&rounded, &value, 2, .bankers)
+        // Half away from zero, like the web app's Intl.NumberFormat: 0,125 → 0,13.
+        NSDecimalRound(&rounded, &value, 2, .plain)
         let negative = rounded < 0
         let absolute = negative ? -rounded : rounded
         let text = NSDecimalNumber(decimal: absolute).stringValue
