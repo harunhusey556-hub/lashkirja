@@ -11,9 +11,18 @@ enum AppConfig {
 
 @main
 struct LashKirjaApp: App {
+    @State private var app = AppModel()
+    @Environment(\.scenePhase) private var scenePhase
+
     var body: some Scene {
         WindowGroup {
-            Text("LashKirja \(LashKirjaCore.apiVersion)")
+            RootView()
+                .environment(app)
+                .tint(Theme.accent)
+                .task { await app.start() }
+                .onChange(of: scenePhase) { _, phase in
+                    if phase == .active { Task { await app.foreground() } }
+                }
         }
     }
 }

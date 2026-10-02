@@ -30,6 +30,7 @@ targets:
         LKAPIBaseURL: $(API_BASE_URL)
         UILaunchScreen: {}
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
+        UIRequiresFullScreen: true
         ITSAppUsesNonExemptEncryption: false
         NSCameraUsageDescription: "Kameralla kuvaat kuitit kirjanpitoon."
         NSPhotoLibraryUsageDescription: "Valitse kuitin kuva kirjastosta."
