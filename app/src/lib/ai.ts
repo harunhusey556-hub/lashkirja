@@ -113,7 +113,7 @@ Palauta VAIN validi JSON seuraavalla rakenteella (ei muuta tekstiä):
   "documentType": "kuitti"
 }
 
-documentType: "kuitti" (ostokuitti tai maksukuitti), "lasku" (maksettava lasku), "markkinointi" (mainos, tarjous, uutiskirje, kampanja — vaikka siinä näkyisi hintoja) tai "muu" (esim. toimitusilmoitus, tiedote, salasanaviesti). Vain kuitti ja lasku ovat kirjanpidon tositteita.
+documentType: "kuitti" (ostokuitti tai maksukuitti), "lasku" (maksettava lasku), "markkinointi" (mainos, tarjous, uutiskirje, kampanja — vaikka siinä näkyisi hintoja) tai "muu" (esim. toimitusilmoitus, tiedote, salasanaviesti). Vain kuitti ja lasku kirjataan kirjanpitoon.
 
 Kategoriat (käytä TARKALLEEN näitä id-arvoja category-kentässä):
 ${categoriesForAiPrompt()}${priorsHint}
