@@ -91,6 +91,8 @@ final class AppModel {
         // The lock belongs to the signed-in owner; the next account sets its own.
         AppLock.shared.disable()
         DocumentCache.shared.clear()
+        // Receipt photos waiting for a connection belong to this owner: they leave with them.
+        OfflineReceiptQueueModel.shared.clearForSignOut()
         profile = nil
         chat = nil
         removedIds = []

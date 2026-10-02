@@ -2,126 +2,373 @@ import SwiftUI
 import PhotosUI
 import UIKit
 import ImageIO
+import UniformTypeIdentifiers
 import LashKirjaCore
 
-/// Kuvaa kuitti: camera (or photo library) → upload → the server reads it →
-/// the owner checks the fields → save. With `transactionId` the saved
-/// receipt is matched to that bank row.
+/// Kuvaa kuitti: camera, photos (up to ten at once) or files (PDF, images) → each file is
+/// uploaded and read in turn → the owner checks the fields → save (web `ReceiptUploadArea.tsx`).
+/// The first file read opens in the editor by itself; the rest wait in "Lähetysjono" with
+/// "Käytä lomakkeessa". Without a connection the files are kept on the phone and sent later
+/// (`OfflineReceiptQueueModel`). With `transactionId` one receipt is picked and the saved one
+/// is matched to that bank row.
 struct CaptureFlow: View {
     @Environment(AppModel.self) private var app
     @Environment(\.dismiss) private var dismiss
     let transactionId: String?
-    /// Called once the receipt is saved (and matched), just before the flow closes.
-    /// Not called when the flow is cancelled.
+    /// Called after each receipt is saved (and matched). Not called when the flow is cancelled.
     var onSaved: (() -> Void)? = nil
 
-    enum Step { case pick, uploading, edit(ReceiptDraft), failed(String) }
-    @State private var step: Step = .pick
-    @State private var showCamera = UIImagePickerController.isSourceTypeAvailable(.camera)
-    @State private var photo: PhotosPickerItem?
-    @State private var progress = "Ladataan…"
-    @State private var confirmDiscard = false
+    enum Step { case pick, queue, edit(rowId: String, draft: ReceiptDraft) }
+    /// Where a picked file's bytes come from; read only when its turn comes, so ten photos are
+    /// never all in memory at once.
+    enum Source { case camera(UIImage), photo(PhotosPickerItem), file(URL) }
+    /// A file as it is sent: photos re-encoded to JPEG, PDFs as they are.
+    struct Encoded: Sendable { let data: Data; let name: String; let mimeType: String }
 
-    /// A receipt that is being read or was read but not saved is work the owner would lose.
-    private var unsaved: Bool {
-        switch step {
-        case .uploading, .edit: true
-        case .pick, .failed: false
-        }
+    @State private var step: Step = .pick
+    @State private var queue = ReceiptUploadQueue()
+    @State private var sources: [String: Source] = [:]
+    @State private var worker: Task<Void, Never>?
+    /// Bumped by "Peruuta lähetys": a cancelled worker finishing late must not clear a newer one.
+    @State private var generation = 0
+    @State private var showCamera = UIImagePickerController.isSourceTypeAvailable(.camera)
+    @State private var showFiles = false
+    @State private var photos: [PhotosPickerItem] = []
+    @State private var confirmDiscard = false
+    @State private var importFailure: String?
+    @State private var limit = ShowMore()
+
+    /// Matching a bank row takes exactly one receipt, and never goes to the offline queue
+    /// (the inbox cannot match it).
+    private var single: Bool { transactionId != nil }
+
+    /// A file on its way, or read but not saved, is work the owner would lose.
+    private var unsaved: Bool { editing || queue.holdsWork }
+
+    private var editing: Bool {
+        if case .edit = step { return true }
+        return false
     }
+
+    private static let fileTypes: [UTType] = [.pdf, .jpeg, .png, .heic, .heif]
 
     var body: some View {
         NavigationStack {
             Group {
                 switch step {
                 case .pick:
-                    VStack(spacing: 16) {
-                        Image(systemName: "doc.viewfinder").font(.system(size: 54)).foregroundStyle(Theme.accent)
-                        Text("Kuvaa kuitti tai valitse kuva").font(.headline)
-                        if UIImagePickerController.isSourceTypeAvailable(.camera) {
-                            Button { showCamera = true } label: { Label("Avaa kamera", systemImage: "camera").frame(maxWidth: .infinity, minHeight: 44) }
-                                .buttonStyle(.primary)
-                        }
-                        PhotosPicker(selection: $photo, matching: .images) {
-                            Label("Valitse kirjastosta", systemImage: "photo").frame(maxWidth: .infinity, minHeight: 44)
-                        }
-                        .buttonStyle(.bordered)
-                    }
-                    .padding(24)
-                case .uploading:
-                    ProgressView(progress)
-                case .edit(let draft):
-                    ReceiptEditor(draft: draft, transactionId: transactionId) {
-                        onSaved?()
-                        dismiss()
-                    }
-                case .failed(let message):
-                    ContentUnavailableView {
-                        Label("Kuitin luku epäonnistui", systemImage: "exclamationmark.triangle")
-                    } description: { Text(message) } actions: {
-                        Button("Yritä uudelleen") { step = .pick }
-                    }
+                    ScrollView { picker.padding(24) }
+                case .queue:
+                    queueList
+                case .edit(let rowId, let draft):
+                    ReceiptEditor(draft: draft, transactionId: transactionId) { saved(rowId) }
+                        .id(rowId)
                 }
             }
+            .background(Theme.canvas)
             .navigationTitle("Uusi kuitti")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Peruuta") { if unsaved { confirmDiscard = true } else { dismiss() } }
+                    Button("Peruuta") { if unsaved { confirmDiscard = true } else { close() } }
+                }
+                if editing && queue.rows.count > 1 {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button("Lähetysjono") { step = .queue }
+                    }
                 }
             }
-            .discardGuard(dirty: unsaved, busy: false, asking: $confirmDiscard) { dismiss() }
+            .discardGuard(dirty: unsaved, busy: false, asking: $confirmDiscard) { close() }
             .fullScreenCover(isPresented: $showCamera) {
                 CameraPicker { image in
                     showCamera = false
-                    if let image { Task { await upload { ReceiptImageEncoder.jpeg(from: image) } } }
+                    if let image { add([(ReceiptUploadQueue.Pick(name: "kuitti.jpg", size: nil), .camera(image))]) }
                 }
                 .ignoresSafeArea()
             }
-            .onChange(of: photo) { _, item in
-                guard let item else { return }
-                // Cleared so that picking the same photo again after a failure still fires.
-                photo = nil
-                Task {
-                    if let data = try? await item.loadTransferable(type: Data.self) {
-                        await upload { ReceiptImageEncoder.jpeg(fromData: data) }
-                    }
-                }
+            .fileImporter(isPresented: $showFiles, allowedContentTypes: Self.fileTypes, allowsMultipleSelection: !single) { result in
+                importFiles(result)
+            }
+            .onChange(of: photos) { _, items in
+                guard !items.isEmpty else { return }
+                // Cleared so that picking the same photos again after a failure still fires.
+                photos = []
+                let start = queue.rows.count
+                add(items.enumerated().map { offset, item in
+                    (ReceiptUploadQueue.Pick(name: ReceiptUploadFile.photoName(index: start + offset), size: nil), Source.photo(item))
+                })
             }
         }
     }
 
-    /// `encode` runs off the main actor: decoding and scaling a 12–48 MP photo is heavy.
-    private func upload(_ encode: @escaping @Sendable () -> Data?) async {
-        step = .uploading
-        progress = "Ladataan…"
-        guard let jpeg = await Task.detached(priority: .userInitiated, operation: encode).value else {
-            step = .failed("Kuvaa ei voitu lukea.")
+    // MARK: Pieces
+
+    private var picker: some View {
+        VStack(spacing: 16) {
+            Image(systemName: "doc.viewfinder").font(.system(size: 54)).foregroundStyle(Theme.accent)
+            Text("Lisää kuva tai PDF kuitista tai laskusta").font(.headline).multilineTextAlignment(.center)
+            pickButtons
+            if let importFailure { Text(importFailure).font(.footnote).foregroundStyle(Theme.danger) }
+        }
+    }
+
+    @ViewBuilder private var pickButtons: some View {
+        if UIImagePickerController.isSourceTypeAvailable(.camera) {
+            Button { showCamera = true } label: { Label("Kuvaa kuitti", systemImage: "camera").frame(maxWidth: .infinity, minHeight: 44) }
+                .buttonStyle(.primary)
+        }
+        PhotosPicker(selection: $photos, maxSelectionCount: single ? 1 : ReceiptUploadQueue.maxPick, matching: .images) {
+            Label("Valitse kuvista", systemImage: "photo.on.rectangle").frame(maxWidth: .infinity, minHeight: 44)
+        }
+        .buttonStyle(.bordered)
+        Button { showFiles = true } label: { Label("Valitse tiedosto", systemImage: "doc").frame(maxWidth: .infinity, minHeight: 44) }
+            .buttonStyle(.bordered)
+    }
+
+    private var queueList: some View {
+        List {
+            if queue.offlineCount > 0 {
+                Text(OfflineReceiptRules.offlineNotice).font(.footnote).foregroundStyle(Theme.ink)
+                    .listRowBackground(Theme.accentSoft)
+            }
+            Section {
+                ForEach(queue.rows.prefix(limit.visible(queue.rows.count))) { row in queueRow(row) }
+                ShowMoreButton(limit: $limit, total: queue.rows.count)
+                if queue.isWorking {
+                    Button("Peruuta lähetys") { cancelUploads() }.foregroundStyle(Theme.ink)
+                }
+                if queue.hasFailed {
+                    Button("Yritä epäonnistuneet") { retryFailed() }.foregroundStyle(Theme.accent)
+                }
+            } header: {
+                Text("Lähetysjono")
+            }
+            if queue.isFinished {
+                Section {
+                    Button { close() } label: { Text("Valmis").frame(maxWidth: .infinity, minHeight: 44).font(.headline) }
+                        .buttonStyle(.primary)
+                        .listRowBackground(Color.clear)
+                }
+            }
+            // Matching a bank row: another pick only once the first one is out of the way.
+            if !single || !queue.holdsWork {
+                Section {
+                    pickButtons.listRowBackground(Color.clear).listRowSeparator(.hidden)
+                    if let importFailure { Text(importFailure).font(.footnote).foregroundStyle(Theme.danger) }
+                } header: {
+                    Text("Lisää")
+                }
+            }
+        }
+        .scrollContentBackground(.hidden)
+    }
+
+    private func queueRow(_ row: UploadQueueRow) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 8) {
+                Text(row.name).lineLimit(1).truncationMode(.middle)
+                Spacer(minLength: 8)
+                if row.status == .uploading || row.status == .processing { ProgressView().controlSize(.small) }
+                Text(row.status.label).font(.caption).foregroundStyle(row.status == .failed ? Theme.danger : Theme.ink2)
+            }
+            if let progress = row.progress, row.status != .ready {
+                Text(progress).font(.caption).foregroundStyle(Theme.ink2)
+            }
+            if let error = row.error {
+                Text(error).font(.caption).foregroundStyle(row.status == .failed ? Theme.danger : Theme.ink2)
+            }
+            if row.status == .ready, let draft = row.draft {
+                Button("Käytä lomakkeessa") {
+                    Haptics.selection()
+                    step = .edit(rowId: row.id, draft: draft)
+                }
+                .font(.caption.bold())
+                .buttonStyle(.borderless)
+                .foregroundStyle(Theme.accent)
+            }
+        }
+    }
+
+    // MARK: Picking
+
+    private func add(_ picks: [(ReceiptUploadQueue.Pick, Source)]) {
+        guard !picks.isEmpty else { return }
+        importFailure = nil
+        let ids = queue.enqueue(picks.map(\.0))
+        for (id, pick) in zip(ids, picks) { sources[id] = pick.1 }
+        if case .pick = step { step = .queue }
+        startWorker()
+    }
+
+    /// Files picked from Files are copied to the app's temporary folder at once: the access to
+    /// the original ends with this call.
+    private func importFiles(_ result: Result<[URL], Error>) {
+        let urls: [URL]
+        switch result {
+        case .success(let picked): urls = picked
+        case .failure: importFailure = "Tiedostoa ei voitu avata."; return
+        }
+        var picks: [(ReceiptUploadQueue.Pick, Source)] = []
+        var unreadable = 0
+        for url in urls {
+            let scoped = url.startAccessingSecurityScopedResource()
+            defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+            let copy = FileManager.default.temporaryDirectory
+                .appendingPathComponent("kuitti-\(UUID().uuidString)")
+                .appendingPathExtension(url.pathExtension)
+            do {
+                try FileManager.default.copyItem(at: url, to: copy)
+            } catch {
+                unreadable += 1
+                continue
+            }
+            let size = (try? copy.resourceValues(forKeys: [.fileSizeKey]))?.fileSize
+            picks.append((ReceiptUploadQueue.Pick(name: url.lastPathComponent, size: size), .file(copy)))
+        }
+        add(picks)
+        if unreadable > 0 { importFailure = unreadable == 1 ? "Yhtä tiedostoa ei voitu avata." : "\(unreadable) tiedostoa ei voitu avata." }
+    }
+
+    // MARK: Sending
+
+    private func startWorker() {
+        guard worker == nil else { return }
+        let mine = generation
+        worker = Task {
+            while !Task.isCancelled, let next = queue.nextPending {
+                await process(next.id, name: next.name)
+            }
+            if generation == mine { worker = nil }
+        }
+    }
+
+    private func stopWorker() {
+        generation += 1
+        worker?.cancel()
+        worker = nil
+    }
+
+    /// "Peruuta lähetys": what has not finished stops; read and failed files stay.
+    private func cancelUploads() {
+        stopWorker()
+        queue.cancelPending()
+        Haptics.selection()
+    }
+
+    private func retryFailed() {
+        queue.retryFailed()
+        startWorker()
+    }
+
+    private func process(_ id: String, name: String) async {
+        guard let source = sources[id] else {
+            queue.markFailed(id, "Tiedostoa ei voitu lukea.")
+            return
+        }
+        queue.markUploading(id)
+        guard let file = await Self.encode(source, name: name) else {
+            queue.markFailed(id, "Kuvaa ei voitu lukea.")
+            return
+        }
+        guard !Task.isCancelled else { queue.markCancelled(id); return }
+        if let problem = ReceiptUploadQueue.validate(name: file.name, size: file.data.count) {
+            queue.markFailed(id, problem)
+            return
+        }
+        // No network at all: kept on the phone straight away instead of waiting for a timeout.
+        if !single && !Connectivity.shared.online {
+            keepOffline(id, file)
             return
         }
         var form = Multipart()
-        form.addFile("file", filename: "kuitti.jpg", mimeType: "image/jpeg", data: jpeg)
+        form.addFile("file", filename: file.name, mimeType: file.mimeType, data: file.data)
         do {
             let response = try await app.api.raw("POST", "/api/receipts", body: form.finalize(), contentType: form.contentType)
             let result = try JSONDecoder().decode(UploadResult.self, from: response.body)
             var extracted = result.extracted
-            if let jobId = result.jobId {
-                progress = "Luetaan kuittia…"
-                for _ in 0..<60 {
+            if extracted == nil, let jobId = result.jobId {
+                queue.markProcessing(id)
+                var finished = false
+                for _ in 0..<90 {
                     try await Task.sleep(nanoseconds: 1_500_000_000)
                     let job: JobResponse = try await app.api.get("/api/jobs/\(jobId)")
                     if job.job.isFinished {
-                        if job.job.status != "done" { throw LKError(status: 0, message: job.job.error ?? "Kuitin luku epäonnistui.") }
+                        // Not status 0: a reading the server gave up on is not a lost connection.
+                        if job.job.status != "done" { throw LKError(status: 422, message: job.job.error ?? "Kuitin luku epäonnistui.") }
                         extracted = job.job.extracted
+                        finished = true
                         break
                     }
                 }
+                if !finished {
+                    queue.markBackground(id)
+                    dropSource(id)
+                    return
+                }
             }
-            step = .edit(ReceiptDraft(uploadId: result.uploadId, extracted: extracted))
+            queue.markReady(id, draft: ReceiptDraft(uploadId: result.uploadId, extracted: extracted))
+            dropSource(id)
+            if case .queue = step, let row = queue.takeAutoOpen(), let draft = row.draft {
+                step = .edit(rowId: row.id, draft: draft)
+            }
         } catch is CancellationError {
+            queue.markCancelled(id)
+        } catch let error where !single && ReceiptUploadFile.isNetworkFailure(error) {
+            keepOffline(id, file)
         } catch {
-            step = .failed(error.userMessage)
+            queue.markFailed(id, error.userMessage)
         }
+    }
+
+    private func keepOffline(_ id: String, _ file: Encoded) {
+        if OfflineReceiptQueueModel.shared.enqueue(app: app, data: file.data, fileName: file.name, mimeType: file.mimeType) {
+            queue.markOffline(id)
+            dropSource(id)
+        } else {
+            queue.markFailed(id, "Kuvaa ei voitu tallentaa puhelimeen.")
+        }
+    }
+
+    /// Decoding and scaling a 12–48 MP photo is heavy: it runs off the main actor.
+    private static func encode(_ source: Source, name: String) async -> Encoded? {
+        switch source {
+        case .camera(let image):
+            let jpeg = await Task.detached(priority: .userInitiated) { ReceiptImageEncoder.jpeg(from: image) }.value
+            return jpeg.map { Encoded(data: $0, name: name, mimeType: "image/jpeg") }
+        case .photo(let item):
+            guard let data = try? await item.loadTransferable(type: Data.self) else { return nil }
+            let jpeg = await Task.detached(priority: .userInitiated) { ReceiptImageEncoder.jpeg(fromData: data) }.value
+            return jpeg.map { Encoded(data: $0, name: name, mimeType: "image/jpeg") }
+        case .file(let url):
+            guard let data = try? await Task.detached(priority: .userInitiated, operation: { try Data(contentsOf: url) }).value else { return nil }
+            if ReceiptUploadFile.isPDF(name: name) { return Encoded(data: data, name: name, mimeType: "application/pdf") }
+            let jpeg = await Task.detached(priority: .userInitiated) { ReceiptImageEncoder.jpeg(fromData: data) }.value
+            return jpeg.map { Encoded(data: $0, name: ReceiptUploadFile.jpegName(for: name), mimeType: "image/jpeg") }
+        }
+    }
+
+    // MARK: Closing
+
+    private func saved(_ rowId: String) {
+        queue.markSaved(rowId)
+        onSaved?()
+        // A bank row takes one receipt: once it is saved the match is done.
+        if single || queue.closesAfterSave { close() } else { step = .queue }
+    }
+
+    private func close() {
+        stopWorker()
+        removeTemporaryFiles()
+        dismiss()
+    }
+
+    private func dropSource(_ id: String) {
+        if case .file(let url)? = sources[id] { try? FileManager.default.removeItem(at: url) }
+        sources[id] = nil
+    }
+
+    private func removeTemporaryFiles() {
+        for id in Array(sources.keys) { dropSource(id) }
     }
 }
 

@@ -56,6 +56,8 @@ struct MainTabView: View {
             paths[pending.tab] = NavigationStackRule.collapse((paths[pending.tab] ?? []) + [pending.route])
         }
         .task { await OnboardingGate.shared.check(app) }
+        // Receipts photographed offline go out as soon as the app runs, not only once Kuitit opens.
+        .task { OfflineReceiptQueueModel.shared.start(app: app) }
     }
 
     @ViewBuilder private func root(_ item: AppTab) -> some View {

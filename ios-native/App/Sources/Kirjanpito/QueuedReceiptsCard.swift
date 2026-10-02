@@ -1,0 +1,85 @@
+import SwiftUI
+import LashKirjaCore
+
+/// Kuitit's "Jonossa N kuittia" (web `QueuedReceiptsCard.tsx`): photos still waiting for a
+/// connection, with retry and remove on a failure, and the sent ones folded to one line.
+/// List sections; shows nothing while the offline queue is empty. The screen showing it starts
+/// the queue (`OfflineReceiptQueueModel.start`).
+struct QueuedReceiptsCard: View {
+    @State private var queue = OfflineReceiptQueueModel.shared
+    @State private var connectivity = Connectivity.shared
+    @State private var confirmRemove: String?
+    @State private var limit = ShowMore()
+
+    var body: some View {
+        let waiting = queue.waiting
+        let sent = queue.sent
+        Group {
+            if !waiting.isEmpty {
+                Section {
+                    if !connectivity.online {
+                        Text(OfflineReceiptRules.offlineNotice).font(.footnote).foregroundStyle(Theme.ink)
+                            .listRowBackground(Theme.accentSoft)
+                    }
+                    ForEach(waiting.prefix(limit.visible(waiting.count))) { item in row(item) }
+                    ShowMoreButton(limit: $limit, total: waiting.count)
+                } header: {
+                    Text(OfflineReceiptRules.waitingTitle(waiting.count))
+                }
+                .confirmationDialog("Poista kuva jonosta?", isPresented: Binding(get: { confirmRemove != nil }, set: { if !$0 { confirmRemove = nil } }),
+                                    titleVisibility: .visible) {
+                    Button("Poista", role: .destructive) {
+                        if let id = confirmRemove { withAnimation { queue.remove(id) } }
+                        confirmRemove = nil
+                    }
+                } message: {
+                    Text("Kuvaa ei lähetetä, jos poistat sen jonosta.")
+                }
+            }
+            if !sent.isEmpty {
+                Section {
+                    HStack(spacing: 12) {
+                        Text(OfflineReceiptRules.sentText(sent.count)).font(.caption).foregroundStyle(Theme.ink2)
+                        Spacer(minLength: 0)
+                        Button("Poista listalta") {
+                            Haptics.selection()
+                            withAnimation { queue.clearSent() }
+                        }
+                        .font(.caption.bold())
+                        .buttonStyle(.borderless)
+                        .foregroundStyle(Theme.accent)
+                    }
+                } header: {
+                    Text("Lähetetyt kuvat")
+                }
+            }
+        }
+    }
+
+    private func row(_ item: QueuedReceipt) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Text(OfflineReceiptRules.title(createdAt: item.createdAt)).lineLimit(1)
+                Spacer()
+                if item.status == .sending { ProgressView().controlSize(.small) }
+            }
+            Text(OfflineReceiptRules.statusText(item))
+                .font(.caption)
+                .foregroundStyle(item.status == .failed ? Theme.danger : Theme.ink2)
+            if item.status == .failed {
+                HStack(spacing: 20) {
+                    Button("Yritä uudelleen") {
+                        Haptics.selection()
+                        queue.retry(item.id)
+                    }
+                    .foregroundStyle(Theme.accent)
+                    Button("Poista", role: .destructive) { confirmRemove = item.id }
+                        .foregroundStyle(Theme.danger)
+                }
+                .font(.caption.bold())
+                .buttonStyle(.borderless)
+            }
+        }
+        .accessibilityElement(children: .contain)
+    }
+}

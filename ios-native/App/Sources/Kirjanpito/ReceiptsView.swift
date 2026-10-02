@@ -14,6 +14,13 @@ struct ReceiptsView: View {
     @State private var loadingMore = false
     @State private var counts: ReceiptCounts.Counts?
     @State private var pending: [Receipt] = []
+    @State private var pendingTruncated = false
+    @State private var loadingMorePending = false
+    /// Rejected receipts stay reachable and restorable (F38).
+    @State private var rejected: [Receipt] = []
+    @State private var rejectedTotal = 0
+    @State private var rejectedTruncated = false
+    @State private var loadingMoreRejected = false
     @State private var query: ReceiptListQuery
     @State private var editingAmount = false
     @State private var minDraft = ""
@@ -27,9 +34,6 @@ struct ReceiptsView: View {
     @State private var selected: Set<String> = []
     @State private var deleteIds: [String] = []
     @State private var confirmDelete = false
-    /// The review queue shows its first rows only, so the receipts below stay in reach.
-    @State private var showAllPending = false
-    private static let pendingPreview = 3
     @State private var limit = ShowMore()
 
     /// Month, tab, category, source and sort are kept between visits (as the purchase invoices' filter).
@@ -56,46 +60,25 @@ struct ReceiptsView: View {
 
     var body: some View {
         List {
-            let queue = pending.filter { !app.removedIds.contains($0.id) }
-            if !queue.isEmpty && !selecting {
-                Section {
-                    ForEach(showAllPending ? queue : Array(queue.prefix(Self.pendingPreview))) { receipt in
-                        NavigationLink(value: Route.receipt(receipt.id)) {
-                            HStack(spacing: 10) {
-                                ReceiptRow(receipt: receipt)
-                                // Its own button: a tap on the pill approves, the rest of the row opens the receipt.
-                                Button { Task { await review([receipt.id]) } } label: {
-                                    Text("Hyväksy").font(.caption.bold()).padding(.horizontal, 12).padding(.vertical, 5)
-                                        .background(Theme.accentSoft, in: Capsule())
-                                        .foregroundStyle(Theme.accentDark)
-                                }
-                                .buttonStyle(.borderless)
-                                .disabled(busy)
-                                .accessibilityLabel("Hyväksy \(receipt.title)")
-                            }
-                        }
-                            .swipeActions(edge: .trailing) {
-                                Button("Hyväksy") { Task { await review([receipt.id]) } }
-                                    .tint(Theme.successFill)
-                                    .disabled(busy)
-                            }
+            QueuedReceiptsCard()
+            if !selecting {
+                ReviewQueueSection(
+                    pending: pending.filter { !app.removedIds.contains($0.id) },
+                    rejected: rejected.filter { !app.removedIds.contains($0.id) },
+                    rejectedTotal: rejectedTotal,
+                    pendingHasMore: pendingTruncated,
+                    rejectedHasMore: rejectedTruncated,
+                    loadingPending: loadingMorePending,
+                    loadingRejected: loadingMoreRejected,
+                    busy: busy,
+                    approve: { ids in await review(ids) },
+                    restore: { id in await restore(id) },
+                    loadMorePending: { await loadMorePending() },
+                    loadMoreRejected: {
+                        await loadMoreRejected()
+                        return rejected.count
                     }
-                    if queue.count > Self.pendingPreview {
-                        Button {
-                            withAnimation(.snappy) { showAllPending.toggle() }
-                        } label: {
-                            Label(showAllPending ? String("Näytä vähemmän") : String("Näytä kaikki (\(queue.count))"),
-                                  systemImage: showAllPending ? "chevron.up" : "chevron.down")
-                        }
-                        .foregroundStyle(Theme.ink)
-                    }
-                    Button { Task { await review(queue.map(\.id)) } } label: {
-                        Label("Hyväksy kaikki (\(queue.count))", systemImage: "checkmark.circle")
-                    }
-                    .disabled(busy)
-                } header: {
-                    Text("Odottaa hyväksyntää · \(queue.count)")
-                }
+                )
             }
             if let failure { Text(failure).foregroundStyle(Theme.danger) }
             if let notice { Text(notice).foregroundStyle(Theme.ink2) }
@@ -184,6 +167,9 @@ struct ReceiptsView: View {
             limit.reset()
         }
         .animation(.snappy, value: pending.map(\.id))
+        .animation(.snappy, value: rejected.map(\.id))
+        // Photos kept while offline are sent from here too, not only from the capture screen.
+        .task { OfflineReceiptQueueModel.shared.start(app: app) }
     }
 
     // MARK: Pieces
@@ -370,10 +356,12 @@ struct ReceiptsView: View {
         let countsQuery = asked.countsQuery()
         async let countsResponse: ReceiptCounts? = try? api.get("/api/receipts/counts", query: countsQuery)
         async let queue: ReceiptList? = try? api.get("/api/receipts", query: ["reviewStatus": "pending"])
+        async let rejectedResponse: ReceiptList? = try? api.get("/api/receipts", query: ["reviewStatus": "rejected"])
         do {
             let list: ReceiptList = try await api.get("/api/receipts", query: listQuery)
             guard asked == query else {
-                if let q = await queue { pending = q.receipts }
+                if let q = await queue { applyPending(q) }
+                if let r = await rejectedResponse { applyRejected(r) }
                 return
             }
             receipts = .loaded(list.receipts)
@@ -389,7 +377,49 @@ struct ReceiptsView: View {
             if receipts.value == nil { receipts = .failed(error.userMessage) } else { failure = error.userMessage }
         }
         if let c = await countsResponse, asked == query { counts = c.counts }
-        if let q = await queue { pending = q.receipts }
+        if let q = await queue { applyPending(q) }
+        if let r = await rejectedResponse { applyRejected(r) }
+    }
+
+    private func applyPending(_ list: ReceiptList) {
+        pending = list.receipts
+        pendingTruncated = list.truncated ?? false
+    }
+
+    private func applyRejected(_ list: ReceiptList) {
+        rejected = list.receipts
+        rejectedTotal = list.count ?? list.receipts.count
+        rejectedTruncated = list.truncated ?? false
+    }
+
+    /// "Lataa lisää tarkastettavia": the next 200 of the review queue.
+    private func loadMorePending() async {
+        guard pendingTruncated, !loadingMorePending else { return }
+        loadingMorePending = true
+        defer { loadingMorePending = false }
+        do {
+            let page: ReceiptList = try await app.api.get("/api/receipts", query: ["reviewStatus": "pending", "offset": String(pending.count)])
+            pending = ReceiptPaging.append(pending, page.receipts)
+            pendingTruncated = page.truncated ?? false
+        } catch is CancellationError {
+        } catch {
+            failure = error.userMessage
+        }
+    }
+
+    private func loadMoreRejected() async {
+        guard rejectedTruncated, !loadingMoreRejected else { return }
+        loadingMoreRejected = true
+        defer { loadingMoreRejected = false }
+        do {
+            let page: ReceiptList = try await app.api.get("/api/receipts", query: ["reviewStatus": "rejected", "offset": String(rejected.count)])
+            rejected = ReceiptPaging.append(rejected, page.receipts)
+            rejectedTotal = page.count ?? rejectedTotal
+            rejectedTruncated = page.truncated ?? false
+        } catch is CancellationError {
+        } catch {
+            failure = error.userMessage
+        }
     }
 
     private func loadMore() async {
@@ -420,17 +450,49 @@ struct ReceiptsView: View {
         defer { busy = false }
         do {
             let result: BatchApproveResult = try await app.api.send("POST", "/api/receipts/batch-approve", body: Body(receiptIds: ids))
-            if let problem = result.firstError {
-                failure = problem
+            let refusals = (result.failed ?? []).map { $0.error ?? "" }
+            // The refusal is named (F15): what went and why the rest did not.
+            let outcome = ReviewQueue.approvalOutcome(approved: result.approvedCount, failures: refusals)
+            if !refusals.isEmpty {
+                failure = outcome
                 Haptics.error()
                 await load()
                 return
             }
+            if ids.count > 1 { notice = outcome }
             Haptics.success()
             withAnimation { pending.removeAll { ids.contains($0.id) } }
             await load()
         } catch {
             failure = error.userMessage
+        }
+    }
+
+    /// "Palauta": a rejected receipt goes back to the review queue (`PATCH …/review`).
+    private func restore(_ id: String) async {
+        guard !busy, let index = rejected.firstIndex(where: { $0.id == id }) else { return }
+        busy = true
+        failure = nil
+        notice = nil
+        defer { busy = false }
+        let row = rejected[index]
+        withAnimation {
+            rejected.remove(at: index)
+            rejectedTotal = max(0, rejectedTotal - 1)
+        }
+        do {
+            let _: Ignored = try await app.api.send("PATCH", "/api/receipts/\(id)/review", body: ReviewStatusBody.restore)
+            Haptics.success()
+            notice = "Kuitti palautettiin tarkastettavaksi"
+            await load()
+        } catch is CancellationError {
+        } catch {
+            withAnimation {
+                rejected.insert(row, at: min(index, rejected.count))
+                rejectedTotal += 1
+            }
+            failure = error.userMessage
+            Haptics.error()
         }
     }
 
