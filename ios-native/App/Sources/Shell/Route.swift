@@ -1,4 +1,5 @@
 import SwiftUI
+import LashKirjaCore
 
 enum AppTab: Hashable, CaseIterable {
     case koti, myynti, kirjanpito, raportit, add
@@ -36,6 +37,27 @@ enum Route: Hashable {
     case bankAccounts
     case alv(String)
     case settings
+}
+
+extension Route {
+    /// An in-app link from an assistant reply ("/kuitit", "/laskut/lasku?id=…").
+    static func fromHref(_ href: String) -> Route? {
+        let parts = href.split(separator: "?", maxSplits: 1)
+        let path = String(parts.first ?? "")
+        let query = parts.count > 1 ? String(parts[1]) : ""
+        let id = query.split(separator: "&").first { $0.hasPrefix("id=") }.map { String($0.dropFirst(3)) }
+        switch path {
+        case "/kuitit": return .receipts
+        case "/kuitit/kuitti": return id.map(Route.receipt)
+        case "/pankki/tapahtumat": return .bankFeed
+        case "/kirjanpito/pankkitilit": return .bankAccounts
+        case "/kirjanpito/alv": return .alv(query.split(separator: "&").first { $0.hasPrefix("period=") }.map { String($0.dropFirst(7)) } ?? MonthKey.current())
+        case "/laskut/lasku": return id.map(Route.invoice)
+        case "/asiakkaat": return .customers
+        case "/asetukset", "/asetukset/laskutus": return .settings
+        default: return nil
+        }
+    }
 }
 
 extension View {

@@ -4,6 +4,7 @@ struct MainTabView: View {
     @State private var tab: AppTab = .koti
     @State private var showAdd = false
     @State private var showProfile = false
+    @State private var showAssistant = false
 
     var body: some View {
         TabView(selection: Binding(get: { tab }, set: select)) {
@@ -11,7 +12,9 @@ struct MainTabView: View {
                 NavigationStack {
                     root(item)
                         .toolbar {
-                            ToolbarItem(placement: .topBarTrailing) {
+                            ToolbarItemGroup(placement: .topBarTrailing) {
+                                Button { showAssistant = true } label: { Image(systemName: "bubble.left") }
+                                    .accessibilityLabel("Avustaja")
                                 Button { showProfile = true } label: { Image(systemName: "person.crop.circle") }
                                     .accessibilityLabel("Profiili")
                             }
@@ -27,6 +30,7 @@ struct MainTabView: View {
         }
         .sheet(isPresented: $showAdd) { AddSheet().presentationDetents([.medium]) }
         .sheet(isPresented: $showProfile) { ProfileSheet().presentationDetents([.medium, .large]) }
+        .sheet(isPresented: $showAssistant) { AssistantView() }
     }
 
     @ViewBuilder private func root(_ item: AppTab) -> some View {
