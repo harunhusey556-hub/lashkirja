@@ -19,3 +19,9 @@ import Foundation
     #expect(draft.lines.map(\.vatRate) == [0, Decimal(string: "25.5")!])
     #expect(InvoiceDraft.Line.new(sellerRegistered: true).vatRate == Decimal(string: "25.5")!)
 }
+
+@Test func windows1252TableCoversTheTypographicMarks() {
+    // € ‚ „ … ” – — ™ plus Ä ö: what a Finnish Excel CSV holds.
+    let bytes = Data([0x80, 0x82, 0x84, 0x85, 0x94, 0x96, 0x97, 0x99, 0xC4, 0xF6])
+    #expect(CustomerImportRequest.windows1252(bytes) == "€‚„…”–—™Äö")
+}

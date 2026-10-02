@@ -26,7 +26,23 @@ public struct CustomerImportRequest: Encodable, Sendable {
         var bytes = data
         if bytes.starts(with: [0xEF, 0xBB, 0xBF]) { bytes = bytes.dropFirst(3) }
         if let text = String(data: bytes, encoding: .utf8) { return text }
-        return String(data: bytes, encoding: .windowsCP1252)
+        return windows1252(bytes)
+    }
+
+    /// Decoded by table: Foundation on Linux (Swift 6.1) has no Windows-1252 converter.
+    /// 0x80–0x9F hold the typographic marks; the five unassigned bytes map to their own code
+    /// points (as browsers do); every other byte is the Latin-1 code point.
+    static func windows1252(_ bytes: Data) -> String {
+        let high: [UInt32] = [
+            0x20AC, 0x81, 0x201A, 0x0192, 0x201E, 0x2026, 0x2020, 0x2021, 0x02C6, 0x2030, 0x0160, 0x2039, 0x0152, 0x8D, 0x017D, 0x8F,
+            0x90, 0x2018, 0x2019, 0x201C, 0x201D, 0x2022, 0x2013, 0x2014, 0x02DC, 0x2122, 0x0161, 0x203A, 0x0153, 0x9D, 0x017E, 0x0178,
+        ]
+        var scalars = String.UnicodeScalarView()
+        for byte in bytes {
+            let value = (0x80...0x9F).contains(byte) ? high[Int(byte) - 0x80] : UInt32(byte)
+            if let scalar = Unicode.Scalar(value) { scalars.append(scalar) }
+        }
+        return String(scalars)
     }
 
     /// The server takes at most 200 000 characters.
