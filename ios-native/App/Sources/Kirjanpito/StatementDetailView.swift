@@ -306,13 +306,11 @@ struct StatementDetailView: View {
     }
 
     private func deleteStatement() async {
-        let ok = await perform {
-            let _: Ignored = try await app.api.send("DELETE", "/api/statements/\(statementId)", body: Optional<EmptyBody>.none)
+        let api = app.api, id = statementId
+        app.removeInBackground([id]) {
+            let _: Ignored = try await api.send("DELETE", "/api/statements/\(id)", body: Optional<EmptyBody>.none)
         }
-        if ok {
-            app.dataVersion += 1
-            dismiss()
-        }
+        dismiss()
     }
 }
 

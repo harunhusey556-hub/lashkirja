@@ -339,14 +339,11 @@ struct ReceiptDetailView: View {
     }
 
     private func delete() async {
-        do {
-            let _: Ignored = try await app.api.send("DELETE", "/api/receipts/\(receiptId)", body: Optional<EmptyBody>.none)
-            Haptics.success()
-            app.dataVersion += 1
-            dismiss()
-        } catch {
-            failure = error.userMessage
+        let api = app.api, id = receiptId
+        app.removeInBackground([id]) {
+            let _: Ignored = try await api.send("DELETE", "/api/receipts/\(id)", body: Optional<EmptyBody>.none)
         }
+        dismiss()
     }
 }
 

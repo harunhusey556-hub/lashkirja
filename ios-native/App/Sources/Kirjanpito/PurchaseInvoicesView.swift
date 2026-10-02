@@ -62,7 +62,7 @@ struct PurchaseInvoicesView: View {
 
     @ViewBuilder
     private func content(_ list: PurchaseInvoiceList) -> some View {
-        let groups = PurchaseFilter.groups(list.invoices, filter: filter)
+        let groups = PurchaseFilter.groups(list.invoices.filter { !app.removedIds.contains($0.id) }, filter: filter)
         let visibleCount = groups.reduce(0) { $0 + $1.items.count }
         let noPurchases = visibleCount == 0 && filter == .all
 
@@ -250,17 +250,12 @@ struct PurchaseInvoicesView: View {
     }
 
     private func delete(_ invoice: PurchaseInvoice) async {
-        busy = true
         failure = nil
-        defer { busy = false }
-        do {
-            let _: Ignored = try await app.api.send("DELETE", "/api/purchase-invoices/\(invoice.id)", body: Optional<EmptyBody>.none)
-            Haptics.success()
-            app.dataVersion += 1
-        } catch is CancellationError {
-        } catch {
-            Haptics.error()
-            failure = error.userMessage
+        let api = app.api, id = invoice.id
+        withAnimation {
+            app.removeInBackground([id]) {
+                let _: Ignored = try await api.send("DELETE", "/api/purchase-invoices/\(id)", body: Optional<EmptyBody>.none)
+            }
         }
     }
 }
@@ -625,9 +620,10 @@ struct PurchaseInvoiceDetailView: View {
     }
 
     private func deleteInvoice() async {
-        await run {
-            let _: Ignored = try await app.api.send("DELETE", "/api/purchase-invoices/\(purchaseInvoiceId)", body: Optional<EmptyBody>.none)
-            dismiss()
+        let api = app.api, id = purchaseInvoiceId
+        app.removeInBackground([id]) {
+            let _: Ignored = try await api.send("DELETE", "/api/purchase-invoices/\(id)", body: Optional<EmptyBody>.none)
         }
+        dismiss()
     }
 }

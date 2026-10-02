@@ -49,7 +49,7 @@ struct StatementsView: View {
             } header: {
                 Text("Tuo tiliote")
             }
-            if let list = statements.value {
+            if let list = statements.value?.filter({ !app.removedIds.contains($0.id) }) {
                 Section {
                     if list.isEmpty {
                         Text("Ei vielä tiliotteita. Tuo tiliote tai yhdistä pankki.").foregroundStyle(Theme.ink2)

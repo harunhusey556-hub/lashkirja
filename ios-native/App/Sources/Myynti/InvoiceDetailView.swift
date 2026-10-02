@@ -256,10 +256,11 @@ struct InvoiceDetailView: View {
     }
 
     private func deleteDraft() async {
-        await run {
-            let _: Ignored = try await app.api.send("DELETE", "/api/invoices/\(invoiceId)", body: Optional<EmptyBody>.none)
-            dismiss()
+        let api = app.api, id = invoiceId
+        app.removeInBackground([id]) {
+            let _: Ignored = try await api.send("DELETE", "/api/invoices/\(id)", body: Optional<EmptyBody>.none)
         }
+        dismiss()
     }
 
     private func deletePayment(_ payment: Invoice.Payment) async {

@@ -14,6 +14,11 @@ final class AppModel {
     private(set) var phase: Phase = .launching
     /// Bumped after a change made outside a screen (the "+" sheet), so that screen reloads.
     var dataVersion = 0
+    /// Ids deleted but not yet confirmed by the server: lists leave them out at once, so a delete
+    /// does not wait on the server's answer (removing a tiliote can take seconds).
+    private(set) var removedIds: Set<String> = []
+    /// A delete that failed after its screen had closed; the tab view shows it.
+    var removalFailure: String?
     /// The owner's profile, loaded once and kept: forms and the ALV screen read VAT settings from
     /// it instead of asking the server each time. Settings screens hand back what they save.
     private(set) var profile: Profile?
@@ -87,6 +92,7 @@ final class AppModel {
         DocumentCache.shared.clear()
         profile = nil
         chat = nil
+        removedIds = []
         phase = .signedOut(notice: nil)
         let auth = self.auth
         Task { await auth.logout() }
@@ -126,6 +132,24 @@ final class AppModel {
     }
 
     func profileChanged(_ new: Profile?) { profile = new }
+
+    func hide(_ ids: [String]) { removedIds.formUnion(ids) }
+    func unhide(_ ids: [String]) { removedIds.subtract(ids) }
+
+    /// Hides `ids` now and deletes them on the server without holding the screen; a refusal brings
+    /// them back and says why. The write bumps `dataVersion`, so lists reload after it lands.
+    func removeInBackground(_ ids: [String], _ work: @escaping @Sendable @MainActor () async throws -> Void) {
+        hide(ids)
+        Haptics.success()
+        Task {
+            do { try await work() }
+            catch {
+                unhide(ids)
+                removalFailure = error.userMessage
+                Haptics.error()
+            }
+        }
+    }
 
     private func signedOut(notice: String?) {
         DocumentCache.shared.clear()

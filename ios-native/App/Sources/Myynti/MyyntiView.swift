@@ -185,7 +185,7 @@ struct MyyntiView: View {
     private func visible(_ invoices: [Invoice]) -> [Invoice] {
         let needle = search.trimmingCharacters(in: .whitespaces).lowercased()
         return invoices.filter { invoice in
-            filter.matches(invoice) && (needle.isEmpty
+            !app.removedIds.contains(invoice.id) && filter.matches(invoice) && (needle.isEmpty
                 || invoice.customer.name.lowercased().contains(needle)
                 || String(invoice.number) == needle
                 || invoice.reference.contains(needle))

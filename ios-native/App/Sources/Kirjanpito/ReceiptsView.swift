@@ -54,9 +54,10 @@ struct ReceiptsView: View {
 
     var body: some View {
         List {
-            if !pending.isEmpty && !selecting {
+            let queue = pending.filter { !app.removedIds.contains($0.id) }
+            if !queue.isEmpty && !selecting {
                 Section {
-                    ForEach(showAllPending ? pending : Array(pending.prefix(Self.pendingPreview))) { receipt in
+                    ForEach(showAllPending ? queue : Array(queue.prefix(Self.pendingPreview))) { receipt in
                         NavigationLink(value: Route.receipt(receipt.id)) {
                             HStack(spacing: 10) {
                                 ReceiptRow(receipt: receipt)
@@ -77,21 +78,21 @@ struct ReceiptsView: View {
                                     .disabled(busy)
                             }
                     }
-                    if pending.count > Self.pendingPreview {
+                    if queue.count > Self.pendingPreview {
                         Button {
                             withAnimation(.snappy) { showAllPending.toggle() }
                         } label: {
-                            Label(showAllPending ? String("Näytä vähemmän") : String("Näytä kaikki (\(pending.count))"),
+                            Label(showAllPending ? String("Näytä vähemmän") : String("Näytä kaikki (\(queue.count))"),
                                   systemImage: showAllPending ? "chevron.up" : "chevron.down")
                         }
                         .foregroundStyle(Theme.ink)
                     }
-                    Button { Task { await review(pending.map(\.id)) } } label: {
-                        Label("Hyväksy kaikki (\(pending.count))", systemImage: "checkmark.circle")
+                    Button { Task { await review(queue.map(\.id)) } } label: {
+                        Label("Hyväksy kaikki (\(queue.count))", systemImage: "checkmark.circle")
                     }
                     .disabled(busy)
                 } header: {
-                    Text("Odottaa hyväksyntää · \(pending.count)")
+                    Text("Odottaa hyväksyntää · \(queue.count)")
                 }
             }
             if let failure { Text(failure).foregroundStyle(Theme.danger) }
@@ -105,7 +106,7 @@ struct ReceiptsView: View {
             .listRowBackground(Color.clear)
             .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 4, trailing: 0))
 
-            if let all = receipts.value {
+            if let all = receipts.value?.filter({ !app.removedIds.contains($0.id) }) {
                 Section {
                     if all.isEmpty {
                         Text(query.isFiltered ? "Ei hakua vastaavia kuitteja." : "Ei kuitteja.").foregroundStyle(Theme.ink2)
@@ -439,6 +440,8 @@ struct ReceiptsView: View {
         failure = nil
         notice = nil
         defer { busy = false }
+        // Gone from the list at once; the ones the server refuses come back.
+        withAnimation { app.hide(ids) }
         var deleted: [String] = []
         var refused: [String] = []
         var messages: [String] = []
@@ -464,6 +467,7 @@ struct ReceiptsView: View {
             }
             app.dataVersion += 1
         }
+        withAnimation { app.unhide(refused) }
         selected = Set(refused)
         if selecting && refused.isEmpty { selecting = false }
         if refused.isEmpty {

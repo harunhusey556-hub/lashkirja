@@ -14,7 +14,7 @@ struct CustomersView: View {
         List {
             if let notice { Section { Text(notice).font(.subheadline) } }
             if let customers = state.value {
-                let rows = customers.filter { search.isEmpty || $0.name.localizedCaseInsensitiveContains(search) }
+                let rows = customers.filter { !app.removedIds.contains($0.id) && (search.isEmpty || $0.name.localizedCaseInsensitiveContains(search)) }
                 if rows.isEmpty { Text("Ei asiakkaita.").foregroundStyle(Theme.ink2) }
                 ForEach(rows) { customer in
                     NavigationLink(value: Route.customer(customer.id)) {
@@ -184,13 +184,11 @@ struct CustomerDetailView: View {
     }
 
     private func delete() async {
-        do {
-            let _: Ignored = try await app.api.send("DELETE", "/api/customers/\(customerId)", body: Optional<EmptyBody>.none)
-            Haptics.success()
-            dismiss()
-        } catch {
-            failure = error.userMessage
+        let api = app.api, id = customerId
+        app.removeInBackground([id]) {
+            let _: Ignored = try await api.send("DELETE", "/api/customers/\(id)", body: Optional<EmptyBody>.none)
         }
+        dismiss()
     }
 }
 
