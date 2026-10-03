@@ -27,6 +27,10 @@ struct InvoiceDetailView: View {
     @State private var paymentLimit = ShowMore()
     /// The history is secondary on this long screen: five events, then more on request.
     @State private var activityLimit = ShowMore(step: 5)
+    /// One group at a time instead of rows, payments, reminder and history stacked down the screen.
+    @State private var tab: InvoiceDetailLayout.Tab = .lines
+    @State private var tabChosen = false
+    @State private var customerRoute: Route?
 
     enum SheetKind: Identifiable { case payment, send, pdf, edit, reminder, reminderPdf, close; var id: Self { self } }
     enum ConfirmKind: Identifiable { case delete, credit, markSent; var id: Self { self } }
@@ -34,88 +38,25 @@ struct InvoiceDetailView: View {
     var body: some View {
         List {
             if let invoice = state.value {
-                Section { header(invoice).listRowBackground(Color.clear).listRowInsets(EdgeInsets()) }
-                if let main = primaryAction(invoice) {
-                    Section {
-                        Button { perform(main) } label: {
-                            Label(main.title, systemImage: main.symbol).frame(maxWidth: .infinity)
-                        }
-                        .buttonStyle(.primary)
-                        .listRowBackground(Color.clear)
-                        .listRowInsets(EdgeInsets())
-                    }
-                }
+                Section { summaryCard(invoice).listRowBackground(Color.clear).listRowInsets(EdgeInsets()) }
+                Section { actionBar(invoice).listRowBackground(Color.clear).listRowInsets(EdgeInsets()) }
                 if let failure { Section { Text(failure).foregroundStyle(Theme.danger).font(.footnote) } }
                 if let warning { Section { Text(warning).foregroundStyle(Theme.warning).font(.footnote) } }
                 if let notice { Section { Text(notice).foregroundStyle(Theme.success).font(.footnote) } }
-                Section {
-                    LabeledContent("Päivätty", value: APIDate.displayDay(invoice.issueDate))
-                    LabeledContent("Eräpäivä", value: APIDate.displayDay(invoice.dueDate))
-                    LabeledContent("Viite", value: invoice.reference)
-                    if let reason = invoice.closedReason, !reason.isEmpty { LabeledContent("Suljettu", value: reason) }
-                    NavigationLink(value: Route.customer(invoice.customer.id)) {
-                        LabeledContent("Asiakas", value: invoice.customer.name)
-                    }
-                }
-                Section("Rivit") {
-                    ForEach(invoice.lines.prefix(lineLimit.visible(invoice.lines.count))) { line in
-                        VStack(alignment: .leading, spacing: 2) {
-                            HStack {
-                                Text(line.description)
-                                Spacer()
-                                MoneyText(amount: line.net)
-                            }
-                            Text("\(Self.number(line.quantity)) \(line.unit) × \(Money.format(line.unitPrice)) · ALV \(Self.number(line.vatRate)) %")
-                                .font(.caption).foregroundStyle(Theme.ink2)
-                        }
-                    }
-                    ShowMoreButton(limit: $lineLimit, total: invoice.lines.count)
-                    LabeledContent("Veroton") { MoneyText(amount: invoice.net) }
-                    LabeledContent("ALV") { MoneyText(amount: invoice.vat) }
-                    LabeledContent("Yhteensä") { MoneyText(amount: invoice.gross).fontWeight(.semibold) }
-                }
-                Section("Maksut") {
-                    if invoice.payments.isEmpty {
-                        Text("Ei maksuja.").foregroundStyle(Theme.ink2)
-                    }
-                    ForEach(invoice.payments.prefix(paymentLimit.visible(invoice.payments.count))) { payment in
-                        HStack {
-                            VStack(alignment: .leading) {
-                                Text(APIDate.displayDay(payment.paidDate))
-                                if let note = payment.note { Text(note).font(.caption).foregroundStyle(Theme.ink2) }
-                            }
-                            Spacer()
-                            MoneyText(amount: payment.amount)
-                        }
-                        .swipeActions {
-                            Button("Poista", role: .destructive) { Task { await deletePayment(payment) } }
-                        }
-                    }
-                    ShowMoreButton(limit: $paymentLimit, total: invoice.payments.count)
-                    if invoice.open > 0 && invoice.displayStatus != .draft && primaryAction(invoice) != .payment {
-                        Button { sheet = .payment } label: { Label("Kirjaa maksu", systemImage: "eurosign.circle") }
-                    }
-                }
+                // A possible double payment needs a decision, so it stays above the tabs.
                 if !duplicates.isEmpty {
                     Section("Tarkista maksu") {
                         ForEach(duplicates) { pair in duplicateRow(pair) }
                     }
                 }
-                if invoice.displayStatus == .overdue {
-                    reminderSection(invoice)
+                let tabs = InvoiceDetailLayout.tabs(payments: invoice.payments.count, activity: invoice.activity.count,
+                                                    overdue: invoice.displayStatus == .overdue)
+                Section {
+                    tabPicker(tabs)
+                        .listRowBackground(Color.clear)
+                        .listRowInsets(EdgeInsets())
                 }
-                if !invoice.activity.isEmpty {
-                    Section("Historia") {
-                        // Newest first: the server sends the oldest first, and only the first rows show.
-                        ForEach(Array(invoice.activity.reversed()).prefix(activityLimit.visible(invoice.activity.count))) { item in
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(item.summary).font(.subheadline)
-                                Text(Self.timestamp(item.createdAt)).font(.caption).foregroundStyle(Theme.ink2)
-                            }
-                        }
-                        ShowMoreButton(limit: $activityLimit, total: invoice.activity.count)
-                    }
-                }
+                tabContent(invoice, tab: tabs.contains { $0.tab == tab } ? tab : .lines)
             } else {
                 LoadState(state: state, retry: load) { (_: Invoice) in EmptyView() }.listRowBackground(Color.clear)
             }
@@ -131,8 +72,13 @@ struct InvoiceDetailView: View {
             }
         }
         .onDisappear { toastTask?.cancel() }
+        .navigationDestination(item: $customerRoute) { route in RouteScreen(route: route) }
         .refreshable { await load() }
         .task { await load() }
+        // An overdue invoice opens on its reminder, until the owner picks a tab.
+        .onChange(of: state.value?.displayStatus) { _, status in
+            if !tabChosen, let status { tab = InvoiceDetailLayout.initialTab(overdue: status == .overdue) }
+        }
         .disabled(busy)
         .sheet(item: $sheet, onDismiss: { Task { await load() } }) { kind in
             if let invoice = state.value {
@@ -173,17 +119,183 @@ struct InvoiceDetailView: View {
         }
     }
 
-    private func header(_ invoice: Invoice) -> some View {
-        VStack(spacing: 6) {
-            MoneyText(amount: invoice.gross).font(.system(size: 36, weight: .bold, design: .rounded))
-            Text(invoice.customer.name).font(.headline)
-            StatusBadge(status: invoice.displayStatus)
-            if invoice.open > 0 && invoice.paid > 0 {
-                Text("Avoinna \(Money.format(invoice.open))").font(.caption).foregroundStyle(Theme.ink2)
+    /// Amount, customer, where the invoice stands and the three dates, in one card.
+    private func summaryCard(_ invoice: Invoice) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .firstTextBaseline) {
+                StatusBadge(status: invoice.displayStatus)
+                Spacer(minLength: 8)
+                Text(InvoiceDetailLayout.dueLine(status: invoice.displayStatus, dueDate: invoice.dueDate,
+                                                 paidAt: invoice.paidAt, today: APIDate.dayString(Date())))
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(invoice.displayStatus == .overdue ? Theme.danger : Theme.ink2)
+            }
+            VStack(alignment: .leading, spacing: 2) {
+                MoneyText(amount: invoice.gross).font(.system(size: 34, weight: .bold, design: .rounded))
+                // A button, not a NavigationLink: a link would make the whole card one tap target.
+                Button { customerRoute = .customer(invoice.customer.id) } label: {
+                    HStack(spacing: 4) {
+                        Text(invoice.customer.name).font(.headline).foregroundStyle(Theme.ink)
+                        Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(Theme.ink2)
+                    }
+                }
+                .buttonStyle(.borderless)
+            }
+            if let fraction = InvoiceDetailLayout.paidFraction(gross: invoice.gross, paid: invoice.paid) {
+                VStack(alignment: .leading, spacing: 4) {
+                    ProgressView(value: fraction).tint(Theme.success)
+                    Text("Maksettu \(Money.format(invoice.paid)) · avoinna \(Money.format(invoice.open))")
+                        .font(.caption).foregroundStyle(Theme.ink2)
+                }
+            }
+            Divider()
+            HStack(alignment: .top, spacing: 12) {
+                fact("Päivätty", APIDate.displayDay(invoice.issueDate))
+                fact("Eräpäivä", APIDate.displayDay(invoice.dueDate))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Viite").font(.caption).foregroundStyle(Theme.ink2)
+                    Button {
+                        UIPasteboard.general.string = invoice.reference
+                        Haptics.success()
+                        showToast("Viitenumero kopioitu.", action: nil, run: nil)
+                    } label: {
+                        HStack(spacing: 4) {
+                            Text(invoice.reference).font(.subheadline.monospacedDigit()).lineLimit(1).minimumScaleFactor(0.8)
+                            Image(systemName: "doc.on.doc").font(.caption2)
+                        }
+                        .foregroundStyle(Theme.ink)
+                    }
+                    .buttonStyle(.borderless)
+                    .accessibilityLabel("Kopioi viitenumero \(invoice.reference)")
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            if let reason = invoice.closedReason, !reason.isEmpty {
+                Text("Suljettu: \(reason)").font(.caption).foregroundStyle(Theme.ink2)
             }
         }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 12)
+        .padding(16)
+        .background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
+    }
+
+    private func fact(_ title: String, _ value: String) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(title).font(.caption).foregroundStyle(Theme.ink2)
+            Text(value).font(.subheadline)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// The next step as the one big button, and PDF / send / copy within a thumb's reach
+    /// instead of behind the ⋯ menu.
+    private func actionBar(_ invoice: Invoice) -> some View {
+        VStack(spacing: 10) {
+            if let main = primaryAction(invoice) {
+                Button { perform(main) } label: {
+                    Label(main.title, systemImage: main.symbol).frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.primary)
+            }
+            HStack(spacing: 10) {
+                quickAction("PDF", symbol: "doc.richtext") { sheet = .pdf }
+                if invoice.status != "credited" && primaryAction(invoice) != .send {
+                    quickAction("Lähetä", symbol: "paperplane") { sheet = .send }
+                }
+                if invoice.open > 0 && invoice.displayStatus != .draft && primaryAction(invoice) != .payment {
+                    quickAction("Maksu", symbol: "eurosign.circle") { sheet = .payment }
+                }
+                if invoice.displayStatus == .draft {
+                    quickAction("Muokkaa", symbol: "pencil") { sheet = .edit }
+                } else {
+                    quickAction("Kopioi", symbol: "plus.square.on.square") { Task { await duplicate() } }
+                }
+            }
+        }
+    }
+
+    private func quickAction(_ title: String, symbol: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            VStack(spacing: 4) {
+                Image(systemName: symbol).font(.body.weight(.semibold))
+                Text(title).font(.caption)
+            }
+            .foregroundStyle(Theme.accent)
+            .frame(maxWidth: .infinity, minHeight: 52)
+            .background(Theme.surface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        }
+        .buttonStyle(.borderless)
+    }
+
+    private func tabPicker(_ tabs: [InvoiceDetailLayout.TabItem]) -> some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(tabs) { item in
+                    SectionChip(title: item.title, selected: item.tab == tab) {
+                        tabChosen = true
+                        withAnimation(.snappy) { tab = item.tab }
+                    }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder private func tabContent(_ invoice: Invoice, tab: InvoiceDetailLayout.Tab) -> some View {
+        switch tab {
+        case .lines:
+            Section {
+                ForEach(invoice.lines.prefix(lineLimit.visible(invoice.lines.count))) { line in
+                    VStack(alignment: .leading, spacing: 2) {
+                        HStack(alignment: .firstTextBaseline) {
+                            Text(line.description)
+                            Spacer()
+                            MoneyText(amount: line.net)
+                        }
+                        Text("\(Self.number(line.quantity)) \(line.unit) × \(Money.format(line.unitPrice)) · ALV \(Self.number(line.vatRate)) %")
+                            .font(.caption).foregroundStyle(Theme.ink2)
+                    }
+                }
+                ShowMoreButton(limit: $lineLimit, total: invoice.lines.count)
+                LabeledContent("Veroton") { MoneyText(amount: invoice.net) }.font(.subheadline)
+                LabeledContent("ALV") { MoneyText(amount: invoice.vat) }.font(.subheadline)
+                LabeledContent("Yhteensä") { MoneyText(amount: invoice.gross).fontWeight(.semibold) }
+            }
+        case .payments:
+            Section {
+                if invoice.payments.isEmpty {
+                    Text("Ei maksuja.").foregroundStyle(Theme.ink2)
+                }
+                ForEach(invoice.payments.prefix(paymentLimit.visible(invoice.payments.count))) { payment in
+                    HStack {
+                        VStack(alignment: .leading) {
+                            Text(APIDate.displayDay(payment.paidDate))
+                            if let note = payment.note { Text(note).font(.caption).foregroundStyle(Theme.ink2) }
+                        }
+                        Spacer()
+                        MoneyText(amount: payment.amount)
+                    }
+                    .swipeActions {
+                        Button("Poista", role: .destructive) { Task { await deletePayment(payment) } }
+                    }
+                }
+                ShowMoreButton(limit: $paymentLimit, total: invoice.payments.count)
+                if invoice.open > 0 && invoice.displayStatus != .draft {
+                    Button { sheet = .payment } label: { Label("Kirjaa maksu", systemImage: "eurosign.circle") }
+                }
+            }
+        case .reminder:
+            reminderSection(invoice)
+        case .history:
+            Section {
+                // Newest first: the server sends the oldest first, and only the first rows show.
+                ForEach(Array(invoice.activity.reversed()).prefix(activityLimit.visible(invoice.activity.count))) { item in
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(item.summary).font(.subheadline)
+                        Text(Self.timestamp(item.createdAt)).font(.caption).foregroundStyle(Theme.ink2)
+                    }
+                }
+                ShowMoreButton(limit: $activityLimit, total: invoice.activity.count)
+            }
+        }
     }
 
     /// The invoice's next step as one visible button; the rarer actions stay in the ⋯ menu.
@@ -396,7 +508,7 @@ struct InvoiceDetailView: View {
     @ViewBuilder
     private func reminderSection(_ invoice: Invoice) -> some View {
         if let reminder {
-            Section("Muistutukset") {
+            Section {
                 Text("Myöhässä \(reminder.daysLate) päivää · muistutus \(reminder.level)")
                     .font(.caption).foregroundStyle(Theme.ink2)
                 LabeledContent("Avoin pääoma") { MoneyText(amount: reminder.open) }
@@ -415,7 +527,7 @@ struct InvoiceDetailView: View {
                 }
             }
         } else if reminderFailed {
-            Section("Muistutukset") {
+            Section {
                 Text("Muistutuksen tietoja ei saatu ladattua.").font(.footnote).foregroundStyle(Theme.ink2)
                 Button { Task { await loadReminder() } } label: { Label("Yritä uudelleen", systemImage: "arrow.clockwise") }
             }
