@@ -114,8 +114,14 @@ private struct KotiContent: View {
             PartialFailureNotice(messages: Koti.failedSections(d.sectionErrors)) { await model.load() }
         case .setup:
             if let setup = d.setup {
-                SetupCard(setup: setup, capture: { captureFor = CaptureTarget(transactionId: nil) })
+                if Koti.isFreshAccount(d) {
+                    FirstRunCard(progress: Koti.setupProgress(setup), capture: { captureFor = CaptureTarget(transactionId: nil) })
+                } else {
+                    SetupCard(setup: setup, capture: { captureFor = CaptureTarget(transactionId: nil) })
+                }
             }
+        case .firstRunNote:
+            FirstRunNote()
         case .balance:
             if let bank = d.bank {
                 BalanceCard(bank: bank, trend: BalanceTrend(d.bankTrend),
@@ -137,26 +143,36 @@ private struct KotiContent: View {
         }
     }
 
-    private func header(_ d: Dashboard) -> some View {
-        Text(d.firstName.map { "Hyvää päivää, \($0)" } ?? "Hyvää päivää")
-            .font(.subheadline)
-            .foregroundStyle(Theme.ink2)
+    /// By the hour of the owner's clock, as on the web; without a name there is no line.
+    @ViewBuilder private func header(_ d: Dashboard) -> some View {
+        if let greeting = Koti.greeting(at: Date(), firstName: d.firstName) {
+            Text(greeting)
+                .font(.subheadline)
+                .foregroundStyle(Theme.ink2)
+        }
     }
 
     /// The month's checklist, and the VAT estimate as one line under it.
     private func statusCard(_ d: Dashboard) -> some View {
         let blocking = max(0, (d.blockingTotal ?? 0) - (d.items.count - model.visibleItems.count))
-        let done = d.events?.done ?? d.matching.matched
-        let total = d.events?.total ?? d.matching.matchable
+        let status = Koti.monthStatus(done: d.events?.done ?? d.matching.matched,
+                                      total: d.events?.total ?? d.matching.matchable, blocking: blocking)
         return Card {
             NavigationLink(value: Route.monthClose(d.month)) {
                 HStack(alignment: .center, spacing: 14) {
-                    ProgressRing(progress: total > 0 ? Double(done) / Double(total) : 1)
-                        .frame(width: 44, height: 44)
+                    // Nothing counted is not 100 %: an empty ring with no figure instead.
+                    if let progress = status.progress {
+                        ProgressRing(progress: progress)
+                            .frame(width: 44, height: 44)
+                    } else {
+                        Circle().stroke(Theme.line, lineWidth: 5)
+                            .frame(width: 44, height: 44)
+                            .accessibilityHidden(true)
+                    }
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(Koti.headline(blocking: blocking)).font(.headline).foregroundStyle(Theme.ink)
-                        if total > 0 {
-                            Text("\(done) / \(total) tapahtumaa on kunnossa").font(.caption).foregroundStyle(Theme.ink2)
+                        Text(status.headline).font(.headline).foregroundStyle(Theme.ink)
+                        if let detail = status.detail {
+                            Text(detail).font(.caption).foregroundStyle(Theme.ink2)
                         }
                     }
                     Spacer(minLength: 8)
@@ -374,6 +390,7 @@ private struct RowIcon: View {
 
 struct ProgressRing: View {
     let progress: Double
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     var body: some View {
         ZStack {
             Circle().stroke(Theme.line, lineWidth: 5)
@@ -381,7 +398,7 @@ struct ProgressRing: View {
             Text("\(Int((progress * 100).rounded())) %").font(.caption2.weight(.semibold)).monospacedDigit()
                 .minimumScaleFactor(0.6).lineLimit(1)
         }
-        .animation(.snappy, value: progress)
+        .animation(reduceMotion ? nil : .snappy, value: progress)
     }
 }
 
@@ -591,6 +608,106 @@ private struct SetupCard: View {
             if !done { Chevron() }
         }
         .contentShape(Rectangle())
+    }
+}
+
+/// Aloitetaan (TF-06): a brand-new account's three steps, why each is worth doing and how far
+/// along they are. The next step carries the one filled button; the others are plain rows that
+/// open the same places as Käyttöönotto (the camera, the bank connection, the seller details).
+private struct FirstRunCard: View {
+    let progress: Koti.SetupProgress
+    let capture: () -> Void
+
+    var body: some View {
+        Card {
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text(Koti.firstRunTitle).font(.title3.weight(.semibold)).foregroundStyle(Theme.ink)
+                        .accessibilityAddTraits(.isHeader)
+                    Spacer(minLength: 8)
+                    Text(progress.label).font(.caption.weight(.semibold)).monospacedDigit().foregroundStyle(Theme.ink2)
+                        .accessibilityLabel(progress.accessibilityLabel)
+                }
+                Text(Koti.firstRunLead).font(.subheadline).foregroundStyle(Theme.ink2)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            // The count above says the same to VoiceOver.
+            ProgressView(value: Double(progress.done), total: Double(max(progress.total, 1)))
+                .tint(Theme.success)
+                .accessibilityHidden(true)
+            VStack(spacing: 0) {
+                ForEach(Array(progress.rows.enumerated()), id: \.element.id) { index, row in
+                    if index > 0 { Divider().padding(.leading, 48) }
+                    stepRow(row)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder private func stepRow(_ row: Koti.SetupProgress.Row) -> some View {
+        let label = progress.rowAccessibilityLabel(row)
+        if row.done {
+            content(row, isNext: false)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(label)
+        } else if row.step == progress.next {
+            VStack(alignment: .leading, spacing: 10) {
+                content(row, isNext: true)
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel(label)
+                stepLink(row.step) {
+                    Text(row.step.actionTitle).font(.body.weight(.semibold)).frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.primary)
+            }
+            .padding(.bottom, 10)
+        } else {
+            stepLink(row.step) { content(row, isNext: false) }
+                .buttonStyle(.plain)
+                .accessibilityLabel(label)
+        }
+    }
+
+    private func content(_ row: Koti.SetupProgress.Row, isNext: Bool) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            RowIcon(symbol: row.done ? "checkmark" : row.step.symbol,
+                    tint: row.done ? Theme.success : (isNext ? Theme.accent : Theme.ink2))
+            VStack(alignment: .leading, spacing: 2) {
+                Text(row.step.title).font(.body.weight(isNext ? .semibold : .regular))
+                    .foregroundStyle(row.done ? Theme.ink2 : Theme.ink)
+                Text(row.step.benefit).font(.caption).foregroundStyle(Theme.ink2)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 8)
+            if !row.done && !isNext { Chevron().padding(.top, 4) }
+        }
+        .padding(.vertical, 10)
+        .frame(minHeight: 44)
+        .contentShape(Rectangle())
+    }
+
+    /// Where a step is done: the same routes as Käyttöönotto.
+    @ViewBuilder private func stepLink<Label: View>(_ step: Koti.SetupStep, @ViewBuilder label: () -> Label) -> some View {
+        let shown = label()
+        switch step {
+        case .receipt: Button(action: capture) { shown }
+        case .bank: NavigationLink(value: Route.bankAccounts) { shown }
+        case .seller: NavigationLink(value: Route.settings) { shown }
+        }
+    }
+}
+
+/// What Koti will show once something is in the books, said once instead of 0,00 € cards.
+private struct FirstRunNote: View {
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: "chart.bar.doc.horizontal").foregroundStyle(Theme.ink2).accessibilityHidden(true)
+            Text(Koti.firstRunNote).font(.subheadline).foregroundStyle(Theme.ink2)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous).stroke(Theme.line))
     }
 }
 

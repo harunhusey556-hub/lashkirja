@@ -197,3 +197,171 @@ private let trend = BalanceTrend(points: [
     #expect(Koti.failedSections(nil).isEmpty)
     #expect(Koti.failedSections(["vat": "B", "items": "A"]) == ["A", "B"])
 }
+
+// MARK: A brand-new account (TF-06)
+
+private let freshSetup = #""setup":{"receipts":false,"bank":false,"seller":false,"empty":true}"#
+
+private func setup(_ json: String) throws -> Dashboard.Setup {
+    try #require(try dashboard(json).setup)
+}
+
+@Test func freshAccountIsNothingBookedAndNoBank() throws {
+    #expect(Koti.isFreshAccount(try dashboard(freshSetup)))
+    // The seller details alone do not start the books.
+    #expect(Koti.isFreshAccount(try dashboard(#""setup":{"receipts":false,"bank":false,"seller":true,"empty":true}"#)))
+    #expect(!Koti.isFreshAccount(try dashboard(#""setup":{"receipts":true,"bank":false,"seller":false,"empty":false}"#)))
+    #expect(!Koti.isFreshAccount(try dashboard(#""setup":{"receipts":false,"bank":true,"seller":false,"empty":true}"#)))
+    // An invoice (empty false) is something booked.
+    #expect(!Koti.isFreshAccount(try dashboard(#""setup":{"receipts":false,"bank":false,"seller":true,"empty":false}"#)))
+    // A setup that did not load is no reason to hide the month.
+    #expect(!Koti.isFreshAccount(try dashboard("")))
+}
+
+@Test func freshAccountStartsFromTheSetupCardWithoutRingOrZeroCards() throws {
+    let input = KotiLayout.Input(dashboard: try dashboard(freshSetup), atCurrentMonth: true, hasTasks: false, failedJobs: 0)
+    #expect(input.fresh)
+    let sections = KotiLayout.sections(input)
+    #expect(sections == [.setup, .firstRunNote])
+    #expect(!sections.contains(.status) && !sections.contains(.money))
+}
+
+@Test func freshAccountKeepsTheOnboardingCardOnTopAndTheFailures() {
+    let all = KotiLayout.sections(.init(brandNew: true, fresh: true, setupOpen: true, partialFailure: true, hasTasks: true, failedJobs: true,
+                                        hasPositions: true, cashflowMoved: true, handled: true, onboardingOpen: true, vatThreshold: true))
+    #expect(all == [.onboarding, .setup, .partialFailure, .tasks, .failedJobs, .firstRunNote])
+}
+
+@Test func freshAccountOnAPastMonthShowsNoZeroFiguresEither() {
+    let past = KotiLayout.sections(.init(atCurrentMonth: false, brandNew: true, fresh: true, setupOpen: true))
+    #expect(past == [.firstRunNote])
+}
+
+@Test func anAccountWithABankLooksAsBefore() throws {
+    // Brand-new by its books but with a bank: the old order, setup first.
+    let banked = try dashboard(#""setup":{"receipts":false,"bank":true,"seller":false,"empty":true}"#)
+    let input = KotiLayout.Input(dashboard: banked, atCurrentMonth: true, hasTasks: false, failedJobs: 0)
+    #expect(!input.fresh)
+    #expect(KotiLayout.sections(input) == [.setup, .status, .money])
+}
+
+@Test func setupProgressCountsAndPicksTheNextStep() throws {
+    let none = Koti.setupProgress(try setup(freshSetup))
+    #expect(none.rows.map(\.step) == [.receipt, .bank, .seller])
+    #expect(none.done == 0 && none.total == 3)
+    #expect(none.label == "0/3 valmis")
+    #expect(none.next == .receipt)
+    #expect(!none.complete)
+
+    let seller = Koti.setupProgress(try setup(#""setup":{"receipts":false,"bank":false,"seller":true,"empty":true}"#))
+    #expect(seller.label == "1/3 valmis")
+    #expect(seller.accessibilityLabel == "Tehty 1, jäljellä 2")
+    #expect(seller.next == .receipt)
+
+    let receipt = Koti.setupProgress(try setup(#""setup":{"receipts":true,"bank":false,"seller":false,"empty":false}"#))
+    #expect(receipt.next == .bank)
+    #expect(receipt.rowAccessibilityLabel(receipt.rows[1])
+            == "Yhdistä pankki, seuraava askel. Tapahtumat tulevat itsestään ja maksut kohdistuvat laskuihin.")
+    #expect(receipt.rowAccessibilityLabel(receipt.rows[0]).hasPrefix("Kuvaa ensimmäinen kuitti, valmis."))
+    #expect(receipt.rowAccessibilityLabel(receipt.rows[2]).hasPrefix("Täydennä laskuttajan tiedot, tekemättä."))
+
+    let all = Koti.setupProgress(try setup(#""setup":{"receipts":true,"bank":true,"seller":true,"empty":false}"#))
+    #expect(all.complete && all.next == nil && all.label == "3/3 valmis")
+}
+
+@Test func setupStepsSayWhyAndHaveASymbol() {
+    for step in Koti.SetupStep.allCases {
+        #expect(!step.benefit.isEmpty && !step.symbol.isEmpty && !step.actionTitle.isEmpty)
+    }
+    #expect(Koti.SetupStep.receipt.actionTitle == "Kuvaa kuitti")
+    #expect(Koti.firstRunTitle == "Aloitetaan")
+    #expect(Koti.firstRunLead == "Kolme askelta, niin kirjanpito pyörii itsestään.")
+    #expect(!Koti.firstRunNote.contains("0,00"))
+}
+
+// MARK: The status ring
+
+@Test func emptyMonthIsNeverAFullRingOrKaikkiKunnossa() {
+    let empty = Koti.monthStatus(done: 0, total: 0, blocking: 0)
+    #expect(empty.progress == nil)
+    #expect(empty.headline == "Ei vielä tapahtumia tässä kuussa")
+    #expect(empty.detail == nil)
+    // Something to do still says so, without a ring.
+    let todo = Koti.monthStatus(done: 0, total: 0, blocking: 2)
+    #expect(todo.progress == nil && todo.headline == "2 asiaa ennen kuun loppua")
+}
+
+@Test func countedMonthKeepsItsRing() {
+    let half = Koti.monthStatus(done: 3, total: 6, blocking: 1)
+    #expect(half.progress == 0.5)
+    #expect(half.headline == "1 asia ennen kuun loppua")
+    #expect(half.detail == "3 / 6 tapahtumaa on kunnossa")
+    let all = Koti.monthStatus(done: 4, total: 4, blocking: 0)
+    #expect(all.progress == 1 && all.headline == "Kaikki kunnossa")
+}
+
+// MARK: Greeting (web lib/koti-greeting.test.ts)
+
+@Test func greetingHasTheWebsHourBoundaries() {
+    #expect(Koti.timeOfDayGreeting(hour: 4, firstName: "A") == "Hyvää yötä, A")
+    #expect(Koti.timeOfDayGreeting(hour: 5, firstName: "A") == "Hyvää huomenta, A")
+    #expect(Koti.timeOfDayGreeting(hour: 9, firstName: "A") == "Hyvää huomenta, A")
+    #expect(Koti.timeOfDayGreeting(hour: 10, firstName: "A") == "Hyvää päivää, A")
+    #expect(Koti.timeOfDayGreeting(hour: 16, firstName: "A") == "Hyvää päivää, A")
+    #expect(Koti.timeOfDayGreeting(hour: 17, firstName: "A") == "Hyvää iltaa, A")
+    #expect(Koti.timeOfDayGreeting(hour: 22, firstName: "A") == "Hyvää iltaa, A")
+    #expect(Koti.timeOfDayGreeting(hour: 23, firstName: "A") == "Hyvää yötä, A")
+    #expect(Koti.timeOfDayGreeting(hour: 0, firstName: "") == "Hyvää yötä")
+}
+
+@Test func greetingReadsTheOwnersClock() throws {
+    let helsinki = try #require(TimeZone(identifier: "Europe/Helsinki"))
+    let iso = ISO8601DateFormatter()
+    // The owner's screenshot: 19:16 in October is evening, not "päivää".
+    let screenshot = try #require(iso.date(from: "2026-10-03T16:16:00Z"))
+    let morning = try #require(iso.date(from: "2026-10-14T05:30:00Z"))   // 08:30
+    let day = try #require(iso.date(from: "2026-10-14T10:00:00Z"))       // 13:00
+    let night = try #require(iso.date(from: "2026-10-14T21:30:00Z"))     // 00:30
+    let winter = try #require(iso.date(from: "2026-10-31T20:30:00Z"))    // 22:30, winter time from 25.10.
+    #expect(Koti.greeting(at: screenshot, firstName: "Harun", timeZone: helsinki) == "Hyvää iltaa, Harun")
+    #expect(Koti.greeting(at: morning, firstName: "Liisa", timeZone: helsinki) == "Hyvää huomenta, Liisa")
+    #expect(Koti.greeting(at: day, firstName: "Liisa", timeZone: helsinki) == "Hyvää päivää, Liisa")
+    #expect(Koti.greeting(at: night, firstName: "Liisa", timeZone: helsinki) == "Hyvää yötä, Liisa")
+    #expect(Koti.greeting(at: winter, firstName: "Liisa", timeZone: helsinki) == "Hyvää iltaa, Liisa")
+}
+
+@Test func greetingSaysNothingWithoutAName() throws {
+    let utc = try #require(TimeZone(identifier: "UTC"))
+    #expect(Koti.greeting(at: Date(), firstName: nil) == nil)
+    #expect(Koti.greeting(at: Date(), firstName: " ") == nil)
+    #expect(Koti.greeting(at: Date(timeIntervalSince1970: 0), firstName: " Liisa ", timeZone: utc) == "Hyvää yötä, Liisa")
+}
+
+// MARK: ALV-ilmoitus before the account existed
+
+@Test func vatReturnBeforeTheAccountIsNotAsked() {
+    // Opened in October: August's return (due 12.10.) is not this account's to file.
+    #expect(Koti.vatDue(registered: true, atCurrentMonth: true, month: "2026-10", today: "2026-10-03", kind: "month",
+                        accountCreatedMonth: "2026-10") == nil)
+    #expect(Koti.vatDue(registered: true, atCurrentMonth: true, month: "2026-10", today: "2026-10-03", kind: "month",
+                        accountCreatedMonth: "2026-09") == nil)
+    // Opened in August: the August return is the owner's.
+    #expect(Koti.vatDue(registered: true, atCurrentMonth: true, month: "2026-10", today: "2026-10-03", kind: "month",
+                        accountCreatedMonth: "2026-08")?.key == "2026-08")
+    // Opened inside the quarter: Q3 (ends in September) is the owner's.
+    #expect(Koti.vatDue(registered: true, atCurrentMonth: true, month: "2026-10", today: "2026-10-03", kind: "quarter",
+                        accountCreatedMonth: "2026-08")?.key == "2026-Q3")
+    #expect(Koti.vatDue(registered: true, atCurrentMonth: true, month: "2026-10", today: "2026-10-03", kind: "quarter",
+                        accountCreatedMonth: "2026-10") == nil)
+    // A past month before the account: nothing.
+    #expect(Koti.vatDue(registered: true, atCurrentMonth: false, month: "2026-08", today: "2026-10-03", kind: "month",
+                        accountCreatedMonth: "2026-10") == nil)
+    // Without the field (an older server): as before.
+    #expect(Koti.vatDue(registered: true, atCurrentMonth: true, month: "2026-10", today: "2026-10-03", kind: "month")?.key == "2026-08")
+}
+
+@Test func dashboardReadsTheAccountMonth() throws {
+    #expect(try dashboard(#""accountCreatedMonth":"2026-10""#).accountCreatedMonth == "2026-10")
+    #expect(try dashboard("").accountCreatedMonth == nil)
+    #expect(try dashboard(#""accountCreatedMonth":null"#).accountCreatedMonth == nil)
+}

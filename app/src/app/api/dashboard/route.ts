@@ -123,6 +123,7 @@ export async function GET(req: NextRequest) {
       businessName: true,
       businessId: true,
       invoiceIban: true,
+      createdAt: true,
       imapAccounts: { select: { id: true }, take: 1 },
     },
   });
@@ -379,6 +380,9 @@ export async function GET(req: NextRequest) {
     blockingTotal: koti?.blockingTotal ?? null,
     previousMonth,
     setup,
+    // The Helsinki month the account was opened: Koti does not ask for a VAT
+    // return of a period that ended before the account existed.
+    accountCreatedMonth: user?.createdAt ? helsinkiMonthKey(user.createdAt) : null,
     isSingleVatProfile: vatProfile.isSingleRate && vatProfile.isVatRegistered,
     singleVatRate: vatProfile.defaultSalesRate,
     ...(Object.keys(sectionErrors).length > 0 ? { sectionErrors } : {}),

@@ -129,13 +129,17 @@ extension Koti {
     public static let vatDueTitle = "ALV-ilmoitus"
 
     /// The return the status card names: the next one due on the current month; on a past month
-    /// the period that month closes (none for a quarterly filer's July).
-    public static func vatDue(registered: Bool, atCurrentMonth: Bool, month: String, today: String, kind: String?) -> KotiVatDue? {
+    /// the period that month closes (none for a quarterly filer's July). A period that ended
+    /// before the account was opened (`accountCreatedMonth`) is not the owner's to file here.
+    public static func vatDue(registered: Bool, atCurrentMonth: Bool, month: String, today: String, kind: String?,
+                              accountCreatedMonth: String? = nil) -> KotiVatDue? {
         guard registered else { return nil }
         let key = atCurrentMonth
             ? VatDue.nextDueKey(today: today, kind: VatKind(profile: kind))
             : PeriodClose.vatPeriodEnding(in: month, kind: VatKind(profile: kind).rawValue)
-        return key.flatMap(KotiVatDue.init(key:))
+        guard let due = key.flatMap(KotiVatDue.init(key:)) else { return nil }
+        if let created = accountCreatedMonth, due.lastMonth < created { return nil }
+        return due
     }
 
     /// "Elokuu 2026 · eräpäivä 12.10. · Ilmoittamatta"; without figures the state is left out.

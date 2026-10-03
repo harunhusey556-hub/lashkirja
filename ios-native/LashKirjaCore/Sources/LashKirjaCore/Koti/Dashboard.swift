@@ -27,6 +27,8 @@ public struct Dashboard: Decodable, Sendable {
     public let blockingTotal: Int?
     public let previousMonth: PreviousMonth?
     public let setup: Setup?
+    /// "2026-10": the Helsinki month the account was opened (VAT returns before it are not asked for).
+    public let accountCreatedMonth: String?
     public let sectionErrors: [String: String]?
 
     public struct Matching: Decodable, Sendable { public let matchable: Int; public let matched: Int; public let suggested: Int }
@@ -112,7 +114,7 @@ public struct Dashboard: Decodable, Sendable {
     enum CodingKeys: String, CodingKey {
         case firstName, month, income, expenses, source, txCount, receiptCount, invoiceCount, pendingReceiptsCount
         case matching, events, handled, estimatedVat, isRefund, vat, hasImap, bank, bankTrend, cashflow
-        case receivables, payables, items, blockingTotal, previousMonth, setup, sectionErrors
+        case receivables, payables, items, blockingTotal, previousMonth, setup, accountCreatedMonth, sectionErrors
     }
 
     public init(from decoder: Decoder) throws {
@@ -142,6 +144,7 @@ public struct Dashboard: Decodable, Sendable {
         blockingTotal = try c.decodeIfPresent(Int.self, forKey: .blockingTotal)
         previousMonth = try c.decodeIfPresent(PreviousMonth.self, forKey: .previousMonth)
         setup = try c.decodeIfPresent(Setup.self, forKey: .setup)
+        accountCreatedMonth = try c.decodeIfPresent(String.self, forKey: .accountCreatedMonth)
         sectionErrors = try c.decodeIfPresent([String: String].self, forKey: .sectionErrors)
     }
 }
