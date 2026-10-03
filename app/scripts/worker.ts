@@ -4,6 +4,7 @@ import { listSyncableImapAccounts, syncImapAccount } from "../src/lib/mail-sync"
 import { drainPendingDocumentJobs } from "../src/lib/document-jobs";
 import { runDueRecurringPurchases } from "../src/lib/recurring-purchases";
 import { runMatchReviewCycle } from "../src/lib/match-review-run";
+import { formatReconcileSummary, reconcileEnabled, reconcilePosPayments } from "../src/lib/pos-payments";
 
 const SYNC_INTERVAL_MS = 10 * 60 * 1000; // 10 minutes
 
@@ -45,6 +46,23 @@ async function runMatchReview() {
   }
 }
 
+/**
+ * Korttimaksut: a backup for card payments the app and the Stripe webhook
+ * missed. It only reads from Stripe and books through the same once-only path.
+ * Off with POS_RECONCILE=off; a no-op without STRIPE_SECRET_KEY.
+ */
+async function runPosReconcile() {
+  if (!reconcileEnabled()) return;
+  try {
+    const result = await reconcilePosPayments();
+    if (result.checked > 0 || result.errors > 0) {
+      console.log(`[${new Date().toISOString()}] ${formatReconcileSummary(result)}`);
+    }
+  } catch (error) {
+    console.error(`[${new Date().toISOString()}] POS reconcile cycle failed`, error instanceof Error ? error.name : "error");
+  }
+}
+
 async function runSyncCycle() {
   console.log(`[${new Date().toISOString()}] Starting background email sync cycle...`);
   try {
@@ -80,6 +98,7 @@ async function main() {
     console.error(`[${new Date().toISOString()}] Document jobs failed`, error)
   );
   await runMatchReview();
+  await runPosReconcile();
 
   // Schedule loop. Bank sync itself stays on a 6h gate inside syncDueBankConnections.
   setInterval(async () => {
@@ -90,6 +109,7 @@ async function main() {
       console.error(`[${new Date().toISOString()}] Document jobs failed`, error)
     );
     await runMatchReview();
+    await runPosReconcile();
   }, SYNC_INTERVAL_MS);
 }
 

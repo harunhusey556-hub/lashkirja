@@ -879,3 +879,171 @@ export async function handleStripeEvent(event: StripeEvent): Promise<void> {
       return;
   }
 }
+
+// ---------------------------------------------------------------------------
+// Reconcile (worker): the safety net for what the app and the webhook missed
+// ---------------------------------------------------------------------------
+
+/** Not settled yet: Stripe may still have moved the money. "failed" can still succeed on a retried tap. */
+const RECONCILE_STATUSES: PosPaymentStatus[] = ["created", "processing", "failed"];
+
+export const RECONCILE_DEFAULTS = {
+  /** Younger payments are still in the app's own hands (finalize, webhook). */
+  minAgeMs: 10 * 60_000,
+  /** Older ones are left alone; a payment that old is support's to look at. */
+  maxAgeMs: 7 * 24 * 60 * 60_000,
+  /** Stripe reads per cycle, all owners together. */
+  maxReads: 20,
+  /** Stripe reads per cycle for one owner. */
+  maxReadsPerOwner: 5,
+  /** Reads in flight at once. */
+  concurrency: 4,
+  /** No new read starts after this; reads already started finish (each has Stripe's own 20 s timeout). */
+  deadlineMs: 60_000,
+} as const;
+
+export type ReconcileOptions = Partial<Record<keyof typeof RECONCILE_DEFAULTS, number>> & { now?: Date };
+
+export interface ReconcileSummary {
+  /** POS_RECONCILE=off or no Stripe key: nothing was read. */
+  disabled: boolean;
+  owners: number;
+  checked: number;
+  succeeded: number;
+  /** Succeeded and an invoice payment exists for it (booked now or earlier). */
+  booked: number;
+  /** Succeeded at Stripe in test mode: never booked. */
+  testPayments: number;
+  canceled: number;
+  failed: number;
+  /** Still processing or waiting for a card at Stripe: left as is. */
+  pending: number;
+  errors: number;
+  /** Left for the next cycle because the deadline passed. */
+  skipped: number;
+}
+
+export function reconcileEnabled(): boolean {
+  const flag = process.env.POS_RECONCILE?.trim().toLowerCase();
+  if (flag === "off" || flag === "false" || flag === "0") return false;
+  return stripeConfigured();
+}
+
+/**
+ * Finds card payments that are 10 minutes to 7 days old and not settled, asks
+ * Stripe about each (on the owner's connected account) and applies the answer
+ * through applyIntent, the very path finalize and the webhook use: a succeeded
+ * payment is booked once (a test payment never), a canceled one is marked
+ * canceled, anything else is left as finalize would leave it. It only reads
+ * from Stripe: it never creates, confirms or cancels a PaymentIntent.
+ */
+export async function reconcilePosPayments(options: ReconcileOptions = {}): Promise<ReconcileSummary> {
+  const summary: ReconcileSummary = {
+    disabled: false,
+    owners: 0,
+    checked: 0,
+    succeeded: 0,
+    booked: 0,
+    testPayments: 0,
+    canceled: 0,
+    failed: 0,
+    pending: 0,
+    errors: 0,
+    skipped: 0,
+  };
+  if (!reconcileEnabled()) return { ...summary, disabled: true };
+
+  const limits = { ...RECONCILE_DEFAULTS, ...options };
+  const now = options.now ?? new Date();
+  const where = {
+    status: { in: RECONCILE_STATUSES },
+    succeededAt: null,
+    createdAt: { gte: new Date(now.getTime() - limits.maxAgeMs), lte: new Date(now.getTime() - limits.minAgeMs) },
+    user: { stripeAccountId: { not: null } },
+  };
+
+  // Owners with the oldest waiting payment first; no more owners than reads.
+  const owners = await prisma.posPayment.groupBy({
+    by: ["userId"],
+    where,
+    _min: { createdAt: true },
+    orderBy: { _min: { createdAt: "asc" } },
+    take: limits.maxReads,
+  });
+  const picked: Array<{ id: string; userId: string; account: string; reconciledAt: Date | null; createdAt: Date }> = [];
+  for (const owner of owners) {
+    const rows = await prisma.posPayment.findMany({
+      where: { ...where, userId: owner.userId },
+      // Never-checked first (oldest first), then the least recently checked.
+      orderBy: [{ reconciledAt: { sort: "asc", nulls: "first" } }, { createdAt: "asc" }],
+      take: limits.maxReadsPerOwner,
+      select: { id: true, userId: true, reconciledAt: true, createdAt: true, user: { select: { stripeAccountId: true } } },
+    });
+    for (const row of rows) {
+      if (row.user.stripeAccountId) picked.push({ ...row, account: row.user.stripeAccountId });
+    }
+  }
+  picked.sort(
+    (a, b) =>
+      (a.reconciledAt?.getTime() ?? 0) - (b.reconciledAt?.getTime() ?? 0) || a.createdAt.getTime() - b.createdAt.getTime()
+  );
+  const queue = picked.slice(0, limits.maxReads);
+  summary.owners = new Set(queue.map((row) => row.userId)).size;
+
+  const deadline = Date.now() + limits.deadlineMs;
+  const reconcileOne = async (item: (typeof queue)[number]) => {
+    summary.checked += 1;
+    try {
+      await prisma.posPayment.update({ where: { id: item.id }, data: { reconciledAt: new Date() } });
+      const pos = await prisma.posPayment.findUniqueOrThrow({ where: { id: item.id } });
+      const intent = await retrievePaymentIntent(item.account, pos.providerPaymentIntentId);
+      const status = await applyIntent(pos, intent);
+      const after = await prisma.posPayment.findUniqueOrThrow({
+        where: { id: item.id },
+        select: { status: true, livemode: true, invoicePayment: { select: { id: true } } },
+      });
+      if (status === "succeeded") {
+        summary.succeeded += 1;
+        if (after.invoicePayment) summary.booked += 1;
+        else if (!isLivePayment(after.livemode)) summary.testPayments += 1;
+      } else if (after.status === "canceled") {
+        summary.canceled += 1;
+      } else if (after.status === "failed") {
+        summary.failed += 1;
+      } else {
+        summary.pending += 1;
+      }
+    } catch (error) {
+      summary.errors += 1;
+      // Classification only: no ids from Stripe, no card data, no key.
+      const code = error instanceof AppError ? error.code : error instanceof Error ? error.name : "error";
+      console.warn("[pos reconcile] payment not reconciled", item.id, code);
+    }
+  };
+
+  let next = 0;
+  const lane = async () => {
+    while (next < queue.length) {
+      if (Date.now() > deadline) {
+        summary.skipped += queue.length - next;
+        next = queue.length;
+        return;
+      }
+      const item = queue[next];
+      next += 1;
+      await reconcileOne(item);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.max(1, Math.min(limits.concurrency, queue.length)) }, lane));
+  return summary;
+}
+
+/** One log line: counts only. */
+export function formatReconcileSummary(summary: ReconcileSummary): string {
+  if (summary.disabled) return "POS reconcile disabled";
+  return (
+    `POS reconcile owners=${summary.owners} checked=${summary.checked} succeeded=${summary.succeeded} ` +
+    `booked=${summary.booked} test=${summary.testPayments} canceled=${summary.canceled} failed=${summary.failed} ` +
+    `pending=${summary.pending} errors=${summary.errors} skipped=${summary.skipped}`
+  );
+}

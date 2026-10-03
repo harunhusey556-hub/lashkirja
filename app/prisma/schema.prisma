@@ -709,10 +709,13 @@ model PosPayment {
   /// transaction that books the InvoicePayment.
   succeededAt             DateTime?
   refundedAt              DateTime?
+  /// Last time the worker's reconcile asked Stripe about this payment.
+  reconciledAt            DateTime?
   invoicePayment          InvoicePayment?
 
   @@index([userId, createdAt])
   @@index([invoiceId])
+  @@index([status, createdAt])
 }
 
 // A supplier invoice the user owes. Deliberately a payables tracker only: the

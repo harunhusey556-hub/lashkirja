@@ -872,6 +872,178 @@ describe("test mode: a Stripe test payment never reaches the books", () => {
   });
 });
 
+describe("reconcile: the worker's safety net for payments the app and webhook missed", () => {
+  const MINUTE = 60_000;
+  const DAY = 24 * 60 * MINUTE;
+
+  async function reconcile(options: Record<string, number> = {}) {
+    const { reconcilePosPayments } = await import("@/lib/pos-payments");
+    return reconcilePosPayments(options);
+  }
+
+  /** A started card payment, back-dated as if the app went away after the tap. */
+  async function strandedPayment(amount = 10, ageMs = 30 * MINUTE, key?: string) {
+    const invoice = await invoiceInState();
+    const { payment } = await readJson(await startPayment(invoice.id, amount, key ?? `st-${invoice.id}`));
+    await prisma.posPayment.update({
+      where: { id: payment.id },
+      data: { createdAt: new Date(Date.now() - ageMs), status: "processing" },
+    });
+    return { invoice, payment };
+  }
+
+  const reads = () => stripe.callsTo("GET", "/v1/payment_intents/");
+
+  it("books an old payment that succeeded at Stripe, once, through the finalize path", async () => {
+    await connectReadyAccount();
+    const { invoice, payment } = await strandedPayment(125.5);
+    stripe.setIntent(payment.paymentIntentId, "succeeded");
+    const first = await reconcile();
+    expect(first).toMatchObject({ checked: 1, succeeded: 1, booked: 1, testPayments: 0, errors: 0 });
+    const rows = await invoicePayments(invoice.id);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ source: "stripe_terminal", posPaymentId: payment.id, amountCents: 12_550 });
+    expect((await openInvoice(invoice.id)).status).toBe("paid");
+    expect(reads()[0].headers.get("stripe-account")).toMatch(/^acct_/);
+
+    // The next cycle does not even ask again: the payment is settled.
+    const second = await reconcile();
+    expect(second.checked).toBe(0);
+    expect(await invoicePayments(invoice.id)).toHaveLength(1);
+    expect((await finalizeReq(payment.id)).status).toBe(200);
+    expect(await invoicePayments(invoice.id)).toHaveLength(1);
+  });
+
+  it("a test-mode payment is marked succeeded but never booked", async () => {
+    process.env.STRIPE_SECRET_KEY = TEST_KEY;
+    await connectReadyAccount();
+    const { invoice, payment } = await strandedPayment(125.5);
+    stripe.setIntent(payment.paymentIntentId, "succeeded");
+    expect(await reconcile()).toMatchObject({ checked: 1, succeeded: 1, booked: 0, testPayments: 1 });
+    expect((await prisma.posPayment.findUniqueOrThrow({ where: { id: payment.id } })).status).toBe("succeeded");
+    expect(await invoicePayments(invoice.id)).toHaveLength(0);
+    expect((await openInvoice(invoice.id)).status).toBe("sent");
+  });
+
+  it("skips payments younger than 10 minutes and older than 7 days", async () => {
+    await connectReadyAccount();
+    const young = await strandedPayment(10, 2 * MINUTE);
+    const old = await strandedPayment(10, 8 * DAY);
+    stripe.setIntent(young.payment.paymentIntentId, "succeeded");
+    stripe.setIntent(old.payment.paymentIntentId, "succeeded");
+    expect(await reconcile()).toMatchObject({ checked: 0 });
+    expect(reads()).toHaveLength(0);
+    expect(await invoicePayments(young.invoice.id)).toHaveLength(0);
+    expect(await invoicePayments(old.invoice.id)).toHaveLength(0);
+  });
+
+  it("respects the per-cycle cap and the per-owner cap, oldest first", async () => {
+    await connectReadyAccount();
+    const stranded = [];
+    for (let index = 0; index < 7; index += 1) {
+      stranded.push(await strandedPayment(10, (60 - index) * MINUTE));
+    }
+    for (const { payment } of stranded) stripe.setIntent(payment.paymentIntentId, "succeeded");
+
+    const capped = await reconcile({ maxReads: 3 });
+    expect(capped.checked).toBe(3);
+    expect(reads()).toHaveLength(3);
+    // Oldest first: the three oldest are the first three created.
+    for (const { invoice } of stranded.slice(0, 3)) expect(await invoicePayments(invoice.id)).toHaveLength(1);
+    for (const { invoice } of stranded.slice(3)) expect(await invoicePayments(invoice.id)).toHaveLength(0);
+
+    const perOwner = await reconcile({ maxReads: 20, maxReadsPerOwner: 2 });
+    expect(perOwner.checked).toBe(2);
+    const defaults = await reconcile();
+    expect(defaults.checked).toBe(2);
+    expect(reads()).toHaveLength(7);
+  });
+
+  it("the default caps are 20 per cycle and 5 per owner", async () => {
+    await connectReadyAccount();
+    for (let index = 0; index < 6; index += 1) {
+      const { payment } = await strandedPayment(10, (30 + index) * MINUTE);
+      stripe.setIntent(payment.paymentIntentId, "processing");
+    }
+    expect((await reconcile()).checked).toBe(5);
+  });
+
+  it("racing finalize books exactly one invoice payment", async () => {
+    await connectReadyAccount();
+    const { invoice, payment } = await strandedPayment(125.5);
+    stripe.setIntent(payment.paymentIntentId, "succeeded");
+    const [summary, finalized] = await Promise.all([reconcile(), finalizeReq(payment.id), reconcile()]);
+    expect(finalized.status).toBe(200);
+    expect(summary.errors).toBe(0);
+    expect(await invoicePayments(invoice.id)).toHaveLength(1);
+    expect(await prisma.invoiceActivity.count({ where: { invoiceId: invoice.id, kind: "payment_added" } })).toBe(1);
+  });
+
+  it("marks a payment canceled at Stripe canceled, and leaves one still processing", async () => {
+    await connectReadyAccount();
+    const canceled = await strandedPayment(10);
+    const processing = await strandedPayment(10);
+    stripe.setIntent(canceled.payment.paymentIntentId, "canceled");
+    stripe.setIntent(processing.payment.paymentIntentId, "processing");
+    expect(await reconcile()).toMatchObject({ checked: 2, canceled: 1, pending: 1, booked: 0 });
+    expect((await prisma.posPayment.findUniqueOrThrow({ where: { id: canceled.payment.id } })).status).toBe("canceled");
+    expect((await prisma.posPayment.findUniqueOrThrow({ where: { id: processing.payment.id } })).status).toBe("processing");
+    // It never cancels, creates or confirms anything at Stripe.
+    expect(stripe.calls.filter((call) => call.method === "POST" && call.path.startsWith("/v1/payment_intents"))).toHaveLength(2);
+  });
+
+  it("a Stripe error on one payment does not stop the others", async () => {
+    await connectReadyAccount();
+    const stranded = [await strandedPayment(10), await strandedPayment(10), await strandedPayment(10)];
+    for (const { payment } of stranded) stripe.setIntent(payment.paymentIntentId, "succeeded");
+    stripe.failNext(500, { type: "api_error", message: "boom" });
+    const summary = await reconcile();
+    expect(summary).toMatchObject({ checked: 3, errors: 1, booked: 2 });
+    let booked = 0;
+    for (const { invoice } of stranded) booked += (await invoicePayments(invoice.id)).length;
+    expect(booked).toBe(2);
+  });
+
+  it("skips owners whose Stripe account is no longer connected", async () => {
+    await connectReadyAccount();
+    const { payment } = await strandedPayment(10);
+    stripe.setIntent(payment.paymentIntentId, "succeeded");
+    await prisma.user.update({ where: { id: user.id }, data: { stripeAccountId: null } });
+    expect((await reconcile()).checked).toBe(0);
+    expect(reads()).toHaveLength(0);
+  });
+
+  it("does nothing without a Stripe key or with POS_RECONCILE=off", async () => {
+    await connectReadyAccount();
+    const { payment } = await strandedPayment(10);
+    stripe.setIntent(payment.paymentIntentId, "succeeded");
+    const before = stripe.calls.length;
+    try {
+      process.env.POS_RECONCILE = "off";
+      expect(await reconcile()).toMatchObject({ checked: 0, disabled: true });
+      delete process.env.POS_RECONCILE;
+      delete process.env.STRIPE_SECRET_KEY;
+      expect(await reconcile()).toMatchObject({ checked: 0, disabled: true });
+    } finally {
+      delete process.env.POS_RECONCILE;
+    }
+    expect(stripe.calls.length).toBe(before);
+  });
+
+  it("logs one summary line without secrets or card data", async () => {
+    await connectReadyAccount();
+    const { payment } = await strandedPayment(10);
+    stripe.setIntent(payment.paymentIntentId, "succeeded");
+    const { formatReconcileSummary } = await import("@/lib/pos-payments");
+    const line = formatReconcileSummary(await reconcile());
+    expect(line).toMatch(/checked=1 .*booked=1/);
+    expect(line).not.toContain("4242");
+    expect(line).not.toContain(SECRET_KEY);
+    expect(line).not.toContain(payment.paymentIntentId);
+    expect(line.split("\n")).toHaveLength(1);
+  });
+});
+
 describe("account data", () => {
   it("the data copy carries korttimaksut.json", async () => {
     await connectReadyAccount();
