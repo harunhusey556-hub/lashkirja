@@ -580,8 +580,62 @@ describe("refund", () => {
     return { invoice, payment };
   }
 
-  const refundReq = (id: string, body: Record<string, unknown> = {}) =>
-    refund(buildRequest("POST", `/api/pos/payments/${id}/refund`, body, { cookie }), routeContext({ id }));
+  let refundKeys = 0;
+  const refundReq = (id: string, body: Record<string, unknown> = {}, key: string | null = `refund-${++refundKeys}`) =>
+    refund(
+      buildRequest("POST", `/api/pos/payments/${id}/refund`, body, {
+        cookie,
+        headers: key ? { "idempotency-key": key } : {},
+      }),
+      routeContext({ id })
+    );
+
+  it("needs an Idempotency-Key, so a retried refund can never be a second one", async () => {
+    const { payment } = await bookedPayment();
+    expect((await refundReq(payment.id, { amount: 10 }, null)).status).toBe(400);
+    expect(stripe.callsTo("POST", "/v1/refunds")).toHaveLength(0);
+  });
+
+  it("a retry with the same key after the refund was booked refunds nothing more", async () => {
+    const { invoice, payment } = await bookedPayment();
+    expect((await refundReq(payment.id, { amount: 25.5 }, "same-key")).status).toBe(200);
+    const again = await refundReq(payment.id, { amount: 25.5 }, "same-key");
+    expect(again.status).toBe(200);
+    expect((await readJson(again)).payment).toMatchObject({ refunded: 25.5 });
+    expect(stripe.callsTo("POST", "/v1/refunds")).toHaveLength(1);
+    expect((await invoicePayments(invoice.id))[0].amountCents).toBe(10_000);
+  });
+
+  it("a refund whose answer was lost is not repeated after a webhook moved the total", async () => {
+    const { invoice, payment } = await bookedPayment();
+    // The first try reaches Stripe, but the answer never reaches the server: nothing is stored.
+    const pos = await prisma.posPayment.findUniqueOrThrow({ where: { id: payment.id } });
+    const account = (await prisma.user.findUniqueOrThrow({ where: { id: user.id } })).stripeAccountId!;
+    const { refundPosPayment } = await import("@/lib/pos-payments");
+    await refundPosPayment(user.id, payment.id, 25.5, "lost-answer");
+    await prisma.posPayment.update({ where: { id: pos.id }, data: { refundedCents: pos.refundedCents, status: pos.status } });
+    // Meanwhile Stripe's charge.refunded books the 25,50 € that really went out.
+    const intent = stripe.intents.get(payment.paymentIntentId)!;
+    const charge = stripe.charges.get(intent.latest_charge!)!;
+    const event = { id: "evt_lost", object: "event", type: "charge.refunded", account, data: { object: charge } };
+    expect((await webhook(webhookRequest(event))).status).toBe(200);
+    // The app retries with the same key: Stripe answers the same refund, the total stays 25,50 €.
+    const retry = await refundReq(payment.id, { amount: 25.5 }, "lost-answer");
+    expect(retry.status).toBe(200);
+    expect(new Set(stripe.callsTo("POST", "/v1/refunds").map((c) => c.headers.get("idempotency-key"))).size).toBe(1);
+    expect(stripe.charges.get(intent.latest_charge!)!.amount_refunded).toBe(2_550);
+    expect((await prisma.posPayment.findUniqueOrThrow({ where: { id: payment.id } })).refundedCents).toBe(2_550);
+    expect((await invoicePayments(invoice.id))[0].amountCents).toBe(10_000);
+  });
+
+  it("books the refunded total Stripe reports, not a sum kept by the server", async () => {
+    const { payment } = await bookedPayment();
+    // A Dashboard refund the server has not heard of yet.
+    const intent = stripe.intents.get(payment.paymentIntentId)!;
+    stripe.charges.get(intent.latest_charge!)!.amount_refunded = 1_000;
+    const body = await readJson(await refundReq(payment.id, { amount: 25.5 }));
+    expect(body.payment.refunded).toBe(35.5);
+  });
 
   it("a partial refund reduces the invoice payment and reopens the invoice", async () => {
     const { invoice, payment } = await bookedPayment();

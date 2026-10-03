@@ -706,13 +706,22 @@ async function applyRefundTotal(
 }
 
 /** Refunds (part of) a booked card payment on the connected account. */
+/**
+ * Refunds (part of) a card payment. `idempotencyKey` is the client's key for this refund: it goes
+ * to Stripe as is, so a retry after a lost answer is the same refund there and never a second one,
+ * whatever the server's own total did in between (a charge.refunded webhook, say). The total booked
+ * is what Stripe reports as refunded on the charge, not a sum the server keeps.
+ */
 export async function refundPosPayment(
   userId: string,
   id: string,
-  amount: number | null | undefined
+  amount: number | null | undefined,
+  idempotencyKey: string
 ): Promise<FinalizedPayment> {
   assertPosFeatureOn();
   const pos = await requirePosPayment(userId, id);
+  // A full refund retried after it went through: nothing is left, and that is the answer.
+  if (amount == null && pos.status === "refunded") return viewWithInvoice(userId, id);
   if (!pos.succeededAt || !(pos.status === "succeeded" || pos.status === "partially_refunded")) {
     throw new ConflictError("Vain onnistuneen korttimaksun voi palauttaa.", "POS_NOT_REFUNDABLE");
   }
@@ -730,17 +739,22 @@ export async function refundPosPayment(
   const booked = await prisma.invoicePayment.findUnique({ where: { posPaymentId: pos.id }, select: { paidDate: true } });
   if (booked) await assertPeriodOpen(userId, [booked.paidDate]);
 
+  const account = await accountFor(userId);
   const refund = await createRefund(
-    await accountFor(userId),
+    account,
     { paymentIntent: pos.providerPaymentIntentId, amountCents: cents, metadata: { posPaymentId: pos.id, userId } },
-    // Same refund asked again (a retry after a lost answer) -> the same refund at Stripe.
-    `lashkirja:pos-refund:${pos.id}:${pos.refundedCents}:${cents}`
+    `lashkirja:pos-refund:${userId}:${pos.id}:${idempotencyKey}`
   );
   if (refund.status === "failed" || refund.status === "canceled") {
     throw new AppError("Palautus epäonnistui. Yritä uudelleen.", "POS_REFUND_FAILED", 502);
   }
+  const intent = await retrievePaymentIntent(account, pos.providerPaymentIntentId);
+  const charge = intent.latest_charge;
+  if (!charge || typeof charge === "string" || typeof charge.amount_refunded !== "number") {
+    throw new AppError("Palautuksen tilaa ei saatu Stripestä. Yritä uudelleen.", "POS_REFUND_UNKNOWN", 502);
+  }
   await prisma.$transaction((tx) =>
-    applyRefundTotal(tx, pos.id, pos.refundedCents + refund.amount, { allowLockedMonth: false })
+    applyRefundTotal(tx, pos.id, charge.amount_refunded, { allowLockedMonth: false })
   );
   return viewWithInvoice(userId, id);
 }

@@ -1139,14 +1139,16 @@ export async function applyInvoicePayment(
   if (input.transactionId) {
     const transaction = await conn.transaction.findFirst({
       where: { id: input.transactionId, statement: { userId } },
-      select: { id: true },
+      select: { id: true, purchasePayment: { select: { id: true } } },
     });
     if (!transaction) throw new NotFoundError("Tapahtumaa ei löytynyt.");
     const taken = await conn.invoicePayment.findUnique({
       where: { transactionId: input.transactionId },
       select: { invoiceId: true },
     });
-    if (taken) {
+    // One bank row pays one invoice: a row already paying a purchase invoice is spoken for too
+    // (the purchase side refuses a row paying a sales invoice the same way).
+    if (taken || transaction.purchasePayment) {
       throw new AppError(
         "Tämä pankkitapahtuma on jo kohdistettu laskulle.",
         "TRANSACTION_ALREADY_USED",
@@ -1335,11 +1337,12 @@ export async function linkPaymentToTransaction(
       type: true,
       amountCents: true,
       invoicePayment: { select: { id: true } },
+      purchasePayment: { select: { id: true } },
       receipt: { select: { date: true } },
     },
   });
   if (!row) throw new NotFoundError("Tapahtumaa ei löytynyt.");
-  if (row.invoicePayment) {
+  if (row.invoicePayment || row.purchasePayment) {
     throw new AppError(
       "Tämä pankkitapahtuma on jo kohdistettu laskulle.",
       "TRANSACTION_ALREADY_USED",

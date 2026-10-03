@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { prisma } from "@/lib/db";
+import { POST as addSalesPayment } from "@/app/api/invoices/[id]/payments/route";
 import { POST as createPurchase } from "@/app/api/purchase-invoices/route";
 import {
   DELETE as deletePurchasePayment,
@@ -452,5 +453,57 @@ describe("purchase match suggestions", () => {
     );
     expect(response.status).toBe(404);
     expect(await prisma.automationEvent.count()).toBe(0);
+  });
+});
+
+describe("one bank row pays one invoice, sales or purchase", () => {
+  async function sentSalesInvoice() {
+    const customer = await prisma.customer.create({ data: { userId: user.id, name: "Anna Asiakas" } });
+    return prisma.salesInvoice.create({
+      data: {
+        userId: user.id,
+        customerId: customer.id,
+        number: 900 + Math.floor(Math.random() * 1000),
+        reference: "1232",
+        issueDate: new Date("2026-01-10T00:00:00Z"),
+        dueDate: new Date("2026-01-24T00:00:00Z"),
+        status: "sent",
+        grossCents: 124_00,
+        netCents: 98_80,
+        vatCents: 25_20,
+      },
+    });
+  }
+
+  async function paySales(invoiceId: string, transactionId: string) {
+    const response = await addSalesPayment(
+      buildRequest("POST", `/api/invoices/${invoiceId}/payments`, { amount: 124, paidDate: "2026-01-25", transactionId }, { cookie }),
+      routeContext({ id: invoiceId })
+    );
+    return { status: response.status, body: await readJson(response) };
+  }
+
+  it("a row that paid a purchase invoice cannot also pay a sales invoice", async () => {
+    const purchase = await makePurchase();
+    const sales = await sentSalesInvoice();
+    const [row] = await bankRows(user, [{ amountCents: -124_00 }]);
+    expect((await link(purchase.id, { amount: 124, paidDate: "2026-01-25", transactionId: row.id })).status).toBe(201);
+
+    const result = await paySales(sales.id, row.id);
+    expect(result.status).toBe(409);
+    expect(result.body.error.code).toBe("TRANSACTION_ALREADY_USED");
+    expect(await prisma.invoicePayment.count({ where: { invoiceId: sales.id } })).toBe(0);
+  });
+
+  it("a row that paid a sales invoice cannot also pay a purchase invoice", async () => {
+    const purchase = await makePurchase();
+    const sales = await sentSalesInvoice();
+    const [row] = await bankRows(user, [{ amountCents: -124_00 }]);
+    expect((await paySales(sales.id, row.id)).status).toBe(201);
+
+    const result = await link(purchase.id, { amount: 124, paidDate: "2026-01-25", transactionId: row.id });
+    expect(result.status).toBe(409);
+    expect(result.body.error.code).toBe("TRANSACTION_ALREADY_USED");
+    expect(await prisma.purchasePayment.count({ where: { purchaseInvoiceId: purchase.id } })).toBe(0);
   });
 });
