@@ -2,7 +2,8 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    # native is the branch that ships; its server and web tests run on every push too.
+    branches: [main, native]
   pull_request:
 
 # Cancel superseded runs on the same ref.

@@ -36,7 +36,10 @@ test("login lands on the dashboard and the tab bar navigates", async ({ page }) 
   await login(page);
 
   await expect(page.getByRole("heading", { name: MONTH_HEADING })).toBeVisible();
-  await expect(page.getByText("Tulot", { exact: true })).toBeVisible();
+  // The income card (KotiMoneyCards, v0.9.0) is titled "Myynti <kuukausi>";
+  // "Tulot" stays in its link's accessible name.
+  await expect(page.getByRole("link", { name: /^Tulot .*, avaa$/ })).toBeVisible();
+  await expect(page.getByText(/^Myynti (tammi|helmi|maalis|huhti|touko|kesä|heinä|elo|syys|loka|marras|joulu)kuu$/)).toBeVisible();
 
   const nav = page.getByRole("navigation", { name: "Päävalikko" });
   await expect(nav.getByRole("link", { name: "Muut" })).toHaveCount(0);
@@ -295,8 +298,12 @@ test("privacy request status is visible and the lock PIN is masked", async ({ pa
   expect(requested.ok()).toBe(true);
 
   await page.goto("/asetukset/tietosuoja");
-  await expect(page.getByText("Tietojen kopio")).toBeVisible();
-  await expect(page.getByText("Odottaa")).toBeVisible();
+  // The request row, not the page's "Tietojen kopio sisältää ..." paragraph
+  // (F57): a bare getByText matches both once the list has loaded. first():
+  // a CI retry adds another pending request on the same server.
+  const request = page.getByRole("listitem").filter({ hasText: /^Tietojen kopio/ }).first();
+  await expect(request).toBeVisible();
+  await expect(request.getByText("Odottaa", { exact: true })).toBeVisible();
 
   await page.goto("/asetukset/turvallisuus/lukitus");
   await expect(page.locator("#lockPin")).toHaveAttribute("type", "password");
