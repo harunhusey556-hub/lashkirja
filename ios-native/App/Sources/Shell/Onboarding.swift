@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 import Observation
 import LashKirjaCore
 
@@ -44,16 +45,20 @@ final class OnboardingGate {
     /// Koti's "Viimeistele yritysprofiili" card: the questions open where they were left.
     func resume() { isPresented = true }
 
-    /// "Ohita nyt": nothing is saved on the server; the answers so far wait as a draft.
-    func snooze(_ answers: OnboardingAnswers) {
+    /// "Ohita nyt": nothing is saved on the server; the conversation so far waits as a draft.
+    func snooze(_ flow: OnboardingFlow) {
         if let userId {
             UserDefaults.standard.set(OnboardingSnooze.until(now: Date()), forKey: OnboardingSnooze.key(userId: userId))
-            if let data = try? JSONEncoder().encode(answers) {
-                UserDefaults.standard.set(data, forKey: OnboardingSnooze.draftKey(userId: userId))
-            }
         }
+        keepDraft(flow)
         isSnoozed = true
         isPresented = false
+    }
+
+    /// After each answer, so an app kill reopens the conversation where it was (saveOnboardingDraft).
+    func keepDraft(_ flow: OnboardingFlow) {
+        guard let userId, let data = try? JSONEncoder().encode(flow) else { return }
+        UserDefaults.standard.set(data, forKey: OnboardingSnooze.draftKey(userId: userId))
     }
 
     func completed() {
@@ -65,112 +70,251 @@ final class OnboardingGate {
         isPresented = false
     }
 
-    func draft() -> OnboardingAnswers? {
+    func draft() -> OnboardingFlow? {
         guard let userId, let data = UserDefaults.standard.data(forKey: OnboardingSnooze.draftKey(userId: userId)) else { return nil }
-        return (try? JSONDecoder().decode(OnboardingAnswers.self, from: data))?.sanitized()
+        return OnboardingFlow.draft(from: data)
     }
 }
 
-/// First sign-in: business form, VAT, what the business sells and its usual costs
-/// (lib/onboarding.ts ONBOARDING_STEPS), the minimum the books and the assistant need.
+/// First sign-in, as a conversation (OnboardingChat.tsx): business form, VAT, what the business
+/// sells and its usual costs (lib/onboarding.ts ONBOARDING_STEPS), the minimum the books and the
+/// assistant need. One question at a time; its choices sit where a composer would be.
 struct OnboardingView: View {
     @Environment(AppModel.self) private var app
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     private var gate: OnboardingGate { .shared }
-    @State private var answers = OnboardingAnswers()
+    private static let bottomId = "onboarding-bottom"
+    @State private var flow = OnboardingFlow()
+    /// The chips picked so far for the current multi-select question.
+    @State private var picked: [String] = []
+    /// The next question is being "written": its bubble and choices wait for the dots.
+    @State private var typing = false
+    @State private var reply: Task<Void, Never>?
     @State private var restored = false
     @State private var busy = false
     @State private var failure: String?
 
     var body: some View {
         NavigationStack {
-            Form {
-                Section {
-                    Text("Kerro yrityksestäsi, niin kirjanpito osaa laskea verot oikein.").foregroundStyle(Theme.ink2)
-                }
-                Section("Yritysmuoto") {
-                    Picker("Yritysmuoto", selection: $answers.entityType) {
-                        Text("Toiminimi").tag("toiminimi")
-                        Text("Kevytyrittäjä").tag("kevytyrittaja")
-                        Text("Osakeyhtiö").tag("oy")
+            ScrollViewReader { proxy in
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 12) {
+                        transcript
+                        Color.clear.frame(height: 1).id(Self.bottomId)
                     }
-                    .pickerStyle(.inline)
-                    .labelsHidden()
+                    .padding(16)
                 }
-                Section("Arvonlisävero") {
-                    Toggle("ALV-rekisterissä", isOn: $answers.vatRegistered)
-                    if answers.vatRegistered {
-                        Picker("Verokausi", selection: $answers.vatPeriod) {
-                            Text("Kuukausi").tag("month")
-                            Text("Neljännesvuosi").tag("quarter")
-                            Text("Vuosi").tag("year")
-                        }
+                .defaultScrollAnchor(.bottom, for: .initialOffset)
+                .defaultScrollAnchor(.bottom, for: .sizeChanges)
+                .background(Theme.canvas)
+                .safeAreaInset(edge: .top, spacing: 0) { progressBar }
+                .safeAreaInset(edge: .bottom, spacing: 0) { answerArea }
+                // Each new bubble (or the summary) scrolls into view.
+                .onChange(of: scrollKey) { _, _ in
+                    if reduceMotion {
+                        proxy.scrollTo(Self.bottomId, anchor: .bottom)
+                    } else {
+                        withAnimation(.easeOut(duration: 0.25)) { proxy.scrollTo(Self.bottomId, anchor: .bottom) }
                     }
-                }
-                multiSelect(OnboardingQuestions.sales, picked: answers.salesTypes) { answers.toggleSales($0) }
-                multiSelect(OnboardingQuestions.expenses, picked: answers.expenseCategories) { answers.toggleExpense($0) }
-                if let failure { Text(failure).foregroundStyle(Theme.danger) }
-                Section {
-                    Button { Task { await save() } } label: { Text("Aloita").frame(maxWidth: .infinity, minHeight: 44).font(.headline) }
-                        .buttonStyle(.primary).disabled(busy)
-                        .listRowBackground(Color.clear)
                 }
             }
             .navigationTitle("Tervetuloa")
+            .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Ohita nyt") {
                         Haptics.selection()
-                        gate.snooze(answers)
+                        reply?.cancel()
+                        gate.snooze(flow)
                     }
+                    .tint(Theme.ink2)
                     .disabled(busy)
                 }
             }
         }
         .interactiveDismissDisabled()
         .onAppear {
-            // Reopened from Koti: the answers given before "Ohita nyt".
+            // Reopened from Koti or after an app kill: the conversation where it was left.
             guard !restored else { return }
             restored = true
-            if let draft = gate.draft() { answers = draft }
+            if let draft = gate.draft() { flow = draft }
+            picked = flow.current.map { flow.selection(for: $0) } ?? []
+        }
+        .onDisappear { reply?.cancel() }
+    }
+
+    private var scrollKey: String {
+        "\(flow.transcript.count)|\(flow.current?.rawValue ?? "summary")|\(typing)|\(failure ?? "")"
+    }
+
+    /// The intro, each answered question with the user's answer, then the current question
+    /// (the dots while it is "written") or the summary.
+    @ViewBuilder private var transcript: some View {
+        OnboardingAssistantBubble { Text(OnboardingFlow.intro) }
+        ForEach(Array(flow.transcript.enumerated()), id: \.element) { index, step in
+            OnboardingQuestionBubble(step: step, avatar: index > 0)
+            OnboardingAnswerBubble(text: flow.answerText(step), disabled: busy) { edit(step) }
+        }
+        if typing {
+            OnboardingTypingBubble()
+        } else if let step = flow.current {
+            OnboardingQuestionBubble(step: step, avatar: !flow.transcript.isEmpty)
+        } else {
+            OnboardingSummaryBubble(rows: flow.summary, disabled: busy) { edit($0) }
         }
     }
 
-    /// One "Voit valita useita." question; none picked is a valid answer.
-    private func multiSelect(_ question: OnboardingQuestion, picked: [String], toggle: @escaping (String) -> Void) -> some View {
-        Section {
-            ForEach(question.choices) { choice in
-                Button {
-                    Haptics.selection()
-                    toggle(choice.value)
-                } label: {
-                    HStack(spacing: 12) {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(choice.label).foregroundStyle(Theme.ink)
-                            if let detail = choice.detail { Text(detail).font(.caption).foregroundStyle(Theme.ink2) }
-                        }
-                        Spacer(minLength: 8)
-                        Image(systemName: picked.contains(choice.value) ? "checkmark.circle.fill" : "circle")
-                            .foregroundStyle(picked.contains(choice.value) ? Theme.accent : Theme.line)
-                            .imageScale(.large)
-                    }
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .accessibilityAddTraits(picked.contains(choice.value) ? .isSelected : [])
-            }
-        } header: {
-            Text(question.question)
-        } footer: {
-            Text(question.hint)
+    private var progressBar: some View {
+        HStack(spacing: 12) {
+            ProgressView(value: flow.progress)
+                .tint(Theme.accent)
+                .animation(reduceMotion ? nil : .easeOut(duration: 0.3), value: flow.progress)
+            Text(flow.progressLabel)
+                .font(.caption.monospacedDigit())
+                .foregroundStyle(Theme.ink2)
         }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
+        .background(.bar)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Edistyminen")
+        .accessibilityValue(flow.isComplete ? "Valmis" : "Kysymys \(flow.progressLabel)")
+    }
+
+    /// Pinned at the bottom: the current question's choices, or "Aloita käyttö" at the summary.
+    private var answerArea: some View {
+        VStack(spacing: 8) {
+            if typing {
+                EmptyView()
+            } else if let step = flow.current {
+                if dynamicTypeSize.isAccessibilitySize {
+                    // Large text: the choices scroll instead of pushing the conversation off screen.
+                    ScrollView { choices(step) }.frame(maxHeight: 280)
+                } else {
+                    choices(step)
+                }
+                if step.isMultiSelect {
+                    Button { finishMultiSelect() } label: {
+                        Text(picked.isEmpty ? OnboardingFlow.noSelection : "Valmis")
+                            .font(.headline)
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.primary)
+                }
+            } else {
+                if let failure {
+                    Text(failure)
+                        .font(.footnote)
+                        .foregroundStyle(Theme.danger)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                Button { Task { await save() } } label: {
+                    Group {
+                        if busy { ProgressView().tint(Theme.onInk) } else { Text("Aloita käyttö") }
+                    }
+                    .font(.headline)
+                    .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.primary)
+                .disabled(busy)
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, typing ? 0 : 12)
+        .padding(.bottom, 8)
+        .frame(maxWidth: .infinity)
+        .background(.bar)
+    }
+
+    private func choices(_ step: OnboardingStep) -> some View {
+        VStack(spacing: 8) {
+            ForEach(step.choices) { choice in
+                OnboardingChoiceRow(
+                    choice: choice,
+                    selected: step.isMultiSelect ? picked.contains(choice.value) : flow.selection(for: step).contains(choice.value),
+                    multiSelect: step.isMultiSelect
+                ) {
+                    if step.isMultiSelect { toggle(choice.value) } else { answer(choice.value) }
+                }
+            }
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(step.question)
+    }
+
+    /// One tap answers a single-choice question and moves on.
+    private func answer(_ value: String) {
+        guard !typing, !busy else { return }
+        Haptics.selection()
+        advance { $0.answer(value) }
+    }
+
+    private func toggle(_ value: String) {
+        Haptics.selection()
+        picked = picked.contains(value) ? picked.filter { $0 != value } : picked + [value]
+    }
+
+    private func finishMultiSelect() {
+        guard !typing, !busy else { return }
+        Haptics.selection()
+        let values = picked
+        advance { $0.answer(values) }
+    }
+
+    /// Takes the answer, then "writes" the next question: three dots for a moment, none with Reduce Motion.
+    private func advance(_ change: (inout OnboardingFlow) -> Void) {
+        var next = flow
+        change(&next)
+        guard next != flow else { return }
+        reply?.cancel()
+        failure = nil
+        withAnimation(reduceMotion ? nil : .easeOut(duration: 0.2)) {
+            flow = next
+            typing = !reduceMotion
+        }
+        gate.keepDraft(next)
+        picked = next.current.map { next.selection(for: $0) } ?? []
+        guard !reduceMotion else {
+            announce()
+            return
+        }
+        reply = Task {
+            try? await Task.sleep(for: .milliseconds(400))
+            guard !Task.isCancelled else { return }
+            withAnimation(.easeOut(duration: 0.2)) { typing = false }
+            announce()
+        }
+    }
+
+    /// "Muuta" on an answer or a summary row: that question is asked again.
+    private func edit(_ step: OnboardingStep) {
+        guard !busy else { return }
+        reply?.cancel()
+        Haptics.selection()
+        failure = nil
+        withAnimation(reduceMotion ? nil : .easeOut(duration: 0.2)) {
+            flow.edit(step)
+            typing = false
+        }
+        gate.keepDraft(flow)
+        picked = flow.selection(for: step)
+        announce()
+    }
+
+    /// VoiceOver hears how far along the conversation is and the new question.
+    private func announce() {
+        let text = flow.current.map { "Kysymys \(flow.progressLabel). \($0.question)" } ?? OnboardingFlow.summaryIntro
+        UIAccessibility.post(notification: .announcement, argument: text)
     }
 
     private func save() async {
+        guard flow.isComplete, !busy else { return }
         busy = true
         failure = nil
         defer { busy = false }
         do {
-            let _: Ignored = try await app.api.send("POST", "/api/onboarding", body: answers.body)
+            let _: Ignored = try await app.api.send("POST", "/api/onboarding", body: flow.answers.body)
             Haptics.success()
             app.profileChanged(nil)
             gate.completed()
@@ -180,3 +324,4 @@ struct OnboardingView: View {
         }
     }
 }
+
