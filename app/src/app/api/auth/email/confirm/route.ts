@@ -4,7 +4,7 @@ import { z } from "zod";
 import { sessionOptions, type SessionData } from "@/lib/session";
 import { guardWrite } from "@/lib/http-security";
 import { consumeRateLimit, requestClientKey } from "@/lib/rate-limit";
-import { AccountSecurityError, confirmEmailChange } from "@/lib/account-security";
+import { AccountSecurityError, confirmEmailChange, notifyEmailChanged } from "@/lib/account-security";
 
 const bodySchema = z.object({
   token: z.string().trim().min(20).max(200),
@@ -26,6 +26,7 @@ export async function POST(req: NextRequest) {
   }
   try {
     const confirmed = await confirmEmailChange(parsed.data.token);
+    await notifyEmailChanged(confirmed.userId, confirmed.previousEmail, confirmed.email);
     const res = NextResponse.json({ ok: true, email: confirmed.email });
     const session = await getIronSession<SessionData>(req, res, sessionOptions);
     if (session.userId === confirmed.userId) {

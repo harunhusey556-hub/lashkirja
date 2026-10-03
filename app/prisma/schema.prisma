@@ -143,11 +143,28 @@ model AccountToken {
   purpose   String
   tokenHash String    @unique
   payload   String?
+  /// Password reset only: hash of the 6-digit code mailed with the link.
+  codeHash     String?
+  /// Wrong codes so far; the fifth one voids the row (link included).
+  codeAttempts Int       @default(0)
   expiresAt DateTime
   usedAt    DateTime?
   createdAt DateTime  @default(now())
 
   @@index([userId, purpose])
+}
+
+/// A sign-up waiting for its emailed code. Not a User until the code is
+/// verified; a new start for the same address replaces the row.
+model PendingSignup {
+  id           String   @id @default(uuid())
+  email        String   @unique
+  passwordHash String
+  firstName    String
+  codeHash     String
+  attempts     Int      @default(0)
+  expiresAt    DateTime
+  createdAt    DateTime @default(now())
 }
 
 /// A request to close the account, receive a copy of the books, or recover a
