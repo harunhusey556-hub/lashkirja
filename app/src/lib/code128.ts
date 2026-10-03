@@ -52,12 +52,12 @@ export function barcodeRects(
 ): { rects: BarRect[]; module: number; width: number } {
   const bars = code128cBars(digits);
   const modules = bars.reduce((sum, w) => sum + w, 0) + 2 * QUIET_MODULES;
-  const module = Math.min(MAX_MODULE, box.maxWidth / modules);
+  const moduleWidth = Math.min(MAX_MODULE, box.maxWidth / modules);
   const rects: BarRect[] = [];
-  let x = box.x + QUIET_MODULES * module;
+  let x = box.x + QUIET_MODULES * moduleWidth;
   bars.forEach((width, index) => {
-    if (index % 2 === 0) rects.push({ x, y: box.y, width: width * module, height: box.height });
-    x += width * module;
+    if (index % 2 === 0) rects.push({ x, y: box.y, width: width * moduleWidth, height: box.height });
+    x += width * moduleWidth;
   });
-  return { rects, module, width: modules * module };
+  return { rects, module: moduleWidth, width: modules * moduleWidth };
 }
