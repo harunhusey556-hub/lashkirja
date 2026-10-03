@@ -81,6 +81,8 @@ final class AppModel {
     /// Opens the app for a session AuthService already stored (password or passkey sign-in).
     /// The sign-in screen holds this back while it offers a passkey after a password sign-in.
     func enter(_ user: AuthUser) {
+        // The sign-in field still holds the keyboard: it would stay up over the app.
+        Keyboard.dismiss()
         // After an expired session someone else may sign in: they are not locked behind the
         // previous owner's PIN (the same policy as signing out).
         AppLock.shared.keepOnly(for: user.userId)

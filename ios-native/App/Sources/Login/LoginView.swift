@@ -10,6 +10,7 @@ struct LoginView: View {
     @State private var busy = false
     @State private var failure: String?
     @FocusState private var focus: Field?
+    @State private var showPassword = false
     private enum Field { case email, password }
     /// The recovery sheet, opened from the link below or from a `lashkirja://…?token=…` link.
     @State private var recovery: Recovery?
@@ -40,17 +41,18 @@ struct LoginView: View {
 
     var body: some View {
         ScrollView {
-            VStack(spacing: 28) {
-                VStack(spacing: 8) {
+            VStack(spacing: 24) {
+                VStack(spacing: 10) {
                     Image(systemName: "book.closed.fill")
-                        .font(.system(size: 34, weight: .semibold))
+                        .font(.system(size: 30, weight: .semibold))
                         .foregroundStyle(.white)
-                        .frame(width: 64, height: 64)
+                        .frame(width: 60, height: 60)
                         .background(Theme.accentFill, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                        .shadow(color: Theme.accentFill.opacity(0.25), radius: 12, y: 6)
                     Text("LashKirja").font(.largeTitle.bold()).foregroundStyle(Theme.ink)
                     Text("Kirjanpito yksinkertaisesti").font(.subheadline).foregroundStyle(Theme.ink2)
                 }
-                .padding(.top, 60)
+                .padding(.top, 48)
 
                 if let offer {
                     offerCard(offer)
@@ -60,6 +62,9 @@ struct LoginView: View {
                 }
             }
             .padding(.horizontal, 20)
+            .padding(.bottom, 24)
+            .frame(maxWidth: 460)
+            .frame(maxWidth: .infinity)
         }
         .scrollDismissesKeyboard(.interactively)
         .background(Theme.canvas.ignoresSafeArea())
@@ -94,21 +99,41 @@ struct LoginView: View {
                     .padding(12)
                     .background(Theme.danger.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
             }
-            TextField("Sähköposti", text: $email)
-                .textContentType(.username)
-                .keyboardType(.emailAddress)
-                .textInputAutocapitalization(.never)
-                .autocorrectionDisabled()
-                .focused($focus, equals: .email)
-                .submitLabel(.next)
-                .onSubmit { focus = .password }
-                .loginField()
-            SecureField("Salasana", text: $password)
+            Text("Kirjaudu sisään").font(.title3.weight(.semibold)).foregroundStyle(Theme.ink)
+            HStack(spacing: 10) {
+                Image(systemName: "envelope").foregroundStyle(Theme.ink2).frame(width: 20)
+                TextField("Sähköposti", text: $email)
+                    .textContentType(.username)
+                    .keyboardType(.emailAddress)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .focused($focus, equals: .email)
+                    .submitLabel(.next)
+                    .onSubmit { focus = .password }
+            }
+            .loginField(focused: focus == .email)
+            HStack(spacing: 10) {
+                Image(systemName: "lock").foregroundStyle(Theme.ink2).frame(width: 20)
+                Group {
+                    if showPassword {
+                        TextField("Salasana", text: $password)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                    } else {
+                        SecureField("Salasana", text: $password)
+                    }
+                }
                 .textContentType(.password)
                 .focused($focus, equals: .password)
                 .submitLabel(.go)
                 .onSubmit { Task { await submit() } }
-                .loginField()
+                Button { showPassword.toggle() } label: {
+                    Image(systemName: showPassword ? "eye.slash" : "eye").foregroundStyle(Theme.ink2)
+                }
+                .buttonStyle(.borderless)
+                .accessibilityLabel(showPassword ? "Piilota salasana" : "Näytä salasana")
+            }
+            .loginField(focused: focus == .password)
             passwordButton
             Button("Unohditko salasanan?") {
                 recovery = Recovery(step: .request, link: "")
@@ -212,6 +237,8 @@ struct LoginView: View {
 
     private func submit() async {
         guard !busy else { return }
+        // The keyboard goes as soon as the owner taps sign in, not only once the app opens.
+        focus = nil
         busy = true
         failure = nil
         defer { busy = false }
@@ -374,10 +401,11 @@ private struct OutlineButtonStyle: ButtonStyle {
 }
 
 private extension View {
-    func loginField() -> some View {
+    func loginField(focused: Bool = false) -> some View {
         padding(.horizontal, 14)
             .frame(minHeight: 50)
             .background(Theme.canvas, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(Theme.line))
+            .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(focused ? Theme.accent : Theme.line, lineWidth: focused ? 1.5 : 1))
     }
 }

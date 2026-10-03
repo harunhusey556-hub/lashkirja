@@ -127,6 +127,13 @@ struct AssistantView: View {
             }
             // Opening a source page drops the focus, so coming back does not pop the keyboard up.
             .onDisappear { focused = false }
+            // Any push (a card, a link, a source) ends editing before the page slides in: a field
+            // still first responder is restored by UIKit on return, behind the keyboard.
+            .onChange(of: path) { old, new in
+                guard old.count != new.count else { return }
+                focused = false
+                Keyboard.dismiss()
+            }
         }
     }
 
