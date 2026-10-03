@@ -174,6 +174,15 @@ describe("GET /api/dashboard: Koti tells the truth (FP-2)", () => {
     expect(body.setup).toEqual({ receipts: false, bank: false, seller: false, empty: true });
     expect(body.blockingTotal).toBe(0);
     expect(body.previousMonth).toBeNull();
+    // A user created now opened the account this month.
+    expect(body.accountCreatedMonth).toBe(current);
+  });
+
+  it("names the Helsinki month the account was opened, so Koti skips older VAT returns", async () => {
+    // 22:30 UTC on 31 July is already 1 August in Helsinki.
+    await prisma.user.update({ where: { id: user.id }, data: { createdAt: new Date("2026-07-31T22:30:00.000Z") } });
+    const body = await getDashboard(current);
+    expect(body.accountCreatedMonth).toBe("2026-08");
   });
 });
 

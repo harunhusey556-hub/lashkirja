@@ -64,7 +64,8 @@ final class KotiModel {
         let profile = await self.profile()
         let registered = dashboard.vat?.registered ?? profile?.vatRegistered ?? false
         let due = Koti.vatDue(registered: registered, atCurrentMonth: dashboard.month >= MonthKey.current(),
-                              month: dashboard.month, today: APIDate.dayString(Date()), kind: profile?.vatPeriod)
+                              month: dashboard.month, today: APIDate.dayString(Date()), kind: profile?.vatPeriod,
+                              accountCreatedMonth: dashboard.accountCreatedMonth)
         guard loads.isCurrent(generation) else { return }
         if due?.key != vatDue?.key { vatFigures = nil }
         vatDue = due

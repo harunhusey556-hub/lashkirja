@@ -28,6 +28,8 @@ public enum KotiSection: Hashable, Sendable {
     case cashflow
     /// Hoidettu automaattisesti: this week, so only on the current month.
     case handled
+    /// A brand-new account: one sentence on what Koti will show, instead of zero cards.
+    case firstRunNote
 }
 
 public enum KotiLayout {
@@ -35,6 +37,8 @@ public enum KotiLayout {
         public var atCurrentMonth: Bool
         /// Nothing booked yet (no receipt, statement or invoice).
         public var brandNew: Bool
+        /// Nothing booked and no bank either (`Koti.isFreshAccount`): the first-run page.
+        public var fresh: Bool
         /// A Käyttöönotto step is still open.
         public var setupOpen: Bool
         public var partialFailure: Bool
@@ -47,11 +51,12 @@ public enum KotiLayout {
         public var onboardingOpen: Bool
         public var vatThreshold: Bool
 
-        public init(atCurrentMonth: Bool = true, brandNew: Bool = false, setupOpen: Bool = false, partialFailure: Bool = false,
+        public init(atCurrentMonth: Bool = true, brandNew: Bool = false, fresh: Bool = false, setupOpen: Bool = false, partialFailure: Bool = false,
                     balanceCard: Bool = false, hasTasks: Bool = false, failedJobs: Bool = false, hasPositions: Bool = false,
                     cashflowMoved: Bool = false, handled: Bool = false, onboardingOpen: Bool = false, vatThreshold: Bool = false) {
             self.atCurrentMonth = atCurrentMonth
             self.brandNew = brandNew
+            self.fresh = fresh
             self.setupOpen = setupOpen
             self.partialFailure = partialFailure
             self.balanceCard = balanceCard
@@ -69,6 +74,7 @@ public enum KotiLayout {
             self.init(
                 atCurrentMonth: atCurrentMonth,
                 brandNew: setup?.empty == true,
+                fresh: Koti.isFreshAccount(d),
                 setupOpen: setup.map { $0.empty || !$0.receipts || !$0.bank } ?? false,
                 partialFailure: !Koti.failedSections(d.sectionErrors).isEmpty,
                 balanceCard: Koti.showsBalanceCard(d.bank),
@@ -88,6 +94,16 @@ public enum KotiLayout {
         var sections: [KotiSection] = []
         // As on the web, the skipped onboarding waits at the top of Koti.
         if input.onboardingOpen { sections.append(.onboarding) }
+        // Nothing to count yet (TF-06): no ring saying "Kaikki kunnossa", no 0,00 € cards and no
+        // empty lists; getting started and one honest sentence. Failures and tasks still show.
+        if input.fresh {
+            if setup { sections.append(.setup) }
+            if input.partialFailure { sections.append(.partialFailure) }
+            if input.hasTasks { sections.append(.tasks) }
+            if input.failedJobs { sections.append(.failedJobs) }
+            sections.append(.firstRunNote)
+            return sections
+        }
         // A brand-new account has no money to show yet: getting started is the whole page.
         if setup && input.brandNew { sections.append(.setup) }
         sections.append(.status)
