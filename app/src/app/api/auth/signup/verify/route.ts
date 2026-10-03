@@ -10,10 +10,12 @@ import {
 } from "@/lib/account-security";
 import { sealBearerToken } from "@/lib/auth-credential";
 import { rejectSignupRequest, verifySignup, welcomeMail } from "@/lib/signup";
+import { PASSWORD_MAX } from "@/lib/session-policy";
 
 const bodySchema = z.object({
   email: z.string().trim().toLowerCase().email().max(254),
   code: z.string().trim().max(20),
+  password: z.string().min(1).max(PASSWORD_MAX),
   device: z.string().max(40).optional(),
 });
 
@@ -38,7 +40,7 @@ export async function POST(req: NextRequest) {
     );
   }
   try {
-    const user = await verifySignup(email, parsed.data.code);
+    const user = await verifySignup(email, parsed.data.code, parsed.data.password);
     const device = parsed.data.device === "ios-app" ? ("ios-app" as const) : undefined;
     const row = await openAuthSession(user.id, req.headers.get("user-agent"), device);
     const sealed = await sealBearerToken({
@@ -48,13 +50,13 @@ export async function POST(req: NextRequest) {
       sessionId: row.id,
     });
     // The account exists now; a welcome that cannot be sent is only logged.
-    await sendAccountMail(
-      user.id,
-      welcomeMail(user.email, user.firstName, accountLinkBase(req.nextUrl.origin))
-    ).catch((error) => {
-      console.error("Welcome mail failed", error);
-      return false;
-    });
+    const linkBase = accountLinkBase(req.nextUrl.origin);
+    if (linkBase) {
+      await sendAccountMail(user.id, welcomeMail(user.email, user.firstName, linkBase)).catch((error) => {
+        console.error("Welcome mail failed", error);
+        return false;
+      });
+    }
     return NextResponse.json({
       token: sealed.token,
       tokenType: "Bearer",

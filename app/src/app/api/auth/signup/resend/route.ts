@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { consumeRateLimit, opaqueRateKey, requestClientKey } from "@/lib/rate-limit";
-import { normalizeLoginEmail } from "@/lib/account-security";
+import { deliverInBackground, normalizeLoginEmail } from "@/lib/account-security";
 import { sendPlatformMail } from "@/lib/mailer";
 import { rejectSignupRequest, renewSignupCode, signupCodeMail } from "@/lib/signup";
 
@@ -34,14 +34,11 @@ export async function POST(req: NextRequest) {
       }
     );
   }
-  const code = await renewSignupCode(email);
-  if (code) {
-    try {
-      await sendPlatformMail(signupCodeMail(email, code));
-    } catch (error) {
-      // Kept neutral: a different answer would tell which addresses have a pending sign-up.
-      console.error("Sign-up code resend failed", error);
-    }
-  }
+  // After the answer, and the answer is neutral: neither its content nor its
+  // timing may tell which addresses have a pending sign-up.
+  deliverInBackground("Sign-up code resend failed", async () => {
+    const code = await renewSignupCode(email);
+    if (code) await sendPlatformMail(signupCodeMail(email, code));
+  });
   return NextResponse.json({ ok: true, mailConfigured: true });
 }

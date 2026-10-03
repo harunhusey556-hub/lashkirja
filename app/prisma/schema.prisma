@@ -165,6 +165,21 @@ model PendingSignup {
   attempts     Int      @default(0)
   expiresAt    DateTime
   createdAt    DateTime @default(now())
+
+  @@index([expiresAt])
+}
+
+/// Wrong emailed codes per target ("signup:<email>", "reset:<userId>"). Kept
+/// apart from the code rows so issuing a new code never resets the budget:
+/// 5 within an hour block the target for an hour, 10 within a day for a day.
+model AccountCodeGuard {
+  id           String    @id @default(uuid())
+  scope        String    @unique
+  hourFailures Int       @default(0)
+  hourStart    DateTime  @default(now())
+  dayFailures  Int       @default(0)
+  dayStart     DateTime  @default(now())
+  blockedUntil DateTime?
 }
 
 /// A request to close the account, receive a copy of the books, or recover a

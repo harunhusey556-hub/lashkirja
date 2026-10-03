@@ -26,7 +26,7 @@ export async function POST(req: NextRequest) {
   }
   try {
     const confirmed = await confirmEmailChange(parsed.data.token);
-    await notifyEmailChanged(confirmed.userId, confirmed.previousEmail, confirmed.email);
+    notifyEmailChanged(confirmed.userId, confirmed.previousEmail, confirmed.email);
     const res = NextResponse.json({ ok: true, email: confirmed.email });
     const session = await getIronSession<SessionData>(req, res, sessionOptions);
     if (session.userId === confirmed.userId) {

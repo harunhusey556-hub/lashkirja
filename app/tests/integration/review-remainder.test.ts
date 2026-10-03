@@ -7,6 +7,7 @@ import { GET as listRequests, POST as accountRequest } from "@/app/api/account/r
 import { GET as downloadPackage } from "@/app/api/account/request/[id]/package/route";
 import { GET as listConversations } from "@/app/api/ai/conversations/route";
 import { prisma } from "@/lib/db";
+import { settleAccountMailForTests } from "@/lib/account-security";
 import {
   completeAccountClose,
   completeAccountExport,
@@ -170,6 +171,7 @@ describe("password recovery without invoice SMTP", () => {
       );
       expect(sent.status).toBe(200);
       expect((await readJson<{ message: string }>(sent)).message).toMatch(/tukeen/);
+      await settleAccountMailForTests();
       expect(await prisma.accountToken.count({ where: { userId: user.id } })).toBe(1);
       const queued = await prisma.accountRequest.findMany({
         where: { userId: user.id, kind: "recovery" },
@@ -178,6 +180,7 @@ describe("password recovery without invoice SMTP", () => {
       expect(queued[0]?.status).toBe("pending");
 
       await forgotPassword(buildRequest("POST", "/api/auth/password/forgot", { email: user.email }));
+      await settleAccountMailForTests();
       expect(await prisma.accountRequest.count({ where: { userId: user.id, kind: "recovery" } })).toBe(1);
 
       const cookie = await loginAs(user.email);
@@ -206,6 +209,7 @@ describe("password recovery without invoice SMTP", () => {
         buildRequest("POST", "/api/auth/password/forgot", { email: user.email })
       );
       expect(sent.status).toBe(200);
+      await settleAccountMailForTests();
       expect(await prisma.accountToken.count({ where: { userId: user.id } })).toBe(1);
       expect(await prisma.accountRequest.count({ where: { userId: user.id, kind: "recovery" } })).toBe(0);
     } finally {

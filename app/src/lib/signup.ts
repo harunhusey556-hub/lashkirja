@@ -4,6 +4,7 @@ import { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/db";
 import { guardWrite } from "@/lib/http-security";
 import { platformMailConfig } from "@/lib/mailer";
+import { clearCodeGuard, reserveCodeAttempt } from "@/lib/account-code-guard";
 import {
   AccountSecurityError,
   MAX_CODE_ATTEMPTS,
@@ -99,10 +100,23 @@ function expired() {
   return new AccountSecurityError(SIGNUP_EXPIRED, 410, "SIGNUP_EXPIRED");
 }
 
-/** Checks the code and creates the User in one transaction with the pending row's removal. */
-export async function verifySignup(email: string, code: string) {
+function codeInvalid(attemptsLeft: number) {
+  return new AccountSecurityError("Koodi ei kelpaa.", 400, "SIGNUP_CODE_INVALID", attemptsLeft);
+}
+
+/**
+ * Checks the code and the password given at start, and creates the User in one
+ * transaction with the pending row's removal. The password binds the code to
+ * whoever started this sign-up: a later start by someone else replaces the
+ * row, and then the first caller's password no longer matches it. A wrong
+ * password is answered exactly like a wrong code.
+ */
+export async function verifySignup(email: string, code: string, password: string) {
   const row = await prisma.pendingSignup.findUnique({ where: { email } });
   if (!row || row.expiresAt.getTime() < Date.now()) throw expired();
+  const scope = codeScope(email);
+  const guard = await reserveCodeAttempt(scope);
+  if (!guard.allowed) throw codeInvalid(0);
   // Counted before the compare, so parallel guesses cannot share one slot.
   const counted = await prisma.pendingSignup.updateMany({
     where: { id: row.id, attempts: { lt: MAX_CODE_ATTEMPTS } },
@@ -112,14 +126,17 @@ export async function verifySignup(email: string, code: string) {
     await prisma.pendingSignup.deleteMany({ where: { id: row.id } });
     throw expired();
   }
-  if (!hashesEqual(row.codeHash, hashEmailCode(codeScope(email), code))) {
+  // Both are checked every time, so the answer time does not tell which one failed.
+  const codeMatches = hashesEqual(row.codeHash, hashEmailCode(scope, code));
+  const passwordMatches = await bcrypt.compare(password, row.passwordHash);
+  if (!codeMatches || !passwordMatches) {
     const after = await prisma.pendingSignup.findUnique({ where: { id: row.id } });
     const attemptsLeft = Math.max(0, MAX_CODE_ATTEMPTS - (after?.attempts ?? MAX_CODE_ATTEMPTS));
     if (attemptsLeft === 0) await prisma.pendingSignup.deleteMany({ where: { id: row.id } });
-    throw new AccountSecurityError("Koodi ei kelpaa.", 400, "SIGNUP_CODE_INVALID", attemptsLeft);
+    throw codeInvalid(Math.min(attemptsLeft, guard.left));
   }
   try {
-    return await prisma.$transaction(async (db) => {
+    const user = await prisma.$transaction(async (db) => {
       const consumed = await db.pendingSignup.deleteMany({ where: { id: row.id } });
       if (consumed.count !== 1) throw expired();
       return db.user.create({
@@ -132,6 +149,8 @@ export async function verifySignup(email: string, code: string) {
         select: { id: true, email: true, firstName: true },
       });
     });
+    await clearCodeGuard(scope);
+    return user;
   } catch (error) {
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
       // The address became a User after the code was sent; the pending row is spent either way.
@@ -140,6 +159,12 @@ export async function verifySignup(email: string, code: string) {
     }
     throw error;
   }
+}
+
+/** Cleanup run: an abandoned sign-up must not stay in the table forever. */
+export async function pruneExpiredPendingSignups(now = new Date()) {
+  const result = await prisma.pendingSignup.deleteMany({ where: { expiresAt: { lt: now } } });
+  return result.count;
 }
 
 export function signupCodeMail(to: string, code: string) {

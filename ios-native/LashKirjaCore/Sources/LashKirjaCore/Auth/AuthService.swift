@@ -76,9 +76,10 @@ public actor AuthService: TokenProvider {
     }
 
     /// The right code creates the account and answers like `/api/auth/token`: signed in at once.
-    public func signupVerify(email: String, code: String) async throws -> AuthUser {
+    public func signupVerify(email: String, code: String, password: String) async throws -> AuthUser {
         guard let client else { throw LKError(status: 0, message: LKError.unreachable) }
-        let response: TokenResponse = try await client.send("POST", "/api/auth/signup/verify", body: SignUpVerifyBody(email: email, code: code))
+        let body = SignUpVerifyBody(email: email, code: code, password: password)
+        let response: TokenResponse = try await client.send("POST", "/api/auth/signup/verify", body: body)
         try await start(response)
         return response.user
     }

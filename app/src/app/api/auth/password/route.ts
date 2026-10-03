@@ -36,7 +36,7 @@ export async function POST(req: NextRequest) {
       parsed.data.currentPassword,
       parsed.data.newPassword
     );
-    await notifyPasswordChanged(session.userId, accountLinkBase(req.nextUrl.origin));
+    notifyPasswordChanged(session.userId, accountLinkBase(req.nextUrl.origin));
     return NextResponse.json({ ok: true });
   } catch (error) {
     if (error instanceof AccountSecurityError) {

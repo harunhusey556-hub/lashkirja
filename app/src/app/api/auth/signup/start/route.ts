@@ -54,12 +54,14 @@ export async function POST(req: NextRequest) {
   });
   try {
     // An address that already has an account gets a notice instead of a code,
-    // and the caller gets the very same answer either way.
-    await sendPlatformMail(
-      started.kind === "pending"
-        ? signupCodeMail(email, started.code)
-        : signupExistingMail(email, accountLinkBase(req.nextUrl.origin))
-    );
+    // and the caller gets the very same answer either way. The notice carries
+    // a link, so without a trusted origin (accountLinkBase) it is not sent.
+    if (started.kind === "pending") {
+      await sendPlatformMail(signupCodeMail(email, started.code));
+    } else {
+      const linkBase = accountLinkBase(req.nextUrl.origin);
+      if (linkBase) await sendPlatformMail(signupExistingMail(email, linkBase));
+    }
   } catch (error) {
     console.error("Sign-up mail failed", error);
     if (started.kind === "pending") await discardPendingSignup(email);

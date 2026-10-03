@@ -3,19 +3,19 @@ import { z } from "zod";
 import { requireSession } from "@/lib/session";
 import { guardWrite } from "@/lib/http-security";
 import { consumeRateLimit } from "@/lib/rate-limit";
-import { AccountSecurityError, cancelEmailChange, requestEmailChange, sendAccountMail } from "@/lib/account-security";
+import {
+  AccountSecurityError,
+  accountLinkBase,
+  cancelEmailChange,
+  requestEmailChange,
+  sendAccountMail,
+} from "@/lib/account-security";
 import { contactSupportPhrase } from "@/lib/account-copy";
 
 const bodySchema = z.object({
   email: z.string().trim().max(254),
   currentPassword: z.string().min(1).max(1024),
 });
-
-function confirmLink(req: NextRequest, token: string): string {
-  const configured = process.env.APP_ORIGIN?.trim().replace(/\/$/, "");
-  const base = configured || req.nextUrl.origin;
-  return `${base}/vahvista-sahkoposti?token=${encodeURIComponent(token)}`;
-}
 
 export async function POST(req: NextRequest) {
   const blocked = guardWrite(req);
@@ -39,11 +39,15 @@ export async function POST(req: NextRequest) {
       parsed.data.email,
       parsed.data.currentPassword
     );
-    const delivered = await sendAccountMail(session.userId, {
-      to: pending.email,
-      subject: "Vahvista LashKirjan sähköposti",
-      text: `Vahvista uusi kirjautumissähköposti linkistä. Vanha osoite toimii, kunnes vahvistat:\n${confirmLink(req, pending.token)}`,
-    });
+    // Without a trusted link origin (accountLinkBase) the mail is not sent.
+    const linkBase = accountLinkBase(req.nextUrl.origin);
+    const delivered =
+      linkBase !== null &&
+      (await sendAccountMail(session.userId, {
+        to: pending.email,
+        subject: "Vahvista LashKirjan sähköposti",
+        text: `Vahvista uusi kirjautumissähköposti linkistä. Vanha osoite toimii, kunnes vahvistat:\n${linkBase}/vahvista-sahkoposti?token=${encodeURIComponent(pending.token)}`,
+      }));
     if (!delivered) {
       // Delivery is part of the change: nothing stays pending that no link
       // exists for, and the answer is an error, not a success (F53). Not a 502/503/504: those read as a dead gateway on the client.

@@ -14,7 +14,7 @@ import { PATCH as patchProfile } from "@/app/api/profile/route";
 import { POST as saveOnboarding } from "@/app/api/onboarding/route";
 import { POST as postChat } from "@/app/api/ai/chat/route";
 import { prisma } from "@/lib/db";
-import { requestEmailChange } from "@/lib/account-security";
+import { requestEmailChange, settleAccountMailForTests } from "@/lib/account-security";
 import { resetRateLimitsForTests } from "@/lib/rate-limit";
 import { createUser, resetDatabase, type TestUser } from "./helpers/factories";
 import { buildRequest, readJson } from "./helpers/http";
@@ -204,12 +204,14 @@ describe("wave I account", () => {
       buildRequest("POST", "/api/auth/password/forgot", { email: "ei-ole@example.com" })
     );
     expect(missing.status).toBe(200);
+    await settleAccountMailForTests();
     expect(await prisma.accountToken.count()).toBe(0);
 
     const sent = await forgotPassword(
       buildRequest("POST", "/api/auth/password/forgot", { email: user.email })
     );
     expect(sent.status).toBe(200);
+    await settleAccountMailForTests();
     const payload = await readJson<{ token?: string; message: string; mailConfigured: boolean }>(sent);
     expect(payload.token).toBeUndefined();
     // No PLATFORM_SMTP_* in the test env: the text must not claim a send, and

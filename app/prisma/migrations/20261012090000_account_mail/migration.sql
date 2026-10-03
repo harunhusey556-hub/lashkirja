@@ -1,5 +1,5 @@
 -- Tilin luonti ja salasanan palautus sähköpostikoodilla. Purely additive:
--- one new table and two new AccountToken columns with defaults.
+-- two new tables and two new AccountToken columns with defaults.
 ALTER TABLE "AccountToken" ADD COLUMN "codeHash" TEXT;
 ALTER TABLE "AccountToken" ADD COLUMN "codeAttempts" INTEGER NOT NULL DEFAULT 0;
 
@@ -14,3 +14,15 @@ CREATE TABLE "PendingSignup" (
     "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE UNIQUE INDEX "PendingSignup_email_key" ON "PendingSignup"("email");
+CREATE INDEX "PendingSignup_expiresAt_idx" ON "PendingSignup"("expiresAt");
+
+CREATE TABLE "AccountCodeGuard" (
+    "id" TEXT NOT NULL PRIMARY KEY,
+    "scope" TEXT NOT NULL,
+    "hourFailures" INTEGER NOT NULL DEFAULT 0,
+    "hourStart" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "dayFailures" INTEGER NOT NULL DEFAULT 0,
+    "dayStart" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "blockedUntil" DATETIME
+);
+CREATE UNIQUE INDEX "AccountCodeGuard_scope_key" ON "AccountCodeGuard"("scope");

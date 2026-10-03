@@ -177,7 +177,7 @@ struct SignUpView: View {
         busy = true
         defer { busy = false }
         do {
-            let user = try await app.auth.signupVerify(email: email, code: digits)
+            let user = try await app.auth.signupVerify(email: email, code: digits, password: password)
             let chosen = password
             password = ""
             onSignedIn(user, AccountCode.address(email), chosen)

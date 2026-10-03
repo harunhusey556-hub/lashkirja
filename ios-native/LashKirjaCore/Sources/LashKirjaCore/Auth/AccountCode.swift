@@ -38,14 +38,18 @@ public struct SignUpStartResponse: Decodable, Equatable, Sendable {
     }
 }
 
-/// `POST /api/auth/signup/verify`: answered with the `/api/auth/token` shape.
+/// `POST /api/auth/signup/verify`: answered with the `/api/auth/token` shape. The password is
+/// the one given at start: it ties the code to this sign-up, so a later start by someone else
+/// for the same address cannot be completed with the owner's code.
 public struct SignUpVerifyBody: Encodable, Equatable, Sendable {
     public let email: String
     public let code: String
+    public let password: String
     public let device: String
-    public init(email: String, code: String, device: String = "ios-app") {
+    public init(email: String, code: String, password: String, device: String = "ios-app") {
         self.email = AccountCode.address(email)
         self.code = AccountCode.normalize(code) ?? code.trimmingCharacters(in: .whitespacesAndNewlines)
+        self.password = password
         self.device = device
     }
 }
@@ -101,8 +105,11 @@ public enum AccountCode {
 
 /// What the sign-up and reset-by-code routes refused, from the server's `code` (or the 429).
 public enum AccountCodeFailure: Equatable, Sendable {
-    /// `SIGNUP_CODE_INVALID` / `RESET_CODE_INVALID`, with the tries the server still allows.
+    /// `SIGNUP_CODE_INVALID`, with the tries the server still allows.
     case codeInvalid(attemptsLeft: Int?)
+    /// `RESET_CODE_INVALID`: one answer for a wrong, expired or blocked code (and an unknown
+    /// address), so the reset never tells whether an account exists.
+    case resetCodeInvalid
     /// `SIGNUP_EXPIRED`: the code ran out or was wrong too often; the sign-up starts over.
     case signUpExpired
     /// `RESET_EXPIRED`: a new reset mail is needed.
@@ -118,8 +125,9 @@ public enum AccountCodeFailure: Equatable, Sendable {
 
     public init(_ error: LKError) {
         switch error.code {
-        case "SIGNUP_CODE_INVALID", "RESET_CODE_INVALID":
+        case "SIGNUP_CODE_INVALID":
             self = .codeInvalid(attemptsLeft: error.fields["attemptsLeft"].flatMap { Int($0) })
+        case "RESET_CODE_INVALID": self = .resetCodeInvalid
         case "SIGNUP_EXPIRED": self = .signUpExpired
         case "RESET_EXPIRED": self = .resetExpired
         case "SIGNUP_EMAIL_TAKEN": self = .emailTaken
@@ -136,6 +144,7 @@ public enum AccountCodeFailure: Equatable, Sendable {
         case .codeInvalid(let left?) where left == 1: "Koodi ei kelpaa. Yksi yritys jäljellä."
         case .codeInvalid(let left?) where left > 1: "Koodi ei kelpaa. Yrityksiä jäljellä: \(left)."
         case .codeInvalid: "Koodi ei kelpaa."
+        case .resetCodeInvalid: "Koodi ei kelpaa tai se on vanhentunut."
         case .signUpExpired: "Koodi on vanhentunut tai sitä yritettiin liian monta kertaa. Aloita tilin luonti uudelleen."
         case .resetExpired: "Koodi on vanhentunut tai sitä yritettiin liian monta kertaa. Pyydä uusi palautusviesti."
         case .emailTaken: "Tällä sähköpostiosoitteella on jo tili. Kirjaudu sisään tai palauta salasana."

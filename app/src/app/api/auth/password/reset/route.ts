@@ -58,7 +58,7 @@ export async function POST(req: NextRequest) {
       }
       userId = await resetPasswordWithCode(email, code, password);
     }
-    await notifyPasswordChanged(userId, accountLinkBase(req.nextUrl.origin));
+    notifyPasswordChanged(userId, accountLinkBase(req.nextUrl.origin));
     return NextResponse.json({ ok: true });
   } catch (error) {
     if (error instanceof AccountSecurityError) {

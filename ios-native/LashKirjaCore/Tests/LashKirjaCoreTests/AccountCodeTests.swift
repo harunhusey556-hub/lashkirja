@@ -55,7 +55,7 @@ private func sent(_ request: URLRequest) throws -> [String: String] {
 
 @Test func signUpBodiesUseTheContractFields() throws {
     #expect(try object(SignUpStartBody(email: " A@B.fi ", password: "salasana1", firstName: " Harun ")) == ["email": "a@b.fi", "password": "salasana1", "firstName": "Harun"])
-    #expect(try object(SignUpVerifyBody(email: "A@b.fi", code: "123 456")) == ["email": "a@b.fi", "code": "123456", "device": "ios-app"])
+    #expect(try object(SignUpVerifyBody(email: "A@b.fi", code: "123 456", password: "salasana1")) == ["email": "a@b.fi", "code": "123456", "password": "salasana1", "device": "ios-app"])
     #expect(try object(SignUpResendBody(email: " a@b.fi")) == ["email": "a@b.fi"])
     #expect(try object(ResetWithCodeBody(email: "A@B.fi", code: "LashKirja-vahvistuskoodi: 654321", password: "uusisalasana")) == ["email": "a@b.fi", "code": "654321", "password": "uusisalasana"])
 }
@@ -89,7 +89,7 @@ private func sent(_ request: URLRequest) throws -> [String: String] {
         AccountCodeFailure(APIErrorDecoder.decode(status: status, data: Data(body.utf8)))
     }
     #expect(failure(400, #"{"error":"Koodi ei kelpaa.","code":"SIGNUP_CODE_INVALID","attemptsLeft":2}"#) == .codeInvalid(attemptsLeft: 2))
-    #expect(failure(400, #"{"error":"Koodi ei kelpaa.","code":"RESET_CODE_INVALID"}"#) == .codeInvalid(attemptsLeft: nil))
+    #expect(failure(400, #"{"error":"Koodi ei kelpaa tai se on vanhentunut.","code":"RESET_CODE_INVALID"}"#) == .resetCodeInvalid)
     #expect(failure(410, #"{"error":"Vanhentunut","code":"SIGNUP_EXPIRED"}"#) == .signUpExpired)
     #expect(failure(410, #"{"error":"Vanhentunut","code":"RESET_EXPIRED"}"#) == .resetExpired)
     #expect(failure(409, #"{"code":"SIGNUP_EMAIL_TAKEN"}"#) == .emailTaken)
@@ -103,6 +103,8 @@ private func sent(_ request: URLRequest) throws -> [String: String] {
     #expect(AccountCodeFailure.codeInvalid(attemptsLeft: 3).message(serverMessage: "x") == "Koodi ei kelpaa. Yrityksiä jäljellä: 3.")
     #expect(AccountCodeFailure.codeInvalid(attemptsLeft: 1).message(serverMessage: nil) == "Koodi ei kelpaa. Yksi yritys jäljellä.")
     #expect(AccountCodeFailure.codeInvalid(attemptsLeft: nil).message(serverMessage: nil) == "Koodi ei kelpaa.")
+    #expect(AccountCodeFailure.resetCodeInvalid.message(serverMessage: "x") == "Koodi ei kelpaa tai se on vanhentunut.")
+    #expect(!AccountCodeFailure.resetCodeInvalid.startsOver)
     #expect(AccountCodeFailure.disabled.message(serverMessage: nil) == "Uusien tilien luonti ei ole käytössä.")
     #expect(AccountCodeFailure.rateLimited.message(serverMessage: "Odota hetki.") == "Odota hetki.")
     #expect(AccountCodeFailure.other.message(serverMessage: "Tilin luonti ei ole juuri nyt käytössä.") == "Tilin luonti ei ole juuri nyt käytössä.")
@@ -131,10 +133,10 @@ private func sent(_ request: URLRequest) throws -> [String: String] {
 
 @Test func signupVerifySignsInLikeLogin() async throws {
     let (auth, store, transport) = await make([reply(tokenBody)])
-    let user = try await auth.signupVerify(email: "a@b.fi", code: "123 456")
+    let user = try await auth.signupVerify(email: "a@b.fi", code: "123 456", password: "salasana1")
     #expect(user == AuthUser(userId: "u1", email: "a@b.fi", firstName: "Harun"))
     #expect(transport.requests[0].url?.path == "/api/auth/signup/verify")
-    #expect(try sent(transport.requests[0]) == ["email": "a@b.fi", "code": "123456", "device": "ios-app"])
+    #expect(try sent(transport.requests[0]) == ["email": "a@b.fi", "code": "123456", "password": "salasana1", "device": "ios-app"])
     #expect(await store.load()?.token == "T1")
     #expect(await auth.currentToken() == "T1")
 }
@@ -142,7 +144,7 @@ private func sent(_ request: URLRequest) throws -> [String: String] {
 @Test func signupVerifyWrongCodeKeepsNoSession() async throws {
     let (auth, store, _) = await make([reply(#"{"error":"Koodi ei kelpaa.","code":"SIGNUP_CODE_INVALID","attemptsLeft":4}"#, 400)])
     do {
-        _ = try await auth.signupVerify(email: "a@b.fi", code: "000000")
+        _ = try await auth.signupVerify(email: "a@b.fi", code: "000000", password: "salasana1")
         Issue.record("a wrong code must throw")
     } catch let error as LKError {
         #expect(AccountCodeFailure(error) == .codeInvalid(attemptsLeft: 4))
