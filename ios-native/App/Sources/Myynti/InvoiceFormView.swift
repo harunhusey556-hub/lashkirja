@@ -80,7 +80,9 @@ struct InvoiceFormView: View {
                 }
             }
             .scrollDismissesKeyboard(.interactively)
-            .safeAreaInset(edge: .bottom, spacing: 0) { bottomBar }
+            // While typing, the keyboard's own bar (Seuraava · total · Valmis) takes this bar's place:
+            // both at once overlapped above the keyboard.
+            .safeAreaInset(edge: .bottom, spacing: 0) { if focus == nil { bottomBar } }
             .navigationTitle(existing == nil ? "Uusi lasku" : "Muokkaa laskua")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -90,6 +92,10 @@ struct InvoiceFormView: View {
                 ToolbarItemGroup(placement: .keyboard) {
                     Button("Seuraava") { focusNext() }
                         .disabled(InvoiceForm.field(after: focus, lines: draft.lines) == nil)
+                    Spacer()
+                    Text("Yhteensä \(Money.format(draft.totals.gross))")
+                        .font(.subheadline.weight(.semibold).monospacedDigit())
+                        .foregroundStyle(Theme.ink)
                     Spacer()
                     Button("Valmis") { focus = nil }.fontWeight(.semibold)
                 }

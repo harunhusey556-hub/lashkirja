@@ -25,6 +25,9 @@ struct LashKirjaApp: App {
         WindowGroup {
             RootView()
                 .environment(app)
+                // The app speaks Finnish: date pickers and system formatting follow it, not the
+                // phone's language ("3.10.2026", not "3. Oct 2026").
+                .environment(\.locale, Locale(identifier: "fi_FI"))
                 .tint(Theme.accent)
                 .task {
                     await app.start()
