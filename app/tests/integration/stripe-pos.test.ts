@@ -26,6 +26,7 @@ import { readStoredZip } from "@/lib/zip-store";
 import { resetRateLimitsForTests } from "@/lib/rate-limit";
 import { createUser, resetDatabase, type TestUser } from "./helpers/factories";
 import { buildRequest, readJson, routeContext, sessionCookie } from "./helpers/http";
+import { listRefunds, StripeListIncompleteError } from "@/lib/stripe";
 import { installFakeStripe, stripeSignature, type FakeStripe } from "./helpers/fake-stripe";
 
 // A live-looking key by default: only a live key with a livemode PaymentIntent
@@ -1159,6 +1160,127 @@ describe("refund in a locked month: the closed month is never changed", () => {
       routeContext({ id: invoice.id })
     );
     expect(removed.status).toBe(409);
+  });
+
+  function refundUpdatedEvent(account: string, refundId: string, id = "evt_refund_updated", type = "charge.refund.updated") {
+    const refund = stripe.refunds.get(refundId)!;
+    return { id, object: "event", type, livemode: true, account, data: { object: { ...refund } } };
+  }
+
+  const refundedCents = async (id: string) => (await prisma.posPayment.findUniqueOrThrow({ where: { id } })).refundedCents;
+
+  it("a pending refund makes no card; when it succeeds it makes exactly one", async () => {
+    const { account, invoice, payment } = await bookedLive();
+    await lockThrough(helsinkiMonthKey());
+    stripe.refundStatus = "pending";
+    const response = await refundReq(payment.id, { amount: 25.5 });
+    expect(response.status).toBe(200);
+    expect(await readJson(response)).toMatchObject({ correctionPending: false });
+    expect(await refundedCents(payment.id)).toBe(2_550);
+    expect(await posRefunds(payment.id)).toHaveLength(0);
+    expect(await cards()).toHaveLength(0);
+    // charge.refunded while the refund is still pending adds nothing to accept either.
+    expect((await webhook(webhookRequest(chargedRefundEvent(account, payment.paymentIntentId)))).status).toBe(200);
+    expect(await posRefunds(payment.id)).toHaveLength(0);
+
+    const [pending] = [...stripe.refunds.values()];
+    stripe.setRefund(pending.id, "succeeded");
+    const event = refundUpdatedEvent(account, pending.id);
+    expect((await webhook(webhookRequest(event))).status).toBe(200);
+    expect((await webhook(webhookRequest(event))).status).toBe(200);
+    expect((await webhook(webhookRequest(chargedRefundEvent(account, payment.paymentIntentId, "evt_again")))).status).toBe(200);
+    expect(await posRefunds(payment.id)).toEqual([
+      expect.objectContaining({ stripeRefundId: pending.id, amountCents: 2_550, books: "correction_pending" }),
+    ]);
+    expect(await cards()).toHaveLength(1);
+    expect((await invoicePayments(invoice.id))[0].amountCents).toBe(12_550);
+  });
+
+  it("a pending refund that fails never becomes a card", async () => {
+    const { account, payment } = await bookedLive();
+    await lockThrough(helsinkiMonthKey());
+    stripe.refundStatus = "pending";
+    expect((await refundReq(payment.id, { amount: 25.5 })).status).toBe(200);
+    const [pending] = [...stripe.refunds.values()];
+    stripe.setRefund(pending.id, "failed");
+    expect((await webhook(webhookRequest(refundUpdatedEvent(account, pending.id, "evt_failed", "refund.updated")))).status).toBe(200);
+    expect(await posRefunds(payment.id)).toHaveLength(0);
+    expect(await cards()).toHaveLength(0);
+  });
+
+  it("refunds adding up to more than Stripe's refunded total make no card and no partial row", async () => {
+    const { account, payment } = await bookedLive();
+    await lockThrough(helsinkiMonthKey());
+    stripe.dashboardRefund(payment.paymentIntentId, 1_000);
+    const second = stripe.dashboardRefund(payment.paymentIntentId, 2_000);
+    // The charge says 30,00 was refunded; the list says 60,00.
+    second.amount = 5_000;
+    const event = chargedRefundEvent(account, payment.paymentIntentId);
+    expect((await webhook(webhookRequest(event))).status).toBe(500);
+    expect(await posRefunds(payment.id)).toHaveLength(0);
+    expect(await cards()).toHaveLength(0);
+    expect(await refundedCents(payment.id)).toBe(0);
+
+    // Stripe's retry after the list agrees with the total books both.
+    second.amount = 2_000;
+    expect((await webhook(webhookRequest(event))).status).toBe(200);
+    expect((await posRefunds(payment.id)).map((row) => row.amountCents).sort((a, b) => a - b)).toEqual([1_000, 2_000]);
+    expect(await cards()).toHaveLength(2);
+  });
+
+  it("an already recorded refund counts: a fresh one above what is left makes no row", async () => {
+    const { account, payment } = await bookedLive();
+    await lockThrough(helsinkiMonthKey());
+    expect((await refundReq(payment.id, { amount: 25.5 })).status).toBe(200);
+    const fresh = stripe.dashboardRefund(payment.paymentIntentId, 1_000);
+    // 25,50 recorded + 100,00 listed fits the payment but not the 35,50 Stripe refunded.
+    fresh.amount = 10_000;
+    expect((await webhook(webhookRequest(chargedRefundEvent(account, payment.paymentIntentId)))).status).toBe(500);
+    expect(await posRefunds(payment.id)).toEqual([expect.objectContaining({ amountCents: 2_550 })]);
+    expect(await cards()).toHaveLength(1);
+  });
+
+  it("a succeeded refund whose amount is not whole cents books nothing", async () => {
+    const { account, payment } = await bookedLive();
+    await lockThrough(helsinkiMonthKey());
+    const odd = stripe.dashboardRefund(payment.paymentIntentId, 1_000);
+    odd.amount = 1_000.5;
+    expect((await webhook(webhookRequest(chargedRefundEvent(account, payment.paymentIntentId)))).status).toBe(500);
+    expect(await posRefunds(payment.id)).toHaveLength(0);
+  });
+
+  it("more than one page of refunds books nothing and is retried", async () => {
+    const { account, payment } = await bookedLive();
+    await lockThrough(helsinkiMonthKey());
+    stripe.refundsHaveMore = true;
+    await expect(listRefunds(account, payment.paymentIntentId)).rejects.toBeInstanceOf(StripeListIncompleteError);
+    const response = await refundReq(payment.id, { amount: 25.5 }, "paged");
+    expect(response.status).toBe(502);
+    stripe.dashboardRefund(payment.paymentIntentId, 1_000);
+    const event = chargedRefundEvent(account, payment.paymentIntentId);
+    expect((await webhook(webhookRequest(event))).status).toBe(500);
+    expect(await posRefunds(payment.id)).toHaveLength(0);
+    expect(await cards()).toHaveLength(0);
+
+    stripe.refundsHaveMore = false;
+    // The retry is the same refund at Stripe (same key), not a second one.
+    expect((await refundReq(payment.id, { amount: 25.5 }, "paged")).status).toBe(200);
+    expect(stripe.refunds.size).toBe(2);
+    expect((await posRefunds(payment.id)).map((row) => row.amountCents).sort((a, b) => a - b)).toEqual([1_000, 2_550]);
+    expect(await cards()).toHaveLength(2);
+  });
+
+  it("a succeeded live payment stored as test takes the fresh PaymentIntent's mode before the refund", async () => {
+    const { invoice, payment } = await bookedLive();
+    // A row from before livemode was stored: the migration defaulted it to false.
+    await prisma.posPayment.update({ where: { id: payment.id }, data: { livemode: false } });
+    await lockThrough(helsinkiMonthKey());
+    const response = await refundReq(payment.id, { amount: 25.5 });
+    expect(response.status).toBe(200);
+    expect(await readJson(response)).toMatchObject({ testPayment: false, correctionPending: true });
+    expect((await prisma.posPayment.findUniqueOrThrow({ where: { id: payment.id } })).livemode).toBe(true);
+    expect(await posRefunds(payment.id)).toEqual([expect.objectContaining({ amountCents: 2_550, books: "correction_pending" })]);
+    expect((await invoicePayments(invoice.id))[0].amountCents).toBe(12_550);
   });
 });
 

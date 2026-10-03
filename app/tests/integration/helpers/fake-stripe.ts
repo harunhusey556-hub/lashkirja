@@ -58,6 +58,12 @@ export interface FakeStripe {
   refunds: Map<string, FakeRefund>;
   /** A refund made outside the app (the Stripe Dashboard): a refund object plus the charge total. */
   dashboardRefund(paymentIntentId: string, amount: number): FakeRefund;
+  /** Status of new refunds; "succeeded" by default. A pending refund already counts in the charge total, as at Stripe. */
+  refundStatus: string;
+  /** Moves a refund to a state; a failed or canceled one leaves the charge total, as at Stripe. */
+  setRefund(id: string, status: string): FakeRefund;
+  /** The refund list answers has_more: true (more than one page). */
+  refundsHaveMore: boolean;
   accounts: Map<string, { id: string; charges_enabled: boolean; payouts_enabled: boolean; details_submitted: boolean }>;
   intents: Map<string, FakeIntent>;
   charges: Map<string, FakeCharge>;
@@ -89,7 +95,7 @@ export function installFakeStripe(): FakeStripe {
       id: next("re"),
       object: "refund",
       amount,
-      status: "succeeded",
+      status: state.refundStatus,
       payment_intent: intent.id,
       charge: charge.id,
       created: Math.floor(Date.now() / 1000),
@@ -107,6 +113,20 @@ export function installFakeStripe(): FakeStripe {
       if (!intent?.latest_charge) throw new Error(`no charged intent ${paymentIntentId}`);
       return addRefund(intent, amount);
     },
+    refundStatus: "succeeded",
+    setRefund(id, status) {
+      const refund = state.refunds.get(id);
+      if (!refund) throw new Error(`no refund ${id}`);
+      const gone = (value: string) => value === "failed" || value === "canceled";
+      if (gone(status) && !gone(refund.status)) {
+        const charge = state.charges.get(refund.charge)!;
+        charge.amount_refunded -= refund.amount;
+        charge.refunded = charge.amount_refunded === charge.amount;
+      }
+      refund.status = status;
+      return refund;
+    },
+    refundsHaveMore: false,
     accounts: new Map(),
     intents: new Map(),
     charges: new Map(),
@@ -243,7 +263,7 @@ export function installFakeStripe(): FakeStripe {
       const intent = state.intents.get(intentId);
       if (!intent || intent.account !== account) return notFound();
       const data = [...state.refunds.values()].filter((refund) => refund.payment_intent === intentId).reverse();
-      return json({ object: "list", data, has_more: false, url: "/v1/refunds" });
+      return json({ object: "list", data, has_more: state.refundsHaveMore, url: "/v1/refunds" });
     }
     return json({ error: { type: "invalid_request_error", message: `unhandled ${method} ${path}` } }, 404);
   }

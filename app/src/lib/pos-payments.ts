@@ -693,15 +693,26 @@ interface RefundInfo {
   createdAt: Date;
 }
 
-/** Refunds that took (or may still take) money back: not failed or canceled. */
+/**
+ * Refunds that took money back: succeeded only. A pending refund can still fail, and an accepted
+ * correction could not be taken back; it gets its card once a later read sees it succeeded.
+ */
 function refundInfos(refunds: StripeRefund[]): RefundInfo[] {
   return refunds
-    .filter((refund) => refund.status !== "failed" && refund.status !== "canceled" && refund.amount > 0)
-    .map((refund) => ({
-      id: refund.id,
-      amountCents: refund.amount,
-      createdAt: refund.created ? new Date(refund.created * 1000) : new Date(),
-    }));
+    .filter((refund) => refund.status === "succeeded")
+    .map((refund) => {
+      if (!Number.isSafeInteger(refund.amount) || refund.amount <= 0) throw refundsUnclear();
+      return {
+        id: refund.id,
+        amountCents: refund.amount,
+        createdAt: refund.created ? new Date(refund.created * 1000) : new Date(),
+      };
+    });
+}
+
+/** Stripe's refunds and its refunded total disagree: nothing is booked, a later read retries. */
+function refundsUnclear(): AppError {
+  return new AppError("Palautuksen tilaa ei saatu Stripestä. Yritä uudelleen.", "POS_REFUND_UNKNOWN", 502);
 }
 
 const CARDED: string[] = ["correction_pending", "corrected"];
@@ -729,6 +740,7 @@ async function applyRefundTotal(
   totalRefundedCents: number,
   options: { stripeLivemode: boolean; refunds: RefundInfo[] }
 ): Promise<void> {
+  if (!Number.isSafeInteger(totalRefundedCents) || totalRefundedCents < 0) throw refundsUnclear();
   // Write first: takes the write lock before the reads below.
   await tx.posPayment.updateMany({ where: { id: posId }, data: { refundedCents: { increment: 0 } } });
   const pos = await tx.posPayment.findUniqueOrThrow({ where: { id: posId } });
@@ -756,6 +768,15 @@ async function applyRefundTotal(
   });
   const knownIds = new Set(known.map((row) => row.stripeRefundId));
   const fresh = options.refunds.filter((refund) => !knownIds.has(refund.id));
+  if (fresh.length > 0) {
+    // Every recorded refund can become a correction of its own amount, so together they may never
+    // pass what Stripe says it refunded, or the payment. Throwing rolls back the whole update.
+    const recordedCents = known.reduce((sum, row) => sum + row.amountCents, 0);
+    const listedCents = recordedCents + fresh.reduce((sum, refund) => sum + refund.amountCents, 0);
+    if (!Number.isSafeInteger(listedCents) || listedCents > totalRefundedCents || listedCents > pos.amountCents) {
+      throw refundsUnclear();
+    }
+  }
   const lockedThrough = await getLockedThrough(pos.userId, tx);
   const locked = isDateLocked(lockedThrough, booked.paidDate);
 
@@ -864,7 +885,13 @@ export async function refundPosPayment(
     throw new AppError("Palautuksen tilaa ei saatu Stripestä. Yritä uudelleen.", "POS_REFUND_UNKNOWN", 502);
   }
   const stripeLivemode = intent.livemode === true;
-  const listed = await refundsForBooks(account, pos, stripeLivemode);
+  // The fresh PaymentIntent is authoritative, also for a payment booked before livemode was
+  // stored (those rows were migrated as test): kept before the refund is weighed against it.
+  if (pos.livemode !== stripeLivemode) {
+    await prisma.posPayment.update({ where: { id: pos.id }, data: { livemode: stripeLivemode } });
+  }
+  const current = { ...pos, livemode: stripeLivemode };
+  const listed = await refundsForBooks(account, current, stripeLivemode);
   // The refund just made is in the list too; it is added in case the list lags behind.
   const refunds = listed.some((row) => row.id === refund.id)
     ? listed
@@ -872,7 +899,7 @@ export async function refundPosPayment(
   await prisma.$transaction((tx) =>
     applyRefundTotal(tx, pos.id, charge.amount_refunded, {
       stripeLivemode,
-      refunds: stripeLivemode && isLivePayment(pos.livemode) ? refunds : [],
+      refunds: stripeLivemode && isLivePayment(current.livemode) ? refunds : [],
     })
   );
   return viewWithInvoice(userId, id);
@@ -997,6 +1024,22 @@ export async function handleStripeEvent(event: StripeEvent): Promise<void> {
       // The charge carries only the total; the refund ids come from Stripe's list.
       const refunds = await refundsForBooks(accountId, pos, stripeLivemode);
       await prisma.$transaction((tx) => applyRefundTotal(tx, pos.id, refunded, { stripeLivemode, refunds }));
+      return;
+    }
+    case "charge.refund.updated":
+    case "refund.updated": {
+      // A refund changed state (a pending one succeeded or failed). The event carries no total,
+      // so the total comes from the PaymentIntent and the refund ids from Stripe's list.
+      const intentId = str(object.payment_intent);
+      if (!intentId) return;
+      const pos = await prisma.posPayment.findFirst({ where: { providerPaymentIntentId: intentId, userId: user.id } });
+      if (!pos) return;
+      const intent = await retrievePaymentIntent(accountId, intentId);
+      const charge = intent.latest_charge;
+      if (!charge || typeof charge === "string" || typeof charge.amount_refunded !== "number") throw refundsUnclear();
+      const stripeLivemode = intent.livemode === true && event.livemode !== false;
+      const refunds = await refundsForBooks(accountId, pos, stripeLivemode);
+      await prisma.$transaction((tx) => applyRefundTotal(tx, pos.id, charge.amount_refunded, { stripeLivemode, refunds }));
       return;
     }
     default:

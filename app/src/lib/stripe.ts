@@ -469,12 +469,26 @@ export function verifyWebhookSignature(
   });
 }
 
-/** Every refund of a PaymentIntent on the connected account, newest first (at most 100). */
-export function listRefunds(account: string, paymentIntentId: string): Promise<{ data: StripeRefund[] }> {
-  return stripeRequest<{ data: StripeRefund[] }>(
+/** Stripe's list did not fit one page: the books are not changed from a partial list. */
+export class StripeListIncompleteError extends AppError {
+  constructor() {
+    super("Palautuksia ei saatu kokonaan Stripestä. Yritä hetken päästä uudelleen.", "POS_REFUNDS_INCOMPLETE", 502);
+    this.name = "StripeListIncompleteError";
+  }
+}
+
+/**
+ * Every refund of a PaymentIntent on the connected account, newest first. More than 100
+ * (has_more) throws StripeListIncompleteError: a refund missing from the list would never get
+ * its correction card, so nothing is booked from it.
+ */
+export async function listRefunds(account: string, paymentIntentId: string): Promise<{ data: StripeRefund[] }> {
+  const list = await stripeRequest<{ data: StripeRefund[]; has_more?: boolean }>(
     "GET",
     "/v1/refunds",
     { payment_intent: stripeId(paymentIntentId), limit: 100 },
     { account }
   );
+  if (list.has_more !== false || !Array.isArray(list.data)) throw new StripeListIncompleteError();
+  return { data: list.data };
 }
