@@ -35,6 +35,11 @@ jobs:
           cache: npm
           cache-dependency-path: app/package-lock.json
 
+      # The backup and database-upgrade tests drive the sqlite3 command-line tool,
+      # which the runner image does not ship.
+      - name: Install sqlite3
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq sqlite3
+
       - name: Install dependencies
         run: npm ci
 
