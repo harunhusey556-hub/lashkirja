@@ -1,5 +1,6 @@
 name: LashKirja
 options:
+  developmentLanguage: fi
   bundleIdPrefix: fi.tiyouba
   deploymentTarget: { iOS: "18.0" }
   createIntermediateGroups: true
@@ -39,6 +40,11 @@ targets:
       path: Config/Info.plist
       properties:
         CFBundleDisplayName: LashKirja
+        # The app is Finnish only: system-drawn controls (PasteButton "Liitä", Done, Cancel,
+        # the text-edit menu) follow these instead of falling back to English.
+        CFBundleDevelopmentRegion: fi
+        CFBundleLocalizations: [fi]
+        CFBundleAllowMixedLocalizations: true
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         LKAPIBaseURL: $(API_BASE_URL)
