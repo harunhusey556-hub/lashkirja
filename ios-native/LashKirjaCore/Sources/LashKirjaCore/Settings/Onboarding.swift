@@ -1,6 +1,6 @@
 import Foundation
 
-/// One answer of a multi-select onboarding question (lib/onboarding.ts ONBOARDING_STEPS).
+/// One answer chip of an onboarding question (lib/onboarding.ts ONBOARDING_STEPS).
 public struct OnboardingChoice: Sendable, Identifiable, Equatable {
     public let value: String
     public let label: String
@@ -10,13 +10,41 @@ public struct OnboardingChoice: Sendable, Identifiable, Equatable {
 
 public struct OnboardingQuestion: Sendable {
     public let question: String
-    public let hint: String
+    /// One short line under the question.
+    public let hint: String?
     public let choices: [OnboardingChoice]
 }
 
 public enum OnboardingQuestions {
     public static let entityTypes = ["toiminimi", "kevytyrittaja", "oy"]
     public static let vatPeriods = ["month", "quarter", "year"]
+
+    public static let entity = OnboardingQuestion(
+        question: "Mikä on yritysmuotosi?",
+        hint: nil,
+        choices: [
+            OnboardingChoice(value: "toiminimi", label: "Toiminimi", detail: "Yksityinen elinkeinonharjoittaja"),
+            OnboardingChoice(value: "kevytyrittaja", label: "Kevytyrittäjä", detail: "Laskutat laskutuspalvelun kautta"),
+            OnboardingChoice(value: "oy", label: "Osakeyhtiö (Oy)", detail: nil),
+        ])
+
+    /// The values are the answer as text: "true" / "false".
+    public static let vat = OnboardingQuestion(
+        question: "Oletko arvonlisäverorekisterissä?",
+        hint: "Tästä riippuu, lasketaanko myynnistäsi ALV.",
+        choices: [
+            OnboardingChoice(value: "true", label: "Kyllä, olen ALV-rekisterissä", detail: nil),
+            OnboardingChoice(value: "false", label: "En ole ALV-rekisterissä", detail: nil),
+        ])
+
+    public static let vatPeriod = OnboardingQuestion(
+        question: "Kuinka usein ilmoitat ALV:n OmaVerossa?",
+        hint: nil,
+        choices: [
+            OnboardingChoice(value: "month", label: "Kuukausittain", detail: "Tavallisin"),
+            OnboardingChoice(value: "quarter", label: "Neljännesvuosittain", detail: "Kolmen kuukauden välein"),
+            OnboardingChoice(value: "year", label: "Vuosittain", detail: nil),
+        ])
 
     public static let sales = OnboardingQuestion(
         question: "Mitä yrityksesi myy?",
@@ -92,7 +120,7 @@ public struct OnboardingAnswers: Codable, Equatable, Sendable {
     }
 
     /// Known values only, once each, in the question's order.
-    private static func ordered(_ list: [String], in question: OnboardingQuestion) -> [String] {
+    static func ordered(_ list: [String], in question: OnboardingQuestion) -> [String] {
         question.choices.map(\.value).filter { list.contains($0) }
     }
 }
