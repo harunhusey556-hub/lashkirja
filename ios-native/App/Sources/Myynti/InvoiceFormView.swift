@@ -15,6 +15,8 @@ struct InvoiceFormView: View {
     @State private var issueDate = Date()
     @State private var customers: [Customer] = []
     @State private var showNewCustomer = false
+    @State private var showCustomerPicker = false
+    @State private var showCatalog = false
     @State private var busy = false
     @State private var failure: String?
     @State private var key = UUID().uuidString
@@ -26,90 +28,70 @@ struct InvoiceFormView: View {
     @State private var baseline: InvoiceDraft?
     @State private var restored = false
     @State private var confirmDiscard = false
+    /// Each line's price as typed, so an empty field reads "Hinta puuttuu." instead of 0 €.
+    @State private var priceTexts: [UUID: String] = [:]
+    /// "Muu" picked: the due date picker shows even when the days match a preset.
+    @State private var customTerm = false
+    /// Field errors appear after the first save attempt and then follow the typing.
+    @State private var showErrors = false
+    @State private var showDetails = false
+    @State private var scrollTarget: InvoiceFormField?
+    @FocusState private var focus: InvoiceFormField?
 
     var body: some View {
         NavigationStack {
-            Form {
-                if restored {
-                    Section {
-                        Text("Palautettiin tallentamaton luonnos.")
-                        Button("Aloita tyhjästä", role: .destructive) { startOver() }
-                    }
-                }
-                // F22: what a send will need, said before the invoice exists. Never blocks a draft.
-                if existing == nil, let note = SellerPreflight.note(profile: app.profile) {
-                    Section {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(note.title).font(.subheadline.weight(.semibold)).foregroundStyle(Theme.ink)
-                            Text(note.body).font(.caption).foregroundStyle(Theme.ink2)
-                        }
-                        NavigationLink { SellerDetailsScreen() } label: {
-                            Text("Täydennä tiedot").foregroundStyle(Theme.accentDark)
-                        }
-                    }
-                    .listRowBackground(Theme.warning.opacity(0.10))
-                }
-                Section("Asiakas") {
-                    Picker("Asiakas", selection: Binding(get: { draft.customerId }, set: { pickCustomer($0) })) {
-                        Text("Valitse asiakas").tag("")
-                        ForEach(customers) { Text($0.name).tag($0.id) }
-                    }
-                    Button { showNewCustomer = true } label: { Label("Uusi asiakas", systemImage: "person.badge.plus") }
-                }
-                Section("Päivät") {
-                    DatePicker("Laskun päivä", selection: $issueDate, displayedComponents: .date)
-                    Stepper("Maksuaika \(draft.paymentTermDays) pv", value: $draft.paymentTermDays, in: 0...365, step: 7)
-                }
-                Section {
-                    ForEach($draft.lines) { $line in
-                        LineEditor(line: $line, catalog: catalog, issueDate: APIDate.dayString(issueDate), showsVat: sellerRegistered) { saved in
-                            Task { await saveProduct(saved) }
-                        }
-                    }
-                    .onDelete { draft.lines.remove(atOffsets: $0) }
-                    Button { withAnimation { draft.lines.append(.new(sellerRegistered: sellerRegistered)) } } label: { Label("Lisää rivi", systemImage: "plus") }
-                } header: {
-                    Text("Rivit")
-                } footer: {
-                    if let productNotice { Text(productNotice) }
-                }
-                if !catalog.isEmpty {
-                    Section {
-                        DisclosureGroup("Tallennetut tuotteet (\(catalog.count))") {
-                            ForEach(catalog) { item in
-                                HStack {
-                                    Text(item.name)
-                                    Spacer()
-                                    MoneyText(amount: item.unitPrice).foregroundStyle(Theme.ink2)
-                                }
-                                .swipeActions {
-                                    Button("Poista", role: .destructive) { Task { await deleteProduct(item) } }
-                                }
+            ScrollViewReader { proxy in
+                Form {
+                    if restored {
+                        Section {
+                            HStack {
+                                Label("Palautettiin tallentamaton luonnos.", systemImage: "clock.arrow.circlepath")
+                                    .font(.subheadline)
+                                    .foregroundStyle(Theme.ink)
+                                Spacer(minLength: 8)
+                                Button("Aloita tyhjästä", role: .destructive) { startOver() }
+                                    .font(.subheadline)
+                                    .buttonStyle(.borderless)
                             }
                         }
-                    } footer: {
-                        Text("Pyyhkäise tuotetta vasemmalle poistaaksesi sen valikosta. Laskut, joilla sitä on käytetty, eivät muutu.")
                     }
+                    // F22: what a send will need, said before the invoice exists. Never blocks a draft.
+                    if existing == nil, let note = SellerPreflight.note(profile: app.profile) {
+                        Section {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(note.title).font(.subheadline.weight(.semibold)).foregroundStyle(Theme.ink)
+                                Text(note.body).font(.caption).foregroundStyle(Theme.ink2)
+                            }
+                            NavigationLink { SellerDetailsScreen() } label: {
+                                Text("Täydennä tiedot").foregroundStyle(Theme.accentDark)
+                            }
+                        }
+                        .listRowBackground(Theme.warning.opacity(0.10))
+                    }
+                    customerSection
+                    datesSection
+                    linesSection
+                    detailsSection
                 }
-                Section {
-                    let t = draft.totals
-                    LabeledContent("Veroton") { MoneyText(amount: t.net) }
-                    LabeledContent("ALV") { MoneyText(amount: t.vat) }
-                    LabeledContent("Yhteensä") { MoneyText(amount: t.gross).fontWeight(.semibold) }
+                .onChange(of: scrollTarget) { _, target in
+                    guard let target else { return }
+                    withAnimation { proxy.scrollTo(rowId(target), anchor: .center) }
+                    scrollTarget = nil
                 }
-                Section("Lisätiedot") {
-                    TextField("Viesti laskulle (valinnainen)", text: $draft.notes, axis: .vertical).lineLimit(2...5)
-                }
-                if let failure { Section { Text(failure).foregroundStyle(Theme.danger) } }
             }
+            .scrollDismissesKeyboard(.interactively)
+            .safeAreaInset(edge: .bottom, spacing: 0) { bottomBar }
             .navigationTitle(existing == nil ? "Uusi lasku" : "Muokkaa laskua")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Peruuta") { if dirty { confirmDiscard = true } else { dismiss() } }.disabled(busy)
                 }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button(existing == nil ? "Luo lasku" : "Tallenna") { Task { await save() } }.disabled(busy)
+                ToolbarItemGroup(placement: .keyboard) {
+                    Button("Seuraava") { focusNext() }
+                        .disabled(InvoiceForm.field(after: focus, lines: draft.lines) == nil)
+                    Spacer()
+                    Button("Valmis") { focus = nil }.fontWeight(.semibold)
                 }
             }
             .confirmationDialog("Hylätäänkö muutokset?", isPresented: $confirmDiscard, titleVisibility: .visible) {
@@ -126,11 +108,17 @@ struct InvoiceFormView: View {
                 Text(existing == nil ? "Laskua ei ole vielä luotu." : "Muutoksia ei ole tallennettu.")
             }
             .sheet(isPresented: $showNewCustomer) {
-                CustomerFormSheet(existing: nil) { created in
-                    customers.append(created)
-                    draft.customerId = created.id
-                    draft.paymentTermDays = created.defaultPaymentTermDays
-                }
+                CustomerFormSheet(existing: nil) { created in addCreatedCustomer(created) }
+            }
+            .sheet(isPresented: $showCustomerPicker) {
+                CustomerPickerSheet(customers: customers, selectedId: draft.customerId,
+                                    onPick: { pickCustomer($0.id) },
+                                    onCreated: { addCreatedCustomer($0) })
+            }
+            .sheet(isPresented: $showCatalog) {
+                CatalogPickerSheet(catalog: catalog, showsVat: sellerRegistered,
+                                   onPick: { addFromCatalog($0) },
+                                   onDelete: { item in Task { await deleteProduct(item) } })
             }
             // A date moved into 2026 turns old 14 % lines into 13,5 % (as the web form does).
             .onChange(of: issueDate) { _, date in
@@ -141,6 +129,317 @@ struct InvoiceFormView: View {
             .interactiveDismissDisabled(busy || dirty)
         }
     }
+
+    // MARK: Sections
+
+    private var selectedCustomer: Customer? { customers.first { $0.id == draft.customerId } }
+
+    private var customerSection: some View {
+        Section {
+            if let customer = selectedCustomer {
+                InvoiceCustomerCard(name: customer.name, detail: InvoiceForm.customerDetail(customer)) { showCustomerPicker = true }
+                    .id(rowId(.customer))
+            } else if let existing, existing.customer.id == draft.customerId {
+                // An edited invoice whose customer has since been archived: shown, not offered in the list.
+                InvoiceCustomerCard(name: existing.customer.name, detail: InvoiceForm.customerDetail(existing.customer)) { showCustomerPicker = true }
+                    .id(rowId(.customer))
+            } else {
+                Button { showCustomerPicker = true } label: {
+                    HStack {
+                        Label("Valitse asiakas", systemImage: "person.crop.circle")
+                        Spacer()
+                        Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(Theme.ink2)
+                    }
+                    .contentShape(Rectangle())
+                }
+                .foregroundStyle(Theme.accentDark)
+                .id(rowId(.customer))
+                Button { showNewCustomer = true } label: { Label("Uusi asiakas", systemImage: "person.badge.plus") }
+                    .foregroundStyle(Theme.accentDark)
+            }
+            if let message = errors[.customer] { InvoiceFieldError(message: message) }
+        } header: {
+            Text("Asiakas")
+        }
+    }
+
+    private var datesSection: some View {
+        Section {
+            DatePicker("Laskun päivä", selection: $issueDate, displayedComponents: .date)
+                .id(rowId(.dueDate))
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Maksuaika").font(.subheadline).foregroundStyle(Theme.ink2)
+                Picker("Maksuaika", selection: termBinding) {
+                    ForEach(InvoiceForm.paymentTerms, id: \.self) { days in
+                        Text(InvoiceForm.TermChoice.days(days).label).tag(InvoiceForm.TermChoice.days(days))
+                    }
+                    Text(InvoiceForm.TermChoice.other.label).tag(InvoiceForm.TermChoice.other)
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+            }
+            if termBinding.wrappedValue == .other {
+                DatePicker("Eräpäivä", selection: dueBinding, in: dueRange, displayedComponents: .date)
+            }
+            if let message = errors[.dueDate] { InvoiceFieldError(message: message) }
+        } header: {
+            Text("Päivät")
+        } footer: {
+            if let summary = InvoiceForm.dueSummary(issueDate: issueDay, termDays: draft.paymentTermDays) {
+                Text(summary).monospacedDigit()
+            }
+        }
+    }
+
+    private var linesSection: some View {
+        Section {
+            if !sellerRegistered {
+                Text("Et ole ALV-rekisterissä, laskulle ei lisätä ALV:tä.").font(.caption).foregroundStyle(Theme.ink2)
+            }
+            ForEach($draft.lines) { $line in
+                let index = draft.lines.firstIndex { $0.id == line.id } ?? 0
+                InvoiceLineCard(
+                    line: $line,
+                    priceText: priceBinding(line.id),
+                    number: index + 1,
+                    issueDate: issueDay,
+                    showsVat: sellerRegistered,
+                    catalog: catalog,
+                    errors: errors,
+                    focus: $focus,
+                    canMoveUp: index > 0,
+                    canMoveDown: index < draft.lines.count - 1,
+                    canDelete: draft.lines.count > 1
+                ) { action in handle(action, lineId: line.id) }
+                .id(rowId(.description(line.id)))
+                .swipeActions(edge: .trailing) {
+                    if draft.lines.count > 1 {
+                        Button("Poista", role: .destructive) { handle(.delete, lineId: line.id) }
+                    }
+                }
+                .swipeActions(edge: .leading) {
+                    Button("Kopioi") { handle(.copy, lineId: line.id) }.tint(Theme.accent)
+                }
+            }
+            HStack(spacing: 10) {
+                Button { addLine() } label: {
+                    Label("Lisää rivi", systemImage: "plus").frame(maxWidth: .infinity)
+                }
+                if !catalog.isEmpty {
+                    Button { showCatalog = true } label: {
+                        Label("Lisää tuotteista", systemImage: "shippingbox").frame(maxWidth: .infinity)
+                    }
+                }
+            }
+            .font(.subheadline.weight(.semibold))
+            .buttonStyle(.bordered)
+            .tint(Theme.accent)
+            .id(rowId(.lines))
+            if let message = errors[.lines] { InvoiceFieldError(message: message) }
+        } header: {
+            Text("Rivit")
+        } footer: {
+            if let productNotice {
+                Text(productNotice)
+            } else if draft.totals.gross == 0, draft.lines.contains(where: { (priceTexts[$0.id] ?? "x").trimmingCharacters(in: .whitespaces).isEmpty }) {
+                Text("Summa päivittyy, kun rivillä on hinta. Tyhjä kenttä ei ole nolla euroa.")
+            }
+        }
+    }
+
+    private var detailsSection: some View {
+        Section {
+            DisclosureGroup(isExpanded: $showDetails) {
+                TextField("Viesti laskulle (valinnainen)", text: $draft.notes, axis: .vertical)
+                    .lineLimit(2...5)
+                    .focused($focus, equals: InvoiceFormField.notes)
+                if let message = errors[.notes] { InvoiceFieldError(message: message) }
+            } label: {
+                HStack {
+                    Text("Lisätiedot").foregroundStyle(Theme.ink)
+                    if !showDetails, !draft.notes.isEmpty {
+                        Text(draft.notes).font(.caption).foregroundStyle(Theme.ink2).lineLimit(1)
+                    }
+                }
+            }
+            .id(rowId(.notes))
+        }
+    }
+
+    /// Totals and the save button stay above the keyboard and the home indicator.
+    @ViewBuilder private var bottomBar: some View {
+        let totals = draft.totals
+        VStack(spacing: 8) {
+            if let message = failure ?? (showErrors ? InvoiceForm.errorSummary(errors) : nil) {
+                Label(message, systemImage: "exclamationmark.triangle.fill")
+                    .font(.caption)
+                    .foregroundStyle(Theme.danger)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            HStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 2) {
+                    if sellerRegistered {
+                        Text("Veroton \(Money.format(totals.net)) · ALV \(Money.format(totals.vat))")
+                            .font(.caption)
+                            .foregroundStyle(Theme.ink2)
+                            .monospacedDigit()
+                    }
+                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                        Text("Yhteensä").font(.subheadline).foregroundStyle(Theme.ink2)
+                        MoneyText(amount: totals.gross).font(.title3.weight(.semibold)).foregroundStyle(Theme.ink)
+                    }
+                }
+                .accessibilityElement(children: .combine)
+                Spacer(minLength: 8)
+                Button { Task { await save() } } label: {
+                    if busy {
+                        ProgressView().tint(Theme.onInk)
+                    } else {
+                        Text(existing == nil ? "Luo lasku" : "Tallenna").font(.body.weight(.semibold))
+                    }
+                }
+                .buttonStyle(.primary)
+                .disabled(busy || baseline == nil)
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 10)
+        .padding(.bottom, 8)
+        .background(Theme.surface)
+        .overlay(alignment: .top) { Divider() }
+    }
+
+    // MARK: Bindings
+
+    private var issueDay: String { APIDate.dayString(issueDate) }
+
+    private var termBinding: Binding<InvoiceForm.TermChoice> {
+        Binding(
+            get: { customTerm ? .other : InvoiceForm.termChoice(draft.paymentTermDays) },
+            set: { choice in
+                switch choice {
+                case .days(let days):
+                    customTerm = false
+                    draft.paymentTermDays = days
+                case .other:
+                    customTerm = true
+                }
+                Haptics.selection()
+            }
+        )
+    }
+
+    /// The due date as a picker value; picking one sets the term the create call sends.
+    private var dueBinding: Binding<Date> {
+        Binding(
+            get: { APIDate.day(InvoiceForm.dueDate(issueDate: issueDay, termDays: draft.paymentTermDays) ?? "") ?? issueDate },
+            set: { date in
+                if let days = InvoiceForm.termDays(issueDate: issueDay, dueDate: APIDate.dayString(date)) {
+                    draft.paymentTermDays = days
+                }
+            }
+        )
+    }
+
+    private var dueRange: ClosedRange<Date> {
+        let start = APIDate.day(issueDay) ?? Calendar.current.startOfDay(for: issueDate)
+        let end = APIDate.day(InvoiceForm.dueDate(issueDate: issueDay, termDays: InvoiceForm.maxPaymentTermDays) ?? "") ?? start
+        return start...end
+    }
+
+    private func priceBinding(_ id: UUID) -> Binding<String> {
+        Binding(
+            get: { priceTexts[id] ?? "" },
+            set: { text in
+                priceTexts[id] = text
+                if let index = draft.lines.firstIndex(where: { $0.id == id }) {
+                    draft.lines[index].unitPrice = Money.parse(text) ?? 0
+                }
+            }
+        )
+    }
+
+    private var errors: [InvoiceFormField: String] {
+        showErrors ? InvoiceForm.fieldErrors(snapshot, priceTexts: priceTexts, vatRegistered: sellerRegistered) : [:]
+    }
+
+    private func rowId(_ field: InvoiceFormField) -> String {
+        switch field {
+        case .customer: "customer"
+        case .dueDate: "dates"
+        case .lines: "add-line"
+        case .notes: "details"
+        case .description(let id), .quantity(let id), .unitPrice(let id), .vatRate(let id): "line-\(id.uuidString)"
+        }
+    }
+
+    // MARK: Lines
+
+    private func focusNext() {
+        guard let next = InvoiceForm.field(after: focus, lines: draft.lines) else { focus = nil; return }
+        if next == .notes { showDetails = true }
+        focus = next
+    }
+
+    private func addLine() {
+        let line = InvoiceDraft.Line.new(sellerRegistered: sellerRegistered)
+        priceTexts[line.id] = ""
+        withAnimation { draft.lines.append(line) }
+        focus = InvoiceFormField.description(line.id)
+    }
+
+    private func handle(_ action: InvoiceLineCard.Action, lineId: UUID) {
+        guard let index = draft.lines.firstIndex(where: { $0.id == lineId }) else { return }
+        switch action {
+        case .copy:
+            withAnimation {
+                if let copy = draft.lines.duplicateLine(at: index) {
+                    priceTexts[copy] = priceTexts[lineId] ?? InvoiceForm.priceText(draft.lines[index].unitPrice)
+                }
+            }
+        case .moveUp: withAnimation { draft.lines.moveLine(at: index, by: -1) }
+        case .moveDown: withAnimation { draft.lines.moveLine(at: index, by: 1) }
+        case .delete:
+            if let focused = focus, rowId(focused) == rowId(.description(lineId)) { focus = nil }
+            _ = withAnimation { draft.lines.remove(at: index) }
+            priceTexts[lineId] = nil
+        case .saveProduct:
+            let line = draft.lines[index]
+            Task { await saveProduct(line) }
+            return
+        case .pick(let item):
+            fill(index, with: item)
+        }
+        Haptics.selection()
+    }
+
+    private func fill(_ index: Int, with item: CatalogItem) {
+        draft.lines[index].apply(item, issueDate: issueDay)
+        draft.lines.followSellerVat(registered: sellerRegistered)
+        priceTexts[draft.lines[index].id] = InvoiceForm.priceText(item.unitPrice)
+    }
+
+    /// "Lisää tuotteista": fills the untouched last line, otherwise adds one.
+    private func addFromCatalog(_ item: CatalogItem) {
+        withAnimation {
+            if let index = InvoiceForm.lineForCatalogPick(draft.lines, priceTexts: priceTexts) {
+                fill(index, with: item)
+            } else {
+                draft.lines.append(.new(sellerRegistered: sellerRegistered))
+                fill(draft.lines.count - 1, with: item)
+            }
+        }
+    }
+
+    /// Lines the owner did not type here (an edited invoice, a restored draft) show their amount;
+    /// a fresh 0 € line starts empty.
+    private func seedPriceTexts(blankZero: Bool) {
+        for line in draft.lines where priceTexts[line.id] == nil {
+            priceTexts[line.id] = blankZero && line.unitPrice == 0 ? "" : InvoiceForm.priceText(line.unitPrice)
+        }
+    }
+
+    // MARK: State
 
     /// The draft with the picked date, as it would be sent.
     private var snapshot: InvoiceDraft {
@@ -162,7 +461,18 @@ struct InvoiceFormView: View {
     /// Picking a customer on a new invoice brings that customer's payment term along.
     private func pickCustomer(_ id: String) {
         draft.customerId = id
-        if existing == nil, let c = customers.first(where: { $0.id == id }) { draft.paymentTermDays = c.defaultPaymentTermDays }
+        if existing == nil, let c = customers.first(where: { $0.id == id }) {
+            draft.paymentTermDays = c.defaultPaymentTermDays
+            customTerm = false
+        }
+    }
+
+    private func addCreatedCustomer(_ created: Customer) {
+        customers.append(created)
+        customers.sort { $0.name.localizedCompare($1.name) == .orderedAscending }
+        draft.customerId = created.id
+        draft.paymentTermDays = created.defaultPaymentTermDays
+        customTerm = false
     }
 
     /// A new invoice the owner has typed into is kept in memory until it is created or discarded.
@@ -179,6 +489,10 @@ struct InvoiceFormView: View {
         guard let baseline else { return }
         draft = baseline
         issueDate = APIDate.day(baseline.issueDate) ?? Date()
+        priceTexts = [:]
+        seedPriceTexts(blankZero: true)
+        customTerm = false
+        showErrors = false
         restored = false
         if let owner { SalesDraftStore.shared.clear(owner: owner) }
     }
@@ -192,21 +506,23 @@ struct InvoiceFormView: View {
         async let catalogList: CatalogList? = try? api.get("/api/catalog")
         async let profile = app.cachedProfile()
         if let list = await customerList { customers = list.customers.filter { $0.archivedAt == nil } }
-        // The form works without the catalog; the product picker just stays hidden.
+        // The form works without the catalog; "Lisää tuotteista" just stays hidden.
         if let list = await catalogList { catalog = list.items }
         if let profile = await profile { sellerRegistered = profile.vatRegistered }
         if let existing {
             draft.customerId = existing.customer.id
             draft.issueDate = existing.issueDate
             issueDate = APIDate.day(existing.issueDate) ?? Date()
-            if let issue = APIDate.day(existing.issueDate), let due = APIDate.day(existing.dueDate) {
-                draft.paymentTermDays = max(0, Calendar.current.dateComponents([.day], from: issue, to: due).day ?? 14)
+            if let term = InvoiceForm.termDays(issueDate: existing.issueDate, dueDate: existing.dueDate) {
+                draft.paymentTermDays = term
             }
             draft.notes = existing.notes ?? ""
             draft.lines = existing.lines.map { .init(description: $0.description, quantity: $0.quantity, unit: $0.unit, unitPrice: $0.unitPrice, vatRate: $0.vatRate) }
+            seedPriceTexts(blankZero: false)
         } else {
             if let presetCustomerId { pickCustomer(presetCustomerId) }
             if draft.lines.isEmpty { draft.lines = [.new(sellerRegistered: sellerRegistered)] }
+            seedPriceTexts(blankZero: true)
         }
         draft.followSellerVat(registered: sellerRegistered)
         // What the date change below would do anyway, done before the baseline so it does not
@@ -214,6 +530,7 @@ struct InvoiceFormView: View {
         draft.lines.adjustVatRates(issueDate: APIDate.dayString(issueDate))
         baseline = snapshot
         restoreKeptDraft()
+        showDetails = !draft.notes.isEmpty
     }
 
     /// "Uusi lasku" again after closing an unsaved one: the owner continues where they left off.
@@ -230,10 +547,12 @@ struct InvoiceFormView: View {
         draft = restoredDraft
         issueDate = APIDate.day(restoredDraft.issueDate) ?? Date()
         draft.lines.adjustVatRates(issueDate: APIDate.dayString(issueDate))
+        priceTexts = [:]
+        seedPriceTexts(blankZero: true)
         restored = true
     }
 
-/// "Tallenna tuotteeksi": the line becomes a catalog product for later invoices.
+    /// "Tallenna tuotteeksi": the line becomes a catalog product for later invoices.
     private func saveProduct(_ line: InvoiceDraft.Line) async {
         let product = CatalogItemDraft(line: line)
         if let problem = product.validationError { productNotice = problem; Haptics.error(); return }
@@ -262,9 +581,22 @@ struct InvoiceFormView: View {
     }
 
     private func save() async {
+        focus = nil
         draft.issueDate = APIDate.dayString(issueDate)
         draft.followSellerVat(registered: sellerRegistered)
-        if let problem = draft.validationError { failure = problem; Haptics.error(); return }
+        let problems = InvoiceForm.fieldErrors(draft, priceTexts: priceTexts, vatRegistered: sellerRegistered)
+        if !problems.isEmpty {
+            // Each message sits at its field; the bar says how many, the form goes to the first.
+            showErrors = true
+            failure = nil
+            Haptics.error()
+            if let first = InvoiceForm.firstInvalid(problems, lines: draft.lines) {
+                if first == .notes { showDetails = true }
+                scrollTarget = first
+                if InvoiceForm.textFieldOrder(lines: draft.lines).contains(first) { focus = first }
+            }
+            return
+        }
         busy = true
         failure = nil
         defer { busy = false }
