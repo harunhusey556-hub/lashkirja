@@ -311,6 +311,8 @@ export interface StripeRefund {
   amount: number;
   status: string | null;
   payment_intent: string | null;
+  /** Unix seconds. */
+  created?: number;
 }
 
 export interface StripeEvent {
@@ -465,4 +467,14 @@ export function verifyWebhookSignature(
     const given = Buffer.from(candidate, "utf8");
     return given.length === expected.length && timingSafeEqual(given, expected);
   });
+}
+
+/** Every refund of a PaymentIntent on the connected account, newest first (at most 100). */
+export function listRefunds(account: string, paymentIntentId: string): Promise<{ data: StripeRefund[] }> {
+  return stripeRequest<{ data: StripeRefund[] }>(
+    "GET",
+    "/v1/refunds",
+    { payment_intent: stripeId(paymentIntentId), limit: 100 },
+    { account }
+  );
 }

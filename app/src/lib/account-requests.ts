@@ -192,6 +192,7 @@ export async function buildAccountCopyZip(userId: string): Promise<Buffer> {
     conversations,
     emailTemplates,
     cardPayments,
+    cardRefunds,
   ] = await Promise.all([
     prisma.customer.findMany({ ...byUser, orderBy: { name: "asc" } }),
     prisma.salesInvoice.findMany({
@@ -222,6 +223,7 @@ export async function buildAccountCopyZip(userId: string): Promise<Buffer> {
     }),
     prisma.invoiceEmailTemplate.findMany({ ...byUser, orderBy: { createdAt: "asc" } }),
     prisma.posPayment.findMany({ ...byUser, orderBy: { createdAt: "asc" } }),
+    prisma.posRefund.findMany({ ...byUser, orderBy: { createdAt: "asc" } }),
   ]);
 
   const jsonFiles: Array<[string, unknown[] | object]> = [
@@ -250,6 +252,7 @@ export async function buildAccountCopyZip(userId: string): Promise<Buffer> {
         ...(row.livemode ? {} : { huomautus: "Stripen testimaksu – ei kirjattu laskulle." }),
       })),
     ],
+    ["korttipalautukset.json", cardRefunds],
   ];
 
   const customerRows: CsvValue[][] = customers.map((row) => [

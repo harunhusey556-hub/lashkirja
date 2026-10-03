@@ -20,6 +20,15 @@ import Foundation
     #expect(JobsQueue.visibleJobs(jobs).map(\.id) == ["c", "a", "d", "e"])
 }
 
+@Test func workItemCarriesACardRefundCorrection() throws {
+    let body = #"{"items":[{"id":"card_refund_correction:r1","kind":"card_refund_correction","title":"Anna · lasku 7","detail":"Korttimaksu palautettiin 25,50 €.","href":"/laskut/lasku?id=i1","correctionId":"r1"}]}"#
+    let item = try JSONDecoder().decode(WorkQueueList.self, from: Data(body.utf8)).items[0]
+    #expect(item.correctionId == "r1")
+    #expect(item.kindLabel == "Korttipalautuksen korjaus")
+    #expect(item.retryIds.isEmpty)
+    #expect(JobsQueue.workKinds.contains("card_refund_correction"))
+}
+
 @Test func workItemsDecodeWithRetry() throws {
     let body = #"{"items":[{"id":"corrupt_file:j1","kind":"corrupt_file","title":"Kuitti","detail":"Ei voitu lukea.","href":null,"retryJobId":"j1","retryJobIds":["j1","j2"],"count":2},{"id":"missing_document:t1","kind":"missing_document","title":"Neste","detail":"Tapahtumalla ei ole kuittia.","href":"/pankki/tapahtumat/tiliote?id=s1"}]}"#
     let items = try JSONDecoder().decode(WorkQueueList.self, from: Data(body.utf8)).items

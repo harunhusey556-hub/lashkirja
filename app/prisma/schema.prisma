@@ -84,6 +84,7 @@ model User {
   vatFilings      VatFiling[]
   invoiceEmailTemplates InvoiceEmailTemplate[]
   posPayments     PosPayment[]
+  posRefunds      PosRefund[]
 }
 
 /// A browser or device that logged in. The iron-session cookie stores this id.
@@ -674,9 +675,37 @@ model InvoicePayment {
   /// booked at most once, however many times finalize and the webhook run.
   posPaymentId  String?      @unique
   posPayment    PosPayment?  @relation(fields: [posPaymentId], references: [id], onDelete: SetNull)
+  /// Set on the correction row of a card refund made after the payment's month was locked.
+  posRefundCorrection PosRefund? @relation("PosRefundCorrection")
   createdAt     DateTime     @default(now())
 
   @@index([invoiceId])
+}
+
+/// One Stripe refund of a booked live card payment, once per Stripe refund id
+/// (unique), however many times the app, its retry and the webhook report it.
+/// books: "applied" (the payment's month was open: the invoice payment shrank),
+/// "correction_pending" (the month was locked: a card in Huomioitavat waits for
+/// the owner) or "corrected" (accepted: a negative card payment row was posted
+/// in the first open month; the locked month is never changed).
+model PosRefund {
+  id                  String          @id @default(uuid())
+  userId              String
+  user                User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  posPaymentId        String
+  posPayment          PosPayment      @relation(fields: [posPaymentId], references: [id], onDelete: Cascade)
+  stripeRefundId      String          @unique
+  amountCents         Int
+  /// When Stripe made the refund (refund.created).
+  refundedAt          DateTime
+  books               String
+  correctionPaymentId String?         @unique
+  correctionPayment   InvoicePayment? @relation("PosRefundCorrection", fields: [correctionPaymentId], references: [id], onDelete: SetNull)
+  correctedAt         DateTime?
+  createdAt           DateTime        @default(now())
+
+  @@index([userId, books])
+  @@index([posPaymentId])
 }
 
 /// A card payment taken on the phone (Stripe Terminal, Tap to Pay) on the
@@ -712,6 +741,7 @@ model PosPayment {
   /// Last time the worker's reconcile asked Stripe about this payment.
   reconciledAt            DateTime?
   invoicePayment          InvoicePayment?
+  refunds                 PosRefund[]
 
   @@index([userId, createdAt])
   @@index([invoiceId])

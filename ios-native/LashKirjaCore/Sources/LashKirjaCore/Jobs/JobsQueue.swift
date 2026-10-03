@@ -59,8 +59,11 @@ public struct WorkQueueItem: Decodable, Sendable, Identifiable, Hashable {
     public let retryJobId: String?
     public let retryJobIds: [String]?
     public let count: Int?
+    /// A card refund made after its month was locked: accepting posts the correction
+    /// (`POST /api/pos/corrections/:id/accept`) in the first open month.
+    public let correctionId: String?
 
-    enum CodingKeys: String, CodingKey { case id, kind, title, detail, href, retryJobId, retryJobIds, count }
+    enum CodingKeys: String, CodingKey { case id, kind, title, detail, href, retryJobId, retryJobIds, count, correctionId }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -72,6 +75,7 @@ public struct WorkQueueItem: Decodable, Sendable, Identifiable, Hashable {
         retryJobId = try c.decodeIfPresent(String.self, forKey: .retryJobId)
         retryJobIds = try c.decodeIfPresent([String].self, forKey: .retryJobIds)
         count = try c.decodeIfPresent(Int.self, forKey: .count)
+        correctionId = try c.decodeIfPresent(String.self, forKey: .correctionId)
     }
 
     /// Every failed job the row's one retry starts again (F29).
@@ -106,7 +110,7 @@ public enum JobsQueue {
         "cancelled": "Peruttu",
     ]
     public static let workKinds = ["pending_review", "missing_document", "amount_mismatch", "corrupt_file",
-                                   "link_error", "ambiguous_match", "payment_duplicate"]
+                                   "link_error", "ambiguous_match", "payment_duplicate", "card_refund_correction"]
     public static let workKindLabels = [
         "pending_review": "Odottaa tarkistusta",
         "missing_document": "Kuitti puuttuu",
@@ -115,6 +119,7 @@ public enum JobsQueue {
         "link_error": "Kohdistus ei onnistunut",
         "ambiguous_match": "Epäselvä kohdistus",
         "payment_duplicate": "Mahdollinen tuplamaksu",
+        "card_refund_correction": "Korttipalautuksen korjaus",
     ]
     /// The server caps each kind at this many rows, so a count on it may be more.
     public static let take = 40

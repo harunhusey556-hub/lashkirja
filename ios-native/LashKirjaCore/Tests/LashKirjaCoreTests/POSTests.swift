@@ -437,6 +437,17 @@ private let receipt = POSReceipt(amount: 105, cardLabel: "Visa •••• 4242
     #expect(POSPaymentPhase.accountingRecorded(POSReceipt(amount: 5, cardLabel: nil, testPayment: true)).title == "Testimaksu – ei kirjattu laskulle")
 }
 
+@Test func posRefundInALockedMonthSaysTheCorrectionWaits() throws {
+    let locked = #"{"payment":{"id":"pp_r","status":"partially_refunded","amount":125.5,"refunded":25.5,"createdAt":"x","livemode":true},"invoice":null,"booked":true,"testPayment":false,"correctionPending":true}"#
+    let response = try JSONDecoder().decode(POSFinalizeResponse.self, from: Data(locked.utf8))
+    #expect(response.correctionPending == true)
+    #expect(response.refundNotice == "Korttimaksu palautettiin asiakkaalle. Kuukausi on lukittu – korjaus odottaa hyväksyntää Huomioitavissa.")
+    let open = #"{"payment":{"id":"pp_o","status":"refunded","amount":10,"refunded":10,"createdAt":"x"}}"#
+    let plain = try JSONDecoder().decode(POSFinalizeResponse.self, from: Data(open.utf8))
+    #expect(plain.correctionPending == nil)
+    #expect(plain.refundNotice == "Korttimaksu palautettiin asiakkaalle.")
+}
+
 @Test func posFinalizeReadsThePaymentEvenWithoutAnInvoice() throws {
     let json = #"{"payment":{"id":"pp_1","invoiceId":null,"status":"succeeded","amount":105,"refunded":0,"createdAt":"x"},"invoice":null}"#
     let response = try JSONDecoder().decode(POSFinalizeResponse.self, from: Data(json.utf8))

@@ -18,7 +18,8 @@ export interface WorkQueueItem {
     | "corrupt_file"
     | "link_error"
     | "ambiguous_match"
-    | "payment_duplicate";
+    | "payment_duplicate"
+    | "card_refund_correction";
   title: string;
   detail: string;
   href: string | null;
@@ -28,6 +29,8 @@ export interface WorkQueueItem {
   retryJobIds?: string[];
   /** How many identical failures the row stands for. */
   count?: number;
+  /** A card refund made after its month was locked: accepting posts the correction (POST /api/pos/corrections/:id/accept). */
+  correctionId?: string;
 }
 
 const TAKE = 40;
@@ -173,6 +176,40 @@ export async function listWorkQueue(userId: string): Promise<WorkQueueItem[]> {
           ? "Useita tai epävarmoja osumia."
           : "Osuma on epävarma.",
       href: detailHref("statement", tx.statementId),
+    });
+  }
+
+  // A card refund made after the payment's month was locked. The locked month
+  // is never changed: accepting posts the correction in the first open month.
+  const corrections = await prisma.posRefund.findMany({
+    where: { userId, books: "correction_pending" },
+    orderBy: { createdAt: "asc" },
+    take: TAKE,
+    select: {
+      id: true,
+      amountCents: true,
+      posPayment: {
+        select: {
+          invoiceId: true,
+          invoicePayment: { select: { paidDate: true } },
+          invoice: { select: { number: true, customer: { select: { name: true } } } },
+        },
+      },
+    },
+  });
+  for (const correction of corrections) {
+    const invoice = correction.posPayment.invoice;
+    const paidDate = correction.posPayment.invoicePayment?.paidDate;
+    const month = paidDate ? `${paidDate.getUTCMonth() + 1}/${paidDate.getUTCFullYear()}` : null;
+    items.push({
+      id: `card_refund_correction:${correction.id}`,
+      kind: "card_refund_correction",
+      title: invoice ? `${invoice.customer.name} · lasku ${invoice.number}` : "Korttimaksun palautus",
+      detail:
+        `Korttimaksu palautettiin ${formatEur(centsToEuros(correction.amountCents))}, mutta maksun kuukausi` +
+        `${month ? ` ${month}` : ""} on lukittu. Hyväksy korjaus: se kirjataan ensimmäiselle avoimelle kuukaudelle.`,
+      href: correction.posPayment.invoiceId ? detailHref("invoice", correction.posPayment.invoiceId) : null,
+      correctionId: correction.id,
     });
   }
 

@@ -19,6 +19,8 @@ import { POST as finalize } from "@/app/api/pos/payments/[id]/finalize/route";
 import { POST as cancel } from "@/app/api/pos/payments/[id]/cancel/route";
 import { POST as refund } from "@/app/api/pos/payments/[id]/refund/route";
 import { POST as webhook } from "@/app/api/stripe/webhook/route";
+import { POST as acceptCorrection } from "@/app/api/pos/corrections/[id]/accept/route";
+import { GET as workQueue } from "@/app/api/work-queue/route";
 import { buildAccountCopyZip, completeAccountClose } from "@/lib/account-requests";
 import { readStoredZip } from "@/lib/zip-store";
 import { createUser, resetDatabase, type TestUser } from "./helpers/factories";
@@ -869,6 +871,215 @@ describe("test mode: a Stripe test payment never reaches the books", () => {
     });
     const { listPosPayments } = await import("@/lib/pos-payments");
     expect((await listPosPayments(user.id))[0]).toMatchObject({ id: payment.id, livemode: false });
+  });
+});
+
+describe("refund in a locked month: the closed month is never changed", () => {
+  /** "YYYY-MM" shifted by whole months. */
+  function shiftMonth(month: string, by: number): string {
+    const [year, mon] = month.split("-").map(Number);
+    const date = new Date(Date.UTC(year, mon - 1 + by, 1));
+    return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}`;
+  }
+
+  async function bookedLive(amount = 125.5, key = "lk") {
+    const account = await connectReadyAccount();
+    const invoice = await invoiceInState();
+    const { payment } = await readJson(await startPayment(invoice.id, amount, key));
+    stripe.setIntent(payment.paymentIntentId, "succeeded");
+    expect((await finalizeReq(payment.id)).status).toBe(200);
+    return { account, invoice, payment };
+  }
+
+  const lockThrough = (month: string) =>
+    prisma.user.update({ where: { id: user.id }, data: { booksLockedThrough: month } });
+
+  let keys = 0;
+  const refundReq = (id: string, body: Record<string, unknown> = {}, key = `locked-${++keys}`) =>
+    refund(
+      buildRequest("POST", `/api/pos/payments/${id}/refund`, body, { cookie, headers: { "idempotency-key": key } }),
+      routeContext({ id })
+    );
+
+  const accept = (id: string, as = cookie) =>
+    acceptCorrection(buildRequest("POST", `/api/pos/corrections/${id}/accept`, {}, { cookie: as }), routeContext({ id }));
+
+  async function cards() {
+    const body = await readJson(await workQueue(buildRequest("GET", "/api/work-queue", undefined, { cookie })));
+    return (body.items as Array<{ kind: string; correctionId?: string; detail: string; href: string | null }>).filter(
+      (item) => item.kind === "card_refund_correction"
+    );
+  }
+
+  const posRefunds = (posPaymentId: string) =>
+    prisma.posRefund.findMany({ where: { posPaymentId }, orderBy: { createdAt: "asc" } });
+
+  function chargedRefundEvent(account: string, paymentIntentId: string, id = "evt_lock") {
+    const intent = stripe.intents.get(paymentIntentId)!;
+    const charge = stripe.charges.get(intent.latest_charge!)!;
+    return { id, object: "event", type: "charge.refunded", livemode: true, account, data: { object: { ...charge } } };
+  }
+
+  it("refunds at Stripe, marks the card payment refunded, leaves the locked month alone and adds one card", async () => {
+    const { invoice, payment } = await bookedLive();
+    await lockThrough(helsinkiMonthKey());
+    const response = await refundReq(payment.id, { amount: 25.5 });
+    expect(response.status).toBe(200);
+    const body = await readJson(response);
+    expect(body.payment).toMatchObject({ status: "partially_refunded", refunded: 25.5 });
+    expect(body).toMatchObject({ booked: true, testPayment: false, correctionPending: true });
+    expect(stripe.callsTo("POST", "/v1/refunds")).toHaveLength(1);
+
+    const rows = await invoicePayments(invoice.id);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].amountCents).toBe(12_550);
+    expect((await openInvoice(invoice.id)).status).toBe("paid");
+
+    const refunds = await posRefunds(payment.id);
+    expect(refunds).toHaveLength(1);
+    expect(refunds[0]).toMatchObject({ amountCents: 2_550, books: "correction_pending" });
+    expect(refunds[0].stripeRefundId).toMatch(/^re_/);
+    const queue = await cards();
+    expect(queue).toHaveLength(1);
+    expect(queue[0].correctionId).toBe(refunds[0].id);
+    expect(queue[0].detail).toContain("25,50");
+    expect(queue[0].href).toContain(invoice.id);
+    const activity = await prisma.invoiceActivity.findMany({ where: { invoiceId: invoice.id, kind: "pos_refund" } });
+    expect(activity).toHaveLength(1);
+    expect(activity[0].summary).toContain("korjaus odottaa hyväksyntää");
+  });
+
+  it("accepting posts the correction once, in the first open month", async () => {
+    const { invoice, payment } = await bookedLive();
+    const month = helsinkiMonthKey();
+    await lockThrough(month);
+    expect((await refundReq(payment.id, { amount: 25.5 })).status).toBe(200);
+    const [card] = await cards();
+
+    const response = await accept(card.correctionId!);
+    expect(response.status).toBe(200);
+    const body = await readJson(response);
+    expect(body.invoice.status).toBe("sent");
+    expect(body.invoice.open).toBe(25.5);
+
+    const rows = await invoicePayments(invoice.id);
+    expect(rows).toHaveLength(2);
+    const correction = rows.find((row) => row.amountCents < 0)!;
+    expect(correction.amountCents).toBe(-2_550);
+    expect(correction.source).toBe("stripe_terminal");
+    expect(correction.posPaymentId).toBeNull();
+    // The month is locked through this month: the first open day is the 1st of next month.
+    expect(correction.paidDate.toISOString().slice(0, 10)).toBe(`${shiftMonth(month, 1)}-01`);
+    expect(rows.find((row) => row.amountCents > 0)!.amountCents).toBe(12_550);
+
+    const refunds = await posRefunds(payment.id);
+    expect(refunds[0]).toMatchObject({ books: "corrected", correctionPaymentId: correction.id });
+    expect(await cards()).toHaveLength(0);
+
+    // A repeated accept changes nothing.
+    expect((await accept(card.correctionId!)).status).toBe(200);
+    expect(await invoicePayments(invoice.id)).toHaveLength(2);
+  });
+
+  it("dates the correction on the refund day when that month is open", async () => {
+    const { invoice, payment } = await bookedLive();
+    // The payment was in last month, which is now locked; this month is open.
+    const lastMonth = shiftMonth(helsinkiMonthKey(), -1);
+    await prisma.invoicePayment.updateMany({ where: { posPaymentId: payment.id }, data: { paidDate: new Date(`${lastMonth}-15T00:00:00.000Z`) } });
+    await lockThrough(lastMonth);
+    expect((await refundReq(payment.id, { amount: 25.5 })).status).toBe(200);
+    const [card] = await cards();
+    expect((await accept(card.correctionId!)).status).toBe(200);
+    const correction = (await invoicePayments(invoice.id)).find((row) => row.amountCents < 0)!;
+    expect(correction.paidDate.toISOString().slice(0, 10)).toBe(helsinkiCalendarDate());
+  });
+
+  it("the app refund, its retry and the webhook make one card and one correction", async () => {
+    const { account, invoice, payment } = await bookedLive();
+    await lockThrough(helsinkiMonthKey());
+    expect((await refundReq(payment.id, { amount: 25.5 }, "same-refund")).status).toBe(200);
+    expect((await refundReq(payment.id, { amount: 25.5 }, "same-refund")).status).toBe(200);
+    const event = chargedRefundEvent(account, payment.paymentIntentId);
+    expect((await webhook(webhookRequest(event))).status).toBe(200);
+    expect((await webhook(webhookRequest(event))).status).toBe(200);
+    expect(stripe.callsTo("POST", "/v1/refunds")).toHaveLength(1);
+    expect(await posRefunds(payment.id)).toHaveLength(1);
+    const queue = await cards();
+    expect(queue).toHaveLength(1);
+    await Promise.all([accept(queue[0].correctionId!), accept(queue[0].correctionId!)]);
+    expect((await invoicePayments(invoice.id)).filter((row) => row.amountCents < 0)).toHaveLength(1);
+  });
+
+  it("two partial refunds are two cards with their own amounts", async () => {
+    const { invoice, payment } = await bookedLive();
+    await lockThrough(helsinkiMonthKey());
+    expect((await refundReq(payment.id, { amount: 25.5 })).status).toBe(200);
+    expect((await refundReq(payment.id, { amount: 10 })).status).toBe(200);
+    const refunds = await posRefunds(payment.id);
+    expect(refunds.map((row) => row.amountCents).sort((a, b) => a - b)).toEqual([1_000, 2_550]);
+    const queue = await cards();
+    expect(queue).toHaveLength(2);
+    for (const card of queue) expect((await accept(card.correctionId!)).status).toBe(200);
+    const corrections = (await invoicePayments(invoice.id)).filter((row) => row.amountCents < 0);
+    expect(corrections.map((row) => row.amountCents).sort((a, b) => a - b)).toEqual([-2_550, -1_000]);
+    expect((await openInvoice(invoice.id)).open).toBe(35.5);
+    expect((await prisma.posPayment.findUniqueOrThrow({ where: { id: payment.id } })).refundedCents).toBe(3_550);
+  });
+
+  it("a Stripe Dashboard refund in a locked month becomes a card from the webhook", async () => {
+    const { account, invoice, payment } = await bookedLive();
+    await lockThrough(helsinkiMonthKey());
+    stripe.dashboardRefund(payment.paymentIntentId, 5_050);
+    expect((await webhook(webhookRequest(chargedRefundEvent(account, payment.paymentIntentId)))).status).toBe(200);
+    expect((await prisma.posPayment.findUniqueOrThrow({ where: { id: payment.id } })).refundedCents).toBe(5_050);
+    expect((await invoicePayments(invoice.id))[0].amountCents).toBe(12_550);
+    const queue = await cards();
+    expect(queue).toHaveLength(1);
+    expect(queue[0].detail).toContain("50,50");
+    const listed = stripe.callsTo("GET", "/v1/refunds");
+    expect(listed[0].headers.get("stripe-account")).toBe(account);
+  });
+
+  it("a refund in an open month works as before and leaves no card, even if the month is locked later", async () => {
+    const { account, invoice, payment } = await bookedLive();
+    expect((await refundReq(payment.id, { amount: 25.5 })).status).toBe(200);
+    expect((await invoicePayments(invoice.id))[0].amountCents).toBe(10_000);
+    expect(await posRefunds(payment.id)).toEqual([expect.objectContaining({ amountCents: 2_550, books: "applied" })]);
+    await lockThrough(helsinkiMonthKey());
+    expect((await webhook(webhookRequest(chargedRefundEvent(account, payment.paymentIntentId)))).status).toBe(200);
+    expect(await cards()).toHaveLength(0);
+    expect((await invoicePayments(invoice.id))[0].amountCents).toBe(10_000);
+  });
+
+  it("a test payment never gets a card", async () => {
+    process.env.STRIPE_SECRET_KEY = TEST_KEY;
+    const { account, invoice, payment } = await bookedLive();
+    await lockThrough(helsinkiMonthKey());
+    const response = await refundReq(payment.id, { amount: 25.5 });
+    expect(response.status).toBe(200);
+    expect(await readJson(response)).toMatchObject({ testPayment: true, correctionPending: false });
+    expect((await webhook(webhookRequest(chargedRefundEvent(account, payment.paymentIntentId)))).status).toBe(200);
+    expect(await cards()).toHaveLength(0);
+    expect(await prisma.posRefund.count()).toBe(0);
+    expect(await invoicePayments(invoice.id)).toHaveLength(0);
+  });
+
+  it("only the owner can accept, and a correction cannot be removed by hand", async () => {
+    const { invoice, payment } = await bookedLive();
+    await lockThrough(helsinkiMonthKey());
+    expect((await refundReq(payment.id, { amount: 25.5 })).status).toBe(200);
+    const [card] = await cards();
+    const other = await createUser();
+    expect((await accept(card.correctionId!, await sessionCookie(other))).status).toBe(404);
+    expect((await invoicePayments(invoice.id)).filter((row) => row.amountCents < 0)).toHaveLength(0);
+
+    expect((await accept(card.correctionId!)).status).toBe(200);
+    const correction = (await invoicePayments(invoice.id)).find((row) => row.amountCents < 0)!;
+    const removed = await deletePayment(
+      buildRequest("DELETE", `/api/invoices/${invoice.id}/payments?paymentId=${correction.id}`, undefined, { cookie }),
+      routeContext({ id: invoice.id })
+    );
+    expect(removed.status).toBe(409);
   });
 });
 

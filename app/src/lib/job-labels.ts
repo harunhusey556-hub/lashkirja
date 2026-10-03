@@ -20,6 +20,7 @@ export const WORK_KIND_LABEL: Record<string, string> = {
   link_error: "Kohdistus ei onnistunut",
   ambiguous_match: "Epäselvä kohdistus",
   payment_duplicate: "Mahdollinen tuplamaksu",
+  card_refund_correction: "Korttipalautuksen korjaus",
 };
 
 export function jobKindLabel(kind: string): string {

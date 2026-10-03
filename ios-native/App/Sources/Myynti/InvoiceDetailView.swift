@@ -559,9 +559,9 @@ struct InvoiceDetailView: View {
     private func refund(_ payment: Invoice.Payment) async {
         guard let posId = payment.posPaymentId else { return }
         await run {
-            let _: Ignored = try await app.api.send("POST", "/api/pos/payments/\(posId)/refund", body: POSRefundRequest(),
-                                                    idempotencyKey: "pos-refund-\(posId)-\(payment.id)")
-            notice = "Korttimaksu palautettiin asiakkaalle."
+            let response: POSFinalizeResponse = try await app.api.send("POST", "/api/pos/payments/\(posId)/refund", body: POSRefundRequest(),
+                                                                       idempotencyKey: "pos-refund-\(posId)-\(payment.id)")
+            notice = response.refundNotice
             warning = nil
         }
         await load()

@@ -42,8 +42,22 @@ interface FakeCharge {
   payment_method_details: { type: string; card_present: { brand: string; last4: string } };
 }
 
+interface FakeRefund {
+  id: string;
+  object: "refund";
+  amount: number;
+  status: string;
+  payment_intent: string;
+  charge: string;
+  created: number;
+  livemode: boolean;
+}
+
 export interface FakeStripe {
   calls: StripeCall[];
+  refunds: Map<string, FakeRefund>;
+  /** A refund made outside the app (the Stripe Dashboard): a refund object plus the charge total. */
+  dashboardRefund(paymentIntentId: string, amount: number): FakeRefund;
   accounts: Map<string, { id: string; charges_enabled: boolean; payouts_enabled: boolean; details_submitted: boolean }>;
   intents: Map<string, FakeIntent>;
   charges: Map<string, FakeCharge>;
@@ -67,8 +81,32 @@ export function installFakeStripe(): FakeStripe {
   const idempotent = new Map<string, unknown>();
   let pendingFailure: { status: number; error: Record<string, unknown> } | null = null;
 
+  const addRefund = (intent: FakeIntent, amount: number): FakeRefund => {
+    const charge = state.charges.get(intent.latest_charge!)!;
+    charge.amount_refunded += amount;
+    charge.refunded = charge.amount_refunded === charge.amount;
+    const refund: FakeRefund = {
+      id: next("re"),
+      object: "refund",
+      amount,
+      status: "succeeded",
+      payment_intent: intent.id,
+      charge: charge.id,
+      created: Math.floor(Date.now() / 1000),
+      livemode: intent.livemode,
+    };
+    state.refunds.set(refund.id, refund);
+    return refund;
+  };
+
   const state: FakeStripe = {
     calls: [],
+    refunds: new Map(),
+    dashboardRefund(paymentIntentId, amount) {
+      const intent = state.intents.get(paymentIntentId);
+      if (!intent?.latest_charge) throw new Error(`no charged intent ${paymentIntentId}`);
+      return addRefund(intent, amount);
+    },
     accounts: new Map(),
     intents: new Map(),
     charges: new Map(),
@@ -198,9 +236,14 @@ export function installFakeStripe(): FakeStripe {
       if (amount > charge.amount - charge.amount_refunded) {
         return json({ error: { type: "invalid_request_error", code: "amount_too_large", message: "too large" } }, 400);
       }
-      charge.amount_refunded += amount;
-      charge.refunded = charge.amount_refunded === charge.amount;
-      return json({ object: "refund", id: next("re"), amount, status: "succeeded", payment_intent: intent.id, charge: charge.id });
+      return json(addRefund(intent, amount));
+    }
+    if (method === "GET" && path === "/v1/refunds") {
+      const intentId = call.query.get("payment_intent") ?? "";
+      const intent = state.intents.get(intentId);
+      if (!intent || intent.account !== account) return notFound();
+      const data = [...state.refunds.values()].filter((refund) => refund.payment_intent === intentId).reverse();
+      return json({ object: "list", data, has_more: false, url: "/v1/refunds" });
     }
     return json({ error: { type: "invalid_request_error", message: `unhandled ${method} ${path}` } }, 404);
   }

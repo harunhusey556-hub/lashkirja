@@ -43,6 +43,7 @@ import {
   createRefund,
   createTerminalLocation,
   isLivePayment,
+  listRefunds,
   retrieveAccount,
   retrievePaymentIntent,
   StripeApiError,
@@ -52,6 +53,7 @@ import {
   type StripeCharge,
   type StripeEvent,
   type StripePaymentIntent,
+  type StripeRefund,
   stripeTestMode,
 } from "./stripe";
 
@@ -614,16 +616,20 @@ export interface FinalizedPayment {
   booked: boolean;
   /** A Stripe test payment: never booked ("Testimaksu – ei kirjattu laskulle"). */
   testPayment: boolean;
+  /** A refund in a locked month waits as a correction card in Huomioitavat. */
+  correctionPending: boolean;
 }
 
 async function viewWithInvoice(userId: string, id: string): Promise<FinalizedPayment> {
   const row = await requirePosPayment(userId, id);
   const booked = await prisma.invoicePayment.count({ where: { posPaymentId: row.id } });
+  const pending = await prisma.posRefund.count({ where: { posPaymentId: row.id, books: "correction_pending" } });
   return {
     payment: toPosPaymentView(row),
     invoice: row.invoiceId ? await getInvoice(userId, row.invoiceId) : null,
     booked: booked > 0,
     testPayment: !isLivePayment(row.livemode),
+    correctionPending: pending > 0,
   };
 }
 
@@ -680,76 +686,143 @@ export async function cancelPosPayment(userId: string, id: string): Promise<Fina
 // Refunds
 // ---------------------------------------------------------------------------
 
+/** One Stripe refund, as the books need it. */
+interface RefundInfo {
+  id: string;
+  amountCents: number;
+  createdAt: Date;
+}
+
+/** Refunds that took (or may still take) money back: not failed or canceled. */
+function refundInfos(refunds: StripeRefund[]): RefundInfo[] {
+  return refunds
+    .filter((refund) => refund.status !== "failed" && refund.status !== "canceled" && refund.amount > 0)
+    .map((refund) => ({
+      id: refund.id,
+      amountCents: refund.amount,
+      createdAt: refund.created ? new Date(refund.created * 1000) : new Date(),
+    }));
+}
+
+const CARDED: string[] = ["correction_pending", "corrected"];
+
 /**
- * Brings the books in line with the total Stripe has refunded for a card
- * payment. The total is absolute and only ever grows, so applying the same
- * refund twice (route, then webhook) changes nothing the second time.
- * The booked invoice payment shrinks by the refund, or goes when nothing is
- * left, and a paid invoice reopens when it is no longer covered.
+ * Brings the books in line with what Stripe has refunded for a card payment.
  *
- * `stripeLivemode` is what Stripe said about this refund's object. A test
- * payment (stored livemode false, a test key, or Stripe saying test) only has
- * its own refunded total updated: the invoice is not touched.
+ * The PosPayment always shows the refunded total (absolute and only ever
+ * growing, so the route, its retry and the webhook change nothing the second
+ * time). For a booked live payment, every Stripe refund id is recorded once in
+ * PosRefund (unique), and then:
+ * - the payment's month is open: the invoice payment shrinks by the refunds
+ *   not handled by a correction, or goes when nothing is left, and a paid
+ *   invoice reopens (the behaviour before locked months were handled);
+ * - the payment's month is locked: the locked month is never changed. Each new
+ *   refund becomes a correction card in Huomioitavat; accepting it
+ *   (acceptRefundCorrection) posts a negative card payment row in the first
+ *   open month.
+ * A test payment (stored livemode false, a test key, or Stripe saying test)
+ * only has its refunded total updated: never the invoice, never a card.
  */
 async function applyRefundTotal(
   tx: Prisma.TransactionClient,
   posId: string,
   totalRefundedCents: number,
-  options: { allowLockedMonth: boolean; stripeLivemode: boolean }
-): Promise<boolean> {
-  // Write first: takes the write lock before the read below.
+  options: { stripeLivemode: boolean; refunds: RefundInfo[] }
+): Promise<void> {
+  // Write first: takes the write lock before the reads below.
   await tx.posPayment.updateMany({ where: { id: posId }, data: { refundedCents: { increment: 0 } } });
   const pos = await tx.posPayment.findUniqueOrThrow({ where: { id: posId } });
   const total = Math.min(pos.amountCents, Math.max(pos.refundedCents, totalRefundedCents));
-  if (total === pos.refundedCents) return false;
   const delta = total - pos.refundedCents;
-  const now = new Date();
-  await tx.posPayment.update({
-    where: { id: pos.id },
-    data: {
-      refundedCents: total,
-      refundedAt: now,
-      // Before booking (succeededAt empty) only the total is kept; the booking nets it out.
-      ...(pos.succeededAt ? { status: refundStatus(pos.amountCents, total) ?? pos.status } : {}),
-    },
-  });
-  if (!pos.succeededAt || !pos.invoiceId) return true;
-  if (!options.stripeLivemode || !isLivePayment(pos.livemode)) return true;
-
-  const booked = await tx.invoicePayment.findUnique({ where: { posPaymentId: pos.id } });
-  const amountText = formatEur(centsToEuros(delta));
-  if (!booked) return true;
-  const lockedThrough = await getLockedThrough(pos.userId, tx);
-  if (isDateLocked(lockedThrough, booked.paidDate)) {
-    if (!options.allowLockedMonth) await assertPeriodOpen(pos.userId, [booked.paidDate], tx);
-    // A refund made in the Stripe Dashboard while the month is closed: the
-    // money already went back, so it is recorded on the card payment and noted
-    // on the invoice for the owner to book by hand.
-    await addInvoiceActivity(
-      tx,
-      pos.invoiceId,
-      "pos_refund",
-      `Korttimaksu palautettu ${amountText}. Maksun kuukausi on suljettu, joten laskun maksua ei muutettu.`
-    );
-    return true;
+  if (delta > 0) {
+    await tx.posPayment.update({
+      where: { id: pos.id },
+      data: {
+        refundedCents: total,
+        refundedAt: new Date(),
+        // Before booking (succeededAt empty) only the total is kept; the booking nets it out.
+        ...(pos.succeededAt ? { status: refundStatus(pos.amountCents, total) ?? pos.status } : {}),
+      },
+    });
   }
-  const remaining = pos.amountCents - total;
+  if (!pos.succeededAt || !pos.invoiceId) return;
+  if (!options.stripeLivemode || !isLivePayment(pos.livemode)) return;
+  const booked = await tx.invoicePayment.findUnique({ where: { posPaymentId: pos.id } });
+  if (!booked) return;
+
+  const known = await tx.posRefund.findMany({
+    where: { posPaymentId: pos.id },
+    select: { stripeRefundId: true, amountCents: true, books: true },
+  });
+  const knownIds = new Set(known.map((row) => row.stripeRefundId));
+  const fresh = options.refunds.filter((refund) => !knownIds.has(refund.id));
+  const lockedThrough = await getLockedThrough(pos.userId, tx);
+  const locked = isDateLocked(lockedThrough, booked.paidDate);
+
+  for (const refund of fresh) {
+    await tx.posRefund.create({
+      data: {
+        userId: pos.userId,
+        posPaymentId: pos.id,
+        stripeRefundId: refund.id,
+        amountCents: refund.amountCents,
+        refundedAt: refund.createdAt,
+        books: locked ? "correction_pending" : "applied",
+      },
+    });
+  }
+
+  if (locked) {
+    for (const refund of fresh) {
+      await addInvoiceActivity(
+        tx,
+        pos.invoiceId,
+        "pos_refund",
+        `Korttimaksu palautettu ${formatEur(centsToEuros(refund.amountCents))}. Maksun kuukausi on lukittu – korjaus odottaa hyväksyntää Huomioitavissa.`
+      );
+    }
+    // A refund Stripe reported only as a total (no refund object): noted for the owner.
+    const unnamed = delta - fresh.reduce((sum, refund) => sum + refund.amountCents, 0);
+    if (unnamed > 0) {
+      await addInvoiceActivity(
+        tx,
+        pos.invoiceId,
+        "pos_refund",
+        `Korttimaksu palautettu ${formatEur(centsToEuros(unnamed))}. Maksun kuukausi on lukittu, joten laskun maksua ei muutettu.`
+      );
+    }
+    return;
+  }
+
+  if (delta <= 0) return;
+  // Refunds that have a correction card are handled by the correction, not here.
+  const cardedCents = known
+    .filter((row) => CARDED.includes(row.books))
+    .reduce((sum, row) => sum + row.amountCents, 0);
+  const remaining = pos.amountCents - Math.max(0, total - cardedCents);
   if (remaining <= 0) {
     await tx.invoicePayment.delete({ where: { id: booked.id } });
   } else {
     await tx.invoicePayment.update({ where: { id: booked.id }, data: { amountCents: remaining } });
   }
-  await addInvoiceActivity(tx, pos.invoiceId, "pos_refund", `Korttimaksu palautettu ${amountText}.`);
+  await addInvoiceActivity(tx, pos.invoiceId, "pos_refund", `Korttimaksu palautettu ${formatEur(centsToEuros(delta))}.`);
   await reopenIfUncovered(tx, pos.invoiceId);
-  return true;
 }
 
-/** Refunds (part of) a booked card payment on the connected account. */
+/** Stripe's refunds of this payment, only when the books could need their ids. */
+async function refundsForBooks(account: string, pos: PosPaymentRow, stripeLivemode: boolean): Promise<RefundInfo[]> {
+  if (!stripeLivemode || !isLivePayment(pos.livemode) || !pos.succeededAt || !pos.invoiceId) return [];
+  return refundInfos((await listRefunds(account, pos.providerPaymentIntentId)).data);
+}
+
 /**
  * Refunds (part of) a card payment. `idempotencyKey` is the client's key for this refund: it goes
  * to Stripe as is, so a retry after a lost answer is the same refund there and never a second one,
  * whatever the server's own total did in between (a charge.refunded webhook, say). The total booked
  * is what Stripe reports as refunded on the charge, not a sum the server keeps.
+ *
+ * A locked payment month does not stop the refund: the money goes back at Stripe, the card
+ * payment shows it, and the books get a correction card instead of a change to the closed month.
  */
 export async function refundPosPayment(
   userId: string,
@@ -775,8 +848,6 @@ export async function refundPosPayment(
       { leftCents: left }
     );
   }
-  const booked = await prisma.invoicePayment.findUnique({ where: { posPaymentId: pos.id }, select: { paidDate: true } });
-  if (booked) await assertPeriodOpen(userId, [booked.paidDate]);
 
   const account = await accountFor(userId);
   const refund = await createRefund(
@@ -792,13 +863,66 @@ export async function refundPosPayment(
   if (!charge || typeof charge === "string" || typeof charge.amount_refunded !== "number") {
     throw new AppError("Palautuksen tilaa ei saatu Stripestä. Yritä uudelleen.", "POS_REFUND_UNKNOWN", 502);
   }
+  const stripeLivemode = intent.livemode === true;
+  const listed = await refundsForBooks(account, pos, stripeLivemode);
+  // The refund just made is in the list too; it is added in case the list lags behind.
+  const refunds = listed.some((row) => row.id === refund.id)
+    ? listed
+    : [...listed, ...refundInfos([refund])];
   await prisma.$transaction((tx) =>
     applyRefundTotal(tx, pos.id, charge.amount_refunded, {
-      allowLockedMonth: false,
-      stripeLivemode: intent.livemode === true,
+      stripeLivemode,
+      refunds: stripeLivemode && isLivePayment(pos.livemode) ? refunds : [],
     })
   );
   return viewWithInvoice(userId, id);
+}
+
+/** The first day that is not in a locked month, or the refund day if that is later. */
+export function correctionDate(lockedThrough: string | null, refundedAt: Date): string {
+  const refundDay = helsinkiCalendarDate(refundedAt);
+  if (!lockedThrough || !/^\d{4}-\d{2}$/.test(lockedThrough)) return refundDay;
+  const [year, month] = lockedThrough.split("-").map(Number);
+  const next = new Date(Date.UTC(year, month, 1));
+  const firstOpen = `${next.getUTCFullYear()}-${String(next.getUTCMonth() + 1).padStart(2, "0")}-01`;
+  return refundDay > firstOpen ? refundDay : firstOpen;
+}
+
+/**
+ * The owner accepts a correction card: a negative card payment row for the
+ * refunded amount is posted in the first open month (or on the refund day, if
+ * that is later), and the locked month stays as it was. Once per refund: the
+ * card is claimed (correction_pending -> corrected) in the same transaction
+ * that posts the row, so a repeated or concurrent accept posts nothing more.
+ */
+export async function acceptRefundCorrection(userId: string, posRefundId: string): Promise<PublicInvoice> {
+  const invoiceId = await prisma.$transaction(async (tx) => {
+    const claimed = await tx.posRefund.updateMany({
+      where: { id: posRefundId, userId, books: "correction_pending" },
+      data: { books: "corrected", correctedAt: new Date() },
+    });
+    const row = await tx.posRefund.findFirst({
+      where: { id: posRefundId, userId },
+      include: { posPayment: { select: { invoiceId: true, cardLast4: true } } },
+    });
+    if (!row) throw new NotFoundError("Korjausta ei löytynyt.");
+    const target = row.posPayment.invoiceId;
+    if (!target) throw new ConflictError("Korttimaksun laskua ei enää ole.", "POS_CORRECTION_NO_INVOICE");
+    if (claimed.count === 0) return target;
+
+    const paidDate = correctionDate(await getLockedThrough(userId, tx), row.refundedAt);
+    const correctionId = await applyInvoicePayment(tx, userId, target, {
+      amountCents: -row.amountCents,
+      paidDate,
+      source: "stripe_terminal",
+      note: row.posPayment.cardLast4
+        ? `Korttimaksun palautus, kortti •••• ${row.posPayment.cardLast4} (lukitun kuukauden korjaus)`
+        : "Korttimaksun palautus (lukitun kuukauden korjaus)",
+    });
+    await tx.posRefund.update({ where: { id: row.id }, data: { correctionPaymentId: correctionId } });
+    return target;
+  });
+  return getInvoice(userId, invoiceId);
 }
 
 export async function listPosPayments(userId: string, invoiceId?: string | null): Promise<PosPaymentView[]> {
@@ -870,9 +994,9 @@ export async function handleStripeEvent(event: StripeEvent): Promise<void> {
       if (!pos) return;
       // The charge and the event both say whether this is a test-mode refund.
       const stripeLivemode = object.livemode === true && event.livemode !== false;
-      await prisma.$transaction((tx) =>
-        applyRefundTotal(tx, pos.id, refunded, { allowLockedMonth: true, stripeLivemode })
-      );
+      // The charge carries only the total; the refund ids come from Stripe's list.
+      const refunds = await refundsForBooks(accountId, pos, stripeLivemode);
+      await prisma.$transaction((tx) => applyRefundTotal(tx, pos.id, refunded, { stripeLivemode, refunds }));
       return;
     }
     default:

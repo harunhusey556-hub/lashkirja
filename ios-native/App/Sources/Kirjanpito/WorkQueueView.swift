@@ -194,7 +194,24 @@ struct WorkQueueView: View {
             // The reason ends in the advice, so it is shown in full (F29).
             Text("\(item.kindLabel) · \(item.detail)").font(.caption).foregroundStyle(Theme.ink2)
         }
-        if !item.retryIds.isEmpty {
+        if let correctionId = item.correctionId {
+            HStack(spacing: 12) {
+                label
+                Spacer(minLength: 8)
+                Button {
+                    Task { await accept(item, correctionId: correctionId) }
+                } label: {
+                    Text(retrying == item.id ? "Kirjataan…" : "Hyväksy korjaus")
+                        .font(.caption.weight(.semibold))
+                        .padding(.horizontal, 10)
+                        .frame(minHeight: 32)
+                        .background(Theme.accentSoft, in: Capsule())
+                        .foregroundStyle(Theme.accentDark)
+                }
+                .buttonStyle(.borderless)
+                .disabled(retrying != nil)
+            }
+        } else if !item.retryIds.isEmpty {
             HStack(spacing: 12) {
                 label
                 Spacer(minLength: 8)
@@ -255,6 +272,24 @@ struct WorkQueueView: View {
             note = (error.userMessage, true)
             Haptics.error()
         }
+    }
+
+    /// A card refund in a locked month: the correction is posted in the first open month.
+    private func accept(_ item: WorkQueueItem, correctionId: String) async {
+        guard retrying == nil else { return }
+        retrying = item.id
+        defer { retrying = nil }
+        do {
+            let _: Ignored = try await app.api.send("POST", "/api/pos/corrections/\(correctionId)/accept", body: Optional<EmptyBody>.none)
+            Haptics.success()
+            note = ("Korjaus kirjattiin ensimmäiselle avoimelle kuukaudelle.", false)
+            app.dataVersion += 1
+        } catch is CancellationError {
+        } catch {
+            Haptics.error()
+            note = (error.userMessage, true)
+        }
+        await load()
     }
 
     /// One retry starts every identical failure the row stands for (F29).

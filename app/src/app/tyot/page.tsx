@@ -34,6 +34,8 @@ interface WorkRow {
   retryJobId?: string;
   /** All the identical failures this row stands for; one retry starts them all (F29). */
   retryJobIds?: string[];
+  /** A card refund in a locked month: accepting posts the correction in the first open month. */
+  correctionId?: string;
 }
 
 interface TyotData {
@@ -50,6 +52,7 @@ const WORK_FILTERS = [
   "link_error",
   "ambiguous_match",
   "payment_duplicate",
+  "card_refund_correction",
 ] as const;
 
 type WorkFilter = (typeof WORK_FILTERS)[number];
@@ -166,6 +169,25 @@ export default function TyotPage() {
     }
   }
 
+  async function acceptCorrection(correctionId: string, rowId: string) {
+    setRetryingId(rowId);
+    try {
+      const response = await apiFetch(`/api/pos/corrections/${correctionId}/accept`, { method: "POST" });
+      if (!response.ok) await readJson(response, "Korjauksen kirjaus epäonnistui");
+      showToast({ tone: "success", text: "Korjaus kirjattiin ensimmäiselle avoimelle kuukaudelle." });
+      await load();
+    } catch (acceptError: unknown) {
+      if (isUnauthorized(acceptError)) {
+        redirectToLogin();
+        return;
+      }
+      void hapticNotify("error");
+      showToast({ tone: "error", text: errorMessage(acceptError, "Korjauksen kirjaus epäonnistui") });
+    } finally {
+      setRetryingId(null);
+    }
+  }
+
   const items = useMemo(() => data?.items ?? [], [data]);
   // Each kind is capped at WORK_QUEUE_TAKE rows server-side, so a kind whose
   // fetched count hits that cap gets a "+" (never presented as exact).
@@ -246,7 +268,15 @@ export default function TyotPage() {
                     secondary={`${workKindLabel(item.kind)} · ${item.detail}`}
                     secondaryLines="all"
                     trailing={
-                      item.retryJobId ? (
+                      item.correctionId ? (
+                        <ActionPill
+                          onClick={() => void acceptCorrection(item.correctionId!, item.id)}
+                          disabled={retryingId !== null}
+                          ariaLabel={`Hyväksy korjaus: ${item.title}`}
+                        >
+                          {retryingId === item.id ? "Kirjataan…" : "Hyväksy korjaus"}
+                        </ActionPill>
+                      ) : item.retryJobId ? (
                         <ActionPill
                           onClick={() => void retry(item.retryJobIds ?? [item.retryJobId!], item.retryJobId!)}
                           disabled={retryingId !== null}

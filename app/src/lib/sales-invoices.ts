@@ -1106,7 +1106,7 @@ export async function applyInvoicePayment(
   userId: string,
   invoiceId: string,
   input: InvoicePaymentWrite
-): Promise<void> {
+): Promise<string> {
   const { amountCents, source } = input;
   const manual = source === "manual";
 
@@ -1175,7 +1175,7 @@ export async function applyInvoicePayment(
   const reopens =
     invoice.status === "paid" && !invoice.closedReason?.trim() && paidCents < invoice.grossCents;
 
-  await conn.invoicePayment.create({
+  const created = await conn.invoicePayment.create({
     data: {
       invoiceId,
       transactionId: input.transactionId ?? null,
@@ -1192,7 +1192,9 @@ export async function applyInvoicePayment(
     invoiceId,
     "payment_added",
     source === "stripe_terminal"
-      ? `Korttimaksu ${amountText} kirjattiin.`
+      ? amountCents < 0
+        ? `Korttimaksun palautus ${formatEur(centsToEuros(-amountCents))} kirjattiin korjauksena.`
+        : `Korttimaksu ${amountText} kirjattiin.`
       : amountCents < 0
         ? `Hyvitys ${amountText} kirjattiin.`
         : `Maksu ${amountText} kirjattiin.`
@@ -1210,6 +1212,7 @@ export async function applyInvoicePayment(
     });
     await recordActivity(conn, invoiceId, "status_changed", "Tila muuttui: Maksettu → Odottaa maksua.");
   }
+  return created.id;
 }
 
 /**

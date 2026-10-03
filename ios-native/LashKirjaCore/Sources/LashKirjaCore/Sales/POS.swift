@@ -183,8 +183,10 @@ public struct POSFinalizeResponse: Decodable, Sendable {
     public let booked: Bool?
     /// A Stripe test payment: succeeded at Stripe, never booked on the invoice.
     public let testPayment: Bool?
+    /// A refund made after the payment's month was locked waits as a correction in Huomioitavat.
+    public let correctionPending: Bool?
 
-    enum CodingKeys: String, CodingKey { case payment, invoice, booked, testPayment }
+    enum CodingKeys: String, CodingKey { case payment, invoice, booked, testPayment, correctionPending }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -192,6 +194,14 @@ public struct POSFinalizeResponse: Decodable, Sendable {
         invoice = try? c.decodeIfPresent(Invoice.self, forKey: .invoice)
         booked = try c.decodeIfPresent(Bool.self, forKey: .booked)
         testPayment = try c.decodeIfPresent(Bool.self, forKey: .testPayment)
+        correctionPending = try c.decodeIfPresent(Bool.self, forKey: .correctionPending)
+    }
+
+    /// The note after a refund: the locked month is not changed, the correction waits for the owner.
+    public var refundNotice: String {
+        correctionPending == true
+            ? "Korttimaksu palautettiin asiakkaalle. Kuukausi on lukittu – korjaus odottaa hyväksyntää Huomioitavissa."
+            : "Korttimaksu palautettiin asiakkaalle."
     }
 
     /// The server said test, or the payment's livemode is false.
