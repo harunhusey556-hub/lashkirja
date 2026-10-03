@@ -405,6 +405,38 @@ private let receipt = POSReceipt(amount: 105, cardLabel: "Visa •••• 4242
     #expect(m.phase == .idle)
 }
 
+@Test func posFinalizeReadsATestPayment() throws {
+    let json = #"{"payment":{"id":"pp_t","invoiceId":"inv_1","status":"succeeded","amount":125.5,"refunded":0,"createdAt":"x","livemode":false},"invoice":null,"booked":false,"testPayment":true}"#
+    let response = try JSONDecoder().decode(POSFinalizeResponse.self, from: Data(json.utf8))
+    #expect(response.booked == false)
+    #expect(response.testPayment == true)
+    #expect(response.payment.livemode == false)
+    #expect(response.isTestPayment)
+}
+
+@Test func posFinalizeLiveAndOlderServer() throws {
+    let live = #"{"payment":{"id":"pp_l","status":"succeeded","amount":10,"createdAt":"x","livemode":true},"booked":true,"testPayment":false}"#
+    let liveResponse = try JSONDecoder().decode(POSFinalizeResponse.self, from: Data(live.utf8))
+    #expect(liveResponse.booked == true)
+    #expect(!liveResponse.isTestPayment)
+    // An older server sends none of the three: treated as booked, as before.
+    let old = #"{"payment":{"id":"pp_o","status":"succeeded","amount":10,"createdAt":"x"}}"#
+    let oldResponse = try JSONDecoder().decode(POSFinalizeResponse.self, from: Data(old.utf8))
+    #expect(oldResponse.booked == nil)
+    #expect(oldResponse.payment.livemode == nil)
+    #expect(!oldResponse.isTestPayment)
+    // Only livemode said false: still a test payment.
+    let modeOnly = #"{"payment":{"id":"pp_m","status":"succeeded","amount":10,"createdAt":"x","livemode":false}}"#
+    #expect(try JSONDecoder().decode(POSFinalizeResponse.self, from: Data(modeOnly.utf8)).isTestPayment)
+}
+
+@Test func posTestPaymentSaysNotBooked() {
+    let test = POSReceipt(amount: 125.5, cardLabel: "Visa •••• 4242", testPayment: true)
+    #expect(POSPaymentPhase.accountingRecorded(test).title == "Testimaksu – ei kirjattu laskulle · Visa •••• 4242")
+    #expect(!POSPaymentPhase.accountingRecorded(test).title.contains("✓"))
+    #expect(POSPaymentPhase.accountingRecorded(POSReceipt(amount: 5, cardLabel: nil, testPayment: true)).title == "Testimaksu – ei kirjattu laskulle")
+}
+
 @Test func posFinalizeReadsThePaymentEvenWithoutAnInvoice() throws {
     let json = #"{"payment":{"id":"pp_1","invoiceId":null,"status":"succeeded","amount":105,"refunded":0,"createdAt":"x"},"invoice":null}"#
     let response = try JSONDecoder().decode(POSFinalizeResponse.self, from: Data(json.utf8))

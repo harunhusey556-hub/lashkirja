@@ -700,8 +700,13 @@ model PosPayment {
   failureCode             String?
   failureMessage          String?
   idempotencyKey          String?
+  /// Stripe's livemode of the PaymentIntent (re-checked on every read from
+  /// Stripe). Booked on the invoice only when true AND the server key is live;
+  /// a test payment never creates an InvoicePayment.
+  livemode                Boolean         @default(false)
   createdAt               DateTime        @default(now())
-  /// Set in the same transaction that books the InvoicePayment.
+  /// Set when Stripe confirmed the payment; for a live payment in the same
+  /// transaction that books the InvoicePayment.
   succeededAt             DateTime?
   refundedAt              DateTime?
   invoicePayment          InvoicePayment?

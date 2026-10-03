@@ -28,6 +28,7 @@ interface FakeIntent {
   account: string;
   latest_charge: string | null;
   last_payment_error: { code?: string; message?: string } | null;
+  livemode: boolean;
 }
 
 interface FakeCharge {
@@ -37,6 +38,7 @@ interface FakeCharge {
   amount_refunded: number;
   payment_intent: string;
   refunded: boolean;
+  livemode: boolean;
   payment_method_details: { type: string; card_present: { brand: string; last4: string } };
 }
 
@@ -45,6 +47,12 @@ export interface FakeStripe {
   accounts: Map<string, { id: string; charges_enabled: boolean; payouts_enabled: boolean; details_submitted: boolean }>;
   intents: Map<string, FakeIntent>;
   charges: Map<string, FakeCharge>;
+  /**
+   * `livemode` of new PaymentIntents and charges. null (the default) follows
+   * the key, as Stripe does: true only for an sk_live_/rk_live_ key. A test
+   * sets it to answer a mode that does not match the key.
+   */
+  forceLivemode: boolean | null;
   /** Moves a PaymentIntent to a state, as the reader would. */
   setIntent(id: string, status: string, options?: { amountReceived?: number }): FakeIntent;
   setAccount(id: string, flags: Partial<{ charges_enabled: boolean; payouts_enabled: boolean; details_submitted: boolean }>): void;
@@ -64,6 +72,7 @@ export function installFakeStripe(): FakeStripe {
     accounts: new Map(),
     intents: new Map(),
     charges: new Map(),
+    forceLivemode: null,
     setIntent(id, status, options = {}) {
       const intent = state.intents.get(id);
       if (!intent) throw new Error(`no intent ${id}`);
@@ -77,6 +86,7 @@ export function installFakeStripe(): FakeStripe {
           amount_refunded: 0,
           payment_intent: intent.id,
           refunded: false,
+          livemode: intent.livemode,
           payment_method_details: { type: "card_present", card_present: { brand: "visa", last4: "4242" } },
         };
         state.charges.set(charge.id, charge);
@@ -104,6 +114,8 @@ export function installFakeStripe(): FakeStripe {
     new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
   const notFound = () =>
     json({ error: { type: "invalid_request_error", code: "resource_missing", message: "No such object" } }, 404);
+
+  const liveKey = (headers: Headers) => /^Bearer (sk|rk)_live_/.test(headers.get("authorization") ?? "");
 
   function intentView(intent: FakeIntent, expand: string[]) {
     const { account: _account, ...rest } = intent;
@@ -157,6 +169,7 @@ export function installFakeStripe(): FakeStripe {
         account,
         latest_charge: null,
         last_payment_error: null,
+        livemode: state.forceLivemode ?? liveKey(call.headers),
       };
       state.intents.set(id, intent);
       return json(intentView(intent, []));

@@ -466,7 +466,9 @@ final class POSCoordinator {
             case "succeeded", "partially_refunded", "refunded":
                 recordedInvoice = response.invoice
                 let label = response.payment.cardLabel ?? sdkCardLabel
-                feed(.finalized(succeeded: true, receipt: POSReceipt(amount: response.payment.amount, cardLabel: label)), gen: gen)
+                // A test payment is not booked: the sheet says so instead of "kirjattu".
+                let receipt = POSReceipt(amount: response.payment.amount, cardLabel: label, testPayment: response.isTestPayment)
+                feed(.finalized(succeeded: true, receipt: receipt), gen: gen)
                 return
             case "canceled":
                 dropIntent(notice: "Maksu peruttiin Stripessä. Korttia ei veloitettu.", gen: gen)

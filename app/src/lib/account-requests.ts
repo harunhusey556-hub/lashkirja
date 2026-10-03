@@ -241,7 +241,15 @@ export async function buildAccountCopyZip(userId: string): Promise<Buffer> {
     ["postilaatikko.json", mailboxes],
     ["avustaja.json", conversations],
     ["sahkopostimallit.json", emailTemplates],
-    ["korttimaksut.json", cardPayments],
+    // A Stripe test payment is kept in the copy but labelled: it was never booked.
+    [
+      "korttimaksut.json",
+      cardPayments.map((row) => ({
+        ...row,
+        testimaksu: !row.livemode,
+        ...(row.livemode ? {} : { huomautus: "Stripen testimaksu – ei kirjattu laskulle." }),
+      })),
+    ],
   ];
 
   const customerRows: CsvValue[][] = customers.map((row) => [

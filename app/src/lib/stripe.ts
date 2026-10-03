@@ -37,6 +37,24 @@ export function stripeTestMode(): boolean {
   return key.startsWith("sk_test_") || key.startsWith("rk_test_");
 }
 
+/**
+ * The configured key is a Stripe live key. Only the prefix is read. Anything
+ * that is not clearly live (a test key, an unknown prefix) counts as test, so
+ * a card payment is booked only with a live key.
+ */
+export function stripeLiveKey(): boolean {
+  const key = process.env.STRIPE_SECRET_KEY?.trim() ?? "";
+  return key.startsWith("sk_live_") || key.startsWith("rk_live_");
+}
+
+/**
+ * A card payment is real money only when Stripe says so (livemode true) and
+ * the server is on a live key. Everything else is a test payment.
+ */
+export function isLivePayment(livemode: boolean | null | undefined): boolean {
+  return livemode === true && stripeLiveKey();
+}
+
 export function webhookSecret(): string | null {
   return process.env.STRIPE_WEBHOOK_SECRET?.trim() || null;
 }
@@ -257,6 +275,7 @@ export interface StripeCharge {
   amount_refunded: number;
   payment_intent: string | null;
   refunded?: boolean;
+  livemode?: boolean;
   payment_method_details?: {
     type?: string;
     card_present?: { brand?: string | null; last4?: string | null } | null;
@@ -283,6 +302,8 @@ export interface StripePaymentIntent {
   metadata: Record<string, string>;
   latest_charge: string | StripeCharge | null;
   last_payment_error?: { code?: string | null; decline_code?: string | null; message?: string | null } | null;
+  /** false for a Stripe test-mode object. */
+  livemode: boolean;
 }
 
 export interface StripeRefund {
@@ -297,6 +318,8 @@ export interface StripeEvent {
   type: string;
   /** Set on Connect events: the connected account the event happened on. */
   account?: string | null;
+  /** false for an event from Stripe's test mode. */
+  livemode?: boolean;
   data: { object: Record<string, unknown> };
 }
 

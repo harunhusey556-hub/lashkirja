@@ -11,6 +11,13 @@
  * InvoicePayment, and InvoicePayment.posPaymentId is unique as the backstop,
  * so finalize and the webhook may run in any order, any number of times, also
  * at the same moment.
+ *
+ * Test mode: a payment is booked only when Stripe's PaymentIntent says
+ * livemode true AND the server key is a live key (isLivePayment). A test
+ * payment is marked succeeded on its PosPayment and goes no further: no
+ * InvoicePayment, no invoice status change, no activity line, and a refund of
+ * it changes nothing on the invoice. So a test key on the production database
+ * cannot put fake money in the books.
  */
 import { createHash, randomUUID } from "crypto";
 import type { Prisma } from "@/generated/prisma/client";
@@ -35,6 +42,7 @@ import {
   createExpressAccount,
   createRefund,
   createTerminalLocation,
+  isLivePayment,
   retrieveAccount,
   retrievePaymentIntent,
   StripeApiError,
@@ -105,6 +113,8 @@ export interface PosPaymentView {
   cardLast4: string | null;
   createdAt: string;
   succeededAt: string | null;
+  /** Stripe's livemode for this payment. false: a test payment, never booked. */
+  livemode: boolean;
 }
 
 export interface CreatedPaymentIntent {
@@ -214,6 +224,7 @@ export function toPosPaymentView(row: PosPaymentRow): PosPaymentView {
     cardLast4: row.cardLast4,
     createdAt: row.createdAt.toISOString(),
     succeededAt: row.succeededAt ? row.succeededAt.toISOString() : null,
+    livemode: row.livemode,
   };
 }
 
@@ -435,6 +446,7 @@ export async function createPosPaymentIntent(
       currency: "EUR",
       status: "created",
       idempotencyKey: clientKey,
+      livemode: intent.livemode === true,
     },
   });
   return {
@@ -474,7 +486,8 @@ function cardOf(charge: StripeCharge | null): { brand: string | null; last4: str
 /**
  * Books a PaymentIntent Stripe reports as succeeded: claims the PosPayment
  * (succeededAt) and inserts the InvoicePayment in one transaction. A second
- * caller finds the claim taken and books nothing.
+ * caller finds the claim taken and books nothing. A test payment is claimed
+ * the same way but books nothing at all.
  */
 async function bookSucceeded(pos: PosPaymentRow, intent: StripePaymentIntent): Promise<void> {
   if (intent.currency.toLowerCase() !== "eur") {
@@ -483,12 +496,15 @@ async function bookSucceeded(pos: PosPaymentRow, intent: StripePaymentIntent): P
   const charge = chargeOf(intent);
   const card = cardOf(charge);
   const amountCents = intent.amount_received;
+  const livemode = intent.livemode === true;
+  const books = isLivePayment(livemode);
   const now = new Date();
   try {
     await prisma.$transaction(async (tx) => {
       const claimed = await tx.posPayment.updateMany({
         where: { id: pos.id, succeededAt: null },
         data: {
+          livemode,
           amountCents,
           providerChargeId: charge?.id ?? null,
           cardBrand: card.brand,
@@ -506,7 +522,8 @@ async function bookSucceeded(pos: PosPaymentRow, intent: StripePaymentIntent): P
         where: { id: pos.id },
         data: { status: refundStatus(amountCents, fresh.refundedCents) ?? "succeeded" },
       });
-      if (fresh.invoiceId && bookedCents > 0) {
+      // A test payment stops here: it is succeeded at Stripe, never in the books.
+      if (books && fresh.invoiceId && bookedCents > 0) {
         await applyInvoicePayment(tx, fresh.userId, fresh.invoiceId, {
           amountCents: bookedCents,
           paidDate: helsinkiCalendarDate(now),
@@ -527,6 +544,7 @@ async function bookSucceeded(pos: PosPaymentRow, intent: StripePaymentIntent): P
         where: { id: pos.id, succeededAt: null },
         data: {
           status: "succeeded",
+          livemode,
           amountCents,
           providerChargeId: charge?.id ?? null,
           cardBrand: card.brand,
@@ -550,6 +568,12 @@ async function applyIntent(pos: PosPaymentRow, intent: StripePaymentIntent): Pro
   if (intent.id !== pos.providerPaymentIntentId) {
     throw new AppError("Korttimaksu ei vastaa laskun maksua.", "POS_INTENT_MISMATCH", 409);
   }
+  // Re-checked from Stripe on every read until the payment is claimed; after
+  // that it stays what decided the booking.
+  await prisma.posPayment.updateMany({
+    where: { id: pos.id, succeededAt: null },
+    data: { livemode: intent.livemode === true },
+  });
   const status = intent.status;
   if (status === "succeeded") {
     await bookSucceeded(pos, intent);
@@ -586,13 +610,20 @@ const PENDING_MESSAGES: Record<string, string> = {
 export interface FinalizedPayment {
   payment: PosPaymentView;
   invoice: PublicInvoice | null;
+  /** An invoice payment exists for this card payment. */
+  booked: boolean;
+  /** A Stripe test payment: never booked ("Testimaksu – ei kirjattu laskulle"). */
+  testPayment: boolean;
 }
 
 async function viewWithInvoice(userId: string, id: string): Promise<FinalizedPayment> {
   const row = await requirePosPayment(userId, id);
+  const booked = await prisma.invoicePayment.count({ where: { posPaymentId: row.id } });
   return {
     payment: toPosPaymentView(row),
     invoice: row.invoiceId ? await getInvoice(userId, row.invoiceId) : null,
+    booked: booked > 0,
+    testPayment: !isLivePayment(row.livemode),
   };
 }
 
@@ -619,8 +650,11 @@ export async function cancelPosPayment(userId: string, id: string): Promise<Fina
   const intent = await retrievePaymentIntent(account, pos.providerPaymentIntentId);
   if (intent.status === "succeeded") {
     await applyIntent(pos, intent);
+    const test = !isLivePayment((await requirePosPayment(userId, id)).livemode);
     throw new PosPaymentNotSucceededError(
-      "Maksu ehti jo onnistua, eikä sitä voi perua. Se kirjattiin laskulle; palauta maksu tarvittaessa.",
+      test
+        ? "Maksu ehti jo onnistua, eikä sitä voi perua. Testimaksu – ei kirjattu laskulle."
+        : "Maksu ehti jo onnistua, eikä sitä voi perua. Se kirjattiin laskulle; palauta maksu tarvittaessa.",
       "succeeded"
     );
   }
@@ -652,12 +686,16 @@ export async function cancelPosPayment(userId: string, id: string): Promise<Fina
  * refund twice (route, then webhook) changes nothing the second time.
  * The booked invoice payment shrinks by the refund, or goes when nothing is
  * left, and a paid invoice reopens when it is no longer covered.
+ *
+ * `stripeLivemode` is what Stripe said about this refund's object. A test
+ * payment (stored livemode false, a test key, or Stripe saying test) only has
+ * its own refunded total updated: the invoice is not touched.
  */
 async function applyRefundTotal(
   tx: Prisma.TransactionClient,
   posId: string,
   totalRefundedCents: number,
-  options: { allowLockedMonth: boolean }
+  options: { allowLockedMonth: boolean; stripeLivemode: boolean }
 ): Promise<boolean> {
   // Write first: takes the write lock before the read below.
   await tx.posPayment.updateMany({ where: { id: posId }, data: { refundedCents: { increment: 0 } } });
@@ -676,6 +714,7 @@ async function applyRefundTotal(
     },
   });
   if (!pos.succeededAt || !pos.invoiceId) return true;
+  if (!options.stripeLivemode || !isLivePayment(pos.livemode)) return true;
 
   const booked = await tx.invoicePayment.findUnique({ where: { posPaymentId: pos.id } });
   const amountText = formatEur(centsToEuros(delta));
@@ -754,7 +793,10 @@ export async function refundPosPayment(
     throw new AppError("Palautuksen tilaa ei saatu Stripestä. Yritä uudelleen.", "POS_REFUND_UNKNOWN", 502);
   }
   await prisma.$transaction((tx) =>
-    applyRefundTotal(tx, pos.id, charge.amount_refunded, { allowLockedMonth: false })
+    applyRefundTotal(tx, pos.id, charge.amount_refunded, {
+      allowLockedMonth: false,
+      stripeLivemode: intent.livemode === true,
+    })
   );
   return viewWithInvoice(userId, id);
 }
@@ -826,7 +868,11 @@ export async function handleStripeEvent(event: StripeEvent): Promise<void> {
       if (!intentId || refunded === null) return;
       const pos = await prisma.posPayment.findFirst({ where: { providerPaymentIntentId: intentId, userId: user.id } });
       if (!pos) return;
-      await prisma.$transaction((tx) => applyRefundTotal(tx, pos.id, refunded, { allowLockedMonth: true }));
+      // The charge and the event both say whether this is a test-mode refund.
+      const stripeLivemode = object.livemode === true && event.livemode !== false;
+      await prisma.$transaction((tx) =>
+        applyRefundTotal(tx, pos.id, refunded, { allowLockedMonth: true, stripeLivemode })
+      );
       return;
     }
     default:

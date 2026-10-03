@@ -141,10 +141,16 @@ struct POSPaymentSheet: View {
             if let notice = pos.notice {
                 Text(notice).font(.footnote).foregroundStyle(Theme.ink2).multilineTextAlignment(.center)
             }
-        case .accountingRecorded:
+        case .accountingRecorded(let receipt):
             VStack(spacing: 8) {
-                Image(systemName: "checkmark.circle.fill").font(.system(size: 56)).foregroundStyle(Theme.success)
+                Image(systemName: receipt.testPayment ? "testtube.2" : "checkmark.circle.fill")
+                    .font(.system(size: 56))
+                    .foregroundStyle(receipt.testPayment ? Theme.ink2 : Theme.success)
                 Text(pos.phase.title).font(.title3.weight(.semibold)).multilineTextAlignment(.center)
+                if receipt.testPayment {
+                    Text("Stripen testitila: rahaa ei siirtynyt, eikä laskun tila muuttunut.")
+                        .font(.footnote).foregroundStyle(Theme.ink2).multilineTextAlignment(.center)
+                }
             }
         case .succeeded:
             VStack(spacing: 8) {

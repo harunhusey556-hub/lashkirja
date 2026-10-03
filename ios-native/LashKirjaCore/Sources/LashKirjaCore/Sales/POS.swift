@@ -144,8 +144,10 @@ public struct POSPaymentView: Decodable, Sendable, Equatable, Identifiable {
     public let cardLast4: String?
     public let createdAt: String
     public let succeededAt: String?
+    /// Stripe's livemode; false is a test payment, which the server never books. nil from an older server.
+    public let livemode: Bool?
 
-    enum CodingKeys: String, CodingKey { case id, invoiceId, status, amount, refunded, cardBrand, cardLast4, createdAt, succeededAt }
+    enum CodingKeys: String, CodingKey { case id, invoiceId, status, amount, refunded, cardBrand, cardLast4, createdAt, succeededAt, livemode }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -158,6 +160,7 @@ public struct POSPaymentView: Decodable, Sendable, Equatable, Identifiable {
         cardLast4 = try c.decodeIfPresent(String.self, forKey: .cardLast4)
         createdAt = try c.decodeIfPresent(String.self, forKey: .createdAt) ?? ""
         succeededAt = try c.decodeIfPresent(String.self, forKey: .succeededAt)
+        livemode = try c.decodeIfPresent(Bool.self, forKey: .livemode)
     }
 
     public var cardLabel: String? { POSCard.label(brand: cardBrand, last4: cardLast4) }
@@ -176,14 +179,23 @@ public struct POSFinalizeResponse: Decodable, Sendable {
     /// The invoice after booking; read leniently, because the payment's status alone decides
     /// whether the money was recorded (an unreadable invoice must not look like a failure).
     public let invoice: Invoice?
+    /// An invoice payment exists for this card payment. nil from an older server.
+    public let booked: Bool?
+    /// A Stripe test payment: succeeded at Stripe, never booked on the invoice.
+    public let testPayment: Bool?
 
-    enum CodingKeys: String, CodingKey { case payment, invoice }
+    enum CodingKeys: String, CodingKey { case payment, invoice, booked, testPayment }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         payment = try c.decode(POSPaymentView.self, forKey: .payment)
         invoice = try? c.decodeIfPresent(Invoice.self, forKey: .invoice)
+        booked = try c.decodeIfPresent(Bool.self, forKey: .booked)
+        testPayment = try c.decodeIfPresent(Bool.self, forKey: .testPayment)
     }
+
+    /// The server said test, or the payment's livemode is false.
+    public var isTestPayment: Bool { testPayment ?? (payment.livemode == false) }
 }
 
 /// `POST /api/pos/payments/:id/refund`; no amount refunds what is left.
@@ -589,9 +601,12 @@ public enum POSErrorMapping {
 public struct POSReceipt: Sendable, Equatable {
     public let amount: Decimal
     public let cardLabel: String?
-    public init(amount: Decimal, cardLabel: String?) {
+    /// A Stripe test payment: it went through at Stripe but was not booked on the invoice.
+    public let testPayment: Bool
+    public init(amount: Decimal, cardLabel: String?, testPayment: Bool = false) {
         self.amount = amount
         self.cardLabel = cardLabel
+        self.testPayment = testPayment
     }
 }
 
@@ -619,7 +634,9 @@ public enum POSPaymentPhase: Sendable, Equatable {
         case .processing: "Käsitellään maksua…"
         case .verifyingServer: "Vahvistetaan maksua…"
         case .succeeded: "Maksu veloitettu · kirjaus vahvistuu"
-        case .accountingRecorded(let receipt): ["✓ Maksu onnistui", receipt.cardLabel].compactMap { $0 }.joined(separator: " · ")
+        case .accountingRecorded(let receipt):
+            [receipt.testPayment ? "Testimaksu – ei kirjattu laskulle" : "✓ Maksu onnistui", receipt.cardLabel]
+                .compactMap { $0 }.joined(separator: " · ")
         case .failed(let failure): failure.title
         }
     }

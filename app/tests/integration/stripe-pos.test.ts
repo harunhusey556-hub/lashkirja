@@ -20,11 +20,15 @@ import { POST as cancel } from "@/app/api/pos/payments/[id]/cancel/route";
 import { POST as refund } from "@/app/api/pos/payments/[id]/refund/route";
 import { POST as webhook } from "@/app/api/stripe/webhook/route";
 import { buildAccountCopyZip, completeAccountClose } from "@/lib/account-requests";
+import { readStoredZip } from "@/lib/zip-store";
 import { createUser, resetDatabase, type TestUser } from "./helpers/factories";
 import { buildRequest, readJson, routeContext, sessionCookie } from "./helpers/http";
 import { installFakeStripe, stripeSignature, type FakeStripe } from "./helpers/fake-stripe";
 
-const SECRET_KEY = "sk_test_integration_key_never_logged";
+// A live-looking key by default: only a live key with a livemode PaymentIntent
+// books a card payment. The test-mode tests switch to TEST_KEY.
+const SECRET_KEY = "sk_live_integration_key_never_logged";
+const TEST_KEY = "sk_test_integration_key_never_logged";
 const WEBHOOK_SECRET = "whsec_integration_secret";
 // 100 + 25,5 % VAT = 125,50
 const LINE = { description: "Ripsienpidennys", quantity: 1, unitPrice: 100, vatRate: 25.5 };
@@ -142,7 +146,7 @@ describe("feature switch", () => {
   });
 
   it("says testMode only for a Stripe test key, and never returns the key", async () => {
-    for (const key of [SECRET_KEY, "rk_test_restricted_integration_key"]) {
+    for (const key of [TEST_KEY, "rk_test_restricted_integration_key"]) {
       process.env.STRIPE_SECRET_KEY = key;
       const response = await posStatus(buildRequest("GET", "/api/pos/status", undefined, { cookie }));
       expect(response.status).toBe(200);
@@ -150,7 +154,7 @@ describe("feature switch", () => {
       expect(JSON.parse(text)).toMatchObject({ enabled: true, testMode: true });
       expect(text).not.toContain(key);
     }
-    for (const key of ["sk_live_integration_key_never_logged", "rk_live_restricted_integration_key", "sk_testlike"]) {
+    for (const key of [SECRET_KEY, "rk_live_restricted_integration_key", "sk_testlike"]) {
       process.env.STRIPE_SECRET_KEY = key;
       const response = await posStatus(buildRequest("GET", "/api/pos/status", undefined, { cookie }));
       expect(response.status).toBe(200);
@@ -388,8 +392,9 @@ describe("finalize", () => {
     const response = await finalizeReq(payment.id);
     expect(response.status).toBe(200);
     const body = await readJson(response);
-    expect(body.payment).toMatchObject({ id: payment.id, invoiceId: invoice.id, status: "succeeded", amount: 125.5, refunded: 0, cardBrand: "visa", cardLast4: "4242" });
+    expect(body.payment).toMatchObject({ id: payment.id, invoiceId: invoice.id, status: "succeeded", amount: 125.5, refunded: 0, cardBrand: "visa", cardLast4: "4242", livemode: true });
     expect(body.payment.succeededAt).toBeTruthy();
+    expect(body).toMatchObject({ booked: true, testPayment: false });
     expect(body.invoice.status).toBe("paid");
     expect(body.invoice.open).toBe(0);
     const card = body.invoice.payments.find((row: { source: string }) => row.source === "stripe_terminal");
@@ -723,13 +728,159 @@ describe("refund", () => {
   });
 });
 
+describe("test mode: a Stripe test payment never reaches the books", () => {
+  async function paidTestPayment(key = TEST_KEY, forceLivemode: boolean | null = null) {
+    process.env.STRIPE_SECRET_KEY = key;
+    stripe.forceLivemode = forceLivemode;
+    const account = await connectReadyAccount();
+    const invoice = await invoiceInState();
+    const { payment } = await readJson(await startPayment(invoice.id, 125.5, `tm-${key}-${forceLivemode}`));
+    stripe.setIntent(payment.paymentIntentId, "succeeded");
+    return { account, invoice, payment };
+  }
+
+  async function expectBooksUntouched(invoiceId: string) {
+    expect(await invoicePayments(invoiceId)).toHaveLength(0);
+    const invoice = await openInvoice(invoiceId);
+    expect(invoice.status).toBe("sent");
+    expect(invoice.open).toBe(125.5);
+    expect(invoice.payments).toEqual([]);
+    const activity = await prisma.invoiceActivity.count({
+      where: { invoiceId, kind: { in: ["payment_added", "pos_refund"] } },
+    });
+    expect(activity).toBe(0);
+  }
+
+  it("finalize of a test PaymentIntent (livemode false) marks it succeeded and books nothing", async () => {
+    const { invoice, payment } = await paidTestPayment();
+    expect(stripe.intents.get(payment.paymentIntentId)!.livemode).toBe(false);
+    const response = await finalizeReq(payment.id);
+    expect(response.status).toBe(200);
+    const body = await readJson(response);
+    expect(body).toMatchObject({ booked: false, testPayment: true });
+    expect(body.payment).toMatchObject({ id: payment.id, status: "succeeded", livemode: false, amount: 125.5 });
+    expect(body.payment.succeededAt).toBeTruthy();
+    expect(body.invoice.status).toBe("sent");
+    await expectBooksUntouched(invoice.id);
+    const row = await prisma.posPayment.findUniqueOrThrow({ where: { id: payment.id } });
+    expect(row).toMatchObject({ livemode: false, status: "succeeded" });
+    // Running it again still books nothing.
+    expect((await finalizeReq(payment.id)).status).toBe(200);
+    await expectBooksUntouched(invoice.id);
+  });
+
+  it("stores the PaymentIntent's livemode when the payment is created", async () => {
+    process.env.STRIPE_SECRET_KEY = TEST_KEY;
+    await connectReadyAccount();
+    const testInvoice = await invoiceInState();
+    const { payment: test } = await readJson(await startPayment(testInvoice.id, 10, "lm-test"));
+    expect((await prisma.posPayment.findUniqueOrThrow({ where: { id: test.id } })).livemode).toBe(false);
+
+    process.env.STRIPE_SECRET_KEY = SECRET_KEY;
+    const liveInvoice = await invoiceInState();
+    const { payment: live } = await readJson(await startPayment(liveInvoice.id, 10, "lm-live"));
+    expect((await prisma.posPayment.findUniqueOrThrow({ where: { id: live.id } })).livemode).toBe(true);
+  });
+
+  it("a live key with a test PaymentIntent is not booked", async () => {
+    const { invoice, payment } = await paidTestPayment(SECRET_KEY, false);
+    const body = await readJson(await finalizeReq(payment.id));
+    expect(body).toMatchObject({ booked: false, testPayment: true });
+    expect(body.payment.livemode).toBe(false);
+    await expectBooksUntouched(invoice.id);
+  });
+
+  it("a test key with a PaymentIntent that says livemode true is not booked", async () => {
+    const { invoice, payment } = await paidTestPayment(TEST_KEY, true);
+    const body = await readJson(await finalizeReq(payment.id));
+    expect(body).toMatchObject({ booked: false, testPayment: true });
+    await expectBooksUntouched(invoice.id);
+  });
+
+  it("a key that is neither sk_live_ nor rk_live_ counts as test", async () => {
+    const { invoice, payment } = await paidTestPayment("sk_testlike_unknown_prefix", true);
+    const body = await readJson(await finalizeReq(payment.id));
+    expect(body).toMatchObject({ booked: false, testPayment: true });
+    await expectBooksUntouched(invoice.id);
+  });
+
+  it("livemode is re-checked from the retrieved PaymentIntent at finalize", async () => {
+    const { invoice, payment } = await paidTestPayment(SECRET_KEY);
+    // Stored as live at creation; Stripe now answers livemode false.
+    expect((await prisma.posPayment.findUniqueOrThrow({ where: { id: payment.id } })).livemode).toBe(true);
+    stripe.intents.get(payment.paymentIntentId)!.livemode = false;
+    const body = await readJson(await finalizeReq(payment.id));
+    expect(body).toMatchObject({ booked: false, testPayment: true });
+    expect((await prisma.posPayment.findUniqueOrThrow({ where: { id: payment.id } })).livemode).toBe(false);
+    await expectBooksUntouched(invoice.id);
+  });
+
+  it("a verified payment_intent.succeeded for a test payment books nothing", async () => {
+    const { account, invoice, payment } = await paidTestPayment();
+    const intent = stripe.intents.get(payment.paymentIntentId)!;
+    const event = { id: "evt_t", object: "event", type: "payment_intent.succeeded", livemode: false, account, data: { object: intent } };
+    expect((await webhook(webhookRequest(event))).status).toBe(200);
+    expect((await webhook(webhookRequest(event))).status).toBe(200);
+    expect((await prisma.posPayment.findUniqueOrThrow({ where: { id: payment.id } })).status).toBe("succeeded");
+    await expectBooksUntouched(invoice.id);
+  });
+
+  it("refunding a test payment calls Stripe but leaves the invoice alone", async () => {
+    const { invoice, payment } = await paidTestPayment();
+    expect((await finalizeReq(payment.id)).status).toBe(200);
+    const response = await refund(
+      buildRequest("POST", `/api/pos/payments/${payment.id}/refund`, { amount: 25.5 }, { cookie, headers: { "idempotency-key": "tm-refund" } }),
+      routeContext({ id: payment.id })
+    );
+    expect(response.status).toBe(200);
+    const body = await readJson(response);
+    expect(body).toMatchObject({ booked: false, testPayment: true });
+    expect(body.payment).toMatchObject({ status: "partially_refunded", refunded: 25.5, livemode: false });
+    const call = stripe.callsTo("POST", "/v1/refunds");
+    expect(call).toHaveLength(1);
+    expect(call[0].form.get("amount")).toBe("2550");
+    await expectBooksUntouched(invoice.id);
+  });
+
+  it("charge.refunded for a test payment only updates the card payment", async () => {
+    const { account, invoice, payment } = await paidTestPayment();
+    expect((await finalizeReq(payment.id)).status).toBe(200);
+    const intent = stripe.intents.get(payment.paymentIntentId)!;
+    const charge = stripe.charges.get(intent.latest_charge!)!;
+    charge.amount_refunded = 12_550;
+    const event = { id: "evt_tr", object: "event", type: "charge.refunded", livemode: false, account, data: { object: charge } };
+    expect((await webhook(webhookRequest(event))).status).toBe(200);
+    const row = await prisma.posPayment.findUniqueOrThrow({ where: { id: payment.id } });
+    expect(row).toMatchObject({ refundedCents: 12_550, status: "refunded" });
+    await expectBooksUntouched(invoice.id);
+  });
+
+  it("a test payment is labelled in the data copy", async () => {
+    const { payment } = await paidTestPayment();
+    expect((await finalizeReq(payment.id)).status).toBe(200);
+    const files = readStoredZip(await buildAccountCopyZip(user.id));
+    const rows = JSON.parse(files.get("korttimaksut.json")!.toString("utf8"));
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      id: payment.id,
+      livemode: false,
+      testimaksu: true,
+      huomautus: "Stripen testimaksu – ei kirjattu laskulle.",
+    });
+    const { listPosPayments } = await import("@/lib/pos-payments");
+    expect((await listPosPayments(user.id))[0]).toMatchObject({ id: payment.id, livemode: false });
+  });
+});
+
 describe("account data", () => {
   it("the data copy carries korttimaksut.json", async () => {
     await connectReadyAccount();
     const invoice = await invoiceInState();
     await startPayment(invoice.id, 10, "copy");
-    const zip = await buildAccountCopyZip(user.id);
-    expect(zip.includes(Buffer.from("korttimaksut.json"))).toBe(true);
+    const files = readStoredZip(await buildAccountCopyZip(user.id));
+    const rows = JSON.parse(files.get("korttimaksut.json")!.toString("utf8"));
+    expect(rows[0]).toMatchObject({ livemode: true, testimaksu: false });
+    expect(rows[0].huomautus).toBeUndefined();
   });
 
   it("closing the account switches card payments off", async () => {
