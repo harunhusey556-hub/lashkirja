@@ -4,21 +4,19 @@ import { prisma } from "@/lib/db";
 import { requireSession } from "@/lib/session";
 import { runMatching, buildReceiptMatchViews } from "@/lib/matching";
 import { dismissIncomeDraft } from "@/lib/income-automation";
-import { centsToEuros, eurosToCents } from "@/lib/money";
+import { centsToEuros } from "@/lib/money";
 import { removeUserUpload } from "@/lib/storage";
-import { isoDateSchema, isoDateToUtc, nonnegativeMoneySchema } from "@/lib/validation";
+import { isoDateSchema, nonnegativeMoneySchema } from "@/lib/validation";
 import {
   noStoreJson,
   rejectCrossSite,
   rejectOversizedContentLength,
 } from "@/lib/http-security";
-import { withErrorHandler, UnauthorizedError, NotFoundError, ValidationError } from "@/lib/api-errors";
-import { sanitizeText } from "@/lib/sanitizer";
+import { withErrorHandler, UnauthorizedError } from "@/lib/api-errors";
 
 import { assertPeriodOpen } from "@/lib/period-lock";
-import { parseVatDetails } from "@/lib/alv";
-import { sameVatLines, vatLinesProblem } from "@/lib/receipt-vat";
-import { expectedUpdatedAtDate, versionConflict } from "@/lib/edit-conflict";
+import { expectedUpdatedAtDate } from "@/lib/edit-conflict";
+import { applyReceiptPatch } from "@/lib/receipt-update";
 const patchSchema = z.object({
   vendor: z.string().trim().max(300).nullish(),
   date: isoDateSchema.nullish(),
@@ -158,102 +156,8 @@ export const PATCH = withErrorHandler(async (
   }
   const expected = expectedUpdatedAtDate(expectedUpdatedAt);
 
-  // The VAT that would be stored (the sent one, or the stored one when only the
-  // total changes) must fit the total that would be stored: same rule as save.
-  if (body.vatDetails !== undefined || body.totalAmount !== undefined) {
-    const storedLines = (parseVatDetails(owned.vatDetails) ?? []).map((line) => ({
-      rate: line.rate,
-      amount: centsToEuros(line.amountCents),
-    }));
-    const vatLines = body.vatDetails !== undefined ? (body.vatDetails ?? []) : storedLines;
-    const totalAmount =
-      body.totalAmount !== undefined
-        ? body.totalAmount
-        : owned.totalAmountCents == null
-          ? null
-          : centsToEuros(owned.totalAmountCents);
-    // Lines sent back exactly as stored are not a change: an old off-list rate must not
-    // block an edit of something else (R61). Any changed line is held to the save rule.
-    const vatChanged = body.vatDetails !== undefined && !sameVatLines(vatLines, storedLines);
-    const vatProblem = vatLinesProblem(vatLines, totalAmount, vatChanged);
-    if (vatProblem) throw new ValidationError(vatProblem);
-  }
-
-  // Both where the receipt is now and where it would move to must be open.
-  await assertPeriodOpen(session.userId!, [
-    owned.date,
-    body.date ? isoDateToUtc(body.date) : null,
-  ]);
-
-  const receipt = await prisma.$transaction(async (tx) => {
-    const won = await tx.receipt.updateMany({
-      where: {
-        id,
-        userId: session.userId!,
-        ...(expected ? { updatedAt: expected } : {}),
-      },
-      data: {
-      ...(body.vendor !== undefined ? { vendor: sanitizeText(body.vendor) } : {}),
-      ...(body.date !== undefined ? { date: body.date ? isoDateToUtc(body.date) : null } : {}),
-      ...(body.totalAmount !== undefined
-        ? { totalAmountCents: body.totalAmount == null ? null : eurosToCents(body.totalAmount) }
-        : {}),
-      ...(body.vatDetails !== undefined
-        ? { vatDetails: body.vatDetails?.length ? JSON.stringify(body.vatDetails) : null }
-        : {}),
-      ...(body.category !== undefined ? { category: sanitizeText(body.category) } : {}),
-      ...(body.notes !== undefined ? { notes: sanitizeText(body.notes) } : {}),
-      ...(body.type !== undefined ? { type: body.type } : {}),
-      ...(body.reference !== undefined ? { reference: sanitizeText(body.reference) } : {}),
-      ...(body.invoiceNumber !== undefined ? { invoiceNumber: sanitizeText(body.invoiceNumber) } : {}),
-      },
-    });
-    if (won.count === 0) {
-      const still = await tx.receipt.findFirst({
-        where: { id, userId: session.userId! },
-        select: { id: true },
-      });
-      if (!still) throw new NotFoundError("Kuittia ei löytynyt");
-      throw versionConflict();
-    }
-    if (body.category !== undefined) {
-      const nextCategory = sanitizeText(body.category);
-      if (nextCategory !== owned.category) {
-        await tx.automationEvent.create({
-          data: {
-            userId: session.userId!,
-            kind: "category",
-            resourceType: "receipt",
-            resourceId: id,
-            previousValue: owned.category,
-            newValue: nextCategory,
-            reason: "käyttäjän korjaus",
-          },
-        });
-      }
-    }
-    return tx.receipt.findFirst({
-      where: { id },
-      select: {
-        id: true,
-        vendor: true,
-        date: true,
-        totalAmountCents: true,
-        vatDetails: true,
-        category: true,
-        notes: true,
-        type: true,
-        reference: true,
-        invoiceNumber: true,
-        fileName: true,
-        source: true,
-        confidence: true,
-        createdAt: true,
-        updatedAt: true,
-      },
-    });
-  });
-  if (!receipt) throw new NotFoundError("Kuittia ei löytynyt");
+  // The same write the assistant's accepted receipt_update uses (lib/receipt-update.ts).
+  const receipt = await applyReceiptPatch(session.userId!, id, body, { expected });
 
   await runMatching(session.userId!).catch((error) =>
     console.error("Matching after receipt edit failed:", error)

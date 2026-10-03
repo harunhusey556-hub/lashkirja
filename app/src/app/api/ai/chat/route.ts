@@ -1,11 +1,10 @@
-import { replyLooksLikeCode } from "@/lib/chat-scope";
+import { GuardedReplyStream } from "@/lib/chat-stream-gate";
 import { randomUUID } from "crypto";
 import { guardWrite } from "@/lib/http-security";
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { requireSession } from "@/lib/session";
-import { prepareChat, type ChatMatchProposal } from "@/lib/ai-assistant";
-import { streamChat } from "@/lib/chat-provider";
+import { prepareChat, preparedProposalData, streamPreparedReply, type ChatProposal } from "@/lib/ai-assistant";
 import { providerFailedNotice } from "@/lib/chat-policy";
 import { mapMessage } from "@/lib/chat-message-view";
 import { errorText } from "@/lib/api-errors";
@@ -28,7 +27,7 @@ import {
 } from "@/lib/chat-store";
 import { ChatDecisionError, decideChatProposal } from "@/lib/chat-decision";
 
-function proposalJson(proposal: ChatMatchProposal | undefined, limited: boolean | undefined): string | null {
+function proposalJson(proposal: ChatProposal | undefined, limited: boolean | undefined): string | null {
   if (proposal) return JSON.stringify({ ...proposal, limited: Boolean(limited) });
   if (limited) return JSON.stringify({ limited: true });
   return null;
@@ -172,7 +171,7 @@ export async function POST(req: NextRequest) {
 
     if (prepared.kind === "local" || !stream) {
       let reply = prepared.kind === "local" ? prepared.reply : "";
-      let proposal = prepared.kind === "local" ? prepared.proposal : undefined;
+      let proposal: ChatProposal | undefined = prepared.kind === "local" ? prepared.proposal : undefined;
       let limited = prepared.kind === "local" ? prepared.limited : false;
       let sources = prepared.kind === "local" ? prepared.sources : prepared.sources;
       if (prepared.kind === "provider") {
@@ -233,8 +232,9 @@ export async function POST(req: NextRequest) {
 
     const encoderStream = new ReadableStream({
       async start(controller) {
-        let streamed = "";
-        let codeSeen = false;
+        // A3: a sentence with a figure, a percentage, a claimed action, a link or
+        // code is held until the final guard has read the whole reply.
+        const gate = new GuardedReplyStream();
         controller.enqueue(sse({ conversationId: conversation.id, userMessageId: userRow.id }));
         try {
           const result = await runAssistantTurn({
@@ -246,18 +246,24 @@ export async function POST(req: NextRequest) {
             failureNotice: providerFailedNotice(prepared.english),
             honesty: prepared.honesty,
             sources: prepared.sources,
-            // Once the reply turns into code it is no longer streamed; the final guard replaces it.
+            // A tool's proposal (invoice draft, receipt fix) rides on the reply as its card.
+            proposalData: () => preparedProposalData(prepared),
             onDelta: (delta) => {
-              streamed += delta;
-              if (!codeSeen && replyLooksLikeCode(streamed)) codeSeen = true;
-              if (!codeSeen) controller.enqueue(sse({ delta }));
+              const visible = gate.push(delta);
+              if (visible) controller.enqueue(sse({ delta: visible }));
             },
-            // Copilot, then LLM_BASE_URL's model once Copilot's quota is spent.
-            stream: (signal) => streamChat(prepared.systemPrompt, prepared.userMessage, signal, prior),
+            // Copilot, then LLM_BASE_URL's model once Copilot's quota is spent; with the
+            // turn's tools (bounded rounds), then the answer streamed (chat-provider.ts).
+            stream: (signal) => streamPreparedReply(prepared, signal, prior),
           });
           const row = await prisma.chatMessage.findUnique({ where: { id: result.messageId } });
           const mapped = row ? mapMessage(row) : null;
           if (result.replay && mapped) controller.enqueue(sse({ delta: mapped.content }));
+          else {
+            // What was held, once the guard let it through; a rejected reply arrives only as the final content.
+            const rest = gate.finish({ content: mapped?.content ?? result.content, status: result.status });
+            if (rest && !mapped?.limited) controller.enqueue(sse({ delta: rest }));
+          }
           controller.enqueue(
             sse({
               done: result.status === "complete",

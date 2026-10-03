@@ -2,6 +2,13 @@ import { prisma } from "./db";
 import { confirmMatch, MatchConflictError, MatchNotFoundError, runMatching } from "./matching";
 import { PeriodLockedError } from "./period-lock";
 import { serverApprovalBlock } from "./receipt-approval";
+import { AppError } from "./api-errors";
+import {
+  acceptInvoiceDraft,
+  acceptReceiptUpdate,
+  type InvoiceDraftProposal,
+  type ReceiptUpdateProposal,
+} from "./chat-tools-propose";
 
 export const INCOMPLETE_RECEIPT_MESSAGE = "Täydennä kuitin tiedot ennen kohdistusta.";
 
@@ -46,6 +53,9 @@ export async function decideChatProposal(
   });
   if (!message) throw new ChatDecisionError("Viestiä ei löydy", 404);
   const proposal = readProposal(message.proposalData);
+  if (proposal.type === "invoice_draft" || proposal.type === "receipt_update") {
+    return decideActionProposal(message, proposal, input, hooks);
+  }
   if (proposal.type !== "match_proposal" || !proposal.transactionId || !proposal.receiptId) {
     throw new ChatDecisionError("Viestissä ei ole kohdistusehdotusta", 400);
   }
@@ -127,5 +137,60 @@ export async function decideChatProposal(
     }
   }
 
+  return prisma.chatMessage.findFirst({ where: { id: message.id, userId: input.userId } });
+}
+
+type ActionProposal = (InvoiceDraftProposal | ReceiptUpdateProposal) & { status?: string };
+
+/**
+ * Hyväksy / Hylkää on a tool's proposal (chat-tools-propose.ts). Accepting
+ * writes through the screens' own code: a DRAFT invoice (createInvoice) or the
+ * receipt edit (period lock and edit conflicts included). The decision and
+ * the write commit together, and the decision is claimed first, so a double
+ * tap cannot create two invoices.
+ */
+async function decideActionProposal(
+  message: { id: string; proposalData: string | null },
+  raw: MatchProposal,
+  input: { userId: string; messageId: string; decision: "accepted" | "rejected" },
+  hooks?: { beforeChatWrite?: () => void }
+) {
+  const proposal = raw as unknown as ActionProposal;
+  if (proposal.status === input.decision) return prisma.chatMessage.findFirst({ where: { id: message.id, userId: input.userId } });
+  if (proposal.status === "accepted" || proposal.status === "rejected") {
+    throw new ChatDecisionError("Päätös on jo tallennettu", 409);
+  }
+  try {
+    await prisma.$transaction(async (tx) => {
+      // Claim the decision against the stored text: a second request finds it changed.
+      const claimed = await tx.chatMessage.updateMany({
+        where: { id: message.id, userId: input.userId, proposalData: message.proposalData },
+        data: { proposalData: JSON.stringify({ ...proposal, status: input.decision }) },
+      });
+      if (claimed.count !== 1) throw new ChatDecisionError("Päätös on jo tallennettu", 409);
+      if (input.decision === "rejected") return;
+      const result =
+        proposal.type === "invoice_draft"
+          ? await acceptInvoiceDraft(input.userId, proposal, tx)
+          : await acceptReceiptUpdate(input.userId, proposal, tx);
+      hooks?.beforeChatWrite?.();
+      await tx.chatMessage.update({
+        where: { id: message.id },
+        data: { proposalData: JSON.stringify({ ...proposal, ...result, status: "accepted" }) },
+      });
+    });
+  } catch (error) {
+    if (error instanceof ChatDecisionError) throw error;
+    // Period lock, a receipt edited meanwhile, an archived customer, a changed total: said as the screens say it.
+    if (error instanceof AppError) throw new ChatDecisionError(error.message, error.statusCode);
+    throw error;
+  }
+  if (input.decision === "accepted" && proposal.type === "receipt_update") {
+    try {
+      await runMatching(input.userId);
+    } catch (error) {
+      console.error("Matching after chat receipt update failed:", error);
+    }
+  }
   return prisma.chatMessage.findFirst({ where: { id: message.id, userId: input.userId } });
 }

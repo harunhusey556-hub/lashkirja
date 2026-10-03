@@ -3,6 +3,7 @@ import { centsToEuros } from "./money";
 import { greetingReply, limitedModeNotice, matchStatusReply } from "./chat-policy";
 import {
   citedEuroAmounts,
+  claimedActionKinds,
   explainsLimitedMode,
   formatBookedVatAnswer,
   mergeSources,
@@ -12,6 +13,7 @@ import {
   enforceAssistantReply,
   guardStreamReply,
   sourcesFromText,
+  vatReturnNote,
 } from "./chat-honesty";
 import { humanizeScreenPaths } from "./chat-honesty";
 import { settleChatStream } from "./chat-turn";
@@ -165,5 +167,127 @@ describe("screen paths in replies", () => {
     expect(humanizeScreenPaths("Katso /kuitit.")).toBe("Katso [Kuitit](/kuitit).");
     expect(humanizeScreenPaths("[Kuitit](/kuitit) ja 1/2 kpl")).toBe("[Kuitit](/kuitit) ja 1/2 kpl");
     expect(humanizeScreenPaths("polku /tuntematon")).toBe("polku /tuntematon");
+  });
+});
+
+describe("A2: the guard reads every common way of writing euros", () => {
+  it.each([
+    ["Maksettavaa 999 EUR.", "999.00"],
+    ["Maksettavaa 999 €.", "999.00"],
+    ["You owe €999.", "999.00"],
+    ["You owe € 999.50.", "999.50"],
+    ["It was 123.45 euros.", "123.45"],
+    ["Summa 123,45 e.", "123.45"],
+    ["Summa 123,45e", "123.45"],
+    ["Yhteensä 1 234,50 €", "1234.50"],
+    ["Yhteensä 1 234,50 €", "1234.50"],
+    ["Yhteensä 1.234,50", "1234.50"],
+    ["Total 1,234.50", "1234.50"],
+    ["Toplam 250 avro", "250.00"],
+    ["ALV 12,5 €", "12.50"],
+    ["Hinta 40 euroa.", "40.00"],
+    ["Summa EUR 75,00", "75.00"],
+  ])("%s → %s", (text, amount) => {
+    expect(citedEuroAmounts(text)).toEqual([amount]);
+  });
+
+  it("does not read a rate, a count, a date or a year as euros", () => {
+    expect(citedEuroAmounts("ALV 25,5 % ja 3 eri kuittia 12.10.2026, vuonna 2026.")).toEqual([]);
+    expect(citedEuroAmounts("Q3 2026 ja 14 % ruoasta")).toEqual([]);
+  });
+
+  it("compares every form against the figures in context", () => {
+    const ctx = { ...EMPTY_HONESTY, allowedAmounts: ["999.00", "1234.50"] };
+    for (const text of ["999 EUR", "999 €", "€999", "999,00 €", "1 234,50 €", "1.234,50", "1234.5 euros"]) {
+      expect(enforceAssistantReply(`Summa: ${text}.`, ctx).rejected, text).toBe(false);
+    }
+    for (const text of ["998 EUR", "123.45 euros", "123,45 e", "€ 1000", "1.234,51"]) {
+      expect(enforceAssistantReply(`Summa: ${text}.`, ctx).reason, text).toBe("amount");
+    }
+    // A refund's figure is the same number without its sign.
+    expect(enforceAssistantReply("Palautus -999,00 €.", ctx).rejected).toBe(false);
+  });
+});
+
+describe("A2: false action claims in every language", () => {
+  it.each([
+    "Lähetin laskun asiakkaalle.",
+    "Kirjasin kuitin menoksi.",
+    "Olen lähettänyt laskun.",
+    "I sent the invoice to your customer.",
+    "I've booked the receipt.",
+    "I have recorded the payment.",
+    "Faturayı müşteriye yolladım.",
+    "Faturayı gönderdim.",
+    "Fişi kaydettim.",
+    "Jag skickade fakturan till kunden.",
+    "Skickade fakturan i morse.",
+    "Jag har bokfört kvittot.",
+    "Poistin kuitin.",
+    "I deleted the duplicate receipt.",
+    "Fişi banka işlemiyle eşleştirdim.",
+  ])("rejects %s when nothing was done", (text) => {
+    expect(replyClaimsUnperformedAction(text)).toBe(true);
+    expect(enforceAssistantReply(text, EMPTY_HONESTY).reason).toBe("unperformed");
+  });
+
+  it.each([
+    "En ole lähettänyt laskua. Voit lähettää sen Laskut-näkymästä.",
+    "I have not sent anything; you can send it from Laskut.",
+    "Faturayı göndermedim, Laskut ekranından gönderebilirsin.",
+    "Jag har inte skickat fakturan.",
+    "Sinulla on kolme lähetettyä laskua.",
+    "Du har tre skickade fakturor.",
+    "Tarkistin pankkitapahtumasi ja kuitit.",
+  ])("lets %s through", (text) => {
+    expect(replyClaimsUnperformedAction(text)).toBe(false);
+  });
+
+  it("allows only the action the turn performed", () => {
+    expect(claimedActionKinds("Lähetin laskun.")).toEqual(["send"]);
+    expect(claimedActionKinds("Kirjasin kuitin.")).toEqual(["book"]);
+    const sent = { ...EMPTY_HONESTY, performedActions: ["send"] };
+    expect(enforceAssistantReply("Lähetin laskun asiakkaalle.", sent).rejected).toBe(false);
+    expect(enforceAssistantReply("I sent the invoice.", sent).rejected).toBe(false);
+    expect(enforceAssistantReply("Kirjasin kuitin ja lähetin laskun.", sent).reason).toBe("unperformed");
+    expect(enforceAssistantReply("Faturayı gönderdim.", { ...EMPTY_HONESTY, performedActions: ["invoice_sent"] }).rejected).toBe(false);
+  });
+});
+
+describe("A1: the booked VAT answer names the period it is for", () => {
+  it("names a month, a quarter or a year, in Finnish, English or Turkish", () => {
+    expect(formatBookedVatAnswer({ period: "2026-09", amount: "287.01", isRefund: false, language: "fi" }).text).toBe(
+      "Syyskuun ALV: maksettavaa 287,01 €."
+    );
+    expect(formatBookedVatAnswer({ period: "2025-12", amount: "1.00", isRefund: true, language: "fi", showYear: true }).text).toBe(
+      "Joulukuun 2025 ALV: palautusta 1,00 €."
+    );
+    const quarter = formatBookedVatAnswer({ period: "2026-Q3", amount: "1234.50", isRefund: false, language: "fi" });
+    expect(quarter.text).toBe("Q3/2026 ALV: maksettavaa 1 234,50 €.");
+    expect(quarter.sources).toEqual([{ label: "ALV-ilmoitus", href: "/kirjanpito/alv?period=2026-Q3" }]);
+    expect(formatBookedVatAnswer({ period: "2026", amount: "10.00", isRefund: false, language: "fi" }).text).toMatch(/^Vuoden 2026 ALV/);
+    expect(formatBookedVatAnswer({ period: "2026-09", amount: "287.01", isRefund: false, english: true }).text).toBe(
+      "VAT for September: 287.01 € to pay."
+    );
+    expect(formatBookedVatAnswer({ period: "2026-10", amount: "287.01", isRefund: false, language: "tr" }).text).toBe(
+      "Ekim KDV: ödenecek 287,01 €."
+    );
+    // The figure the guard allows is the one in the text, however it is written.
+    for (const language of ["fi", "en", "tr"] as const) {
+      const answer = formatBookedVatAnswer({ period: "2026-Q3", amount: "1234.50", isRefund: false, language });
+      expect(enforceAssistantReply(answer.text, { ...EMPTY_HONESTY, allowedAmounts: [answer.amount] }).rejected).toBe(false);
+    }
+  });
+
+  it("says which return a month belongs to when the owner files by quarter or year", () => {
+    expect(vatReturnNote({ period: "2026-09", ownerKind: "month", language: "fi" })).toBeNull();
+    expect(vatReturnNote({ period: "2026-Q3", ownerKind: "quarter", language: "fi" })).toBeNull();
+    expect(vatReturnNote({ period: "2026-09", ownerKind: "quarter", language: "fi" })).toBe(
+      "ALV-kautesi on neljännesvuosi, joten tämä kuukausi kuuluu kauden Q3/2026 ilmoitukseen."
+    );
+    expect(vatReturnNote({ period: "2026-Q2", ownerKind: "year", language: "en" })).toBe(
+      "Your VAT period is the calendar year, so this quarter is part of the 2026 return."
+    );
+    expect(vatReturnNote({ period: "2026-09", ownerKind: "quarter", language: "tr" })).toMatch(/2026 3\. çeyrek/);
   });
 });

@@ -1163,13 +1163,13 @@ export function AiChatDrawer({
                     </div>
                   </div>
                 )}
-              {message.proposal?.status === "accepted" && (
+              {message.proposal?.transactionId && message.proposal.status === "accepted" && (
                 <p className="mt-1 flex items-center gap-1.5 px-1 text-caption font-medium text-success">
                   <Icon icon={Check} size="inline" />
                   Kohdistus hyväksytty
                 </p>
               )}
-              {message.proposal?.status === "rejected" && (
+              {message.proposal?.transactionId && message.proposal.status === "rejected" && (
                 <p className="mt-1 px-1 text-caption text-ink-2">Ehdotus hylätty</p>
               )}
               {message === lastMessage && showShortcutsAfterLast && (

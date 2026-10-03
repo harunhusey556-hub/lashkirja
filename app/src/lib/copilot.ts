@@ -174,6 +174,33 @@ export async function* askCopilotStream(
   yield* readChatCompletionStream(response.body);
 }
 
+/**
+ * One raw `chat/completions` call to Copilot with a caller-built body (the
+ * tool loop sends its own messages, tools and tool_choice). The caller reads
+ * the response; an HTTP error is thrown as ProviderHttpError.
+ */
+export async function copilotCompletion(
+  ghToken: string,
+  body: Record<string, unknown>,
+  signal?: AbortSignal
+): Promise<Response> {
+  const session = await getCopilotSessionToken(ghToken);
+  const response = await fetch(`${session.baseUrl}/chat/completions`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${session.token}`,
+      "Copilot-Integration-Id": "vscode-chat",
+      "Openai-Organization": "github-copilot",
+      ...COPILOT_HEADERS,
+    },
+    signal,
+    body: JSON.stringify({ model: process.env.COPILOT_MODEL || "gpt-4o", ...body }),
+  });
+  if (!response.ok) throw new ProviderHttpError(`Copilot API error: ${response.status}`, response.status);
+  return response;
+}
+
 /** Content deltas from an OpenAI-style `chat/completions` SSE body. */
 export async function* readChatCompletionStream(body: ReadableStream<Uint8Array>): AsyncGenerator<string> {
   const reader = body.getReader();

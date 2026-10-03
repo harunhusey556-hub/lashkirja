@@ -1,6 +1,9 @@
 import { displayChatContent } from "./chat-legacy";
 import type { ChatSource } from "./chat-turn";
 
+/** Proposal kinds a reply can carry: a receipt-to-bank-row match, and the tools' confirmed actions. */
+const PROPOSAL_TYPES = new Set(["match_proposal", "invoice_draft", "receipt_update"]);
+
 function parseSources(raw: string | null): ChatSource[] {
   if (!raw) return [];
   try {
@@ -25,7 +28,8 @@ export function mapMessage(message: {
   createdAt: Date;
 }) {
   const raw = message.proposalData ? (JSON.parse(message.proposalData) as Record<string, unknown>) : null;
-  const proposal = raw && raw.type === "match_proposal" ? raw : null;
+  // A client that does not know a type leaves the card out (the native app ignores unknown types).
+  const proposal = raw && typeof raw.type === "string" && PROPOSAL_TYPES.has(raw.type) ? raw : null;
   return {
     id: message.id,
     role: message.role,

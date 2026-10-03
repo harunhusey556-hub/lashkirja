@@ -246,7 +246,7 @@ struct AssistantView: View {
     }
 }
 
-/// One message with what hangs under it: a match proposal and the screens the reply points to.
+/// One message with what hangs under it: a proposal to confirm (match, draft invoice, receipt fix) and the screens the reply points to.
 private struct MessageRow: View {
     let message: ChatMessage
     let streaming: Bool

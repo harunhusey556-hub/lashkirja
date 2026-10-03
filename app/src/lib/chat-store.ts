@@ -339,6 +339,8 @@ export async function runAssistantTurn(input: {
   failureNotice?: string;
   honesty?: HonestyContext;
   sources?: ChatSource[];
+  /** Read after the stream: a proposal the turn's tools made, stored with a reply the guard accepted. */
+  proposalData?: () => string | null;
   stream?: (signal: AbortSignal) => AsyncGenerator<string>;
   onDelta?: (delta: string) => void;
 }): Promise<{
@@ -442,11 +444,14 @@ export async function runAssistantTurn(input: {
     limited = true;
   }
   const sources = settled.rejected ? [] : mergeSources(input.sources, content);
+  // A card under a refused or unfinished reply would ask to confirm something the text never explained.
+  const proposalData = !settled.rejected && settled.status === "complete" ? (input.proposalData?.() ?? null) : null;
   const saved = await finishAssistantReply({
     messageId: claim.messageId,
     owner: input.owner,
     content,
     status: settled.status,
+    proposalData,
     sources,
     limited,
   });

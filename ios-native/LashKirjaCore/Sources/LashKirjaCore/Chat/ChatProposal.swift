@@ -15,12 +15,16 @@ public struct ChatDecisionRequest: Encodable, Sendable, Equatable {
     }
 }
 
-/// The "Ehdotus kohdistukseksi" card under an assistant reply: what it shows and how a decision
-/// is applied before the server has answered.
+/// The proposal card under an assistant reply ("Ehdotus kohdistukseksi", "Laskuluonnos",
+/// "Kuitin korjaus"): what it shows and how a decision is applied before the server has answered.
 public enum ChatProposalCard {
     public static let title = "Ehdotus kohdistukseksi"
     public static let acceptedLabel = "Kohdistus hyväksytty"
     public static let rejectedLabel = "Ehdotus hylätty"
+    public static let invoiceDraftTitle = "Laskuluonnos"
+    public static let invoiceDraftAcceptedLabel = "Luonnos tehty"
+    public static let receiptUpdateTitle = "Kuitin korjaus"
+    public static let receiptUpdateAcceptedLabel = "Kuitti korjattu"
 
     public enum Phase: Equatable, Sendable {
         /// Buttons on.
@@ -31,13 +35,69 @@ public enum ChatProposalCard {
         case rejected
     }
 
-    /// A proposal is only shown when it names both the bank row and the receipt (as the web does).
-    public static func isShown(_ proposal: ChatMatchProposal?) -> Bool {
+    /// A match is only shown when it names both the bank row and the receipt (as the web does); a
+    /// draft needs a customer and a line, a receipt fix at least one change.
+    public static func isShown(_ proposal: ChatProposal?) -> Bool {
         guard let proposal else { return false }
-        return !proposal.transactionId.isEmpty && !proposal.receiptId.isEmpty
+        switch proposal.kind {
+        case .match:
+            return !proposal.transactionId.isEmpty && !proposal.receiptId.isEmpty
+        case .invoiceDraft:
+            guard let draft = proposal.invoiceDraft else { return false }
+            return !draft.customerName.isEmpty && !draft.lines.isEmpty
+        case .receiptUpdate:
+            return !(proposal.receiptUpdate?.changes.isEmpty ?? true)
+        }
     }
 
-    public static func phase(_ proposal: ChatMatchProposal, saving: ChatProposalDecision?) -> Phase {
+    public static func title(_ proposal: ChatProposal) -> String {
+        switch proposal.kind {
+        case .match: title
+        case .invoiceDraft: invoiceDraftTitle
+        case .receiptUpdate: receiptUpdateTitle
+        }
+    }
+
+    /// The decided line for this kind of proposal.
+    public static func statusLabel(_ phase: Phase, for proposal: ChatProposal) -> String? {
+        switch phase {
+        case .open: return nil
+        case .saving(.rejected), .rejected: return rejectedLabel
+        case .saving(.accepted), .accepted:
+            switch proposal.kind {
+            case .match: return acceptedLabel
+            case .invoiceDraft: return invoiceDraftAcceptedLabel
+            case .receiptUpdate: return receiptUpdateAcceptedLabel
+            }
+        }
+    }
+
+    /// After Hyväksy: where the created draft or the corrected receipt opens. Nil before, or for a match.
+    public static func resultLink(_ proposal: ChatProposal) -> (label: String, href: String)? {
+        guard proposal.status == "accepted", let href = proposal.href, href.hasPrefix("/") else { return nil }
+        switch proposal.kind {
+        case .match: return nil
+        case .invoiceDraft:
+            if let number = proposal.invoiceDraft?.invoiceNumber { return ("Avaa lasku \(number)", href) }
+            return ("Avaa lasku", href)
+        case .receiptUpdate: return ("Avaa kuitti", href)
+        }
+    }
+
+    /// "2 × 25,50 €" for a draft line (net unit price); just the quantity when the price is missing.
+    public static func lineDetail(_ line: ChatInvoiceDraft.Line) -> String {
+        let quantity = NSDecimalNumber(decimal: line.quantity).stringValue.replacingOccurrences(of: ".", with: ",")
+        guard let price = line.unitPrice else { return quantity }
+        return "\(quantity) × \(Money.format(price))"
+    }
+
+    /// "Yhteensä 164,41 €" with "sis. ALV 33,41 €" under it.
+    public static func draftTotals(_ draft: ChatInvoiceDraft) -> (total: String, vat: String?)? {
+        guard let gross = draft.gross else { return nil }
+        return ("Yhteensä \(Money.format(gross))", draft.vat.map { "sis. ALV \(Money.format($0))" })
+    }
+
+    public static func phase(_ proposal: ChatProposal, saving: ChatProposalDecision?) -> Phase {
         if let saving { return .saving(saving) }
         switch proposal.status {
         case "accepted": return .accepted
@@ -46,7 +106,7 @@ public enum ChatProposalCard {
         }
     }
 
-    public static func canDecide(_ proposal: ChatMatchProposal?, saving: ChatProposalDecision?) -> Bool {
+    public static func canDecide(_ proposal: ChatProposal?, saving: ChatProposalDecision?) -> Bool {
         guard let proposal, isShown(proposal) else { return false }
         return phase(proposal, saving: saving) == .open
     }

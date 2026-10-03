@@ -33,6 +33,11 @@ export interface ExtractedReceipt {
   unreadable?: boolean;
   /** What the AI took the document to be; mail sync archives marketing and other non-bills. */
   documentType?: DocumentType | null;
+  /**
+   * The VAT lines were not read from the document but guessed from its category
+   * or vendor (vat-rules.ts); the notes say so too. Absent when VAT was read.
+   */
+  vatGuessed?: boolean;
 }
 
 export type DocumentType = "receipt" | "invoice" | "marketing" | "other";
@@ -483,9 +488,35 @@ export function normalizeAIResult(
     invoiceNumber: normalizeExtractedRef(parsed.invoiceNumber),
     source: "ai",
     provenance,
-    confidence: 0.85,
+    confidence: aiReadingConfidence({ vendor, date, totalAmount, vatDetails, documentType: normalizeDocumentType(parsed.documentType) }),
     documentType: normalizeDocumentType(parsed.documentType),
   };
+}
+
+/**
+ * How much of a bill the model actually read (A4), instead of one constant: the
+ * vendor, date and total, VAT lines that fit inside the total, and whether the
+ * document is a bill at all. Capped below certainty: a person still checks it.
+ */
+function aiReadingConfidence(input: {
+  vendor: string | null;
+  date: string | null;
+  totalAmount: number | null;
+  vatDetails: { rate: number; amount: number }[];
+  documentType: DocumentType | null;
+}): number {
+  let score = 0.3;
+  if (input.vendor) score += 0.15;
+  if (input.date) score += 0.15;
+  if (input.totalAmount != null && input.totalAmount > 0) score += 0.2;
+  if (input.vatDetails.length > 0) {
+    const vat = input.vatDetails.reduce((sum, line) => sum + line.amount, 0);
+    const fits = input.totalAmount != null && vat <= input.totalAmount + 0.02;
+    score += fits ? 0.15 : -0.25;
+  }
+  if (input.documentType === "receipt" || input.documentType === "invoice") score += 0.05;
+  else if (input.documentType === "marketing" || input.documentType === "other") score -= 0.2;
+  return Math.min(0.95, Math.max(0.05, Math.round(score * 100) / 100));
 }
 
 function isStrictIsoDate(value: string): boolean {
@@ -994,7 +1025,7 @@ function ocrConfidence(
   return Math.min(0.95, Math.round(score * 100) / 100);
 }
 
-function enrichExtractedReceipt(extracted: ExtractedReceipt): ExtractedReceipt {
+export function enrichExtractedReceipt(extracted: ExtractedReceipt): ExtractedReceipt {
   const text = extracted.rawText ?? "";
   const guess = guessVatForReceipt({
     category: extracted.category,
@@ -1005,12 +1036,19 @@ function enrichExtractedReceipt(extracted: ExtractedReceipt): ExtractedReceipt {
   });
   if (!guess) return extracted;
 
-  const notes = [extracted.notes, guess.note].filter(Boolean).join(" ") || null;
+  const guessed = guess.vatDetails.length > 0;
+  // A guessed VAT line says it was not read from the receipt (A4).
+  const guessNote =
+    guessed && !/arvioitu/i.test(guess.note ?? "")
+      ? [guess.note, "ALV arvioitu, ei luettu kuitista."].filter(Boolean).join(" ")
+      : guess.note;
+  const notes = [extracted.notes, guessNote].filter(Boolean).join(" ") || null;
   return {
     ...extracted,
     vatDetails: guess.vatDetails,
     notes,
     confidence: Math.min(extracted.confidence, guess.confidence),
+    ...(guessed ? { vatGuessed: true } : {}),
   };
 }
 

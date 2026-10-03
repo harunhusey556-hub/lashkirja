@@ -33,12 +33,94 @@ const KNOWN_SCREENS = new Set([
 ]);
 const RECORD_ID_SOURCE = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
 
-const UNPERFORMED_ACTION =
-  /olen yhdistänyt|yhdistin kuitin|hyväksyin täsmäytyksen|muutin kirjanpidon|lähetin laskun|kirjasin maksun|i (?:have )?matched your|i updated your books|i sent the invoice|i (?:have )?connected your bank|yhdistin pank|pankkiyhteys on nyt yhdistetty|bankan[ıi]z[ıi] ba[ğg]lad[ıi]m|faturan[ıi]z[ıi] g[öo]nderdim/i;
+/** What a reply can claim the assistant did to the books. */
+export type ActionKind = "send" | "book" | "match" | "connect" | "delete" | "create" | "pay" | "update";
+
+const W_BEFORE = String.raw`(?<![\p{L}])`;
+const W_AFTER = String.raw`(?![\p{L}])`;
+// English "I sent", "I've sent", "I have just sent"; never "I have not sent".
+const EN_I = String.raw`i(?:['’]ve|\s+have)?\s+(?:just\s+|already\s+|now\s+|also\s+)?`;
+// Swedish "jag skickade", "jag har skickat"; never "jag har inte skickat".
+const SV_JAG = String.raw`jag\s+(?:har\s+)?(?:nu\s+|redan\s+|också\s+)?`;
+const claim = (source: string) => new RegExp(`${W_BEFORE}(?:${source})${W_AFTER}`, "iu");
+
+/**
+ * First-person past claims of a change to the books, per kind, in Finnish,
+ * English, Turkish and Swedish. Passive status words ("lähetetty", "sent
+ * invoices", "skickade fakturor") describe records and are not claims.
+ */
+const ACTION_CLAIMS: Array<{ kind: ActionKind; pattern: RegExp }> = [
+  {
+    kind: "connect",
+    pattern: claim(
+      String.raw`yhdistin\s+pank\p{L}*|olen\s+yhdistänyt\s+pank\p{L}*|pankkiyhteys\s+on\s+nyt\s+yhdistetty|${EN_I}connected\s+(?:your|the)\s+bank|bankan[ıi]z[ıi]\s+ba[ğg]lad[ıi]m|ba[ğg]lad[ıi]m|${SV_JAG}(?:anslutit|anslöt|kopplat\s+banken|kopplade\s+banken)`
+    ),
+  },
+  {
+    kind: "match",
+    pattern: claim(
+      String.raw`yhdistin(?!\s+pank)|olen\s+yhdistänyt(?!\s+pank)|kohdistin|olen\s+kohdistanut|täs[m]äytin|hyväksyin\s+täs[m]äytyksen|${EN_I}(?:matched|linked|reconciled)|e[şs]le[şs]tirdim|${SV_JAG}(?:matchat|matchade|stämt\s+av|stämde\s+av)`
+    ),
+  },
+  {
+    kind: "send",
+    pattern: claim(
+      String.raw`lähetin|olen\s+lähettänyt|${EN_I}(?:sent|emailed|mailed)|yollad[ıi]m|g[öo]nderdim|ilettim|${SV_JAG}(?:skickat|skickade|mejlat|mejlade)|skickade\s+(?:jag|fakturan|kvittot|den|det|dem)`
+    ),
+  },
+  {
+    kind: "book",
+    pattern: claim(
+      String.raw`kirjasin|olen\s+kirjannut|tallensin|olen\s+tallentanut|merkitsin|olen\s+merkinnyt|hyväksyin(?!\s+täs[m]äytyksen)|olen\s+hyväksynyt|${EN_I}(?:booked|recorded|posted|saved|logged|approved|entered)|kaydettim|i[şs]ledim|onaylad[ıi]m|${SV_JAG}(?:bokfört|bokförde|registrerat|registrerade|sparat|sparade|godkänt|godkände)`
+    ),
+  },
+  {
+    kind: "delete",
+    pattern: claim(String.raw`poistin|olen\s+poistanut|${EN_I}(?:deleted|removed)|sildim|${SV_JAG}(?:raderat|raderade|tagit\s+bort|tog\s+bort)`),
+  },
+  {
+    kind: "create",
+    pattern: claim(String.raw`loin|olen\s+luonut|${EN_I}created|olu[şs]turdum|${SV_JAG}(?:skapat|skapade)`),
+  },
+  {
+    kind: "pay",
+    pattern: claim(String.raw`maksoin|olen\s+maksanut|${EN_I}paid|[öo]dedim|${SV_JAG}(?:betalat|betalade)`),
+  },
+  {
+    kind: "update",
+    pattern: claim(
+      String.raw`muutin|olen\s+muuttanut|päivitin|olen\s+päivittänyt|korjasin|olen\s+korjannut|${EN_I}(?:updated|changed|corrected|fixed|edited)|g[üu]ncelledim|de[ğg]i[şs]tirdim|d[üu]zelttim|${SV_JAG}(?:uppdaterat|uppdaterade|ändrat|ändrade|rättat|rättade)`
+    ),
+  },
+];
+
+/** The kinds of change a reply claims the assistant made, in a fixed order. */
+export function claimedActionKinds(text: string): ActionKind[] {
+  return ACTION_CLAIMS.filter((entry) => entry.pattern.test(text)).map((entry) => entry.kind);
+}
 
 /** A reply that says the bot already changed the books, when it did not. */
 export function replyClaimsUnperformedAction(text: string): boolean {
-  return UNPERFORMED_ACTION.test(text);
+  return claimedActionKinds(text).length > 0;
+}
+
+/**
+ * The kind of a performed action as the turn recorded it: either the kind
+ * itself ("send") or a descriptive id ("invoice_sent", "receipt_category_fixed").
+ */
+export function actionKindOf(performed: string): ActionKind | null {
+  const text = performed.toLowerCase();
+  const kinds: ActionKind[] = ["send", "book", "match", "connect", "delete", "create", "pay", "update"];
+  if (kinds.includes(text as ActionKind)) return text as ActionKind;
+  if (/send|sent|mail/.test(text)) return "send";
+  if (/match|link|reconcil/.test(text)) return "match";
+  if (/connect|bank_consent/.test(text)) return "connect";
+  if (/delet|remov/.test(text)) return "delete";
+  if (/creat|draft|new/.test(text)) return "create";
+  if (/pay|paid/.test(text)) return "pay";
+  if (/book|record|approv|save/.test(text)) return "book";
+  if (/updat|fix|edit|chang|correct|categor|field/.test(text)) return "update";
+  return null;
 }
 
 export function explainsLimitedMode(text: string): boolean {
@@ -46,12 +128,36 @@ export function explainsLimitedMode(text: string): boolean {
   return /en osaa vielä vastata|can't answer that yet/i.test(text);
 }
 
-/** Euro amounts written like 12,50 € or 12.50 €. */
+const GROUP_SPACE = "[   ]";
+// A number as people write money: "1 234,50", "1.234,50", "1,234.50", "999", "12,5".
+const MONEY_NUMBER = String.raw`\d{1,3}(?:${GROUP_SPACE}\d{3})+(?:[.,]\d{1,2})?|\d{1,3}(?:\.\d{3})+(?:,\d{1,2})?|\d{1,3}(?:,\d{3})+(?:\.\d{1,2})?|\d+(?:[.,]\d{1,2})?`;
+const CURRENCY_BEFORE = String.raw`€|eur(?:o)?(?![\p{L}])`;
+const CURRENCY_AFTER = String.raw`€|(?:euro(?:a|ja|s|n|ssa|lla|lta|lle)?|eur|e|avro|evro)(?![\p{L}\d])`;
+// Grouped thousands with cents read as money even without a currency: "1.234,50".
+const BARE_MONEY = String.raw`\d{1,3}(?:[.${GROUP_SPACE.slice(1, -1)}]\d{3})+,\d{2}|\d{1,3}(?:,\d{3})+\.\d{2}`;
+const MONEY = new RegExp(
+  String.raw`(?<![\d.,])(?:(?:${CURRENCY_BEFORE})${GROUP_SPACE}?(${MONEY_NUMBER})|(${MONEY_NUMBER})${GROUP_SPACE}?(?:${CURRENCY_AFTER})|(${BARE_MONEY}))(?!\d)`,
+  "giu"
+);
+
+/** "1 234,5" → "1234.50": the last separator followed by one or two digits is the decimal mark. */
+function canonicalMoney(raw: string): string {
+  const compact = raw.replace(/[\s  ]/g, "");
+  const decimal = /[.,](\d{1,2})$/.exec(compact);
+  const whole = (decimal ? compact.slice(0, decimal.index) : compact).replace(/[.,]/g, "");
+  const cents = decimal ? decimal[1].padEnd(2, "0") : "00";
+  return `${String(Number(whole))}.${cents}`;
+}
+
+/** A context figure ("-12.5", "12.50") in the same canonical form, without its sign. */
+export function canonicalAmount(value: string): string {
+  const number = Number(value.replace(/^[-+−]/, ""));
+  return Number.isFinite(number) ? number.toFixed(2) : value;
+}
+
+/** Euro amounts in a reply, however written: 12,50 €, 999 EUR, €999, 123.45 euros, 1.234,50. */
 export function citedEuroAmounts(text: string): string[] {
-  // A space (or no-break space) between thousands is part of the number: "1 234,56 €".
-  return [...text.matchAll(/(\d{1,3}(?:[\s ]\d{3})+|\d+)[.,](\d{2})\s*€/g)].map(
-    (match) => `${match[1].replace(/[\s ]/g, "")}.${match[2]}`
-  );
+  return [...text.matchAll(MONEY)].map((match) => canonicalMoney(match[1] ?? match[2] ?? match[3]));
 }
 
 /** Every cited euro figure is the one the calculation helper produced. */
@@ -77,7 +183,13 @@ const SOURCE_RULES: Array<{ prefix: string; label: string }> = [
 ];
 
 function labelForHref(href: string): string | null {
+  // A destination named by its whole address first: "/kirjanpito/pankkitilit?connect=1" is
+  // "Yhdistä pankki", the same screen without the query "Pankkiyhteys ja tilit".
+  const exact = CHAT_DESTINATIONS.find((item) => item.href === href);
+  if (exact) return exact.label;
   const path = href.split("?")[0];
+  const plain = CHAT_DESTINATIONS.find((item) => item.href === path);
+  if (plain) return plain.label;
   return SOURCE_RULES.find((rule) => path === rule.prefix)?.label ?? null;
 }
 
@@ -137,11 +249,12 @@ export function enforceAssistantReply(
   if (replyLooksLikeCode(text)) {
     return { text: scopeRefusal(ctx.language ?? "fi"), rejected: true, reason: "scope" };
   }
-  if (replyClaimsUnperformedAction(text) && ctx.performedActions.length === 0) {
+  const performed = new Set(ctx.performedActions.map(actionKindOf));
+  if (claimedActionKinds(text).some((kind) => !performed.has(kind))) {
     return { text: HONESTY_REFUSAL, rejected: true, reason: "unperformed" };
   }
-  const amounts = citedEuroAmounts(text);
-  if (amounts.some((amount) => !ctx.allowedAmounts.includes(amount))) {
+  const allowed = new Set(ctx.allowedAmounts.map(canonicalAmount));
+  if (citedEuroAmounts(text).some((amount) => !allowed.has(amount))) {
     return { text: HONESTY_REFUSAL, rejected: true, reason: "amount" };
   }
   const allowedIds = new Set(ctx.allowedRecordIds.map((id) => id.toLowerCase()));
@@ -204,24 +317,83 @@ const ENGLISH_MONTHS = [
   "July", "August", "September", "October", "November", "December",
 ];
 
+const TURKISH_MONTHS = [
+  "Ocak", "Şubat", "Mart", "Nisan", "Mayıs", "Haziran",
+  "Temmuz", "Ağustos", "Eylül", "Ekim", "Kasım", "Aralık",
+];
+
+type AnswerLanguage = "fi" | "en" | "tr";
+
+/** "Syyskuun" / "September" / "Eylül", a quarter or a year, as the answer names the period. */
+function periodName(key: string, language: AnswerLanguage, showYear: boolean): string {
+  const year = key.slice(0, 4);
+  const quarter = /-Q([1-4])$/.exec(key);
+  if (quarter) {
+    return { fi: `Q${quarter[1]}/${year}`, en: `Q${quarter[1]} ${year}`, tr: `${year} ${quarter[1]}. çeyrek` }[language];
+  }
+  if (key.length === 4) return { fi: `Vuoden ${year}`, en: year, tr: `${year} yılı` }[language];
+  const index = Number(key.slice(5, 7)) - 1;
+  const suffix = showYear ? ` ${year}` : "";
+  if (language === "en") return `${ENGLISH_MONTHS[index] ?? key}${suffix}`;
+  if (language === "tr") return `${TURKISH_MONTHS[index] ?? key}${suffix}`;
+  return `${monthGenitive(key)}${suffix}`;
+}
+
 /**
- * This month's booked VAT, written for a person: month name, fi-FI money, no
- * screen path, no ISO period, no field number (F59). `amount` stays the canonical
- * "287.01" so the honesty check compares numbers, never wording.
+ * A period's booked VAT, written for a person: the period's name, fi-FI money,
+ * no screen path, no ISO period, no field number (F59). `amount` stays the
+ * canonical "287.01" so the honesty check compares numbers, never wording.
+ * `period` is "2026-09", "2026-Q3" or "2026"; `month` is its older name.
  */
 export function formatBookedVatAnswer(input: {
-  month: string;
+  period?: string;
+  month?: string;
   amount: string;
   isRefund: boolean;
-  english: boolean;
+  english?: boolean;
+  language?: AnswerLanguage;
+  /** Name the year of a month (a month of another year than the current one). */
+  showYear?: boolean;
 }): { text: string; sources: ChatSource[]; amount: string } {
-  const href = alvDrillHref(input.month);
+  const key = input.period ?? input.month ?? "";
+  const language: AnswerLanguage = input.language ?? (input.english ? "en" : "fi");
+  const href = alvDrillHref(key);
   const [whole, cents] = input.amount.split(".");
-  const grouped = whole.replace(/\B(?=(\d{3})+(?!\d))/g, "\u00a0");
-  const money = input.english ? `${input.amount} €` : `${grouped},${cents ?? "00"}\u00a0€`;
-  const english = ENGLISH_MONTHS[Number(input.month.slice(5, 7)) - 1] ?? input.month;
-  const text = input.english
-    ? `VAT for ${english}: ${money} ${input.isRefund ? "to be refunded" : "to pay"}.`
-    : `${monthGenitive(input.month)} ALV: ${input.isRefund ? "palautusta" : "maksettavaa"} ${money}.`;
+  const grouped = whole.replace(/\B(?=(\d{3})+(?!\d))/g, " ");
+  const money = language === "en" ? `${input.amount} €` : `${grouped},${cents ?? "00"} €`;
+  const name = periodName(key, language, Boolean(input.showYear));
+  const text = {
+    en: `VAT for ${name}: ${money} ${input.isRefund ? "to be refunded" : "to pay"}.`,
+    tr: `${name} KDV: ${input.isRefund ? "iade edilecek" : "ödenecek"} ${money}.`,
+    fi: `${name} ALV: ${input.isRefund ? "palautusta" : "maksettavaa"} ${money}.`,
+  }[language];
   return { text, sources: [{ label: "ALV-ilmoitus", href }], amount: input.amount };
+}
+
+/**
+ * When the asked period is shorter than the owner's VAT period (a month for a
+ * quarterly filer), the return it belongs to. Null when the units agree.
+ */
+export function vatReturnNote(input: {
+  period: string;
+  ownerKind: "month" | "quarter" | "year";
+  language: AnswerLanguage;
+}): string | null {
+  const year = input.period.slice(0, 4);
+  const askedQuarter = /-Q[1-4]$/.test(input.period);
+  const askedMonth = /^\d{4}-\d{2}$/.test(input.period);
+  if (input.ownerKind === "month" || (!askedMonth && !askedQuarter)) return null;
+  if (input.ownerKind === "quarter" && !askedMonth) return null;
+  const returnKey =
+    input.ownerKind === "quarter" ? `${year}-Q${Math.floor((Number(input.period.slice(5, 7)) - 1) / 3) + 1}` : year;
+  const returnName = periodName(returnKey, input.language, true);
+  const quarterly = input.ownerKind === "quarter";
+  if (input.language === "en") {
+    return `Your VAT period is ${quarterly ? "a quarter" : "the calendar year"}, so this ${askedMonth ? "month" : "quarter"} is part of the ${returnName} return.`;
+  }
+  if (input.language === "tr") {
+    return `KDV dönemin ${quarterly ? "üç aylık" : "yıllık"}; bu ${askedMonth ? "ay" : "çeyrek"} ${returnName} beyannamesine dahil.`;
+  }
+  const fiName = returnKey.length === 4 ? `vuoden ${year}` : `kauden ${returnName}`;
+  return `ALV-kautesi on ${quarterly ? "neljännesvuosi" : "kalenterivuosi"}, joten tämä ${askedMonth ? "kuukausi" : "neljännes"} kuuluu ${fiName} ilmoitukseen.`;
 }

@@ -4,10 +4,11 @@ import LashKirjaCore
 /// The widest a card under a reply grows: it reads as part of the conversation, not a full-width list.
 private let cardMaxWidth: CGFloat = 360
 
-/// "Ehdotus kohdistukseksi": the receipt and the bank row the assistant would link, with
-/// Hyväksy / Hylkää, or what was decided.
+/// The card under a reply that asks for a decision: "Ehdotus kohdistukseksi" (the receipt and the bank
+/// row the assistant would link), "Laskuluonnos" (customer, lines, total) or "Kuitin korjaus" (each
+/// field old → new), with Hyväksy / Hylkää, or what was decided and a link to the result.
 struct ChatProposalCardView: View {
-    let proposal: ChatMatchProposal
+    let proposal: ChatProposal
     let saving: ChatProposalDecision?
     let error: String?
     let decide: (ChatProposalDecision) -> Void
@@ -15,19 +16,14 @@ struct ChatProposalCardView: View {
     var body: some View {
         let phase = ChatProposalCard.phase(proposal, saving: saving)
         VStack(alignment: .leading, spacing: 10) {
-            Label(ChatProposalCard.title, systemImage: "link")
+            Label(ChatProposalCard.title(proposal), systemImage: symbol)
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(Theme.accentDark)
-            VStack(alignment: .leading, spacing: 4) {
-                side("Kuitti", proposal.receiptSummary, symbol: "receipt")
-                Image(systemName: "arrow.up.arrow.down")
-                    .font(.caption2.weight(.semibold))
-                    .foregroundStyle(Theme.ink2)
-                    .frame(width: 22)
-                    .accessibilityHidden(true)
-                side("Pankkitapahtuma", proposal.txSummary, symbol: "building.columns")
+            switch proposal.kind {
+            case .match: matchContent
+            case .invoiceDraft: if let draft = proposal.invoiceDraft { draftContent(draft) }
+            case .receiptUpdate: if let update = proposal.receiptUpdate { receiptContent(update) }
             }
-            if let reasons = reasonsLine { Text(reasons).font(.caption).foregroundStyle(Theme.ink2) }
             switch phase {
             case .open:
                 HStack(spacing: 8) {
@@ -47,6 +43,18 @@ struct ChatProposalCardView: View {
             case .saving, .accepted, .rejected:
                 decided(phase)
             }
+            if saving == nil, let link = ChatProposalCard.resultLink(proposal), let route = Route.fromHref(link.href) {
+                NavigationLink(value: route) {
+                    HStack(spacing: 4) {
+                        Text(link.label)
+                        Image(systemName: "chevron.right").font(.caption2.weight(.semibold))
+                    }
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(Theme.accentDark)
+                }
+                .buttonStyle(.plain)
+                .accessibilityAddTraits(.isLink)
+            }
             if let error {
                 Label(error, systemImage: "exclamationmark.triangle")
                     .font(.footnote)
@@ -58,6 +66,72 @@ struct ChatProposalCardView: View {
         .background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous).stroke(Theme.line))
         .animation(.snappy, value: phase)
+    }
+
+    private var symbol: String {
+        switch proposal.kind {
+        case .match: "link"
+        case .invoiceDraft: "doc.text"
+        case .receiptUpdate: "pencil"
+        }
+    }
+
+    private var matchContent: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: 4) {
+                side("Kuitti", proposal.receiptSummary, symbol: "receipt")
+                Image(systemName: "arrow.up.arrow.down")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(Theme.ink2)
+                    .frame(width: 22)
+                    .accessibilityHidden(true)
+                side("Pankkitapahtuma", proposal.txSummary, symbol: "building.columns")
+            }
+            if let reasons = reasonsLine { Text(reasons).font(.caption).foregroundStyle(Theme.ink2) }
+        }
+    }
+
+    private func draftContent(_ draft: ChatInvoiceDraft) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            side("Asiakas", draft.customerName, symbol: "person")
+            VStack(alignment: .leading, spacing: 4) {
+                ForEach(Array(draft.lines.enumerated()), id: \.offset) { _, line in
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        Text(line.description).font(.subheadline).foregroundStyle(Theme.ink).lineLimit(2)
+                        Spacer(minLength: 4)
+                        Text(ChatProposalCard.lineDetail(line)).font(.caption).foregroundStyle(Theme.ink2).monospacedDigit()
+                    }
+                    .accessibilityElement(children: .combine)
+                }
+            }
+            if let totals = ChatProposalCard.draftTotals(draft) {
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(totals.total).font(.subheadline.weight(.semibold)).foregroundStyle(Theme.ink).monospacedDigit()
+                    if let vat = totals.vat { Text(vat).font(.caption).foregroundStyle(Theme.ink2).monospacedDigit() }
+                }
+                .accessibilityElement(children: .combine)
+            }
+        }
+    }
+
+    private func receiptContent(_ update: ChatReceiptUpdate) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            side("Kuitti", update.receiptSummary, symbol: "receipt")
+            VStack(alignment: .leading, spacing: 6) {
+                ForEach(Array(update.changes.enumerated()), id: \.offset) { _, change in
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(change.label).font(.caption).foregroundStyle(Theme.ink2)
+                        HStack(alignment: .firstTextBaseline, spacing: 6) {
+                            Text(change.from).strikethrough().foregroundStyle(Theme.ink2)
+                            Image(systemName: "arrow.right").font(.caption2).foregroundStyle(Theme.ink2).accessibilityHidden(true)
+                            Text(change.to).fontWeight(.semibold).foregroundStyle(Theme.ink)
+                        }
+                        .font(.subheadline)
+                    }
+                    .accessibilityElement(children: .combine)
+                }
+            }
+        }
     }
 
     private var reasonsLine: String? {
@@ -84,7 +158,7 @@ struct ChatProposalCardView: View {
             } else {
                 Image(systemName: accepted ? "checkmark.circle.fill" : "xmark.circle")
             }
-            Text(ChatProposalCard.statusLabel(phase) ?? "")
+            Text(ChatProposalCard.statusLabel(phase, for: proposal) ?? "")
         }
         .font(.footnote.weight(.medium))
         .foregroundStyle(accepted ? Theme.success : Theme.ink2)
