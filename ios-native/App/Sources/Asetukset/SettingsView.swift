@@ -26,6 +26,9 @@ struct SettingsView: View {
                     NavigationLink { EmailTemplatesView() } label: {
                         SettingRow(title: "Sähköpostimallit", subtitle: "Laskun saateviesti ja aihe", symbol: "envelope.badge")
                     }
+                    NavigationLink { PaymentsSettingsView() } label: {
+                        SettingRow(title: "Maksut", subtitle: "Korttimaksut Stripellä ja Tap to Pay", symbol: "creditcard")
+                    }
                 }
                 Section("Kuitit") {
                     NavigationLink { EmailImportView { self.profile = $0; app.profileChanged($0) } } label: {

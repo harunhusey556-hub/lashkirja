@@ -249,9 +249,14 @@ export interface PublicInvoice {
     id: string;
     paidDate: string;
     amount: number;
+    /** "manual" | "bank" | "stripe_terminal" */
     source: string;
     transactionId: string | null;
     note: string | null;
+    /** The card payment behind a "stripe_terminal" row; refunded, not deleted. */
+    posPaymentId: string | null;
+    cardBrand: string | null;
+    cardLast4: string | null;
   }>;
   sends: Array<{
     id: string;
@@ -304,6 +309,8 @@ type InvoiceWithRelations = {
     source: string;
     transactionId: string | null;
     note: string | null;
+    posPaymentId: string | null;
+    posPayment: { cardBrand: string | null; cardLast4: string | null } | null;
   }>;
   emailSends: Array<{
     id: string;
@@ -321,7 +328,10 @@ type InvoiceWithRelations = {
 const invoiceInclude = {
   customer: { select: { id: true, name: true, email: true, businessId: true } },
   lines: { orderBy: { sortOrder: "asc" as const } },
-  payments: { orderBy: { paidDate: "asc" as const } },
+  payments: {
+    orderBy: { paidDate: "asc" as const },
+    include: { posPayment: { select: { cardBrand: true, cardLast4: true } } },
+  },
   creditsInvoice: { select: { id: true, number: true } },
   creditNotes: {
     select: { id: true, number: true, status: true },
@@ -388,6 +398,9 @@ export function toPublicInvoice(
       source: payment.source,
       transactionId: payment.transactionId,
       note: payment.note,
+      posPaymentId: payment.posPaymentId,
+      cardBrand: payment.posPayment?.cardBrand ?? null,
+      cardLast4: payment.posPayment?.cardLast4 ?? null,
     })),
     sends: invoice.emailSends.map((send) => ({
       id: send.id,
@@ -1020,6 +1033,19 @@ export interface RecordPaymentInput {
   source?: "manual" | "bank";
 }
 
+export type InvoicePaymentSource = "manual" | "bank" | "stripe_terminal";
+
+/** One payment row to book on an invoice, in integer cents. */
+export interface InvoicePaymentWrite {
+  amountCents: number;
+  paidDate: string;
+  source: InvoicePaymentSource;
+  transactionId?: string | null;
+  note?: string | null;
+  /** The verified card payment this row books (source "stripe_terminal"). */
+  posPaymentId?: string | null;
+}
+
 /**
  * Records a payment and closes the invoice once it is fully covered.
  *
@@ -1052,107 +1078,175 @@ export async function recordPayment(
     );
   }
 
-  const run = async (conn: Prisma.TransactionClient) => {
-    // A write comes first: it takes the write lock, so the balance read below
-    // is still true when this transaction commits.
-    await conn.$executeRaw`UPDATE "SalesInvoice" SET "grossCents" = "grossCents" WHERE "id" = ${invoiceId} AND "userId" = ${userId}`;
-
-    const invoice = await conn.salesInvoice.findFirst({
-      where: { id: invoiceId, userId },
-      include: { payments: { select: { amountCents: true } } },
-    });
-    if (!invoice) throw new NotFoundError("Laskua ei löytynyt.");
-    if (invoice.status === "draft") {
-      throw new AppError("Luonnokselle ei voi kirjata maksua.", "INVOICE_IS_DRAFT", 409);
-    }
-    if (invoice.status === "credited" || invoice.documentKind === "credit_note") {
-      throw new AppError("Hyvitetylle laskulle ei voi kirjata maksua.", "INVOICE_CREDITED", 409);
-    }
-
-    await assertPeriodOpen(userId, [isoDateToUtc(input.paidDate)], conn);
-
-    if (manual && isoDateToUtc(input.paidDate) < invoice.issueDate) {
-      throw new AppError(
-        `Maksupäivä (${formatDate(input.paidDate)}) on ennen laskun päivää (${formatDate(invoice.issueDate.toISOString())}).`,
-        "PAYMENT_BEFORE_INVOICE",
-        422
-      );
-    }
-
-    if (input.transactionId) {
-      const transaction = await conn.transaction.findFirst({
-        where: { id: input.transactionId, statement: { userId } },
-        select: { id: true },
-      });
-      if (!transaction) throw new NotFoundError("Tapahtumaa ei löytynyt.");
-      const taken = await conn.invoicePayment.findUnique({
-        where: { transactionId: input.transactionId },
-        select: { invoiceId: true },
-      });
-      if (taken) {
-        throw new AppError(
-          "Tämä pankkitapahtuma on jo kohdistettu laskulle.",
-          "TRANSACTION_ALREADY_USED",
-          409
-        );
-      }
-    }
-
-    const paidBefore = invoice.payments.reduce((sum, payment) => sum + payment.amountCents, 0);
-    const openCents = invoice.grossCents - paidBefore;
-    if (manual && amountCents > openCents) {
-      throw new AppError(
-        openCents <= 0
-          ? `Lasku on jo maksettu. Avoin summa on ${formatEur(0)}.`
-          : `Maksu on suurempi kuin laskun avoin summa (${formatEur(centsToEuros(openCents))}). Kirjaa enintään avoin summa.`,
-        "PAYMENT_EXCEEDS_OPEN",
-        422,
-        { openCents }
-      );
-    }
-
-    const paidCents = paidBefore + amountCents;
-    const covered = paidCents >= invoice.grossCents;
-    const reopens =
-      invoice.status === "paid" && !invoice.closedReason?.trim() && paidCents < invoice.grossCents;
-
-    await conn.invoicePayment.create({
-      data: {
-        invoiceId,
-        transactionId: input.transactionId ?? null,
-        paidDate: isoDateToUtc(input.paidDate),
-        amountCents,
-        source,
-        note: input.note?.trim() || null,
-      },
-    });
-    await recordActivity(
-      conn,
-      invoiceId,
-      "payment_added",
-      amountCents < 0
-        ? `Hyvitys ${formatEur(centsToEuros(amountCents))} kirjattiin.`
-        : `Maksu ${formatEur(centsToEuros(amountCents))} kirjattiin.`
-    );
-    if (covered && invoice.status === "sent") {
-      await conn.salesInvoice.update({
-        where: { id: invoiceId },
-        data: { status: "paid", paidAt: isoDateToUtc(input.paidDate) },
-      });
-      await recordActivity(conn, invoiceId, "status_changed", "Tila muuttui: Odottaa maksua → Maksettu.");
-    } else if (reopens) {
-      await conn.salesInvoice.update({
-        where: { id: invoiceId },
-        data: { status: "sent", paidAt: null },
-      });
-      await recordActivity(conn, invoiceId, "status_changed", "Tila muuttui: Maksettu → Odottaa maksua.");
-    }
+  const write: InvoicePaymentWrite = {
+    amountCents,
+    paidDate: input.paidDate,
+    source,
+    transactionId: input.transactionId ?? null,
+    note: input.note,
   };
-  if (db) await run(db);
-  else await prisma.$transaction(run);
+  if (db) await applyInvoicePayment(db, userId, invoiceId, write);
+  else await prisma.$transaction((tx) => applyInvoicePayment(tx, userId, invoiceId, write));
 
   return getInvoice(userId, invoiceId, db ?? prisma);
 }
+
+/**
+ * The one path that books a payment row on an invoice: period lock, the
+ * draft/credited guards, the open-balance check for a hand-keyed payment, the
+ * activity line and the sent -> paid (or paid -> sent) status change. Runs in
+ * the caller's transaction. Hand-recorded payments (recordPayment) and
+ * verified card payments (pos-payments) both come through here.
+ *
+ * Only a "manual" payment is refused on amount or date: a bank row or a card
+ * payment Stripe confirmed records money that has already moved.
+ */
+export async function applyInvoicePayment(
+  conn: Prisma.TransactionClient,
+  userId: string,
+  invoiceId: string,
+  input: InvoicePaymentWrite
+): Promise<void> {
+  const { amountCents, source } = input;
+  const manual = source === "manual";
+
+  // A write comes first: it takes the write lock, so the balance read below
+  // is still true when this transaction commits.
+  await conn.$executeRaw`UPDATE "SalesInvoice" SET "grossCents" = "grossCents" WHERE "id" = ${invoiceId} AND "userId" = ${userId}`;
+
+  const invoice = await conn.salesInvoice.findFirst({
+    where: { id: invoiceId, userId },
+    include: { payments: { select: { amountCents: true } } },
+  });
+  if (!invoice) throw new NotFoundError("Laskua ei löytynyt.");
+  if (invoice.status === "draft") {
+    throw new AppError("Luonnokselle ei voi kirjata maksua.", "INVOICE_IS_DRAFT", 409);
+  }
+  if (invoice.status === "credited" || invoice.documentKind === "credit_note") {
+    throw new AppError("Hyvitetylle laskulle ei voi kirjata maksua.", "INVOICE_CREDITED", 409);
+  }
+
+  await assertPeriodOpen(userId, [isoDateToUtc(input.paidDate)], conn);
+
+  if (manual && isoDateToUtc(input.paidDate) < invoice.issueDate) {
+    throw new AppError(
+      `Maksupäivä (${formatDate(input.paidDate)}) on ennen laskun päivää (${formatDate(invoice.issueDate.toISOString())}).`,
+      "PAYMENT_BEFORE_INVOICE",
+      422
+    );
+  }
+
+  if (input.transactionId) {
+    const transaction = await conn.transaction.findFirst({
+      where: { id: input.transactionId, statement: { userId } },
+      select: { id: true },
+    });
+    if (!transaction) throw new NotFoundError("Tapahtumaa ei löytynyt.");
+    const taken = await conn.invoicePayment.findUnique({
+      where: { transactionId: input.transactionId },
+      select: { invoiceId: true },
+    });
+    if (taken) {
+      throw new AppError(
+        "Tämä pankkitapahtuma on jo kohdistettu laskulle.",
+        "TRANSACTION_ALREADY_USED",
+        409
+      );
+    }
+  }
+
+  const paidBefore = invoice.payments.reduce((sum, payment) => sum + payment.amountCents, 0);
+  const openCents = invoice.grossCents - paidBefore;
+  if (manual && amountCents > openCents) {
+    throw new AppError(
+      openCents <= 0
+        ? `Lasku on jo maksettu. Avoin summa on ${formatEur(0)}.`
+        : `Maksu on suurempi kuin laskun avoin summa (${formatEur(centsToEuros(openCents))}). Kirjaa enintään avoin summa.`,
+      "PAYMENT_EXCEEDS_OPEN",
+      422,
+      { openCents }
+    );
+  }
+
+  const paidCents = paidBefore + amountCents;
+  const covered = paidCents >= invoice.grossCents;
+  const reopens =
+    invoice.status === "paid" && !invoice.closedReason?.trim() && paidCents < invoice.grossCents;
+
+  await conn.invoicePayment.create({
+    data: {
+      invoiceId,
+      transactionId: input.transactionId ?? null,
+      paidDate: isoDateToUtc(input.paidDate),
+      amountCents,
+      source,
+      note: input.note?.trim() || null,
+      posPaymentId: input.posPaymentId ?? null,
+    },
+  });
+  const amountText = formatEur(centsToEuros(amountCents));
+  await recordActivity(
+    conn,
+    invoiceId,
+    "payment_added",
+    source === "stripe_terminal"
+      ? `Korttimaksu ${amountText} kirjattiin.`
+      : amountCents < 0
+        ? `Hyvitys ${amountText} kirjattiin.`
+        : `Maksu ${amountText} kirjattiin.`
+  );
+  if (covered && invoice.status === "sent") {
+    await conn.salesInvoice.update({
+      where: { id: invoiceId },
+      data: { status: "paid", paidAt: isoDateToUtc(input.paidDate) },
+    });
+    await recordActivity(conn, invoiceId, "status_changed", "Tila muuttui: Odottaa maksua → Maksettu.");
+  } else if (reopens) {
+    await conn.salesInvoice.update({
+      where: { id: invoiceId },
+      data: { status: "sent", paidAt: null },
+    });
+    await recordActivity(conn, invoiceId, "status_changed", "Tila muuttui: Maksettu → Odottaa maksua.");
+  }
+}
+
+/**
+ * After a payment row shrank or went away: a payment-only close reopens when
+ * the payments no longer cover the invoice. A write-off stays closed.
+ */
+export async function reopenIfUncovered(
+  tx: Prisma.TransactionClient,
+  invoiceId: string
+): Promise<void> {
+  const invoice = await tx.salesInvoice.findUnique({
+    where: { id: invoiceId },
+    select: { status: true, closedReason: true, grossCents: true },
+  });
+  if (!invoice || invoice.status !== "paid" || invoice.closedReason?.trim()) return;
+  const remaining = await tx.invoicePayment.aggregate({
+    where: { invoiceId },
+    _sum: { amountCents: true },
+  });
+  if ((remaining._sum.amountCents ?? 0) < invoice.grossCents) {
+    await tx.salesInvoice.update({
+      where: { id: invoiceId },
+      data: { status: "sent", paidAt: null },
+    });
+    await recordActivity(tx, invoiceId, "status_changed", "Tila muuttui: Maksettu → Odottaa maksua.");
+  }
+}
+
+/** Activity line on an invoice, for modules that change it from outside. */
+export async function addInvoiceActivity(
+  db: Prisma.TransactionClient | typeof prisma,
+  invoiceId: string,
+  kind: string,
+  summary: string
+): Promise<void> {
+  await recordActivity(db, invoiceId, kind, summary);
+}
+
+export const CARD_PAYMENT_NOT_REMOVABLE = "CARD_PAYMENT_NOT_REMOVABLE";
 
 export interface BankRowCandidate {
   transactionId: string;
@@ -1223,9 +1317,13 @@ export async function linkPaymentToTransaction(
 ): Promise<PublicInvoice> {
   const payment = await prisma.invoicePayment.findFirst({
     where: { id: paymentId, invoiceId, invoice: { userId } },
-    select: { id: true, transactionId: true, amountCents: true, paidDate: true },
+    select: { id: true, transactionId: true, amountCents: true, paidDate: true, source: true },
   });
   if (!payment) throw new NotFoundError("Maksua ei löytynyt.");
+  // Stripe pays card money out in batches; one card payment is never one bank row.
+  if (payment.source === "stripe_terminal") {
+    throw new AppError("Korttimaksua ei yhdistetä pankkitapahtumaan.", "CARD_PAYMENT_NOT_LINKABLE", 409);
+  }
   if (payment.transactionId) {
     throw new AppError("Maksu on jo yhdistetty pankkitapahtumaan.", "PAYMENT_ALREADY_LINKED", 409);
   }
@@ -1323,9 +1421,14 @@ export async function removePayment(
 
   const payment = await prisma.invoicePayment.findFirst({
     where: { id: paymentId, invoiceId },
-    select: { paidDate: true, transactionId: true },
+    select: { paidDate: true, transactionId: true, source: true, posPaymentId: true },
   });
   if (!payment) throw new NotFoundError("Maksua ei löytynyt.");
+  // A card payment is money Stripe holds for the business: deleting the row
+  // would leave the books saying it was never paid. It is undone by a refund.
+  if (payment.source === "stripe_terminal" || payment.posPaymentId) {
+    throw new AppError("Korttimaksua ei voi poistaa. Palauta maksu.", CARD_PAYMENT_NOT_REMOVABLE, 409);
+  }
 
   // While a bank row settles the invoice, an income receipt of that same row is
   // left out of the books (the invoice is the sale). Once the payment is gone
@@ -1373,23 +1476,7 @@ export async function removePayment(
     }
 
     // A write-off stays closed. A payment-only close reopens when the cover is gone.
-    if (invoice.status === "paid" && !invoice.closedReason?.trim()) {
-      const remaining = await tx.invoicePayment.aggregate({
-        where: { invoiceId },
-        _sum: { amountCents: true },
-      });
-      const full = await tx.salesInvoice.findUnique({
-        where: { id: invoiceId },
-        select: { grossCents: true },
-      });
-      if ((remaining._sum.amountCents ?? 0) < (full?.grossCents ?? 0)) {
-        await tx.salesInvoice.update({
-          where: { id: invoiceId },
-          data: { status: "sent", paidAt: null },
-        });
-        await recordActivity(tx, invoiceId, "status_changed", "Tila muuttui: Maksettu → Odottaa maksua.");
-      }
-    }
+    await reopenIfUncovered(tx, invoiceId);
     return true;
   });
   if (!removed) throw new NotFoundError("Maksua ei löytynyt.");

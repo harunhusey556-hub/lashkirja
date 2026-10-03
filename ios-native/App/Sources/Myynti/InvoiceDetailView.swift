@@ -31,9 +31,13 @@ struct InvoiceDetailView: View {
     @State private var tab: InvoiceDetailLayout.Tab = .lines
     @State private var tabChosen = false
     @State private var customerRoute: Route?
+    /// Whether this server takes card payments at all (Stripe configured); nil until asked.
+    @State private var posStatus: POSStatus?
+    /// Card details and refund state of the card payments, by `posPaymentId`.
+    @State private var cardPayments: [String: POSPaymentView] = [:]
 
-    enum SheetKind: Identifiable { case payment, send, pdf, edit, reminder, reminderPdf, close; var id: Self { self } }
-    enum ConfirmKind: Identifiable { case delete, credit, markSent; var id: Self { self } }
+    enum SheetKind: Identifiable { case payment, card, send, pdf, edit, reminder, reminderPdf, close; var id: Self { self } }
+    enum ConfirmKind: Identifiable, Hashable { case delete, credit, markSent, refund(Invoice.Payment); var id: Self { self } }
 
     var body: some View {
         List {
@@ -84,6 +88,13 @@ struct InvoiceDetailView: View {
             if let invoice = state.value {
                 switch kind {
                 case .payment: PaymentSheet(invoice: invoice)
+                case .card: POSPaymentSheet(invoice: invoice) {
+                    // After the card sheet has gone: one sheet at a time.
+                    Task {
+                        try? await Task.sleep(nanoseconds: 500_000_000)
+                        sheet = .send
+                    }
+                }
                 case .send: SendInvoiceSheet(invoice: invoice) { result in
                     if result.isWarning { warning = result.message; notice = nil } else { notice = result.message; warning = nil }
                 }
@@ -104,6 +115,7 @@ struct InvoiceDetailView: View {
             case .delete: Button("Poista luonnos", role: .destructive) { Task { await deleteDraft() } }
             case .credit: Button("Luo hyvityslasku") { Task { await credit() } }
             case .markSent: Button("Merkitse lähetetyksi") { Task { await setStatus(.markSent) } }
+            case .refund(let payment): Button("Palauta maksu", role: .destructive) { Task { await refund(payment) } }
             case nil: EmptyView()
             }
         }
@@ -115,6 +127,7 @@ struct InvoiceDetailView: View {
         case .delete: "Poistetaanko luonnos?"
         case .credit: "Luodaanko hyvityslasku? Alkuperäinen lasku kuitataan hyvitetyksi."
         case .markSent: "Merkitäänkö lasku lähetetyksi ilman sähköpostia?"
+        case .refund(let payment): "Palautetaanko korttimaksu \(Money.format(payment.amount))? Raha palautetaan asiakkaan kortille Stripen kautta."
         case nil: ""
         }
     }
@@ -253,6 +266,9 @@ struct InvoiceDetailView: View {
                 if invoice.open > 0 && invoice.displayStatus != .draft && primaryAction(invoice) != .payment {
                     quickAction("Maksu", symbol: "eurosign.circle") { sheet = .payment }
                 }
+                if offersCardPayment(invoice) {
+                    quickAction("Korttimaksu", symbol: "wave.3.right.circle") { sheet = .card }
+                }
                 if invoice.displayStatus == .draft {
                     quickAction("Muokkaa", symbol: "pencil") { sheet = .edit }
                 } else {
@@ -317,13 +333,29 @@ struct InvoiceDetailView: View {
                     HStack {
                         VStack(alignment: .leading) {
                             Text(APIDate.displayDay(payment.paidDate))
+                            if payment.isCardPayment {
+                                Label(cardLabel(payment), systemImage: "wave.3.right.circle")
+                                    .font(.caption).foregroundStyle(Theme.ink2)
+                            }
                             if let note = payment.note { Text(note).font(.caption).foregroundStyle(Theme.ink2) }
                         }
                         Spacer()
                         MoneyText(amount: payment.amount)
                     }
+                    // A card payment is undone by refunding it through Stripe; the server refuses a delete.
                     .swipeActions {
-                        Button("Poista", role: .destructive) { Task { await deletePayment(payment) } }
+                        if payment.isCardPayment {
+                            if canRefund(payment) {
+                                Button("Palauta maksu") { confirm = .refund(payment) }.tint(Theme.accentFill)
+                            }
+                        } else {
+                            Button("Poista", role: .destructive) { Task { await deletePayment(payment) } }
+                        }
+                    }
+                    .contextMenu {
+                        if payment.isCardPayment && canRefund(payment) {
+                            Button { confirm = .refund(payment) } label: { Label("Palauta maksu", systemImage: "arrow.uturn.backward") }
+                        }
                     }
                 }
                 ShowMoreButton(limit: $paymentLimit, total: invoice.payments.count)
@@ -407,6 +439,7 @@ struct InvoiceDetailView: View {
             state = .loaded(response.invoice)
             duplicates = response.paymentDuplicates ?? []
             prefetchPdf(response.invoice)
+            await loadCardPayments(response.invoice)
             if response.invoice.displayStatus == .overdue {
                 await loadReminder()
             } else {
@@ -487,6 +520,51 @@ struct InvoiceDetailView: View {
             let _: Ignored = try await api.send("DELETE", "/api/invoices/\(id)", body: Optional<EmptyBody>.none)
         }
         dismiss()
+    }
+
+    /// Card payments need Stripe on the server, a sent invoice and money still open; whether the
+    /// owner's account and this iPhone are ready is explained in the sheet itself.
+    private func offersCardPayment(_ invoice: Invoice) -> Bool {
+        posStatus?.enabled == true && invoice.open > 0 && !invoice.isCreditNote
+            && (invoice.displayStatus == .sent || invoice.displayStatus == .overdue)
+    }
+
+    private func cardLabel(_ payment: Invoice.Payment) -> String {
+        let view = payment.posPaymentId.flatMap { cardPayments[$0] }
+        let label = POSCard.label(brand: payment.cardBrand ?? view?.cardBrand, last4: payment.cardLast4 ?? view?.cardLast4) ?? "Korttimaksu"
+        if let view, view.refunded > 0 { return "\(label) · palautettu \(Money.format(view.refunded))" }
+        return label
+    }
+
+    private func canRefund(_ payment: Invoice.Payment) -> Bool {
+        guard let id = payment.posPaymentId else { return false }
+        return cardPayments[id]?.isRefundable ?? true
+    }
+
+    /// The POS status (once per screen) and, when the invoice has card payments, their card details.
+    private func loadCardPayments(_ invoice: Invoice) async {
+        let pos = POSCoordinator.shared
+        pos.bind(app)
+        if posStatus == nil {
+            if let known = pos.status { posStatus = known } else { posStatus = await pos.refreshStatus() }
+        }
+        guard invoice.payments.contains(where: \.isCardPayment) else { return }
+        if let list: POSPaymentsResponse = try? await app.api.get("/api/pos/payments", query: ["invoiceId": invoice.id]) {
+            cardPayments = Dictionary(list.payments.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        }
+    }
+
+    /// The whole remaining amount back to the customer's card; the server then reduces the invoice
+    /// payment so the open balance is right again.
+    private func refund(_ payment: Invoice.Payment) async {
+        guard let posId = payment.posPaymentId else { return }
+        await run {
+            let _: Ignored = try await app.api.send("POST", "/api/pos/payments/\(posId)/refund", body: POSRefundRequest(),
+                                                    idempotencyKey: "pos-refund-\(posId)-\(payment.id)")
+            notice = "Korttimaksu palautettiin asiakkaalle."
+            warning = nil
+        }
+        await load()
     }
 
     private func deletePayment(_ payment: Invoice.Payment) async {

@@ -2,6 +2,10 @@ name: iOS native
 
 on:
   push:
+    branches: [native, "feature/**"]
+    paths: ["ios-native/**", ".github/workflows/ios-native.yml"]
+  # A pull request into native is built and tested before it is merged.
+  pull_request:
     branches: [native]
     paths: ["ios-native/**", ".github/workflows/ios-native.yml"]
   workflow_dispatch:

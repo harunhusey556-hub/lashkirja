@@ -28,9 +28,32 @@ public struct Invoice: Decodable, Sendable, Identifiable, Hashable {
         public let id: String
         public let paidDate: String
         public let amount: Decimal
+        /// "manual", "bank", "stripe_terminal", ... (the server's default is "manual").
         public let source: String
         public let transactionId: String?
         public let note: String?
+        /// The card payment behind a `stripe_terminal` row; refunded through it, never deleted.
+        public let posPaymentId: String?
+        /// Sent by servers that join the card details onto the row; otherwise read from `/api/pos/payments`.
+        public let cardBrand: String?
+        public let cardLast4: String?
+
+        public var isCardPayment: Bool { source == "stripe_terminal" }
+
+        enum CodingKeys: String, CodingKey { case id, paidDate, amount, source, transactionId, note, posPaymentId, cardBrand, cardLast4 }
+
+        public init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            id = try c.decode(String.self, forKey: .id)
+            paidDate = try c.decode(String.self, forKey: .paidDate)
+            amount = try c.decode(Decimal.self, forKey: .amount)
+            source = try c.decodeIfPresent(String.self, forKey: .source) ?? "manual"
+            transactionId = try c.decodeIfPresent(String.self, forKey: .transactionId)
+            note = try c.decodeIfPresent(String.self, forKey: .note)
+            posPaymentId = try c.decodeIfPresent(String.self, forKey: .posPaymentId)
+            cardBrand = try c.decodeIfPresent(String.self, forKey: .cardBrand)
+            cardLast4 = try c.decodeIfPresent(String.self, forKey: .cardLast4)
+        }
     }
     public struct Send: Decodable, Sendable, Identifiable, Hashable {
         public let id: String

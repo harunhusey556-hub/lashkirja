@@ -47,6 +47,16 @@ model User {
   /// Login and API sessions stop. Receipts and invoices stay for the
   /// accounting retention period. This is not a delete.
   accessDisabledAt DateTime?
+  /// Card payments (Stripe Connect, Tap to Pay). The business's own connected
+  /// account; the platform never holds the money (direct charges).
+  stripeAccountId        String?  @unique
+  /// Terminal Location created on the connected account.
+  stripeLocationId       String?
+  stripeChargesEnabled   Boolean  @default(false)
+  stripePayoutsEnabled   Boolean  @default(false)
+  stripeDetailsSubmitted Boolean  @default(false)
+  /// The owner switched card payments on. Allowed only while charges are enabled.
+  posEnabled             Boolean  @default(false)
   createdAt     DateTime    @default(now())
   receipts      Receipt[]
   statements    Statement[]
@@ -73,6 +83,7 @@ model User {
   accountRequests AccountRequest[]
   vatFilings      VatFiling[]
   invoiceEmailTemplates InvoiceEmailTemplate[]
+  posPayments     PosPayment[]
 }
 
 /// A browser or device that logged in. The iron-session cookie stores this id.
@@ -622,6 +633,7 @@ model SalesInvoice {
   emailSends   InvoiceEmailSend[]
   activities   InvoiceActivity[]
   recurringRun RecurringInvoiceRun?
+  posPayments  PosPayment[]
 
   @@unique([userId, number])
   @@unique([userId, reference])
@@ -656,10 +668,45 @@ model InvoicePayment {
   transaction   Transaction? @relation(fields: [transactionId], references: [id], onDelete: SetNull)
   paidDate      DateTime
   amountCents   Int
-  source        String       @default("manual") // "manual" | "bank"
+  source        String       @default("manual") // "manual" | "bank" | "stripe_terminal"
   note          String?
+  /// The verified card payment this row books. Unique: one card payment is
+  /// booked at most once, however many times finalize and the webhook run.
+  posPaymentId  String?      @unique
+  posPayment    PosPayment?  @relation(fields: [posPaymentId], references: [id], onDelete: SetNull)
   createdAt     DateTime     @default(now())
 
+  @@index([invoiceId])
+}
+
+/// A card payment taken on the phone (Stripe Terminal, Tap to Pay) on the
+/// business's own connected account. Amounts in integer cents.
+model PosPayment {
+  id                      String          @id @default(uuid())
+  userId                  String
+  user                    User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  invoiceId               String?
+  invoice                 SalesInvoice?   @relation(fields: [invoiceId], references: [id], onDelete: SetNull)
+  provider                String          @default("stripe")
+  providerPaymentIntentId String          @unique
+  providerChargeId        String?
+  amountCents             Int
+  currency                String          @default("EUR")
+  /// created | processing | succeeded | failed | canceled | refunded | partially_refunded
+  status                  String          @default("created")
+  refundedCents           Int             @default(0)
+  cardBrand               String?
+  cardLast4               String?
+  failureCode             String?
+  failureMessage          String?
+  idempotencyKey          String?
+  createdAt               DateTime        @default(now())
+  /// Set in the same transaction that books the InvoicePayment.
+  succeededAt             DateTime?
+  refundedAt              DateTime?
+  invoicePayment          InvoicePayment?
+
+  @@index([userId, createdAt])
   @@index([invoiceId])
 }
 

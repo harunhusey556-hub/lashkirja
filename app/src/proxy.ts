@@ -41,7 +41,17 @@ export function isPublicPage(pathname: string): boolean {
   return PUBLIC_PAGES.includes(pathname);
 }
 
-const PUBLIC_API_PREFIXES = ["/api/auth/", "/api/cron/", "/api/health"];
+// /api/stripe/webhook has no session: Stripe signs the body and the route
+// verifies that signature (HMAC) before doing anything.
+// /api/pos/onboarding/return has no session either: it carries no data,
+// changes nothing and only redirects to the app's fixed lashkirja:// link.
+const PUBLIC_API_PREFIXES = [
+  "/api/auth/",
+  "/api/cron/",
+  "/api/health",
+  "/api/stripe/webhook",
+  "/api/pos/onboarding/return",
+];
 
 function isPublicApi(pathname: string): boolean {
   return PUBLIC_API_PREFIXES.some((prefix) => pathname.startsWith(prefix));

@@ -106,6 +106,30 @@ describe("proxy() request handling (signed out, no session cookie)", () => {
     expectPassThrough(response);
   });
 
+  it("lets the Stripe webhook through without a session (it checks Stripe's signature itself)", async () => {
+    const request = new NextRequest("http://127.0.0.1/api/stripe/webhook", { method: "POST" });
+    const response = await proxy(request);
+    expectPassThrough(response);
+  });
+
+  it("lets the Stripe onboarding return page through without a session (it only redirects to the app)", async () => {
+    const request = new NextRequest("http://127.0.0.1/api/pos/onboarding/return?state=return", { method: "GET" });
+    const response = await proxy(request);
+    expectPassThrough(response);
+  });
+
+  it("still guards starting onboarding: POST /api/pos/onboarding", async () => {
+    const request = new NextRequest("http://127.0.0.1/api/pos/onboarding", { method: "POST" });
+    const response = await proxy(request);
+    expect(response.status).toBe(401);
+  });
+
+  it("still guards the card payment routes: POST /api/pos/connection-token", async () => {
+    const request = new NextRequest("http://127.0.0.1/api/pos/connection-token", { method: "POST" });
+    const response = await proxy(request);
+    expect(response.status).toBe(401);
+  });
+
   it("blocks an unauthenticated protected API route: GET /api/receipts", async () => {
     const request = new NextRequest("http://127.0.0.1/api/receipts", { method: "GET" });
     const response = await proxy(request);

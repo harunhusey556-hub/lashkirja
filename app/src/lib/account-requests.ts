@@ -191,6 +191,7 @@ export async function buildAccountCopyZip(userId: string): Promise<Buffer> {
     mailboxes,
     conversations,
     emailTemplates,
+    cardPayments,
   ] = await Promise.all([
     prisma.customer.findMany({ ...byUser, orderBy: { name: "asc" } }),
     prisma.salesInvoice.findMany({
@@ -220,6 +221,7 @@ export async function buildAccountCopyZip(userId: string): Promise<Buffer> {
       include: { messages: { orderBy: { createdAt: "asc" } } },
     }),
     prisma.invoiceEmailTemplate.findMany({ ...byUser, orderBy: { createdAt: "asc" } }),
+    prisma.posPayment.findMany({ ...byUser, orderBy: { createdAt: "asc" } }),
   ]);
 
   const jsonFiles: Array<[string, unknown[] | object]> = [
@@ -239,6 +241,7 @@ export async function buildAccountCopyZip(userId: string): Promise<Buffer> {
     ["postilaatikko.json", mailboxes],
     ["avustaja.json", conversations],
     ["sahkopostimallit.json", emailTemplates],
+    ["korttimaksut.json", cardPayments],
   ];
 
   const customerRows: CsvValue[][] = customers.map((row) => [
@@ -301,7 +304,7 @@ export async function buildAccountCopyZip(userId: string): Promise<Buffer> {
   const readme =
     `LashKirjan tietokopio.\n\n` +
     `Tässä ovat tilisi tiedot: profiili ja laskutustiedot, asiakkaat, myynti- ja ostolaskut, maksut, kuitit ja niiden tiedostot, ` +
-    `tiliotteet ja pankkitapahtumat, pankkitilit ja pankkiyhteydet, ALV-ilmoitukset, toistuvat laskut, tuotteet, ` +
+    `tiliotteet ja pankkitapahtumat, pankkitilit ja pankkiyhteydet, korttimaksut, ALV-ilmoitukset, toistuvat laskut, tuotteet, ` +
     `yhdistetyn postilaatikon tiedot ja keskustelut avustajan kanssa. Jokainen tieto on JSON-tiedostossa; ` +
     `laskut, asiakkaat ja kuitit ovat lisäksi csv-yhteenvetona.\n\n` +
     `Mukana ei ole salasanasi tiivistettä, postilaatikon salasanaa eikä pankkiyhteyden salaisuuksia. ` +
@@ -389,7 +392,9 @@ export async function completeAccountClose(id: string, options: { bankClient?: E
     prisma.recurringPurchase.updateMany({ where: { userId: row.userId }, data: { active: false } }),
     prisma.user.update({
       where: { id: row.userId },
-      data: { accessDisabledAt: now, phone: null, businessDetails: null, pendingEmail: null },
+      // A closed account takes no card payments either. The Stripe account id
+      // stays: refunds and payouts of earlier card payments still refer to it.
+      data: { accessDisabledAt: now, phone: null, businessDetails: null, pendingEmail: null, posEnabled: false },
     }),
     prisma.accountToken.updateMany({ where: { userId: row.userId, usedAt: null }, data: { usedAt: now } }),
     prisma.accountRequest.update({

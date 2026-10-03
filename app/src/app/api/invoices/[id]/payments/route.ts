@@ -2,9 +2,9 @@ import { NextRequest } from "next/server";
 import { z } from "zod";
 import { requireSession } from "@/lib/session";
 import { noStoreJson, rejectCrossSite, rejectOversizedContentLength } from "@/lib/http-security";
-import { UnauthorizedError, ValidationError, withErrorHandler } from "@/lib/api-errors";
+import { AppError, UnauthorizedError, ValidationError, withErrorHandler } from "@/lib/api-errors";
 import { hashIdempotencyPayload, idempotencyKeyFrom, withIdempotency } from "@/lib/idempotency";
-import { recordPayment, removePayment } from "@/lib/sales-invoices";
+import { CARD_PAYMENT_NOT_REMOVABLE, recordPayment, removePayment } from "@/lib/sales-invoices";
 import { isoDateSchema, moneySchema } from "@/lib/validation";
 
 const bodySchema = z.object({
@@ -51,5 +51,14 @@ export const DELETE = withErrorHandler(async (req: NextRequest, context: RouteCo
   const paymentId = req.nextUrl.searchParams.get("paymentId");
   if (!paymentId) throw new ValidationError("Maksun tunnus puuttuu.");
 
-  return noStoreJson({ invoice: await removePayment(session.userId, id, paymentId) });
+  try {
+    return noStoreJson({ invoice: await removePayment(session.userId, id, paymentId) });
+  } catch (error) {
+    // A card payment is undone by a refund, never deleted. Flat {error} as the
+    // POS contract defines it.
+    if (error instanceof AppError && error.code === CARD_PAYMENT_NOT_REMOVABLE) {
+      return noStoreJson({ error: error.message, code: error.code }, { status: 409 });
+    }
+    throw error;
+  }
 });

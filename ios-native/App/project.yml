@@ -3,6 +3,13 @@ options:
   bundleIdPrefix: fi.tiyouba
   deploymentTarget: { iOS: "18.0" }
   createIntermediateGroups: true
+# Debug and Release stay unsigned (CI, the unsigned IPA). Release-Signed is the owner's own signed
+# build with the Tap to Pay entitlement; only it references the entitlements file, because a
+# free-account re-sign of the unsigned IPA would fail on an entitlement it cannot grant.
+configs:
+  Debug: debug
+  Release: release
+  Release-Signed: release
 settings:
   base:
     SWIFT_VERSION: "5.0"
@@ -13,9 +20,16 @@ settings:
     CODE_SIGNING_ALLOWED: "NO"
     CODE_SIGNING_REQUIRED: "NO"
     CODE_SIGN_IDENTITY: ""
+    # "YES" only in the signed build: the app reads it (Info.plist LKTapToPayEntitlement) to say
+    # whether this install can take Tap to Pay payments at all.
+    LK_TAP_TO_PAY_ENTITLEMENT: "NO"
 packages:
   LashKirjaCore:
     path: ../LashKirjaCore
+  # Stripe Terminal (Tap to Pay on iPhone), App target only; Core stays plain Foundation.
+  StripeTerminal:
+    url: https://github.com/stripe/stripe-terminal-ios-spm
+    from: 5.8.0
 targets:
   LashKirja:
     type: application
@@ -35,6 +49,11 @@ targets:
         NSCameraUsageDescription: "Kameralla kuvaat kuitit kirjanpitoon."
         NSPhotoLibraryUsageDescription: "Valitse kuitin kuva kirjastosta."
         NSFaceIDUsageDescription: "Face ID avaa sovelluksen lukituksen."
+        # Stripe Terminal needs the location to accept a card payment (Tap to Pay).
+        NSLocationWhenInUseUsageDescription: "Sijaintia tarvitaan korttimaksuissa: Stripe vaatii maksupaikan tiedon jokaiseen Tap to Pay -maksuun."
+        # The Stripe SDK links Bluetooth for external readers; v1 uses none (no bluetooth background mode).
+        NSBluetoothAlwaysUsageDescription: "Bluetoothia käytetään vain, jos yhdistät erillisen Stripe-kortinlukijan."
+        LKTapToPayEntitlement: $(LK_TAP_TO_PAY_ENTITLEMENT)
         # Local notifications fed by Background App Refresh (no push: the app is signed with a
         # free account). Info.plist keys only; no entitlement is needed. The identifier must match
         # AppNotifications.refreshTaskId.
@@ -47,8 +66,22 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: fi.tiyouba.lashkirja
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+      configs:
+        # The owner's signed Tap to Pay build. Needs a paid Apple Developer account with the
+        # Tap to Pay on iPhone entitlement granted; set DEVELOPMENT_TEAM here (or pass
+        # DEVELOPMENT_TEAM=XXXXXXXXXX to xcodebuild) before building scheme LashKirja-TapToPay.
+        Release-Signed:
+          CODE_SIGNING_ALLOWED: "YES"
+          CODE_SIGNING_REQUIRED: "YES"
+          CODE_SIGN_STYLE: Automatic
+          CODE_SIGN_IDENTITY: "Apple Development"
+          DEVELOPMENT_TEAM: ""
+          CODE_SIGN_ENTITLEMENTS: Config/LashKirja-TapToPay.entitlements
+          LK_TAP_TO_PAY_ENTITLEMENT: "YES"
     dependencies:
       - package: LashKirjaCore
+      - package: StripeTerminal
+        product: StripeTerminal
   LashKirjaAppTests:
     type: bundle.unit-test
     platform: iOS
@@ -56,6 +89,18 @@ targets:
     dependencies:
       - target: LashKirja
 schemes:
+  # Unsigned, as CI and the IPA build it.
   LashKirja:
     build: { targets: { LashKirja: all } }
-    test: { targets: [LashKirjaAppTests] }
+    run: { config: Debug }
+    test: { config: Debug, targets: [LashKirjaAppTests] }
+    profile: { config: Release }
+    analyze: { config: Debug }
+    archive: { config: Release }
+  # Signed with the Tap to Pay entitlement (Release-Signed); run on a device from Xcode.
+  LashKirja-TapToPay:
+    build: { targets: { LashKirja: all } }
+    run: { config: Release-Signed }
+    profile: { config: Release-Signed }
+    analyze: { config: Release-Signed }
+    archive: { config: Release-Signed }
