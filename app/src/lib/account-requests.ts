@@ -190,6 +190,7 @@ export async function buildAccountCopyZip(userId: string): Promise<Buffer> {
     catalog,
     mailboxes,
     conversations,
+    emailTemplates,
   ] = await Promise.all([
     prisma.customer.findMany({ ...byUser, orderBy: { name: "asc" } }),
     prisma.salesInvoice.findMany({
@@ -218,6 +219,7 @@ export async function buildAccountCopyZip(userId: string): Promise<Buffer> {
       orderBy: { createdAt: "asc" },
       include: { messages: { orderBy: { createdAt: "asc" } } },
     }),
+    prisma.invoiceEmailTemplate.findMany({ ...byUser, orderBy: { createdAt: "asc" } }),
   ]);
 
   const jsonFiles: Array<[string, unknown[] | object]> = [
@@ -236,6 +238,7 @@ export async function buildAccountCopyZip(userId: string): Promise<Buffer> {
     ["tuotteet.json", catalog],
     ["postilaatikko.json", mailboxes],
     ["avustaja.json", conversations],
+    ["sahkopostimallit.json", emailTemplates],
   ];
 
   const customerRows: CsvValue[][] = customers.map((row) => [

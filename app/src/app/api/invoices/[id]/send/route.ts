@@ -6,12 +6,22 @@ import { UnauthorizedError, withErrorHandler } from "@/lib/api-errors";
 import { previewInvoiceSend, sendInvoiceByEmail } from "@/lib/invoice-mail";
 import { hashIdempotencyPayload, idempotencyKeyFrom, withIdempotentSideEffect } from "@/lib/idempotency";
 import { getInvoice } from "@/lib/sales-invoices";
+import { messageSchema, subjectSchema } from "@/lib/invoice-email-templates";
 
+/**
+ * POST body, every field optional:
+ * - `to`: another recipient than the customer's address.
+ * - `subject` (max 200, one line) and `message` (max 5000, plain text): the
+ *   owner's own text. Placeholders {asiakas}, {laskunumero}, {summa},
+ *   {erapaiva}, {viitenumero}, {tilinumero} and {yritys} are filled for this
+ *   invoice. Left out, the default template (or the built-in text) is used.
+ * The mail is plain text only, so nothing typed here is read as HTML.
+ */
 const bodySchema = z
   .object({
-    to: z.string().trim().email().max(160).optional(),
-    subject: z.string().trim().min(1).max(200).optional(),
-    message: z.string().trim().max(4000).optional(),
+    to: z.string().trim().email("Sähköpostiosoite ei kelpaa.").max(160).optional(),
+    subject: subjectSchema.optional(),
+    message: messageSchema.optional(),
   })
   .default({});
 
@@ -20,7 +30,9 @@ export const GET = withErrorHandler(
     const session = await requireSession(req);
     if (!session) throw new UnauthorizedError();
     const { id } = await context.params;
-    return noStoreJson({ preview: await previewInvoiceSend(session.userId, id) });
+    // `?templateId=` fills the text from that template instead of the default one.
+    const templateId = req.nextUrl.searchParams.get("templateId")?.trim() || undefined;
+    return noStoreJson({ preview: await previewInvoiceSend(session.userId, id, { templateId }) });
   }
 );
 

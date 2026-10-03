@@ -23,6 +23,9 @@ struct SettingsView: View {
                     NavigationLink { ProfileForm(original: profile, section: .seller) { saved($0) } } label: {
                         SettingRow(title: "Laskuttajan tiedot", subtitle: profile.invoiceIban == nil ? "Täydennä tilinumero laskuille" : (profile.businessName ?? "Nimi, Y-tunnus ja IBAN"), symbol: "doc.text")
                     }
+                    NavigationLink { EmailTemplatesView() } label: {
+                        SettingRow(title: "Sähköpostimallit", subtitle: "Laskun saateviesti ja aihe", symbol: "envelope.badge")
+                    }
                 }
                 Section("Kuitit") {
                     NavigationLink { EmailImportView { self.profile = $0; app.profileChanged($0) } } label: {

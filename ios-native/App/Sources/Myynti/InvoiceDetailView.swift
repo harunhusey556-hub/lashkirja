@@ -49,7 +49,7 @@ struct InvoiceDetailView: View {
                         ForEach(duplicates) { pair in duplicateRow(pair) }
                     }
                 }
-                let tabs = InvoiceDetailLayout.tabs(payments: invoice.payments.count, activity: invoice.activity.count,
+                let tabs = InvoiceDetailLayout.tabs(payments: invoice.payments.count, activity: invoice.activity.count + invoice.sends.count,
                                                     overdue: invoice.displayStatus == .overdue)
                 Section {
                     tabPicker(tabs)
@@ -148,6 +148,9 @@ struct InvoiceDetailView: View {
                         .font(.caption).foregroundStyle(Theme.ink2)
                 }
             }
+            if let line = InvoiceSendState.line(status: invoice.status, sentAt: invoice.sentAt, sends: invoice.sends) {
+                sendLine(line)
+            }
             Divider()
             HStack(alignment: .top, spacing: 12) {
                 fact("Päivätty", APIDate.displayDay(invoice.issueDate))
@@ -170,12 +173,58 @@ struct InvoiceDetailView: View {
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
+            if let barcode = invoice.barcode {
+                Button { copyBarcode(barcode) } label: {
+                    Label("Kopioi virtuaaliviivakoodi", systemImage: "barcode")
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(Theme.accent)
+                }
+                .buttonStyle(.borderless)
+            }
+            if let issue = invoice.barcodeIssue, !issue.isEmpty {
+                Text(issue).font(.caption).foregroundStyle(Theme.ink2)
+            }
             if let reason = invoice.closedReason, !reason.isEmpty {
                 Text("Suljettu: \(reason)").font(.caption).foregroundStyle(Theme.ink2)
             }
         }
         .padding(16)
         .background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
+    }
+
+    /// Whether the invoice reached the customer. The line opens Historia, where every attempt is;
+    /// a plain failure also offers the send sheet again.
+    private func sendLine(_ line: InvoiceSendState.Line) -> some View {
+        let color: Color = switch line.tone {
+        case .muted: Theme.ink2
+        case .warning: Theme.warning
+        case .danger: Theme.danger
+        }
+        return HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Button {
+                tabChosen = true
+                withAnimation(.snappy) { tab = .history }
+            } label: {
+                Label(line.text, systemImage: line.tone == .muted ? "paperplane" : "exclamationmark.triangle")
+                    .font(.caption)
+                    .foregroundStyle(color)
+                    .multilineTextAlignment(.leading)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .buttonStyle(.borderless)
+            if line.canRetry {
+                Button("Yritä uudelleen") { sheet = .send }
+                    .font(.caption.weight(.semibold))
+                    .buttonStyle(.borderless)
+                    .foregroundStyle(Theme.accent)
+            }
+        }
+    }
+
+    private func copyBarcode(_ barcode: String) {
+        UIPasteboard.general.string = barcode
+        Haptics.success()
+        showToast("Virtuaaliviivakoodi kopioitu.", action: nil, run: nil)
     }
 
     private func fact(_ title: String, _ value: String) -> some View {
@@ -286,14 +335,16 @@ struct InvoiceDetailView: View {
             reminderSection(invoice)
         case .history:
             Section {
-                // Newest first: the server sends the oldest first, and only the first rows show.
-                ForEach(Array(invoice.activity.reversed()).prefix(activityLimit.visible(invoice.activity.count))) { item in
+                // Events and send attempts in one feed, newest first, as on the web.
+                let items = InvoiceSendState.history(activity: invoice.activity, sends: invoice.sends)
+                ForEach(items.prefix(activityLimit.visible(items.count))) { item in
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(item.summary).font(.subheadline)
-                        Text(Self.timestamp(item.createdAt)).font(.caption).foregroundStyle(Theme.ink2)
+                        Text(item.title).font(.subheadline)
+                            .foregroundStyle(item.tone == .danger ? Theme.danger : item.tone == .warning ? Theme.warning : Theme.ink)
+                        Text(item.meta).font(.caption).foregroundStyle(Theme.ink2)
                     }
                 }
-                ShowMoreButton(limit: $activityLimit, total: invoice.activity.count)
+                ShowMoreButton(limit: $activityLimit, total: items.count)
             }
         }
     }
@@ -327,6 +378,9 @@ struct InvoiceDetailView: View {
                 Button { sheet = .reminder } label: { Label("Lähetä maksumuistutus", systemImage: "bell") }
             }
             Button { UIPasteboard.general.string = invoice.reference } label: { Label("Kopioi viitenumero", systemImage: "doc.on.doc") }
+            if let barcode = invoice.barcode {
+                Button { copyBarcode(barcode) } label: { Label("Kopioi virtuaaliviivakoodi", systemImage: "barcode") }
+            }
             Button { Task { await duplicate() } } label: { Label("Kopioi luonnokseksi", systemImage: "plus.square.on.square") }
             if invoice.displayStatus == .draft {
                 Button { confirm = .markSent } label: { Label("Merkitse lähetetyksi", systemImage: "checkmark.circle") }
@@ -700,7 +754,8 @@ struct ReminderSheet: View {
 }
 
 /// "Lähetä lasku": the server checks the send first (recipient, sum, due date, IBAN, attachment)
-/// and names what blocks it, with the place to fix it; the send itself goes to the customer's address.
+/// and names what blocks it, with the place to fix it. The check also hands over the subject and
+/// message (the default template or the built-in text, filled for this invoice) to edit before sending.
 struct SendInvoiceSheet: View {
     @Environment(AppModel.self) private var app
     @Environment(\.dismiss) private var dismiss
@@ -710,13 +765,24 @@ struct SendInvoiceSheet: View {
     @State private var busy = false
     @State private var failure: String?
     @State private var key = UUID().uuidString
+    @State private var to = ""
+    @State private var subject = ""
+    @State private var message = ""
+    @State private var templateId: String?
+    /// The text is filled once; a check run again (back from a fix) keeps what the owner typed.
+    @State private var filled = false
+    @State private var templateBusy = false
+    @State private var askName = false
+    @State private var templateName = ""
+    @State private var askConvert = false
+    @State private var templateNotice: String?
 
     var body: some View {
         NavigationStack {
             Form {
                 if let preview = check.value {
+                    mailSection(preview)
                     Section {
-                        LabeledContent("Vastaanottaja", value: preview.recipient ?? "–")
                         LabeledContent("Summa") { MoneyText(amount: preview.gross) }
                         if preview.showsDueDate, let due = preview.dueDate {
                             LabeledContent("Eräpäivä", value: APIDate.displayDay(due))
@@ -737,7 +803,7 @@ struct SendInvoiceSheet: View {
                         }
                         LabeledContent("Liite", value: preview.attachment)
                     }
-                    if let blocked = preview.blockedReason {
+                    if let blocked = preview.blockedReason, !preview.canSend(typedRecipient: to) {
                         Section {
                             Text(blocked).foregroundStyle(Theme.danger)
                             if let fix = preview.fix {
@@ -748,7 +814,7 @@ struct SendInvoiceSheet: View {
                     }
                     if let failure { Section { Text(failure).foregroundStyle(Theme.danger) } }
                     Section {
-                        Button { Task { await send() } } label: {
+                        Button { Task { await send(preview) } } label: {
                             HStack {
                                 Spacer()
                                 if busy { ProgressView() } else { Text("Lähetä") }
@@ -756,7 +822,7 @@ struct SendInvoiceSheet: View {
                             }
                         }
                         .buttonStyle(.primary)
-                        .disabled(busy || !preview.canSend)
+                        .disabled(busy || templateBusy || !preview.canSend(typedRecipient: to) || textProblem(preview) != nil)
                         .listRowBackground(Color.clear)
                         .listRowInsets(EdgeInsets())
                     }
@@ -774,7 +840,85 @@ struct SendInvoiceSheet: View {
             .onAppear { Task { await loadCheck() } }
             .appDestinations()
             .interactiveDismissDisabled(busy)
+            .alert("Tallenna mallina", isPresented: $askName) {
+                TextField("Mallin nimi", text: $templateName)
+                Button("Tallenna") { nameChosen() }
+                Button("Peruuta", role: .cancel) {}
+            } message: {
+                Text("Malli löytyy myöhemmin kohdasta Asetukset → Sähköpostimallit.")
+            }
+            .confirmationDialog("Korvataanko tämän laskun tiedot paikkamerkeillä?", isPresented: $askConvert, titleVisibility: .visible) {
+                Button("Korvaa paikkamerkeillä") { Task { await saveTemplate(convert: true) } }
+                Button("Tallenna sellaisenaan") { Task { await saveTemplate(convert: false) } }
+                Button("Peruuta", role: .cancel) {}
+            } message: {
+                Text("Silloin malli sopii muillekin laskuille: esimerkiksi asiakkaan nimen tilalle tulee {asiakas}.")
+            }
         }
+    }
+
+    /// To, template, subject and message. A server without the text fields gets the old fixed recipient row.
+    @ViewBuilder
+    private func mailSection(_ preview: InvoiceSendPreview) -> some View {
+        if preview.subject == nil || preview.message == nil {
+            Section { LabeledContent("Vastaanottaja", value: preview.recipient ?? "–") }
+        } else {
+            Section {
+                LabeledContent("Vastaanottaja") {
+                    TextField("Asiakkaan sähköposti", text: $to)
+                        .keyboardType(.emailAddress)
+                        .textContentType(.emailAddress)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .multilineTextAlignment(.trailing)
+                }
+                if let templates = preview.templates, !templates.isEmpty {
+                    Menu {
+                        ForEach(templates) { template in
+                            Button { Task { await applyTemplate(template.id) } } label: {
+                                if template.id == templateId { Label(template.name, systemImage: "checkmark") } else { Text(template.name) }
+                            }
+                        }
+                    } label: {
+                        LabeledContent("Malli") {
+                            HStack(spacing: 4) {
+                                if templateBusy { ProgressView() }
+                                Text(templates.first { $0.id == templateId }?.name ?? "Valitse")
+                                Image(systemName: "chevron.up.chevron.down").font(.caption2)
+                            }
+                            .foregroundStyle(Theme.accent)
+                        }
+                    }
+                    .disabled(templateBusy || busy)
+                }
+                TextField("Aihe", text: $subject)
+                    .textInputAutocapitalization(.sentences)
+                TextEditor(text: $message)
+                    .frame(minHeight: 160)
+                    .accessibilityLabel("Viesti")
+                Button { templateName = ""; askName = true } label: {
+                    Label("Tallenna mallina", systemImage: "square.and.arrow.down")
+                }
+                .disabled(templateBusy || busy || textProblem(preview) != nil)
+            } header: {
+                Text("Viesti")
+            } footer: {
+                if let problem = textProblem(preview) {
+                    Text(problem).foregroundStyle(Theme.danger)
+                } else if let templateNotice {
+                    Text(templateNotice).foregroundStyle(Theme.success)
+                } else {
+                    Text("PDF-lasku tulee liitteeksi. Paikkamerkit, kuten {asiakas} tai {summa}, täytetään lähetettäessä.")
+                }
+            }
+        }
+    }
+
+    /// Only what the owner can fix here; an empty address is the server's block, said in its own section.
+    private func textProblem(_ preview: InvoiceSendPreview) -> String? {
+        guard preview.subject != nil, preview.message != nil else { return nil }
+        if !to.trimmingCharacters(in: .whitespaces).isEmpty, let bad = InvoiceMailText.recipientError(to) { return bad }
+        return InvoiceMailText.subjectError(subject) ?? InvoiceMailText.messageError(message)
     }
 
     @ViewBuilder
@@ -792,7 +936,18 @@ struct SendInvoiceSheet: View {
         if check.value == nil { check = .loading }
         do {
             let response: InvoiceSendPreviewResponse = try await app.api.get("/api/invoices/\(invoice.id)/send")
-            check = .loaded(response.preview)
+            let preview = response.preview
+            check = .loaded(preview)
+            if !filled {
+                to = preview.recipient ?? ""
+                subject = preview.subject ?? ""
+                message = preview.message ?? ""
+                templateId = preview.templateId
+                filled = true
+            } else if to.trimmingCharacters(in: .whitespaces).isEmpty {
+                // Back from adding the customer's address: it fills the empty field.
+                to = preview.recipient ?? ""
+            }
             // A fresh check is a new send, unless a lost answer left it open whether the last one went.
             if failure == nil { key = UUID().uuidString }
         } catch is CancellationError {
@@ -801,13 +956,79 @@ struct SendInvoiceSheet: View {
         }
     }
 
-    private func send() async {
+    /// The chosen template, filled for this invoice by the server; it replaces the text in the editor.
+    private func applyTemplate(_ id: String) async {
+        templateBusy = true
+        templateNotice = nil
+        defer { templateBusy = false }
+        do {
+            let response: InvoiceSendPreviewResponse = try await app.api.get("/api/invoices/\(invoice.id)/send", query: ["templateId": id])
+            subject = response.preview.subject ?? subject
+            message = response.preview.message ?? message
+            templateId = id
+            Haptics.selection()
+        } catch is CancellationError {
+        } catch {
+            failure = error.userMessage
+            Haptics.error()
+        }
+    }
+
+    private func nameChosen() {
+        if let problem = InvoiceMailText.nameError(templateName) {
+            templateNotice = nil
+            failure = problem
+            Haptics.error()
+            return
+        }
+        let values = check.value?.placeholders ?? [:]
+        if EmailTemplateText.hasInvoiceValues(subject + "\n" + message, values: values) {
+            askConvert = true
+        } else {
+            Task { await saveTemplate(convert: false) }
+        }
+    }
+
+    private func saveTemplate(convert: Bool) async {
+        let values = check.value?.placeholders ?? [:]
+        let draft = EmailTemplateDraft(
+            name: templateName,
+            subject: convert ? EmailTemplateText.toPlaceholders(subject, values: values) : subject,
+            body: convert ? EmailTemplateText.toPlaceholders(message, values: values) : message,
+            isDefault: false
+        )
+        if let problem = draft.problem { failure = problem; Haptics.error(); return }
+        templateBusy = true
+        failure = nil
+        defer { templateBusy = false }
+        do {
+            let saved: EmailTemplateResponse = try await app.api.send("POST", "/api/invoice-email-templates", body: draft)
+            if var preview = check.value {
+                preview.templates = (preview.templates ?? []) + [EmailTemplateRef(id: saved.template.id, name: saved.template.name, isDefault: saved.template.isDefault)]
+                check = .loaded(preview)
+            }
+            templateId = saved.template.id
+            templateNotice = "Malli \(saved.template.name) tallennettiin."
+            Haptics.success()
+        } catch {
+            failure = error.userMessage
+            Haptics.error()
+        }
+    }
+
+    private func send(_ preview: InvoiceSendPreview) async {
         busy = true
         failure = nil
         defer { busy = false }
         do {
-            // The web sends `{}`: the address is the customer's, as the check showed.
-            let result: InvoiceSendResult = try await app.api.send("POST", "/api/invoices/\(invoice.id)/send", body: EmptyBody(), idempotencyKey: key)
+            let result: InvoiceSendResult
+            if preview.subject == nil || preview.message == nil {
+                // A server without editable text: the customer's address and its own text, as before.
+                result = try await app.api.send("POST", "/api/invoices/\(invoice.id)/send", body: EmptyBody(), idempotencyKey: key)
+            } else {
+                let body = InvoiceSendBody(recipient: preview.recipient, to: to, subject: subject, message: message)
+                result = try await app.api.send("POST", "/api/invoices/\(invoice.id)/send", body: body, idempotencyKey: key)
+            }
             if result.isWarning { Haptics.error() } else { Haptics.success() }
             onSent(result)
             dismiss()

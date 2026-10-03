@@ -13,8 +13,25 @@ public struct InvoiceSendPreview: Decodable, Sendable, Hashable {
     public let blockedReason: String?
     public let mailboxMissing: Bool?
     public let lockedMonth: String?
+    /// The text a send would carry, ready to edit: the default template filled for this invoice,
+    /// or the built-in text. Absent from a server before e-mail templates.
+    public var subject: String?
+    public var message: String?
+    /// The template `subject`/`message` came from; nil for the built-in text.
+    public var templateId: String?
+    public var templates: [EmailTemplateRef]?
+    /// What each placeholder stands for on this invoice ("asiakas" -> "Anna Asiakas").
+    public var placeholders: [String: String]?
 
     public var canSend: Bool { blockedReason == nil }
+
+    /// The customer has no address but the owner typed one: the server takes `to`, so only the
+    /// missing address is lifted; every other block still holds.
+    public func canSend(typedRecipient: String) -> Bool {
+        if canSend { return true }
+        guard fix == .customerEmail, mailboxMissing != true, (lockedMonth ?? "").isEmpty else { return false }
+        return InvoiceMailText.recipientError(typedRecipient) == nil
+    }
     /// A credit note is not paid: no due date and no account number on the check.
     public var showsDueDate: Bool { creditNote != true && dueDate != nil }
     public var showsIban: Bool { creditNote != true }
@@ -49,6 +66,88 @@ public enum InvoiceSendFix: Sendable, Hashable {
     public var note: String? {
         if case .connectMailbox = self { return "Voit myös jakaa PDF:n tai merkitä laskun lähetetyksi toimintovalikosta." }
         return nil
+    }
+}
+
+/// A template in the send sheet's picker (`preview.templates`).
+public struct EmailTemplateRef: Decodable, Sendable, Hashable, Identifiable {
+    public let id: String
+    public let name: String
+    public let isDefault: Bool
+
+    public init(id: String, name: String, isDefault: Bool) {
+        self.id = id
+        self.name = name
+        self.isDefault = isDefault
+    }
+}
+
+/// `POST /api/invoices/{id}/send`: the edited subject and message, and a recipient only when
+/// the owner changed the customer's address. Placeholders left in the text are filled by the server.
+public struct InvoiceSendBody: Encodable, Sendable, Equatable {
+    public let to: String?
+    public let subject: String
+    public let message: String
+
+    public init(recipient: String?, to: String, subject: String, message: String) {
+        let typed = to.trimmingCharacters(in: .whitespacesAndNewlines)
+        let original = (recipient ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        self.to = typed.isEmpty || typed.caseInsensitiveCompare(original) == .orderedSame ? nil : typed
+        self.subject = InvoiceMailText.oneLine(subject)
+        self.message = message.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    enum CodingKeys: String, CodingKey { case to, subject, message }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        if let to { try c.encode(to, forKey: .to) }
+        try c.encode(subject, forKey: .subject)
+        try c.encode(message, forKey: .message)
+    }
+}
+
+/// The server's limits for an invoice e-mail and a template (`lib/invoice-email-templates.ts`),
+/// checked before the tap. Lengths count UTF-16 units, as JavaScript does.
+public enum InvoiceMailText {
+    public static let subjectMax = 200
+    public static let messageMax = 5000
+    public static let nameMax = 80
+
+    /// A subject is one line: a pasted line break becomes a space.
+    public static func oneLine(_ text: String) -> String {
+        text.components(separatedBy: .newlines).joined(separator: " ")
+            .replacingOccurrences(of: "\t", with: " ")
+            .split(separator: " ", omittingEmptySubsequences: true).joined(separator: " ")
+    }
+
+    public static func subjectError(_ subject: String) -> String? {
+        let clean = oneLine(subject)
+        if clean.isEmpty { return "Aihe puuttuu." }
+        if clean.utf16.count > subjectMax { return "Aihe on liian pitkä (enintään \(subjectMax) merkkiä)." }
+        return nil
+    }
+
+    public static func messageError(_ message: String) -> String? {
+        let clean = message.trimmingCharacters(in: .whitespacesAndNewlines)
+        if clean.isEmpty { return "Viesti puuttuu." }
+        if clean.utf16.count > messageMax { return "Viesti on liian pitkä (enintään \(messageMax) merkkiä)." }
+        return nil
+    }
+
+    public static func nameError(_ name: String) -> String? {
+        let clean = oneLine(name)
+        if clean.isEmpty { return "Anna mallille nimi." }
+        if clean.utf16.count > nameMax { return "Nimi on liian pitkä (enintään \(nameMax) merkkiä)." }
+        return nil
+    }
+
+    /// The address the owner typed, when it is not one the server would take.
+    public static func recipientError(_ to: String) -> String? {
+        let typed = to.trimmingCharacters(in: .whitespacesAndNewlines)
+        if typed.isEmpty { return "Vastaanottaja puuttuu." }
+        let shape = typed.range(of: #"^[^\s@]+@[^\s@]+\.[^\s@]+$"#, options: .regularExpression) != nil
+        return shape && typed.utf16.count <= 160 ? nil : "Sähköpostiosoite ei kelpaa."
     }
 }
 

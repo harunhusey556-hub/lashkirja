@@ -9,7 +9,8 @@
  */
 import { createHash, randomUUID } from "crypto";
 import { AppError, ValidationError } from "./api-errors";
-import { formatEur, formatMonth } from "./format";
+import { formatDate, formatEur, formatMonth } from "./format";
+import { formatIban } from "./iban";
 import { formatReference } from "./finnish-reference";
 import { renderInvoicePdf, type InvoicePdfData } from "./invoice-pdf";
 import { missingSellerSendFields, parsePartySnapshot } from "./invoice-snapshot";
@@ -26,9 +27,19 @@ import {
 } from "./sales-invoices";
 import { prisma } from "./db";
 import { CRASHED_SEND_NOTE } from "./send-history";
+import {
+  cleanMessage,
+  cleanSubject,
+  defaultEmailTemplate,
+  getEmailTemplate,
+  listEmailTemplates,
+  renderPlaceholders,
+  type PlaceholderValues,
+} from "./invoice-email-templates";
 
 export interface SendInvoiceInput {
   to?: string;
+  /** The owner's own text; placeholders in it are filled like a template's. */
   subject?: string;
   message?: string;
 }
@@ -66,6 +77,65 @@ export function defaultMessage(data: {
     "Kiitos!",
     data.sellerName,
   ].join("\n");
+}
+
+export function defaultSubject(data: { number: number; sellerName: string; creditNote?: boolean }): string {
+  return `${data.creditNote ? "Hyvityslasku" : "Lasku"} ${data.number} · ${data.sellerName}`;
+}
+
+/** What one invoice puts in the place of each placeholder. A credit note has nothing to pay against. */
+export function invoicePlaceholderValues(data: {
+  number: number;
+  gross: number;
+  dueDate: string;
+  reference: string;
+  iban: string | null | undefined;
+  sellerName: string;
+  customerName: string;
+  creditNote: boolean;
+}): PlaceholderValues {
+  return {
+    asiakas: data.customerName,
+    laskunumero: String(data.number),
+    summa: formatEur(data.gross),
+    erapaiva: data.creditNote ? "–" : formatDate(data.dueDate),
+    viitenumero: data.creditNote ? "–" : formatReference(data.reference),
+    tilinumero: data.iban ? formatIban(data.iban) : "–",
+    yritys: data.sellerName,
+  };
+}
+
+export interface ComposedInvoiceMail {
+  subject: string;
+  message: string;
+  /** The template the text came from; null for the owner's own text or the built-in one. */
+  templateId: string | null;
+}
+
+/**
+ * The subject and message for one invoice: the owner's own text when given,
+ * else the chosen template, else the default template, else the built-in text.
+ * Placeholders are filled in every case.
+ */
+export async function composeInvoiceMail(
+  userId: string,
+  values: PlaceholderValues,
+  builtIn: { subject: string; message: string },
+  input: { subject?: string; message?: string; templateId?: string } = {}
+): Promise<ComposedInvoiceMail> {
+  const template = input.templateId
+    ? await getEmailTemplate(userId, input.templateId)
+    : input.subject !== undefined && input.message !== undefined
+      ? null
+      : await defaultEmailTemplate(userId, "invoice");
+  const subject = input.subject ?? template?.subject ?? builtIn.subject;
+  const message = input.message ?? template?.body ?? builtIn.message;
+  return {
+    // Cleaned again after filling: a customer name cannot add a line break to the subject.
+    subject: cleanSubject(renderPlaceholders(subject, values)),
+    message: cleanMessage(renderPlaceholders(message, values)),
+    templateId: input.subject === undefined && input.message === undefined ? (template?.id ?? null) : null,
+  };
 }
 
 const UNRECORDED_NOTICE =
@@ -301,19 +371,21 @@ export async function sendInvoiceByEmail(
     });
     const creditNote = stored.documentKind === "credit_note";
     attachment = invoicePdfFileName(frozenInvoice.number, creditNote ? "credit_note" : "invoice");
-    const subject =
-      input.subject ??
-      `${creditNote ? "Hyvityslasku" : "Lasku"} ${frozenInvoice.number} · ${data.seller.name}`;
-    const text =
-      input.message ??
-      defaultMessage({
+    const { subject, message: text } = await composeInvoiceMail(
+      userId,
+      invoicePlaceholderValues({
         number: frozenInvoice.number,
-        gross: formatEur(frozenInvoice.gross),
+        gross: frozenInvoice.gross,
         dueDate: frozenInvoice.dueDate,
-        reference: formatReference(frozenInvoice.reference),
+        reference: frozenInvoice.reference,
+        iban: data.seller.iban,
         sellerName: data.seller.name,
+        customerName: data.customer.name,
         creditNote,
-      });
+      }),
+      builtInMail(frozenInvoice, data.seller.name, creditNote),
+      { subject: input.subject, message: input.message }
+    );
 
     const attempt = await prisma.invoiceEmailSend.create({
       data: {
@@ -413,6 +485,24 @@ export async function sendInvoiceByEmail(
   }
 }
 
+function builtInMail(
+  invoice: { number: number; gross: number; dueDate: string; reference: string },
+  sellerName: string,
+  creditNote: boolean
+): { subject: string; message: string } {
+  return {
+    subject: defaultSubject({ number: invoice.number, sellerName, creditNote }),
+    message: defaultMessage({
+      number: invoice.number,
+      gross: formatEur(invoice.gross),
+      dueDate: formatDate(invoice.dueDate),
+      reference: formatReference(invoice.reference),
+      sellerName,
+      creditNote,
+    }),
+  };
+}
+
 export interface SendPreview {
   recipient: string | null;
   gross: number;
@@ -428,10 +518,23 @@ export interface SendPreview {
   mailboxMissing: boolean;
   /** The month key ("2026-08") of the issue date when that month is closed; a send would be refused (G09). */
   lockedMonth: string | null;
+  /** The text a send without one of its own would carry, ready to edit (default template or built-in). */
+  subject: string;
+  message: string;
+  /** The template `subject`/`message` came from; null for the built-in text. */
+  templateId: string | null;
+  /** The owner's invoice templates for the picker, the default first. */
+  templates: Array<{ id: string; name: string; isDefault: boolean }>;
+  /** What each placeholder stands for on this invoice, so a client can turn the values back into placeholders. */
+  placeholders: PlaceholderValues;
 }
 
 /** What the sender confirms before SMTP. Does not send. */
-export async function previewInvoiceSend(userId: string, invoiceId: string): Promise<SendPreview> {
+export async function previewInvoiceSend(
+  userId: string,
+  invoiceId: string,
+  options: { templateId?: string } = {}
+): Promise<SendPreview> {
   const invoice = await getInvoice(userId, invoiceId);
   const stored = await prisma.salesInvoice.findFirst({
     where: { id: invoiceId, userId },
@@ -469,6 +572,28 @@ export async function previewInvoiceSend(userId: string, invoiceId: string): Pro
     blockedReason = `Kausi ${formatMonth(lockedMonth)} on suljettu.`;
   }
 
+  const placeholders = invoicePlaceholderValues({
+    number: invoice.number,
+    gross: invoice.gross,
+    dueDate: invoice.dueDate,
+    reference: invoice.reference,
+    iban: data.seller.iban,
+    sellerName: data.seller.name,
+    customerName: data.customer.name,
+    creditNote,
+  });
+  const composed = await composeInvoiceMail(
+    userId,
+    placeholders,
+    builtInMail(invoice, data.seller.name, creditNote),
+    { templateId: options.templateId }
+  );
+  const templates = (await listEmailTemplates(userId, "invoice")).map((t) => ({
+    id: t.id,
+    name: t.name,
+    isDefault: t.isDefault,
+  }));
+
   return {
     recipient: invoice.customer.email,
     gross: invoice.gross,
@@ -480,5 +605,10 @@ export async function previewInvoiceSend(userId: string, invoiceId: string): Pro
     blockedReason,
     mailboxMissing,
     lockedMonth,
+    subject: composed.subject,
+    message: composed.message,
+    templateId: composed.templateId,
+    templates,
+    placeholders,
   };
 }

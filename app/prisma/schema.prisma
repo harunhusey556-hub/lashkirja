@@ -72,6 +72,7 @@ model User {
   passkeys        PasskeyCredential[]
   accountRequests AccountRequest[]
   vatFilings      VatFiling[]
+  invoiceEmailTemplates InvoiceEmailTemplate[]
 }
 
 /// A browser or device that logged in. The iron-session cookie stores this id.
@@ -953,4 +954,24 @@ model VatFiling {
   updatedAt        DateTime  @updatedAt
 
   @@unique([userId, period])
+}
+
+/// A saved e-mail text for sending an invoice ("Sähköpostimallit"). Subject and
+/// body may carry placeholders ({asiakas}, {summa}, ...) that the server fills in
+/// for each invoice. One default per user and kind; the default fills the send
+/// sheet and is used when an invoice is sent without a text of its own.
+model InvoiceEmailTemplate {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name      String
+  subject   String
+  body      String
+  /// "invoice" | "reminder". Only invoice templates are applied today.
+  kind      String   @default("invoice")
+  isDefault Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId, kind])
 }

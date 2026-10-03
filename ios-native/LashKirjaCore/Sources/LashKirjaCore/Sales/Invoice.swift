@@ -38,6 +38,9 @@ public struct Invoice: Decodable, Sendable, Identifiable, Hashable {
         public let status: String
         public let error: String?
         public let createdAt: String
+        /// The PDF and sum that attempt carried (web Historia shows them); absent from older servers.
+        public var attachmentName: String?
+        public var gross: Decimal?
     }
     public struct Activity: Decodable, Sendable, Identifiable, Hashable {
         public let id: String
@@ -78,6 +81,10 @@ public struct Invoice: Decodable, Sendable, Identifiable, Hashable {
     public let payments: [Payment]
     public let sends: [Send]
     public let activity: [Activity]
+    /// The bank virtual barcode (pankkiviivakoodi) to paste into a bank app; nil when the invoice
+    /// has none (credit note, no IBAN, ...). `barcodeIssue` then says why, when the server knows.
+    public var barcode: String?
+    public var barcodeIssue: String?
 
     public var isCreditNote: Bool { documentKind == "credit_note" }
 }
