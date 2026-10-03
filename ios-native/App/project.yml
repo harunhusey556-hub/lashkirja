@@ -62,6 +62,8 @@ targets:
         CFBundleURLTypes:
           - CFBundleURLName: fi.tiyouba.lashkirja
             CFBundleURLSchemes: [lashkirja]
+        # "Avaa sähköposti" on the code screens opens Gmail when canOpenURL says it is installed.
+        LSApplicationQueriesSchemes: [googlegmail]
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: fi.tiyouba.lashkirja

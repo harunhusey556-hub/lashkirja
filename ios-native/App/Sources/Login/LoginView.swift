@@ -9,10 +9,12 @@ struct LoginView: View {
     @State private var password = ""
     @State private var busy = false
     @State private var failure: String?
+    /// The address's own check, shown under the field before anything is sent.
+    @State private var emailProblem: String?
     @FocusState private var focus: Field?
     @State private var showPassword = false
     private enum Field { case email, password }
-    /// The recovery sheet, opened from the link below or from a `lashkirja://…?token=…` link.
+    /// The recovery screen, opened from the link below or from a `lashkirja://…?token=…` link.
     @State private var recovery: Recovery?
     /// False until the server says passkeys work for this app, so the button only ever appears
     /// (never appears and then fails).
@@ -36,53 +38,51 @@ struct LoginView: View {
         var created = false
     }
 
-    struct Recovery: Identifiable {
+    struct Recovery: Identifiable, Hashable {
         let id = UUID()
         let step: PasswordRecoveryView.Step
         let link: String
     }
 
     var body: some View {
-        ScrollView {
-            VStack(spacing: 24) {
-                VStack(spacing: 10) {
-                    Image(systemName: "book.closed.fill")
-                        .font(.system(size: 30, weight: .semibold))
-                        .foregroundStyle(.white)
-                        .frame(width: 60, height: 60)
-                        .background(Theme.accentFill, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-                        .shadow(color: Theme.accentFill.opacity(0.25), radius: 12, y: 6)
-                    Text("LashKirja").font(.largeTitle.bold()).foregroundStyle(Theme.ink)
-                    Text("Kirjanpito yksinkertaisesti").font(.subheadline).foregroundStyle(Theme.ink2)
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 24) {
+                    brand
+                    if let offer {
+                        offerCard(offer)
+                    } else {
+                        notices
+                        if passkeyReady { passkeyButton }
+                        form
+                        if signupEnabled { signUpButton }
+                    }
                 }
-                .padding(.top, 48)
-
-                if let offer {
-                    offerCard(offer)
-                } else {
-                    if passkeyReady { passkeyButton }
-                    form
-                    if signupEnabled { signUpButton }
-                }
+                .padding(.horizontal, 16)
+                .padding(.top, 24)
+                .padding(.bottom, 24)
+                .frame(maxWidth: 460, alignment: .leading)
+                .frame(maxWidth: .infinity)
             }
-            .padding(.horizontal, 20)
-            .padding(.bottom, 24)
-            .frame(maxWidth: 460)
-            .frame(maxWidth: .infinity)
-        }
-        .scrollDismissesKeyboard(.interactively)
-        .background(Theme.canvas.ignoresSafeArea())
-        .sheet(item: $recovery) { r in
-            PasswordRecoveryView(step: r.step, email: email, link: r.link)
-        }
-        .sheet(isPresented: $signingUp) {
-            SignUpView(email: email) { user, address, typed in
-                signingUp = false
-                email = address
-                Task {
-                    busy = true
-                    defer { busy = false }
-                    await afterSignIn(user, email: address, password: typed)
+            .scrollDismissesKeyboard(.interactively)
+            .background(Theme.canvas.ignoresSafeArea())
+            // The sign-in button rides above the keyboard, so it never hides under it.
+            .safeAreaInset(edge: .bottom) {
+                if offer == nil { AuthBottomBar { passwordButton } }
+            }
+            .toolbar(.hidden, for: .navigationBar)
+            .navigationDestination(item: $recovery) { r in
+                PasswordRecoveryView(step: r.step, email: email, link: r.link)
+            }
+            .navigationDestination(isPresented: $signingUp) {
+                SignUpView(email: email) { user, address, typed in
+                    signingUp = false
+                    email = address
+                    Task {
+                        busy = true
+                        defer { busy = false }
+                        await afterSignIn(user, email: address, password: typed)
+                    }
                 }
             }
         }
@@ -91,34 +91,58 @@ struct LoginView: View {
         .onChange(of: app.pendingResetLink, initial: true) { _, link in
             guard let link else { return }
             app.pendingResetLink = nil
+            signingUp = false
             recovery = Recovery(step: .reset, link: link)
         }
         .task { await checkPasskeys() }
         .task { await checkSignup() }
     }
 
-    private var form: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            if let info, failure == nil {
-                Text(info)
-                    .font(.footnote)
+    /// Small and quiet: the screen is about signing in, not the logo.
+    private var brand: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack(spacing: 8) {
+                Image(systemName: "book.closed.fill")
+                    .font(.title3)
+                    .foregroundStyle(Theme.accent)
+                    .accessibilityHidden(true)
+                Text("LashKirja").font(.headline).foregroundStyle(Theme.ink)
+            }
+            VStack(alignment: .leading, spacing: 4) {
+                Text(offer == nil ? "Kirjaudu sisään" : "Olet kirjautunut")
+                    .font(.largeTitle.bold())
                     .foregroundStyle(Theme.ink)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(12)
-                    .background(Theme.warning.opacity(0.12), in: RoundedRectangle(cornerRadius: 10))
+                    .accessibilityAddTraits(.isHeader)
+                Text("Kirjanpito yksinkertaisesti")
+                    .font(.subheadline)
+                    .foregroundStyle(Theme.ink2)
             }
-            if let message = failure ?? notice {
-                Text(message)
-                    .font(.footnote)
-                    .foregroundStyle(Theme.danger)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(12)
-                    .background(Theme.danger.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
-            }
-            Text("Kirjaudu sisään").font(.title3.weight(.semibold)).foregroundStyle(Theme.ink)
-            HStack(spacing: 10) {
-                Image(systemName: "envelope").foregroundStyle(Theme.ink2).frame(width: 20)
-                TextField("Sähköposti", text: $email)
+        }
+    }
+
+    @ViewBuilder private var notices: some View {
+        if let info, failure == nil {
+            Label(info, systemImage: "info.circle")
+                .font(.footnote)
+                .foregroundStyle(Theme.ink)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(12)
+                .background(Theme.warning.opacity(0.12), in: RoundedRectangle(cornerRadius: 10))
+        }
+        if let message = failure ?? notice {
+            Label(message, systemImage: "exclamationmark.circle")
+                .font(.footnote)
+                .foregroundStyle(Theme.danger)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(12)
+                .background(Theme.danger.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
+        }
+    }
+
+    private var form: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            AuthField(label: "Sähköposti", problem: emailProblem, focused: focus == .email) {
+                TextField("Sähköposti", text: $email, prompt: Text("nimi@yritys.fi"))
                     .textContentType(.username)
                     .keyboardType(.emailAddress)
                     .textInputAutocapitalization(.never)
@@ -127,9 +151,7 @@ struct LoginView: View {
                     .submitLabel(.next)
                     .onSubmit { focus = .password }
             }
-            .loginField(focused: focus == .email)
-            HStack(spacing: 10) {
-                Image(systemName: "lock").foregroundStyle(Theme.ink2).frame(width: 20)
+            AuthField(label: "Salasana", focused: focus == .password) {
                 Group {
                     if showPassword {
                         TextField("Salasana", text: $password)
@@ -143,48 +165,47 @@ struct LoginView: View {
                 .focused($focus, equals: .password)
                 .submitLabel(.go)
                 .onSubmit { Task { await submit() } }
-                Button { showPassword.toggle() } label: {
-                    Image(systemName: showPassword ? "eye.slash" : "eye").foregroundStyle(Theme.ink2)
-                }
-                .buttonStyle(.borderless)
-                .accessibilityLabel(showPassword ? "Piilota salasana" : "Näytä salasana")
+                ShowPasswordButton(shown: $showPassword)
             }
-            .loginField(focused: focus == .password)
-            passwordButton
             Button("Unohditko salasanan?") {
                 recovery = Recovery(step: .request, link: "")
             }
             .font(.subheadline.weight(.medium))
             .foregroundStyle(Theme.accent)
-            .frame(maxWidth: .infinity, minHeight: 44)
+            .frame(minHeight: 44)
+            .frame(maxWidth: .infinity, alignment: .trailing)
         }
-        .padding(20)
-        .background(Theme.surface, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .onChange(of: email) { emailProblem = nil }
+        // A typo in the address shows as soon as the owner moves on, not only after a failed sign-in.
+        .onChange(of: focus) { old, _ in
+            if old == .email, !email.isEmpty { emailProblem = EmailCheck.problem(email) }
+        }
     }
 
-    /// Under the card and never a primary: most people opening the app already have an account.
+    /// Under the form and never a primary: most people opening the app already have an account.
     private var signUpButton: some View {
-        HStack(spacing: 4) {
-            Text("Eikö sinulla ole tiliä?").foregroundStyle(Theme.ink2)
-            Button("Luo tili") { signingUp = true }
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(Theme.accent)
-                .disabled(busy || passkeyBusy)
+        VStack(spacing: 8) {
+            Text("Eikö sinulla ole vielä tiliä?")
+                .font(.subheadline)
+                .foregroundStyle(Theme.ink2)
+            Button { signingUp = true } label: {
+                Text("Luo tili")
+                    .font(.headline)
+                    .frame(maxWidth: .infinity, minHeight: 52)
+            }
+            .buttonStyle(OutlineButtonStyle())
+            .disabled(busy || passkeyBusy)
         }
-        .font(.subheadline)
-        .frame(maxWidth: .infinity, minHeight: 44)
+        .frame(maxWidth: .infinity)
+        .padding(.top, 8)
     }
 
     @ViewBuilder private var passwordButton: some View {
         let button = Button {
             Task { await submit() }
         } label: {
-            ZStack {
-                Text("Kirjaudu sisään").opacity(busy ? 0 : 1)
-                if busy { ProgressView().tint(passkeyReady ? Theme.ink : Theme.onInk) }
-            }
-            .font(.headline)
-            .frame(maxWidth: .infinity, minHeight: 50)
+            AuthButtonLabel(title: "Kirjaudu sisään", busyTitle: "Kirjaudutaan…", busy: busy,
+                            spinnerTint: passkeyReady ? Theme.ink : Theme.onInk)
         }
         .disabled(busy || passkeyBusy || email.isEmpty || password.isEmpty)
         // One primary per screen: with a passkey offered, the passkey button is the primary.
@@ -205,7 +226,7 @@ struct LoginView: View {
                     }
                 }
                 .font(.headline)
-                .frame(maxWidth: .infinity, minHeight: 50)
+                .frame(maxWidth: .infinity, minHeight: 52)
             }
             .buttonStyle(.primary)
             .disabled(passkeyBusy || busy)
@@ -249,7 +270,7 @@ struct LoginView: View {
                         Text(offer.busy ? "Luodaan…" : "Luo pääsyavain")
                     }
                     .font(.headline)
-                    .frame(maxWidth: .infinity, minHeight: 50)
+                    .frame(maxWidth: .infinity, minHeight: 52)
                 }
                 .buttonStyle(.primary)
                 .disabled(offer.busy || offer.created)
@@ -266,6 +287,12 @@ struct LoginView: View {
 
     private func submit() async {
         guard !busy else { return }
+        emailProblem = EmailCheck.problem(email)
+        if emailProblem != nil {
+            Haptics.error()
+            focus = .email
+            return
+        }
         // The keyboard goes as soon as the owner taps sign in, not only once the app opens.
         focus = nil
         busy = true
@@ -421,30 +448,5 @@ extension LoginView {
         guard let user = offer?.user else { return }
         offer = nil
         app.enter(user)
-    }
-}
-
-/// The password button when the passkey button is the primary one.
-private struct OutlineButtonStyle: ButtonStyle {
-    @Environment(\.isEnabled) private var isEnabled
-
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .foregroundStyle(Theme.ink.opacity(isEnabled ? 1 : 0.4))
-            .padding(.horizontal, 18)
-            .frame(minHeight: 44)
-            .background(Theme.canvas.opacity(configuration.isPressed ? 0.6 : 1), in: Capsule())
-            .overlay(Capsule().stroke(Theme.line))
-            .contentShape(Capsule())
-    }
-}
-
-private extension View {
-    func loginField(focused: Bool = false) -> some View {
-        padding(.horizontal, 14)
-            .frame(minHeight: 50)
-            .background(Theme.canvas, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .stroke(focused ? Theme.accent : Theme.line, lineWidth: focused ? 1.5 : 1))
     }
 }

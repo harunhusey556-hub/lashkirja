@@ -76,7 +76,8 @@ public struct ResetWithCodeBody: Encodable, Equatable, Sendable {
 
 public enum AccountCode {
     public static let length = 6
-    /// The mail's subject line starts with this; owners paste the whole subject too.
+    /// Older mails' subject line starts with this; owners paste the whole subject too. Newer
+    /// subjects start with the code ("123456 on LashKirja-vahvistuskoodisi"): `extract` reads both.
     public static let subjectPrefix = "LashKirja-vahvistuskoodi:"
     /// Seconds before another code may be asked for (the server allows one a minute).
     public static let resendSeconds = 60
@@ -95,9 +96,103 @@ public enum AccountCode {
         return kept
     }
 
+    /// The code inside a longer text, as Gmail copies the subject or a body line
+    /// ("LashKirja-tilisi vahvistuskoodi on 123456. Koodi on voimassa 15 minuuttia."): the first
+    /// standalone six ASCII digits, which may be split 3 + 3 by one space or dash. A longer
+    /// number, or digits inside a word or a link's token, is never taken for the code.
+    public static func extract(_ text: String) -> String? {
+        let scalars = Array(text.unicodeScalars)
+        var index = 0
+        while index < scalars.count {
+            guard isDigit(scalars[index]) else {
+                index += 1
+                continue
+            }
+            // One number: digit runs joined by single separators ("123 456", "040 123 4567").
+            let start = index
+            var runs: [Int] = []
+            var digits = ""
+            while true {
+                var run = 0
+                while index < scalars.count, isDigit(scalars[index]) {
+                    digits.unicodeScalars.append(scalars[index])
+                    run += 1
+                    index += 1
+                }
+                runs.append(run)
+                guard index + 1 < scalars.count, codeSeparators.contains(scalars[index]), isDigit(scalars[index + 1]) else { break }
+                index += 1
+            }
+            if runs == [length] || runs == [length / 2, length / 2],
+               standsAlone(scalars, before: start - 1, after: index) {
+                return digits
+            }
+        }
+        return nil
+    }
+
+    /// What the code field keeps after a change: the code `extract` finds in what was just
+    /// typed or pasted (or in the whole field), otherwise only the ASCII digits. More than six
+    /// digits keeps `previous`, so a pasted long number never turns into a wrong code.
+    public static func input(_ text: String, previous: String = "") -> String {
+        if let code = extract(inserted(text, previous: previous)) ?? extract(text) { return code }
+        var digits = ""
+        digits.unicodeScalars.append(contentsOf: text.unicodeScalars.filter(isDigit))
+        return digits.count <= length ? digits : previous
+    }
+
+    /// The part of `text` a keystroke or a paste added to `previous`.
+    static func inserted(_ text: String, previous: String) -> String {
+        let new = Array(text), old = Array(previous)
+        var head = 0
+        while head < new.count, head < old.count, new[head] == old[head] { head += 1 }
+        var tail = 0
+        while tail < new.count - head, tail < old.count - head,
+              new[new.count - 1 - tail] == old[old.count - 1 - tail] { tail += 1 }
+        return String(new[head..<(new.count - tail)])
+    }
+
+    private static let codeSeparators = CharacterSet(charactersIn: " \u{00A0}\u{202F}-‐‑‒–—")
+    /// What may stand right before or after the code: space, line breaks and sentence marks,
+    /// never a letter, a digit or a link's `=`, `/`, `_`, `-`.
+    private static let codeBoundaries = CharacterSet.whitespacesAndNewlines
+        .union(CharacterSet(charactersIn: ".,:;!?()[]{}\"'«»“”„‘’*"))
+
+    private static func isDigit(_ scalar: Unicode.Scalar) -> Bool { scalar.value >= 48 && scalar.value <= 57 }
+
+    private static func standsAlone(_ scalars: [Unicode.Scalar], before: Int, after: Int) -> Bool {
+        func edge(_ at: Int, _ beyond: Int) -> Bool {
+            guard at >= 0, at < scalars.count else { return true }
+            guard codeBoundaries.contains(scalars[at]) else { return false }
+            // "123456.78" or "1,123456" is a number, not a code followed by a full stop.
+            let mark = scalars[at] == "." || scalars[at] == ","
+            return !(mark && beyond >= 0 && beyond < scalars.count && isDigit(scalars[beyond]))
+        }
+        return edge(before, before - 1) && edge(after, after + 1)
+    }
+
     /// The address as the sign-in sends it.
     public static func address(_ email: String) -> String {
         email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    }
+}
+
+// MARK: - The address, before anything is sent
+
+public enum EmailCheck {
+    public static let missing = "Kirjoita sähköpostiosoite."
+    public static let invalid = "Tarkista sähköpostiosoite, esim. nimi@yritys.fi."
+
+    /// The sign-in and sign-up forms' own check, so a typo shows next to the field instead of
+    /// coming back from the server. Nil when the address can be sent; the server decides the rest.
+    public static func problem(_ email: String) -> String? {
+        let text = email.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return missing }
+        let parts = text.split(separator: "@", omittingEmptySubsequences: false)
+        guard parts.count == 2, !parts[0].isEmpty, !text.contains(where: { $0.isWhitespace }) else { return invalid }
+        let labels = parts[1].split(separator: ".", omittingEmptySubsequences: false)
+        guard labels.count >= 2, labels.allSatisfy({ !$0.isEmpty }) else { return invalid }
+        return nil
     }
 }
 

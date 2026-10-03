@@ -167,11 +167,15 @@ export async function pruneExpiredPendingSignups(now = new Date()) {
   return result.count;
 }
 
+/**
+ * The code leads the subject, so the lock-screen notification already shows it,
+ * and stands alone on the body's first line, so a long-press copies just it.
+ */
 export function signupCodeMail(to: string, code: string) {
   return {
     to,
-    subject: `LashKirja-vahvistuskoodi: ${code}`,
-    text: `LashKirja-tilisi vahvistuskoodi on ${code}. Koodi on voimassa 15 minuuttia.\n\nJos et luonut LashKirja-tiliä, voit ohittaa tämän viestin.`,
+    subject: `${code} on LashKirja-vahvistuskoodisi`,
+    text: `${code}\n\nTämä on LashKirja-tilisi vahvistuskoodi, ja se on voimassa 15 minuuttia.\n\nJos et luonut LashKirja-tiliä, voit ohittaa tämän viestin.`,
   };
 }
 
