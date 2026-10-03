@@ -109,6 +109,42 @@ private func sent(_ request: URLRequest) throws -> [String: String] {
     for kept in ["", "1", "12345", "123456"] { #expect(AccountCode.input(kept, previous: kept) == kept) }
 }
 
+@Test func codeFieldTakesTheOneTimeCodeAutoFill() {
+    // The suggestion inserted twice in one change: the code, not an empty field.
+    #expect(AccountCode.input("123456123456", previous: "") == "123456")
+    #expect(AccountCode.input("123456 123456", previous: "") == "123456")
+    #expect(AccountCode.input("123456-123456", previous: "") == "123456")
+    #expect(AccountCode.input("123456123456123456", previous: "") == "123456")
+    #expect(AccountCode.input("12123456123456", previous: "12") == "123456")
+    // Inserted after digits already typed, or after the code already there: the inserted code wins.
+    #expect(AccountCode.input("12123456", previous: "12") == "123456")
+    #expect(AccountCode.input("1123456", previous: "1") == "123456")
+    #expect(AccountCode.input("987654123456", previous: "987654") == "123456")
+    #expect(AccountCode.input("123456123456", previous: "123456") == "123456")
+    // The field's own write-back of the kept code is stable.
+    #expect(AccountCode.input("123456", previous: "123456123456") == "123456")
+    // A longer number that is not one code repeated is still refused.
+    #expect(AccountCode.input("1234567", previous: "") == "")
+    #expect(AccountCode.input("123456123457", previous: "") == "")
+    #expect(AccountCode.input("123456 12345", previous: "") == "")
+    #expect(AccountCode.input("123456789012", previous: "12") == "12")
+    #expect(AccountCode.input("123456a123456", previous: "") == "")
+    #expect(AccountCode.repeated("123456") == nil)
+    // Typing digit by digit, then deleting.
+    var field = ""
+    for digit in "123456" { field = AccountCode.input(field + String(digit), previous: field) }
+    #expect(field == "123456")
+    #expect(AccountCode.input("12345", previous: "123456") == "12345")
+    #expect(AccountCode.input("1", previous: "12") == "1")
+    #expect(AccountCode.input("", previous: "1") == "")
+}
+
+@Test func codeFieldInsertedPartIsWhatChanged() {
+    #expect(AccountCode.inserted("12123456", previous: "12") == "123456")
+    #expect(AccountCode.inserted("12https://x.fi/palauta-salasana?token=abc", previous: "12") == "https://x.fi/palauta-salasana?token=abc")
+    #expect(AccountCode.inserted("12345", previous: "123456") == "")
+}
+
 @Test func emailCheckCatchesTyposBeforeSending() {
     #expect(EmailCheck.problem("nimi@yritys.fi") == nil)
     #expect(EmailCheck.problem(" Nimi.Suku+x@posti.yritys.fi \n") == nil)

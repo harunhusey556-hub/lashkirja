@@ -135,14 +135,28 @@ public enum AccountCode {
     /// typed or pasted (or in the whole field), otherwise only the ASCII digits. More than six
     /// digits keeps `previous`, so a pasted long number never turns into a wrong code.
     public static func input(_ text: String, previous: String = "") -> String {
-        if let code = extract(inserted(text, previous: previous)) ?? extract(text) { return code }
+        let added = inserted(text, previous: previous)
+        if let code = extract(added) ?? repeated(added) ?? extract(text) ?? repeated(text) { return code }
         var digits = ""
         digits.unicodeScalars.append(contentsOf: text.unicodeScalars.filter(isDigit))
         return digits.count <= length ? digits : previous
     }
 
+    /// The one-time-code AutoFill sometimes inserts the code twice in one change
+    /// ("123456123456", "123456 123456"); as one 12-digit number `extract` rightly refuses it.
+    /// Only the same six digits over and over, with nothing but separators between, count.
+    static func repeated(_ text: String) -> String? {
+        let between = codeSeparators.union(.whitespacesAndNewlines)
+        let scalars = text.unicodeScalars.filter { !between.contains($0) }
+        guard scalars.count >= 2 * length, scalars.count % length == 0, scalars.allSatisfy(isDigit) else { return nil }
+        var digits = ""
+        digits.unicodeScalars.append(contentsOf: scalars)
+        let code = String(digits.prefix(length))
+        return digits == String(repeating: code, count: digits.count / length) ? code : nil
+    }
+
     /// The part of `text` a keystroke or a paste added to `previous`.
-    static func inserted(_ text: String, previous: String) -> String {
+    public static func inserted(_ text: String, previous: String) -> String {
         let new = Array(text), old = Array(previous)
         var head = 0
         while head < new.count, head < old.count, new[head] == old[head] { head += 1 }
