@@ -22,6 +22,9 @@ struct LoginView: View {
     @State private var info: String?
     /// After a password sign-in: the session is stored, and the app opens once the offer is answered.
     @State private var offer: Offer?
+    /// False until the server says it creates accounts: any doubt keeps "Luo tili" hidden.
+    @State private var signupEnabled = false
+    @State private var signingUp = false
 
     struct Offer {
         let user: AuthUser
@@ -59,6 +62,7 @@ struct LoginView: View {
                 } else {
                     if passkeyReady { passkeyButton }
                     form
+                    if signupEnabled { signUpButton }
                 }
             }
             .padding(.horizontal, 20)
@@ -71,6 +75,17 @@ struct LoginView: View {
         .sheet(item: $recovery) { r in
             PasswordRecoveryView(step: r.step, email: email, link: r.link)
         }
+        .sheet(isPresented: $signingUp) {
+            SignUpView(email: email) { user, address, typed in
+                signingUp = false
+                email = address
+                Task {
+                    busy = true
+                    defer { busy = false }
+                    await afterSignIn(user, email: address, password: typed)
+                }
+            }
+        }
         // A reset link handed to the app (lashkirja://palauta-salasana?token=…), caught at the
         // root so it also arrives when the link opened the app before this screen showed.
         .onChange(of: app.pendingResetLink, initial: true) { _, link in
@@ -79,6 +94,7 @@ struct LoginView: View {
             recovery = Recovery(step: .reset, link: link)
         }
         .task { await checkPasskeys() }
+        .task { await checkSignup() }
     }
 
     private var form: some View {
@@ -144,6 +160,19 @@ struct LoginView: View {
         }
         .padding(20)
         .background(Theme.surface, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+    }
+
+    /// Under the card and never a primary: most people opening the app already have an account.
+    private var signUpButton: some View {
+        HStack(spacing: 4) {
+            Text("Eikö sinulla ole tiliä?").foregroundStyle(Theme.ink2)
+            Button("Luo tili") { signingUp = true }
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(Theme.accent)
+                .disabled(busy || passkeyBusy)
+        }
+        .font(.subheadline)
+        .frame(maxWidth: .infinity, minHeight: 44)
     }
 
     @ViewBuilder private var passwordButton: some View {
@@ -244,14 +273,7 @@ struct LoginView: View {
         defer { busy = false }
         do {
             let user = try await app.auth.login(email: email, password: password)
-            if await shouldOfferPasskey(email: email) {
-                UserDefaults.standard.set(true, forKey: PasskeyOffer.key(email: email))
-                Haptics.success()
-                offer = Offer(user: user, password: password)
-                password = ""
-                return
-            }
-            app.enter(user)
+            await afterSignIn(user, email: email, password: password)
         } catch let problem as LKError {
             failure = problem.message
             Haptics.error()
@@ -259,9 +281,26 @@ struct LoginView: View {
             failure = LKError.unreachable
         }
     }
+
+    /// A password sign-in or a new account: the passkey offer once, otherwise straight in.
+    private func afterSignIn(_ user: AuthUser, email: String, password: String) async {
+        if await shouldOfferPasskey(email: email) {
+            UserDefaults.standard.set(true, forKey: PasskeyOffer.key(email: email))
+            Haptics.success()
+            offer = Offer(user: user, password: password)
+            self.password = ""
+            return
+        }
+        app.enter(user)
+    }
 }
 
 extension LoginView {
+    /// Fail closed: offline, an error or a server without the route keeps the button hidden.
+    private func checkSignup() async {
+        signupEnabled = (try? await app.auth.signupStatus())?.enabled == true
+    }
+
     /// The server's `native` flag also needs its associated-domains file for this app.
     private func checkPasskeys() async {
         guard let status: PasskeyStatus = try? await app.api.get("/api/auth/passkey/status") else { return }
