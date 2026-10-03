@@ -1,18 +1,34 @@
-import { createHash, randomBytes, timingSafeEqual } from "crypto";
+import { createHash, randomBytes, randomInt, timingSafeEqual } from "crypto";
 import bcrypt from "bcryptjs";
 import { prisma } from "@/lib/db";
 import { findSenderAccount, platformMailConfig, sendMail, sendPlatformMail } from "@/lib/mailer";
 import { passwordProblem, deviceLabel } from "@/lib/session-policy";
+import { contactSupportPhrase } from "@/lib/account-copy";
 
 const RESET_TTL_MS = 30 * 60 * 1000;
 const EMAIL_TTL_MS = 24 * 60 * 60 * 1000;
+/** Wrong emailed codes allowed per reset or sign-up before it is void. */
+export const MAX_CODE_ATTEMPTS = 5;
 
 export class AccountSecurityError extends Error {
   status: number;
-  constructor(message: string, status: number) {
+  code?: string;
+  attemptsLeft?: number;
+  constructor(message: string, status: number, code?: string, attemptsLeft?: number) {
     super(message);
     this.name = "AccountSecurityError";
     this.status = status;
+    this.code = code;
+    this.attemptsLeft = attemptsLeft;
+  }
+
+  /** The JSON body a route answers with; `code` and `attemptsLeft` only when set. */
+  body() {
+    return {
+      error: this.message,
+      ...(this.code ? { code: this.code } : {}),
+      ...(this.attemptsLeft !== undefined ? { attemptsLeft: this.attemptsLeft } : {}),
+    };
   }
 }
 
@@ -25,7 +41,17 @@ export function hashAccountToken(token: string): string {
   return createHash("sha256").update(token).digest("hex");
 }
 
-function hashesEqual(left: string, right: string): boolean {
+/** A 6-digit code for mail; the caller stores only hashEmailCode() of it. */
+export function newEmailCode(): string {
+  return String(randomInt(0, 1_000_000)).padStart(6, "0");
+}
+
+/** Scoped so one code hash cannot be replayed against another reset or sign-up. */
+export function hashEmailCode(scope: string, code: string): string {
+  return hashAccountToken(`${scope}:${code.trim()}`);
+}
+
+export function hashesEqual(left: string, right: string): boolean {
   const a = Buffer.from(left);
   const b = Buffer.from(right);
   if (a.length !== b.length) return false;
@@ -117,20 +143,27 @@ async function retireTokens(userId: string, purpose: string) {
 }
 
 export async function issuePasswordReset(userId: string) {
+  return (await issuePasswordResetWithCode(userId)).token;
+}
+
+/** One reset row, two ways to use it: the link token and a 6-digit code typed in the app. */
+export async function issuePasswordResetWithCode(userId: string) {
   await retireTokens(userId, "password_reset");
   const minted = newAccountToken();
+  const code = newEmailCode();
   await prisma.accountToken.create({
     data: {
       userId,
       purpose: "password_reset",
       tokenHash: minted.tokenHash,
+      codeHash: hashEmailCode(`reset:${userId}`, code),
       expiresAt: new Date(Date.now() + RESET_TTL_MS),
     },
   });
-  return minted.token;
+  return { token: minted.token, code };
 }
 
-export async function resetPasswordWithToken(token: string, nextPassword: string) {
+export async function resetPasswordWithToken(token: string, nextPassword: string): Promise<string> {
   const problem = passwordProblem(nextPassword);
   if (problem) throw new AccountSecurityError(problem, 400);
   const row = await prisma.accountToken.findUnique({ where: { tokenHash: hashAccountToken(token) } });
@@ -146,6 +179,58 @@ export async function resetPasswordWithToken(token: string, nextPassword: string
     prisma.accountToken.update({ where: { id: row.id }, data: { usedAt: new Date() } }),
   ]);
   await revokeAuthSessions(row.userId);
+  return row.userId;
+}
+
+const RESET_EXPIRED = "Palautuskoodi ei ole enää voimassa. Pyydä uusi.";
+
+/** The code path of a reset: same effect as the link, and five wrong codes void the row (link too). */
+export async function resetPasswordWithCode(
+  emailRaw: string,
+  code: string,
+  nextPassword: string
+): Promise<string> {
+  const problem = passwordProblem(nextPassword);
+  if (problem) throw new AccountSecurityError(problem, 400);
+  const user = await prisma.user.findUnique({
+    where: { email: normalizeLoginEmail(emailRaw) },
+    select: { id: true },
+  });
+  const row = user
+    ? await prisma.accountToken.findFirst({
+        where: { userId: user.id, purpose: "password_reset", usedAt: null, codeHash: { not: null } },
+        orderBy: { createdAt: "desc" },
+      })
+    : null;
+  if (!row || !row.codeHash || row.expiresAt.getTime() < Date.now()) {
+    throw new AccountSecurityError(RESET_EXPIRED, 410, "RESET_EXPIRED");
+  }
+  // The attempt is counted before the compare, so parallel guesses cannot
+  // share one slot and the total stays at MAX_CODE_ATTEMPTS.
+  const counted = await prisma.accountToken.updateMany({
+    where: { id: row.id, usedAt: null, codeAttempts: { lt: MAX_CODE_ATTEMPTS } },
+    data: { codeAttempts: { increment: 1 } },
+  });
+  if (counted.count !== 1) throw new AccountSecurityError(RESET_EXPIRED, 410, "RESET_EXPIRED");
+  if (!hashesEqual(row.codeHash, hashEmailCode(`reset:${row.userId}`, code))) {
+    const after = await prisma.accountToken.findUniqueOrThrow({ where: { id: row.id } });
+    const attemptsLeft = Math.max(0, MAX_CODE_ATTEMPTS - after.codeAttempts);
+    if (attemptsLeft === 0) {
+      await prisma.accountToken.updateMany({ where: { id: row.id, usedAt: null }, data: { usedAt: new Date() } });
+    }
+    throw new AccountSecurityError("Koodi ei kelpaa.", 400, "RESET_CODE_INVALID", attemptsLeft);
+  }
+  const passwordHash = await bcrypt.hash(nextPassword, 12);
+  await prisma.$transaction(async (db) => {
+    const consumed = await db.accountToken.updateMany({
+      where: { id: row.id, usedAt: null },
+      data: { usedAt: new Date() },
+    });
+    if (consumed.count !== 1) throw new AccountSecurityError(RESET_EXPIRED, 410, "RESET_EXPIRED");
+    await db.user.update({ where: { id: row.userId }, data: { passwordHash } });
+  });
+  await revokeAuthSessions(row.userId);
+  return row.userId;
 }
 
 export function normalizeLoginEmail(email: string): string {
@@ -206,6 +291,10 @@ export async function confirmEmailChange(token: string) {
   if (taken && taken.id !== row.userId) {
     throw new AccountSecurityError("Sähköposti on jo käytössä.", 409);
   }
+  const previous = await prisma.user.findUniqueOrThrow({
+    where: { id: row.userId },
+    select: { email: true },
+  });
   await prisma.$transaction([
     prisma.user.update({
       where: { id: row.userId },
@@ -213,7 +302,7 @@ export async function confirmEmailChange(token: string) {
     }),
     prisma.accountToken.update({ where: { id: row.id }, data: { usedAt: new Date() } }),
   ]);
-  return { userId: row.userId, email: row.payload };
+  return { userId: row.userId, email: row.payload, previousEmail: previous.email };
 }
 
 /**
@@ -242,6 +331,62 @@ export async function sendAccountMail(
     console.error("Account mail failed", error);
     return false;
   }
+}
+
+/** Public web origin for links in mail: APP_ORIGIN, else the request's own origin. */
+export function accountLinkBase(requestOrigin: string): string {
+  const configured = process.env.APP_ORIGIN?.trim().replace(/\/$/, "");
+  return configured || requestOrigin;
+}
+
+/** "3.10.2026 klo 14.05" in Finnish local time. */
+export function helsinkiTime(at: Date): string {
+  return new Intl.DateTimeFormat("fi-FI", {
+    timeZone: "Europe/Helsinki",
+    day: "numeric",
+    month: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(at);
+}
+
+/** "m***@example.com": enough for the owner to recognise, not enough to copy. */
+export function maskEmail(email: string): string {
+  const at = email.lastIndexOf("@");
+  if (at <= 0) return "***";
+  return `${email[0]}***${email.slice(at)}`;
+}
+
+/**
+ * Security notices are best-effort: the action has already committed, so a
+ * mail that cannot be sent never turns the answer into an error. sendAccountMail
+ * logs its own send failures; having no mail path at all is not an error.
+ */
+async function sendSecurityNotice(userId: string, mail: { to: string; subject: string; text: string }) {
+  try {
+    await sendAccountMail(userId, mail);
+  } catch (error) {
+    console.error("Security notice failed", { userId, subject: mail.subject }, error);
+  }
+}
+
+export async function notifyPasswordChanged(userId: string, linkBase: string, at = new Date()) {
+  const user = await prisma.user.findUnique({ where: { id: userId }, select: { email: true } });
+  if (!user) return;
+  await sendSecurityNotice(userId, {
+    to: user.email,
+    subject: "LashKirjan salasana vaihdettiin",
+    text: `LashKirjan salasana vaihdettiin ${helsinkiTime(at)}. Jos se et ollut sinä: ${linkBase}/unohtunut-salasana`,
+  });
+}
+
+export async function notifyEmailChanged(userId: string, previousEmail: string, nextEmail: string) {
+  await sendSecurityNotice(userId, {
+    to: previousEmail,
+    subject: "LashKirjan kirjautumissähköposti vaihdettiin",
+    text: `Kirjautumissähköposti vaihdettiin osoitteeseen ${maskEmail(nextEmail)}. Jos se et ollut sinä, ${contactSupportPhrase()}.`,
+  });
 }
 
 export async function recordAccountRequest(userId: string, kind: "close" | "export", currentPassword: string) {

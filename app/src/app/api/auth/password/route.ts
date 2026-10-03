@@ -3,7 +3,7 @@ import { z } from "zod";
 import { requireSession } from "@/lib/session";
 import { guardWrite } from "@/lib/http-security";
 import { consumeRateLimit } from "@/lib/rate-limit";
-import { AccountSecurityError, changePassword } from "@/lib/account-security";
+import { AccountSecurityError, accountLinkBase, changePassword, notifyPasswordChanged } from "@/lib/account-security";
 import { PASSWORD_MAX } from "@/lib/session-policy";
 
 const bodySchema = z.object({
@@ -36,6 +36,7 @@ export async function POST(req: NextRequest) {
       parsed.data.currentPassword,
       parsed.data.newPassword
     );
+    await notifyPasswordChanged(session.userId, accountLinkBase(req.nextUrl.origin));
     return NextResponse.json({ ok: true });
   } catch (error) {
     if (error instanceof AccountSecurityError) {

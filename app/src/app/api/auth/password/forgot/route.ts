@@ -3,7 +3,7 @@ import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { guardWrite } from "@/lib/http-security";
 import { consumeRateLimit, opaqueRateKey, requestClientKey } from "@/lib/rate-limit";
-import { issuePasswordReset, normalizeLoginEmail, sendAccountMail } from "@/lib/account-security";
+import { issuePasswordResetWithCode, normalizeLoginEmail, sendAccountMail } from "@/lib/account-security";
 import { queueRecoveryRequest } from "@/lib/account-requests";
 import { forgotPasswordMessage } from "@/lib/account-copy";
 import { platformMailConfig } from "@/lib/mailer";
@@ -38,11 +38,11 @@ export async function POST(req: NextRequest) {
 
   const user = await prisma.user.findUnique({ where: { email }, select: { id: true } });
   if (user) {
-    const token = await issuePasswordReset(user.id);
+    const { token, code } = await issuePasswordResetWithCode(user.id);
     const mailed = await sendAccountMail(user.id, {
       to: email,
       subject: "LashKirjan salasanan palautus",
-      text: `Avaa linkki 30 minuutin kuluessa ja valitse uusi salasana:\n${resetLink(req, token)}\n\nJos et pyytänyt palautusta, voit ohittaa tämän viestin.`,
+      text: `Avaa linkki 30 minuutin kuluessa ja valitse uusi salasana:\n${resetLink(req, token)}\n\nTai kirjoita sovellukseen koodi ${code}. Koodi on voimassa 30 minuuttia.\n\nJos et pyytänyt palautusta, voit ohittaa tämän viestin.`,
     });
     if (!mailed) await queueRecoveryRequest(user.id);
   }
