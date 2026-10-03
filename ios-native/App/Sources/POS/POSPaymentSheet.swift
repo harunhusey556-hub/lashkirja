@@ -19,7 +19,7 @@ struct POSPaymentSheet: View {
         NavigationStack {
             Group {
                 if let status {
-                    let missing = POSReadiness.missing(status: status, device: POSDevice.capability)
+                    let missing = POSReadiness.missing(status: status, device: POSDevice.capability, testMode: pos.simulationActive)
                     if missing.isEmpty && status.ready {
                         paymentView
                     } else {
@@ -57,6 +57,7 @@ struct POSPaymentSheet: View {
     private var paymentView: some View {
         ScrollView {
             VStack(spacing: 20) {
+                if pos.simulationActive { testModeBadge }
                 VStack(spacing: 4) {
                     Text("Lasku \(invoice.number) · \(invoice.customer.name)")
                         .font(.subheadline).foregroundStyle(Theme.ink2)
@@ -64,11 +65,50 @@ struct POSPaymentSheet: View {
                     Text("Avoinna \(Money.format(invoice.open))").font(.caption).foregroundStyle(Theme.ink2)
                 }
                 amountSection
+                if pos.simulationActive && !pos.phase.isBusy && !pos.machine.isFinished { testCardPicker }
                 stateSection
                 actions
             }
             .padding(16)
         }
+    }
+
+    // MARK: Testitila
+
+    /// Says plainly that no money moves: Stripe's simulated reader and a test key.
+    private var testModeBadge: some View {
+        VStack(spacing: 4) {
+            Text("TESTITILA")
+                .font(.caption.weight(.heavy))
+                .tracking(1.5)
+                .foregroundStyle(Theme.onInk)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 4)
+                .background(Theme.warning, in: Capsule())
+            Text("\(pos.expectedSimulatedReader.label) · rahaa ei liiku")
+                .font(.caption2).foregroundStyle(Theme.ink2)
+        }
+        .accessibilityElement(children: .combine)
+    }
+
+    private var testCardPicker: some View {
+        let reader = pos.expectedSimulatedReader
+        return VStack(alignment: .leading, spacing: 6) {
+            Picker("Testikortti", selection: $pos.testCard) {
+                ForEach(POSTestCard.allCases.filter { $0.isSupported(on: reader) }) { card in
+                    Text(card.title).tag(card)
+                }
+            }
+            .pickerStyle(.menu)
+            .tint(Theme.accentDark)
+            Text(pos.testCard.detail).font(.caption).foregroundStyle(Theme.ink2)
+            if reader == .tapToPay {
+                Text("PIN-korttia voi kokeilla vain simuloidulla kortinlukijalla.").font(.caption2).foregroundStyle(Theme.ink2)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(16)
+        .background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
     }
 
     @ViewBuilder
@@ -261,8 +301,9 @@ struct POSPaymentSheet: View {
         }
         let fresh = await pos.refreshStatus()
         status = fresh
-        // Apple's "How to Tap" before the owner's first payment on this device.
-        if POSReadiness.canTakePayments(status: fresh, device: POSDevice.capability), case .signedIn(let user) = app.phase {
+        // Apple's "How to Tap" before the owner's first payment on this device (not for the simulator).
+        if !pos.simulationActive, POSReadiness.canTakePayments(status: fresh, device: POSDevice.capability),
+           case .signedIn(let user) = app.phase {
             await TapToPayEducation.showIfFirstUse(userId: user.userId)
         }
     }

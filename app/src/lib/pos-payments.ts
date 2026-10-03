@@ -44,6 +44,7 @@ import {
   type StripeCharge,
   type StripeEvent,
   type StripePaymentIntent,
+  stripeTestMode,
 } from "./stripe";
 
 /** The two places Stripe sends the owner back to after onboarding. */
@@ -87,6 +88,11 @@ export interface PosStatus {
   locationId: string | null;
   posEnabled: boolean;
   ready: boolean;
+  /**
+   * The server's key is a Stripe test key: the app may offer its simulated
+   * reader. Never true for a live key.
+   */
+  testMode: boolean;
 }
 
 export interface PosPaymentView {
@@ -182,6 +188,7 @@ function statusOf(user: PosUser): PosStatus {
     ready: Boolean(
       enabled && user.stripeAccountId && user.stripeChargesEnabled && user.stripeLocationId && user.posEnabled
     ),
+    testMode: enabled && stripeTestMode(),
   };
 }
 

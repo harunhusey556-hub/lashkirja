@@ -28,6 +28,15 @@ export function stripeConfigured(): boolean {
   return Boolean(process.env.STRIPE_SECRET_KEY?.trim());
 }
 
+/**
+ * The configured key is a Stripe test-mode key (secret or restricted). Only the
+ * prefix is read; the key itself never leaves this module.
+ */
+export function stripeTestMode(): boolean {
+  const key = process.env.STRIPE_SECRET_KEY?.trim() ?? "";
+  return key.startsWith("sk_test_") || key.startsWith("rk_test_");
+}
+
 export function webhookSecret(): string | null {
   return process.env.STRIPE_WEBHOOK_SECRET?.trim() || null;
 }

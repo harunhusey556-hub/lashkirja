@@ -41,20 +41,25 @@ public struct POSStatus: Decodable, Sendable, Equatable {
     public let ready: Bool
     /// A Stripe Express dashboard link, only when the server offers one (not in the v1 contract).
     public let dashboardUrl: String?
+    /// The server's Stripe key is a test key: the app may offer the simulated reader (Testitila).
+    /// Missing (older servers) and any live key read as false.
+    public let testMode: Bool
 
-    public init(enabled: Bool, account: Account, locationId: String?, posEnabled: Bool, ready: Bool, dashboardUrl: String? = nil) {
+    public init(enabled: Bool, account: Account, locationId: String?, posEnabled: Bool, ready: Bool, dashboardUrl: String? = nil,
+                testMode: Bool = false) {
         self.enabled = enabled
         self.account = account
         self.locationId = locationId
         self.posEnabled = posEnabled
         self.ready = ready
         self.dashboardUrl = dashboardUrl
+        self.testMode = testMode
     }
 
     /// A server without Stripe answers every `/api/pos/*` with 503: the same as "not enabled".
     public static let unavailable = POSStatus(enabled: false, account: .none, locationId: nil, posEnabled: false, ready: false)
 
-    enum CodingKeys: String, CodingKey { case enabled, account, locationId, posEnabled, ready, dashboardUrl }
+    enum CodingKeys: String, CodingKey { case enabled, account, locationId, posEnabled, ready, dashboardUrl, testMode }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -64,6 +69,7 @@ public struct POSStatus: Decodable, Sendable, Equatable {
         posEnabled = try c.decodeIfPresent(Bool.self, forKey: .posEnabled) ?? false
         ready = try c.decodeIfPresent(Bool.self, forKey: .ready) ?? false
         dashboardUrl = try c.decodeIfPresent(String.self, forKey: .dashboardUrl)
+        testMode = try c.decodeIfPresent(Bool.self, forKey: .testMode) ?? false
     }
 }
 
@@ -274,7 +280,10 @@ public enum POSMissing: String, CaseIterable, Sendable {
 }
 
 public enum POSReadiness {
-    public static func missing(status: POSStatus, device: POSDeviceCapability) -> [POSMissing] {
+    /// `testMode`: the owner's Testitila is on. It waives the iPhone's own requirements (the
+    /// simulated reader needs neither Tap to Pay hardware nor the entitlement), and only while the
+    /// server says its Stripe key is a test key.
+    public static func missing(status: POSStatus, device: POSDeviceCapability, testMode: Bool = false) -> [POSMissing] {
         var out: [POSMissing] = []
         if !status.enabled {
             out.append(.server)
@@ -291,13 +300,108 @@ public enum POSReadiness {
             }
             if !status.posEnabled { out.append(.posDisabled) }
         }
+        if testMode && status.testMode { return out }
         if !device.supportsTapToPay { out.append(.deviceSupport) }
         if !device.hasEntitlement { out.append(.entitlement) }
         return out
     }
 
-    public static func canTakePayments(status: POSStatus, device: POSDeviceCapability) -> Bool {
-        status.ready && missing(status: status, device: device).isEmpty
+    public static func canTakePayments(status: POSStatus, device: POSDeviceCapability, testMode: Bool = false) -> Bool {
+        status.ready && missing(status: status, device: device, testMode: testMode).isEmpty
+    }
+}
+
+// MARK: - Testitila (simulated reader)
+
+public enum POSTestMode {
+    /// Simulation runs only when the server's key is a Stripe test key and the owner turned it on.
+    /// With a live key the owner's stored choice is ignored: no money can move through a simulator.
+    public static func isActive(status: POSStatus?, ownerEnabled: Bool) -> Bool {
+        guard let status else { return false }
+        return ownerEnabled && status.enabled && status.testMode
+    }
+
+    /// The owner's choice, kept per owner on this device.
+    public static func key(userId: String) -> String { "pos.testMode.\(userId)" }
+}
+
+/// Which of Stripe's simulated readers carries a test payment.
+public enum POSSimulatedReader: String, Sendable, Equatable {
+    /// Tried first: the same reader kind as real payments.
+    case tapToPay
+    /// A simulated Bluetooth WisePad 3, for an install without Tap to Pay (no entitlement, older iPhone).
+    case bluetooth
+
+    public var label: String {
+        switch self {
+        case .tapToPay: "Simuloitu Tap to Pay"
+        case .bluetooth: "Simuloitu kortinlukija (WisePad 3)"
+        }
+    }
+
+    /// Whether a failed simulated Tap to Pay discovery or connect should move on to the simulated
+    /// Bluetooth reader. Stripe needs the Tap to Pay entitlement even for its simulator, and which
+    /// code a build without it gets is not documented, so every refusal falls back except the
+    /// owner's own cancel and a network failure (`SCPErrors.h` codes).
+    public static func fallsBackToBluetooth(errorCode: Int) -> Bool {
+        if errorCode == POSErrorMapping.Code.canceled { return false }
+        if (9000...9099).contains(errorCode) { return false }
+        return true
+    }
+}
+
+/// The card the simulated reader presents (Stripe's `SimulatedCardType`; the App maps each case).
+public enum POSTestCard: String, CaseIterable, Sendable, Identifiable {
+    case visa, mastercard, declined, insufficientFunds, expired, processingError, offlinePin
+
+    public enum Outcome: Sendable, Equatable { case succeeds, declined, pin }
+
+    public static let defaultCard: POSTestCard = .visa
+
+    public var id: String { rawValue }
+
+    public var title: String {
+        switch self {
+        case .visa: "Onnistuu (Visa)"
+        case .mastercard: "Onnistuu (Mastercard)"
+        case .declined: "Hylätty"
+        case .insufficientFunds: "Hylätty: ei katetta"
+        case .expired: "Hylätty: vanhentunut kortti"
+        case .processingError: "Käsittelyvirhe"
+        case .offlinePin: "Vaatii PIN-koodin"
+        }
+    }
+
+    public var detail: String {
+        switch self {
+        case .visa, .mastercard: "Maksu onnistuu ja kirjautuu laskulle."
+        case .declined: "Pankki hylkää kortin (card_declined)."
+        case .insufficientFunds: "Pankki hylkää kortin: tilillä ei ole katetta."
+        case .expired: "Kortti on vanhentunut."
+        case .processingError: "Stripe ei pysty käsittelemään korttia."
+        case .offlinePin: "Kortti vaatii sirun ja PIN-koodin. Simuloitavissa vain kortinlukijalla (WisePad 3), jossa PIN syötetään ja maksu onnistuu."
+        }
+    }
+
+    public var outcome: Outcome {
+        switch self {
+        case .visa, .mastercard: .succeeds
+        case .declined, .insufficientFunds, .expired, .processingError: .declined
+        case .offlinePin: .pin
+        }
+    }
+
+    /// Stripe's decline code on the failed charge, where the simulator sets one.
+    public var declineCode: String? {
+        switch self {
+        case .insufficientFunds: "insufficient_funds"
+        default: nil
+        }
+    }
+
+    /// Stripe simulates PIN cards on a WisePad 3 only.
+    public func isSupported(on reader: POSSimulatedReader) -> Bool {
+        self == .offlinePin ? reader == .bluetooth : true
     }
 }
 

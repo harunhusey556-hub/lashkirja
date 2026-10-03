@@ -19,6 +19,8 @@ struct PaymentsSettingsView: View {
                 stripeSection(status)
                 if status.enabled { toggleSection(status) }
                 deviceSection
+                // Only a server with a Stripe test key offers it; with a live key it is hidden and ignored.
+                if status.enabled && status.testMode { testModeSection }
                 if let failure { Section { Text(failure).foregroundStyle(Theme.danger).font(.footnote) } }
                 if let notice { Section { Text(notice).foregroundStyle(Theme.success).font(.footnote) } }
             } else {
@@ -117,6 +119,25 @@ struct PaymentsSettingsView: View {
             } else {
                 Text("Asiakas vie kortin tai puhelimen iPhonen yläosan päälle. Erillistä maksupäätettä ei tarvita.")
             }
+        }
+    }
+
+    // MARK: Testitila
+
+    private var testModeSection: some View {
+        Section {
+            Toggle(isOn: Binding(get: { pos.testModeChosen }, set: { pos.setTestMode($0) })) {
+                Text("Testitila (simuloitu lukija)")
+            }
+            .tint(Theme.accent)
+            .disabled(pos.phase.isBusy)
+            if pos.simulationActive {
+                LabeledContent("Lukija", value: pos.expectedSimulatedReader.label).font(.subheadline)
+            }
+        } header: {
+            Text("Testaus")
+        } footer: {
+            Text("Käyttää Stripen simuloitua lukijaa ja testikortteja. Rahaa ei liiku.")
         }
     }
 

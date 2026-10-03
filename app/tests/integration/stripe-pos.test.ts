@@ -140,6 +140,26 @@ describe("feature switch", () => {
     const response = await posStatus(buildRequest("GET", "/api/pos/status"));
     expect(response.status).toBe(401);
   });
+
+  it("says testMode only for a Stripe test key, and never returns the key", async () => {
+    for (const key of [SECRET_KEY, "rk_test_restricted_integration_key"]) {
+      process.env.STRIPE_SECRET_KEY = key;
+      const response = await posStatus(buildRequest("GET", "/api/pos/status", undefined, { cookie }));
+      expect(response.status).toBe(200);
+      const text = await response.text();
+      expect(JSON.parse(text)).toMatchObject({ enabled: true, testMode: true });
+      expect(text).not.toContain(key);
+    }
+    for (const key of ["sk_live_integration_key_never_logged", "rk_live_restricted_integration_key", "sk_testlike"]) {
+      process.env.STRIPE_SECRET_KEY = key;
+      const response = await posStatus(buildRequest("GET", "/api/pos/status", undefined, { cookie }));
+      expect(response.status).toBe(200);
+      const text = await response.text();
+      expect(JSON.parse(text)).toMatchObject({ enabled: true, testMode: false });
+      expect(text).not.toContain(key);
+    }
+    expect(stripe.calls).toHaveLength(0);
+  });
 });
 
 describe("onboarding", () => {

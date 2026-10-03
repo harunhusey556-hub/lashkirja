@@ -60,6 +60,20 @@ final class POSCoordinator {
     private(set) var recordedInvoice: Invoice?
     /// The reader kind this flow drives; only Tap to Pay in v1.
     let readerKind: POSReaderKind = .tapToPay
+    /// The owner's Testitila switch on this device (stored per owner). It counts only while the
+    /// server says its Stripe key is a test key; see `simulationActive`.
+    private(set) var testModeChosen = false
+    /// The simulated reader in use (or last connected) while Testitila is on.
+    private(set) var simulatedReader: POSSimulatedReader?
+    /// The card Stripe's simulator presents on the next test payment.
+    var testCard: POSTestCard = .defaultCard
+
+    /// Simulated reader and test cards: only with a server test key and the owner's switch on.
+    /// A live key ignores the stored switch.
+    var simulationActive: Bool { POSTestMode.isActive(status: status, ownerEnabled: testModeChosen) }
+
+    /// The simulated reader the next connect starts with.
+    var expectedSimulatedReader: POSSimulatedReader { simulatedReader ?? (tapToPaySimulatorRefused ? .bluetooth : .tapToPay) }
 
     var phase: POSPaymentPhase { machine.phase }
 
@@ -74,6 +88,9 @@ final class POSCoordinator {
     /// Bumped when a payment session is dropped: a step still running for the old one (a late
     /// finalize answer) must not move the new one.
     @ObservationIgnored private var generation = 0
+    /// Stripe refused the simulated Tap to Pay reader on this install (no entitlement): later test
+    /// payments in this app run go straight to the simulated Bluetooth reader.
+    @ObservationIgnored private var tapToPaySimulatorRefused = false
 
     private init() {}
 
@@ -97,6 +114,9 @@ final class POSCoordinator {
         let switching = userId != nil
         userId = user.userId
         status = nil
+        testModeChosen = UserDefaults.standard.bool(forKey: POSTestMode.key(userId: user.userId))
+        simulatedReader = nil
+        testCard = .defaultCard
         resetPayment()
         if switching && Terminal.isInitialized() {
             Terminal.shared.disconnectReader { _ in
@@ -118,6 +138,18 @@ final class POSCoordinator {
             // Offline: keep what was known.
         }
         return status ?? .unavailable
+    }
+
+    /// Asetukset → Maksut: turns Testitila on or off for the signed-in owner. The connected reader
+    /// (simulated or real) is let go so the next payment connects the right kind.
+    func setTestMode(_ on: Bool) {
+        guard let userId, !phase.isBusy else { return }
+        UserDefaults.standard.set(on, forKey: POSTestMode.key(userId: userId))
+        guard on != testModeChosen else { return }
+        testModeChosen = on
+        simulatedReader = nil
+        testCard = .defaultCard
+        if Terminal.isInitialized() { Task { await disconnectIfConnected() } }
     }
 
     func update(status new: POSStatus) {
@@ -226,9 +258,17 @@ final class POSCoordinator {
         }
         initTerminalIfNeeded()
         readerMessage = nil
-        if Terminal.shared.connectionStatus == .connected, Terminal.shared.connectedReader?.deviceType == .tapToPay {
-            feed(.readerConnected, gen: gen)
+        if simulationActive {
+            await connectSimulated(locationId: locationId, gen: gen)
             return
+        }
+        if Terminal.shared.connectionStatus == .connected, let connected = Terminal.shared.connectedReader {
+            // A reader left from Testitila is never used for a real payment.
+            if connected.deviceType == .tapToPay && connected.simulated == POSDevice.isSimulator {
+                feed(.readerConnected, gen: gen)
+                return
+            }
+            await disconnectIfConnected()
         }
         do {
             let reader = try await discoverReader()
@@ -264,6 +304,103 @@ final class POSCoordinator {
         discoverCancelable = nil
     }
 
+    // MARK: Testitila (simulated readers)
+
+    /// Stripe's simulated Tap to Pay reader first; when Stripe refuses it (an install without the
+    /// Tap to Pay entitlement, an older iPhone), its simulated Bluetooth WisePad 3.
+    private func connectSimulated(locationId: String, gen: Int) async {
+        if let connected = Terminal.shared.connectedReader, Terminal.shared.connectionStatus == .connected {
+            let fits = connected.simulated
+                && ((simulatedReader == .tapToPay && connected.deviceType == .tapToPay)
+                    || (simulatedReader == .bluetooth && connected.deviceType != .tapToPay))
+            if fits {
+                feed(.readerConnected, gen: gen)
+                return
+            }
+            await disconnectIfConnected()
+        }
+        do {
+            if !tapToPaySimulatorRefused {
+                do {
+                    let config = try TapToPayDiscoveryConfigurationBuilder().setSimulated(true).build()
+                    let reader = try await discover(config) { $0.first }
+                    try await connect(reader, locationId: locationId)
+                    guard gen == generation else { return }
+                    simulatedReader = .tapToPay
+                    feed(.readerConnected, gen: gen)
+                    return
+                } catch {
+                    let ns = error as NSError
+                    let refused = ns.domain != NSURLErrorDomain
+                        && (error is POSFlowError || POSSimulatedReader.fallsBackToBluetooth(errorCode: ns.code))
+                    guard refused else { throw error }
+                    tapToPaySimulatorRefused = true
+                    discoverCancelable = nil
+                    await disconnectIfConnected()
+                }
+            }
+            let config = try BluetoothScanDiscoveryConfigurationBuilder().setSimulated(true).build()
+            // The simulator offers several Bluetooth readers; the WisePad 3 is the one Stripe sells in Finland.
+            let reader = try await discover(config) { readers in readers.first { $0.deviceType == .wisePad3 } ?? readers.first }
+            let connection = try BluetoothConnectionConfigurationBuilder(delegate: bridge, locationId: locationId).build()
+            try await connect(reader, config: connection)
+            guard gen == generation else { return }
+            simulatedReader = .bluetooth
+            feed(.readerConnected, gen: gen)
+        } catch {
+            feed(.failed(Self.sdkFailure(error)), gen: gen)
+        }
+    }
+
+    private func discover(_ config: DiscoveryConfiguration, pick: @escaping ([Reader]) -> Reader?) async throws -> Reader {
+        try await withCheckedThrowingContinuation { continuation in
+            let once = ResumeOnce(continuation)
+            bridge.onDiscovered = { readers in
+                if let chosen = pick(readers) { once.resume(.success(chosen)) }
+            }
+            discoverCancelable = Terminal.shared.discoverReaders(config, delegate: bridge) { error in
+                once.resume(.failure(error ?? POSFlowError.noReader))
+            }
+        }
+    }
+
+    private func connect(_ reader: Reader, config: ConnectionConfiguration) async throws {
+        let _: Reader = try await withCheckedThrowingContinuation { continuation in
+            Terminal.shared.connectReader(reader, connectionConfig: config) { connected, error in
+                if let connected { continuation.resume(returning: connected) }
+                else { continuation.resume(throwing: error ?? POSFlowError.noReader) }
+            }
+        }
+        discoverCancelable = nil
+    }
+
+    private func disconnectIfConnected() async {
+        guard Terminal.isInitialized(), Terminal.shared.connectionStatus == .connected else { return }
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            Terminal.shared.disconnectReader { _ in continuation.resume() }
+        }
+    }
+
+    /// The card Stripe's simulator presents next; set before every test payment (Stripe resets it
+    /// after a payment).
+    private func applyTestCard() {
+        let reader = simulatedReader ?? .tapToPay
+        if !testCard.isSupported(on: reader) { testCard = .defaultCard }
+        Terminal.shared.simulatorConfiguration.simulatedCard = SimulatedCard(type: Self.sdkCardType(testCard))
+    }
+
+    static func sdkCardType(_ card: POSTestCard) -> SimulatedCardType {
+        switch card {
+        case .visa: .visa
+        case .mastercard: .mastercard
+        case .declined: .chargeDeclined
+        case .insufficientFunds: .chargeDeclinedInsufficientFunds
+        case .expired: .chargeDeclinedExpiredCard
+        case .processingError: .chargeDeclinedProcessingError
+        case .offlinePin: .offlinePinScaRetry
+        }
+    }
+
     private func process(gen: Int) async {
         guard let payment = machine.payment else { return }
         do {
@@ -282,6 +419,7 @@ final class POSCoordinator {
                 feed(.processed, gen: gen)
                 return
             }
+            if simulationActive, Terminal.shared.connectedReader?.simulated == true { applyTestCard() }
             let result: Result<PaymentIntent, Error> = await withCheckedContinuation { continuation in
                 collectCancelable = Terminal.shared.processPaymentIntent(intent, collectConfig: nil, confirmConfig: nil) { processed, error in
                     if let processed { continuation.resume(returning: .success(processed)) }
@@ -507,7 +645,7 @@ private final class TerminalBridge: NSObject, DiscoveryDelegate, TapToPayReaderD
 
     init(owner: POSCoordinator) { self.owner = owner }
 
-    private func onMain(_ work: @escaping @MainActor (POSCoordinator) -> Void) {
+    fileprivate func onMain(_ work: @escaping @MainActor (POSCoordinator) -> Void) {
         Task { @MainActor [weak self] in
             if let owner = self?.owner { work(owner) }
         }
@@ -555,5 +693,31 @@ private final class TerminalBridge: NSObject, DiscoveryDelegate, TapToPayReaderD
 
     func readerDidFailReconnect(_ reader: Reader) {
         onMain { $0.reconnecting(false) }
+    }
+}
+
+/// Testitila's simulated Bluetooth reader (WisePad 3) reports through the mobile-reader delegate;
+/// the events mean the same as Tap to Pay's.
+extension TerminalBridge: MobileReaderDelegate {
+    func reader(_ reader: Reader, didReportAvailableUpdate update: ReaderSoftwareUpdate) {}
+
+    func reader(_ reader: Reader, didStartInstallingUpdate update: ReaderSoftwareUpdate, cancelable: Cancelable?) {
+        onMain { $0.updateStarted() }
+    }
+
+    func reader(_ reader: Reader, didReportReaderSoftwareUpdateProgress progress: Float) {
+        onMain { $0.updateProgressed(progress) }
+    }
+
+    func reader(_ reader: Reader, didFinishInstallingUpdate update: ReaderSoftwareUpdate?, error: Error?) {
+        onMain { $0.updateFinished() }
+    }
+
+    func reader(_ reader: Reader, didRequestReaderInput inputOptions: ReaderInputOptions = []) {
+        onMain { $0.readerWaitsForCard() }
+    }
+
+    func reader(_ reader: Reader, didRequestReaderDisplayMessage displayMessage: ReaderDisplayMessage) {
+        onMain { $0.readerMessage(displayMessage) }
     }
 }
