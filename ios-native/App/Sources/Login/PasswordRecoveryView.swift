@@ -2,12 +2,15 @@ import SwiftUI
 import UIKit
 import LashKirjaCore
 
-/// Salasanan palautus (/unohtunut-salasana) and the new password (/palauta-salasana).
-/// The mail link opens the web page; here the owner can paste that link (or its token), or
-/// type the mail's 6-digit code, and a `lashkirja://…?token=…` link opens this sheet with the
-/// token filled in.
+/// Salasanan palautus (/unohtunut-salasana) and the new password (/palauta-salasana), pushed
+/// from the sign-in screen. The mail has a link and a 6-digit code: here the owner types or
+/// pastes the code (the same boxes as the sign-up), or pastes the link (or its token), and a
+/// `lashkirja://…?token=…` link opens this screen with the token filled in.
 struct PasswordRecoveryView: View {
     enum Step: Hashable { case request, reset }
+    /// How the reset proves the mail was read: its code (with the address) or its link.
+    private enum Proof: Hashable { case code, link }
+    private enum Field: Hashable { case email, link, password, again }
 
     @Environment(AppModel.self) private var app
     @Environment(\.dismiss) private var dismiss
@@ -15,39 +18,41 @@ struct PasswordRecoveryView: View {
     @State var email: String
     @State var link: String
 
+    @State private var proof: Proof
+    @State private var code = ""
     @State private var busy = false
     @State private var failure: String?
+    @State private var emailProblem: String?
     @State private var sent: ForgotPasswordResponse?
     @State private var password = ""
     @State private var again = ""
     @State private var errors = PasswordReset.Errors()
     @State private var done = false
+    @FocusState private var focus: Field?
+    @FocusState private var codeFocused: Bool
 
     init(step: Step = .request, email: String = "", link: String = "") {
         _step = State(initialValue: step)
         _email = State(initialValue: email)
         _link = State(initialValue: link)
+        _proof = State(initialValue: link.isEmpty ? .code : .link)
     }
 
     var body: some View {
-        NavigationStack {
-            Form {
-                if done {
-                    doneSection
-                } else if step == .request {
-                    requestSections
-                } else {
-                    resetSections
+        Group {
+            if step == .reset && !done {
+                resetScreen
+            } else {
+                Form {
+                    if done { doneSection } else { requestSections }
                 }
-            }
-            .scrollContentBackground(.hidden)
-            .background(Theme.canvas)
-            .navigationTitle(step == .request ? "Salasanan palautus" : "Uusi salasana")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) { Button("Sulje") { dismiss() } }
+                .scrollContentBackground(.hidden)
+                .background(Theme.canvas)
             }
         }
+        .navigationTitle(step == .request ? "Salasanan palautus" : "Uusi salasana")
+        .navigationBarTitleDisplayMode(.inline)
+        .navigationBarBackButtonHidden(busy)
     }
 
     // MARK: Request a link
@@ -67,9 +72,9 @@ struct PasswordRecoveryView: View {
             }
             if sent.mailSent {
                 Section {
-                    Button("Minulla on linkki tai koodi") { switchTo(.reset) }
+                    Button("Minulla on koodi tai linkki") { switchTo(.reset) }
                 } footer: {
-                    Text("Avaa viestin linkki, tai liitä se tähän sovellukseen. Voit myös syöttää viestin 6-numeroisen koodin.")
+                    Text("Syötä viestin 6-numeroinen koodi tähän sovellukseen, tai avaa viestin linkki.")
                 }
             }
         } else {
@@ -92,62 +97,137 @@ struct PasswordRecoveryView: View {
                     busyLabel("Lähetä linkki", busyText: "Lähetetään…")
                 }
                 .disabled(busy)
-                Button("Minulla on jo linkki tai koodi") { switchTo(.reset) }
+                Button("Minulla on jo koodi tai linkki") { switchTo(.reset) }
             }
         }
     }
 
     // MARK: Choose the new password
 
-    @ViewBuilder private var resetSections: some View {
-        Section {
-            TextField("Linkki tai koodi", text: $link, axis: .vertical)
-                .textInputAutocapitalization(.never)
-                .autocorrectionDisabled()
-                .lineLimit(1...3)
-            Button {
-                if let text = UIPasteboard.general.string { link = text }
-            } label: {
-                Label("Liitä leikepöydältä", systemImage: "doc.on.clipboard")
+    private var resetScreen: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 20) {
+                Picker("Palautustapa", selection: $proof) {
+                    Text("Koodi").tag(Proof.code)
+                    Text("Linkki").tag(Proof.link)
+                }
+                .pickerStyle(.segmented)
+                if proof == .code { codeFields } else { linkField }
+                Text("Koodi ja linkki ovat voimassa 30 minuuttia.")
+                    .font(.footnote)
+                    .foregroundStyle(Theme.ink2)
+                AuthField(label: "Uusi salasana", problem: errors.password, focused: focus == .password) {
+                    SecureField("Uusi salasana", text: $password)
+                        .textContentType(.newPassword)
+                        .focused($focus, equals: .password)
+                        .submitLabel(.next)
+                        .onSubmit { focus = .again }
+                }
+                AuthField(label: "Toista uusi salasana", problem: errors.repeat, focused: focus == .again) {
+                    SecureField("Toista uusi salasana", text: $again)
+                        .textContentType(.newPassword)
+                        .focused($focus, equals: .again)
+                        .submitLabel(.done)
+                        .onSubmit { Task { await reset() } }
+                }
+                Text("Vähintään \(PasswordReset.minLength) merkkiä.")
+                    .font(.footnote)
+                    .foregroundStyle(Theme.ink2)
+                if let failure {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Label(failure, systemImage: "exclamationmark.circle")
+                            .font(.subheadline)
+                            .foregroundStyle(Theme.danger)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Button("Pyydä uusi viesti") { switchTo(.request) }
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(Theme.accent)
+                            .frame(minHeight: 44)
+                    }
+                }
             }
-        } header: {
-            Text("Palautuslinkki tai koodi")
-        } footer: {
-            Text("Liitä linkki tai syötä 6-numeroinen koodi sähköpostista. Ne ovat voimassa 30 minuuttia.")
+            .padding(.horizontal, 16)
+            .padding(.top, 8)
+            .padding(.bottom, 24)
+            .frame(maxWidth: 460, alignment: .leading)
+            .frame(maxWidth: .infinity)
         }
-        // The code alone does not say whose it is; the link's token does.
-        if isCode {
-            Section {
-                TextField("Sähköposti", text: $email)
+        .scrollDismissesKeyboard(.interactively)
+        .background(Theme.canvas.ignoresSafeArea())
+        .safeAreaInset(edge: .bottom) {
+            AuthBottomBar {
+                Button { Task { await reset() } } label: {
+                    AuthButtonLabel(title: "Tallenna salasana", busyTitle: "Tallennetaan…", busy: busy)
+                }
+                .buttonStyle(.primary)
+                .disabled(busy)
+            }
+        }
+        .onChange(of: email) { emailProblem = nil }
+        .onChange(of: password) { errors.password = nil }
+        .onChange(of: again) { errors.repeat = nil }
+        // A code typed or pasted into the link field belongs in the code boxes.
+        .onChange(of: link) { _, text in
+            guard PasswordReset.token(from: text) == nil, let found = AccountCode.extract(text) else { return }
+            link = ""
+            code = found
+            proof = .code
+        }
+    }
+
+    /// The code alone does not say whose it is; the link's token does, so the code needs the address.
+    private var codeFields: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            AuthField(label: "Tilin sähköposti", problem: emailProblem, focused: focus == .email) {
+                TextField("Tilin sähköposti", text: $email, prompt: Text("nimi@yritys.fi"))
                     .textContentType(.username)
                     .keyboardType(.emailAddress)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
-            } header: {
-                Text("Tilin sähköposti")
+                    .focused($focus, equals: .email)
+                    .submitLabel(.next)
+                    .onSubmit { codeFocused = true }
+            }
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Koodi sähköpostista")
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(Theme.ink)
+                    .accessibilityHidden(true)
+                AccountCodeField(
+                    code: $code,
+                    focus: $codeFocused,
+                    onComplete: { _ in
+                        // The new password is still needed: the code moves the owner on to it.
+                        if password.isEmpty { focus = .password }
+                    },
+                    onPasteOther: { text in
+                        // The mail's link pasted here: take it as the link instead.
+                        guard PasswordReset.token(from: text) != nil else { return false }
+                        link = text
+                        proof = .link
+                        return true
+                    })
             }
         }
-        Section {
-            SecureField("Uusi salasana", text: $password)
-                .textContentType(.newPassword)
-            if let message = errors.password { Text(message).font(.footnote).foregroundStyle(Theme.danger) }
-            SecureField("Toista uusi salasana", text: $again)
-                .textContentType(.newPassword)
-            if let message = errors.repeat { Text(message).font(.footnote).foregroundStyle(Theme.danger) }
-        } footer: {
-            Text("Vähintään \(PasswordReset.minLength) merkkiä.")
-        }
-        if let failure {
-            Section {
-                Text(failure).foregroundStyle(Theme.danger)
-                Button("Pyydä uusi viesti") { switchTo(.request) }
+        .onAppear { if !email.isEmpty, code.isEmpty { codeFocused = true } }
+    }
+
+    private var linkField: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            AuthField(label: "Palautuslinkki", focused: focus == .link) {
+                TextField("Palautuslinkki", text: $link, prompt: Text("https://…"), axis: .vertical)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .lineLimit(1...3)
+                    .focused($focus, equals: .link)
             }
-        }
-        Section {
-            Button { Task { await reset() } } label: {
-                busyLabel("Tallenna salasana", busyText: "Tallennetaan…")
+            // The system's paste button reads the clipboard without the "Allow Paste" prompt.
+            PasteButton(payloadType: String.self) { strings in
+                let text = strings.first ?? ""
+                Task { @MainActor in link = text }
             }
-            .disabled(busy)
+            .buttonBorderShape(.capsule)
+            .tint(Theme.ink)
         }
     }
 
@@ -166,8 +246,6 @@ struct PasswordRecoveryView: View {
         }
     }
 
-    private var isCode: Bool { AccountCode.normalize(link) != nil }
-
     private func busyLabel(_ text: String, busyText: String) -> some View {
         HStack {
             Text(busy ? busyText : text)
@@ -177,6 +255,7 @@ struct PasswordRecoveryView: View {
 
     private func switchTo(_ next: Step) {
         failure = nil
+        emailProblem = nil
         errors = PasswordReset.Errors()
         step = next
     }
@@ -206,25 +285,22 @@ struct PasswordRecoveryView: View {
     private func reset() async {
         guard !busy else { return }
         failure = nil
-        // Six digits are the mail's code; anything else must be the link or its token.
-        let digits = AccountCode.normalize(link)
-        let token = digits == nil ? PasswordReset.token(from: link) : nil
+        let digits = proof == .code ? AccountCode.normalize(code) : nil
+        let token = proof == .link ? PasswordReset.token(from: link) : nil
         errors = PasswordReset.validate(password: password, repeat: again)
-        guard digits != nil || token != nil else {
-            failure = "Linkki tai koodi puuttuu tai on vanhentunut. Pyydä uusi palautusviesti."
+        if proof == .code {
+            emailProblem = EmailCheck.problem(email)
+            if digits == nil { failure = "Syötä sähköpostin 6-numeroinen koodi." }
+        } else if token == nil {
+            failure = "Linkki puuttuu tai on vanhentunut. Pyydä uusi palautusviesti."
+        }
+        guard failure == nil, emailProblem == nil, errors.isValid else {
             Haptics.error()
             return
         }
         let address = email.trimmingCharacters(in: .whitespacesAndNewlines)
-        if digits != nil, address.isEmpty {
-            failure = "Kirjoita tilisi sähköpostiosoite."
-            Haptics.error()
-            return
-        }
-        guard errors.isValid else {
-            Haptics.error()
-            return
-        }
+        focus = nil
+        codeFocused = false
         busy = true
         defer { busy = false }
         do {
@@ -240,6 +316,7 @@ struct PasswordRecoveryView: View {
         } catch is CancellationError {
         } catch let error as LKError where digits != nil {
             Haptics.error()
+            code = ""
             failure = AccountCodeFailure(error).message(serverMessage: error.message)
         } catch {
             Haptics.error()

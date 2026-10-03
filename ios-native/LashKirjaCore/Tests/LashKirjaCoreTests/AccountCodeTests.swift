@@ -51,6 +51,78 @@ private func sent(_ request: URLRequest) throws -> [String: String] {
     #expect(PasswordReset.token(from: "123456") == nil)
 }
 
+@Test func extractFindsTheCodeInWhatGmailCopies() {
+    // The subjects (new and old) and the body sentences as they arrive.
+    #expect(AccountCode.extract("123456 on LashKirja-vahvistuskoodisi") == "123456")
+    #expect(AccountCode.extract("LashKirja-vahvistuskoodi: 123456") == "123456")
+    #expect(AccountCode.extract("LashKirja-tilisi vahvistuskoodi on 123456. Koodi on voimassa 15 minuuttia.") == "123456")
+    #expect(AccountCode.extract("042001\n\nTämä on LashKirja-tilisi vahvistuskoodi, ja se on voimassa 15 minuuttia.") == "042001")
+    #expect(AccountCode.extract("Re: 654321 on LashKirja-vahvistuskoodisi") == "654321")
+    #expect(AccountCode.extract("Re: LashKirja-vahvistuskoodi: 042 001") == "042001")
+    #expect(AccountCode.extract("123 456") == "123456")
+    #expect(AccountCode.extract("123-456") == "123456")
+    #expect(AccountCode.extract("123–456") == "123456")
+    #expect(AccountCode.extract("Koodi: 123456, voimassa 30 minuuttia") == "123456")
+    #expect(AccountCode.extract("Koodi (123456)") == "123456")
+    #expect(AccountCode.extract(" 123456 \n") == "123456")
+}
+
+@Test func extractRefusesWhatIsNotACode() {
+    #expect(AccountCode.extract("") == nil)
+    #expect(AccountCode.extract("Koodi on voimassa 15 minuuttia.") == nil)
+    #expect(AccountCode.extract("1234567") == nil)
+    #expect(AccountCode.extract("Tilaus 1234567 on vahvistettu") == nil)
+    #expect(AccountCode.extract("12345") == nil)
+    #expect(AccountCode.extract("040 123 4567") == nil)
+    #expect(AccountCode.extract("12 3456") == nil)
+    #expect(AccountCode.extract("123  456") == nil)
+    #expect(AccountCode.extract("abc123456") == nil)
+    #expect(AccountCode.extract("123456.78") == nil)
+    #expect(AccountCode.extract("１２３４５６") == nil)
+    #expect(AccountCode.extract("https://x.fi/palauta-salasana?token=123456") == nil)
+    #expect(AccountCode.extract("https://x.fi/palauta-salasana?token=Ab-123456_xyzABCDEFGHIJ") == nil)
+}
+
+@Test func extractTakesTheFirstCodeAndSkipsLongerNumbers() {
+    #expect(AccountCode.extract("Viite 1234567, koodi 222333 tai 444555") == "222333")
+    #expect(AccountCode.extract("Avaa linkki: https://x.fi/palauta-salasana?token=abc123456def\n\n987654 on koodi") == "987654")
+}
+
+@Test func codeFieldKeepsTheCodeOrDigitsOnly() {
+    // Typing one digit at a time, and the keyboard's one-time-code suggestion.
+    #expect(AccountCode.input("1", previous: "") == "1")
+    #expect(AccountCode.input("123456", previous: "12345") == "123456")
+    #expect(AccountCode.input("123456", previous: "") == "123456")
+    // A pasted subject or body line becomes just the code.
+    #expect(AccountCode.input("123456 on LashKirja-vahvistuskoodisi", previous: "") == "123456")
+    #expect(AccountCode.input("LashKirja-tilisi vahvistuskoodi on 123456. Koodi on voimassa 15 minuuttia.", previous: "") == "123456")
+    // Pasted after digits already typed: the pasted code wins, not the first six digits.
+    #expect(AccountCode.input("12345987654", previous: "12345") == "987654")
+    #expect(AccountCode.input("12Koodi 987 654", previous: "12") == "987654")
+    // No code: only the digits, at most six.
+    #expect(AccountCode.input("12a", previous: "12") == "12")
+    #expect(AccountCode.input("", previous: "123") == "")
+    #expect(AccountCode.input("1234567", previous: "123456") == "123456")
+    #expect(AccountCode.input("1234567", previous: "") == "")
+    #expect(AccountCode.input("Koodi on voimassa 15 minuuttia.", previous: "") == "15")
+    // Its own result is stable, so setting it again changes nothing.
+    for kept in ["", "1", "12345", "123456"] { #expect(AccountCode.input(kept, previous: kept) == kept) }
+}
+
+@Test func emailCheckCatchesTyposBeforeSending() {
+    #expect(EmailCheck.problem("nimi@yritys.fi") == nil)
+    #expect(EmailCheck.problem(" Nimi.Suku+x@posti.yritys.fi \n") == nil)
+    #expect(EmailCheck.problem("") == EmailCheck.missing)
+    #expect(EmailCheck.problem("   ") == EmailCheck.missing)
+    #expect(EmailCheck.problem("nimi") == EmailCheck.invalid)
+    #expect(EmailCheck.problem("nimi@") == EmailCheck.invalid)
+    #expect(EmailCheck.problem("@yritys.fi") == EmailCheck.invalid)
+    #expect(EmailCheck.problem("nimi@yritys") == EmailCheck.invalid)
+    #expect(EmailCheck.problem("nimi@yritys.") == EmailCheck.invalid)
+    #expect(EmailCheck.problem("nimi@@yritys.fi") == EmailCheck.invalid)
+    #expect(EmailCheck.problem("ni mi@yritys.fi") == EmailCheck.invalid)
+}
+
 // MARK: Request bodies (contract field names)
 
 @Test func signUpBodiesUseTheContractFields() throws {

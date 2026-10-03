@@ -151,8 +151,9 @@ describe("sign-up with an emailed code", () => {
     const pending = await prisma.pendingSignup.findUniqueOrThrow({ where: { email: NEW_EMAIL } });
     const [mail] = mailsTo(NEW_EMAIL);
     const code = codeIn(mail.subject);
-    expect(mail.subject).toBe(`LashKirja-vahvistuskoodi: ${code}`);
-    expect(mail.text).toContain(code);
+    // Code first: the lock-screen notification shows it, and the first line copies alone.
+    expect(mail.subject).toBe(`${code} on LashKirja-vahvistuskoodisi`);
+    expect(mail.text.split(/\r?\n/)[0]).toBe(code);
     expect(mail.text).toContain("voimassa 15 minuuttia");
     // Only a hash of the code is stored, and the password is bcrypt.
     expect(JSON.stringify(pending)).not.toContain(code);
@@ -499,7 +500,10 @@ describe("password reset by code", () => {
     await settle();
     const mail = mailsTo(user.email).at(-1)!;
     expect(mail.text).toContain("/palauta-salasana?token=");
-    return codeIn(mail.text.replace(/token=\S+/, ""));
+    const code = codeIn(mail.text.replace(/token=\S+/, ""));
+    expect(mail.subject).toBe(`${code} on LashKirjan salasanan palautuskoodisi`);
+    expect(mail.text.split(/\r?\n/)[0]).toBe(code);
+    return code;
   }
 
   it("resets with email + code, revokes sessions and mails a notice", async () => {

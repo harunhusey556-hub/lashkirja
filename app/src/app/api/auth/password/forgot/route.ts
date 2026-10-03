@@ -48,8 +48,9 @@ export async function POST(req: NextRequest) {
       const { token, code } = await issuePasswordResetWithCode(user.id);
       mailed = await sendAccountMail(user.id, {
         to: email,
-        subject: "LashKirjan salasanan palautus",
-        text: `Avaa linkki 30 minuutin kuluessa ja valitse uusi salasana:\n${linkBase}/palauta-salasana?token=${encodeURIComponent(token)}\n\nTai kirjoita sovellukseen koodi ${code}. Koodi on voimassa 30 minuuttia.\n\nJos et pyytänyt palautusta, voit ohittaa tämän viestin.`,
+        // Code first in the subject and alone on the first line, like the sign-up mail.
+        subject: `${code} on LashKirjan salasanan palautuskoodisi`,
+        text: `${code}\n\nKirjoita tämä koodi LashKirja-sovellukseen, ja valitse uusi salasana 30 minuutin kuluessa.\n\nVoit myös avata linkin:\n${linkBase}/palauta-salasana?token=${encodeURIComponent(token)}\n\nJos et pyytänyt palautusta, voit ohittaa tämän viestin.`,
       });
     }
     if (!mailed) await queueRecoveryRequest(user.id);
