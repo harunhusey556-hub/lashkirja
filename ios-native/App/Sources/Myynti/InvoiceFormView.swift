@@ -196,10 +196,12 @@ struct InvoiceFormView: View {
             if !sellerRegistered {
                 Text("Et ole ALV-rekisterissä, laskulle ei lisätä ALV:tä.").font(.caption).foregroundStyle(Theme.ink2)
             }
-            ForEach($draft.lines) { $line in
+            // Values, not `$draft.lines`: a binding into the array crashed (index out of range) when a
+            // line was deleted while its card or a field in it was still on screen.
+            ForEach(draft.lines) { line in
                 let index = draft.lines.firstIndex { $0.id == line.id } ?? 0
                 InvoiceLineCard(
-                    line: $line,
+                    line: lineBinding(line),
                     priceText: priceBinding(line.id),
                     number: index + 1,
                     issueDate: issueDay,
@@ -388,6 +390,16 @@ struct InvoiceFormView: View {
         focus = InvoiceFormField.description(line.id)
     }
 
+    /// A line looked up by id on every read and write: still valid after other lines move or go.
+    private func lineBinding(_ line: InvoiceDraft.Line) -> Binding<InvoiceDraft.Line> {
+        Binding(
+            get: { draft.lines.first { $0.id == line.id } ?? line },
+            set: { updated in
+                if let i = draft.lines.firstIndex(where: { $0.id == updated.id }) { draft.lines[i] = updated }
+            }
+        )
+    }
+
     private func handle(_ action: InvoiceLineCard.Action, lineId: UUID) {
         guard let index = draft.lines.firstIndex(where: { $0.id == lineId }) else { return }
         switch action {
@@ -400,9 +412,14 @@ struct InvoiceFormView: View {
         case .moveUp: withAnimation { draft.lines.moveLine(at: index, by: -1) }
         case .moveDown: withAnimation { draft.lines.moveLine(at: index, by: 1) }
         case .delete:
-            if let focused = focus, rowId(focused) == rowId(.description(lineId)) { focus = nil }
-            _ = withAnimation { draft.lines.remove(at: index) }
-            priceTexts[lineId] = nil
+            // Any field of this line loses focus first, then the line goes once the swipe has
+            // finished, so no view is left editing a line that no longer exists.
+            if let focused = focus, focused.lineId == lineId { focus = nil }
+            Task { @MainActor in
+                guard let current = draft.lines.firstIndex(where: { $0.id == lineId }), draft.lines.count > 1 else { return }
+                _ = withAnimation { draft.lines.remove(at: current) }
+                priceTexts[lineId] = nil
+            }
         case .saveProduct:
             let line = draft.lines[index]
             Task { await saveProduct(line) }

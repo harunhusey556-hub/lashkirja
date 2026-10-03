@@ -406,10 +406,20 @@ struct RecurringFormSheet: View {
                     Toggle("Lähetä sähköpostilla automaattisesti", isOn: $draft.autoSend).tint(Theme.accent)
                 }
                 Section("Rivit") {
-                    ForEach($draft.lines) { $line in
-                        LineEditor(line: $line, catalog: catalog, issueDate: APIDate.dayString(startDate), showsVat: sellerRegistered)
+                    // Values with a lookup binding, not `$draft.lines`: an array binding crashes when a
+                    // swiped line goes while its editor is still on screen.
+                    ForEach(draft.lines) { line in
+                        LineEditor(line: Binding(
+                            get: { draft.lines.first { $0.id == line.id } ?? line },
+                            set: { updated in
+                                if let i = draft.lines.firstIndex(where: { $0.id == updated.id }) { draft.lines[i] = updated }
+                            }
+                        ), catalog: catalog, issueDate: APIDate.dayString(startDate), showsVat: sellerRegistered)
                     }
-                    .onDelete { draft.lines.remove(atOffsets: $0) }
+                    .onDelete { offsets in
+                        let ids = offsets.map { draft.lines[$0].id }
+                        Task { @MainActor in withAnimation { draft.lines.removeAll { ids.contains($0.id) } } }
+                    }
                     Button { withAnimation { draft.lines.append(.new(sellerRegistered: sellerRegistered)) } } label: { Label("Lisää rivi", systemImage: "plus") }
                 }
                 if let failure { Section { Text(failure).foregroundStyle(Theme.danger) } }

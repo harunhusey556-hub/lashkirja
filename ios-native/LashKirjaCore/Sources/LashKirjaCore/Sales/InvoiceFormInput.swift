@@ -5,6 +5,14 @@ import Foundation
 public enum InvoiceFormField: Hashable, Sendable {
     case customer, dueDate, lines, notes
     case description(UUID), quantity(UUID), unitPrice(UUID), vatRate(UUID)
+
+    /// The line a field belongs to; deleting that line must first take the focus from any of them.
+    public var lineId: UUID? {
+        switch self {
+        case .description(let id), .quantity(let id), .unitPrice(let id), .vatRate(let id): id
+        case .customer, .dueDate, .lines, .notes: nil
+        }
+    }
 }
 
 /// The invoice form's choices, figures and checks (web `InvoiceForm.tsx`, server `createInvoice`).

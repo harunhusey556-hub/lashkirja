@@ -240,3 +240,12 @@ private func line(_ description: String = "Ripsienpidennys", quantity: Decimal =
     #expect(InvoiceForm.lineForCatalogPick([filled], priceTexts: [:]) == nil)
     #expect(InvoiceForm.lineForCatalogPick([], priceTexts: [:]) == nil)
 }
+
+@Test func everyFieldOfALineKnowsItsLine() {
+    let id = UUID()
+    #expect(InvoiceFormField.description(id).lineId == id)
+    #expect(InvoiceFormField.quantity(id).lineId == id)
+    #expect(InvoiceFormField.unitPrice(id).lineId == id)
+    #expect(InvoiceFormField.vatRate(id).lineId == id)
+    #expect(InvoiceFormField.notes.lineId == nil)
+}
