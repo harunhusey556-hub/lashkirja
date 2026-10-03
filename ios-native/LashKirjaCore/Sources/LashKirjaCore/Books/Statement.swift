@@ -11,6 +11,12 @@ public struct BankTransaction: Decodable, Sendable, Identifiable, Hashable {
         public let id: String
         public let number: Int
     }
+    /// The purchase invoice this row paid, and the payment that holds the row.
+    public struct PurchaseBrief: Decodable, Sendable, Hashable {
+        public let id: String
+        public let supplierName: String
+        public let paymentId: String
+    }
 
     public let id: String
     public let statementId: String
@@ -27,6 +33,7 @@ public struct BankTransaction: Decodable, Sendable, Identifiable, Hashable {
     public let settlesInvoice: Bool?
     public let settlesPurchase: Bool?
     public let paidInvoice: InvoiceBrief?
+    public let paidPurchase: PurchaseBrief?
     public let receipt: ReceiptBrief?
     public let suggestedReceipt: ReceiptBrief?
     /// Up to three scored receipts for an unmatched row (the statement GET adds them).

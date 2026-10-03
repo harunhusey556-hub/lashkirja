@@ -414,6 +414,18 @@ struct BankRowSheet: View {
                 }
                 if let failure { Text(failure).foregroundStyle(Theme.danger) }
                 Section { actions }
+                if purchaseLinkable {
+                    Section {
+                        // Pushed on this sheet's stack; a confirmed link closes the sheet like the other actions.
+                        NavigationLink {
+                            PurchaseRowLinkView(row: row) { dismiss() }
+                        } label: {
+                            Label("Kohdista ostolaskuun", systemImage: "doc.text.magnifyingglass")
+                        }
+                    } footer: {
+                        Text("Maksoiko tämä ostolaskun? Kohdista se laskuun, niin lasku merkitään maksetuksi.")
+                    }
+                }
                 if searchable { candidateSection }
                 if showStatementLink {
                     Section {
@@ -492,6 +504,12 @@ struct BankRowSheet: View {
         case .invoice:
             if let invoice = row.paidInvoice {
                 openLink(.invoice(invoice.id), "Avaa lasku \(invoice.number)", symbol: "doc.text")
+            } else if let purchase = row.paidPurchase {
+                Text("Maksu ostolaskulle: \(purchase.supplierName)").foregroundStyle(Theme.ink2)
+                openLink(.purchaseInvoice(purchase.id), "Avaa ostolasku", symbol: "doc.text")
+                Button(role: .destructive) { Task { await unlinkPurchase(purchase) } } label: {
+                    Label("Irrota ostolaskusta", systemImage: "link")
+                }
             } else {
                 Text("Tämä maksu on kirjattu laskulle.").foregroundStyle(Theme.ink2)
             }
@@ -511,6 +529,12 @@ struct BankRowSheet: View {
         } else {
             NavigationLink(value: route) { Label(title, systemImage: symbol) }
         }
+    }
+
+    /// "Kohdista ostolaskuun": a payment out that waits for a kuitti, has a suggestion, or was set aside.
+    private var purchaseLinkable: Bool {
+        let state = BankFeed.state(of: row)
+        return (state == .missing || state == .suggested || state == .ignored) && PurchaseBankLink.canLink(row)
     }
 
     /// "Etsi kuitti": a kuitti that is waiting or suggested can be chosen by hand.
@@ -608,6 +632,17 @@ struct BankRowSheet: View {
     private func ignore(_ ignored: Bool) async {
         struct Body: Encodable { let transactionId: String; let ignored: Bool }
         await run { let _: Ignored = try await app.api.send("POST", "/api/matching/ignore", body: Body(transactionId: row.id, ignored: ignored)) }
+    }
+
+    /// Removes the purchase payment that holds this row: the invoice reopens if no longer paid, the row is free again.
+    private func unlinkPurchase(_ purchase: BankTransaction.PurchaseBrief) async {
+        await run {
+            let _: Ignored = try await app.api.send(
+                "DELETE", "/api/purchase-invoices/\(purchase.id)/payments", query: ["paymentId": purchase.paymentId], body: Optional<EmptyBody>.none
+            )
+            // The Ostolaskut screens show the invoice open again.
+            app.dataVersion += 1
+        }
     }
 
     private func unlink() async {

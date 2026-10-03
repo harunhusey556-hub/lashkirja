@@ -33,14 +33,36 @@ public enum PurchaseDisplayStatus: String, Codable, Sendable, CaseIterable {
 /// `PublicPurchaseInvoice` from `app/src/lib/purchase-invoices.ts`.
 public struct PurchaseInvoice: Decodable, Sendable, Identifiable, Hashable {
     public struct Payment: Decodable, Sendable, Identifiable, Hashable {
+        /// The bank row that paid it (`payments[].transaction`).
+        public struct BankRow: Decodable, Sendable, Hashable {
+            public let id: String
+            public let statementId: String?
+            public let date: String?
+            public let counterparty: String?
+            /// Signed, as on the statement.
+            public let amount: Decimal
+
+            enum CodingKeys: String, CodingKey { case id, statementId, date, counterparty, amount }
+
+            public init(from decoder: Decoder) throws {
+                let c = try decoder.container(keyedBy: CodingKeys.self)
+                id = try c.decode(String.self, forKey: .id)
+                statementId = try c.decodeIfPresent(String.self, forKey: .statementId)
+                date = try c.decodeIfPresent(String.self, forKey: .date)
+                counterparty = try c.decodeIfPresent(String.self, forKey: .counterparty)
+                amount = try c.decodeMoneyIfPresent(.amount) ?? 0
+            }
+        }
+
         public let id: String
         public let paidDate: String
         public let amount: Decimal
         public let source: String
         public let transactionId: String?
         public let note: String?
+        public let transaction: BankRow?
 
-        enum CodingKeys: String, CodingKey { case id, paidDate, amount, source, transactionId, note }
+        enum CodingKeys: String, CodingKey { case id, paidDate, amount, source, transactionId, note, transaction }
 
         public init(from decoder: Decoder) throws {
             let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -50,9 +72,12 @@ public struct PurchaseInvoice: Decodable, Sendable, Identifiable, Hashable {
             source = try c.decodeIfPresent(String.self, forKey: .source) ?? "manual"
             transactionId = try c.decodeIfPresent(String.self, forKey: .transactionId)
             note = try c.decodeIfPresent(String.self, forKey: .note)
+            transaction = try? c.decodeIfPresent(BankRow.self, forKey: .transaction)
         }
 
         public var isFromBank: Bool { source == "bank" }
+        /// Holds a bank row: removing it ("Irrota") frees the row for another invoice.
+        public var isLinkedToBank: Bool { transactionId != nil }
     }
 
     public let id: String
@@ -336,7 +361,54 @@ public struct PurchaseReceiptLinks: Decodable, Sendable {
 public struct PurchaseMatchResult: Decodable, Sendable {
     public struct Applied: Decodable, Sendable { public let invoiceId: String; public let supplierName: String }
     public struct Skipped: Decodable, Sendable { public let invoiceId: String; public let supplierName: String }
-    public struct Suggestion: Decodable, Sendable { public let invoiceId: String; public let supplierName: String }
+    /// A bank row + purchase invoice pair for the owner: "Hyväksy" posts the payment with the row, "Hylkää" forgets it.
+    public struct Suggestion: Decodable, Sendable, Identifiable, Hashable {
+        public let invoiceId: String
+        public let supplierName: String
+        public let invoiceNumber: String?
+        public let open: Decimal?
+        public let transactionId: String?
+        public let amount: Decimal?
+        public let paidDate: String?
+        public let counterparty: String?
+        public let reasons: [String]
+
+        public var id: String { "\(transactionId ?? ""):\(invoiceId)" }
+
+        enum CodingKeys: String, CodingKey { case invoiceId, supplierName, invoiceNumber, open, transactionId, amount, paidDate, counterparty, reasons }
+
+        public init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            invoiceId = try c.decode(String.self, forKey: .invoiceId)
+            supplierName = try c.decodeIfPresent(String.self, forKey: .supplierName) ?? ""
+            invoiceNumber = try c.decodeIfPresent(String.self, forKey: .invoiceNumber)
+            open = try c.decodeMoneyIfPresent(.open)
+            transactionId = try c.decodeIfPresent(String.self, forKey: .transactionId)
+            amount = try c.decodeMoneyIfPresent(.amount)
+            paidDate = try c.decodeIfPresent(String.self, forKey: .paidDate)
+            counterparty = try c.decodeIfPresent(String.self, forKey: .counterparty)
+            reasons = (try? c.decodeIfPresent([String].self, forKey: .reasons)) ?? []
+        }
+
+        /// Accepting needs the row, its amount and its date (an older server sent only names).
+        public var canAccept: Bool { transactionId != nil && (amount ?? 0) > 0 && paidDate != nil }
+
+        /// "Pankista 25.1.2026 · Tukku Oy · 124,00 €".
+        public var bankLine: String {
+            var parts = ["Pankista" + (paidDate.map { " \(APIDate.displayDay($0))" } ?? "")]
+            if let name = PurchaseBankLinkText.nonEmpty(counterparty) { parts.append(name) }
+            if let amount { parts.append(Money.format(amount)) }
+            return parts.joined(separator: " · ")
+        }
+
+        public var why: String? { BankMatchText.why(reasons) }
+
+        /// The payment "Hyväksy" records: the whole row, dated as the bank dated it.
+        public var acceptBody: PurchasePaymentBody? {
+            guard canAccept, let amount, let paidDate, let transactionId else { return nil }
+            return PurchasePaymentBody(amount: amount, paidDate: paidDate, transactionId: transactionId)
+        }
+    }
 
     public let applied: [Applied]
     public let skippedLocked: [Skipped]
@@ -564,15 +636,17 @@ public struct PurchaseReceiptLink: Encodable, Sendable {
     }
 }
 
-/// The body of `POST /api/purchase-invoices/[id]/payments`.
-public struct PurchasePaymentBody: Encodable, Sendable {
+/// The body of `POST /api/purchase-invoices/[id]/payments`; with `transactionId` the payment is that bank row.
+public struct PurchasePaymentBody: Encodable, Sendable, Equatable {
     public let amount: Decimal
     public let paidDate: String
+    public let transactionId: String?
     public let note: String?
 
-    public init(amount: Decimal, paidDate: String, note: String? = nil) {
+    public init(amount: Decimal, paidDate: String, transactionId: String? = nil, note: String? = nil) {
         self.amount = amount
         self.paidDate = paidDate
+        self.transactionId = transactionId
         self.note = PurchaseInvoicePatch.clean(note)
     }
 

@@ -23,6 +23,7 @@ import { isValidIban, normalizeIban } from "./iban";
 import { buildAging, displayStatus, openPosition, overdueBefore, type AgingReport } from "./invoices";
 import { assertPeriodOpen, PeriodLockedError } from "./period-lock";
 import { planPairs } from "./match-gate";
+import { rejectedPurchasePairs } from "./purchase-bank-match";
 
 export type PurchaseStatus = "open" | "paid" | "cancelled";
 
@@ -73,6 +74,15 @@ export interface PublicPurchaseInvoice {
     source: string;
     transactionId: string | null;
     note: string | null;
+    /** The bank row that paid it ("Irrota" frees the row), when one did. */
+    transaction: {
+      id: string;
+      statementId: string;
+      date: string | null;
+      counterparty: string | null;
+      /** Signed, as on the bank statement: a payment out is negative. */
+      amount: number;
+    } | null;
   }>;
 }
 
@@ -102,10 +112,26 @@ type PurchaseRow = {
     source: string;
     transactionId: string | null;
     note: string | null;
+    transaction?: {
+      id: string;
+      statementId: string;
+      date: Date | null;
+      counterparty: string | null;
+      amountCents: number;
+    } | null;
   }>;
 };
 
-const purchaseInclude = { payments: { orderBy: { paidDate: "asc" as const } } };
+const purchaseInclude = {
+  payments: {
+    orderBy: { paidDate: "asc" as const },
+    include: {
+      transaction: {
+        select: { id: true, statementId: true, date: true, counterparty: true, amountCents: true },
+      },
+    },
+  },
+};
 
 export function toPublicPurchaseInvoice(
   invoice: PurchaseRow,
@@ -155,6 +181,15 @@ export function toPublicPurchaseInvoice(
       source: payment.source,
       transactionId: payment.transactionId,
       note: payment.note,
+      transaction: payment.transaction
+        ? {
+            id: payment.transaction.id,
+            statementId: payment.transaction.statementId,
+            date: payment.transaction.date ? payment.transaction.date.toISOString().slice(0, 10) : null,
+            counterparty: payment.transaction.counterparty,
+            amount: centsToEuros(payment.transaction.amountCents),
+          }
+        : null,
     })),
   };
 }
@@ -518,7 +553,9 @@ export interface RecordPurchasePaymentInput {
  * insert, after a write has taken SQLite's write lock, so two payments that
  * arrive together cannot both fit. A payment that carries a bank row
  * (`transactionId`, or `source: "bank"`) records what the bank says happened
- * and is not refused on amount or date.
+ * and is not refused on the open amount or the date; it must be a payment out
+ * of the owner's account that no other invoice holds, and may be part of the
+ * row (a partial payment) but never more than the row paid.
  */
 /** `db`: the transaction of an idempotent request; without it the payment opens its own. */
 export async function recordPurchasePayment(
@@ -562,7 +599,7 @@ export async function recordPurchasePayment(
     if (input.transactionId) {
       const transaction = await tx.transaction.findFirst({
         where: { id: input.transactionId, statement: { userId } },
-        select: { id: true },
+        select: { id: true, amountCents: true, invoicePayment: { select: { id: true } } },
       });
       if (!transaction) throw new NotFoundError("Tapahtumaa ei löytynyt.");
       const taken = await tx.purchasePayment.findUnique({
@@ -574,6 +611,29 @@ export async function recordPurchasePayment(
           "Tämä pankkitapahtuma on jo kohdistettu ostolaskulle.",
           "TRANSACTION_ALREADY_USED",
           409
+        );
+      }
+      if (transaction.invoicePayment) {
+        throw new AppError(
+          "Tämä pankkitapahtuma on jo kohdistettu myyntilaskulle.",
+          "TRANSACTION_ALREADY_USED",
+          409
+        );
+      }
+      if (transaction.amountCents >= 0) {
+        throw new AppError(
+          "Ostolaskun maksuksi voi kohdistaa vain lähtevän maksun.",
+          "TRANSACTION_NOT_OUTGOING",
+          422
+        );
+      }
+      const rowCents = Math.abs(transaction.amountCents);
+      if (amountCents > rowCents) {
+        throw new AppError(
+          `Maksu on suurempi kuin pankkitapahtuman summa (${formatEur(centsToEuros(rowCents))}).`,
+          "PAYMENT_EXCEEDS_TRANSACTION",
+          422,
+          { rowCents }
         );
       }
     }
@@ -768,20 +828,130 @@ export async function countPurchaseInvoicesByDisplayStatus(
   return { open, overdue, paid, cancelled };
 }
 
+export interface PurchaseMatchSuggestion {
+  invoiceId: string;
+  supplierName: string;
+  invoiceNumber: string | null;
+  /** What is still owed on the invoice. */
+  open: number;
+  transactionId: string;
+  /** What the bank row paid (positive). */
+  amount: number;
+  /** The bank row's date: the payment date "Hyväksy" records. */
+  paidDate: string | null;
+  counterparty: string | null;
+  score: number;
+  /** Exact open amount plus the supplier's name (or a viite in the message): never the amount alone. */
+  reason: "amount_and_party";
+  /** Finnish reasons ("summa sama", "nimi vastaa"). */
+  reasons: string[];
+}
+
 export interface PurchaseMatchResult {
   applied: Array<{ invoiceId: string; supplierName: string; transactionId: string; amount: number }>;
   /** Reference hits that fall inside a closed period and were left alone. */
   skippedLocked: Array<{ invoiceId: string; supplierName: string; transactionId: string }>;
-  suggestions: Array<{
-    invoiceId: string;
-    supplierName: string;
-    transactionId: string;
-    amount: number;
-    /** Exact open amount plus the supplier's name (or a viite in the message): never the amount alone. */
-    reason: "amount_and_party";
-    /** Finnish reasons ("summa sama", "nimi vastaa"). */
-    reasons: string[];
-  }>;
+  /**
+   * Pairs for the owner to accept ("Hyväksy": POST /api/purchase-invoices/[id]/payments
+   * with `transactionId`, `amount`, `paidDate`) or reject (POST /api/purchase-invoices/match/reject).
+   */
+  suggestions: PurchaseMatchSuggestion[];
+}
+
+type OpenPurchase = Prisma.PurchaseInvoiceGetPayload<{ include: { payments: { select: { amountCents: true } } } }>;
+type OutgoingRow = {
+  id: string;
+  amountCents: number;
+  date: Date | null;
+  reference: string | null;
+  message: string | null;
+  counterparty: string | null;
+  receiptId: string | null;
+};
+
+async function loadMatchInputs(userId: string): Promise<{ openInvoices: OpenPurchase[]; outgoing: OutgoingRow[] }> {
+  const openInvoices = await prisma.purchaseInvoice.findMany({
+    where: { userId, status: "open" },
+    include: { payments: { select: { amountCents: true } } },
+  });
+  if (openInvoices.length === 0) return { openInvoices, outgoing: [] };
+  const outgoing = await prisma.transaction.findMany({
+    where: { statement: { userId }, amountCents: { lt: 0 }, purchasePayment: null, invoicePayment: null },
+    select: {
+      id: true,
+      amountCents: true,
+      date: true,
+      reference: true,
+      message: true,
+      counterparty: true,
+      receiptId: true,
+    },
+  });
+  return { openInvoices, outgoing };
+}
+
+/**
+ * The exact open amount AND the supplier's name, inside the payment window
+ * (match-gate.ts); two equally plausible payables give no suggestion. A pair the
+ * owner rejected is not suggested again, and a row documented by another
+ * receipt is left alone (it is that receipt's purchase).
+ */
+async function planPurchaseSuggestions(
+  userId: string,
+  openInvoices: OpenPurchase[],
+  outgoing: OutgoingRow[]
+): Promise<PurchaseMatchSuggestion[]> {
+  if (openInvoices.length === 0 || outgoing.length === 0) return [];
+  const rejected = await rejectedPurchasePairs(userId);
+  const rowById = new Map(outgoing.map((row) => [row.id, row]));
+  const invoiceById = new Map(openInvoices.map((invoice) => [invoice.id, invoice]));
+  const paidOf = (invoice: OpenPurchase) => invoice.payments.reduce((sum, payment) => sum + payment.amountCents, 0);
+  const plan = planPairs(
+    outgoing.map((row) => ({ ...row, amountCents: Math.abs(row.amountCents), counterpartyIban: null })),
+    openInvoices.map((invoice) => ({
+      id: invoice.id,
+      kind: "lasku" as const,
+      date: invoice.issueDate,
+      dueDate: invoice.dueDate,
+      amountCents: invoice.grossCents,
+      openCents: invoice.grossCents - paidOf(invoice),
+      party: invoice.supplierName,
+      reference: invoice.reference,
+      invoiceNumber: invoice.invoiceNumber,
+      iban: invoice.supplierIban,
+    })),
+    (rowId, invoiceId) => {
+      const row = rowById.get(rowId)!;
+      const invoice = invoiceById.get(invoiceId)!;
+      if (invoice.grossCents - paidOf(invoice) <= 0) return false;
+      if (rejected.has(`${rowId}:${invoiceId}`)) return false;
+      if (row.receiptId && row.receiptId !== invoice.receiptId) return false;
+      return !row.date || row.date.getTime() >= invoice.issueDate.getTime();
+    }
+  );
+  return plan.picks.map((pick) => {
+    const invoice = invoiceById.get(pick.candidateId)!;
+    const row = rowById.get(pick.rowId)!;
+    return {
+      invoiceId: invoice.id,
+      supplierName: invoice.supplierName,
+      invoiceNumber: invoice.invoiceNumber,
+      open: centsToEuros(invoice.grossCents - paidOf(invoice)),
+      transactionId: row.id,
+      amount: centsToEuros(Math.abs(row.amountCents)),
+      paidDate: row.date ? row.date.toISOString().slice(0, 10) : null,
+      counterparty: row.counterparty,
+      score: pick.verdict.score,
+      reason: "amount_and_party" as const,
+      reasons: pick.verdict.reasons,
+    };
+  });
+}
+
+/** The suggestions alone, nothing written: what the Ostolaskut list shows as "N ehdotusta". */
+export async function listPurchaseSuggestions(userId: string): Promise<PurchaseMatchSuggestion[]> {
+  const { openInvoices, outgoing } = await loadMatchInputs(userId);
+  return planPurchaseSuggestions(userId, openInvoices, outgoing);
 }
 
 /**
@@ -793,16 +963,8 @@ export async function matchPurchasePaymentsFromBank(
   userId: string,
   now: Date = new Date()
 ): Promise<PurchaseMatchResult> {
-  const openInvoices = await prisma.purchaseInvoice.findMany({
-    where: { userId, status: "open" },
-    include: { payments: { select: { amountCents: true } } },
-  });
+  const { openInvoices, outgoing } = await loadMatchInputs(userId);
   if (openInvoices.length === 0) return { applied: [], suggestions: [], skippedLocked: [] };
-
-  const outgoing = await prisma.transaction.findMany({
-    where: { statement: { userId }, amountCents: { lt: 0 }, purchasePayment: null },
-    select: { id: true, amountCents: true, date: true, reference: true, message: true, counterparty: true },
-  });
 
   const byReference = new Map(
     openInvoices
@@ -810,7 +972,6 @@ export async function matchPurchasePaymentsFromBank(
       .map((invoice) => [invoice.reference as string, invoice])
   );
   const applied: PurchaseMatchResult["applied"] = [];
-  const suggestions: PurchaseMatchResult["suggestions"] = [];
   const skippedLocked: PurchaseMatchResult["skippedLocked"] = [];
   const consumed = new Set<string>();
 
@@ -853,50 +1014,10 @@ export async function matchPurchasePaymentsFromBank(
     byReference.delete(invoice.reference as string);
   }
 
-  // The exact open amount AND the supplier's name, inside the payment window
-  // (match-gate.ts); two equally plausible payables give no suggestion.
-  const remaining = openInvoices.filter((invoice) => !applied.some((entry) => entry.invoiceId === invoice.id));
-  const rowById = new Map(outgoing.map((row) => [row.id, row]));
-  const invoiceById = new Map(remaining.map((invoice) => [invoice.id, invoice]));
-  const plan = planPairs(
-    outgoing
-      .filter((row) => !consumed.has(row.id))
-      .map((row) => ({ ...row, amountCents: Math.abs(row.amountCents), counterpartyIban: null })),
-    remaining.map((invoice) => {
-      const paid = invoice.payments.reduce((sum, payment) => sum + payment.amountCents, 0);
-      return {
-        id: invoice.id,
-        kind: "lasku" as const,
-        date: invoice.issueDate,
-        dueDate: invoice.dueDate,
-        amountCents: invoice.grossCents,
-        openCents: invoice.grossCents - paid,
-        party: invoice.supplierName,
-        reference: invoice.reference,
-        invoiceNumber: invoice.invoiceNumber,
-        iban: invoice.supplierIban,
-      };
-    }),
-    (rowId, invoiceId) => {
-      const row = rowById.get(rowId)!;
-      const invoice = invoiceById.get(invoiceId)!;
-      const paid = invoice.payments.reduce((sum, payment) => sum + payment.amountCents, 0);
-      if (invoice.grossCents - paid <= 0) return false;
-      return !row.date || row.date.getTime() >= invoice.issueDate.getTime();
-    }
+  const suggestions = await planPurchaseSuggestions(
+    userId,
+    openInvoices.filter((invoice) => !applied.some((entry) => entry.invoiceId === invoice.id)),
+    outgoing.filter((row) => !consumed.has(row.id))
   );
-  for (const pick of plan.picks) {
-    const invoice = invoiceById.get(pick.candidateId)!;
-    const row = rowById.get(pick.rowId)!;
-    suggestions.push({
-      invoiceId: invoice.id,
-      supplierName: invoice.supplierName,
-      transactionId: row.id,
-      amount: centsToEuros(Math.abs(row.amountCents)),
-      reason: "amount_and_party",
-      reasons: pick.verdict.reasons,
-    });
-  }
-
   return { applied, suggestions, skippedLocked };
 }

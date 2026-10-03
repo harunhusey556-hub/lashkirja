@@ -35,7 +35,10 @@ const statementInclude = {
       },
       // Which invoice the row paid: the delete dialog, and Pankki's "Maksu laskulle N" (F12).
       invoicePayment: { select: { id: true, invoice: { select: { id: true, number: true } } } },
-      purchasePayment: { select: { id: true } },
+      // Which purchase invoice the row paid: the app's "Avaa ostolasku" and "Irrota".
+      purchasePayment: {
+        select: { id: true, purchaseInvoice: { select: { id: true, supplierName: true } } },
+      },
     },
   },
 };
@@ -47,7 +50,7 @@ async function enrichStatements(
       id: string;
       suggestedReceiptId: string | null;
       invoicePayment?: { id: string; invoice: { id: string; number: number } } | null;
-      purchasePayment?: { id: string } | null;
+      purchasePayment?: { id: string; purchaseInvoice: { id: string; supplierName: string } } | null;
       receipt: {
         id: string;
         vendor: string | null;
@@ -98,6 +101,13 @@ async function enrichStatements(
       settlesInvoice: Boolean(invoicePayment),
       paidInvoice: invoicePayment ? { id: invoicePayment.invoice.id, number: invoicePayment.invoice.number } : null,
       settlesPurchase: Boolean(purchasePayment),
+      paidPurchase: purchasePayment
+        ? {
+            id: purchasePayment.purchaseInvoice.id,
+            supplierName: purchasePayment.purchaseInvoice.supplierName,
+            paymentId: purchasePayment.id,
+          }
+        : null,
       receipt: t.receipt ? publicReceipt(t.receipt) : null,
       suggestedReceipt: t.suggestedReceiptId
         ? suggestedById.get(t.suggestedReceiptId)

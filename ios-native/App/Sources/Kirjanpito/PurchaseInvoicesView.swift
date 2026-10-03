@@ -20,6 +20,9 @@ struct PurchaseInvoicesView: View {
     @State private var payTarget: PurchaseInvoice?
     @State private var deleteTarget: PurchaseInvoice?
     @State private var limit = ShowMore()
+    /// Bank rows the matcher thinks paid an invoice (`GET /api/purchase-invoices/match`), for "N ehdotusta".
+    @State private var suggestions: [PurchaseMatchResult.Suggestion] = []
+    @State private var showSuggestions = false
     /// A link's chip (a VAT figure opens every status); the owner's own pick replaces it.
     /// Kept apart from `filterRaw` so a link never overwrites the chip remembered between visits.
     @State private var linked: PurchaseFilter?
@@ -63,6 +66,7 @@ struct PurchaseInvoicesView: View {
         .disabled(busy)
         .sheet(isPresented: $showNew) { PurchaseInvoiceFormView(existing: nil) }
         .sheet(item: $payTarget) { invoice in PurchasePaymentSheet(invoice: invoice) }
+        .sheet(isPresented: $showSuggestions) { PurchaseSuggestionsSheet(suggestions: suggestions) }
         .confirmationDialog(
             "Poistetaanko ostolasku?",
             isPresented: Binding(get: { deleteTarget != nil }, set: { if !$0 { deleteTarget = nil } }),
@@ -103,8 +107,21 @@ struct PurchaseInvoicesView: View {
                 Button { Task { await runBankMatch() } } label: {
                     Label("Hae ostolaskujen maksut pankista", systemImage: "arrow.left.arrow.right")
                 }
+                if !suggestions.isEmpty {
+                    Button { showSuggestions = true } label: {
+                        HStack {
+                            Label("Maksuehdotukset", systemImage: "link")
+                            Spacer()
+                            Text(PurchaseBankLinkText.suggestionCount(suggestions.count))
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(Theme.accent)
+                            Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(Theme.ink2)
+                        }
+                    }
+                    .accessibilityHint("Hyväksy tai hylkää ehdotetut maksut")
+                }
             } footer: {
-                Text("Kohdistaa pankin lähtevät maksut ostolaskuihin viitenumerolla.")
+                Text("Kohdistaa pankin lähtevät maksut ostolaskuihin viitenumerolla. Summan ja toimittajan perusteella löytyneet ovat ehdotuksia.")
             }
         }
 
@@ -276,6 +293,8 @@ struct PurchaseInvoicesView: View {
         async let freshCounts: PurchaseInvoiceCountsResponse? = try? api.get("/api/purchase-invoices/counts")
         // Optional: a server without recurring purchases (404) simply hides the row.
         async let recurring: RecurringPurchaseList? = try? api.get("/api/recurring-purchases")
+        // Optional too: an older server without the suggestion list simply shows none.
+        async let pending: PurchaseSuggestionList? = try? api.get("/api/purchase-invoices/match")
         do {
             let tagged: PurchaseInvoiceTaggedList = try await app.api.get("/api/purchase-invoices", query: query)
             state = .loaded(tagged.list)
@@ -290,6 +309,7 @@ struct PurchaseInvoicesView: View {
             counts = response.counts
         }
         recurringCount = await recurring.map { $0.activeCount }
+        if let list = await pending { suggestions = list.suggestions.filter(\.canAccept) }
     }
 
     private func runBankMatch() async {
@@ -300,7 +320,10 @@ struct PurchaseInvoicesView: View {
         do {
             let result: PurchaseMatchResult = try await app.api.send("POST", "/api/purchase-invoices/match", body: EmptyBody())
             Haptics.success()
-            withAnimation { message = result.summary }
+            withAnimation {
+                message = result.summary
+                suggestions = result.suggestions.filter(\.canAccept)
+            }
             if !result.applied.isEmpty { app.dataVersion += 1 }
         } catch is CancellationError {
         } catch {
@@ -338,13 +361,15 @@ struct PurchaseInvoiceDetailView: View {
     @State private var failure: String?
 
     enum SheetKind: String, Identifiable {
-        case edit, payment, markPaid, makeRecurring
+        case edit, payment, bankLink, markPaid, makeRecurring
         var id: String { rawValue }
     }
 
     enum ConfirmKind: Identifiable {
         case delete, cancel, reopen, markPaid
         case removePayment(PurchaseInvoice.Payment)
+        /// A payment that holds a bank row: removing it frees the row.
+        case unlinkPayment(PurchaseInvoice.Payment)
 
         var id: String {
             switch self {
@@ -353,6 +378,7 @@ struct PurchaseInvoiceDetailView: View {
             case .reopen: "reopen"
             case .markPaid: "markPaid"
             case .removePayment(let payment): "payment-\(payment.id)"
+            case .unlinkPayment(let payment): "unlink-\(payment.id)"
             }
         }
     }
@@ -409,6 +435,7 @@ struct PurchaseInvoiceDetailView: View {
                 switch kind {
                 case .edit: PurchaseInvoiceFormView(existing: invoice) { updated in apply(updated) }
                 case .payment: PurchasePaymentSheet(invoice: invoice) { updated in apply(updated) }
+                case .bankLink: PurchaseBankLinkSheet(invoice: invoice) { updated in apply(updated) }
                 case .markPaid: PurchaseMarkPaidSheet(invoice: invoice) { updated in apply(updated) }
                 case .makeRecurring:
                     RecurringPurchaseFormSheet(existing: nil, prefill: RecurringPurchaseForm(from: invoice)) { message in
@@ -436,6 +463,8 @@ struct PurchaseInvoiceDetailView: View {
                 Button("Merkitse maksetuksi") { Task { await setStatus(PurchaseStatusChange(status: .paid)) } }
             case .removePayment(let payment):
                 Button("Poista maksu", role: .destructive) { Task { await removePayment(payment) } }
+            case .unlinkPayment(let payment):
+                Button("Irrota", role: .destructive) { Task { await removePayment(payment) } }
             }
         } message: { kind in
             Text(confirmMessage(kind))
@@ -558,28 +587,41 @@ struct PurchaseInvoiceDetailView: View {
                 HStack {
                     VStack(alignment: .leading, spacing: 2) {
                         Text(APIDate.displayDay(payment.paidDate))
-                        let detail = [payment.isFromBank ? "pankista" : nil, payment.note].compactMap { $0 }.joined(separator: " · ")
+                        let detail = PurchaseBankLinkText.paymentDetail(payment)
                         if !detail.isEmpty {
                             Text(detail).font(.caption).foregroundStyle(Theme.ink2)
                         }
                     }
                     Spacer()
                     MoneyText(amount: payment.amount)
+                    if payment.isLinkedToBank {
+                        Button("Irrota") { confirm = .unlinkPayment(payment) }
+                            .buttonStyle(.borderless)
+                            .font(.subheadline)
+                            .foregroundStyle(Theme.danger)
+                            .padding(.leading, 8)
+                            .accessibilityLabel("Irrota pankkitapahtuma \(Money.format(payment.amount))")
+                    }
                 }
                 .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                    Button(role: .destructive) { confirm = .removePayment(payment) } label: {
-                        Label("Poista maksu", systemImage: "trash")
+                    Button(role: .destructive) {
+                        confirm = payment.isLinkedToBank ? .unlinkPayment(payment) : .removePayment(payment)
+                    } label: {
+                        Label(payment.isLinkedToBank ? "Irrota" : "Poista maksu", systemImage: payment.isLinkedToBank ? "link" : "trash")
                     }
                 }
             }
             if invoice.canRecordPayment {
+                Button { sheet = .bankLink } label: { Label("Kohdista pankkitapahtumaan", systemImage: "building.columns") }
                 Button { sheet = .payment } label: { Label("Kirjaa maksu", systemImage: "eurosign.circle") }
             }
         } header: {
             Text("Maksut")
         } footer: {
             if !invoice.payments.isEmpty {
-                Text("Pyyhkäise maksua vasemmalle poistaaksesi sen.")
+                Text("Pyyhkäise maksua vasemmalle poistaaksesi sen. Irrotettu pankkitapahtuma vapautuu kohdistettavaksi uudelleen.")
+            } else if invoice.canRecordPayment {
+                Text("Maksoitko laskun pankista? Kohdista pankkitapahtuma, niin maksu kirjautuu pankin päivällä ja summalla.")
             }
         }
     }
@@ -588,6 +630,7 @@ struct PurchaseInvoiceDetailView: View {
         Menu {
             Button { sheet = .edit } label: { Label("Muokkaa", systemImage: "pencil") }
             if invoice.canRecordPayment {
+                Button { sheet = .bankLink } label: { Label("Kohdista pankkitapahtumaan", systemImage: "building.columns") }
                 Button { sheet = .payment } label: { Label("Kirjaa maksu", systemImage: "eurosign.circle") }
             }
             if invoice.canMarkPaid {
@@ -629,6 +672,7 @@ struct PurchaseInvoiceDetailView: View {
         case .reopen: "Palautetaanko ostolasku avoimeksi?"
         case .markPaid: "Merkitäänkö ostolasku maksetuksi?"
         case .removePayment: "Poistetaanko maksu?"
+        case .unlinkPayment: "Irrotetaanko pankkitapahtuma?"
         case nil: ""
         }
     }
@@ -642,6 +686,8 @@ struct PurchaseInvoiceDetailView: View {
         case .markPaid: return "Kirjatut maksut kattavat laskun summan."
         case .removePayment(let payment):
             return "\(Money.format(payment.amount)) poistetaan ostolaskulta. Ostolasku palaa avoimeksi, jos se ei ole sen jälkeen kokonaan maksettu."
+        case .unlinkPayment(let payment):
+            return "Maksu \(Money.format(payment.amount)) poistetaan ostolaskulta ja pankkitapahtuma vapautuu kohdistettavaksi uudelleen. Ostolasku palaa avoimeksi, jos se ei ole sen jälkeen kokonaan maksettu."
         }
     }
 
