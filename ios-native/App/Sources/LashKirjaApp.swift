@@ -11,25 +11,45 @@ enum AppConfig {
 
 @main
 struct LashKirjaApp: App {
-    @State private var app = AppModel()
+    @State private var app: AppModel
     @Environment(\.scenePhase) private var scenePhase
+
+    init() {
+        let app = AppModel()
+        _app = State(initialValue: app)
+        // Before launch finishes: a notification tap that launched the app must find its delegate.
+        AppNotifications.shared.activate(app: app)
+    }
 
     var body: some Scene {
         WindowGroup {
             RootView()
                 .environment(app)
                 .tint(Theme.accent)
-                .task { await app.start() }
+                .task {
+                    await app.start()
+                    await AppNotifications.shared.appBecameActive()
+                }
                 .onChange(of: scenePhase) { _, phase in
-                    if phase == .active { Task { await app.foreground() } }
+                    if phase == .active {
+                        Task {
+                            await app.foreground()
+                            await AppNotifications.shared.appBecameActive()
+                        }
+                    }
                     if phase == .background {
                         app.background()
                         AppLock.shared.lockIfEnabled()
+                        AppNotifications.shared.scheduleBackgroundRefresh()
                     }
                 }
                 // Links reach the app whatever screen is showing; the sign-in screen takes a
                 // reset link from AppModel when it appears.
                 .onOpenURL { url in app.handle(url: url) }
+        }
+        // Background App Refresh: iOS decides when (if ever) this runs; see AppNotifications.
+        .backgroundTask(.appRefresh(AppNotifications.refreshTaskId)) {
+            await AppNotifications.shared.backgroundRefresh()
         }
     }
 }

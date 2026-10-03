@@ -46,6 +46,7 @@ struct SettingsView: View {
                 NavigationLink(value: Route.passkeys) { SettingRow(title: "Pääsyavaimet", subtitle: "Kirjaudu Face ID:llä ilman salasanaa", symbol: "person.badge.key") }
                 NavigationLink { DevicesView() } label: { SettingRow(title: "Laitteet", subtitle: "Kirjautuneet laitteet", symbol: "iphone") }
                 NavigationLink { AppLockSettingsView() } label: { SettingRow(title: "Sovelluslukitus", subtitle: lockEnabled ? "Käytössä" : "Ei käytössä", symbol: "lock") }
+                NavigationLink { NotificationSettingsView() } label: { SettingRow(title: "Ilmoitukset", subtitle: "Muistutukset kuiteista ja laskuista", symbol: "bell") }
             }
             Section("Tietosuoja ja ohje") {
                 NavigationLink(value: Route.privacy) { SettingRow(title: "Tietosuoja", subtitle: "Tietojen vienti ja tilin sulkeminen", symbol: "hand.raised") }

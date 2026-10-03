@@ -28,6 +28,8 @@ final class AppModel {
     /// A screen to open from outside its tab (a new invoice made from "+"): MainTabView
     /// switches to the tab, pushes the route and clears this.
     var pendingRoute: PendingRoute?
+    /// "Kuvaa kuitti" on a notification: MainTabView opens the camera for this bank row.
+    var pendingCapture: PendingCapture?
     /// A password reset link handed to the app (`lashkirja://…?token=…`), waiting for the
     /// sign-in screen to open the reset form with it.
     var pendingResetLink: String?
@@ -191,7 +193,10 @@ final class AppModel {
         profile = nil
         removedIds = []
         pendingRoute = nil
+        pendingCapture = nil
         removalFailure = nil
+        // This owner's notifications, shown or waiting, and the record of what was shown.
+        AppNotifications.shared.clearForSignOut()
     }
 }
 
@@ -200,4 +205,9 @@ struct MeResponse: Decodable { let user: AuthUser }
 struct PendingRoute: Equatable {
     let tab: AppTab
     let route: Route
+}
+
+struct PendingCapture: Identifiable, Equatable {
+    let id = UUID()
+    let transactionId: String
 }

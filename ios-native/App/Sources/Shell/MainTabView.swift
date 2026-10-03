@@ -42,6 +42,8 @@ struct MainTabView: View {
         .sheet(isPresented: $showAssistant) { AssistantView() }
         // Skipping ("Ohita nyt") keeps them away for a day; Koti then offers to resume them.
         .fullScreenCover(isPresented: Bindable(OnboardingGate.shared).isPresented) { OnboardingView() }
+        // "Kuvaa kuitti" on a notification: the camera for that bank row, whatever tab is showing.
+        .fullScreenCover(item: Bindable(app).pendingCapture) { capture in CaptureFlow(transactionId: capture.transactionId) }
         .overlay(alignment: .top) { OfflineBanner() }
         .alert("Poisto epäonnistui", isPresented: Binding(get: { app.removalFailure != nil }, set: { if !$0 { app.removalFailure = nil } })) {
             Button("OK", role: .cancel) {}
@@ -52,6 +54,10 @@ struct MainTabView: View {
         .onChange(of: app.pendingRoute, initial: true) { _, pending in
             guard let pending else { return }
             app.pendingRoute = nil
+            // A notification tap or a sheet's hand-off: the screen must not open under a sheet.
+            showSettings = false
+            showAssistant = false
+            showAdd = false
             tab = pending.tab
             paths[pending.tab] = NavigationStackRule.collapse((paths[pending.tab] ?? []) + [pending.route])
         }

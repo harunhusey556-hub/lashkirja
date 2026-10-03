@@ -35,6 +35,11 @@ targets:
         NSCameraUsageDescription: "Kameralla kuvaat kuitit kirjanpitoon."
         NSPhotoLibraryUsageDescription: "Valitse kuitin kuva kirjastosta."
         NSFaceIDUsageDescription: "Face ID avaa sovelluksen lukituksen."
+        # Local notifications fed by Background App Refresh (no push: the app is signed with a
+        # free account). Info.plist keys only; no entitlement is needed. The identifier must match
+        # AppNotifications.refreshTaskId.
+        UIBackgroundModes: [fetch]
+        BGTaskSchedulerPermittedIdentifiers: [fi.tiyouba.lashkirja.refresh]
         CFBundleURLTypes:
           - CFBundleURLName: fi.tiyouba.lashkirja
             CFBundleURLSchemes: [lashkirja]
