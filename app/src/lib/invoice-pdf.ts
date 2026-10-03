@@ -9,6 +9,7 @@ import PDFDocument from "pdfkit";
 import { formatIban } from "./iban";
 import { formatReference } from "./finnish-reference";
 import { buildBankBarcode, formatBankBarcode } from "./bank-barcode";
+import { barcodeRects } from "./code128";
 import { pdfFontFiles } from "./pdf-fonts";
 import { pdfMoney, sanitizePdfText, winAnsiCanDraw } from "./pdf-text";
 
@@ -377,14 +378,7 @@ export function renderInvoicePdf(input: InvoicePdfData): Promise<Buffer> {
         })
       : null;
     if (barcode) {
-      doc.fontSize(8).fillColor("#666666").text("Virtuaaliviivakoodi", left, y);
-      doc
-        .font("Courier")
-        .fontSize(9)
-        .fillColor("#000000")
-        .text(formatBankBarcode(barcode), left, doc.y);
-      doc.font(fonts.regular);
-      y = doc.y + 8;
+      y = drawBankBarcode(doc, barcode, { left, y, width, regularFont: fonts.regular });
     }
 
     if (data.seller.terms) {
@@ -536,14 +530,7 @@ export function renderReminderPdf(input: ReminderPdfData): Promise<Buffer> {
         })
       : null;
     if (barcode) {
-      doc.fontSize(8).fillColor("#666666").text("Virtuaaliviivakoodi", left, y);
-      doc
-        .font("Courier")
-        .fontSize(9)
-        .fillColor("#000000")
-        .text(formatBankBarcode(barcode), left, doc.y);
-      doc.font(fonts.regular);
-      y = doc.y + 8;
+      y = drawBankBarcode(doc, barcode, { left, y, width, regularFont: fonts.regular });
     }
 
     if (data.notes) {
@@ -552,4 +539,35 @@ export function renderReminderPdf(input: ReminderPdfData): Promise<Buffer> {
 
     doc.end();
   });
+}
+
+/**
+ * The virtuaaliviivakoodi as bars a bank app or scanner reads (Code 128 C), with its digits
+ * underneath for typing. Moves to a new page when the bars would not fit, since a cut barcode
+ * cannot be scanned. Returns the y below it.
+ */
+function drawBankBarcode(
+  doc: PDFKit.PDFDocument,
+  barcode: string,
+  at: { left: number; y: number; width: number; regularFont: string }
+): number {
+  const barHeight = 36;
+  let y = at.y;
+  if (y + barHeight + 40 > doc.page.height - doc.page.margins.bottom) {
+    doc.addPage();
+    y = doc.page.margins.top;
+  }
+  doc.font(at.regularFont).fontSize(8).fillColor("#666666").text("Virtuaaliviivakoodi", at.left, y);
+  const top = doc.y + 4;
+  const layout = barcodeRects(barcode, { x: at.left, y: top, maxWidth: at.width, height: barHeight });
+  doc.save().fillColor("#000000");
+  for (const bar of layout.rects) doc.rect(bar.x, bar.y, bar.width, bar.height);
+  doc.fill().restore();
+  doc
+    .font("Courier")
+    .fontSize(8)
+    .fillColor("#000000")
+    .text(formatBankBarcode(barcode), at.left, top + barHeight + 4, { width: at.width });
+  doc.font(at.regularFont);
+  return doc.y + 8;
 }

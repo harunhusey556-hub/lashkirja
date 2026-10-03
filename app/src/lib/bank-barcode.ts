@@ -103,3 +103,16 @@ export function decodeBankBarcode(barcode: string): DecodedBarcode | null {
 export function formatBankBarcode(barcode: string): string {
   return barcode.replace(/(.{6})(?=.)/g, "$1 ");
 }
+
+/** Why an invoice gets no barcode, in words the owner can act on; null when it gets one. */
+export function barcodeIssue(input: { iban: string | null | undefined; reference: string; amountCents: number }): string | null {
+  const iban = normalizeIban(input.iban ?? "");
+  if (!iban) return "Lisää yrityksen tilinumero (IBAN) asetuksiin, niin laskuun tulee virtuaaliviivakoodi.";
+  if (!iban.startsWith("FI")) return "Virtuaaliviivakoodi tehdään vain suomalaiselle tilinumerolle (FI).";
+  if (!isValidIban(iban)) return "Tarkista yrityksen tilinumero (IBAN) asetuksista.";
+  const reference = normalizeReference(input.reference ?? "");
+  if (/^RF/i.test(reference)) return "RF-viitteelle ei tehdä virtuaaliviivakoodia; maksaja syöttää viitteen käsin.";
+  if (!isValidReferenceNumber(reference)) return "Laskun viitenumero ei kelpaa virtuaaliviivakoodiin.";
+  if (input.amountCents > MAX_BARCODE_CENTS) return "Yli 999 999,99 euron summaa ei voi esittää virtuaaliviivakoodina.";
+  return buildBankBarcode({ iban, reference, amountCents: input.amountCents }) ? null : "Virtuaaliviivakoodia ei voitu muodostaa.";
+}

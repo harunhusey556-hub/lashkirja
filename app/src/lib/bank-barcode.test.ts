@@ -147,3 +147,26 @@ describe("formatBankBarcode", () => {
     expect(formatted.replace(/\s/g, "")).toBe(barcode);
   });
 });
+
+describe("barcodeIssue", () => {
+  it("is null when the barcode can be made", async () => {
+    const { barcodeIssue } = await import("./bank-barcode");
+    expect(barcodeIssue({ iban: IBAN, reference: REFERENCE, amountCents: 100 })).toBeNull();
+  });
+
+  it("says why there is no barcode", async () => {
+    const { barcodeIssue } = await import("./bank-barcode");
+    expect(barcodeIssue({ iban: null, reference: REFERENCE, amountCents: 100 })).toBe(
+      "Lisää yrityksen tilinumero (IBAN) asetuksiin, niin laskuun tulee virtuaaliviivakoodi."
+    );
+    expect(barcodeIssue({ iban: "SE4550000000058398257466", reference: REFERENCE, amountCents: 100 })).toBe(
+      "Virtuaaliviivakoodi tehdään vain suomalaiselle tilinumerolle (FI)."
+    );
+    expect(barcodeIssue({ iban: IBAN, reference: "RF18539007547034", amountCents: 100 })).toBe(
+      "RF-viitteelle ei tehdä virtuaaliviivakoodia; maksaja syöttää viitteen käsin."
+    );
+    expect(barcodeIssue({ iban: IBAN, reference: REFERENCE, amountCents: MAX_BARCODE_CENTS + 1 })).toBe(
+      "Yli 999 999,99 euron summaa ei voi esittää virtuaaliviivakoodina."
+    );
+  });
+});
