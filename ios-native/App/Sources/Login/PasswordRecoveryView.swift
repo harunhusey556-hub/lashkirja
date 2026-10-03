@@ -3,8 +3,9 @@ import UIKit
 import LashKirjaCore
 
 /// Salasanan palautus (/unohtunut-salasana) and the new password (/palauta-salasana).
-/// The mail link opens the web page; here the owner can paste that link (or its
-/// code), and a `lashkirja://…?token=…` link opens this sheet with the code filled in.
+/// The mail link opens the web page; here the owner can paste that link (or its token), or
+/// type the mail's 6-digit code, and a `lashkirja://…?token=…` link opens this sheet with the
+/// token filled in.
 struct PasswordRecoveryView: View {
     enum Step: Hashable { case request, reset }
 
@@ -66,9 +67,9 @@ struct PasswordRecoveryView: View {
             }
             if sent.mailSent {
                 Section {
-                    Button("Minulla on linkki") { switchTo(.reset) }
+                    Button("Minulla on linkki tai koodi") { switchTo(.reset) }
                 } footer: {
-                    Text("Avaa viestin linkki, tai kopioi se ja liitä tähän sovellukseen.")
+                    Text("Avaa viestin linkki, tai liitä se tähän sovellukseen. Voit myös syöttää viestin 6-numeroisen koodin.")
                 }
             }
         } else {
@@ -83,7 +84,7 @@ struct PasswordRecoveryView: View {
             } header: {
                 Text("Sähköposti")
             } footer: {
-                Text("Kirjoita tilisi sähköpostiosoite. Jos tili löytyy, saat postiin linkin, jolla valitset uuden salasanan. Jos viestiä ei tule, ota yhteyttä tukeen.")
+                Text("Kirjoita tilisi sähköpostiosoite. Jos tili löytyy, saat postiin linkin ja koodin, joilla valitset uuden salasanan. Jos viestiä ei tule, ota yhteyttä tukeen.")
             }
             if let failure { Section { Text(failure).foregroundStyle(Theme.danger) } }
             Section {
@@ -91,7 +92,7 @@ struct PasswordRecoveryView: View {
                     busyLabel("Lähetä linkki", busyText: "Lähetetään…")
                 }
                 .disabled(busy)
-                Button("Minulla on jo linkki") { switchTo(.reset) }
+                Button("Minulla on jo linkki tai koodi") { switchTo(.reset) }
             }
         }
     }
@@ -110,9 +111,21 @@ struct PasswordRecoveryView: View {
                 Label("Liitä leikepöydältä", systemImage: "doc.on.clipboard")
             }
         } header: {
-            Text("Palautuslinkki")
+            Text("Palautuslinkki tai koodi")
         } footer: {
-            Text("Liitä sähköpostin linkki kokonaan. Linkki on voimassa 30 minuuttia.")
+            Text("Liitä linkki tai syötä 6-numeroinen koodi sähköpostista. Ne ovat voimassa 30 minuuttia.")
+        }
+        // The code alone does not say whose it is; the link's token does.
+        if isCode {
+            Section {
+                TextField("Sähköposti", text: $email)
+                    .textContentType(.username)
+                    .keyboardType(.emailAddress)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+            } header: {
+                Text("Tilin sähköposti")
+            }
         }
         Section {
             SecureField("Uusi salasana", text: $password)
@@ -127,7 +140,7 @@ struct PasswordRecoveryView: View {
         if let failure {
             Section {
                 Text(failure).foregroundStyle(Theme.danger)
-                Button("Pyydä uusi linkki") { switchTo(.request) }
+                Button("Pyydä uusi viesti") { switchTo(.request) }
             }
         }
         Section {
@@ -152,6 +165,8 @@ struct PasswordRecoveryView: View {
             Button("Kirjaudu sisään") { dismiss() }
         }
     }
+
+    private var isCode: Bool { AccountCode.normalize(link) != nil }
 
     private func busyLabel(_ text: String, busyText: String) -> some View {
         HStack {
@@ -191,13 +206,21 @@ struct PasswordRecoveryView: View {
     private func reset() async {
         guard !busy else { return }
         failure = nil
-        guard let token = PasswordReset.token(from: link) else {
-            errors = PasswordReset.validate(password: password, repeat: again)
-            failure = "Linkki puuttuu tai on vanhentunut. Pyydä uusi palautuslinkki."
+        // Six digits are the mail's code; anything else must be the link or its token.
+        let digits = AccountCode.normalize(link)
+        let token = digits == nil ? PasswordReset.token(from: link) : nil
+        errors = PasswordReset.validate(password: password, repeat: again)
+        guard digits != nil || token != nil else {
+            failure = "Linkki tai koodi puuttuu tai on vanhentunut. Pyydä uusi palautusviesti."
             Haptics.error()
             return
         }
-        errors = PasswordReset.validate(password: password, repeat: again)
+        let address = email.trimmingCharacters(in: .whitespacesAndNewlines)
+        if digits != nil, address.isEmpty {
+            failure = "Kirjoita tilisi sähköpostiosoite."
+            Haptics.error()
+            return
+        }
         guard errors.isValid else {
             Haptics.error()
             return
@@ -205,12 +228,19 @@ struct PasswordRecoveryView: View {
         busy = true
         defer { busy = false }
         do {
-            let _: Ignored = try await app.api.send("POST", "/api/auth/password/reset", body: ResetPasswordBody(token: token, password: password))
+            if let digits {
+                try await app.auth.resetWithCode(email: address, code: digits, password: password)
+            } else if let token {
+                let _: Ignored = try await app.api.send("POST", "/api/auth/password/reset", body: ResetPasswordBody(token: token, password: password))
+            }
             Haptics.success()
             password = ""
             again = ""
             done = true
         } catch is CancellationError {
+        } catch let error as LKError where digits != nil {
+            Haptics.error()
+            failure = AccountCodeFailure(error).message(serverMessage: error.message)
         } catch {
             Haptics.error()
             failure = error.userMessage

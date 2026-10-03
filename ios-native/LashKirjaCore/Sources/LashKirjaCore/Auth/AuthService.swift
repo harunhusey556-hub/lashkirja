@@ -62,6 +62,38 @@ public actor AuthService: TokenProvider {
         return response.user
     }
 
+    /// Whether this server creates new accounts at all (`SIGNUP_ENABLED`).
+    public func signupStatus() async throws -> SignUpStatus {
+        guard let client else { throw LKError(status: 0, message: LKError.unreachable) }
+        return try await client.get("/api/auth/signup/status")
+    }
+
+    /// Mails a 6-digit code. The answer is the same whether or not the address has an account.
+    public func signupStart(email: String, password: String, firstName: String) async throws -> SignUpStartResponse {
+        guard let client else { throw LKError(status: 0, message: LKError.unreachable) }
+        let body = SignUpStartBody(email: email, password: password, firstName: firstName)
+        return try await client.send("POST", "/api/auth/signup/start", body: body)
+    }
+
+    /// The right code creates the account and answers like `/api/auth/token`: signed in at once.
+    public func signupVerify(email: String, code: String) async throws -> AuthUser {
+        guard let client else { throw LKError(status: 0, message: LKError.unreachable) }
+        let response: TokenResponse = try await client.send("POST", "/api/auth/signup/verify", body: SignUpVerifyBody(email: email, code: code))
+        try await start(response)
+        return response.user
+    }
+
+    public func signupResend(email: String) async throws {
+        guard let client else { throw LKError(status: 0, message: LKError.unreachable) }
+        let _: Ignored = try await client.send("POST", "/api/auth/signup/resend", body: SignUpResendBody(email: email))
+    }
+
+    /// The reset mail's code instead of its link. Signs every device out, like the link does.
+    public func resetWithCode(email: String, code: String, password: String) async throws {
+        guard let client else { throw LKError(status: 0, message: LKError.unreachable) }
+        let _: Ignored = try await client.send("POST", "/api/auth/password/reset", body: ResetWithCodeBody(email: email, code: code, password: password))
+    }
+
     /// A stored, unexpired token: the signed-in user without a network call.
     public func restore() async -> AuthUser? {
         guard let stored = await store.load() else { return nil }

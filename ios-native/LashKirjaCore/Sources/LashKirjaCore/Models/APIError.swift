@@ -50,7 +50,20 @@ extension LKError: CustomNSError, LocalizedError {
 }
 
 public enum APIErrorDecoder {
-    private struct Flat: Decodable { let error: String }
+    /// `error` may be missing when `code` says it all (`{"code":"SIGNUP_EMAIL_TAKEN"}`).
+    private struct Flat: Decodable {
+        let error: String?
+        let code: String?
+        let attemptsLeft: Int?
+        enum CodingKeys: String, CodingKey { case error, code, attemptsLeft }
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            error = try c.decodeIfPresent(String.self, forKey: .error)
+            // Extras of an unexpected type must not cost the sentence in `error`.
+            code = try? c.decodeIfPresent(String.self, forKey: .code)
+            attemptsLeft = try? c.decodeIfPresent(Int.self, forKey: .attemptsLeft)
+        }
+    }
     private struct Nested: Decodable {
         struct Body: Decodable {
             struct Detail: Decodable { let field: String?; let message: String }
@@ -72,11 +85,15 @@ public enum APIErrorDecoder {
         let error: Body
     }
 
-    /// Both server shapes: `{"error":"text"}` and `{"error":{code,message,details}}`.
+    /// Both server shapes: `{"error":"text"}` (optionally with `code` and `attemptsLeft`)
+    /// and `{"error":{code,message,details}}`.
     public static func decode(status: Int, data: Data) -> LKError {
         let decoder = JSONDecoder()
-        if let flat = try? decoder.decode(Flat.self, from: data) {
-            return LKError(status: status, message: flat.error)
+        // A nested `error` object fails the String here and falls through to Nested.
+        if let flat = try? decoder.decode(Flat.self, from: data), flat.error != nil || flat.code != nil {
+            var fields: [String: String] = [:]
+            if let left = flat.attemptsLeft { fields["attemptsLeft"] = String(left) }
+            return LKError(status: status, code: flat.code, message: flat.error ?? LKError.unreachable, fields: fields)
         }
         if let nested = try? decoder.decode(Nested.self, from: data) {
             var fields: [String: String] = [:]
