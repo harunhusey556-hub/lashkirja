@@ -297,7 +297,8 @@ final class POSCoordinator {
                 feed(.cardRead, gen: gen)
                 feed(.processed, gen: gen)
             case .failure(let error):
-                if let updated = (error as? ConfirmPaymentIntentError)?.paymentIntent ?? (error as? ProcessPaymentError)?.paymentIntent {
+                // processPaymentIntent fails with a ConfirmPaymentIntentError when the intent was reached.
+                if let updated = (error as? ConfirmPaymentIntentError)?.paymentIntent {
                     sdkIntent = updated
                 }
                 feed(.failed(Self.sdkFailure(error)), gen: gen)
@@ -456,9 +457,6 @@ final class POSCoordinator {
     private static func declineCode(_ error: Error) -> String? {
         if let confirm = error as? ConfirmPaymentIntentError {
             return confirm.declineCode ?? confirm.apiError?.declineCode ?? confirm.paymentIntent?.lastPaymentError?.declineCode
-        }
-        if let process = error as? ProcessPaymentError {
-            return process.declineCode ?? process.paymentIntent?.lastPaymentError?.declineCode
         }
         // Fall back to any decline code string in userInfo.
         return (error as NSError).userInfo.values.lazy
