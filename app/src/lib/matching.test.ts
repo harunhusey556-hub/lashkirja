@@ -154,17 +154,23 @@ describe("computeSuggestions", () => {
     expect(result).toHaveLength(0);
   });
 
-  it("one receipt vs two candidate rows: greedy picks the higher score", () => {
+  it("one receipt vs two candidate rows: the clearly closer row wins", () => {
     const strong = tx({ id: "txA" }); // same day
-    const weaker = tx({ id: "txB", date: new Date("2026-08-13") }); // 3 days off
+    const weaker = tx({ id: "txB", date: new Date("2026-08-18") }); // 8 days off
     const result = computeSuggestions([weaker, strong], [receipt()], new Set());
     expect(result).toHaveLength(1);
     expect(result[0].transactionId).toBe("txA");
   });
 
+  it("two equally plausible rows for one receipt: no suggestion at all", () => {
+    const first = tx({ id: "txA", date: new Date("2026-08-11") });
+    const second = tx({ id: "txB", date: new Date("2026-08-12") });
+    expect(computeSuggestions([first, second], [receipt()], new Set())).toEqual([]);
+  });
+
   it("flags the winner as competing when a rival scored plausibly", () => {
     const strong = tx({ id: "txA" });
-    const weaker = tx({ id: "txB", date: new Date("2026-08-13") });
+    const weaker = tx({ id: "txB", date: new Date("2026-08-18") });
     const [winner] = computeSuggestions([weaker, strong], [receipt()], new Set());
     // The rival exists, so however good the winner looks it must not auto-post.
     expect(winner.reasons).toContain("competing");
@@ -203,15 +209,27 @@ describe("computeSuggestions", () => {
 });
 
 describe("candidatesFor", () => {
-  it("returns scored shortlist sorted by score, skipping rejected", () => {
+  it("suggest mode lists only gate-eligible receipts, skipping rejected", () => {
     const receipts = [
       receipt({ id: "good" }),
-      receipt({ id: "meh", date: new Date("2026-08-14"), vendor: null }),
+      receipt({ id: "later", date: new Date("2026-08-04") }), // bought 6 days before the row
+      receipt({ id: "meh", date: new Date("2026-08-14"), vendor: null }), // amount only
       receipt({ id: "rejected" }),
     ];
     const result = candidatesFor(tx(), receipts, new Set(["tx1:rejected"]));
-    expect(result.map((c) => c.receiptId)).toEqual(["good", "meh"]);
+    expect(result.map((c) => c.receiptId)).toEqual(["good", "later"]);
     expect(result[0].score).toBeGreaterThan(result[1].score);
+    expect(result[0].explanation).toEqual(expect.arrayContaining(["summa sama", "nimi vastaa", "sama päivä"]));
+  });
+
+  it("search mode adds related receipts after the eligible ones, never date-only ones", () => {
+    const receipts = [
+      receipt({ id: "good" }),
+      receipt({ id: "meh", date: new Date("2026-08-14"), vendor: null }),
+      receipt({ id: "dateOnly", vendor: "Joku Muu", totalAmount: 999 }),
+    ];
+    const result = candidatesFor(tx(), receipts, new Set(), 5, "search");
+    expect(result.map((c) => c.receiptId)).toEqual(["good", "meh"]);
   });
 });
 

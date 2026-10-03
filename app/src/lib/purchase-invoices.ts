@@ -22,6 +22,7 @@ import { isValidBusinessId, isValidReferenceNumber, normalizeBusinessId, normali
 import { isValidIban, normalizeIban } from "./iban";
 import { buildAging, displayStatus, openPosition, overdueBefore, type AgingReport } from "./invoices";
 import { assertPeriodOpen, PeriodLockedError } from "./period-lock";
+import { planPairs } from "./match-gate";
 
 export type PurchaseStatus = "open" | "paid" | "cancelled";
 
@@ -776,7 +777,10 @@ export interface PurchaseMatchResult {
     supplierName: string;
     transactionId: string;
     amount: number;
-    reason: "amount_and_date";
+    /** Exact open amount plus the supplier's name (or a viite in the message): never the amount alone. */
+    reason: "amount_and_party";
+    /** Finnish reasons ("summa sama", "nimi vastaa"). */
+    reasons: string[];
   }>;
 }
 
@@ -797,7 +801,7 @@ export async function matchPurchasePaymentsFromBank(
 
   const outgoing = await prisma.transaction.findMany({
     where: { statement: { userId }, amountCents: { lt: 0 }, purchasePayment: null },
-    select: { id: true, amountCents: true, date: true, reference: true, message: true },
+    select: { id: true, amountCents: true, date: true, reference: true, message: true, counterparty: true },
   });
 
   const byReference = new Map(
@@ -849,24 +853,49 @@ export async function matchPurchasePaymentsFromBank(
     byReference.delete(invoice.reference as string);
   }
 
-  for (const transaction of outgoing) {
-    if (consumed.has(transaction.id)) continue;
-    const magnitude = Math.abs(transaction.amountCents);
-    for (const invoice of openInvoices) {
-      if (applied.some((entry) => entry.invoiceId === invoice.id)) continue;
+  // The exact open amount AND the supplier's name, inside the payment window
+  // (match-gate.ts); two equally plausible payables give no suggestion.
+  const remaining = openInvoices.filter((invoice) => !applied.some((entry) => entry.invoiceId === invoice.id));
+  const rowById = new Map(outgoing.map((row) => [row.id, row]));
+  const invoiceById = new Map(remaining.map((invoice) => [invoice.id, invoice]));
+  const plan = planPairs(
+    outgoing
+      .filter((row) => !consumed.has(row.id))
+      .map((row) => ({ ...row, amountCents: Math.abs(row.amountCents), counterpartyIban: null })),
+    remaining.map((invoice) => {
       const paid = invoice.payments.reduce((sum, payment) => sum + payment.amountCents, 0);
-      const open = invoice.grossCents - paid;
-      if (open <= 0 || magnitude !== open) continue;
-      if (transaction.date && transaction.date.getTime() < invoice.issueDate.getTime()) continue;
-      suggestions.push({
-        invoiceId: invoice.id,
-        supplierName: invoice.supplierName,
-        transactionId: transaction.id,
-        amount: centsToEuros(magnitude),
-        reason: "amount_and_date",
-      });
-      break;
+      return {
+        id: invoice.id,
+        kind: "lasku" as const,
+        date: invoice.issueDate,
+        dueDate: invoice.dueDate,
+        amountCents: invoice.grossCents,
+        openCents: invoice.grossCents - paid,
+        party: invoice.supplierName,
+        reference: invoice.reference,
+        invoiceNumber: invoice.invoiceNumber,
+        iban: invoice.supplierIban,
+      };
+    }),
+    (rowId, invoiceId) => {
+      const row = rowById.get(rowId)!;
+      const invoice = invoiceById.get(invoiceId)!;
+      const paid = invoice.payments.reduce((sum, payment) => sum + payment.amountCents, 0);
+      if (invoice.grossCents - paid <= 0) return false;
+      return !row.date || row.date.getTime() >= invoice.issueDate.getTime();
     }
+  );
+  for (const pick of plan.picks) {
+    const invoice = invoiceById.get(pick.candidateId)!;
+    const row = rowById.get(pick.rowId)!;
+    suggestions.push({
+      invoiceId: invoice.id,
+      supplierName: invoice.supplierName,
+      transactionId: row.id,
+      amount: centsToEuros(Math.abs(row.amountCents)),
+      reason: "amount_and_party",
+      reasons: pick.verdict.reasons,
+    });
   }
 
   return { applied, suggestions, skippedLocked };

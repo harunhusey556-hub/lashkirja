@@ -305,3 +305,93 @@ export async function* streamChatWithTools(
   }
   throw lastError;
 }
+
+/* ------------------------------------------------------------------ */
+/* Reasoned one-shot calls (match review): thinking when supported.    */
+/* ------------------------------------------------------------------ */
+
+export type ReasoningEffort = "low" | "medium" | "high";
+
+/**
+ * The `reasoning_effort` to send with `model`, or null to leave it out.
+ * LLM_REASONING_EFFORT overrides: "low" / "medium" / "high" sends that value
+ * whatever the model, "off" never sends it. Otherwise it is sent only to
+ * models known to accept it on an OpenAI-compatible endpoint: Gemini 2.5 and
+ * later (mapped to thinking_level / thinking_budget), OpenAI o-series and
+ * gpt-5. Anything else (gpt-4o, a local model) gets a plain call.
+ */
+export function reasoningEffortFor(model: string, env: Record<string, string | undefined> = process.env): ReasoningEffort | null {
+  const configured = env.LLM_REASONING_EFFORT?.trim().toLowerCase();
+  if (configured === "off" || configured === "none") return null;
+  const forced = configured === "low" || configured === "medium" || configured === "high" ? configured : null;
+  const name = model.toLowerCase().replace(/^models\//, "");
+  const supported = /^gemini-(2\.5|[3-9])/.test(name) || /^o\d/.test(name) || /^gpt-5/.test(name);
+  if (forced) return forced;
+  return supported ? "medium" : null;
+}
+
+export interface ReasonedAnswer {
+  text: string;
+  model: string | null;
+  reasoning: boolean;
+}
+
+/**
+ * One non-streamed answer for a reasoning task. Providers whose model takes
+ * `reasoning_effort` are tried first. A provider that refuses the parameter
+ * (HTTP 400/422) is asked once more without it, silently; any other failure
+ * moves to the next provider.
+ */
+export async function askReasoned(
+  system: string,
+  user: string,
+  options: { signal?: AbortSignal; maxTokens?: number } = {}
+): Promise<ReasonedAnswer> {
+  const copilotModel = process.env.COPILOT_MODEL || "gpt-4o";
+  const llmModel = llmConfig()?.model ?? "";
+  const ranked = chatProviders()
+    .map((provider) => {
+      const model = provider.id === "copilot" ? copilotModel : llmModel;
+      return { provider, model, effort: reasoningEffortFor(model) };
+    })
+    .sort((a, b) => Number(Boolean(b.effort)) - Number(Boolean(a.effort)));
+  if (ranked.length === 0) throw new Error("provider missing");
+  let lastError: unknown;
+  for (const { provider, model, effort } of ranked) {
+    const body = (withEffort: boolean) => ({
+      messages: [
+        { role: "system", content: system },
+        { role: "user", content: user },
+      ],
+      // Thinking tokens count against the output limit on some endpoints.
+      max_tokens: withEffort ? Math.max(options.maxTokens ?? 0, 8000) : (options.maxTokens ?? 800),
+      ...(withEffort ? { reasoning_effort: effort } : { temperature: 0 }),
+      stream: false,
+    });
+    const attempt = async (withEffort: boolean): Promise<ReasonedAnswer> => {
+      const response = await provider.raw(body(withEffort), options.signal);
+      const data = (await response.json()) as { choices?: Array<{ message?: { content?: unknown } }>; model?: unknown };
+      const content = data.choices?.[0]?.message?.content;
+      const text = typeof content === "string" ? content : "";
+      if (!text.trim()) throw new Error(`${provider.id} returned an empty answer`);
+      return { text, model: typeof data.model === "string" ? data.model : model || null, reasoning: withEffort };
+    };
+    try {
+      if (effort) {
+        try {
+          return await attempt(true);
+        } catch (error) {
+          if (options.signal?.aborted) throw error;
+          if (!(error instanceof ProviderHttpError) || (error.status !== 400 && error.status !== 422)) throw error;
+          // The endpoint does not take reasoning_effort: ask plainly.
+        }
+      }
+      return await attempt(false);
+    } catch (error) {
+      noteFailure(provider, error);
+      if (options.signal?.aborted) throw error;
+      lastError = error;
+    }
+  }
+  throw lastError;
+}

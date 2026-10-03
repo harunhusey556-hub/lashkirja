@@ -768,10 +768,33 @@ describe("POST /api/invoices/match - bank reconciliation", () => {
     expect(await prisma.invoicePayment.count()).toBe(1);
   });
 
+  it("never suggests on the amount alone: the payer must be the customer", async () => {
+    await sentInvoiceWithReference();
+    await createStatementWithTransactions(user.id, {
+      transactions: [{ date: "2026-01-20", amountCents: 125_50, counterparty: "Joku Muu" }],
+    });
+    const result = await readJson(
+      await runMatch(buildRequest("POST", "/api/invoices/match", undefined, { cookie }))
+    );
+    expect(result.suggestions).toEqual([]);
+  });
+
+  it("suggests none when two open invoices fit the payment equally", async () => {
+    await sentInvoiceWithReference();
+    await sentInvoiceWithReference();
+    await createStatementWithTransactions(user.id, {
+      transactions: [{ date: "2026-01-29", amountCents: 125_50, counterparty: "ANNA ASIAKAS" }],
+    });
+    const result = await readJson(
+      await runMatch(buildRequest("POST", "/api/invoices/match", undefined, { cookie }))
+    );
+    expect(result.suggestions).toEqual([]);
+  });
+
   it("only suggests when the amount matches but the reference does not", async () => {
     const invoice = await sentInvoiceWithReference();
     await createStatementWithTransactions(user.id, {
-      transactions: [{ date: "2026-01-15", amountCents: 125_50 }],
+      transactions: [{ date: "2026-01-15", amountCents: 125_50, counterparty: "ANNA ASIAKAS" }],
     });
 
     const result = await readJson(
@@ -782,8 +805,9 @@ describe("POST /api/invoices/match - bank reconciliation", () => {
     expect(result.suggestions[0]).toMatchObject({
       invoiceNumber: invoice.number,
       amount: 125.5,
-      reason: "amount_and_date",
+      reason: "amount_and_party",
     });
+    expect(result.suggestions[0].reasons).toEqual(expect.arrayContaining(["summa sama", "nimi vastaa"]));
     // A suggestion must not touch the books.
     expect(await prisma.invoicePayment.count()).toBe(0);
     expect((await prisma.salesInvoice.findUnique({ where: { id: invoice.id } }))?.status).toBe("sent");

@@ -4,8 +4,11 @@ import { enableBankingStatus } from "./enablebanking/signing";
 import { APP_GUIDE, CHAT_DESTINATIONS, asksToConnectBank, suggestedChatActions } from "./chat-app";
 import { prisma } from "./db";
 import { parseBusinessDetails, generateProfileSummary } from "./onboarding";
-import { centsToEuros } from "./money";
-import { candidatesFor, MatchTx, MatchReceipt, offerableReceiptWhere } from "./matching";
+import { offerableReceiptWhere } from "./matching";
+import { buildMatchProposal, type ChatMatchProposal } from "./chat-match-proposal";
+import { reviewedReceiptMatches } from "./match-review-run";
+
+export { buildMatchProposal, type ChatMatchProposal } from "./chat-match-proposal";
 import { chatProviderConfigured, streamChatWithTools } from "./chat-provider";
 import { CHAT_TOOL_RULES, createChatToolSession, withToolHonesty, type ChatToolSession } from "./chat-tools";
 import type { ChatActionProposal } from "./chat-tools-propose";
@@ -39,16 +42,6 @@ import {
   replyLanguage,
 } from "./chat-policy";
 
-export interface ChatMatchProposal {
-  type: "match_proposal";
-  transactionId: string;
-  receiptId: string;
-  txSummary: string;
-  receiptSummary: string;
-  confidenceScore: number;
-  reasons: string[];
-}
-
 /** What a reply can carry for the owner to confirm: a match, or a tool's proposed action. */
 export type ChatProposal = ChatMatchProposal | ChatActionProposal;
 
@@ -79,32 +72,6 @@ export type PreparedChat =
       /** The turn's owner-scoped tools; their proposal (if any) is stored on the reply. */
       tools: ChatToolSession;
     };
-
-/**
- * One bank row and one receipt as the chat offers them: the summaries the
- * proposal card shows. Shared by the "kohdista" chat turn and a receipt
- * sent to the chat (chat-receipt.ts), so both read alike.
- */
-export function buildMatchProposal(
-  tx: { id: string; date: Date | null; counterparty: string | null; message: string | null; amountCents: number },
-  receipt: { id: string; vendor: string | null; totalAmountCents: number | null; fileName: string },
-  candidate: { score: number; reasons: string[] }
-): ChatMatchProposal {
-  const txDateStr = tx.date ? new Date(tx.date).toLocaleDateString("fi-FI") : "";
-  const txVendor = tx.counterparty || tx.message || "Tuntematon siirto";
-  const txAmt = centsToEuros(tx.amountCents).toFixed(2);
-  const rVendor = receipt.vendor || receipt.fileName;
-  const rAmt = receipt.totalAmountCents ? centsToEuros(receipt.totalAmountCents).toFixed(2) : "?";
-  return {
-    type: "match_proposal",
-    transactionId: tx.id,
-    receiptId: receipt.id,
-    txSummary: `${txVendor} — ${txAmt} € (${txDateStr})`,
-    receiptSummary: `${rVendor} — ${rAmt} € (${receipt.fileName})`,
-    confidenceScore: candidate.score,
-    reasons: candidate.reasons,
-  };
-}
 
 /** A language model is configured, so free-form questions can be answered. */
 export function assistantAvailable(): boolean {
@@ -225,136 +192,93 @@ export async function prepareChat(
   const isMatchIntent = isMatchRequest(userMessage);
 
   if (isMatchIntent) {
-    const unmatchedTxs = await prisma.transaction.findMany({
-      where: {
-        statement: { userId },
-        matchStatus: { in: ["unmatched", "suggested"] },
-        receiptId: null,
-      },
-      select: {
-        id: true,
-        date: true,
-        counterparty: true,
-        amountCents: true,
-        reference: true,
-        message: true,
-        type: true,
-      },
-      orderBy: { date: "desc" },
-      take: 20,
-    });
+    const [unmatched, openReceipts] = await Promise.all([
+      prisma.transaction.count({
+        where: { statement: { userId }, matchStatus: { in: ["unmatched", "suggested"] }, receiptId: null },
+      }),
+      prisma.receipt.count({ where: { userId, linkedTransaction: null, ...offerableReceiptWhere() } }),
+    ]);
 
-    const openReceipts = await prisma.receipt.findMany({
-      where: { userId, linkedTransaction: null, ...offerableReceiptWhere() },
-      select: {
-        id: true,
-        vendor: true,
-        date: true,
-        totalAmountCents: true,
-        type: true,
-        reference: true,
-        invoiceNumber: true,
-        fileName: true,
-      },
-      orderBy: { createdAt: "desc" },
-      take: 20,
-    });
-
-    if (unmatchedTxs.length > 0 && openReceipts.length > 0) {
-      const rejections = await prisma.matchRejection.findMany({
-        where: { transaction: { statement: { userId } } },
-        select: { transactionId: true, receiptId: true },
-      });
-      const rejectedPairs = new Set(
-        rejections.map((r) => `${r.transactionId}:${r.receiptId}`)
-      );
-
-      const txModels: MatchTx[] = unmatchedTxs.map((t) => ({
-        id: t.id,
-        date: t.date,
-        counterparty: t.counterparty,
-        amount: centsToEuros(t.amountCents),
-        reference: t.reference,
-        message: t.message,
-        type: t.type,
-      }));
-
-      const receiptModels: MatchReceipt[] = openReceipts.map((r) => ({
-        id: r.id,
-        vendor: r.vendor,
-        date: r.date,
-        totalAmount: r.totalAmountCents ? centsToEuros(r.totalAmountCents) : null,
-        type: r.type,
-        reference: r.reference,
-        invoiceNumber: r.invoiceNumber,
-      }));
-
-      let bestProposal: ChatMatchProposal | undefined;
-      let matchSources: ChatSource[] | undefined;
-      let highestScore = 0;
-
-      for (const tx of txModels) {
-        const topCandidates = candidatesFor(tx, receiptModels, rejectedPairs, 1);
-        if (topCandidates.length > 0 && topCandidates[0].score > highestScore) {
-          highestScore = topCandidates[0].score;
-          const candidate = topCandidates[0];
-          const rawReceipt = openReceipts.find((r) => r.id === candidate.receiptId);
-          const rawTx = unmatchedTxs.find((t) => t.id === candidate.transactionId);
-
-          if (rawTx && rawReceipt) {
-            const txMonth = monthKey(rawTx.date);
-            const receiptMonth = monthKey(rawReceipt.date);
-            bestProposal = buildMatchProposal(rawTx, rawReceipt, candidate);
-            const proposalSources: ChatSource[] = [];
-            if (txMonth) proposalSources.push({ label: "Tiliotteet", href: statementDrillHref(txMonth) });
-            if (receiptMonth) {
-              proposalSources.push({
-                label: "Kuitit",
-                href: receiptDrillHref({ month: receiptMonth, type: rawReceipt.type === "tulo" ? "tulo" : "meno" }),
-              });
-            }
-            matchSources = proposalSources;
-          }
+    if (unmatched > 0 && openReceipts > 0) {
+      // Only what passed the gate (and, when a model is configured, its review)
+      // is offered. Date-only or vendor-only look-alikes never are; no
+      // suggestion is a valid answer.
+      const { offered, report } = await reviewedReceiptMatches(userId);
+      const ambiguousRows = report.ambiguous.filter((row) => row.target === "receipt").length;
+      const waiting = report.aiAvailable ? report.unreviewed : 0;
+      const best = offered[0];
+      if (best) {
+        const proposal = buildMatchProposal(
+          { id: best.transactionId, date: best.row.date, counterparty: best.row.counterparty, message: best.row.message, amountCents: best.row.amountCents },
+          { id: best.candidateId, vendor: best.candidate.label, totalAmountCents: best.candidate.amountCents, fileName: best.candidate.fileName ?? "" },
+          { score: best.confidence ?? best.score, reasons: [], explanation: best.reasons }
+        );
+        const txMonth = monthKey(best.row.date);
+        const receiptMonth = monthKey(best.candidate.date);
+        const matchSources: ChatSource[] = [];
+        if (txMonth) matchSources.push({ label: "Tiliotteet", href: statementDrillHref(txMonth) });
+        if (receiptMonth) {
+          matchSources.push({
+            label: "Kuitit",
+            href: receiptDrillHref({ month: receiptMonth, type: best.row.amountCents >= 0 ? "tulo" : "meno" }),
+          });
         }
-      }
-
-      if (bestProposal) {
-        const amounts = [bestProposal.txSummary, bestProposal.receiptSummary]
+        const amounts = [proposal.txSummary, proposal.receiptSummary]
           .flatMap((line) => [...line.matchAll(/(\d+\.\d{2})/g)].map((match) => match[1]));
+        const more = offered.length - 1;
+        const tail = english
+          ? more > 0 ? ` ${more} more suggestion${more === 1 ? "" : "s"} can be confirmed in Pankki.` : ""
+          : more > 0 ? ` Pankki-näkymässä odottaa vielä ${more} muuta ehdotusta.` : "";
         return {
           kind: "local",
           reply: english
-            ? "I checked your bank rows and receipts and found one suggestion. Confirm it below. I have not linked them."
-            : "Tarkistin pankkitapahtumasi ja kuitit. Löysin yhden ehdotuksen. Vahvista se alta. En ole vielä yhdistänyt niitä.",
-          proposal: bestProposal,
+            ? `I checked your bank rows and receipts and found a suggestion. Confirm it below. I have not linked them.${tail}`
+            : `Tarkistin pankkitapahtumasi ja kuitit. Löysin ehdotuksen. Vahvista se alta. En ole vielä yhdistänyt niitä.${tail}`,
+          proposal,
           sources: matchSources,
           honesty: {
             performedActions: [],
             allowedAmounts: amounts,
-            allowedRecordIds: [bestProposal.transactionId, bestProposal.receiptId],
-            allowedHrefs: (matchSources ?? []).map((source) => source.href),
+            allowedRecordIds: [proposal.transactionId, proposal.receiptId],
+            allowedHrefs: matchSources.map((source) => source.href),
           },
         };
       }
+      const notes: string[] = [];
+      if (ambiguousRows > 0) {
+        notes.push(
+          english
+            ? `${ambiguousRows} bank row${ambiguousRows === 1 ? " has" : "s have"} two equally likely receipts, so I did not pick one; choose it yourself in Pankki.`
+            : `${ambiguousRows} pankkitapahtumalle sopii kaksi yhtä hyvää kuittia, joten en valinnut kumpaakaan. Valitse oikea itse Pankki-näkymässä.`
+        );
+      }
+      if (waiting > 0) {
+        notes.push(
+          english
+            ? `${waiting} possible match${waiting === 1 ? " is" : "es are"} still being checked.`
+            : `${waiting} mahdollista ehdotusta on vielä tarkistettavana.`
+        );
+      }
       return {
         kind: "local",
-        reply: english
-          ? `No confident match among ${unmatchedTxs.length} open bank rows and ${openReceipts.length} receipts.`
-          : `Avoimista pankkitapahtumista (${unmatchedTxs.length}) ja kuiteista (${openReceipts.length}) ei löytynyt varmaa ehdotusta.`,
+        reply: [
+          english
+            ? `No confident match among ${unmatched} open bank rows and ${openReceipts} receipts.`
+            : `Avoimista pankkitapahtumista (${unmatched}) ja kuiteista (${openReceipts}) ei löytynyt varmaa ehdotusta.`,
+          ...notes,
+        ].join(" "),
       };
     }
 
     const totalTransactions =
-      unmatchedTxs.length === 0
-        ? await prisma.transaction.count({ where: { statement: { userId } } })
-        : unmatchedTxs.length;
+      unmatched === 0 ? await prisma.transaction.count({ where: { statement: { userId } } }) : unmatched;
     return {
       kind: "local",
       reply:
         matchStatusReply({
           totalTransactions,
-          unmatched: unmatchedTxs.length,
-          openReceipts: openReceipts.length,
+          unmatched,
+          openReceipts,
           english,
         }) ?? greetingReply(english),
     };

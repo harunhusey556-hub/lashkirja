@@ -15,7 +15,7 @@ import {
   type ExtractedReceipt,
 } from "./ai";
 import { buildMatchProposal, type ChatMatchProposal } from "./ai-assistant";
-import { candidatesForReceipt, runMatching, type MatchTx } from "./matching";
+import { candidatesForReceipt, runMatching, unambiguousBest, type MatchTx } from "./matching";
 import { centsToEuros } from "./money";
 import { ensureReceiptPreviewImage } from "./preview";
 import {
@@ -361,7 +361,8 @@ async function bestBankRow(userId: string, receipt: StoredReceipt): Promise<Bank
     message: row.message,
     type: row.type,
   }));
-  const [best] = candidatesForReceipt(
+  // Only a gate-eligible row, and only when no other row fits equally well.
+  const best = unambiguousBest(candidatesForReceipt(
     {
       id: receipt.id,
       vendor: receipt.vendor,
@@ -374,8 +375,8 @@ async function bestBankRow(userId: string, receipt: StoredReceipt): Promise<Bank
     },
     txs,
     rejected,
-    1
-  );
+    3
+  ));
   if (!best) return null;
   const row = rows.find((candidate) => candidate.id === best.transactionId);
   if (!row) return null;

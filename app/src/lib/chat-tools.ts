@@ -10,10 +10,15 @@
  */
 import { READ_TOOLS, type ChatTool, type ToolContext } from "./chat-tools-read";
 import { PROPOSAL_TOOLS, type ChatActionProposal } from "./chat-tools-propose";
+import { MATCH_TOOLS } from "./chat-tools-match";
+import type { ChatMatchProposal } from "./chat-match-proposal";
 import { ToolInputError } from "./chat-tools-shared";
 import type { ChatToolDefinition, ChatToolRunner } from "./chat-provider";
 
-export const CHAT_TOOLS: ChatTool[] = [...READ_TOOLS, ...PROPOSAL_TOOLS];
+export const CHAT_TOOLS: ChatTool[] = [...READ_TOOLS, ...PROPOSAL_TOOLS, ...MATCH_TOOLS];
+
+/** What one reply may carry for the owner to confirm. */
+export type ChatToolProposal = ChatActionProposal | ChatMatchProposal;
 
 /** One exact euro figure a tool returned ("1234.56", unsigned as replies cite it). */
 export interface ToolFigure {
@@ -34,8 +39,8 @@ export interface ChatToolSession extends ChatToolRunner {
   figures(): ToolFigure[];
   recordIds(): string[];
   hrefs(): string[];
-  /** The proposal a propose_* tool made on this turn (at most one), to store on the reply. */
-  proposal(): ChatActionProposal | null;
+  /** The proposal a propose_* or review_matches tool made on this turn (at most one), to store on the reply. */
+  proposal(): ChatToolProposal | null;
   calls(): ChatToolCallLog[];
 }
 
@@ -82,7 +87,7 @@ export function createChatToolSession(userId: string, now: Date = new Date(), to
   const byName = new Map(tools.map((tool) => [tool.definition.function.name, tool]));
   const ledger = { figures: [] as ToolFigure[], ids: new Set<string>(), hrefs: new Set<string>() };
   const log: ChatToolCallLog[] = [];
-  let proposal: ChatActionProposal | null = null;
+  let proposal: ChatToolProposal | null = null;
 
   async function run(name: string, argumentsJson: string): Promise<string> {
     const tool = byName.get(name);
@@ -107,7 +112,7 @@ export function createChatToolSession(userId: string, now: Date = new Date(), to
     }
     if (result.ok === true && result.proposal && typeof result.proposal === "object") {
       if (proposal) return fail("One proposal per reply: this reply already carries one. Ask the user to confirm it first.");
-      proposal = result.proposal as ChatActionProposal;
+      proposal = result.proposal as ChatToolProposal;
     }
     const text = JSON.stringify(result);
     if (text.length > RESULT_MAX_CHARS) return fail("The result is too large. Ask again with a smaller limit or a narrower period.");
@@ -146,6 +151,7 @@ export const CHAT_TOOL_RULES = [
   "Resolve relative periods from observedAt (Europe/Helsinki): 'last month' is the previous calendar month, 'last three months' is from/to covering the three months before the current one unless the user includes this month.",
   "Totals in a tool result cover every match; items are one page. If nextCursor is set and the user needs more rows, call again with it.",
   "Tool amounts are exact euros like \"1234.50\"; write them in Finnish form (1 234,50 €) when replying in Finnish.",
+  "To match bank rows with receipts or sales invoices, call review_matches and suggest only what it returns as passed, with its Finnish reasons; it shows the best receipt match as a card to confirm. Never suggest a match yourself.",
   "To create a draft invoice or fix a receipt, call propose_invoice_draft or propose_receipt_update. They only show the user a card to confirm; nothing is written until the user taps Hyväksy. Never say an invoice was created or a receipt changed. If a tool returns ok:false, tell the user what is missing.",
 ].join("\n");
 

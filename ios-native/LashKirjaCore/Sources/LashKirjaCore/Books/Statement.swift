@@ -31,6 +31,8 @@ public struct BankTransaction: Decodable, Sendable, Identifiable, Hashable {
     public let suggestedReceipt: ReceiptBrief?
     /// Up to three scored receipts for an unmatched row (the statement GET adds them).
     public let matchCandidates: [BankMatchCandidate]?
+    /// What the matcher stored with a suggestion: codes plus Finnish "fi:" reasons.
+    public let matchReasons: MatchReasons?
 
     public var title: String {
         if let c = counterparty, !c.isEmpty { return c }

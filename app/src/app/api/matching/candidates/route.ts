@@ -61,7 +61,11 @@ export async function GET(req: NextRequest) {
       ...receipt,
       totalAmount: totalAmountCents == null ? null : centsToEuros(totalAmountCents),
     })),
-    rejectedPairs
+    rejectedPairs,
+    5,
+    // The owner is looking by hand: related receipts may follow the eligible
+    // ones, but a date-only or vendor-only receipt is never listed.
+    "search"
   );
   const byId = new Map(receipts.map((r) => [r.id, r]));
 
@@ -69,6 +73,7 @@ export async function GET(req: NextRequest) {
     candidates: scored.map((c) => ({
       score: c.score,
       reasons: c.reasons,
+      explanation: c.explanation ?? [],
       receipt: byId.get(c.receiptId)
         ? {
             ...byId.get(c.receiptId)!,

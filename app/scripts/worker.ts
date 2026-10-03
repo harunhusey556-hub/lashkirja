@@ -3,6 +3,7 @@ import { syncDueBankConnections } from "../src/lib/enablebanking/sync";
 import { listSyncableImapAccounts, syncImapAccount } from "../src/lib/mail-sync";
 import { drainPendingDocumentJobs } from "../src/lib/document-jobs";
 import { runDueRecurringPurchases } from "../src/lib/recurring-purchases";
+import { runMatchReviewCycle } from "../src/lib/match-review-run";
 
 const SYNC_INTERVAL_MS = 10 * 60 * 1000; // 10 minutes
 
@@ -29,6 +30,18 @@ async function runRecurringPurchaseCycle() {
     );
   } catch (error) {
     console.error(`[${new Date().toISOString()}] Recurring purchase cycle failed`, error);
+  }
+}
+
+/** AI review of uncertain bank-row matches, after the syncs and never inside one (cached per question). */
+async function runMatchReview() {
+  try {
+    const result = await runMatchReviewCycle();
+    if (result.reviewed > 0) {
+      console.log(`[${new Date().toISOString()}] Match review users=${result.users} reviewed=${result.reviewed}`);
+    }
+  } catch (error) {
+    console.error(`[${new Date().toISOString()}] Match review cycle failed`, error);
   }
 }
 
@@ -66,6 +79,7 @@ async function main() {
   await drainPendingDocumentJobs().catch((error) =>
     console.error(`[${new Date().toISOString()}] Document jobs failed`, error)
   );
+  await runMatchReview();
 
   // Schedule loop. Bank sync itself stays on a 6h gate inside syncDueBankConnections.
   setInterval(async () => {
@@ -75,6 +89,7 @@ async function main() {
     await drainPendingDocumentJobs().catch((error) =>
       console.error(`[${new Date().toISOString()}] Document jobs failed`, error)
     );
+    await runMatchReview();
   }, SYNC_INTERVAL_MS);
 }
 

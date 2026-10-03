@@ -2,14 +2,40 @@
 import type { Prisma } from "@/generated/prisma/client";
 import { prisma } from "./db";
 import { centsToEuros } from "./money";
+import {
+  AMBIGUOUS_REASON,
+  decide,
+  ELIGIBLE_MIN,
+  gatePair,
+  normalizeRef,
+  planPairs,
+  type GateCandidate,
+  type GatedPair,
+  type GateRow,
+  type GateVerdict,
+  type MatchKind,
+} from "./match-gate";
+
+import {
+  cachedReviews,
+  mergedReasons,
+  prismaReviewCache,
+  reviewKey,
+  type ReviewCase,
+  type StoredReview,
+} from "./match-review";
+
+export { nameSimilarity, normalizeRef } from "./match-gate";
 import { assertPeriodOpen, PeriodLockedError } from "./period-lock";
 
 /**
- * Deterministic bank-transaction ↔ receipt matcher.
+ * Bank-transaction ↔ receipt matcher.
  *
- * Scoring is transparent and auditable: each signal contributes a fixed
- * weight, thresholds decide suggested vs candidate vs unmatched. AI is never
- * asked to pick a match — it only extracts fields upstream.
+ * The decision is deterministic (lib/match-gate.ts): a pair is suggested only
+ * with hard evidence (exact amount plus viite, IBAN or a strong name match,
+ * or a viite alone for a lasku), only when it is the clear best from both
+ * sides, and dates only rank. An AI review (lib/match-review.ts) may later
+ * veto or explain an uncertain pick; it never adds one the gate refused.
  */
 
 export interface MatchTx {
@@ -39,26 +65,30 @@ export interface ScoredPair {
   transactionId: string;
   receiptId: string;
   score: number;
+  /** Stable codes: viite, amount, iban, vendor, date, competing, ai. */
   reasons: string[];
+  /** Short Finnish reasons for the owner ("viite täsmää", "summa sama"). */
+  explanation?: string[];
+  /** viite + exact amount. */
+  certain?: boolean;
 }
 
-export const SUGGEST_THRESHOLD = 0.85;
-export const CANDIDATE_THRESHOLD = 0.55;
+/** Lowest score of a pair the gate lets through (display default). */
+export const SUGGEST_THRESHOLD = ELIGIBLE_MIN;
+/** Anything below this is at most a search hit, never a suggestion. */
+export const CANDIDATE_THRESHOLD = ELIGIBLE_MIN;
 /** Strong matches link immediately without manual approval. */
 export const AUTO_CONFIRM_THRESHOLD = 0.85;
 
 /**
  * Evidence-based, not score-based. Posting to the books without a human needs
- * proof the pair belongs together, and only two signals are proof:
+ * proof the pair belongs together, and only two signals together are proof:
  *
  *   viite  — the bank reference equals the receipt reference or invoice number
  *   amount — the amounts agree to the cent
  *
- * vendor and date are weak. `date` is pushed for *any* proximity inside a
- * 35-day window, so the old `amount + date` rule auto-posted on little more
- * than "same amount, same month" — two identical MobilePay payments would link
- * to whichever receipt sorted first. `competing` marks a pair that had a
- * plausible rival, which means the evidence is not decisive.
+ * `competing` marks a pair that had another eligible rival, which means the
+ * evidence is not decisive.
  */
 export function shouldAutoConfirm(score: number, reasons: string[]): boolean {
   if (score < AUTO_CONFIRM_THRESHOLD) return false;
@@ -66,234 +96,186 @@ export function shouldAutoConfirm(score: number, reasons: string[]): boolean {
   return reasons.includes("viite") && reasons.includes("amount");
 }
 
-const WEIGHT_VIITE = 0.45;
-const WEIGHT_AMOUNT = 0.45;
-const WEIGHT_VENDOR = 0.3;
-const WEIGHT_DATE = 0.2;
-
-// Invoice date vs payment date: Finnish laskut are paid on 14-30 day terms,
-// card kuitit hit the bank within days.
-const DATE_WINDOW_LASKU_DAYS = 35;
-const DATE_WINDOW_KUITTI_DAYS = 5;
-
-/** Normalize a Finnish viite / invoice number for comparison.
- *  RF-references ("RF18 1009") reduce to the underlying viite. */
-export function normalizeRef(raw: string | null | undefined): string | null {
-  if (!raw) return null;
-  let s = raw.toUpperCase().replace(/[^A-Z0-9]/g, "");
-  if (/^RF\d{2}/.test(s)) s = s.slice(4);
-  s = s.replace(/^0+/, "");
-  return s.length >= 2 ? s : null;
+/** Euros (as the matcher models carry them) to whole cents, sign dropped. */
+function toCents(euros: number): number {
+  return Math.round(Math.abs(euros) * 100);
 }
 
-const LEGAL_SUFFIXES =
-  /\b(OY|OYJ|AB|KY|TMI|T:MI|LTD|OSK|RY|GMBH|INC|AS)\b/g;
-
-function normalizeName(raw: string | null | undefined): string[] {
-  if (!raw) return [];
-  return raw
-    .toUpperCase()
-    .replace(LEGAL_SUFFIXES, " ")
-    .replace(/[^A-ZÄÖÅ0-9]+/g, " ")
-    .split(" ")
-    .filter((t) => t.length >= 2);
+/** A receipt with a viite or an invoice number is a lasku (paid on terms). */
+function receiptKind(receipt: MatchReceipt): MatchKind {
+  return normalizeRef(receipt.reference) || normalizeRef(receipt.invoiceNumber) ? "lasku" : "kuitti";
 }
 
-function levenshteinDistance(a: string, b: string): number {
-  if (a.length === 0) return b.length;
-  if (b.length === 0) return a.length;
-  const matrix = Array.from({ length: a.length + 1 }, () => new Array(b.length + 1).fill(0));
-  for (let i = 0; i <= a.length; i++) matrix[i][0] = i;
-  for (let j = 0; j <= b.length; j++) matrix[0][j] = j;
-  for (let i = 1; i <= a.length; i++) {
-    for (let j = 1; j <= b.length; j++) {
-      if (a[i - 1] === b[j - 1]) {
-        matrix[i][j] = matrix[i - 1][j - 1];
-      } else {
-        matrix[i][j] = Math.min(
-          matrix[i - 1][j - 1] + 1, // substitution
-          matrix[i][j - 1] + 1,     // insertion
-          matrix[i - 1][j] + 1      // deletion
-        );
-      }
-    }
-  }
-  return matrix[a.length][b.length];
+export function txToGateRow(tx: MatchTx): GateRow {
+  return {
+    id: tx.id,
+    date: tx.date,
+    amountCents: toCents(tx.amount),
+    counterparty: tx.counterparty,
+    reference: tx.reference,
+    message: tx.message,
+  };
 }
 
-function fuzzyTokenMatch(t1: string, t2: string): boolean {
-  if (t1 === t2) return true;
-  if (t1.length >= 4 && t2.length >= 4) {
-    // Allow small typos (dist <= 2 for longer words, 1 for shorter ones)
-    const threshold = Math.max(1, Math.floor(Math.min(t1.length, t2.length) / 3));
-    return levenshteinDistance(t1, t2) <= threshold;
-  }
-  return false;
+export function receiptToGateCandidate(receipt: MatchReceipt): GateCandidate {
+  return {
+    id: receipt.id,
+    kind: receiptKind(receipt),
+    date: receipt.date,
+    amountCents: receipt.totalAmount == null ? null : toCents(receipt.totalAmount),
+    party: receipt.vendor,
+    reference: receipt.reference,
+    invoiceNumber: receipt.invoiceNumber,
+  };
 }
 
-/** 0..1 similarity between receipt vendor and a bank-row name/message using fuzzy matching. */
-export function nameSimilarity(
-  vendor: string | null | undefined,
-  bankText: string | null | undefined
-): number {
-  const a = normalizeName(vendor);
-  const b = normalizeName(bankText);
-  if (a.length === 0 || b.length === 0) return 0;
-  let matches = 0;
-  for (const tA of a) {
-    if (b.some(tB => fuzzyTokenMatch(tA, tB))) matches++;
-  }
-  return matches / Math.min(a.length, b.length);
+/** Money direction must agree; transfers and salaries never match a receipt. */
+function directionAllowed(tx: MatchTx, receipt: MatchReceipt): boolean {
+  if (tx.type !== "tulo" && tx.type !== "meno") return false;
+  return receipt.type === tx.type;
 }
 
-function dayDiff(a: Date, b: Date): number {
-  return Math.abs(a.getTime() - b.getTime()) / 86_400_000;
+export interface PairScore {
+  score: number;
+  reasons: string[];
+  explanation: string[];
+  eligible: boolean;
+  certain: boolean;
+  verdict: GateVerdict;
 }
 
-/** Score one tx↔receipt pair. Returns null when the pair is gated out. */
-export function scorePair(
-  tx: MatchTx,
-  receipt: MatchReceipt
-): { score: number; reasons: string[] } | null {
-  // Sign/type gate: money direction must agree; oma_siirto never matches.
-  if (tx.type !== "tulo" && tx.type !== "meno") return null;
-  if (receipt.type !== tx.type) return null;
-
-  let score = 0;
-  const reasons: string[] = [];
-
-  const txRef = normalizeRef(tx.reference);
-  const rRef = normalizeRef(receipt.reference);
-  const rInv = normalizeRef(receipt.invoiceNumber);
-  const viiteHit =
-    txRef !== null && (txRef === rRef || txRef === rInv);
-  if (viiteHit) {
-    score += WEIGHT_VIITE;
-    reasons.push("viite");
-  }
-
-  if (
-    receipt.totalAmount !== null &&
-    receipt.totalAmount > 0 &&
-    Math.abs(Math.abs(tx.amount) - receipt.totalAmount) <= 0.011
-  ) {
-    score += WEIGHT_AMOUNT;
-    reasons.push("amount");
-  }
-
-  const vendorSim = Math.max(
-    nameSimilarity(receipt.vendor, tx.counterparty),
-    nameSimilarity(receipt.vendor, tx.message)
-  );
-  if (vendorSim >= 0.5) {
-    score += WEIGHT_VENDOR * vendorSim;
-    reasons.push("vendor");
-  }
-
-  if (tx.date && receipt.date) {
-    const isLasku = rRef !== null || rInv !== null;
-    const window = isLasku ? DATE_WINDOW_LASKU_DAYS : DATE_WINDOW_KUITTI_DAYS;
-    const proximity = Math.max(0, 1 - dayDiff(tx.date, receipt.date) / window);
-    if (proximity > 0) {
-      score += WEIGHT_DATE * proximity;
-      reasons.push("date");
-    }
-  }
-
-  return { score: Math.round(score * 1000) / 1000, reasons };
+/** Score one tx↔receipt pair. Returns null when the direction gate refuses it. */
+export function scorePair(tx: MatchTx, receipt: MatchReceipt): PairScore | null {
+  if (!directionAllowed(tx, receipt)) return null;
+  const verdict = gatePair(txToGateRow(tx), receiptToGateCandidate(receipt));
+  return {
+    score: verdict.score,
+    reasons: verdict.codes,
+    explanation: verdict.reasons,
+    eligible: verdict.eligible,
+    certain: verdict.certain,
+    verdict,
+  };
 }
 
 function pairKey(transactionId: string, receiptId: string): string {
   return `${transactionId}:${receiptId}`;
 }
 
+function toScored(pair: GatedPair, competing: boolean): ScoredPair {
+  return {
+    transactionId: pair.rowId,
+    receiptId: pair.candidateId,
+    score: pair.verdict.score,
+    reasons: competing ? [...pair.verdict.codes, "competing"] : [...pair.verdict.codes],
+    explanation: [...pair.verdict.reasons],
+    certain: pair.verdict.certain,
+  };
+}
+
+export interface ReceiptPlan {
+  /** Pairs to suggest (or auto-confirm when certain and uncontested). */
+  picks: ScoredPair[];
+  /** Rows whose best receipts tie: listed for the owner, never suggested. */
+  ambiguous: Map<string, ScoredPair[]>;
+  /** Every eligible pair per row, best first. */
+  eligibleByRow: Map<string, ScoredPair[]>;
+}
+
+/** The gate's plan over rows and receipts (rejected pairs and wrong directions left out). */
+export function planReceiptPairs(
+  txs: MatchTx[],
+  receipts: MatchReceipt[],
+  rejectedPairs: Set<string>
+): ReceiptPlan {
+  const txById = new Map(txs.map((tx) => [tx.id, tx]));
+  const receiptById = new Map(receipts.map((r) => [r.id, r]));
+  const plan = planPairs(
+    txs.map(txToGateRow),
+    receipts.map(receiptToGateCandidate),
+    (rowId, candidateId) =>
+      !rejectedPairs.has(pairKey(rowId, candidateId)) &&
+      directionAllowed(txById.get(rowId)!, receiptById.get(candidateId)!)
+  );
+  // A rival on either side (another eligible receipt for the row, another
+  // eligible row for the receipt) keeps a certain pair from posting by itself.
+  const rowsPerReceipt = new Map<string, number>();
+  for (const pairs of plan.eligibleByRow.values()) {
+    for (const pair of pairs) rowsPerReceipt.set(pair.candidateId, (rowsPerReceipt.get(pair.candidateId) ?? 0) + 1);
+  }
+  const competing = (pair: GatedPair) =>
+    (plan.eligibleByRow.get(pair.rowId)?.length ?? 0) > 1 || (rowsPerReceipt.get(pair.candidateId) ?? 0) > 1;
+  return {
+    picks: plan.picks.map((pair) => toScored(pair, competing(pair))),
+    ambiguous: new Map(
+      [...plan.ambiguousRows].map(([rowId, pairs]) => [
+        rowId,
+        pairs.map((pair) => ({ ...toScored(pair, true), explanation: [...pair.verdict.reasons, AMBIGUOUS_REASON] })),
+      ])
+    ),
+    eligibleByRow: new Map(
+      [...plan.eligibleByRow].map(([rowId, pairs]) => [rowId, pairs.map((pair) => toScored(pair, pairs.length > 1))])
+    ),
+  };
+}
+
 /**
- * Score every allowed pair and assign greedily (highest score first) so one
- * receipt is suggested to at most one transaction. Only pairs at or above
- * SUGGEST_THRESHOLD become suggestions.
+ * The pairs to suggest: each eligible pair that is the clear best from both
+ * sides. Two equally plausible receipts (or rows) give no suggestion at all.
  */
 export function computeSuggestions(
   txs: MatchTx[],
   receipts: MatchReceipt[],
   rejectedPairs: Set<string>
 ): ScoredPair[] {
-  // Kept down to CANDIDATE_THRESHOLD rather than SUGGEST_THRESHOLD: a rival
-  // scoring 0.6 is still a reason not to post automatically, and filtering at
-  // 0.85 here would hide exactly the ambiguity the competing check looks for.
-  const plausible: ScoredPair[] = [];
-  for (const tx of txs) {
-    for (const receipt of receipts) {
-      if (rejectedPairs.has(pairKey(tx.id, receipt.id))) continue;
-      const result = scorePair(tx, receipt);
-      if (result && result.score >= CANDIDATE_THRESHOLD) {
-        plausible.push({
-          transactionId: tx.id,
-          receiptId: receipt.id,
-          score: result.score,
-          reasons: result.reasons,
-        });
-      }
-    }
-  }
-
-  const scored = plausible.filter((p) => p.score >= SUGGEST_THRESHOLD);
-  scored.sort((a, b) => b.score - a.score);
-  const usedTx = new Set<string>();
-  const usedReceipt = new Set<string>();
-  const assignments: ScoredPair[] = [];
-  for (const pair of scored) {
-    if (usedTx.has(pair.transactionId) || usedReceipt.has(pair.receiptId)) {
-      continue;
-    }
-    usedTx.add(pair.transactionId);
-    usedReceipt.add(pair.receiptId);
-    assignments.push(pair);
-  }
-
-  // Greedy assignment always produces a single winner, which hides ambiguity:
-  // with two plausible receipts the highest score wins silently. Flag any
-  // winner that had a real rival on either side so it cannot auto-post.
-  // The pair stays a suggestion for the user to resolve.
-  for (const pair of assignments) {
-    const hasRival = plausible.some(
-      (other) =>
-        other !== pair &&
-        (other.transactionId === pair.transactionId ||
-          other.receiptId === pair.receiptId)
-    );
-    if (hasRival && !pair.reasons.includes("competing")) {
-      pair.reasons = [...pair.reasons, "competing"];
-    }
-  }
-
-  return assignments;
+  return planReceiptPairs(txs, receipts, rejectedPairs).picks;
 }
 
-/** Scored shortlist for one transaction ("Valitse kuitti" UI). */
+/**
+ * Shortlist for one bank row. `suggest` (inline picks, the chat) lists only
+ * gate-eligible receipts, ties marked `competing`. `search` ("Etsi kuitti",
+ * the owner looking by hand) adds related receipts (same amount, a viite, or
+ * the same name within the date window) after them, never date-only ones.
+ */
 export function candidatesFor(
   tx: MatchTx,
   receipts: MatchReceipt[],
   rejectedPairs: Set<string>,
-  limit = 5
+  limit = 5,
+  mode: "suggest" | "search" = "suggest"
 ): ScoredPair[] {
-  const scored: ScoredPair[] = [];
+  const scored: Array<ScoredPair & { eligible: boolean }> = [];
   for (const receipt of receipts) {
     if (rejectedPairs.has(pairKey(tx.id, receipt.id))) continue;
     const result = scorePair(tx, receipt);
-    if (result && result.score >= 0.15) {
-      scored.push({
-        transactionId: tx.id,
-        receiptId: receipt.id,
-        score: result.score,
-        reasons: result.reasons,
-      });
-    }
+    if (!result) continue;
+    if (!result.eligible && (mode === "suggest" || result.score <= 0)) continue;
+    scored.push({
+      transactionId: tx.id,
+      receiptId: receipt.id,
+      score: result.score,
+      reasons: result.reasons,
+      explanation: result.explanation,
+      certain: result.certain,
+      eligible: result.eligible,
+    });
   }
-  scored.sort((a, b) => b.score - a.score);
-  return scored.slice(0, limit);
+  const decision = decide(scored.filter((s) => s.eligible).map((s) => ({ ...s, certain: Boolean(s.certain) })));
+  const tied = new Set(decision.ambiguous.map((s) => s.receiptId));
+  const eligibleCount = decision.eligible.length;
+  return scored
+    .sort((a, b) => Number(b.eligible) - Number(a.eligible) || Number(b.certain) - Number(a.certain) || b.score - a.score)
+    .slice(0, limit)
+    .map(({ eligible, ...pair }) => {
+      if (!eligible) return pair;
+      if (tied.has(pair.receiptId)) {
+        return { ...pair, reasons: [...pair.reasons, "competing"], explanation: [...(pair.explanation ?? []), AMBIGUOUS_REASON] };
+      }
+      return eligibleCount > 1 ? { ...pair, reasons: [...pair.reasons, "competing"] } : pair;
+    });
 }
 
-/** Scored shortlist for one receipt ("which bank row fits this kuitti?"). */
+/** Gate-eligible bank rows for one receipt ("which bank row fits this kuitti?"). */
 export function candidatesForReceipt(
   receipt: MatchReceipt,
   txs: MatchTx[],
@@ -304,17 +286,52 @@ export function candidatesForReceipt(
   for (const tx of txs) {
     if (rejectedPairs.has(pairKey(tx.id, receipt.id))) continue;
     const result = scorePair(tx, receipt);
-    if (result && result.score >= 0.15) {
-      scored.push({
-        transactionId: tx.id,
-        receiptId: receipt.id,
-        score: result.score,
-        reasons: result.reasons,
-      });
-    }
+    if (!result?.eligible) continue;
+    scored.push({
+      transactionId: tx.id,
+      receiptId: receipt.id,
+      score: result.score,
+      reasons: result.reasons,
+      explanation: result.explanation,
+      certain: result.certain,
+    });
   }
-  scored.sort((a, b) => b.score - a.score);
-  return scored.slice(0, limit);
+  const decision = decide(scored.map((s) => ({ ...s, certain: Boolean(s.certain) })));
+  const tied = new Set(decision.ambiguous.map((s) => s.transactionId));
+  return decision.eligible.slice(0, limit).map((pair) =>
+    tied.has(pair.transactionId)
+      ? { ...pair, reasons: [...pair.reasons, "competing"], explanation: [...(pair.explanation ?? []), AMBIGUOUS_REASON] }
+      : decision.eligible.length > 1
+        ? { ...pair, reasons: [...pair.reasons, "competing"] }
+        : pair
+  );
+}
+
+/** The one pick a shortlist allows: its best entry, unless that entry ties with another. */
+export function unambiguousBest(list: ScoredPair[]): ScoredPair | null {
+  const [best] = list;
+  if (!best) return null;
+  return best.explanation?.includes(AMBIGUOUS_REASON) ? null : best;
+}
+
+/* ------------------------- stored reasons ------------------------- */
+
+const FI_PREFIX = "fi:";
+
+/** Transaction.matchReasons: the codes, then the Finnish reasons as "fi:" entries
+ *  (the web shows labels for known codes and skips the rest). */
+export function encodeMatchReasons(codes: string[], explanation: string[] = []): string {
+  return JSON.stringify([...codes, ...explanation.map((text) => `${FI_PREFIX}${text}`)]);
+}
+
+/** The Finnish reasons stored on a row, for "Miksi: …". */
+export function matchExplanation(reasons: string[] | null | undefined): string[] {
+  return (reasons ?? []).filter((r) => r.startsWith(FI_PREFIX)).map((r) => r.slice(FI_PREFIX.length));
+}
+
+/** The stable codes stored on a row, without the Finnish reasons. */
+export function matchCodes(reasons: string[] | null | undefined): string[] {
+  return (reasons ?? []).filter((r) => !r.startsWith(FI_PREFIX));
 }
 
 export interface BankTxMatchSummary {
@@ -738,6 +755,87 @@ export function sourceDraftPairs(
   return pairs;
 }
 
+/** The AI review question for a row's pick: the row and its eligible receipts, the pick first. */
+export function receiptReviewCase(
+  tx: MatchTx,
+  pick: ScoredPair,
+  eligible: ScoredPair[],
+  receiptById: Map<string, MatchReceipt>
+): ReviewCase {
+  const ordered = [pick, ...eligible.filter((p) => p.receiptId !== pick.receiptId)].slice(0, 3);
+  return {
+    target: "receipt",
+    row: {
+      id: tx.id,
+      date: isoDay(tx.date),
+      amount: tx.amount.toFixed(2),
+      counterparty: tx.counterparty,
+      message: tx.message,
+      reference: tx.reference,
+    },
+    candidates: ordered.flatMap((pair) => {
+      const receipt = receiptById.get(pair.receiptId);
+      if (!receipt) return [];
+      return [{
+        id: receipt.id,
+        kind: receiptToGateCandidate(receipt).kind,
+        date: isoDay(receipt.date),
+        dueDate: null,
+        amount: receipt.totalAmount == null ? "?" : receipt.totalAmount.toFixed(2),
+        open: null,
+        party: receipt.vendor,
+        reference: receipt.reference,
+        invoiceNumber: receipt.invoiceNumber,
+        gateReasons: pair.explanation ?? [],
+      }];
+    }),
+    gatePickId: pick.receiptId,
+  };
+}
+
+function isoDay(date: Date | null): string | null {
+  return date ? date.toISOString().slice(0, 10) : null;
+}
+
+/** The plan's picks with cached AI reviews applied: vetoed ones dropped, confirmed ones explained. */
+async function applyReviews(
+  userId: string,
+  plan: ReceiptPlan,
+  txs: MatchTx[],
+  receipts: MatchReceipt[]
+): Promise<ScoredPair[]> {
+  const uncertain = plan.picks.filter((p) => !p.certain);
+  if (uncertain.length === 0) return plan.picks;
+  const txById = new Map(txs.map((tx) => [tx.id, tx]));
+  const receiptById = new Map(receipts.map((r) => [r.id, r]));
+  const cases = new Map(
+    uncertain.map((pick) => [
+      pick,
+      receiptReviewCase(txById.get(pick.transactionId)!, pick, plan.eligibleByRow.get(pick.transactionId) ?? [pick], receiptById),
+    ])
+  );
+  let reviews: Map<string, StoredReview>;
+  try {
+    reviews = await cachedReviews(prismaReviewCache(userId), [...cases.values()]);
+  } catch (error) {
+    // The review is advisory: without it the gate's own picks stand.
+    console.error("Reading match reviews failed:", error);
+    return plan.picks;
+  }
+  return plan.picks.flatMap((pick) => {
+    const item = cases.get(pick);
+    if (!item) return [pick];
+    const review = reviews.get(reviewKey(item));
+    if (!review) return [pick];
+    if (!review.accepted) return [];
+    return [{
+      ...pick,
+      reasons: [...pick.reasons, "ai"],
+      explanation: mergedReasons(pick.explanation ?? [], review),
+    }];
+  });
+}
+
 export interface RunMatchingResult {
   autoConfirmed: number;
   suggested: number;
@@ -751,7 +849,8 @@ export interface RunMatchingResult {
  * never re-proposed. Runs globally per user (data volumes are small) so
  * scoped triggers can't leave two transactions suggesting the same receipt.
  */
-export async function runMatching(userId: string): Promise<RunMatchingResult> {
+/** Open bank rows, unlinked receipts and rejected pairs: what the matcher works on. */
+export async function loadMatchingInputs(userId: string) {
   const [rawTxs, rawReceipts, rejections] = await Promise.all([
     prisma.transaction.findMany({
       where: {
@@ -767,6 +866,8 @@ export async function runMatching(userId: string): Promise<RunMatchingResult> {
         reference: true,
         message: true,
         type: true,
+        matchStatus: true,
+        suggestedReceiptId: true,
       },
     }),
     prisma.receipt.findMany({
@@ -801,13 +902,21 @@ export async function runMatching(userId: string): Promise<RunMatchingResult> {
     ...receipt,
     totalAmount: totalAmountCents == null ? null : centsToEuros(totalAmountCents),
   }));
+  return { allTxs, allReceipts, rejectedPairs };
+}
+
+export async function runMatching(userId: string): Promise<RunMatchingResult> {
+  const { allTxs, allReceipts, rejectedPairs } = await loadMatchingInputs(userId);
 
   // An income draft was made from one bank row, so that row is its only match.
   // Scoring it against every row made all MobilePay drafts (same vendor) rivals
   // for all MobilePay rows, and the user had to pick from three look-alikes.
   // A real document still wins the row; the draft only fills an empty one.
   const receipts = allReceipts.filter((r) => !isSourceDraft(r));
-  const documentPairs = computeSuggestions(allTxs, receipts, rejectedPairs);
+  const plan = planReceiptPairs(allTxs, receipts, rejectedPairs);
+  // An uncertain pick the AI review vetoed for exactly this question is not
+  // suggested again; one it confirmed carries its reasons too.
+  const documentPairs = await applyReviews(userId, plan, allTxs, receipts);
   const takenTx = new Set(documentPairs.map((p) => p.transactionId));
   const assignments = [
     ...documentPairs,
@@ -870,7 +979,7 @@ export async function runMatching(userId: string): Promise<RunMatchingResult> {
             matchStatus: "suggested",
             suggestedReceiptId: a.receiptId,
             matchScore: a.score,
-            matchReasons: JSON.stringify(a.reasons),
+            matchReasons: encodeMatchReasons(a.reasons, a.explanation),
           },
         })
       )
@@ -883,6 +992,8 @@ export async function runMatching(userId: string): Promise<RunMatchingResult> {
 export interface InlineMatchCandidate {
   score: number;
   reasons: string[];
+  /** Finnish "Miksi" reasons ("summa sama", "nimi vastaa", "veloitettu 2 päivää oston jälkeen"). */
+  explanation: string[];
   receipt: {
     id: string;
     vendor: string | null;
@@ -892,7 +1003,12 @@ export interface InlineMatchCandidate {
   };
 }
 
-/** Top receipt picks for unmatched rows — shown inline so users skip manual search. */
+/**
+ * Gate-eligible receipt picks for unmatched rows, shown inline so users skip
+ * manual search. Never a date-only or vendor-only pick; a pick the AI review
+ * vetoed is left out; two equally plausible receipts are both listed, marked
+ * for the owner to choose.
+ */
 export async function buildInlineCandidates(
   userId: string,
   txs: Array<{
@@ -937,43 +1053,61 @@ export async function buildInlineCandidates(
   const rejectedPairs = new Set(
     rejections.map((r) => pairKey(r.transactionId, r.receiptId))
   );
-  const receiptModels = receipts.map(({ totalAmountCents, ...receipt }) => ({
+  const receiptModels: MatchReceipt[] = receipts.map(({ totalAmountCents, ...receipt }) => ({
     ...receipt,
     totalAmount: totalAmountCents == null ? null : centsToEuros(totalAmountCents),
   }));
   const receiptById = new Map(receipts.map((r) => [r.id, r]));
+  const modelById = new Map(receiptModels.map((r) => [r.id, r]));
 
+  const lists = new Map<string, ScoredPair[]>();
+  const cases: Array<{ txId: string; pick: ScoredPair; item: ReviewCase }> = [];
   for (const tx of unmatched) {
-    const scored = candidatesFor(
-      { ...tx, amount: centsToEuros(tx.amountCents) },
-      receiptModels,
-      rejectedPairs,
-      3
-    );
+    const model: MatchTx = { ...tx, amount: centsToEuros(tx.amountCents) };
+    const scored = candidatesFor(model, receiptModels, rejectedPairs, 3);
     if (scored.length === 0) continue;
-    result.set(
-      tx.id,
-      scored
-        .map((c) => {
-          const row = receiptById.get(c.receiptId);
-          if (!row) return null;
-          return {
-            score: c.score,
-            reasons: c.reasons,
-            receipt: {
-              id: row.id,
-              vendor: row.vendor,
-              date: row.date,
-              totalAmount:
-                row.totalAmountCents == null
-                  ? null
-                  : centsToEuros(row.totalAmountCents),
-              fileName: row.fileName,
-            },
-          };
-        })
-        .filter((c): c is InlineMatchCandidate => c !== null)
-    );
+    lists.set(tx.id, scored);
+    const best = unambiguousBest(scored);
+    if (best && !best.certain) cases.push({ txId: tx.id, pick: best, item: receiptReviewCase(model, best, scored, modelById) });
+  }
+
+  if (cases.length > 0) {
+    try {
+      const reviews = await cachedReviews(prismaReviewCache(userId), cases.map((c) => c.item));
+      for (const { txId, pick, item } of cases) {
+        const review = reviews.get(reviewKey(item));
+        if (!review) continue;
+        const list = lists.get(txId)!;
+        lists.set(
+          txId,
+          review.accepted
+            ? list.map((c) => (c === pick ? { ...c, explanation: mergedReasons(c.explanation ?? [], review) } : c))
+            : list.filter((c) => c !== pick)
+        );
+      }
+    } catch (error) {
+      console.error("Reading match reviews failed:", error);
+    }
+  }
+
+  for (const [txId, scored] of lists) {
+    const candidates = scored.flatMap((c) => {
+      const row = receiptById.get(c.receiptId);
+      if (!row) return [];
+      return [{
+        score: c.score,
+        reasons: c.reasons,
+        explanation: c.explanation ?? [],
+        receipt: {
+          id: row.id,
+          vendor: row.vendor,
+          date: row.date,
+          totalAmount: row.totalAmountCents == null ? null : centsToEuros(row.totalAmountCents),
+          fileName: row.fileName,
+        },
+      }];
+    });
+    if (candidates.length > 0) result.set(txId, candidates);
   }
 
   return result;

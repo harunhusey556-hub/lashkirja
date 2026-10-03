@@ -577,8 +577,21 @@ describe("POST /api/purchase-invoices/match", () => {
     );
     expect(result.applied).toHaveLength(0);
     expect(result.suggestions).toHaveLength(1);
-    expect(result.suggestions[0]).toMatchObject({ amount: 124, reason: "amount_and_date" });
+    expect(result.suggestions[0]).toMatchObject({ amount: 124, reason: "amount_and_party" });
+    expect(result.suggestions[0].reasons).toEqual(expect.arrayContaining(["summa sama", "nimi vastaa"]));
     expect(await prisma.purchasePayment.count()).toBe(0);
+  });
+
+  it("never suggests on the amount alone: the payee must be the supplier", async () => {
+    await makePurchase();
+    await outgoing(-124_00, { counterparty: "Joku Muu" });
+
+    const result = await readJson(
+      await runPurchaseMatch(
+        buildRequest("POST", "/api/purchase-invoices/match", undefined, { cookie })
+      )
+    );
+    expect(result.suggestions).toHaveLength(0);
   });
 
   it("ignores incoming money", async () => {

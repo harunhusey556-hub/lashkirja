@@ -468,7 +468,12 @@ struct BankRowSheet: View {
             Button { Task { await ignore(true) } } label: { Label("Ei ole myyntiä", systemImage: "nosign") }
         case .suggested:
             if let suggested = row.suggestedReceipt {
-                Text("Ehdotus: \(suggested.vendor ?? "kuitti")").foregroundStyle(Theme.ink2)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Ehdotus: \(suggested.vendor ?? "kuitti")").foregroundStyle(Theme.ink2)
+                    if let why = BankFeed.matchWhy(row) {
+                        Text(why).font(.caption).foregroundStyle(Theme.ink2)
+                    }
+                }
                 Button { Task { await confirm(suggested.id) } } label: { Label("Kohdista kuitti", systemImage: "link") }
                 Button { Task { await reject(suggested.id) } } label: { Label("Väärä kuitti", systemImage: "xmark") }
             }
@@ -548,7 +553,12 @@ struct BankRowSheet: View {
         if let receipt = candidate.receipt {
             Button { Task { await confirm(receipt.id) } } label: {
                 HStack {
-                    Text(BankMatchText.receiptLabel(receipt)).foregroundStyle(Theme.ink).lineLimit(2)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(BankMatchText.receiptLabel(receipt)).foregroundStyle(Theme.ink).lineLimit(2)
+                        if let why = candidate.why {
+                            Text(why).font(.caption).foregroundStyle(Theme.ink2).lineLimit(3)
+                        }
+                    }
                     Spacer()
                     Text("\(candidate.percent) %").font(.caption).foregroundStyle(Theme.ink2)
                 }

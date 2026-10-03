@@ -226,7 +226,7 @@ describe("Minor: the match preview respects period locks", () => {
     await send(invoice.id);
     await createStatementWithTransactions(user.id, {
       periodMonth: "2026-02",
-      transactions: [{ date: "2026-02-10", amountCents: 125_50 }],
+      transactions: [{ date: "2026-02-10", amountCents: 125_50, counterparty: "Anna Asiakas" }],
     });
     const preview = await readJson(
       await previewMatch(buildRequest("GET", "/api/invoices/match", undefined, { cookie }))

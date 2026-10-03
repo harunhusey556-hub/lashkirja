@@ -109,7 +109,8 @@ describe("POST /api/ai/chat/receipt", () => {
       receiptSummary: "K-Market — 8.90 € (kuitti.jpg)",
     });
     expect(body.assistantMessage.proposal.confidenceScore).toBeGreaterThan(0.85);
-    expect(body.assistantMessage.proposal.reasons).toContain("amount");
+    // The card says why, in Finnish, never with an internal code.
+    expect(body.assistantMessage.proposal.reasons).toEqual(["summa sama", "nimi vastaa", "sama päivä"]);
     expect(body.assistantMessage.sources).toEqual(
       expect.arrayContaining([
         { label: "Avaa kuitti", href: `/kuitit/kuitti?id=${body.receiptId}` },
@@ -225,6 +226,21 @@ describe("POST /api/ai/chat/receipt", () => {
   });
 });
 
+describe("POST /api/ai/chat/receipt never proposes a weak match", () => {
+  it("vendor and date alone, without the amount, give no proposal", async () => {
+    await bankRow(user.id, { date: "2026-09-20", amountCents: -1_290, counterparty: "K-Market" });
+    const { body } = await send(jpeg(20));
+    expect(body.assistantMessage.proposal).toBeNull();
+  });
+
+  it("two equally fitting bank rows give no proposal", async () => {
+    await bankRow(user.id, { date: "2026-09-20", amountCents: -890, counterparty: "K-Market" });
+    await bankRow(user.id, { date: "2026-09-21", amountCents: -890, counterparty: "K-Market" });
+    const { body } = await send(jpeg(21));
+    expect(body.assistantMessage.proposal).toBeNull();
+  });
+});
+
 describe("PATCH /api/ai/chat accepting a receipt proposal", () => {
   it("approves the pending receipt and links it to the bank row", async () => {
     const tx = await bankRow(user.id, { date: "2026-09-20", amountCents: -890, counterparty: "K-Market" });
@@ -243,7 +259,9 @@ describe("PATCH /api/ai/chat accepting a receipt proposal", () => {
 
   it("refuses an incomplete pending receipt with 422 and links nothing", async () => {
     const tx = await bankRow(user.id, { date: "2026-09-20", amountCents: -890, counterparty: "K-Market" });
-    extracted = { ...READ, totalAmount: null, vatDetails: [] };
+    // Read without an amount: only its viite ties it to the row.
+    extracted = { ...READ, totalAmount: null, vatDetails: [], reference: "1232" };
+    await prisma.transaction.update({ where: { id: tx.id }, data: { reference: "1232" } });
     const { body } = await send(jpeg(11));
     expect(body.assistantMessage.proposal).toMatchObject({ transactionId: tx.id });
 

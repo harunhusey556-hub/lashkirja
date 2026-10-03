@@ -135,7 +135,7 @@ struct ChatProposalCardView: View {
     }
 
     private var reasonsLine: String? {
-        let parts = proposal.reasons.filter { !$0.isEmpty } + [ChatProposalCard.confidenceLabel(proposal.confidenceScore)].compactMap { $0 }
+        let parts = [BankMatchText.why(proposal.reasons), ChatProposalCard.confidenceLabel(proposal.confidenceScore)].compactMap { $0 }
         return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }
 

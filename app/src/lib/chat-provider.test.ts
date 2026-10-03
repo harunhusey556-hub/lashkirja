@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { askChat, chatProviderConfigured, streamChat } from "./chat-provider";
+import { askChat, askReasoned, chatProviderConfigured, reasoningEffortFor, streamChat } from "./chat-provider";
 import { copilotPaused, resetCopilotPauseForTests } from "./copilot";
 
 function sseBody(...deltas: string[]): ReadableStream<Uint8Array> {
@@ -94,5 +94,59 @@ describe("chat provider chain", () => {
     expect(chatProviderConfigured()).toBe(false);
     vi.stubEnv("LLM_API_KEY", "key");
     expect(chatProviderConfigured()).toBe(true);
+  });
+});
+
+describe("reasoning (thinking) for the match review", () => {
+  it("is sent only to models that take it, and can be forced or turned off", () => {
+    expect(reasoningEffortFor("gemini-2.5-flash", {})).toBe("medium");
+    expect(reasoningEffortFor("gemini-3.1-flash-lite", {})).toBe("medium");
+    expect(reasoningEffortFor("models/gemini-3-pro", {})).toBe("medium");
+    expect(reasoningEffortFor("o4-mini", {})).toBe("medium");
+    expect(reasoningEffortFor("gpt-4o", {})).toBeNull();
+    expect(reasoningEffortFor("gemini-2.0-flash", {})).toBeNull();
+    expect(reasoningEffortFor("llama3", { LLM_REASONING_EFFORT: "high" })).toBe("high");
+    expect(reasoningEffortFor("gemini-2.5-pro", { LLM_REASONING_EFFORT: "off" })).toBeNull();
+    expect(reasoningEffortFor("gemini-2.5-pro", { LLM_REASONING_EFFORT: "low" })).toBe("low");
+  });
+
+  it("asks the thinking model first with reasoning_effort, and falls back silently when refused", async () => {
+    vi.stubEnv("LLM_CHAT_MODEL", "gemini-2.5-flash");
+    const bodies: Array<Record<string, unknown>> = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init?: RequestInit) => {
+        if (url.includes("copilot")) throw new Error("copilot must not be asked first");
+        const body = JSON.parse(String(init?.body));
+        bodies.push(body);
+        if (body.reasoning_effort) return new Response("unknown field reasoning_effort", { status: 400 });
+        return new Response(JSON.stringify({ model: "gemini-2.5-flash", choices: [{ message: { content: '{"match":null}' } }] }));
+      })
+    );
+    const answer = await askReasoned("sys", "data");
+    expect(answer).toEqual({ text: '{"match":null}', model: "gemini-2.5-flash", reasoning: false });
+    expect(bodies[0]).toMatchObject({ model: "gemini-2.5-flash", reasoning_effort: "medium" });
+    expect(bodies[0].temperature).toBeUndefined();
+    expect(bodies[1].reasoning_effort).toBeUndefined();
+  });
+
+  it("reports thinking when the endpoint takes it, and never sends it to a model without it", async () => {
+    vi.stubEnv("LLM_CHAT_MODEL", "gemini-3.1-flash-lite");
+    vi.stubEnv("COPILOT_GITHUB_TOKEN", "");
+    const bodies: Array<Record<string, unknown>> = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: string, init?: RequestInit) => {
+        bodies.push(JSON.parse(String(init?.body)));
+        return new Response(JSON.stringify({ choices: [{ message: { content: "{}" } }] }));
+      })
+    );
+    expect((await askReasoned("sys", "data")).reasoning).toBe(true);
+
+    vi.stubEnv("LLM_CHAT_MODEL", "gpt-4o-mini");
+    bodies.length = 0;
+    expect((await askReasoned("sys", "data")).reasoning).toBe(false);
+    expect(bodies[0].reasoning_effort).toBeUndefined();
+    expect(bodies[0].temperature).toBe(0);
   });
 });

@@ -19,10 +19,45 @@ public struct BankMatchCandidate: Decodable, Sendable, Hashable {
 
     public let score: Double
     public let reasons: [String]?
+    /// Finnish reasons ("summa sama", "nimi vastaa", "veloitettu 2 päivää oston jälkeen").
+    public let explanation: [String]?
     public let receipt: Receipt?
 
     /// "87 %" as the web shows it.
     public var percent: Int { Int((score * 100).rounded()) }
+
+    /// "Miksi: summa sama · nimi vastaa", or nil when the server gave no reasons.
+    public var why: String? { BankMatchText.why(explanation ?? []) }
+}
+
+/// `Transaction.matchReasons`: a JSON array stored as text (the statement GET)
+/// or sent as an array. Codes ("viite", "amount") are for the program; the
+/// "fi:" entries are the Finnish reasons for people. Anything unreadable is empty.
+public struct MatchReasons: Decodable, Sendable, Hashable {
+    public let entries: [String]
+
+    public init(entries: [String]) { self.entries = entries }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        if let list = try? container.decode([String].self) {
+            entries = list
+        } else if let text = try? container.decode(String.self),
+                  let data = text.data(using: .utf8),
+                  let list = try? JSONDecoder().decode([String].self, from: data) {
+            entries = list
+        } else {
+            entries = []
+        }
+    }
+
+    /// The Finnish reasons, without the "fi:" prefix.
+    public var finnish: [String] {
+        entries.filter { $0.hasPrefix("fi:") }.map { String($0.dropFirst(3)) }.filter { !$0.isEmpty }
+    }
+
+    /// The AI review confirmed this suggestion.
+    public var reviewed: Bool { entries.contains("ai") }
 }
 
 public struct BankMatchCandidates: Decodable, Sendable {
@@ -38,6 +73,21 @@ public enum BankMatchText {
         if let amount = r.totalAmount { parts.append(Money.format(amount)) }
         if let date = r.date { parts.append(APIDate.displayDay(date)) }
         return parts.joined(separator: " · ")
+    }
+
+    /// "Miksi: viite täsmää · summa sama · maksettu 3 päivää eräpäivän jälkeen".
+    /// Older chat cards stored codes; they read as Finnish, and internal ones are dropped.
+    private static let codeText: [String: String?] = [
+        "viite": "viite täsmää", "amount": "summa sama", "vendor": "nimi vastaa", "iban": "tilinumero sama",
+        "date": nil, "competing": nil, "ai": nil, "manual": nil, "auto_income": nil, "approved": nil,
+    ]
+
+    public static func why(_ reasons: [String]) -> String? {
+        let parts = reasons
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .compactMap { reason -> String? in codeText.keys.contains(reason) ? codeText[reason] ?? nil : reason }
+            .filter { !$0.isEmpty }
+        return parts.isEmpty ? nil : "Miksi: " + parts.joined(separator: " · ")
     }
 }
 
@@ -86,6 +136,11 @@ extension BankFeed {
     public static func query(month: String?) -> [String: String] {
         guard let month, !month.isEmpty else { return [:] }
         return ["month": month]
+    }
+
+    /// Why the matcher suggested the row's receipt, as the sheet shows it.
+    public static func matchWhy(_ row: BankTransaction) -> String? {
+        BankMatchText.why(row.matchReasons?.finnish ?? [])
     }
 
     /// Kuitti suggestions that "Kohdista kaikki" would link (sales are approved one by one).

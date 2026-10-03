@@ -15,6 +15,8 @@ import { formatDate, formatEur } from "./format";
 import { allocateInvoiceNumber, peekInvoiceNumber, releaseInvoiceNumber } from "./invoice-sequence";
 import { helsinkiCalendarDate, isoDateToUtc, periodScopeBoundsUtc } from "./validation";
 import { normalizeReference, referenceForInvoice } from "./finnish-reference";
+import { planPairs, type GateCandidate, type GatedPair, type GateVerdict } from "./match-gate";
+import { cachedReviews, prismaReviewCache, reviewKey, type ReviewCase } from "./match-review";
 import {
   adjustVatRateForDate,
   applySellerVatRules,
@@ -1578,8 +1580,148 @@ export interface BankMatchResult {
     amount: number;
     /** The bank row's booking date, the payment date a confirm would book. */
     paidDate: string;
-    reason: "amount_and_date";
+    /** Exact open amount plus the payer's name (or IBAN): never the amount alone. */
+    reason: "amount_and_party";
+    /** Finnish reasons ("summa sama", "nimi vastaa", "maksettu 3 päivää eräpäivän jälkeen"). */
+    reasons: string[];
+    score: number;
   }>;
+}
+
+/** An incoming bank row as the invoice-payment gate reads it. */
+export interface InvoicePaymentRow {
+  id: string;
+  amountCents: number;
+  date: Date | null;
+  reference: string | null;
+  message: string | null;
+  counterparty: string | null;
+}
+
+/** An open sales invoice as the invoice-payment gate reads it. */
+export interface InvoicePaymentInvoice {
+  id: string;
+  number: number;
+  reference: string;
+  issueDate: Date;
+  dueDate: Date;
+  grossCents: number;
+  payments: Array<{ amountCents: number }>;
+  customer: { name: string };
+}
+
+export interface InvoicePaymentPick<R extends InvoicePaymentRow = InvoicePaymentRow, I extends InvoicePaymentInvoice = InvoicePaymentInvoice> {
+  transaction: R;
+  invoice: I;
+  verdict: GateVerdict;
+}
+
+function invoiceGateCandidate(invoice: InvoicePaymentInvoice): GateCandidate {
+  const paid = invoice.payments.reduce((sum, payment) => sum + payment.amountCents, 0);
+  return {
+    id: invoice.id,
+    kind: "lasku",
+    date: invoice.issueDate,
+    dueDate: invoice.dueDate,
+    amountCents: invoice.grossCents,
+    openCents: invoice.grossCents - paid,
+    party: invoice.customer.name,
+    reference: invoice.reference,
+    invoiceNumber: String(invoice.number),
+  };
+}
+
+/**
+ * Which incoming rows most likely pay which open invoice, by the gate alone.
+ * A row that does not reach the invoice's open amount, or that only matches
+ * on amount, is never picked; a row paid before the invoice was issued neither.
+ */
+export function planInvoicePaymentSuggestions<R extends InvoicePaymentRow, I extends InvoicePaymentInvoice>(
+  rows: R[],
+  invoices: I[]
+): { picks: Array<InvoicePaymentPick<R, I>>; ambiguous: Map<string, Array<InvoicePaymentPick<R, I>>>; eligibleByRow: Map<string, Array<InvoicePaymentPick<R, I>>> } {
+  const incoming = rows.filter((row) => row.amountCents > 0);
+  const open = invoices.filter((invoice) => {
+    const paid = invoice.payments.reduce((sum, payment) => sum + payment.amountCents, 0);
+    return invoice.grossCents - paid > 0;
+  });
+  const rowById = new Map(incoming.map((row) => [row.id, row]));
+  const invoiceById = new Map(open.map((invoice) => [invoice.id, invoice]));
+  const plan = planPairs(
+    incoming.map((row) => ({ ...row, counterpartyIban: null })),
+    open.map(invoiceGateCandidate),
+    (rowId, invoiceId) => {
+      const row = rowById.get(rowId)!;
+      const invoice = invoiceById.get(invoiceId)!;
+      return !row.date || row.date.getTime() >= invoice.issueDate.getTime();
+    }
+  );
+  const toPick = (pair: GatedPair): InvoicePaymentPick<R, I> => ({
+    transaction: rowById.get(pair.rowId)!,
+    invoice: invoiceById.get(pair.candidateId)!,
+    verdict: pair.verdict,
+  });
+  return {
+    picks: plan.picks.map(toPick),
+    ambiguous: new Map([...plan.ambiguousRows].map(([rowId, pairs]) => [rowId, pairs.map(toPick)])),
+    eligibleByRow: new Map([...plan.eligibleByRow].map(([rowId, pairs]) => [rowId, pairs.map(toPick)])),
+  };
+}
+
+function isoDayOf(date: Date | null): string | null {
+  return date ? date.toISOString().slice(0, 10) : null;
+}
+
+/** The AI review question for an invoice-payment pick: the row and its eligible invoices, the pick first. */
+export function salesReviewCase(pick: InvoicePaymentPick, eligible: InvoicePaymentPick[] = [pick]): ReviewCase {
+  const ordered = [pick, ...eligible.filter((p) => p.invoice.id !== pick.invoice.id)].slice(0, 3);
+  return {
+    target: "sales_invoice",
+    row: {
+      id: pick.transaction.id,
+      date: isoDayOf(pick.transaction.date),
+      amount: centsToEuros(pick.transaction.amountCents).toFixed(2),
+      counterparty: pick.transaction.counterparty,
+      message: pick.transaction.message,
+      reference: pick.transaction.reference,
+    },
+    candidates: ordered.map((entry) => {
+      const gate = invoiceGateCandidate(entry.invoice);
+      return {
+        id: entry.invoice.id,
+        kind: "myyntilasku" as const,
+        date: isoDayOf(entry.invoice.issueDate),
+        dueDate: isoDayOf(entry.invoice.dueDate),
+        amount: centsToEuros(entry.invoice.grossCents).toFixed(2),
+        open: gate.openCents === entry.invoice.grossCents ? null : centsToEuros(gate.openCents ?? 0).toFixed(2),
+        party: entry.invoice.customer.name,
+        reference: entry.invoice.reference,
+        invoiceNumber: String(entry.invoice.number),
+        gateReasons: entry.verdict.reasons,
+      };
+    }),
+    gatePickId: pick.invoice.id,
+  };
+}
+
+/** Rows whose invoice pick the AI review vetoed for exactly this question. */
+async function vetoedSalesPicks(
+  userId: string,
+  picks: InvoicePaymentPick[],
+  eligibleByRow: Map<string, InvoicePaymentPick[]>
+): Promise<Set<string>> {
+  const uncertain = picks.filter((pick) => !pick.verdict.certain);
+  if (uncertain.length === 0) return new Set();
+  try {
+    const cases = uncertain.map((pick) => salesReviewCase(pick, eligibleByRow.get(pick.transaction.id)));
+    const reviews = await cachedReviews(prismaReviewCache(userId), cases);
+    return new Set(
+      cases.filter((item) => reviews.get(reviewKey(item))?.accepted === false).map((item) => item.row.id)
+    );
+  } catch (error) {
+    console.error("Reading match reviews failed:", error);
+    return new Set();
+  }
 }
 
 /** A reference hit the run would book, as the confirmation sheet lists it. */
@@ -1623,7 +1765,7 @@ export async function matchInvoicePaymentsFromBank(
       amountCents: { gt: 0 },
       invoicePayment: null,
     },
-    select: { id: true, amountCents: true, date: true, reference: true, message: true },
+    select: { id: true, amountCents: true, date: true, reference: true, message: true, counterparty: true },
   });
   // A closed period is left alone by the run, so the preview must say the same
   // thing the run will do, and a suggestion there could never be confirmed.
@@ -1706,27 +1848,29 @@ export async function matchInvoicePaymentsFromBank(
     byReference.delete(invoice.reference);
   }
 
-  // Weaker signal: exact open amount, paid on or after the invoice was issued.
-  for (const transaction of incoming) {
-    if (consumed.has(transaction.id)) continue;
-    if (isDateLocked(lockedThrough, paidDateOf(transaction))) continue;
-    for (const invoice of openInvoices) {
-      if (applied.some((entry) => entry.invoiceId === invoice.id)) continue;
-      const paid = invoice.payments.reduce((sum, payment) => sum + payment.amountCents, 0);
-      const open = invoice.grossCents - paid;
-      if (open <= 0 || transaction.amountCents !== open) continue;
-      if (transaction.date && transaction.date.getTime() < invoice.issueDate.getTime()) continue;
-      suggestions.push({
-        invoiceId: invoice.id,
-        invoiceNumber: invoice.number,
-        customerName: invoice.customer.name,
-        transactionId: transaction.id,
-        amount: centsToEuros(transaction.amountCents),
-        paidDate: paidDateOf(transaction),
-        reason: "amount_and_date",
-      });
-      break;
-    }
+  // Weaker signal: the exact open amount AND the payer's name, inside the
+  // payment window (match-gate.ts). An amount alone is never a suggestion, two
+  // equally plausible invoices give none, and a pair the AI review vetoed for
+  // the same question stays out.
+  const open = incoming.filter(
+    (transaction) => !consumed.has(transaction.id) && !isDateLocked(lockedThrough, paidDateOf(transaction))
+  );
+  const remaining = openInvoices.filter((invoice) => !applied.some((entry) => entry.invoiceId === invoice.id));
+  const plan = planInvoicePaymentSuggestions(open, remaining);
+  const vetoed = await vetoedSalesPicks(userId, plan.picks, plan.eligibleByRow);
+  for (const pick of plan.picks) {
+    if (vetoed.has(pick.transaction.id)) continue;
+    suggestions.push({
+      invoiceId: pick.invoice.id,
+      invoiceNumber: pick.invoice.number,
+      customerName: pick.invoice.customer.name,
+      transactionId: pick.transaction.id,
+      amount: centsToEuros(pick.transaction.amountCents),
+      paidDate: paidDateOf(pick.transaction),
+      reason: "amount_and_party",
+      reasons: pick.verdict.reasons,
+      score: pick.verdict.score,
+    });
   }
 
   if (options.dryRun) return { applied: [], suggestions, skippedLocked, preview };
