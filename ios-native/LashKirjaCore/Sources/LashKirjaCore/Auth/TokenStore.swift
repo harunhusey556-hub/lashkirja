@@ -2,7 +2,7 @@ import Foundation
 
 public protocol TokenStore: Sendable {
     func load() async -> StoredToken?
-    func save(_ token: StoredToken) async
+    func save(_ token: StoredToken) async throws
     func clear() async
     func loadPendingRevoke() async -> String?
     func savePendingRevoke(_ token: String?) async

@@ -21,7 +21,8 @@ struct CaptureFlow: View {
     enum Step { case pick, queue, edit(rowId: String, draft: ReceiptDraft) }
     /// Where a picked file's bytes come from; read only when its turn comes, so ten photos are
     /// never all in memory at once.
-    enum Source { case camera(UIImage), photo(PhotosPickerItem), file(URL) }
+    /// `refused`: a picked file that was never copied (too large, empty); its row fails with the reason.
+    enum Source { case camera(UIImage), photo(PhotosPickerItem), file(URL), refused(String) }
     /// A file as it is sent: photos re-encoded to JPEG, PDFs as they are.
     struct Encoded: Sendable { let data: Data; let name: String; let mimeType: String }
 
@@ -36,6 +37,8 @@ struct CaptureFlow: View {
     @State private var photos: [PhotosPickerItem] = []
     @State private var confirmDiscard = false
     @State private var importFailure: String?
+    /// Copying picked files off the main actor; cancelled when the flow closes.
+    @State private var importTask: Task<Void, Never>?
     @State private var limit = ShowMore()
 
     /// Matching a bank row takes exactly one receipt, and never goes to the offline queue
@@ -200,33 +203,43 @@ struct CaptureFlow: View {
         startWorker()
     }
 
-    /// Files picked from Files are copied to the app's temporary folder at once: the access to
-    /// the original ends with this call.
+    /// Files picked from Files are copied to the app's temporary folder, off the main actor (a
+    /// large PDF must not freeze the screen): the access to the originals is opened here, while
+    /// the picker's grant is fresh, and closed once each copy is made. A file over the limit is
+    /// sized from its metadata and never copied.
     private func importFiles(_ result: Result<[URL], Error>) {
         let urls: [URL]
         switch result {
         case .success(let picked): urls = picked
         case .failure: importFailure = "Tiedostoa ei voitu avata."; return
         }
-        var picks: [(ReceiptUploadQueue.Pick, Source)] = []
-        var unreadable = 0
-        for url in urls {
-            let scoped = url.startAccessingSecurityScopedResource()
-            defer { if scoped { url.stopAccessingSecurityScopedResource() } }
-            let copy = FileManager.default.temporaryDirectory
-                .appendingPathComponent("kuitti-\(UUID().uuidString)")
-                .appendingPathExtension(url.pathExtension)
-            do {
-                try FileManager.default.copyItem(at: url, to: copy)
-            } catch {
-                unreadable += 1
-                continue
+        let scoped = urls.map { ($0, $0.startAccessingSecurityScopedResource()) }
+        let maxBytes = ReceiptUploadQueue.maxBytes
+        importTask = Task {
+            var picks: [(ReceiptUploadQueue.Pick, Source)] = []
+            var unreadable = 0
+            for (url, didScope) in scoped {
+                var copied: Result<LocalFile.Copied, LocalFile.Problem> = .failure(.unreadable)
+                if !Task.isCancelled { copied = await LocalFile.copyToTemporary(url, prefix: "kuitti", maxBytes: maxBytes) }
+                if didScope { url.stopAccessingSecurityScopedResource() }
+                switch copied {
+                case .success(let copy):
+                    picks.append((ReceiptUploadQueue.Pick(name: url.lastPathComponent, size: copy.size), .file(copy.url)))
+                case .failure(.unreadable):
+                    unreadable += 1
+                case .failure(let problem):
+                    picks.append((ReceiptUploadQueue.Pick(name: url.lastPathComponent, size: nil), .refused(problem.message(maxBytes: maxBytes))))
+                }
             }
-            let size = (try? copy.resourceValues(forKeys: [.fileSizeKey]))?.fileSize
-            picks.append((ReceiptUploadQueue.Pick(name: url.lastPathComponent, size: size), .file(copy)))
+            importTask = nil
+            // Closed meanwhile: the copies are not kept.
+            guard !Task.isCancelled else {
+                for case (_, .file(let copy)) in picks { try? FileManager.default.removeItem(at: copy) }
+                return
+            }
+            add(picks)
+            if unreadable > 0 { importFailure = unreadable == 1 ? "Yhtä tiedostoa ei voitu avata." : "\(unreadable) tiedostoa ei voitu avata." }
         }
-        add(picks)
-        if unreadable > 0 { importFailure = unreadable == 1 ? "Yhtä tiedostoa ei voitu avata." : "\(unreadable) tiedostoa ei voitu avata." }
     }
 
     // MARK: Sending
@@ -263,6 +276,10 @@ struct CaptureFlow: View {
     private func process(_ id: String, name: String) async {
         guard let source = sources[id] else {
             queue.markFailed(id, "Tiedostoa ei voitu lukea.")
+            return
+        }
+        if case .refused(let reason) = source {
+            queue.markFailed(id, reason)
             return
         }
         queue.markUploading(id)
@@ -340,10 +357,12 @@ struct CaptureFlow: View {
             let jpeg = await Task.detached(priority: .userInitiated) { ReceiptImageEncoder.jpeg(fromData: data) }.value
             return jpeg.map { Encoded(data: $0, name: name, mimeType: "image/jpeg") }
         case .file(let url):
-            guard let data = try? await Task.detached(priority: .userInitiated, operation: { try Data(contentsOf: url) }).value else { return nil }
+            guard case .success(let data) = await LocalFile.read(url, maxBytes: ReceiptUploadQueue.maxBytes) else { return nil }
             if ReceiptUploadFile.isPDF(name: name) { return Encoded(data: data, name: name, mimeType: "application/pdf") }
             let jpeg = await Task.detached(priority: .userInitiated) { ReceiptImageEncoder.jpeg(fromData: data) }.value
             return jpeg.map { Encoded(data: $0, name: ReceiptUploadFile.jpegName(for: name), mimeType: "image/jpeg") }
+        case .refused:
+            return nil
         }
     }
 
@@ -357,6 +376,7 @@ struct CaptureFlow: View {
     }
 
     private func close() {
+        importTask?.cancel()
         stopWorker()
         removeTemporaryFiles()
         dismiss()

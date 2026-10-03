@@ -17,7 +17,7 @@ final class KeychainTokenStoreTests: XCTestCase {
         try requireKeychain()
         let store = KeychainTokenStore(account: "test.\(UUID().uuidString)")
         let token = StoredToken(token: "T", expiresAt: Date(timeIntervalSince1970: 2_000_000_000), issuedAt: Date(timeIntervalSince1970: 1_000_000_000), userId: "u")
-        await store.save(token)
+        try await store.save(token)
         let loaded = await store.load()
         XCTAssertEqual(loaded, token)
         await store.savePendingRevoke("R")

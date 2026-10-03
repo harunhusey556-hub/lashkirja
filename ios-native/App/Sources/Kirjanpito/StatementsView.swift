@@ -116,20 +116,28 @@ struct StatementsView: View {
 
     private func upload(_ url: URL) async {
         guard !uploading else { return }
-        guard url.startAccessingSecurityScopedResource() else { return }
-        defer { url.stopAccessingSecurityScopedResource() }
-        guard let data = try? Data(contentsOf: url) else {
-            uploadMessage = "Tiedostoa ei voitu lukea."
+        // Busy from the first moment: the file is read before the request, and a second pick
+        // must not start meanwhile.
+        uploading = true
+        defer { uploading = false }
+        uploadFailed = false
+        uploadMessage = "Käsitellään tiliotetta…"
+        let scoped = url.startAccessingSecurityScopedResource()
+        // Sized first (the server's statement limit), then read off the main actor.
+        let read = await LocalFile.read(url, maxBytes: LocalFile.statementMaxBytes)
+        if scoped { url.stopAccessingSecurityScopedResource() }
+        let data: Data
+        switch read {
+        case .success(let bytes): data = bytes
+        case .failure(let problem):
+            uploadMessage = problem.message(maxBytes: LocalFile.statementMaxBytes)
             uploadFailed = true
+            Haptics.error()
             return
         }
         var form = Multipart()
         form.addFile("file", filename: url.lastPathComponent.replacingOccurrences(of: "\"", with: ""), mimeType: "application/octet-stream", data: data)
         if !targetAccountId.isEmpty { form.addField("bankAccountId", targetAccountId) }
-        uploading = true
-        uploadFailed = false
-        uploadMessage = "Käsitellään tiliotetta…"
-        defer { uploading = false }
         do {
             let response = try await app.api.raw("POST", "/api/statements", body: form.finalize(), contentType: form.contentType)
             let result = try? JSONDecoder().decode(StatementUploadResult.self, from: response.body)

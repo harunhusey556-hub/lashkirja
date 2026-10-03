@@ -285,6 +285,10 @@ extension LoginView {
         do {
             app.enter(try await app.auth.passkeySignIn(verify))
         } catch is CancellationError {
+        } catch let error as LKError where error.code == "KEYCHAIN" {
+            // Signed in on the server but the phone could not keep the session: say so, not "offline".
+            Haptics.error()
+            failure = error.message
         } catch let error as LKError {
             fail(PasskeySignInFailure.fromVerify(status: error.status), error.message)
         } catch {

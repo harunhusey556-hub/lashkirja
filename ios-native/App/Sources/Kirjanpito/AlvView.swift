@@ -11,6 +11,8 @@ struct AlvView: View {
     @State private var notice: String?
     /// The mark being saved ("filed", "paid", "undo"), so its button shows progress and the others wait.
     @State private var busy: String?
+    /// Bumped by every load: only the latest one's answer is shown.
+    @State private var loadGeneration = 0
 
     private var kind: VatKind { VatKind(key: period) }
     private var today: String { APIDate.dayString(Date()) }
@@ -316,10 +318,23 @@ struct AlvView: View {
         }
     }
 
+    /// An answer (or failure) is shown only while its period (and so its kind) is still on screen
+    /// and no later load has started: a slow pull-to-refresh or a load from before a period
+    /// change must not put another period's figures under this one's heading.
     private func load() async {
-        do { state = .loaded(try await app.api.get("/api/alv", query: ["period": period])) }
+        let asked = period
+        loadGeneration += 1
+        let mine = loadGeneration
+        do {
+            let report: AlvReport = try await app.api.get("/api/alv", query: ["period": asked])
+            guard asked == period, mine == loadGeneration else { return }
+            state = .loaded(report)
+        }
         catch is CancellationError {}
-        catch { state = .failed(error.userMessage) }
+        catch {
+            guard asked == period, mine == loadGeneration else { return }
+            state = .failed(error.userMessage)
+        }
     }
 
     /// PATCH /api/alv/filing: `filed: false` undoes both marks, `paid` needs a filed return.
@@ -328,14 +343,18 @@ struct AlvView: View {
         guard busy == nil else { return }
         busy = filed == false || paid == false ? "undo" : filed == true ? "filed" : "paid"
         defer { busy = nil }
+        let asked = period
         do {
-            let _: Ignored = try await app.api.send("PATCH", "/api/alv/filing", body: Body(period: period, filed: filed, paid: paid))
+            let _: Ignored = try await app.api.send("PATCH", "/api/alv/filing", body: Body(period: asked, filed: filed, paid: paid))
+            // Another period is on screen now: its notes are not this mark's.
+            guard asked == period else { return }
             Haptics.success()
             failure = nil
             notice = done
             await load()
         } catch is CancellationError {
         } catch {
+            guard asked == period else { return }
             notice = nil
             failure = error.userMessage
             Haptics.error()

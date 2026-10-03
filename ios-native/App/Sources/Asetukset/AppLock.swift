@@ -15,8 +15,10 @@ final class AppLock {
     private(set) var isLocked = false
     private(set) var failures = 0
     private(set) var waitUntil: Date?
+    /// A PIN is being stretched (off the main actor); the PIN fields wait for it.
+    private(set) var checking = false
     private let service = "fi.tiyouba.lashkirja.lock"
-    private static let rounds = 100_000
+    private nonisolated static let rounds = 100_000
 
     /// A cold start opens locked when the lock is on. The flag is not a secret:
     /// a PIN that cannot be read still means locked (fail closed).
@@ -57,9 +59,13 @@ final class AppLock {
 
     /// True only when the PIN is stored: the caller shows an error otherwise.
     @discardableResult
-    func setPIN(_ pin: String, owner: String?) -> Bool {
+    func setPIN(_ pin: String, owner: String?) async -> Bool {
+        guard !checking else { return false }
+        checking = true
+        defer { checking = false }
         let salt = (0..<16).map { _ in String(format: "%02x", UInt8.random(in: 0...255)) }.joined()
-        guard write("pin", Data("\(salt):\(Self.hash(salt: salt, pin: pin))".utf8)) else { return false }
+        let hashed = await Self.stretch(salt: salt, pin: pin)
+        guard write("pin", Data("\(salt):\(hashed)".utf8)) else { return false }
         UserDefaults.standard.set(owner, forKey: "lock.owner")
         UserDefaults.standard.set(true, forKey: "lock.enabled")
         resetBackoff()
@@ -75,12 +81,20 @@ final class AppLock {
         isLocked = false
     }
 
-    func unlock(pin: String) -> Bool {
+    /// One attempt at a time: a second one while a PIN is being checked is refused (not counted).
+    func unlock(pin: String) async -> Bool {
+        guard !checking else { return false }
         if let waitUntil, waitUntil > Date() { return false }
         // Fail closed: no readable PIN means no unlock by PIN.
         guard let stored = read("pin").map({ String(decoding: $0, as: UTF8.self) }) else { return false }
         let parts = stored.split(separator: ":", maxSplits: 1).map(String.init)
-        guard parts.count == 2, Self.hash(salt: parts[0], pin: pin) == parts[1] else {
+        var matches = false
+        if parts.count == 2 {
+            checking = true
+            matches = await Self.stretch(salt: parts[0], pin: pin) == parts[1]
+            checking = false
+        }
+        guard matches else {
             failures += 1
             waitUntil = Date().addingTimeInterval(TimeInterval(AppLockPolicy.delay(afterFailures: failures)))
             saveBackoff()
@@ -110,8 +124,15 @@ final class AppLock {
         delete("backoff")
     }
 
+    /// The stretching takes a noticeable moment: it runs off the main actor so the lock screen
+    /// keeps drawing (and the input waits on `checking`).
+    private static func stretch(salt: String, pin: String) async -> String {
+        await Task.detached(priority: .userInitiated) { Self.hash(salt: salt, pin: pin) }.value
+    }
+
     /// Stretched: 100 000 rounds, so a copied hash of a 4-digit PIN is not cracked in an instant.
-    private static func hash(salt: String, pin: String) -> String {
+    /// The stored "salt:hex" format and the rounds are unchanged, so PINs set earlier still open.
+    private nonisolated static func hash(salt: String, pin: String) -> String {
         var digest = Data(SHA256.hash(data: Data("\(salt):\(pin)".utf8)))
         for _ in 0..<rounds { digest = Data(SHA256.hash(data: digest + Data(salt.utf8))) }
         return digest.map { String(format: "%02x", $0) }.joined()
@@ -158,7 +179,15 @@ struct LockScreen: View {
                 .background(Theme.surface, in: RoundedRectangle(cornerRadius: 12))
                 .focused($focused)
                 .onSubmit { attempt() }
-            Button("Avaa") { attempt() }.buttonStyle(.primary)
+                .disabled(lock.checking)
+            Button { attempt() } label: {
+                ZStack {
+                    Text("Avaa").opacity(lock.checking ? 0 : 1)
+                    if lock.checking { ProgressView().tint(Theme.onInk) }
+                }
+            }
+            .buttonStyle(.primary)
+            .disabled(lock.checking)
             if wrong {
                 Text(lock.waitUntil.map { $0 > Date() ? "Väärä PIN. Odota hetki ennen uutta yritystä." : "Väärä PIN" } ?? "Väärä PIN")
                     .foregroundStyle(Theme.danger).font(.footnote)
@@ -184,8 +213,12 @@ struct LockScreen: View {
     }
 
     private func attempt() {
-        if lock.unlock(pin: pin) { Haptics.success(); wrong = false }
-        else { Haptics.error(); wrong = true; pin = "" }
+        guard !lock.checking else { return }
+        let entered = pin
+        Task {
+            if await lock.unlock(pin: entered) { Haptics.success(); wrong = false }
+            else { Haptics.error(); wrong = true; pin = ""; focused = true }
+        }
     }
 }
 
@@ -211,19 +244,32 @@ struct AppLockSettingsView: View {
                 Section {
                     SecureField("Uusi PIN (4–8 numeroa)", text: $newPin).keyboardType(.numberPad)
                     SecureField("PIN uudelleen", text: $confirmPin).keyboardType(.numberPad)
-                    Button("Ota lukitus käyttöön") {
-                        guard AppLockPolicy.acceptable(newPin) else { message = "PIN on 4–8 numeroa."; return }
-                        guard newPin == confirmPin else { message = "PIN-koodit eivät täsmää."; return }
-                        guard lock.setPIN(newPin, owner: signedInUserId) else { message = "Lukituksen tallennus epäonnistui. Yritä uudelleen."; return }
-                        enabled = true
-                        message = nil
-                        Haptics.success()
+                    Button {
+                        enable()
+                    } label: {
+                        HStack {
+                            Text("Ota lukitus käyttöön")
+                            if lock.checking { Spacer(); ProgressView() }
+                        }
                     }
                 }
+                .disabled(lock.checking)
             }
             if let message { Text(message).foregroundStyle(Theme.danger) }
         }
         .navigationTitle("Sovelluslukitus")
+    }
+
+    private func enable() {
+        guard AppLockPolicy.acceptable(newPin) else { message = "PIN on 4–8 numeroa."; return }
+        guard newPin == confirmPin else { message = "PIN-koodit eivät täsmää."; return }
+        let pin = newPin, owner = signedInUserId
+        Task {
+            guard await lock.setPIN(pin, owner: owner) else { message = "Lukituksen tallennus epäonnistui. Yritä uudelleen."; return }
+            enabled = true
+            message = nil
+            Haptics.success()
+        }
     }
 
     private var signedInUserId: String? {

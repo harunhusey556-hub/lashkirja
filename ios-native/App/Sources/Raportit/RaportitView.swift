@@ -15,6 +15,8 @@ struct RaportitView: View {
     @State private var categoryLimit = ShowMore()
     /// The month picked on the chart; nil = the latest month with figures.
     @State private var selectedMonth: String?
+    /// Reloads after a change elsewhere (`dataVersion`) as well as on another year.
+    @State private var gate = ReloadGate()
 
     struct ExportKind: Identifiable { let type: String; let title: String; var id: String { type } }
     private let exports = [
@@ -86,7 +88,15 @@ struct RaportitView: View {
         .background(Theme.canvas)
         .navigationTitle("Raportit")
         .refreshable { await load() }
-        .task(id: year) { await load() }
+        .task(id: "\(year)|\(app.dataVersion)") {
+            let key = String(year)
+            guard state.value == nil || gate.isDue(key: key, version: app.dataVersion) else { return }
+            // The report on screen stays while the new one loads (another year clears it in `setYear`).
+            // Marked only after a load that finished: a cancelled one must not count as fresh.
+            let version = app.dataVersion
+            await load()
+            if !Task.isCancelled { gate.mark(key: key, version: version) }
+        }
         .onChange(of: year) { _, _ in categoryLimit.reset() }
         .sheet(isPresented: $showPackage) {
             DocumentPreviewSheet(path: "/api/export/package", query: ["month": packagePeriod], fileName: "kirjanpito-\(packagePeriod).zip")
@@ -253,7 +263,8 @@ struct RaportitView: View {
         return "\(head) \(MonthKey.name(month)): tulot \(Money.format(picked.incomeNet)), menot \(Money.format(picked.expenseNet))."
     }
 
-    /// The year's `.task(id:)` loads it and cancels a slower load of the previous year.
+    /// The year's `.task(id:)` loads it and cancels a slower load of the previous year; the old
+    /// year's figures are not shown under the new year's heading meanwhile.
     private func setYear(_ next: Int) {
         year = next
         selectedMonth = nil
@@ -261,12 +272,19 @@ struct RaportitView: View {
     }
 
     private func load() async {
+        // A pull-to-refresh is not cancelled by a year change: its answer is for the year it asked.
+        let asked = year
         do {
-            let report: ProfitLoss = try await app.api.get("/api/reports/profit-loss", query: ["from": "\(year)-01", "to": "\(year)-12"])
+            let report: ProfitLoss = try await app.api.get("/api/reports/profit-loss", query: ["from": "\(asked)-01", "to": "\(asked)-12"])
             try Task.checkCancellation()
+            guard asked == year else { return }
             state = .loaded(report)
         }
         catch is CancellationError {}
-        catch { state = .failed(error.userMessage) }
+        catch {
+            guard asked == year else { return }
+            // A failed reload keeps the figures already shown (as the other gated screens).
+            if state.value == nil { state = .failed(error.userMessage) }
+        }
     }
 }

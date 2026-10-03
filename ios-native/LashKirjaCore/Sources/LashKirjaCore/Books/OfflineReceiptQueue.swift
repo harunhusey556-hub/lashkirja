@@ -19,9 +19,12 @@ public struct QueuedReceipt: Codable, Sendable, Equatable, Identifiable {
     public var nextAttemptAt: Date
     public var lastError: String?
     public var jobId: String?
+    /// When the server took it. Records from before this field have none: their `createdAt` stands in.
+    public var completedAt: Date?
 
     public init(id: String, userId: String, createdAt: Date, capturedAt: String, fileName: String, mimeType: String,
-                size: Int, status: Status, attempts: Int, nextAttemptAt: Date, lastError: String? = nil, jobId: String? = nil) {
+                size: Int, status: Status, attempts: Int, nextAttemptAt: Date, lastError: String? = nil, jobId: String? = nil,
+                completedAt: Date? = nil) {
         self.id = id
         self.userId = userId
         self.createdAt = createdAt
@@ -34,6 +37,7 @@ public struct QueuedReceipt: Codable, Sendable, Equatable, Identifiable {
         self.nextAttemptAt = nextAttemptAt
         self.lastError = lastError
         self.jobId = jobId
+        self.completedAt = completedAt
     }
 }
 
@@ -87,9 +91,10 @@ public enum OfflineReceiptRules {
         }
     }
 
-    /// Sent rows are kept a day (for "Lähetetyt kuvat"), then dropped.
+    /// Sent rows are kept a day after sending (for "Lähetetyt kuvat"), then dropped. A photo
+    /// that waited offline for days is not gone the moment it is sent.
     public static func expiredDone(_ items: [QueuedReceipt], now: Date) -> [String] {
-        items.filter { $0.status == .done && now.timeIntervalSince($0.createdAt) > doneRetention }.map(\.id)
+        items.filter { $0.status == .done && now.timeIntervalSince($0.completedAt ?? $0.createdAt) > doneRetention }.map(\.id)
     }
 
     /// What one send attempt leaves behind (`sendOne` on the web). `status` nil = no answer.
@@ -101,6 +106,7 @@ public enum OfflineReceiptRules {
             next.status = .done
             next.lastError = nil
             next.jobId = jobId
+            next.completedAt = now
             return (next, false)
         case .paused:
             // The session is gone: kept for the next sign-in, and the rest of the queue waits too.
@@ -161,6 +167,14 @@ public enum OfflineReceiptRules {
 
     public static func sentText(_ count: Int) -> String {
         (count == 1 ? "1 kuva lähetetty." : "\(count) kuvaa lähetetty.") + " Kuitit näkyvät tarkistettavissa, kun ne on luettu."
+    }
+
+    /// A state change could not be written: the queue stops rather than sending the same row again.
+    public static let storageFailure = "Kuvan tilaa ei voitu tallentaa puhelimeen, joten lähetys pysäytettiin. Vapauta tallennustilaa ja yritä uudelleen."
+
+    /// Records on the phone that could not be read (and so cannot be sent).
+    public static func corruptText(_ count: Int) -> String {
+        (count == 1 ? "Yhtä" : "\(count)") + " jonossa ollutta kuvaa ei voitu lukea puhelimesta."
     }
 
     public static let offlineNotice = "Ei yhteyttä. Kuva tallennettiin ja lähetetään automaattisesti, kun yhteys palaa."
@@ -230,14 +244,21 @@ public struct OfflineReceiptStore: Sendable {
     }
 
     @discardableResult
-    public func enqueue(userId: String, data: Data, fileName: String, mimeType: String, now: Date = Date()) throws -> QueuedReceipt {
+    public func enqueue(userId: String, data: Data, fileName: String, mimeType: String,
+                        id: String = UUID().uuidString.lowercased(), now: Date = Date()) throws -> QueuedReceipt {
         try ensureDirectory()
-        let item = QueuedReceipt(id: UUID().uuidString.lowercased(), userId: userId, createdAt: now,
+        let item = QueuedReceipt(id: id, userId: userId, createdAt: now,
                                  capturedAt: OfflineReceiptRules.isoString(now), fileName: fileName, mimeType: mimeType,
                                  size: data.count, status: .queued, attempts: 0, nextAttemptAt: now)
-        // The file first: a record never points at a missing file.
+        // The file first: a record never points at a missing file. A record that cannot be
+        // written takes its file with it, so nothing is left that no record knows of.
         try data.write(to: fileURL(item.id), options: writeOptions)
-        try save(item)
+        do {
+            try save(item)
+        } catch {
+            try? FileManager.default.removeItem(at: fileURL(item.id))
+            throw error
+        }
         return item
     }
 
@@ -253,9 +274,174 @@ public struct OfflineReceiptStore: Sendable {
         try? FileManager.default.removeItem(at: fileURL(id))
     }
 
+    /// What `repair()` found on disk.
+    public struct Check: Equatable, Sendable {
+        /// Files with no record (left by a crash between the two writes); already deleted.
+        public var orphansRemoved: [String]
+        /// Records that could not be read or decoded; kept (with their files) until removed by hand.
+        public var corrupt: [String]
+
+        public init(orphansRemoved: [String], corrupt: [String]) {
+            self.orphansRemoved = orphansRemoved
+            self.corrupt = corrupt
+        }
+    }
+
+    /// On start: deletes files no record points at and reports records that cannot be read.
+    /// Only the queue's own `.json`/`.bin` names are looked at.
+    public func repair() -> Check {
+        let names = (try? FileManager.default.contentsOfDirectory(atPath: directory.path)) ?? []
+        let records = Set(names.filter { $0.hasSuffix(".json") }.map { String($0.dropLast(5)) })
+        var orphans: [String] = []
+        for name in names where name.hasSuffix(".bin") {
+            let id = String(name.dropLast(4))
+            guard !records.contains(id) else { continue }
+            if (try? FileManager.default.removeItem(at: fileURL(id))) != nil { orphans.append(id) }
+        }
+        let decoder = JSONDecoder()
+        let corrupt = records.filter { id in
+            guard let data = try? Data(contentsOf: recordURL(id)) else { return true }
+            return (try? decoder.decode(QueuedReceipt.self, from: data)) == nil
+        }
+        return Check(orphansRemoved: orphans.sorted(), corrupt: corrupt.sorted())
+    }
+
+    /// Sign-out: every queued file goes, readable or not (one account's queue at a time is kept).
+    public func removeAll() {
+        let names = (try? FileManager.default.contentsOfDirectory(atPath: directory.path)) ?? []
+        for name in names where name.hasSuffix(".json") || name.hasSuffix(".bin") {
+            try? FileManager.default.removeItem(at: directory.appendingPathComponent(name))
+        }
+    }
+
     /// Another account signed in on this phone: the previous owner's photos are not kept for it
     /// (the web wipes its queue on sign-out).
     public func removeOtherUsers(keeping userId: String) {
         for item in all() where item.userId != userId { delete(id: item.id) }
+    }
+}
+
+/// One pass of the queue's sender (the web driver's `drain`): due rows go oldest first, one at a
+/// time. Every state change is written before the next step, and a pass stops at once when
+///
+/// - `isCurrent` turns false (signed out, another account, the session expired or the pass was
+///   cancelled): it is asked after every await and right before a file goes out, and a stale pass
+///   neither sends, writes nor reports rows;
+/// - a write fails: going on would leave the row `queued` on disk and pick it again, a loop of
+///   uploads. The row stays as it was (`sending` after an upload, which the next start re-queues;
+///   the Idempotency-Key keeps that resend from becoming a second receipt).
+@MainActor
+public struct OfflineReceiptDrain {
+    public enum Stop: Equatable, Sendable {
+        /// Nothing due; `next` is when the earliest backed-off row is (nil = none waiting).
+        case idle(next: Date?)
+        case offline
+        /// A 401: the rest waits for the next sign-in.
+        case paused
+        case stale
+        case storage
+    }
+
+    /// The server's answer to one upload. `status` nil = no answer at all.
+    public struct Answer: Sendable, Equatable {
+        public var status: Int?
+        public var serverError: String?
+        public var jobId: String?
+        public init(status: Int?, serverError: String? = nil, jobId: String? = nil) {
+            self.status = status
+            self.serverError = serverError
+            self.jobId = jobId
+        }
+    }
+
+    public let store: OfflineReceiptStore
+    public let userId: String
+    private let isCurrent: () -> Bool
+    private let isOnline: () -> Bool
+    private let onRows: ([QueuedReceipt]) -> Void
+    private let now: () -> Date
+    private let loadFile: (QueuedReceipt) async -> Data?
+    private let upload: (QueuedReceipt, Data) async -> Answer
+
+    /// `loadFile` defaults to reading the stored file off the main actor.
+    public init(store: OfflineReceiptStore, userId: String,
+                isCurrent: @escaping () -> Bool,
+                isOnline: @escaping () -> Bool,
+                onRows: @escaping ([QueuedReceipt]) -> Void,
+                now: @escaping () -> Date = { Date() },
+                loadFile: ((QueuedReceipt) async -> Data?)? = nil,
+                upload: @escaping (QueuedReceipt, Data) async -> Answer) {
+        self.store = store
+        self.userId = userId
+        self.isCurrent = isCurrent
+        self.isOnline = isOnline
+        self.onRows = onRows
+        self.now = now
+        self.loadFile = loadFile ?? { item in
+            try? await Task.detached(priority: .utility) { try store.data(for: item) }.value
+        }
+        self.upload = upload
+    }
+
+    public func run(releaseBackoff: Bool) async -> Stop {
+        guard isCurrent() else { return .stale }
+        let start = now()
+        for id in OfflineReceiptRules.expiredDone(store.list(userId: userId), now: start) { store.delete(id: id) }
+        var items = store.list(userId: userId)
+        if releaseBackoff {
+            for (before, after) in zip(items, OfflineReceiptRules.releaseBackoff(items, now: start)) where before != after {
+                guard persist(after) else { return .storage }
+            }
+            items = store.list(userId: userId)
+        }
+        onRows(items)
+        while true {
+            guard isCurrent() else { return .stale }
+            guard isOnline() else { return .offline }
+            guard let next = OfflineReceiptRules.pickNext(items, now: now()) else {
+                return .idle(next: OfflineReceiptRules.earliestNextAttempt(items))
+            }
+            if let stop = await send(next) { return stop }
+            guard isCurrent() else { return .stale }
+            items = store.list(userId: userId)
+            onRows(items)
+        }
+    }
+
+    /// nil = go on with the next row.
+    private func send(_ item: QueuedReceipt) async -> Stop? {
+        var sending = item
+        sending.status = .sending
+        guard persist(sending) else { return .storage }
+        onRows(store.list(userId: userId))
+
+        let data = await loadFile(item)
+        // Right before the upload: the account the file was read for must still be the one signed in.
+        guard isCurrent() else { return .stale }
+        guard let data else {
+            // The file itself is gone: another try would read nothing again.
+            var failed = item
+            failed.status = .failed
+            failed.attempts += 1
+            failed.lastError = "Kuvaa ei voitu lukea. Kuvaa kuitti uudelleen."
+            return persist(failed) ? nil : .storage
+        }
+        let answer = await upload(item, data)
+        // Signed out (or another owner in) while this was on its way: its file may already be
+        // gone, and a record written back now would be a ghost row.
+        guard isCurrent() else { return .stale }
+        let outcome = OfflineReceiptRules.afterSend(item, status: answer.status, serverError: answer.serverError, jobId: answer.jobId,
+                                                    deviceOffline: !isOnline(), now: now())
+        guard persist(outcome.item) else { return .storage }
+        return outcome.paused ? .paused : nil
+    }
+
+    private func persist(_ item: QueuedReceipt) -> Bool {
+        do {
+            try store.save(item)
+            return true
+        } catch {
+            return false
+        }
     }
 }

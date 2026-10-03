@@ -153,6 +153,16 @@ final class ChatModel {
         task = Task { await stream(trimmed, replyId: replyId) }
     }
 
+    /// The session ended (sign-out or expiry): nothing of this conversation keeps running, and
+    /// nothing that was running writes back.
+    func shutdown() {
+        stop()
+        dropPendingReceipts()
+        cooldownTask?.cancel()
+        cooldownTask = nil
+        loads.next()
+    }
+
     func stop() {
         task?.cancel()
         task = nil
@@ -175,7 +185,8 @@ final class ChatModel {
             request.httpMethod = "POST"
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
             request.setValue("text/event-stream", forHTTPHeaderField: "Accept")
-            if let token = await app.auth.currentToken() { request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
+            let token = await app.auth.currentToken()
+            if let token { request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
             request.httpBody = try JSONEncoder().encode(Body(message: text, clientId: UUID().uuidString, conversationId: conversationId))
             request.timeoutInterval = 120
             let (bytes, response) = try await Self.streamSession.bytes(for: request)
@@ -185,7 +196,10 @@ final class ChatModel {
                 if http.statusCode == 429, liveReplyId == replyId {
                     startCooldown(retryAfter: http.value(forHTTPHeaderField: "Retry-After"))
                 }
-                throw APIErrorDecoder.decode(status: http.statusCode, data: data)
+                let failure = APIErrorDecoder.decode(status: http.statusCode, data: data)
+                // Not `app.api`, so its sign-out on an ended session is done here.
+                if failure.endsSession { await app.unauthorized(sentToken: token) }
+                throw failure
             }
             // Pieces are gathered and shown about every 60 ms: one update per token re-rendered
             // the whole reply many times a second.
@@ -347,14 +361,17 @@ final class ChatModel {
             request.httpMethod = "POST"
             request.setValue(form.contentType, forHTTPHeaderField: "Content-Type")
             request.setValue("application/json", forHTTPHeaderField: "Accept")
-            if let token = await app.auth.currentToken() { request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
+            let token = await app.auth.currentToken()
+            if let token { request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
             request.timeoutInterval = 120
             let progress = UploadProgress { [weak self] fraction in
                 Task { @MainActor in self?.uploadProgress(localId, fraction) }
             }
             let (data, response) = try await Self.streamSession.upload(for: request, from: form.finalize(), delegate: progress)
             if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
-                throw ChatReceiptFile.failure(status: http.statusCode, data: data)
+                let failure = ChatReceiptFile.failure(status: http.statusCode, data: data)
+                if failure.endsSession { await app.unauthorized(sentToken: token) }
+                throw failure
             }
             guard let result = try? JSONDecoder().decode(ChatReceiptResponse.self, from: data) else {
                 throw LKError(status: 200, code: "DECODE", message: "Palvelimen vastausta ei voitu lukea.")

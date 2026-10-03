@@ -33,6 +33,9 @@ final class AppModel {
     var pendingResetLink: String?
     /// When the app went to the background: coming back after a while reloads the screens.
     private var backgroundedAt: Date?
+    /// Bumped whenever the signed-in session starts or ends: an answer that arrives for an earlier
+    /// session (a profile, `/api/auth/me`, a failed delete) is dropped, not shown to the next one.
+    private var session = LoadGeneration()
     let auth: AuthService
     let api: APIClient
 
@@ -51,11 +54,8 @@ final class AppModel {
             guard !path.hasPrefix("/api/auth"), !path.hasPrefix("/api/ai/") else { return }
             await MainActor.run { self?.dataVersion += 1 }
         }
+        await api.setOnUnauthorized { [weak self] in await self?.sessionExpired() }
         let auth = self.auth
-        await api.setOnUnauthorized { [weak self] in
-            let had = await auth.handleUnauthorized()
-            await self?.signedOut(notice: had ? "Istunto vanheni. Kirjaudu uudelleen." : nil)
-        }
         // The revoke of an earlier sign-out is a network call: it must not hold up opening the app.
         Task { await auth.revokePending() }
         guard let user = await auth.restore() else {
@@ -66,10 +66,14 @@ final class AppModel {
         AppLock.shared.adoptOwnerIfUnknown(user.userId)
         AppLock.shared.keepOnly(for: user.userId)
         phase = .signedIn(user)
+        let started = session.current
         await auth.refreshIfDue()
         // A refused refresh already signed out (with the notice): stop here.
         guard await auth.currentToken() != nil else { return }
-        if let me: MeResponse = try? await api.get("/api/auth/me"), case .signedIn = phase {
+        // Only for the account it was asked for: a sign-out (and maybe another sign-in) can
+        // happen while it loads.
+        if let me: MeResponse = try? await api.get("/api/auth/me"), session.isCurrent(started),
+           case .signedIn(let current) = phase, current.userId == me.user.userId {
             phase = .signedIn(me.user)
         }
     }
@@ -81,24 +85,40 @@ final class AppModel {
         // previous owner's PIN (the same policy as signing out).
         AppLock.shared.keepOnly(for: user.userId)
         Haptics.success()
+        session.next()
         phase = .signedIn(user)
         Task { await auth.revokePending() }
     }
 
-    /// Signed out at once; the server revoke runs behind (it may take the full
-    /// timeout when the server is unreachable, and then retries next launch).
+    /// The token is gone from this device before the sign-in screen shows; the server revoke
+    /// runs behind (it may take the full timeout when the server is unreachable, and then
+    /// retries next launch).
     func logout() async {
         // The lock belongs to the signed-in owner; the next account sets its own.
         AppLock.shared.disable()
-        DocumentCache.shared.clear()
         // Receipt photos waiting for a connection belong to this owner: they leave with them.
         OfflineReceiptQueueModel.shared.clearForSignOut()
-        profile = nil
-        chat = nil
-        removedIds = []
+        endLocalSession()
+        await auth.endSession()
         phase = .signedOut(notice: nil)
         let auth = self.auth
-        Task { await auth.logout() }
+        Task { await auth.revokePending() }
+    }
+
+    /// The server refused the session (a 401, or a refused refresh). Waiting receipt photos stay
+    /// on the device for when the same owner signs in again; nothing else of theirs stays.
+    func sessionExpired() async {
+        let had = await auth.handleUnauthorized()
+        OfflineReceiptQueueModel.shared.detach()
+        endLocalSession()
+        phase = .signedOut(notice: had ? "Istunto vanheni. Kirjaudu uudelleen." : nil)
+    }
+
+    /// A 401 to a request made outside `api` (the assistant's stream and receipt upload): it ends
+    /// the session only if it was sent with the token still in use, as `APIClient` does.
+    func unauthorized(sentToken: String?) async {
+        guard let sentToken, await auth.currentToken() == sentToken else { return }
+        await sessionExpired()
     }
 
     func background() {
@@ -130,7 +150,9 @@ final class AppModel {
 
     func cachedProfile() async -> Profile? {
         if let profile { return profile }
-        if let response: ProfileResponse = try? await api.get("/api/profile") { profile = response.profile }
+        let started = session.current
+        guard let response: ProfileResponse = try? await api.get("/api/profile"), session.isCurrent(started) else { return profile }
+        profile = response.profile
         return profile
     }
 
@@ -144,9 +166,12 @@ final class AppModel {
     func removeInBackground(_ ids: [String], _ work: @escaping @Sendable @MainActor () async throws -> Void) {
         hide(ids)
         Haptics.success()
+        let started = session.current
         Task {
             do { try await work() }
             catch {
+                // Signed out meanwhile: the next session never saw these rows hidden.
+                guard session.isCurrent(started) else { return }
                 unhide(ids)
                 removalFailure = error.userMessage
                 Haptics.error()
@@ -154,11 +179,17 @@ final class AppModel {
         }
     }
 
-    private func signedOut(notice: String?) {
+    /// What every way out of a session leaves behind: nothing of this owner's on screen or in
+    /// flight. Run before the sign-in screen shows.
+    private func endLocalSession() {
+        session.next()
+        chat?.shutdown()
+        chat = nil
         DocumentCache.shared.clear()
         profile = nil
-        chat = nil
-        phase = .signedOut(notice: notice)
+        removedIds = []
+        pendingRoute = nil
+        removalFailure = nil
     }
 }
 

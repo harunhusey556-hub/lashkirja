@@ -3,7 +3,9 @@ import LashKirjaCore
 
 /// Kuitit's "Jonossa N kuittia" (web `QueuedReceiptsCard.tsx`): photos still waiting for a
 /// connection, with retry and remove on a failure, and the sent ones folded to one line.
-/// List sections; shows nothing while the offline queue is empty. The screen showing it starts
+/// A write the phone refused stops the queue and says so here; records that could not be read
+/// are reported with a remove. List sections; shows nothing while the offline queue is empty
+/// and healthy. The screen showing it starts
 /// the queue (`OfflineReceiptQueueModel.start`).
 struct QueuedReceiptsCard: View {
     @State private var queue = OfflineReceiptQueueModel.shared
@@ -15,6 +17,33 @@ struct QueuedReceiptsCard: View {
         let waiting = queue.waiting
         let sent = queue.sent
         Group {
+            if let storageError = queue.storageError {
+                Section {
+                    Text(storageError).font(.footnote).foregroundStyle(Theme.danger)
+                    Button("Yritä uudelleen") {
+                        Haptics.selection()
+                        queue.retryStorage()
+                    }
+                    .font(.caption.bold())
+                    .buttonStyle(.borderless)
+                    .foregroundStyle(Theme.accent)
+                }
+            }
+            if !queue.corrupt.isEmpty {
+                Section {
+                    HStack(spacing: 12) {
+                        Text(OfflineReceiptRules.corruptText(queue.corrupt.count)).font(.caption).foregroundStyle(Theme.ink2)
+                        Spacer(minLength: 0)
+                        Button("Poista", role: .destructive) {
+                            Haptics.selection()
+                            withAnimation { queue.removeCorrupt() }
+                        }
+                        .font(.caption.bold())
+                        .buttonStyle(.borderless)
+                        .foregroundStyle(Theme.danger)
+                    }
+                }
+            }
             if !waiting.isEmpty {
                 Section {
                     if !connectivity.online {

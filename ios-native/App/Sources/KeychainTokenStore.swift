@@ -20,18 +20,22 @@ actor KeychainTokenStore: TokenStore {
         return try? decoder.decode(StoredToken.self, from: data)
     }
 
-    func save(_ token: StoredToken) {
+    func save(_ token: StoredToken) throws {
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .secondsSince1970
-        if let data = try? encoder.encode(token) { write(account, data) }
+        try write(account, try encoder.encode(token))
     }
 
-    func clear() { delete(account) }
+    func clear() {
+        // A token that cannot be deleted is overwritten with nothing readable instead, so it
+        // never signs anyone in again.
+        if !delete(account) { try? write(account, Data()) }
+    }
 
     func loadPendingRevoke() -> String? { read(revokeAccount).map { String(decoding: $0, as: UTF8.self) } }
 
     func savePendingRevoke(_ token: String?) {
-        if let token { write(revokeAccount, Data(token.utf8)) } else { delete(revokeAccount) }
+        if let token { try? write(revokeAccount, Data(token.utf8)) } else { delete(revokeAccount) }
     }
 
     private func base(_ account: String) -> [String: Any] {
@@ -47,13 +51,29 @@ actor KeychainTokenStore: TokenStore {
         return item as? Data
     }
 
-    private func write(_ account: String, _ data: Data) {
-        delete(account)
-        var query = base(account)
-        query[kSecValueData as String] = data
-        query[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
-        SecItemAdd(query as CFDictionary, nil)
+    /// Updates the item in place (no moment without a token, as delete-then-add had); adds it when
+    /// there is none. A refusal is thrown, so a sign-in that did not stick is not shown as done.
+    private func write(_ account: String, _ data: Data) throws {
+        let attributes: [String: Any] = [
+            kSecValueData as String: data,
+            kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly,
+        ]
+        var status = SecItemUpdate(base(account) as CFDictionary, attributes as CFDictionary)
+        if status == errSecItemNotFound {
+            let query = base(account).merging(attributes) { _, new in new }
+            status = SecItemAdd(query as CFDictionary, nil)
+        }
+        guard status == errSecSuccess else { throw KeychainError(status: status) }
     }
 
-    private func delete(_ account: String) { SecItemDelete(base(account) as CFDictionary) }
+    /// True when the item is gone (or never was).
+    @discardableResult
+    private func delete(_ account: String) -> Bool {
+        let status = SecItemDelete(base(account) as CFDictionary)
+        return status == errSecSuccess || status == errSecItemNotFound
+    }
+}
+
+struct KeychainError: Error {
+    let status: OSStatus
 }
