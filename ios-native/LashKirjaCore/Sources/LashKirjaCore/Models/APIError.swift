@@ -28,6 +28,27 @@ public struct LKError: Error, Equatable, Sendable {
     public static func offline() -> LKError { LKError(status: 0, code: "OFFLINE", message: "Ei verkkoyhteyttä.") }
 }
 
+/// Survives a trip through Objective-C (Stripe Terminal hands our connection token error back as
+/// an NSError): the status, code and Finnish message stay readable from the NSError.
+extension LKError: CustomNSError, LocalizedError {
+    public static let errorDomain = "fi.lashkirja.LKError"
+    public var errorCode: Int { status }
+    public var errorUserInfo: [String: Any] {
+        var info: [String: Any] = [NSLocalizedDescriptionKey: message]
+        if let code { info["code"] = code }
+        return info
+    }
+    public var errorDescription: String? { message }
+
+    /// The LKError an NSError was made from, if it was one.
+    public init?(bridged error: NSError) {
+        guard error.domain == LKError.errorDomain else { return nil }
+        self.init(status: error.code,
+                  code: error.userInfo["code"] as? String,
+                  message: error.userInfo[NSLocalizedDescriptionKey] as? String ?? LKError.unreachable)
+    }
+}
+
 public enum APIErrorDecoder {
     private struct Flat: Decodable { let error: String }
     private struct Nested: Decodable {

@@ -448,6 +448,18 @@ private let receipt = POSReceipt(amount: 105, cardLabel: "Visa •••• 4242
     #expect(plain.refundNotice == "Korttimaksu palautettiin asiakkaalle.")
 }
 
+@Test func posFindsTheServerAnswerInsideAnSDKError() {
+    let limited = LKError(status: 429, message: "Liian monta yhteyspyyntöä korttimaksuihin. Yritä hetken kuluttua uudelleen.")
+    // Stripe Terminal's "connection token provider completed with an error" (9050) wraps ours.
+    let wrapped = NSError(domain: "com.stripe-terminal", code: POSErrorMapping.Code.tokenProviderError,
+                          userInfo: [NSUnderlyingErrorKey: limited as NSError])
+    #expect(POSErrorMapping.serverError(in: limited) == limited)
+    let found = POSErrorMapping.serverError(in: wrapped)
+    #expect(found?.status == 429)
+    #expect(found?.message == limited.message)
+    #expect(POSErrorMapping.serverError(in: NSError(domain: "x", code: 1)) == nil)
+}
+
 @Test func posFinalizeReadsThePaymentEvenWithoutAnInvoice() throws {
     let json = #"{"payment":{"id":"pp_1","invoiceId":null,"status":"succeeded","amount":105,"refunded":0,"createdAt":"x"},"invoice":null}"#
     let response = try JSONDecoder().decode(POSFinalizeResponse.self, from: Data(json.utf8))

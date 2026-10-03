@@ -586,7 +586,9 @@ final class POSCoordinator {
 
     static func sdkFailure(_ error: Error) -> POSFailure {
         if let flow = error as? POSFlowError { return .make(flow == .noReader ? .readerDisconnected : .other) }
-        if error is LKError { return serverFailure(error) }
+        // Also the server's answer the SDK wrapped (a connection token refused with 429, say):
+        // shown as is, and nothing retries it on its own; the owner taps "Yritä uudelleen".
+        if let server = POSErrorMapping.serverError(in: error) { return serverFailure(server) }
         let ns = error as NSError
         // Stripe's codes are positive (SCPErrors.h); a URL error here means the network went away.
         if ns.domain == NSURLErrorDomain { return .make(.network) }

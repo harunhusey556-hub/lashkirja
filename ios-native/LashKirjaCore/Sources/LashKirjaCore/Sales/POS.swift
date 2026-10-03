@@ -583,6 +583,22 @@ public enum POSErrorMapping {
     /// Finnish debit cards).
     public static let offlinePinDeclineCodes: Set<String> = ["offline_pin_required", "online_or_offline_pin_required"]
 
+    /// The server's own answer inside an SDK error. Stripe Terminal wraps what the connection
+    /// token provider returned (code 9050) and keeps it as the underlying error, so a 429 or
+    /// 409 from /api/pos/connection-token still shows the server's Finnish sentence instead of
+    /// a generic network failure.
+    public static func serverError(in error: Error) -> LKError? {
+        var current: Error? = error
+        for _ in 0..<4 {
+            guard let candidate = current else { return nil }
+            if let server = candidate as? LKError { return server }
+            let ns = candidate as NSError
+            if let server = LKError(bridged: ns) { return server }
+            current = ns.userInfo[NSUnderlyingErrorKey] as? Error
+        }
+        return nil
+    }
+
     public static func failure(code: Int, declineCode: String?) -> POSFailure {
         if let declineCode, offlinePinDeclineCodes.contains(declineCode) { return .make(.offlinePinRequired) }
         switch code {

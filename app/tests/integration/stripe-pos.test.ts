@@ -23,6 +23,7 @@ import { POST as acceptCorrection } from "@/app/api/pos/corrections/[id]/accept/
 import { GET as workQueue } from "@/app/api/work-queue/route";
 import { buildAccountCopyZip, completeAccountClose } from "@/lib/account-requests";
 import { readStoredZip } from "@/lib/zip-store";
+import { resetRateLimitsForTests } from "@/lib/rate-limit";
 import { createUser, resetDatabase, type TestUser } from "./helpers/factories";
 import { buildRequest, readJson, routeContext, sessionCookie } from "./helpers/http";
 import { installFakeStripe, stripeSignature, type FakeStripe } from "./helpers/fake-stripe";
@@ -260,6 +261,84 @@ describe("onboarding", () => {
     const response = await connectionToken(buildRequest("POST", "/api/pos/connection-token", {}, { cookie }));
     expect(response.status).toBe(409);
     expect(stripe.callsTo("POST", "/v1/terminal/connection_tokens")).toHaveLength(0);
+  });
+});
+
+describe("connection token rate limit", () => {
+  const tokenReq = (as = cookie, headers: Record<string, string> = {}) =>
+    connectionToken(buildRequest("POST", "/api/pos/connection-token", {}, { cookie: as, headers }));
+  const tokenCalls = () => stripe.callsTo("POST", "/v1/terminal/connection_tokens").length;
+
+  beforeEach(() => resetRateLimitsForTests());
+  afterEach(() => {
+    vi.useRealTimers();
+    delete process.env.TRUST_PROXY;
+  });
+
+  it("allows 10 a minute; the 11th answers 429 with Retry-After and never reaches Stripe", async () => {
+    await connectReadyAccount();
+    for (let index = 0; index < 10; index += 1) expect((await tokenReq()).status).toBe(200);
+    expect(tokenCalls()).toBe(10);
+    const limited = await tokenReq();
+    expect(limited.status).toBe(429);
+    const retryAfter = Number(limited.headers.get("retry-after"));
+    expect(retryAfter).toBeGreaterThan(0);
+    expect(retryAfter).toBeLessThanOrEqual(60);
+    expect(limited.headers.get("cache-control")).toContain("no-store");
+    const body = await readJson(limited);
+    expect(body.error).toBe("Liian monta yhteyspyyntöä korttimaksuihin. Yritä hetken kuluttua uudelleen.");
+    expect(tokenCalls()).toBe(10);
+  });
+
+  it("another owner is not affected", async () => {
+    await connectReadyAccount();
+    for (let index = 0; index < 11; index += 1) await tokenReq();
+    const other = await createUser();
+    const otherCookie = await sessionCookie(other);
+    // The other owner has no account yet: answered by the app (409), not by the limit.
+    expect((await tokenReq(otherCookie)).status).toBe(409);
+    expect((await tokenReq()).status).toBe(429);
+  });
+
+  it("the minute window passing lets it through again, up to 60 an hour", async () => {
+    await connectReadyAccount();
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const start = Date.now();
+    let allowed = 0;
+    for (let minute = 0; minute < 7; minute += 1) {
+      vi.setSystemTime(start + minute * 61_000);
+      for (let index = 0; index < 10; index += 1) {
+        if ((await tokenReq()).status === 200) allowed += 1;
+      }
+    }
+    // Six full minutes fit in the hour's 60; the seventh minute is refused by the hour.
+    expect(allowed).toBe(60);
+    const limited = await tokenReq();
+    expect(limited.status).toBe(429);
+    expect(Number(limited.headers.get("retry-after"))).toBeGreaterThan(60);
+    expect(tokenCalls()).toBe(60);
+
+    vi.setSystemTime(start + 61 * 60_000);
+    expect((await tokenReq()).status).toBe(200);
+  });
+
+  it("limits one client address across owners when the proxy is trusted", async () => {
+    process.env.TRUST_PROXY = "true";
+    await connectReadyAccount();
+    const ip = { "x-forwarded-for": "203.0.113.7" };
+    const others = await Promise.all(Array.from({ length: 4 }, async () => sessionCookie(await createUser())));
+    // 30 a minute from one address, whoever asks.
+    let answered = 0;
+    for (const as of [cookie, ...others]) {
+      for (let index = 0; index < 6; index += 1) {
+        const response = await tokenReq(as, ip);
+        if (response.status !== 429) answered += 1;
+      }
+    }
+    expect(answered).toBe(30);
+    expect((await tokenReq(cookie, ip)).status).toBe(429);
+    // Another address is not limited by the first one.
+    expect((await tokenReq(others[0], { "x-forwarded-for": "198.51.100.2" })).status).toBe(409);
   });
 });
 
