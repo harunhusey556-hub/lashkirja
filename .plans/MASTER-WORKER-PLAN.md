@@ -56,7 +56,7 @@ Worker sırayı bozmasın. Bir madde bloklanırsa (ör. cihaz testi bekliyor) ya
 |---|---|---|
 | P0.0 | Zemin: `native` HEAD, clean tree, CI durumu, prod commit'i ölç ve RUN'a yaz | her run |
 | P0.1 | OTP AutoFill: 10 giriş şekli testli; çift gönderim kapısı core'a taşınıp testlendi; **cihazda kabul** | kod+test tamam (`5f3f1f5`); cihaz testi bekliyor |
-| P0.2 | Dokunma geri bildirimi + uçuştaki isteği kilitleme (fatura/ödeme/silme/gönderme çift gönderilemez) | kısım 1 (çift gönderim) kod tamam `4089ba0`, cihaz bekliyor; kısım 2 (dokunma geri bildirimi) açık |
+| P0.2 | Dokunma geri bildirimi + uçuştaki isteği kilitleme (fatura/ödeme/silme/gönderme çift gönderilemez) | kod tamam (`4089ba0` çift gönderim, `1e9f1af` dokunma geri bildirimi); cihaz testi bekliyor |
 | P0.3 | Loading / boş / kısmi / hata / oturum bitti / offline / başarı durumları, ekran ekran | açık |
 | P0.4 | Klavye ve form ergonomisi (klavye tipi, FocusState, kaydedilmemiş değişiklik uyarısı) | açık |
 | P0.5 | Sheet, geri kaydırma, yıkıcı akış güvenliği | açık |
@@ -215,6 +215,36 @@ P0.2 kısım 1: önemli işlemler ikinci dokunuşla iki kez gönderilemesin (P0.
 
 ### Sıradaki tek iş
 - P0.2 kısım 2: dokunma geri bildirimi (anlık görsel durum + Haptics) denetimi + `CustomerFormSheet` koruması.
+
+
+## RUN — 2026-10-05 18:20
+
+### Hedef
+P0.2 kısım 2: her dokunuş anında görsel tepki versin; müşteri oluşturma çift gönderimi kapansın.
+
+### Başlangıç ölçümü
+- `native` `7fcbdc5`. 8 kategori denetlendi, 4'ünde açık: 46 kart/satır butonu `.buttonStyle(.plain)` → basılı durum yok. Ortak `.primary` / `OutlineButtonStyle`, sistem liste/toolbar/segmented/yıkıcı kontroller zaten doğru.
+
+### Yapılan
+- `PressableButtonStyle` (`.pressable`): basınca 0.6 opaklık + 0.98 ölçek; Reduce Motion'da yalnız opaklık. 46 `.plain` buton buna geçti (Koti kartları, fatura/kuitti/banka satırları, AI kartları, onboarding seçimleri).
+- `CustomerFormSheet.save` → `SubmitGuard` + `InFlightLabel` + hata haptiği.
+- Koti nakit akışı grafiği dokunuşuna seçim haptiği.
+- Rapor + 6 maddelik cihaz listesi: `docs/worker-reports/2026-10-05-tap-feedback.md`.
+
+### Değişen dosyalar / commitler
+- `1e9f1af` fix(ios): every tap answers at once (P0.2) — 18 Swift dosyası
+
+### Test / gates
+- iOS native CI: run 37321863976 yeşil (Linux core + simulator + IPA). Yeni saf mantık yok → yeni core testi yok.
+
+### Cihaz / canlı doğrulama
+- P0.1 + P0.2 için tek IPA (run 37321863976) ve birleşik Türkçe test listesi sahibe gönderildi. **Sonuç bekleniyor.**
+
+### Kalan risk / blocker
+- Basılı görünüm ve haptik yalnız cihazda doğrulanabilir.
+
+### Sıradaki tek iş
+- P0.3: ekran ekran loading / boş / kısmi / hata / oturum bitti / offline / başarı durumları denetimi.
 
 ---
 
