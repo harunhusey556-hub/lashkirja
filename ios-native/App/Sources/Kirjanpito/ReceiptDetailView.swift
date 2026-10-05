@@ -10,7 +10,9 @@ struct ReceiptDetailView: View {
     @State private var editing = false
     @State private var confirmDelete = false
     @State private var failure: String?
-    @State private var matchBusy = false
+    /// Confirm / unlink of the bank match: one at a time, a second tap sends nothing.
+    @State private var matchSubmit = SubmitGuard()
+    private var matchBusy: Bool { matchSubmit.inFlight }
     @State private var reviewBusy = false
     @State private var prefetched = false
     @State private var ruleActive = false
@@ -236,11 +238,13 @@ struct ReceiptDetailView: View {
 
     private func confirm(_ transactionId: String) async {
         struct Body: Encodable { let transactionId: String; let receiptId: String }
-        matchBusy = true
+        guard matchSubmit.begin() != nil else { return }
         failure = nil
-        defer { matchBusy = false }
+        var succeeded = false
+        defer { matchSubmit.finish(succeeded: succeeded) }
         do {
             let _: Ignored = try await app.api.send("POST", "/api/matching/confirm", body: Body(transactionId: transactionId, receiptId: receiptId))
+            succeeded = true
             Haptics.success()
             app.dataVersion += 1
             await load()
@@ -253,11 +257,13 @@ struct ReceiptDetailView: View {
 
     private func unlink(_ transactionId: String) async {
         struct Body: Encodable { let transactionId: String }
-        matchBusy = true
+        guard matchSubmit.begin() != nil else { return }
         failure = nil
-        defer { matchBusy = false }
+        var succeeded = false
+        defer { matchSubmit.finish(succeeded: succeeded) }
         do {
             let _: Ignored = try await app.api.send("POST", "/api/matching/unlink", body: Body(transactionId: transactionId))
+            succeeded = true
             Haptics.success()
             app.dataVersion += 1
             await load()

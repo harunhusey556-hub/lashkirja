@@ -124,7 +124,9 @@ struct CustomerDetailView: View {
     @State private var showEdit = false
     @State private var showNewInvoice = false
     @State private var confirmDelete = false
-    @State private var busy = false
+    /// Archive / delete / restore: one at a time, a second tap sends nothing.
+    @State private var submit = SubmitGuard()
+    private var busy: Bool { submit.inFlight }
     @State private var failure: String?
     @State private var notice: String?
     @State private var showMerge = false
@@ -278,12 +280,14 @@ struct CustomerDetailView: View {
     /// Not optimistic: the reply says whether the customer was deleted or archived (it has invoices
     /// or recurring invoices), and an archived one stays on screen with "Palauta arkistosta".
     private func delete() async {
-        busy = true
+        guard submit.begin() != nil else { return }
         failure = nil
         notice = nil
-        defer { busy = false }
+        var succeeded = false
+        defer { submit.finish(succeeded: succeeded) }
         do {
             let result: CustomerRemoval = try await app.api.send("DELETE", "/api/customers/\(customerId)", body: Optional<EmptyBody>.none)
+            succeeded = true
             Haptics.success()
             if result.archived {
                 notice = result.message
@@ -300,12 +304,14 @@ struct CustomerDetailView: View {
     }
 
     private func restore() async {
-        busy = true
+        guard submit.begin() != nil else { return }
         failure = nil
         notice = nil
-        defer { busy = false }
+        var succeeded = false
+        defer { submit.finish(succeeded: succeeded) }
         do {
             let _: CustomerResponse = try await app.api.send("PATCH", "/api/customers/\(customerId)", body: CustomerArchive.Restore())
+            succeeded = true
             Haptics.success()
             notice = CustomerArchive.restoredText
             await load()

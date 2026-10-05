@@ -17,9 +17,10 @@ struct InvoiceFormView: View {
     @State private var showNewCustomer = false
     @State private var showCustomerPicker = false
     @State private var showCatalog = false
-    @State private var busy = false
+    /// One key per invoice being created: a retry after a lost answer gets the same invoice back.
+    @State private var submit = SubmitGuard()
+    private var busy: Bool { submit.inFlight }
     @State private var failure: String?
-    @State private var key = UUID().uuidString
     @State private var loaded = false
     @State private var sellerRegistered = true
     @State private var catalog: [CatalogItem] = []
@@ -604,6 +605,7 @@ struct InvoiceFormView: View {
     }
 
     private func save() async {
+        guard !busy else { return }
         focus = nil
         draft.issueDate = APIDate.dayString(issueDate)
         draft.followSellerVat(registered: sellerRegistered)
@@ -620,9 +622,10 @@ struct InvoiceFormView: View {
             }
             return
         }
-        busy = true
+        guard let key = submit.begin() else { return }
         failure = nil
-        defer { busy = false }
+        var succeeded = false
+        defer { submit.finish(succeeded: succeeded) }
         do {
             if let existing {
                 let _: InvoiceResponse = try await app.api.send("PATCH", "/api/invoices/\(existing.id)", body: InvoicePatch(draft: draft, expectedUpdatedAt: existing.updatedAt))
@@ -631,6 +634,7 @@ struct InvoiceFormView: View {
                 if let owner { SalesDraftStore.shared.clear(owner: owner) }
                 onCreated?(response.invoice.id)
             }
+            succeeded = true
             // Saved: nothing left to lose, so the sheet may close without asking.
             baseline = snapshot
             Haptics.success()

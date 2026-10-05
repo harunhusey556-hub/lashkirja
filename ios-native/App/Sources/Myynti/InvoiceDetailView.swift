@@ -8,7 +8,9 @@ struct InvoiceDetailView: View {
     @State private var state: Loadable<Invoice> = .idle
     @State private var sheet: SheetKind?
     @State private var confirm: ConfirmKind?
-    @State private var busy = false
+    /// Credit, copy, status changes, refund: one at a time, a second tap sends nothing.
+    @State private var submit = SubmitGuard()
+    private var busy: Bool { submit.inFlight }
     @State private var failure: String?
     @State private var pushedId: String?
     @State private var duplicates: [PaymentDuplicate] = []
@@ -453,10 +455,11 @@ struct InvoiceDetailView: View {
     }
 
     private func run(_ work: () async throws -> Void) async {
-        busy = true
+        guard submit.begin() != nil else { return }
         failure = nil
-        defer { busy = false }
-        do { try await work(); Haptics.success() }
+        var succeeded = false
+        defer { submit.finish(succeeded: succeeded) }
+        do { try await work(); succeeded = true; Haptics.success() }
         catch { failure = error.userMessage; Haptics.error() }
     }
 
@@ -680,9 +683,10 @@ struct PaymentSheet: View {
     @State private var amountText = ""
     @State private var date = Date()
     @State private var note = ""
-    @State private var busy = false
+    /// One key until the payment is booked: a retry after a lost answer is replayed, never booked twice.
+    @State private var submit = SubmitGuard()
+    private var busy: Bool { submit.inFlight }
     @State private var failure: String?
-    @State private var key = UUID().uuidString
     @State private var bankRow: PaymentCandidate?
     @State private var useBankRow = true
 
@@ -715,16 +719,16 @@ struct PaymentSheet: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Peruuta") { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Tallenna") { Task { await save() } }.disabled(busy || Money.parse(amountText) == nil)
+                    Button { Task { await save() } } label: { InFlightLabel("Tallenna", inFlight: busy) }
+                        .disabled(busy || Money.parse(amountText) == nil)
                 }
             }
             .onAppear {
                 if amountText.isEmpty { amountText = Money.format(invoice.open).replacingOccurrences(of: "\u{00A0}€", with: "") }
             }
-            // A different payload needs its own idempotency key.
-            .onChange(of: useBankRow) { _, _ in key = UUID().uuidString }
-            .onChange(of: amountText) { _, _ in key = UUID().uuidString }
-            .onChange(of: date) { _, _ in key = UUID().uuidString }
+            // The key stays the same when the form is edited after a failure: a refused attempt has
+            // released it on the server, and one whose answer was lost must not be booked again
+            // with other figures (the server refuses the changed retry instead).
             .task(id: candidateKey) { await findBankRow() }
         }
         .presentationDetents([.medium, .large])
@@ -757,13 +761,15 @@ struct PaymentSheet: View {
             Haptics.error()
             return
         }
-        busy = true
+        guard let key = submit.begin() else { return }
         failure = nil
-        defer { busy = false }
+        var succeeded = false
+        defer { submit.finish(succeeded: succeeded) }
         do {
             let body = PaymentEntry(amount: amount, paidDate: APIDate.dayString(date),
                                     transactionId: carriesRow ? bankRow?.transactionId : nil, note: note)
             let _: InvoiceResponse = try await app.api.send("POST", "/api/invoices/\(invoice.id)/payments", body: body, idempotencyKey: key)
+            succeeded = true
             Haptics.success()
             app.dataVersion += 1
             dismiss()
@@ -781,7 +787,8 @@ struct ReminderSheet: View {
     let invoice: Invoice
     let preview: ReminderPreview
     let onSent: (String) -> Void
-    @State private var busy = false
+    @State private var submit = SubmitGuard()
+    private var busy: Bool { submit.inFlight }
     @State private var failure: String?
 
     var body: some View {
@@ -808,7 +815,8 @@ struct ReminderSheet: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Peruuta") { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Lähetä") { Task { await send() } }.disabled(busy || preview.blockedReason() != nil)
+                    Button { Task { await send() } } label: { InFlightLabel("Lähetä", inFlight: busy) }
+                        .disabled(busy || preview.blockedReason() != nil)
                 }
             }
             .interactiveDismissDisabled(busy)
@@ -816,11 +824,14 @@ struct ReminderSheet: View {
     }
 
     private func send() async {
-        busy = true
+        // The reminder route takes no Idempotency-Key: the guard is what keeps a second tap from mailing twice.
+        guard submit.begin() != nil else { return }
         failure = nil
-        defer { busy = false }
+        var succeeded = false
+        defer { submit.finish(succeeded: succeeded) }
         do {
             let result: ReminderSendResult = try await app.api.send("POST", "/api/invoices/\(invoice.id)/reminders", body: EmptyBody())
+            succeeded = true
             Haptics.success()
             onSent(result.message)
             dismiss()
@@ -840,9 +851,9 @@ struct SendInvoiceSheet: View {
     let invoice: Invoice
     let onSent: (InvoiceSendResult) -> Void
     @State private var check: Loadable<InvoiceSendPreview> = .idle
-    @State private var busy = false
+    @State private var submit = SubmitGuard()
+    private var busy: Bool { submit.inFlight }
     @State private var failure: String?
-    @State private var key = UUID().uuidString
     @State private var to = ""
     @State private var subject = ""
     @State private var message = ""
@@ -1027,7 +1038,7 @@ struct SendInvoiceSheet: View {
                 to = preview.recipient ?? ""
             }
             // A fresh check is a new send, unless a lost answer left it open whether the last one went.
-            if failure == nil { key = UUID().uuidString }
+            if failure == nil { submit.renew() }
         } catch is CancellationError {
         } catch {
             if check.value == nil { check = .failed(error.userMessage) } else { failure = error.userMessage }
@@ -1095,9 +1106,10 @@ struct SendInvoiceSheet: View {
     }
 
     private func send(_ preview: InvoiceSendPreview) async {
-        busy = true
+        guard let key = submit.begin() else { return }
         failure = nil
-        defer { busy = false }
+        var succeeded = false
+        defer { submit.finish(succeeded: succeeded) }
         do {
             let result: InvoiceSendResult
             if preview.subject == nil || preview.message == nil {
@@ -1107,6 +1119,7 @@ struct SendInvoiceSheet: View {
                 let body = InvoiceSendBody(recipient: preview.recipient, to: to, subject: subject, message: message)
                 result = try await app.api.send("POST", "/api/invoices/\(invoice.id)/send", body: body, idempotencyKey: key)
             }
+            succeeded = true
             if result.isWarning { Haptics.error() } else { Haptics.success() }
             onSent(result)
             dismiss()

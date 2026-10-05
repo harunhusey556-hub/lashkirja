@@ -58,7 +58,10 @@ private struct KotiApprovalForm: View {
     @State private var customCategory: Bool
     @State private var errors: [String: String] = [:]
     @State private var failure: String?
-    @State private var busy = false
+    /// Hyväksy once: a second tap neither saves nor approves again. It stays in flight after a
+    /// success, because the sheet is then closing (an unchanged form approves without an await).
+    @State private var submit = SubmitGuard()
+    private var busy: Bool { submit.inFlight }
     @State private var confirmDiscard = false
 
     init(item: DashboardItem, receipt: Receipt, approve: @escaping () -> Void, openReceipt: @escaping () -> Void) {
@@ -224,6 +227,7 @@ private struct KotiApprovalForm: View {
     private static let fieldKeys: Set<String> = ["vendor", "totalAmount", "date", "category"]
 
     private func save() async {
+        guard submit.begin() != nil else { return }
         failure = nil
         switch form.makePatch(baseline: baseline, expectedUpdatedAt: receipt.updatedAt) {
         case .unchanged:
@@ -231,22 +235,24 @@ private struct KotiApprovalForm: View {
         case .invalid(let found):
             show(found)
             Haptics.error()
+            submit.finish(succeeded: false)
         case .patch(let patch):
             errors = [:]
-            busy = true
-            defer { busy = false }
             do {
                 let _: ReceiptResponse = try await app.api.send("PATCH", "/api/receipts/\(receipt.id)", body: patch)
                 finish()
             } catch is CancellationError {
+                submit.finish(succeeded: false)
             } catch let error as LKError {
                 let kind = ReceiptSaveFailure(error)
                 if case .fields(let named, _) = kind { show(named) }
                 failure = kind.message
                 Haptics.error()
+                submit.finish(succeeded: false)
             } catch {
                 failure = error.userMessage
                 Haptics.error()
+                submit.finish(succeeded: false)
             }
         }
     }

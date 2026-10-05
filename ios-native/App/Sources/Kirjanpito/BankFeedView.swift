@@ -385,7 +385,9 @@ struct BankRowSheet: View {
     /// "Avaa tiliote/kuitti/lasku": handed to the screen under the sheet, which pushes it after
     /// the sheet closes. Without it the screen opens inside the sheet.
     let onOpen: ((Route) -> Void)?
-    @State private var busy = false
+    /// Confirm, reject, ignore, approve, unlink: one at a time, a second tap sends nothing.
+    @State private var submit = SubmitGuard()
+    private var busy: Bool { submit.inFlight }
     @State private var failure: String?
     @State private var capture = false
     @State private var captured = false
@@ -603,10 +605,11 @@ struct BankRowSheet: View {
     }
 
     private func run(_ work: () async throws -> Void) async {
-        busy = true
+        guard submit.begin() != nil else { return }
         failure = nil
-        defer { busy = false }
-        do { try await work(); Haptics.success(); dismiss() }
+        var succeeded = false
+        defer { submit.finish(succeeded: succeeded) }
+        do { try await work(); succeeded = true; Haptics.success(); dismiss() }
         catch { failure = error.userMessage; Haptics.error() }
     }
 

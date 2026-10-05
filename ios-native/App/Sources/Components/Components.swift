@@ -87,3 +87,22 @@ struct MoneyText: View {
     var signed = false
     var body: some View { Text(Money.format(amount, signed: signed)).monospacedDigit() }
 }
+
+/// The label of a button whose request is in flight (`SubmitGuard.inFlight`): the title keeps its
+/// place and a spinner sits on it, so the bar neither jumps nor blanks while the server answers.
+struct InFlightLabel: View {
+    let title: String
+    let inFlight: Bool
+
+    init(_ title: String, inFlight: Bool) {
+        self.title = title
+        self.inFlight = inFlight
+    }
+
+    var body: some View {
+        Text(title)
+            .opacity(inFlight ? 0 : 1)
+            .overlay { if inFlight { ProgressView() } }
+            .accessibilityLabel(inFlight ? "\(title), lähetetään" : title)
+    }
+}
