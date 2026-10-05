@@ -5,7 +5,7 @@ import LashKirjaCore
 struct RaportitView: View {
     @Environment(AppModel.self) private var app
     @State private var year = Int(MonthKey.current().prefix(4)) ?? 2026
-    @State private var state: Loadable<ProfitLoss> = .idle
+    @State private var state = ScreenLoad<ProfitLoss>()
     @State private var export: ExportKind?
     /// The accountant package's period: "YYYY-MM", "YYYY-Qn" or "YYYY" (SALES-21).
     @State private var packageChoice = MonthKey.shift(MonthKey.current(), by: -1)
@@ -42,6 +42,11 @@ struct RaportitView: View {
                 .buttonStyle(.borderless)
             }
             if let report = state.value {
+                if let banner = state.banner {
+                    Section { RefreshFailureBanner(failure: banner, retry: load) }
+                        .listRowBackground(Color.clear)
+                        .listRowInsets(EdgeInsets())
+                }
                 let yearKey = String(year)
                 Section("Tulos ilman ALV:ta") {
                     drillFigure(ReportDrill.incomeTargets(report.total, key: yearKey)) {
@@ -64,7 +69,7 @@ struct RaportitView: View {
                 monthSection(report.filledMonths(year: yearKey))
                 categorySection(report.total)
             } else {
-                LoadState(state: state, retry: load) { (_: ProfitLoss) in EmptyView() }.listRowBackground(Color.clear)
+                ScreenStateView(state: state, retry: load) { (_: ProfitLoss) in EmptyView() }.listRowBackground(Color.clear)
             }
             Section {
                 Picker("Kausi", selection: Binding(get: { packagePeriod }, set: { packageChoice = $0 })) {
@@ -268,23 +273,24 @@ struct RaportitView: View {
     private func setYear(_ next: Int) {
         year = next
         selectedMonth = nil
-        state = .loading
+        state.restart()
     }
 
     private func load() async {
         // A pull-to-refresh is not cancelled by a year change: its answer is for the year it asked.
         let asked = year
+        state.begin()
         do {
             let report: ProfitLoss = try await app.api.get("/api/reports/profit-loss", query: ["from": "\(asked)-01", "to": "\(asked)-12"])
             try Task.checkCancellation()
             guard asked == year else { return }
-            state = .loaded(report)
+            state.succeed(report)
         }
         catch is CancellationError {}
         catch {
             guard asked == year else { return }
             // A failed reload keeps the figures already shown (as the other gated screens).
-            if state.value == nil { state = .failed(error.userMessage) }
+            state.fail(error)
         }
     }
 }

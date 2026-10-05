@@ -9,7 +9,7 @@ final class KotiModel {
     /// The owner's profile, kept by AppModel: its ALV-verokausi picks the return the status card names.
     private let profile: () async -> Profile?
     var month: String = MonthKey.current()
-    private(set) var state: Loadable<Dashboard> = .idle
+    private(set) var state = ScreenLoad<Dashboard>()
     /// Rows the owner just acted on: gone from the list at once, back if undone or failed,
     /// and not brought back by a reload while the action is still waiting or on its way.
     private(set) var hidden = KotiHiddenRows()
@@ -36,7 +36,7 @@ final class KotiModel {
     func load() async {
         let generation = loads.next()
         let month = self.month
-        if state.value == nil { state = .loading }
+        state.begin()
         // The job list loads beside the dashboard; it only decides whether the failures row shows.
         let api = self.api
         async let jobsList: JobsList? = try? api.get("/api/jobs")
@@ -45,7 +45,7 @@ final class KotiModel {
             let dashboard: Dashboard = try await api.get("/api/dashboard", query: ["month": month])
             guard loads.isCurrent(generation), month == self.month else { return }
             hidden.reloaded(present: dashboard.items.map(\.id), loadGeneration: generation)
-            state = .loaded(dashboard)
+            state.succeed(dashboard)
             if let jobs = await jobsList, loads.isCurrent(generation) {
                 failedJobs = JobsQueue.failedCount(jobs.jobs, connections: await connections, dismissedLocally: JobDismissals.ids)
             }
@@ -54,7 +54,8 @@ final class KotiModel {
             return
         } catch {
             guard loads.isCurrent(generation), month == self.month else { return }
-            if state.value == nil { state = .failed(error.userMessage) }
+            // With a dashboard shown it stays, under a banner saying the refresh failed.
+            state.fail(error)
         }
     }
 

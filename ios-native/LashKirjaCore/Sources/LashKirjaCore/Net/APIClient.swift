@@ -64,7 +64,16 @@ public actor APIClient {
     /// views can ignore it instead of showing "no connection".
     static func transportError(_ error: Error) -> Error {
         if error is CancellationError { return error }
-        if let url = error as? URLError, url.code == .cancelled { return CancellationError() }
+        if let url = error as? URLError {
+            switch url.code {
+            case .cancelled: return CancellationError()
+            // The request never left the phone.
+            case .notConnectedToInternet, .dataNotAllowed, .internationalRoamingOff: return LKError.offline()
+            // It may have reached the server: a write's outcome is unknown, as with NETWORK.
+            case .timedOut: return LKError(status: 0, code: "TIMEOUT", message: LKError.unreachable)
+            default: break
+            }
+        }
         return LKError(status: 0, code: "NETWORK", message: LKError.unreachable)
     }
 

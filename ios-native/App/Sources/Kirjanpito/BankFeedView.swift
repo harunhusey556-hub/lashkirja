@@ -4,7 +4,7 @@ import LashKirjaCore
 
 struct BankFeedView: View {
     @Environment(AppModel.self) private var app
-    @State private var state: Loadable<[BankFeed.Month]> = .idle
+    @State private var state = ScreenLoad<[BankFeed.Month]>()
     /// Coming back to the screen does not ask the server again unless something changed.
     @State private var gate = ReloadGate()
     @State private var statements: [Statement] = []
@@ -87,6 +87,11 @@ struct BankFeedView: View {
                 }
             }
             if let months = state.value {
+                if let banner = state.banner {
+                    Section { RefreshFailureBanner(failure: banner, retry: load) }
+                        .listRowBackground(Color.clear)
+                        .listRowInsets(EdgeInsets())
+                }
                 if months.isEmpty {
                     ContentUnavailableView {
                         Label(month == nil ? "Ei pankkitapahtumia vielä" : "Ei tapahtumia tässä kuussa", systemImage: "building.columns")
@@ -133,7 +138,7 @@ struct BankFeedView: View {
                     Text(search.isEmpty ? "Kaikilla tapahtumilla on kuitti tai merkintä." : "Ei osumia.").foregroundStyle(Theme.ink2)
                 }
             } else {
-                LoadState(state: state, retry: load) { (_: [BankFeed.Month]) in EmptyView() }.listRowBackground(Color.clear)
+                ScreenStateView(state: state, retry: load) { (_: [BankFeed.Month]) in EmptyView() }.listRowBackground(Color.clear)
             }
         }
         .scrollContentBackground(.hidden)
@@ -225,19 +230,19 @@ struct BankFeedView: View {
     }
 
     private func load() async {
-        if state.value == nil { state = .loading }
+        state.begin()
         // A slow answer for a month the owner already left must not replace the newer one.
         let requested = month
         do {
             let list: StatementList = try await app.api.get("/api/statements", query: BankFeed.query(month: requested))
             guard requested == month else { return }
             statements = list.statements
-            state = .loaded(BankFeed.months(list.statements))
+            state.succeed(BankFeed.months(list.statements))
             openPendingFocus()
         } catch is CancellationError {
         } catch {
             guard requested == month else { return }
-            if state.value == nil { state = .failed(error.userMessage) }
+            state.fail(error)
         }
     }
 

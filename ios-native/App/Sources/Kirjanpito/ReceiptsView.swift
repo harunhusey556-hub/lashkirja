@@ -6,7 +6,7 @@ import LashKirjaCore
 /// review queue on top, and multi-select delete.
 struct ReceiptsView: View {
     @Environment(AppModel.self) private var app
-    @State private var receipts: Loadable<[Receipt]> = .idle
+    @State private var receipts = ScreenLoad<[Receipt]>()
     /// Coming back to the screen does not ask the server again unless something changed.
     @State private var gate = ReloadGate()
     @State private var total = 0
@@ -98,6 +98,11 @@ struct ReceiptsView: View {
             .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 4, trailing: 0))
 
             if receipts.value != nil {
+                if let banner = receipts.banner {
+                    Section { RefreshFailureBanner(failure: banner, retry: load) }
+                        .listRowBackground(Color.clear)
+                        .listRowInsets(EdgeInsets())
+                }
                 let all = shownReceipts
                 Section {
                     if all.isEmpty {
@@ -113,7 +118,7 @@ struct ReceiptsView: View {
                     if !all.isEmpty { Text("\(total) kuittia") }
                 }
             } else {
-                LoadState(state: receipts, retry: load) { (_: [Receipt]) in EmptyView() }.listRowBackground(Color.clear)
+                ScreenStateView(state: receipts, retry: load) { (_: [Receipt]) in EmptyView() }.listRowBackground(Color.clear)
             }
         }
         .scrollContentBackground(.hidden)
@@ -357,7 +362,7 @@ struct ReceiptsView: View {
     // MARK: Loading
 
     private func load() async {
-        if receipts.value == nil { receipts = .loading }
+        receipts.begin()
         let api = app.api
         // A slow answer for filters the owner already changed must not replace the newer list.
         let asked = query
@@ -373,7 +378,7 @@ struct ReceiptsView: View {
                 if let r = await rejectedResponse { applyRejected(r) }
                 return
             }
-            receipts = .loaded(list.receipts)
+            receipts.succeed(list.receipts)
             total = list.count ?? list.receipts.count
             truncated = list.truncated ?? false
             failure = nil
@@ -383,7 +388,7 @@ struct ReceiptsView: View {
             return
         } catch {
             guard asked == query else { return }
-            if receipts.value == nil { receipts = .failed(error.userMessage) } else { failure = error.userMessage }
+            receipts.fail(error)
         }
         if let c = await countsResponse, asked == query { counts = c.counts }
         if let q = await queue { applyPending(q) }
@@ -440,7 +445,7 @@ struct ReceiptsView: View {
             let page: ReceiptList = try await app.api.get("/api/receipts", query: asked.listQuery(offset: loaded.count))
             // The filters changed while this page was on its way: the fresh load wins.
             guard asked == query else { return }
-            receipts = .loaded(ReceiptPaging.append(loaded, page.receipts))
+            receipts.update { $0 = ReceiptPaging.append(loaded, page.receipts) }
             total = page.count ?? total
             truncated = page.truncated ?? false
         } catch is CancellationError {
@@ -534,7 +539,7 @@ struct ReceiptsView: View {
         }
         if !deleted.isEmpty {
             withAnimation {
-                if let rows = receipts.value { receipts = .loaded(rows.filter { !deleted.contains($0.id) }) }
+                receipts.update { rows in rows.removeAll { deleted.contains($0.id) } }
                 total = max(0, total - deleted.count)
             }
             app.dataVersion += 1

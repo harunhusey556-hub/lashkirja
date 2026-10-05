@@ -54,7 +54,7 @@ private struct KotiContent: View {
 
     var body: some View {
         ScrollView {
-            LoadState(state: model.state, retry: model.load) { dashboard in
+            ScreenStateView(state: model.state, retry: model.load) { dashboard in
                 let sections = KotiLayout.sections(.init(dashboard: dashboard, atCurrentMonth: model.atCurrentMonth,
                                                          hasTasks: !model.visibleItems.isEmpty, failedJobs: model.failedJobs,
                                                          onboardingOpen: OnboardingGate.shared.isSnoozed))

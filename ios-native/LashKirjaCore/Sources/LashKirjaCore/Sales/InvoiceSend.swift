@@ -174,7 +174,7 @@ public struct InvoiceSendResult: Decodable, Sendable {
 
     /// A lost connection leaves it open whether the mail left; the same key makes a retry safe.
     public static func failureMessage(_ error: Error) -> String {
-        if let error = error as? LKError, error.status == 0, error.code == "NETWORK" {
+        if let error = error as? LKError, error.status == 0, error.code == "NETWORK" || error.code == "TIMEOUT" {
             return "Yhteys katkesi, emmekä tiedä ehtikö viesti lähteä. Voit yrittää uudelleen: samaa laskua ei lähetetä kahdesti."
         }
         return (error as? LKError)?.message ?? LKError.unreachable

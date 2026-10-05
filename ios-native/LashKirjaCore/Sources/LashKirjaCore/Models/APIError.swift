@@ -25,7 +25,8 @@ public struct LKError: Error, Equatable, Sendable {
     }
 
     public static let unreachable = "Palvelimeen ei saada yhteyttä. Yritä hetken päästä uudelleen."
-    public static func offline() -> LKError { LKError(status: 0, code: "OFFLINE", message: "Ei verkkoyhteyttä.") }
+    public static func offline() -> LKError { LKError(status: 0, code: "OFFLINE", message: LKError.offlineMessage) }
+    public static let offlineMessage = "Ei verkkoyhteyttä. Mitään ei lähetetty; yritä uudelleen, kun yhteys palaa."
 }
 
 /// Survives a trip through Objective-C (Stripe Terminal hands our connection token error back as

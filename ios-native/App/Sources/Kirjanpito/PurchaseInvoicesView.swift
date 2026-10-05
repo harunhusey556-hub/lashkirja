@@ -5,7 +5,7 @@ import LashKirjaCore
 struct PurchaseInvoicesView: View {
     @Environment(AppModel.self) private var app
     @AppStorage("ostolaskut.filter") private var filterRaw = PurchaseFilter.all.rawValue
-    @State private var state: Loadable<PurchaseInvoiceList> = .idle
+    @State private var state = ScreenLoad<PurchaseInvoiceList>()
     /// Coming back to the screen does not ask the server again unless something changed.
     @State private var gate = ReloadGate()
     @State private var counts: PurchaseStatusCounts?
@@ -36,9 +36,14 @@ struct PurchaseInvoicesView: View {
     var body: some View {
         List {
             if let list = state.value {
+                if let banner = state.banner {
+                    Section { RefreshFailureBanner(failure: banner, retry: load) }
+                        .listRowBackground(Color.clear)
+                        .listRowInsets(EdgeInsets())
+                }
                 content(list)
             } else {
-                LoadState(state: state, retry: load) { (_: PurchaseInvoiceList) in EmptyView() }
+                ScreenStateView(state: state, retry: load) { (_: PurchaseInvoiceList) in EmptyView() }
                     .listRowBackground(Color.clear)
             }
         }
@@ -285,7 +290,7 @@ struct PurchaseInvoicesView: View {
     }
 
     private func load() async {
-        if state.value == nil { state = .loading }
+        state.begin()
         var query: [String: String] = [:]
         if let status = filter.queryValue { query["status"] = status }
         // Counts load alongside the list (one round trip instead of two).
@@ -297,13 +302,13 @@ struct PurchaseInvoicesView: View {
         async let pending: PurchaseSuggestionList? = try? api.get("/api/purchase-invoices/match")
         do {
             let tagged: PurchaseInvoiceTaggedList = try await app.api.get("/api/purchase-invoices", query: query)
-            state = .loaded(tagged.list)
+            state.succeed(tagged.list)
             recurringIds = tagged.recurringIds
             failure = nil
         } catch is CancellationError {
             return
         } catch {
-            if state.value == nil { state = .failed(error.userMessage) } else { failure = error.userMessage }
+            state.fail(error)
         }
         if let response = await freshCounts {
             counts = response.counts

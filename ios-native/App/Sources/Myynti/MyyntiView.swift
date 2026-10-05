@@ -7,7 +7,7 @@ struct MyyntiView: View {
     var openNewInvoice = false
     /// A report link's period or customer (`/laskut?month=…`); empty for the Myynti tab itself.
     var scope = InvoiceScope()
-    @State private var state: Loadable<InvoiceList> = .idle
+    @State private var state = ScreenLoad<InvoiceList>()
     /// Coming back to the screen does not ask the server again unless something changed.
     @State private var gate = ReloadGate()
     @State private var counts: [String: Int]?
@@ -40,6 +40,11 @@ struct MyyntiView: View {
     var body: some View {
         List {
             if let list = state.value {
+                if let banner = state.banner {
+                    Section { RefreshFailureBanner(failure: banner, retry: load) }
+                        .listRowBackground(Color.clear)
+                        .listRowInsets(EdgeInsets())
+                }
                 Section {
                     ReceivablesCard(aging: list.aging, filter: filter, lateBucket: lateBucket) { segment in
                         filter = filter == segment ? .all : segment
@@ -116,7 +121,7 @@ struct MyyntiView: View {
                     }
                 }
             } else {
-                LoadState(state: state, retry: load) { (_: InvoiceList) in EmptyView() }
+                ScreenStateView(state: state, retry: load) { (_: InvoiceList) in EmptyView() }
                     .listRowBackground(Color.clear)
             }
         }
@@ -260,12 +265,15 @@ struct MyyntiView: View {
     }
 
     private func load() async {
-        if state.value == nil { state = .loading }
+        state.begin()
         // The list and the chip counts are independent: one round trip instead of two.
         async let fresh = loadCounts()
-        do { state = .loaded(try await app.api.get("/api/invoices", query: SalesListQuery.query(scope: scope, filter: filter, search: query))) }
+        do {
+            let list: InvoiceList = try await app.api.get("/api/invoices", query: SalesListQuery.query(scope: scope, filter: filter, search: query))
+            state.succeed(list)
+        }
         catch is CancellationError {}
-        catch { if state.value == nil { state = .failed(error.userMessage) } }
+        catch { state.fail(error) }
         if let fresh = await fresh { counts = fresh }
     }
 
