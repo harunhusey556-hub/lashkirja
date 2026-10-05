@@ -344,6 +344,8 @@ struct CustomerFormSheet: View {
     /// The form as it opened; anything else is an unsaved change.
     @State private var baseline: CustomerDraft?
     @State private var confirmDiscard = false
+    private enum Field: Hashable { case name, businessId, contact, email, phone, street, postal, city, notes }
+    @FocusState private var focus: Field?
 
     private var dirty: Bool { baseline.map { $0 != draft } ?? false }
 
@@ -352,24 +354,42 @@ struct CustomerFormSheet: View {
             Form {
                 Section {
                     TextField("Nimi", text: $draft.name)
+                        .textContentType(.organizationName).textInputAutocapitalization(.words)
+                        .focused($focus, equals: .name).submitLabel(.next).onSubmit { focus = .businessId }
                     TextField("Y-tunnus (valinnainen)", text: $draft.businessId)
+                        .codeInput(.never)
+                        .focused($focus, equals: .businessId).submitLabel(.next).onSubmit { focus = .contact }
                     TextField("Yhteyshenkilö (valinnainen)", text: $draft.contactPerson)
+                        .textContentType(.name).textInputAutocapitalization(.words)
+                        .focused($focus, equals: .contact).submitLabel(.next).onSubmit { focus = .email }
                 }
                 Section {
-                    TextField("Sähköposti", text: $draft.email).keyboardType(.emailAddress).textInputAutocapitalization(.never)
-                    TextField("Puhelin", text: $draft.phone).keyboardType(.phonePad)
+                    TextField("Sähköposti", text: $draft.email)
+                        .emailInput()
+                        .focused($focus, equals: .email).submitLabel(.next).onSubmit { focus = .phone }
+                    TextField("Puhelin", text: $draft.phone)
+                        .phoneInput()
+                        .focused($focus, equals: .phone)
                 }
                 Section("Osoite") {
                     TextField("Katuosoite", text: $draft.addressStreet)
-                    TextField("Postinumero", text: $draft.addressPostalCode).keyboardType(.numberPad)
+                        .textContentType(.streetAddressLine1).textInputAutocapitalization(.words)
+                        .focused($focus, equals: .street).submitLabel(.next).onSubmit { focus = .postal }
+                    TextField("Postinumero", text: $draft.addressPostalCode)
+                        .keyboardType(.numberPad).textContentType(.postalCode)
+                        .focused($focus, equals: .postal)
                     TextField("Kaupunki", text: $draft.addressCity)
+                        .textContentType(.addressCity).textInputAutocapitalization(.words)
+                        .focused($focus, equals: .city).submitLabel(.next).onSubmit { focus = .notes }
                 }
                 Section {
                     Stepper("Maksuaika \(draft.defaultPaymentTermDays) pv", value: $draft.defaultPaymentTermDays, in: 0...365, step: 7)
                     TextField("Muistiinpanot", text: $draft.notes, axis: .vertical)
+                        .focused($focus, equals: .notes)
                 }
                 if let failure { Text(failure).foregroundStyle(Theme.danger) }
             }
+            .formKeyboard()
             .navigationTitle(existing == nil ? "Uusi asiakas" : "Muokkaa asiakasta")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {

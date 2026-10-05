@@ -699,7 +699,7 @@ struct PaymentSheet: View {
         NavigationStack {
             Form {
                 Section {
-                    TextField("Summa", text: $amountText).keyboardType(.decimalPad)
+                    TextField("Summa", text: $amountText).moneyInput()
                     DatePicker("Maksupäivä", selection: $date, in: ...Date(), displayedComponents: .date)
                     TextField("Lisätieto (valinnainen)", text: $note)
                 } footer: {
@@ -719,6 +719,7 @@ struct PaymentSheet: View {
                 }
                 if let failure { Text(failure).foregroundStyle(Theme.danger) }
             }
+            .formKeyboard()
             .navigationTitle("Kirjaa maksu")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -930,6 +931,7 @@ struct SendInvoiceSheet: View {
                         .listRowBackground(Color.clear)
                 }
             }
+            .formKeyboard()
             .navigationTitle(invoice.isCreditNote ? "Lähetä hyvityslasku" : "Lähetä lasku")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -1166,6 +1168,7 @@ struct CloseReasonSheet: View {
                         .listRowInsets(EdgeInsets())
                 }
             }
+            .formKeyboard()
             .navigationTitle("Sulje perustelulla")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Peruuta") { dismiss() } } }

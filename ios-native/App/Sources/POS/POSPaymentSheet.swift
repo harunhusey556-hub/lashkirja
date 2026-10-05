@@ -30,6 +30,7 @@ struct POSPaymentSheet: View {
                 }
             }
             .background(Theme.canvas)
+            .formKeyboard()
             .navigationTitle("Korttimaksu")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -118,7 +119,7 @@ struct POSPaymentSheet: View {
                 Text("Summa").font(.caption).foregroundStyle(Theme.ink2)
                 HStack {
                     TextField("0,00", text: $amountText)
-                        .keyboardType(.decimalPad)
+                        .moneyInput()
                         .font(.system(size: 34, weight: .bold, design: .rounded))
                         .onChange(of: amountText) { _, _ in amountProblem = nil }
                     Text("€").font(.title.weight(.semibold)).foregroundStyle(Theme.ink2)

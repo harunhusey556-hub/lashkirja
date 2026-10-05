@@ -142,7 +142,9 @@ struct ProfileForm: View {
                 case .person:
                     Section {
                         TextField("Etunimi", text: binding.firstName.orEmpty)
+                            .textContentType(.givenName).textInputAutocapitalization(.words)
                         TextField("Sukunimi", text: binding.lastName.orEmpty)
+                            .textContentType(.familyName).textInputAutocapitalization(.words)
                     } footer: { Text("Sähköposti: \(original.email)") }
                 case .company:
                     Section {
@@ -163,17 +165,20 @@ struct ProfileForm: View {
                 case .seller:
                     Section("Yritys") {
                         TextField("Yrityksen nimi", text: binding.businessName.orEmpty)
-                        TextField("Y-tunnus", text: binding.businessId.orEmpty)
-                        TextField("Puhelin", text: binding.phone.orEmpty).keyboardType(.phonePad)
+                            .textContentType(.organizationName).textInputAutocapitalization(.words)
+                        TextField("Y-tunnus", text: binding.businessId.orEmpty).codeInput(.never)
+                        TextField("Puhelin", text: binding.phone.orEmpty).phoneInput()
                     }
                     Section("Osoite") {
                         TextField("Katuosoite", text: binding.addressStreet.orEmpty)
-                        TextField("Postinumero", text: binding.addressPostalCode.orEmpty).keyboardType(.numberPad)
+                            .textContentType(.streetAddressLine1).textInputAutocapitalization(.words)
+                        TextField("Postinumero", text: binding.addressPostalCode.orEmpty).keyboardType(.numberPad).textContentType(.postalCode)
                         TextField("Kaupunki", text: binding.addressCity.orEmpty)
+                            .textContentType(.addressCity).textInputAutocapitalization(.words)
                     }
                     Section("Maksutiedot") {
-                        TextField("IBAN", text: binding.invoiceIban.orEmpty).textInputAutocapitalization(.characters).autocorrectionDisabled()
-                        TextField("BIC", text: binding.invoiceBic.orEmpty).textInputAutocapitalization(.characters).autocorrectionDisabled()
+                        TextField("IBAN", text: binding.invoiceIban.orEmpty).codeInput()
+                        TextField("BIC", text: binding.invoiceBic.orEmpty).codeInput()
                         TextField("Maksuehdot laskulla", text: binding.invoiceTerms.orEmpty, axis: .vertical)
                     }
                     if let fields = Binding($collection) { collectionSection(fields) }
@@ -181,6 +186,7 @@ struct ProfileForm: View {
             }
             if let failure { Text(failure).foregroundStyle(Theme.danger) }
         }
+        .formKeyboard()
         .navigationTitle(title)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Tallenna") { Task { await save() } }.disabled(busy) } }
@@ -194,13 +200,13 @@ struct ProfileForm: View {
     private func collectionSection(_ fields: Binding<CollectionFields>) -> some View {
         Section {
             LabeledContent("Viivästyskorko % / v") {
-                TextField("11,5", text: fields.interest).keyboardType(.decimalPad).multilineTextAlignment(.trailing)
+                TextField("11,5", text: fields.interest).moneyInput().multilineTextAlignment(.trailing)
             }
             if showCollectionErrors, let problem = fields.wrappedValue.interestError {
                 Text(problem).font(.footnote).foregroundStyle(Theme.danger)
             }
             LabeledContent("Muistutusmaksu (€)") {
-                TextField("5,00", text: fields.fee).keyboardType(.decimalPad).multilineTextAlignment(.trailing)
+                TextField("5,00", text: fields.fee).moneyInput().multilineTextAlignment(.trailing)
             }
             if showCollectionErrors, let problem = fields.wrappedValue.feeError {
                 Text(problem).font(.footnote).foregroundStyle(Theme.danger)
@@ -260,16 +266,22 @@ struct PasswordView: View {
     @State private var again = ""
     @State private var busy = false
     @State private var failure: String?
+    private enum Field: Hashable { case current, new, again }
+    @FocusState private var focus: Field?
 
     var body: some View {
         Form {
             Section {
                 SecureField("Nykyinen salasana", text: $current).textContentType(.password)
+                    .focused($focus, equals: .current).submitLabel(.next).onSubmit { focus = .new }
                 SecureField("Uusi salasana", text: $next).textContentType(.newPassword)
+                    .focused($focus, equals: .new).submitLabel(.next).onSubmit { focus = .again }
                 SecureField("Uusi salasana uudelleen", text: $again).textContentType(.newPassword)
+                    .focused($focus, equals: .again).submitLabel(.done).onSubmit { focus = nil }
             } footer: { Text("Vähintään 8 merkkiä.") }
             if let failure { Text(failure).foregroundStyle(Theme.danger) }
         }
+        .formKeyboard()
         .navigationTitle("Vaihda salasana")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {

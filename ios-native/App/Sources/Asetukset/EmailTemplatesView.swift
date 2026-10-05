@@ -150,6 +150,11 @@ struct EmailTemplateEditor: View {
     @State private var busy = false
     @State private var failure: String?
     @State private var loaded = false
+    /// The fields as the editor opened; anything else is an unsaved change.
+    @State private var baseline: [String]?
+    @State private var confirmDiscard = false
+    private var snapshot: [String] { [name, subject, message, String(isDefault)] }
+    private var dirty: Bool { baseline.map { $0 != snapshot } ?? false }
 
     private var draft: EmailTemplateDraft {
         EmailTemplateDraft(name: name, subject: subject, body: message, isDefault: isDefault)
@@ -186,15 +191,16 @@ struct EmailTemplateEditor: View {
                 }
                 if let failure { Section { Text(failure).foregroundStyle(Theme.danger) } }
             }
+            .formKeyboard()
             .navigationTitle(existing == nil ? "Uusi malli" : "Muokkaa mallia")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Peruuta") { dismiss() }.disabled(busy) }
+                ToolbarItem(placement: .cancellationAction) { Button("Peruuta") { if dirty { confirmDiscard = true } else { dismiss() } }.disabled(busy) }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Tallenna") { Task { await save() } }.disabled(busy || draft.problem != nil)
                 }
             }
-            .interactiveDismissDisabled(busy)
+            .discardGuard(dirty: dirty, busy: busy, asking: $confirmDiscard) { dismiss() }
             .onAppear {
                 guard !loaded else { return }
                 loaded = true
@@ -208,6 +214,7 @@ struct EmailTemplateEditor: View {
                     subject = "Lasku {laskunumero} · {yritys}"
                     message = "Hei {asiakas},\n\nliitteenä lasku {laskunumero}.\n\nSumma: {summa}\nEräpäivä: {erapaiva}\nViitenumero: {viitenumero}\n\nKiitos!\n{yritys}"
                 }
+                baseline = snapshot
             }
         }
     }

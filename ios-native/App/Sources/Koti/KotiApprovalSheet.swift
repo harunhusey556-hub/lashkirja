@@ -26,6 +26,7 @@ struct KotiApprovalSheet: View {
                 }
             }
             .background(Theme.canvas)
+            .formKeyboard()
             .navigationTitle(item.party)
             .navigationBarTitleDisplayMode(.inline)
         }
@@ -153,7 +154,7 @@ private struct KotiApprovalForm: View {
             fieldError("vendor")
         case .amount:
             TextField("Summa €", text: Binding(get: { form.totalText }, set: { form.setTotal($0) }))
-                .keyboardType(.decimalPad)
+                .moneyInput()
             fieldError("totalAmount")
         case .date:
             DatePicker("Päivä", selection: Binding(get: { APIDate.day(form.date) ?? Date() },

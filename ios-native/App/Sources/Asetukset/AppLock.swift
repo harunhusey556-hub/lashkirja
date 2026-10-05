@@ -257,6 +257,7 @@ struct AppLockSettingsView: View {
             }
             if let message { Text(message).foregroundStyle(Theme.danger) }
         }
+        .formKeyboard()
         .navigationTitle("Sovelluslukitus")
     }
 

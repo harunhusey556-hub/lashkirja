@@ -24,6 +24,7 @@ struct PurchaseInvoiceFormView: View {
             Form {
                 Section {
                     TextField("Toimittaja", text: $form.supplierName, prompt: Text("Tukku Oy"))
+                        .textContentType(.organizationName)
                         .textInputAutocapitalization(.words)
                     fieldError(.supplierName)
                 } header: {
@@ -33,13 +34,13 @@ struct PurchaseInvoiceFormView: View {
                 Section {
                     LabeledContent("Summa (€)") {
                         TextField("124,00", text: $form.gross)
-                            .keyboardType(.decimalPad)
+                            .moneyInput()
                             .multilineTextAlignment(.trailing)
                     }
                     fieldError(.gross)
                     LabeledContent("ALV (€)") {
                         TextField("0,00", text: $form.vat)
-                            .keyboardType(.decimalPad)
+                            .moneyInput()
                             .multilineTextAlignment(.trailing)
                     }
                     fieldError(.vat)
@@ -66,6 +67,7 @@ struct PurchaseInvoiceFormView: View {
                     fieldError(.reference)
                     LabeledContent("Laskun numero") {
                         TextField("", text: $form.invoiceNumber)
+                            .codeInput(.never)
                             .multilineTextAlignment(.trailing)
                     }
                     LabeledContent("Kategoria") {
@@ -91,6 +93,7 @@ struct PurchaseInvoiceFormView: View {
             }
             .scrollContentBackground(.hidden)
             .background(Theme.canvas)
+            .formKeyboard()
             .navigationTitle(existing == nil ? "Uusi ostolasku" : "Muokkaa ostolaskua")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -198,7 +201,7 @@ struct PurchasePaymentSheet: View {
                 Section {
                     LabeledContent("Summa (€)") {
                         TextField("124,00", text: $amountText)
-                            .keyboardType(.decimalPad)
+                            .moneyInput()
                             .multilineTextAlignment(.trailing)
                     }
                     DatePicker("Maksupäivä", selection: $date, displayedComponents: .date)
@@ -212,6 +215,7 @@ struct PurchasePaymentSheet: View {
                     Section { Text(failure).foregroundStyle(Theme.danger) }
                 }
             }
+            .formKeyboard()
             .navigationTitle("Kirjaa maksu")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -287,6 +291,7 @@ struct PurchaseMarkPaidSheet: View {
                     Section { Text(failure).foregroundStyle(Theme.danger) }
                 }
             }
+            .formKeyboard()
             .navigationTitle("Merkitse maksetuksi")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {

@@ -443,7 +443,7 @@ struct RecurringPurchaseFormSheet: View {
                     LabeledContent("Y-tunnus") {
                         TextField("1234567-8", text: $form.businessId)
                             .multilineTextAlignment(.trailing)
-                            .textInputAutocapitalization(.never)
+                            .codeInput(.never)
                     }
                     fieldError(.businessId)
                     LabeledContent("IBAN") {
@@ -458,7 +458,7 @@ struct RecurringPurchaseFormSheet: View {
                 Section {
                     LabeledContent("Summa (€)") {
                         TextField("850,00", text: $form.gross)
-                            .keyboardType(.decimalPad)
+                            .moneyInput()
                             .multilineTextAlignment(.trailing)
                     }
                     fieldError(.gross)
@@ -524,6 +524,7 @@ struct RecurringPurchaseFormSheet: View {
             }
             .scrollContentBackground(.hidden)
             .background(Theme.canvas)
+            .formKeyboard()
             .navigationTitle(existing == nil ? "Uusi toistuva ostolasku" : "Muokkaa toistuvaa")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {

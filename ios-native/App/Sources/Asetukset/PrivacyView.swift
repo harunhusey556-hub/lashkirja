@@ -245,6 +245,7 @@ private struct CloseAccountSheet: View {
             }
             .scrollContentBackground(.hidden)
             .background(Theme.canvas)
+            .formKeyboard()
             .navigationTitle("Pyydetäänkö tilin sulkemista?")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {

@@ -38,10 +38,8 @@ struct ChangeEmailView: View {
                 }
                 Section {
                     TextField("Uusi sähköposti", text: $email)
-                        .textContentType(.emailAddress)
-                        .keyboardType(.emailAddress)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
+                        .emailInput()
+                        .submitLabel(.next)
                         .onChange(of: email) { _, _ in emailError = nil }
                     if let emailError { Text(emailError).font(.footnote).foregroundStyle(Theme.danger) }
                     SecureField("Nykyinen salasana", text: $password)
@@ -78,6 +76,7 @@ struct ChangeEmailView: View {
         }
         .scrollContentBackground(.hidden)
         .background(Theme.canvas)
+        .formKeyboard()
         .navigationTitle("Sähköposti")
         .navigationBarTitleDisplayMode(.inline)
         .refreshable { await load() }

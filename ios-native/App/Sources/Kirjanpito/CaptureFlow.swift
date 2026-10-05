@@ -69,6 +69,7 @@ struct CaptureFlow: View {
                 }
             }
             .background(Theme.canvas)
+            .formKeyboard()
             .navigationTitle("Uusi kuitti")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -434,7 +435,7 @@ struct ReceiptEditor: View {
                 DatePicker("Päivä", selection: dateBinding, displayedComponents: .date)
                 fieldError("date")
                 TextField("Summa €", text: Binding(get: { form.totalText }, set: { form.setTotal($0) }))
-                    .keyboardType(.decimalPad)
+                    .moneyInput()
                 fieldError("totalAmount")
             }
             Section {
@@ -501,7 +502,7 @@ struct ReceiptEditor: View {
                     .pickerStyle(.menu)
                     .fixedSize()
                     TextField("ALV €", text: Binding(get: { row.amountText }, set: { form.setVatAmount($0, at: index) }))
-                        .keyboardType(.decimalPad)
+                        .moneyInput()
                         .multilineTextAlignment(.trailing)
                     Button(role: .destructive) { form.removeVatRow(at: index) } label: { Image(systemName: "minus.circle") }
                         .buttonStyle(.borderless)

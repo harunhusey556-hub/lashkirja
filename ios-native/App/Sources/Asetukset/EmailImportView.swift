@@ -193,6 +193,7 @@ private struct ConnectMailboxSheet: View {
             }
             .scrollContentBackground(.hidden)
             .background(Theme.canvas)
+            .formKeyboard()
             .navigationTitle(provider?.title ?? "Yhdistä sähköposti")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {

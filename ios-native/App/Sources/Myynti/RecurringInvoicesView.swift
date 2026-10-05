@@ -429,6 +429,7 @@ struct RecurringFormSheet: View {
                 }
                 if let failure { Section { Text(failure).foregroundStyle(Theme.danger) } }
             }
+            .formKeyboard()
             .navigationTitle(existing == nil ? "Uusi toistuva lasku" : "Muokkaa toistuvaa laskua")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {

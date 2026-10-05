@@ -78,7 +78,7 @@ struct PurchaseLinkConfirmView: View {
             Section {
                 LabeledContent("Kirjattava summa (€)") {
                     TextField("124,00", text: $amountText)
-                        .keyboardType(.decimalPad)
+                        .moneyInput()
                         .multilineTextAlignment(.trailing)
                 }
             } footer: {
@@ -99,6 +99,7 @@ struct PurchaseLinkConfirmView: View {
                 .listRowInsets(EdgeInsets())
             }
         }
+        .formKeyboard()
         .navigationTitle("Vahvista kohdistus")
         .navigationBarTitleDisplayMode(.inline)
         .onAppear {

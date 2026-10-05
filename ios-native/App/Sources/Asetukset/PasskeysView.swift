@@ -207,6 +207,7 @@ private struct CreatePasskeySheet: View {
             }
             .scrollContentBackground(.hidden)
             .background(Theme.canvas)
+            .formKeyboard()
             .navigationTitle("Vahvista salasanalla")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {

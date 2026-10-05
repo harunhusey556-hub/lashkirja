@@ -375,6 +375,7 @@ struct StatementRowEditSheet: View {
                 }
                 if let failure { Text(failure).foregroundStyle(Theme.danger) }
             }
+            .formKeyboard()
             .navigationTitle("Muokkaa tapahtumaa")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {

@@ -392,6 +392,7 @@ struct BankAccountFormSheet: View {
                         .autocorrectionDisabled()
                     fieldError(errors.iban)
                     TextField("Pankki", text: $draft.bankName, prompt: Text("Nordea"))
+                        .textInputAutocapitalization(.words)
                     TextField("BIC", text: $draft.bic)
                         .textInputAutocapitalization(.characters)
                         .autocorrectionDisabled()
@@ -409,6 +410,7 @@ struct BankAccountFormSheet: View {
                 }
                 if let failure { Text(failure).foregroundStyle(Theme.danger) }
             }
+            .formKeyboard()
             .navigationTitle(account == nil ? "Uusi pankkitili" : "Muokkaa tiliä")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -553,6 +555,7 @@ struct BankAccountDetailSheet: View {
                     Text("Napauta kuukautta ja kirjaa pankin ilmoittama loppusaldo.")
                 }
             }
+            .formKeyboard()
             .navigationTitle(account.name)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Valmis") { dismiss() } } }

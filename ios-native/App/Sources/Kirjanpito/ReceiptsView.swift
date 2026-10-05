@@ -152,8 +152,8 @@ struct ReceiptsView: View {
         }
         .fullScreenCover(isPresented: $capture, onDismiss: { Task { await load() } }) { CaptureFlow(transactionId: nil) }
         .alert("Summarajaus", isPresented: $editingAmount) {
-            TextField("Vähintään €", text: $minDraft).keyboardType(.decimalPad)
-            TextField("Enintään €", text: $maxDraft).keyboardType(.decimalPad)
+            TextField("Vähintään €", text: $minDraft).moneyInput()
+            TextField("Enintään €", text: $maxDraft).moneyInput()
             Button("Käytä") { applyAmount() }
             Button("Peru", role: .cancel) {}
         } message: {

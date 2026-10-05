@@ -106,7 +106,7 @@ struct InvoiceLineCard: View {
                 .disabled(line.quantity <= 1)
                 .accessibilityLabel("Vähennä määrää")
             TextField("Määrä", text: $quantityText)
-                .keyboardType(.decimalPad)
+                .moneyInput()
                 .multilineTextAlignment(.center)
                 .monospacedDigit()
                 .frame(width: 48)
@@ -152,7 +152,7 @@ struct InvoiceLineCard: View {
     private var priceField: some View {
         HStack(spacing: 4) {
             TextField("0,00", text: $priceText)
-                .keyboardType(.decimalPad)
+                .moneyInput()
                 .multilineTextAlignment(.trailing)
                 .monospacedDigit()
                 .frame(minWidth: 70, maxWidth: 110)

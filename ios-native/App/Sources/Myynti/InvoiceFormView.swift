@@ -675,10 +675,10 @@ struct LineEditor: View {
             }
             TextField("Kuvaus", text: $line.description)
             HStack {
-                TextField("Määrä", text: $quantityText).keyboardType(.decimalPad).frame(maxWidth: 70)
+                TextField("Määrä", text: $quantityText).moneyInput().frame(maxWidth: 70)
                     .onChange(of: quantityText) { _, t in line.quantity = Money.parse(t) ?? 0 }
                 TextField("Yksikkö", text: $line.unit).frame(maxWidth: 70)
-                TextField("À-hinta €", text: $priceText).keyboardType(.decimalPad)
+                TextField("À-hinta €", text: $priceText).moneyInput()
                     .onChange(of: priceText) { _, t in line.unitPrice = Money.parse(t) ?? 0 }
             }
             if showsVat {
