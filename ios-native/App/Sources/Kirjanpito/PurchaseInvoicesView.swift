@@ -730,6 +730,8 @@ struct PurchaseInvoiceDetailView: View {
     }
 
     private func run(_ work: () async throws -> Void) async {
+        // A second tap while the first request runs must not send it again.
+        guard !busy else { return }
         busy = true
         failure = nil
         defer { busy = false }

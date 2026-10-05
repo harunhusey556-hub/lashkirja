@@ -512,7 +512,7 @@ struct ReceiptsView: View {
 
     private func delete(_ ids: [String]) async {
         struct Body: Encodable { let receiptIds: [String] }
-        guard !ids.isEmpty else { return }
+        guard !ids.isEmpty, !busy else { return }
         busy = true
         failure = nil
         notice = nil

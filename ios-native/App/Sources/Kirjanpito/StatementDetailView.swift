@@ -232,6 +232,7 @@ struct StatementDetailView: View {
     /// Runs an action with the shared busy flag and error handling; true when it went through.
     @discardableResult
     private func perform(_ work: () async throws -> Void) async -> Bool {
+        guard !busy else { return false }
         busy = true
         failure = nil
         locked = false

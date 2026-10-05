@@ -10,6 +10,7 @@ struct EmailImportView: View {
     @State private var syncing = false
     @State private var note: (text: String, failed: Bool)?
     @State private var disconnecting: ImapAccount?
+    @State private var disconnectingNow = false
 
     var body: some View {
         List {
@@ -113,6 +114,9 @@ struct EmailImportView: View {
     }
 
     private func disconnect(_ account: ImapAccount) async {
+        guard !disconnectingNow else { return }
+        disconnectingNow = true
+        defer { disconnectingNow = false }
         do {
             let _: Ignored = try await app.api.send("DELETE", "/api/integrations/imap", query: ["id": account.id], body: Optional<EmptyBody>.none)
             Haptics.success()

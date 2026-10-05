@@ -134,6 +134,14 @@ struct ProfileForm: View {
     @State private var showCollectionErrors = false
     @State private var busy = false
     @State private var failure: String?
+    @State private var confirmDiscard = false
+
+    /// What Tallenna would send: the same diff `save()` builds, so "dirty" never disagrees with it.
+    private var dirty: Bool {
+        guard var edited else { return false }
+        if section == .seller, let collection { collection.apply(to: &edited, from: original) }
+        return !ProfilePatch(from: original, to: edited).isEmpty
+    }
 
     var body: some View {
         Form {
@@ -190,6 +198,7 @@ struct ProfileForm: View {
         .navigationTitle(title)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Tallenna") { Task { await save() } }.disabled(busy) } }
+        .pushedDiscardGuard(dirty: dirty, busy: busy, asking: $confirmDiscard) { dismiss() }
         .onAppear {
             if edited == nil { edited = original }
             if collection == nil { collection = CollectionFields(profile: original) }
@@ -268,6 +277,8 @@ struct PasswordView: View {
     @State private var failure: String?
     private enum Field: Hashable { case current, new, again }
     @FocusState private var focus: Field?
+    @State private var confirmDiscard = false
+    private var dirty: Bool { !current.isEmpty || !next.isEmpty || !again.isEmpty }
 
     var body: some View {
         Form {
@@ -289,6 +300,7 @@ struct PasswordView: View {
                 Button("Tallenna") { Task { await save() } }.disabled(busy || current.isEmpty || next.count < 8 || next != again)
             }
         }
+        .pushedDiscardGuard(dirty: dirty, busy: busy, asking: $confirmDiscard) { dismiss() }
     }
 
     private func save() async {
@@ -311,6 +323,9 @@ struct DevicesView: View {
     @State private var sessions = ScreenLoad<[DeviceSession]>()
     @State private var failure: String?
     @State private var limit = ShowMore()
+    @State private var signingOut = false
+    @State private var confirmSession: DeviceSession?
+    @State private var confirmOthers = false
 
     var body: some View {
         List {
@@ -326,12 +341,13 @@ struct DevicesView: View {
                         Text("Käytetty \(InvoiceDetailView.timestamp(s.lastSeenAt ?? s.createdAt))").font(.caption).foregroundStyle(Theme.ink2)
                     }
                     .swipeActions {
-                        if !s.current { Button("Kirjaa ulos", role: .destructive) { Task { await signOut(id: s.id) } } }
+                        if !s.current { Button("Kirjaa ulos", role: .destructive) { confirmSession = s } }
                     }
                 }
                 ShowMoreButton(limit: $limit, total: list.count)
                 if list.count > 1 {
-                    Button(role: .destructive) { Task { await signOutOthers() } } label: { Text("Kirjaa ulos kaikki muut laitteet") }
+                    Button(role: .destructive) { confirmOthers = true } label: { Text("Kirjaa ulos kaikki muut laitteet") }
+                        .disabled(signingOut)
                 }
             } else {
                 ScreenStateView(state: sessions, retry: load) { (_: [DeviceSession]) in EmptyView() }
@@ -341,6 +357,18 @@ struct DevicesView: View {
         .navigationTitle("Laitteet")
         .refreshable { await load() }
         .task { await load() }
+        .confirmationDialog("Kirjataanko laite ulos?", isPresented: Binding(get: { confirmSession != nil }, set: { if !$0 { confirmSession = nil } }), titleVisibility: .visible, presenting: confirmSession) { session in
+            Button("Kirjaa ulos", role: .destructive) { Task { await signOut(id: session.id) } }
+            Button("Peruuta", role: .cancel) {}
+        } message: { session in
+            Text("\(session.label) kirjataan ulos, ja sinne pitää kirjautua uudelleen.")
+        }
+        .confirmationDialog("Kirjataanko kaikki muut laitteet ulos?", isPresented: $confirmOthers, titleVisibility: .visible) {
+            Button("Kirjaa ulos kaikki muut", role: .destructive) { Task { await signOutOthers() } }
+            Button("Peruuta", role: .cancel) {}
+        } message: {
+            Text("Vain tämä laite jää kirjautuneeksi. Muille laitteille pitää kirjautua uudelleen.")
+        }
     }
 
     private func load() async {
@@ -352,12 +380,18 @@ struct DevicesView: View {
 
     private func signOut(id: String) async {
         struct Body: Encodable { let id: String }
+        guard !signingOut else { return }
+        signingOut = true
+        defer { signingOut = false }
         do { let _: Ignored = try await app.api.send("POST", "/api/auth/sessions", body: Body(id: id)); await load() }
         catch { failure = error.userMessage }
     }
 
     private func signOutOthers() async {
         struct Body: Encodable { let scope = "others" }
+        guard !signingOut else { return }
+        signingOut = true
+        defer { signingOut = false }
         do { let _: Ignored = try await app.api.send("POST", "/api/auth/sessions", body: Body()); Haptics.success(); await load() }
         catch { failure = error.userMessage }
     }

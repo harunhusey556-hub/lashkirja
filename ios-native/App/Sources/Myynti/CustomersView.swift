@@ -457,6 +457,8 @@ struct CustomerImportSheet: View {
     /// import's answer back from the server instead of creating every customer twice.
     @State private var commitKey = UUID().uuidString
     @State private var rowLimit = ShowMore()
+    @State private var confirmDiscard = false
+    private var dirty: Bool { !csv.isEmpty }
 
     var body: some View {
         NavigationStack {
@@ -497,13 +499,15 @@ struct CustomerImportSheet: View {
             .navigationTitle("Tuo asiakkaita")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Peruuta") { dismiss() } }
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Peruuta") { if dirty { confirmDiscard = true } else { dismiss() } }.disabled(busy)
+                }
                 if busy { ToolbarItem(placement: .confirmationAction) { ProgressView() } }
             }
             .fileImporter(isPresented: $picking, allowedContentTypes: [.commaSeparatedText, .plainText, .text, .data]) { picked in
                 if case .success(let url) = picked { read(url) }
             }
-            .interactiveDismissDisabled(busy)
+            .discardGuard(dirty: dirty, busy: busy, asking: $confirmDiscard) { dismiss() }
         }
     }
 
@@ -540,6 +544,7 @@ struct CustomerImportSheet: View {
     }
 
     private func commit() async {
+        guard !busy else { return }
         busy = true
         failure = nil
         defer { busy = false }
@@ -565,6 +570,7 @@ struct CustomerMergeSheet: View {
     @State private var mergeId = ""
     @State private var busy = false
     @State private var failure: String?
+    @State private var confirmMerge = false
 
     var body: some View {
         NavigationStack {
@@ -584,15 +590,22 @@ struct CustomerMergeSheet: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Peruuta") { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Yhdistä tähän") { Task { await merge() } }.disabled(busy || mergeId.isEmpty)
+                    Button("Yhdistä tähän") { confirmMerge = true }.disabled(busy || mergeId.isEmpty)
                 }
             }
             .interactiveDismissDisabled(busy)
+            .confirmationDialog("Yhdistetäänkö asiakkaat?", isPresented: $confirmMerge, titleVisibility: .visible) {
+                Button("Yhdistä ja arkistoi toinen", role: .destructive) { Task { await merge() } }
+                Button("Peruuta", role: .cancel) {}
+            } message: {
+                Text("\(others.first { $0.id == mergeId }?.name ?? "Valittu asiakas") arkistoidaan, ja sen laskut siirtyvät tälle asiakkaalle. Tätä ei voi perua.")
+            }
         }
         .presentationDetents([.medium])
     }
 
     private func merge() async {
+        guard !busy else { return }
         busy = true
         failure = nil
         defer { busy = false }

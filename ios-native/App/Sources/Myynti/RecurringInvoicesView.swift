@@ -350,6 +350,7 @@ struct RecurringDetailView: View {
     }
 
     private func remove() async {
+        guard !busy else { return }
         busy = true
         failure = nil
         defer { busy = false }

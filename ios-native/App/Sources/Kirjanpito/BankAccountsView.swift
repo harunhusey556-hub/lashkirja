@@ -316,6 +316,7 @@ struct BankAccountsView: View {
     }
 
     private func disconnect(_ c: BankConnection) async {
+        guard syncing == nil else { return }
         syncing = c.id
         defer { syncing = nil }
         do {
@@ -609,6 +610,7 @@ struct BankAccountDetailSheet: View {
     }
 
     private func run(_ work: () async throws -> Void) async -> Bool {
+        guard !busy else { return false }
         busy = true
         failure = nil
         defer { busy = false }

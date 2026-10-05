@@ -14,6 +14,7 @@ struct PasskeysView: View {
     @State private var renaming: Passkey?
     @State private var newName = ""
     @State private var deleting: Passkey?
+    @State private var removing = false
     @State private var creating = false
 
     var body: some View {
@@ -154,6 +155,9 @@ struct PasskeysView: View {
     }
 
     private func delete(_ key: Passkey) async {
+        guard !removing else { return }
+        removing = true
+        defer { removing = false }
         do {
             let _: Ignored = try await app.api.send("DELETE", "/api/auth/passkey/\(key.id)", body: Optional<EmptyBody>.none)
             rows.update { list in list.removeAll { $0.id == key.id } }

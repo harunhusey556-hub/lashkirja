@@ -694,6 +694,10 @@ struct PaymentSheet: View {
     @State private var failure: String?
     @State private var bankRow: PaymentCandidate?
     @State private var useBankRow = true
+    /// The amount the sheet filled in itself: only a different one, or a note, is the owner's typing.
+    @State private var prefilled = ""
+    @State private var confirmDiscard = false
+    private var dirty: Bool { amountText != prefilled || !note.trimmingCharacters(in: .whitespaces).isEmpty }
 
     var body: some View {
         NavigationStack {
@@ -723,14 +727,19 @@ struct PaymentSheet: View {
             .navigationTitle("Kirjaa maksu")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Peruuta") { dismiss() } }
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Peruuta") { if dirty { confirmDiscard = true } else { dismiss() } }.disabled(busy)
+                }
                 ToolbarItem(placement: .confirmationAction) {
                     Button { Task { await save() } } label: { InFlightLabel("Tallenna", inFlight: busy) }
                         .disabled(busy || Money.parse(amountText) == nil)
                 }
             }
             .onAppear {
-                if amountText.isEmpty { amountText = Money.format(invoice.open).replacingOccurrences(of: "\u{00A0}€", with: "") }
+                if amountText.isEmpty {
+                    amountText = Money.format(invoice.open).replacingOccurrences(of: "\u{00A0}€", with: "")
+                    prefilled = amountText
+                }
             }
             // The key stays the same when the form is edited after a failure: a refused attempt has
             // released it on the server, and one whose answer was lost must not be booked again
@@ -738,6 +747,7 @@ struct PaymentSheet: View {
             .task(id: candidateKey) { await findBankRow() }
         }
         .presentationDetents([.medium, .large])
+        .discardGuard(dirty: dirty, busy: busy, asking: $confirmDiscard) { dismiss() }
     }
 
     private var candidateKey: String { "\(amountText)|\(APIDate.dayString(date))" }
@@ -1147,6 +1157,8 @@ struct CloseReasonSheet: View {
     let onClose: (String) -> Void
     @State private var reason = ""
     @State private var problem: String?
+    @State private var confirmDiscard = false
+    private var dirty: Bool { !reason.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
 
     var body: some View {
         NavigationStack {
@@ -1171,9 +1183,14 @@ struct CloseReasonSheet: View {
             .formKeyboard()
             .navigationTitle("Sulje perustelulla")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Peruuta") { dismiss() } } }
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Peruuta") { if dirty { confirmDiscard = true } else { dismiss() } }
+                }
+            }
         }
         .presentationDetents([.medium])
+        .discardGuard(dirty: dirty, busy: false, asking: $confirmDiscard) { dismiss() }
     }
 
     private func close() {
