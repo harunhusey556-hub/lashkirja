@@ -19,8 +19,8 @@ struct AccountCodeField: View {
     @Environment(\.openURL) private var openURL
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var note: String?
-    /// The last value the field settled on, so a write-back that restores it completes nothing.
-    @State private var settled = ""
+    /// Decides what each change does (write back, complete); see `AccountCodeGate`.
+    @State private var gate = AccountCodeGate()
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -65,24 +65,15 @@ struct AccountCodeField: View {
         .onTapGesture { focus.wrappedValue = true }
         .animation(reduceMotion ? nil : .easeOut(duration: 0.15), value: code)
         .onChange(of: code) { old, new in
-            let kept = AccountCode.input(new, previous: old)
-            // Setting the kept value runs this again with it, and only then can it complete:
-            // `input` returns its own result unchanged, so the write-back cannot loop.
-            guard kept == new else {
-                let added = AccountCode.inserted(new, previous: old)
-                if added.contains(where: \.isLetter), AccountCode.extract(added) == nil, onPasteOther?(added) == true {
-                    code = old
-                } else {
-                    code = kept
-                }
-                return
+            // The decision lives in `AccountCodeGate` (tested in core); a write-back runs this
+            // again with the kept value, and only then can it complete.
+            switch gate.change(to: new, from: old, onPasteOther: onPasteOther) {
+            case .writeBack(let value):
+                code = value
+            case .accepted(let complete):
+                note = nil
+                if let complete { onComplete(complete) }
             }
-            note = nil
-            // A rejected seventh digit is written back to the code already there: completing
-            // again would send it again.
-            guard kept != settled else { return }
-            settled = kept
-            if kept.count == AccountCode.length { onComplete(kept) }
         }
     }
 
