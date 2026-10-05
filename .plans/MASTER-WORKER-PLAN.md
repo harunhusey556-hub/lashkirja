@@ -56,7 +56,7 @@ Worker sırayı bozmasın. Bir madde bloklanırsa (ör. cihaz testi bekliyor) ya
 |---|---|---|
 | P0.0 | Zemin: `native` HEAD, clean tree, CI durumu, prod commit'i ölç ve RUN'a yaz | her run |
 | P0.1 | OTP AutoFill: 10 giriş şekli testli; çift gönderim kapısı core'a taşınıp testlendi; **cihazda kabul** | kod+test tamam (`5f3f1f5`); cihaz testi bekliyor |
-| P0.2 | Dokunma geri bildirimi + uçuştaki isteği kilitleme (fatura/ödeme/silme/gönderme çift gönderilemez) | açık |
+| P0.2 | Dokunma geri bildirimi + uçuştaki isteği kilitleme (fatura/ödeme/silme/gönderme çift gönderilemez) | kısım 1 (çift gönderim) kod tamam `4089ba0`, cihaz bekliyor; kısım 2 (dokunma geri bildirimi) açık |
 | P0.3 | Loading / boş / kısmi / hata / oturum bitti / offline / başarı durumları, ekran ekran | açık |
 | P0.4 | Klavye ve form ergonomisi (klavye tipi, FocusState, kaydedilmemiş değişiklik uyarısı) | açık |
 | P0.5 | Sheet, geri kaydırma, yıkıcı akış güvenliği | açık |
@@ -98,6 +98,7 @@ Sahip açıkça "aç" demedikçe: yeni özellik yok, yeniden tasarım yok, imza/
 ## 10. Teknik borç kuyruğu — ana akışı bloklamıyorsa P0–P2'yi geciktirme
 
 ### Yüksek
+- Sunucu idempotency eksik: fatura kopyası ve ödeme hatırlatma gönderimi route'ları (yalnız istemci `SubmitGuard` koruyor).
 - Live-test 2026-09-30 açık P1'leri arasında sunucu kaynaklı olanlar (banka bağlantı durumları G30–G35, offline kurtarma F31–F34, hesap/gizlilik F53–F57).
 - Sahip kararı bekleyen: production OCR yolu; AI "ana beyin" (yerel vs bulut); hatırlatma bekleme süresi.
 
@@ -180,6 +181,40 @@ Planı oluştur; P0.1 OTP'nin cihazsız yapılabilecek kısmını kapat ve sahib
 
 ### Sıradaki tek iş
 - Sahip OTP sonucu: geçti → P0.1 kapat, P0.2 (dokunma geri bildirimi + çift gönderim kilidi) başla. Kaldı → geçici debug enstrümantasyonu (yalnız uzunluk/desen).
+
+
+## RUN — 2026-10-05 17:30
+
+### Hedef
+P0.2 kısım 1: önemli işlemler ikinci dokunuşla iki kez gönderilemesin (P0.1 cihaz sonucu beklenirken aynı fazda ilerle).
+
+### Başlangıç ölçümü
+- `native` `9ace29e`, CI yeşil. 27 önemli işlem denetlendi; 12'sinde açık vardı: `busy = true` async fonksiyonun içinde set ediliyor, `.disabled(busy)` bir render sonra etkili → hızlı iki dokunuş iki `Task` → iki istek.
+
+### Yapılan
+- Ortak mekanizma: `SubmitGuard` (LashKirjaCore, testli: uçuştayken `begin()` nil; hata sonrası aynı idempotency anahtarı, başarı sonrası yeni) + `InFlightLabel` (buton yerinde spinner, ekran boşalmaz).
+- 12 açık 8 view'da kapatıldı: fatura oluştur/gönder/hatırlatma/hyvitys/kopya/durum değişiklikleri, kart iadesi + ödeme silme, satış ödemesi kaydı, Koti "Hyväksy", kuitti banka eşle/kaldır, banka satırı onay/ret/yoksay/onayla/kaldır, müşteri arşiv/geri al.
+- Davranış değişikliği: ödeme sheet'i artık tutar/tarih değişince yeni anahtar üretmiyor; başarıya kadar tek anahtar (sunucu reddedilen denemede anahtarı serbest bırakıyor).
+- Denetim tablosu + 8 maddelik Türkçe cihaz listesi: `docs/worker-reports/2026-10-05-mutation-double-submit.md`.
+
+### Değişen dosyalar / commitler
+- `4089ba0` fix(ios): important actions cannot be sent twice (P0.2)
+
+### Test / gates
+- Core (swift test, Linux): 690 test geçti (yeni `SubmitGuardTests` dahil).
+- iOS native CI: run 37319607127 yeşil (simulator + IPA).
+- Sunucu: değişiklik yok.
+
+### Cihaz / canlı doğrulama
+- Bekliyor (P0.1 OTP ile aynı IPA turunda test edilebilir).
+
+### Kalan risk / blocker
+- Sunucuda idempotency olmayan iki route: fatura kopyası, ödeme hatırlatma gönderimi → yalnız istemci koruması (§10'a eklendi).
+- `CustomerFormSheet.save` (müşteri oluşturma) henüz korunmuyor.
+- Ödeme sheet'i: bağlantı kopup sunucu kaydetmişse, farklı tutarla tekrar deneme sunucuda reddedilir; kullanıcı sheet'i kapatıp açmadan takılabilir — cihazda gözlenmeli.
+
+### Sıradaki tek iş
+- P0.2 kısım 2: dokunma geri bildirimi (anlık görsel durum + Haptics) denetimi + `CustomerFormSheet` koruması.
 
 ---
 
