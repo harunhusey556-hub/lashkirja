@@ -57,7 +57,7 @@ Worker sırayı bozmasın. Bir madde bloklanırsa (ör. cihaz testi bekliyor) ya
 | P0.0 | Zemin: `native` HEAD, clean tree, CI durumu, prod commit'i ölç ve RUN'a yaz | her run |
 | P0.1 | OTP AutoFill: 10 giriş şekli testli; çift gönderim kapısı core'a taşınıp testlendi; **cihazda kabul** | kod+test tamam (`5f3f1f5`); cihaz testi bekliyor |
 | P0.2 | Dokunma geri bildirimi + uçuştaki isteği kilitleme (fatura/ödeme/silme/gönderme çift gönderilemez) | kod tamam (`4089ba0` çift gönderim, `1e9f1af` dokunma geri bildirimi); cihaz testi bekliyor |
-| P0.3 | Loading / boş / kısmi / hata / oturum bitti / offline / başarı durumları, ekran ekran | ortak katman + sekme kökleri + günlük listeler tamam; kalan ekranlar devam ediyor |
+| P0.3 | Loading / boş / kısmi / hata / oturum bitti / offline / başarı durumları, ekran ekran | kod tamam, tüm ekranlar ortak katmanda (`67e124f`); cihaz testi bekliyor |
 | P0.4 | Klavye ve form ergonomisi (klavye tipi, FocusState, kaydedilmemiş değişiklik uyarısı) | açık |
 | P0.5 | Sheet, geri kaydırma, yıkıcı akış güvenliği | açık |
 
@@ -107,6 +107,7 @@ Sahip açıkça "aç" demedikçe: yeni özellik yok, yeniden tasarım yok, imza/
 - Eski worktree'ler (`.claude/worktrees/agent-*`, her biri ~1 GB) ve `feat/real-app-phase01` dalı temizlenmeli (sahip onayıyla).
 
 ### Düşük
+- Kullanılmayan `Loadable`/`LoadState` (`ios-native/App/Sources/Components/Components.swift`) silinebilir.
 - Web arayüzündeki ikon-only buton zemin taraması kapandı (sahip "A"); yeniden açılmaz.
 
 ---
@@ -275,6 +276,34 @@ P0.3: ağdan yüklenen ekranlar için açık durumlar (yükleniyor, yenileme, bo
 
 ### Sıradaki tek iş
 - P0.3 kalan ekranları aynı ortak katmana taşı.
+
+
+## RUN — 2026-10-05 20:00
+
+### Hedef
+P0.3 kalan ekranları ortak `ScreenLoad` katmanına taşı.
+
+### Başlangıç ölçümü
+- `native` `62a4b8c`; rapordaki "P0.3 kalan" listesi ~20 ekran + 5 sheet.
+
+### Yapılan
+- Taşındı: InvoiceDetail (+ gönderim önizleme sheet), Customers liste/detay, RecurringInvoices, ReceiptDetail, PurchaseInvoiceDetail, RecurringPurchases, BankHub, Statements, StatementDetail, EmailInbox, WorkQueue, Alv, Periods (ay + kilit), BankAccounts (rollforward, banka seçici), 5 sheet, Asetukset Sessions/Passkeys/Privacy/EmailImport/ChangeEmail/EmailTemplates/Payments.
+- Konu değişen ekranlar (ALV dönemi, ay, klasör, hesap tipi) `restart()` kullanıyor. Eski `Loadable`/`LoadState` artık kullanılmıyor.
+
+### Değişen dosyalar / commitler
+- `67e124f` fix(ios): screen states, remaining screens (P0.3) — 25 dosya
+
+### Test / gates
+- iOS native CI run 37328534443 yeşil. Ortak katman genişletilmedi → yeni core testi yok.
+
+### Cihaz / canlı doğrulama
+- Bekliyor (`docs/worker-reports/2026-10-05-screen-states.md` listesi).
+
+### Kalan risk / blocker
+- Kullanılmayan `Loadable`/`LoadState` tipleri `Components.swift`'te duruyor (§10 düşük).
+
+### Sıradaki tek iş
+- P0.4: klavye ve form ergonomisi.
 
 ---
 
