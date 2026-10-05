@@ -209,7 +209,7 @@ struct MyyntiView: View {
             .background(Theme.surface, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
             .contentShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.pressable)
     }
 
     private var chips: some View {
@@ -234,7 +234,7 @@ struct MyyntiView: View {
                         .background(selected ? Theme.ink : Theme.surface, in: Capsule())
                         .overlay(Capsule().stroke(Theme.line, lineWidth: selected ? 0 : 1))
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(.pressable)
                     .accessibilityAddTraits(selected ? .isSelected : [])
                 }
             }
@@ -355,7 +355,7 @@ private struct ReceivablesCard: View {
                         Button { onSegment(segment.filter) } label: {
                             Rectangle().fill(color(segment.tone)).opacity(dimmed(segment) ? 0.3 : 1)
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(.pressable)
                         .frame(width: max(4, (geo.size.width - gaps) * share))
                         .accessibilityLabel("\(segment.label) \(Money.format(segment.amount))")
                     }

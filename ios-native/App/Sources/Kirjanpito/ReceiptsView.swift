@@ -226,7 +226,7 @@ struct ReceiptsView: View {
                         .background(active ? Theme.ink : Theme.surface, in: Capsule())
                         .overlay(Capsule().stroke(Theme.line, lineWidth: active ? 0 : 1))
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(.pressable)
                 }
             }
             .padding(.horizontal, 16)
@@ -271,7 +271,7 @@ struct ReceiptsView: View {
             .padding(.vertical, 5)
             .background(Theme.accentSoft, in: Capsule())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.pressable)
         .accessibilityLabel("Poista suodatin \(title)")
     }
 

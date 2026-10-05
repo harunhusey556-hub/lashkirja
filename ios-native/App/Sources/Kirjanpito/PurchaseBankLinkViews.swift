@@ -231,7 +231,7 @@ struct PurchaseBankLinkSheet: View {
                     Button { target = PurchaseLinkPair(invoice: invoice, row: candidate) } label: {
                         PurchaseBankCandidateRow(candidate: candidate)
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(.pressable)
                     .accessibilityHint("Avaa vahvistus")
                 }
                 ShowMoreButton(limit: $limit, total: list.candidates.count)
@@ -330,7 +330,7 @@ struct PurchaseRowLinkView: View {
                             Button { target = PurchaseLinkPair(candidate: candidate, row: row) } label: {
                                 PurchaseInvoiceCandidateRow(candidate: candidate)
                             }
-                            .buttonStyle(.plain)
+                            .buttonStyle(.pressable)
                             .accessibilityHint("Avaa vahvistus")
                         }
                         ShowMoreButton(limit: $limit, total: list.candidates.count)

@@ -230,7 +230,7 @@ struct PurchaseInvoicesView: View {
                 .background(selected ? Theme.ink : Theme.surface, in: Capsule())
                 .overlay(Capsule().stroke(Theme.line, lineWidth: selected ? 0 : 1))
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.pressable)
         .accessibilityAddTraits(selected ? .isSelected : [])
     }
 
@@ -483,7 +483,7 @@ struct PurchaseInvoiceDetailView: View {
                     Button { openTemplate = recurringPurchaseId } label: {
                         RecurringBadge(chevron: true)
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(.pressable)
                     .accessibilityLabel("Toistuva ostolasku")
                     .accessibilityHint("Avaa toistuva ostolasku")
                 }

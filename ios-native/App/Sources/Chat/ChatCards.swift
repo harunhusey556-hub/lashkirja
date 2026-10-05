@@ -38,7 +38,7 @@ struct ChatProposalCardView: View {
                             .overlay(Capsule().stroke(Theme.line))
                             .contentShape(Capsule())
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(.pressable)
                 }
             case .saving, .accepted, .rejected:
                 decided(phase)
@@ -52,7 +52,7 @@ struct ChatProposalCardView: View {
                     .font(.footnote.weight(.semibold))
                     .foregroundStyle(Theme.accentDark)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.pressable)
                 .accessibilityAddTraits(.isLink)
             }
             if let error {
@@ -175,10 +175,10 @@ struct ChatDestinationCards: View {
             ForEach(cards) { card in
                 if card.isBank {
                     NavigationLink(value: Route.bankHub) { ChatBankCard(card: card, model: model) }
-                        .buttonStyle(.plain)
+                        .buttonStyle(.pressable)
                 } else if let route = Route.fromHref(card.href) {
                     NavigationLink(value: route) { ChatDestinationCard(card: card) }
-                        .buttonStyle(.plain)
+                        .buttonStyle(.pressable)
                 }
             }
         }

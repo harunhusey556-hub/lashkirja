@@ -164,7 +164,7 @@ struct WorkQueueView: View {
                                     .overlay(Capsule().stroke(Theme.line))
                                     .foregroundStyle(filter == chip.id ? Theme.onInk : Theme.ink)
                             }
-                            .buttonStyle(.plain)
+                            .buttonStyle(.pressable)
                         }
                     }
                 }

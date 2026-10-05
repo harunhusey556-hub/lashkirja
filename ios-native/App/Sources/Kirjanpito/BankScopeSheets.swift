@@ -292,7 +292,7 @@ struct BankHistorySheet: View {
             }
             .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.pressable)
         .accessibilityAddTraits(choiceKey == key ? .isSelected : [])
     }
 

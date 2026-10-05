@@ -60,7 +60,7 @@ struct BankAccountsView: View {
                             .contentShape(Rectangle())
                             .opacity(account.archivedAt == nil ? 1 : 0.6)
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(.pressable)
                     }
                     Button { adding = true } label: { Label("Lisää tili käsin", systemImage: "plus.circle") }
                     if showArchived || (overview.archivedCount ?? 0) > 0 {
@@ -195,7 +195,7 @@ struct BankAccountsView: View {
                 }
                 .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.pressable)
         }
         if connection.reportsHistory {
             VStack(alignment: .leading, spacing: 6) {
@@ -537,7 +537,7 @@ struct BankAccountDetailSheet: View {
                         }
                         ForEach(Array(value.months.reversed())) { month in
                             Button { startBalance(month) } label: { BankBalanceRow(month: month) }
-                                .buttonStyle(.plain)
+                                .buttonStyle(.pressable)
                                 .swipeActions {
                                     if month.reportedClosing != nil {
                                         Button("Poista", role: .destructive) { Task { await clearBalance(month.month) } }
@@ -776,7 +776,7 @@ struct BankPickerSheet: View {
                         }
                         .contentShape(Rectangle())
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(.pressable)
                     .accessibilityAddTraits(historyKey == choice.key ? .isSelected : [])
                 }
             } header: {

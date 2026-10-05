@@ -119,7 +119,7 @@ struct BankFeedView: View {
                     }
                     Section {
                         ForEach(group.rows.prefix(limit.visible(group.rows.count))) { row in
-                            Button { selected = row } label: { BankRow(row: row) }.buttonStyle(.plain)
+                            Button { selected = row } label: { BankRow(row: row) }.buttonStyle(.pressable)
                         }
                         ShowMoreButton(limit: $limit, total: group.rows.count)
                     } header: {

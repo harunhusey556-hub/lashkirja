@@ -106,3 +106,21 @@ struct InFlightLabel: View {
             .accessibilityLabel(inFlight ? "\(title), lähetetään" : title)
     }
 }
+
+/// Pressed state for tappable cards and rows that are not system list rows: the label dims at
+/// touch-down, and shrinks a hair unless Reduce Motion is on (then opacity alone). Replaces
+/// `.plain`, which gives a custom card no visible answer to the finger.
+struct PressableButtonStyle: ButtonStyle {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .opacity(configuration.isPressed ? 0.6 : 1)
+            .scaleEffect(configuration.isPressed && !reduceMotion ? 0.98 : 1)
+            .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: configuration.isPressed)
+    }
+}
+
+extension ButtonStyle where Self == PressableButtonStyle {
+    static var pressable: PressableButtonStyle { PressableButtonStyle() }
+}

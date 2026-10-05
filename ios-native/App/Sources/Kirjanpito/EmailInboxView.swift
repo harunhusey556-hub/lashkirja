@@ -181,7 +181,7 @@ struct EmailInboxView: View {
                         .background(selected ? Theme.ink : Theme.surface, in: Capsule())
                         .overlay(Capsule().stroke(Theme.line, lineWidth: selected ? 0 : 1))
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(.pressable)
                     .accessibilityAddTraits(selected ? .isSelected : [])
                 }
             }

@@ -180,7 +180,7 @@ private struct KotiContent: View {
                 }
                 .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.pressable)
             if model.atCurrentMonth, let previous = d.previousMonth {
                 Divider()
                 NavigationLink(value: Route.monthClose(previous.month)) {
@@ -195,7 +195,7 @@ private struct KotiContent: View {
                     }
                     .contentShape(Rectangle())
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.pressable)
             }
             if let due = model.vatDue {
                 Divider()
@@ -226,7 +226,7 @@ private struct KotiContent: View {
             }
             .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.pressable)
         .accessibilityElement(children: .combine)
     }
 
@@ -247,7 +247,7 @@ private struct KotiContent: View {
             .background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
             .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.pressable)
     }
 
     /// Myynti and Kulut side by side; stacked at the largest text sizes so the figures fit.
@@ -267,7 +267,7 @@ private struct KotiContent: View {
                               trend: MoneyTrend.make(rows: d.cashflow, month: d.month, source: d.source, metric: metric, value: amount),
                               income: income)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.pressable)
             }
         }
     }
@@ -288,7 +288,7 @@ private struct KotiContent: View {
                         .padding(.horizontal, 16)
                         .padding(.vertical, 12)
                         .contentShape(Rectangle())
-                        .buttonStyle(.plain)
+                        .buttonStyle(.pressable)
                 }
             }
             .background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
@@ -308,7 +308,7 @@ private struct KotiContent: View {
             NavigationLink(value: route) {
                 row.contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.pressable)
         } else {
             row
         }
@@ -345,7 +345,7 @@ private struct KotiContent: View {
                     NavigationLink(value: route(row)) {
                         PositionRowView(row: row).contentShape(Rectangle())
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(.pressable)
                 }
             }
             .background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
@@ -506,7 +506,7 @@ private struct TaskRow: View {
             Button(action: capture) {
                 Text(action.label ?? "").font(.caption.bold()).padding(.horizontal, 10).padding(.vertical, 5)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.pressable)
             .background(Theme.ink, in: Capsule())
             .foregroundStyle(Theme.onInk)
         case .open(let label):
@@ -524,7 +524,7 @@ private struct TaskRow: View {
                 if busy { ProgressView().controlSize(.mini) }
             }
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.pressable)
         .disabled(busy)
         .accessibilityLabel("\(action.label ?? ""): \(item.party)")
     }
@@ -583,19 +583,19 @@ private struct SetupCard: View {
                 step("Kuvaa ensimmäinen kuitti", done: true)
             } else {
                 Button(action: capture) { step("Kuvaa ensimmäinen kuitti", done: false) }
-                    .buttonStyle(.plain)
+                    .buttonStyle(.pressable)
             }
             if setup.bank {
                 step("Yhdistä pankki", done: true)
             } else {
                 NavigationLink(value: Route.bankAccounts) { step("Yhdistä pankki", done: false) }
-                    .buttonStyle(.plain)
+                    .buttonStyle(.pressable)
             }
             if setup.seller {
                 step("Täydennä laskuttajan tiedot", done: true)
             } else {
                 NavigationLink(value: Route.settings) { step("Täydennä laskuttajan tiedot", done: false) }
-                    .buttonStyle(.plain)
+                    .buttonStyle(.pressable)
             }
         }
     }
@@ -663,7 +663,7 @@ private struct FirstRunCard: View {
             .padding(.bottom, 10)
         } else {
             stepLink(row.step) { content(row, isNext: false) }
-                .buttonStyle(.plain)
+                .buttonStyle(.pressable)
                 .accessibilityLabel(label)
         }
     }
@@ -738,7 +738,7 @@ private struct BalanceCard: View {
             NavigationLink(value: Route.bankHub) {
                 heading.contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.pressable)
             .accessibilityElement(children: .ignore)
             .accessibilityLabel("\(title). \(trend.accessibilitySummary(total: bank.totalBalance))")
             .accessibilityHint("Avaa pankin")
@@ -922,7 +922,7 @@ private struct CashflowCard: View {
                         .onTapGesture { location in
                             guard let plot = proxy.plotFrame else { return }
                             let x = location.x - geometry[plot].origin.x
-                            if let month = proxy.value(atX: x, as: String.self) { select(month) }
+                            if let month = proxy.value(atX: x, as: String.self) { Haptics.selection(); select(month) }
                         }
                 }
             }
@@ -967,7 +967,7 @@ private struct HandledCard: View {
             .background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
             .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.pressable)
     }
 
     private var route: Route {
@@ -1028,7 +1028,7 @@ private struct OnboardingResumeCard: View {
             .background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
             .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.pressable)
     }
 }
 
@@ -1056,7 +1056,7 @@ private struct VatThresholdCard: View {
             .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous).stroke(tint.opacity(0.3)))
             .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.pressable)
         .accessibilityElement(children: .combine)
     }
 }

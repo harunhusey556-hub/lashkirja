@@ -328,9 +328,9 @@ struct CustomerFormSheet: View {
     let existing: Customer?
     let onSaved: (Customer) -> Void
     @State private var draft = CustomerDraft()
-    @State private var busy = false
+    @State private var submit = SubmitGuard()
+    private var busy: Bool { submit.inFlight }
     @State private var failure: String?
-    @State private var key = UUID().uuidString
     /// The form as it opened; anything else is an unsaved change.
     @State private var baseline: CustomerDraft?
     @State private var confirmDiscard = false
@@ -367,7 +367,7 @@ struct CustomerFormSheet: View {
                     Button("Peruuta") { if dirty { confirmDiscard = true } else { dismiss() } }.disabled(busy)
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Tallenna") { Task { await save() } }.disabled(busy || draft.name.trimmingCharacters(in: .whitespaces).isEmpty)
+                    Button { Task { await save() } } label: { InFlightLabel("Tallenna", inFlight: busy) }.disabled(busy || draft.name.trimmingCharacters(in: .whitespaces).isEmpty)
                 }
             }
             .confirmationDialog("Hylätäänkö muutokset?", isPresented: $confirmDiscard, titleVisibility: .visible) {
@@ -390,8 +390,10 @@ struct CustomerFormSheet: View {
     }
 
     private func save() async {
-        busy = true
-        defer { busy = false }
+        guard let key = submit.begin() else { return }
+        failure = nil
+        var succeeded = false
+        defer { submit.finish(succeeded: succeeded) }
         do {
             let r: CustomerResponse
             if let existing {
@@ -399,12 +401,14 @@ struct CustomerFormSheet: View {
             } else {
                 r = try await app.api.send("POST", "/api/customers", body: draft, idempotencyKey: key)
             }
+            succeeded = true
             Haptics.success()
             baseline = draft
             onSaved(r.customer)
             dismiss()
         } catch {
             failure = error.userMessage
+            Haptics.error()
         }
     }
 }

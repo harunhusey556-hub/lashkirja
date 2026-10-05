@@ -74,7 +74,7 @@ struct OnboardingAnswerBubble: View {
             .frame(minHeight: 44)
             .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.pressable)
         .disabled(disabled)
         .frame(maxWidth: .infinity, alignment: .trailing)
         .padding(.leading, 48)
@@ -142,7 +142,7 @@ struct OnboardingSummaryBubble: View {
                         .frame(minHeight: 44)
                         .contentShape(Rectangle())
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(.pressable)
                     .disabled(disabled)
                     .accessibilityElement(children: .ignore)
                     .accessibilityAddTraits(.isButton)
@@ -190,7 +190,7 @@ struct OnboardingChoiceRow: View {
             .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous).stroke(selected ? Theme.accent : Theme.line))
             .contentShape(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.pressable)
         .accessibilityAddTraits(selected ? .isSelected : [])
     }
 }

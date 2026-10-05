@@ -200,7 +200,7 @@ struct AssistantView: View {
                             .background(Theme.accentSoft, in: Capsule())
                             .foregroundStyle(Theme.accentDark)
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(.pressable)
                     .disabled(model.streaming || !model.canSendShortcut)
                 }
             }

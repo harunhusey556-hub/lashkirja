@@ -189,7 +189,7 @@ struct StatementDetailView: View {
             }
             ForEach(shown.prefix(limit.visible(shown.count))) { row in
                 Button { selected = row } label: { BankRow(row: row) }
-                    .buttonStyle(.plain)
+                    .buttonStyle(.pressable)
                     .swipeActions(edge: .trailing) {
                         Button(role: .destructive) { deletingRow = row } label: { Label("Poista", systemImage: "trash") }
                         Button { editing = row } label: { Label("Muokkaa", systemImage: "pencil") }
