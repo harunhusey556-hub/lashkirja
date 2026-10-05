@@ -57,7 +57,7 @@ Worker sırayı bozmasın. Bir madde bloklanırsa (ör. cihaz testi bekliyor) ya
 | P0.0 | Zemin: `native` HEAD, clean tree, CI durumu, prod commit'i ölç ve RUN'a yaz | her run |
 | P0.1 | OTP AutoFill: 10 giriş şekli testli; çift gönderim kapısı core'a taşınıp testlendi; **cihazda kabul** | kod+test tamam (`5f3f1f5`); cihaz testi bekliyor |
 | P0.2 | Dokunma geri bildirimi + uçuştaki isteği kilitleme (fatura/ödeme/silme/gönderme çift gönderilemez) | kod tamam (`4089ba0` çift gönderim, `1e9f1af` dokunma geri bildirimi); cihaz testi bekliyor |
-| P0.3 | Loading / boş / kısmi / hata / oturum bitti / offline / başarı durumları, ekran ekran | açık |
+| P0.3 | Loading / boş / kısmi / hata / oturum bitti / offline / başarı durumları, ekran ekran | ortak katman + sekme kökleri + günlük listeler tamam; kalan ekranlar devam ediyor |
 | P0.4 | Klavye ve form ergonomisi (klavye tipi, FocusState, kaydedilmemiş değişiklik uyarısı) | açık |
 | P0.5 | Sheet, geri kaydırma, yıkıcı akış güvenliği | açık |
 
@@ -245,6 +245,36 @@ P0.2 kısım 2: her dokunuş anında görsel tepki versin; müşteri oluşturma 
 
 ### Sıradaki tek iş
 - P0.3: ekran ekran loading / boş / kısmi / hata / oturum bitti / offline / başarı durumları denetimi.
+
+
+## RUN — 2026-10-05 19:10
+
+### Hedef
+P0.3: ağdan yüklenen ekranlar için açık durumlar (yükleniyor, yenileme, boş, hata + tekrar, oturum bitti, offline, zaman aşımı).
+
+### Başlangıç ölçümü
+- `native` `200bc96`. ~35 ekran denetlendi. Başarısız yenileme çoğu yerde sessiz ya da ham kırmızı metin; Koti başka aya geçip hata alınca eski ayın rakamlarını yeni başlık altında gösteriyordu.
+
+### Yapılan
+- `ScreenLoad<Value>` + `LoadFailure` (LashKirjaCore/Net/ScreenLoad.swift): yenileme veriyi korur, başarısız yenileme veriyi korur + banner; offline / zaman aşımı (timedOut, 504) / sunucuya ulaşılamıyor (502, 503) / oturum bitti (401, tekrar butonu yok) / okunamayan yanıt ayrı, Fince metinle.
+- `APIClient.transportError`: OFFLINE ve TIMEOUT ayrı kodlar (status 0 korunuyor; yükleme kuyruğu ve POS aynı). Fatura gönderimi TIMEOUT'u NETWORK gibi ele alıyor.
+- App: `ScreenStateView`, `RefreshFailureBanner`, `LoadFailureView`.
+- Taşınan ekranlar: Koti (özet + görevler), Myynti fatura listesi, Raportit, Kuitit, Pankkitapahtumat, Ostolaskut.
+
+### Değişen dosyalar / commitler
+- fix(ios): screen states (P0.3) — `feature/screen-states` → `native`
+
+### Test / gates
+- Core: 18 yeni `ScreenStateTests` (önce yazıldı). iOS native CI run 37325339410 yeşil.
+
+### Cihaz / canlı doğrulama
+- 6 maddelik liste: `docs/worker-reports/2026-10-05-screen-states.md`. Bekliyor.
+
+### Kalan risk / blocker
+- P0.3 kalan: InvoiceDetail, Customers liste/detay, RecurringInvoices, ReceiptDetail, PurchaseInvoiceDetail, RecurringPurchases, BankHub, Statements, StatementDetail, EmailInbox, WorkQueue, Alv, Periods, BankAccounts, 5 tek seferlik sheet, Asetukset alt sayfaları (Sessions, Passkeys, Privacy, EmailImport yenileme hatasında listeyi siliyor).
+
+### Sıradaki tek iş
+- P0.3 kalan ekranları aynı ortak katmana taşı.
 
 ---
 
