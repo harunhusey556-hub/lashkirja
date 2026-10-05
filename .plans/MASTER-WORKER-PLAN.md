@@ -59,7 +59,7 @@ Worker sırayı bozmasın. Bir madde bloklanırsa (ör. cihaz testi bekliyor) ya
 | P0.2 | Dokunma geri bildirimi + uçuştaki isteği kilitleme (fatura/ödeme/silme/gönderme çift gönderilemez) | kod tamam (`4089ba0` çift gönderim, `1e9f1af` dokunma geri bildirimi); cihaz testi bekliyor |
 | P0.3 | Loading / boş / kısmi / hata / oturum bitti / offline / başarı durumları, ekran ekran | kod tamam, tüm ekranlar ortak katmanda (`67e124f`); cihaz testi bekliyor |
 | P0.4 | Klavye ve form ergonomisi (klavye tipi, FocusState, kaydedilmemiş değişiklik uyarısı) | kod tamam (`1cd8279`, ortak `FormFields.swift`); cihaz testi bekliyor |
-| P0.5 | Sheet, geri kaydırma, yıkıcı akış güvenliği | açık |
+| P0.5 | Sheet, geri kaydırma, yıkıcı akış güvenliği | kod tamam (`a081b12`, `PushedDiscardGuard`); cihaz testi bekliyor |
 
 **Kabul:** NP P0 kabul kriterleri + her madde için sahip cihaz notu (model, iOS, build no).
 
@@ -335,6 +335,39 @@ P0.4 klavye ve form ergonomisi.
 
 ### Sıradaki tek iş
 - P0.5: sheet, geri kaydırma, yıkıcı akış güvenliği.
+
+---
+
+## RUN — 2026-10-05 22:00
+
+### Hedef
+P0.5 sheet, geri kaydırma, yıkıcı akış güvenliği.
+
+### Başlangıç ölçümü
+- `native` `41b543c`; `feature/sheet-safety` `a081b12` native üstünde, iOS native CI run 37356526365 yeşil.
+
+### Yapılan
+- Değişiklik koruması: fatura ödeme sheet'i, kapatma nedeni sheet'i, müşteri CSV import (kaydederken Peruuta kapalı).
+- Yeni `Components/PushedDiscardGuard.swift`: ProfileForm ve PasswordView kirliyken geri butonu + kenar kaydırma yerine "Takaisin" onayı.
+- Yeni onay pencereleri: müşteri birleştirme, cihaz oturumunu kapatma (tek / diğerleri).
+- 9 yıkıcı yolda çift dokunma kilidi (alış faturası, banka hesabı, ekstre, tekrarlayan fatura, kuitti silme, banka bağlantısı, passkey, posta kutusu, cihaz çıkışı).
+- Üst liste yenileme: `dataVersion` her yazımda artıyor, değişiklik gerekmedi.
+- `native` fast-forward → `a081b12`.
+
+### Değişen dosyalar / commitler
+- `a081b12` fix(ios): sheet, swipe-back and destructive-flow safety (P0.5); rapor `docs/worker-reports/2026-10-05-sheet-safety.md`
+
+### Test / gates
+- iOS native CI yeşil (37356526365). Yeni saf mantık yok → yeni core testi yok.
+
+### Cihaz / canlı doğrulama
+- Bekliyor: rapordaki 6 maddelik Türkçe liste; IPA sahibe gönderildi.
+
+### Kalan risk / blocker
+- Değişiklik koruması yok: ChangeEmail, passkey oluşturma, posta kutusu bağlama formları, gönderim mesajı (§10 düşük). iPhone SE detent/kaydırma cihazda görülmeli.
+
+### Sıradaki tek iş
+- P0 kod tarafı bitti. P0.1–P0.5 cihaz sonuçlarını bekle; kalan sorunları düzelt. Ardından P1 navigasyon dokunuş ölçümü.
 
 ---
 
