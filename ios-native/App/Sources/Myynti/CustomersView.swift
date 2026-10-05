@@ -400,12 +400,7 @@ struct CustomerFormSheet: View {
                     Button { Task { await save() } } label: { InFlightLabel("Tallenna", inFlight: busy) }.disabled(busy || draft.name.trimmingCharacters(in: .whitespaces).isEmpty)
                 }
             }
-            .confirmationDialog("Hylätäänkö muutokset?", isPresented: $confirmDiscard, titleVisibility: .visible) {
-                Button("Hylkää muutokset", role: .destructive) { dismiss() }
-                Button("Jatka muokkausta", role: .cancel) {}
-            } message: {
-                Text("Muutoksia ei ole tallennettu.")
-            }
+            .discardGuard(dirty: dirty, busy: busy, asking: $confirmDiscard) { dismiss() }
             .onAppear {
                 // Once: a second onAppear must not overwrite what the owner has typed.
                 guard baseline == nil else { return }
@@ -415,7 +410,6 @@ struct CustomerFormSheet: View {
                 }
                 baseline = draft
             }
-            .interactiveDismissDisabled(busy || dirty)
         }
     }
 

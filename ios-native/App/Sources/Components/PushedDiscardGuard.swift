@@ -23,7 +23,7 @@ struct PushedDiscardGuard: ViewModifier {
                     }
                 }
             }
-            .confirmationDialog("Hylätäänkö muutokset?", isPresented: $asking, titleVisibility: .visible) {
+            .alert("Hylätäänkö muutokset?", isPresented: $asking) {
                 Button("Hylkää muutokset", role: .destructive) { discard() }
                 Button("Jatka muokkausta", role: .cancel) {}
             } message: {

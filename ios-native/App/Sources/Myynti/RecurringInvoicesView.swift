@@ -448,18 +448,12 @@ struct RecurringFormSheet: View {
                     draft.paymentTermDays = created.defaultPaymentTermDays
                 }
             }
-            .confirmationDialog("Hylätäänkö muutokset?", isPresented: $confirmDiscard, titleVisibility: .visible) {
-                Button("Hylkää muutokset", role: .destructive) { dismiss() }
-                Button("Jatka muokkausta", role: .cancel) {}
-            } message: {
-                Text("Muutoksia ei ole tallennettu.")
-            }
+            .discardGuard(dirty: dirty, busy: busy, asking: $confirmDiscard) { dismiss() }
             // A start date moved into 2026 turns old 14 % lines into 13,5 % (as the web form does).
             .onChange(of: startDate) { _, date in
                 draft.lines.adjustVatRates(issueDate: APIDate.dayString(date))
             }
             .task { await prepare() }
-            .interactiveDismissDisabled(busy || dirty)
         }
     }
 

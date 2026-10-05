@@ -101,7 +101,9 @@ struct InvoiceFormView: View {
                     Button("Valmis") { focus = nil }.fontWeight(.semibold)
                 }
             }
-            .confirmationDialog("Hylätäänkö muutokset?", isPresented: $confirmDiscard, titleVisibility: .visible) {
+            // Own alert (three choices for a new invoice); the swipe hook is the shared one.
+            .background(SwipeAttemptObserver { if dirty && !busy { confirmDiscard = true } })
+            .alert("Hylätäänkö muutokset?", isPresented: $confirmDiscard) {
                 Button("Hylkää muutokset", role: .destructive) {
                     if existing == nil, let owner { SalesDraftStore.shared.clear(owner: owner) }
                     dismiss()
