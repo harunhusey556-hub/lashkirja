@@ -58,7 +58,7 @@ Worker sırayı bozmasın. Bir madde bloklanırsa (ör. cihaz testi bekliyor) ya
 | P0.1 | OTP AutoFill: 10 giriş şekli testli; çift gönderim kapısı core'a taşınıp testlendi; **cihazda kabul** | kod+test tamam (`5f3f1f5`); cihaz testi bekliyor |
 | P0.2 | Dokunma geri bildirimi + uçuştaki isteği kilitleme (fatura/ödeme/silme/gönderme çift gönderilemez) | kod tamam (`4089ba0` çift gönderim, `1e9f1af` dokunma geri bildirimi); cihaz testi bekliyor |
 | P0.3 | Loading / boş / kısmi / hata / oturum bitti / offline / başarı durumları, ekran ekran | kod tamam, tüm ekranlar ortak katmanda (`67e124f`); cihaz testi bekliyor |
-| P0.4 | Klavye ve form ergonomisi (klavye tipi, FocusState, kaydedilmemiş değişiklik uyarısı) | açık |
+| P0.4 | Klavye ve form ergonomisi (klavye tipi, FocusState, kaydedilmemiş değişiklik uyarısı) | kod tamam (`1cd8279`, ortak `FormFields.swift`); cihaz testi bekliyor |
 | P0.5 | Sheet, geri kaydırma, yıkıcı akış güvenliği | açık |
 
 **Kabul:** NP P0 kabul kriterleri + her madde için sahip cihaz notu (model, iOS, build no).
@@ -304,6 +304,37 @@ P0.3 kalan ekranları ortak `ScreenLoad` katmanına taşı.
 
 ### Sıradaki tek iş
 - P0.4: klavye ve form ergonomisi.
+
+---
+
+## RUN — 2026-10-05 21:00
+
+### Hedef
+P0.4 klavye ve form ergonomisi.
+
+### Başlangıç ölçümü
+- `native` `298a33b`; `feature/form-ergonomics` `1cd8279` native üstünde, iOS native CI run 37331269016 yeşil.
+
+### Yapılan
+- Ortak `FormFields.swift`: `.formKeyboard()` (kaydırınca klavye kapanır + "Valmis"), `.emailInput()`, `.moneyInput()`, `.codeInput()`, `.phoneInput()`; 20 çıplak decimalPad bunlara geçti.
+- Müşteri formu ve şifre değiştirmede Return ile alan zinciri; e-posta şablon editörüne "Hylätäänkö muutokset?" koruması.
+- Ana oturum kontrolü: hiçbir dosyada `.formKeyboard()` + özel klavye toolbar'ı birlikte yok; `ReceiptEditor` iç içe uygulanmıyor (çift "Valmis" yok).
+- `native` fast-forward → `1cd8279`.
+
+### Değişen dosyalar / commitler
+- `1cd8279` fix(ios): form ergonomics (P0.4) — 24 dosya; rapor `docs/worker-reports/2026-10-05-form-ergonomics.md`
+
+### Test / gates
+- iOS native CI yeşil (37331269016). Para ayrıştırma mevcut `MoneyTests` ile kapsanıyor; yeni core mantığı yok.
+
+### Cihaz / canlı doğrulama
+- Bekliyor: rapordaki 6 maddelik Türkçe liste; IPA sahibe gönderildi.
+
+### Kalan risk / blocker
+- Return zinciri eksik: alış faturası, profil, tekrarlayan alış formları (yalnız "Valmis" + klavye tipleri). Gönderim sheet'i mesajında değişiklik koruması yok (§10 düşük).
+
+### Sıradaki tek iş
+- P0.5: sheet, geri kaydırma, yıkıcı akış güvenliği.
 
 ---
 
