@@ -7,7 +7,7 @@ import LashKirjaCore
 struct EmailInboxView: View {
     @Environment(AppModel.self) private var app
     @State private var folder: EmailInboxFolder = .pending
-    @State private var receipts: Loadable<[Receipt]> = .idle
+    @State private var receipts = ScreenLoad<[Receipt]>()
     @State private var total = 0
     @State private var truncated = false
     @State private var loadingMore = false
@@ -55,6 +55,11 @@ struct EmailInboxView: View {
                     .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 4, trailing: 0))
                     .listRowSeparator(.hidden)
                 if let rows = receipts.value?.filter({ !app.removedIds.contains($0.id) }) {
+                    if let banner = receipts.banner {
+                        Section { RefreshFailureBanner(failure: banner, retry: load) }
+                            .listRowBackground(Color.clear)
+                            .listRowInsets(EdgeInsets())
+                    }
                     if folder == .pending && EmailInboxText.cleanupCandidates(rows) > 0 {
                         cleanupSection(EmailInboxText.cleanupCandidates(rows))
                     }
@@ -70,7 +75,7 @@ struct EmailInboxView: View {
                         }
                     }
                 } else {
-                    LoadState(state: receipts, retry: load) { (_: [Receipt]) in EmptyView() }
+                    ScreenStateView(state: receipts, retry: load) { (_: [Receipt]) in EmptyView() }
                         .listRowBackground(Color.clear)
                 }
             }
@@ -256,7 +261,7 @@ struct EmailInboxView: View {
         guard next != folder else { return }
         Haptics.selection()
         // The rows of the folder left must not stay under the new chip (their swipes would differ).
-        receipts = .idle
+        receipts.restart()
         total = 0
         truncated = false
         limit.reset()
@@ -266,7 +271,7 @@ struct EmailInboxView: View {
     // MARK: Loading
 
     private func load() async {
-        if receipts.value == nil { receipts = .loading }
+        receipts.begin()
         let api = app.api
         // A slow answer for a folder the owner already left must not replace the newer list.
         let asked = folder
@@ -277,7 +282,7 @@ struct EmailInboxView: View {
         do {
             let list: ReceiptList = try await api.get("/api/receipts", query: asked.listQuery())
             if asked == folder {
-                receipts = .loaded(list.receipts)
+                receipts.succeed(list.receipts)
                 total = list.count ?? list.receipts.count
                 truncated = list.truncated ?? false
                 failure = nil
@@ -286,7 +291,7 @@ struct EmailInboxView: View {
             return
         } catch {
             if asked == folder {
-                if receipts.value == nil { receipts = .failed(error.userMessage) } else { failure = error.userMessage }
+                receipts.fail(error)
             }
         }
         if let response = await profile {
@@ -307,7 +312,7 @@ struct EmailInboxView: View {
         do {
             let page: ReceiptList = try await app.api.get("/api/receipts", query: asked.listQuery(offset: loaded.count))
             guard asked == folder else { return }
-            receipts = .loaded(ReceiptPaging.append(loaded, page.receipts))
+            receipts.update { $0 = ReceiptPaging.append(loaded, page.receipts) }
             total = page.count ?? total
             truncated = page.truncated ?? false
         } catch is CancellationError {
@@ -414,8 +419,7 @@ struct EmailInboxView: View {
 
     /// Out of the loaded rows before the reload, so a reload that fails does not bring it back here.
     private func dropRow(_ id: String) {
-        guard let rows = receipts.value else { return }
-        receipts = .loaded(rows.filter { $0.id != id })
+        receipts.update { rows in rows.removeAll { $0.id == id } }
         total = max(0, total - 1)
     }
 

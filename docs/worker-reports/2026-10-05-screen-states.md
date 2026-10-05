@@ -65,31 +65,35 @@ tabs; 401 → sign-in screen with notice (all screens).
 | Pankkitapahtumat (`BankFeedView`) | L, R, E (ContentUnavailable), refresh **silent** | **ScreenLoad** + banner |
 | Ostolaskut list | L, R, E, refresh error as red raw text | **ScreenLoad** + banner |
 | Asetukset root | profile failure inline text; menu usable | unchanged |
-| Invoice detail | L, R, refresh silent, M notice/toast | P0.3 kalan |
-| Customers list / detail | L, R, E, refresh silent | P0.3 kalan |
-| Toistuvat laskut | L, R, refresh error as notice | P0.3 kalan |
-| Receipt detail | L, R, refresh error as red text | P0.3 kalan |
-| Ostolasku detail | L, R, refresh error as red text | P0.3 kalan |
-| Toistuvat ostot | L, R, refresh error toast | P0.3 kalan |
-| Pankki hub, Tiliotteet, Tiliote detail | L, R, refresh silent | P0.3 kalan |
-| Sähköposti inbox | L, R, refresh error red text | P0.3 kalan |
-| Tuonnit ja virheet (`WorkQueueView`) | L, R, refresh error note (BOOKS-16) | P0.3 kalan (already shows it) |
-| ALV (`AlvView`) | period change → spinner (intended), failure replaces | P0.3 kalan |
-| Kuukauden sulku (`PeriodsView`) | month status failure replaces data | P0.3 kalan |
-| Pankkitilit rollforward / bank picker | rollforward silent; picker reload = spinner | P0.3 kalan |
-| Sheets: Koti approval, bank match (Myynti), bank candidates, purchase↔bank link, send preview | one-shot loads; failure replaces sheet body | P0.3 kalan (one-shot, low risk) |
-| Asetukset subpages: sessions, passkeys, privacy, email import, change email, templates, payments | sessions/passkeys/privacy/import: refresh failure **replaces** list | P0.3 kalan |
+| Invoice detail | L, R, refresh silent, M notice/toast | **ScreenLoad** + banner (moved, P0.3 part 2) |
+| Customers list / detail | L, R, E, refresh silent | **ScreenLoad** + banner (moved, P0.3 part 2) |
+| Toistuvat laskut | L, R, refresh error as notice | **ScreenLoad** + banner (moved, P0.3 part 2) |
+| Receipt detail | L, R, refresh error as red text | **ScreenLoad** + banner (moved, P0.3 part 2) |
+| Ostolasku detail | L, R, refresh error as red text | **ScreenLoad** + banner (moved, P0.3 part 2) |
+| Toistuvat ostot | L, R, refresh error toast | **ScreenLoad** + banner (moved, P0.3 part 2) |
+| Pankki hub, Tiliotteet, Tiliote detail | L, R, refresh silent | **ScreenLoad** + banner (moved, P0.3 part 2) |
+| Sähköposti inbox | L, R, refresh error red text | **ScreenLoad** + banner (moved, P0.3 part 2) |
+| Tuonnit ja virheet (`WorkQueueView`) | L, R, refresh error note (BOOKS-16) | **ScreenLoad** + banner; the note was replaced by the banner (moved, P0.3 part 2) |
+| ALV (`AlvView`) | period change → spinner (intended), failure replaces | **ScreenLoad** + banner (moved, P0.3 part 2) |
+| Kuukauden sulku (`PeriodsView`) | month status failure replaces data | **ScreenLoad** + banner (moved, P0.3 part 2) |
+| Pankkitilit rollforward / bank picker | rollforward silent; picker reload = spinner | **ScreenLoad** + banner (moved, P0.3 part 2) |
+| Sheets: Koti approval, bank match (Myynti), bank candidates, purchase↔bank link, send preview | one-shot loads; failure replaces sheet body | **ScreenLoad** + banner (moved, P0.3 part 2): `KotiApprovalSheet`, `BankMatchSheet` (Myynti), `BankRowSheet` candidates, both purchase↔bank link sheets, send preview |
+| Asetukset subpages: sessions, passkeys, privacy, email import, change email, templates, payments | sessions/passkeys/privacy/import: refresh failure **replaces** list | **ScreenLoad** + banner (moved, P0.3 part 2) |
 | Assistant (chat) | own streaming states (P4) | out of scope |
 
 Server: no route returned a shape that hides a state; no server change.
 
 ## P0.3 kalan
 
-Move to `ScreenLoad` + `RefreshFailureBanner`: InvoiceDetail, Customers (list+detail),
-RecurringInvoices, ReceiptDetail, PurchaseInvoiceDetail, RecurringPurchases, BankHub, Statements,
-StatementDetail, EmailInbox, WorkQueue, AlvView, PeriodsView, BankAccounts (rollforward, picker),
-the five load sheets, Asetukset subpages (SettingsView sessions, Passkeys, Privacy, EmailImport,
-ChangeEmail, EmailTemplates, PaymentsSettings). The old `Loadable`/`LoadState` stays until then.
+Nothing left on the `Loadable`/`LoadState` path: every network-backed screen above is on `ScreenLoad`
+(part 2, branch `feature/screen-states-2`: InvoiceDetail, Customers list + detail, RecurringInvoices,
+ReceiptDetail, PurchaseInvoiceDetail, RecurringPurchases, BankHub, Statements, StatementDetail,
+EmailInbox, WorkQueue, AlvView, PeriodsView (month + lock), BankAccounts rollforward and bank picker,
+the five load sheets (+ the second purchase link sheet), Settings: Devices/Sessions, Passkeys, Privacy,
+EmailImport, ChangeEmail, EmailTemplates, Payments). A period/year/account-type/folder change calls
+`restart()`, so the other subject's figures never stay under the new heading. `Loadable` and
+`LoadState` remain defined in Components.swift but have no users (delete in a later cleanup).
+Not verified on a device; Swift compiles only on CI.
 
 ## Cihaz kontrol listesi (TR)
 

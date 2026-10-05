@@ -354,7 +354,7 @@ struct PurchaseInvoiceDetailView: View {
 
     @Environment(AppModel.self) private var app
     @Environment(\.dismiss) private var dismiss
-    @State private var state: Loadable<PurchaseInvoice> = .idle
+    @State private var state = ScreenLoad<PurchaseInvoice>()
     @State private var links: PurchaseReceiptLinks?
     /// The recurring template that made this invoice, when one did.
     @State private var recurringPurchaseId: String?
@@ -391,6 +391,11 @@ struct PurchaseInvoiceDetailView: View {
     var body: some View {
         List {
             if let invoice = state.value {
+                if let banner = state.banner {
+                    Section { RefreshFailureBanner(failure: banner, retry: load) }
+                        .listRowBackground(Color.clear)
+                        .listRowInsets(EdgeInsets())
+                }
                 Section {
                     header(invoice).listRowBackground(Color.clear).listRowInsets(EdgeInsets())
                 }
@@ -418,7 +423,7 @@ struct PurchaseInvoiceDetailView: View {
                     }
                 }
             } else {
-                LoadState(state: state, retry: load) { (_: PurchaseInvoice) in EmptyView() }
+                ScreenStateView(state: state, retry: load) { (_: PurchaseInvoice) in EmptyView() }
                     .listRowBackground(Color.clear)
             }
         }
@@ -699,20 +704,20 @@ struct PurchaseInvoiceDetailView: View {
     // MARK: Actions
 
     private func apply(_ invoice: PurchaseInvoice) {
-        state = .loaded(invoice)
+        state.succeed(invoice)
         Task { await loadLinks() }
     }
 
     private func load() async {
-        if state.value == nil { state = .loading }
+        state.begin()
         do {
             let response: PurchaseInvoiceTaggedResponse = try await app.api.get("/api/purchase-invoices/\(purchaseInvoiceId)")
-            state = .loaded(response.invoice)
+            state.succeed(response.invoice)
             recurringPurchaseId = response.recurringPurchaseId
         } catch is CancellationError {
             return
         } catch {
-            if state.value == nil { state = .failed(error.userMessage) } else { failure = error.userMessage }
+            state.fail(error)
             return
         }
         await loadLinks()
@@ -742,14 +747,14 @@ struct PurchaseInvoiceDetailView: View {
     private func setStatus(_ change: PurchaseStatusChange) async {
         await run {
             let response: PurchaseInvoiceResponse = try await app.api.send("PATCH", "/api/purchase-invoices/\(purchaseInvoiceId)", body: change)
-            state = .loaded(response.invoice)
+            state.succeed(response.invoice)
         }
     }
 
     private func setReceipt(_ receiptId: String?) async {
         await run {
             let response: PurchaseInvoiceResponse = try await app.api.send("PATCH", "/api/purchase-invoices/\(purchaseInvoiceId)", body: PurchaseReceiptLink(receiptId: receiptId))
-            state = .loaded(response.invoice)
+            state.succeed(response.invoice)
         }
         await loadLinks()
     }
@@ -757,7 +762,7 @@ struct PurchaseInvoiceDetailView: View {
     private func removePayment(_ payment: PurchaseInvoice.Payment) async {
         await run {
             let response: PurchaseInvoiceResponse = try await app.api.send("DELETE", "/api/purchase-invoices/\(purchaseInvoiceId)/payments", query: ["paymentId": payment.id], body: Optional<EmptyBody>.none)
-            state = .loaded(response.invoice)
+            state.succeed(response.invoice)
         }
     }
 

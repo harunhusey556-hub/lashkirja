@@ -488,7 +488,7 @@ struct BankAccountDetailSheet: View {
     @Environment(\.dismiss) private var dismiss
     let account: BankAccount
     let onChanged: (String?) -> Void
-    @State private var rollforward: Loadable<BankRollforward> = .idle
+    @State private var rollforward = ScreenLoad<BankRollforward>()
     @State private var editing = false
     @State private var confirmRemove = false
     @State private var balanceMonth: String?
@@ -522,13 +522,15 @@ struct BankAccountDetailSheet: View {
                 }
                 if let failure { Text(failure).foregroundStyle(Theme.danger) }
                 Section {
-                    switch rollforward {
-                    case .idle, .loading:
+                    switch rollforward.display {
+                    case .loading:
                         ProgressView().frame(maxWidth: .infinity)
-                    case .failed(let message):
-                        Text(message).foregroundStyle(Theme.danger)
-                        Button("Yritä uudelleen") { Task { await load() } }
-                    case .loaded(let value):
+                    case .failed(let failure):
+                        LoadFailureView(failure: failure, retry: load)
+                    case .content(let value):
+                        if let banner = rollforward.banner {
+                            RefreshFailureBanner(failure: banner, retry: load)
+                        }
                         if let note = excludedNote(value) {
                             Text(note).font(.caption).foregroundStyle(Theme.warning)
                         }
@@ -593,13 +595,13 @@ struct BankAccountDetailSheet: View {
     }
 
     private func load() async {
-        if rollforward.value == nil { rollforward = .loading }
+        rollforward.begin()
         do {
             let value: BankRollforward = try await app.api.get("/api/bank-accounts/\(account.id)")
-            rollforward = .loaded(value)
+            rollforward.succeed(value)
         } catch is CancellationError {
         } catch {
-            if rollforward.value == nil { rollforward = .failed(error.userMessage) }
+            rollforward.fail(error)
         }
     }
 
@@ -699,7 +701,7 @@ struct BankPickerSheet: View {
     /// After the bank's consent went through, with the new connection when the server returned it.
     var onConnected: (BankConnection?) -> Void
     @State private var psuType: String
-    @State private var banks: Loadable<[Aspsp]> = .idle
+    @State private var banks = ScreenLoad<[Aspsp]>()
     @State private var search: String
 
     /// A reconnect keeps the connection's own account type (web `preferredPsu`) and starts the
@@ -726,6 +728,11 @@ struct BankPickerSheet: View {
                 .listRowBackground(Color.clear)
                 if let failure { Text(failure).foregroundStyle(Theme.danger) }
                 if let list = banks.value {
+                    if let banner = banks.banner {
+                        Section { RefreshFailureBanner(failure: banner, retry: load) }
+                            .listRowBackground(Color.clear)
+                            .listRowInsets(EdgeInsets())
+                    }
                     ForEach(list.filter { BankSearch.matches($0.name, search) }) { bank in
                         Button {
                             Haptics.selection()
@@ -743,7 +750,7 @@ struct BankPickerSheet: View {
                         .disabled(connecting != nil)
                     }
                 } else {
-                    LoadState(state: banks, retry: load) { (_: [Aspsp]) in EmptyView() }
+                    ScreenStateView(state: banks, retry: load) { (_: [Aspsp]) in EmptyView() }
                 }
             }
             .searchable(text: $search, prompt: "Hae pankkia")
@@ -751,7 +758,11 @@ struct BankPickerSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Peruuta") { dismiss() } } }
             .navigationDestination(item: $chosen) { bank in historyStep(bank) }
-            .task(id: psuType) { await load() }
+            .task(id: psuType) {
+                // The other account type's banks must not stay on screen while its list loads.
+                banks.restart()
+                await load()
+            }
         }
         .interactiveDismissDisabled(connecting != nil)
     }
@@ -811,13 +822,13 @@ struct BankPickerSheet: View {
     }
 
     private func load() async {
-        banks = .loading
+        banks.begin()
         do {
             let list: AspspList = try await app.api.get("/api/bank/aspsps", query: ["country": "FI", "psuType": psuType])
-            banks = .loaded(list.aspsps)
+            banks.succeed(list.aspsps)
         } catch is CancellationError {
         } catch {
-            banks = .failed(error.userMessage)
+            banks.fail(error)
         }
     }
 

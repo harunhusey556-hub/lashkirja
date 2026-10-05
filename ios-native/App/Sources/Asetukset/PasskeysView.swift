@@ -7,7 +7,7 @@ import LashKirjaCore
 /// create one with the system passkey sheet when the server and the build allow it.
 struct PasskeysView: View {
     @Environment(AppModel.self) private var app
-    @State private var rows: Loadable<[Passkey]> = .idle
+    @State private var rows = ScreenLoad<[Passkey]>()
     @State private var canCreate: Bool?
     @State private var message: String?
     @State private var success: String?
@@ -26,6 +26,11 @@ struct PasskeysView: View {
                     .listRowInsets(EdgeInsets(top: 4, leading: 4, bottom: 4, trailing: 4))
             }
             if let list = rows.value {
+                if let banner = rows.banner {
+                    Section { RefreshFailureBanner(failure: banner, retry: load) }
+                        .listRowBackground(Color.clear)
+                        .listRowInsets(EdgeInsets())
+                }
                 Section {
                     if list.isEmpty {
                         Text("Ei pääsyavaimia vielä.").foregroundStyle(Theme.ink2)
@@ -58,7 +63,7 @@ struct PasskeysView: View {
                 }
                 createSection
             } else {
-                LoadState(state: rows, retry: load) { (_: [Passkey]) in EmptyView() }
+                ScreenStateView(state: rows, retry: load) { (_: [Passkey]) in EmptyView() }
                     .listRowBackground(Color.clear)
             }
         }
@@ -70,7 +75,7 @@ struct PasskeysView: View {
         .task { if rows.value == nil { await load() } }
         .sheet(isPresented: $creating) {
             CreatePasskeySheet { created in
-                if case .loaded(let list) = rows { rows = .loaded(list + [created]) }
+                rows.update { $0.append(created) }
                 message = nil
                 success = "Pääsyavain luotu."
             }
@@ -109,13 +114,14 @@ struct PasskeysView: View {
     }
 
     private func load() async {
+        rows.begin()
         do {
             let list: PasskeyList = try await app.api.get("/api/auth/passkey")
-            rows = .loaded(list.passkeys)
+            rows.succeed(list.passkeys)
         } catch is CancellationError {
             return
         } catch {
-            rows = .failed(error.userMessage)
+            rows.fail(error)
         }
         // `native` also needs the server's associated-domains file for this app.
         if let status: PasskeyStatus = try? await app.api.get("/api/auth/passkey/status") {
@@ -134,9 +140,8 @@ struct PasskeysView: View {
         let body = PasskeyRenameBody(deviceName: newName)
         do {
             let _: Ignored = try await app.api.send("PATCH", "/api/auth/passkey/\(key.id)", body: body)
-            if case .loaded(var list) = rows, let index = list.firstIndex(where: { $0.id == key.id }) {
-                list[index].deviceName = body.deviceName
-                rows = .loaded(list)
+            rows.update { list in
+                if let index = list.firstIndex(where: { $0.id == key.id }) { list[index].deviceName = body.deviceName }
             }
             Haptics.success()
             message = nil
@@ -151,7 +156,7 @@ struct PasskeysView: View {
     private func delete(_ key: Passkey) async {
         do {
             let _: Ignored = try await app.api.send("DELETE", "/api/auth/passkey/\(key.id)", body: Optional<EmptyBody>.none)
-            if case .loaded(let list) = rows { rows = .loaded(list.filter { $0.id != key.id }) }
+            rows.update { list in list.removeAll { $0.id == key.id } }
             Haptics.success()
             message = nil
             success = "Pääsyavain poistettu."

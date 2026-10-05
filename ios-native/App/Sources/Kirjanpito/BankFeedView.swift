@@ -396,7 +396,7 @@ struct BankRowSheet: View {
     @State private var failure: String?
     @State private var capture = false
     @State private var captured = false
-    @State private var candidates: Loadable<[BankMatchCandidate]> = .idle
+    @State private var candidates = ScreenLoad<[BankMatchCandidate]>()
     /// The data version the row was read at; a newer one re-reads it.
     @State private var seenVersion: Int?
 
@@ -467,7 +467,7 @@ struct BankRowSheet: View {
             if let fresh = response.statement.transactions.first(where: { $0.id == row.id }) {
                 if fresh != row {
                     row = fresh
-                    candidates = .idle
+                    candidates = ScreenLoad()
                 }
             } else {
                 dismiss()
@@ -560,19 +560,23 @@ struct BankRowSheet: View {
             }
         }
         Section {
-            switch candidates {
-            case .idle:
+            if candidates.phase == .idle && candidates.value == nil {
                 Button { Task { await loadCandidates() } } label: { Label("Etsi kuitti", systemImage: "magnifyingglass") }
-            case .loading:
-                ProgressView().frame(maxWidth: .infinity)
-            case .failed(let message):
-                Text(message).foregroundStyle(Theme.danger)
-                Button("Yritä uudelleen") { Task { await loadCandidates() } }
-            case .loaded(let list):
-                if list.isEmpty {
-                    Text("Ei sopivia kuitteja. Lisää ensin uusi kuitti Kuitit-näkymässä.").foregroundStyle(Theme.ink2)
-                } else {
-                    ForEach(list, id: \.self) { candidate in candidateButton(candidate) }
+            } else {
+                switch candidates.display {
+                case .loading:
+                    ProgressView().frame(maxWidth: .infinity)
+                case .failed(let failure):
+                    LoadFailureView(failure: failure, retry: loadCandidates)
+                case .content(let list):
+                    if let banner = candidates.banner {
+                        RefreshFailureBanner(failure: banner, retry: loadCandidates)
+                    }
+                    if list.isEmpty {
+                        Text("Ei sopivia kuitteja. Lisää ensin uusi kuitti Kuitit-näkymässä.").foregroundStyle(Theme.ink2)
+                    } else {
+                        ForEach(list, id: \.self) { candidate in candidateButton(candidate) }
+                    }
                 }
             }
         } header: {
@@ -598,14 +602,13 @@ struct BankRowSheet: View {
     }
 
     private func loadCandidates() async {
-        candidates = .loading
+        candidates.begin()
         do {
             let response: BankMatchCandidates = try await app.api.get("/api/matching/candidates", query: ["transactionId": row.id])
-            candidates = .loaded(response.usable)
-        } catch is CancellationError {
-            candidates = .idle
+            candidates.succeed(response.usable)
         } catch {
-            candidates = .failed(error.userMessage)
+            // A cancelled load puts the "Etsi kuitti" button back; any other failure is told in Finnish.
+            candidates.fail(error)
         }
     }
 

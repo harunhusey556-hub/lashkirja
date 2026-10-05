@@ -9,7 +9,7 @@ import LashKirjaCore
 
 struct CustomersView: View {
     @Environment(AppModel.self) private var app
-    @State private var state: Loadable<[Customer]> = .idle
+    @State private var state = ScreenLoad<[Customer]>()
     @State private var gate = ReloadGate()
     @State private var search = ""
     @State private var showNew = false
@@ -32,6 +32,11 @@ struct CustomersView: View {
                 .listRowSeparator(.hidden)
             }
             if let customers = state.value {
+                if let banner = state.banner {
+                    Section { RefreshFailureBanner(failure: banner, retry: load) }
+                        .listRowBackground(Color.clear)
+                        .listRowInsets(EdgeInsets())
+                }
                 let rows = customers.filter { !app.removedIds.contains($0.id) && (search.isEmpty || $0.name.localizedCaseInsensitiveContains(search)) }
                 Section {
                     if rows.isEmpty { Text(search.isEmpty ? "Ei asiakkaita." : "Ei osumia.").foregroundStyle(Theme.ink2) }
@@ -51,7 +56,7 @@ struct CustomersView: View {
                     ShowMoreButton(limit: $limit, total: rows.count)
                 }
             } else {
-                LoadState(state: state, retry: load) { (_: [Customer]) in EmptyView() }.listRowBackground(Color.clear)
+                ScreenStateView(state: state, retry: load) { (_: [Customer]) in EmptyView() }.listRowBackground(Color.clear)
             }
         }
         .scrollContentBackground(.hidden)
@@ -94,14 +99,14 @@ struct CustomersView: View {
     }
 
     private func load() async {
-        if state.value == nil { state = .loading }
+        state.begin()
         let archived = includeArchived
         do {
             let list: CustomerList = try await app.api.get("/api/customers", query: CustomerArchive.listQuery(includeArchived: archived))
-            state = .loaded(archived ? list.customers : list.customers.filter { !$0.isArchived })
+            state.succeed(archived ? list.customers : list.customers.filter { !$0.isArchived })
         } catch is CancellationError {
         } catch {
-            if state.value == nil { state = .failed(error.userMessage) }
+            state.fail(error)
         }
     }
 }
@@ -120,7 +125,7 @@ struct CustomerDetailView: View {
     @Environment(AppModel.self) private var app
     @Environment(\.dismiss) private var dismiss
     let customerId: String
-    @State private var state: Loadable<CustomerDetail> = .idle
+    @State private var state = ScreenLoad<CustomerDetail>()
     @State private var showEdit = false
     @State private var showNewInvoice = false
     @State private var confirmDelete = false
@@ -139,6 +144,11 @@ struct CustomerDetailView: View {
     var body: some View {
         List {
             if let detail = state.value {
+                if let banner = state.banner {
+                    Section { RefreshFailureBanner(failure: banner, retry: load) }
+                        .listRowBackground(Color.clear)
+                        .listRowInsets(EdgeInsets())
+                }
                 let c = detail.customer
                 if c.isArchived {
                     Section {
@@ -193,7 +203,7 @@ struct CustomerDetailView: View {
                 }
                 if let notes = c.notes { Section("Muistiinpanot") { Text(notes) } }
             } else {
-                LoadState(state: state, retry: load) { (_: CustomerDetail) in EmptyView() }.listRowBackground(Color.clear)
+                ScreenStateView(state: state, retry: load) { (_: CustomerDetail) in EmptyView() }.listRowBackground(Color.clear)
             }
         }
         .scrollContentBackground(.hidden)
@@ -252,16 +262,16 @@ struct CustomerDetailView: View {
     }
 
     private func load() async {
-        if state.value == nil { state = .loading }
+        state.begin()
         do {
-            state = .loaded(try await app.api.get("/api/customers/\(customerId)"))
+            state.succeed(try await app.api.get("/api/customers/\(customerId)"))
             // Merge candidates: every other customer still in use.
             if let list: CustomerList = try? await app.api.get("/api/customers") {
                 others = list.customers.filter { $0.id != customerId && $0.archivedAt == nil }
             }
         } catch is CancellationError {
         } catch {
-            if state.value == nil { state = .failed(error.userMessage) }
+            state.fail(error)
         }
     }
 

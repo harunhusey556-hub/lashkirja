@@ -4,7 +4,7 @@ import LashKirjaCore
 /// Tietosuoja (/asetukset/tietosuoja): what is kept, a copy of the data, and closing the account.
 struct PrivacyView: View {
     @Environment(AppModel.self) private var app
-    @State private var requests: Loadable<[AccountRequest]> = .idle
+    @State private var requests = ScreenLoad<[AccountRequest]>()
     @State private var password = ""
     @State private var passwordError: String?
     @State private var formError: String?
@@ -95,14 +95,20 @@ struct PrivacyView: View {
     }
 
     @ViewBuilder private var requestsSection: some View {
-        switch requests {
-        case .failed(let message):
+        switch requests.display {
+        case .failed(let failure):
             Section {
-                Text("Aiempia pyyntöjä ei saatu ladattua.").foregroundStyle(Theme.danger)
-                Text(message).font(.footnote).foregroundStyle(Theme.ink2)
-                Button("Yritä uudelleen") { Task { await load() } }
+                LoadFailureView(failure: failure, retry: load)
+            } header: {
+                Text("Pyynnöt")
             }
-        case .loaded(let rows):
+            .listRowBackground(Color.clear)
+        case .content(let rows):
+            if let banner = requests.banner {
+                Section { RefreshFailureBanner(failure: banner, retry: load) }
+                    .listRowBackground(Color.clear)
+                    .listRowInsets(EdgeInsets())
+            }
             if !rows.isEmpty {
             Section {
                 ForEach(rows.prefix(requestLimit.visible(rows.count))) { request in
@@ -129,7 +135,7 @@ struct PrivacyView: View {
                 Text("Pyynnöt")
             }
             }
-        default:
+        case .loading:
             EmptyView()
         }
     }
@@ -150,12 +156,13 @@ struct PrivacyView: View {
     }
 
     private func load() async {
+        requests.begin()
         do {
             let list: AccountRequestList = try await app.api.get("/api/account/request")
-            requests = .loaded(list.requests)
+            requests.succeed(list.requests)
         } catch is CancellationError {
         } catch {
-            requests = .failed(error.userMessage)
+            requests.fail(error)
         }
     }
 

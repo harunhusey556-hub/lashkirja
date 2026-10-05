@@ -6,7 +6,7 @@ struct StatementDetailView: View {
     @Environment(AppModel.self) private var app
     @Environment(\.dismiss) private var dismiss
     let statementId: String
-    @State private var state: Loadable<Statement> = .idle
+    @State private var state = ScreenLoad<Statement>()
     @State private var onlyOpen = false
     @State private var limit = ShowMore()
     @State private var selected: BankTransaction?
@@ -24,9 +24,14 @@ struct StatementDetailView: View {
     var body: some View {
         List {
             if let statement = state.value {
+                if let banner = state.banner {
+                    Section { RefreshFailureBanner(failure: banner, retry: load) }
+                        .listRowBackground(Color.clear)
+                        .listRowInsets(EdgeInsets())
+                }
                 content(statement)
             } else {
-                LoadState(state: state, retry: load) { (_: Statement) in EmptyView() }.listRowBackground(Color.clear)
+                ScreenStateView(state: state, retry: load) { (_: Statement) in EmptyView() }.listRowBackground(Color.clear)
             }
         }
         .scrollContentBackground(.hidden)
@@ -214,13 +219,13 @@ struct StatementDetailView: View {
     }
 
     private func load() async {
-        if state.value == nil { state = .loading }
+        state.begin()
         do {
             let response: StatementResponse = try await app.api.get("/api/statements/\(statementId)")
-            state = .loaded(response.statement)
+            state.succeed(response.statement)
         } catch is CancellationError {
         } catch {
-            if state.value == nil { state = .failed(error.userMessage) }
+            state.fail(error)
         }
     }
 
@@ -264,7 +269,7 @@ struct StatementDetailView: View {
         var message: String?
         let ok = await perform {
             let result: StatementReinferResult = try await app.api.send("POST", "/api/statements/\(statementId)/reinfer-types", body: EmptyBody())
-            if let statement = result.statement { state = .loaded(statement) }
+            if let statement = result.statement { state.succeed(statement) }
             message = result.message
         }
         if ok { status = message; await changed() }

@@ -296,13 +296,18 @@ struct PasswordView: View {
 
 struct DevicesView: View {
     @Environment(AppModel.self) private var app
-    @State private var sessions: Loadable<[DeviceSession]> = .idle
+    @State private var sessions = ScreenLoad<[DeviceSession]>()
     @State private var failure: String?
     @State private var limit = ShowMore()
 
     var body: some View {
         List {
             if let list = sessions.value {
+                if let banner = sessions.banner {
+                    Section { RefreshFailureBanner(failure: banner, retry: load) }
+                        .listRowBackground(Color.clear)
+                        .listRowInsets(EdgeInsets())
+                }
                 ForEach(list.prefix(limit.visible(list.count))) { s in
                     VStack(alignment: .leading, spacing: 2) {
                         Text(s.label + (s.current ? " (tämä laite)" : ""))
@@ -317,7 +322,7 @@ struct DevicesView: View {
                     Button(role: .destructive) { Task { await signOutOthers() } } label: { Text("Kirjaa ulos kaikki muut laitteet") }
                 }
             } else {
-                LoadState(state: sessions, retry: load) { (_: [DeviceSession]) in EmptyView() }
+                ScreenStateView(state: sessions, retry: load) { (_: [DeviceSession]) in EmptyView() }
             }
             if let failure { Text(failure).foregroundStyle(Theme.danger) }
         }
@@ -327,9 +332,10 @@ struct DevicesView: View {
     }
 
     private func load() async {
-        do { sessions = .loaded(DeviceSession.currentFirst((try await app.api.get("/api/auth/sessions") as DeviceSessions).sessions)) }
+        sessions.begin()
+        do { sessions.succeed(DeviceSession.currentFirst((try await app.api.get("/api/auth/sessions") as DeviceSessions).sessions)) }
         catch is CancellationError {}
-        catch { sessions = .failed(error.userMessage) }
+        catch { sessions.fail(error) }
     }
 
     private func signOut(id: String) async {

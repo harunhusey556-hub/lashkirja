@@ -6,7 +6,7 @@ import LashKirjaCore
 /// files, newest first. Pankkitapahtumat lists the rows; this lists the files.
 struct StatementsView: View {
     @Environment(AppModel.self) private var app
-    @State private var statements: Loadable<[Statement]> = .idle
+    @State private var statements = ScreenLoad<[Statement]>()
     @State private var accounts: [BankAccount] = []
     @State private var limit = ShowMore()
     @State private var importing = false
@@ -50,6 +50,11 @@ struct StatementsView: View {
                 Text("Tuo tiliote")
             }
             if let list = statements.value?.filter({ !app.removedIds.contains($0.id) }) {
+                if let banner = statements.banner {
+                    Section { RefreshFailureBanner(failure: banner, retry: load) }
+                        .listRowBackground(Color.clear)
+                        .listRowInsets(EdgeInsets())
+                }
                 Section {
                     if list.isEmpty {
                         Text("Ei vielä tiliotteita. Tuo tiliote tai yhdistä pankki.").foregroundStyle(Theme.ink2)
@@ -62,7 +67,7 @@ struct StatementsView: View {
                     Text("Tiedostot")
                 }
             } else {
-                LoadState(state: statements, retry: load) { (_: [Statement]) in EmptyView() }
+                ScreenStateView(state: statements, retry: load) { (_: [Statement]) in EmptyView() }
                     .listRowBackground(Color.clear)
             }
             Section {
@@ -91,7 +96,7 @@ struct StatementsView: View {
     }
 
     private func load() async {
-        if statements.value == nil { statements = .loading }
+        statements.begin()
         let api = app.api
         // Files and accounts load side by side; the accounts only fill the picker.
         async let filesResult = Result<StatementList, Error>(asyncCatching: { try await api.get("/api/statements") })
@@ -99,10 +104,10 @@ struct StatementsView: View {
         let (files, overview) = await (filesResult, accountsResult)
         if Task.isCancelled { return }
         switch files {
-        case .success(let value): statements = .loaded(value.statements)
+        case .success(let value): statements.succeed(value.statements)
         case .failure(let error):
             if error is CancellationError { return }
-            if statements.value == nil { statements = .failed(error.userMessage) }
+            statements.fail(error)
         }
         if let overview {
             // Accounts a tiliote can be imported to: the ones in use. Keep what was picked.

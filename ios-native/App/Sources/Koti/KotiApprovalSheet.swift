@@ -11,7 +11,7 @@ struct KotiApprovalSheet: View {
     let item: DashboardItem
     let approve: () -> Void
     let openReceipt: () -> Void
-    @State private var state: Loadable<Receipt> = .idle
+    @State private var state = ScreenLoad<Receipt>()
 
     var body: some View {
         NavigationStack {
@@ -19,7 +19,7 @@ struct KotiApprovalSheet: View {
                 if let receipt = state.value {
                     KotiApprovalForm(item: item, receipt: receipt, approve: approve, openReceipt: openReceipt)
                 } else {
-                    ScrollView { LoadState(state: state, retry: load) { (_: Receipt) in EmptyView() } }
+                    ScrollView { ScreenStateView(state: state, retry: load) { (_: Receipt) in EmptyView() } }
                         .toolbar {
                             ToolbarItem(placement: .cancellationAction) { Button("Peruuta") { dismiss() } }
                         }
@@ -35,13 +35,13 @@ struct KotiApprovalSheet: View {
 
     private func load() async {
         guard let id = item.receiptId else { return }
-        if state.value == nil { state = .loading }
+        state.begin()
         do {
             let response: ReceiptResponse = try await app.api.get("/api/receipts/\(id)")
-            state = .loaded(response.receipt)
+            state.succeed(response.receipt)
         } catch is CancellationError {
         } catch {
-            state = .failed(error.userMessage)
+            state.fail(error)
         }
     }
 }

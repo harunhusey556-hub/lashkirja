@@ -6,13 +6,13 @@ import LashKirjaCore
 struct PeriodsView: View {
     @Environment(AppModel.self) private var app
     @State private var month: String
-    @State private var status: Loadable<PeriodMonthStatus> = .idle
+    @State private var status = ScreenLoad<PeriodMonthStatus>()
     @State private var vat: (key: String, facts: PeriodClose.Vat, report: AlvReport)?
     @State private var confirmClose = false
     @State private var closing = false
     @State private var closeError: String?
 
-    @State private var lockedThrough: Loadable<String?> = .idle
+    @State private var lockedThrough = ScreenLoad<PeriodLockState>()
     @State private var choice: String??
     @State private var precheck: PeriodPrecheck?
     @State private var checking = false
@@ -49,9 +49,14 @@ struct PeriodsView: View {
         List {
             monthPicker
             if let data = status.value, data.month == month {
+                if let banner = status.banner {
+                    Section { RefreshFailureBanner(failure: banner, retry: loadMonth) }
+                        .listRowBackground(Color.clear)
+                        .listRowInsets(EdgeInsets())
+                }
                 monthSections(data)
             } else {
-                LoadState(state: status, retry: loadMonth) { (_: PeriodMonthStatus) in EmptyView() }
+                ScreenStateView(state: status, retry: loadMonth) { (_: PeriodMonthStatus) in EmptyView() }
                     .listRowBackground(Color.clear)
             }
             lockSections
@@ -327,10 +332,13 @@ struct PeriodsView: View {
 
     private func loadMonth() async {
         let key = month
+        // Another month's figures must not stay under this month's heading while it loads.
+        if status.value?.month != key { status.restart() }
+        status.begin()
         do {
             let data: PeriodMonthStatus = try await app.api.get("/api/dashboard/month", query: ["month": key])
             try Task.checkCancellation()
-            status = .loaded(data)
+            status.succeed(data)
             if data.vatRegistered, let period = PeriodClose.vatPeriodEnding(in: key, kind: data.vatPeriod) {
                 if let report: AlvReport = try? await app.api.get("/api/alv", query: ["period": period]) {
                     let facts = PeriodClose.vat(filedAt: report.filing?.filedAt, paidAt: report.filing?.paidAt,
@@ -343,7 +351,7 @@ struct PeriodsView: View {
             }
         } catch is CancellationError {
         } catch {
-            status = .failed(error.userMessage)
+            status.fail(error)
         }
     }
 
@@ -355,7 +363,7 @@ struct PeriodsView: View {
             let state: PeriodLockState = try await app.api.send("PUT", "/api/period-lock",
                 body: PeriodLockBody(month: data.month, reopen: false, expectedLockedThrough: data.lockedThrough))
             Haptics.success()
-            lockedThrough = .loaded(state.lockedThrough)
+            lockedThrough.succeed(state)
             lockNote = "\(MonthKey.name(data.month)) on merkitty valmiiksi."
             app.dataVersion += 1
         } catch is CancellationError {
@@ -371,8 +379,9 @@ struct PeriodsView: View {
     // MARK: Lock
 
     @ViewBuilder private var lockSections: some View {
-        switch lockedThrough {
-        case .loaded(let current):
+        switch lockedThrough.display {
+        case .content(let lock):
+            let current = lock.lockedThrough
             let selected: String? = choice ?? current
             let change = PeriodLock.change(current: current, selected: selected)
             let acknowledged = selected != nil && precheck?.month == selected && (precheck?.count ?? 0) > 0
@@ -414,15 +423,19 @@ struct PeriodsView: View {
             if let precheck, precheck.count > 0 {
                 precheckSection(precheck)
             }
-        case .failed(let message):
+            if let banner = lockedThrough.banner {
+                Section { RefreshFailureBanner(failure: banner, retry: loadLock) }
+                    .listRowBackground(Color.clear)
+                    .listRowInsets(EdgeInsets())
+            }
+        case .failed(let failure):
             Section {
-                Text("Lukituksen haku epäonnistui").foregroundStyle(Theme.danger)
-                Text(message).font(.footnote).foregroundStyle(Theme.ink2)
-                Button("Yritä uudelleen") { Task { await loadLock() } }
+                LoadFailureView(failure: failure, retry: loadLock)
+                    .listRowBackground(Color.clear)
             } header: {
                 Text("Suljetut kaudet")
             }
-        case .idle, .loading:
+        case .loading:
             Section {
                 ProgressView().frame(maxWidth: .infinity)
             } header: {
@@ -503,7 +516,7 @@ struct PeriodsView: View {
             let state: PeriodLockState = try await app.api.send("PUT", "/api/period-lock",
                 body: PeriodLockBody(month: pending.month, reopen: pending.reopen, expectedLockedThrough: pending.previous))
             Haptics.success()
-            lockedThrough = .loaded(state.lockedThrough)
+            lockedThrough.succeed(state)
             choice = nil
             precheck = nil
             lockError = nil
@@ -519,12 +532,13 @@ struct PeriodsView: View {
     }
 
     private func loadLock() async {
+        lockedThrough.begin()
         do {
             let state: PeriodLockState = try await app.api.get("/api/period-lock")
-            lockedThrough = .loaded(state.lockedThrough)
+            lockedThrough.succeed(state)
         } catch is CancellationError {
         } catch {
-            if lockedThrough.value == nil { lockedThrough = .failed(error.userMessage) }
+            lockedThrough.fail(error)
         }
     }
 }

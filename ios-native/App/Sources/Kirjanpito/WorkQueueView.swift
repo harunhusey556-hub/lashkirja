@@ -4,7 +4,7 @@ import LashKirjaCore
 /// Tuonnit ja virheet (/tyot): background jobs and the exception queue, with a retry for failed reads.
 struct WorkQueueView: View {
     @Environment(AppModel.self) private var app
-    @State private var state: Loadable<Snapshot> = .idle
+    @State private var state = ScreenLoad<Snapshot>()
     /// Coming back to the screen does not ask the server again unless something changed.
     @State private var gate = ReloadGate()
     @State private var filter = "all"
@@ -24,11 +24,16 @@ struct WorkQueueView: View {
     var body: some View {
         List {
             if let data = state.value {
+                if let banner = state.banner {
+                    Section { RefreshFailureBanner(failure: banner, retry: load) }
+                        .listRowBackground(Color.clear)
+                        .listRowInsets(EdgeInsets())
+                }
                 failuresSection(JobsQueue.listedFailures(data.jobs, connections: data.connections, dismissedLocally: JobDismissals.ids))
                 jobsSection(JobsQueue.visibleJobs(data.jobs))
                 itemsSections(data.items)
             } else {
-                LoadState(state: state, retry: load) { (_: Snapshot) in EmptyView() }
+                ScreenStateView(state: state, retry: load) { (_: Snapshot) in EmptyView() }
                     .listRowBackground(Color.clear)
             }
         }
@@ -245,17 +250,18 @@ struct WorkQueueView: View {
     }
 
     private func load() async {
+        state.begin()
         do {
             let api = app.api
             async let jobs: JobsList = api.get("/api/jobs")
             async let queue: WorkQueueList = api.get("/api/work-queue")
             async let connections = JobDismissals.connections(api: api)
             let snapshot = Snapshot(jobs: try await jobs.jobs, items: try await queue.items, connections: await connections)
-            state = .loaded(snapshot)
+            state.succeed(snapshot)
         } catch is CancellationError {
         } catch {
-            // "Not loaded" is not "empty" (BOOKS-16): a loaded list stays, with the error below it.
-            if state.value == nil { state = .failed(error.userMessage) } else { note = (error.userMessage, true) }
+            // "Not loaded" is not "empty" (BOOKS-16): a loaded list stays, with the banner above it.
+            state.fail(error)
         }
     }
 

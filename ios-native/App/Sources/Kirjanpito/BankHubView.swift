@@ -5,7 +5,7 @@ import LashKirjaCore
 /// one page. Everything else (the row sheets, accounts, statement files) opens through routes.
 struct BankHubView: View {
     @Environment(AppModel.self) private var app
-    @State private var state: Loadable<[Statement]> = .idle
+    @State private var state = ScreenLoad<[Statement]>()
     @State private var position: BankHubPosition?
     @State private var positionFailed = false
     @State private var openRows = 0
@@ -21,6 +21,11 @@ struct BankHubView: View {
     var body: some View {
         List {
             if let statements = state.value {
+                if let banner = state.banner {
+                    Section { RefreshFailureBanner(failure: banner, retry: { await load() }) }
+                        .listRowBackground(Color.clear)
+                        .listRowInsets(EdgeInsets())
+                }
                 // Unknown balances are not "no bank": the empty state waits for the accounts answer.
                 if !positionFailed && BankHub.isEmpty(position, statements: statements) {
                     emptyState
@@ -32,7 +37,7 @@ struct BankHubView: View {
                 }
                 links
             } else {
-                LoadState(state: state, retry: { await load() }) { (_: [Statement]) in EmptyView() }
+                ScreenStateView(state: state, retry: { await load() }) { (_: [Statement]) in EmptyView() }
                     .listRowBackground(Color.clear)
             }
         }
@@ -245,7 +250,7 @@ struct BankHubView: View {
     /// Returns whether the rows loaded.
     @discardableResult
     private func load() async -> Bool {
-        if state.value == nil { state = .loading }
+        state.begin()
         let api = app.api
         async let listResult = Result<StatementList, Error>(asyncCatching: { try await api.get("/api/statements") })
         async let positionResult = Result<BankHubPosition, Error>(asyncCatching: { try await api.get("/api/bank-accounts") })
@@ -262,14 +267,14 @@ struct BankHubView: View {
         }
         switch list {
         case .success(let value):
-            state = .loaded(value.statements)
+            state.succeed(value.statements)
             if !monthChosen { month = BankHub.startMonth(value.statements) }
             // A server without the count route: counted from the rows, as Kirjanpito does.
             openRows = count?.open ?? BankFeed.months(value.statements).reduce(0) { $0 + $1.open }
             return true
         case .failure(let error):
             if error is CancellationError { return false }
-            if state.value == nil { state = .failed(error.userMessage) }
+            state.fail(error)
             return false
         }
     }

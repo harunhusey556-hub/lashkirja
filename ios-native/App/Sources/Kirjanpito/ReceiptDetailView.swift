@@ -5,7 +5,7 @@ struct ReceiptDetailView: View {
     @Environment(AppModel.self) private var app
     @Environment(\.dismiss) private var dismiss
     let receiptId: String
-    @State private var state: Loadable<Receipt> = .idle
+    @State private var state = ScreenLoad<Receipt>()
     @State private var showFile = false
     @State private var editing = false
     @State private var confirmDelete = false
@@ -24,6 +24,11 @@ struct ReceiptDetailView: View {
     var body: some View {
         List {
             if let r = state.value {
+                if let banner = state.banner {
+                    Section { RefreshFailureBanner(failure: banner, retry: load) }
+                        .listRowBackground(Color.clear)
+                        .listRowInsets(EdgeInsets())
+                }
                 Section {
                     VStack(spacing: 6) {
                         if let amount = r.totalAmount { MoneyText(amount: amount).font(.system(size: 34, weight: .bold, design: .rounded)) }
@@ -65,7 +70,7 @@ struct ReceiptDetailView: View {
                 }
                 if let failure { Text(failure).foregroundStyle(Theme.danger) }
             } else {
-                LoadState(state: state, retry: load) { (_: Receipt) in EmptyView() }.listRowBackground(Color.clear)
+                ScreenStateView(state: state, retry: load) { (_: Receipt) in EmptyView() }.listRowBackground(Color.clear)
             }
         }
         .scrollContentBackground(.hidden)
@@ -304,10 +309,10 @@ struct ReceiptDetailView: View {
     private static let fileQuery = ["preview": "1"]
 
     private func load() async {
-        if state.value == nil { state = .loading }
+        state.begin()
         do {
             let r: ReceiptResponse = try await app.api.get("/api/receipts/\(receiptId)")
-            state = .loaded(r.receipt)
+            state.succeed(r.receipt)
             if r.receipt.hasOriginalFile && !prefetched {
                 prefetched = true
                 DocumentCache.shared.prefetch(app, path: "/api/receipts/\(receiptId)/file", query: Self.fileQuery, fileName: r.receipt.fileName ?? "kuitti", key: Self.fileCacheKey)
@@ -315,7 +320,7 @@ struct ReceiptDetailView: View {
             await loadRule(vendor: r.receipt.vendor)
         } catch is CancellationError {
         } catch {
-            if state.value == nil { state = .failed(error.userMessage) } else { failure = error.userMessage }
+            state.fail(error)
         }
     }
 

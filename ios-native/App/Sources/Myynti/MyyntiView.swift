@@ -425,7 +425,7 @@ struct BankMatchSheet: View {
     @Environment(AppModel.self) private var app
     @Environment(\.dismiss) private var dismiss
     let onDone: (String) -> Void
-    @State private var state: Loadable<BankMatchPreview> = .idle
+    @State private var state = ScreenLoad<BankMatchPreview>()
     @State private var busy = false
     @State private var failure: String?
     @State private var limit = ShowMore()
@@ -434,6 +434,11 @@ struct BankMatchSheet: View {
         NavigationStack {
             List {
                 if let preview = state.value {
+                    if let banner = state.banner {
+                        Section { RefreshFailureBanner(failure: banner, retry: load) }
+                            .listRowBackground(Color.clear)
+                            .listRowInsets(EdgeInsets())
+                    }
                     Section {
                         Text(preview.headline)
                         ForEach(preview.rows.prefix(limit.visible(preview.rows.count))) { row in
@@ -466,7 +471,7 @@ struct BankMatchSheet: View {
                         }
                     }
                 } else {
-                    LoadState(state: state, retry: load) { (_: BankMatchPreview) in EmptyView() }
+                    ScreenStateView(state: state, retry: load) { (_: BankMatchPreview) in EmptyView() }
                         .listRowBackground(Color.clear)
                 }
             }
@@ -485,10 +490,10 @@ struct BankMatchSheet: View {
     }
 
     private func load() async {
-        state = .loading
-        do { state = .loaded(try await app.api.get("/api/invoices/match")) }
+        state.begin()
+        do { state.succeed(try await app.api.get("/api/invoices/match")) }
         catch is CancellationError {}
-        catch { state = .failed(error.userMessage) }
+        catch { state.fail(error) }
     }
 
     private func run() async {

@@ -4,7 +4,7 @@ import LashKirjaCore
 /// Toistuvat ostolaskut: rent and other routine bills that become a purchase invoice every period.
 struct RecurringPurchasesView: View {
     @Environment(AppModel.self) private var app
-    @State private var state: Loadable<RecurringPurchaseList> = .idle
+    @State private var state = ScreenLoad<RecurringPurchaseList>()
     @State private var gate = ReloadGate()
     /// The server does not have the feature yet (its list answered 404).
     @State private var unavailable = false
@@ -31,9 +31,14 @@ struct RecurringPurchasesView: View {
                 }
                 .listRowBackground(Color.clear)
             } else if let list = state.value {
+                if let banner = state.banner {
+                    Section { RefreshFailureBanner(failure: banner, retry: load) }
+                        .listRowBackground(Color.clear)
+                        .listRowInsets(EdgeInsets())
+                }
                 content(list)
             } else {
-                LoadState(state: state, retry: load) { (_: RecurringPurchaseList) in EmptyView() }
+                ScreenStateView(state: state, retry: load) { (_: RecurringPurchaseList) in EmptyView() }
                     .listRowBackground(Color.clear)
             }
         }
@@ -171,16 +176,16 @@ struct RecurringPurchasesView: View {
     }
 
     private func load() async {
-        if state.value == nil { state = .loading }
+        state.begin()
         do {
             let list: RecurringPurchaseList = try await app.api.get("/api/recurring-purchases")
-            state = .loaded(list)
+            state.succeed(list)
             unavailable = false
         } catch is CancellationError {
         } catch let error where RecurringPurchaseText.isUnavailable(error) {
             unavailable = true
         } catch {
-            if state.value == nil { state = .failed(error.userMessage) } else { show(error.userMessage) }
+            state.fail(error)
         }
     }
 

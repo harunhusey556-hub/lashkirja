@@ -8,7 +8,7 @@ struct PaymentsSettingsView: View {
     @Environment(AppModel.self) private var app
     @Environment(\.webAuthenticationSession) private var webAuth
     @State private var pos = POSCoordinator.shared
-    @State private var state: Loadable<POSStatus> = .idle
+    @State private var state = ScreenLoad<POSStatus>()
     @State private var busy: String?
     @State private var failure: String?
     @State private var notice: String?
@@ -16,6 +16,11 @@ struct PaymentsSettingsView: View {
     var body: some View {
         List {
             if let status = state.value {
+                if let banner = state.banner {
+                    Section { RefreshFailureBanner(failure: banner, retry: load) }
+                        .listRowBackground(Color.clear)
+                        .listRowInsets(EdgeInsets())
+                }
                 stripeSection(status)
                 if status.enabled { toggleSection(status) }
                 deviceSection
@@ -24,7 +29,7 @@ struct PaymentsSettingsView: View {
                 if let failure { Section { Text(failure).foregroundStyle(Theme.danger).font(.footnote) } }
                 if let notice { Section { Text(notice).foregroundStyle(Theme.success).font(.footnote) } }
             } else {
-                LoadState(state: state, retry: load) { (_: POSStatus) in EmptyView() }.listRowBackground(Color.clear)
+                ScreenStateView(state: state, retry: load) { (_: POSStatus) in EmptyView() }.listRowBackground(Color.clear)
             }
         }
         .scrollContentBackground(.hidden)
@@ -156,7 +161,7 @@ struct PaymentsSettingsView: View {
 
     private func load() async {
         pos.bind(app)
-        if state.value == nil { state = .loading }
+        state.begin()
         do {
             let response: POSStatusEnvelope = try await app.api.get("/api/pos/status")
             show(response.status)
@@ -164,12 +169,12 @@ struct PaymentsSettingsView: View {
             show(.unavailable)
         } catch is CancellationError {
         } catch {
-            if state.value == nil { state = .failed(error.userMessage) } else { failure = error.userMessage }
+            state.fail(error)
         }
     }
 
     private func show(_ status: POSStatus) {
-        state = .loaded(status)
+        state.succeed(status)
         pos.update(status: status)
     }
 

@@ -5,7 +5,7 @@ struct InvoiceDetailView: View {
     @Environment(AppModel.self) private var app
     @Environment(\.dismiss) private var dismiss
     let invoiceId: String
-    @State private var state: Loadable<Invoice> = .idle
+    @State private var state = ScreenLoad<Invoice>()
     @State private var sheet: SheetKind?
     @State private var confirm: ConfirmKind?
     /// Credit, copy, status changes, refund: one at a time, a second tap sends nothing.
@@ -44,6 +44,11 @@ struct InvoiceDetailView: View {
     var body: some View {
         List {
             if let invoice = state.value {
+                if let banner = state.banner {
+                    Section { RefreshFailureBanner(failure: banner, retry: load) }
+                        .listRowBackground(Color.clear)
+                        .listRowInsets(EdgeInsets())
+                }
                 Section { summaryCard(invoice).listRowBackground(Color.clear).listRowInsets(EdgeInsets()) }
                 Section { actionBar(invoice).listRowBackground(Color.clear).listRowInsets(EdgeInsets()) }
                 if let failure { Section { Text(failure).foregroundStyle(Theme.danger).font(.footnote) } }
@@ -64,7 +69,7 @@ struct InvoiceDetailView: View {
                 }
                 tabContent(invoice, tab: tabs.contains { $0.tab == tab } ? tab : .lines)
             } else {
-                LoadState(state: state, retry: load) { (_: Invoice) in EmptyView() }.listRowBackground(Color.clear)
+                ScreenStateView(state: state, retry: load) { (_: Invoice) in EmptyView() }.listRowBackground(Color.clear)
             }
         }
         .scrollContentBackground(.hidden)
@@ -435,10 +440,10 @@ struct InvoiceDetailView: View {
     }
 
     private func load() async {
-        if state.value == nil { state = .loading }
+        state.begin()
         do {
             let response: InvoiceDetailResponse = try await app.api.get("/api/invoices/\(invoiceId)")
-            state = .loaded(response.invoice)
+            state.succeed(response.invoice)
             duplicates = response.paymentDuplicates ?? []
             prefetchPdf(response.invoice)
             await loadCardPayments(response.invoice)
@@ -450,7 +455,7 @@ struct InvoiceDetailView: View {
             }
         } catch is CancellationError {
         } catch {
-            if state.value == nil { state = .failed(error.userMessage) }
+            state.fail(error)
         }
     }
 
@@ -468,7 +473,7 @@ struct InvoiceDetailView: View {
         var done = false
         await run {
             let r: InvoiceResponse = try await app.api.send("POST", "/api/invoices/\(invoiceId)/status", body: change)
-            state = .loaded(r.invoice)
+            state.succeed(r.invoice)
             done = true
         }
         return done
@@ -573,7 +578,7 @@ struct InvoiceDetailView: View {
     private func deletePayment(_ payment: Invoice.Payment) async {
         await run {
             let r: InvoiceResponse = try await app.api.send("DELETE", "/api/invoices/\(invoiceId)/payments", query: ["paymentId": payment.id], body: Optional<EmptyBody>.none)
-            state = .loaded(r.invoice)
+            state.succeed(r.invoice)
         }
     }
 
@@ -850,7 +855,7 @@ struct SendInvoiceSheet: View {
     @Environment(\.dismiss) private var dismiss
     let invoice: Invoice
     let onSent: (InvoiceSendResult) -> Void
-    @State private var check: Loadable<InvoiceSendPreview> = .idle
+    @State private var check = ScreenLoad<InvoiceSendPreview>()
     @State private var submit = SubmitGuard()
     private var busy: Bool { submit.inFlight }
     @State private var failure: String?
@@ -870,6 +875,11 @@ struct SendInvoiceSheet: View {
         NavigationStack {
             Form {
                 if let preview = check.value {
+                    if let banner = check.banner {
+                        Section { RefreshFailureBanner(failure: banner, retry: loadCheck) }
+                            .listRowBackground(Color.clear)
+                            .listRowInsets(EdgeInsets())
+                    }
                     mailSection(preview)
                     Section {
                         LabeledContent("Summa") { MoneyText(amount: preview.gross) }
@@ -916,7 +926,7 @@ struct SendInvoiceSheet: View {
                         .listRowInsets(EdgeInsets())
                     }
                 } else {
-                    LoadState(state: check, retry: loadCheck) { (_: InvoiceSendPreview) in EmptyView() }
+                    ScreenStateView(state: check, retry: loadCheck) { (_: InvoiceSendPreview) in EmptyView() }
                         .listRowBackground(Color.clear)
                 }
             }
@@ -1022,11 +1032,11 @@ struct SendInvoiceSheet: View {
     }
 
     private func loadCheck() async {
-        if check.value == nil { check = .loading }
+        check.begin()
         do {
             let response: InvoiceSendPreviewResponse = try await app.api.get("/api/invoices/\(invoice.id)/send")
             let preview = response.preview
-            check = .loaded(preview)
+            check.succeed(preview)
             if !filled {
                 to = preview.recipient ?? ""
                 subject = preview.subject ?? ""
@@ -1041,7 +1051,7 @@ struct SendInvoiceSheet: View {
             if failure == nil { submit.renew() }
         } catch is CancellationError {
         } catch {
-            if check.value == nil { check = .failed(error.userMessage) } else { failure = error.userMessage }
+            check.fail(error)
         }
     }
 
@@ -1092,9 +1102,8 @@ struct SendInvoiceSheet: View {
         defer { templateBusy = false }
         do {
             let saved: EmailTemplateResponse = try await app.api.send("POST", "/api/invoice-email-templates", body: draft)
-            if var preview = check.value {
+            check.update { preview in
                 preview.templates = (preview.templates ?? []) + [EmailTemplateRef(id: saved.template.id, name: saved.template.name, isDefault: saved.template.isDefault)]
-                check = .loaded(preview)
             }
             templateId = saved.template.id
             templateNotice = "Malli \(saved.template.name) tallennettiin."

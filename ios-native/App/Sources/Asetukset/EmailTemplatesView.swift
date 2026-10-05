@@ -5,7 +5,7 @@ import LashKirjaCore
 /// fills the send sheet (and automatic sends); placeholders are filled per invoice by the server.
 struct EmailTemplatesView: View {
     @Environment(AppModel.self) private var app
-    @State private var state: Loadable<[EmailTemplate]> = .idle
+    @State private var state = ScreenLoad<[EmailTemplate]>()
     @State private var placeholders = EmailPlaceholder.all
     @State private var gate = ReloadGate()
     @State private var limit = ShowMore()
@@ -25,6 +25,11 @@ struct EmailTemplatesView: View {
     var body: some View {
         List {
             if let all = state.value {
+                if let banner = state.banner {
+                    Section { RefreshFailureBanner(failure: banner, retry: load) }
+                        .listRowBackground(Color.clear)
+                        .listRowInsets(EdgeInsets())
+                }
                 let rows = all.filter { !app.removedIds.contains($0.id) }
                 Section {
                     if rows.isEmpty {
@@ -46,7 +51,7 @@ struct EmailTemplatesView: View {
                 }
                 placeholderHelp
             } else {
-                LoadState(state: state, retry: load) { (_: [EmailTemplate]) in EmptyView() }
+                ScreenStateView(state: state, retry: load) { (_: [EmailTemplate]) in EmptyView() }
                     .listRowBackground(Color.clear)
             }
             if let failure { Section { Text(failure).foregroundStyle(Theme.danger) } }
@@ -100,14 +105,14 @@ struct EmailTemplatesView: View {
     }
 
     private func load() async {
-        if state.value == nil { state = .loading }
+        state.begin()
         do {
             let list: EmailTemplateList = try await app.api.get("/api/invoice-email-templates", query: ["kind": "invoice"])
-            state = .loaded(list.templates)
+            state.succeed(list.templates)
             if let server = list.placeholders, !server.isEmpty { placeholders = server }
         } catch is CancellationError {
         } catch {
-            if state.value == nil { state = .failed(error.userMessage) } else { failure = error.userMessage }
+            state.fail(error)
         }
     }
 

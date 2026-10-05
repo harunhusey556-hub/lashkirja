@@ -146,7 +146,7 @@ struct PurchaseBankLinkSheet: View {
     let invoice: PurchaseInvoice
     var onLinked: (PurchaseInvoice) -> Void = { _ in }
 
-    @State private var state: Loadable<PurchaseBankCandidateList> = .idle
+    @State private var state = ScreenLoad<PurchaseBankCandidateList>()
     @State private var search = ""
     @State private var month: String?
     @State private var limit = ShowMore()
@@ -160,14 +160,18 @@ struct PurchaseBankLinkSheet: View {
                 } footer: {
                     Text("Valitse pankkitapahtuma, jolla tämä ostolasku maksettiin. Parhaat osumat ovat ylimpänä.")
                 }
-                switch state {
-                case .loaded(let list): content(list)
-                case .failed(let message):
-                    Section {
-                        Text(message).foregroundStyle(Theme.danger)
-                        Button("Yritä uudelleen") { Task { await load() } }
+                switch state.display {
+                case .content(let list):
+                    if let banner = state.banner {
+                        Section { RefreshFailureBanner(failure: banner, retry: load) }
+                            .listRowBackground(Color.clear)
+                            .listRowInsets(EdgeInsets())
                     }
-                case .idle, .loading:
+                    content(list)
+                case .failed(let failure):
+                    Section { LoadFailureView(failure: failure, retry: load) }
+                        .listRowBackground(Color.clear)
+                case .loading:
                     ProgressView().frame(maxWidth: .infinity).listRowBackground(Color.clear)
                 }
             }
@@ -253,7 +257,7 @@ struct PurchaseBankLinkSheet: View {
     }
 
     private func load() async {
-        if state.value == nil { state = .loading }
+        state.begin()
         var query: [String: String] = [:]
         let q = search.trimmingCharacters(in: .whitespaces)
         if !q.isEmpty { query["q"] = q }
@@ -262,11 +266,11 @@ struct PurchaseBankLinkSheet: View {
             let list: PurchaseBankCandidateList = try await app.api.get(
                 "/api/purchase-invoices/\(invoice.id)/payments/candidates", query: query
             )
-            state = .loaded(list)
+            state.succeed(list)
             limit.reset()
         } catch is CancellationError {
         } catch {
-            state = .failed(error.userMessage)
+            state.fail(error)
         }
     }
 }
@@ -299,7 +303,7 @@ struct PurchaseRowLinkView: View {
     let row: BankTransaction
     let onLinked: () -> Void
 
-    @State private var state: Loadable<PurchaseInvoiceCandidateList> = .idle
+    @State private var state = ScreenLoad<PurchaseInvoiceCandidateList>()
     @State private var search = ""
     @State private var limit = ShowMore()
     @State private var target: PurchaseLinkPair?
@@ -311,8 +315,13 @@ struct PurchaseRowLinkView: View {
             } footer: {
                 Text("Valitse ostolasku, jonka tämä maksu maksoi. Parhaat osumat ovat ylimpänä.")
             }
-            switch state {
-            case .loaded(let list):
+            switch state.display {
+            case .content(let list):
+                if let banner = state.banner {
+                    Section { RefreshFailureBanner(failure: banner, retry: load) }
+                        .listRowBackground(Color.clear)
+                        .listRowInsets(EdgeInsets())
+                }
                 if list.candidates.isEmpty {
                     Section {
                         ContentUnavailableView {
@@ -338,12 +347,10 @@ struct PurchaseRowLinkView: View {
                         Text("Avoimet ostolaskut · \(list.total)")
                     }
                 }
-            case .failed(let message):
-                Section {
-                    Text(message).foregroundStyle(Theme.danger)
-                    Button("Yritä uudelleen") { Task { await load() } }
-                }
-            case .idle, .loading:
+            case .failed(let failure):
+                Section { LoadFailureView(failure: failure, retry: load) }
+                    .listRowBackground(Color.clear)
+            case .loading:
                 ProgressView().frame(maxWidth: .infinity).listRowBackground(Color.clear)
             }
         }
@@ -361,17 +368,17 @@ struct PurchaseRowLinkView: View {
     }
 
     private func load() async {
-        if state.value == nil { state = .loading }
+        state.begin()
         var query = ["transactionId": row.id]
         let q = search.trimmingCharacters(in: .whitespaces)
         if !q.isEmpty { query["q"] = q }
         do {
             let list: PurchaseInvoiceCandidateList = try await app.api.get("/api/matching/purchase-candidates", query: query)
-            state = .loaded(list)
+            state.succeed(list)
             limit.reset()
         } catch is CancellationError {
         } catch {
-            state = .failed(error.userMessage)
+            state.fail(error)
         }
     }
 }

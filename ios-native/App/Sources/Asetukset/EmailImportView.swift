@@ -5,7 +5,7 @@ import LashKirjaCore
 struct EmailImportView: View {
     @Environment(AppModel.self) private var app
     let onChange: (Profile) -> Void
-    @State private var accounts: Loadable<[ImapAccount]> = .idle
+    @State private var accounts = ScreenLoad<[ImapAccount]>()
     @State private var adding = false
     @State private var syncing = false
     @State private var note: (text: String, failed: Bool)?
@@ -21,6 +21,11 @@ struct EmailImportView: View {
                     .listRowInsets(EdgeInsets(top: 4, leading: 4, bottom: 4, trailing: 4))
             }
             if let list = accounts.value {
+                if let banner = accounts.banner {
+                    Section { RefreshFailureBanner(failure: banner, retry: load) }
+                        .listRowBackground(Color.clear)
+                        .listRowInsets(EdgeInsets())
+                }
                 if !list.isEmpty {
                     Section {
                         ForEach(list) { account in
@@ -56,7 +61,7 @@ struct EmailImportView: View {
                     }
                 }
             } else {
-                LoadState(state: accounts, retry: load) { (_: [ImapAccount]) in EmptyView() }
+                ScreenStateView(state: accounts, retry: load) { (_: [ImapAccount]) in EmptyView() }
             }
         }
         .scrollContentBackground(.hidden)
@@ -81,13 +86,14 @@ struct EmailImportView: View {
     }
 
     private func load() async {
+        accounts.begin()
         do {
             let profile = (try await app.api.get("/api/profile") as ProfileResponse).profile
-            withAnimation { accounts = .loaded(profile.imapAccounts ?? []) }
+            withAnimation { accounts.succeed(profile.imapAccounts ?? []) }
             onChange(profile)
         } catch is CancellationError {
         } catch {
-            accounts = .failed(error.userMessage)
+            accounts.fail(error)
         }
     }
 

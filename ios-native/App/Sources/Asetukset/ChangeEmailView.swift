@@ -6,7 +6,7 @@ import LashKirjaCore
 /// confirmation link, and the old one keeps working until that link is opened.
 struct ChangeEmailView: View {
     @Environment(AppModel.self) private var app
-    @State private var profile: Loadable<AccountEmailProfile> = .idle
+    @State private var profile = ScreenLoad<AccountEmailProfile>()
     @State private var email = ""
     @State private var password = ""
     @State private var emailError: String?
@@ -21,6 +21,11 @@ struct ChangeEmailView: View {
     var body: some View {
         List {
             if let current = profile.value {
+                if let banner = profile.banner {
+                    Section { RefreshFailureBanner(failure: banner, retry: load) }
+                        .listRowBackground(Color.clear)
+                        .listRowInsets(EdgeInsets())
+                }
                 Section {
                     LabeledContent("Nykyinen", value: current.email)
                     if let pending = current.pendingEmail {
@@ -67,7 +72,7 @@ struct ChangeEmailView: View {
                     confirmSection
                 }
             } else {
-                LoadState(state: profile, retry: load) { (_: AccountEmailProfile) in EmptyView() }
+                ScreenStateView(state: profile, retry: load) { (_: AccountEmailProfile) in EmptyView() }
                     .listRowBackground(Color.clear)
             }
         }
@@ -110,13 +115,14 @@ struct ChangeEmailView: View {
     }
 
     private func load() async {
+        profile.begin()
         do {
             let response: AccountEmailProfile.Response = try await app.api.get("/api/profile")
-            profile = .loaded(response.profile)
+            profile.succeed(response.profile)
             if email.isEmpty, let pending = response.profile.pendingEmail { email = pending }
         } catch is CancellationError {
         } catch {
-            profile = .failed(error.userMessage)
+            profile.fail(error)
         }
     }
 

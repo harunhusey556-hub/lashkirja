@@ -6,7 +6,7 @@ struct AlvView: View {
     @State var period: String
     /// The profile's ALV-verokausi has been read and the opening period settled.
     @State private var resolved = false
-    @State private var state: Loadable<AlvReport> = .idle
+    @State private var state = ScreenLoad<AlvReport>()
     @State private var failure: String?
     @State private var notice: String?
     /// The mark being saved ("filed", "paid", "undo"), so its button shows progress and the others wait.
@@ -21,6 +21,11 @@ struct AlvView: View {
         List {
             periodSections
             if let r = state.value {
+                if let banner = state.banner {
+                    Section { RefreshFailureBanner(failure: banner, retry: load) }
+                        .listRowBackground(Color.clear)
+                        .listRowInsets(EdgeInsets())
+                }
                 if !r.vatRegistered { notRegistered }
                 Section {
                     VStack(alignment: .leading, spacing: 4) {
@@ -66,7 +71,7 @@ struct AlvView: View {
                     if ReportDrill.alvScope(period).isEmpty { Text("Neljännesvuoden kuitit ja laskut avautuvat koko listana.") }
                 }
             } else {
-                LoadState(state: state, retry: load) { (_: AlvReport) in EmptyView() }.listRowBackground(Color.clear)
+                ScreenStateView(state: state, retry: load) { (_: AlvReport) in EmptyView() }.listRowBackground(Color.clear)
             }
         }
         .scrollContentBackground(.hidden)
@@ -142,7 +147,7 @@ struct AlvView: View {
 
     private func show(_ key: String) {
         guard key != period else { return }
-        state = .loading
+        state.restart()
         failure = nil
         period = key
     }
@@ -325,15 +330,16 @@ struct AlvView: View {
         let asked = period
         loadGeneration += 1
         let mine = loadGeneration
+        state.begin()
         do {
             let report: AlvReport = try await app.api.get("/api/alv", query: ["period": asked])
             guard asked == period, mine == loadGeneration else { return }
-            state = .loaded(report)
+            state.succeed(report)
         }
         catch is CancellationError {}
         catch {
             guard asked == period, mine == loadGeneration else { return }
-            state = .failed(error.userMessage)
+            state.fail(error)
         }
     }
 

@@ -5,7 +5,7 @@ import LashKirjaCore
 /// Recurring invoices (`/toistuvat`): schedules that make an invoice every month, quarter or year.
 struct RecurringInvoicesView: View {
     @Environment(AppModel.self) private var app
-    @State private var state: Loadable<RecurringList> = .idle
+    @State private var state = ScreenLoad<RecurringList>()
     @State private var showInactive = false
     /// The pushed schedule. Kept apart from the rows, so a reload that drops its row
     /// (paused while only active ones show) does not pop the screen.
@@ -18,6 +18,11 @@ struct RecurringInvoicesView: View {
     var body: some View {
         List {
             if let list = state.value {
+                if let banner = state.banner {
+                    Section { RefreshFailureBanner(failure: banner, retry: load) }
+                        .listRowBackground(Color.clear)
+                        .listRowInsets(EdgeInsets())
+                }
                 if let notice {
                     Section { Text(notice).font(.subheadline) }
                 }
@@ -65,7 +70,7 @@ struct RecurringInvoicesView: View {
                     ShowMoreButton(limit: $limit, total: list.recurring.count)
                 }
             } else {
-                LoadState(state: state, retry: load) { (_: RecurringList) in EmptyView() }
+                ScreenStateView(state: state, retry: load) { (_: RecurringList) in EmptyView() }
                     .listRowBackground(Color.clear)
             }
         }
@@ -121,13 +126,13 @@ struct RecurringInvoicesView: View {
     }
 
     private func load() async {
-        if state.value == nil { state = .loading }
+        state.begin()
         do {
             let list: RecurringList = try await app.api.get("/api/recurring-invoices", query: showInactive ? ["includeInactive": "1"] : [:])
-            state = .loaded(list)
+            state.succeed(list)
         } catch is CancellationError {
         } catch {
-            if state.value == nil { state = .failed(error.userMessage) } else { notice = error.userMessage }
+            state.fail(error)
         }
     }
 }
