@@ -55,7 +55,7 @@ Worker sırayı bozmasın. Bir madde bloklanırsa (ör. cihaz testi bekliyor) ya
 | ID | İş | Durum |
 |---|---|---|
 | P0.0 | Zemin: `native` HEAD, clean tree, CI durumu, prod commit'i ölç ve RUN'a yaz | her run |
-| P0.1 | OTP AutoFill: 10 giriş şekli testli; çift gönderim kapısı core'a taşınıp testlendi; **cihazda kabul** | devam ediyor |
+| P0.1 | OTP AutoFill: 10 giriş şekli testli; çift gönderim kapısı core'a taşınıp testlendi; **cihazda kabul** | kod+test tamam (`5f3f1f5`); cihaz testi bekliyor |
 | P0.2 | Dokunma geri bildirimi + uçuştaki isteği kilitleme (fatura/ödeme/silme/gönderme çift gönderilemez) | açık |
 | P0.3 | Loading / boş / kısmi / hata / oturum bitti / offline / başarı durumları, ekran ekran | açık |
 | P0.4 | Klavye ve form ergonomisi (klavye tipi, FocusState, kaydedilmemiş değişiklik uyarısı) | açık |
@@ -158,23 +158,28 @@ Planı oluştur; P0.1 OTP'nin cihazsız yapılabilecek kısmını kapat ve sahib
 - `AccountCodeTests.swift`: NP P0.1 giriş şekilleri 1–9 core seviyesinde testli; şekil 10 (write-back sonrası tek gönderim) `AccountCodeField.swift` içindeki `@State settled` ile, testsiz.
 
 ### Yapılan
-- Bu plan dosyası oluşturuldu.
-- (devam ediyor) P0.1: tamamlama kapısını core'a taşı + test; IPA + test listesi.
+- Bu plan dosyası oluşturuldu (`84ab561`).
+- P0.1: tamamlama kararı (`settled` + write-back) view'dan core'a taşındı: `AccountCodeGate` (`LashKirjaCore/Auth/AccountCodeGate.swift`). `AccountCodeField` artık sadece gate sonucunu uyguluyor. Davranış değişmedi.
 
 ### Değişen dosyalar / commitler
-- `.plans/MASTER-WORKER-PLAN.md`
+- `84ab561` docs(plans): MASTER-WORKER-PLAN
+- `5f3f1f5` fix(ios): OTP completion decided in core and tested (P0.1) — `AccountCodeGate.swift`, `AccountCodeField.swift`, `AccountCodeGateTests.swift`
 
 ### Test / gates
-- —
+- Core (swift test, Linux CI): yeşil; 7 yeni gate testi (6 hane elle, AutoFill çift ekleme + write-back, 1–2 hane sonrası öneri, 7. hane reddi, temizle + tekrar yaz, uzun basma yapıştırma, 7 hane).
+- iOS native CI: run 37316830020 yeşil (simulator build/test + imzasız IPA).
+- Sunucu: değişiklik yok.
 
 ### Cihaz / canlı doğrulama
-- Bekliyor: sahip OTP testi.
+- IPA + Türkçe test listesi sahibe gönderildi (2026-10-05). **Sonuç bekleniyor** — P0.1 bu not gelmeden kapanmaz.
 
 ### Kalan risk / blocker
-- Cihaz doğrulaması sahibe bağlı.
+- Gerçek iPhone'da AutoFill'in ne eklediği hâlâ gözlenmedi.
+- `onPasteOther` (sıfırlama linki yapıştırma) yolu gate testlerinde yok.
+- Testler implementasyonla aynı commit'te yazıldı (önce-kırmızı kanıtı yok).
 
 ### Sıradaki tek iş
-- P0.1 tamamlama kapısı (core + test) → CI → IPA → sahip testi.
+- Sahip OTP sonucu: geçti → P0.1 kapat, P0.2 (dokunma geri bildirimi + çift gönderim kilidi) başla. Kaldı → geçici debug enstrümantasyonu (yalnız uzunluk/desen).
 
 ---
 
