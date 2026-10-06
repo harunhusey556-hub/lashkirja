@@ -56,6 +56,13 @@ class WalkTestCase: XCTestCase {
         note("MISS could not find \(arg)"); return false
     }
     func tap(_ label: String) -> Bool { tapLabel("label == %@", label) }
+    /// Opens a link through the host (`simctl openurl`), the way a quick action or Siri would.
+    func openURL(_ url: String) {
+        let name = "\(shotDir)/\(UUID().uuidString).openurl"
+        FileManager.default.createFile(atPath: name, contents: url.data(using: .utf8))
+        for _ in 0..<40 where FileManager.default.fileExists(atPath: name) { usleep(250_000) }
+        sleep(2)
+    }
     /// The walk's API proxy drops every connection while this file exists (scripts/sim/api-proxy.py).
     func goOffline() { FileManager.default.createFile(atPath: "\(shotDir)/offline.flag", contents: nil) }
     func goOnline() { try? FileManager.default.removeItem(atPath: "\(shotDir)/offline.flag") }

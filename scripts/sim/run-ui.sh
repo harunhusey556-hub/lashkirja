@@ -33,7 +33,12 @@ sleep 5
 
 rm -rf "$SH" "$REPO/build-sim/$TAG.xcresult"; mkdir -p "$SH" "$REPO/build-sim"
 # XCUIScreen screenshots time out on a headless simulator, so the test asks the host for them.
-( while true; do for r in "$SH"/*.req(N); do n=${r:r}; xcrun simctl io "$U" screenshot "$n.png" >/dev/null 2>&1; rm -f "$r"; done; sleep 0.3; done ) &
+# Same channel for links: a .openurl file holds a URL to open, as a quick action or Siri would.
+( while true; do
+    for r in "$SH"/*.req(N); do n=${r:r}; xcrun simctl io "$U" screenshot "$n.png" >/dev/null 2>&1; rm -f "$r"; done
+    for o in "$SH"/*.openurl(N); do xcrun simctl openurl "$U" "$(cat "$o")" >/dev/null 2>&1; rm -f "$o"; done
+    sleep 0.3
+  done ) &
 W=$!
 # The app talks to the API through a proxy the tests can switch off (offline.flag in the shot dir).
 pkill -f "api-proxy.py $PROXY_PORT" 2>/dev/null
