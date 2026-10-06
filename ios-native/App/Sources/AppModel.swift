@@ -44,11 +44,18 @@ final class AppModel {
     private var session = LoadGeneration()
     let auth: AuthService
     let api: APIClient
+    /// Sends unexpected server failures and MetricKit diagnostics to /api/observe, signed in only.
+    let observer: ObserveReporter
 
     init(baseURL: URL = AppConfig.apiBaseURL, store: TokenStore = KeychainTokenStore()) {
         let auth = AuthService(store: store)
         self.auth = auth
-        self.api = APIClient(baseURL: baseURL, transport: URLSessionTransport(), tokens: auth)
+        let api = APIClient(baseURL: baseURL, transport: URLSessionTransport(), tokens: auth)
+        self.api = api
+        self.observer = ObserveReporter(
+            app: ObserveAppInfo.current,
+            isSignedIn: { await auth.currentToken() != nil },
+            send: { payload in let _: Ignored = try await api.send("POST", "/api/observe", body: payload) })
     }
 
     func start() async {
@@ -61,6 +68,10 @@ final class AppModel {
             await MainActor.run { self?.dataVersion += 1 }
         }
         await api.setOnUnauthorized { [weak self] in await self?.sessionExpired() }
+        let observer = self.observer
+        await api.setOnUnexpectedFailure { method, path, status, decodeError in
+            await observer.reportAPIFailure(method: method, path: path, status: status, decodeError: decodeError)
+        }
         // The offline banner also covers a server that does not answer while the phone has a network.
         await api.setOnReachability { reached in await MainActor.run { Connectivity.shared.requestFinished(reached: reached) } }
         Connectivity.shared.attach { [api] in let _: Ignored? = try? await api.get("/api/auth/me") }
