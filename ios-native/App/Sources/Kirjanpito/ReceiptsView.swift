@@ -197,12 +197,12 @@ struct ReceiptsView: View {
                     Image(systemName: selected.contains(receipt.id) ? "checkmark.circle.fill" : "circle")
                         .foregroundStyle(selected.contains(receipt.id) ? Theme.accent : Theme.ink2)
                         .imageScale(.large)
-                    ReceiptRow(receipt: receipt)
+                    ReceiptRow(receipt: receipt, thumbnail: true)
                 }
             }
             .foregroundStyle(Theme.ink)
         } else {
-            NavigationLink(value: Route.receipt(receipt.id)) { ReceiptRow(receipt: receipt) }
+            NavigationLink(value: Route.receipt(receipt.id)) { ReceiptRow(receipt: receipt, thumbnail: true) }
                 .swipeActions(edge: .trailing) {
                     Button(role: .destructive) {
                         deleteIds = [receipt.id]
@@ -559,8 +559,11 @@ struct ReceiptsView: View {
 
 struct ReceiptRow: View {
     let receipt: Receipt
+    /// Kuitit shows a small picture of the file; the review queue and mail list stay text only.
+    var thumbnail = false
     var body: some View {
         HStack {
+            if thumbnail { ReceiptThumbnail(receipt: receipt) }
             VStack(alignment: .leading, spacing: 2) {
                 Text(receipt.title).lineLimit(1)
                 HStack(spacing: 4) {
