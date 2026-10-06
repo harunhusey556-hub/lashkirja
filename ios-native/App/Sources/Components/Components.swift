@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 import LashKirjaCore
 
 /// A rounded surface card, the app's basic container.
@@ -162,7 +163,7 @@ struct ToastView: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            Image(systemName: "checkmark.circle")
+            Image(systemName: "checkmark.circle").accessibilityHidden(true)
             Text(toast.text).font(.subheadline).lineLimit(2)
             Spacer(minLength: 8)
             if let label = toast.actionLabel {
@@ -220,4 +221,75 @@ struct PressableButtonStyle: ButtonStyle {
 
 extension ButtonStyle where Self == PressableButtonStyle {
     static var pressable: PressableButtonStyle { PressableButtonStyle() }
+}
+
+// MARK: Accessibility helpers
+
+/// `withMotion` that does nothing visible when Reduce Motion is on, for call sites that have no
+/// view environment at hand (models, closures).
+@MainActor
+func withMotion<Result>(_ animation: Animation? = .default, _ body: () throws -> Result) rethrows -> Result {
+    try withMotion(UIAccessibility.isReduceMotionEnabled ? nil : animation, body)
+}
+
+private struct MotionModifier<Value: Equatable>: ViewModifier {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    let animation: Animation?
+    let value: Value
+
+    func body(content: Content) -> some View {
+        content.animation(reduceMotion ? nil : animation, value: value)
+    }
+}
+
+private struct LineLimitUnlessLargeModifier: ViewModifier {
+    @Environment(\.dynamicTypeSize) private var typeSize
+
+    func body(content: Content) -> some View {
+        content.lineLimit(typeSize.isAccessibilitySize ? nil : 1)
+    }
+}
+
+private struct ScaledFontModifier: ViewModifier {
+    @ScaledMetric private var size: CGFloat
+    let weight: Font.Weight
+    let design: Font.Design
+
+    init(size: CGFloat, weight: Font.Weight, design: Font.Design, style: Font.TextStyle) {
+        _size = ScaledMetric(wrappedValue: size, relativeTo: style)
+        self.weight = weight
+        self.design = design
+    }
+
+    func body(content: Content) -> some View {
+        content.font(.system(size: size, weight: weight, design: design))
+    }
+}
+
+extension View {
+    /// `.animation(_:value:)` that is skipped when Reduce Motion is on.
+    func motion<Value: Equatable>(_ animation: Animation?, value: Value) -> some View {
+        modifier(MotionModifier(animation: animation, value: value))
+    }
+
+    /// A custom-size system font that still follows Dynamic Type, scaled relative to `style`.
+    func scaledFont(size: CGFloat, weight: Font.Weight = .regular, design: Font.Design = .default,
+                    relativeTo style: Font.TextStyle = .body) -> some View {
+        modifier(ScaledFontModifier(size: size, weight: weight, design: design, style: style))
+    }
+
+    /// A 44pt hit area for a small icon control. Uses the content shape, never a visible background.
+    func tapTarget() -> some View {
+        frame(minWidth: 44, minHeight: 44).contentShape(Rectangle())
+    }
+
+    /// One line of a list row, but free to wrap at accessibility text sizes so names are not cut.
+    func lineLimitUnlessLarge() -> some View {
+        modifier(LineLimitUnlessLargeModifier())
+    }
+
+    /// A headline figure: one line, shrinking only as a last resort at the largest text sizes.
+    func moneyHero() -> some View {
+        lineLimit(1).minimumScaleFactor(0.5)
+    }
 }

@@ -289,6 +289,7 @@ struct BankHistorySheet: View {
                 Spacer()
                 Image(systemName: choiceKey == key ? "largecircle.fill.circle" : "circle")
                     .foregroundStyle(choiceKey == key ? Theme.ink : Theme.line)
+                    .accessibilityHidden(true)
             }
             .contentShape(Rectangle())
         }

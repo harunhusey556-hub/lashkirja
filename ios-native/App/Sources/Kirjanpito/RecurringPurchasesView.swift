@@ -151,7 +151,7 @@ struct RecurringPurchasesView: View {
     private func row(_ entry: RecurringPurchase) -> some View {
         HStack(alignment: .firstTextBaseline) {
             VStack(alignment: .leading, spacing: 3) {
-                Text(entry.supplierName).lineLimit(1)
+                Text(entry.supplierName).lineLimitUnlessLarge()
                 Text(entry.secondary(today: APIDate.dayString(Date()))).font(.caption).foregroundStyle(Theme.ink2).lineLimit(2)
                 if let last = entry.lastInvoice {
                     Text("Viimeisin \(APIDate.displayDay(last.issueDate))").font(.caption).foregroundStyle(Theme.ink2)
@@ -162,14 +162,14 @@ struct RecurringPurchasesView: View {
                 MoneyText(amount: entry.grossAmount).font(.subheadline.weight(.semibold))
                 if !entry.active { RecurringPausedBadge() }
             }
-            Image(systemName: "chevron.right").font(.footnote.weight(.semibold)).foregroundStyle(Theme.ink2)
+            Image(systemName: "chevron.right").font(.footnote.weight(.semibold)).foregroundStyle(Theme.ink2).accessibilityHidden(true)
         }
         .padding(.vertical, 2)
         .contentShape(Rectangle())
     }
 
     private func show(_ message: String, invoiceId: String? = nil) {
-        withAnimation {
+        withMotion {
             notice = message
             createdInvoiceId = invoiceId
         }
@@ -217,7 +217,7 @@ struct RecurringPurchasesView: View {
 
     private func remove(_ entry: RecurringPurchase) {
         let api = app.api, id = entry.id
-        withAnimation {
+        withMotion {
             app.removeInBackground([id]) {
                 let _: Ignored = try await api.send("DELETE", "/api/recurring-purchases/\(id)", body: Optional<EmptyBody>.none)
             }

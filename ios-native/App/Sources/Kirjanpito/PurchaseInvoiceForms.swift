@@ -355,9 +355,9 @@ struct RecurringBadge: View {
 
     var body: some View {
         HStack(spacing: 3) {
-            Image(systemName: "repeat").imageScale(.small)
+            Image(systemName: "repeat").imageScale(.small).accessibilityHidden(true)
             Text("Toistuva")
-            if chevron { Image(systemName: "chevron.right").imageScale(.small) }
+            if chevron { Image(systemName: "chevron.right").imageScale(.small).accessibilityHidden(true) }
         }
         .font(.caption2.weight(.semibold))
         .padding(.horizontal, 8)
@@ -374,7 +374,7 @@ struct PurchaseInvoiceRow: View {
     var body: some View {
         HStack(alignment: .firstTextBaseline) {
             VStack(alignment: .leading, spacing: 3) {
-                Text(invoice.supplierName).foregroundStyle(Theme.ink).lineLimit(1)
+                Text(invoice.supplierName).foregroundStyle(Theme.ink).lineLimitUnlessLarge()
                 Text(invoice.rowSecondary).font(.caption).foregroundStyle(Theme.ink2).lineLimit(2)
             }
             Spacer()

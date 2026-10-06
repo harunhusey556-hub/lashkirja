@@ -152,6 +152,7 @@ struct PaymentsSettingsView: View {
                 Text(value)
                 Image(systemName: ok ? "checkmark.circle.fill" : "exclamationmark.circle")
                     .foregroundStyle(ok ? Theme.success : Theme.warning)
+                    .accessibilityLabel(ok ? "Kunnossa" : "Vaatii huomiota")
             }
             .font(.subheadline)
         }

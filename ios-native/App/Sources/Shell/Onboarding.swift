@@ -115,7 +115,7 @@ struct OnboardingView: View {
                     if reduceMotion {
                         proxy.scrollTo(Self.bottomId, anchor: .bottom)
                     } else {
-                        withAnimation(.easeOut(duration: 0.25)) { proxy.scrollTo(Self.bottomId, anchor: .bottom) }
+                        withMotion(.easeOut(duration: 0.25)) { proxy.scrollTo(Self.bottomId, anchor: .bottom) }
                     }
                 }
             }
@@ -269,7 +269,7 @@ struct OnboardingView: View {
         guard next != flow else { return }
         reply?.cancel()
         failure = nil
-        withAnimation(reduceMotion ? nil : .easeOut(duration: 0.2)) {
+        withMotion(reduceMotion ? nil : .easeOut(duration: 0.2)) {
             flow = next
             typing = !reduceMotion
         }
@@ -282,7 +282,7 @@ struct OnboardingView: View {
         reply = Task {
             try? await Task.sleep(for: .milliseconds(400))
             guard !Task.isCancelled else { return }
-            withAnimation(.easeOut(duration: 0.2)) { typing = false }
+            withMotion(.easeOut(duration: 0.2)) { typing = false }
             announce()
         }
     }
@@ -293,7 +293,7 @@ struct OnboardingView: View {
         reply?.cancel()
         Haptics.selection()
         failure = nil
-        withAnimation(reduceMotion ? nil : .easeOut(duration: 0.2)) {
+        withMotion(reduceMotion ? nil : .easeOut(duration: 0.2)) {
             flow.edit(step)
             typing = false
         }

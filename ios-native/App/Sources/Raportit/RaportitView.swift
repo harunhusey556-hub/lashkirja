@@ -32,11 +32,13 @@ struct RaportitView: View {
         List {
             Section {
                 HStack {
-                    Button { setYear(year - 1) } label: { Image(systemName: "chevron.left") }
+                    Button { setYear(year - 1) } label: { Image(systemName: "chevron.left").tapTarget() }
+                        .accessibilityLabel("Edellinen vuosi")
                     Spacer()
                     Text(String(year)).font(.headline).monospacedDigit()
                     Spacer()
-                    Button { setYear(year + 1) } label: { Image(systemName: "chevron.right") }
+                    Button { setYear(year + 1) } label: { Image(systemName: "chevron.right").tapTarget() }
+                        .accessibilityLabel("Seuraava vuosi")
                         .disabled(year >= Int(MonthKey.current().prefix(4)) ?? year)
                 }
                 .buttonStyle(.borderless)

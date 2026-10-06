@@ -221,7 +221,7 @@ struct LoginView: View {
                         ProgressView().tint(Theme.onInk)
                         Text("Odotetaan pääsyavainta…")
                     } else {
-                        Image(systemName: "person.badge.key.fill")
+                        Image(systemName: "person.badge.key.fill").accessibilityHidden(true)
                         Text("Kirjaudu pääsyavaimella")
                     }
                 }
@@ -243,10 +243,11 @@ struct LoginView: View {
     private func offerCard(_ offer: Offer) -> some View {
         VStack(spacing: 18) {
             Image(systemName: "person.badge.key")
-                .font(.system(size: 26, weight: .semibold))
+                .scaledFont(size: 26, weight: .semibold, relativeTo: .title)
                 .foregroundStyle(Theme.ink)
                 .frame(width: 56, height: 56)
                 .background(Theme.canvas, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .accessibilityHidden(true)
             VStack(spacing: 8) {
                 Text(PasskeyOffer.title).font(.headline).foregroundStyle(Theme.ink)
                 Text(PasskeyOffer.text).font(.subheadline).foregroundStyle(Theme.ink2)

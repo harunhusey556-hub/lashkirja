@@ -167,7 +167,7 @@ struct LockScreen: View {
 
     var body: some View {
         VStack(spacing: 20) {
-            Image(systemName: "lock.fill").font(.system(size: 40)).foregroundStyle(Theme.accent)
+            Image(systemName: "lock.fill").scaledFont(size: 40, relativeTo: .largeTitle).foregroundStyle(Theme.accent).accessibilityHidden(true)
             Text("LashKirja on lukittu").font(.title3.weight(.semibold))
             SecureField("PIN", text: $pin)
                 .keyboardType(.numberPad)

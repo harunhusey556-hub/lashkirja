@@ -82,7 +82,7 @@ struct PurchaseInvoicesView: View {
         } message: { invoice in
             Text("\(invoice.supplierName) · \(Money.format(invoice.gross))")
         }
-        .animation(.snappy, value: filter)
+        .motion(.snappy, value: filter)
     }
 
     @ViewBuilder
@@ -120,7 +120,7 @@ struct PurchaseInvoicesView: View {
                             Text(PurchaseBankLinkText.suggestionCount(suggestions.count))
                                 .font(.subheadline.weight(.semibold))
                                 .foregroundStyle(Theme.accent)
-                            Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(Theme.ink2)
+                            Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(Theme.ink2).accessibilityHidden(true)
                         }
                     }
                     .accessibilityHint("Hyväksy tai hylkää ehdotetut maksut")
@@ -325,7 +325,7 @@ struct PurchaseInvoicesView: View {
         do {
             let result: PurchaseMatchResult = try await app.api.send("POST", "/api/purchase-invoices/match", body: EmptyBody())
             Haptics.success()
-            withAnimation {
+            withMotion {
                 message = result.summary
                 suggestions = result.suggestions.filter(\.canAccept)
             }
@@ -340,7 +340,7 @@ struct PurchaseInvoicesView: View {
     private func delete(_ invoice: PurchaseInvoice) async {
         failure = nil
         let api = app.api, id = invoice.id
-        withAnimation {
+        withMotion {
             app.removeInBackground([id]) {
                 let _: Ignored = try await api.send("DELETE", "/api/purchase-invoices/\(id)", body: Optional<EmptyBody>.none)
             }
@@ -485,7 +485,7 @@ struct PurchaseInvoiceDetailView: View {
 
     private func header(_ invoice: PurchaseInvoice) -> some View {
         VStack(spacing: 6) {
-            MoneyText(amount: invoice.gross).font(.system(size: 36, weight: .bold, design: .rounded))
+            MoneyText(amount: invoice.gross).scaledFont(size: 36, weight: .bold, design: .rounded, relativeTo: .largeTitle).moneyHero()
             Text(invoice.supplierName).font(.headline).foregroundStyle(Theme.ink)
             HStack(spacing: 6) {
                 PurchaseStatusBadge(status: invoice.displayStatus)

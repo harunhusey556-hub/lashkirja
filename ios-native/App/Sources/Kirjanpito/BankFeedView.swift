@@ -211,7 +211,7 @@ struct BankFeedView: View {
             await loadBankLinks()
             if !Task.isCancelled { gate.mark(key: month ?? "", version: version) }
         }
-        .animation(.snappy, value: onlyOpen)
+        .motion(.snappy, value: onlyOpen)
     }
 
     /// The month groups with the rows the filter and search leave, empty months dropped.
@@ -367,7 +367,7 @@ struct BankRow: View {
         let state = BankFeed.state(of: row)
         HStack {
             VStack(alignment: .leading, spacing: 2) {
-                Text(row.title).lineLimit(1).foregroundStyle(Theme.ink)
+                Text(row.title).lineLimitUnlessLarge().foregroundStyle(Theme.ink)
                 Text([row.date.map(APIDate.displayDay), BankFeed.label(state, income: row.amount > 0)].compactMap { $0 }.joined(separator: " · "))
                     .font(.caption)
                     .foregroundStyle(BankFeed.needsAction(row) ? Theme.accent : Theme.ink2)
@@ -414,7 +414,7 @@ struct BankRowSheet: View {
                         Text(row.title).font(.headline)
                         if let date = row.date { Text(APIDate.displayDay(date)).font(.caption).foregroundStyle(Theme.ink2) }
                         MoneyText(amount: row.amount, signed: true)
-                            .font(.system(size: 30, weight: .bold, design: .rounded))
+                            .scaledFont(size: 30, weight: .bold, design: .rounded, relativeTo: .largeTitle).moneyHero()
                             .foregroundStyle(row.amount > 0 ? Theme.success : Theme.ink)
                     }
                     .listRowBackground(Color.clear)

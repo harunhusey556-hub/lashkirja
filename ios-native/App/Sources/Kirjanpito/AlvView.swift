@@ -30,7 +30,7 @@ struct AlvView: View {
                 Section {
                     VStack(alignment: .leading, spacing: 4) {
                         Text(r.field308.isRefund ? "Palautettava ALV" : "Maksettava ALV").font(.subheadline).foregroundStyle(Theme.ink2)
-                        MoneyText(amount: r.field308.amount).font(.system(size: 32, weight: .bold, design: .rounded))
+                        MoneyText(amount: r.field308.amount).scaledFont(size: 32, weight: .bold, design: .rounded, relativeTo: .largeTitle).moneyHero()
                     }
                     .padding(.vertical, 4)
                     // TF-11: pending receipts are not in the figure yet; Kuitit lists them on top.
@@ -114,7 +114,7 @@ struct AlvView: View {
         }
         Section {
             HStack {
-                Button { show(VatPeriod.shift(period, by: -1)) } label: { Image(systemName: "chevron.left") }
+                Button { show(VatPeriod.shift(period, by: -1)) } label: { Image(systemName: "chevron.left").tapTarget() }
                     .accessibilityLabel("Edellinen kausi")
                 Spacer()
                 Menu {
@@ -131,7 +131,7 @@ struct AlvView: View {
                 }
                 .accessibilityLabel("Valitse kausi")
                 Spacer()
-                Button { show(VatPeriod.shift(period, by: 1)) } label: { Image(systemName: "chevron.right") }
+                Button { show(VatPeriod.shift(period, by: 1)) } label: { Image(systemName: "chevron.right").tapTarget() }
                     .disabled(period >= VatPeriod.key(for: MonthKey.current(), kind: kind.rawValue))
                     .accessibilityLabel("Seuraava kausi")
             }
@@ -223,7 +223,7 @@ struct AlvView: View {
         let owed = VatFiling.amountToPay(amount: r.field308.amount, filedAt: filing?.filedAt, filedAmount: filing?.filedAmount)
         Section {
             HStack(spacing: 6) {
-                if vat.state != .open { Image(systemName: "checkmark.circle.fill").foregroundStyle(Theme.success) }
+                if vat.state != .open { Image(systemName: "checkmark.circle.fill").foregroundStyle(Theme.success).accessibilityHidden(true) }
                 Text(VatFiling.stateLabel(vat.state, nothingToPay: vat.nothingToPay)).font(.subheadline.weight(.semibold))
                 if !dueIso.isEmpty {
                     Text("· eräpäivä \(VatDue.dueDateText(dueIso, periodYear: periodYear))").font(.subheadline).foregroundStyle(Theme.ink2)

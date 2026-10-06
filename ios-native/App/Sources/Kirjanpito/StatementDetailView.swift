@@ -101,7 +101,7 @@ struct StatementDetailView: View {
             VStack(alignment: .leading, spacing: 4) {
                 if let net = s.totals?.net {
                     MoneyText(amount: net, signed: true)
-                        .font(.system(size: 30, weight: .bold, design: .rounded))
+                        .scaledFont(size: 30, weight: .bold, design: .rounded, relativeTo: .largeTitle).moneyHero()
                         .foregroundStyle(net >= 0 ? Theme.success : Theme.ink)
                 }
                 Text(StatementText.title(s)).font(.headline).foregroundStyle(Theme.ink)

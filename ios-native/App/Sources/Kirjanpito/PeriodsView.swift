@@ -95,12 +95,12 @@ struct PeriodsView: View {
     private var monthPicker: some View {
         Section {
             HStack {
-                Button { changeMonth(by: -1) } label: { Image(systemName: "chevron.left") }
+                Button { changeMonth(by: -1) } label: { Image(systemName: "chevron.left").tapTarget() }
                     .accessibilityLabel("Edellinen kuukausi")
                 Spacer()
                 Text("\(MonthKey.name(month)) \(String(month.prefix(4)))").font(.headline)
                 Spacer()
-                Button { changeMonth(by: 1) } label: { Image(systemName: "chevron.right") }
+                Button { changeMonth(by: 1) } label: { Image(systemName: "chevron.right").tapTarget() }
                     .disabled(month >= MonthKey.current())
                     .accessibilityLabel("Seuraava kuukausi")
             }
@@ -146,7 +146,7 @@ struct PeriodsView: View {
             if PeriodClose.complete(f) {
                 let done = "\(MonthKey.name(data.month)) on valmis."
                 VStack(spacing: 6) {
-                    Image(systemName: "checkmark.circle").font(.system(size: 40)).foregroundStyle(Theme.success)
+                    Image(systemName: "checkmark.circle").scaledFont(size: 40, relativeTo: .largeTitle).foregroundStyle(Theme.success).accessibilityHidden(true)
                     Text(done).font(.headline).foregroundStyle(Theme.ink)
                     Text("Kirjanpitäjä saa kaiken tarvittavan.").font(.subheadline).foregroundStyle(Theme.ink2)
                 }
@@ -172,6 +172,7 @@ struct PeriodsView: View {
                 } icon: {
                     Image(systemName: step.state == .done ? "checkmark.circle.fill" : step.state == .none ? "circle.dashed" : "circle")
                         .foregroundStyle(step.state == .done ? Theme.success : Theme.ink2)
+                        .accessibilityLabel(step.state == .done ? "Valmis" : "Kesken")
                 }
             }
             if !data.hasStatement && steps.contains(where: { $0.key == "bank" }) {
@@ -209,6 +210,7 @@ struct PeriodsView: View {
                     HStack {
                         Image(systemName: f.vat?.done == true ? "checkmark.circle.fill" : "percent")
                             .foregroundStyle(f.vat?.done == true ? Theme.success : Theme.accent)
+                            .accessibilityHidden(true)
                         VStack(alignment: .leading, spacing: 2) {
                             Text("ALV-ilmoitus").foregroundStyle(Theme.ink)
                             Text(vatLine(f.vat)).font(.caption).foregroundStyle(Theme.ink2)
@@ -264,7 +266,7 @@ struct PeriodsView: View {
     @ViewBuilder private func itemRow(_ item: DashboardItem) -> some View {
         let content = HStack {
             VStack(alignment: .leading, spacing: 2) {
-                Text(item.party.isEmpty ? "–" : item.party).foregroundStyle(Theme.ink).lineLimit(1)
+                Text(item.party.isEmpty ? "–" : item.party).foregroundStyle(Theme.ink).lineLimitUnlessLarge()
                 Text(PeriodClose.secondary(item)).font(.caption).foregroundStyle(Theme.ink2)
             }
             Spacer(minLength: 8)

@@ -177,8 +177,8 @@ struct ReceiptsView: View {
             if remembers { UserDefaults.standard.set(next.remembered, forKey: Self.filterKey) }
             limit.reset()
         }
-        .animation(.snappy, value: pending.map(\.id))
-        .animation(.snappy, value: rejected.map(\.id))
+        .motion(.snappy, value: pending.map(\.id))
+        .motion(.snappy, value: rejected.map(\.id))
         // Photos kept while offline are sent from here too, not only from the capture screen.
         .task { OfflineReceiptQueueModel.shared.start(app: app) }
     }
@@ -197,10 +197,12 @@ struct ReceiptsView: View {
                     Image(systemName: selected.contains(receipt.id) ? "checkmark.circle.fill" : "circle")
                         .foregroundStyle(selected.contains(receipt.id) ? Theme.accent : Theme.ink2)
                         .imageScale(.large)
+                        .accessibilityHidden(true)
                     ReceiptRow(receipt: receipt, thumbnail: true)
                 }
             }
             .foregroundStyle(Theme.ink)
+            .accessibilityAddTraits(selected.contains(receipt.id) ? .isSelected : [])
         } else {
             NavigationLink(value: Route.receipt(receipt.id)) { ReceiptRow(receipt: receipt, thumbnail: true) }
                 .swipeActions(edge: .trailing) {
@@ -268,7 +270,7 @@ struct ReceiptsView: View {
         Button(action: clear) {
             HStack(spacing: 4) {
                 Text(title)
-                Image(systemName: "xmark").font(.caption2.bold())
+                Image(systemName: "xmark").font(.caption2.bold()).accessibilityHidden(true)
             }
             .font(.caption)
             .foregroundStyle(Theme.accentDark)
@@ -475,7 +477,7 @@ struct ReceiptsView: View {
             }
             if ids.count > 1 { notice = outcome }
             Haptics.success()
-            withAnimation { pending.removeAll { ids.contains($0.id) } }
+            withMotion { pending.removeAll { ids.contains($0.id) } }
             await load()
         } catch {
             failure = error.userMessage
@@ -490,7 +492,7 @@ struct ReceiptsView: View {
         notice = nil
         defer { busy = false }
         let row = rejected[index]
-        withAnimation {
+        withMotion {
             rejected.remove(at: index)
             rejectedTotal = max(0, rejectedTotal - 1)
         }
@@ -501,7 +503,7 @@ struct ReceiptsView: View {
             await load()
         } catch is CancellationError {
         } catch {
-            withAnimation {
+            withMotion {
                 rejected.insert(row, at: min(index, rejected.count))
                 rejectedTotal += 1
             }
@@ -518,7 +520,7 @@ struct ReceiptsView: View {
         notice = nil
         defer { busy = false }
         // Gone from the list at once; the ones the server refuses come back.
-        withAnimation { app.hide(ids) }
+        withMotion { app.hide(ids) }
         var deleted: [String] = []
         var refused: [String] = []
         var messages: [String] = []
@@ -538,13 +540,13 @@ struct ReceiptsView: View {
             }
         }
         if !deleted.isEmpty {
-            withAnimation {
+            withMotion {
                 receipts.update { rows in rows.removeAll { deleted.contains($0.id) } }
                 total = max(0, total - deleted.count)
             }
             app.dataVersion += 1
         }
-        withAnimation { app.unhide(refused) }
+        withMotion { app.unhide(refused) }
         selected = Set(refused)
         if selecting && refused.isEmpty { selecting = false }
         if refused.isEmpty {
@@ -565,7 +567,7 @@ struct ReceiptRow: View {
         HStack {
             if thumbnail { ReceiptThumbnail(receipt: receipt) }
             VStack(alignment: .leading, spacing: 2) {
-                Text(receipt.title).lineLimit(1)
+                Text(receipt.title).lineLimitUnlessLarge()
                 HStack(spacing: 4) {
                     Text([receipt.date.map(APIDate.displayDay), receipt.category.map(ReceiptCategory.label(for:))].compactMap { $0 }.joined(separator: " · "))
                     if receipt.linkedTransaction != nil {
@@ -603,10 +605,10 @@ struct PagedShowMoreButton: View {
                     let before = loaded
                     Task {
                         let after = await fetch()
-                        withAnimation(.snappy) { PagedShowMore.revealFetched(&limit, before: before, after: after) }
+                        withMotion(.snappy) { PagedShowMore.revealFetched(&limit, before: before, after: after) }
                     }
                 case .reveal, .fold:
-                    withAnimation(.snappy) { limit.more(total: loaded) }
+                    withMotion(.snappy) { limit.more(total: loaded) }
                 case nil:
                     break
                 }
@@ -619,6 +621,7 @@ struct PagedShowMoreButton: View {
                     } else {
                         Image(systemName: limit.visible(loaded) >= loaded && !serverHasMore ? "chevron.up" : "chevron.down")
                             .font(.caption.weight(.semibold))
+                            .accessibilityHidden(true)
                     }
                 }
                 .foregroundStyle(Theme.accent)

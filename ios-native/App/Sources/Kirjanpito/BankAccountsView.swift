@@ -191,7 +191,7 @@ struct BankAccountsView: View {
                             .foregroundStyle(BankScope.isUnscoped(connection) ? Theme.warning : Theme.ink2)
                     }
                     Spacer()
-                    Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(Theme.ink2)
+                    Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(Theme.ink2).accessibilityHidden(true)
                 }
                 .contentShape(Rectangle())
             }
@@ -339,7 +339,7 @@ struct StatementFileRow: View {
         HStack(alignment: .firstTextBaseline) {
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 6) {
-                    Text(StatementText.title(statement)).foregroundStyle(Theme.ink).lineLimit(1)
+                    Text(StatementText.title(statement)).foregroundStyle(Theme.ink).lineLimitUnlessLarge()
                     if StatementFiles.isBankFeed(statement) {
                         Text("Pankki")
                             .font(.caption2.weight(.semibold))
@@ -749,7 +749,7 @@ struct BankPickerSheet: View {
                                 BankLogo(name: bank.name, logo: bank.logo)
                                 Text(bank.name).foregroundStyle(Theme.ink)
                                 Spacer()
-                                Image(systemName: "chevron.right").foregroundStyle(Theme.ink2)
+                                Image(systemName: "chevron.right").foregroundStyle(Theme.ink2).accessibilityHidden(true)
                             }
                         }
                         .disabled(connecting != nil)
@@ -789,6 +789,7 @@ struct BankPickerSheet: View {
                             Spacer()
                             Image(systemName: historyKey == choice.key ? "largecircle.fill.circle" : "circle")
                                 .foregroundStyle(historyKey == choice.key ? Theme.ink : Theme.line)
+                                .accessibilityHidden(true)
                         }
                         .contentShape(Rectangle())
                     }

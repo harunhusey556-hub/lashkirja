@@ -36,7 +36,7 @@ struct QueuedReceiptsCard: View {
                         Spacer(minLength: 0)
                         Button("Poista", role: .destructive) {
                             Haptics.selection()
-                            withAnimation { queue.removeCorrupt() }
+                            withMotion { queue.removeCorrupt() }
                         }
                         .font(.caption.bold())
                         .buttonStyle(.borderless)
@@ -58,7 +58,7 @@ struct QueuedReceiptsCard: View {
                 .confirmationDialog("Poista kuva jonosta?", isPresented: Binding(get: { confirmRemove != nil }, set: { if !$0 { confirmRemove = nil } }),
                                     titleVisibility: .visible) {
                     Button("Poista", role: .destructive) {
-                        if let id = confirmRemove { withAnimation { queue.remove(id) } }
+                        if let id = confirmRemove { withMotion { queue.remove(id) } }
                         confirmRemove = nil
                     }
                 } message: {
@@ -72,7 +72,7 @@ struct QueuedReceiptsCard: View {
                         Spacer(minLength: 0)
                         Button("Poista listalta") {
                             Haptics.selection()
-                            withAnimation { queue.clearSent() }
+                            withMotion { queue.clearSent() }
                         }
                         .font(.caption.bold())
                         .buttonStyle(.borderless)
@@ -88,7 +88,7 @@ struct QueuedReceiptsCard: View {
     private func row(_ item: QueuedReceipt) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack {
-                Text(OfflineReceiptRules.title(createdAt: item.createdAt)).lineLimit(1)
+                Text(OfflineReceiptRules.title(createdAt: item.createdAt)).lineLimitUnlessLarge()
                 Spacer()
                 if item.status == .sending { ProgressView().controlSize(.small) }
             }

@@ -31,7 +31,7 @@ struct ReceiptDetailView: View {
                 }
                 Section {
                     VStack(spacing: 6) {
-                        if let amount = r.totalAmount { MoneyText(amount: amount).font(.system(size: 34, weight: .bold, design: .rounded)) }
+                        if let amount = r.totalAmount { MoneyText(amount: amount).scaledFont(size: 34, weight: .bold, design: .rounded, relativeTo: .largeTitle).moneyHero() }
                         Text(r.title).font(.headline)
                         Text(r.isIncome ? "Tulo" : "Meno").font(.caption).foregroundStyle(Theme.ink2)
                     }
@@ -85,6 +85,7 @@ struct ReceiptDetailView: View {
                         Button { editing = true } label: { Label("Muokkaa", systemImage: "pencil") }
                         Button(role: .destructive) { confirmDelete = true } label: { Label("Poista kuitti", systemImage: "trash") }
                     } label: { Image(systemName: "ellipsis.circle") }
+                    .accessibilityLabel("Toiminnot")
                 }
             }
         }
@@ -227,7 +228,7 @@ struct ReceiptDetailView: View {
     private func transactionLine(_ tx: Receipt.LinkedTransaction) -> some View {
         HStack {
             VStack(alignment: .leading, spacing: 2) {
-                Text(tx.counterparty ?? "Pankkitapahtuma").lineLimit(1)
+                Text(tx.counterparty ?? "Pankkitapahtuma").lineLimitUnlessLarge()
                 if let date = tx.date { Text(APIDate.displayDay(date)).font(.caption).foregroundStyle(Theme.ink2) }
             }
             Spacer()
@@ -284,11 +285,11 @@ struct ReceiptDetailView: View {
     private func showToast(_ text: String, action: String?, run: (() async -> Void)?) {
         toastTask?.cancel()
         toastAction = run
-        withAnimation(.snappy) { toast = Toast(text: text, actionLabel: action) }
+        withMotion(.snappy) { toast = Toast(text: text, actionLabel: action) }
         toastTask = Task {
             try? await Task.sleep(nanoseconds: 5_000_000_000)
             guard !Task.isCancelled else { return }
-            withAnimation { toast = nil }
+            withMotion { toast = nil }
             toastAction = nil
         }
     }
@@ -297,7 +298,7 @@ struct ReceiptDetailView: View {
         let action = toastAction
         toastTask?.cancel()
         toastAction = nil
-        withAnimation { toast = nil }
+        withMotion { toast = nil }
         if let action { Task { await action() } }
     }
 
@@ -494,7 +495,7 @@ struct ReceiptEditSheet: View {
                     TextField("ALV €", text: Binding(get: { row.amountText }, set: { form.setVatAmount($0, at: index) }))
                         .moneyInput()
                         .multilineTextAlignment(.trailing)
-                    Button(role: .destructive) { form.removeVatRow(at: index) } label: { Image(systemName: "minus.circle") }
+                    Button(role: .destructive) { form.removeVatRow(at: index) } label: { Image(systemName: "minus.circle").tapTarget() }
                         .buttonStyle(.borderless)
                         .accessibilityLabel("Poista ALV-rivi")
                 }

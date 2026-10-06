@@ -167,8 +167,8 @@ struct MyyntiView: View {
             guard !Task.isCancelled else { return }
             query = text
         }
-        .animation(.snappy, value: filter)
-        .animation(.snappy, value: lateBucket)
+        .motion(.snappy, value: filter)
+        .motion(.snappy, value: lateBucket)
         // Another chip or search shows a different list: it opens on its first rows again.
         .onChange(of: filter) { _, new in
             limit.reset()
@@ -199,6 +199,7 @@ struct MyyntiView: View {
                     .font(.body.weight(.semibold))
                     .foregroundStyle(Theme.accent)
                     .frame(width: 24)
+                    .accessibilityHidden(true)
                 Text(title)
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(Theme.ink)
@@ -206,7 +207,7 @@ struct MyyntiView: View {
                     .minimumScaleFactor(0.85)
                     .multilineTextAlignment(.leading)
                 Spacer(minLength: 0)
-                Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(Theme.ink2)
+                Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(Theme.ink2).accessibilityHidden(true)
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 16)
@@ -314,13 +315,14 @@ private struct ReceivablesCard: View {
                 }
                 Spacer()
                 if !buckets.isEmpty {
-                    Button { withAnimation(.snappy) { open.toggle() } } label: {
+                    Button { withMotion(.snappy) { open.toggle() } } label: {
                         HStack(spacing: 4) {
                             Text("Erittely")
-                            Image(systemName: "chevron.down").rotationEffect(.degrees(open ? 180 : 0))
+                            Image(systemName: "chevron.down").rotationEffect(.degrees(open ? 180 : 0)).accessibilityHidden(true)
                         }
                         .font(.caption)
                         .foregroundStyle(Theme.ink2)
+                        .frame(minHeight: 44)
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(.borderless)
@@ -521,7 +523,7 @@ struct InvoiceRow: View {
     var body: some View {
         HStack(alignment: .firstTextBaseline) {
             VStack(alignment: .leading, spacing: 3) {
-                Text(invoice.customer.name).font(.body).foregroundStyle(Theme.ink).lineLimit(1)
+                Text(invoice.customer.name).font(.body).foregroundStyle(Theme.ink).lineLimitUnlessLarge()
                 Text(secondary).font(.caption).foregroundStyle(Theme.ink2)
             }
             Spacer()

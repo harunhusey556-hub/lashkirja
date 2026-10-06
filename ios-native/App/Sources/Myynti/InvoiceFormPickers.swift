@@ -12,9 +12,10 @@ struct InvoiceCustomerCard: View {
             Image(systemName: "person.crop.circle.fill")
                 .font(.title2)
                 .foregroundStyle(Theme.accent)
+                .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 2) {
-                Text(name).font(.body.weight(.semibold)).foregroundStyle(Theme.ink).lineLimit(1)
-                if let detail { Text(detail).font(.caption).foregroundStyle(Theme.ink2).lineLimit(1) }
+                Text(name).font(.body.weight(.semibold)).foregroundStyle(Theme.ink).lineLimitUnlessLarge()
+                if let detail { Text(detail).font(.caption).foregroundStyle(Theme.ink2).lineLimitUnlessLarge() }
             }
             Spacer(minLength: 8)
             Button("Vaihda", action: onChange)
@@ -61,7 +62,7 @@ struct CustomerPickerSheet: View {
                                 }
                                 Spacer()
                                 if customer.id == selectedId {
-                                    Image(systemName: "checkmark").foregroundStyle(Theme.accent)
+                                    Image(systemName: "checkmark").foregroundStyle(Theme.accent).accessibilityHidden(true)
                                 }
                             }
                             .contentShape(Rectangle())

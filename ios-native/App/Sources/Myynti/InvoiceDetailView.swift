@@ -151,12 +151,12 @@ struct InvoiceDetailView: View {
                     .foregroundStyle(invoice.displayStatus == .overdue ? Theme.danger : Theme.ink2)
             }
             VStack(alignment: .leading, spacing: 2) {
-                MoneyText(amount: invoice.gross).font(.system(size: 34, weight: .bold, design: .rounded))
+                MoneyText(amount: invoice.gross).scaledFont(size: 34, weight: .bold, design: .rounded, relativeTo: .largeTitle).moneyHero()
                 // A button, not a NavigationLink: a link would make the whole card one tap target.
                 Button { customerRoute = .customer(invoice.customer.id) } label: {
                     HStack(spacing: 4) {
                         Text(invoice.customer.name).font(.headline).foregroundStyle(Theme.ink)
-                        Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(Theme.ink2)
+                        Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(Theme.ink2).accessibilityHidden(true)
                     }
                 }
                 .buttonStyle(.borderless)
@@ -223,7 +223,7 @@ struct InvoiceDetailView: View {
         return HStack(alignment: .firstTextBaseline, spacing: 8) {
             Button {
                 tabChosen = true
-                withAnimation(.snappy) { tab = .history }
+                withMotion(.snappy) { tab = .history }
             } label: {
                 Label(line.text, systemImage: line.tone == .muted ? "paperplane" : "exclamationmark.triangle")
                     .font(.caption)
@@ -288,7 +288,7 @@ struct InvoiceDetailView: View {
     private func quickAction(_ title: String, symbol: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             VStack(spacing: 4) {
-                Image(systemName: symbol).font(.body.weight(.semibold))
+                Image(systemName: symbol).font(.body.weight(.semibold)).accessibilityHidden(true)
                 Text(title).font(.caption)
             }
             .foregroundStyle(Theme.accent)
@@ -304,7 +304,7 @@ struct InvoiceDetailView: View {
                 ForEach(tabs) { item in
                     SectionChip(title: item.title, selected: item.tab == tab) {
                         tabChosen = true
-                        withAnimation(.snappy) { tab = item.tab }
+                        withMotion(.snappy) { tab = item.tab }
                     }
                 }
             }
@@ -504,11 +504,11 @@ struct InvoiceDetailView: View {
     private func showToast(_ text: String, action: String?, run: (() async -> Void)?) {
         toastTask?.cancel()
         toastAction = run
-        withAnimation(.snappy) { toast = Toast(text: text, actionLabel: action) }
+        withMotion(.snappy) { toast = Toast(text: text, actionLabel: action) }
         toastTask = Task {
             try? await Task.sleep(nanoseconds: 5_000_000_000)
             guard !Task.isCancelled else { return }
-            withAnimation { toast = nil }
+            withMotion { toast = nil }
             toastAction = nil
         }
     }
@@ -517,7 +517,7 @@ struct InvoiceDetailView: View {
         let action = toastAction
         toastTask?.cancel()
         toastAction = nil
-        withAnimation { toast = nil }
+        withMotion { toast = nil }
         if let action { Task { await action() } }
     }
 
@@ -917,7 +917,7 @@ struct SendInvoiceSheet: View {
                                     Text(preview.iban ?? "–").textSelection(.enabled)
                                     if let iban = preview.iban {
                                         Button { UIPasteboard.general.string = iban; Haptics.selection() } label: {
-                                            Image(systemName: "doc.on.doc")
+                                            Image(systemName: "doc.on.doc").tapTarget()
                                         }
                                         .buttonStyle(.borderless)
                                         .accessibilityLabel("Kopioi IBAN")
@@ -1009,7 +1009,7 @@ struct SendInvoiceSheet: View {
                             HStack(spacing: 4) {
                                 if templateBusy { ProgressView() }
                                 Text(templates.first { $0.id == templateId }?.name ?? "Valitse")
-                                Image(systemName: "chevron.up.chevron.down").font(.caption2)
+                                Image(systemName: "chevron.up.chevron.down").font(.caption2).accessibilityHidden(true)
                             }
                             .foregroundStyle(Theme.accent)
                         }

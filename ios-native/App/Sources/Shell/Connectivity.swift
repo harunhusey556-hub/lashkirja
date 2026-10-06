@@ -40,7 +40,7 @@ final class Connectivity {
     }
 
     private func publish() {
-        if notice != state.notice { withAnimation(.easeInOut(duration: 0.25)) { notice = state.notice } }
+        if notice != state.notice { withMotion(.easeInOut(duration: 0.25)) { notice = state.notice } }
         if state.notice == .serverUnreachable { startProbing() } else { probing?.cancel(); probing = nil }
     }
 

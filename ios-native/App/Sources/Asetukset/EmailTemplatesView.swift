@@ -90,7 +90,7 @@ struct EmailTemplatesView: View {
                         .background(Theme.accent.opacity(0.12), in: Capsule())
                 }
             }
-            Text(template.subject).font(.caption).foregroundStyle(Theme.ink2).lineLimit(1)
+            Text(template.subject).font(.caption).foregroundStyle(Theme.ink2).lineLimitUnlessLarge()
         }
     }
 
@@ -129,7 +129,7 @@ struct EmailTemplatesView: View {
 
     private func remove(_ template: EmailTemplate) {
         let api = app.api, id = template.id
-        withAnimation {
+        withMotion {
             app.removeInBackground([id]) {
                 let _: Ignored = try await api.send("DELETE", "/api/invoice-email-templates/\(id)", body: Optional<EmptyBody>.none)
             }

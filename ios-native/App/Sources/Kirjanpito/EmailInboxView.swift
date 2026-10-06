@@ -133,7 +133,7 @@ struct EmailInboxView: View {
                 Section {
                     ForEach(mailboxes) { account in
                         HStack(spacing: 12) {
-                            Image(systemName: "envelope.fill").foregroundStyle(Theme.success).frame(width: 28)
+                            Image(systemName: "envelope.fill").foregroundStyle(Theme.success).frame(width: 28).accessibilityHidden(true)
                             Text(account.email).lineLimit(1).truncationMode(.middle)
                         }
                     }
@@ -338,7 +338,7 @@ struct EmailInboxView: View {
             await load()
             // The server counts only the bills; what it archived shows as the archive's growth.
             let archived = archivedBefore.flatMap { before in counts.rejected.map { max(0, $0 - before) } }
-            withAnimation { notice = EmailInboxText.syncNotice(bills: result.count, archived: archived) }
+            withMotion { notice = EmailInboxText.syncNotice(bills: result.count, archived: archived) }
             Haptics.success()
         } catch {
             failure = error.userMessage
@@ -355,7 +355,7 @@ struct EmailInboxView: View {
         do {
             let result: EmailArchiveResult = try await app.api.send("POST", "/api/integrations/imap/archive", body: EmptyBody())
             await load()
-            withAnimation { notice = EmailInboxText.cleanupNotice(result.archived) }
+            withMotion { notice = EmailInboxText.cleanupNotice(result.archived) }
             Haptics.success()
         } catch {
             failure = error.userMessage
@@ -370,7 +370,7 @@ struct EmailInboxView: View {
         moving.insert(id)
         defer { moving.remove(id) }
         failure = nil
-        withAnimation { app.hide([id]) }
+        withMotion { app.hide([id]) }
         do {
             let _: Ignored = try await app.api.send("PATCH", "/api/receipts/\(id)/review", body: ReceiptReviewBody(target))
             Haptics.success()
@@ -383,7 +383,7 @@ struct EmailInboxView: View {
             }
             await load()
         } catch {
-            withAnimation { app.unhide([id]) }
+            withMotion { app.unhide([id]) }
             failure = error.userMessage
             Haptics.error()
         }
@@ -396,11 +396,11 @@ struct EmailInboxView: View {
         moving.insert(id)
         defer { moving.remove(id) }
         failure = nil
-        withAnimation { app.hide([id]) }
+        withMotion { app.hide([id]) }
         do {
             let result: BatchApproveResult = try await app.api.send("POST", "/api/receipts/batch-approve", body: Body(receiptIds: [id]))
             if let problem = result.firstError {
-                withAnimation { app.unhide([id]) }
+                withMotion { app.unhide([id]) }
                 failure = problem
                 Haptics.error()
                 return
@@ -411,7 +411,7 @@ struct EmailInboxView: View {
             showToast("Hyväksytty.", action: nil, run: nil)
             await load()
         } catch {
-            withAnimation { app.unhide([id]) }
+            withMotion { app.unhide([id]) }
             failure = error.userMessage
             Haptics.error()
         }
@@ -428,11 +428,11 @@ struct EmailInboxView: View {
     private func showToast(_ text: String, action: String?, run: (() async -> Void)?) {
         toastTask?.cancel()
         toastAction = run
-        withAnimation(.snappy) { toast = Toast(text: text, actionLabel: action) }
+        withMotion(.snappy) { toast = Toast(text: text, actionLabel: action) }
         toastTask = Task {
             try? await Task.sleep(nanoseconds: 5_000_000_000)
             guard !Task.isCancelled else { return }
-            withAnimation { toast = nil }
+            withMotion { toast = nil }
             toastAction = nil
         }
     }
@@ -441,7 +441,7 @@ struct EmailInboxView: View {
         let action = toastAction
         toastTask?.cancel()
         toastAction = nil
-        withAnimation { toast = nil }
+        withMotion { toast = nil }
         if let action { Task { await action() } }
     }
 }

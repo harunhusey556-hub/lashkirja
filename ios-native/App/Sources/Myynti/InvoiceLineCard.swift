@@ -93,7 +93,7 @@ struct InvoiceLineCard: View {
             Image(systemName: "ellipsis.circle")
                 .font(.body)
                 .foregroundStyle(Theme.accent)
-                .frame(minWidth: 32, minHeight: 32)
+                .frame(minWidth: 44, minHeight: 44)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.borderless)
@@ -102,7 +102,7 @@ struct InvoiceLineCard: View {
 
     private var quantityControl: some View {
         HStack(spacing: 2) {
-            Button { step(-1) } label: { Image(systemName: "minus.circle").font(.title3) }
+            Button { step(-1) } label: { Image(systemName: "minus.circle").font(.title3).tapTarget() }
                 .disabled(line.quantity <= 1)
                 .accessibilityLabel("Vähennä määrää")
             TextField("Määrä", text: $quantityText)
@@ -113,7 +113,7 @@ struct InvoiceLineCard: View {
                 .focused(focus, equals: InvoiceFormField.quantity(line.id))
                 .onChange(of: quantityText) { _, text in line.quantity = Money.parse(text) ?? 0 }
                 .accessibilityLabel("Rivin \(number) määrä")
-            Button { step(1) } label: { Image(systemName: "plus.circle").font(.title3) }
+            Button { step(1) } label: { Image(systemName: "plus.circle").font(.title3).tapTarget() }
                 .accessibilityLabel("Lisää määrää")
         }
         .buttonStyle(.borderless)
@@ -138,7 +138,7 @@ struct InvoiceLineCard: View {
         } label: {
             HStack(spacing: 2) {
                 Text(line.unit.isEmpty ? "kpl" : line.unit)
-                Image(systemName: "chevron.up.chevron.down").font(.caption2)
+                Image(systemName: "chevron.up.chevron.down").font(.caption2).accessibilityHidden(true)
             }
             .foregroundStyle(Theme.ink)
             .padding(.horizontal, 8)

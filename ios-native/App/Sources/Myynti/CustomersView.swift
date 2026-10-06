@@ -231,6 +231,7 @@ struct CustomerDetailView: View {
                             Button(role: .destructive) { confirmDelete = true } label: { Label("Poista", systemImage: "trash") }
                         }
                     } label: { Image(systemName: "ellipsis.circle") }
+                    .accessibilityLabel("Toiminnot")
                 }
             }
         }

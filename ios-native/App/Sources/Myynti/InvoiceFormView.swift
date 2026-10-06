@@ -78,7 +78,7 @@ struct InvoiceFormView: View {
                 }
                 .onChange(of: scrollTarget) { _, target in
                     guard let target else { return }
-                    withAnimation { proxy.scrollTo(rowId(target), anchor: .center) }
+                    withMotion { proxy.scrollTo(rowId(target), anchor: .center) }
                     scrollTarget = nil
                 }
             }
@@ -168,7 +168,7 @@ struct InvoiceFormView: View {
                     HStack {
                         Label("Valitse asiakas", systemImage: "person.crop.circle")
                         Spacer()
-                        Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(Theme.ink2)
+                        Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(Theme.ink2).accessibilityHidden(true)
                     }
                     .contentShape(Rectangle())
                 }
@@ -406,7 +406,7 @@ struct InvoiceFormView: View {
     private func addLine() {
         let line = InvoiceDraft.Line.new(sellerRegistered: sellerRegistered)
         priceTexts[line.id] = ""
-        withAnimation { draft.lines.append(line) }
+        withMotion { draft.lines.append(line) }
         focus = InvoiceFormField.description(line.id)
     }
 
@@ -424,20 +424,20 @@ struct InvoiceFormView: View {
         guard let index = draft.lines.firstIndex(where: { $0.id == lineId }) else { return }
         switch action {
         case .copy:
-            withAnimation {
+            withMotion {
                 if let copy = draft.lines.duplicateLine(at: index) {
                     priceTexts[copy] = priceTexts[lineId] ?? InvoiceForm.priceText(draft.lines[index].unitPrice)
                 }
             }
-        case .moveUp: withAnimation { draft.lines.moveLine(at: index, by: -1) }
-        case .moveDown: withAnimation { draft.lines.moveLine(at: index, by: 1) }
+        case .moveUp: withMotion { draft.lines.moveLine(at: index, by: -1) }
+        case .moveDown: withMotion { draft.lines.moveLine(at: index, by: 1) }
         case .delete:
             // Any field of this line loses focus first, then the line goes once the swipe has
             // finished, so no view is left editing a line that no longer exists.
             if let focused = focus, focused.lineId == lineId { focus = nil }
             Task { @MainActor in
                 guard let current = draft.lines.firstIndex(where: { $0.id == lineId }), draft.lines.count > 1 else { return }
-                _ = withAnimation { draft.lines.remove(at: current) }
+                _ = withMotion { draft.lines.remove(at: current) }
                 priceTexts[lineId] = nil
             }
         case .saveProduct:
@@ -458,7 +458,7 @@ struct InvoiceFormView: View {
 
     /// "Lisää tuotteista": fills the untouched last line, otherwise adds one.
     private func addFromCatalog(_ item: CatalogItem) {
-        withAnimation {
+        withMotion {
             if let index = InvoiceForm.lineForCatalogPick(draft.lines, priceTexts: priceTexts) {
                 fill(index, with: item)
             } else {
@@ -617,7 +617,7 @@ struct InvoiceFormView: View {
     private func deleteProduct(_ item: CatalogItem) async {
         do {
             let _: Ignored = try await app.api.send("DELETE", "/api/catalog/\(item.id)", body: Optional<EmptyBody>.none)
-            withAnimation { catalog.removeAll { $0.id == item.id } }
+            withMotion { catalog.removeAll { $0.id == item.id } }
             productNotice = "Tuote \(item.name) poistettiin valikosta."
             Haptics.success()
         } catch {

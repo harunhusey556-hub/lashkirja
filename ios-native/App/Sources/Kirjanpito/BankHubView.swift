@@ -109,13 +109,13 @@ struct BankHubView: View {
         let oldest = BankHub.oldestMonth(statements)
         return Section {
             HStack {
-                Button { step(-1) } label: { Image(systemName: "chevron.left") }
+                Button { step(-1) } label: { Image(systemName: "chevron.left").tapTarget() }
                     .disabled(!BankHub.canStepBack(month, oldest: oldest))
                     .accessibilityLabel("Edellinen kuukausi")
                 Spacer()
                 Text(StatementText.month(month)).font(.headline)
                 Spacer()
-                Button { step(1) } label: { Image(systemName: "chevron.right") }
+                Button { step(1) } label: { Image(systemName: "chevron.right").tapTarget() }
                     .disabled(!BankHub.canStepForward(month))
                     .accessibilityLabel("Seuraava kuukausi")
             }
@@ -287,7 +287,7 @@ private struct AccountLineRow: View {
     var body: some View {
         HStack(alignment: .firstTextBaseline) {
             VStack(alignment: .leading, spacing: 2) {
-                Text(line.name).foregroundStyle(Theme.ink).lineLimit(1)
+                Text(line.name).foregroundStyle(Theme.ink).lineLimitUnlessLarge()
                 let detail = [line.bank, line.asOf].compactMap { $0 }.joined(separator: " · ")
                 if !detail.isEmpty {
                     Text(detail).font(.caption).foregroundStyle(Theme.ink2).lineLimit(2)

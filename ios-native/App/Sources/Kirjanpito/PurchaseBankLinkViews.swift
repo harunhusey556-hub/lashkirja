@@ -282,9 +282,9 @@ struct PurchaseBankCandidateRow: View {
     var body: some View {
         HStack(alignment: .top) {
             VStack(alignment: .leading, spacing: 2) {
-                Text(candidate.title).foregroundStyle(Theme.ink).lineLimit(1)
+                Text(candidate.title).foregroundStyle(Theme.ink).lineLimitUnlessLarge()
                 if !candidate.detail.isEmpty {
-                    Text(candidate.detail).font(.caption).foregroundStyle(Theme.ink2).lineLimit(1)
+                    Text(candidate.detail).font(.caption).foregroundStyle(Theme.ink2).lineLimitUnlessLarge()
                 }
                 if let why = candidate.why {
                     Text(why).font(.caption).foregroundStyle(candidate.amountDiff != nil ? Theme.warning : Theme.ink2).lineLimit(3)
@@ -390,9 +390,9 @@ struct PurchaseInvoiceCandidateRow: View {
     var body: some View {
         HStack(alignment: .top) {
             VStack(alignment: .leading, spacing: 2) {
-                Text(candidate.title).foregroundStyle(Theme.ink).lineLimit(1)
+                Text(candidate.title).foregroundStyle(Theme.ink).lineLimitUnlessLarge()
                 if !candidate.detail.isEmpty {
-                    Text(candidate.detail).font(.caption).foregroundStyle(Theme.ink2).lineLimit(1)
+                    Text(candidate.detail).font(.caption).foregroundStyle(Theme.ink2).lineLimitUnlessLarge()
                 }
                 if let why = candidate.why {
                     Text(why).font(.caption).foregroundStyle(candidate.amountDiff != nil ? Theme.warning : Theme.ink2).lineLimit(3)
@@ -438,7 +438,7 @@ struct PurchaseSuggestionsSheet: View {
             .navigationTitle("Maksuehdotukset")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Valmis") { dismiss() } } }
-            .animation(.snappy, value: suggestions.map(\.id))
+            .motion(.snappy, value: suggestions.map(\.id))
         }
         .presentationDetents([.medium, .large])
     }

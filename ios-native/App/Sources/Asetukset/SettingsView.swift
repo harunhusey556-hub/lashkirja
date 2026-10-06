@@ -112,7 +112,7 @@ struct SettingRow: View {
     let symbol: String
     var body: some View {
         HStack(spacing: 12) {
-            Image(systemName: symbol).foregroundStyle(Theme.accent).frame(width: 28)
+            Image(systemName: symbol).foregroundStyle(Theme.accent).frame(width: 28).accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 2) {
                 Text(title.isEmpty ? "Profiili" : title)
                 if let subtitle { Text(subtitle).font(.caption).foregroundStyle(Theme.ink2) }

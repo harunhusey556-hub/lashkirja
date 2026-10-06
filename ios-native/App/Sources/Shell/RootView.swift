@@ -15,6 +15,6 @@ struct RootView: View {
                     .background(LockWindowHost(locked: AppLock.shared.isLocked, app: app))
             }
         }
-        .animation(.default, value: app.phase)
+        .motion(.default, value: app.phase)
     }
 }

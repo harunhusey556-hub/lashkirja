@@ -76,6 +76,7 @@ struct HubRow: View {
                 .foregroundStyle(Theme.accent)
                 .frame(width: 34, height: 34)
                 .background(Theme.accentSoft, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+                .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 2) {
                 Text(title).foregroundStyle(Theme.ink)
                 Text(subtitle).font(.caption).foregroundStyle(Theme.ink2)

@@ -123,7 +123,7 @@ struct CaptureFlow: View {
 
     private var picker: some View {
         VStack(spacing: 16) {
-            Image(systemName: "doc.viewfinder").font(.system(size: 54)).foregroundStyle(Theme.accent)
+            Image(systemName: "doc.viewfinder").scaledFont(size: 54, relativeTo: .largeTitle).foregroundStyle(Theme.accent).accessibilityHidden(true)
             Text("Lisää kuva tai PDF kuitista tai laskusta").font(.headline).multilineTextAlignment(.center)
             pickButtons
             if let importFailure { Text(importFailure).font(.footnote).foregroundStyle(Theme.danger) }
@@ -184,7 +184,7 @@ struct CaptureFlow: View {
     private func queueRow(_ row: UploadQueueRow) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 8) {
-                Text(row.name).lineLimit(1).truncationMode(.middle)
+                Text(row.name).lineLimitUnlessLarge().truncationMode(.middle)
                 Spacer(minLength: 8)
                 if row.status == .uploading || row.status == .processing { ProgressView().controlSize(.small) }
                 Text(row.status.label).font(.caption).foregroundStyle(row.status == .failed ? Theme.danger : Theme.ink2)
@@ -528,7 +528,7 @@ struct ReceiptEditor: View {
                     TextField("ALV €", text: Binding(get: { row.amountText }, set: { form.setVatAmount($0, at: index) }))
                         .moneyInput()
                         .multilineTextAlignment(.trailing)
-                    Button(role: .destructive) { form.removeVatRow(at: index) } label: { Image(systemName: "minus.circle") }
+                    Button(role: .destructive) { form.removeVatRow(at: index) } label: { Image(systemName: "minus.circle").tapTarget() }
                         .buttonStyle(.borderless)
                         .accessibilityLabel("Poista ALV-rivi")
                 }
