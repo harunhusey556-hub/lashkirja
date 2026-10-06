@@ -27,6 +27,8 @@ done
 
 curl -s -o /dev/null --max-time 60 "http://127.0.0.1:$UPSTREAM_PORT/login" || { echo "API on :$UPSTREAM_PORT not reachable (tunnel down?)"; exit 2; }
 # `simctl bootstatus -b` can hang for minutes on a busy Mac; poll the device state instead.
+# A second, browser-like session, so the Laitteet walk has another device to sign out.
+curl -s -o /dev/null -X POST "http://127.0.0.1:$UPSTREAM_PORT/api/auth/token" -H 'content-type: application/json'   -A 'Mozilla/5.0 (Macintosh) Safari' -d '{"email":"demo@lashkirja.fi","password":"demo123"}'
 xcrun simctl boot "$U" 2>/dev/null
 for i in {1..60}; do xcrun simctl list devices | grep "$U" | grep -q Booted && break; sleep 2; done
 sleep 5
