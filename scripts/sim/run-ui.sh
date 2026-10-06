@@ -19,7 +19,8 @@ CORES=$(sysctl -n hw.ncpu)
 quiet=0
 while true; do
   load=$(sysctl -n vm.loadavg | awk '{print int($2)}')
-  if pgrep -f xcodebuild | xargs -I{} ps -o args= -p {} 2>/dev/null | grep -v "$APP" | grep -q xcodebuild; then quiet=0; else quiet=$((quiet+1)); fi
+  # Another project's xcodebuild (the binary itself, not a grep or this script) means wait.
+  if ps -axo args= | grep -E '^[^ ]*/xcodebuild ' | grep -vq -- "$APP"; then quiet=0; else quiet=$((quiet+1)); fi
   if [ $quiet -ge 4 ] && [ $load -lt $((CORES * 2)) ]; then break; fi
   sleep 30
 done
