@@ -6,6 +6,7 @@ struct MainTabView: View {
     @State private var showAdd = false
     @State private var showSettings = false
     @State private var showAssistant = false
+    @State private var showNewInvoice = false
     /// Each tab's pushed screens, so a screen can be opened from outside its tab (AppModel.pendingRoute).
     @State private var paths: [AppTab: [Route]] = [:]
     @Environment(AppModel.self) private var app
@@ -58,8 +59,29 @@ struct MainTabView: View {
             showSettings = false
             showAssistant = false
             showAdd = false
+            showNewInvoice = false
             tab = pending.tab
             paths[pending.tab] = NavigationStackRule.collapse((paths[pending.tab] ?? []) + [pending.route])
+        }
+        // A Home Screen quick action or App Intent: the same sheets the "+" tab and the assistant
+        // button open. `initial` catches one that arrived before the tabs were on screen.
+        .onChange(of: app.pendingQuickAction, initial: true) { _, action in
+            guard let action else { return }
+            app.pendingQuickAction = nil
+            showSettings = false
+            showAdd = false
+            showAssistant = false
+            showNewInvoice = false
+            switch action {
+            case .capture: app.pendingCapture = PendingCapture(transactionId: nil)
+            case .newInvoice: showNewInvoice = true
+            case .assistant: showAssistant = true
+            }
+        }
+        .sheet(isPresented: $showNewInvoice) {
+            InvoiceFormView(existing: nil, onCreated: { id in
+                app.pendingRoute = PendingRoute(tab: .myynti, route: .invoice(id))
+            })
         }
         .task { await OnboardingGate.shared.check(app) }
         // Receipts photographed offline go out as soon as the app runs, not only once Kuitit opens.

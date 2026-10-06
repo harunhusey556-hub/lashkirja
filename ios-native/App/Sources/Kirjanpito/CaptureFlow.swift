@@ -2,6 +2,7 @@ import SwiftUI
 import PhotosUI
 import UIKit
 import ImageIO
+import VisionKit
 import UniformTypeIdentifiers
 import LashKirjaCore
 
@@ -32,7 +33,7 @@ struct CaptureFlow: View {
     @State private var worker: Task<Void, Never>?
     /// Bumped by "Peruuta lähetys": a cancelled worker finishing late must not clear a newer one.
     @State private var generation = 0
-    @State private var showCamera = UIImagePickerController.isSourceTypeAvailable(.camera)
+    @State private var showCamera = CaptureFlow.cameraAvailable
     @State private var showFiles = false
     @State private var photos: [PhotosPickerItem] = []
     @State private var confirmDiscard = false
@@ -51,6 +52,11 @@ struct CaptureFlow: View {
     private var editing: Bool {
         if case .edit = step { return true }
         return false
+    }
+
+    /// The document scanner where the device has one, else the plain camera.
+    private static var cameraAvailable: Bool {
+        VNDocumentCameraViewController.isSupported || UIImagePickerController.isSourceTypeAvailable(.camera)
     }
 
     private static let fileTypes: [UTType] = [.pdf, .jpeg, .png, .heic, .heif]
@@ -84,11 +90,19 @@ struct CaptureFlow: View {
             }
             .discardGuard(dirty: unsaved, busy: false, asking: $confirmDiscard) { close() }
             .fullScreenCover(isPresented: $showCamera) {
-                CameraPicker { image in
-                    showCamera = false
-                    if let image { add([(ReceiptUploadQueue.Pick(name: "kuitti.jpg", size: nil), .camera(image))]) }
+                if VNDocumentCameraViewController.isSupported {
+                    DocumentScanner { images in
+                        showCamera = false
+                        addScanned(images)
+                    }
+                    .ignoresSafeArea()
+                } else {
+                    CameraPicker { image in
+                        showCamera = false
+                        if let image { add([(ReceiptUploadQueue.Pick(name: "kuitti.jpg", size: nil), .camera(image))]) }
+                    }
+                    .ignoresSafeArea()
                 }
-                .ignoresSafeArea()
             }
             .fileImporter(isPresented: $showFiles, allowedContentTypes: Self.fileTypes, allowsMultipleSelection: !single) { result in
                 importFiles(result)
@@ -117,7 +131,7 @@ struct CaptureFlow: View {
     }
 
     @ViewBuilder private var pickButtons: some View {
-        if UIImagePickerController.isSourceTypeAvailable(.camera) {
+        if Self.cameraAvailable {
             Button { showCamera = true } label: { Label("Kuvaa kuitti", systemImage: "camera").frame(maxWidth: .infinity, minHeight: 44) }
                 .buttonStyle(.primary)
         }
@@ -194,6 +208,16 @@ struct CaptureFlow: View {
     }
 
     // MARK: Picking
+
+    /// Each scanned page is its own receipt, like each photo of a multi-pick; matching a bank row
+    /// takes the first page only.
+    private func addScanned(_ images: [UIImage]) {
+        let pages = single ? Array(images.prefix(1)) : images
+        let start = queue.rows.count
+        add(pages.enumerated().map { offset, image in
+            (ReceiptUploadQueue.Pick(name: ReceiptUploadFile.photoName(index: start + offset), size: nil), Source.camera(image))
+        })
+    }
 
     private func add(_ picks: [(ReceiptUploadQueue.Pick, Source)]) {
         guard !picks.isEmpty else { return }
