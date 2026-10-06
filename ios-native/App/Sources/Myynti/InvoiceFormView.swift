@@ -36,6 +36,8 @@ struct InvoiceFormView: View {
     /// Field errors appear after the first save attempt and then follow the typing.
     @State private var showErrors = false
     @State private var showDetails = false
+    /// The number the server will give this invoice; shown under the title, read-only.
+    @State private var nextNumber: Int?
     @State private var scrollTarget: InvoiceFormField?
     @FocusState private var focus: InvoiceFormField?
 
@@ -87,6 +89,15 @@ struct InvoiceFormView: View {
             .navigationTitle(existing == nil ? "Uusi lasku" : "Muokkaa laskua")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                if existing == nil, let label = InvoiceSequence.label(nextNumber) {
+                    ToolbarItem(placement: .principal) {
+                        VStack(spacing: 0) {
+                            Text("Uusi lasku").font(.headline).foregroundStyle(Theme.ink)
+                            Text(label).font(.caption2).foregroundStyle(Theme.ink2)
+                        }
+                        .accessibilityElement(children: .combine)
+                    }
+                }
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Peruuta") { if dirty { confirmDiscard = true } else { dismiss() } }.disabled(busy)
                 }
@@ -523,6 +534,12 @@ struct InvoiceFormView: View {
         if let owner { SalesDraftStore.shared.clear(owner: owner) }
     }
 
+    private func fetchNextNumber() async -> Int? {
+        guard existing == nil else { return nil }
+        let sequence: InvoiceSequence? = try? await app.api.get("/api/invoices/sequence")
+        return sequence?.nextNumber
+    }
+
     private func prepare() async {
         guard !loaded else { return }
         loaded = true
@@ -531,10 +548,13 @@ struct InvoiceFormView: View {
         async let customerList: CustomerList? = try? api.get("/api/customers")
         async let catalogList: CatalogList? = try? api.get("/api/catalog")
         async let profile = app.cachedProfile()
+        async let number = fetchNextNumber()
         if let list = await customerList { customers = list.customers.filter { $0.archivedAt == nil } }
         // The form works without the catalog; "Lisää tuotteista" just stays hidden.
         if let list = await catalogList { catalog = list.items }
         if let profile = await profile { sellerRegistered = profile.vatRegistered }
+        // Only a hint: a failed read leaves the title as it was.
+        nextNumber = await number
         if let existing {
             draft.customerId = existing.customer.id
             draft.issueDate = existing.issueDate
