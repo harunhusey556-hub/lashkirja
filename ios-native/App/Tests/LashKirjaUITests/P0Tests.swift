@@ -84,7 +84,7 @@ final class P0Tests: WalkTestCase {
 
     // P0.5 #1: payment sheet asks only when dirty.
     func testE_PaymentSheet() {
-        guard tapLabel("label CONTAINS %@", "myöhässä 16") else { return }
+        guard tapLabel("label CONTAINS %@", "· myöhässä") else { return }
         _ = app.buttons["Maksu"].waitForExistence(timeout: 30)
         sleep(1); shot("e2-invoice"); dump(app, "e2-invoice")
         let pay = app.buttons["Kirjaa maksu"].firstMatch

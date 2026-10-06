@@ -7,6 +7,12 @@ class WalkTestCase: XCTestCase {
     var scrolls = 0
     var app: XCUIApplication!
 
+    let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+    /// The system password manager offers to save the demo login; not part of the app.
+    func dismissSystemPrompts() {
+        for label in ["Not Now", "Ei nyt"] where springboard.buttons[label].exists { springboard.buttons[label].tap() }
+    }
+
     override func tearDown() { goOnline(); super.tearDown() }
 
     override func setUp() {
@@ -15,6 +21,7 @@ class WalkTestCase: XCTestCase {
         app.launch()
         if app.secureTextFields.firstMatch.waitForExistence(timeout: 8) { signIn(app) }
         _ = app.tabBars.firstMatch.waitForExistence(timeout: 30)
+        sleep(1); dismissSystemPrompts()
     }
 
     func note(_ s: String) {
@@ -63,6 +70,9 @@ class WalkTestCase: XCTestCase {
         let name = "\(shotDir)/\(UUID().uuidString).openurl"
         FileManager.default.createFile(atPath: name, contents: url.data(using: .utf8))
         for _ in 0..<40 where FileManager.default.fileExists(atPath: name) { usleep(250_000) }
+        // simctl asks "Open in LashKirja?" for a custom scheme; a quick action or Siri does not.
+        let open = springboard.buttons["Open"]
+        if open.waitForExistence(timeout: 5) { open.tap() }
         sleep(2)
     }
     /// The walk's API proxy drops every connection while this file exists (scripts/sim/api-proxy.py).

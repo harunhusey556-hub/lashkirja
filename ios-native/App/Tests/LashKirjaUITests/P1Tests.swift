@@ -15,19 +15,19 @@ final class P1Tests: WalkTestCase {
         measure("create invoice (Lisää)", reached: app.navigationBars["Uusi lasku"].waitForExistence(timeout: 15))
     }
     func test03_OpenOverdueInvoice() {
-        tapLabel("label CONTAINS %@", "myöhässä 16")
-        measure("open overdue invoice (Koti)", reached: exists("label == %@", "Myöhässä 16 päivää"))
+        tapLabel("label CONTAINS %@", "· myöhässä")
+        measure("open overdue invoice (Koti)", reached: exists("label BEGINSWITH %@", "Myöhässä "))
     }
     func test04_ReviewReceipt() {
         tab("Kirjanpito"); tap("Kuitit"); sleep(3); dump(app, "nav-receipts")
-        let first = app.cells.firstMatch
-        if first.waitForExistence(timeout: 10) { first.tap(); taps += 1 }
+        // Rows are buttons labelled "<vendor>, <date · category>, <amount>"; the demo seed has Sähköyhtiö.
+        tapLabel("label BEGINSWITH %@", "Sähköyhtiö,")
         sleep(3)
-        measure("review receipt", reached: app.navigationBars.count > 0 && !app.navigationBars["Kuitit"].exists)
+        measure("review receipt", reached: !app.navigationBars["Kuitit"].exists)
     }
     func test05_UnmatchedBankTransaction() {
         tab("Kirjanpito"); tap("Pankki"); sleep(3); dump(app, "nav-bankhub")
-        tapLabel("label CONTAINS %@", "vaatii toimia"); sleep(3); dump(app, "nav-open-rows")
+        tapLabel("label BEGINSWITH %@", "Vaatii toimia"); sleep(3); dump(app, "nav-open-rows")
         let first = app.cells.firstMatch
         if first.waitForExistence(timeout: 10) { first.tap(); taps += 1 }
         sleep(2)

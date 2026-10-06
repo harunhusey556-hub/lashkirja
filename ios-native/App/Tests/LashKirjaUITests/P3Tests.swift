@@ -24,7 +24,7 @@ final class P3Tests: WalkTestCase {
         tab("Myynti")
         let drafts = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Luonnokset'")).firstMatch
         let before = drafts.waitForExistence(timeout: 10) ? drafts.label : "?"
-        guard tapLabel("label CONTAINS %@", "myöhässä") || { tab("Koti"); return tapLabel("label CONTAINS %@", "myöhässä 16") }() else { return }
+        guard tapLabel("label CONTAINS %@", "· myöhässä") || { tab("Koti"); return tapLabel("label CONTAINS %@", "· myöhässä") }() else { return }
         _ = app.buttons["Kopioi"].waitForExistence(timeout: 30)
         goOffline(); sleep(1)
         guard tap("Kopioi") else { return }
