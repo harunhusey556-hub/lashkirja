@@ -2,9 +2,8 @@ import XCTest
 
 /// P3: offline banner, recovery, and a copy made while the API is unreachable.
 final class P3Tests: WalkTestCase {
-    var banner: XCUIElement {
-        app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS 'yhteyttä' OR label CONTAINS 'Ei verkkoyhteyttä'")).firstMatch
-    }
+    /// The quiet capsule at the top; the screen's own failure panel can carry the same words.
+    var banner: XCUIElement { app.descendants(matching: .any)["offline-banner"] }
 
     func testA_OfflineBannerAndRecovery() {
         tab("Myynti")
@@ -18,6 +17,10 @@ final class P3Tests: WalkTestCase {
         let recovered = XCTWaiter().wait(for: [XCTNSPredicateExpectation(predicate: gone, object: banner)], timeout: 30) == .completed
         shot("p3a-online")
         check("P3 banner clears after the API is back", recovered)
+        // The screen that failed while offline reloads on its own: no "Yritä uudelleen" needed.
+        let reloaded = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Luonnokset'")).firstMatch.waitForExistence(timeout: 20)
+        shot("p3a-reloaded")
+        check("P3 failed screen reloads by itself when back online", reloaded)
     }
 
     func testB_CopyWhileOffline() {

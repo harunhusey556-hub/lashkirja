@@ -12,6 +12,8 @@ final class Connectivity {
     private(set) var online = true
     /// What the banner says, nil when all is well.
     private(set) var notice: ReachabilityState.Notice?
+    /// Ticks each time the banner goes away: screens that failed for want of a connection reload.
+    private(set) var backOnline = 0
     private var state = ReachabilityState()
     private let monitor = NWPathMonitor()
     private var probe: (@Sendable () async -> Void)?
@@ -40,7 +42,10 @@ final class Connectivity {
     }
 
     private func publish() {
-        if notice != state.notice { withMotion(.easeInOut(duration: 0.25)) { notice = state.notice } }
+        if notice != state.notice {
+            if notice != nil && state.notice == nil { backOnline += 1 }
+            withMotion(.easeInOut(duration: 0.25)) { notice = state.notice }
+        }
         if state.notice == .serverUnreachable { startProbing() } else { probing?.cancel(); probing = nil }
     }
 
@@ -72,6 +77,7 @@ struct OfflineBanner: View {
                     .padding(.top, 4)
                     .transition(.move(edge: .top).combined(with: .opacity))
                     .accessibilityElement(children: .combine)
+                    .accessibilityIdentifier("offline-banner")
             }
         }
     }

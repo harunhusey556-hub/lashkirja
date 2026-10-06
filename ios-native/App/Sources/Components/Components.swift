@@ -84,6 +84,7 @@ struct LoadFailureView: View {
                     .buttonStyle(.primary)
             }
         }
+        .retryWhenBackOnline(failure, retry)
     }
 }
 
@@ -116,10 +117,32 @@ struct RefreshFailureBanner: View {
                 .buttonStyle(.borderless)
             }
         }
+        .retryWhenBackOnline(failure, retry)
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
         .accessibilityElement(children: .combine)
+    }
+}
+
+extension View {
+    /// A load that failed for want of a connection runs again on its own when the connection is
+    /// back, so the owner is not left looking at "no connection" after it has returned.
+    func retryWhenBackOnline(_ failure: LoadFailure, _ retry: @escaping () async -> Void) -> some View {
+        modifier(RetryWhenBackOnline(failure: failure, retry: retry))
+    }
+}
+
+private struct RetryWhenBackOnline: ViewModifier {
+    let failure: LoadFailure
+    let retry: () async -> Void
+    @State private var connectivity = Connectivity.shared
+
+    func body(content: Content) -> some View {
+        content.onChange(of: connectivity.backOnline) {
+            guard failure.canRetry, [.offline, .timeout, .unavailable].contains(failure.kind) else { return }
+            Task { await retry() }
+        }
     }
 }
 
