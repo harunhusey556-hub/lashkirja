@@ -93,3 +93,27 @@ actor Flag { var value = false; func set() { value = true } }
     let c = APIClient(baseURL: base, transport: t, tokens: FixedToken(value: nil), sleep: noSleep)
     let _: Ignored = try await c.send("DELETE", "/x", body: Optional<EmptyBody>.none)
 }
+
+private actor FailureLog {
+    var items: [String] = []
+    func add(_ s: String) { items.append(s) }
+}
+
+@Test func reportsServerFailuresAndDecodeErrorsButNotClientErrorsOrOffline() async throws {
+    let log = FailureLog()
+    let t = FakeTransport([
+        HTTPResponse(status: 500, headers: [:], body: Data()),
+        HTTPResponse(status: 404, headers: [:], body: Data()),
+        ok(#"{"nope":1}"#),
+    ])
+    let c = APIClient(baseURL: base, transport: t, tokens: FixedToken(value: "abc"), sleep: noSleep)
+    await c.setOnUnexpectedFailure { method, path, status, decodeError in
+        await log.add("\(method) \(path) \(status) \(decodeError)")
+    }
+    let _: Me? = try? await c.send("POST", "/api/a", body: EmptyBody())
+    let _: Me? = try? await c.send("POST", "/api/b", body: EmptyBody())
+    let _: Me? = try? await c.get("/api/c")
+    // The hook runs detached so it never holds up the request; give it a moment.
+    for _ in 0..<50 where await log.items.count < 2 { try await Task.sleep(nanoseconds: 20_000_000) }
+    #expect(await log.items.sorted() == ["GET /api/c 200 true", "POST /api/a 500 false"])
+}

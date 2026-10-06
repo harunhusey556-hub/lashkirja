@@ -21,6 +21,8 @@ struct LashKirjaApp: App {
         _app = State(initialValue: app)
         // Before launch finishes: a notification tap that launched the app must find its delegate.
         AppNotifications.shared.activate(app: app)
+        // MetricKit hands over the previous run's crash and hang reports shortly after launch.
+        DiagnosticsObserver.shared.start(reporter: app.observer)
         // A quick action that launched the app is already waiting in QuickActions.
         QuickActions.attach { url in app.handle(url: url) }
     }

@@ -23,6 +23,9 @@ public actor APIClient {
     /// Told after each request whether the server answered (true) or the request never got an
     /// answer (false), for the offline indicator. A cancelled request says nothing.
     public private(set) var onReachability: (@Sendable (Bool) async -> Void)?
+    /// Told (method, path, status, decodeError) of a 5xx the server answered or an answer that
+    /// would not decode, never of offline, timeouts or 4xx. Runs detached: it cannot slow a request.
+    public private(set) var onUnexpectedFailure: (@Sendable (String, String, Int, Bool) async -> Void)?
 
     public init(baseURL: URL, transport: HTTPTransport, tokens: TokenProvider,
                 sleep: @escaping @Sendable (UInt64) async -> Void = { try? await Task.sleep(nanoseconds: $0) }) {
@@ -36,15 +39,22 @@ public actor APIClient {
     public func setOnWrite(_ handler: (@Sendable (String) async -> Void)?) { onWrite = handler }
     public func setOnReachability(_ handler: (@Sendable (Bool) async -> Void)?) { onReachability = handler }
 
+    public func setOnUnexpectedFailure(_ handler: (@Sendable (String, String, Int, Bool) async -> Void)?) { onUnexpectedFailure = handler }
+
+    private func noteUnexpected(_ method: String, _ path: String, _ status: Int, decodeError: Bool) {
+        guard let handler = onUnexpectedFailure else { return }
+        Task.detached { await handler(method, path, status, decodeError) }
+    }
+
     public func get<T: Decodable>(_ path: String, query: [String: String] = [:]) async throws -> T {
         let response = try await perform("GET", path, query: query, body: nil, contentType: nil, idempotencyKey: nil)
-        return try decode(response)
+        return try decode(response, method: "GET", path: path)
     }
 
     public func send<T: Decodable, B: Encodable>(_ method: String, _ path: String, query: [String: String] = [:], body: B?, idempotencyKey: String? = nil) async throws -> T {
         let data = try body.map { try JSONEncoder().encode($0) }
         let response = try await perform(method, path, query: query, body: data, contentType: data == nil ? nil : "application/json", idempotencyKey: idempotencyKey)
-        return try decode(response)
+        return try decode(response, method: method, path: path)
     }
 
     public func raw(_ method: String, _ path: String, query: [String: String] = [:], body: Data?, contentType: String?, idempotencyKey: String? = nil) async throws -> HTTPResponse {
@@ -81,11 +91,14 @@ public actor APIClient {
         return LKError(status: 0, code: "NETWORK", message: LKError.unreachable)
     }
 
-    private func decode<T: Decodable>(_ response: HTTPResponse) throws -> T {
+    private func decode<T: Decodable>(_ response: HTTPResponse, method: String? = nil, path: String? = nil) throws -> T {
         // A 204 (or any empty body) reads as an empty object.
         let body = response.body.isEmpty ? Data("{}".utf8) : response.body
         do { return try JSONDecoder().decode(T.self, from: body) }
-        catch { throw LKError(status: response.status, code: "DECODE", message: "Palvelimen vastausta ei voitu lukea.") }
+        catch {
+            if let method, let path { noteUnexpected(method, path, response.status, decodeError: true) }
+            throw LKError(status: response.status, code: "DECODE", message: "Palvelimen vastausta ei voitu lukea.")
+        }
     }
 
     private func url(_ path: String, query: [String: String]) -> URL {
@@ -138,6 +151,7 @@ public actor APIClient {
             // ends it: a wrong password (no token) or a stale request from a
             // previous sign-in must not sign the owner out.
             let failure = APIErrorDecoder.decode(status: response.status, data: response.body)
+            if response.status >= 500 { noteUnexpected(method, path, response.status, decodeError: false) }
             if failure.endsSession, let sentToken, let handler = onUnauthorized,
                await tokens.currentToken() == sentToken {
                 await handler()
