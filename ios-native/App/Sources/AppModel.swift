@@ -204,6 +204,8 @@ final class AppModel {
         removedIds = []
         pendingRoute = nil
         pendingCapture = nil
+        // A shortcut tapped by the previous owner must not open on the next one's account.
+        pendingQuickAction = nil
         removalFailure = nil
         // This owner's notifications, shown or waiting, and the record of what was shown.
         AppNotifications.shared.clearForSignOut()
