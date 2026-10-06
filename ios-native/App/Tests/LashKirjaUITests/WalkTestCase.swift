@@ -46,6 +46,8 @@ class WalkTestCase: XCTestCase {
     @discardableResult
     func tapLabel(_ pred: String, _ arg: String) -> Bool {
         let q = app.descendants(matching: .any).matching(NSPredicate(format: pred, arg))
+        // Screens load from the API; give the target time to appear before scrolling for it.
+        _ = q.firstMatch.waitForExistence(timeout: 12)
         for _ in 0..<7 {
             let e = q.firstMatch
             if e.exists && e.frame.minY > 30 && e.frame.maxY < app.windows.firstMatch.frame.maxY - 60 {

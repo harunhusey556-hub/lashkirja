@@ -42,6 +42,7 @@ rm -rf "$SH" "$REPO/build-sim/$TAG.xcresult"; mkdir -p "$SH" "$REPO/build-sim"
 W=$!
 # The app talks to the API through a proxy the tests can switch off (offline.flag in the shot dir).
 pkill -f "api-proxy.py $PROXY_PORT" 2>/dev/null
+ulimit -n 4096
 python3 "$REPO/scripts/sim/api-proxy.py" $PROXY_PORT $UPSTREAM_PORT "$SH/offline.flag" &
 P=$!
 trap 'kill $W $P 2>/dev/null' EXIT

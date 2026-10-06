@@ -20,7 +20,6 @@ def cut_when_offline():
                 for s in list(live):
                     try: s.shutdown(socket.SHUT_RDWR)
                     except OSError: pass
-                live.clear()
         time.sleep(0.2)
 
 def pipe(a, b):
@@ -30,8 +29,16 @@ def pipe(a, b):
     except OSError:
         pass
     finally:
+        # Both directions end here; whichever finishes second closes the pair (no fd leak).
         for s in (a, b):
             try: s.shutdown(socket.SHUT_RDWR)
+            except OSError: pass
+        with lock:
+            if a in live or b in live:
+                live.discard(a); live.discard(b)
+                return
+        for s in (a, b):
+            try: s.close()
             except OSError: pass
 
 def serve(client):
