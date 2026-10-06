@@ -19,6 +19,8 @@ public struct ChatDecisionRequest: Encodable, Sendable, Equatable {
 /// "Kuitin korjaus"): what it shows and how a decision is applied before the server has answered.
 public enum ChatProposalCard {
     public static let title = "Ehdotus kohdistukseksi"
+    /// Shown while a decision is on its way: nothing reads as done before the server says so.
+    public static let savingLabel = "Tallennetaan…"
     public static let acceptedLabel = "Kohdistus hyväksytty"
     public static let rejectedLabel = "Ehdotus hylätty"
     public static let invoiceDraftTitle = "Laskuluonnos"
@@ -62,8 +64,9 @@ public enum ChatProposalCard {
     public static func statusLabel(_ phase: Phase, for proposal: ChatProposal) -> String? {
         switch phase {
         case .open: return nil
-        case .saving(.rejected), .rejected: return rejectedLabel
-        case .saving(.accepted), .accepted:
+        case .saving: return savingLabel
+        case .rejected: return rejectedLabel
+        case .accepted:
             switch proposal.kind {
             case .match: return acceptedLabel
             case .invoiceDraft: return invoiceDraftAcceptedLabel
@@ -115,8 +118,9 @@ public enum ChatProposalCard {
     public static func statusLabel(_ phase: Phase) -> String? {
         switch phase {
         case .open: nil
-        case .saving(.accepted), .accepted: acceptedLabel
-        case .saving(.rejected), .rejected: rejectedLabel
+        case .saving: savingLabel
+        case .accepted: acceptedLabel
+        case .rejected: rejectedLabel
         }
     }
 
