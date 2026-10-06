@@ -39,6 +39,7 @@ rm -rf "$SH" "$REPO/build-sim/$TAG.xcresult"; mkdir -p "$SH" "$REPO/build-sim"
 ( while true; do
     for r in "$SH"/*.req(N); do n=${r:r}; xcrun simctl io "$U" screenshot "$n.png" >/dev/null 2>&1; rm -f "$r"; done
     for o in "$SH"/*.openurl(N); do xcrun simctl openurl "$U" "$(cat "$o")" >/dev/null 2>&1; rm -f "$o"; done
+    for c in "$SH"/*.contentsize(N); do xcrun simctl ui "$U" content_size "$(cat "$c")" >/dev/null 2>&1; rm -f "$c"; done
     sleep 0.3
   done ) &
 W=$!
@@ -47,7 +48,7 @@ pkill -f "api-proxy.py $PROXY_PORT" 2>/dev/null
 ulimit -n 4096
 python3 "$REPO/scripts/sim/api-proxy.py" $PROXY_PORT $UPSTREAM_PORT "$SH/offline.flag" &
 P=$!
-trap 'kill $W $P 2>/dev/null' EXIT
+trap 'kill $W $P 2>/dev/null; xcrun simctl ui "$U" content_size large >/dev/null 2>&1' EXIT
 
 cd "$APP" && PATH=$HOME/bin:$PATH xcodegen generate -q
 # Ad-hoc signing: an unsigned simulator build cannot use the Keychain, so sign-in would fail.

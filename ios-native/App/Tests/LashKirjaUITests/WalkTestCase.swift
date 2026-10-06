@@ -75,6 +75,13 @@ class WalkTestCase: XCTestCase {
         if open.waitForExistence(timeout: 5) { open.tap() }
         sleep(2)
     }
+    /// Text size through the host (`simctl ui content_size`), e.g. "accessibility-extra-extra-extra-large".
+    func contentSize(_ size: String) {
+        let name = "\(shotDir)/\(UUID().uuidString).contentsize"
+        FileManager.default.createFile(atPath: name, contents: size.data(using: .utf8))
+        for _ in 0..<40 where FileManager.default.fileExists(atPath: name) { usleep(250_000) }
+        sleep(2)
+    }
     /// The walk's API proxy drops every connection while this file exists (scripts/sim/api-proxy.py).
     func goOffline() { FileManager.default.createFile(atPath: "\(shotDir)/offline.flag", contents: nil) }
     func goOnline() { try? FileManager.default.removeItem(atPath: "\(shotDir)/offline.flag") }
