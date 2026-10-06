@@ -152,6 +152,25 @@ final class AppModel {
         // Quick actions and App Intents: MainTabView exists only while signed in, so before
         // sign-in (or during launch) the action waits here and runs once the tabs appear.
         if let action = QuickAction(url: url) { pendingQuickAction = action }
+        // A Spotlight result: its tab and detail, as a notification tap opens them. Nothing opens
+        // for a signed-out app (the index is cleared at sign-out, so a stale result only misses).
+        if let target = OpenTarget(url: url), !isSignedOut {
+            switch target {
+            case .customer(let id): pendingRoute = PendingRoute(tab: .myynti, route: .customer(id))
+            case .invoice(let id): pendingRoute = PendingRoute(tab: .myynti, route: .invoice(id))
+            }
+        }
+    }
+
+    private var isSignedOut: Bool {
+        if case .signedOut = phase { return true }
+        return false
+    }
+
+    /// Lists that loaded feed system search, only while an owner is signed in.
+    func indexForSpotlight(_ entries: [SpotlightEntry]) {
+        guard case .signedIn = phase else { return }
+        SpotlightIndexer.index(entries)
     }
 
     /// The sign-in email was changed and confirmed: the profile and the signed-in user show it.
@@ -200,6 +219,8 @@ final class AppModel {
         chat?.shutdown()
         chat = nil
         DocumentCache.shared.clear()
+        // Names, Y-tunnukset and amounts must not stay findable in system search.
+        SpotlightIndexer.clear()
         profile = nil
         removedIds = []
         pendingRoute = nil

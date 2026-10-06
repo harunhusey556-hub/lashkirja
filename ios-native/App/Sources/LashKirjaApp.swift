@@ -1,4 +1,5 @@
 import SwiftUI
+import CoreSpotlight
 import LashKirjaCore
 
 enum AppConfig {
@@ -52,6 +53,9 @@ struct LashKirjaApp: App {
                 // Links reach the app whatever screen is showing; the sign-in screen takes a
                 // reset link from AppModel when it appears.
                 .onOpenURL { url in app.handle(url: url) }
+                .onContinueUserActivity(CSSearchableItemActionType) { activity in
+                    if let url = SpotlightIndexer.url(from: activity) { app.handle(url: url) }
+                }
         }
         // Background App Refresh: iOS decides when (if ever) this runs; see AppNotifications.
         .backgroundTask(.appRefresh(AppNotifications.refreshTaskId)) {

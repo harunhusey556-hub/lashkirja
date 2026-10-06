@@ -271,6 +271,10 @@ struct MyyntiView: View {
         do {
             let list: InvoiceList = try await app.api.get("/api/invoices", query: SalesListQuery.query(scope: scope, filter: filter, search: query))
             state.succeed(list)
+            app.indexForSpotlight(list.invoices.compactMap {
+                SpotlightEntry.invoice(id: $0.id, number: $0.number, customerName: $0.customer.name,
+                                       gross: $0.gross, statusLabel: $0.displayStatus.label)
+            })
         }
         catch is CancellationError {}
         catch { state.fail(error) }
