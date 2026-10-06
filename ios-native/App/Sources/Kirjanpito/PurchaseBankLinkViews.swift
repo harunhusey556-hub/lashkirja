@@ -418,6 +418,8 @@ struct PurchaseSuggestionsSheet: View {
     @State var suggestions: [PurchaseMatchResult.Suggestion]
     @State private var busyId: String?
     @State private var failure: String?
+    /// One key per suggestion: tapping "Hyväksy" again after a failure is the same payment.
+    @State private var acceptKeys: [String: String] = [:]
 
     var body: some View {
         NavigationStack {
@@ -473,9 +475,11 @@ struct PurchaseSuggestionsSheet: View {
 
     private func accept(_ suggestion: PurchaseMatchResult.Suggestion) async {
         guard let body = suggestion.acceptBody else { return }
+        let key = acceptKeys[suggestion.id] ?? UUID().uuidString
+        acceptKeys[suggestion.id] = key
         await act(suggestion) {
             let _: PurchaseInvoiceResponse = try await app.api.send(
-                "POST", "/api/purchase-invoices/\(suggestion.invoiceId)/payments", body: body, idempotencyKey: UUID().uuidString
+                "POST", "/api/purchase-invoices/\(suggestion.invoiceId)/payments", body: body, idempotencyKey: key
             )
         }
     }

@@ -57,6 +57,9 @@ final class AppModel {
             await MainActor.run { self?.dataVersion += 1 }
         }
         await api.setOnUnauthorized { [weak self] in await self?.sessionExpired() }
+        // The offline banner also covers a server that does not answer while the phone has a network.
+        await api.setOnReachability { reached in await MainActor.run { Connectivity.shared.requestFinished(reached: reached) } }
+        Connectivity.shared.attach { [api] in let _: Ignored? = try? await api.get("/api/auth/me") }
         let auth = self.auth
         // The revoke of an earlier sign-out is a network call: it must not hold up opening the app.
         Task { await auth.revokePending() }

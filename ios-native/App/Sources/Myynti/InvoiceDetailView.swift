@@ -468,6 +468,20 @@ struct InvoiceDetailView: View {
         catch { failure = error.userMessage; Haptics.error() }
     }
 
+    /// Like `run`, handing over the attempt's Idempotency-Key and saying what happened to the
+    /// action when the connection fails. A retry after a failure reuses the key.
+    private func runKeyed(notDone: String, maybeDone: String, _ work: (String) async throws -> Void) async {
+        guard let key = submit.begin() else { return }
+        failure = nil
+        var succeeded = false
+        defer { submit.finish(succeeded: succeeded) }
+        do { try await work(key); succeeded = true; Haptics.success() }
+        catch {
+            failure = WriteFailureCopy.message(for: error, notDone: notDone, maybeDone: maybeDone, retrySafe: true)
+            Haptics.error()
+        }
+    }
+
     @discardableResult
     private func setStatus(_ change: InvoiceStatusChange) async -> Bool {
         var done = false
@@ -516,8 +530,8 @@ struct InvoiceDetailView: View {
     }
 
     private func duplicate() async {
-        await run {
-            let r: InvoiceResponse = try await app.api.send("POST", "/api/invoices/\(invoiceId)/duplicate", body: EmptyBody())
+        await runKeyed(notDone: "Kopiota ei luotu.", maybeDone: "Kopio on voinut tallentua luonnoksiin.") { key in
+            let r: InvoiceResponse = try await app.api.send("POST", "/api/invoices/\(invoiceId)/duplicate", body: EmptyBody(), idempotencyKey: key)
             pushedId = r.invoice.id
         }
     }
@@ -840,19 +854,19 @@ struct ReminderSheet: View {
     }
 
     private func send() async {
-        // The reminder route takes no Idempotency-Key: the guard is what keeps a second tap from mailing twice.
-        guard submit.begin() != nil else { return }
+        // The same key on every retry of this reminder: a lost answer is replayed, not mailed twice.
+        guard let key = submit.begin() else { return }
         failure = nil
         var succeeded = false
         defer { submit.finish(succeeded: succeeded) }
         do {
-            let result: ReminderSendResult = try await app.api.send("POST", "/api/invoices/\(invoice.id)/reminders", body: EmptyBody())
+            let result: ReminderSendResult = try await app.api.send("POST", "/api/invoices/\(invoice.id)/reminders", body: EmptyBody(), idempotencyKey: key)
             succeeded = true
             Haptics.success()
             onSent(result.message)
             dismiss()
         } catch {
-            failure = error.userMessage
+            failure = WriteFailureCopy.message(for: error, notDone: "Muistutusta ei lähetetty.", maybeDone: "Muistutus on voinut lähteä asiakkaalle.", retrySafe: true)
             Haptics.error()
         }
     }

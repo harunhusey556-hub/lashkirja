@@ -20,6 +20,9 @@ public actor APIClient {
     /// Told the path of every write the server accepted, so the app can mark what it shows as
     /// out of date without each screen remembering to.
     public private(set) var onWrite: (@Sendable (String) async -> Void)?
+    /// Told after each request whether the server answered (true) or the request never got an
+    /// answer (false), for the offline indicator. A cancelled request says nothing.
+    public private(set) var onReachability: (@Sendable (Bool) async -> Void)?
 
     public init(baseURL: URL, transport: HTTPTransport, tokens: TokenProvider,
                 sleep: @escaping @Sendable (UInt64) async -> Void = { try? await Task.sleep(nanoseconds: $0) }) {
@@ -31,6 +34,7 @@ public actor APIClient {
 
     public func setOnUnauthorized(_ handler: (@Sendable () async -> Void)?) { onUnauthorized = handler }
     public func setOnWrite(_ handler: (@Sendable (String) async -> Void)?) { onWrite = handler }
+    public func setOnReachability(_ handler: (@Sendable (Bool) async -> Void)?) { onReachability = handler }
 
     public func get<T: Decodable>(_ path: String, query: [String: String] = [:]) async throws -> T {
         let response = try await perform("GET", path, query: query, body: nil, contentType: nil, idempotencyKey: nil)
@@ -102,23 +106,34 @@ public actor APIClient {
         if let sentToken { request.setValue("Bearer \(sentToken)", forHTTPHeaderField: "Authorization") }
         request.httpBody = body
 
-        let attempts = method == "GET" ? 3 : 1
+        let attempts = RetryPolicy.attempts(method: method)
         var last: HTTPResponse?
         for attempt in 0..<attempts {
             let response: HTTPResponse
             do { response = try await transport.send(request) }
             catch let error as LKError { throw error }
-            catch { throw Self.transportError(error) }
+            catch {
+                if RetryPolicy.retriesTransport(error) && attempt < attempts - 1 {
+                    await sleep(RetryPolicy.delay(afterAttempt: attempt))
+                    continue
+                }
+                let failure = Self.transportError(error)
+                if !(failure is CancellationError) { await onReachability?(false) }
+                throw failure
+            }
             if (200..<300).contains(response.status) {
+                await onReachability?(true)
                 if method != "GET", let onWrite { await onWrite(path) }
                 return response
             }
-            let gateway = [502, 503, 504].contains(response.status) && !response.fromApp
+            let gateway = RetryPolicy.retriesStatus(response.status, fromApp: response.fromApp)
             if gateway && attempt < attempts - 1 {
                 last = response
-                await sleep(UInt64(500_000_000) << UInt64(attempt))
+                await sleep(RetryPolicy.delay(afterAttempt: attempt))
                 continue
             }
+            // A refusal the app wrote still proves the server answered; a gateway's does not.
+            await onReachability?(!gateway)
             // Only a request that carried the session that is still current
             // ends it: a wrong password (no token) or a stale request from a
             // previous sign-in must not sign the owner out.

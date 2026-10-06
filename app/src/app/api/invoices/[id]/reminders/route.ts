@@ -14,6 +14,7 @@ import {
 import { findSenderAccount, sendMail } from "@/lib/mailer";
 import { formatEur } from "@/lib/format";
 import { formatReference } from "@/lib/finnish-reference";
+import { hashIdempotencyPayload, idempotencyKeyFrom, withIdempotentSideEffect } from "@/lib/idempotency";
 import { invoicePdfFileName } from "@/lib/sales-invoices";
 
 const bodySchema = z
@@ -53,7 +54,22 @@ export const POST = withErrorHandler(async (req: NextRequest, context: RouteCont
   const { id } = await context.params;
   const body = bodySchema.parse(await req.json().catch(() => ({})));
 
-  const preview = await previewReminder(session.userId, id);
+  // One key per send: a retry after a lost answer gets the first answer back instead of hitting
+  // the cooldown, which would refuse a mail the person never saw confirmed.
+  const outcome = await withIdempotentSideEffect(
+    session.userId,
+    `invoice-reminder:${id}`,
+    idempotencyKeyFrom(req),
+    () => sendReminder(session.userId, id, body),
+    hashIdempotencyPayload(body)
+  );
+  return noStoreJson(outcome.replayed ? { ...outcome.body, replayed: true } : outcome.body, {
+    status: outcome.status,
+  });
+});
+
+async function sendReminder(userId: string, id: string, body: z.infer<typeof bodySchema>) {
+  const preview = await previewReminder(userId, id);
 
   const to = body.to ?? preview.recipient;
   if (!to) {
@@ -62,7 +78,7 @@ export const POST = withErrorHandler(async (req: NextRequest, context: RouteCont
     );
   }
 
-  const account = await findSenderAccount(session.userId);
+  const account = await findSenderAccount(userId);
   if (!account) {
     throw new AppError(
       "Lähettävää sähköpostitiliä ei ole yhdistetty. Lisää tili asetuksista.",
@@ -72,11 +88,11 @@ export const POST = withErrorHandler(async (req: NextRequest, context: RouteCont
   }
 
   const invoiceNumber = preview.invoice.number;
-  const reservation = await reserveReminder(session.userId, id, preview);
+  const reservation = await reserveReminder(userId, id, preview);
   try {
     // The level comes from the claimed slot, not from the earlier read.
     const reserved = { ...preview, level: reservation.level };
-    const { buffer } = await renderReminder(session.userId, id, new Date(), reserved);
+    const { buffer } = await renderReminder(userId, id, new Date(), reserved);
 
     await sendMail(account, {
       to,
@@ -112,8 +128,9 @@ export const POST = withErrorHandler(async (req: NextRequest, context: RouteCont
 
   const reminder = await confirmReminder(reservation.id, to);
 
-  return noStoreJson(
-    {
+  return {
+    status: 201,
+    body: {
       ok: true,
       sentTo: to,
       reminder: {
@@ -124,6 +141,5 @@ export const POST = withErrorHandler(async (req: NextRequest, context: RouteCont
       },
       attachment: invoicePdfFileName(invoiceNumber),
     },
-    { status: 201 }
-  );
-});
+  };
+}
