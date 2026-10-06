@@ -33,6 +33,10 @@ final class AppModel {
     /// A password reset link handed to the app (`lashkirja://…?token=…`), waiting for the
     /// sign-in screen to open the reset form with it.
     var pendingResetLink: String?
+    /// A Home Screen quick action or App Intent (`lashkirja://capture`, `invoice/new`, `assistant`),
+    /// waiting for MainTabView to open its sheet. Cleared on sign-out so it never runs for
+    /// someone else.
+    var pendingQuickAction: QuickAction?
     /// When the app went to the background: coming back after a while reloads the screens.
     private var backgroundedAt: Date?
     /// Bumped whenever the signed-in session starts or ends: an answer that arrives for an earlier
@@ -142,6 +146,9 @@ final class AppModel {
     func handle(url: URL) {
         let link = url.absoluteString
         if PasswordReset.token(from: link) != nil { pendingResetLink = link }
+        // Quick actions and App Intents: MainTabView exists only while signed in, so before
+        // sign-in (or during launch) the action waits here and runs once the tabs appear.
+        if let action = QuickAction(url: url) { pendingQuickAction = action }
     }
 
     /// The sign-in email was changed and confirmed: the profile and the signed-in user show it.
@@ -209,5 +216,6 @@ struct PendingRoute: Equatable {
 
 struct PendingCapture: Identifiable, Equatable {
     let id = UUID()
-    let transactionId: String
+    /// The bank row to match; nil for a plain "Kuvaa kuitti" (quick action).
+    let transactionId: String?
 }

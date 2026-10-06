@@ -11,6 +11,7 @@ enum AppConfig {
 
 @main
 struct LashKirjaApp: App {
+    @UIApplicationDelegateAdaptor(QuickActionAppDelegate.self) private var quickActionDelegate
     @State private var app: AppModel
     @Environment(\.scenePhase) private var scenePhase
 
@@ -19,6 +20,8 @@ struct LashKirjaApp: App {
         _app = State(initialValue: app)
         // Before launch finishes: a notification tap that launched the app must find its delegate.
         AppNotifications.shared.activate(app: app)
+        // A quick action that launched the app is already waiting in QuickActions.
+        QuickActions.attach { url in app.handle(url: url) }
     }
 
     var body: some Scene {
