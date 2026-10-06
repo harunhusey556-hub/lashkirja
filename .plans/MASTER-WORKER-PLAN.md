@@ -371,6 +371,39 @@ P0.5 sheet, geri kaydırma, yıkıcı akış güvenliği.
 
 ---
 
+## RUN — 2026-10-06 03:00
+
+### Hedef
+P0.4/P0.5 cihaz listelerini iMac simulator'da çalıştır; bulunanı düzelt.
+
+### Başlangıç ölçümü
+- `native` `7792800`; iMac'te başka worker (EasyStock) iPhone 16 simulator'da UI test koşuyor.
+
+### Yapılan
+- iMac: kendi simulator'larım `LK-P0 iPhone 17` / `LK-P0 iPhone SE`, ayrı klon `~/LashKirja/native-sim` (eski `~/LashKirja/repo` ve EasyStock'a dokunulmadı). Diğer worker'ın testi bitip yük düşünce koşuldu.
+- Sahte veri sunucusu: `C:/Users/Hhusey/lk-simserver` (.env yok, `demo-seed.ts` veritabanı, 127.0.0.1:3999) + iMac'e SSH ters tünel; simulator build'i `API_BASE_URL=http://127.0.0.1:3999`, ad-hoc imzalı (Keychain için).
+- Yerel, commit edilmemiş XCUITest walk (`LKSimUITests`, 8 test, 22 kontrol): profil geri kaydırma, cihaz çıkış onayları (tek / hepsi), şablon editörü, müşteri formu Return zinciri + "Valmis", ödeme sheet'i.
+- **Bulunan hata:** kirli sheet aşağı kaydırılınca soru sormadan geri zıplıyordu (yalnız Peruuta soruyordu). `DiscardGuard` artık `presentationControllerDidAttemptToDismiss` ile kaydırmada da soruyor. iOS 26'da confirmationDialog başlık üstünde yüzen, geri dönüş butonu görünmeyen bir balon olduğu için soru `alert` oldu ("Hylkää muutokset" / "Jatka muokkausta"). Müşteri, fatura ve tekrarlayan fatura formlarının kendi kopyaları vardı; ortak korumaya bağlandı.
+- `native` fast-forward → `cc213f9`.
+
+### Değişen dosyalar / commitler
+- `cc213f9` fix(ios): swiping an edited sheet asks instead of bouncing silently (P0.5) — 5 dosya
+
+### Test / gates
+- Simulator walk: 22/22 PASS (düzeltmeden önce kaydırma kontrolleri FAIL). iOS native CI run 37390855445 yeşil.
+
+### Cihaz / canlı doğrulama
+- Simulator'da P0.4 #1, #3, #5 ve P0.5 #1, #3, #4 geçti. Cihazda hâlâ bakılacak: OTP AutoFill (P0.1), dokunma hissi, alert'in cam arka planı (headless screenshot'ta saydam görünüyor), iPhone SE detent, müşteri birleştirme metni.
+
+### Kalan risk / blocker
+- Walk test dosyaları yalnız iMac klonunda (sabit yollar, demo giriş). Kalıcı UI test hedefi istenirse ayrı iş.
+- `SwipeAttemptObserver` presentation-controller delegate'ini sarıyor; SwiftUI'nin iç davranışı değişirse ilk kırılacak yer burası (§10).
+
+### Sıradaki tek iş
+- P0 cihaz sonuçlarını bekle. Bu arada P1 navigasyon dokunuş ölçümü simulator'da yapılabilir.
+
+---
+
 ## 13. Worker'ın şimdi başlayacağı iş
 
 **P0.1 OTP AutoFill — cihazsız kısım, sonra cihaz kabulü.**
