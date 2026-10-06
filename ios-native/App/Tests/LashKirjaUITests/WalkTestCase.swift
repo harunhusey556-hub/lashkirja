@@ -7,6 +7,8 @@ class WalkTestCase: XCTestCase {
     var scrolls = 0
     var app: XCUIApplication!
 
+    override func tearDown() { goOnline(); super.tearDown() }
+
     override func setUp() {
         continueAfterFailure = true
         app = XCUIApplication()
@@ -54,6 +56,9 @@ class WalkTestCase: XCTestCase {
         note("MISS could not find \(arg)"); return false
     }
     func tap(_ label: String) -> Bool { tapLabel("label == %@", label) }
+    /// The walk's API proxy drops every connection while this file exists (scripts/sim/api-proxy.py).
+    func goOffline() { FileManager.default.createFile(atPath: "\(shotDir)/offline.flag", contents: nil) }
+    func goOnline() { try? FileManager.default.removeItem(atPath: "\(shotDir)/offline.flag") }
     func tab(_ name: String) { app.tabBars.buttons[name].firstMatch.tap(); taps += 1; sleep(2) }
     /// One measured task from a fresh launch: records "TAPS <name>: n taps, m scrolls" and a screenshot.
     func measure(_ name: String, reached: Bool) {

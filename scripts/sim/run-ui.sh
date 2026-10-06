@@ -11,7 +11,9 @@ U=${1:?simulator udid}; ONLY=${2:-}; TAG=${3:-walk}
 REPO=$(cd "$(dirname "$0")/../.." && pwd)
 APP="$REPO/ios-native/App"
 SH=${LK_SHOT_DIR:-$REPO/sim-shots/$TAG}
-API=${LK_API_BASE_URL:-http://127.0.0.1:3999}
+UPSTREAM_PORT=${LK_API_PORT:-3999}
+PROXY_PORT=3998
+API=http://127.0.0.1:$PROXY_PORT
 CORES=$(sysctl -n hw.ncpu)
 
 quiet=0
@@ -22,7 +24,7 @@ while true; do
   sleep 30
 done
 
-curl -s -o /dev/null --max-time 60 "$API/login" || { echo "API $API not reachable (tunnel down?)"; exit 2; }
+curl -s -o /dev/null --max-time 60 "http://127.0.0.1:$UPSTREAM_PORT/login" || { echo "API on :$UPSTREAM_PORT not reachable (tunnel down?)"; exit 2; }
 # `simctl bootstatus -b` can hang for minutes on a busy Mac; poll the device state instead.
 xcrun simctl boot "$U" 2>/dev/null
 for i in {1..60}; do xcrun simctl list devices | grep "$U" | grep -q Booted && break; sleep 2; done
@@ -32,7 +34,11 @@ rm -rf "$SH" "$REPO/build-sim/$TAG.xcresult"; mkdir -p "$SH" "$REPO/build-sim"
 # XCUIScreen screenshots time out on a headless simulator, so the test asks the host for them.
 ( while true; do for r in "$SH"/*.req(N); do n=${r:r}; xcrun simctl io "$U" screenshot "$n.png" >/dev/null 2>&1; rm -f "$r"; done; sleep 0.3; done ) &
 W=$!
-trap 'kill $W 2>/dev/null' EXIT
+# The app talks to the API through a proxy the tests can switch off (offline.flag in the shot dir).
+pkill -f "api-proxy.py $PROXY_PORT" 2>/dev/null
+python3 "$REPO/scripts/sim/api-proxy.py" $PROXY_PORT $UPSTREAM_PORT "$SH/offline.flag" &
+P=$!
+trap 'kill $W $P 2>/dev/null' EXIT
 
 cd "$APP" && PATH=$HOME/bin:$PATH xcodegen generate -q
 # Ad-hoc signing: an unsigned simulator build cannot use the Keychain, so sign-in would fail.
