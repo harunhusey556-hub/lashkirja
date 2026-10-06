@@ -14,7 +14,9 @@ final class P4Tests: WalkTestCase {
         openAssistant()
         guard composer.waitForExistence(timeout: 10) else { check("P4 composer exists", false); return }
         goOffline()
-        type(composer, "Paljonko myyntiä tässä kuussa?\n")
+        type(composer, "Paljonko myyntiä tässä kuussa?")
+        // The composer is multi-line: Return adds a line, the arrow button sends.
+        app.buttons["Lähetä"].firstMatch.tap()
         sleep(6); shot("p4-failed"); dump(app, "p4-failed")
         let retry = app.buttons["Yritä uudelleen"].firstMatch
         check("P4 failed answer offers Yritä uudelleen", retry.waitForExistence(timeout: 20))
