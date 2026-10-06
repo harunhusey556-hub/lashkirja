@@ -11,7 +11,13 @@ final class ChatModel {
     var conversationId: String?
     var title = "Avustaja"
     private(set) var messages: [ChatMessage] = []
-    private(set) var streaming = false
+    /// Where the current question stands (see `ChatTurn`); a failed one offers "Yritä uudelleen".
+    private(set) var turn: ChatTurn = .idle
+    var streaming: Bool { turn.isBusy }
+    /// The client id of the last question: a retry repeats it, so the server keeps one user message.
+    private var clientId = UUID().uuidString
+    /// A reply that came in part before failing: a retry replaces it.
+    private var failedReplyId: String?
     var failure: String?
     /// The composer's draft: kept here so closing the sheet does not lose it.
     var input = ""
@@ -121,6 +127,7 @@ final class ChatModel {
 
     func open(_ conversation: Conversation) async {
         stop()
+        turn = .idle
         dropPendingReceipts()
         loads.next()
         failure = nil
@@ -132,6 +139,7 @@ final class ChatModel {
 
     func startNew() {
         stop()
+        turn = .idle
         dropPendingReceipts()
         loads.next()
         failure = nil
@@ -140,15 +148,30 @@ final class ChatModel {
         messages = []
     }
 
-    func send(_ text: String) {
+    func send(_ text: String) { send(text, retrying: false) }
+
+    /// Asks the failed question again: its message stays where it is (no second bubble) and
+    /// goes out with the same client id.
+    func retry() {
+        guard let text = turn.retryText else { return }
+        send(text, retrying: true)
+    }
+
+    private func send(_ text: String, retrying: Bool) {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, !streaming, cooldownUntil == nil, !receiptBusy else { return }
         loads.next()
         failure = nil
-        messages.append(ChatMessage(id: UUID().uuidString, role: "user", content: trimmed))
+        if retrying {
+            if let id = failedReplyId { messages.removeAll { $0.id == id } }
+        } else {
+            clientId = UUID().uuidString
+            messages.append(ChatMessage(id: UUID().uuidString, role: "user", content: trimmed))
+        }
+        failedReplyId = nil
         let replyId = UUID().uuidString
         messages.append(ChatMessage(id: replyId, role: "assistant", content: ""))
-        streaming = true
+        turn = retrying ? turn.retried() : turn.sent()
         liveReplyId = replyId
         task = Task { await stream(trimmed, replyId: replyId) }
     }
@@ -169,14 +192,14 @@ final class ChatModel {
         // Stopped before the first word: no empty bubble is left behind.
         if let id = liveReplyId { messages.removeAll { $0.id == id && $0.content.isEmpty } }
         liveReplyId = nil
-        streaming = false
+        turn = turn.stopped()
     }
 
     private func stream(_ text: String, replyId: String) async {
         defer {
             if liveReplyId == replyId {
                 liveReplyId = nil
-                streaming = false
+                turn = turn.finished()
             }
         }
         struct Body: Encodable { let message: String; let stream = true; let clientId: String; let conversationId: String? }
@@ -187,7 +210,7 @@ final class ChatModel {
             request.setValue("text/event-stream", forHTTPHeaderField: "Accept")
             let token = await app.auth.currentToken()
             if let token { request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
-            request.httpBody = try JSONEncoder().encode(Body(message: text, clientId: UUID().uuidString, conversationId: conversationId))
+            request.httpBody = try JSONEncoder().encode(Body(message: text, clientId: clientId, conversationId: conversationId))
             request.timeoutInterval = 120
             let (bytes, response) = try await Self.streamSession.bytes(for: request)
             if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
@@ -209,6 +232,7 @@ final class ChatModel {
                 if !pending.isEmpty {
                     let piece = pending
                     pending = ""
+                    turn = turn.received(piece)
                     update(replyId) { $0.content += piece }
                 }
                 lastFlush = .now
@@ -236,17 +260,24 @@ final class ChatModel {
                     messages.removeAll { $0.id == message.id && $0.id != replyId }
                     update(replyId) { $0 = message }
                 case .failed(let message):
-                    failure = message
-                    update(replyId) { if $0.content.isEmpty { $0.content = message } }
+                    fail(message, text: text, replyId: replyId)
                 }
             }
         } catch is CancellationError {
         } catch let error as URLError where error.code == .cancelled {
         } catch {
             guard liveReplyId == replyId else { return }
-            failure = error.userMessage
-            messages.removeAll { $0.id == replyId && $0.content.isEmpty }
+            fail(error.userMessage, text: text, replyId: replyId)
         }
+    }
+
+    /// The answer did not come (or stopped short): the reason stays visible and the question can
+    /// be asked again. An empty placeholder goes; a partial answer stays until the retry.
+    private func fail(_ message: String, text: String, replyId: String) {
+        failure = message
+        turn = turn.failed(message, text: text)
+        messages.removeAll { $0.id == replyId && $0.content.isEmpty }
+        if messages.contains(where: { $0.id == replyId }) { failedReplyId = replyId }
     }
 
     // MARK: Match proposal

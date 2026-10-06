@@ -151,7 +151,7 @@ struct ChatProposalCardView: View {
     }
 
     private func decided(_ phase: ChatProposalCard.Phase) -> some View {
-        let accepted = phase == .accepted || phase == .saving(.accepted)
+        let accepted = phase == .accepted
         return HStack(spacing: 6) {
             if saving != nil {
                 ProgressView().controlSize(.small)
