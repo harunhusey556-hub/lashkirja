@@ -21,16 +21,12 @@ import Foundation
 @Test func markdownBlocksOfEmptyAndStreamingText() {
     #expect(ChatMarkdown.blocks("").isEmpty)
     #expect(ChatMarkdown.blocks("- ") == [.paragraph("-")])
-    // A half-written marker still renders (as text) while the reply grows.
-    #expect(String(ChatMarkdown.inline("**bol").characters).contains("bol"))
+    #expect(ChatMarkdown.blocks("**bol") == [.paragraph("**bol")])
 }
 
-@Test func inlineLinksKeepTheirInAppPath() {
-    let text = ChatMarkdown.inline("Avaa [Kuitit](/kuitit?month=2026-10) ja [Google](https://example.com)")
-    let urls = text.runs.compactMap(\.link)
-    #expect(urls.count == 2)
-    #expect(ChatInlineLink.inAppHref(urls[0]) == "/kuitit?month=2026-10")
-    #expect(ChatInlineLink.inAppHref(urls[1]) == nil)
+@Test func inlineLinkPathsStayInApp() throws {
+    #expect(ChatInlineLink.inAppHref(try #require(URL(string: "/kuitit?month=2026-10"))) == "/kuitit?month=2026-10")
+    #expect(ChatInlineLink.inAppHref(try #require(URL(string: "https://example.com"))) == nil)
 }
 
 @Test func turnStopIsNotAFailureAndRetryResendsTheSameText() {

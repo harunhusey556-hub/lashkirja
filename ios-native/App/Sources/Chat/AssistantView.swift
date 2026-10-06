@@ -339,6 +339,12 @@ private struct Bubble: View, Equatable {
     }
 }
 
+/// Bold, italic, code and links; a half-written marker or unreadable text shows as plain text.
+private func inlineMarkdown(_ text: String) -> AttributedString {
+    let options = AttributedString.MarkdownParsingOptions(interpretedSyntax: .inlineOnlyPreservingWhitespace)
+    return (try? AttributedString(markdown: text, options: options)) ?? AttributedString(text)
+}
+
 /// An assistant reply: paragraphs, headings and lists drawn with SwiftUI text, links inline.
 private struct ChatMarkdownText: View {
     let text: String
@@ -349,9 +355,9 @@ private struct ChatMarkdownText: View {
             ForEach(Array(blocks.enumerated()), id: \.offset) { _, block in
                 switch block {
                 case .paragraph(let value):
-                    Text(ChatMarkdown.inline(value))
+                    Text(inlineMarkdown(value))
                 case .heading(let value):
-                    Text(ChatMarkdown.inline(value)).font(.headline)
+                    Text(inlineMarkdown(value)).font(.headline)
                 case .bullets(let items):
                     list(items) { _ in "\u{2022}" }
                 case .numbered(let items):
@@ -367,7 +373,7 @@ private struct ChatMarkdownText: View {
             ForEach(Array(items.enumerated()), id: \.offset) { index, item in
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
                     Text(marker(index)).foregroundStyle(Theme.ink2)
-                    Text(ChatMarkdown.inline(item))
+                    Text(inlineMarkdown(item))
                 }
             }
         }

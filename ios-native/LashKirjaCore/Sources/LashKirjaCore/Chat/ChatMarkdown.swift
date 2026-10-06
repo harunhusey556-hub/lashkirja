@@ -43,13 +43,6 @@ public enum ChatMarkdown {
         return blocks
     }
 
-    /// Inline markdown (bold, italic, code, links) as styled text; a half-written marker
-    /// (`**bol` while streaming) or anything unreadable shows as plain text, never an error.
-    public static func inline(_ text: String) -> AttributedString {
-        let options = AttributedString.MarkdownParsingOptions(interpretedSyntax: .inlineOnlyPreservingWhitespace)
-        return (try? AttributedString(markdown: text, options: options)) ?? AttributedString(text)
-    }
-
     /// "**bold** text" starts with "*" but not "* ", so the space check keeps it a paragraph.
     private static func bulletItem(_ line: String) -> String? {
         guard let first = line.first, "-*•".contains(first) else { return nil }
