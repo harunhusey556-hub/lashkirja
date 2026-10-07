@@ -2,6 +2,7 @@ import { ZodError } from "zod";
 import type { NextRequest } from "next/server";
 import { noStoreJson } from "./http-security";
 import { zodErrorBody } from "./zod-messages";
+import { errorFields, logServerEvent } from "./event-log";
 
 export interface ApiErrorResponse {
   error: {
@@ -68,6 +69,18 @@ function asPrismaError(error: unknown): PrismaLikeError | null {
   return error && typeof error === "object" ? (error as PrismaLikeError) : null;
 }
 
+/** An unexpected failure into the event log, under the request id the app sent. */
+function logRequestError(req: NextRequest, error: unknown, status: number): void {
+  logServerEvent({
+    kind: "error",
+    requestId: req.headers.get("x-request-id") ?? undefined,
+    method: req.method,
+    path: req.nextUrl.pathname,
+    status,
+    ...errorFields(error),
+  });
+}
+
 export function withErrorHandler<Args extends unknown[]>(
   handler: (req: NextRequest, ...args: Args) => Promise<Response>
 ) {
@@ -117,6 +130,7 @@ export function withErrorHandler<Args extends unknown[]>(
 
       if (prismaError?.name === "PrismaClientValidationError") {
         console.error("[PrismaClientValidationError]", prismaError.message);
+        logRequestError(req, error, 400);
         return noStoreJson(
           { error: { code: "DATABASE_VALIDATION", message: "Tietokannan rakenteen validointi epäonnistui." } },
           { status: 400 }
@@ -125,6 +139,7 @@ export function withErrorHandler<Args extends unknown[]>(
 
       // Log untyped/unexpected errors for debugging server-side only
       console.error("[API Error Handler]", req.method, req.url, error);
+      logRequestError(req, error, 500);
 
       return noStoreJson(
         {

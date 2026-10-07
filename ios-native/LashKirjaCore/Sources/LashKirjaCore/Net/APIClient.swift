@@ -26,6 +26,9 @@ public actor APIClient {
     /// Told (method, path, status, decodeError) of a 5xx the server answered or an answer that
     /// would not decode, never of offline, timeouts or 4xx. Runs detached: it cannot slow a request.
     public private(set) var onUnexpectedFailure: (@Sendable (String, String, Int, Bool) async -> Void)?
+    /// Told about every request once it is over (the debugging trail, `EventLog`). Runs
+    /// detached; the trail's own uploads (/api/observe…) are not reported.
+    public private(set) var onRequestFinished: (@Sendable (RequestTrace) async -> Void)?
 
     public init(baseURL: URL, transport: HTTPTransport, tokens: TokenProvider,
                 sleep: @escaping @Sendable (UInt64) async -> Void = { try? await Task.sleep(nanoseconds: $0) }) {
@@ -40,6 +43,22 @@ public actor APIClient {
     public func setOnReachability(_ handler: (@Sendable (Bool) async -> Void)?) { onReachability = handler }
 
     public func setOnUnexpectedFailure(_ handler: (@Sendable (String, String, Int, Bool) async -> Void)?) { onUnexpectedFailure = handler }
+    public func setOnRequestFinished(_ handler: (@Sendable (RequestTrace) async -> Void)?) { onRequestFinished = handler }
+
+    private func noteFinished(_ method: String, _ path: String, status: Int, started: Date, requestId: String, error: Error?) {
+        guard let handler = onRequestFinished, !path.hasPrefix("/api/observe") else { return }
+        let trace = RequestTrace(method: method, path: path, status: status,
+                                 durationMs: Int(Date().timeIntervalSince(started) * 1000),
+                                 requestId: requestId, error: error.map(Self.traceDescription))
+        Task.detached { await handler(trace) }
+    }
+
+    /// The error code and message the owner saw, or the kind of failure without an answer.
+    static func traceDescription(_ error: Error) -> String {
+        if let failure = error as? LKError { return [failure.code, failure.message].compactMap { $0 }.joined(separator: ": ") }
+        if error is CancellationError { return "cancelled" }
+        return String(describing: type(of: error))
+    }
 
     private func noteUnexpected(_ method: String, _ path: String, _ status: Int, decodeError: Bool) {
         guard let handler = onUnexpectedFailure else { return }
@@ -110,8 +129,24 @@ public actor APIClient {
     }
 
     private func perform(_ method: String, _ path: String, query: [String: String], body: Data?, contentType: String?, idempotencyKey: String?) async throws -> HTTPResponse {
+        // Sent as X-Request-Id: the server logs its errors under the same id.
+        let requestId = String(UUID().uuidString.prefix(8)).lowercased()
+        let started = Date()
+        do {
+            let response = try await attempt(method, path, query: query, body: body, contentType: contentType,
+                                             idempotencyKey: idempotencyKey, requestId: requestId)
+            noteFinished(method, path, status: response.status, started: started, requestId: requestId, error: nil)
+            return response
+        } catch {
+            noteFinished(method, path, status: (error as? LKError)?.status ?? 0, started: started, requestId: requestId, error: error)
+            throw error
+        }
+    }
+
+    private func attempt(_ method: String, _ path: String, query: [String: String], body: Data?, contentType: String?, idempotencyKey: String?, requestId: String) async throws -> HTTPResponse {
         var request = URLRequest(url: url(path, query: query))
         request.httpMethod = method
+        request.setValue(requestId, forHTTPHeaderField: "X-Request-Id")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         if let contentType { request.setValue(contentType, forHTTPHeaderField: "Content-Type") }
         if let idempotencyKey { request.setValue(idempotencyKey, forHTTPHeaderField: "Idempotency-Key") }

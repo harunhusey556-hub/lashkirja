@@ -54,6 +54,7 @@ struct SettingsView: View {
             Section("Tietosuoja ja ohje") {
                 NavigationLink(value: Route.privacy) { SettingRow(title: "Tietosuoja", subtitle: "Tietojen vienti ja tilin sulkeminen", symbol: "hand.raised") }
                 NavigationLink(value: Route.help) { SettingRow(title: "Ohje", subtitle: "Näin sovellus toimii", symbol: "questionmark.circle") }
+                NavigationLink { ReportProblemView() } label: { SettingRow(title: "Ilmoita ongelmasta", subtitle: "Lähettää tapahtumalokin tästä hetkestä", symbol: "ladybug") }
             }
             Section {
                 LabeledContent("Versio", value: "\(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "") (\(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? ""))")

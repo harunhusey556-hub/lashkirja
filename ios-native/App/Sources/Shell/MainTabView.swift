@@ -106,11 +106,13 @@ struct MainTabView: View {
     /// "Lisää" is an action, not a place: it opens the add sheet and stays on the current tab.
     private func select(_ next: AppTab) {
         if next == .add {
+            EventLog.shared.log(.screen("add-sheet"))
             Haptics.impact()
             showAdd = true
             return
         }
         if next != tab { Haptics.selection() }
+        EventLog.shared.log(.screen("tab.\(next)"))
         tab = next
     }
 }

@@ -5,6 +5,7 @@
   "scripts": {
     "dev": "next dev -H 0.0.0.0",
     "worker": "tsx scripts/worker.ts",
+    "debug-log": "tsx scripts/debug-log.ts",
     "build": "next build",
     "start": "next start -H 0.0.0.0",
     "lint": "eslint",

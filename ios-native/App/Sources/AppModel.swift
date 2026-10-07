@@ -46,6 +46,9 @@ final class AppModel {
     let api: APIClient
     /// Sends unexpected server failures and MetricKit diagnostics to /api/observe, signed in only.
     let observer: ObserveReporter
+    /// Sends the debugging trail (EventLog: screens, requests, problem reports) to /api/observe/events.
+    let eventUploader: EventLogUploader
+    private var eventFlushLoop: Task<Void, Never>?
 
     init(baseURL: URL = AppConfig.apiBaseURL, store: TokenStore = KeychainTokenStore()) {
         let auth = AuthService(store: store)
@@ -56,7 +59,15 @@ final class AppModel {
             app: ObserveAppInfo.current,
             isSignedIn: { await auth.currentToken() != nil },
             send: { payload in let _: Ignored = try await api.send("POST", "/api/observe", body: payload) })
+        self.eventUploader = EventLogUploader(
+            log: EventLog.shared,
+            app: ObserveAppInfo.current,
+            isSignedIn: { await auth.currentToken() != nil },
+            send: { batch in let _: Ignored = try await api.send("POST", "/api/observe/events", body: batch) })
     }
+
+    /// Now, for a problem report or a trip to the background; otherwise every 30 s.
+    func flushEvents() async { await eventUploader.flush() }
 
     func start() async {
         await auth.bind(api)
@@ -71,6 +82,15 @@ final class AppModel {
         let observer = self.observer
         await api.setOnUnexpectedFailure { method, path, status, decodeError in
             await observer.reportAPIFailure(method: method, path: path, status: status, decodeError: decodeError)
+        }
+        await api.setOnRequestFinished { trace in await EventLog.shared.record(.request(trace)) }
+        EventLog.shared.log(.lifecycle("launch"))
+        let uploader = eventUploader
+        eventFlushLoop = Task {
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 30_000_000_000)
+                await uploader.flush()
+            }
         }
         // The offline banner also covers a server that does not answer while the phone has a network.
         await api.setOnReachability { reached in await MainActor.run { Connectivity.shared.requestFinished(reached: reached) } }
@@ -145,9 +165,13 @@ final class AppModel {
 
     func background() {
         backgroundedAt = Date()
+        EventLog.shared.log(.lifecycle("background"))
+        let uploader = eventUploader
+        Task { await uploader.flush() }
     }
 
     func foreground() async {
+        EventLog.shared.log(.lifecycle("foreground"))
         // Back after more than five minutes: what the screens show may be out of date.
         if ForegroundRefresh.isStale(backgroundedAt: backgroundedAt, now: Date()), case .signedIn = phase {
             dataVersion += 1

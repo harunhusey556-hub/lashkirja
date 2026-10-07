@@ -87,6 +87,7 @@ struct CaptureFlow: View {
             .background(Theme.canvas)
             .formKeyboard()
             .navigationTitle("Uusi kuitti")
+            .onAppear { EventLog.shared.log(.screen(transactionId.map { "capture.forBankRow(\($0))" } ?? "capture")) }
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
