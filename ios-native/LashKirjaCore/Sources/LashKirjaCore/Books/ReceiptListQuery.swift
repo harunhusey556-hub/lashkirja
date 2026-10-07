@@ -160,6 +160,22 @@ public enum ReceiptMatchText {
 
     /// "90 %"
     public static func percent(_ score: Double?) -> String { "\(Int(((score ?? 0) * 100).rounded())) %" }
+
+    /// Bank amount minus receipt total when they disagree by more than a fee
+    /// (2 € or 0,5 %, as `linkAmountGapCents` in lib/fee-tolerance.ts); nil otherwise.
+    public static func amountGap(bank: Decimal, receiptTotal: Decimal?) -> Decimal? {
+        guard let receiptTotal else { return nil }
+        let paid = abs(bank), booked = abs(receiptTotal)
+        let diff = paid - booked
+        var ratio = booked * Decimal(string: "0.005")!
+        var rounded = Decimal()
+        NSDecimalRound(&rounded, &ratio, 2, .plain)
+        let tolerance = max(Decimal(2), rounded)
+        return abs(diff) > tolerance ? diff : nil
+    }
+
+    /// "Kohdistettu · summa poikkeaa 1 521,46 €"
+    public static func gapTitle(_ gap: Decimal) -> String { "Kohdistettu · summa poikkeaa \(Money.format(abs(gap)))" }
 }
 
 // MARK: Kept between visits

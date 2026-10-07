@@ -29,7 +29,6 @@ export const RETIRED_TERMS: RetiredTerm[] = [
   { pattern: re(`${S}tilitapahtum`), use: "Pankkitapahtumat" },
   { pattern: re(`${S}taustatyö`), use: "Huomioitavat" },
   { pattern: re(`${S}poikkeusjono`), use: "Huomioitavat" },
-  { pattern: re(`${S}lisää kuitti`), use: "Uusi kuitti" },
   { pattern: re(`${S}ota kuva`), use: "Kuvaa kuitti" },
   { pattern: re(`${S}kirjaudu(?:taanko|taan|tko|t)? ulos`), use: "Kirjaa ulos" },
   { pattern: re(`${S}virheviite`), use: "tukikoodi" },

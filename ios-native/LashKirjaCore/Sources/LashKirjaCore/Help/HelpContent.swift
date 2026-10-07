@@ -20,7 +20,7 @@ public enum HelpContent {
     public static let sections: [Section] = [
         Section(id: "kirjanpito", title: "Kirjanpito", topics: [
             Topic(id: "kuitit", title: "Miten kuitti kirjataan?",
-                  body: "Kuvaa kuitti +-painikkeella tai tuo se kuvista. Sovellus lukee summan, päivän ja ALV:n. Tarkista tiedot ja hyväksy kuitti, niin se on mukana kirjanpidossa ja ALV-laskelmassa."),
+                  body: "Lisää kuitti +-painikkeella: kuvaa se tai valitse kuvista tai tiedostoista. Sovellus lukee summan, päivän ja ALV:n. Tarkista tiedot ja hyväksy kuitti, niin se on mukana kirjanpidossa ja ALV-laskelmassa."),
             Topic(id: "pankki", title: "Mitä pankkitapahtumille pitää tehdä?",
                   body: "Jokaiselle tulolle ja menolle tarvitaan tosite: kuitti, laskun maksu tai kuittaus. Pankkitapahtumat-näkymä näyttää tapahtumat, joilta puuttuu kuitti, ja ehdottaa sopivia kuitteja."),
             Topic(id: "kuukausi", title: "Miten kuukausi suljetaan?",

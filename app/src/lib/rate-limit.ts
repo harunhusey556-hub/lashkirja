@@ -91,3 +91,9 @@ export function resetRateLimitsForTests(): void {
   buckets.clear();
 }
 
+/**
+ * Receipt uploads per owner in 10 minutes, shared by the app, the web, the
+ * offline inbox and the assistant: one pick holds up to 25 files, and a batch
+ * with its retries must fit.
+ */
+export const RECEIPT_UPLOADS_PER_WINDOW = 60;

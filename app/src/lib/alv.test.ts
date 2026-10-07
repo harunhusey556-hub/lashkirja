@@ -131,6 +131,8 @@ describe("computeAlvReport with sales invoices", () => {
       invoiceCount: 1,
       purchaseInvoiceVat: 0,
       purchaseInvoiceCount: 0,
+      reverseChargeVat: 0,
+      foreignVatNotDeducted: 0,
     });
   });
 
@@ -239,5 +241,68 @@ describe("computeAlvReport with purchase invoices (F39)", () => {
   it("can turn a return into a refund", () => {
     const report = computeAlvReport([], [], [{ vatCents: 1_000 }]);
     expect(report.field308).toEqual({ amount: 10, isRefund: true });
+  });
+});
+
+describe("computeAlvReport — foreign purchases", () => {
+  const foreign = (treatment: string, total: number, vat: { rate: number; amount: number }[], date = "2026-09-10"): ReceiptLike => ({
+    ...receipt("meno", total, vat),
+    vatTreatment: treatment,
+    date,
+  });
+
+  it("self-assesses EU service VAT into 306 and 314 and deducts it in 307: net zero", () => {
+    // Shopify International 305,42 € with reverse charge.
+    const r = computeAlvReport([foreign("eu_service", 305.42, [{ rate: 0, amount: 0 }])]);
+    expect(r.field306.amount).toBe(77.88);
+    expect(r.field314.amount).toBe(305.42);
+    expect(r.field307.amount).toBe(77.88);
+    expect(r.field308).toEqual({ amount: 0, isRefund: false });
+    expect(r.sources.reverseChargeVat).toBe(77.88);
+  });
+
+  it("puts EU goods into 305 and 313", () => {
+    const r = computeAlvReport([foreign("eu_goods", 100, [])]);
+    expect(r.field305.amount).toBe(25.5);
+    expect(r.field313.amount).toBe(100);
+    expect(r.field306.amount).toBe(0);
+    expect(r.field308.amount).toBe(0);
+  });
+
+  it("puts tax on non-EU services into 301 without a base", () => {
+    const r = computeAlvReport([foreign("non_eu_service", 10, [{ rate: 0, amount: 0 }])]);
+    expect(r.field301).toEqual({ netSales: 0, vat: 2.55 });
+    expect(r.field307.amount).toBe(2.55);
+    expect(r.field308.amount).toBe(0);
+  });
+
+  it("uses 24 % for purchases before 1.9.2024", () => {
+    const r = computeAlvReport([foreign("eu_service", 100, [], "2024-08-31")]);
+    expect(r.field306.amount).toBe(24);
+  });
+
+  it("never deducts Finnish VAT a foreign seller charged through OSS", () => {
+    // Anthropic Ireland: 180 € + VAT – Finland 25.5 % 45,90 €.
+    const r = computeAlvReport([foreign("foreign_vat_charged", 225.9, [{ rate: 25.5, amount: 45.9 }])]);
+    expect(r.field307.amount).toBe(0);
+    expect(r.sources.foreignVatNotDeducted).toBe(45.9);
+    expect(r.review.count).toBe(0);
+  });
+
+  it("sends non-EU goods to review instead of guessing import VAT", () => {
+    const r = computeAlvReport([foreign("non_eu_goods", 80, [])]);
+    expect(r.field307.amount).toBe(0);
+    expect(r.review).toEqual({ salesGross: 0, purchasesGross: 80, count: 1 });
+  });
+
+  it("treats purchase invoices the same way, and domestic ones as before", () => {
+    const r = computeAlvReport([], [], [
+      { vatCents: 0, grossCents: 50_00, vatTreatment: "eu_service", date: "2026-09-01" },
+      { vatCents: 2_55, grossCents: 12_55 },
+    ]);
+    expect(r.field306.amount).toBe(12.75);
+    expect(r.field307.amount).toBe(15.3);
+    expect(r.sources.purchaseInvoiceVat).toBe(2.55);
+    expect(r.field308).toEqual({ amount: 2.55, isRefund: true });
   });
 });

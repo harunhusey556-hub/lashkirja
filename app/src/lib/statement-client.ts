@@ -1,4 +1,6 @@
 import { formatEur, formatMonth as formatMonthName } from "./format";
+import { linkAmountGapCents } from "./fee-tolerance";
+import { centsToEuros, eurosToCents } from "./money";
 
 export interface LinkedReceipt {
   id: string;
@@ -102,6 +104,12 @@ export function receiptLabel(r: LinkedReceipt): string {
   if (r.totalAmount != null) parts.push(formatEur(r.totalAmount));
   if (r.date) parts.push(new Date(r.date).toLocaleDateString("fi-FI"));
   return parts.join(" · ");
+}
+
+/** " · summa poikkeaa X €" when the linked receipt's total is not what the row paid; "" otherwise. */
+export function linkedGapSuffix(bankAmount: number, r: Pick<LinkedReceipt, "totalAmount">): string {
+  const gap = linkAmountGapCents(eurosToCents(bankAmount), r.totalAmount == null ? null : eurosToCents(r.totalAmount));
+  return gap === null ? "" : ` · summa poikkeaa ${formatEur(centsToEuros(Math.abs(gap)))}`;
 }
 
 export function needsReceipt(t: StatementTransaction): boolean {

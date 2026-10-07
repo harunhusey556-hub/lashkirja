@@ -17,6 +17,8 @@ import {
 } from "@/lib/upload-queue";
 
 const MAX_UPLOAD_BYTES = 15 * 1024 * 1024;
+/** As many files read at once as one pick may hold (native ReceiptUploadQueue.maxPick). */
+const PARALLEL_READS = 25;
 
 export interface ExtractedUpload {
   source?: string;
@@ -190,59 +192,69 @@ export function useReceiptUploadQueue(
     }
   }
 
+  /** Uploads one row and waits for its reading; several run side by side (drain). */
+  async function runRow(next: InternalRow) {
+    const controller = new AbortController();
+    const stop = () => controller.abort();
+    if (cancelAll.current) return;
+    const onCancel = () => stop();
+    cancelListeners.current.set(next.localId, onCancel);
+    try {
+      await uploadOne(next, controller.signal);
+    } catch (error: unknown) {
+      if (cancelAll.current || (error instanceof DOMException && error.name === "AbortError")) {
+        patch(next.localId, { status: "cancelled", progress: undefined, error: undefined });
+        return;
+      }
+      if (isUnauthorized(error)) {
+        redirectToLogin();
+        return;
+      }
+      if (error instanceof Error && error.message === "BACKGROUND") {
+        patch(next.localId, {
+          status: "background",
+          progress: "Käsittely jatkuu taustalla",
+          error: "Näet tilanteen töistä. Muut tiedostot jatkuvat.",
+        });
+        return;
+      }
+      // A genuine network failure (timeout, gateway 502/503/504, or the
+      // connection simply dropped) never reaches readJson, so it is
+      // never an ApiError -- unlike a real 4xx business rejection, which
+      // always is. Task 10: on the mobile build this file is handed to
+      // the offline queue instead of being shown as "failed".
+      if (callbacksRef.current.onNetworkFailure && !(error instanceof ApiError)) {
+        callbacksRef.current.onNetworkFailure(next.file);
+        patch(next.localId, { status: "cancelled", progress: undefined, error: undefined });
+        return;
+      }
+      const existingId = duplicateReceiptId(error);
+      patch(next.localId, {
+        status: "failed",
+        progress: undefined,
+        error: errorMessage(error, "Lataus epäonnistui"),
+        duplicateReceiptId: existingId ?? undefined,
+      });
+    } finally {
+      cancelListeners.current.delete(next.localId);
+    }
+  }
+
   async function drain() {
     if (draining.current) return;
     draining.current = true;
     cancelAll.current = false;
-    try {
+    // Every picked file is read at the same time instead of one after another:
+    // each lane takes the next pending row; uploadOne marks it before its first await.
+    const lane = async () => {
       while (!cancelAll.current) {
         const next = rowsRef.current.find((row) => row.status === "pending");
-        if (!next) break;
-        const controller = new AbortController();
-        const stop = () => controller.abort();
-        if (cancelAll.current) break;
-        const onCancel = () => stop();
-        cancelListeners.current.set(next.localId, onCancel);
-        try {
-          await uploadOne(next, controller.signal);
-        } catch (error: unknown) {
-          if (cancelAll.current || (error instanceof DOMException && error.name === "AbortError")) {
-            patch(next.localId, { status: "cancelled", progress: undefined, error: undefined });
-            continue;
-          }
-          if (isUnauthorized(error)) {
-            redirectToLogin();
-            return;
-          }
-          if (error instanceof Error && error.message === "BACKGROUND") {
-            patch(next.localId, {
-              status: "background",
-              progress: "Käsittely jatkuu taustalla",
-              error: "Näet tilanteen töistä. Muut tiedostot jatkuvat.",
-            });
-            continue;
-          }
-          // A genuine network failure (timeout, gateway 502/503/504, or the
-          // connection simply dropped) never reaches readJson, so it is
-          // never an ApiError -- unlike a real 4xx business rejection, which
-          // always is. Task 10: on the mobile build this file is handed to
-          // the offline queue instead of being shown as "failed".
-          if (callbacksRef.current.onNetworkFailure && !(error instanceof ApiError)) {
-            callbacksRef.current.onNetworkFailure(next.file);
-            patch(next.localId, { status: "cancelled", progress: undefined, error: undefined });
-            continue;
-          }
-          const existingId = duplicateReceiptId(error);
-          patch(next.localId, {
-            status: "failed",
-            progress: undefined,
-            error: errorMessage(error, "Lataus epäonnistui"),
-            duplicateReceiptId: existingId ?? undefined,
-          });
-        } finally {
-          cancelListeners.current.delete(next.localId);
-        }
+        if (!next) return;
+        await runRow(next);
       }
+    };
+    try {
+      await Promise.all(Array.from({ length: PARALLEL_READS }, lane));
     } finally {
       draining.current = false;
     }

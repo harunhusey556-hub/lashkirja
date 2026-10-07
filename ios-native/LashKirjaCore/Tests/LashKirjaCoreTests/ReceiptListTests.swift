@@ -61,6 +61,14 @@ import Foundation
     #expect(ReceiptMatchText.percent(0.904) == "90 %")
 }
 
+@Test func linkedAmountGapMatchesTheWebTolerance() {
+    #expect(ReceiptMatchText.amountGap(bank: -124, receiptTotal: 124) == nil)
+    #expect(ReceiptMatchText.amountGap(bank: -126, receiptTotal: 124) == nil)
+    #expect(ReceiptMatchText.amountGap(bank: -99, receiptTotal: nil) == nil)
+    #expect(ReceiptMatchText.amountGap(bank: Decimal(string: "-25.01")!, receiptTotal: Decimal(string: "1546.47")!) == Decimal(string: "-1521.46")!)
+    #expect(ReceiptMatchText.amountGap(bank: -130, receiptTotal: Decimal(string: "124.25")!) == Decimal(string: "5.75")!)
+}
+
 @Test func captureImageDownscaleSize() {
     let big = CaptureImageSizing.targetSize(width: 4032, height: 3024)
     #expect(big.width == 2400)

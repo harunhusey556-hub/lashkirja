@@ -4,6 +4,8 @@ import { StatusTag } from "@/components/ds";
 import { Skeleton, SkeletonGroup } from "@/components/ds/Skeleton";
 import { formatEur } from "@/lib/format";
 import { tintedButtonClass } from "@/components/control-styles";
+import { linkAmountGapCents } from "@/lib/fee-tolerance";
+import { eurosToCents, centsToEuros } from "@/lib/money";
 
 export interface BankTxMatch {
   id: string;
@@ -67,8 +69,12 @@ interface ReceiptMatchPanelProps {
    * this panel to pad its own content. */
   compact?: boolean;
   busy?: boolean;
+  /** The saved receipt total in euros; a linked row that paid a different amount is flagged. */
+  receiptTotal?: number | null;
   onConfirm?: (transactionId: string) => void;
   onUnlink?: () => void;
+  /** Puts the bank row's amount into the form; offered only when the amounts disagree. */
+  onFitToBank?: (bankAmount: number) => void;
 }
 
 export default function ReceiptMatchPanel({
@@ -76,8 +82,10 @@ export default function ReceiptMatchPanel({
   linkedTransaction,
   compact = false,
   busy = false,
+  receiptTotal,
   onConfirm,
   onUnlink,
+  onFitToBank,
 }: ReceiptMatchPanelProps) {
   const linked = linkedTransaction ?? null;
   const pad = compact ? "" : "px-4 py-4";
@@ -85,11 +93,21 @@ export default function ReceiptMatchPanel({
   if (linked || match.status === "linked") {
     const tx = linked!;
     const strong = isStrongMatch(tx.matchScore, tx.matchReasons);
+    const gapCents = linkAmountGapCents(
+      eurosToCents(tx.amount),
+      receiptTotal == null ? null : eurosToCents(receiptTotal)
+    );
     return (
       <div className={`space-y-1.5 ${pad}`}>
-        <StatusTag tone="success">
-          {strong ? "Kohdistettu, varma osuma" : "Kohdistettu pankkitapahtumaan"}
-        </StatusTag>
+        {gapCents === null ? (
+          <StatusTag tone="success">
+            {strong ? "Kohdistettu, varma osuma" : "Kohdistettu pankkitapahtumaan"}
+          </StatusTag>
+        ) : (
+          <StatusTag tone="warning">
+            {`Kohdistettu · summa poikkeaa ${formatEur(centsToEuros(Math.abs(gapCents)))}`}
+          </StatusTag>
+        )}
         <p className={`text-caption text-ink ${compact ? "truncate" : ""}`}>
           {txLabel(tx)}
         </p>
@@ -97,6 +115,21 @@ export default function ReceiptMatchPanel({
           <p className="text-caption text-ink-2">
             Peruste: {reasonLabel(tx.matchReasons)}
           </p>
+        )}
+        {gapCents !== null && !compact && (
+          <p className="text-caption text-ink-2">
+            {`Pankista maksettiin ${formatEur(Math.abs(tx.amount))}, kuitissa on ${formatEur(receiptTotal ?? 0)}. Kirjanpito laskee kuitin summan, joten korjaa summa tai poista kohdistus, jos tapahtuma kuuluu toiseen kuittiin.`}
+          </p>
+        )}
+        {gapCents !== null && onFitToBank && (
+          <button
+            type="button"
+            onClick={() => onFitToBank(Math.abs(tx.amount))}
+            disabled={busy}
+            className={tintedButtonClass("accent")}
+          >
+            Korjaa summa pankin mukaan
+          </button>
         )}
         {onUnlink && (
           <button

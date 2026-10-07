@@ -182,8 +182,15 @@ struct ReceiptDetailView: View {
         Section {
             if let tx = r.linkedTransaction {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(ReceiptMatchText.isStrong(score: tx.bestScore, reasons: tx.bestReasons) ? "Kohdistettu, varma osuma" : "Kohdistettu pankkitapahtumaan")
-                        .font(.caption.weight(.semibold)).foregroundStyle(Theme.success)
+                    if let gap = ReceiptMatchText.amountGap(bank: tx.amount, receiptTotal: r.totalAmount) {
+                        Text(ReceiptMatchText.gapTitle(gap))
+                            .font(.caption.weight(.semibold)).foregroundStyle(Theme.warning)
+                        Text("Pankista maksettiin \(Money.format(abs(tx.amount))), kuitissa on \(Money.format(r.totalAmount ?? 0)). Kirjanpito laskee kuitin summan, joten korjaa summa tai poista kohdistus.")
+                            .font(.caption).foregroundStyle(Theme.ink2)
+                    } else {
+                        Text(ReceiptMatchText.isStrong(score: tx.bestScore, reasons: tx.bestReasons) ? "Kohdistettu, varma osuma" : "Kohdistettu pankkitapahtumaan")
+                            .font(.caption.weight(.semibold)).foregroundStyle(Theme.success)
+                    }
                     transactionLine(tx)
                     let reasons = ReceiptMatchText.reasons(tx.bestReasons)
                     if !reasons.isEmpty { Text("Peruste: \(reasons)").font(.caption).foregroundStyle(Theme.ink2) }

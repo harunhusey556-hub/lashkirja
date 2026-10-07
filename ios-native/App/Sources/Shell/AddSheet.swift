@@ -23,7 +23,7 @@ struct AddSheet: View {
     var body: some View {
         NavigationStack {
             List {
-                Button { capture = true } label: { Label("Kuvaa kuitti", systemImage: "camera") }
+                Button { capture = true } label: { Label("Lisää kuitti", systemImage: "doc.badge.plus") }
                 Button { importing = true } label: { Label("Tuo tiliote", systemImage: "square.and.arrow.down") }
                     .disabled(busy)
                 Button { newInvoice = true } label: { Label("Uusi lasku", systemImage: "doc.badge.plus") }
@@ -60,7 +60,7 @@ struct AddSheet: View {
             }
             // Screens reload when something was actually saved: every accepted write bumps
             // AppModel.dataVersion, so a cancelled flow reloads nothing.
-            .fullScreenCover(isPresented: $capture, onDismiss: { dismiss() }) { CaptureFlow(transactionId: nil) }
+            .fullScreenCover(isPresented: $capture, onDismiss: { dismiss() }) { CaptureFlow(transactionId: nil, opensCamera: false) }
             .sheet(isPresented: $newInvoice, onDismiss: openCreatedInvoice) {
                 InvoiceFormView(existing: nil, onCreated: { id in createdInvoiceId = id })
             }

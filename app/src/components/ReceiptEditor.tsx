@@ -630,6 +630,17 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
     }
   }
 
+  /** The form takes the bank row's amount; the owner sees the change and saves it (VAT follows like a typed total). */
+  function handleFitToBank(bankAmount: number) {
+    const totalAmount = moneyField(bankAmount);
+    setFormData((prev) => ({
+      ...prev,
+      totalAmount,
+      vatDetails: syncAutoVat(prev.vatDetails, totalAmount),
+    }));
+    showToast({ tone: "info", text: "Summa vaihdettu pankin mukaan. Tarkista ALV ja tallenna." });
+  }
+
   async function handleSave() {
     const resolvedCategory = useCustomCategory
       ? formData.customCategory.trim()
@@ -997,8 +1008,10 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
                     match={matchData}
                     linkedTransaction={linkedTx}
                     busy={matchBusy}
+                    receiptTotal={parseReceiptAmount(baseline.totalAmount)}
                     onConfirm={handleMatchConfirm}
                     onUnlink={linkedTx ? handleMatchUnlink : undefined}
+                    onFitToBank={handleFitToBank}
                   />
                 </ErrorBoundary>
               </Section>

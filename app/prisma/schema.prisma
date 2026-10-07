@@ -210,8 +210,14 @@ model Receipt {
   user             User      @relation(fields: [userId], references: [id])
   vendor           String?
   date             DateTime?
-  totalAmountCents Int?
-  vatDetails       String?
+  totalAmountCents Int? // EUR, what the books count
+  vatDetails       String? // VAT printed on the document
+  /// ISO 4217 code of the document; totalAmountCents stays in EUR.
+  currency            String @default("EUR")
+  /// The amount in `currency` when it is not EUR.
+  originalAmountCents Int?
+  /// domestic | eu_service | eu_goods | non_eu_service | non_eu_goods | foreign_vat_charged (lib/alv.ts)
+  vatTreatment        String @default("domestic")
   category         String?
   notes            String?
   type             String    @default("meno")
@@ -799,6 +805,9 @@ model PurchaseInvoice {
   grossCents         Int
   vatCents           Int       @default(0)
   netCents           Int       @default(0)
+  currency            String   @default("EUR")
+  originalAmountCents Int?
+  vatTreatment        String   @default("domestic")
   category           String?
   notes              String?
   paidAt             DateTime?

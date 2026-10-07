@@ -6,8 +6,8 @@ import VisionKit
 import UniformTypeIdentifiers
 import LashKirjaCore
 
-/// Kuvaa kuitti: camera, photos (up to ten at once) or files (PDF, images) → each file is
-/// uploaded and read in turn → the owner checks the fields → save (web `ReceiptUploadArea.tsx`).
+/// Lisää kuitti: camera, photos (up to 25 at once) or files (PDF, images) → the files are
+/// uploaded in turn and read side by side → the owner checks the fields → save (web `ReceiptUploadArea.tsx`).
 /// The first file read opens in the editor by itself; the rest wait in "Lähetysjono" with
 /// "Käytä lomakkeessa". Without a connection the files are kept on the phone and sent later
 /// (`OfflineReceiptQueueModel`). With `transactionId` one receipt is picked and the saved one
@@ -18,6 +18,14 @@ struct CaptureFlow: View {
     let transactionId: String?
     /// Called after each receipt is saved (and matched). Not called when the flow is cancelled.
     var onSaved: (() -> Void)? = nil
+
+    /// `opensCamera`: a missing-receipt action goes straight to the camera; "+" → "Lisää kuitti"
+    /// opens this page so the owner picks camera, photos or files.
+    init(transactionId: String?, onSaved: (() -> Void)? = nil, opensCamera: Bool = true) {
+        self.transactionId = transactionId
+        self.onSaved = onSaved
+        _showCamera = State(initialValue: opensCamera && CaptureFlow.cameraAvailable)
+    }
 
     enum Step { case pick, queue, edit(rowId: String, draft: ReceiptDraft) }
     /// Where a picked file's bytes come from; read only when its turn comes, so ten photos are
@@ -31,9 +39,11 @@ struct CaptureFlow: View {
     @State private var queue = ReceiptUploadQueue()
     @State private var sources: [String: Source] = [:]
     @State private var worker: Task<Void, Never>?
+    /// One per file the server is reading: the next file goes up meanwhile, so all are read side by side.
+    @State private var readers: [String: Task<Void, Never>] = [:]
     /// Bumped by "Peruuta lähetys": a cancelled worker finishing late must not clear a newer one.
     @State private var generation = 0
-    @State private var showCamera = CaptureFlow.cameraAvailable
+    @State private var showCamera: Bool
     @State private var showFiles = false
     @State private var photos: [PhotosPickerItem] = []
     @State private var confirmDiscard = false
@@ -284,6 +294,8 @@ struct CaptureFlow: View {
         generation += 1
         worker?.cancel()
         worker = nil
+        for reader in readers.values { reader.cancel() }
+        readers = [:]
     }
 
     /// "Peruuta lähetys": what has not finished stops; read and failed files stay.
@@ -327,38 +339,51 @@ struct CaptureFlow: View {
         do {
             let response = try await app.api.raw("POST", "/api/receipts", body: form.finalize(), contentType: form.contentType)
             let result = try JSONDecoder().decode(UploadResult.self, from: response.body)
-            var extracted = result.extracted
-            if extracted == nil, let jobId = result.jobId {
+            if result.extracted == nil, let jobId = result.jobId {
                 queue.markProcessing(id)
-                var finished = false
-                for _ in 0..<90 {
-                    try await Task.sleep(nanoseconds: 1_500_000_000)
-                    let job: JobResponse = try await app.api.get("/api/jobs/\(jobId)")
-                    if job.job.isFinished {
-                        // Not status 0: a reading the server gave up on is not a lost connection.
-                        if job.job.status != "done" { throw LKError(status: 422, message: job.job.error ?? "Kuitin luku epäonnistui.") }
-                        extracted = job.job.extracted
-                        finished = true
-                        break
-                    }
-                }
-                if !finished {
-                    queue.markBackground(id)
-                    dropSource(id)
-                    return
-                }
+                readers[id] = Task { await awaitReading(id, jobId: jobId, uploadId: result.uploadId, file: file) }
+                return
             }
-            queue.markReady(id, draft: ReceiptDraft(uploadId: result.uploadId, extracted: extracted))
-            dropSource(id)
-            if case .queue = step, let row = queue.takeAutoOpen(), let draft = row.draft {
-                step = .edit(rowId: row.id, draft: draft)
-            }
+            finishReading(id, uploadId: result.uploadId, extracted: result.extracted)
         } catch is CancellationError {
             queue.markCancelled(id)
         } catch let error where !single && ReceiptUploadFile.isNetworkFailure(error) {
             keepOffline(id, file)
         } catch {
             queue.markFailed(id, error.userMessage)
+        }
+    }
+
+    /// Waits for the server's reading of one uploaded file; runs beside the uploads of the others.
+    private func awaitReading(_ id: String, jobId: String, uploadId: String, file: Encoded) async {
+        defer { readers[id] = nil }
+        do {
+            for _ in 0..<90 {
+                try await Task.sleep(nanoseconds: 1_500_000_000)
+                let job: JobResponse = try await app.api.get("/api/jobs/\(jobId)")
+                if job.job.isFinished {
+                    // Not status 0: a reading the server gave up on is not a lost connection.
+                    if job.job.status != "done" { throw LKError(status: 422, message: job.job.error ?? "Kuitin luku epäonnistui.") }
+                    finishReading(id, uploadId: uploadId, extracted: job.job.extracted)
+                    return
+                }
+            }
+            queue.markBackground(id)
+            dropSource(id)
+        } catch is CancellationError {
+            queue.markCancelled(id)
+        } catch let error where !single && ReceiptUploadFile.isNetworkFailure(error) {
+            keepOffline(id, file)
+        } catch {
+            queue.markFailed(id, error.userMessage)
+        }
+    }
+
+    private func finishReading(_ id: String, uploadId: String, extracted: Extracted?) {
+        queue.markReady(id, draft: ReceiptDraft(uploadId: uploadId, extracted: extracted))
+        dropSource(id)
+        if case .queue = step, let row = queue.takeAutoOpen(), let draft = row.draft {
+            step = .edit(rowId: row.id, draft: draft)
         }
     }
 

@@ -56,8 +56,10 @@ test("login lands on the dashboard and the tab bar navigates", async ({ page }) 
   await expect(page).toHaveURL(/\/kirjanpito$/);
 
   await nav.getByRole("button", { name: "Lisää" }).click();
-  await expect(page.getByRole("button", { name: "Kuvaa kuitti" })).toBeVisible();
-  await page.keyboard.press("Escape");
+  // "Lisää kuitti" opens the receipt page (camera, photos or files), not the camera itself.
+  await page.getByRole("button", { name: "Lisää kuitti" }).click();
+  await expect(page).toHaveURL(/\/kuitit\/uusi$/);
+  await page.goto("/");
 
   await nav.getByRole("link", { name: "Raportit" }).click();
   await expect(page).toHaveURL(/\/raportit$/);

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   feeDifferenceCents,
+  linkAmountGapCents,
   matchesPurchaseSearch,
   rankPurchasePairs,
   scorePurchasePair,
@@ -43,6 +44,23 @@ describe("feeDifferenceCents", () => {
     expect(feeDifferenceCents(10_040_00, invoice({ grossCents: 10_000_00, openCents: 10_000_00 }))).toBe(40_00);
     // Against the open amount once part is paid.
     expect(feeDifferenceCents(25_00, invoice({ openCents: 24_00 }))).toBe(1_00);
+  });
+});
+
+describe("linkAmountGapCents", () => {
+  it("is null within a fee and for a receipt without a total", () => {
+    expect(linkAmountGapCents(-124_00, 124_00)).toBeNull();
+    expect(linkAmountGapCents(-126_00, 124_00)).toBeNull();
+    expect(linkAmountGapCents(-99_00, null)).toBeNull();
+  });
+
+  it("reports a collection demand paid only in part", () => {
+    // Svea: interest + fee paid (25,01 €) against a 1 546,47 € demand.
+    expect(linkAmountGapCents(-25_01, 1_546_47)).toBe(-1_521_46);
+  });
+
+  it("reports a bank row larger than the receipt", () => {
+    expect(linkAmountGapCents(-130_00, 124_25)).toBe(5_75);
   });
 });
 

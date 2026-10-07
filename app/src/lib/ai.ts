@@ -38,6 +38,10 @@ export interface ExtractedReceipt {
    * or vendor (vat-rules.ts); the notes say so too. Absent when VAT was read.
    */
   vatGuessed?: boolean;
+  /** ISO 4217 code printed on the document; totalAmount is EUR only when EUR is printed. */
+  currency?: string | null;
+  /** ISO 3166 alpha-2 country of the seller, when the document names it. */
+  sellerCountry?: string | null;
 }
 
 export type DocumentType = "receipt" | "invoice" | "marketing" | "other";
@@ -115,7 +119,9 @@ Palauta VAIN validi JSON seuraavalla rakenteella (ei muuta tekstiä):
   "type": "meno",
   "reference": "maksun viitenumero (esim. 1009 tai RF-viite), EI viitteenne/viitteemme",
   "invoiceNumber": "laskun numero",
-  "documentType": "kuitti"
+  "documentType": "kuitti",
+  "currency": "EUR",
+  "sellerCountry": "FI"
 }
 
 documentType: "kuitti" (ostokuitti tai maksukuitti), "lasku" (maksettava lasku), "markkinointi" (mainos, tarjous, uutiskirje, kampanja — vaikka siinä näkyisi hintoja) tai "muu" (esim. toimitusilmoitus, tiedote, salasanaviesti). Vain kuitti ja lasku kirjataan kirjanpitoon.
@@ -130,6 +136,11 @@ ${categoriesVatHintsForAiPrompt()}
 - Vakuutus, TyEL/YEL, pankkipalvelumaksut, verot: vatDetails [{rate:0, amount:0}], ei vähennyskelpoista ALV:ta.
 - Muistutusmaksu/viivästyskorko/perintämaksu (5–10 € yms.) EI ole ALV-vähennyskelpoinen — kirjoita notes-kenttään, älä sisällytä ALV-laskentaan.
 - Oletus verollisille ostoille: 25,5 % ellei 13,5 % tai 10 % ole selvästi oikea.
+Ulkomaiset ostot:
+- currency = dokumentin valuutta (ISO-koodi, esim. EUR, USD). sellerCountry = myyjän maa (ISO-koodi, esim. FI, IE, US), null jos ei näy.
+- Jos dokumentti ei ole euroissa, totalAmount on euromäärä VAIN jos se lukee dokumentissa. Muuten totalAmount = null ja kirjoita alkuperäinen summa ja valuutta notes-kenttään. ÄLÄ KOSKAAN arvioi valuuttakurssia.
+- Ulkomaisen myyjän laskulla ilman ALV:ta (reverse charge / käännetty verovelvollisuus): vatDetails [{rate:0, amount:0}]. Älä arvioi Suomen ALV:ta.
+- Jos ulkomainen myyjä on veloittanut Suomen ALV:n (esim. "VAT – Finland 25.5%"), kirjaa se vatDetails-kenttään sellaisenaan ja mainitse notes-kentässä: "Ulkomainen myyjä veloitti Suomen ALV:n".
 Tyyppi: "tulo" (myynti/tulo) tai "meno" (osto/kulu)
 ALV-kannat Suomessa 2026: 25.5%, 13.5%, 10%, 0%
 Päivämäärä muodossa YYYY-MM-DD.
@@ -490,8 +501,26 @@ export function normalizeAIResult(
     provenance,
     confidence: aiReadingConfidence({ vendor, date, totalAmount, vatDetails, documentType: normalizeDocumentType(parsed.documentType) }),
     documentType: normalizeDocumentType(parsed.documentType),
+    currency: isoCode(parsed.currency, 3),
+    sellerCountry: isoCode(parsed.sellerCountry, 2),
   };
 }
+
+function isoCode(value: unknown, length: 2 | 3): string | null {
+  if (typeof value !== "string") return null;
+  const code = value.trim().toUpperCase();
+  return code.length === length && /^[A-Z]+$/.test(code) ? code : null;
+}
+
+/** A foreign seller or a non-EUR document: Finnish VAT is never guessed for it. */
+export function isForeignPurchase(extracted: Pick<ExtractedReceipt, "currency" | "sellerCountry">): boolean {
+  return (
+    (extracted.currency != null && extracted.currency !== "EUR") ||
+    (extracted.sellerCountry != null && extracted.sellerCountry !== "FI")
+  );
+}
+
+const FOREIGN_VAT_NOTE = "Ulkomainen osto: tarkista ALV-käsittely (käännetty verovelvollisuus) ja euromäärä pankista.";
 
 /**
  * How much of a bill the model actually read (A4), instead of one constant: the
@@ -1026,6 +1055,15 @@ function ocrConfidence(
 }
 
 export function enrichExtractedReceipt(extracted: ExtractedReceipt): ExtractedReceipt {
+  if (isForeignPurchase(extracted)) {
+    // The category hints are Finnish rates; a foreign document gets the owner's review instead.
+    if (extracted.notes?.includes(FOREIGN_VAT_NOTE)) return extracted;
+    return {
+      ...extracted,
+      notes: [extracted.notes, FOREIGN_VAT_NOTE].filter(Boolean).join(" "),
+      confidence: Math.min(extracted.confidence, 0.6),
+    };
+  }
   const text = extracted.rawText ?? "";
   const guess = guessVatForReceipt({
     category: extracted.category,

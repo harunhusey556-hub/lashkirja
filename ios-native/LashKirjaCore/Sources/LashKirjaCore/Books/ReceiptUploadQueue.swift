@@ -32,8 +32,8 @@ public struct UploadQueueRow: Identifiable, Sendable, Equatable {
 }
 
 /// The several-files-at-once upload of the new-receipt screen (web `useReceiptUploadQueue.ts`):
-/// files go one at a time; the first one read opens in the editor by itself, the rest wait
-/// with "Käytä lomakkeessa".
+/// files go up one at a time and are read side by side; the first one read opens in the editor
+/// by itself, the rest wait with "Käytä lomakkeessa".
 public struct ReceiptUploadQueue: Sendable, Equatable {
     public struct Pick: Sendable, Equatable {
         public let name: String
@@ -44,7 +44,7 @@ public struct ReceiptUploadQueue: Sendable, Equatable {
 
     public static let maxBytes = 15 * 1024 * 1024
     /// How many photos one library pick may hold.
-    public static let maxPick = 10
+    public static let maxPick = 25
 
     public private(set) var rows: [UploadQueueRow] = []
     private var autoOpened = false

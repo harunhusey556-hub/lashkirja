@@ -14,9 +14,9 @@ import { centsToEuros } from "./money";
 import { formatEur } from "./format";
 import { ELIGIBLE_MIN, gatePair, RELATED_MAX, type GateCandidate, type GateRow } from "./match-gate";
 
-/** A difference of up to 2 € or 0.5 % of the amount owed counts as a fee. */
-export const FEE_TOLERANCE_CENTS = 2_00;
-export const FEE_TOLERANCE_RATIO = 0.005;
+import { FEE_TOLERANCE_CENTS, FEE_TOLERANCE_RATIO } from "./fee-tolerance";
+
+export { FEE_TOLERANCE_CENTS, FEE_TOLERANCE_RATIO, linkAmountGapCents } from "./fee-tolerance";
 /** The most rows or invoices one list returns. */
 export const PURCHASE_CANDIDATE_LIMIT = 30;
 /** Without a search, rows this far around the invoice are listed even with no signal. */

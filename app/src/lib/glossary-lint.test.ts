@@ -81,7 +81,7 @@ describe("the retired-word patterns", () => {
     for (const text of [
       "Puuttuva tosite", "Linkitä kuitti", "Kuitti linkitetty.", "Täsmäytys hyväksytty", "Palaa etusivulle",
       "602,40 € erääntynyt", "Myyntisaamiset", "Ostovelat", "Tilitapahtumat", "Taustatyöt", "Poikkeusjono",
-      "Lisää kuitti", "Ota kuva", "Kirjaudu ulos", "Kopioi virheviite", "Muu IMAP", "Maksuaika 14 pv",
+      "Ota kuva", "Kirjaudu ulos", "Kopioi virheviite", "Muu IMAP", "Maksuaika 14 pv",
       "Hyväksy kaikki 3 kpl", "Lähetetty", "Avoimet", "Täsmää",
       "Ei puuttuvia tositteita.", "Poista linkitys", "Linkitys epäonnistui", "Tilitapahtuma", "tilitapahtumaan",
       "Tilitapahtumasta", "Kirjaudutaan ulos…", "Kirjaudu ulos", "Kirjaudutko ulos", "Kirjaudutaanko ulos", "Kirjaudut ulos",
@@ -93,7 +93,7 @@ describe("the retired-word patterns", () => {
   it("leave plain Finnish alone", () => {
     for (const text of [
       "Salasanat eivät täsmää.", "Koodi ei täsmää.", "Kuitti kohdistettu.", "Odottaa maksua", "Kirjaa ulos",
-      "Kuvaa kuitti", "Kuitti puuttuu", "Koti", "Pankkitapahtumat", "Huomioitavat", "Lasku on lähetetty asiakkaalle.",
+      "Kuvaa kuitti", "Lisää kuitti", "Kuitti puuttuu", "Koti", "Pankkitapahtumat", "Huomioitavat", "Lasku on lähetetty asiakkaalle.",
       "IMAP_CONNECTION_FAILED", "Maksuaika 14 päivää",
     ]) {
       expect(flagged(text), text).toBe(false);

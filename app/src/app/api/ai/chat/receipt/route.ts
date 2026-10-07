@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 import { requireSession } from "@/lib/session";
-import { consumeRateLimit } from "@/lib/rate-limit";
+import { consumeRateLimit, RECEIPT_UPLOADS_PER_WINDOW } from "@/lib/rate-limit";
 import { MAX_RECEIPT_REQUEST_BYTES } from "@/lib/storage";
 import { noStoreJson, rejectCrossSite, rejectOversizedContentLength } from "@/lib/http-security";
 import { ChatBusyError } from "@/lib/chat-store";
@@ -23,7 +23,7 @@ export async function POST(req: NextRequest) {
   if (oversized) return oversized;
 
   // Reading the file is a paid model call: the same bucket as every other receipt upload.
-  const rate = consumeRateLimit(`receipt-upload:${session.userId}`, 20, 10 * 60_000);
+  const rate = consumeRateLimit(`receipt-upload:${session.userId}`, RECEIPT_UPLOADS_PER_WINDOW, 10 * 60_000);
   if (!rate.allowed) {
     return noStoreJson(
       { error: "Liian monta kuittia. Odota hetki." },

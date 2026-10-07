@@ -8,7 +8,7 @@ import { Icon, KeyValueList } from "@/components/ds";
 import { Ban, Camera, Check, FileText, Landmark, Link2, ReceiptText, RotateCcw, Unlink, X } from "lucide-react";
 import { apiFetch, errorMessage, isUnauthorized, readJson, redirectToLogin } from "@/components/clientFetch";
 import { formatDate, formatEur, formatEurSigned } from "@/lib/format";
-import { receiptLabel, type StatementTransaction } from "@/lib/statement-client";
+import { linkedGapSuffix, receiptLabel, type StatementTransaction } from "@/lib/statement-client";
 import { rowState, unlinkMessage, unlinkedRowPatch, type FeedRow } from "@/lib/bank-feed";
 import { detailHref } from "@/lib/routes";
 import { requestReceiptCapture } from "@/lib/capture-request";
@@ -359,7 +359,7 @@ export function BankRowSheet({
           {state === "linked" && (
             <>
               <KeyValueList
-                rows={[{ label: "Kohdistettu", value: row.receipt ? receiptLabel(row.receipt) : "Kunnossa" }]}
+                rows={[{ label: "Kohdistettu", value: row.receipt ? receiptLabel(row.receipt) + linkedGapSuffix(row.amount, row.receipt) : "Kunnossa" }]}
               />
               {row.receipt && (
                 <Link

@@ -4,7 +4,7 @@ import { prisma } from "@/lib/db";
 import { requireSession } from "@/lib/session";
 import { enqueueDocumentAnalysis } from "@/lib/document-jobs";
 import { centsToEuros } from "@/lib/money";
-import { consumeRateLimit } from "@/lib/rate-limit";
+import { consumeRateLimit, RECEIPT_UPLOADS_PER_WINDOW } from "@/lib/rate-limit";
 import {
   MAX_RECEIPT_BYTES,
   UploadValidationError,
@@ -96,7 +96,7 @@ export async function POST(req: NextRequest) {
   if (crossSite) return crossSite;
   const oversized = rejectOversizedContentLength(req, MAX_RECEIPT_BYTES + 1024 * 1024);
   if (oversized) return oversized;
-  const rate = consumeRateLimit(`receipt-upload:${session.userId}`, 20, 10 * 60_000);
+  const rate = consumeRateLimit(`receipt-upload:${session.userId}`, RECEIPT_UPLOADS_PER_WINDOW, 10 * 60_000);
   if (!rate.allowed) {
     return noStoreJson(
       { error: "Liian monta tiedostoa. Yritä myöhemmin uudelleen." },
