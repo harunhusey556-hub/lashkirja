@@ -60,6 +60,14 @@ public struct AppEvent: Codable, Equatable, Sendable {
     /// Kinds written to the phone at once: a freeze right after them must not lose them.
     static let durableKinds: Set<String> = ["action", "hang", "report"]
 
+    /// Written at once as well: a request that got no answer or a server error (not a
+    /// cancellation), the events a debugging session needs most.
+    var isDurable: Bool {
+        if Self.durableKinds.contains(kind) { return true }
+        guard kind == "request", let status else { return false }
+        return status >= 500 || (status == 0 && message != "cancelled")
+    }
+
     /// A request as APIClient saw it; status 0 means no answer arrived.
     public static func request(_ trace: RequestTrace) -> AppEvent {
         AppEvent(kind: "request", method: trace.method, path: trace.path, status: trace.status,
@@ -123,7 +131,7 @@ public actor EventLog {
         unsaved += 1
         // Written now and then, on every flush or trip to the background, and at once for the
         // events a freeze would otherwise take with it (the app is killed before the next save).
-        if unsaved >= 25 || AppEvent.durableKinds.contains(event.kind) { save() }
+        if unsaved >= 25 || event.isDurable { save() }
     }
 
     /// For SwiftUI and other synchronous callers.
@@ -183,19 +191,24 @@ public actor EventLogUploader {
         sending = true
         defer { sending = false }
         guard await isSignedIn() else { await log.save(); return false }
-        while true {
-            let batch = await log.pending(max: 200)
+        // What waited when the flush began, and no more: events logged while it sends (its own
+        // requests' side effects) wait for the next flush instead of keeping this one going.
+        var left = await log.count
+        while left > 0 {
+            let batch = await log.pending(max: min(200, left))
             if batch.isEmpty { return true }
             do {
                 try await send(EventBatch(sessionId: EventLog.sessionId,
                                           app: .init(version: app.version, build: app.build, os: app.os),
                                           events: batch))
                 await log.removeSent(batch.count)
+                left -= batch.count
             } catch {
                 await log.save()
                 return false
             }
         }
+        return true
     }
 }
 

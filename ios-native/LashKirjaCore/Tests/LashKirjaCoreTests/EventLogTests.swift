@@ -110,3 +110,32 @@ private actor Traces {
     #expect(saved.map(\.kind) == ["screen", "action"])
     #expect(await log.lastScreen == "receipts")
 }
+
+private actor Sends {
+    var count = 0
+    func add() -> Int { count += 1; return count }
+}
+
+@Test func aFlushDoesNotChaseTheEventsItsOwnUploadsCause() async {
+    // Each upload used to mark the screens stale; their reloads logged new events and the same
+    // flush sent those too, for ever. A flush now sends only what waited when it began.
+    let log = EventLog(fileURL: nil)
+    for index in 0..<3 { await log.record(.screen("s\(index)")) }
+    let sends = Sends()
+    let uploader = EventLogUploader(log: log, app: ObserveAppInfo(version: "1", build: "2", os: "26"),
+                                    isSignedIn: { true }, send: { _ in
+        _ = await sends.add()
+        await log.record(AppEvent(kind: "request", method: "GET", path: "/api/dashboard", status: 200))
+    })
+    #expect(await uploader.flush() == true)
+    #expect(await sends.count == 1)
+    #expect(await log.count == 1)
+}
+
+@Test func failedRequestsAreDurableButCancellationsAreNot() {
+    #expect(AppEvent(kind: "request", status: 0, message: "URLError").isDurable)
+    #expect(AppEvent(kind: "request", status: 502).isDurable)
+    #expect(!AppEvent(kind: "request", status: 0, message: "cancelled").isDurable)
+    #expect(!AppEvent(kind: "request", status: 200).isDurable)
+    #expect(AppEvent.action("x").isDurable)
+}

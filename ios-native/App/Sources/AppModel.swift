@@ -73,9 +73,11 @@ final class AppModel {
         await auth.bind(api)
         // Every write the server accepts marks what the screens show as out of date, so a list
         // reloads when the owner comes back to it after acting on a detail screen or a sheet.
-        // Sign-in and chat housekeeping change no bookkeeping data.
+        // Sign-in, chat housekeeping and the app's own diagnostics change no bookkeeping data.
+        // /api/observe above all: an event upload that marked the screens stale made them
+        // reload, the reloads logged new events, and the next upload reloaded them again.
         await api.setOnWrite { [weak self] path in
-            guard !path.hasPrefix("/api/auth"), !path.hasPrefix("/api/ai/") else { return }
+            guard !path.hasPrefix("/api/auth"), !path.hasPrefix("/api/ai/"), !path.hasPrefix("/api/observe") else { return }
             await MainActor.run { self?.dataVersion += 1 }
         }
         await api.setOnUnauthorized { [weak self] in await self?.sessionExpired() }

@@ -127,9 +127,19 @@ function safeSegment(value: string): string {
   return value;
 }
 
+const STORAGE_KEY = /^[a-f0-9-]{36}\.[a-z0-9]{2,5}$/;
+
 function safeStorageKey(value: string): string {
-  if (!/^[a-f0-9-]{36}\.[a-z0-9]{2,5}$/.test(value)) throw new Error("Unsafe storage key");
+  if (!STORAGE_KEY.test(value)) throw new Error("Unsafe storage key");
   return value;
+}
+
+/**
+ * Whether a receipt's filePath names a stored upload at all. Receipts drafted from a bank row
+ * carry "auto-generated" and have no file: their file and preview answer 404, never 500.
+ */
+export function isStoredUploadKey(value: string | null | undefined): value is string {
+  return typeof value === "string" && STORAGE_KEY.test(value);
 }
 
 export async function ensurePrivateUploadDirectories(userId: string): Promise<string> {

@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import * as path from "path";
 import { prisma } from "@/lib/db";
 import { requireSession } from "@/lib/session";
-import { inlineContentDisposition, readUserUpload } from "@/lib/storage";
+import { inlineContentDisposition, readUserUpload, isStoredUploadKey } from "@/lib/storage";
 import { noStoreJson } from "@/lib/http-security";
 import { receiptPreview } from "@/lib/receipt-preview";
 
@@ -35,6 +35,7 @@ export async function GET(
     },
   });
   if (!receipt?.filePath) return noStoreJson({ error: "Kuittia ei löytynyt" }, { status: 404 });
+  if (!isStoredUploadKey(receipt.filePath)) return noStoreJson({ error: "Kuitilla ei ole tiedostoa" }, { status: 404 });
 
   try {
     const original = await readUserUpload(session.userId!, receipt.filePath, true);

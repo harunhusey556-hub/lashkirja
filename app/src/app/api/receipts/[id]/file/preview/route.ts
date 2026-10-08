@@ -3,7 +3,7 @@ import * as path from "path";
 import { prisma } from "@/lib/db";
 import { readReceiptPreviewBuffer } from "@/lib/preview";
 import { requireSession } from "@/lib/session";
-import { inlineContentDisposition, resolveUserUploadPath } from "@/lib/storage";
+import { inlineContentDisposition, resolveUserUploadPath, isStoredUploadKey } from "@/lib/storage";
 import { noStoreJson } from "@/lib/http-security";
 
 const MIME: Record<string, string> = {
@@ -37,6 +37,9 @@ export async function GET(
   if (!receipt?.filePath) {
     return noStoreJson({ error: "Kuittia ei löytynyt" }, { status: 404 });
   }
+  if (!isStoredUploadKey(receipt.filePath)) {
+    return noStoreJson({ error: "Kuitilla ei ole tiedostoa" }, { status: 404 });
+  }
 
   const mimeType =
     receipt.upload?.mimeType ||
@@ -60,6 +63,11 @@ export async function GET(
       },
     });
   } catch (error) {
+    // A file that is gone (as in the file route) is a 404, not a server fault: the list shows
+    // its placeholder instead of counting an error per row.
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return noStoreJson({ error: "Tiedostoa ei löytynyt" }, { status: 404 });
+    }
     console.error("Receipt preview failed:", error);
     return noStoreJson({ error: "Esikatselun luonti epäonnistui" }, { status: 500 });
   }
