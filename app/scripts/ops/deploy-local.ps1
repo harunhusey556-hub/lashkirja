@@ -228,6 +228,7 @@ function Swap-InStagedRelease {
   foreach ($name in @('node_modules', '.next')) {
     $live = Join-Path $AppDir $name
     $prev = Join-Path $AppDir "$name.prev"
+    # Normally already gone (deleted while preparing); only renames happen while the server is down.
     Remove-Tree $prev
     if (Test-Path -LiteralPath $live) { Rename-Item -LiteralPath $live -NewName "$name.prev" }
     Move-Item -LiteralPath (Join-Path $StageApp $name) -Destination $live
@@ -250,7 +251,10 @@ function Restore-PreviousRelease([string]$PrevSha) {
     $prev = Join-Path $AppDir "$name.prev"
     if (-not (Test-Path -LiteralPath $prev)) { continue }
     try {
-      Remove-Tree $live
+      # The failed release is set aside by rename (instant); the next deploy deletes it while preparing.
+      $failed = Join-Path $AppDir "$name.failed"
+      Remove-Tree $failed
+      if (Test-Path -LiteralPath $live) { Rename-Item -LiteralPath $live -NewName "$name.failed" }
       Rename-Item -LiteralPath $prev -NewName $name
       Log "restored $name.prev as $name"
     } catch {
@@ -363,6 +367,9 @@ try {
   }
   # A failed earlier run may have left a build behind; npm ci replaces node_modules itself.
   Remove-Tree (Join-Path $StageApp '.next')
+  # The release before the current one, and a set-aside failed one: deleting them takes tens of
+  # seconds (2026-10-08 rehearsal: 31 s), so it happens now, not while the server is down.
+  foreach ($old in @('node_modules.prev', '.next.prev', 'node_modules.failed', '.next.failed')) { Remove-Tree (Join-Path $AppDir $old) }
   Copy-Item -LiteralPath (Join-Path $AppDir '.env') -Destination (Join-Path $StageApp '.env') -Force
   # NODE_ENV stays unset so npm ci keeps the dev dependencies the build and the worker (tsx) need.
   Remove-Item Env:NODE_ENV -ErrorAction SilentlyContinue
