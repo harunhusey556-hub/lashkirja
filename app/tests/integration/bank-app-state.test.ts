@@ -120,4 +120,23 @@ describe("startBankConsent with client: app", () => {
     expect(stored.accounts).toHaveLength(1);
     expect(stored.accounts[0].iban).toBe("FI2112345600000785");
   });
+
+  it("reads the accounts from the session when authorize lists none (Holvi, 2026-10-09)", async () => {
+    const capture: { state?: string } = {};
+    await startBankConsent(user.id, { aspspName: "Testipankki", aspspCountry: "FI", psuType: "business" }, fakeClient(capture));
+    const asked: string[] = [];
+    const client = {
+      authorizeSession: async (): Promise<EbSession> => ({ session_id: "session-h", accounts: [], access: { valid_until: "2027-01-01T00:00:00.000Z" } }),
+      getSession: async () => ({ status: "AUTHORIZED", accounts: ["holvi-acc"] }),
+      getAccountDetails: async (uid: string) => {
+        asked.push(uid);
+        return { name: "Holvi", currency: "EUR", account_id: { iban: "FI21 1234 5600 0007 85" } };
+      },
+    } as never;
+    const connection = await completeBankConsent(user.id, "auth-code-h", capture.state!, client);
+    expect(connection.status).toBe("active");
+    expect(asked).toEqual(["holvi-acc"]);
+    const stored = await prisma.connectedAccount.findMany({ where: { connectionId: connection.id } });
+    expect(stored.map((account) => [account.providerAccountUid, account.iban])).toEqual([["holvi-acc", "FI2112345600000785"]]);
+  });
 });

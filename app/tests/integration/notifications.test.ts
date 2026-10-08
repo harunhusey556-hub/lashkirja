@@ -78,7 +78,9 @@ describe("GET /api/notifications", () => {
   it("answers an empty feed with a cursor for the next call", async () => {
     const before = Date.now();
     const body = await fetchFeed();
-    expect(body.items).toEqual([]);
+    // Calendar reminders (the VAT due date, month close) come and go with the day the test
+    // runs: from the 9th to the 12th the VAT reminder is in the feed (failed 2026-10-09).
+    expect(body.items.filter((entry: { kind: string }) => entry.kind === "missing_receipt")).toEqual([]);
     // A minute behind now on purpose (overlap); the phone drops repeats by id.
     expect(Date.parse(body.cursor)).toBeGreaterThanOrEqual(before - 2 * 60 * 1000);
     expect(Date.parse(body.cursor)).toBeLessThanOrEqual(Date.now());
@@ -116,7 +118,7 @@ describe("GET /api/notifications", () => {
     await expenseRows(user.id, "2026-08", [-1_500]);
     await prisma.user.update({ where: { id: user.id }, data: { booksLockedThrough: "2026-08" } });
     const body = await fetchFeed();
-    expect(body.items).toEqual([]);
+    expect(body.items.filter((entry: { kind: string }) => entry.kind === "missing_receipt")).toEqual([]);
     expect(body.counts.missing_receipt).toBe(0);
   });
 

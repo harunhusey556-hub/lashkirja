@@ -467,8 +467,13 @@ export class EnableBankingClient {
     return body.balances ?? [];
   }
 
-  async getSession(sessionId: string): Promise<{ status?: string }> {
-    return this.request<{ status?: string }>(`/sessions/${encodeURIComponent(sessionId)}`);
+  async getSession(sessionId: string): Promise<{ status?: string; accounts?: string[] }> {
+    return this.request<{ status?: string; accounts?: string[] }>(`/sessions/${encodeURIComponent(sessionId)}`);
+  }
+
+  /** One account's details (IBAN and the rest); for a session whose authorize answer listed none. */
+  async getAccountDetails(accountUid: string): Promise<EbSessionAccount> {
+    return this.request<EbSessionAccount>(`/accounts/${encodeURIComponent(accountUid)}/details`);
   }
 
   async deleteSession(sessionId: string, psuHeaders?: Record<string, string>): Promise<void> {

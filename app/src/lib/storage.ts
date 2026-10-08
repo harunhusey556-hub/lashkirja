@@ -107,6 +107,14 @@ export function validateUploadBuffer(
       ? new Set([".heic", ".heif"])
       : new Set([detected.extension]);
   if (!acceptable.has(suppliedExt)) {
+    // A bank statement is read by what it contains (the parser follows `kind`) and stored under
+    // the detected extension, so its name does not matter: bank exports often carry another one
+    // (a CSV as .txt, an "Excel" file that is CSV). Refused that way on 2026-10-09, eleven times
+    // in a row from the phone. Receipts keep the check.
+    if (purpose === "statement") {
+      console.warn(`Statement upload: name says ${suppliedExt || "(none)"}, content is ${detected.kind}; read as ${detected.kind}`);
+      return detected;
+    }
     throw new UploadValidationError("Tiedoston sisältö ja tiedostopääte eivät vastaa toisiaan", 415);
   }
   return detected;

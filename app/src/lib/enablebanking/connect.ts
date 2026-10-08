@@ -16,7 +16,7 @@ import {
   isPendingStateFresh,
   psuIdForUser,
 } from "./consent";
-import { describeSessionAccounts, sessionAccountsForStorage, toPublicConnection, type PublicBankConnection } from "./mapping";
+import { describeSessionAccounts, sessionAccountsForStorage, toPublicConnection, type EbSessionAccount, type PublicBankConnection } from "./mapping";
 import { CONSENT_REVOKED_MESSAGE } from "../bank-consent-copy";
 
 const connectionInclude = { accounts: { orderBy: { iban: "asc" as const } } };
@@ -179,10 +179,16 @@ export async function completeBankConsent(
     if (!session.session_id) {
       throw new EnableBankingError("Pankki ei palauttanut istuntoa.", 502);
     }
-    const accounts = sessionAccountsForStorage(session.accounts ?? [], userId, pending.id);
+    let sessionAccounts = session.accounts ?? [];
+    if (sessionAccounts.length === 0) {
+      // Holvi (2026-10-09) authorizes with an empty account list; the session itself names the
+      // accounts, and each one's details carry the IBAN.
+      sessionAccounts = await accountsFromSession(client, session.session_id);
+    }
+    const accounts = sessionAccountsForStorage(sessionAccounts, userId, pending.id);
     if (accounts.length === 0) {
       console.warn(
-        `Bank consent ${pending.aspspName}: no account with an IBAN. accounts=${describeSessionAccounts(session.accounts ?? [])}`
+        `Bank consent ${pending.aspspName}: no account with an IBAN. accounts=${describeSessionAccounts(sessionAccounts)}`
       );
       throw new EnableBankingError(
         "Pankki ei palauttanut IBAN-tiliä. Yhdistä uudelleen ja valitse tili.",
@@ -235,6 +241,18 @@ export async function completeBankConsent(
     await prisma.bankConnection.update({ where: { id: pending.id }, data: RETIRED });
     throw error;
   }
+}
+
+/** The session's accounts read one by one: GET /sessions/{id} lists their uids, /details the rest. */
+async function accountsFromSession(client: EnableBankingClient, sessionId: string): Promise<EbSessionAccount[]> {
+  const uids = ((await client.getSession(sessionId)).accounts ?? []).filter((uid) => typeof uid === "string" && uid.trim());
+  console.warn(`Bank consent: authorize listed no accounts; the session lists ${uids.length}`);
+  const accounts: EbSessionAccount[] = [];
+  for (const uid of uids.slice(0, 20)) {
+    const details = await client.getAccountDetails(uid);
+    accounts.push({ ...details, uid: details.uid?.trim() || uid });
+  }
+  return accounts;
 }
 
 const DAY_MS = 24 * 60 * 60 * 1000;
