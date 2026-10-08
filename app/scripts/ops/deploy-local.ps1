@@ -11,8 +11,11 @@
        git worktree of prod) is checked out at the commit, gets prod's .env,
        npm ci, prisma generate and next build. A failure here leaves
        production untouched.
+       It also asks prisma migrate status whether migrations are pending; when
+       none are, backup-local.ps1 -Tag predeploy runs now, with the server up.
     3. stop the supervisor (downtime starts)
-    4. backup-local.ps1 -Tag predeploy (skipped only when prod.db does not exist yet)
+    4. with migrations pending: backup-local.ps1 -Tag predeploy, server stopped
+       (skipped only when prod.db does not exist yet)
     5. SWAP: prod is checked out at the commit; app\node_modules and app\.next
        are renamed to node_modules.prev / .next.prev and the staged ones are
        moved in (a rename on the same disk). Turbopack keeps junctions with
@@ -201,7 +204,7 @@ function Start-Supervisor {
 # Deletes a folder without following the junctions inside it (see the header).
 function Remove-Tree([string]$Path) {
   if (-not (Test-Path -LiteralPath $Path)) { return }
-  & cmd.exe /d /c "rmdir /s /q `"$Path`""
+  & cmd.exe /d /c "rmdir /s /q `"$Path`"" 2>&1 | Out-Null
   if (Test-Path -LiteralPath $Path) { throw "could not delete $Path" }
 }
 
@@ -315,6 +318,32 @@ function Restore-PredeployDb([string]$ZipPath) {
   }
 }
 
+# backup-local.ps1 -Tag predeploy; returns the zip's path ($null when there is no prod.db yet).
+function Invoke-PredeployBackup {
+  $zip = $null
+  if (Test-Path (Join-Path $Root 'data\prod.db')) {
+    # Same PS 5.1 stderr-under-Stop issue as Stop-Supervisor: scope the
+    # preference around the capture, then decide success from $LASTEXITCODE.
+    $old = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+      $out = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $OpsDir 'backup-local.ps1') -Root $Root -Tag predeploy 2>&1
+      $backupCode = $LASTEXITCODE
+    } finally {
+      $ErrorActionPreference = $old
+    }
+    foreach ($line in $out) { Log ("    " + (Format-Line $line)) }
+    if ($backupCode -ne 0) { throw "backup-local.ps1 exited with code $backupCode" }
+    $zip = Get-ChildItem -LiteralPath (Join-Path $Root 'backups') -Filter 'lashkirja-*-predeploy.zip' -File -ErrorAction SilentlyContinue |
+      Sort-Object LastWriteTime -Descending | Select-Object -First 1 | ForEach-Object { $_.FullName }
+    if (-not $zip) { Log 'WARNING: predeploy backup reported success but the zip could not be located afterward; an automatic database restore will not be possible if migrate deploy fails' }
+    else { Log "predeploy backup: $zip" }
+  } else {
+    Log 'no prod.db yet (first deploy); backup skipped, migrate deploy creates it'
+  }
+  return $zip
+}
+
 # Full rollback used after migrate deploy has run (or may have): the previous
 # release AND database. Returns $true only if every step succeeded.
 function Restore-FullPreviousVersion([string]$PrevSha, [string]$PredeployZip) {
@@ -378,6 +407,25 @@ try {
   Exec 'node' @('node_modules\prisma\build\index.js', 'generate') $StageApp
   Exec 'node' @('node_modules\next\dist\bin\next', 'build') $StageApp
   if (-not (Test-Path (Join-Path $StageApp '.next\BUILD_ID'))) { throw 'build finished without .next\BUILD_ID' }
+  # Read-only against the live database: exit 0 = up to date, anything else counts as pending.
+  $old = $ErrorActionPreference
+  $ErrorActionPreference = 'Continue'
+  try {
+    Push-Location $StageApp
+    & node 'node_modules\prisma\build\index.js' migrate status 2>&1 | Out-Null
+    $pending = ($LASTEXITCODE -ne 0)
+  } finally {
+    Pop-Location
+    $ErrorActionPreference = $old
+  }
+  Log "migrations pending: $pending"
+  $predeployZip = $null
+  if (-not $pending) {
+    # No migration: the database is never restored on a rollback, so the backup can be taken
+    # while the server still serves (2026-10-08: 37 s of a 45 s downtime was this backup).
+    $stage = 'backup-live'
+    $predeployZip = Invoke-PredeployBackup
+  }
   Log 'prepared; stopping the live server for the swap'
 
   # 3. stop
@@ -386,28 +434,11 @@ try {
   Stop-Supervisor
   $stopped = $true
 
-  # 4. backup, after the stop so nothing written before it can be lost to a restore
-  $stage = 'backup'
-  $predeployZip = $null
-  if (Test-Path (Join-Path $Root 'data\prod.db')) {
-    # Same PS 5.1 stderr-under-Stop issue as Stop-Supervisor: scope the
-    # preference around the capture, then decide success from $LASTEXITCODE.
-    $old = $ErrorActionPreference
-    $ErrorActionPreference = 'Continue'
-    try {
-      $out = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $OpsDir 'backup-local.ps1') -Root $Root -Tag predeploy 2>&1
-      $backupCode = $LASTEXITCODE
-    } finally {
-      $ErrorActionPreference = $old
-    }
-    foreach ($line in $out) { Log ("    " + (Format-Line $line)) }
-    if ($backupCode -ne 0) { throw "backup-local.ps1 exited with code $backupCode" }
-    $predeployZip = Get-ChildItem -LiteralPath (Join-Path $Root 'backups') -Filter 'lashkirja-*-predeploy.zip' -File -ErrorAction SilentlyContinue |
-      Sort-Object LastWriteTime -Descending | Select-Object -First 1 | ForEach-Object { $_.FullName }
-    if (-not $predeployZip) { Log 'WARNING: predeploy backup reported success but the zip could not be located afterward; an automatic database restore will not be possible if migrate deploy fails' }
-    else { Log "predeploy backup: $predeployZip" }
-  } else {
-    Log 'no prod.db yet (first deploy); backup skipped, migrate deploy creates it'
+  # 4. backup. With migrations pending it is taken now, server stopped, so a database restore
+  # after a failed migration loses nothing; without them it was taken while preparing.
+  if ($pending) {
+    $stage = 'backup'
+    $predeployZip = Invoke-PredeployBackup
   }
 
   # 5. swap
@@ -425,10 +456,12 @@ try {
   Start-Supervisor
   $stopped = $false
   if (-not (Test-Health $HealthTimeoutSeconds)) {
-    Log 'new build is not healthy; rolling back to the previous release and database'
     Stop-Supervisor
     $stopped = $true
-    if (Restore-FullPreviousVersion $prevSha $predeployZip) {
+    # Without a migration the database stays: the previous release reads it as it is.
+    if ($pending) { Log 'new build is not healthy; rolling back to the previous release and database'; $restored = Restore-FullPreviousVersion $prevSha $predeployZip }
+    else { Log 'new build is not healthy; rolling back to the previous release (no migration ran, database kept)'; $restored = Restore-PreviousRelease $prevSha }
+    if ($restored) {
       Start-Supervisor
       $stopped = $false
       if (Test-Health $HealthTimeoutSeconds) { Log 'rollback healthy (previous code and database)' }
@@ -442,7 +475,7 @@ try {
 } catch {
   $exitCode = 1
   Log "deploy FAILED at stage '$stage': $($_.Exception.Message)"
-  if ($stage -in @('fetch', 'prepare')) {
+  if ($stage -in @('fetch', 'prepare', 'backup-live')) {
     # The live server was never stopped.
     if ($stopped) { Start-Supervisor }
   } elseif ($stage -in @('stop', 'backup', 'swap')) {
