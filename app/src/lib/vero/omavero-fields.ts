@@ -18,6 +18,8 @@ export const OMAVERO_FIELDS = {
   307: "Verokauden vähennettävä vero",
   308: "Maksettava vero / Palautukseen oikeuttava vero (-)",
   309: "0-verokannan alainen liikevaihto",
+  313: "Tavaraostot muista EU-maista",
+  314: "Palveluostot muista EU-maista",
   318: "Vero rakentamispalvelun ja metalliromun ostoista",
 } as const;
 

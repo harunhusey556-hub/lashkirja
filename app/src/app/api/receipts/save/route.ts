@@ -14,6 +14,8 @@ import { withErrorHandler, UnauthorizedError, AppError, ValidationError } from "
 import { sanitizeText } from "@/lib/sanitizer";
 import { assertPeriodOpen } from "@/lib/period-lock";
 import { vatLinesProblem } from "@/lib/receipt-vat";
+import { PURCHASE_VAT_TREATMENTS } from "@/lib/alv";
+import { currencySchema, foreignColumns } from "@/lib/foreign-purchase-input";
 
 const vatLineSchema = z.object({
   rate: z.number().finite().min(0).max(100),
@@ -31,6 +33,9 @@ const saveSchema = z.object({
   type: z.enum(["meno", "tulo"]).default("meno"),
   reference: z.string().trim().max(40).nullish(),
   invoiceNumber: z.string().trim().max(40).nullish(),
+  currency: currencySchema.optional(),
+  originalAmount: nonnegativeMoneySchema.nullish(),
+  vatTreatment: z.enum(PURCHASE_VAT_TREATMENTS).optional(),
   forceDuplicate: z.boolean().default(false),
 }).strict();
 
@@ -119,6 +124,7 @@ export const POST = withErrorHandler(async (req: NextRequest) => {
           // never marks the user's own fields as uncertain (V11).
           confidence: upload.extractionSource === "manual" ? null : upload.confidence,
           rawText: upload.rawText,
+          ...foreignColumns(body, upload.extractedJson),
         },
       });
     });
@@ -160,12 +166,13 @@ export const POST = withErrorHandler(async (req: NextRequest) => {
     ]);
     const match = matchViews.get(receipt.id);
 
-    const { totalAmountCents: _tac, rawText: _rawText, filePath: _filePath, userId: _userId, ...safe } = receipt;
+    const { totalAmountCents: _tac, originalAmountCents, rawText: _rawText, filePath: _filePath, userId: _userId, ...safe } = receipt;
     return noStoreJson({
       ok: true,
       receipt: {
         ...safe,
         totalAmount,
+        originalAmount: originalAmountCents == null ? null : centsToEuros(originalAmountCents),
         linkedTransaction: match?.linkedTransaction
           ? {
               ...match.linkedTransaction,

@@ -4,7 +4,7 @@ import { GET as listMessages, PATCH as decideChat } from "@/app/api/ai/chat/rout
 import { prisma } from "@/lib/db";
 import { ReceiptExtractionError, type ExtractedReceipt } from "@/lib/ai";
 import { setChatReceiptExtractorForTests } from "@/lib/chat-receipt";
-import { resetRateLimitsForTests } from "@/lib/rate-limit";
+import { RECEIPT_UPLOADS_PER_WINDOW, resetRateLimitsForTests } from "@/lib/rate-limit";
 import { createStatementWithTransactions, createUser, resetDatabase, type TestUser } from "./helpers/factories";
 import { buildFormRequest, buildRequest, readJson, sessionCookie } from "./helpers/http";
 
@@ -219,7 +219,7 @@ describe("POST /api/ai/chat/receipt", () => {
 
   it("rate limits the paid extraction", async () => {
     let status = 200;
-    for (let index = 0; index < 40 && status !== 429; index += 1) {
+    for (let index = 0; index <= RECEIPT_UPLOADS_PER_WINDOW && status !== 429; index += 1) {
       status = (await send(null)).response.status;
     }
     expect(status).toBe(429);

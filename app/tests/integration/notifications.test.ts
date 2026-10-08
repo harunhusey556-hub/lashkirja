@@ -95,8 +95,11 @@ describe("GET /api/notifications", () => {
     await expenseRows(other.id, "2026-09", [-777]);
 
     const body = await fetchFeed();
-    expect(body.items).toHaveLength(1);
-    const item = body.items[0];
+    // Only the missing-receipt items: a month-close reminder joins them once the
+    // calendar has passed September, which depends on the day the test runs.
+    const missing = body.items.filter((entry: { kind: string }) => entry.kind === "missing_receipt");
+    expect(missing).toHaveLength(1);
+    const item = missing[0];
     expect(item).toMatchObject({
       id: `missing-receipt:${row.id}`,
       kind: "missing_receipt",

@@ -82,6 +82,8 @@ import { IS_MOBILE_BUILD } from "@/lib/build-target";
 import { useConnectivity } from "@/lib/connectivity";
 import { useOfflineReceiptQueue } from "@/components/useOfflineReceiptQueue";
 import { tintedButtonClass } from "@/components/control-styles";
+import { isPurchaseVatTreatment, PURCHASE_VAT_TREATMENTS, type PurchaseVatTreatment } from "@/lib/alv";
+import { foreignFieldsFromExtraction, VAT_TREATMENT_HINTS, VAT_TREATMENT_LABELS } from "@/lib/foreign-purchase";
 
 /** The fields the receipt form shows an error under (the VAT rows are `vat-<n>`). */
 const RECEIPT_FORM_SLOTS = ["vendor", "date", "totalAmount", "category", "reference", "invoiceNumber", "notes"];
@@ -108,6 +110,9 @@ interface ReceiptForm {
   vatDetails: VatRow[];
   reference: string;
   invoiceNumber: string;
+  currency: string;
+  originalAmount: string;
+  vatTreatment: PurchaseVatTreatment;
 }
 
 const emptyForm: ReceiptForm = {
@@ -122,6 +127,9 @@ const emptyForm: ReceiptForm = {
   vatDetails: [],
   reference: "",
   invoiceNumber: "",
+  currency: "EUR",
+  originalAmount: "",
+  vatTreatment: "domestic",
 };
 
 interface ExtractedMeta {
@@ -154,6 +162,9 @@ interface ReceiptResponse {
     type?: string | null;
     reference?: string | null;
     invoiceNumber?: string | null;
+    currency?: string | null;
+    originalAmount?: number | null;
+    vatTreatment?: string | null;
     updatedAt?: string;
     linkedTransaction?: LinkedBankTx | null;
     match?: ReceiptMatchData;
@@ -260,6 +271,15 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
       ),
       reference: upload.extracted.reference || "",
       invoiceNumber: upload.extracted.invoiceNumber || "",
+      ...foreignFieldsFromExtraction({
+        currency: upload.extracted.currency,
+        sellerCountry: upload.extracted.sellerCountry,
+        category: upload.extracted.category,
+        notes: upload.extracted.notes,
+        type: upload.extracted.type || "meno",
+        vatDetails: (upload.extracted.vatDetails ?? []).map((detail) => ({ rate: detail.rate ?? 0, amount: detail.amount ?? 0 })),
+      }),
+      originalAmount: "",
     });
     setUseCustomCategory(!knownCategory && Boolean(upload.extracted.category));
     setFormReady(true);
@@ -444,6 +464,9 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
       vatDetails,
       reference: r.reference || "",
       invoiceNumber: r.invoiceNumber || "",
+      currency: r.currency || "EUR",
+      originalAmount: moneyField(r.originalAmount ?? null),
+      vatTreatment: isPurchaseVatTreatment(r.vatTreatment) ? r.vatTreatment : "domestic",
     };
     setFormData(loaded);
     setBaseline(loaded);
@@ -696,6 +719,9 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
         type: formData.type,
         reference: formData.reference || null,
         invoiceNumber: formData.invoiceNumber || null,
+        currency: /^[A-Za-z]{3}$/.test(formData.currency.trim()) ? formData.currency.trim().toUpperCase() : "EUR",
+        originalAmount: formData.currency.trim().toUpperCase() === "EUR" ? null : parseReceiptAmount(formData.originalAmount),
+        vatTreatment: formData.type === "tulo" ? "domestic" : formData.vatTreatment,
       };
 
       const res = isEdit
@@ -1200,6 +1226,63 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
 
               <Section title="ALV-erittely">
                 <div className="space-y-3 px-4 py-4">
+                  {formData.type === "meno" && (
+                    <div className="field-grid">
+                      <div>
+                        <label htmlFor="receipt-vat-treatment" className={LABEL_CLASS}>
+                          ALV-käsittely
+                        </label>
+                        <select
+                          id="receipt-vat-treatment"
+                          value={formData.vatTreatment}
+                          onChange={(e) =>
+                            setFormData({ ...formData, vatTreatment: e.target.value as PurchaseVatTreatment })
+                          }
+                          className={controlClass}
+                        >
+                          {PURCHASE_VAT_TREATMENTS.map((treatment) => (
+                            <option key={treatment} value={treatment}>
+                              {VAT_TREATMENT_LABELS[treatment]}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      <div>
+                        <label htmlFor="receipt-currency" className={LABEL_CLASS}>
+                          Valuutta
+                        </label>
+                        <input
+                          id="receipt-currency"
+                          type="text"
+                          value={formData.currency}
+                          maxLength={3}
+                          autoCapitalize="characters"
+                          onChange={(e) => setFormData({ ...formData, currency: e.target.value.toUpperCase() })}
+                          className={controlClass}
+                        />
+                      </div>
+                      {formData.currency.trim().toUpperCase() !== "EUR" && (
+                        <div>
+                          <label htmlFor="receipt-original-amount" className={LABEL_CLASS}>
+                            {`Summa (${formData.currency.trim().toUpperCase() || "valuutta"})`}
+                          </label>
+                          <input
+                            id="receipt-original-amount"
+                            type="text"
+                            inputMode="decimal"
+                            value={formData.originalAmount}
+                            onChange={(e) => setFormData({ ...formData, originalAmount: e.target.value })}
+                            className={controlClass}
+                          />
+                        </div>
+                      )}
+                    </div>
+                  )}
+                  {formData.type === "meno" && formData.vatTreatment !== "domestic" && (
+                    <p className="text-caption text-ink-2" data-testid="vat-treatment-hint">
+                      {VAT_TREATMENT_HINTS[formData.vatTreatment]}
+                    </p>
+                  )}
                   {formData.vatDetails.length === 0 && (
                     <p className="text-body text-ink-2" data-testid="vat-empty">
                       Ei ALV-erittelyä. Lisää rivi, jos kuitilla on ALV.

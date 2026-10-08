@@ -15,6 +15,7 @@ import { assertPeriodOpen } from "./period-lock";
 import { parseVatDetails } from "./alv";
 import { sameVatLines, vatLinesProblem } from "./receipt-vat";
 import { versionConflict } from "./edit-conflict";
+import type { PurchaseVatTreatment } from "./alv";
 
 export interface ReceiptPatch {
   vendor?: string | null;
@@ -26,6 +27,9 @@ export interface ReceiptPatch {
   type?: "meno" | "tulo";
   reference?: string | null;
   invoiceNumber?: string | null;
+  currency?: string;
+  originalAmount?: number | null;
+  vatTreatment?: PurchaseVatTreatment;
 }
 
 export const UPDATED_RECEIPT_SELECT = {
@@ -39,6 +43,9 @@ export const UPDATED_RECEIPT_SELECT = {
   type: true,
   reference: true,
   invoiceNumber: true,
+  currency: true,
+  originalAmountCents: true,
+  vatTreatment: true,
   fileName: true,
   source: true,
   confidence: true,
@@ -92,6 +99,11 @@ async function applyIn(tx: Db, userId: string, id: string, body: ReceiptPatch, e
       ...(body.type !== undefined ? { type: body.type } : {}),
       ...(body.reference !== undefined ? { reference: sanitizeText(body.reference) } : {}),
       ...(body.invoiceNumber !== undefined ? { invoiceNumber: sanitizeText(body.invoiceNumber) } : {}),
+      ...(body.currency !== undefined ? { currency: body.currency } : {}),
+      ...(body.originalAmount !== undefined
+        ? { originalAmountCents: body.originalAmount == null ? null : eurosToCents(body.originalAmount) }
+        : {}),
+      ...(body.vatTreatment !== undefined ? { vatTreatment: body.vatTreatment } : {}),
     },
   });
   if (won.count === 0) {
@@ -114,6 +126,20 @@ async function applyIn(tx: Db, userId: string, id: string, body: ReceiptPatch, e
         },
       });
     }
+  }
+  // The VAT treatment moves a purchase between fields of the VAT return: kept like a category change.
+  if (body.vatTreatment !== undefined && body.vatTreatment !== owned.vatTreatment) {
+    await tx.automationEvent.create({
+      data: {
+        userId,
+        kind: "vat_treatment",
+        resourceType: "receipt",
+        resourceId: id,
+        previousValue: owned.vatTreatment,
+        newValue: body.vatTreatment,
+        reason: "käyttäjän korjaus",
+      },
+    });
   }
   const receipt = await tx.receipt.findFirst({ where: { id }, select: UPDATED_RECEIPT_SELECT });
   if (!receipt) throw new NotFoundError("Kuittia ei löytynyt");

@@ -52,6 +52,8 @@ import { useCachedResource } from "@/components/useCachedResource";
 import { useCacheAfterBoot } from "@/components/invoices/useCacheAfterBoot";
 import { PURCHASE_COUNTS_KEY } from "@/lib/cached-resource";
 import { tintedButtonClass } from "@/components/control-styles";
+import { PURCHASE_VAT_TREATMENTS, type PurchaseVatTreatment } from "@/lib/alv";
+import { VAT_TREATMENT_HINTS, VAT_TREATMENT_LABELS } from "@/lib/foreign-purchase";
 
 interface PurchaseInvoice {
   id: string;
@@ -181,6 +183,7 @@ export default function PurchaseInvoicesPage() {
     gross: "",
     vat: "",
     category: "",
+    vatTreatment: "domestic" as PurchaseVatTreatment,
   });
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
   const [createError, setCreateError] = useState("");
@@ -275,6 +278,7 @@ export default function PurchaseInvoicesPage() {
       gross: gross as number,
       vat: vat as number,
       category: form.category.trim() || null,
+      vatTreatment: form.vatTreatment,
     };
   }
 
@@ -303,6 +307,7 @@ export default function PurchaseInvoicesPage() {
         gross: "",
         vat: "",
         category: "",
+        vatTreatment: "domestic",
       });
       setFormErrors({});
       await Promise.all([load(), reloadCounts()]);
@@ -664,6 +669,24 @@ export default function PurchaseInvoicesPage() {
                   <p id="pi-vat-error" className="mt-1.5 text-sm text-danger" role="alert">
                     {formErrors.vat}
                   </p>
+                )}
+              </div>
+              <div>
+                <label className={label} htmlFor="pi-vat-treatment">ALV-käsittely</label>
+                <select
+                  id="pi-vat-treatment"
+                  className={field}
+                  value={form.vatTreatment}
+                  onChange={(e) => setForm({ ...form, vatTreatment: e.target.value as PurchaseVatTreatment })}
+                >
+                  {PURCHASE_VAT_TREATMENTS.map((treatment) => (
+                    <option key={treatment} value={treatment}>
+                      {VAT_TREATMENT_LABELS[treatment]}
+                    </option>
+                  ))}
+                </select>
+                {form.vatTreatment !== "domestic" && (
+                  <p className="mt-1.5 text-caption text-ink-2">{VAT_TREATMENT_HINTS[form.vatTreatment]}</p>
                 )}
               </div>
             </div>

@@ -210,3 +210,37 @@ describe("M1-5: the accountant package lists the purchase invoices behind field 
     expect(files.get("lue-minut.txt")!.toString("utf8")).toContain("ostolaskut.csv");
   });
 });
+
+describe("foreign purchases in the VAT return", () => {
+  it("a reverse-charge purchase invoice without VAT of its own self-assesses 306 and deducts it", async () => {
+    await purchase({ supplierName: "Shopify International Limited", grossCents: 30_542, vatCents: 0, netCents: 30_542, vatTreatment: "eu_service" });
+    const report = await alvOf();
+    expect(report.field306.amount).toBeCloseTo(77.88, 2);
+    expect(report.field314.amount).toBeCloseTo(305.42, 2);
+    expect(report.field307.amount).toBeCloseTo(77.88, 2);
+    expect(report.field308.amount).toBe(0);
+  });
+
+  it("a non-EU service receipt without VAT lines is counted, not flagged as missing a breakdown", async () => {
+    const receipt = await createReceipt(user.id, { date: `${PERIOD}-12`, totalAmountCents: 906, vatDetails: null, reviewStatus: "approved", vendor: "OpenCode" });
+    await prisma.receipt.update({ where: { id: receipt.id }, data: { vatTreatment: "non_eu_service", currency: "USD" } });
+    const report = await alvOf();
+    expect(report.field301.vat).toBeCloseTo(2.31, 2);
+    expect(report.field307.amount).toBeCloseTo(2.31, 2);
+    expect(report.review.count).toBe(0);
+  });
+
+  it("Finnish VAT a foreign seller charged is paid but not deducted", async () => {
+    const receipt = await createReceipt(user.id, {
+      date: `${PERIOD}-12`,
+      totalAmountCents: 22_590,
+      vatDetails: '[{"rate":25.5,"amount":45.9}]',
+      reviewStatus: "approved",
+      vendor: "Anthropic Ireland, Limited",
+    });
+    await prisma.receipt.update({ where: { id: receipt.id }, data: { vatTreatment: "foreign_vat_charged" } });
+    const report = await alvOf();
+    expect(report.field307.amount).toBe(0);
+    expect(report.sources.foreignVatNotDeducted).toBeCloseTo(45.9, 2);
+  });
+});

@@ -13,6 +13,7 @@ import * as os from "os";
 import { createHash } from "crypto";
 import { withTrackedJob } from "./job-tracker";
 import { ARCHIVED_NOTE, isMarketingMail, isTooSmallToBeABill, looksLikeBill } from "./mail-classify";
+import { foreignFieldsFromExtraction } from "./foreign-purchase";
 // We only process attachments that are likely to be receipts.
 const VALID_EXTENSIONS = [".pdf", ".jpg", ".jpeg", ".png", ".heic"];
 
@@ -75,6 +76,35 @@ function isBodyOnlyReceipt(envelope: { subject?: string } | null | undefined): b
 }
 
 /** The mailboxes a background run may read: a closed account's mailbox is never polled again (F57). */
+/** Letters and digits only, upper case: "8JOO0FMM-0001" and "8JOO0FMM0001" are one number. */
+export function invoiceNumberKey(value: string | null | undefined): string {
+  return (value ?? "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+}
+
+/**
+ * A receipt the owner already has for the same invoice: same invoice number
+ * and, when both are known, the same total. Rejected receipts do not count.
+ */
+export async function findSameInvoiceReceipt(
+  userId: string,
+  extraction: { invoiceNumber: string | null; totalAmount: number | null }
+): Promise<{ id: string; invoiceNumber: string | null; vendor: string | null } | null> {
+  const key = invoiceNumberKey(extraction.invoiceNumber);
+  if (key.length < 4) return null;
+  const candidates = await prisma.receipt.findMany({
+    where: { userId, invoiceNumber: { not: null }, reviewStatus: { not: "rejected" } },
+    select: { id: true, invoiceNumber: true, vendor: true, totalAmountCents: true },
+  });
+  const totalCents = extraction.totalAmount == null ? null : Math.round(extraction.totalAmount * 100);
+  return (
+    candidates.find(
+      (receipt) =>
+        invoiceNumberKey(receipt.invoiceNumber) === key &&
+        (totalCents == null || receipt.totalAmountCents == null || receipt.totalAmountCents === totalCents)
+    ) ?? null
+  );
+}
+
 export async function listSyncableImapAccounts() {
   return prisma.imapAccount.findMany({ where: { user: { accessDisabledAt: null } } });
 }
@@ -210,7 +240,12 @@ async function syncImapAccountUntracked(accountId: string) {
           try {
             // 1) Run extraction
             const extraction = await extractReceipt(tempPath, mimeType, profileContext, vendorPriors);
-            const isBill = looksLikeBill(extraction);
+            // An invoice often arrives with its payment receipt in the same email (Anthropic,
+            // Stripe sellers): one purchase, two PDFs. The second is kept, but never counted.
+            const sameInvoice = looksLikeBill(extraction)
+              ? await findSameInvoiceReceipt(account.userId, extraction)
+              : null;
+            const isBill = looksLikeBill(extraction) && !sameInvoice;
             
             const { storageKey, absolutePath } = await writePrivateUpload(
               account.userId,
@@ -249,9 +284,11 @@ async function syncImapAccountUntracked(accountId: string) {
                 totalAmountCents: extraction.totalAmount ? Math.round(extraction.totalAmount * 100) : null,
                 vatDetails: extraction.vatDetails.length ? JSON.stringify(extraction.vatDetails) : null,
                 category: extraction.category,
-                notes: isBill
-                  ? extraction.notes || `Haettu sähköpostista (${account.email})`
-                  : `${ARCHIVED_NOTE} Haettu sähköpostista (${account.email})`,
+                notes: sameInvoice
+                  ? `Kaksoiskappale: sama osto kuin lasku ${sameInvoice.invoiceNumber} (${sameInvoice.vendor ?? "sama myyjä"}). Ei kirjata toiseen kertaan.`
+                  : isBill
+                    ? extraction.notes || `Haettu sähköpostista (${account.email})`
+                    : `${ARCHIVED_NOTE} Haettu sähköpostista (${account.email})`,
                 reference: extraction.reference,
                 invoiceNumber: extraction.invoiceNumber,
                 type: extraction.type,
@@ -261,6 +298,7 @@ async function syncImapAccountUntracked(accountId: string) {
                 reviewStatus: isBill ? "pending" : "rejected",
                 confidence: extraction.confidence,
                 rawText: extraction.rawText,
+                ...foreignFieldsFromExtraction(extraction),
               }
             });
             if (isBill) processedCount++;

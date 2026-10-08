@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
+  bankEuroAmount,
   scorePair,
   computeSuggestions,
   candidatesFor,
@@ -262,5 +263,23 @@ describe("sourceDraftPairs", () => {
     expect(isSourceDraft(drafts[0])).toBe(true);
     expect(isSourceDraft(drafts[2])).toBe(false);
     expect(isSourceDraft({ source: "auto_income", sourceTransactionId: null })).toBe(false);
+  });
+});
+
+describe("bankEuroAmount", () => {
+  it("leaves a euro receipt alone", () => {
+    expect(bankEuroAmount({ currency: "EUR", totalAmountCents: 1000, originalAmountCents: null, vatDetails: null }, -950)).toEqual({});
+  });
+
+  it("books a foreign receipt at the bank's euros and keeps the original", () => {
+    expect(
+      bankEuroAmount({ currency: "USD", totalAmountCents: 1000, originalAmountCents: null, vatDetails: '[{"rate":0,"amount":0}]' }, -906)
+    ).toEqual({ totalAmountCents: 906, originalAmountCents: 1000, vatDetails: '[{"rate":0,"amount":0}]' });
+  });
+
+  it("scales VAT lines and does not overwrite a known original amount", () => {
+    expect(
+      bankEuroAmount({ currency: "USD", totalAmountCents: 20000, originalAmountCents: 23500, vatDetails: '[{"rate":25.5,"amount":40}]' }, -18000)
+    ).toEqual({ totalAmountCents: 18000, vatDetails: '[{"rate":25.5,"amount":36}]' });
   });
 });

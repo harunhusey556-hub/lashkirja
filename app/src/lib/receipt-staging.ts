@@ -10,6 +10,7 @@ import { prisma } from "./db";
 import type { ExtractedReceipt } from "./ai";
 import { removeUserUpload } from "./storage";
 import { UNREADABLE_RECEIPT_NOTE } from "./receipt-unreadable";
+import { foreignFieldsFromExtraction } from "./foreign-purchase";
 
 export const STAGING_TTL_MS = 24 * 60 * 60 * 1000;
 /** How long an inbox-claimed upload's file is kept after it becomes a receipt. */
@@ -121,6 +122,8 @@ type PendingReceiptFields = Pick<
   | "type"
   | "confidence"
   | "rawText"
+  | "currency"
+  | "vatTreatment"
 >;
 
 /** Same field mapping mail-sync.ts uses for an email-imported receipt
@@ -143,6 +146,7 @@ export function receiptFieldsFromExtraction(
     type: extracted.type,
     confidence: extracted.confidence,
     rawText: extracted.rawText,
+    ...foreignFieldsFromExtraction(extracted),
   };
 }
 

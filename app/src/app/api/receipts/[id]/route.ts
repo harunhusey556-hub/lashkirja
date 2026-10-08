@@ -17,6 +17,8 @@ import { withErrorHandler, UnauthorizedError } from "@/lib/api-errors";
 import { assertPeriodOpen } from "@/lib/period-lock";
 import { expectedUpdatedAtDate } from "@/lib/edit-conflict";
 import { applyReceiptPatch } from "@/lib/receipt-update";
+import { PURCHASE_VAT_TREATMENTS } from "@/lib/alv";
+import { currencySchema } from "@/lib/foreign-purchase-input";
 const patchSchema = z.object({
   vendor: z.string().trim().max(300).nullish(),
   date: isoDateSchema.nullish(),
@@ -30,6 +32,9 @@ const patchSchema = z.object({
   type: z.enum(["meno", "tulo"]).optional(),
   reference: z.string().trim().max(40).nullish(),
   invoiceNumber: z.string().trim().max(40).nullish(),
+  currency: currencySchema.optional(),
+  originalAmount: nonnegativeMoneySchema.nullish(),
+  vatTreatment: z.enum(PURCHASE_VAT_TREATMENTS).optional(),
   expectedUpdatedAt: z.string().max(40).optional(),
 }).strict();
 
@@ -59,6 +64,9 @@ export const GET = withErrorHandler(async (
       type: true,
       reference: true,
       invoiceNumber: true,
+      currency: true,
+      originalAmountCents: true,
+      vatTreatment: true,
       fileName: true,
       source: true,
       confidence: true,
@@ -80,8 +88,9 @@ export const GET = withErrorHandler(async (
   });
   if (!receipt) return noStoreJson({ error: "Kuittia ei löytynyt" }, { status: 404 });
 
-  const { totalAmountCents, linkedTransaction, ...safe } = receipt;
+  const { totalAmountCents, originalAmountCents, linkedTransaction, ...safe } = receipt;
   const totalAmount = totalAmountCents == null ? null : centsToEuros(totalAmountCents);
+  const originalAmount = originalAmountCents == null ? null : centsToEuros(originalAmountCents);
   const matchViews = await buildReceiptMatchViews(session.userId!, [
     {
       id: receipt.id,
@@ -100,6 +109,7 @@ export const GET = withErrorHandler(async (
     receipt: {
       ...safe,
       totalAmount,
+      originalAmount,
       linkedTransaction: match?.linkedTransaction
         ? {
             id: match.linkedTransaction.id,
@@ -162,10 +172,14 @@ export const PATCH = withErrorHandler(async (
   await runMatching(session.userId!).catch((error) =>
     console.error("Matching after receipt edit failed:", error)
   );
-  const { totalAmountCents, ...safe } = receipt;
+  const { totalAmountCents, originalAmountCents, ...safe } = receipt;
   return noStoreJson({
     ok: true,
-    receipt: { ...safe, totalAmount: totalAmountCents == null ? null : centsToEuros(totalAmountCents) },
+    receipt: {
+      ...safe,
+      totalAmount: totalAmountCents == null ? null : centsToEuros(totalAmountCents),
+      originalAmount: originalAmountCents == null ? null : centsToEuros(originalAmountCents),
+    },
   });
 });
 

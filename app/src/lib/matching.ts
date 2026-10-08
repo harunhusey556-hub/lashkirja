@@ -27,6 +27,7 @@ import {
 
 export { nameSimilarity, normalizeRef } from "./match-gate";
 import { assertPeriodOpen, PeriodLockedError } from "./period-lock";
+import { parseVatDetails } from "./alv";
 
 /**
  * Bank-transaction ↔ receipt matcher.
@@ -581,24 +582,26 @@ export async function confirmMatch(
   fromSuggestion = false,
   db: MatchWriter = prisma
 ): Promise<void> {
-  const [tx, receipt] = await Promise.all([
-    db.transaction.findFirst({
-      where: { id: transactionId, statement: { userId } },
-    }),
-    db.receipt.findFirst({
-      where: { id: receiptId, userId },
-      include: { linkedTransaction: { select: { id: true } } },
-    }),
-  ]);
-  if (!tx || !receipt) throw new MatchNotFoundError();
-  if (receipt.linkedTransaction && receipt.linkedTransaction.id !== tx.id) {
-    throw new MatchConflictError("Kuitti on jo kohdistettu toiseen tapahtumaan");
-  }
-  // Confirming approves a waiting receipt, which moves its month's VAT return
-  // and report exactly as approving it from the review queue does.
-  if (receipt.reviewStatus !== "approved") await assertPeriodOpen(userId, [receipt.date], db);
+  // Read, check and write in one transaction: a period closed (or a receipt
+  // linked elsewhere) between the check and the write cannot slip through.
+  const run = async (client: MatchWriter) => {
+    const [tx, receipt] = await Promise.all([
+      client.transaction.findFirst({
+        where: { id: transactionId, statement: { userId } },
+      }),
+      client.receipt.findFirst({
+        where: { id: receiptId, userId },
+        include: { linkedTransaction: { select: { id: true } } },
+      }),
+    ]);
+    if (!tx || !receipt) throw new MatchNotFoundError();
+    if (receipt.linkedTransaction && receipt.linkedTransaction.id !== tx.id) {
+      throw new MatchConflictError("Kuitti on jo kohdistettu toiseen tapahtumaan");
+    }
+    // Confirming approves a waiting receipt, which moves its month's VAT return
+    // and report exactly as approving it from the review queue does.
+    if (receipt.reviewStatus !== "approved") await assertPeriodOpen(userId, [receipt.date], client);
 
-  const write = async (client: MatchWriter) => {
     await client.automationEvent.create({
       data: {
         userId,
@@ -636,17 +639,40 @@ export async function confirmMatch(
     });
     await client.receipt.update({
       where: { id: receiptId },
-      data: { reviewStatus: "approved" },
+      data: { reviewStatus: "approved", ...bankEuroAmount(receipt, tx.amountCents) },
     });
   };
 
   if (db === prisma) {
     await prisma.$transaction(async (txClient) => {
-      await write(txClient);
+      await run(txClient);
     });
     return;
   }
-  await write(db);
+  await run(db);
+}
+
+/**
+ * A receipt in another currency is booked at what the bank actually charged in
+ * euros: the original amount stays in `originalAmountCents`, VAT lines follow
+ * the new total. Nothing changes for a euro receipt.
+ */
+export function bankEuroAmount(
+  receipt: { currency: string; totalAmountCents: number | null; originalAmountCents: number | null; vatDetails: string | null },
+  bankAmountCents: number
+): { totalAmountCents?: number; originalAmountCents?: number; vatDetails?: string } {
+  if (receipt.currency === "EUR") return {};
+  const euros = Math.abs(bankAmountCents);
+  const previous = receipt.totalAmountCents;
+  const out: { totalAmountCents: number; originalAmountCents?: number; vatDetails?: string } = { totalAmountCents: euros };
+  if (receipt.originalAmountCents == null && previous != null) out.originalAmountCents = previous;
+  const lines = parseVatDetails(receipt.vatDetails);
+  if (lines && previous && previous > 0) {
+    out.vatDetails = JSON.stringify(
+      lines.map((line) => ({ rate: line.rate, amount: Math.round((line.amountCents * euros) / previous) / 100 }))
+    );
+  }
+  return out;
 }
 
 export class MatchNotFoundError extends Error {

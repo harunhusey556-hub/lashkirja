@@ -24,6 +24,7 @@ import { buildAging, displayStatus, openPosition, overdueBefore, type AgingRepor
 import { assertPeriodOpen, PeriodLockedError } from "./period-lock";
 import { planPairs } from "./match-gate";
 import { rejectedPurchasePairs } from "./purchase-bank-match";
+import { isPurchaseVatTreatment, type PurchaseVatTreatment } from "./alv";
 
 export type PurchaseStatus = "open" | "paid" | "cancelled";
 
@@ -40,6 +41,11 @@ export interface PurchaseInvoiceInput {
   category?: string | null;
   notes?: string | null;
   receiptId?: string | null;
+  /** ISO 4217 of the invoice; gross and VAT stay in euros. */
+  currency?: string;
+  /** The amount in `currency` when it is not EUR. */
+  originalAmount?: number | null;
+  vatTreatment?: PurchaseVatTreatment;
   /** Set by a recurring purchase run (lib/recurring-purchases.ts), never by a client. */
   recurringPurchaseId?: string | null;
 }
@@ -63,6 +69,9 @@ export interface PublicPurchaseInvoice {
   closedReason: string | null;
   category: string | null;
   notes: string | null;
+  currency: string;
+  originalAmount: number | null;
+  vatTreatment: PurchaseVatTreatment;
   paidAt: string | null;
   receiptId: string | null;
   /** The recurring template that created this invoice ("Toistuva"), if any. */
@@ -101,6 +110,9 @@ type PurchaseRow = {
   netCents: number;
   category: string | null;
   notes: string | null;
+  currency: string;
+  originalAmountCents: number | null;
+  vatTreatment: string;
   paidAt: Date | null;
   closedReason: string | null;
   receiptId: string | null;
@@ -171,6 +183,9 @@ export function toPublicPurchaseInvoice(
     closedReason: invoice.closedReason,
     category: invoice.category,
     notes: invoice.notes,
+    currency: invoice.currency,
+    originalAmount: invoice.originalAmountCents == null ? null : centsToEuros(invoice.originalAmountCents),
+    vatTreatment: isPurchaseVatTreatment(invoice.vatTreatment) ? invoice.vatTreatment : "domestic",
     paidAt: invoice.paidAt ? invoice.paidAt.toISOString() : null,
     receiptId: invoice.receiptId,
     recurringPurchaseId: invoice.recurringPurchaseId,
@@ -310,6 +325,9 @@ export async function createPurchaseInvoice(
       notes: input.notes?.trim() || null,
       receiptId: input.receiptId ?? null,
       recurringPurchaseId: input.recurringPurchaseId ?? null,
+      currency: input.currency ?? "EUR",
+      originalAmountCents: input.originalAmount == null ? null : eurosToCents(input.originalAmount),
+      vatTreatment: input.vatTreatment ?? "domestic",
     },
     include: purchaseInclude,
   });
@@ -355,6 +373,11 @@ export async function updatePurchaseInvoice(
   if (input.reference !== undefined) data.reference = prepareReference(input.reference);
   if (input.category !== undefined) data.category = input.category?.trim() || null;
   if (input.notes !== undefined) data.notes = input.notes?.trim() || null;
+  if (input.currency !== undefined) data.currency = input.currency;
+  if (input.originalAmount !== undefined) {
+    data.originalAmountCents = input.originalAmount == null ? null : eurosToCents(input.originalAmount);
+  }
+  if (input.vatTreatment !== undefined) data.vatTreatment = input.vatTreatment;
 
   const issueDate = input.issueDate ? isoDateToUtc(input.issueDate) : existing.issueDate;
   if (input.issueDate) data.issueDate = issueDate;

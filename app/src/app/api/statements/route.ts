@@ -105,17 +105,13 @@ export async function POST(req: NextRequest) {
     checksum = fileChecksum;
     const duplicate = await prisma.statement.findFirst({
       where: { userId, checksum: fileChecksum },
-      select: { id: true, fileName: true },
+      select: { id: true },
     });
-    if (duplicate) {
-      return NextResponse.json(
-        {
-          error: `Tämä tiliote on jo tuotu aiemmin (${duplicate.fileName}).`,
-          statementId: duplicate.id,
-        },
-        { status: 409 }
-      );
-    }
+    // A file seen before is not refused outright: rows held back from a month
+    // that was closed then may be importable now. The row identities below
+    // decide; a file with nothing new still gets the "already imported" 409.
+    // The repeat needs its own checksum, as Statement.checksum is unique.
+    const statementChecksum = duplicate ? `${fileChecksum}:again:${Date.now().toString(36)}` : fileChecksum;
 
     const written = await writePrivateUpload(userId, detected.extension, buffer);
     storageKey = written.storageKey;
@@ -192,7 +188,7 @@ export async function POST(req: NextRequest) {
           fileName: file.name,
           fileType,
           filePath: storageKey!,
-          checksum: fileChecksum,
+          checksum: statementChecksum,
           periodMonth: provisionalMonth,
           periodSource: "auto",
         },
@@ -245,7 +241,7 @@ export async function POST(req: NextRequest) {
               fileName: file.name,
               fileType,
               filePath: storageKey!,
-              checksum: `${fileChecksum}:${month}`,
+              checksum: `${statementChecksum}:${month}`,
               periodMonth: month,
               periodSource: "auto",
             },
