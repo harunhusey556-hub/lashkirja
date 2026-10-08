@@ -14,6 +14,8 @@ import { writeEvents, type LoggedEvent } from "@/lib/event-log";
 const text = (max: number) => z.string().max(max).optional();
 
 const eventSchema = z.object({
+  /** Unique per event on the phone: a batch sent again after a crash repeats it. */
+  id: text(40),
   ts: z.string().max(40),
   kind: z.string().min(1).max(40),
   name: text(200),
@@ -48,7 +50,8 @@ export async function POST(req: NextRequest) {
   if (!parsed.success) return noStoreJson({ error: "Virheellinen pyyntö" }, { status: 400 });
   const { sessionId, app, events } = parsed.data;
 
-  const rows: LoggedEvent[] = events.map(({ ts, ...event }) => ({
+  const rows: LoggedEvent[] = events.map(({ ts, id, ...event }) => ({
+    eventId: id,
     source: "ios",
     clientTs: ts,
     userId: session.userId,

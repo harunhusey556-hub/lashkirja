@@ -23,6 +23,7 @@ struct LashKirjaApp: App {
         AppNotifications.shared.activate(app: app)
         // MetricKit hands over the previous run's crash and hang reports shortly after launch.
         DiagnosticsObserver.shared.start(reporter: app.observer)
+        HangWatchdog.shared.start()
         // A quick action that launched the app is already waiting in QuickActions.
         QuickActions.attach { url in app.handle(url: url) }
     }
@@ -41,12 +42,14 @@ struct LashKirjaApp: App {
                 }
                 .onChange(of: scenePhase) { _, phase in
                     if phase == .active {
+                        HangWatchdog.shared.start()
                         Task {
                             await app.foreground()
                             await AppNotifications.shared.appBecameActive()
                         }
                     }
                     if phase == .background {
+                        HangWatchdog.shared.pause()
                         app.background()
                         AppLock.shared.lockIfEnabled()
                         AppNotifications.shared.scheduleBackgroundRefresh()

@@ -3,6 +3,8 @@ import Foundation
 /// One line of the app's debugging trail: a screen, a request or a problem report.
 /// Ids and actions only — never amounts, names, bodies or tokens (server `lib/event-log.ts`).
 public struct AppEvent: Codable, Equatable, Sendable {
+    /// Unique per event: a batch sent again after a crash is told apart from new events.
+    public let id: String
     public let ts: String
     public let kind: String
     public var name: String?
@@ -17,6 +19,7 @@ public struct AppEvent: Codable, Equatable, Sendable {
     public init(kind: String, at date: Date = Date(), name: String? = nil, screen: String? = nil,
                 method: String? = nil, path: String? = nil, status: Int? = nil, durationMs: Int? = nil,
                 requestId: String? = nil, message: String? = nil) {
+        self.id = String(UUID().uuidString.prefix(12)).lowercased()
         self.ts = date.formatted(.iso8601)
         self.kind = kind
         self.name = name
@@ -29,8 +32,33 @@ public struct AppEvent: Codable, Equatable, Sendable {
         self.message = message.map { String($0.prefix(1000)) }
     }
 
+    private enum CodingKeys: String, CodingKey {
+        case id, ts, kind, name, screen, method, path, status, durationMs, requestId, message
+    }
+
+    /// Events saved by an earlier build have no id: they get one, so the saved trail still loads.
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decodeIfPresent(String.self, forKey: .id) ?? String(UUID().uuidString.prefix(12)).lowercased()
+        ts = try c.decode(String.self, forKey: .ts)
+        kind = try c.decode(String.self, forKey: .kind)
+        name = try c.decodeIfPresent(String.self, forKey: .name)
+        screen = try c.decodeIfPresent(String.self, forKey: .screen)
+        method = try c.decodeIfPresent(String.self, forKey: .method)
+        path = try c.decodeIfPresent(String.self, forKey: .path)
+        status = try c.decodeIfPresent(Int.self, forKey: .status)
+        durationMs = try c.decodeIfPresent(Int.self, forKey: .durationMs)
+        requestId = try c.decodeIfPresent(String.self, forKey: .requestId)
+        message = try c.decodeIfPresent(String.self, forKey: .message)
+    }
+
     public static func screen(_ name: String) -> AppEvent { AppEvent(kind: "screen", screen: name) }
     public static func lifecycle(_ name: String) -> AppEvent { AppEvent(kind: "app", name: name) }
+    /// A tap that changes something ("clear-sent"), with the screen it was on.
+    public static func action(_ name: String, screen: String? = nil) -> AppEvent { AppEvent(kind: "action", name: name, screen: screen) }
+
+    /// Kinds written to the phone at once: a freeze right after them must not lose them.
+    static let durableKinds: Set<String> = ["action", "hang", "report"]
 
     /// A request as APIClient saw it; status 0 means no answer arrived.
     public static func request(_ trace: RequestTrace) -> AppEvent {
@@ -71,6 +99,8 @@ public actor EventLog {
     private let capacity: Int
     private var events: [AppEvent] = []
     private var unsaved = 0
+    /// The latest screen recorded, for a hang report.
+    public private(set) var lastScreen: String?
 
     public init(fileURL: URL?, capacity: Int = 2000) {
         self.fileURL = fileURL
@@ -87,11 +117,13 @@ public actor EventLog {
     }
 
     public func record(_ event: AppEvent) {
+        if event.kind == "screen" { lastScreen = event.screen }
         events.append(event)
         if events.count > capacity { events.removeFirst(events.count - capacity) }
         unsaved += 1
-        // Written now and then, and on every flush or trip to the background.
-        if unsaved >= 25 { save() }
+        // Written now and then, on every flush or trip to the background, and at once for the
+        // events a freeze would otherwise take with it (the app is killed before the next save).
+        if unsaved >= 25 || AppEvent.durableKinds.contains(event.kind) { save() }
     }
 
     /// For SwiftUI and other synchronous callers.

@@ -90,3 +90,23 @@ private actor Traces {
     #expect(all[0].status == 200 && all[0].error == nil && all[0].requestId == ids[0])
     #expect(all[1].status == 422 && all[1].error == "BAD: Ei käy")
 }
+
+@Test func eventsSavedByAnEarlierBuildStillLoadAndGetAnId() throws {
+    let old = #"[{"ts":"2026-10-08T09:55:23Z","kind":"screen","screen":"receipts"}]"#
+    let events = try JSONDecoder().decode([AppEvent].self, from: Data(old.utf8))
+    #expect(events.count == 1 && !events[0].id.isEmpty && events[0].screen == "receipts")
+    #expect(AppEvent.screen("a").id != AppEvent.screen("a").id)
+}
+
+@Test func aTapIsOnDiskAtOnceAndTheLastScreenIsKnown() async throws {
+    let url = FileManager.default.temporaryDirectory.appendingPathComponent("event-log-\(UUID().uuidString).json")
+    defer { try? FileManager.default.removeItem(at: url) }
+    let log = EventLog(fileURL: url)
+    await log.record(.screen("receipts"))
+    #expect(!FileManager.default.fileExists(atPath: url.path))
+    await log.record(.action("clear-sent", screen: "receipts"))
+    // Without an explicit save: a freeze right after the tap must not lose it.
+    let saved = try JSONDecoder().decode([AppEvent].self, from: Data(contentsOf: url))
+    #expect(saved.map(\.kind) == ["screen", "action"])
+    #expect(await log.lastScreen == "receipts")
+}

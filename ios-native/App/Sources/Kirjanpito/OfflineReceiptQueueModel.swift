@@ -54,6 +54,9 @@ final class OfflineReceiptQueueModel {
         paused = false
         wireOnce()
         refresh()
+        // "N kuvaa lähetetty" was seen on the visit it was sent; it does not stay on the list
+        // waiting for a tap (the receipts are in the review queue by then).
+        if !sent.isEmpty { clearSent() }
         drain()
     }
 
@@ -101,7 +104,9 @@ final class OfflineReceiptQueueModel {
     }
 
     func clearSent() {
-        for item in sent { store.delete(id: item.id) }
+        let ids = sent.map(\.id)
+        guard !ids.isEmpty else { return }
+        for id in ids { store.delete(id: id) }
         refresh()
     }
 

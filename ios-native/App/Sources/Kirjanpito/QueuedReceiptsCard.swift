@@ -36,7 +36,8 @@ struct QueuedReceiptsCard: View {
                         Spacer(minLength: 0)
                         Button("Poista", role: .destructive) {
                             Haptics.selection()
-                            withMotion { queue.removeCorrupt() }
+                            EventLog.shared.log(.action("remove-corrupt", screen: "receipts"))
+                            Task { @MainActor in queue.removeCorrupt() }
                         }
                         .font(.caption.bold())
                         .buttonStyle(.borderless)
@@ -58,7 +59,10 @@ struct QueuedReceiptsCard: View {
                 .confirmationDialog("Poista kuva jonosta?", isPresented: Binding(get: { confirmRemove != nil }, set: { if !$0 { confirmRemove = nil } }),
                                     titleVisibility: .visible) {
                     Button("Poista", role: .destructive) {
-                        if let id = confirmRemove { withMotion { queue.remove(id) } }
+                        if let id = confirmRemove {
+                            EventLog.shared.log(.action("remove-queued", screen: "receipts"))
+                            Task { @MainActor in queue.remove(id) }
+                        }
                         confirmRemove = nil
                     }
                 } message: {
@@ -72,7 +76,11 @@ struct QueuedReceiptsCard: View {
                         Spacer(minLength: 0)
                         Button("Poista listalta") {
                             Haptics.selection()
-                            withMotion { queue.clearSent() }
+                            EventLog.shared.log(.action("clear-sent", screen: "receipts"))
+                            // After the tap has finished, and without an animation: removing the
+                            // section that holds the button while its gesture is still running
+                            // froze the list on a device (2026-10-08).
+                            Task { @MainActor in queue.clearSent() }
                         }
                         .font(.caption.bold())
                         .buttonStyle(.borderless)

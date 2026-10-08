@@ -30,12 +30,19 @@ export function parseSince(value: string | undefined, now = Date.now()): number 
 
 export function isProblem(event: Event): boolean {
   const status = typeof event.status === "number" ? event.status : 0;
-  return event.kind === "error" || event.kind === "report" || (event.kind === "request" && status === 0) || status >= 400;
+  return (
+    event.kind === "error" ||
+    event.kind === "report" ||
+    event.kind === "hang" ||
+    (event.kind === "request" && status === 0) ||
+    status >= 400
+  );
 }
 
 export function formatEvent(event: Event): string {
-  // Helsinki time, as the owner tells it ("it broke at 14:00").
-  const at = new Date(String(event.ts ?? ""));
+  // Helsinki time, as the owner tells it ("it broke at 14:00"); the phone's own time when the
+  // event came from the app (`ts` is when the batch arrived).
+  const at = new Date(String(event.clientTs ?? event.ts ?? ""));
   const time = Number.isNaN(at.getTime())
     ? String(event.ts ?? "?")
     : at.toLocaleString("sv-SE", { timeZone: "Europe/Helsinki" }).slice(5);
@@ -82,6 +89,17 @@ async function main() {
       }
     }
   }
+
+  // A batch sent again after a crash repeats events: keep the first copy of each.
+  const seen = new Set<string>();
+  events = events.filter((event) => {
+    if (typeof event.eventId !== "string") return true;
+    const key = `${event.sessionId ?? ""}:${event.eventId}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+  events.sort((a, b) => String(a.clientTs ?? a.ts).localeCompare(String(b.clientTs ?? b.ts)));
 
   if (report) {
     // The report itself plus the same app session's trail in the 15 minutes before it.
