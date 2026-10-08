@@ -8,8 +8,10 @@ final class P3Tests: WalkTestCase {
     func testA_OfflineBannerAndRecovery() {
         tab("Myynti")
         goOffline()
-        // Two failed loads make the server count as unreachable.
+        // Two failed loads make the server count as unreachable. A pull-to-refresh swipe does not
+        // always start a load (seen 2026-10-08: no request at all); a tab switch always does.
         for _ in 0..<2 { app.windows.firstMatch.swipeDown(velocity: .fast); sleep(3) }
+        tab("Kirjanpito"); sleep(3); tab("Myynti"); sleep(3)
         shot("p3a-offline")
         check("P3 offline banner appears when the API is unreachable", banner.waitForExistence(timeout: 20))
         goOnline()
