@@ -318,3 +318,16 @@ test("privacy request status is visible and the lock PIN is masked", async ({ pa
   await page.getByRole("status").getByRole("button", { name: "Sulje" }).click();
   await expect(page.getByText("Luonnos tallennettu.")).toBeHidden();
 });
+
+test("the books open from Kirjanpito and show a balanced income statement and balance sheet", async ({ page }) => {
+  await login(page);
+  await page.goto("/kirjanpito");
+  await page.getByRole("link", { name: /Kirjanpito.*Tuloslaskelma, tase/ }).click();
+  await expect(page).toHaveURL(/\/kirjanpito\/paakirja$/);
+  await expect(page.getByText(/^Tuloslaskelma \d{4}$/)).toBeVisible();
+  await expect(page.getByText("Tilikauden tulos")).toBeVisible();
+  await page.getByRole("button", { name: "Tase" }).click();
+  await expect(page.getByText("Vastaavaa yhteensä")).toBeVisible();
+  await expect(page.getByText("Tase ei täsmää")).toHaveCount(0);
+  await page.screenshot({ path: "test-results/paakirja-tase.png", fullPage: true });
+});
