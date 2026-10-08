@@ -23,7 +23,11 @@ final class P4Tests: WalkTestCase {
         goOnline(); sleep(10)
         if retry.exists { retry.tap(); sleep(8) }
         shot("p4-after-retry")
-        let bubbles = app.staticTexts.matching(NSPredicate(format: "label == 'Paljonko myyntiä tässä kuussa?'")).count
+        // Only bubbles in the message area: the conversation takes the question as its title (the
+        // header at the top) and lists it behind the sheet, which once counted as "3 bubbles".
+        let top = app.windows.firstMatch.frame.height * 0.15
+        let bubbles = app.staticTexts.matching(NSPredicate(format: "label == 'Paljonko myyntiä tässä kuussa?'"))
+            .allElementsBoundByIndex.filter { $0.frame.minY > top && $0.isHittable }.count
         check("P4 retry keeps one question bubble (found \(bubbles))", bubbles == 1)
     }
 }
