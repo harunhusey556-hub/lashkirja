@@ -22,7 +22,7 @@ final class P5Tests: WalkTestCase {
             sleep(1)
             opened = tapLabel("label CONTAINS %@", "· myöhässä", scrolls: 20)
         }
-        if opened { sleep(4); shot("p5-invoice-detail") }
+        if opened { sleep(4); shot("p5-invoice-detail") } else { shot("p5-koti-miss"); dump(app, "p5-koti-miss") }
         check("P5 invoice detail opens at AX5", app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'Myöhässä '")).firstMatch.exists)
         tab("Myynti"); tap("Uusi lasku"); sleep(4); shot("p5-invoice-form")
         app.windows.firstMatch.swipeUp(velocity: .slow); sleep(1); shot("p5-invoice-lines")
