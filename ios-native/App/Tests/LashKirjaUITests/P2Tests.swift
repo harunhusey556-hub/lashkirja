@@ -28,7 +28,7 @@ final class P2Tests: WalkTestCase {
     func testA_SpotlightInvoiceRoute() {
         let invoices = demoJSON("/api/invoices")["invoices"] as? [[String: Any]] ?? []
         guard let sent = invoices.first(where: { $0["status"] as? String == "sent" }), let id = sent["id"] as? String,
-              let number = sent["invoiceNumber"] else { check("P2 demo API lists a sent invoice", false); return }
+              let number = sent["number"] else { check("P2 demo API lists a sent invoice", false); return }
         openURL("lashkirja://invoice/\(id)")
         let ok = app.staticTexts["Lasku \(number)"].waitForExistence(timeout: 20)
         shot("p2-spotlight-invoice"); check("P2 Spotlight invoice link opens Lasku \(number)", ok)
