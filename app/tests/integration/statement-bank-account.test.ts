@@ -131,6 +131,87 @@ describe("statement upload -> bank account", () => {
   });
 });
 
+/**
+ * Prod 2026-10-09: an account created in the app that night got the default opening date
+ * (today) and no IBAN. Its Holvi statement for 5.6.-9.10. was stored, but every month-end
+ * balance was refused ("Kuukausi on ennen tilin avauspäivää") and every row was left out of
+ * the balances as "before the account". The first statement is what fits the account.
+ */
+describe("statement upload -> an account opened in the app after the statement's period", () => {
+  const SALDO_CSV =
+    `Tili;${IBAN_A}\n` +
+    "SALDO 05.06.2026 +83,01\n" +
+    "Kirjauspäivä;Summa;Saaja\n" +
+    "05.06.2026;350,00;Asiakas Oy\n" +
+    "18.07.2026;-91,53;Tarvikekauppa\n" +
+    "SALDO 31.07.2026 +341,48\n";
+
+  it("moves a fresh account's opening date back to the statement's first day and takes its IBAN", async () => {
+    const account = await createBankAccountRow(user.id, { name: "Holvi", openingDate: "2026-10-09", isDefault: true });
+
+    const response = await uploadStatement(uploadRequest(SALDO_CSV));
+    expect(response.status).toBe(200);
+
+    const stored = await prisma.bankAccount.findUniqueOrThrow({ where: { id: account.id } });
+    expect(stored.openingDate.toISOString().slice(0, 10)).toBe("2026-06-05");
+    expect(stored.iban).toBe(IBAN_A);
+    expect(stored.openingBalanceCents).toBe(83_01);
+    const balances = await prisma.monthlyBalance.findMany({ where: { bankAccountId: account.id }, orderBy: { month: "asc" } });
+    expect(balances.map((b) => [b.month, b.closingBalanceCents])).toEqual([
+      ["2026-06", 433_01],
+      ["2026-07", 341_48],
+    ]);
+
+    const { getAccountRollforward } = await import("@/lib/bank-accounts");
+    const rollforward = await getAccountRollforward(user.id, account.id, { throughMonth: "2026-07" });
+    expect(rollforward.months.map((m) => [m.month, m.computedClosing])).toEqual([
+      ["2026-06", 433.01],
+      ["2026-07", 341.48],
+    ]);
+  });
+
+  it("fixes the account on a re-upload of a file whose rows are all stored already", async () => {
+    const account = await createBankAccountRow(user.id, { name: "Holvi", openingDate: "2026-10-09", isDefault: true });
+    await prisma.bankAccount.update({ where: { id: account.id }, data: { openingDate: new Date("2026-06-05T00:00:00.000Z") } });
+    expect((await uploadStatement(uploadRequest(SALDO_CSV))).status).toBe(200);
+    // Back to the broken state prod was left in, rows already stored:
+    await prisma.monthlyBalance.deleteMany({ where: { bankAccountId: account.id } });
+    await prisma.bankAccount.update({
+      where: { id: account.id },
+      data: { openingDate: new Date("2026-10-09T00:00:00.000Z"), iban: null, openingBalanceCents: 0 },
+    });
+
+    const again = await uploadStatement(uploadRequest(SALDO_CSV));
+    expect(again.status).toBe(409);
+    expect((await readJson(again)).error).toContain("saldot päivitettiin");
+    const stored = await prisma.bankAccount.findUniqueOrThrow({ where: { id: account.id } });
+    expect(stored.openingDate.toISOString().slice(0, 10)).toBe("2026-06-05");
+    expect(await prisma.monthlyBalance.count({ where: { bankAccountId: account.id } })).toBe(2);
+  });
+
+  it("leaves an account alone whose opening balance the owner entered", async () => {
+    const account = await createBankAccountRow(user.id, {
+      name: "Holvi",
+      openingDate: "2026-10-09",
+      openingBalanceCents: 500_00,
+      isDefault: true,
+    });
+    await uploadStatement(uploadRequest(SALDO_CSV));
+    const stored = await prisma.bankAccount.findUniqueOrThrow({ where: { id: account.id } });
+    expect(stored.openingDate.toISOString().slice(0, 10)).toBe("2026-10-09");
+    expect(stored.openingBalanceCents).toBe(500_00);
+  });
+
+  it("does not take an IBAN another account of the user already has", async () => {
+    await createBankAccountRow(user.id, { name: "Vanha", iban: IBAN_A });
+    await prisma.bankAccount.updateMany({ where: { userId: user.id }, data: { archivedAt: new Date() } });
+    const fresh = await createBankAccountRow(user.id, { name: "Holvi", openingDate: "2026-10-09", isDefault: true });
+    await uploadStatement(uploadRequest(SALDO_CSV, { bankAccountId: fresh.id }));
+    const stored = await prisma.bankAccount.findUniqueOrThrow({ where: { id: fresh.id } });
+    expect(stored.iban).toBeNull();
+  });
+});
+
 describe("PATCH /api/statements/[id] - reassignment", () => {
   async function uploadOne() {
     const { statement } = await readJson(await uploadStatement(uploadRequest(csv(null))));
