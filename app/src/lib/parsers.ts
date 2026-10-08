@@ -864,34 +864,48 @@ function parseHolviDetailLines(lines: string[]): {
   reference: string | null;
 } {
   let counterparty: string | null = null;
-  let message: string | null = null;
+  const messageParts: string[] = [];
+  let inMessage = false;
   let reference: string | null = null;
 
   for (const raw of lines) {
     const line = raw.trim();
     if (!line) continue;
+    // Holvi's page footer and confidentiality notice (between two rows on a page break).
+    if (/^LUOTTAMUKSELLINEN\./i.test(line)) continue;
+    if (/^Holvi Payment Services Oy\./i.test(line) || /^Puh:\s*\+358/i.test(line) || /^©\d{4}\s+Holvi/i.test(line)) continue;
 
     const viiteMatch = line.match(/^viite:\s*(.+)/i);
     if (viiteMatch) {
       reference = viiteMatch[1].trim();
+      inMessage = false;
       continue;
     }
     const viestiMatch = line.match(/^viesti:\s*(.+)/i);
     if (viestiMatch) {
-      message = viestiMatch[1].trim();
+      messageParts.push(viestiMatch[1].trim());
+      inMessage = true;
       continue;
     }
+    // A row's closing lines end its message: the booking time and the payment kind.
+    if (/^varattu:/i.test(line) || /^kello\s/i.test(line)) { inMessage = false; continue; }
+    if (/^(sepa-maksu|lähtevä maksu|korttimaksu)$/i.test(line)) { inMessage = false; continue; }
     if (/^arkistointitunnus:/i.test(line)) continue;
     if (/^[0-9a-f]{20,}$/i.test(line)) continue;
+    // A message wraps over several lines in Holvi's PDF (2026-10-09: 219 of 222 messages were cut
+    // to their first line); every line until the closing lines belongs to it.
+    if (inMessage) {
+      messageParts.push(line);
+      continue;
+    }
     if (/^FI\d{2}\s/i.test(line)) continue;
-    if (/^varattu:/i.test(line) || /^kello\s/i.test(line)) continue;
-    if (/^(sepa-maksu|lähtevä maksu)$/i.test(line)) continue;
 
     if (!counterparty) {
       counterparty = line.replace(/,\s*$/, "").trim() || null;
     }
   }
 
+  const message = messageParts.join(" ").replace(/\s+/g, " ").trim() || null;
   return { counterparty, message, reference };
 }
 

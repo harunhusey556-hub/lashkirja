@@ -210,6 +210,29 @@ describe("statement upload -> an account opened in the app after the statement's
     const stored = await prisma.bankAccount.findUniqueOrThrow({ where: { id: fresh.id } });
     expect(stored.iban).toBeNull();
   });
+
+  it("a re-upload completes a message stored cut, and touches nothing else", async () => {
+    await createBankAccountRow(user.id, { name: "Holvi", iban: IBAN_A, openingDate: "2026-01-01", isDefault: true });
+    const body =
+      `Tili;${IBAN_A}\n` +
+      "Kirjauspäivä;Summa;Saaja;Viesti\n" +
+      "14.07.2026;70,00;VIPPS MOBILEPAY AS;MobilePay Ella Anni Ilma Lehtoranta\n" +
+      "15.07.2026;-12,00;Kahvila;Kahvi\n";
+    expect((await uploadStatement(uploadRequest(body))).status).toBe(200);
+    // As the old parser stored it: the first line only. The other row's message is different, not cut.
+    const cut = await prisma.transaction.findFirstOrThrow({ where: { userId: user.id, amountCents: 70_00 } });
+    await prisma.transaction.update({ where: { id: cut.id }, data: { message: "MobilePay Ella Anni Ilma", matchStatus: "confirmed" } });
+    const other = await prisma.transaction.findFirstOrThrow({ where: { userId: user.id, amountCents: -12_00 } });
+    await prisma.transaction.update({ where: { id: other.id }, data: { message: "oma muistiinpano" } });
+
+    const again = await uploadStatement(uploadRequest(body));
+    expect(again.status).toBe(409);
+    expect((await readJson(again)).error).toContain("1 tapahtuman viesti täydennettiin");
+    const completed = await prisma.transaction.findUniqueOrThrow({ where: { id: cut.id } });
+    expect(completed).toMatchObject({ message: "MobilePay Ella Anni Ilma Lehtoranta", matchStatus: "confirmed", amountCents: 70_00 });
+    expect((await prisma.transaction.findUniqueOrThrow({ where: { id: other.id } })).message).toBe("oma muistiinpano");
+    expect(await prisma.transaction.count({ where: { userId: user.id } })).toBe(2);
+  });
 });
 
 describe("PATCH /api/statements/[id] - reassignment", () => {

@@ -121,6 +121,57 @@ async function fitAccountToStatement(
   await prisma.bankAccount.update({ where: { id: bankAccountId }, data });
 }
 
+/**
+ * A file read again brings the whole message of a row stored with a cut one: the Holvi PDF parser
+ * kept only a message's first line until 2026-10-09 ("MobilePay Ella Anni Ilma" of "MobilePay Ella
+ * Anni Ilma Lehtoranta"). Only a file row of the same account, day, amount and counterparty whose
+ * stored message is the start of the new one; nothing else about the row changes.
+ */
+async function completeCutMessages(
+  userId: string,
+  bankAccountId: string | null,
+  rows: Array<{ date: string | null; amount: number; counterparty: string | null; message: string | null }>
+): Promise<number> {
+  if (!bankAccountId) return 0;
+  const full = rows.filter((row) => row.date && row.message);
+  if (full.length === 0) return 0;
+  const days = full.map((row) => row.date!.slice(0, 10)).sort();
+  const end = new Date(`${days[days.length - 1]}T00:00:00.000Z`);
+  end.setUTCDate(end.getUTCDate() + 1);
+  const stored = await prisma.transaction.findMany({
+    where: {
+      userId,
+      source: "file",
+      statement: { userId, bankAccountId },
+      date: { gte: new Date(`${days[0]}T00:00:00.000Z`), lt: end },
+    },
+    select: { id: true, date: true, amountCents: true, counterparty: true, message: true },
+  });
+  const squash = (value: string | null | undefined) => (value ?? "").replace(/\s+/g, " ").trim();
+  const used = new Set<string>();
+  let completed = 0;
+  for (const row of full) {
+    const message = squash(row.message);
+    const cents = eurosToCents(row.amount);
+    const day = row.date!.slice(0, 10);
+    const cut = stored.find(
+      (tx) =>
+        !used.has(tx.id) &&
+        tx.date?.toISOString().slice(0, 10) === day &&
+        tx.amountCents === cents &&
+        squash(tx.counterparty) === squash(row.counterparty) &&
+        squash(tx.message).length > 0 &&
+        squash(tx.message).length < message.length &&
+        message.startsWith(squash(tx.message))
+    );
+    if (!cut) continue;
+    used.add(cut.id);
+    await prisma.transaction.update({ where: { id: cut.id }, data: { message } });
+    completed += 1;
+  }
+  return completed;
+}
+
 /** Most common YYYY-MM among the rows' dates; the fallback when none has a date. */
 function dominantMonth(rows: Array<{ date: string | null }>, fallback: string): string {
   const counts = new Map<string, number>();
@@ -141,6 +192,8 @@ function splitNotice(months: number): string | null {
 class AllRowsKnownError extends Error {
   /** Month-end balances the file still brought (see recordPrintedBalances). */
   balancesStored = 0;
+  /** Rows whose cut message the file completed (see completeCutMessages). */
+  messagesCompleted = 0;
   constructor(readonly skipped: number) {
     super("all rows already stored");
   }
@@ -360,6 +413,7 @@ export async function POST(req: NextRequest) {
       // they were read, 2026-10-09): they are stored, and the 409 says so.
       if (error instanceof AllRowsKnownError) {
         error.balancesStored = await recordPrintedBalances(userId, bankAccountId, headerText, parsedTransactions, file.name, ibanHint);
+        error.messagesCompleted = await completeCutMessages(userId, bankAccountId, parsedTransactions);
       }
       throw error;
     });
@@ -426,8 +480,14 @@ export async function POST(req: NextRequest) {
       return NextResponse.json(
         {
           error:
-            e.balancesStored > 0
-              ? "Kaikki tiedoston tapahtumat oli jo tuotu aiemmin, joten tapahtumia ei lisätty. Tiliotteen saldot päivitettiin tilille."
+            e.balancesStored > 0 || e.messagesCompleted > 0
+              ? [
+                  "Kaikki tiedoston tapahtumat oli jo tuotu aiemmin, joten tapahtumia ei lisätty.",
+                  e.balancesStored > 0 ? "Tiliotteen saldot päivitettiin tilille." : null,
+                  e.messagesCompleted > 0 ? `${e.messagesCompleted} tapahtuman viesti täydennettiin tiliotteelta.` : null,
+                ]
+                  .filter(Boolean)
+                  .join(" ")
               : "Kaikki tiedoston tapahtumat oli jo tuotu aiemmin, joten mitään ei lisätty.",
           skippedDuplicates: e.skipped,
         },
