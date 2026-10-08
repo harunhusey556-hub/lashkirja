@@ -89,9 +89,12 @@ final class AppModel {
         EventLog.shared.log(.lifecycle("launch"))
         let uploader = eventUploader
         eventFlushLoop = Task {
+            // What the previous run left on the phone (a freeze, a crash) goes first, soon after
+            // launch; then every 30 s.
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
             while !Task.isCancelled {
-                try? await Task.sleep(nanoseconds: 30_000_000_000)
                 await uploader.flush()
+                try? await Task.sleep(nanoseconds: 30_000_000_000)
             }
         }
         // The offline banner also covers a server that does not answer while the phone has a network.
