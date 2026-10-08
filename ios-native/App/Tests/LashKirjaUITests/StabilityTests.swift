@@ -84,4 +84,14 @@ final class StabilityTests: WalkTestCase {
                       "no confirmation code after sending")
         shot("stability-report")
     }
+
+    /// Opens ALV and then reads nothing for 25 s: the app's own hang watchdog (event log) tells
+    /// whether ALV blocks the main thread, without the test's accessibility queries in the way.
+    func test07_AlvLeftAlone() {
+        tab("Kirjanpito"); tap("ALV-ilmoitus")
+        note("MARK alv-open \(Date().formatted(.iso8601))")
+        sleep(25)
+        note("MARK alv-end \(Date().formatted(.iso8601))")
+        XCTAssertEqual(app.state, .runningForeground)
+    }
 }
