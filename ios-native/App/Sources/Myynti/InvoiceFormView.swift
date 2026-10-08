@@ -102,12 +102,10 @@ struct InvoiceFormView: View {
                     Button("Peruuta") { if dirty { confirmDiscard = true } else { dismiss() } }.disabled(busy)
                 }
                 ToolbarItemGroup(placement: .keyboard) {
+                    // Navigation only: the total is in the bar under the form, and a long amount or a
+                    // large text size must not squeeze these buttons.
                     Button("Seuraava") { focusNext() }
                         .disabled(InvoiceForm.field(after: focus, lines: draft.lines) == nil)
-                    Spacer()
-                    Text("Yhteensä \(Money.format(draft.totals.gross))")
-                        .font(.subheadline.weight(.semibold).monospacedDigit())
-                        .foregroundStyle(Theme.ink)
                     Spacer()
                     Button("Valmis") { focus = nil }.fontWeight(.semibold)
                 }
@@ -298,30 +296,17 @@ struct InvoiceFormView: View {
                     .foregroundStyle(Theme.danger)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
-            HStack(spacing: 12) {
-                VStack(alignment: .leading, spacing: 2) {
-                    if sellerRegistered {
-                        Text("Veroton \(Money.format(totals.net)) · ALV \(Money.format(totals.vat))")
-                            .font(.caption)
-                            .foregroundStyle(Theme.ink2)
-                            .monospacedDigit()
-                    }
-                    HStack(alignment: .firstTextBaseline, spacing: 6) {
-                        Text("Yhteensä").font(.subheadline).foregroundStyle(Theme.ink2)
-                        MoneyText(amount: totals.gross).font(.title3.weight(.semibold)).foregroundStyle(Theme.ink)
-                    }
+            // Totals and the button side by side while they fit; stacked at large text sizes.
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 12) {
+                    totalsView(totals)
+                    Spacer(minLength: 8)
+                    saveButton
                 }
-                .accessibilityElement(children: .combine)
-                Spacer(minLength: 8)
-                Button { Task { await save() } } label: {
-                    if busy {
-                        ProgressView().tint(Theme.onInk)
-                    } else {
-                        Text(existing == nil ? "Luo lasku" : "Tallenna").font(.body.weight(.semibold))
-                    }
+                VStack(alignment: .leading, spacing: 10) {
+                    totalsView(totals)
+                    saveButton.frame(maxWidth: .infinity)
                 }
-                .buttonStyle(.primary)
-                .disabled(busy || baseline == nil)
             }
         }
         .padding(.horizontal, 16)
@@ -329,6 +314,34 @@ struct InvoiceFormView: View {
         .padding(.bottom, 8)
         .background(Theme.surface)
         .overlay(alignment: .top) { Divider() }
+    }
+
+    private func totalsView(_ totals: (net: Decimal, vat: Decimal, gross: Decimal)) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            if sellerRegistered {
+                Text("Veroton \(Money.format(totals.net)) · ALV \(Money.format(totals.vat))")
+                    .font(.caption)
+                    .foregroundStyle(Theme.ink2)
+                    .monospacedDigit()
+            }
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Text("Yhteensä").font(.subheadline).foregroundStyle(Theme.ink2)
+                MoneyText(amount: totals.gross).font(.title3.weight(.semibold)).foregroundStyle(Theme.ink)
+            }
+        }
+        .accessibilityElement(children: .combine)
+    }
+
+    private var saveButton: some View {
+        Button { Task { await save() } } label: {
+            if busy {
+                ProgressView().tint(Theme.onInk)
+            } else {
+                Text(existing == nil ? "Luo lasku" : "Tallenna").font(.body.weight(.semibold))
+            }
+        }
+        .buttonStyle(.primary)
+        .disabled(busy || baseline == nil)
     }
 
     // MARK: Bindings

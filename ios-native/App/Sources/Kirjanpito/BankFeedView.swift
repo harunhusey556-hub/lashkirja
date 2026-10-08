@@ -18,6 +18,8 @@ struct BankFeedView: View {
     @State private var notice: String?
     @State private var noticeFailed = false
     @State private var bulkBusy = false
+    /// "Hyväksy kuittiehdotukset" shows what it links before it does (count, money, mismatches).
+    @State private var confirmPreview: BankFeed.ConfirmPreview?
     /// A screen the row sheet asked for ("Avaa kuitti"): pushed here once the sheet has closed,
     /// so it lands on this tab's stack and Back returns to the feed.
     @State private var openAfterSheet: Route?
@@ -77,7 +79,7 @@ struct BankFeedView: View {
                     VStack(alignment: .leading, spacing: 10) {
                         Text("Kuittien kohdistus").font(.body.weight(.medium)).foregroundStyle(Theme.ink)
                         Text("\(confirmable) valmista ehdotusta").font(.caption).foregroundStyle(Theme.ink2)
-                        Button { Task { await confirmAll() } } label: {
+                        Button { confirmPreview = BankFeed.confirmPreview(statements.flatMap(\.transactions)) } label: {
                             if bulkBusy { ProgressView() } else { Text(BankFeed.confirmAllLabel(confirmable)) }
                         }
                         .buttonStyle(.primary)
@@ -172,7 +174,7 @@ struct BankFeedView: View {
                     Button { Task { await rerunMatching() } } label: { Label("Etsi kuitteja uudelleen", systemImage: "arrow.triangle.2.circlepath") }
                         .disabled(bulkBusy)
                     if confirmable > 0 {
-                        Button { Task { await confirmAll() } } label: { Label(BankFeed.confirmAllLabel(confirmable), systemImage: "link") }
+                        Button { confirmPreview = BankFeed.confirmPreview(statements.flatMap(\.transactions)) } label: { Label(BankFeed.confirmAllLabel(confirmable), systemImage: "link") }
                             .disabled(bulkBusy)
                     }
                     Button { pushed = .bankAccounts } label: { Label("Pankkiyhteys ja tilit", systemImage: "building.columns") }
@@ -185,6 +187,13 @@ struct BankFeedView: View {
                 NavigationLink(value: Route.statements) { Image(systemName: "doc.plaintext") }
                     .accessibilityLabel("Tiliotteet")
             }
+        }
+        .sheet(item: $confirmPreview) { preview in
+            ConfirmAllPreviewSheet(preview: preview) {
+                confirmPreview = nil
+                Task { await confirmAll() }
+            }
+            .presentationDetents([.medium, .large])
         }
         .fileImporter(isPresented: $importing, allowedContentTypes: [.commaSeparatedText, .plainText, .xml, .pdf, .spreadsheet, .data]) { result in
             if case .success(let url) = result { Task { await upload(url) } }
@@ -659,5 +668,58 @@ struct BankRowSheet: View {
     private func unlink() async {
         struct Body: Encodable { let transactionId: String }
         await run { let _: Ignored = try await app.api.send("POST", "/api/matching/unlink", body: Body(transactionId: row.id)) }
+    }
+}
+
+/// Before "Hyväksy kuittiehdotukset" links many rows at once: how many, how much money, which
+/// ones disagree on the amount. One button confirms them all; Peruuta changes nothing.
+private struct ConfirmAllPreviewSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    let preview: BankFeed.ConfirmPreview
+    let confirm: () -> Void
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section {
+                    LabeledContent("Kohdistuksia", value: "\(preview.count)")
+                    LabeledContent("Pankkitapahtumien summa") { MoneyText(amount: preview.total) }
+                    if preview.mismatched > 0 {
+                        Text("\(preview.mismatched) ehdotuksessa summa poikkeaa kuitista. Tarkista ne ennen hyväksymistä.")
+                            .font(.footnote).foregroundStyle(Theme.warning)
+                    }
+                }
+                Section("Ehdotukset") {
+                    ForEach(preview.pairs) { pair in
+                        VStack(alignment: .leading, spacing: 2) {
+                            HStack(alignment: .firstTextBaseline) {
+                                Text(pair.counterparty).lineLimit(1)
+                                Spacer()
+                                MoneyText(amount: pair.amount, signed: true)
+                            }
+                            Text("→ \(pair.receiptVendor)\(pair.receiptTotal.map { " · " + Money.format($0) } ?? "")")
+                                .font(.caption).foregroundStyle(Theme.ink2)
+                            if let gap = pair.gap {
+                                Text(ReceiptMatchText.gapTitle(gap)).font(.caption).foregroundStyle(Theme.warning)
+                            }
+                        }
+                        .accessibilityElement(children: .combine)
+                    }
+                }
+            }
+            .navigationTitle("Hyväksy ehdotukset")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Peruuta") { dismiss() } }
+            }
+            .safeAreaInset(edge: .bottom) {
+                Button(action: confirm) {
+                    Text("Vahvista \(preview.count) kohdistusta").frame(maxWidth: .infinity, minHeight: 44).font(.headline)
+                }
+                .buttonStyle(.primary)
+                .padding(16)
+                .background(Theme.surface)
+            }
+        }
     }
 }

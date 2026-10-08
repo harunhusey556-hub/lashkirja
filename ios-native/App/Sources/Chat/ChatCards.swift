@@ -65,7 +65,7 @@ struct ChatProposalCardView: View {
         .frame(maxWidth: cardMaxWidth, alignment: .leading)
         .background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous).stroke(Theme.line))
-        .animation(.snappy, value: phase)
+        .motion(.snappy, value: phase)
     }
 
     private var symbol: String {

@@ -29,15 +29,15 @@ struct MainTabView: View {
                     }
                 }
             }
-            // The search role sets "+" apart from the other tabs: on iOS 26 it is its own round
-            // button beside the bar. Selecting it never switches tab (see `select`).
-            Tab(AppTab.add.title, systemImage: AppTab.add.symbol, value: AppTab.add, role: .search) {
+            // "+" is a plain tab item that opens the Lisää sheet; selecting it never switches tab
+            // (see `select`). Not the search role: that told the system (and VoiceOver) "+" was search.
+            Tab(AppTab.add.title, systemImage: AppTab.add.symbol, value: AppTab.add) {
                 Color.clear
             }
         }
-        // Denser lists everywhere: less gap between sections and lower rows, so more fits on a phone.
+        // Less gap between sections, so more fits on a phone. Rows keep the system's 44 pt minimum,
+        // the smallest comfortable touch target.
         .listSectionSpacing(.compact)
-        .environment(\.defaultMinListRowHeight, 40)
         .sheet(isPresented: $showAdd) { AddSheet() }
         .sheet(isPresented: $showSettings) { SettingsSheet().presentationDetents([.large]) }
         .sheet(isPresented: $showAssistant) { AssistantView() }

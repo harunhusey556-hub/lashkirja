@@ -233,11 +233,15 @@ final class AppModel {
     /// them back and says why. The write bumps `dataVersion`, so lists reload after it lands.
     func removeInBackground(_ ids: [String], _ work: @escaping @Sendable @MainActor () async throws -> Void) {
         hide(ids)
-        Haptics.success()
+        // A light tap now (the row went away); the success feel only once the server agreed, so a
+        // deletion the server refuses never felt done.
+        Haptics.selection()
         let started = session.current
         Task {
-            do { try await work() }
-            catch {
+            do {
+                try await work()
+                if session.isCurrent(started) { Haptics.success() }
+            } catch {
                 // Signed out meanwhile: the next session never saw these rows hidden.
                 guard session.isCurrent(started) else { return }
                 unhide(ids)

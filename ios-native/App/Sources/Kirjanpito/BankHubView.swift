@@ -12,7 +12,6 @@ struct BankHubView: View {
     @State private var month = MonthKey.current()
     /// Set once the owner steps the month; until then a load may move it to the latest month with rows.
     @State private var monthChosen = false
-    @State private var filter: BankHub.Filter = .all
     /// Coming back to the screen does not ask the server again unless something changed.
     @State private var gate = ReloadGate()
     /// The empty state's buttons: two in one list row need their own taps, so they push here.
@@ -122,17 +121,29 @@ struct BankHubView: View {
             .buttonStyle(.borderless)
             NavigationLink(value: Route.bankFeedFiltered(month: month, onlyOpen: false, focus: nil)) {
                 VStack(alignment: .leading, spacing: 8) {
-                    HStack(alignment: .firstTextBaseline) {
-                        figure("Tulot", totals.income, color: Theme.success)
-                        Spacer()
-                        figure("Menot", totals.expenses, color: Theme.ink)
-                        Spacer()
-                        VStack(alignment: .trailing, spacing: 2) {
-                            Text("Netto").font(.caption).foregroundStyle(Theme.ink2)
-                            MoneyText(amount: totals.net, signed: true)
-                                .font(.subheadline.weight(.semibold))
-                                .foregroundStyle(totals.net > 0 ? Theme.success : Theme.ink)
+                    // Three columns while they fit; at large text sizes or long amounts, one per line.
+                    ViewThatFits(in: .horizontal) {
+                        HStack(alignment: .firstTextBaseline) {
+                            figure("Tulot", totals.income, color: Theme.success)
+                            Spacer()
+                            figure("Menot", totals.expenses, color: Theme.ink)
+                            Spacer()
+                            VStack(alignment: .trailing, spacing: 2) {
+                                Text("Netto").font(.caption).foregroundStyle(Theme.ink2)
+                                MoneyText(amount: totals.net, signed: true)
+                                    .font(.subheadline.weight(.semibold))
+                                    .foregroundStyle(totals.net > 0 ? Theme.success : Theme.ink)
+                            }
                         }
+                        VStack(alignment: .leading, spacing: 6) {
+                            LabeledContent("Tulot") { MoneyText(amount: totals.income).foregroundStyle(Theme.success) }
+                            LabeledContent("Menot") { MoneyText(amount: totals.expenses) }
+                            LabeledContent("Netto") {
+                                MoneyText(amount: totals.net, signed: true)
+                                    .foregroundStyle(totals.net > 0 ? Theme.success : Theme.ink)
+                            }
+                        }
+                        .font(.subheadline.weight(.semibold))
                     }
                     Text(totals.count == 0 ? "Ei tapahtumia tässä kuussa" : "\(totals.count) tapahtumaa")
                         .font(.caption)
@@ -172,12 +183,9 @@ struct BankHubView: View {
     }
 
     private func recentSection(_ statements: [Statement]) -> some View {
-        let rows = BankHub.recent(statements, filter: filter)
+        // The hub orients and hands over: filtering belongs to Pankkitapahtumat ("Näytä kaikki").
+        let rows = BankHub.recent(statements, filter: .all, limit: 5)
         return Section {
-            chips
-                .listRowBackground(Color.clear)
-                .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 4, trailing: 0))
-                .listRowSeparator(.hidden)
             if rows.isEmpty {
                 Text("Ei tapahtumia.").foregroundStyle(Theme.ink2)
             }
@@ -192,31 +200,6 @@ struct BankHubView: View {
             }
         } header: {
             Text("Viimeisimmät tapahtumat")
-        }
-    }
-
-    private var chips: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
-                ForEach(BankHub.Filter.allCases) { chip in
-                    let selected = chip == filter
-                    Button {
-                        filter = chip
-                        Haptics.selection()
-                    } label: {
-                        Text(chip.title)
-                            .font(.subheadline.weight(selected ? .semibold : .regular))
-                            .foregroundStyle(selected ? Theme.onInk : Theme.ink)
-                            .padding(.horizontal, 14)
-                            .padding(.vertical, 8)
-                            .background(selected ? Theme.ink : Theme.surface, in: Capsule())
-                            .overlay(Capsule().stroke(Theme.line, lineWidth: selected ? 0 : 1))
-                    }
-                    .buttonStyle(.pressable)
-                    .accessibilityAddTraits(selected ? .isSelected : [])
-                }
-            }
-            .padding(.vertical, 4)
         }
     }
 
@@ -285,24 +268,32 @@ private struct AccountLineRow: View {
     let line: BankHub.AccountLine
 
     var body: some View {
-        HStack(alignment: .firstTextBaseline) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(line.name).foregroundStyle(Theme.ink).lineLimitUnlessLarge()
-                let detail = [line.bank, line.asOf].compactMap { $0 }.joined(separator: " · ")
-                if !detail.isEmpty {
-                    Text(detail).font(.caption).foregroundStyle(Theme.ink2).lineLimit(2)
-                }
-                if line.needsCheck {
-                    Text("Saldo vaatii tarkistusta").font(.caption).foregroundStyle(Theme.danger)
-                }
-            }
-            Spacer()
-            if let balance = line.balance {
-                MoneyText(amount: balance).foregroundStyle(Theme.ink)
-            } else {
-                Text("–").foregroundStyle(Theme.ink2)
-            }
+        // Name and balance side by side while they fit; the balance moves under the name otherwise.
+        ViewThatFits(in: .horizontal) {
+            HStack(alignment: .firstTextBaseline) { description; Spacer(); balance }
+            VStack(alignment: .leading, spacing: 4) { description; balance }
         }
         .padding(.vertical, 2)
+    }
+
+    private var description: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(line.name).foregroundStyle(Theme.ink).lineLimitUnlessLarge()
+            let detail = [line.bank, line.asOf].compactMap { $0 }.joined(separator: " · ")
+            if !detail.isEmpty {
+                Text(detail).font(.caption).foregroundStyle(Theme.ink2).lineLimit(2)
+            }
+            if line.needsCheck {
+                Text("Saldo vaatii tarkistusta").font(.caption).foregroundStyle(Theme.danger)
+            }
+        }
+    }
+
+    @ViewBuilder private var balance: some View {
+        if let balance = line.balance {
+            MoneyText(amount: balance).foregroundStyle(Theme.ink)
+        } else {
+            Text("–").foregroundStyle(Theme.ink2)
+        }
     }
 }

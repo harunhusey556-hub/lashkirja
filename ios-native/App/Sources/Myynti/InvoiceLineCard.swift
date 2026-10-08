@@ -4,6 +4,7 @@ import LashKirjaCore
 /// One line of a new or edited invoice as a compact card: description, quantity stepper and
 /// unit, price, VAT and the line's total, with its actions in one menu.
 struct InvoiceLineCard: View {
+    @Environment(\.dynamicTypeSize) private var typeSize
     @Binding var line: InvoiceDraft.Line
     /// The price as typed; the form owns it so an empty field is "Hinta puuttuu.", not 0 €.
     @Binding var priceText: String
@@ -42,10 +43,14 @@ struct InvoiceLineCard: View {
                 .focused(focus, equals: InvoiceFormField.description(line.id))
                 .accessibilityLabel("Rivin \(number) kuvaus")
             fieldError(.description(line.id))
-            HStack(spacing: 10) {
-                quantityControl
-                unitMenu
-                Spacer(minLength: 4)
+            // Quantity, unit and price on one line; at accessibility text sizes the price gets its own
+            // line. AnyLayout keeps one price field, so its keyboard focus survives the switch.
+            let layout = typeSize.isAccessibilitySize
+                ? AnyLayout(VStackLayout(alignment: .leading, spacing: 10))
+                : AnyLayout(HStackLayout(spacing: 10))
+            layout {
+                HStack(spacing: 10) { quantityControl; unitMenu }
+                if !typeSize.isAccessibilitySize { Spacer(minLength: 4) }
                 priceField
             }
             fieldError(.quantity(line.id))

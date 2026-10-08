@@ -479,7 +479,7 @@ private struct ConversationsSheet: View {
         Button {
             switch PagedShowMore.step(limit, loaded: conversations.count, serverHasMore: hasMore) {
             case .fetch: Task { await loadOlder() }
-            case .reveal, .fold: withAnimation(.snappy) { limit.more(total: conversations.count) }
+            case .reveal, .fold: withMotion(.snappy) { limit.more(total: conversations.count) }
             case nil: break
             }
             Haptics.selection()
@@ -531,7 +531,7 @@ private struct ConversationsSheet: View {
             let before = conversations.count
             conversations = (conversations + page.conversations).uniquedById()
             hasMore = page.hasMore
-            withAnimation(.snappy) { PagedShowMore.revealFetched(&limit, before: before, after: conversations.count) }
+            withMotion(.snappy) { PagedShowMore.revealFetched(&limit, before: before, after: conversations.count) }
             failure = nil
         } catch is CancellationError {
         } catch {
