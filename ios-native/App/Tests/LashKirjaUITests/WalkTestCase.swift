@@ -51,11 +51,11 @@ class WalkTestCase: XCTestCase {
     }
     /// Any element whose label matches; scrolls the screen up to 6 times to find it, taps its centre.
     @discardableResult
-    func tapLabel(_ pred: String, _ arg: String) -> Bool {
+    func tapLabel(_ pred: String, _ arg: String, scrolls maxScrolls: Int = 6) -> Bool {
         let q = app.descendants(matching: .any).matching(NSPredicate(format: pred, arg))
         // Screens load from the API; give the target time to appear before scrolling for it.
         _ = q.firstMatch.waitForExistence(timeout: 12)
-        for _ in 0..<7 {
+        for _ in 0...maxScrolls {
             let e = q.firstMatch
             if e.exists && e.frame.minY > 30 && e.frame.maxY < app.windows.firstMatch.frame.maxY - 60 {
                 e.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap(); taps += 1; return true
