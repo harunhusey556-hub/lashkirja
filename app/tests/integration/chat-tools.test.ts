@@ -177,7 +177,9 @@ describe("search_invoices", () => {
 
     const overdue = (await call(owner.id, "search_invoices", { status: "overdue" })).result;
     expect(overdue.total.count).toBe(2);
-    expect(JSON.stringify(overdue)).not.toContain("999");
+    // The stranger's 1 253,75 € invoice is not among them (compared by amount, not by searching the
+    // JSON for "999": a random invoice id once contained those digits).
+    expect(overdue.items.map((item: { gross: string }) => item.gross)).not.toContain("1253.75");
 
     const first = (await call(owner.id, "search_invoices", { customer: "VIRTANEN", limit: 1 })).result;
     expect(first.total.count).toBe(3);
