@@ -3,7 +3,7 @@
 import { ProgressRing } from "@/components/ds/ProgressRing";
 import { helsinkiMonthKey } from "@/lib/validation";
 import { PullToRefresh } from "@/components/ds/PullToRefresh";
-import { Inbox, ListChecks, LockKeyhole, Percent, ReceiptEuro } from "lucide-react";
+import { BookOpen, Inbox, ListChecks, LockKeyhole, Percent, ReceiptEuro } from "lucide-react";
 import { Icon, PageTitle, Section, ListRow, SlotSkeleton } from "@/components/ds";
 import { apiFetch, readJson } from "@/components/clientFetch";
 import { MONTHS } from "@/lib/finnish-months";
@@ -173,6 +173,13 @@ export default function KirjanpitoPage() {
           title="Suljetut kaudet"
           amount={pending(lock) ? <SlotSkeleton width={72} /> : lockValue}
           amountTone="muted"
+        />
+        <ListRow
+          href="/kirjanpito/paakirja"
+          leading={<Icon icon={BookOpen} />}
+          chevron
+          title="Kirjanpito"
+          secondary="Tuloslaskelma, tase, saldoluettelo ja päiväkirja"
         />
       </Section>
     </div>

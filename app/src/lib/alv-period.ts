@@ -84,7 +84,7 @@ export function bookedSalesWhere(userId: string, start: Date, end: Date) {
  * invoice is left out. One place, so the VAT return and the "ALV-erittely
  * puuttuu" exception below can never disagree about which receipts exist.
  */
-async function loadCountedReceipts(userId: string, start: Date, end: Date) {
+export async function loadCountedReceipts(userId: string, start: Date, end: Date) {
   const [receipts, payments] = await Promise.all([
     prisma.receipt.findMany({
       where: { userId, date: { gte: start, lt: end }, reviewStatus: "approved" },
@@ -223,7 +223,7 @@ function documentKey(value: string | null | undefined): string {
  * (`suspected`), never removed. The owner settles it by linking the receipt to
  * the invoice (Ostolaskut), not by rejecting or cancelling anything.
  */
-async function classifyPurchaseInvoices(userId: string, start: Date, end: Date): Promise<PurchaseVatRow[]> {
+export async function classifyPurchaseInvoices(userId: string, start: Date, end: Date): Promise<PurchaseVatRow[]> {
   const invoices = await prisma.purchaseInvoice.findMany({
     where: { userId, issueDate: { gte: start, lt: end } },
     orderBy: [{ issueDate: "asc" }, { createdAt: "asc" }],

@@ -42,6 +42,8 @@ enum Route: Hashable {
     case statement(String)
     case recurringInvoices
     case periods
+    /// Kirjanpito: the double-entry books (tuloslaskelma, tase, saldoluettelo, päiväkirja).
+    case ledger
     case workQueue
     case privacy
     case help
@@ -184,6 +186,7 @@ struct RouteScreen: View {
         case .statement(let id): StatementDetailView(statementId: id)
         case .recurringInvoices: RecurringInvoicesView()
         case .periods: PeriodsView()
+        case .ledger: LedgerView()
         case .workQueue: WorkQueueView()
         case .privacy: PrivacyView()
         case .help: HelpView()

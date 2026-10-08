@@ -49,3 +49,14 @@ PostgreSQL, Redis rate limit, çok şirketli yapı: tek sahip + tek sunucu için
 
 ## RUN
 - 2026-10-08: plan yazıldı; Faz 1 başlıyor.
+- 2026-10-08 (aynı gün, tamam): Faz 1–5 uygulandı.
+  - Faz 1–2 sunucu `3152e7c` prod'da; veri düzeltmesi uygulandı (15 kayıt, geri alma dosyası
+    `C:\LashKirjaackupsix-foreign-vat-2026-10.revert-1791418643254.json`, yedek
+    `lashkirja-2026-10-08-031618-datafix-foreign-vat.zip`). Yeni bulgu: Anthropic fatura + makbuz aynı
+    e-postadan iki kez sayılıyordu (3 ay × 225,90 €) — mail-sync düzeltildi.
+  - iOS Faz 2 `5a272e5`, Faz 3–4 `198a1dd`: CI yeşil.
+  - Faz 5 muhasebe çekirdeği v1 (türetilmiş): `lib/ledger`, `/api/ledger`, `/api/ledger/export`,
+    web `/kirjanpito/paakirja`, iOS `LedgerView`. Gerçek veride tase dengede (2026: 198 tosite).
+  - Testler: unit 1752 + 5 ortam kaynaklı başarısız (Windows: sqlite3/POSIX), integration 1048/1048.
+  - Kalan (v2): kalıcı/immutable tositeler, avaava tase girişi, ALV maksularının kirjaus'u,
+    tilikausi kapanışı, web toplu kohdistus önizlemesi, "Muuta ostolaskuksi".

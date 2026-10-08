@@ -55,6 +55,12 @@ const ALLOWED: string[] = [
   `lib/chat-legacy.ts:${LEGACY_LIMITED_NOTICE_FI}`,
   `lib/chat-legacy.ts:${PREVIOUS_LIMITED_NOTICE_FI}`,
   // Byte-identical copies of the notice text an applied SQL migration wrote; shown through a sanitiser.
+  // The double-entry books use the statutory terms an accountant reads (tosite, myyntisaamiset,
+  // ostovelat): the plain-language words of the rest of the app would misname the accounts.
+  "lib/ledger/chart.ts:*",
+  "lib/ledger/posting.ts:*",
+  "app/api/ledger/export/route.ts:*",
+  "app/kirjanpito/paakirja/page.tsx:*",
 ];
 
 describe("glossary lint", () => {

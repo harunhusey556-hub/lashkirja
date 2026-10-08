@@ -38,6 +38,7 @@ export const NAV: readonly NavEntry[] = [
   // Behind the gear on Pankki: connection, accounts and tiliote files (owner report 2026-09-30).
   { id: "pankkitilit", kind: "detail", label: "Pankkiyhteys ja tilit", path: "/kirjanpito/pankkitilit", parent: "pankki-tapahtumat" },
   { id: "kaudet", kind: "workspace", label: "Suljetut kaudet", path: "/kirjanpito/kaudet", parent: "kirjanpito" },
+  { id: "paakirja", kind: "workspace", label: "Kirjanpito", path: "/kirjanpito/paakirja", parent: "kirjanpito" },
   // FP-13 (TF-07): one month's finish line; a sticky primary owns the bottom edge.
   { id: "kuukausi", kind: "detail", label: "Kuukauden sulkeminen", path: "/kirjanpito/kuukausi", parent: "kirjanpito" },
 
