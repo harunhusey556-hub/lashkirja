@@ -42,6 +42,38 @@ function publicTransaction<T extends { amountCents: number }>(tx: T) {
 }
 
 /**
+ * Balances the statement prints become the account's month-end balances, so its saldo is the
+ * bank's and not one counted up from an opening balance of 0 (2026-10-09, Holvi PDF). One the
+ * owner entered stays; a month that cannot take one (closed, before the account) is skipped.
+ */
+async function recordPrintedBalances(
+  userId: string,
+  bankAccountId: string | null,
+  headerText: string | null,
+  rows: Array<{ date: string | null; amount: number }>,
+  fileName: string
+): Promise<number> {
+  if (!bankAccountId || !headerText) return 0;
+  const printed = parsePrintedBalances(headerText);
+  // Printed month ends first; the ones counted from the opening and closing balance fill in.
+  const ends = new Map(derivedMonthEndBalances(printed, rows).map((row) => [row.month, row.closingBalance]));
+  for (const row of monthEndBalances(printed)) ends.set(row.month, row.closingBalance);
+  await adoptPrintedOpeningBalance(userId, bankAccountId, printed);
+  let stored = 0;
+  for (const [month, closingBalance] of ends) {
+    const existing = await prisma.monthlyBalance.findUnique({
+      where: { bankAccountId_month: { bankAccountId, month } },
+      select: { source: true },
+    });
+    if (existing?.source === "manual") continue;
+    await upsertMonthlyBalance(userId, bankAccountId, { month, closingBalance, source: "statement", note: fileName.slice(0, 200) })
+      .then(() => { stored += 1; })
+      .catch((e: unknown) => console.warn(`Statement upload: month-end balance ${month} not stored:`, e instanceof Error ? e.message : e));
+  }
+  return stored;
+}
+
+/**
  * The account's opening balance from the statement's first printed balance, only while it is
  * still the default 0 and the account has no row before that date: then the bank's figure is
  * the balance at the opening date too (no movement in between). Holvi 2026-10-09: "SALDO 5.6.
@@ -82,6 +114,8 @@ function splitNotice(months: number): string | null {
 
 /** Every row of the file is already stored (an overlapping or repeated export). */
 class AllRowsKnownError extends Error {
+  /** Month-end balances the file still brought (see recordPrintedBalances). */
+  balancesStored = 0;
   constructor(readonly skipped: number) {
     super("all rows already stored");
   }
@@ -208,7 +242,7 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    const { statement, statements, skippedDuplicates, heldBack } = await prisma.$transaction(async (db) => {
+    const imported = await prisma.$transaction(async (db) => {
       // The statement is written first: that takes SQLite's write lock, so the
       // stored rows read below cannot change under a concurrent import.
       const created = await db.statement.create({
@@ -296,27 +330,17 @@ export async function POST(req: NextRequest) {
         })),
       });
       return { statement: labelled, statements: made, skippedDuplicates: duplicates.length, heldBack: fresh.length - open.length };
-    });
-
-    // Balances the statement prints become the account's month-end balances, so its saldo is the
-    // bank's and not one counted up from an opening balance of 0 (2026-10-09, Holvi PDF). One the
-    // owner entered stays; a month that cannot take one (closed, before the account) is skipped.
-    if (bankAccountId && headerText) {
-      const printed = parsePrintedBalances(headerText);
-      // Printed month ends first; the ones counted from the opening and closing balance fill in.
-      const ends = new Map(derivedMonthEndBalances(printed, parsedTransactions).map((row) => [row.month, row.closingBalance]));
-      for (const row of monthEndBalances(printed)) ends.set(row.month, row.closingBalance);
-      await adoptPrintedOpeningBalance(userId, bankAccountId, printed);
-      for (const [month, closingBalance] of ends) {
-        const existing = await prisma.monthlyBalance.findUnique({
-          where: { bankAccountId_month: { bankAccountId, month } },
-          select: { source: true },
-        });
-        if (existing?.source === "manual") continue;
-        await upsertMonthlyBalance(userId, bankAccountId, { month, closingBalance, source: "statement", note: file.name.slice(0, 200) })
-          .catch((e: unknown) => console.warn(`Statement upload: month-end balance ${month} not stored:`, e instanceof Error ? e.message : e));
+    }).catch(async (error: unknown) => {
+      // A file already imported can still bring the balances it prints (an upload from before
+      // they were read, 2026-10-09): they are stored, and the 409 says so.
+      if (error instanceof AllRowsKnownError) {
+        error.balancesStored = await recordPrintedBalances(userId, bankAccountId, headerText, parsedTransactions, file.name);
       }
-    }
+      throw error;
+    });
+    const { statement, statements, skippedDuplicates, heldBack } = imported;
+
+    await recordPrintedBalances(userId, bankAccountId, headerText, parsedTransactions, file.name);
 
     // Fetch recent emails from connected accounts before matching so that
     // any new emailed receipts can be matched to this statement immediately.
@@ -376,7 +400,10 @@ export async function POST(req: NextRequest) {
     if (e instanceof AllRowsKnownError) {
       return NextResponse.json(
         {
-          error: "Kaikki tiedoston tapahtumat oli jo tuotu aiemmin, joten mitään ei lisätty.",
+          error:
+            e.balancesStored > 0
+              ? "Kaikki tiedoston tapahtumat oli jo tuotu aiemmin, joten tapahtumia ei lisätty. Tiliotteen saldot päivitettiin tilille."
+              : "Kaikki tiedoston tapahtumat oli jo tuotu aiemmin, joten mitään ei lisätty.",
           skippedDuplicates: e.skipped,
         },
         { status: 409 }
