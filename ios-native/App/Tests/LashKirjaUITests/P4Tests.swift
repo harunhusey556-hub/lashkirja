@@ -13,6 +13,9 @@ final class P4Tests: WalkTestCase {
     func testB_RetryDoesNotDuplicate() {
         openAssistant()
         guard composer.waitForExistence(timeout: 10) else { check("P4 composer exists", false); return }
+        // The assistant reopens the latest conversation: earlier runs' questions may already be in
+        // it. What matters is that this send and its retry add exactly one bubble.
+        let before = questionBubbles()
         goOffline()
         type(composer, "Paljonko myyntiä tässä kuussa?")
         // The composer is multi-line: Return adds a line, the arrow button sends.
@@ -23,11 +26,14 @@ final class P4Tests: WalkTestCase {
         goOnline(); sleep(10)
         if retry.exists { retry.tap(); sleep(8) }
         shot("p4-after-retry")
-        // Only bubbles in the message area: the conversation takes the question as its title (the
-        // header at the top) and lists it behind the sheet, which once counted as "3 bubbles".
-        let top = app.windows.firstMatch.frame.height * 0.15
-        let bubbles = app.staticTexts.matching(NSPredicate(format: "label == 'Paljonko myyntiä tässä kuussa?'"))
-            .allElementsBoundByIndex.filter { $0.frame.minY > top && $0.isHittable }.count
-        check("P4 retry keeps one question bubble (found \(bubbles))", bubbles == 1)
+        let added = questionBubbles() - before
+        check("P4 retry keeps one question bubble (added \(added))", added == 1)
+    }
+
+    /// The question's bubbles in the message list; the conversation's title repeats it in the
+    /// navigation bar, which is not a bubble.
+    func questionBubbles() -> Int {
+        let question = NSPredicate(format: "label == 'Paljonko myyntiä tässä kuussa?'")
+        return app.staticTexts.matching(question).count - app.navigationBars.staticTexts.matching(question).count
     }
 }
