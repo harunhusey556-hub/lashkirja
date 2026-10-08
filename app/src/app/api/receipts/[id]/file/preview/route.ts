@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import * as path from "path";
 import { prisma } from "@/lib/db";
-import { readReceiptPreviewBuffer } from "@/lib/preview";
+import { ensureReceiptPreviewImage, readReceiptPreviewBuffer } from "@/lib/preview";
+import { cachedScaledJpeg, PREVIEW_SIDES, scaledCachePath } from "@/lib/receipt-preview";
 import { requireSession } from "@/lib/session";
 import { inlineContentDisposition, resolveUserUploadPath, isStoredUploadKey } from "@/lib/storage";
 import { noStoreJson } from "@/lib/http-security";
@@ -48,7 +49,18 @@ export async function GET(
 
   try {
     const absolutePath = resolveUserUploadPath(session.userId!, receipt.filePath, true);
-    const preview = await readReceiptPreviewBuffer(absolutePath, mimeType);
+    const basePath = await ensureReceiptPreviewImage(absolutePath, mimeType);
+    if (!basePath) {
+      return noStoreJson({ error: "Esikatselua ei voitu luoda" }, { status: 422 });
+    }
+    // ?size=thumb for list rows (360 px), otherwise the viewer's 1600 px copy; both cached.
+    const side = req.nextUrl.searchParams.get("size") === "thumb" ? PREVIEW_SIDES.thumb : PREVIEW_SIDES.view;
+    const scaled = basePath.endsWith(".svg")
+      ? null
+      : await cachedScaledJpeg(basePath, scaledCachePath(absolutePath, side), side);
+    const preview = scaled
+      ? { buffer: scaled, contentType: "image/jpeg" }
+      : await readReceiptPreviewBuffer(absolutePath, mimeType);
     if (!preview) {
       return noStoreJson({ error: "Esikatselua ei voitu luoda" }, { status: 422 });
     }

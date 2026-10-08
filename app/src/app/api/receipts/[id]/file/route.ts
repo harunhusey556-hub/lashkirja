@@ -2,9 +2,9 @@ import { NextRequest, NextResponse } from "next/server";
 import * as path from "path";
 import { prisma } from "@/lib/db";
 import { requireSession } from "@/lib/session";
-import { inlineContentDisposition, readUserUpload, isStoredUploadKey } from "@/lib/storage";
+import { inlineContentDisposition, readUserUpload, isStoredUploadKey, resolveUserUploadPath } from "@/lib/storage";
 import { noStoreJson } from "@/lib/http-security";
-import { receiptPreview } from "@/lib/receipt-preview";
+import { cachedScaledJpeg, PREVIEW_MIN_BYTES, PREVIEW_SIDES, scaledCachePath } from "@/lib/receipt-preview";
 
 const MIME: Record<string, string> = {
   ".pdf": "application/pdf",
@@ -40,8 +40,14 @@ export async function GET(
   try {
     const original = await readUserUpload(session.userId!, receipt.filePath, true);
     const originalType = receipt.upload?.mimeType || MIME[path.extname(receipt.filePath).toLowerCase()] || "application/octet-stream";
-    // ?preview=1: the app's viewer gets a 1600 px copy of a large photo instead of the original.
-    const preview = req.nextUrl.searchParams.get("preview") === "1" ? await receiptPreview(original, originalType) : null;
+    // ?preview=1: the app's viewer gets a 1600 px copy of a large photo instead of the original,
+    // made once and cached beside it (the same copy the preview route serves).
+    let preview: { body: Buffer; contentType: string } | null = null;
+    if (req.nextUrl.searchParams.get("preview") === "1" && original.length >= PREVIEW_MIN_BYTES && originalType.startsWith("image/")) {
+      const absolutePath = resolveUserUploadPath(session.userId!, receipt.filePath, true);
+      const body = await cachedScaledJpeg(absolutePath, scaledCachePath(absolutePath, PREVIEW_SIDES.view), PREVIEW_SIDES.view);
+      preview = body && body.length < original.length ? { body, contentType: "image/jpeg" } : null;
+    }
     const buffer = preview?.body ?? original;
     const contentType = preview?.contentType ?? originalType;
     return new NextResponse(buffer as unknown as BodyInit, {

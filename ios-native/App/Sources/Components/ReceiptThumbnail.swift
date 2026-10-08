@@ -30,19 +30,22 @@ struct ReceiptThumbnail: View {
         .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).stroke(Theme.ink2.opacity(0.15), lineWidth: 0.5))
         .accessibilityHidden(true)
-        .task(id: receipt.updatedAt) { await load() }
+        .task(id: receipt.id) { await load() }
     }
 
     private func load() async {
         guard receipt.hasOriginalFile, case .signedIn(let user) = app.phase else { return }
-        let memoryKey = "\(user.userId)|\(receipt.id)|\(receipt.updatedAt)" as NSString
+        // Keyed by the file, not by updatedAt: approving or matching a receipt changes updatedAt
+        // but never its stored file, and re-downloading every touched row's picture was waste.
+        let memoryKey = "\(user.userId)|\(receipt.id)|thumb" as NSString
         if let hit = Self.memory.object(forKey: memoryKey) {
             image = hit
             return
         }
         // A failed download keeps the symbol; the row still opens the receipt.
+        // ?size=thumb: a ~30 kB copy the server caches, not the multi-megabyte original photo.
         guard let url = try? await DocumentCache.shared.file(
-            app, path: "/api/receipts/\(receipt.id)/file/preview", fileName: "esikatselu.jpg", key: receipt.updatedAt
+            app, path: "/api/receipts/\(receipt.id)/file/preview", query: ["size": "thumb"], fileName: "esikatselu.jpg", key: "thumb-v1"
         ) else { return }
         let side = Self.side * 3
         let thumb = await Task.detached(priority: .utility) { Self.downsample(url, maxPixel: side) }.value

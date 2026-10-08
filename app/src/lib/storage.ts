@@ -215,6 +215,10 @@ export async function removeUserUpload(
       if (stat.isSymbolicLink()) throw new Error("Refusing to remove symlinked upload");
       if (!stat.isFile()) throw new Error("Stored object is not a regular file");
       await fs.unlink(candidate);
+      // Derived copies made beside it (PDF/HEIC preview, scaled JPEGs): nothing outlives the upload.
+      for (const suffix of [".preview.jpg", ".preview.svg", ".360.jpg", ".1600.jpg"]) {
+        await fs.unlink(`${candidate}${suffix}`).catch(() => undefined);
+      }
       return;
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
