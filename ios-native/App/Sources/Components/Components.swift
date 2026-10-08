@@ -252,7 +252,9 @@ extension ButtonStyle where Self == PressableButtonStyle {
 /// view environment at hand (models, closures).
 @MainActor
 func withMotion<Result>(_ animation: Animation? = .default, _ body: () throws -> Result) rethrows -> Result {
-    try withMotion(UIAccessibility.isReduceMotionEnabled ? nil : animation, body)
+    // withAnimation, not withMotion: a rename once turned this into a call to itself, an endless
+    // loop that froze every "Näytä enemmän" (2026-10-08; RecursionGuardTests).
+    try withAnimation(UIAccessibility.isReduceMotionEnabled ? nil : animation, body)
 }
 
 private struct MotionModifier<Value: Equatable>: ViewModifier {

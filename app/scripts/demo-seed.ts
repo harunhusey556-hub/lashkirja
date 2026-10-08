@@ -233,7 +233,50 @@ async function main() {
     ],
   });
 
+  if (CI_FLAG) await seedLongLists(user.id, account.id);
+
   console.log(`Demo data ready for ${email} / demo123`);
+}
+
+/**
+ * Simulator only (`--ci`): lists longer than one "Näytä enemmän" step (10), so the walks open
+ * long lists and fold them back the way an owner with a few months of receipts does.
+ */
+async function seedLongLists(userId: string, bankAccountId: string) {
+  const vendors = ["K-Market", "Prisma", "Lidl", "Tokmanni", "Neste", "Clas Ohlson", "Verkkokauppa.com", "Posti"];
+  await prisma.receipt.createMany({
+    data: Array.from({ length: 26 }, (_, index) => ({
+      userId,
+      vendor: `${vendors[index % vendors.length]} ${index + 1}`,
+      date: new Date(`${isoDaysAgo(2 + index * 2)}T00:00:00Z`),
+      totalAmountCents: 1_000 + index * 137,
+      category: "tarvikkeet",
+      type: "meno",
+      vatDetails: JSON.stringify([{ rate: 25.5, amount: Math.round((1_000 + index * 137) * 0.2032) / 100 }]),
+      filePath: `/tmp/demo-long-${index}.pdf`,
+      fileName: `kuitti-${index + 1}.pdf`,
+      reviewStatus: "approved",
+    })),
+  });
+  await prisma.statement.create({
+    data: {
+      userId,
+      bankAccountId,
+      fileName: "tiliote-pitka.csv",
+      fileType: "csv",
+      filePath: "/tmp/demo-long.csv",
+      checksum: "demo-long-checksum",
+      periodMonth: isoDaysAgo(0).slice(0, 7),
+      transactions: {
+        create: Array.from({ length: 26 }, (_, index) => ({
+          date: new Date(`${isoDaysAgo(index % 7)}T00:00:00Z`),
+          amountCents: -(500 + index * 111),
+          counterparty: `${vendors[index % vendors.length]} ${index + 1}`,
+          type: "meno",
+        })),
+      },
+    },
+  });
 }
 
 main()
