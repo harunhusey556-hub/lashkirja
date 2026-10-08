@@ -202,7 +202,7 @@ https://desktop-7gu8ukj.tail42feb1.ts.net:8443/bank/callback
 
 ## Native tools
 
-Receipt OCR and PDF text extraction call `tesseract`, `pdftotext` and `pdftoppm` on `PATH` (`src/lib/ai.ts`, `src/lib/parsers.ts`). None of them is on this PC's `PATH` today. Without them:
+Receipt OCR and PDF text extraction call `tesseract`, `pdftotext` and `pdftoppm` on `PATH` (`src/lib/ai.ts`, `src/lib/parsers.ts`, `src/lib/preview.ts`). Poppler (`pdftotext`, `pdftoppm`) was installed on 2026-10-08 with `winget install --id oschwartz10612.Poppler --scope user`, which put its `bin` on the user `PATH`; the supervisor picks it up on its next restart (a deploy restarts it). `tesseract` is still missing. Without Poppler, PDF receipts also have no thumbnail. Without the tools:
 
 - **photo receipts** (JPG, PNG, HEIC) are not read by the local OCR (`tesseract`). The job still finishes: the receipt form opens with the photo attached and empty fields, with the line "Kuvasta ei voitu lukea tietoja, täytä ne itse." The cloud AI (`LLM_API_KEY` with `CLOUD_AI_ENABLED`) only structures text that OCR has already read, so it does not read a photo without `tesseract`;
 - **scanned PDFs** (no text layer) are not rasterised and OCR'd (`pdftoppm` + `tesseract`);

@@ -3,6 +3,7 @@ import { randomUUID } from "crypto";
 import { POST as uploadReceipt } from "@/app/api/receipts/route";
 import { GET as getJob } from "@/app/api/jobs/[id]/route";
 import { POST as saveReceipt } from "@/app/api/receipts/save/route";
+import { POST as confirmRoute } from "@/app/api/matching/confirm/route";
 import { PATCH as patchReceipt } from "@/app/api/receipts/[id]/route";
 import { POST as batchApprove } from "@/app/api/receipts/batch-approve/route";
 import { POST as batchDelete } from "@/app/api/receipts/batch-delete/route";
@@ -113,6 +114,19 @@ describe("wave F receipts", () => {
     const duplicateBody = await readJson(duplicate);
     expect(duplicateBody.code).toBe("DUPLICATE_DOCUMENT");
     expect(duplicateBody.receiptId).toBe(receiptId);
+
+    // The iOS bank-row capture then links that receipt to the row it was taken from.
+    const statement = await createStatementWithTransactions(user.id, {
+      periodMonth: "2026-02",
+      transactions: [{ date: "2026-02-03", amountCents: -1_250, counterparty: "KESKO K-MARKET" }],
+    });
+    const transactionId = statement.transactions[0].id;
+    const linked = await confirmRoute(
+      buildRequest("POST", "/api/matching/confirm", { transactionId, receiptId: duplicateBody.receiptId }, { cookie })
+    );
+    expect(linked.status).toBe(200);
+    const row = await prisma.transaction.findUnique({ where: { id: transactionId } });
+    expect(row?.receiptId).toBe(receiptId);
   });
 
   it("keeps a category correction out of permanent rules until asked", async () => {

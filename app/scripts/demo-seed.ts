@@ -277,6 +277,36 @@ async function seedLongLists(userId: string, bankAccountId: string) {
       },
     },
   });
+  // A receipt whose bank row has the exact amount but another name (2026-10-08, "ABC Prisma
+  // Kotka" / "KSO ABC Sahkonlataus"): no automatic suggestion, yet the receipt lists the row.
+  await prisma.receipt.create({
+    data: {
+      userId,
+      vendor: "ABC Prisma Kotka",
+      date: new Date(`${isoDaysAgo(3)}T00:00:00Z`),
+      totalAmountCents: 943,
+      category: "tarvikkeet",
+      type: "meno",
+      vatDetails: JSON.stringify([{ rate: 25.5, amount: 1.91 }]),
+      filePath: "/tmp/demo-abc.pdf",
+      fileName: "abc.pdf",
+      reviewStatus: "approved",
+    },
+  });
+  await prisma.statement.create({
+    data: {
+      userId,
+      bankAccountId,
+      fileName: "tiliote-abc.csv",
+      fileType: "csv",
+      filePath: "/tmp/demo-abc.csv",
+      checksum: "demo-abc-checksum",
+      periodMonth: isoDaysAgo(2).slice(0, 7),
+      transactions: {
+        create: [{ date: new Date(`${isoDaysAgo(2)}T00:00:00Z`), amountCents: -943, counterparty: "KSO ABC Sahkonlataus", type: "meno" }],
+      },
+    },
+  });
 }
 
 main()

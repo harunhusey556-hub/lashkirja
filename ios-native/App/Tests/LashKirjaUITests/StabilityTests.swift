@@ -99,6 +99,23 @@ final class StabilityTests: WalkTestCase {
         shot("stability-report")
     }
 
+    /// A receipt whose bank row has the same amount but another name lists that row and links it
+    /// with one tap (seed: "ABC Prisma Kotka" / "KSO ABC Sahkonlataus", 9,43 €).
+    func test08_SameAmountRowIsOfferedOnTheReceipt() {
+        openHubRow("Kuitit"); sleep(2)
+        XCTAssertTrue(tapLabel("label BEGINSWITH %@", "ABC Prisma Kotka"), "seeded receipt missing")
+        sleep(3)
+        let row = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "KSO ABC Sahkonlataus")).firstMatch
+        for _ in 0..<4 where !row.isHittable { app.swipeUp(velocity: .slow) }
+        shot("stability-same-amount-candidate")
+        XCTAssertTrue(row.exists, "the same-amount bank row is not offered")
+        row.tap(); taps += 1
+        let unlink = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Poista kohdistus")).firstMatch
+        XCTAssertTrue(unlink.waitForExistence(timeout: 10), "tapping the row did not link it")
+        shot("stability-same-amount-linked")
+        assertResponsive("receipt linked")
+    }
+
     /// Opens ALV and then reads nothing for 25 s: the app's own hang watchdog (event log) tells
     /// whether ALV blocks the main thread, without the test's accessibility queries in the way.
     func test07_AlvLeftAlone() {
