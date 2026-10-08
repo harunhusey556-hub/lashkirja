@@ -5,6 +5,13 @@ import { expect, test, type Page } from "@playwright/test";
 const MONTH_HEADING =
   /^(Tammikuu|Helmikuu|Maaliskuu|Huhtikuu|Toukokuu|Kesäkuu|Heinäkuu|Elokuu|Syyskuu|Lokakuu|Marraskuu|Joulukuu)$/;
 
+/** The app's own picker (CustomSelect): a combobox button that opens a listbox of options. */
+async function choose(page: Page, combobox: string, option: string | number) {
+  await page.getByRole("combobox", { name: combobox }).click();
+  const options = page.getByRole("option");
+  await (typeof option === "number" ? options.nth(option) : options.filter({ hasText: option }).first()).click();
+}
+
 async function login(page: Page) {
   await page.goto("/login");
   await page.getByLabel("Sähköposti").fill("demo@lashkirja.fi");
@@ -117,11 +124,12 @@ test("invoice goes from draft to paid", async ({ page }) => {
 
   await page.goto("/laskut");
   await page.getByRole("link", { name: "Uusi lasku" }).click();
-  await page.getByRole("combobox", { name: "Asiakas" }).selectOption({ label: "E2E Asiakas" });
+  await choose(page, "Asiakas", "E2E Asiakas");
   await page.getByLabel("Rivin 1 kuvaus").fill("Ripsienpidennys");
   await page.getByLabel("Rivin 1 määrä").fill("1");
   await page.getByLabel("Rivin 1 hinta").fill("100");
-  await expect(page.getByText("125,50 €").first()).toBeVisible(); // live total
+  // Live total; the seed user is not VAT-registered, so no VAT is added.
+  await expect(page.getByText("100,00 €").first()).toBeVisible();
   await page.getByRole("button", { name: "Luo lasku" }).click();
 
   // Creating the invoice opens it straight away (no trip back through the list).
@@ -140,8 +148,8 @@ test("invoice goes from draft to paid", async ({ page }) => {
   // The payment form now opens in a "Kirjaa maksu" sheet (BottomActions'
   // primary for a sent, still-open invoice) instead of sitting inline.
   await page.getByRole("button", { name: "Kirjaa maksu" }).click();
-  await page.getByLabel("Summa", { exact: true }).fill("125,50");
-  await page.getByRole("dialog").getByRole("button", { name: "Uusi asiakas", exact: true }).click();
+  await page.getByLabel("Summa", { exact: true }).fill("100,00");
+  await page.getByRole("dialog").getByRole("button", { name: "Kirjaa maksu", exact: true }).click();
   // "Maksettu" appears both as the status and as the paid-amount row label.
   await expect(page.getByText("Maksettu", { exact: true }).first()).toBeVisible();
   await expect(page.getByText("Avoinna")).toHaveCount(0);
@@ -180,7 +188,7 @@ test("an invoice can be downloaded as a PDF", async ({ page, context }) => {
 
   await page.goto("/laskut");
   await page.getByRole("link", { name: "Uusi lasku" }).click();
-  await page.getByRole("combobox", { name: "Asiakas" }).selectOption({ label: "PDF Asiakas" });
+  await choose(page, "Asiakas", "PDF Asiakas");
   await page.getByLabel("Rivin 1 kuvaus").fill("Ripsienpidennys");
   await page.getByLabel("Rivin 1 hinta").fill("100");
   await page.getByRole("button", { name: "Luo lasku" }).click();
@@ -230,9 +238,10 @@ test("closing the books makes an earlier period read-only", async ({ page }) => 
   await login(page);
   await page.goto("/kirjanpito/kaudet");
 
-  const lockSelect = page.getByLabel("Lukitse kaudet tähän kuukauteen asti");
-  const currentMonth = await lockSelect.locator("option").nth(1).getAttribute("value");
-  await lockSelect.selectOption(currentMonth!);
+  // The first choice is "no lock"; the next one is the latest month that can be closed. The
+  // picker keeps a hidden native select with the month values.
+  const currentMonth = await page.locator('select[aria-hidden="true"] option').nth(1).getAttribute("value");
+  await choose(page, "Lukitse kaudet tähän kuukauteen asti", 1);
   await page.getByRole("button", { name: "Lukitse", exact: true }).click();
   // Open items are listed first ("Lukitse silti"); a clean month goes straight to the confirm.
   const lockAnyway = page.getByRole("button", { name: "Lukitse silti" });
@@ -249,19 +258,22 @@ test("closing the books makes an earlier period read-only", async ({ page }) => 
 
   await page.goto("/laskut");
   await page.getByRole("link", { name: "Uusi lasku" }).click();
-  await page.getByRole("combobox", { name: "Asiakas" }).selectOption({ label: "Lukko Asiakas" });
+  await choose(page, "Asiakas", "Lukko Asiakas");
   await page.getByLabel("Rivin 1 kuvaus").fill("Lukittu kausi");
   await page.getByLabel("Rivin 1 hinta").fill("50");
   // Date the invoice inside the closed month.
   await page.getByLabel("Laskun päivä").fill(`${currentMonth}-01`);
   await page.getByRole("button", { name: "Luo lasku" }).click();
 
-  await expect(page.getByText(/lukittu/i)).toBeVisible();
+  // The refusal names the closed period ("Kausi syyskuu 2026 on suljettu …").
+  await expect(page.getByText(/on suljettu/).first()).toBeVisible();
 
   await page.goto("/kirjanpito/kaudet");
   await page.getByRole("button", { name: "Avaa kirjanpito uudelleen" }).click();
-  await page.getByRole("dialog").getByRole("button", { name: "Avaa kirjanpito" }).click();
-  await expect(page.getByText("Kirjanpito avattiin.")).toBeVisible();
+  // The card's own button and the confirm share the name; the confirm opens last.
+  await page.getByRole("button", { name: "Avaa kaudet" }).last().click();
+  // "Kirjanpito avattiin." or the reopened range ("Syyskuu 2026 avattiin.").
+  await expect(page.getByText(/avattiin\./).first()).toBeVisible();
 });
 
 test("a recurring invoice generates a real invoice", async ({ page }) => {
@@ -274,7 +286,7 @@ test("a recurring invoice generates a real invoice", async ({ page }) => {
 
   await page.goto("/toistuvat");
   await page.getByRole("button", { name: "Uusi toistuva lasku" }).click();
-  await page.getByRole("combobox", { name: "Asiakas" }).selectOption({ label: "Toisto Asiakas" });
+  await choose(page, "Asiakas", "Toisto Asiakas");
   await page.getByLabel("Rivin 1 kuvaus").fill("Kuukausiylläpito");
   await page.getByLabel("Rivin 1 hinta").fill("50");
   // Start in the past so the first occurrence is immediately due.
@@ -284,7 +296,7 @@ test("a recurring invoice generates a real invoice", async ({ page }) => {
 
   await expect(page.getByText("Toisto Asiakas").first()).toBeVisible();
   // Two steps: the preview sheet lists what would be created, then the confirm books it.
-  await page.getByRole("button", { name: "Luo erääntyneet laskut" }).click();
+  await page.getByRole("button", { name: "Luo odottavat laskut" }).click();
   await page.getByRole("dialog").getByRole("button", { name: /^Luo (lasku|\d+ laskua)$/ }).click();
   await expect(page.getByText(/(1 lasku|\d+ laskua) luotiin\./)).toBeVisible();
 
