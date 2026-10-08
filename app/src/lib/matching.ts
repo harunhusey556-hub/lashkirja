@@ -276,18 +276,26 @@ export function candidatesFor(
     });
 }
 
-/** Gate-eligible bank rows for one receipt ("which bank row fits this kuitti?"). */
+/**
+ * Bank rows for one receipt ("which bank row fits this kuitti?"). `suggest` (the chat's one
+ * proposal) lists only gate-eligible rows. `search` (the receipt screen, the owner choosing by
+ * hand) adds related rows after them: the same amount, a viite or the same name within the date
+ * window, as "Etsi kuitti" does from the bank side. Without it a receipt whose bank row had the
+ * exact amount but a different-looking name (ABC Prisma vs "KSO ABC Sahkonlata") listed nothing.
+ */
 export function candidatesForReceipt(
   receipt: MatchReceipt,
   txs: MatchTx[],
   rejectedPairs: Set<string>,
-  limit = 3
+  limit = 3,
+  mode: "suggest" | "search" = "suggest"
 ): ScoredPair[] {
-  const scored: ScoredPair[] = [];
+  const scored: Array<ScoredPair & { eligible: boolean }> = [];
   for (const tx of txs) {
     if (rejectedPairs.has(pairKey(tx.id, receipt.id))) continue;
     const result = scorePair(tx, receipt);
-    if (!result?.eligible) continue;
+    if (!result) continue;
+    if (!result.eligible && (mode === "suggest" || result.score <= 0)) continue;
     scored.push({
       transactionId: tx.id,
       receiptId: receipt.id,
@@ -295,17 +303,25 @@ export function candidatesForReceipt(
       reasons: result.reasons,
       explanation: result.explanation,
       certain: result.certain,
+      eligible: result.eligible,
     });
   }
-  const decision = decide(scored.map((s) => ({ ...s, certain: Boolean(s.certain) })));
+  const decision = decide(scored.filter((s) => s.eligible).map((s) => ({ ...s, certain: Boolean(s.certain) })));
   const tied = new Set(decision.ambiguous.map((s) => s.transactionId));
-  return decision.eligible.slice(0, limit).map((pair) =>
-    tied.has(pair.transactionId)
-      ? { ...pair, reasons: [...pair.reasons, "competing"], explanation: [...(pair.explanation ?? []), AMBIGUOUS_REASON] }
-      : decision.eligible.length > 1
-        ? { ...pair, reasons: [...pair.reasons, "competing"] }
-        : pair
-  );
+  const eligibleCount = decision.eligible.length;
+  const strip = ({ eligible: _eligible, ...pair }: ScoredPair & { eligible: boolean }): ScoredPair => pair;
+  const eligible = decision.eligible.map((pair) => {
+    const plain = strip(pair as ScoredPair & { eligible: boolean });
+    if (tied.has(plain.transactionId)) {
+      return { ...plain, reasons: [...plain.reasons, "competing"], explanation: [...(plain.explanation ?? []), AMBIGUOUS_REASON] };
+    }
+    return eligibleCount > 1 ? { ...plain, reasons: [...plain.reasons, "competing"] } : plain;
+  });
+  const related = scored
+    .filter((s) => !s.eligible)
+    .sort((a, b) => b.score - a.score)
+    .map(strip);
+  return [...eligible, ...related].slice(0, limit);
 }
 
 /** The one pick a shortlist allows: its best entry, unless that entry ties with another. */
@@ -541,7 +557,8 @@ export async function buildReceiptMatchViews(
       receiptModel,
       sourceTxId ? openTxModels.filter((tx) => tx.id === sourceTxId) : openTxModels,
       rejectedPairs,
-      3
+      5,
+      "search"
     );
     const byId = new Map(openTxs.map((tx) => [tx.id, tx]));
     const matchCandidates = scored

@@ -348,10 +348,30 @@ struct CaptureFlow: View {
             finishReading(id, uploadId: result.uploadId, extracted: result.extracted)
         } catch is CancellationError {
             queue.markCancelled(id)
+        } catch let error as LKError where single && error.duplicateReceiptId != nil {
+            // Taken from a bank row, and the file is already a receipt: link that receipt to the
+            // row instead of stopping at "Tämä kuitti on jo tallennettu" (2026-10-08).
+            await linkExisting(id, receiptId: error.duplicateReceiptId!)
         } catch let error where !single && ReceiptUploadFile.isNetworkFailure(error) {
             keepOffline(id, file)
         } catch {
             queue.markFailed(id, error.userMessage)
+        }
+    }
+
+    private func linkExisting(_ id: String, receiptId: String) async {
+        struct Match: Encodable { let transactionId: String; let receiptId: String }
+        guard let transactionId else { return }
+        EventLog.shared.log(.action("link-existing-receipt", screen: "capture"))
+        do {
+            let _: Ignored = try await app.api.send("POST", "/api/matching/confirm", body: Match(transactionId: transactionId, receiptId: receiptId))
+            dropSource(id)
+            Haptics.success()
+            saved(id)
+        } catch is CancellationError {
+            queue.markCancelled(id)
+        } catch {
+            queue.markFailed(id, "Kuitti oli jo tallennettu, mutta sitä ei voitu kohdistaa tähän tapahtumaan: \(error.userMessage)")
         }
     }
 

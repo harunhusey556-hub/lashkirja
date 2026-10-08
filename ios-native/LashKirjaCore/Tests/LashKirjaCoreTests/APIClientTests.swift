@@ -117,3 +117,12 @@ private actor FailureLog {
     for _ in 0..<50 where await log.items.count < 2 { try await Task.sleep(nanoseconds: 20_000_000) }
     #expect(await log.items.sorted() == ["GET /api/c 200 true", "POST /api/a 500 false"])
 }
+
+@Test func aDuplicateDocumentNamesTheReceiptItAlreadyIs() {
+    let body = Data(#"{"error":"Tämä kuitti on jo tallennettu","code":"DUPLICATE_DOCUMENT","receiptId":"r-42"}"#.utf8)
+    let error = APIErrorDecoder.decode(status: 409, data: body)
+    #expect(error.message == "Tämä kuitti on jo tallennettu")
+    #expect(error.duplicateReceiptId == "r-42")
+    let other = APIErrorDecoder.decode(status: 409, data: Data(#"{"error":"x","code":"CONFLICT","receiptId":"r-1"}"#.utf8))
+    #expect(other.duplicateReceiptId == nil)
+}

@@ -17,6 +17,9 @@ public struct LKError: Error, Equatable, Sendable {
     /// The server's "same receipt already saved" 409 (details.isDuplicate).
     public var isDuplicate: Bool { fields["isDuplicate"] == "true" }
 
+    /// The receipt a re-uploaded file already became (`DUPLICATE_DOCUMENT` with `receiptId`).
+    public var duplicateReceiptId: String? { code == "DUPLICATE_DOCUMENT" ? fields["receiptId"] : nil }
+
     /// A 401 that means the session is gone (not, say, a wrong current password).
     public var endsSession: Bool {
         guard status == 401 else { return false }
@@ -56,13 +59,15 @@ public enum APIErrorDecoder {
         let error: String?
         let code: String?
         let attemptsLeft: Int?
-        enum CodingKeys: String, CodingKey { case error, code, attemptsLeft }
+        let receiptId: String?
+        enum CodingKeys: String, CodingKey { case error, code, attemptsLeft, receiptId }
         init(from decoder: Decoder) throws {
             let c = try decoder.container(keyedBy: CodingKeys.self)
             error = try c.decodeIfPresent(String.self, forKey: .error)
             // Extras of an unexpected type must not cost the sentence in `error`.
             code = try? c.decodeIfPresent(String.self, forKey: .code)
             attemptsLeft = try? c.decodeIfPresent(Int.self, forKey: .attemptsLeft)
+            receiptId = try? c.decodeIfPresent(String.self, forKey: .receiptId)
         }
     }
     private struct Nested: Decodable {
@@ -94,6 +99,7 @@ public enum APIErrorDecoder {
         if let flat = try? decoder.decode(Flat.self, from: data), flat.error != nil || flat.code != nil {
             var fields: [String: String] = [:]
             if let left = flat.attemptsLeft { fields["attemptsLeft"] = String(left) }
+            if let receiptId = flat.receiptId { fields["receiptId"] = receiptId }
             return LKError(status: status, code: flat.code, message: flat.error ?? LKError.unreachable, fields: fields)
         }
         if let nested = try? decoder.decode(Nested.self, from: data) {
