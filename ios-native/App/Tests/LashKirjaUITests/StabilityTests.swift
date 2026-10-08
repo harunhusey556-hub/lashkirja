@@ -31,13 +31,23 @@ final class StabilityTests: WalkTestCase {
         shot("stability-\(screen)")
     }
 
+    /// Opens a Kirjanpito hub row ("Kuitit, 28 kuittia") and checks the screen really opened.
+    func openHubRow(_ title: String) {
+        tab("Kirjanpito")
+        for _ in 0..<2 where !app.navigationBars[title].exists {
+            tapLabel("label BEGINSWITH %@", title)
+            _ = app.navigationBars[title].waitForExistence(timeout: 10)
+        }
+        XCTAssertTrue(app.navigationBars[title].exists, "\(title) did not open")
+    }
+
     func test01_ReceiptsGrowAndFold() {
-        tab("Kirjanpito"); tap("Kuitit"); sleep(3)
+        openHubRow("Kuitit"); sleep(2)
         growAndFold("kuitit")
     }
 
     func test02_BankFeedGrowsAndFolds() {
-        tab("Kirjanpito"); tap("Pankki"); sleep(3)
+        openHubRow("Pankki"); sleep(2)
         tapLabel("label BEGINSWITH %@", "Näytä kaikki"); sleep(3)
         growAndFold("pankkitapahtumat")
     }
