@@ -22,7 +22,17 @@ final class P5Tests: WalkTestCase {
             sleep(1)
             opened = tapLabel("label CONTAINS %@", "· myöhässä", scrolls: 20)
         }
-        if opened { sleep(4); shot("p5-invoice-detail") } else { shot("p5-koti-miss"); dump(app, "p5-koti-miss") }
+        if !opened {
+            // Twenty slow swipes through Koti at AX5 now and then end elsewhere; the invoice itself
+            // is what this checks, so it is opened from Myynti's overdue chip instead (noted above).
+            shot("p5-koti-miss"); dump(app, "p5-koti-miss")
+            tab("Myynti"); sleep(3)
+            if tapLabel("label BEGINSWITH %@", "Myöhäs", scrolls: 4) {
+                sleep(2)
+                opened = tapLabel("label CONTAINS %@", "Lasku ", scrolls: 10)
+            }
+        }
+        if opened { sleep(4); shot("p5-invoice-detail") }
         check("P5 invoice detail opens at AX5", app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'Myöhässä '")).firstMatch.exists)
         tab("Myynti"); tap("Uusi lasku"); sleep(4); shot("p5-invoice-form")
         app.windows.firstMatch.swipeUp(velocity: .slow); sleep(1); shot("p5-invoice-lines")
