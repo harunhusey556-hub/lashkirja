@@ -13,12 +13,10 @@
        production untouched.
     3. stop the supervisor (downtime starts)
     4. backup-local.ps1 -Tag predeploy (skipped only when prod.db does not exist yet)
-    5. SWAP: prod is checked out at the commit; app
-ode_modules and app\.next
+    5. SWAP: prod is checked out at the commit; app\node_modules and app\.next
        are renamed to node_modules.prev / .next.prev and the staged ones are
        moved in (a rename on the same disk). Turbopack keeps junctions with
-       absolute paths in .next
-ode_modules; they are re-pointed from stage
+       absolute paths in .next\node_modules; they are re-pointed from stage
        to prod (rehearsed 2026-10-08: without that, prisma and pino fail).
     6. prisma migrate deploy against C:\LashKirja\data\prod.db
     7. start the supervisor (the "LashKirja prod" Scheduled Task when registered)
