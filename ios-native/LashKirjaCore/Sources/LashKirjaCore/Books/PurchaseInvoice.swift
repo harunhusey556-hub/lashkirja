@@ -99,12 +99,14 @@ public struct PurchaseInvoice: Decodable, Sendable, Identifiable, Hashable {
     public let category: String?
     public let notes: String?
     public let paidAt: String?
+    /// How the VAT return reads it; domestic from an older server.
+    public let vatTreatment: PurchaseVatTreatment
     public let receiptId: String?
     public let payments: [Payment]
 
     enum CodingKeys: String, CodingKey {
         case id, supplierName, supplierBusinessId, supplierIban, invoiceNumber, reference, issueDate, dueDate
-        case status, displayStatus, gross, vat, net, paid, open, closedReason, category, notes, paidAt, receiptId, payments
+        case status, displayStatus, gross, vat, net, paid, open, closedReason, category, notes, paidAt, receiptId, payments, vatTreatment
     }
 
     public init(from decoder: Decoder) throws {
@@ -128,6 +130,7 @@ public struct PurchaseInvoice: Decodable, Sendable, Identifiable, Hashable {
         category = try c.decodeIfPresent(String.self, forKey: .category)
         notes = try c.decodeIfPresent(String.self, forKey: .notes)
         paidAt = try c.decodeIfPresent(String.self, forKey: .paidAt)
+        vatTreatment = (try? c.decodeIfPresent(String.self, forKey: .vatTreatment)).flatMap(PurchaseVatTreatment.init(rawValue:)) ?? .domestic
         receiptId = try c.decodeIfPresent(String.self, forKey: .receiptId)
         payments = try c.decodeIfPresent([Payment].self, forKey: .payments) ?? []
     }
@@ -460,6 +463,8 @@ public struct PurchaseInvoiceInput: Encodable, Sendable, Equatable {
     public var vat: Decimal
     public var category: String?
     public var notes: String?
+    /// Left out for domestic, so a domestic invoice's body is what it always was.
+    public var vatTreatment: PurchaseVatTreatment? = nil
 }
 
 /// A `PATCH /api/purchase-invoices/[id]` that carries only what changed.
@@ -473,6 +478,7 @@ public struct PurchaseInvoicePatch: Encodable, Sendable {
     var vat: Decimal?
     var category: String??
     var notes: String??
+    var vatTreatment: PurchaseVatTreatment?
 
     public init(from input: PurchaseInvoiceInput, existing: PurchaseInvoice) {
         if input.supplierName != existing.supplierName { supplierName = input.supplierName }
@@ -484,6 +490,7 @@ public struct PurchaseInvoicePatch: Encodable, Sendable {
         if input.vat != existing.vat { vat = input.vat }
         if input.category != Self.clean(existing.category) { category = .some(input.category) }
         if input.notes != Self.clean(existing.notes) { notes = .some(input.notes) }
+        if (input.vatTreatment ?? .domestic) != existing.vatTreatment { vatTreatment = input.vatTreatment ?? .domestic }
     }
 
     static func clean(_ value: String?) -> String? {
@@ -493,10 +500,10 @@ public struct PurchaseInvoicePatch: Encodable, Sendable {
 
     public var isEmpty: Bool {
         supplierName == nil && invoiceNumber == nil && reference == nil && issueDate == nil && dueDate == nil
-            && gross == nil && vat == nil && category == nil && notes == nil
+            && gross == nil && vat == nil && category == nil && notes == nil && vatTreatment == nil
     }
 
-    enum CodingKeys: String, CodingKey { case supplierName, invoiceNumber, reference, issueDate, dueDate, gross, vat, category, notes }
+    enum CodingKeys: String, CodingKey { case supplierName, invoiceNumber, reference, issueDate, dueDate, gross, vat, category, notes, vatTreatment }
 
     public func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
@@ -505,6 +512,7 @@ public struct PurchaseInvoicePatch: Encodable, Sendable {
         try c.encodeIfPresent(dueDate, forKey: .dueDate)
         try c.encodeIfPresent(gross, forKey: .gross)
         try c.encodeIfPresent(vat, forKey: .vat)
+        try c.encodeIfPresent(vatTreatment?.rawValue, forKey: .vatTreatment)
         for (value, key) in [(invoiceNumber, CodingKeys.invoiceNumber), (reference, .reference), (category, .category), (notes, .notes)] {
             if case .some(let inner) = value {
                 if let inner { try c.encode(inner, forKey: key) } else { try c.encodeNil(forKey: key) }
@@ -531,6 +539,7 @@ public struct PurchaseInvoiceForm: Sendable, Equatable {
     public var vat = ""
     public var category = ""
     public var notes = ""
+    public var vatTreatment: PurchaseVatTreatment = .domestic
 
     public init(today: String) {
         issueDate = today
@@ -547,6 +556,7 @@ public struct PurchaseInvoiceForm: Sendable, Equatable {
         vat = invoice.vat == 0 ? "" : Self.amountText(invoice.vat)
         category = invoice.category ?? ""
         notes = invoice.notes ?? ""
+        vatTreatment = invoice.vatTreatment
     }
 
     /// "124,00" for a text field.
@@ -601,7 +611,8 @@ public struct PurchaseInvoiceForm: Sendable, Equatable {
             gross: g,
             vat: v,
             category: PurchaseInvoicePatch.clean(category),
-            notes: PurchaseInvoicePatch.clean(notes)
+            notes: PurchaseInvoicePatch.clean(notes),
+            vatTreatment: vatTreatment == .domestic ? nil : vatTreatment
         )
         return Validation(errors: [:], input: input)
     }

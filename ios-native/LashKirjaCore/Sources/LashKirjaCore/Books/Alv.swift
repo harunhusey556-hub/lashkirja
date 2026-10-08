@@ -29,6 +29,10 @@ public struct AlvReport: Decodable, Sendable {
         public let invoiceCount: Int?
         public let purchaseInvoiceVat: Decimal?
         public let purchaseInvoiceCount: Int?
+        /// Self-assessed on foreign purchases: in 301/305/306 and again in 307.
+        public let reverseChargeVat: Decimal?
+        /// Finnish VAT foreign sellers charged; paid but not deductible.
+        public let foreignVatNotDeducted: Decimal?
     }
 
     /// Receipts with no VAT breakdown, left out of the fields (web "N kuittia ilman ALV-erittelyä").
@@ -54,6 +58,11 @@ public struct AlvReport: Decodable, Sendable {
     public let field309: TurnoverField
     public let field307: AmountField
     public let field308: PayableField
+    /// Reverse charge on purchases from other EU countries; absent from an older server.
+    public let field305: AmountField?
+    public let field306: AmountField?
+    public let field313: AmountField?
+    public let field314: AmountField?
     public let receiptCount: Int?
     public let pendingReceiptCount: Int?
     public let filing: Filing?

@@ -55,6 +55,26 @@ struct AlvView: View {
                     field(r.field303)
                     LabeledContent(r.field309.label) { MoneyText(amount: r.field309.turnover) }.font(.subheadline)
                 }
+                if (r.field306?.amount ?? 0) > 0 || (r.field305?.amount ?? 0) > 0 || (r.sources?.reverseChargeVat ?? 0) > 0 || (r.sources?.foreignVatNotDeducted ?? 0) > 0 {
+                    Section {
+                        if let services = r.field306, services.amount > 0 {
+                            LabeledContent("Palveluostot (314)") { MoneyText(amount: r.field314?.amount ?? 0) }.font(.subheadline)
+                            LabeledContent(services.label) { MoneyText(amount: services.amount) }.font(.subheadline)
+                        }
+                        if let goods = r.field305, goods.amount > 0 {
+                            LabeledContent("Tavaraostot (313)") { MoneyText(amount: r.field313?.amount ?? 0) }.font(.subheadline)
+                            LabeledContent(goods.label) { MoneyText(amount: goods.amount) }.font(.subheadline)
+                        }
+                        if let notDeducted = r.sources?.foreignVatNotDeducted, notDeducted > 0 {
+                            LabeledContent("Ulkomaisten myyjien Suomen ALV, ei vähennettävissä") { MoneyText(amount: notDeducted) }
+                                .font(.subheadline).foregroundStyle(Theme.warning)
+                        }
+                    } header: {
+                        Text("Ulkomaiset ostot")
+                    } footer: {
+                        Text("Käännetyn verovelvollisuuden vero on mukana maksettavassa verossa ja vähennetään samalla summalla kohdassa 307. EU:n ulkopuolelta ostettujen palvelujen vero on kohdassa 301.")
+                    }
+                }
                 Section {
                     NavigationLink(value: Route.forDrill(ReportDrill.alvDeductible(period: period))) {
                         LabeledContent(r.field307.label) { MoneyText(amount: r.field307.amount) }.font(.subheadline)

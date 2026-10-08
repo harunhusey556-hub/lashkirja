@@ -426,6 +426,7 @@ struct ReceiptEditSheet: View {
                 } header: {
                     Text("Kategoria")
                 }
+                if form.type == "meno" { foreignPurchaseSection }
                 vatSection
                 Section {
                     TextField("Viitenumero", text: $form.reference)
@@ -481,6 +482,25 @@ struct ReceiptEditSheet: View {
     @ViewBuilder private func fieldError(_ key: String) -> some View {
         if let message = errors[key] {
             Text(message).font(.caption).foregroundStyle(Theme.danger)
+        }
+    }
+
+    /// How the purchase's VAT reaches the return, and the document's currency (web "ALV-käsittely").
+    private var foreignPurchaseSection: some View {
+        Section {
+            Picker("ALV-käsittely", selection: $form.vatTreatment) {
+                ForEach(PurchaseVatTreatment.allCases) { treatment in
+                    Text(treatment.label).tag(treatment)
+                }
+            }
+            .pickerStyle(.navigationLink)
+            TextField("Valuutta", text: $form.currency)
+                .textInputAutocapitalization(.characters)
+                .autocorrectionDisabled()
+        } header: {
+            Text("ALV-käsittely")
+        } footer: {
+            if !form.vatTreatment.hint.isEmpty { Text(form.vatTreatment.hint) }
         }
     }
 

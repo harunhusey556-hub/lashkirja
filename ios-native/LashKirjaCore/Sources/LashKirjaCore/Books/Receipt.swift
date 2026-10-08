@@ -41,10 +41,16 @@ public struct Receipt: Decodable, Sendable, Identifiable, Hashable {
     public let vatDetails: [VatDetail]?
     public let linkedTransaction: LinkedTransaction?
     public let match: Match?
+    /// ISO 4217 of the document; `totalAmount` stays in euros. "EUR" from an older server.
+    public let currency: String
+    /// The amount in `currency` when it is not EUR.
+    public let originalAmount: Decimal?
+    public let vatTreatment: PurchaseVatTreatment
 
     enum CodingKeys: String, CodingKey {
         case id, vendor, date, category, type, reference, invoiceNumber, fileName, source, confidence
         case createdAt, updatedAt, totalAmount, reviewStatus, notes, vatDetails, linkedTransaction, match
+        case currency, originalAmount, vatTreatment
     }
 
     public init(from decoder: Decoder) throws {
@@ -74,6 +80,10 @@ public struct Receipt: Decodable, Sendable, Identifiable, Hashable {
         }
         linkedTransaction = try c.decodeIfPresent(LinkedTransaction.self, forKey: .linkedTransaction)
         match = try c.decodeIfPresent(Match.self, forKey: .match)
+        currency = (try? c.decodeIfPresent(String.self, forKey: .currency)) ?? "EUR"
+        originalAmount = try? c.decodeIfPresent(Decimal.self, forKey: .originalAmount)
+        // An unknown value from a newer server reads as domestic rather than failing the screen.
+        vatTreatment = (try? c.decodeIfPresent(String.self, forKey: .vatTreatment)).flatMap(PurchaseVatTreatment.init(rawValue:)) ?? .domestic
     }
 
     public var isIncome: Bool { type == "tulo" }

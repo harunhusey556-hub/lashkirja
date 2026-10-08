@@ -79,6 +79,18 @@ struct PurchaseInvoiceFormView: View {
                 } footer: {
                     Text("Viitenumero tarvitaan automaattiseen kohdistukseen.")
                 }
+                Section {
+                    Picker("ALV-käsittely", selection: $form.vatTreatment) {
+                        ForEach(PurchaseVatTreatment.allCases) { treatment in
+                            Text(treatment.label).tag(treatment)
+                        }
+                    }
+                    .pickerStyle(.navigationLink)
+                } header: {
+                    Text("ALV-käsittely")
+                } footer: {
+                    if !form.vatTreatment.hint.isEmpty { Text(form.vatTreatment.hint) }
+                }
 
                 Section {
                     TextField("Lisätiedot (valinnainen)", text: $form.notes, axis: .vertical)
