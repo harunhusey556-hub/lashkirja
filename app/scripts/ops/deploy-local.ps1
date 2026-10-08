@@ -370,10 +370,8 @@ try {
   Remove-Item Env:NODE_ENV -ErrorAction SilentlyContinue
   $env:NEXT_TELEMETRY_DISABLED = '1'
   Exec 'npm.cmd' @('ci', '--prefer-offline', '--no-audit', '--no-fund') $StageApp
-  Exec 'node' @('node_modules\prismauild\index.js', 'generate') $StageApp
-  Exec 'node' @('node_modules
-ext\distin
-ext', 'build') $StageApp
+  Exec 'node' @('node_modules\prisma\build\index.js', 'generate') $StageApp
+  Exec 'node' @('node_modules\next\dist\bin\next', 'build') $StageApp
   if (-not (Test-Path (Join-Path $StageApp '.next\BUILD_ID'))) { throw 'build finished without .next\BUILD_ID' }
   Log 'prepared; stopping the live server for the swap'
 
@@ -415,7 +413,7 @@ ext', 'build') $StageApp
 
   # 6. migrate. From here on, a failure must restore the database too.
   $stage = 'migrate'
-  Exec 'node' @('node_modules\prismauild\index.js', 'migrate', 'deploy')
+  Exec 'node' @('node_modules\prisma\build\index.js', 'migrate', 'deploy')
 
   # 7-8. start and verify
   $stage = 'health'
