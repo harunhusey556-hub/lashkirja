@@ -7,8 +7,10 @@ import {
   parseXLSX,
   parseCSV,
   parsePDFStatement,
+  derivedMonthEndBalances,
   monthEndBalances,
   parsePrintedBalances,
+  type PrintedBalance,
   statementHeaderText,
 } from "@/lib/parsers";
 import {
@@ -37,6 +39,29 @@ import { AppError } from "@/lib/api-errors";
 function publicTransaction<T extends { amountCents: number }>(tx: T) {
   const { amountCents, ...rest } = tx;
   return { ...rest, amount: centsToEuros(amountCents) };
+}
+
+/**
+ * The account's opening balance from the statement's first printed balance, only while it is
+ * still the default 0 and the account has no row before that date: then the bank's figure is
+ * the balance at the opening date too (no movement in between). Holvi 2026-10-09: "SALDO 5.6.
+ * + 83,01" against an opening balance of 0 put June's saldo 83,01 off.
+ */
+async function adoptPrintedOpeningBalance(userId: string, bankAccountId: string, printed: PrintedBalance[]) {
+  const first = [...printed].sort((a, b) => a.date.localeCompare(b.date))[0];
+  if (!first) return;
+  const account = await prisma.bankAccount.findFirst({
+    where: { id: bankAccountId, userId },
+    select: { openingBalanceCents: true, openingDate: true },
+  });
+  if (!account || account.openingBalanceCents !== 0) return;
+  const startsAt = new Date(`${first.date}T00:00:00.000Z`);
+  if (startsAt < account.openingDate) return;
+  const earlier = await prisma.transaction.count({
+    where: { statement: { bankAccountId }, date: { lt: startsAt } },
+  });
+  if (earlier > 0) return;
+  await prisma.bankAccount.update({ where: { id: bankAccountId }, data: { openingBalanceCents: eurosToCents(first.balance) } });
 }
 
 /** Most common YYYY-MM among the rows' dates; the fallback when none has a date. */
@@ -277,7 +302,12 @@ export async function POST(req: NextRequest) {
     // bank's and not one counted up from an opening balance of 0 (2026-10-09, Holvi PDF). One the
     // owner entered stays; a month that cannot take one (closed, before the account) is skipped.
     if (bankAccountId && headerText) {
-      for (const { month, closingBalance } of monthEndBalances(parsePrintedBalances(headerText))) {
+      const printed = parsePrintedBalances(headerText);
+      // Printed month ends first; the ones counted from the opening and closing balance fill in.
+      const ends = new Map(derivedMonthEndBalances(printed, parsedTransactions).map((row) => [row.month, row.closingBalance]));
+      for (const row of monthEndBalances(printed)) ends.set(row.month, row.closingBalance);
+      await adoptPrintedOpeningBalance(userId, bankAccountId, printed);
+      for (const [month, closingBalance] of ends) {
         const existing = await prisma.monthlyBalance.findUnique({
           where: { bankAccountId_month: { bankAccountId, month } },
           select: { source: true },

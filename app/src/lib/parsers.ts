@@ -1157,3 +1157,36 @@ export async function statementHeaderText(kind: string, filePath: string): Promi
   }
   return null;
 }
+
+/**
+ * Month-end balances counted from a statement's own opening and closing balance: a Holvi export
+ * of 5.6.-9.10. prints only "SALDO 5.6." and "SALDO 9.10." (2026-10-09), and every month end
+ * between is the opening balance plus the rows up to it. Only when the rows add up exactly from
+ * the first printed balance to the last (they are the whole period); otherwise nothing.
+ */
+export function derivedMonthEndBalances(
+  printed: PrintedBalance[],
+  rows: Array<{ date: string | null; amount: number }>
+): Array<{ month: string; closingBalance: number }> {
+  if (printed.length < 2) return [];
+  const sorted = [...printed].sort((a, b) => a.date.localeCompare(b.date));
+  const start = sorted[0];
+  const end = sorted[sorted.length - 1];
+  // The opening balance stands before its day's rows, the closing one after its day's.
+  const inPeriod = rows.filter((row) => row.date !== null && row.date >= start.date && row.date <= end.date);
+  const cents = (value: number) => Math.round(value * 100);
+  const total = inPeriod.reduce((sum, row) => sum + cents(row.amount), 0);
+  if (cents(start.balance) + total !== cents(end.balance)) return [];
+  const result: Array<{ month: string; closingBalance: number }> = [];
+  let [year, month] = start.date.split("-").map(Number);
+  for (;;) {
+    const key = `${year}-${String(month).padStart(2, "0")}`;
+    const lastDay = `${key}-${String(new Date(Date.UTC(year, month, 0)).getUTCDate()).padStart(2, "0")}`;
+    if (lastDay > end.date) break;
+    const upTo = inPeriod.filter((row) => row.date! <= lastDay).reduce((sum, row) => sum + cents(row.amount), 0);
+    result.push({ month: key, closingBalance: (cents(start.balance) + upTo) / 100 });
+    month += 1;
+    if (month > 12) { month = 1; year += 1; }
+  }
+  return result;
+}

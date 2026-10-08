@@ -126,3 +126,27 @@ describe("printed balances (Holvi PDF, 2026-10-09)", () => {
     ]);
   });
 });
+
+describe("month-end balances counted from a whole-period statement (Holvi, 2026-10-09)", () => {
+  it("adds the rows to the opening balance up to each month end, only when they reach the closing one", async () => {
+    const { derivedMonthEndBalances } = await import("./parsers");
+    const printed = [
+      { date: "2026-06-05", balance: 83.01 },
+      { date: "2026-08-09", balance: 101.51 },
+    ];
+    const rows = [
+      { date: "2026-06-05", amount: 75 },
+      { date: "2026-06-30", amount: -2.5 },
+      { date: "2026-07-14", amount: -60 },
+      { date: "2026-08-09", amount: 6 },
+    ];
+    expect(derivedMonthEndBalances(printed, rows)).toEqual([
+      { month: "2026-06", closingBalance: 155.51 },
+      { month: "2026-07", closingBalance: 95.51 },
+    ]);
+    // A row missing (not the whole period): nothing is counted.
+    expect(derivedMonthEndBalances(printed, rows.slice(1))).toEqual([]);
+    expect(derivedMonthEndBalances(printed.slice(0, 1), rows)).toEqual([]);
+  });
+});
+
