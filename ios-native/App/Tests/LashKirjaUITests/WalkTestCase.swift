@@ -62,6 +62,10 @@ class WalkTestCase: XCTestCase {
             }
             app.windows.firstMatch.swipeUp(velocity: .slow); scrolls += 1
         }
+        // Taller than the screen (a row at the largest text size): never fully inside the window,
+        // but XCTest can still tap its visible part.
+        let e = q.firstMatch
+        if e.exists && e.isHittable { e.tap(); taps += 1; return true }
         note("MISS could not find \(arg)"); return false
     }
     func tap(_ label: String) -> Bool { tapLabel("label == %@", label) }
