@@ -6,7 +6,18 @@ import LashKirjaCore
 /// and a tap comes back as a `lashkirja://customer|invoice/<id>` link through `AppModel.handle`.
 /// Adds only; a row that disappeared stays until sign-out clears the whole index.
 enum SpotlightIndexer {
+    /// Indexing and clearing run here, off the main thread, in the order they were asked: the first
+    /// Core Spotlight call of a run can take seconds, and a list screen called it while drawing
+    /// (simulator hang watchdog, 2026-10-08). One serial queue keeps a sign-out's clear after any
+    /// indexing asked before it.
+    private static let queue = DispatchQueue(label: "fi.tiyouba.lashkirja.spotlight", qos: .utility)
+
     static func index(_ entries: [SpotlightEntry]) {
+        guard !entries.isEmpty else { return }
+        queue.async { indexNow(entries) }
+    }
+
+    private static func indexNow(_ entries: [SpotlightEntry]) {
         let items = entries.map { entry -> CSSearchableItem in
             let attributes = CSSearchableItemAttributeSet(contentType: .content)
             attributes.title = entry.title
@@ -22,8 +33,10 @@ enum SpotlightIndexer {
 
     /// Everything of the signed-out owner's leaves system search.
     static func clear() {
-        CSSearchableIndex.default().deleteAllSearchableItems { error in
-            if let error { NSLog("Spotlight: clearing failed: \(error.localizedDescription)") }
+        queue.async {
+            CSSearchableIndex.default().deleteAllSearchableItems { error in
+                if let error { NSLog("Spotlight: clearing failed: \(error.localizedDescription)") }
+            }
         }
     }
 
