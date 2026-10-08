@@ -7,53 +7,47 @@
   to C:\LashKirja\logs\deploy-<timestamp>.log.
 
     1. git fetch <Remote>, resolve <Ref>
-    2. stop the supervisor (see "Why the app stops" below)
-    3. git checkout of the resolved commit
-    4. npm ci --prefer-offline
-    5. prisma generate
-    6. backup-local.ps1 -Tag predeploy (skipped only when prod.db does not exist yet)
-    7. keep the previous build as .next.prev, then next build into a fresh .next
-    8. prisma migrate deploy against C:\LashKirja\data\prod.db
-    9. start the supervisor (the "LashKirja prod" Scheduled Task when registered)
-   10. poll http://127.0.0.1:3300/api/health for up to 60 s. The app counts
+    2. PREPARE, while the live server keeps serving: C:\LashKirja\stage (a
+       git worktree of prod) is checked out at the commit, gets prod's .env,
+       npm ci, prisma generate and next build. A failure here leaves
+       production untouched.
+    3. stop the supervisor (downtime starts)
+    4. backup-local.ps1 -Tag predeploy (skipped only when prod.db does not exist yet)
+    5. SWAP: prod is checked out at the commit; app
+ode_modules and app\.next
+       are renamed to node_modules.prev / .next.prev and the staged ones are
+       moved in (a rename on the same disk). Turbopack keeps junctions with
+       absolute paths in .next
+ode_modules; they are re-pointed from stage
+       to prod (rehearsed 2026-10-08: without that, prisma and pino fail).
+    6. prisma migrate deploy against C:\LashKirja\data\prod.db
+    7. start the supervisor (the "LashKirja prod" Scheduled Task when registered)
+    8. poll http://127.0.0.1:3300/api/health for up to 60 s. The app counts
        as up when the database and disk checks pass: a 503 caused only by
        the bank-job or mail checks (a user's failed bank sync in the last
        24 h, say) is logged as degraded, not treated as a failed deploy.
 
-  The build now runs BEFORE migrate deploy (reordered from the original
-  install/generate/backup/migrate/build sequence). `next build` only needs
-  the Prisma client from `prisma generate` (the schema file), not a
-  migrated database, so building first means a build failure never leaves
-  the database forward-migrated with the old code still checked out.
+  Downtime is steps 3-8, about half a minute (2026-10-08: LashKirja is in
+  live use). Before, install and build ran with the server stopped: 1.5 to 6
+  minutes per deploy. On Windows npm ci cannot replace native modules the
+  running server has loaded, and next build writes to the .next that next
+  start serves, hence the separate stage directory.
 
-  Failure handling -- in every case below, production ends up fully on the
-  previous version: the git checkout, node_modules, the Prisma client,
-  .next and the worker (which runs from source via the supervisor, so
-  restoring the checkout restores the worker too):
-    - install, generate, backup or build fails (before migrate deploy has
-      run): the previous commit is checked out again, node_modules and the
-      Prisma client are reinstalled/regenerated, .next.prev is swapped back
-      in if a build was in progress, and the old version is started again.
-      The database was never touched, so no database restore is needed.
-    - migrate deploy fails, or a build/migration is otherwise interrupted
-      partway: the previous commit, node_modules, Prisma client and build
-      are restored as above, AND data\prod.db is restored from the
-      predeploy backup this run just took (verified against its
-      MANIFEST.txt sha256). The migrated-but-failed database is kept
-      alongside as data\prod.db.post-migrate-failure-<timestamp>, never
-      deleted. The previous version is then started and health-checked
-      again. If the automatic database restore itself fails, the app is
-      left STOPPED and the failure is logged -- do not start it until
-      data\prod.db is confirmed restored (ops-windows.md, "Restore").
-    - health fails after start (migrate deploy already succeeded by this
-      point): same full restore as the migrate-failure case -- code,
-      dependencies, build AND database -- then restarted and re-checked.
+  Failure handling -- production ends up on the previous version in every case:
+    - fetch or prepare fails: the live server was never stopped; nothing to undo.
+    - backup, swap, migrate or health fails: the previous commit is checked out
+      again and node_modules.prev / .next.prev are renamed back (seconds, no
+      reinstall). If migrate deploy has run (or may have), data\prod.db is also
+      restored from the predeploy backup this run just took (verified against
+      its MANIFEST.txt sha256); the migrated database is kept alongside as
+      data\prod.db.post-migrate-failure-<timestamp>, never deleted. The previous
+      version is then started and health-checked. If the database restore
+      itself fails, the app is left STOPPED and the failure is logged -- do not
+      start it until data\prod.db is confirmed restored (ops-windows.md, "Restore").
 
-  Why the app stops: on Windows, npm ci cannot replace native modules
-  (.node files) that the running server has loaded, and next build always
-  writes to the .next directory that next start serves from (distDir is fixed
-  in next.config.ts). So the swap happens with the server stopped. Downtime
-  is the install plus the build: 1.5 to 6 minutes, longer when the PC is busy.
+  Folders holding junctions (.next, .next.prev) are deleted with cmd's rmdir /s,
+  which removes a junction without following it; a recursive Remove-Item
+  could delete the live node_modules files a junction points to.
 
 .EXAMPLE
   powershell -NoProfile -ExecutionPolicy Bypass -File deploy-local.ps1
@@ -65,7 +59,9 @@ param(
   [string]$Ref = 'feat/real-app-phase01',
   [string]$Root = 'C:\LashKirja',
   [int]$Port = 3300,
-  [int]$HealthTimeoutSeconds = 60
+  [int]$HealthTimeoutSeconds = 60,
+  # Another name only for a rehearsal on a copy (-Root elsewhere), so it never starts the live task.
+  [string]$TaskName = 'LashKirja prod'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -74,7 +70,8 @@ $AppDir = Join-Path $ProdDir 'app'
 $LogDir = Join-Path $Root 'logs'
 $RunDir = Join-Path $Root 'run'
 $OpsDir = $PSScriptRoot
-$TaskName = 'LashKirja prod'
+$StageDir = Join-Path $Root 'stage'
+$StageApp = Join-Path $StageDir 'app'
 foreach ($dir in @($LogDir, $RunDir)) {
   if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Force -Path $dir | Out-Null }
 }
@@ -203,14 +200,67 @@ function Start-Supervisor {
     '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "`"$script`"", '-Root', "`"$Root`"", '-Port', $Port)
 }
 
-function Restore-PreviousBuild {
-  $next = Join-Path $AppDir '.next'
-  $prev = Join-Path $AppDir '.next.prev'
-  if (-not (Test-Path $prev)) { Log 'no .next.prev to restore'; return $false }
-  if (Test-Path $next) { Remove-Item -LiteralPath $next -Recurse -Force }
-  Rename-Item -LiteralPath $prev -NewName '.next'
-  Log 'restored .next.prev as .next'
-  return $true
+# Deletes a folder without following the junctions inside it (see the header).
+function Remove-Tree([string]$Path) {
+  if (-not (Test-Path -LiteralPath $Path)) { return }
+  & cmd.exe /d /c "rmdir /s /q `"$Path`""
+  if (Test-Path -LiteralPath $Path) { throw "could not delete $Path" }
+}
+
+# Junctions under .next\node_modules (Turbopack's external packages) that point
+# into $FromApp are pointed at the same place under $ToApp.
+function Repoint-Junctions([string]$NextDir, [string]$FromApp, [string]$ToApp) {
+  $root = Join-Path $NextDir 'node_modules'
+  if (-not (Test-Path -LiteralPath $root)) { return }
+  $count = 0
+  Get-ChildItem -LiteralPath $root -Force -Recurse -Depth 1 | Where-Object { $_.LinkType -eq 'Junction' } | ForEach-Object {
+    $target = [string]$_.Target
+    if ($target.StartsWith($FromApp, [StringComparison]::OrdinalIgnoreCase)) {
+      $fixed = $ToApp + $target.Substring($FromApp.Length)
+      [System.IO.Directory]::Delete($_.FullName, $false)
+      New-Item -ItemType Junction -Path $_.FullName -Target $fixed | Out-Null
+      $count++
+    }
+  }
+  Log "re-pointed $count junctions in $root"
+}
+
+# The swap of step 5: prod's node_modules and .next become *.prev, the staged ones move in.
+function Swap-InStagedRelease {
+  foreach ($name in @('node_modules', '.next')) {
+    $live = Join-Path $AppDir $name
+    $prev = Join-Path $AppDir "$name.prev"
+    Remove-Tree $prev
+    if (Test-Path -LiteralPath $live) { Rename-Item -LiteralPath $live -NewName "$name.prev" }
+    Move-Item -LiteralPath (Join-Path $StageApp $name) -Destination $live
+  }
+  Repoint-Junctions (Join-Path $AppDir '.next') $StageApp $AppDir
+  if (-not (Test-Path (Join-Path $AppDir '.next\BUILD_ID'))) { throw 'swapped release has no .next\BUILD_ID' }
+}
+
+# Puts the previous release back: commit, node_modules and .next (renames only).
+function Restore-PreviousRelease([string]$PrevSha) {
+  $ok = $true
+  try {
+    if ($PrevSha) { Exec 'git' @('-C', $ProdDir, 'checkout', '--force', '--detach', $PrevSha) $ProdDir }
+  } catch {
+    Log "restoring the previous commit FAILED: $($_.Exception.Message)"
+    $ok = $false
+  }
+  foreach ($name in @('node_modules', '.next')) {
+    $live = Join-Path $AppDir $name
+    $prev = Join-Path $AppDir "$name.prev"
+    if (-not (Test-Path -LiteralPath $prev)) { continue }
+    try {
+      Remove-Tree $live
+      Rename-Item -LiteralPath $prev -NewName $name
+      Log "restored $name.prev as $name"
+    } catch {
+      Log "restoring $name FAILED: $($_.Exception.Message)"
+      $ok = $false
+    }
+  }
+  return $ok
 }
 
 # Restores data\prod.db from the predeploy backup zip this run took, for use
@@ -263,20 +313,10 @@ function Restore-PredeployDb([string]$ZipPath) {
   }
 }
 
-# Full rollback used after migrate deploy has run (or may have): the
-# previous commit, dependencies, Prisma client, build AND database. Returns
-# $true only if every step succeeded.
+# Full rollback used after migrate deploy has run (or may have): the previous
+# release AND database. Returns $true only if every step succeeded.
 function Restore-FullPreviousVersion([string]$PrevSha, [string]$PredeployZip) {
-  $ok = $true
-  try {
-    if ($PrevSha) { Exec 'git' @('-C', $ProdDir, 'checkout', '--force', '--detach', $PrevSha) $ProdDir }
-    Exec 'npm.cmd' @('ci', '--prefer-offline', '--no-audit', '--no-fund')
-    Exec 'node' @('node_modules\prisma\build\index.js', 'generate')
-  } catch {
-    Log "restoring the previous commit/dependencies FAILED: $($_.Exception.Message)"
-    $ok = $false
-  }
-  [void](Restore-PreviousBuild)
+  $ok = Restore-PreviousRelease $PrevSha
   if (-not (Restore-PredeployDb $PredeployZip)) { $ok = $false }
   return $ok
 }
@@ -314,25 +354,36 @@ try {
   $sha = $sha.Trim()
   Log "current $prevSha -> target $sha"
 
-  # 2. stop
+  # 2. prepare in the stage worktree while the live server keeps serving.
+  $stage = 'prepare'
+  if (-not (Test-Path (Join-Path $StageDir '.git'))) {
+    if (Test-Path -LiteralPath $StageDir) { Remove-Tree $StageDir }
+    Exec 'git' @('-C', $ProdDir, 'worktree', 'prune') $ProdDir
+    Exec 'git' @('-C', $ProdDir, 'worktree', 'add', '--force', '--detach', $StageDir, $sha) $ProdDir
+  } else {
+    Exec 'git' @('-C', $StageDir, 'checkout', '--force', '--detach', $sha) $StageDir
+  }
+  # A failed earlier run may have left a build behind; npm ci replaces node_modules itself.
+  Remove-Tree (Join-Path $StageApp '.next')
+  Copy-Item -LiteralPath (Join-Path $AppDir '.env') -Destination (Join-Path $StageApp '.env') -Force
+  # NODE_ENV stays unset so npm ci keeps the dev dependencies the build and the worker (tsx) need.
+  Remove-Item Env:NODE_ENV -ErrorAction SilentlyContinue
+  $env:NEXT_TELEMETRY_DISABLED = '1'
+  Exec 'npm.cmd' @('ci', '--prefer-offline', '--no-audit', '--no-fund') $StageApp
+  Exec 'node' @('node_modules\prismauild\index.js', 'generate') $StageApp
+  Exec 'node' @('node_modules
+ext\distin
+ext', 'build') $StageApp
+  if (-not (Test-Path (Join-Path $StageApp '.next\BUILD_ID'))) { throw 'build finished without .next\BUILD_ID' }
+  Log 'prepared; stopping the live server for the swap'
+
+  # 3. stop
   $stage = 'stop'
+  $downAt = Get-Date
   Stop-Supervisor
   $stopped = $true
 
-  # 3. checkout
-  $stage = 'checkout'
-  if ($isBranch) { Exec 'git' @('-C', $ProdDir, 'checkout', '--force', '-B', $Ref, $sha) $ProdDir }
-  else { Exec 'git' @('-C', $ProdDir, 'checkout', '--force', '--detach', $sha) $ProdDir }
-
-  # 4-5. install and generate. NODE_ENV stays unset here so npm ci keeps the
-  # dev dependencies the build and the worker (tsx) need.
-  $stage = 'install'
-  Remove-Item Env:NODE_ENV -ErrorAction SilentlyContinue
-  Exec 'npm.cmd' @('ci', '--prefer-offline', '--no-audit', '--no-fund')
-  $stage = 'generate'
-  Exec 'node' @('node_modules\prisma\build\index.js', 'generate')
-
-  # 6. backup
+  # 4. backup, after the stop so nothing written before it can be lost to a restore
   $stage = 'backup'
   $predeployZip = $null
   if (Test-Path (Join-Path $Root 'data\prod.db')) {
@@ -356,31 +407,22 @@ try {
     Log 'no prod.db yet (first deploy); backup skipped, migrate deploy creates it'
   }
 
-  # 7. build into a fresh .next, previous kept as .next.prev. Deliberately
-  # BEFORE migrate deploy: `next build` only needs the Prisma client
-  # (already regenerated from the schema file above), not a migrated
-  # database, so a build failure never leaves the database forward-migrated
-  # while the old code is what's checked out.
-  $stage = 'build'
-  $next = Join-Path $AppDir '.next'
-  $prev = Join-Path $AppDir '.next.prev'
-  if (Test-Path $prev) { Remove-Item -LiteralPath $prev -Recurse -Force }
-  if (Test-Path $next) { Rename-Item -LiteralPath $next -NewName '.next.prev' }
-  $env:NEXT_TELEMETRY_DISABLED = '1'
-  Exec 'node' @('node_modules\next\dist\bin\next', 'build')
-  if (-not (Test-Path (Join-Path $next 'BUILD_ID'))) { throw 'build finished without .next\BUILD_ID' }
+  # 5. swap
+  $stage = 'swap'
+  if ($isBranch) { Exec 'git' @('-C', $ProdDir, 'checkout', '--force', '-B', $Ref, $sha) $ProdDir }
+  else { Exec 'git' @('-C', $ProdDir, 'checkout', '--force', '--detach', $sha) $ProdDir }
+  Swap-InStagedRelease
 
-  # 8. migrate. From here on, a failure must restore the database too, not
-  # just the code -- see the 'migrate' and 'health' branches below.
+  # 6. migrate. From here on, a failure must restore the database too.
   $stage = 'migrate'
-  Exec 'node' @('node_modules\prisma\build\index.js', 'migrate', 'deploy')
+  Exec 'node' @('node_modules\prismauild\index.js', 'migrate', 'deploy')
 
-  # 9-10. start and verify
+  # 7-8. start and verify
   $stage = 'health'
   Start-Supervisor
   $stopped = $false
   if (-not (Test-Health $HealthTimeoutSeconds)) {
-    Log 'new build is not healthy; rolling back to the previous commit, dependencies, build and database'
+    Log 'new build is not healthy; rolling back to the previous release and database'
     Stop-Supervisor
     $stopped = $true
     if (Restore-FullPreviousVersion $prevSha $predeployZip) {
@@ -393,36 +435,27 @@ try {
     }
     throw 'deploy failed health check'
   }
-  Log "deploy OK: $sha"
+  Log ("deploy OK: $sha (server down {0:N0} s)" -f ((Get-Date) - $downAt).TotalSeconds)
 } catch {
   $exitCode = 1
   Log "deploy FAILED at stage '$stage': $($_.Exception.Message)"
-  if ($stage -in @('checkout', 'install', 'generate', 'backup', 'build')) {
-    # migrate deploy has not run yet at any of these stages -- the database
-    # is untouched, so only the code needs restoring.
-    try {
-      Log "restoring previous commit $prevSha"
-      if ($prevSha) { Exec 'git' @('-C', $ProdDir, 'checkout', '--force', '--detach', $prevSha) $ProdDir }
-      if ($stage -ne 'checkout') {
-        Exec 'npm.cmd' @('ci', '--prefer-offline', '--no-audit', '--no-fund')
-        Exec 'node' @('node_modules\prisma\build\index.js', 'generate')
-      }
-      if ($stage -eq 'build') {
-        $partial = Join-Path $AppDir '.next'
-        if ((Test-Path (Join-Path $AppDir '.next.prev')) -and (Test-Path $partial)) { Remove-Item -LiteralPath $partial -Recurse -Force }
-        [void](Restore-PreviousBuild)
-      }
+  if ($stage -in @('fetch', 'prepare')) {
+    # The live server was never stopped.
+    if ($stopped) { Start-Supervisor }
+  } elseif ($stage -in @('stop', 'backup', 'swap')) {
+    # migrate deploy has not run: the database is untouched, only the release is put back.
+    if (Restore-PreviousRelease $prevSha) {
       Start-Supervisor
       $stopped = $false
       if (Test-Health $HealthTimeoutSeconds) { Log 'previous version is back up' } else { Log 'previous version did not come back healthy' }
-    } catch {
-      Log "restore of the previous version failed: $($_.Exception.Message)"
+    } else {
+      Log 'restoring the previous release failed; the app is left STOPPED. Check the log before starting it.'
     }
   } elseif ($stage -eq 'migrate') {
     # migrate deploy failed (or was interrupted) partway -- the database may
-    # be on a partial/new schema. Restore code AND database, then try to
-    # bring the previous version back up rather than leaving it stopped.
-    Log 'migration failed; restoring the previous commit, dependencies, build and database'
+    # be on a partial/new schema. Restore release AND database, then bring
+    # the previous version back up rather than leaving it stopped.
+    Log 'migration failed; restoring the previous release and database'
     if (Restore-FullPreviousVersion $prevSha $predeployZip) {
       Start-Supervisor
       $stopped = $false
@@ -431,8 +464,6 @@ try {
     } else {
       Log 'automatic restore after the migration failure could not be completed safely. The app is left STOPPED -- do not start it until data\prod.db is confirmed restored (ops-windows.md, "Restore").'
     }
-  } elseif ($stage -in @('fetch', 'stop')) {
-    if ($stopped) { Start-Supervisor }
   }
 } finally {
   Remove-Item -LiteralPath $LockFile -Force -ErrorAction SilentlyContinue
