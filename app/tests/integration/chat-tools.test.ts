@@ -166,7 +166,7 @@ describe("search_invoices", () => {
     await invoice(owner.id, virtanen.id, { status: "sent", issueDate: "2026-10-01", dueDate: "2026-10-20", netCents: 20_000, paidCents: 5_000 }); // open 201.00
     await invoice(owner.id, virtanen.id, { status: "paid", issueDate: "2026-07-01", dueDate: "2026-07-15", netCents: 9_900, paidCents: 12_425 });
     await invoice(owner.id, other.id, { status: "sent", issueDate: "2026-09-01", dueDate: "2026-09-15", netCents: 7_000 });
-    await invoice(stranger.id, theirs.id, { status: "sent", issueDate: "2026-09-01", dueDate: "2026-09-15", netCents: 99_900 });
+    const strangers = await invoice(stranger.id, theirs.id, { status: "sent", issueDate: "2026-09-01", dueDate: "2026-09-15", netCents: 99_900 });
 
     const { result } = await call(owner.id, "search_invoices", { customer: "virtaselle", status: "open" });
     expect(result.ok).toBe(true);
@@ -177,9 +177,9 @@ describe("search_invoices", () => {
 
     const overdue = (await call(owner.id, "search_invoices", { status: "overdue" })).result;
     expect(overdue.total.count).toBe(2);
-    // The stranger's 1 253,75 € invoice is not among them (compared by amount, not by searching the
-    // JSON for "999": a random invoice id once contained those digits).
-    expect(overdue.items.map((item: { gross: string }) => item.gross)).not.toContain("1253.75");
+    // The stranger's invoice is not among them (by id, not by searching the JSON for "999":
+    // a random invoice id once contained those digits).
+    expect(overdue.items.map((item: { id: string }) => item.id)).not.toContain(strangers.id);
 
     const first = (await call(owner.id, "search_invoices", { customer: "VIRTANEN", limit: 1 })).result;
     expect(first.total.count).toBe(3);
