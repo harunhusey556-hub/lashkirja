@@ -34,7 +34,8 @@ export function isProblem(event: Event): boolean {
     event.kind === "error" ||
     event.kind === "report" ||
     event.kind === "hang" ||
-    (event.kind === "request" && status === 0) ||
+    // A cancelled request (the screen was left) is normal, not a problem.
+    (event.kind === "request" && status === 0 && event.message !== "cancelled") ||
     status >= 400
   );
 }
