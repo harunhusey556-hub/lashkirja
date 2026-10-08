@@ -76,6 +76,9 @@ export interface StatementTotals {
   transfers: number;
   net: number;
   txCount: number;
+  /** All money in and out as the bank counts it (its "Panot" / "Otot"), transfers included. */
+  moneyIn: number;
+  moneyOut: number;
 }
 
 function round2(n: number): number {
@@ -88,7 +91,11 @@ export function computeStatementTotals(
   let income = 0;
   let expenses = 0;
   let transfers = 0;
+  let moneyIn = 0;
+  let moneyOut = 0;
   for (const t of transactions) {
+    if (t.amount > 0) moneyIn += t.amount;
+    else moneyOut += Math.abs(t.amount);
     if (t.type === "tulo") income += t.amount;
     else if (t.type === "meno") expenses += Math.abs(t.amount);
     else if (t.type === "oma_siirto" || t.type === "palkka") transfers += t.amount;
@@ -99,5 +106,7 @@ export function computeStatementTotals(
     transfers: round2(transfers),
     net: round2(income - expenses),
     txCount: transactions.length,
+    moneyIn: round2(moneyIn),
+    moneyOut: round2(moneyOut),
   };
 }

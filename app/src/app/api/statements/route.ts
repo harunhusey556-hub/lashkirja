@@ -7,6 +7,9 @@ import {
   parseXLSX,
   parseCSV,
   parsePDFStatement,
+  monthEndBalances,
+  parsePrintedBalances,
+  statementHeaderText,
 } from "@/lib/parsers";
 import {
   MAX_STATEMENT_BYTES,
@@ -23,7 +26,7 @@ import { inferTransactionType } from "@/lib/statements";
 import { listStatementsForUser } from "@/lib/statement-api";
 import { centsToEuros } from "@/lib/money";
 import { autoGenerateIncomeReceipts } from "@/lib/income-automation";
-import { archivedAccountForIban, archivedAccountImportNotice, resolveAccountForImport } from "@/lib/bank-accounts";
+import { archivedAccountForIban, archivedAccountImportNotice, resolveAccountForImport, upsertMonthlyBalance } from "@/lib/bank-accounts";
 import { extractOwnIban } from "@/lib/iban";
 import { Prisma } from "@/generated/prisma/client";
 import { loadStoredRowIdentities, lockedRowsNotice, skippedRowsNotice, splitNewRows } from "@/lib/bank-row-fingerprint";
@@ -150,11 +153,13 @@ export async function POST(req: NextRequest) {
     const requestedAccountId = formData.get("bankAccountId");
     let bankAccountId: string | null = null;
     let accountNotice: string | null = null;
-    // Only text formats are cheap to scan; xlsx/pdf have no IBAN hint.
+    // What the file says about itself: text formats as they are, a PDF's text and an xlsx's first
+    // rows (a Holvi export names its IBAN in row 1 and prints SALDO lines in its PDF).
     const scannable = detected.kind === "xml" || detected.kind === "csv";
+    const headerText = scannable ? buffer.toString("utf8").slice(0, 200_000) : await statementHeaderText(detected.kind, filePath);
     // The file's own account, never a counterparty's (a transfer to the owner's
     // other account names that account in the rows too).
-    const ibanHint = scannable ? extractOwnIban(buffer.toString("utf8").slice(0, 200_000)) : null;
+    const ibanHint = headerText ? extractOwnIban(headerText) : null;
     if (typeof requestedAccountId === "string" && requestedAccountId.trim()) {
       const owned = await prisma.bankAccount.findFirst({
         where: { id: requestedAccountId.trim(), userId },
@@ -267,6 +272,21 @@ export async function POST(req: NextRequest) {
       });
       return { statement: labelled, statements: made, skippedDuplicates: duplicates.length, heldBack: fresh.length - open.length };
     });
+
+    // Balances the statement prints become the account's month-end balances, so its saldo is the
+    // bank's and not one counted up from an opening balance of 0 (2026-10-09, Holvi PDF). One the
+    // owner entered stays; a month that cannot take one (closed, before the account) is skipped.
+    if (bankAccountId && headerText) {
+      for (const { month, closingBalance } of monthEndBalances(parsePrintedBalances(headerText))) {
+        const existing = await prisma.monthlyBalance.findUnique({
+          where: { bankAccountId_month: { bankAccountId, month } },
+          select: { source: true },
+        });
+        if (existing?.source === "manual") continue;
+        await upsertMonthlyBalance(userId, bankAccountId, { month, closingBalance, source: "statement", note: file.name.slice(0, 200) })
+          .catch((e: unknown) => console.warn(`Statement upload: month-end balance ${month} not stored:`, e instanceof Error ? e.message : e));
+      }
+    }
 
     // Fetch recent emails from connected accounts before matching so that
     // any new emailed receipts can be matched to this statement immediately.

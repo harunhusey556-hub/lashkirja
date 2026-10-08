@@ -114,13 +114,29 @@ struct StatementDetailView: View {
         }
 
         if let totals = s.totals {
+            // The bank's own in/out first, so the figures can be checked against the statement
+            // ("Panot" / "Otot"); the owner read Tulot/Menot as wrong when an owner's withdrawal
+            // was left out of Menot without a word (2026-10-09).
+            if let moneyIn = totals.moneyIn, let moneyOut = totals.moneyOut {
+                Section {
+                    LabeledContent("Tilille tuli") { MoneyText(amount: moneyIn) }
+                    LabeledContent("Tililtä lähti") { MoneyText(amount: moneyOut) }
+                } header: {
+                    Text("Pankin mukaan")
+                }
+            }
             Section {
                 LabeledContent("Tulot") { MoneyText(amount: totals.income).foregroundStyle(Theme.success) }
                 LabeledContent("Menot") { MoneyText(amount: totals.expenses) }
                 LabeledContent("Netto") { MoneyText(amount: totals.net, signed: true).fontWeight(.semibold) }
+                if let transfers = totals.transfers, transfers != 0 {
+                    LabeledContent("Omat siirrot ja yksityisotot") { MoneyText(amount: transfers, signed: true) }
+                }
+            } header: {
+                Text("Kirjanpidossa")
             } footer: {
                 if let transfers = totals.transfers, transfers != 0 {
-                    Text("Omat siirrot \(Money.format(transfers)), eivät sisälly nettoon")
+                    Text("Omat siirrot ja yrittäjän yksityisotot eivät ole tuloa eikä menoa, joten ne eivät sisälly tuloihin, menoihin eikä nettoon.")
                 }
             }
         }

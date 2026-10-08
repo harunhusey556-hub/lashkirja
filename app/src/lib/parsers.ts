@@ -1093,3 +1093,67 @@ export function parseBankStatementText(text: string): ParsedTransaction[] {
   }
   return transactions;
 }
+
+/** A balance the statement itself prints: "SALDO 1.9.2026 + 367,10" (Holvi PDF). */
+export interface PrintedBalance {
+  date: string;
+  balance: number;
+}
+
+export function parsePrintedBalances(text: string): PrintedBalance[] {
+  const found: PrintedBalance[] = [];
+  for (const line of text.split(/\r?\n/)) {
+    const match = /^\s*SALDO\s+(\d{1,2})\.(\d{1,2})\.(\d{4})\s+([+-−])?\s*([\d\s.]+,\d{2})\s*$/i.exec(line);
+    if (!match) continue;
+    const date = `${match[3]}-${match[2].padStart(2, "0")}-${match[1].padStart(2, "0")}`;
+    const amount = parseAmountValue(match[5].replace(/\s/g, ""));
+    if (!isIsoCalendarDate(date) || amount == null) continue;
+    found.push({ date, balance: match[4] === "-" || match[4] === "−" ? -amount : amount });
+  }
+  return found;
+}
+
+/**
+ * Month-end balances from printed ones: a balance on the 1st is the end of the month before
+ * (it is the opening balance, before that day's rows), one on the last day closes its month.
+ * Others say nothing about a month end and are left out.
+ */
+export function monthEndBalances(balances: PrintedBalance[]): Array<{ month: string; closingBalance: number }> {
+  const byMonth = new Map<string, number>();
+  for (const { date, balance } of balances) {
+    const [year, month, day] = date.split("-").map(Number);
+    const lastDay = new Date(Date.UTC(year, month, 0)).getUTCDate();
+    if (day === 1) {
+      const previous = new Date(Date.UTC(year, month - 2, 1));
+      byMonth.set(`${previous.getUTCFullYear()}-${String(previous.getUTCMonth() + 1).padStart(2, "0")}`, balance);
+    } else if (day === lastDay) {
+      byMonth.set(`${year}-${String(month).padStart(2, "0")}`, balance);
+    }
+  }
+  return [...byMonth.entries()].map(([month, closingBalance]) => ({ month, closingBalance }));
+}
+
+/**
+ * Plain text of a PDF or the first rows of an xlsx, for what the statement says about itself
+ * (its own IBAN, printed balances); the rows are parsed separately. Null when unreadable.
+ */
+export async function statementHeaderText(kind: string, filePath: string): Promise<string | null> {
+  try {
+    if (kind === "pdf") {
+      return execFileSync("pdftotext", ["-layout", filePath, "-"], {
+        timeout: 30_000,
+        maxBuffer: MAX_TEXT_OUTPUT_BYTES,
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "ignore"],
+      });
+    }
+    if (kind === "xlsx") {
+      const sheets = await readXlsxFile(readBoundedFile(filePath, "xlsx"));
+      const rows = (sheets[0]?.data ?? []) as Row[];
+      return rows.slice(0, 15).map((row) => row.map((cell) => (cell == null ? "" : String(cell))).join("\t")).join("\n");
+    }
+  } catch (error) {
+    console.warn("Statement header text unreadable:", error instanceof Error ? error.message : error);
+  }
+  return null;
+}

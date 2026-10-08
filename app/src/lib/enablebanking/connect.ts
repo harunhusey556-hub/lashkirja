@@ -190,8 +190,12 @@ export async function completeBankConsent(
       console.warn(
         `Bank consent ${pending.aspspName}: no account with an IBAN. accounts=${describeSessionAccounts(sessionAccounts)}`
       );
+      // No account at all is what Enable Banking's restricted mode gives for an account missing
+      // from its allow list (Holvi, 2026-10-09); accounts without an IBAN are the other case.
       throw new EnableBankingError(
-        "Pankki ei palauttanut IBAN-tiliä. Yhdistä uudelleen ja valitse tili.",
+        sessionAccounts.length === 0
+          ? "Pankki ei antanut pääsyä yhteenkään tiliin. Tarkista, että tili on lisätty Enable Bankingin sallittujen tilien listalle, ja yhdistä uudelleen."
+          : "Pankki ei palauttanut IBAN-tiliä. Yhdistä uudelleen ja valitse tili.",
         422,
         "NO_ACCOUNTS_ADDED"
       );

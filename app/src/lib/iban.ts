@@ -105,6 +105,9 @@ function ibanMentions(text: string): string[] {
   const pattern = /\b[A-Z]{2}[0-9]{2}(?:[ -]?[0-9A-Z]{4}){2,7}(?:[ -]?[0-9A-Z]{1,3})?\b/gi;
   for (const match of text.matchAll(pattern)) {
     const candidate = normalizeIban(match[0]);
+    // An RF creditor reference (ISO 11649) passes the same mod-97 check but is no account:
+    // a Holvi row's "RF44K3HEB8518F" tied with the file's own IBAN (2026-10-09).
+    if (candidate.startsWith("RF")) continue;
     if (isValidIban(candidate)) found.push(candidate);
   }
   return found;
@@ -133,7 +136,9 @@ export function extractOwnIban(text: string): string | null {
     if (isValidIban(candidate)) return candidate;
   }
   for (const line of text.split(/\r?\n/).slice(0, 40)) {
-    const cells = line.split(/[;\t,:]/).map((cell) => cell.trim().replace(/^"|"$/g, ""));
+    // A PDF's layout text separates the label from the number with runs of spaces
+    // ("IBAN            FI03 7997 ...", Holvi 2026-10-09), a CSV with ; or a tab.
+    const cells = line.trim().split(/[;\t,:]|\s{2,}/).map((cell) => cell.trim().replace(/^"|"$/g, ""));
     if (cells.length < 2 || !OWN_ACCOUNT_LABEL.test(cells[0])) continue;
     const found = extractIbans(cells.slice(1).join(" "))[0];
     if (found) return found;

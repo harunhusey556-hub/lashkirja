@@ -54,6 +54,9 @@ public struct Statement: Decodable, Sendable, Identifiable, Hashable {
         public let transfers: Decimal?
         public let net: Decimal
         public let txCount: Int
+        /// Everything in and out as the bank counts it ("Panot" / "Otot"); missing from older servers.
+        public let moneyIn: Decimal?
+        public let moneyOut: Decimal?
     }
     public struct Account: Decodable, Sendable, Hashable {
         public let id: String
