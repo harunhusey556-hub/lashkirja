@@ -16,7 +16,7 @@ import {
   isPendingStateFresh,
   psuIdForUser,
 } from "./consent";
-import { sessionAccountsForStorage, toPublicConnection, type PublicBankConnection } from "./mapping";
+import { describeSessionAccounts, sessionAccountsForStorage, toPublicConnection, type PublicBankConnection } from "./mapping";
 import { CONSENT_REVOKED_MESSAGE } from "../bank-consent-copy";
 
 const connectionInclude = { accounts: { orderBy: { iban: "asc" as const } } };
@@ -181,6 +181,9 @@ export async function completeBankConsent(
     }
     const accounts = sessionAccountsForStorage(session.accounts ?? [], userId, pending.id);
     if (accounts.length === 0) {
+      console.warn(
+        `Bank consent ${pending.aspspName}: no account with an IBAN. accounts=${describeSessionAccounts(session.accounts ?? [])}`
+      );
       throw new EnableBankingError(
         "Pankki ei palauttanut IBAN-tiliä. Yhdistä uudelleen ja valitse tili.",
         422,

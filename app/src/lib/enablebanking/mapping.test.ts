@@ -7,6 +7,8 @@ import {
   normalizeIban,
   pickBookedBalance,
   sessionAccountsForStorage,
+  sessionAccountIban,
+  describeSessionAccounts,
   toPublicConnection,
   withOccurrenceRefs,
   type EbTransaction,
@@ -280,5 +282,23 @@ describe("balances and amounts", () => {
         { balance_type: "CLBD", balance_amount: { currency: "SEK", amount: "9.00" } },
       ])
     ).toEqual({ amountCents: 900, currency: "EUR" });
+  });
+});
+
+describe("sessionAccountIban (Holvi, 2026-10-08)", () => {
+  it("finds the IBAN outside account_id.iban, and never takes another scheme", () => {
+    expect(sessionAccountIban({ uid: "a", account_id: { iban: "FI21 1234 5600 0007 85" } })).toBe("FI2112345600000785");
+    expect(sessionAccountIban({ uid: "a", account_id: { other: { identification: "FI2112345600000785", scheme_name: "IBAN" } } })).toBe("FI2112345600000785");
+    expect(sessionAccountIban({ uid: "a", all_account_ids: [{ identification: "123", scheme_name: "BBAN" }, { identification: "FI2112345600000785", scheme_name: "IBAN" }] })).toBe("FI2112345600000785");
+    expect(sessionAccountIban({ uid: "a", all_account_ids: [{ identification: "FI2112345600000785", scheme_name: "BBAN" }] })).toBeNull();
+    expect(sessionAccountIban({ uid: "a" })).toBeNull();
+    const rows = sessionAccountsForStorage([{ uid: "h1", name: "Holvi", account_id: { other: { identification: "FI2112345600000785", scheme_name: "IBAN" } } }], "u", "c");
+    expect(rows.map((row) => row.iban)).toEqual(["FI2112345600000785"]);
+  });
+
+  it("describes a session's accounts without their numbers", () => {
+    const text = describeSessionAccounts([{ uid: "h1", all_account_ids: [{ identification: "FI2112345600000785", scheme_name: "IBAN" }] }]);
+    expect(text).not.toContain("FI21");
+    expect(text).toContain('"all":["IBAN"]');
   });
 });
