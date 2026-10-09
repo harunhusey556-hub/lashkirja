@@ -140,3 +140,21 @@ describe("startBankConsent with client: app", () => {
     expect(stored.map((account) => [account.providerAccountUid, account.iban])).toEqual([["holvi-acc", "FI2112345600000785"]]);
   });
 });
+
+describe("reconnect before the old connection was marked expired (audit 2026-10-09)", () => {
+  it("keeps the accounts the owner chose and retires the old card", async () => {
+    const old = await prisma.bankConnection.create({
+      data: {
+        userId: user.id, aspspName: "Testipankki", aspspCountry: "FI", psuType: "personal", status: "active",
+        validUntil: new Date(Date.now() - 60_000),
+        accounts: { create: [{ userId: user.id, iban: "FI2112345600000785", label: "Käyttötili", providerAccountUid: "old-acc", inScope: true }] },
+      },
+    });
+    const capture: { state?: string } = {};
+    await startBankConsent(user.id, { aspspName: "Testipankki", aspspCountry: "FI", psuType: "personal" }, fakeClient(capture));
+    const renewed = await completeBankConsent(user.id, "auth-code-r", capture.state!, fakeClient(capture));
+    const accounts = await prisma.connectedAccount.findMany({ where: { connectionId: renewed.id } });
+    expect(accounts.map((account) => account.inScope)).toEqual([true]);
+    expect((await prisma.bankConnection.findUniqueOrThrow({ where: { id: old.id } })).status).toBe("revoked");
+  });
+});

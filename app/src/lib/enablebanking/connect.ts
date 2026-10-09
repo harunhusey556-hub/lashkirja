@@ -213,7 +213,10 @@ export async function completeBankConsent(
           aspspName: pending.aspspName,
           aspspCountry: pending.aspspCountry,
           psuType: pending.psuType,
-          status: { in: ["expired", "error"] },
+          // Also an "active" one whose consent has run out but which no sync has marked expired
+          // yet: renewing it early left the chosen accounts unchosen and two cards for one bank
+          // (audit 2026-10-09).
+          OR: [{ status: { in: ["expired", "error"] } }, { status: "active", validUntil: { lt: new Date() } }],
         },
         include: { accounts: true },
       });
