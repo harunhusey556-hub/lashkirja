@@ -496,6 +496,23 @@ describe("a bank whose continuation pages fail (Holvi ASPSP_ERROR)", () => {
     ).rejects.toMatchObject({ code: "ASPSP_ERROR" });
   });
 
+  it("two identical bookings without a reference stay two (audit 2026-10-09)", async () => {
+    // Same day, amount and text, no entry_reference or transaction_id: a coffee bought twice.
+    const twins = ["2026-07-03", "2026-07-03", "2026-07-15", "2026-08-01", "2026-08-20", "2026-09-09"];
+    const fetcher: TransactionPageFetcher = {
+      async getAccountTransactions(query) {
+        if (query.continuationKey) throw new EnableBankingError('Error interacting with ASPSP "Unknown error"', 400, "ASPSP_ERROR");
+        const inRange = twins.filter((d) => (!query.dateFrom || d >= query.dateFrom) && (!query.dateTo || d <= query.dateTo)).reverse();
+        const rows = inRange.slice(0, 3).map((d) => ({ ...booked, entry_reference: undefined, transaction_id: undefined, booking_date: d }));
+        return { transactions: rows, continuationKey: inRange.length > 3 ? "next" : null };
+      },
+    };
+    const pulled = await collectAccountTransactions(fetcher, {
+      accountUid: "acc-1", firstSync: false, dateFrom: "2026-07-01", now: new Date("2026-10-09T10:00:00.000Z"),
+    });
+    expect(pulled.transactions.map((t) => t.booking_date).sort()).toEqual(twins);
+  });
+
   it("more rows on one day than a page holds: the rows the bank gave are kept, marked partial", async () => {
     const same = Array.from({ length: 5 }, () => "2026-10-08");
     const { fetcher } = holviLikeFetcher(same, 3);

@@ -407,10 +407,12 @@ function addDays(day: string, days: number): string {
 
 /**
  * The window again as two halves, each read in one page where it fits; a half that still needs a
- * continuation page is halved again, down to one day. The first page's rows count as read: they
- * are the newest of the window and are kept (a row a half gives again is the same booking and is
- * deduplicated on write by its entry reference). A day with more rows than one page is marked
- * partial so the next sync reads it again.
+ * continuation page is read again as two halves, down to one day. Only windows read whole are
+ * kept: they do not overlap, so no row is deduplicated here and two identical bookings without a
+ * reference (a coffee bought twice) stay two. The first page and the first page of every window
+ * that was split are read again by the halves, so they are dropped (audit 2026-10-09: a content
+ * key here merged such twins). A day with more rows than one page keeps the rows the bank gave and
+ * is marked partial so the next sync reads it again.
  */
 async function pullBySplitting(
   fetcher: TransactionPageFetcher,
@@ -423,24 +425,22 @@ async function pullBySplitting(
   const to = range.dateTo ?? isoDay(new Date());
   // Without a start (the bank's whole history): two years back.
   const from = range.dateFrom ?? addDays(to, -730);
-  const out = new Map<string, EbTransaction>();
-  const keyOf = (tx: EbTransaction) =>
-    tx.entry_reference || tx.transaction_id || JSON.stringify([tx.booking_date, tx.transaction_amount, tx.credit_debit_indicator, tx.remittance_information]);
-  for (const tx of firstPage) out.set(keyOf(tx), tx);
+  const out: EbTransaction[] = [];
   let truncated = false;
   const queue: Array<[string, string]> = [[from, to]];
   while (queue.length > 0) {
     const [a, b] = queue.shift()!;
     if (Date.now() - startedAt > budgetMs) { truncated = true; break; }
     const result = await fetcher.getAccountTransactions({ accountUid: params.accountUid, dateFrom: a, dateTo: b, psuHeaders: params.psuHeaders });
-    for (const tx of result.transactions) out.set(keyOf(tx), tx);
-    if (!result.continuationKey) continue;
-    if (a === b) { truncated = true; continue; }
+    if (!result.continuationKey) { out.push(...result.transactions); continue; }
+    if (a === b) { out.push(...result.transactions); truncated = true; continue; }
     const span = Math.round((new Date(`${b}T00:00:00.000Z`).getTime() - new Date(`${a}T00:00:00.000Z`).getTime()) / DAY_MS);
     const mid = addDays(a, Math.floor(span / 2));
     queue.push([a, mid], [addDays(mid, 1), b]);
   }
-  return { transactions: [...out.values()], truncated };
+  // Out of time before any window was read whole: the first page is still better than nothing.
+  if (out.length === 0 && truncated) return { transactions: firstPage, truncated };
+  return { transactions: out, truncated };
 }
 
 export class EnableBankingClient {
