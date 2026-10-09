@@ -440,3 +440,69 @@ describe("collectBackfillTransactions: the older window after the owner moved hi
     ).rejects.toMatchObject({ code: "EXPIRED_SESSION" });
   });
 });
+
+/**
+ * Holvi via Enable Banking, 2026-10-09: the first page of transactions comes back, every
+ * continuation page fails with 400 ASPSP_ERROR "Unknown error". The same period asked in shorter
+ * windows (each one page) gives every row. A sync that needs a second page must not fail.
+ */
+function holviLikeFetcher(days: string[], perPage = 3) {
+  const queries: Array<{ dateFrom?: string; dateTo?: string; continuationKey?: string }> = [];
+  const fetcher: TransactionPageFetcher = {
+    async getAccountTransactions(query) {
+      queries.push({ dateFrom: query.dateFrom, dateTo: query.dateTo, continuationKey: query.continuationKey });
+      if (query.continuationKey) throw new EnableBankingError('Error interacting with ASPSP "Unknown error"', 400, "ASPSP_ERROR");
+      // Every booking keeps its own reference whichever window returns it (as a bank's does).
+      const inRange = days.map((d, i) => ({ d, ref: `b${i}` })).filter(({ d }) => (!query.dateFrom || d >= query.dateFrom) && (!query.dateTo || d <= query.dateTo)).reverse();
+      const rows = inRange.slice(0, perPage).map(({ d, ref }) => ({ ...booked, entry_reference: ref, booking_date: d }));
+      return { transactions: rows, continuationKey: inRange.length > perPage ? "next" : null };
+    },
+  };
+  return { fetcher, queries };
+}
+
+describe("a bank whose continuation pages fail (Holvi ASPSP_ERROR)", () => {
+  const days = ["2026-06-05", "2026-06-20", "2026-07-03", "2026-07-15", "2026-07-16", "2026-08-01", "2026-08-02", "2026-08-20", "2026-09-09", "2026-09-30", "2026-10-08"];
+
+  it("first sync from the owner's day gets every row by asking shorter windows", async () => {
+    const { fetcher } = holviLikeFetcher(days);
+    const pulled = await collectAccountTransactions(fetcher, {
+      accountUid: "acc-1", firstSync: true, historyFrom: "2026-01-01", now: new Date("2026-10-09T10:00:00.000Z"),
+    });
+    expect(pulled.transactions.map((t) => t.booking_date).sort()).toEqual(days);
+    expect(pulled.truncated).toBe(false);
+  });
+
+  it("an incremental sync and the bank's whole history (no day chosen) work too", async () => {
+    const { fetcher } = holviLikeFetcher(days);
+    const later = await collectAccountTransactions(fetcher, {
+      accountUid: "acc-1", firstSync: false, dateFrom: "2026-07-01", now: new Date("2026-10-09T10:00:00.000Z"),
+    });
+    expect(later.transactions.map((t) => t.booking_date).sort()).toEqual(days.filter((d) => d >= "2026-07-01"));
+    const whole = await collectAccountTransactions(holviLikeFetcher(days).fetcher, {
+      accountUid: "acc-1", firstSync: true, now: new Date("2026-10-09T10:00:00.000Z"),
+    });
+    expect(whole.transactions.map((t) => t.booking_date).sort()).toEqual(days);
+  });
+
+  it("a bank that fails already on the first page still fails (a real outage is not hidden)", async () => {
+    const fetcher: TransactionPageFetcher = {
+      async getAccountTransactions() {
+        throw new EnableBankingError('Error interacting with ASPSP "Unknown error"', 400, "ASPSP_ERROR");
+      },
+    };
+    await expect(
+      collectAccountTransactions(fetcher, { accountUid: "acc-1", firstSync: false, dateFrom: "2026-10-01", now: new Date("2026-10-09T10:00:00.000Z") })
+    ).rejects.toMatchObject({ code: "ASPSP_ERROR" });
+  });
+
+  it("more rows on one day than a page holds: the rows the bank gave are kept, marked partial", async () => {
+    const same = Array.from({ length: 5 }, () => "2026-10-08");
+    const { fetcher } = holviLikeFetcher(same, 3);
+    const pulled = await collectAccountTransactions(fetcher, {
+      accountUid: "acc-1", firstSync: false, dateFrom: "2026-10-08", now: new Date("2026-10-09T10:00:00.000Z"),
+    });
+    expect(pulled.transactions.length).toBe(3);
+    expect(pulled.truncated).toBe(true);
+  });
+});

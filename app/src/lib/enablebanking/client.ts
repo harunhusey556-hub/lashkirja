@@ -363,14 +363,24 @@ async function pullPages(
   const seenKeys = new Set<string>();
   let continuationKey: string | undefined;
   for (let page = 0; page < MAX_TRANSACTION_PAGES; page += 1) {
-    const result = await fetcher.getAccountTransactions({
-      accountUid: params.accountUid,
-      dateFrom: range.dateFrom,
-      dateTo: range.dateTo,
-      continuationKey,
-      strategy: range.strategy,
-      psuHeaders: params.psuHeaders,
-    });
+    let result: Awaited<ReturnType<TransactionPageFetcher["getAccountTransactions"]>>;
+    try {
+      result = await fetcher.getAccountTransactions({
+        accountUid: params.accountUid,
+        dateFrom: range.dateFrom,
+        dateTo: range.dateTo,
+        continuationKey,
+        strategy: range.strategy,
+        psuHeaders: params.psuHeaders,
+      });
+    } catch (error) {
+      // Holvi (2026-10-09): page 1 comes back, every continuation page fails with ASPSP_ERROR
+      // "Unknown error". The same days asked as shorter windows are one page each.
+      if (page > 0 && isContinuationFailure(error)) {
+        return pullBySplitting(fetcher, params, range, transactions, startedAt, budgetMs);
+      }
+      throw error;
+    }
     transactions.push(...result.transactions);
     if (!result.continuationKey) return { transactions, truncated: false };
     // A key the bank has already sent would loop for ever: stop, and say so.
@@ -382,6 +392,55 @@ async function pullPages(
     if (Date.now() - startedAt > budgetMs) return { transactions, truncated: true };
   }
   return { transactions, truncated: true };
+}
+
+/** A bank-side error on a continuation page (not a dead session, a limit or our request). */
+function isContinuationFailure(error: unknown): boolean {
+  return error instanceof EnableBankingError && error.code === "ASPSP_ERROR";
+}
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+const isoDay = (date: Date) => date.toISOString().slice(0, 10);
+function addDays(day: string, days: number): string {
+  return isoDay(new Date(new Date(`${day}T00:00:00.000Z`).getTime() + days * DAY_MS));
+}
+
+/**
+ * The window again as two halves, each read in one page where it fits; a half that still needs a
+ * continuation page is halved again, down to one day. The first page's rows count as read: they
+ * are the newest of the window and are kept (a row a half gives again is the same booking and is
+ * deduplicated on write by its entry reference). A day with more rows than one page is marked
+ * partial so the next sync reads it again.
+ */
+async function pullBySplitting(
+  fetcher: TransactionPageFetcher,
+  params: { accountUid: string; psuHeaders?: Record<string, string> },
+  range: { dateFrom?: string; dateTo?: string },
+  firstPage: EbTransaction[],
+  startedAt: number,
+  budgetMs: number
+): Promise<PulledTransactions> {
+  const to = range.dateTo ?? isoDay(new Date());
+  // Without a start (the bank's whole history): two years back.
+  const from = range.dateFrom ?? addDays(to, -730);
+  const out = new Map<string, EbTransaction>();
+  const keyOf = (tx: EbTransaction) =>
+    tx.entry_reference || tx.transaction_id || JSON.stringify([tx.booking_date, tx.transaction_amount, tx.credit_debit_indicator, tx.remittance_information]);
+  for (const tx of firstPage) out.set(keyOf(tx), tx);
+  let truncated = false;
+  const queue: Array<[string, string]> = [[from, to]];
+  while (queue.length > 0) {
+    const [a, b] = queue.shift()!;
+    if (Date.now() - startedAt > budgetMs) { truncated = true; break; }
+    const result = await fetcher.getAccountTransactions({ accountUid: params.accountUid, dateFrom: a, dateTo: b, psuHeaders: params.psuHeaders });
+    for (const tx of result.transactions) out.set(keyOf(tx), tx);
+    if (!result.continuationKey) continue;
+    if (a === b) { truncated = true; continue; }
+    const span = Math.round((new Date(`${b}T00:00:00.000Z`).getTime() - new Date(`${a}T00:00:00.000Z`).getTime()) / DAY_MS);
+    const mid = addDays(a, Math.floor(span / 2));
+    queue.push([a, mid], [addDays(mid, 1), b]);
+  }
+  return { transactions: [...out.values()], truncated };
 }
 
 export class EnableBankingClient {
