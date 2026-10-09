@@ -28,7 +28,7 @@ import type { PsuContext } from "./client";
 import { withTrackedJob } from "../job-tracker";
 import { getLockedThrough, isDateLocked, isMonthLocked } from "../period-lock";
 import { normalizeIban } from "../iban";
-import { adoptStatementsByIban } from "../bank-accounts";
+import { adoptStatementsByIban, fitAccountToBankFeed } from "../bank-accounts";
 import { CONSENT_REVOKED_MESSAGE, EXPIRED_CONNECTION_MESSAGE } from "../bank-consent-copy";
 import { StoredRowPool } from "../bank-row-fingerprint";
 import { fallbackStatementMonth, statementMonthOrFallback } from "../report-calendar";
@@ -275,6 +275,13 @@ async function syncBankConnectionUntracked(
             where: { id: account.id },
             data: { balanceCents: picked.amountCents, balanceAt: new Date() },
           });
+          // The owner's account for this IBAN, made in the app with today's date and a 0 balance,
+          // takes its opening from the bank (see fitAccountToBankFeed).
+          const ledger = await prisma.bankAccount.findFirst({
+            where: { userId, iban: normalizeIban(account.iban), archivedAt: null },
+            select: { id: true },
+          });
+          if (ledger) await fitAccountToBankFeed(userId, ledger.id);
         }
       } catch (error) {
         if (isTerminalSessionError(error)) throw error;

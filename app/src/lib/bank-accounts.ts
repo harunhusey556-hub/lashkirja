@@ -152,6 +152,43 @@ async function clearOtherDefaults(userId: string, keepId: string): Promise<void>
   });
 }
 
+/**
+ * An account still at its defaults (opening balance 0) that the bank connection feeds: its
+ * opening date moves back to its first row and its opening balance becomes the bank's balance
+ * less every row since, so its balance is the bank's. 2026-10-09 audit: an account made in the
+ * app opens today, and the rows the feed brought from before today fell outside its balance
+ * (Koti showed -5 € against the bank's 4 000 €). An opening balance the owner entered is never
+ * changed. Returns whether the account was changed.
+ */
+export async function fitAccountToBankFeed(userId: string, bankAccountId: string): Promise<boolean> {
+  const account = await prisma.bankAccount.findFirst({
+    where: { id: bankAccountId, userId, archivedAt: null },
+    select: { iban: true, openingBalanceCents: true, openingDate: true },
+  });
+  if (!account?.iban || account.openingBalanceCents !== 0) return false;
+  const connected = await prisma.connectedAccount.findFirst({
+    where: { userId, iban: account.iban, balanceCents: { not: null }, balanceAt: { not: null }, connection: { status: "active" } },
+    orderBy: { balanceAt: "desc" },
+    select: { balanceCents: true, balanceAt: true },
+  });
+  if (connected?.balanceCents == null || !connected.balanceAt) return false;
+  const first = await prisma.transaction.findFirst({
+    where: { statement: { bankAccountId }, date: { not: null } },
+    orderBy: { date: "asc" },
+    select: { date: true },
+  });
+  if (!first?.date) return false;
+  const openingDate = first.date < account.openingDate ? first.date : account.openingDate;
+  const moved = await prisma.transaction.aggregate({
+    where: { statement: { bankAccountId }, date: { gte: openingDate, lte: connected.balanceAt } },
+    _sum: { amountCents: true },
+  });
+  const openingBalanceCents = connected.balanceCents - (moved._sum.amountCents ?? 0);
+  if (openingBalanceCents === 0 && openingDate.getTime() === account.openingDate.getTime()) return false;
+  await prisma.bankAccount.update({ where: { id: bankAccountId }, data: { openingDate, openingBalanceCents } });
+  return true;
+}
+
 export async function createBankAccount(
   userId: string,
   input: BankAccountInput
@@ -172,7 +209,8 @@ export async function createBankAccount(
   }
   await assertIbanFree(userId, iban);
 
-  const existingCount = await prisma.bankAccount.count({ where: { userId } });
+  // Active accounts only: after the only account was archived, the next one is the default again.
+  const existingCount = await prisma.bankAccount.count({ where: { userId, archivedAt: null } });
   const created = await prisma.bankAccount.create({
     data: {
       userId,
@@ -191,6 +229,9 @@ export async function createBankAccount(
 
   if (created.isDefault) await clearOtherDefaults(userId, created.id);
   await adoptStatementsByIban(userId, created.id, iban);
+  if (await fitAccountToBankFeed(userId, created.id)) {
+    return toPublicBankAccount(await prisma.bankAccount.findUniqueOrThrow({ where: { id: created.id } }));
+  }
   return toPublicBankAccount(created);
 }
 
@@ -231,6 +272,7 @@ export async function updateBankAccount(
   // statements of that IBAN that nobody has claimed.
   if (!updated.archivedAt && (input.iban !== undefined || input.archived === false)) {
     await adoptStatementsByIban(userId, id, updated.iban);
+    await fitAccountToBankFeed(userId, id);
   }
   return toPublicBankAccount(updated);
 }
