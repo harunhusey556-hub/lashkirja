@@ -10,6 +10,7 @@ import {
   derivedMonthEndBalances,
   monthEndBalances,
   parsePrintedBalances,
+  parseCamtBalances,
   type PrintedBalance,
   statementHeaderText,
 } from "@/lib/parsers";
@@ -56,7 +57,7 @@ async function recordPrintedBalances(
   ibanHint: string | null = null
 ): Promise<number> {
   if (!bankAccountId || !headerText) return 0;
-  const printed = parsePrintedBalances(headerText);
+  const printed = [...parsePrintedBalances(headerText), ...parseCamtBalances(headerText)];
   await fitAccountToStatement(userId, bankAccountId, printed, rows, ibanHint);
   // Printed month ends first; the ones counted from the opening and closing balance fill in.
   const ends = new Map(derivedMonthEndBalances(printed, rows).map((row) => [row.month, row.closingBalance]));

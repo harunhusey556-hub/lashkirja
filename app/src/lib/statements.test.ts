@@ -150,3 +150,27 @@ describe("month-end balances counted from a whole-period statement (Holvi, 2026-
   });
 });
 
+
+describe("camt balances (audit 2026-10-09, Holvi camt.052)", () => {
+  it("reads the opening and closing balance a camt file states", async () => {
+    const { parseCamtBalances, derivedMonthEndBalances, monthEndBalances } = await import("./parsers");
+    const xml = `<Document><BkToCstmrAcctRpt><Rpt><Acct><Id><IBAN>FI2112345600000785</IBAN></Id></Acct>
+      <Bal><Tp><CdOrPrtry><Cd>OPBD</Cd></CdOrPrtry></Tp><Amt Ccy="EUR">1307.58</Amt><CdtDbtInd>CRDT</CdtDbtInd><Dt><Dt>2026-03-01</Dt></Dt></Bal>
+      <Bal><Tp><CdOrPrtry><Cd>CLBD</Cd></CdOrPrtry></Tp><Amt Ccy="EUR">12.40</Amt><CdtDbtInd>DBIT</CdtDbtInd><Dt><Dt>2026-08-31</Dt></Dt></Bal>
+      <Ntry></Ntry></Rpt></BkToCstmrAcctRpt></Document>`;
+    const printed = parseCamtBalances(xml);
+    expect(printed).toEqual([
+      { date: "2026-03-01", balance: 1307.58 },
+      { date: "2026-08-31", balance: -12.4 },
+    ]);
+    expect(monthEndBalances(printed)).toEqual([
+      { month: "2026-02", closingBalance: 1307.58 },
+      { month: "2026-08", closingBalance: -12.4 },
+    ]);
+    expect(derivedMonthEndBalances(printed, [{ date: "2026-05-02", amount: -1319.98 }]).map((r) => r.month)).toEqual([
+      "2026-03", "2026-04", "2026-05", "2026-06", "2026-07", "2026-08",
+    ]);
+    // Two accounts in one file: whose balance it is cannot be told, so none.
+    expect(parseCamtBalances(xml.replace("<Rpt>", "<Rpt><Acct></Acct></Rpt><Rpt>"))).toEqual([]);
+  });
+});

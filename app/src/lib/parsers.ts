@@ -1219,3 +1219,25 @@ export function derivedMonthEndBalances(
   }
   return result;
 }
+
+/**
+ * The balances a camt.052/053 states: OPBD/PRCD (opening, before the day's rows) and CLBD
+ * (closing, after them), in the same shape as a PDF's SALDO lines. A Holvi camt of Mar-Aug
+ * gave 1307,58 and 59,81 that the app ignored, so a new account counted from 0 (audit
+ * 2026-10-09). Only a file of one account: with several, whose balance is whose is not told.
+ */
+export function parseCamtBalances(xml: string): PrintedBalance[] {
+  if ((xml.match(/<(?:Stmt|Rpt)>/g) ?? []).length > 1) return [];
+  const found: PrintedBalance[] = [];
+  for (const block of xml.match(/<Bal>[\s\S]*?<\/Bal>/g) ?? []) {
+    const code = /<Cd>\s*(OPBD|PRCD|CLBD)\s*<\/Cd>/.exec(block)?.[1];
+    const amount = /<Amt[^>]*>\s*([\d.]+)\s*<\/Amt>/.exec(block)?.[1];
+    const date = /<Dt>\s*(?:<Dt>)?\s*(\d{4}-\d{2}-\d{2})/.exec(block)?.[1];
+    if (!code || !amount || !date || !isIsoCalendarDate(date)) continue;
+    const value = Number(amount);
+    if (!Number.isFinite(value)) continue;
+    const debit = /<CdtDbtInd>\s*DBIT\s*<\/CdtDbtInd>/.test(block);
+    found.push({ date, balance: debit ? -value : value });
+  }
+  return found.sort((a, b) => a.date.localeCompare(b.date));
+}
