@@ -106,6 +106,44 @@ describe("parseHolviTilioteLayout", () => {
   });
 });
 
+describe("Holvi PDF: a foreign payee (audit 2026-10-09)", () => {
+  // From the owner's Holvi PDF (Aug-Sep 2026): 79 of 478 rows named the payee's IBAN instead of
+  // the payee, and a wrapped name kept only its first line.
+  const FOREIGN = `
+EUR - TILIOTE
+Kausi           1.8.2026 - 30.9.2026 Europe/Helsinki
+ Kirjauspäivä                                  Maksutiedot                                           Tapahtuman nro                    Määrä EUR
+
+ 3.8.2026                                     Arvopäivä: 2.8.2026                                                     3               - 3 000,00
+                                              Arkistointitunnus:
+                                              c1991d4b9766a158a8311df6a0fb03b8
+                                              PL40 2490 0005 0000 4600 0029
+                                              6526
+                                              KAWAFEL SPOLKA Z OGRANICZONA
+                                              ODPOWIEDZIALNOSCIA
+                                              Viesti: Proforma Invoice No. P
+                                              18/07/2026 VAT ID 8393214617
+                                              Varattu: 3. elokuuta 2026 kello
+                                              Lähtevä maksu
+
+ 4.8.2026                                     Arvopäivä: 4.8.2026                                                     4               - 12,00
+                                              Arkistointitunnus:
+                                              b5e8a1371fc0d0b39b2faca5630cf86e
+                                              LV80 BANK 0000 4351 9500 1
+                                              SIA PIRKUMS
+                                              Lähtevä maksu
+`;
+
+  it("names the payee, not its IBAN, and keeps a wrapped name whole", () => {
+    const txs = parseHolviTilioteLayout(FOREIGN);
+    expect(txs.map((tx) => [tx.counterparty, tx.amount])).toEqual([
+      ["KAWAFEL SPOLKA Z OGRANICZONA ODPOWIEDZIALNOSCIA", -3000],
+      ["SIA PIRKUMS", -12],
+    ]);
+    expect(txs[0].message).toBe("Proforma Invoice No. P 18/07/2026 VAT ID 8393214617");
+  });
+});
+
 describe("V30: a file the parser cannot read is refused in plain Finnish", () => {
   async function failure(name: string, bytes: Buffer, parse: (file: string) => Promise<unknown>) {
     const fs = await import("fs");

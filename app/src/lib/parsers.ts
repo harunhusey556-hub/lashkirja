@@ -867,10 +867,15 @@ function parseHolviDetailLines(lines: string[]): {
   const messageParts: string[] = [];
   let inMessage = false;
   let reference: string | null = null;
+  // The payee's name may wrap onto more lines; it ends at the first line of another kind.
+  let nameOpen = false;
+  let afterIban = false;
 
   for (const raw of lines) {
     const line = raw.trim();
     if (!line) continue;
+    const wasNameOpen = nameOpen;
+    nameOpen = false;
     // Holvi's page footer and confidentiality notice (between two rows on a page break).
     if (/^LUOTTAMUKSELLINEN\./i.test(line)) continue;
     if (/^Holvi Payment Services Oy\./i.test(line) || /^Puh:\s*\+358/i.test(line) || /^©\d{4}\s+Holvi/i.test(line)) continue;
@@ -898,10 +903,20 @@ function parseHolviDetailLines(lines: string[]): {
       messageParts.push(line);
       continue;
     }
-    if (/^FI\d{2}\s/i.test(line)) continue;
+    // A payee's IBAN, of any country, and the end of one that wrapped ("PL40 2490 ... 0029" /
+    // "6526"): 79 of 478 rows named the IBAN as the payee (audit 2026-10-09).
+    if (/^[A-Z]{2}\d{2}(?:\s?[0-9A-Z]{1,4}){2,8}$/i.test(line)) { afterIban = true; continue; }
+    if (afterIban && /^[0-9A-Z]{1,4}$/i.test(line)) { afterIban = false; continue; }
+    afterIban = false;
 
+    const name = line.replace(/,\s*$/, "").trim();
     if (!counterparty) {
-      counterparty = line.replace(/,\s*$/, "").trim() || null;
+      counterparty = name || null;
+      nameOpen = true;
+    } else if (wasNameOpen && name) {
+      // "KAWAFEL SPOLKA Z OGRANICZONA" / "ODPOWIEDZIALNOSCIA": one name over two lines.
+      counterparty = `${counterparty} ${name}`;
+      nameOpen = true;
     }
   }
 

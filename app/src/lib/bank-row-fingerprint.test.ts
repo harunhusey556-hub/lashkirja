@@ -87,3 +87,14 @@ describe("lockedRowsNotice", () => {
     expect(lockedRowsNotice(3)).toBe("3 tapahtumaa kuuluu suljettuun kuukauteen, joten niitä ei tuotu.");
   });
 });
+
+describe("the same row from Holvi's xlsx and camt (audit 2026-10-09)", () => {
+  it("a payee with its email appended is the same payee", () => {
+    const camt = [{ date: "2026-08-12", amountCents: -2_500, counterparty: "Qred Bank AB" }];
+    const xlsx = [{ date: "2026-08-12", amountCents: -2_500, counterparty: "Qred Bank AB <asiakaspalvelu@qred.com>" }];
+    expect(splitNewRows(xlsx, camt).fresh).toEqual([]);
+    expect(normaliseRowText("Qred Bank AB <asiakaspalvelu@qred.com>")).toBe("qred bank ab");
+    // A different payee on the same day and amount is still a new row.
+    expect(splitNewRows([{ ...xlsx[0], counterparty: "Tallink <a@b.ee>" }], camt).fresh).toHaveLength(1);
+  });
+});
