@@ -624,7 +624,12 @@ export async function parseXLSX(filePath: string): Promise<ParsedTransaction[]> 
   );
 }
 
+/** The text of a CSV, its line breaks as LF: an old Mac export ends lines with a bare CR. */
 function decodeCSV(buffer: Buffer): string {
+  return decodeCSVText(buffer).replace(/\r(?!\n)/g, "\n");
+}
+
+function decodeCSVText(buffer: Buffer): string {
   if (buffer[0] === 0xff && buffer[1] === 0xfe) {
     return buffer.subarray(2).toString("utf16le");
   }

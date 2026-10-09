@@ -40,6 +40,18 @@ describe("POST /api/statements with a name that does not match the content", () 
     expect((await readJson(second)).statement.fileType).toBe("csv");
   });
 
+  it("reads a UTF-16 CSV (Excel's Unicode text) and one with CR line ends (audit 2026-10-09)", async () => {
+    const text = "Kirjauspäivä;Summa;Saaja\r\n07.01.2026;-12,50;Kahvila Oy\r\n";
+    const utf16 = Buffer.concat([Buffer.from([0xff, 0xfe]), Buffer.from(text, "utf16le")]);
+    const form = new FormData();
+    form.set("file", new File([utf16], "tiliote.csv", { type: "text/csv" }));
+    const first = await uploadStatement(buildFormRequest("/api/statements", form, { cookie }));
+    expect(first.status).toBe(200);
+    expect((await readJson(first)).count).toBe(1);
+    const crOnly = await upload("Kirjauspäivä;Summa;Saaja\r08.01.2026;-3,20;Kioski Oy\r", "vanha-mac.csv");
+    expect(crOnly.status).toBe(200);
+  });
+
   it("still refuses a receipt whose name and content disagree", async () => {
     const form = new FormData();
     form.set("file", new File(["%PDF-1.4\n%%EOF"], "kuitti.jpg", { type: "image/jpeg" }));

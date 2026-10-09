@@ -73,13 +73,20 @@ function detectFile(buffer: Buffer): DetectedFile | null {
     return { extension: ".xls", mimeType: "application/vnd.ms-excel", kind: "xls" };
   }
 
-  if (buffer.includes(0)) return null;
-  const text = buffer.subarray(0, Math.min(buffer.length, 8192)).toString("utf8");
+  // Excel's "Unicode text" and some bank exports are UTF-16 with a byte-order mark: every other
+  // byte is 0, which read as a binary file and was refused (audit 2026-10-09); decodeCSV reads it.
+  const head = buffer.subarray(0, Math.min(buffer.length, 8192));
+  const utf16 = (head[0] === 0xff && head[1] === 0xfe) || (head[0] === 0xfe && head[1] === 0xff);
+  if (!utf16 && buffer.includes(0)) return null;
+  const text = utf16
+    ? (head[0] === 0xff ? head.subarray(2) : Buffer.from(head.subarray(2)).swap16()).toString("utf16le")
+    : head.toString("utf8");
   const trimmed = text.replace(/^\uFEFF/, "").trimStart();
   if (trimmed.startsWith("<?xml") || /^<(Document|[A-Za-z]+:Document)\b/.test(trimmed)) {
     return { extension: ".xml", mimeType: "application/xml", kind: "xml" };
   }
-  if (text.includes("\n") && (text.includes(";") || text.includes(","))) {
+  // A line break of any kind: an old Mac export ends its lines with a bare CR.
+  if (/[\r\n]/.test(text) && (text.includes(";") || text.includes(","))) {
     return { extension: ".csv", mimeType: "text/csv", kind: "csv" };
   }
   return null;
