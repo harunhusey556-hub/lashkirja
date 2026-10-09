@@ -29,7 +29,8 @@ import { listStatementsForUser } from "@/lib/statement-api";
 import { centsToEuros } from "@/lib/money";
 import { autoGenerateIncomeReceipts } from "@/lib/income-automation";
 import { archivedAccountForIban, archivedAccountImportNotice, resolveAccountForImport, upsertMonthlyBalance } from "@/lib/bank-accounts";
-import { extractOwnIban, isValidIban, normalizeIban } from "@/lib/iban";
+import { isValidIban, normalizeIban, ownIbanOf } from "@/lib/iban";
+import { formatIbanDisplay } from "@/lib/enablebanking/mapping";
 import { Prisma } from "@/generated/prisma/client";
 import { loadStoredRowIdentities, lockedRowsNotice, skippedRowsNotice, splitNewRows } from "@/lib/bank-row-fingerprint";
 
@@ -97,12 +98,15 @@ async function fitAccountToStatement(
     where: { id: bankAccountId, userId },
     select: { openingBalanceCents: true, openingDate: true, iban: true },
   });
-  if (!account || account.openingBalanceCents !== 0) return;
+  if (!account) return;
   const first = [...printed].sort((a, b) => a.date.localeCompare(b.date))[0];
   const firstRowDay = rows.map((row) => row.date).filter((d): d is string => Boolean(d)).sort()[0];
   const startDay = first?.date ?? firstRowDay;
   const data: { openingDate?: Date; openingBalanceCents?: number; iban?: string } = {};
-  if (startDay) {
+  // The opening only while it is still the default 0; the IBAN also for an account whose owner
+  // entered an opening balance (audit 2026-10-09: the IBAN was never filled there, so the bank
+  // feed could not find the account's file rows and stored them again).
+  if (startDay && account.openingBalanceCents === 0) {
     const startsAt = new Date(`${startDay}T00:00:00.000Z`);
     const earlier = await prisma.transaction.count({
       where: { statement: { bankAccountId }, date: { lt: startsAt } },
@@ -296,7 +300,10 @@ export async function POST(req: NextRequest) {
     const headerText = scannable ? buffer.toString("utf8").slice(0, 200_000) : await statementHeaderText(detected.kind, filePath);
     // The file's own account, never a counterparty's (a transfer to the owner's
     // other account names that account in the rows too).
-    const ibanHint = headerText ? extractOwnIban(headerText) : null;
+    const ownIban = headerText ? ownIbanOf(headerText) : null;
+    const ibanHint = ownIban?.iban ?? null;
+    // Only an IBAN the file names as its own may become an account's or keep it off the default.
+    const strongIban = ownIban?.strong ? ownIban.iban : null;
     if (typeof requestedAccountId === "string" && requestedAccountId.trim()) {
       const owned = await prisma.bankAccount.findFirst({
         where: { id: requestedAccountId.trim(), userId },
@@ -312,11 +319,14 @@ export async function POST(req: NextRequest) {
       }
       bankAccountId = owned.id;
     } else {
-      bankAccountId = await resolveAccountForImport(userId, { iban: ibanHint });
+      bankAccountId = await resolveAccountForImport(userId, { iban: ibanHint, strong: Boolean(strongIban) });
       // M1-4: the file's own account is archived, so it was filed under none; say so.
       if (bankAccountId === null) {
         const archivedHolder = await archivedAccountForIban(userId, ibanHint);
         if (archivedHolder) accountNotice = archivedAccountImportNotice(archivedHolder.name);
+        else if (strongIban && (await prisma.bankAccount.count({ where: { userId, archivedAt: null } })) > 0) {
+          accountNotice = `Tiedoston tili ${formatIbanDisplay(strongIban)} ei ole yksikään pankkitileistäsi, joten tiliotetta ei liitetty tiliin. Lisää tili, niin tiliote liittyy siihen.`;
+        }
       }
     }
 
@@ -396,6 +406,9 @@ export async function POST(req: NextRequest) {
           statementId: statementOf.get(tx.date ? tx.date.slice(0, 7) : periodMonth)!,
           userId,
           source: "file",
+          // The file's own account, as the bank feed's rows carry it: an account created later
+          // with this IBAN adopts the statement, and the feed finds these rows (audit 2026-10-09).
+          iban: strongIban,
           date: tx.date ? new Date(tx.date) : null,
           counterparty: tx.counterparty,
           amountCents: tx.amountCents,
@@ -412,14 +425,14 @@ export async function POST(req: NextRequest) {
       // A file already imported can still bring the balances it prints (an upload from before
       // they were read, 2026-10-09): they are stored, and the 409 says so.
       if (error instanceof AllRowsKnownError) {
-        error.balancesStored = await recordPrintedBalances(userId, bankAccountId, headerText, parsedTransactions, file.name, ibanHint);
+        error.balancesStored = await recordPrintedBalances(userId, bankAccountId, headerText, parsedTransactions, file.name, strongIban);
         error.messagesCompleted = await completeCutMessages(userId, bankAccountId, parsedTransactions);
       }
       throw error;
     });
     const { statement, statements, skippedDuplicates, heldBack } = imported;
 
-    await recordPrintedBalances(userId, bankAccountId, headerText, parsedTransactions, file.name, ibanHint);
+    await recordPrintedBalances(userId, bankAccountId, headerText, parsedTransactions, file.name, strongIban);
 
     // Fetch recent emails from connected accounts before matching so that
     // any new emailed receipts can be matched to this statement immediately.

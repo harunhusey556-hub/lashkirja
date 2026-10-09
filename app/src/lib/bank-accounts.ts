@@ -591,7 +591,7 @@ export function archivedAccountImportNotice(accountName: string): string {
  */
 export async function resolveAccountForImport(
   userId: string,
-  hints: { iban?: string | null } = {}
+  hints: { iban?: string | null; strong?: boolean } = {}
 ): Promise<string | null> {
   const iban = hints.iban ? normalizeIban(hints.iban) : null;
   if (iban && isValidIban(iban)) {
@@ -604,6 +604,17 @@ export async function resolveAccountForImport(
     });
     if (byIban) return byIban.id;
     if (await archivedAccountForIban(userId, iban)) return null;
+    if (hints.strong) {
+      // The file names its own account and it is none of these: it may be the account still
+      // without an IBAN, never one whose IBAN says otherwise (audit 2026-10-09: an OP file went
+      // under the Nordea account without a word).
+      const withoutIban = await prisma.bankAccount.findFirst({
+        where: { userId, archivedAt: null, iban: null },
+        orderBy: [{ isDefault: "desc" }, { createdAt: "asc" }],
+        select: { id: true },
+      });
+      return withoutIban?.id ?? null;
+    }
   }
   const fallback = await prisma.bankAccount.findFirst({
     where: { userId, archivedAt: null },

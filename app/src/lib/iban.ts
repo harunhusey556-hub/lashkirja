@@ -129,11 +129,21 @@ const OWN_ACCOUNT_LABEL = /^(?:tilinumero|tilin numero|tili|iban|tilin iban|omis
  * Counterparty columns ("Saajan tilinumero") are never a label for this.
  */
 export function extractOwnIban(text: string): string | null {
+  return ownIbanOf(text)?.iban ?? null;
+}
+
+/**
+ * extractOwnIban with how sure it is: `strong` when the file names the account itself (camt
+ * Acct, a labelled line), not when it is only the IBAN mentioned most. Only a strong one may
+ * decide that a file is not the owner's account, or become an account's IBAN (audit 2026-10-09:
+ * a landlord's IBAN in a "Saajan tilinumero" column became the account's).
+ */
+export function ownIbanOf(text: string): { iban: string; strong: boolean } | null {
   const head = text.split(/<Ntry[\s>]/)[0];
   const camt = /<Acct>[\s\S]*?<IBAN>\s*([^<]+?)\s*<\/IBAN>/i.exec(head);
   if (camt) {
     const candidate = normalizeIban(camt[1]);
-    if (isValidIban(candidate)) return candidate;
+    if (isValidIban(candidate)) return { iban: candidate, strong: true };
   }
   for (const line of text.split(/\r?\n/).slice(0, 40)) {
     // A PDF's layout text separates the label from the number with runs of spaces
@@ -141,12 +151,12 @@ export function extractOwnIban(text: string): string | null {
     const cells = line.trim().split(/[;\t,:]|\s{2,}/).map((cell) => cell.trim().replace(/^"|"$/g, ""));
     if (cells.length < 2 || !OWN_ACCOUNT_LABEL.test(cells[0])) continue;
     const found = extractIbans(cells.slice(1).join(" "))[0];
-    if (found) return found;
+    if (found) return { iban: found, strong: true };
   }
   const counts = new Map<string, number>();
   for (const iban of ibanMentions(text)) counts.set(iban, (counts.get(iban) ?? 0) + 1);
   const ranked = [...counts.entries()].sort((a, b) => b[1] - a[1]);
   if (ranked.length === 0) return null;
   if (ranked.length > 1 && ranked[0][1] === ranked[1][1]) return null;
-  return ranked[0][0];
+  return { iban: ranked[0][0], strong: false };
 }
