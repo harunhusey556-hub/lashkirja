@@ -615,6 +615,11 @@ export async function confirmMatch(
     if (receipt.linkedTransaction && receipt.linkedTransaction.id !== tx.id) {
       throw new MatchConflictError("Kuitti on jo kohdistettu toiseen tapahtumaan");
     }
+    // The row's own receipt stays: a second one took the row and left the first approved without
+    // its bank row (audit 2026-10-09). Unlinking first is the way to change it.
+    if (tx.receiptId && tx.receiptId !== receipt.id) {
+      throw new MatchConflictError("Tapahtuma on jo kohdistettu toiseen kuittiin. Poista ensin se kohdistus.");
+    }
     // Confirming approves a waiting receipt, which moves its month's VAT return
     // and report exactly as approving it from the review queue does.
     if (receipt.reviewStatus !== "approved") await assertPeriodOpen(userId, [receipt.date], client);
