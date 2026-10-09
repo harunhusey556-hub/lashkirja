@@ -989,11 +989,16 @@ export async function matchPurchasePaymentsFromBank(
   const { openInvoices, outgoing } = await loadMatchInputs(userId);
   if (openInvoices.length === 0) return { applied: [], suggestions: [], skippedLocked: [] };
 
-  const byReference = new Map(
-    openInvoices
-      .filter((invoice) => invoice.reference)
-      .map((invoice) => [invoice.reference as string, invoice])
-  );
+  // Several open invoices can share a fixed viite (a monthly rent): all of them are kept, and the
+  // payment goes to the one whose open amount it is (audit 2026-10-09: the last one took every
+  // payment, and a payment larger than the invoice was booked and marked paid).
+  const byReference = new Map<string, OpenPurchase[]>();
+  for (const invoice of openInvoices) {
+    if (!invoice.reference) continue;
+    byReference.set(invoice.reference, [...(byReference.get(invoice.reference) ?? []), invoice]);
+  }
+  const openCents = (invoice: OpenPurchase) =>
+    invoice.grossCents - invoice.payments.reduce((sum, payment) => sum + payment.amountCents, 0);
   const applied: PurchaseMatchResult["applied"] = [];
   const skippedLocked: PurchaseMatchResult["skippedLocked"] = [];
   const consumed = new Set<string>();
@@ -1002,7 +1007,14 @@ export async function matchPurchasePaymentsFromBank(
     const candidates = [transaction.reference, transaction.message]
       .filter((value): value is string => Boolean(value))
       .map(normalizeReference);
-    const invoice = candidates.map((value) => byReference.get(value)).find(Boolean);
+    const sharing = candidates.map((value) => byReference.get(value)).find((list) => list && list.length > 0);
+    if (!sharing) continue;
+    const paid = Math.abs(transaction.amountCents);
+    // The invoice of exactly this amount; else, alone with the viite, one this payment does not
+    // exceed (a part payment). An overpayment, or a choice between invoices, is left to the owner.
+    const invoice =
+      sharing.find((candidate) => openCents(candidate) === paid) ??
+      (sharing.length === 1 && paid <= openCents(sharing[0]) ? sharing[0] : undefined);
     if (!invoice) continue;
 
     const amount = centsToEuros(Math.abs(transaction.amountCents));
@@ -1034,7 +1046,9 @@ export async function matchPurchasePaymentsFromBank(
       amount,
     });
     consumed.add(transaction.id);
-    byReference.delete(invoice.reference as string);
+    const rest = sharing.filter((candidate) => candidate.id !== invoice.id);
+    if (paid >= openCents(invoice)) byReference.set(invoice.reference as string, rest);
+    else invoice.payments.push({ amountCents: paid });
   }
 
   const suggestions = await planPurchaseSuggestions(
