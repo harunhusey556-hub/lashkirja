@@ -194,10 +194,27 @@ async function syncBankConnectionUntracked(
 
   for (const account of inScope) {
     try {
+      // Each account from its own history (audit 2026-10-09): one put in scope after the first
+      // sync, with no history and no rows yet, has its own first sync (it only got the last
+      // days); one back in scope after a pause reads from its own last row, not only from the
+      // connection's last success (the pause's rows were never read).
+      // (With a chosen day, the backfill below already reads such an account's history.)
+      const accountFirstSync =
+        firstSync ||
+        (!connection.historyFrom && !account.historyFrom && !(await earliestImportedDay(userId, account.iban)));
+      // Paused: its balance was last fetched (every pull of it does) a day or more before the
+      // connection's last success. A quiet account with old rows is not paused.
+      const paused =
+        !accountFirstSync &&
+        account.balanceAt != null &&
+        connection.lastSuccessAt != null &&
+        account.balanceAt.getTime() < connection.lastSuccessAt.getTime() - 24 * 60 * 60 * 1000;
+      const ownFrom = paused ? overlapDateFrom(account.balanceAt!) : undefined;
+      const accountFrom = accountFirstSync ? undefined : ownFrom && dateFrom && ownFrom < dateFrom ? ownFrom : dateFrom;
       const pulled = await collectAccountTransactions(client, {
         accountUid: account.providerAccountUid,
-        firstSync,
-        dateFrom,
+        firstSync: accountFirstSync,
+        dateFrom: accountFrom,
         historyFrom: connection.historyFrom ?? undefined,
         psuHeaders,
       });
@@ -216,7 +233,7 @@ async function syncBankConnectionUntracked(
       // the owner asked for since (an earlier historyFrom, or an account added
       // to the books after the first sync).
       let historyFrom: string | null = null;
-      if (firstSync) {
+      if (accountFirstSync) {
         if (!truncated) historyFrom = connection.historyFrom ?? earliestDay(mapped) ?? today;
       } else {
         const covered = account.historyFrom ?? (await earliestImportedDay(userId, account.iban)) ?? dateFrom ?? today;
