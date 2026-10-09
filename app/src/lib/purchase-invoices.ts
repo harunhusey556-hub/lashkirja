@@ -308,6 +308,20 @@ export async function createPurchaseInvoice(
   const { grossCents, vatCents, netCents } = purchaseAmounts(input.gross, input.vat);
   if (input.receiptId) await assertReceiptAvailable(userId, input.receiptId, undefined, db ?? prisma);
 
+  // The supplier's invoice number names one invoice: the same one entered twice doubled its cost
+  // and its payable (audit 2026-10-09). An invoice without a number is not checked.
+  const invoiceNumber = input.invoiceNumber?.trim() || null;
+  if (invoiceNumber) {
+    const sameNumber = await (db ?? prisma).purchaseInvoice.findMany({
+      where: { userId, invoiceNumber },
+      select: { supplierName: true },
+    });
+    const key = supplierName.toLocaleLowerCase("fi");
+    if (sameNumber.some((other) => other.supplierName.trim().toLocaleLowerCase("fi") === key)) {
+      throw new AppError(`Lasku ${invoiceNumber} toimittajalta ${supplierName} on jo kirjattu.`, "DUPLICATE_PURCHASE_INVOICE", 409);
+    }
+  }
+
   const created = await (db ?? prisma).purchaseInvoice.create({
     data: {
       userId,

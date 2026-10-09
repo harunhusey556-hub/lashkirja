@@ -47,3 +47,19 @@ describe("reference matching of purchase payments", () => {
     expect((await prisma.purchaseInvoice.findUniqueOrThrow({ where: { id: small.id } })).status).toBe("open");
   });
 });
+
+describe("the same purchase invoice twice (audit 2026-10-09)", () => {
+  it("a second invoice with the supplier's same number is refused; another number is fine", async () => {
+    const { POST } = await import("@/app/api/purchase-invoices/route");
+    const { sessionCookie, buildRequest, readJson } = await import("./helpers/http");
+    const cookie = await sessionCookie(user);
+    const body = { supplierName: "Tukku Oy", invoiceNumber: "4711", issueDate: "2026-09-01", dueDate: "2026-09-15", gross: 124 };
+    const post = (data: object) => POST(buildRequest("POST", "/api/purchase-invoices", data, { cookie }));
+    expect((await post(body)).status).toBe(201);
+    const twice = await post({ ...body, supplierName: "TUKKU OY " });
+    expect(twice.status).toBe(409);
+    expect(JSON.stringify(await readJson(twice))).toContain("4711");
+    expect((await post({ ...body, invoiceNumber: "4712" })).status).toBe(201);
+    expect(await prisma.purchaseInvoice.count({ where: { userId: user.id } })).toBe(2);
+  });
+});
