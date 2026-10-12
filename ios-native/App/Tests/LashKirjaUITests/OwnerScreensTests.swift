@@ -131,7 +131,11 @@ final class OwnerScreensTests: WalkTestCase {
         // Content ends above the home indicator; a centred bubble ends far above that.
         XCTAssertGreaterThanOrEqual(frame.maxY, window.maxY - 60, "the sheet ends at \(frame.maxY) of \(window.maxY): not anchored at the bottom")
         XCTAssertGreaterThan(frame.minY, window.height * 0.25, "the sheet starts at \(frame.minY): not a bottom sheet")
-        XCTAssertGreaterThanOrEqual(frame.width, window.width - 2, "the sheet is \(frame.width) of \(window.width) wide: a floating bubble")
+        // iOS 26 floats a partial-height system sheet 8 pt in from each edge (CI round 3: 386 of 402,
+        // minX 8); a centred alert-style bubble is 270 pt. Full width means edge to edge less that inset.
+        XCTAssertLessThanOrEqual(frame.minX, 12, "the sheet starts \(frame.minX) pt from the left edge: a floating bubble")
+        XCTAssertGreaterThanOrEqual(frame.maxX, window.maxX - 12, "the sheet ends \(window.maxX - frame.maxX) pt from the right edge: a floating bubble")
+        XCTAssertGreaterThanOrEqual(frame.width, window.width - 24, "the sheet is \(frame.width) of \(window.width) wide: a floating bubble")
         XCTAssertGreaterThan(confirm.frame.midY, window.height * 0.6, "Poista is at \(confirm.frame.midY): not where the thumb is")
 
         app.buttons["confirm-sheet-cancel"].firstMatch.tap()
