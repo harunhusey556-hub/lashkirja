@@ -749,8 +749,12 @@ export async function confirmAllSuggestions(
 
 export interface ProposedMatchConfirm {
   confirmed: number;
-  /** Proposed pairs whose suggestion was withdrawn or re-pointed since. */
+  /** Proposed pairs whose suggestion was withdrawn, re-pointed, taken elsewhere or in a closed month. */
   skipped: number;
+  /** Pairs that were already linked to each other (a second tap, a retry): nothing was written. */
+  alreadyConfirmed: number;
+  /** Which pairs were skipped, so a list can mark exactly those rows. */
+  skippedPairs: Array<{ transactionId: string; receiptId: string }>;
 }
 
 /**
@@ -758,8 +762,10 @@ export interface ProposedMatchConfirm {
  * was withdrawn (an AI rejection) or re-pointed by a later run is skipped,
  * never linked from a stale list; income drafts are not silently approved
  * (same guard as confirmAllSuggestions). Ambiguous rows are not pairs here by
- * construction — the review never proposes them. Confirmed and skipped counts
- * let the caller say what actually happened.
+ * construction — the review never proposes them. A pair that is already
+ * confirmed to each other is counted as alreadyConfirmed, so a second tap on
+ * the same list writes nothing and is not reported as a failure. Confirmed,
+ * skipped and alreadyConfirmed counts let the caller say what actually happened.
  */
 export async function confirmProposedMatches(
   userId: string,
@@ -773,27 +779,40 @@ export async function confirmProposedMatches(
       })
     ).map((receipt) => receipt.id)
   );
-  const result: ProposedMatchConfirm = { confirmed: 0, skipped: 0 };
+  const result: ProposedMatchConfirm = { confirmed: 0, skipped: 0, alreadyConfirmed: 0, skippedPairs: [] };
+  const skip = (pair: { transactionId: string; receiptId: string }) => {
+    result.skipped += 1;
+    result.skippedPairs.push({ transactionId: pair.transactionId, receiptId: pair.receiptId });
+  };
+  const seen = new Set<string>();
   for (const pair of pairs) {
+    // The same pair twice in one request is one pair.
+    const key = pairKey(pair.transactionId, pair.receiptId);
+    if (seen.has(key)) continue;
+    seen.add(key);
     if (draftReceiptIds.has(pair.receiptId)) {
-      result.skipped += 1;
+      skip(pair);
       continue;
     }
-    const tx = await prisma.transaction.findUnique({
-      where: { id: pair.transactionId },
-      select: { matchStatus: true, suggestedReceiptId: true },
+    const tx = await prisma.transaction.findFirst({
+      where: { id: pair.transactionId, statement: { userId } },
+      select: { matchStatus: true, suggestedReceiptId: true, receiptId: true },
     });
+    if (tx?.matchStatus === "confirmed" && tx.receiptId === pair.receiptId) {
+      result.alreadyConfirmed += 1;
+      continue;
+    }
     if (tx?.matchStatus !== "suggested" || tx.suggestedReceiptId !== pair.receiptId) {
-      result.skipped += 1;
+      skip(pair);
       continue;
     }
     try {
       await confirmMatch(userId, pair.transactionId, pair.receiptId, true);
       result.confirmed += 1;
     } catch (error) {
-      // A receipt of a closed month stays a suggestion; the rest still go through.
-      if (error instanceof PeriodLockedError) {
-        result.skipped += 1;
+      // A closed month, or a receipt/row taken meanwhile, leaves that pair a suggestion; the rest still go through.
+      if (error instanceof PeriodLockedError || error instanceof MatchConflictError || error instanceof MatchNotFoundError) {
+        skip(pair);
         continue;
       }
       throw error;

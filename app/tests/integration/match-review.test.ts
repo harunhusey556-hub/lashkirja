@@ -166,13 +166,17 @@ describe("review_matches (chat tool)", () => {
     expect(result.ambiguous.map((row: { transactionId: string }) => row.transactionId)).toEqual([f.coffeeRow.id]);
     expect(result.ambiguous[0].options).toHaveLength(2);
 
-    // One card per reply, waiting for Hyväksy; nothing linked.
-    expect(session.proposal()).toMatchObject({
-      type: "match_proposal",
+    // Every passed pair and the ambiguous row ride on the reply as one batch card, waiting for Hyväksy; nothing linked.
+    const batchCard = session.proposal() as unknown as { type: string; cards: Array<Record<string, unknown>>; pairs: unknown[] };
+    expect(batchCard.type).toBe("match_batch");
+    expect(batchCard.pairs).toHaveLength(2);
+    expect(batchCard.cards).toHaveLength(3);
+    expect(batchCard.cards[0]).toMatchObject({
       transactionId: f.rentRow.id,
       receiptId: f.rent.id,
       reasons: expect.arrayContaining(["viite täsmää", "summa sama"]),
     });
+    expect(batchCard.cards[2]).toMatchObject({ transactionId: f.coffeeRow.id, ambiguous: true, receiptId: null });
     expect(await prisma.transaction.count({ where: { receiptId: { not: null } } })).toBe(0);
 
     // The stored suggestion carries the review; a second run asks nothing.
@@ -234,18 +238,22 @@ describe("review_matches (chat tool)", () => {
     }
     await runMatching(owner.id);
 
-    const { result } = await review("2026-09");
+    const { result, session } = await review("2026-09");
     // rent + 11 extras are certain; the phone pair is AI-accepted = 13.
     expect(result.passedTotal).toBe(13);
     expect(result.passed).toHaveLength(13);
     expect(result.truncated).toBe(false);
     expect(result.batch).toMatchObject({ count: 13, ambiguous: 1, href: "/api/matching/confirm-all" });
-    expect(result.batch.pairs).toHaveLength(13);
+    // The accept-all pairs ride on the reply's batch card, not in the model's text.
+    const card = session.proposal() as { type: string; pairs: Array<{ receiptId: string }>; cards: unknown[] };
+    expect(card.type).toBe("match_batch");
+    expect(card.pairs).toHaveLength(13);
+    expect(card.cards).toHaveLength(14);
     const proposed = new Set(result.passed.map((m: { match: { id: string } }) => m.match.id));
     expect(proposed.has(f.coffeeA.id)).toBe(false);
     expect(proposed.has(f.coffeeB.id)).toBe(false);
     expect(proposed.has(f.fuel.id)).toBe(false);
-    const batchIds = new Set(result.batch.pairs.map((p: { receiptId: string }) => p.receiptId));
+    const batchIds = new Set(card.pairs.map((p) => p.receiptId));
     expect(batchIds.has(f.coffeeA.id)).toBe(false);
     expect(batchIds.has(f.coffeeB.id)).toBe(false);
     expect(result.ambiguous.map((row: { transactionId: string }) => row.transactionId)).toEqual([f.coffeeRow.id]);
@@ -267,7 +275,12 @@ describe("confirming exactly the proposed pairs", () => {
       { transactionId: f.rentRow.id, receiptId: f.rent.id },
       { transactionId: f.phoneRow.id, receiptId: f.phone.id },
     ]);
-    expect(result).toEqual({ confirmed: 1, skipped: 1 });
+    expect(result).toEqual({
+      confirmed: 1,
+      skipped: 1,
+      alreadyConfirmed: 0,
+      skippedPairs: [{ transactionId: f.phoneRow.id, receiptId: f.phone.id }],
+    });
     expect(await prisma.transaction.findUnique({ where: { id: f.rentRow.id } })).toMatchObject({
       receiptId: f.rent.id,
       matchStatus: "confirmed",

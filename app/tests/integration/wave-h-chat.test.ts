@@ -405,7 +405,7 @@ describe("chat limits and decisions", () => {
     const transaction = statement.transactions[0];
     const before = await prepareChat(user.id, "Kohdista kuitit");
     expect(before.kind).toBe("local");
-    if (before.kind === "local") expect(before.proposal?.receiptId).toBe(receipt.id);
+    if (before.kind === "local") expect(before.proposal).toMatchObject({ type: "match_proposal", receiptId: receipt.id });
 
     const conversation = await prisma.conversation.create({ data: { userId: user.id, title: "Hylkäys" } });
     const assistant = await prisma.chatMessage.create({
@@ -435,7 +435,7 @@ describe("chat limits and decisions", () => {
     });
     expect(rejection).toBeTruthy();
     const after = await prepareChat(user.id, "Kohdista kuitit");
-    if (after.kind === "local") expect(after.proposal?.receiptId).not.toBe(receipt.id);
+    if (after.kind === "local") expect(after.proposal).not.toMatchObject({ receiptId: receipt.id });
   });
 });
 

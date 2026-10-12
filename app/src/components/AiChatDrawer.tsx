@@ -5,7 +5,9 @@ import Link from "next/link";
 
 import { useEffect, useRef, useState } from "react";
 import styles from "./AiChatDrawer.module.css";
-import { ChatMatchProposal } from "@/lib/ai-assistant";
+import type { ChatMatchProposal } from "@/lib/ai-assistant";
+import type { ChatMatchBatch } from "@/lib/chat-match-batch";
+import { MatchBatchCard } from "@/components/MatchBatchCard";
 import { apiFetch, authorizedFetch, errorMessage, readJson } from "@/components/clientFetch";
 import { STREAM_IDLE_MS, armIdleTimeout, subscribeOverlayClose } from "@/lib/screen-state";
 import { ChatMarkdown } from "@/components/ChatMarkdown";
@@ -73,7 +75,7 @@ interface ChatMessageItem {
   role: "user" | "assistant";
   content: string;
   clientId?: string | null;
-  proposal?: (ChatMatchProposal & { status?: "accepted" | "rejected" }) | null;
+  proposal?: (ChatMatchProposal & { status?: "accepted" | "rejected" }) | ChatMatchBatch | null;
   limited?: boolean;
   sources?: ChatSourceLink[];
   status?: string;
@@ -1135,7 +1137,9 @@ export function AiChatDrawer({
                   )}
                 </div>
               )}
-              {message.proposal?.transactionId &&
+              {message.proposal?.type === "match_batch" && <MatchBatchCard batch={message.proposal} />}
+              {message.proposal?.type === "match_proposal" &&
+                message.proposal.transactionId &&
                 message.proposal.status !== "accepted" &&
                 message.proposal.status !== "rejected" && (
                   <div className="mt-1 w-full max-w-[90%] space-y-3 rounded-card border border-line bg-surface p-4">
@@ -1163,13 +1167,13 @@ export function AiChatDrawer({
                     </div>
                   </div>
                 )}
-              {message.proposal?.transactionId && message.proposal.status === "accepted" && (
+              {message.proposal?.type === "match_proposal" && message.proposal.transactionId && message.proposal.status === "accepted" && (
                 <p className="mt-1 flex items-center gap-1.5 px-1 text-caption font-medium text-success">
                   <Icon icon={Check} size="inline" />
                   Kohdistus hyväksytty
                 </p>
               )}
-              {message.proposal?.transactionId && message.proposal.status === "rejected" && (
+              {message.proposal?.type === "match_proposal" && message.proposal.transactionId && message.proposal.status === "rejected" && (
                 <p className="mt-1 px-1 text-caption text-ink-2">Ehdotus hylätty</p>
               )}
               {message === lastMessage && showShortcutsAfterLast && (

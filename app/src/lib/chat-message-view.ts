@@ -2,7 +2,7 @@ import { displayChatContent } from "./chat-legacy";
 import type { ChatSource } from "./chat-turn";
 
 /** Proposal kinds a reply can carry: a receipt-to-bank-row match, and the tools' confirmed actions. */
-const PROPOSAL_TYPES = new Set(["match_proposal", "invoice_draft", "receipt_update"]);
+const PROPOSAL_TYPES = new Set(["match_proposal", "match_batch", "invoice_draft", "receipt_update"]);
 
 function parseSources(raw: string | null): ChatSource[] {
   if (!raw) return [];

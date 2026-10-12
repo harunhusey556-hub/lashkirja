@@ -12,13 +12,14 @@ import { READ_TOOLS, type ChatTool, type ToolContext } from "./chat-tools-read";
 import { PROPOSAL_TOOLS, type ChatActionProposal } from "./chat-tools-propose";
 import { MATCH_TOOLS } from "./chat-tools-match";
 import type { ChatMatchProposal } from "./chat-match-proposal";
+import type { ChatMatchBatch } from "./chat-match-batch";
 import { ToolInputError } from "./chat-tools-shared";
 import type { ChatToolDefinition, ChatToolRunner } from "./chat-provider";
 
 export const CHAT_TOOLS: ChatTool[] = [...READ_TOOLS, ...PROPOSAL_TOOLS, ...MATCH_TOOLS];
 
 /** What one reply may carry for the owner to confirm. */
-export type ChatToolProposal = ChatActionProposal | ChatMatchProposal;
+export type ChatToolProposal = ChatActionProposal | ChatMatchProposal | ChatMatchBatch;
 
 /** One exact euro figure a tool returned ("1234.56", unsigned as replies cite it). */
 export interface ToolFigure {
@@ -114,7 +115,14 @@ export function createChatToolSession(userId: string, now: Date = new Date(), to
       if (proposal) return fail("One proposal per reply: this reply already carries one. Ask the user to confirm it first.");
       proposal = result.proposal as ChatToolProposal;
     }
-    const text = JSON.stringify(result);
+    // The match card list and the accept-all pairs are for the owner's screen;
+    // the model reads the compact lists and the batch counts, so a long review
+    // fits the result cap.
+    const forModel: Record<string, unknown> = { ...result };
+    delete forModel.cards;
+    if ((forModel.proposal as { type?: unknown } | undefined)?.type === "match_batch") delete forModel.proposal;
+    if (forModel.batch && typeof forModel.batch === "object") forModel.batch = { ...forModel.batch, pairs: undefined };
+    const text = JSON.stringify(forModel);
     if (text.length > RESULT_MAX_CHARS) return fail("The result is too large. Ask again with a smaller limit or a narrower period.");
     if (result.ok === true) harvest(result, name, periodOf(result), null, ledger);
     log.push({ name, ok: result.ok === true });
@@ -151,7 +159,7 @@ export const CHAT_TOOL_RULES = [
   "Resolve relative periods from observedAt (Europe/Helsinki): 'last month' is the previous calendar month, 'last three months' is from/to covering the three months before the current one unless the user includes this month.",
   "Totals in a tool result cover every match; items are one page. If nextCursor is set and the user needs more rows, call again with it.",
   "Tool amounts are exact euros like \"1234.50\"; write them in Finnish form (1 234,50 €) when replying in Finnish.",
-  "To match bank rows with receipts or sales invoices, call review_matches and suggest only what it returns as passed, with its Finnish reasons; it shows the best receipt match as a card to confirm. Never suggest a match yourself.",
+  "To match bank rows with receipts or sales invoices, call review_matches and suggest only what it returns as passed, with its Finnish reasons; it shows every passed receipt match as a card list with a one-tap accept for the confident ones. Never suggest a match yourself.",
   "To create a draft invoice or fix a receipt, call propose_invoice_draft or propose_receipt_update. They only show the user a card to confirm; nothing is written until the user taps Hyväksy. Never say an invoice was created or a receipt changed. If a tool returns ok:false, tell the user what is missing.",
 ].join("\n");
 
