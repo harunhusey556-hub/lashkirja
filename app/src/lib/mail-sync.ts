@@ -2,7 +2,8 @@ import { ImapFlow, SearchObject } from "imapflow";
 import { simpleParser } from "mailparser";
 import { prisma } from "./db";
 import { decrypt } from "./encryption";
-import { extractReceipt } from "./ai";
+import { extractReceipt, type ExtractedReceipt } from "./ai";
+import { fileReceiptAsPurchaseInvoice } from "./purchase-invoices";
 import { runMatching } from "./matching";
 import { writePrivateUpload } from "./storage";
 import { ensureReceiptPreviewImage } from "./preview";
@@ -103,6 +104,93 @@ export async function findSameInvoiceReceipt(
         (totalCents == null || receipt.totalAmountCents == null || receipt.totalAmountCents === totalCents)
     ) ?? null
   );
+}
+
+/**
+ * Stores one read email document as an upload and a receipt, and files a bill
+ * as an ostolasku the same way a saved or photographed one is. Returns true
+ * when the document is a bill waiting for review (counted by the sync).
+ */
+export async function storeEmailDocument(input: {
+  userId: string;
+  accountEmail: string;
+  content: Buffer;
+  filename: string;
+  ext: string;
+  mimeType: string;
+  checksum: string;
+  mailDate: Date | null;
+  extraction: ExtractedReceipt;
+}): Promise<boolean> {
+  const { userId, extraction, filename, mimeType } = input;
+  // An invoice often arrives with its payment receipt in the same email (Anthropic,
+  // Stripe sellers): one purchase, two PDFs. The second is kept, but never counted.
+  const sameInvoice = looksLikeBill(extraction)
+    ? await findSameInvoiceReceipt(userId, extraction)
+    : null;
+  const isBill = looksLikeBill(extraction) && !sameInvoice;
+
+  const { storageKey, absolutePath } = await writePrivateUpload(userId, input.ext, input.content);
+
+  await ensureReceiptPreviewImage(absolutePath, mimeType).catch((err) =>
+    console.warn("Preview generation failed:", err)
+  );
+
+  const newUpload = await prisma.upload.create({
+    data: {
+      userId,
+      purpose: "receipt",
+      storageKey,
+      originalName: filename,
+      mimeType,
+      sizeBytes: input.content.length,
+      sha256: input.checksum,
+      extractedJson: JSON.stringify(extraction),
+      extractionSource: extraction.provenance,
+      confidence: extraction.confidence,
+      rawText: extraction.rawText,
+      expiresAt: new Date(Date.now() + 86400000 * 365), // 1 year
+      claimedAt: new Date(),
+    },
+  });
+
+  const receipt = await prisma.receipt.create({
+    data: {
+      userId,
+      uploadId: newUpload.id,
+      vendor: extraction.vendor,
+      date: extraction.date ? new Date(extraction.date) : input.mailDate,
+      totalAmountCents: extraction.totalAmount ? Math.round(extraction.totalAmount * 100) : null,
+      vatDetails: extraction.vatDetails.length ? JSON.stringify(extraction.vatDetails) : null,
+      category: extraction.category,
+      notes: sameInvoice
+        ? `Kaksoiskappale: sama osto kuin lasku ${sameInvoice.invoiceNumber} (${sameInvoice.vendor ?? "sama myyjä"}). Ei kirjata toiseen kertaan.`
+        : isBill
+          ? extraction.notes || `Haettu sähköpostista (${input.accountEmail})`
+          : `${ARCHIVED_NOTE} Haettu sähköpostista (${input.accountEmail})`,
+      reference: extraction.reference,
+      invoiceNumber: extraction.invoiceNumber,
+      type: extraction.type,
+      filePath: storageKey,
+      fileName: filename,
+      source: "email_sync",
+      reviewStatus: isBill ? "pending" : "rejected",
+      confidence: extraction.confidence,
+      rawText: extraction.rawText,
+      ...foreignFieldsFromExtraction(extraction),
+    }
+  });
+
+  // Only a bill that is not a copy of one already on file becomes an ostolasku;
+  // the archived (marketing, duplicate) documents stay out of the payables.
+  if (isBill) {
+    try {
+      await fileReceiptAsPurchaseInvoice(userId, receipt, extraction);
+    } catch (error) {
+      console.warn(`Email receipt ${receipt.id} was not filed as an ostolasku:`, error);
+    }
+  }
+  return isBill;
 }
 
 export async function listSyncableImapAccounts() {
@@ -240,66 +328,16 @@ async function syncImapAccountUntracked(accountId: string) {
           try {
             // 1) Run extraction
             const extraction = await extractReceipt(tempPath, mimeType, profileContext, vendorPriors);
-            // An invoice often arrives with its payment receipt in the same email (Anthropic,
-            // Stripe sellers): one purchase, two PDFs. The second is kept, but never counted.
-            const sameInvoice = looksLikeBill(extraction)
-              ? await findSameInvoiceReceipt(account.userId, extraction)
-              : null;
-            const isBill = looksLikeBill(extraction) && !sameInvoice;
-            
-            const { storageKey, absolutePath } = await writePrivateUpload(
-              account.userId,
+            const isBill = await storeEmailDocument({
+              userId: account.userId,
+              accountEmail: account.email,
+              content: contentBuffer,
+              filename,
               ext,
-              contentBuffer
-            );
-            
-            await ensureReceiptPreviewImage(absolutePath, mimeType).catch((err) =>
-              console.warn("Preview generation failed:", err)
-            );
-
-            const newUpload = await prisma.upload.create({
-              data: {
-                userId: account.userId,
-                purpose: "receipt",
-                storageKey,
-                originalName: filename,
-                mimeType,
-                sizeBytes: contentBuffer.length,
-                sha256: checksum,
-                extractedJson: JSON.stringify(extraction),
-                extractionSource: extraction.provenance,
-                confidence: extraction.confidence,
-                rawText: extraction.rawText,
-                expiresAt: new Date(Date.now() + 86400000 * 365), // 1 year
-                claimedAt: new Date(),
-              },
-            });
-
-            await prisma.receipt.create({
-              data: {
-                userId: account.userId,
-                uploadId: newUpload.id,
-                vendor: extraction.vendor,
-                date: extraction.date ? new Date(extraction.date) : date,
-                totalAmountCents: extraction.totalAmount ? Math.round(extraction.totalAmount * 100) : null,
-                vatDetails: extraction.vatDetails.length ? JSON.stringify(extraction.vatDetails) : null,
-                category: extraction.category,
-                notes: sameInvoice
-                  ? `Kaksoiskappale: sama osto kuin lasku ${sameInvoice.invoiceNumber} (${sameInvoice.vendor ?? "sama myyjä"}). Ei kirjata toiseen kertaan.`
-                  : isBill
-                    ? extraction.notes || `Haettu sähköpostista (${account.email})`
-                    : `${ARCHIVED_NOTE} Haettu sähköpostista (${account.email})`,
-                reference: extraction.reference,
-                invoiceNumber: extraction.invoiceNumber,
-                type: extraction.type,
-                filePath: storageKey,
-                fileName: filename,
-                source: "email_sync",
-                reviewStatus: isBill ? "pending" : "rejected",
-                confidence: extraction.confidence,
-                rawText: extraction.rawText,
-                ...foreignFieldsFromExtraction(extraction),
-              }
+              mimeType,
+              checksum,
+              mailDate: date,
+              extraction,
             });
             if (isBill) processedCount++;
           } catch (error) {

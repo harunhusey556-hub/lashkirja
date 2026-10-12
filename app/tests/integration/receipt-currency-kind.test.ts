@@ -136,7 +136,7 @@ describe("a foreign-currency bill", () => {
     expect(body.purchaseInvoice.originalAmount).toBe(51);
   });
 
-  it("falls back to the issue date when the bill did not name a due date", async () => {
+  it("falls back to the 14-day payment term when the bill did not name a due date", async () => {
     const saved = await uploadAndSave({ ...usdInvoice, dueDate: null }, {
       vendor: "Acme US",
       date: "2026-02-02",
@@ -147,7 +147,7 @@ describe("a foreign-currency bill", () => {
       invoiceNumber: "INV-77",
     });
     const body = await readJson(saved);
-    expect(body.purchaseInvoice.dueDate).toBe("2026-02-02");
+    expect(body.purchaseInvoice.dueDate).toBe("2026-02-16");
   });
 });
 

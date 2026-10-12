@@ -7,11 +7,14 @@ import {
   backTarget,
   matchNav,
   navRelation,
+  navShortcuts,
   navigationViolations,
   shellShowsBack,
+  shortcutViolations,
   statementListHref,
   tabRoots,
   type NavEntry,
+  type NavShortcut,
 } from "./navigation";
 
 const APP_DIR = path.resolve(__dirname, "../app");
@@ -152,5 +155,28 @@ describe("navRelation", () => {
     expect(navRelation("/kuitit", "/kirjanpito")).toBe("back");
     expect(navRelation("/laskut", "/kirjanpito")).toBeNull();
     expect(navRelation("/dashboard", "/dashboard")).toBeNull();
+  });
+});
+
+describe("Kohdistus shortcuts", () => {
+  it("lists both matching flows, each landing on a registered screen", () => {
+    const kohdistus = navShortcuts("kohdistus");
+    expect(kohdistus.map((shortcut) => [shortcut.label, shortcut.href])).toEqual([
+      ["Kohdista kuitit", "/pankki/tapahtumat?nayta=toimet"],
+      ["Kohdista ostolaskujen maksut", "/kirjanpito/ostolaskut/kohdistus"],
+    ]);
+    expect(shortcutViolations()).toEqual([]);
+    expect(matchNav("/pankki/tapahtumat?nayta=toimet")?.id).toBe("pankki-tapahtumat");
+    expect(matchNav("/kirjanpito/ostolaskut/kohdistus")?.id).toBe("ostolaskut-kohdistus");
+  });
+
+  it("puts the purchase matching page under Ostolaskut, one back from it", () => {
+    expect(backTarget("/kirjanpito/ostolaskut/kohdistus")).toEqual({ label: "Ostolaskut", href: "/kirjanpito/ostolaskut" });
+    expect(navRelation("/kirjanpito", "/kirjanpito/ostolaskut/kohdistus")).toBe("forward");
+  });
+
+  it("rejects a shortcut to an unregistered screen", () => {
+    const stray: NavShortcut = { id: "x", section: "kohdistus", label: "X", href: "/ei-ole", description: "" };
+    expect(shortcutViolations([...navShortcuts("kohdistus"), stray])).toEqual(["x: /ei-ole is not a registered screen"]);
   });
 });

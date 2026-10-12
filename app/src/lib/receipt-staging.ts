@@ -11,6 +11,7 @@ import type { DocumentType, ExtractedReceipt } from "./ai";
 import { removeUserUpload } from "./storage";
 import { UNREADABLE_RECEIPT_NOTE } from "./receipt-unreadable";
 import { foreignFieldsFromExtraction } from "./foreign-purchase";
+import { fileReceiptAsPurchaseInvoice } from "./purchase-invoices";
 
 export const STAGING_TTL_MS = 24 * 60 * 60 * 1000;
 /** How long an inbox-claimed upload's file is kept after it becomes a receipt. */
@@ -199,7 +200,7 @@ export async function createPendingInboxReceipt(
     fields: PendingReceiptFields;
   }
 ): Promise<void> {
-  await tx.receipt.create({
+  const receipt = await tx.receipt.create({
     data: {
       userId: input.userId,
       uploadId: input.uploadId,
@@ -210,11 +211,20 @@ export async function createPendingInboxReceipt(
       ...input.fields,
     },
   });
-  await tx.upload.update({
+  const upload = await tx.upload.update({
     where: { id: input.uploadId },
     data: {
       claimedAt: new Date(),
       expiresAt: new Date(Date.now() + INBOX_UPLOAD_RETENTION_MS),
     },
+    select: { extractedJson: true },
   });
+  // A photographed bill becomes an ostolasku like a saved one (the reading is
+  // on the upload by now). Best effort: a closed period or an incomplete
+  // reading must never lose the capture itself.
+  try {
+    await fileReceiptAsPurchaseInvoice(input.userId, receipt, storedDocumentKind(upload.extractedJson), tx);
+  } catch (error) {
+    console.warn(`Inbox receipt ${receipt.id} was not filed as an ostolasku:`, error);
+  }
 }

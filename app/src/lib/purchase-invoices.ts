@@ -349,6 +349,26 @@ export async function createPurchaseInvoice(
   return toPublicPurchaseInvoice(created);
 }
 
+/** The usual Finnish payment term when a bill does not print its own due date. */
+export const DEFAULT_PAYMENT_TERM_DAYS = 14;
+const ASSUMED_DUE_DATE_NOTE = `Eräpäivä on oletus: laskun päivä + ${DEFAULT_PAYMENT_TERM_DAYS} pv. Tarkista laskulta.`;
+
+/** `issueDate` (YYYY-MM-DD) plus the default payment term. */
+export function assumedDueDate(issueDate: string): string {
+  const due = isoDateToUtc(issueDate);
+  due.setUTCDate(due.getUTCDate() + DEFAULT_PAYMENT_TERM_DAYS);
+  return due.toISOString().slice(0, 10);
+}
+
+export type ReceiptFilingSkip =
+  | "not_an_invoice"
+  | "sales_document"
+  | "no_supplier"
+  | "no_date"
+  | "no_amount"
+  | "duplicate"
+  | "already_filed";
+
 /**
  * Files a receipt the AI read as a payable bill ("lasku"): the receipt stays
  * the document - the VAT return keeps reading it, and a linked purchase
@@ -356,6 +376,10 @@ export async function createPurchaseInvoice(
  * The same supplier invoice number is never entered twice (createPurchaseInvoice
  * guards that); a reading that is not a bill, or a receipt missing what an
  * invoice needs, files nothing. The caller reports what happened.
+ *
+ * Idempotent per receipt: every intake path (save, offline inbox, email, a
+ * later edit) calls it, and a receipt that already has an ostolasku - open,
+ * paid or cancelled by the owner - never gets a second one.
  */
 export async function fileReceiptAsPurchaseInvoice(
   userId: string,
@@ -371,14 +395,22 @@ export async function fileReceiptAsPurchaseInvoice(
     originalAmountCents: number | null;
     vatTreatment: string;
     type: string;
+    uploadId?: string | null;
   },
-  reading: Pick<ExtractedReceipt, "documentType" | "dueDate"> | null
+  reading: Pick<ExtractedReceipt, "documentType" | "dueDate"> | null,
+  db?: Prisma.TransactionClient
 ): Promise<
   | { created: true; invoice: PublicPurchaseInvoice }
-  | { created: false; skipped: "not_an_invoice" | "sales_document" | "no_supplier" | "no_date" | "no_amount" | "duplicate" }
+  | { created: false; skipped: ReceiptFilingSkip }
 > {
   if (reading?.documentType !== "invoice") return { created: false, skipped: "not_an_invoice" };
   if (receipt.type === "tulo") return { created: false, skipped: "sales_document" };
+  const client = db ?? prisma;
+  const filed = await client.purchaseInvoice.findFirst({
+    where: { userId, receiptId: receipt.id },
+    select: { id: true },
+  });
+  if (filed) return { created: false, skipped: "already_filed" };
   const supplierName = receipt.vendor?.trim();
   if (!supplierName) return { created: false, skipped: "no_supplier" };
   if (!receipt.date) return { created: false, skipped: "no_date" };
@@ -386,23 +418,31 @@ export async function fileReceiptAsPurchaseInvoice(
     return { created: false, skipped: "no_amount" };
   }
   const issueDate = receipt.date.toISOString().slice(0, 10);
+  // A bill whose due date was not read gets the usual 14-day term, marked as an
+  // assumption on the ostolasku and in the stored reading ("oletus"). A printed
+  // due date before the issue date is a misreading and is treated the same.
+  const readDue = reading.dueDate && reading.dueDate >= issueDate ? reading.dueDate : null;
   try {
-    const invoice = await createPurchaseInvoice(userId, {
-      supplierName,
-      invoiceNumber: receipt.invoiceNumber,
-      issueDate,
-      // A bill whose due date was not read is due when it was issued; the
-      // owner edits the real term on the ostolasku screen.
-      dueDate: reading.dueDate ?? issueDate,
-      gross: centsToEuros(receipt.totalAmountCents),
-      vat: receiptVatTotalEuros(receipt.vatDetails),
-      category: receipt.category,
-      receiptId: receipt.id,
-      currency: receipt.currency,
-      originalAmount:
-        receipt.originalAmountCents == null ? null : centsToEuros(receipt.originalAmountCents),
-      vatTreatment: isPurchaseVatTreatment(receipt.vatTreatment) ? receipt.vatTreatment : "domestic",
-    });
+    const invoice = await createPurchaseInvoice(
+      userId,
+      {
+        supplierName,
+        invoiceNumber: receipt.invoiceNumber,
+        issueDate,
+        dueDate: readDue ?? assumedDueDate(issueDate),
+        gross: centsToEuros(receipt.totalAmountCents),
+        vat: receiptVatTotalEuros(receipt.vatDetails),
+        category: receipt.category,
+        notes: readDue ? null : ASSUMED_DUE_DATE_NOTE,
+        receiptId: receipt.id,
+        currency: receipt.currency,
+        originalAmount:
+          receipt.originalAmountCents == null ? null : centsToEuros(receipt.originalAmountCents),
+        vatTreatment: isPurchaseVatTreatment(receipt.vatTreatment) ? receipt.vatTreatment : "domestic",
+      },
+      db
+    );
+    if (!readDue && receipt.uploadId) await markDueDateAssumed(client, userId, receipt.uploadId);
     return { created: true, invoice };
   } catch (error) {
     if (error instanceof AppError && error.code === "DUPLICATE_PURCHASE_INVOICE") {
@@ -410,6 +450,156 @@ export async function fileReceiptAsPurchaseInvoice(
     }
     throw error;
   }
+}
+
+/** Writes `dueDateAssumed: true` into the upload's stored reading, so a screen can say "oletus". */
+async function markDueDateAssumed(
+  db: Prisma.TransactionClient | typeof prisma,
+  userId: string,
+  uploadId: string
+): Promise<void> {
+  const upload = await db.upload.findFirst({ where: { id: uploadId, userId }, select: { extractedJson: true } });
+  if (!upload?.extractedJson) return;
+  let reading: Record<string, unknown>;
+  try {
+    reading = JSON.parse(upload.extractedJson) as Record<string, unknown>;
+  } catch (error) {
+    // The flag is a display hint; the ostolasku's own note already says the date is assumed.
+    console.warn(`Stored reading of upload ${uploadId} does not parse; due date not flagged:`, error);
+    return;
+  }
+  await db.upload.update({
+    where: { id: uploadId },
+    data: { extractedJson: JSON.stringify({ ...reading, dueDateAssumed: true }) },
+  });
+}
+
+function storedReading(extractedJson: string | null): {
+  documentType: string | null;
+  dueDate: string | null;
+  dueDateAssumed: boolean;
+} {
+  if (!extractedJson) return { documentType: null, dueDate: null, dueDateAssumed: false };
+  try {
+    const read = JSON.parse(extractedJson) as { documentType?: string | null; dueDate?: string | null; dueDateAssumed?: boolean };
+    return {
+      documentType: read.documentType ?? null,
+      dueDate: read.dueDate ?? null,
+      dueDateAssumed: read.dueDateAssumed === true,
+    };
+  } catch {
+    // A stored reading that does not parse says nothing about the kind.
+    return { documentType: null, dueDate: null, dueDateAssumed: false };
+  }
+}
+
+export interface ReceiptPurchaseInvoiceView {
+  /** What the stored reading says the document is, when there is a reading. */
+  documentType: string | null;
+  purchaseInvoice: {
+    id: string;
+    status: PurchaseStatus;
+    displayStatus: PurchaseStatus | "overdue";
+    dueDate: string;
+    /** The due date is still the 14-day default, not one printed on the bill. */
+    dueDateAssumed: boolean;
+  } | null;
+}
+
+/** The ostolasku a receipt is filed as, for the receipt screen's "Tämä on ostolasku" notice. */
+export async function receiptPurchaseInvoiceView(
+  userId: string,
+  receiptId: string
+): Promise<ReceiptPurchaseInvoiceView> {
+  const receipt = await prisma.receipt.findFirst({
+    where: { id: receiptId, userId },
+    select: {
+      upload: { select: { extractedJson: true } },
+      purchaseInvoice: { include: purchaseInclude },
+    },
+  });
+  if (!receipt) throw new NotFoundError("Kuittia ei löytynyt.");
+  const reading = storedReading(receipt.upload?.extractedJson ?? null);
+  const invoice = receipt.purchaseInvoice ? toPublicPurchaseInvoice(receipt.purchaseInvoice) : null;
+  return {
+    documentType: reading.documentType,
+    purchaseInvoice: invoice
+      ? {
+          id: invoice.id,
+          status: invoice.status,
+          displayStatus: invoice.displayStatus,
+          dueDate: invoice.dueDate,
+          // Once the owner sets the real date on the ostolasku it is no longer an assumption.
+          dueDateAssumed: reading.dueDateAssumed && invoice.dueDate === assumedDueDate(invoice.issueDate),
+        }
+      : null,
+  };
+}
+
+const MARKED_AS_RECEIPT_REASON = "Merkitty kuitiksi";
+
+/**
+ * The owner says what a saved document is (PATCH /api/receipts/[id]).
+ * "invoice" files the ostolasku, or reopens the one cancelled when it was
+ * marked a kuitti; "receipt" cancels the open ostolasku - kept with its
+ * history, never deleted. With no explicit kind, a receipt the reading calls a
+ * bill is filed once it has what an ostolasku needs (an inbox capture the
+ * owner completed by hand).
+ */
+export async function syncReceiptDocumentKind(
+  userId: string,
+  receiptId: string,
+  kind: "invoice" | "receipt" | null
+): Promise<{ action: "filed" | "reopened" | "cancelled" | "none"; skipped?: ReceiptFilingSkip }> {
+  const receipt = await prisma.receipt.findFirst({
+    where: { id: receiptId, userId },
+    include: {
+      upload: { select: { extractedJson: true } },
+      purchaseInvoice: {
+        select: { id: true, status: true, issueDate: true, closedReason: true, payments: { select: { id: true } } },
+      },
+    },
+  });
+  if (!receipt) throw new NotFoundError("Kuittia ei löytynyt.");
+  const linked = receipt.purchaseInvoice;
+  const reading = storedReading(receipt.upload?.extractedJson ?? null);
+
+  if (kind === "receipt") {
+    if (!linked || linked.status === "cancelled") return { action: "none" };
+    if (linked.payments.length > 0) {
+      throw new AppError(
+        "Ostolaskulla on maksuja, joten sitä ei voi muuttaa kuitiksi. Poista maksut ensin.",
+        "INVOICE_HAS_PAYMENTS",
+        409
+      );
+    }
+    await assertPeriodOpen(userId, [linked.issueDate]);
+    await prisma.purchaseInvoice.update({
+      where: { id: linked.id },
+      data: { status: "cancelled", paidAt: null, closedReason: MARKED_AS_RECEIPT_REASON, closedAt: new Date() },
+    });
+    return { action: "cancelled" };
+  }
+
+  if (linked) {
+    // Only the owner's own "kuitti" choice is undone by their "lasku" choice.
+    if (kind === "invoice" && linked.status === "cancelled" && linked.closedReason === MARKED_AS_RECEIPT_REASON) {
+      await assertPeriodOpen(userId, [linked.issueDate]);
+      await prisma.purchaseInvoice.update({
+        where: { id: linked.id },
+        data: { status: "open", closedReason: null, closedAt: null },
+      });
+      return { action: "reopened" };
+    }
+    return { action: "none", skipped: "already_filed" };
+  }
+
+  if (kind !== "invoice" && reading.documentType !== "invoice") return { action: "none" };
+  const filing = await fileReceiptAsPurchaseInvoice(userId, receipt, {
+    documentType: "invoice",
+    dueDate: reading.dueDate,
+  });
+  return filing.created ? { action: "filed" } : { action: "none", skipped: filing.skipped };
 }
 
 /**

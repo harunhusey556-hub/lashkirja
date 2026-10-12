@@ -16,7 +16,8 @@ import { withErrorHandler, UnauthorizedError } from "@/lib/api-errors";
 
 import { assertPeriodOpen } from "@/lib/period-lock";
 import { expectedUpdatedAtDate } from "@/lib/edit-conflict";
-import { applyReceiptPatch } from "@/lib/receipt-update";
+import { applyReceiptPatch, UPDATED_RECEIPT_SELECT } from "@/lib/receipt-update";
+import { syncReceiptDocumentKind } from "@/lib/purchase-invoices";
 import { PURCHASE_VAT_TREATMENTS } from "@/lib/alv";
 import { currencySchema } from "@/lib/foreign-purchase-input";
 const patchSchema = z.object({
@@ -35,6 +36,8 @@ const patchSchema = z.object({
   currency: currencySchema.optional(),
   originalAmount: nonnegativeMoneySchema.nullish(),
   vatTreatment: z.enum(PURCHASE_VAT_TREATMENTS).optional(),
+  // The owner's own kuitti / lasku choice: "invoice" files (or reopens) the ostolasku, "receipt" cancels it.
+  documentType: z.enum(["invoice", "receipt"]).optional(),
   expectedUpdatedAt: z.string().max(40).optional(),
 }).strict();
 
@@ -160,14 +163,29 @@ export const PATCH = withErrorHandler(async (
   if (Object.keys(parsed.data).length === 0) {
     return noStoreJson({ error: "Ei päivitettäviä kenttiä" }, { status: 400 });
   }
-  const { expectedUpdatedAt, ...body } = parsed.data;
-  if (Object.keys(body).length === 0) {
+  const { expectedUpdatedAt, documentType, ...body } = parsed.data;
+  if (Object.keys(body).length === 0 && !documentType) {
     return noStoreJson({ error: "Ei päivitettäviä kenttiä" }, { status: 400 });
   }
   const expected = expectedUpdatedAtDate(expectedUpdatedAt);
 
   // The same write the assistant's accepted receipt_update uses (lib/receipt-update.ts).
-  const receipt = await applyReceiptPatch(session.userId!, id, body, { expected });
+  const receipt =
+    Object.keys(body).length > 0
+      ? await applyReceiptPatch(session.userId!, id, body, { expected })
+      : await prisma.receipt.findFirstOrThrow({ where: { id, userId: session.userId! }, select: UPDATED_RECEIPT_SELECT });
+
+  // An explicit kind always applies (its errors reach the owner); without one, a
+  // receipt read as a bill is filed once the edit gave it what an ostolasku needs.
+  let kind: Awaited<ReturnType<typeof syncReceiptDocumentKind>> | null = null;
+  if (documentType) {
+    kind = await syncReceiptDocumentKind(session.userId!, id, documentType);
+  } else {
+    kind = await syncReceiptDocumentKind(session.userId!, id, null).catch((error) => {
+      console.warn(`Receipt ${id} was not filed as an ostolasku after an edit:`, error);
+      return null;
+    });
+  }
 
   await runMatching(session.userId!).catch((error) =>
     console.error("Matching after receipt edit failed:", error)
@@ -180,6 +198,8 @@ export const PATCH = withErrorHandler(async (
       totalAmount: totalAmountCents == null ? null : centsToEuros(totalAmountCents),
       originalAmount: originalAmountCents == null ? null : centsToEuros(originalAmountCents),
     },
+    purchaseInvoiceAction: kind?.action ?? "none",
+    purchaseInvoiceSkipped: kind?.skipped ?? null,
   });
 });
 

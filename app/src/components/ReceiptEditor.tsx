@@ -85,6 +85,7 @@ import { useOfflineReceiptQueue } from "@/components/useOfflineReceiptQueue";
 import { tintedButtonClass } from "@/components/control-styles";
 import { isPurchaseVatTreatment, PURCHASE_VAT_TREATMENTS, type PurchaseVatTreatment } from "@/lib/alv";
 import { foreignFieldsFromExtraction, VAT_TREATMENT_HINTS, VAT_TREATMENT_LABELS } from "@/lib/foreign-purchase";
+import OstolaskuNotice from "@/components/OstolaskuNotice";
 
 /** The fields the receipt form shows an error under (the VAT rows are `vat-<n>`). */
 const RECEIPT_FORM_SLOTS = ["vendor", "date", "totalAmount", "category", "reference", "invoiceNumber", "notes"];
@@ -1207,6 +1208,8 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
                     )}
 
                     {originalName && <p className="text-caption text-ink-2">{originalName}</p>}
+
+                    {isEdit && receiptId ? <OstolaskuNotice receiptId={receiptId} receiptType={formData.type} /> : null}
 
                     <div>
                       <label htmlFor="receipt-vendor" className={LABEL_CLASS}>Myyjä</label>

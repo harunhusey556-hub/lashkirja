@@ -25,6 +25,7 @@ import { helsinkiCalendarDate, isoDateToUtc } from "@/lib/validation";
 import { openMonthRowsWhere } from "@/lib/month-rows";
 import { approvalGaps, type ApprovalGap } from "@/lib/receipt-approval";
 import { isBlockingKind } from "@/lib/dashboard-kinds";
+import { receiptKindWhere } from "@/lib/receipt-filters";
 
 /** Rows shown per kind; the rest sit behind "Näytä kaikki". */
 export const ITEMS_PER_KIND = 3;
@@ -194,6 +195,8 @@ export async function buildDashboardItems(
         userId,
         reviewStatus: "pending",
         ...(isCurrent ? {} : { date: { gte: monthStart, lt: monthEnd } }),
+        // A bill filed as an ostolasku is handled in Ostolaskut, not in this queue.
+        ...receiptKindWhere("receipt"),
       },
       select: {
         id: true,

@@ -4,6 +4,7 @@ import { AnimatedRows } from "@/components/AnimatedRows";
 import { PullToRefresh } from "@/components/ds/PullToRefresh";
 import { Reveal } from "@/components/ds/Reveal";
 import { useCallback, useEffect, useState } from "react";
+import Link from "next/link";
 import { SkeletonList } from "@/components/AsyncState";
 import { ConnectionNotice, EmptyState, StaleBanner } from "@/components/ScreenState";
 import ConfirmModal from "@/components/ConfirmModal";
@@ -33,6 +34,7 @@ import {
 
 import { Button, controlClass } from "@/components/ui";
 import {
+  ActionPill,
   FilterChips,
   HeaderAddPill,
   KeyValueList,
@@ -164,6 +166,8 @@ export default function PurchaseInvoicesPage() {
   const [createOpen, setCreateOpen] = useState(false);
   const [confirmRemove, setConfirmRemove] = useState<PurchaseInvoice | null>(null);
   const [detailInvoice, setDetailInvoice] = useState<PurchaseInvoice | null>(null);
+  // "Liitä kuitti" straight from the list row, without opening the detail sheet first.
+  const [linkInvoice, setLinkInvoice] = useState<PurchaseInvoice | null>(null);
   const [confirmRemovePayment, setConfirmRemovePayment] = useState<{
     invoiceId: string;
     paymentId: string;
@@ -336,6 +340,31 @@ export default function PurchaseInvoicesPage() {
     void loadReceiptLinks(invoice.id);
   }
 
+  // "Avaa ostolasku" on a receipt (OstolaskuNotice) links here with ?id=: open
+  // that invoice's sheet once, whatever the list filter, then drop the id from the URL.
+  useEffect(() => {
+    const id = new URLSearchParams(window.location.search).get("id");
+    if (!id) return;
+    window.history.replaceState(null, "", "/kirjanpito/ostolaskut");
+    apiFetch(`/api/purchase-invoices/${encodeURIComponent(id)}`, { credentials: "include" })
+      .then((response) => readJson<{ invoice: PurchaseInvoice }>(response, "Ostolaskua ei löytynyt"))
+      .then((data) => openDetail(data.invoice))
+      .catch((error: unknown) => {
+        if (isUnauthorized(error)) {
+          redirectToLogin();
+          return;
+        }
+        showToast({ tone: "error", text: errorMessage(error, "Ostolaskua ei löytynyt") });
+      });
+    // Mount only: the id is read from the URL once.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  function openLinkSheet(invoice: PurchaseInvoice) {
+    setLinkInvoice(invoice);
+    void loadReceiptLinks(invoice.id);
+  }
+
   async function loadReceiptLinks(invoiceId: string) {
     setReceiptLinks(null);
     try {
@@ -360,7 +389,9 @@ export default function PurchaseInvoicesPage() {
         body: JSON.stringify({ receiptId }),
       });
       const data = await readJson<{ invoice: PurchaseInvoice }>(response, "Kuitin liittäminen epäonnistui");
-      setDetailInvoice(data.invoice);
+      // From the list row's sheet the detail stays closed; from the detail it shows the new link.
+      setDetailInvoice((current) => (current ? data.invoice : current));
+      setLinkInvoice(null);
       showToast({ tone: "success", text: receiptId ? "Kuitti liitettiin" : "Liitos poistettiin" });
       await Promise.all([load(), reloadCounts(), loadReceiptLinks(invoice.id)]);
     } catch (error) {
@@ -535,6 +566,12 @@ export default function PurchaseInvoicesPage() {
             Kohdista maksut
           </Button>
         )}
+        {!noPurchases && (
+          // The proposals the button above leaves for review, one by one.
+          <Link href="/kirjanpito/ostolaskut/kohdistus" className={tintedButtonClass("accent", "w-full min-h-11")}>
+            Tarkista maksuehdotukset
+          </Link>
+        )}
 
         <Reveal show={Boolean(message)}>{message ? (
           <p className="rounded-card bg-accent-soft px-4 py-3 text-sm text-ink" role="status">
@@ -573,9 +610,19 @@ export default function PurchaseInvoicesPage() {
                     amount={formatEur(invoice.gross)}
                     secondary={rowSecondary(invoice)}
                     trailing={
-                      <StatusTag tone={PURCHASE_STATUS[invoice.displayStatus].tone}>
-                        {PURCHASE_STATUS[invoice.displayStatus].label}
-                      </StatusTag>
+                      <span className="flex items-center gap-2">
+                        {!invoice.receiptId && invoice.status !== "cancelled" ? (
+                          <ActionPill
+                            onClick={() => openLinkSheet(invoice)}
+                            ariaLabel={`Liitä kuitti ostolaskuun ${invoice.supplierName}`}
+                          >
+                            Liitä kuitti
+                          </ActionPill>
+                        ) : null}
+                        <StatusTag tone={PURCHASE_STATUS[invoice.displayStatus].tone}>
+                          {PURCHASE_STATUS[invoice.displayStatus].label}
+                        </StatusTag>
+                      </span>
                     }
                   />
                 ) }))} />
@@ -927,6 +974,43 @@ export default function PurchaseInvoicesPage() {
               >
                 Poista ostolasku
               </Button>
+            )}
+          </div>
+        )}
+      </BottomSheet>
+
+      <BottomSheet
+        isOpen={linkInvoice !== null}
+        onClose={() => setLinkInvoice(null)}
+        title={linkInvoice ? `Liitä kuitti · ${linkInvoice.supplierName}` : undefined}
+        labelledBy="pi-link-title"
+      >
+        {linkInvoice && (
+          <div className="space-y-3 px-5 py-4 sheet-safe-bottom">
+            <p className="text-caption text-ink-2">
+              {formatEur(linkInvoice.gross)} · eräpäivä {formatDate(linkInvoice.dueDate)}. Liitä saman oston kuitti, niin ALV ei lasketa kahdesti.
+            </p>
+            {receiptLinks === null ? (
+              <SkeletonList rows={2} label="Haetaan kuitteja" />
+            ) : receiptLinks.candidates.length === 0 ? (
+              <p className="text-caption text-ink">Sopivia kuitteja ei löytynyt. Lisää kuitti Kuitit-näkymässä ja liitä se sitten.</p>
+            ) : (
+              <ul className="space-y-1">
+                {receiptLinks.candidates.map((receipt) => (
+                  <li key={receipt.id} className="flex min-h-11 items-center justify-between gap-3 text-caption text-ink">
+                    <span className="min-w-0 truncate">{receiptChoiceText(receipt)}</span>
+                    <button
+                      type="button"
+                      className={tintedButtonClass("accent", "shrink-0")}
+                      disabled={busy}
+                      aria-label={`Liitä kuitti ${receiptChoiceText(receipt)}`}
+                      onClick={() => void setReceiptLink(linkInvoice, receipt.id)}
+                    >
+                      Liitä
+                    </button>
+                  </li>
+                ))}
+              </ul>
             )}
           </div>
         )}
