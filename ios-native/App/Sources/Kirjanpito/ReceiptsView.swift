@@ -292,6 +292,7 @@ struct ReceiptsView: View {
                         .overlay(Capsule().stroke(Theme.line, lineWidth: active ? 0 : 1))
                     }
                     .buttonStyle(.pressable)
+                    .accessibilityIdentifier("receipt-tab-\(tab.rawValue)")
                 }
             }
             .padding(.horizontal, 16)

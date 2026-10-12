@@ -30,7 +30,11 @@ struct ReceiptThumbnail: View {
         .frame(width: Self.side, height: Self.side)
         .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).stroke(Theme.ink2.opacity(0.15), lineWidth: 0.5))
-        .accessibilityHidden(true)
+        // Decorative for VoiceOver; only a UI test run (`-LKUITest`) sees whether the picture loaded.
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(image == nil ? "Ei pienoiskuvaa" : "Pienoiskuva")
+        .accessibilityIdentifier("receipt-thumbnail")
+        .accessibilityHidden(!UITestHooks.active)
         .task(id: receipt.id) { await load() }
     }
 
