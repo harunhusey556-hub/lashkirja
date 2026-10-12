@@ -15,7 +15,7 @@ import { formatDate, formatEur } from "./format";
 import { allocateInvoiceNumber, peekInvoiceNumber, releaseInvoiceNumber } from "./invoice-sequence";
 import { helsinkiCalendarDate, isoDateToUtc, periodScopeBoundsUtc } from "./validation";
 import { normalizeReference, referenceForInvoice } from "./finnish-reference";
-import { planPairs, type GateCandidate, type GatedPair, type GateVerdict } from "./match-gate";
+import { normalizeRef, planPairs, type GateCandidate, type GatedPair, type GateVerdict } from "./match-gate";
 import { cachedReviews, prismaReviewCache, reviewKey, type ReviewCase } from "./match-review";
 import {
   adjustVatRateForDate,
@@ -2044,6 +2044,39 @@ export interface BankMatchPreviewEntry {
   paidDate: string;
 }
 
+/** Above this many distinct amounts the prefilter is skipped rather than sent as a huge IN list. */
+const PREFILTER_MAX_AMOUNTS = 2000;
+
+/**
+ * The incoming rows the run can act on, as SQL: a reference hit (stage one, or the gate's viite
+ * signal) needs a reference or a message with a digit, and a gate pick without one needs the exact
+ * owed or open amount of an open invoice. Every other row reaches neither stage, so leaving it out
+ * of the load changes nothing in the result; it only spares planPairs comparing it with every open
+ * invoice (W28: ~35 ms of Koti on a 5 000-row ledger). The gate's date window is not repeated here:
+ * it would save little and would tie the result to how SQLite compares stored dates. Returns {}
+ * (load every row) when a reference has no digit, because a message hit then has no SQL test.
+ */
+export function incomingPrefilter(openInvoices: InvoicePaymentInvoice[]): Prisma.TransactionWhereInput {
+  const amounts = new Set<number>();
+  for (const invoice of openInvoices) {
+    const gate = invoiceGateCandidate(invoice);
+    if (gate.amountCents != null && gate.amountCents > 0) amounts.add(gate.amountCents);
+    if (gate.openCents != null && gate.openCents > 0) amounts.add(gate.openCents);
+    // Stage one compares the space-stripped message with the raw reference; the gate looks for
+    // normalizeRef(reference) and the invoice number (always digits) inside the message.
+    const gateRef = normalizeRef(invoice.reference);
+    if (!/[0-9]/.test(invoice.reference) || (gateRef !== null && !/[0-9]/.test(gateRef))) return {};
+  }
+  if (amounts.size > PREFILTER_MAX_AMOUNTS) return {};
+  return {
+    OR: [
+      { reference: { not: null } },
+      ...["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"].map((digit) => ({ message: { contains: digit } })),
+      { amountCents: { in: [...amounts] } },
+    ],
+  };
+}
+
 /**
  * Matches incoming bank rows against open invoices.
  *
@@ -2054,7 +2087,11 @@ export interface BankMatchPreviewEntry {
 export async function matchInvoicePaymentsFromBank(
   userId: string,
   now: Date = new Date(),
-  options: { dryRun?: boolean } = {}
+  options: {
+    dryRun?: boolean;
+    /** Load every unpaid incoming row, without incomingPrefilter: the reference its test compares with. */
+    scanAllIncoming?: boolean;
+  } = {}
 ): Promise<BankMatchResult & { preview?: BankMatchPreviewEntry[] }> {
   const openInvoices = await prisma.salesInvoice.findMany({
     where: { userId, status: "sent", documentKind: "invoice" },
@@ -2075,6 +2112,7 @@ export async function matchInvoicePaymentsFromBank(
       statement: { userId },
       amountCents: { gt: 0 },
       invoicePayment: null,
+      ...(options.scanAllIncoming ? {} : incomingPrefilter(openInvoices)),
     },
     select: { id: true, amountCents: true, date: true, reference: true, message: true, counterparty: true },
   });

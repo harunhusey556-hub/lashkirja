@@ -9,7 +9,7 @@
 import { prisma } from "./db";
 import { AppError, NotFoundError, ValidationError, errorText } from "./api-errors";
 import { centsToEuros } from "./money";
-import { isoDateToUtc } from "./validation";
+import { helsinkiCalendarDate, isoDateToUtc } from "./validation";
 import { requireActiveCustomer } from "./customers";
 import { getLockedThrough, isDateLocked, PeriodLockedError } from "./period-lock";
 import {
@@ -489,7 +489,8 @@ export async function runRecurringInvoices(
   options: RunOptions = {}
 ): Promise<RunResult> {
   const now = options.now ?? new Date();
-  const today = now.toISOString().slice(0, 10);
+  // The invoice date is the Helsinki calendar day: a run at 00:30 Helsinki is already the next day.
+  const today = helsinkiCalendarDate(now);
   const scope = options.recurringInvoiceId ? { id: options.recurringInvoiceId } : {};
 
   const out: Pick<RunResult, "generated" | "skipped"> = { generated: [], skipped: [] };
@@ -765,7 +766,7 @@ export async function countDueRecurringInvoices(
     where: {
       userId,
       active: true,
-      nextRunAt: { not: null, lte: isoDateToUtc(now.toISOString().slice(0, 10)) },
+      nextRunAt: { not: null, lte: isoDateToUtc(helsinkiCalendarDate(now)) },
     },
     select: { id: true },
   });

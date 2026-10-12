@@ -12,6 +12,7 @@ import { removeUserUpload } from "./storage";
 import { UNREADABLE_RECEIPT_NOTE } from "./receipt-unreadable";
 import { foreignFieldsFromExtraction } from "./foreign-purchase";
 import { fileReceiptAsPurchaseInvoice } from "./purchase-invoices";
+import { helsinkiDayUtc } from "./validation";
 
 export const STAGING_TTL_MS = 24 * 60 * 60 * 1000;
 /** How long an inbox-claimed upload's file is kept after it becomes a receipt. */
@@ -138,7 +139,8 @@ export function receiptFieldsFromExtraction(
   if (extracted.unreadable) return unreadableReceiptFields(fallbackDate);
   return {
     vendor: extracted.vendor,
-    date: extracted.date ? new Date(extracted.date) : fallbackDate,
+    // The fallback is an instant (capture time); the receipt keeps the Helsinki day it fell on.
+    date: extracted.date ? new Date(extracted.date) : helsinkiDayUtc(fallbackDate),
     totalAmountCents: extracted.totalAmount != null ? Math.round(extracted.totalAmount * 100) : null,
     vatDetails: extracted.vatDetails.length ? JSON.stringify(extracted.vatDetails) : null,
     category: extracted.category,
@@ -157,7 +159,7 @@ export function receiptFieldsFromExtraction(
 export function unreadableReceiptFields(fallbackDate: Date): PendingReceiptFields {
   return {
     vendor: null,
-    date: fallbackDate,
+    date: helsinkiDayUtc(fallbackDate),
     totalAmountCents: null,
     vatDetails: null,
     category: null,

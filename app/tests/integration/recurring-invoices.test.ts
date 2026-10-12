@@ -156,6 +156,13 @@ describe("running a schedule", () => {
     expect(stored?.nextRunAt?.toISOString().slice(0, 10)).toBe("2026-04-01");
   });
 
+  it("dates a run just after midnight in Helsinki by the Helsinki day, not UTC", async () => {
+    await makeRecurring({ anchorDay: 1, startDate: "2026-11-01" });
+    // 00:30 in Helsinki on 1.11 is still 31.10 in UTC.
+    const result = await runRecurringInvoices(user.id, { now: new Date("2026-10-31T22:30:00Z") });
+    expect(result.generated.map((entry) => entry.issueDate)).toEqual(["2026-11-01"]);
+  });
+
   it("is idempotent: a second run generates nothing", async () => {
     await makeRecurring({ anchorDay: 1, startDate: "2026-01-01" });
     const first = await run("2026-02-15");

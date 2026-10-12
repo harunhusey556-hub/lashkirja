@@ -10,6 +10,7 @@ import { Button } from "@/components/ui";
 import { apiFetch, errorMessage, isUnauthorized, readJson, redirectToLogin } from "@/components/clientFetch";
 import { showToast } from "@/lib/toast";
 import { hapticNotify } from "@/lib/haptics";
+import { helsinkiCalendarDate } from "@/lib/validation";
 import {
   PurchaseMatchList,
   isSureSuggestion,
@@ -18,7 +19,8 @@ import {
   type PaymentSuggestion,
 } from "./PurchaseMatchList";
 
-const today = () => new Date().toISOString().slice(0, 10);
+// Helsinki, not UTC: between 00.00 and 03.00 local time UTC still names yesterday.
+const today = () => helsinkiCalendarDate();
 
 /**
  * Kohdista ostolaskujen maksut: every open ostolasku with the outgoing bank

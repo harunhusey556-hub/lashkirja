@@ -1,5 +1,13 @@
 import type { Instrumentation } from "next";
 
+/** Runs once when the server starts, before it answers a request. */
+export async function register() {
+  if (process.env.NEXT_RUNTIME !== "nodejs") return;
+  // API answers were never gzipped under `next start` (lib/route-compression.ts).
+  const { restoreRouteCompression } = await import("@/lib/route-compression");
+  restoreRouteCompression();
+}
+
 /**
  * Errors Next.js catches itself (routes without withErrorHandler, server
  * rendering) go to the event log with the request id the app sent.

@@ -14,6 +14,7 @@ import {
 import { getLockedThrough, isDateLocked } from "@/lib/period-lock";
 import { sendInvoiceByEmail } from "@/lib/invoice-mail";
 import { dueRuns, type RecurrenceInterval } from "@/lib/recurrence";
+import { helsinkiCalendarDate } from "@/lib/validation";
 import { centsToEuros } from "@/lib/money";
 
 /**
@@ -25,7 +26,7 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
   const session = await requireSession(req);
   if (!session) throw new UnauthorizedError();
   const only = req.nextUrl.searchParams.get("recurringInvoiceId");
-  const today = new Date().toISOString().slice(0, 10);
+  const today = helsinkiCalendarDate();
   const schedules = await listRecurringInvoices(session.userId, { includeInactive: false });
   const seller = await prisma.user.findUnique({
     where: { id: session.userId },

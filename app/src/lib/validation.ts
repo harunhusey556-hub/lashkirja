@@ -51,6 +51,14 @@ export function helsinkiCalendarDate(now: Date = new Date()): string {
   }).format(now);
 }
 
+/**
+ * The UTC midnight of the Helsinki calendar day an instant falls on: how a date the owner did
+ * not type (a capture or mail time) is stored, so 01.30 in Helsinki is not still yesterday in UTC.
+ */
+export function helsinkiDayUtc(instant: Date): Date {
+  return isoDateToUtc(helsinkiCalendarDate(instant));
+}
+
 /** YYYY-MM in Europe/Helsinki. Defaults for "this month" use this, not the server's zone. */
 export function helsinkiMonthKey(now: Date = new Date()): string {
   return helsinkiCalendarDate(now).slice(0, 7);

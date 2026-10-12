@@ -196,6 +196,14 @@ struct CaptureFlow: View {
         .buttonStyle(.bordered)
         Button { showFiles = true } label: { Label("Valitse tiedosto", systemImage: "doc").frame(maxWidth: .infinity, minHeight: 44) }
             .buttonStyle(.bordered)
+        // UI tests only (Debug + `-LKUITest`): the simulator has no camera to take a picture with.
+        if UITestHooks.active {
+            Button {
+                add([(ReceiptUploadQueue.Pick(name: UITestHooks.fixtureName, size: nil), .camera(UITestHooks.fixtureReceipt()))])
+            } label: { Label("Testikuitti", systemImage: "testtube.2").frame(maxWidth: .infinity, minHeight: 44) }
+                .buttonStyle(.bordered)
+                .accessibilityIdentifier("capture-fixture")
+        }
     }
 
     private var queueList: some View {
@@ -526,7 +534,7 @@ struct ReceiptEditor: View {
     }
 
     private var dateBinding: Binding<Date> {
-        Binding(get: { APIDate.day(form.date) ?? Date() }, set: { form.setDate(APIDate.dayString($0)) })
+        Binding(get: { APIDate.pickerDate(form.date) ?? Date() }, set: { form.setDate(APIDate.pickerDay($0)) })
     }
 
     @ViewBuilder private func fieldError(_ key: String) -> some View {

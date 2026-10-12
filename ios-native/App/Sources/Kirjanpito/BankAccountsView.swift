@@ -463,7 +463,7 @@ struct BankAccountFormSheet: View {
         guard !filled else { return }
         filled = true
         if let account { draft = BankAccountDraft(account: account) }
-        date = APIDate.day(draft.openingDate) ?? Date()
+        date = APIDate.pickerDate(draft.openingDate) ?? Date()
         openedDraft = draft
         openedDate = date
     }
@@ -475,7 +475,7 @@ struct BankAccountFormSheet: View {
             let account: Account?
         }
         var current = draft
-        current.openingDate = APIDate.dayString(date)
+        current.openingDate = APIDate.pickerDay(date)
         let payload: BankAccountPayload
         switch current.validate() {
         case .success(let value):

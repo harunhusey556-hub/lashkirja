@@ -69,6 +69,7 @@ import { PURCHASE_COUNTS_KEY } from "@/lib/cached-resource";
 import { tintedButtonClass } from "@/components/control-styles";
 import { PURCHASE_VAT_TREATMENTS, type PurchaseVatTreatment } from "@/lib/alv";
 import { VAT_TREATMENT_HINTS, VAT_TREATMENT_LABELS } from "@/lib/foreign-purchase";
+import { helsinkiCalendarDate } from "@/lib/validation";
 
 interface PurchaseInvoice {
   id: string;
@@ -135,7 +136,8 @@ const AGING_BUCKETS = ["1-30", "31-60", "61-90", "90+"] as const;
 /** The fields the "Uusi ostolasku" form shows an error under. */
 const PURCHASE_FORM_SLOTS = ["supplierName", "gross", "vat", "dueDate", "reference"];
 
-const today = () => new Date().toISOString().slice(0, 10);
+// Helsinki, not UTC: between 00.00 and 03.00 local time UTC still names yesterday.
+const today = () => helsinkiCalendarDate();
 
 /**
  * "<number> · eräpäivä d.m. · avoinna X" - "myöhässä" once overdue, no invoice
