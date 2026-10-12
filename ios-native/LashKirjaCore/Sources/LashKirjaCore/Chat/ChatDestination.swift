@@ -94,6 +94,7 @@ public struct ChatDestination: Equatable, Sendable, Identifiable {
         case .customers: return ("Asiakkaat", "Asiakasrekisteri", "person.2")
         case .customer: return ("Asiakas", "Asiakkaan tiedot ja laskut", "person")
         case .purchaseInvoices: return ("Ostolaskut", "Saapuneet laskut", "tray.and.arrow.down")
+        case .purchaseMatch: return ("Kohdista ostolaskujen maksut", "Pankkimaksut ostolaskuille", "creditcard")
         case .purchaseInvoice: return ("Ostolasku", "Ostolaskun tiedot", "tray.and.arrow.down")
         case .recurringInvoices: return ("Toistuvat laskut", "Säännöllisesti lähtevät laskut", "arrow.triangle.2.circlepath")
         case .periods: return ("Kuukauden sulku", "Kuukausien tarkistus ja sulkeminen", "calendar")

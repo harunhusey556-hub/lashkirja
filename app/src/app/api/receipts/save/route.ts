@@ -17,7 +17,7 @@ import { vatLinesProblem } from "@/lib/receipt-vat";
 import { PURCHASE_VAT_TREATMENTS } from "@/lib/alv";
 import { currencySchema, foreignColumns } from "@/lib/foreign-purchase-input";
 import { storedDocumentKind } from "@/lib/receipt-staging";
-import { fileReceiptAsPurchaseInvoice } from "@/lib/purchase-invoices";
+import { fileReceiptAsPurchaseInvoice, matchPurchasePaymentsFromBank } from "@/lib/purchase-invoices";
 import { euroConversionForSave, withFxRecorded } from "@/lib/fx-rates";
 import { canAutoAccept } from "@/lib/auto-accept";
 
@@ -178,6 +178,13 @@ export const POST = withErrorHandler(async (req: NextRequest) => {
     await runMatching(session.userId!).catch((error) =>
       console.error("Matching after receipt save failed:", error)
     );
+    // A bill uploaded after the bank already showed its payment (the owner's 24 of
+    // 2026-10-12): the row carrying its viite pays the new ostolasku now.
+    if (filing.created) {
+      await matchPurchasePaymentsFromBank(session.userId!).catch((error) =>
+        console.error("Purchase payment matching after receipt save failed:", error)
+      );
+    }
 
     const freshReceipt = await prisma.receipt.findUnique({
       where: { id: receipt.id },

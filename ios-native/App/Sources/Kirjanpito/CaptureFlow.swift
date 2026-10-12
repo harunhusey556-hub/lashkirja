@@ -86,7 +86,7 @@ struct CaptureFlow: View {
                 case .queue:
                     queueList
                 case .edit(let rowId, let draft):
-                    ReceiptEditor(model: model, draft: draft, preview: model.previews[rowId], dirty: $formDirty) { autoApproved, invoiceNote in
+                    ReceiptEditor(model: model, rowId: rowId, draft: draft, preview: model.previews[rowId], dirty: $formDirty) { autoApproved, invoiceNote in
                         model.saved(rowId, autoApproved: autoApproved, invoiceNote: invoiceNote)
                     }
                     .id(rowId)
@@ -396,6 +396,8 @@ struct CaptureFlow: View {
 struct ReceiptEditor: View {
     @Environment(AppModel.self) private var app
     let model: CaptureQueueModel
+    /// The queue row this form is for: "Älä tallenna" marks it skipped.
+    let rowId: String
     let uploadId: String
     let transactionId: String?
     /// The file as it was sent (`CaptureQueueModel.previews`); nil when it could not be kept.
@@ -418,9 +420,10 @@ struct ReceiptEditor: View {
     @State private var savedInvoiceNote: String?
     @State private var customCategory: Bool
 
-    init(model: CaptureQueueModel, draft: ReceiptDraft, preview: URL?, dirty: Binding<Bool>, done: @escaping (Bool?, String?) -> Void) {
+    init(model: CaptureQueueModel, rowId: String, draft: ReceiptDraft, preview: URL?, dirty: Binding<Bool>, done: @escaping (Bool?, String?) -> Void) {
         let form = ReceiptForm(draft: draft)
         self.model = model
+        self.rowId = rowId
         uploadId = draft.uploadId
         transactionId = model.transactionId
         self.preview = preview
@@ -496,10 +499,14 @@ struct ReceiptEditor: View {
             }
             if let failure { Section { Text(failure).foregroundStyle(Theme.danger) } }
             if duplicate {
+                // Both answers to the look-alike question; before W27 "no" had no button and the
+                // file waited under "Kesken" for good.
                 Section {
                     Button("Tallenna silti") { Task { await save(forceDuplicate: true) } }
                         .disabled(busy)
-                } footer: { Text("Sama kuitti on jo tallennettu.") }
+                    Button(ReceiptSaving.skipDuplicateTitle, role: .destructive) { Task { await skipDuplicate() } }
+                        .disabled(busy)
+                } footer: { Text("Sama kuitti on jo tallennettu. \"\(ReceiptSaving.skipDuplicateTitle)\" poistaa tämän tiedoston.") }
             }
             Section {
                 Button { Task { await save(forceDuplicate: false) } } label: {
@@ -607,6 +614,23 @@ struct ReceiptEditor: View {
         } catch let error as LKError where error.isDuplicate && savedId == nil {
             duplicate = true
             failure = error.message
+        } catch {
+            failure = error.userMessage
+            Haptics.error()
+        }
+    }
+
+    /// "Älä tallenna": the file is dropped on the server and its row says "Ohitettu (kaksoiskappale)".
+    private func skipDuplicate() async {
+        guard !busy else { return }
+        busy = true
+        failure = nil
+        defer { busy = false }
+        do {
+            try await model.skipDuplicate(rowId, uploadId: uploadId)
+            dirty = false
+            Haptics.success()
+        } catch is CancellationError {
         } catch {
             failure = error.userMessage
             Haptics.error()

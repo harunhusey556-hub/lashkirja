@@ -320,6 +320,7 @@ public struct ReceiptRowText: Sendable, Equatable {
             .compactMap { $0 }.joined(separator: " · ")
         amount = receipt.totalAmount
         isIncome = receipt.isIncome
-        linked = receipt.linkedTransaction != nil
+        // W27: a bill paid from the bank through its ostolasku shows the link mark too.
+        linked = receipt.isBankMatched
     }
 }

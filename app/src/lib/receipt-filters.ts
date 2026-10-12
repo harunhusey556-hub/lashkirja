@@ -37,6 +37,34 @@ export function receiptKindWhere(kind: string | null | undefined): Prisma.Receip
 }
 
 /**
+ * A bank row explains the document: it is linked to the receipt, or it paid the
+ * ostolasku filed from it (a bill is paid through its ostolasku, so the row's own
+ * receipt link is never set for it).
+ */
+const BANK_MATCHED: Prisma.ReceiptWhereInput = {
+  OR: [
+    { linkedTransaction: { isNot: null } },
+    { purchaseInvoice: { is: { payments: { some: { transactionId: { not: null } } } } } },
+  ],
+};
+
+/**
+ * The Kohdistettu / Ei kohdistettu tabs. They span both kinds: a bill uploaded
+ * with the kuitit waits for its bank payment like a kuitti does, so a kuitit-only
+ * `kind=receipt` (what Kuitit and the phone send) does not narrow them. W27: the
+ * owner's 24 uploaded bills were all filed as ostolaskut and "Ei kohdistettu" said 0.
+ * Returns the clause to AND with the list's other filters, or null for any other tab.
+ */
+export function receiptLinkWhere(
+  linkedStatus: string | null | undefined,
+  kind: string | null | undefined
+): Prisma.ReceiptWhereInput | null {
+  if (linkedStatus !== "linked" && linkedStatus !== "unlinked") return null;
+  const matched = linkedStatus === "linked" ? BANK_MATCHED : { NOT: BANK_MATCHED };
+  return kind === "invoice" ? { AND: [matched, FILED_AS_PURCHASE] } : matched;
+}
+
+/**
  * Builds the `where` clause shared by `GET /api/receipts` (the capped row
  * list) and `GET /api/receipts/counts` (the DB-side chip counts) - every
  * filter except `type`/`linkedStatus`, which is the tab dimension each

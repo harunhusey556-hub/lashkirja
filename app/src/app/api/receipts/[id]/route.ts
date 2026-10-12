@@ -18,7 +18,7 @@ import { withErrorHandler, UnauthorizedError, AppError } from "@/lib/api-errors"
 import { assertPeriodOpen } from "@/lib/period-lock";
 import { expectedUpdatedAtDate } from "@/lib/edit-conflict";
 import { applyReceiptPatch, UPDATED_RECEIPT_SELECT } from "@/lib/receipt-update";
-import { syncReceiptDocumentKind } from "@/lib/purchase-invoices";
+import { matchPurchasePaymentsFromBank, syncReceiptDocumentKind } from "@/lib/purchase-invoices";
 import { PURCHASE_VAT_TREATMENTS } from "@/lib/alv";
 import { currencySchema } from "@/lib/foreign-purchase-input";
 const patchSchema = z.object({
@@ -194,6 +194,12 @@ export const PATCH = withErrorHandler(async (
   await runMatching(session.userId!).catch((error) =>
     console.error("Matching after receipt edit failed:", error)
   );
+  // A kuitti just marked as a bill may already have its payment in the bank (W27).
+  if (kind?.action === "filed" || kind?.action === "reopened") {
+    await matchPurchasePaymentsFromBank(session.userId!).catch((error) =>
+      console.error("Purchase payment matching after receipt edit failed:", error)
+    );
+  }
   const { totalAmountCents, originalAmountCents, ...safe } = receipt;
   return noStoreJson({
     ok: true,

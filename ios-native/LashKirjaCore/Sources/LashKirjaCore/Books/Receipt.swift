@@ -41,6 +41,8 @@ public struct Receipt: Decodable, Sendable, Identifiable, Hashable {
     public let vatDetails: [VatDetail]?
     public let linkedTransaction: LinkedTransaction?
     public let match: Match?
+    /// The paged list's narrow row carries this instead of `match` ("linked" | "suggested" | "unlinked").
+    public let matchStatus: String?
     /// ISO 4217 of the document; `totalAmount` stays in euros. "EUR" from an older server.
     public let currency: String
     /// The amount in `currency` when it is not EUR.
@@ -54,7 +56,7 @@ public struct Receipt: Decodable, Sendable, Identifiable, Hashable {
 
     enum CodingKeys: String, CodingKey {
         case id, vendor, date, category, type, reference, invoiceNumber, fileName, source, confidence
-        case createdAt, updatedAt, totalAmount, reviewStatus, notes, vatDetails, linkedTransaction, match
+        case createdAt, updatedAt, totalAmount, reviewStatus, notes, vatDetails, linkedTransaction, match, matchStatus
         case currency, originalAmount, vatTreatment, fxRate, fxRateDate, fxSource
     }
 
@@ -86,6 +88,7 @@ public struct Receipt: Decodable, Sendable, Identifiable, Hashable {
         }
         linkedTransaction = try c.decodeIfPresent(LinkedTransaction.self, forKey: .linkedTransaction)
         match = try c.decodeIfPresent(Match.self, forKey: .match)
+        matchStatus = try? c.decodeIfPresent(String.self, forKey: .matchStatus)
         currency = (try? c.decodeIfPresent(String.self, forKey: .currency)) ?? "EUR"
         originalAmount = try? c.decodeIfPresent(Decimal.self, forKey: .originalAmount)
         // An unknown value from a newer server reads as domestic rather than failing the screen.
@@ -188,4 +191,10 @@ extension Receipt {
     /// Whether `/api/receipts/[id]/file` has something to show. A sale drafted from a bank row
     /// (`auto_income`) is stored with a placeholder name and no upload behind it.
     public var hasOriginalFile: Bool { fileName != nil && source != "auto_income" }
+
+    /// A bank row explains the receipt: linked to it, or (a bill) paid from the bank through its
+    /// ostolasku, which the list reports as `match.status == "linked"` with no linked row (W27).
+    /// The same rule as the Kohdistettu / Ei kohdistettu chips.
+    /// A paged (narrow) row says the same with `matchStatus`.
+    public var isBankMatched: Bool { linkedTransaction != nil || match?.status == "linked" || matchStatus == "linked" }
 }

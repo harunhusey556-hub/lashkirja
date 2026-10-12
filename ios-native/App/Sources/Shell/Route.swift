@@ -103,6 +103,7 @@ extension Route {
         case .customer(let id): return .customer(id)
         case .purchaseInvoices: return .purchaseInvoices
         case .purchaseInvoice(let id): return .purchaseInvoice(id)
+        case .purchaseMatch: return .purchaseMatch
         case .recurringInvoices: return .recurringInvoices
         case .periods: return .periods
         case .workQueue: return .workQueue

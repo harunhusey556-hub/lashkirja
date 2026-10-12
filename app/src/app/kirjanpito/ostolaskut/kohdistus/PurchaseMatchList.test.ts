@@ -71,6 +71,8 @@ describe("PurchaseMatchList", () => {
     expect(html).toContain(">Hylkää<");
     expect(html).toContain("Ei maksuehdotusta");
     expect(html).toContain("Myöhässä, eräpäivä 1.9.");
+    // A row without a proposal opens that ostolasku, not the list (W27).
+    expect(html).toContain('href="/kirjanpito/ostolaskut?id=b"');
     expect(html).not.toContain("Maksettu Oy");
   });
 
