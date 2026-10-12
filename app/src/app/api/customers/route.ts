@@ -5,6 +5,7 @@ import { noStoreJson, rejectCrossSite, rejectOversizedContentLength } from "@/li
 import { UnauthorizedError, withErrorHandler } from "@/lib/api-errors";
 import { createCustomer, listCustomers } from "@/lib/customers";
 import { hashIdempotencyPayload, idempotencyKeyFrom, withIdempotency } from "@/lib/idempotency";
+import { revalidatedJson } from "@/lib/etag-json";
 
 const createSchema = z.object({
   name: z.string().trim().min(1, "Asiakkaan nimi puuttuu").max(120),
@@ -29,7 +30,8 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
     includeArchived: params.get("includeArchived") === "1",
     search: params.get("search") ?? undefined,
   });
-  return noStoreJson({ customers });
+  // ETag (W24): an unchanged customer list answers 304.
+  return revalidatedJson(req, { customers });
 });
 
 export const POST = withErrorHandler(async (req: NextRequest) => {

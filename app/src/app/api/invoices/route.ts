@@ -7,6 +7,8 @@ import { hashIdempotencyPayload, idempotencyKeyFrom, withIdempotency } from "@/l
 import { createInvoice, listInvoices } from "@/lib/sales-invoices";
 import { reminderWaitsFor } from "@/lib/reminder-waits";
 import { isoDateSchema, moneySchema, periodScopeSchema } from "@/lib/validation";
+import { revalidatedJson } from "@/lib/etag-json";
+import { ListCursorError, parseListPage, wantsListPage, type ListPage } from "@/lib/list-cursor";
 
 const lineSchema = z.object({
   description: z.string().trim().min(1, "Rivin kuvaus puuttuu").max(200),
@@ -36,11 +38,20 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
   const params = req.nextUrl.searchParams;
   const rawStatus = params.get("status");
   const rawMonth = params.get("month");
+  // Paged shape (W24): `?cursor=&limit=`; without them the capped list as before.
+  let page: ListPage | undefined;
+  try {
+    page = wantsListPage(params) ? parseListPage(params) : undefined;
+  } catch (error) {
+    if (error instanceof ListCursorError) return noStoreJson({ error: error.message }, { status: 400 });
+    throw error;
+  }
   const result = await listInvoices(session.userId, {
     status: rawStatus ? statusFilter.parse(rawStatus) : undefined,
     customerId: params.get("customerId") ?? undefined,
     month: rawMonth ? periodScopeSchema.parse(rawMonth) : undefined,
     search: params.get("search")?.slice(0, 80) || undefined,
+    page,
   });
   // An overdue invoice that was reminded lately cannot be reminded again yet:
   // the list hides "Muistuta" for it instead of offering a refused action.
@@ -48,7 +59,7 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
     session.userId,
     result.invoices.filter((invoice) => invoice.displayStatus === "overdue").map((invoice) => invoice.id)
   );
-  return noStoreJson({
+  return revalidatedJson(req, {
     ...result,
     invoices: result.invoices.map((invoice) => ({
       ...invoice,

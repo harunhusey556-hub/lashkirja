@@ -1,11 +1,20 @@
 import { NextRequest, NextResponse } from "next/server";
+import { createHash } from "node:crypto";
 import * as path from "path";
 import { prisma } from "@/lib/db";
 import { ensureReceiptPreviewImage, readReceiptPreviewBuffer } from "@/lib/preview";
-import { cachedScaledJpeg, PREVIEW_SIDES, scaledCachePath } from "@/lib/receipt-preview";
+import { cachedScaledJpeg, PREVIEW_SIDES, scaledCachePath, THUMB_WIDTHS } from "@/lib/receipt-preview";
 import { requireSession } from "@/lib/session";
 import { inlineContentDisposition, resolveUserUploadPath, isStoredUploadKey } from "@/lib/storage";
 import { noStoreJson } from "@/lib/http-security";
+
+/** Bump when the rendering changes, so every cached preview gets a new ETag. */
+const PREVIEW_VERSION = 1;
+/**
+ * Private (never a shared cache) and fresh for a day: the bytes for a receipt never change, because
+ * its file is never replaced. Revalidation after that costs one lookup and a 304.
+ */
+const PREVIEW_CACHE_CONTROL = "private, max-age=86400";
 
 const MIME: Record<string, string> = {
   ".pdf": "application/pdf",
@@ -47,14 +56,28 @@ export async function GET(
     MIME[path.extname(receipt.filePath).toLowerCase()] ||
     "application/octet-stream";
 
+  // ?w=160|320 for list rows (W24), ?size=thumb (360 px), otherwise the viewer's 1600 px copy; all cached.
+  const rawWidth = req.nextUrl.searchParams.get("w");
+  const width = rawWidth == null ? null : THUMB_WIDTHS.find((w) => String(w) === rawWidth);
+  if (width === undefined) {
+    return noStoreJson({ error: `w on ${THUMB_WIDTHS.join(" tai ")}` }, { status: 400 });
+  }
+  const side = width ?? (req.nextUrl.searchParams.get("size") === "thumb" ? PREVIEW_SIDES.thumb : PREVIEW_SIDES.view);
+  // A stored upload never changes under its key (a new file gets a new key), so key + size names
+  // the bytes: a list that reopens revalidates each thumbnail with one indexed lookup and a 304,
+  // without reading the file or touching sharp.
+  const etag = `"${createHash("sha1").update(`${PREVIEW_VERSION}|${receipt.filePath}|${side}`).digest("base64url")}"`;
+  const sent = req.headers.get("if-none-match");
+  if (sent && sent.split(",").some((tag) => tag.trim().replace(/^W\//, "") === etag)) {
+    return new NextResponse(null, { status: 304, headers: { ETag: etag, "Cache-Control": PREVIEW_CACHE_CONTROL, Vary: "Cookie, Authorization" } });
+  }
+
   try {
     const absolutePath = resolveUserUploadPath(session.userId!, receipt.filePath, true);
     const basePath = await ensureReceiptPreviewImage(absolutePath, mimeType);
     if (!basePath) {
       return noStoreJson({ error: "Esikatselua ei voitu luoda" }, { status: 422 });
     }
-    // ?size=thumb for list rows (360 px), otherwise the viewer's 1600 px copy; both cached.
-    const side = req.nextUrl.searchParams.get("size") === "thumb" ? PREVIEW_SIDES.thumb : PREVIEW_SIDES.view;
     const scaled = basePath.endsWith(".svg")
       ? null
       : await cachedScaledJpeg(basePath, scaledCachePath(absolutePath, side), side);
@@ -69,7 +92,9 @@ export async function GET(
       headers: {
         "Content-Type": preview.contentType,
         "Content-Length": String(preview.buffer.length),
-        "Cache-Control": "private, no-store, max-age=0",
+        "Cache-Control": PREVIEW_CACHE_CONTROL,
+        ETag: etag,
+        Vary: "Cookie, Authorization",
         "Content-Disposition": inlineContentDisposition(`${baseName}-preview.jpg`),
         "X-Content-Type-Options": "nosniff",
       },

@@ -8,6 +8,8 @@ import { UnauthorizedError, withErrorHandler } from "@/lib/api-errors";
 import { hashIdempotencyPayload, idempotencyKeyFrom, withIdempotency } from "@/lib/idempotency";
 import { createPurchaseInvoice, listPurchaseInvoices } from "@/lib/purchase-invoices";
 import { isoDateSchema, monthSchema, moneySchema, nonnegativeMoneySchema } from "@/lib/validation";
+import { revalidatedJson } from "@/lib/etag-json";
+import { ListCursorError, parseListPage, wantsListPage, type ListPage } from "@/lib/list-cursor";
 
 const createSchema = z.object({
   supplierName: z.string().trim().min(1, "Toimittajan nimi puuttuu").max(120),
@@ -36,11 +38,20 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
   const params = req.nextUrl.searchParams;
   const rawStatus = params.get("status");
   const rawMonth = params.get("month");
+  // Paged shape (W24): `?cursor=&limit=`; without them the capped list as before.
+  let page: ListPage | undefined;
+  try {
+    page = wantsListPage(params) ? parseListPage(params) : undefined;
+  } catch (error) {
+    if (error instanceof ListCursorError) return noStoreJson({ error: error.message }, { status: 400 });
+    throw error;
+  }
   const result = await listPurchaseInvoices(session.userId, {
     status: rawStatus ? statusFilter.parse(rawStatus) : undefined,
     month: rawMonth ? monthSchema.parse(rawMonth) : undefined,
+    page,
   });
-  return noStoreJson(result);
+  return revalidatedJson(req, result);
 });
 
 export const POST = withErrorHandler(async (req: NextRequest) => {

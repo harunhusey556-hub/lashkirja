@@ -31,6 +31,12 @@ export async function receiptPreview(
 /** Sizes the app asks for: a list thumbnail and the viewer's copy. */
 export const PREVIEW_SIDES = { thumb: 360, view: MAX_SIDE } as const;
 
+/**
+ * `?w=` widths a list row may ask for (W24): 160 for a 1x row, 320 for a 2x screen. A fixed set,
+ * so a client cannot fill the disk with one cached copy per arbitrary width.
+ */
+export const THUMB_WIDTHS = [160, 320] as const;
+
 /** The cached scaled copy beside a stored upload (deleted with it, see storage.removeUserUpload). */
 export function scaledCachePath(absolutePath: string, maxSide: number): string {
   return `${absolutePath}.${maxSide}.jpg`;

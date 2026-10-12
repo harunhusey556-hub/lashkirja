@@ -8,6 +8,7 @@ import { consumeRateLimit, RECEIPT_UPLOADS_PER_WINDOW } from "@/lib/rate-limit";
 import {
   MAX_RECEIPT_BYTES,
   UploadValidationError,
+  isStoredUploadKey,
   removeUserUpload,
   safeOriginalName,
   sha256,
@@ -32,6 +33,8 @@ import {
   rejectOversizedContentLength,
 } from "@/lib/http-security";
 import { parseBusinessDetails, generateProfileSummary } from "@/lib/onboarding";
+import { revalidatedJson } from "@/lib/etag-json";
+import { afterListCursor, encodeListCursor, ListCursorError, parseListPage, wantsListPage } from "@/lib/list-cursor";
 
 const MAX_LIST_ROWS = 200;
 const MAX_LIST_OFFSET = 100_000;
@@ -261,6 +264,20 @@ export async function GET(req: NextRequest) {
   // Kuitit lists kuitit (`kind=receipt`) and its Laskut chip the bills filed as ostolaskut (`kind=invoice`).
   Object.assign(where, receiptKindWhere(url.searchParams.get("kind")));
 
+  if (wantsListPage(url.searchParams)) {
+    // Paged shape (W24): only the newest-first order pages stably, so another sort is refused
+    // rather than silently ignored.
+    if (sort !== "date_desc") return noStoreJson({ error: "Sivutus tukee vain järjestystä date_desc" }, { status: 400 });
+    try {
+      const page = await listReceiptPage(session.userId!, where, parseListPage(url.searchParams));
+      noteRequest({ route: "GET /api/receipts?cursor", status: 200, durationMs: Date.now() - started });
+      return revalidatedJson(req, page);
+    } catch (error) {
+      if (error instanceof ListCursorError) return noStoreJson({ error: error.message }, { status: 400 });
+      throw error;
+    }
+  }
+
   let orderBy: Prisma.ReceiptOrderByWithRelationInput = { date: "desc" };
   if (sort === "date_asc") orderBy = { date: "asc" };
   else if (sort === "amount_desc") orderBy = { totalAmountCents: "desc" };
@@ -315,7 +332,8 @@ export async function GET(req: NextRequest) {
     { candidates: false }
   );
 
-  const response = noStoreJson({
+  // ETag (W24): an unchanged list answers 304 instead of resending every row.
+  const response = revalidatedJson(req, {
     receipts: receipts.map(({ totalAmountCents, linkedTransaction, ...receipt }) => {
       const match = matchViews.get(receipt.id);
       return {
@@ -350,4 +368,81 @@ export async function GET(req: NextRequest) {
   });
   noteRequest({ route: "GET /api/receipts", status: 200, durationMs: Date.now() - started });
   return response;
+}
+
+/**
+ * One page of the Kuitit list, narrow: what a list row shows (vendor, amount, date, status, kind,
+ * match state, thumbnail), nothing of the extraction or the match candidates. Three queries for any
+ * page size: the rows (confirmed bank row and ostolasku joined), the total, and which of the page's
+ * receipts a bank row suggests. The detail stays `GET /api/receipts/{id}`.
+ */
+async function listReceiptPage(
+  userId: string,
+  where: Prisma.ReceiptWhereInput,
+  page: ReturnType<typeof parseListPage>
+) {
+  const pageWhere: Prisma.ReceiptWhereInput = page.cursor
+    ? { AND: [where, afterListCursor(page.cursor, "date") as Prisma.ReceiptWhereInput] }
+    : where;
+  const [rows, total] = await timeDb("Receipt", "page", () => Promise.all([
+    prisma.receipt.findMany({
+      where: pageWhere,
+      orderBy: [{ date: "desc" }, { id: "desc" }],
+      take: page.limit + 1,
+      select: {
+        id: true,
+        vendor: true,
+        date: true,
+        totalAmountCents: true,
+        currency: true,
+        originalAmountCents: true,
+        type: true,
+        category: true,
+        reviewStatus: true,
+        source: true,
+        confidence: true,
+        fileName: true,
+        filePath: true,
+        createdAt: true,
+        updatedAt: true,
+        linkedTransaction: { select: { id: true, date: true, counterparty: true, amountCents: true } },
+        purchaseInvoice: { select: { id: true, status: true } },
+      },
+    }),
+    prisma.receipt.count({ where }),
+  ]));
+  const shown = rows.slice(0, page.limit);
+  const unlinkedIds = shown.filter((row) => !row.linkedTransaction).map((row) => row.id);
+  // Same rule as buildReceiptMatchViews: "suggested" while a bank row of this user proposes it.
+  const suggested = new Set(
+    unlinkedIds.length > 0
+      ? (await prisma.transaction.findMany({
+          where: { suggestedReceiptId: { in: unlinkedIds }, matchStatus: "suggested", statement: { userId } },
+          select: { suggestedReceiptId: true },
+        })).map((tx) => tx.suggestedReceiptId)
+      : []
+  );
+  const last = shown[shown.length - 1];
+  return {
+    receipts: shown.map(({ totalAmountCents, filePath, linkedTransaction, purchaseInvoice, ...row }) => ({
+      ...row,
+      totalAmount: totalAmountCents == null ? null : centsToEuros(totalAmountCents),
+      totalAmountCents,
+      // Same rule as receiptKindWhere: a live ostolasku filed from it makes the document a bill.
+      kind: purchaseInvoice && purchaseInvoice.status !== "cancelled" ? "invoice" : "receipt",
+      purchaseInvoiceId: purchaseInvoice?.id ?? null,
+      matchStatus: linkedTransaction ? "linked" : suggested.has(row.id) ? "suggested" : "unlinked",
+      linkedTransaction: linkedTransaction
+        ? {
+            id: linkedTransaction.id,
+            date: linkedTransaction.date?.toISOString() ?? null,
+            counterparty: linkedTransaction.counterparty,
+            amount: centsToEuros(linkedTransaction.amountCents),
+          }
+        : null,
+      thumbnailUrl: isStoredUploadKey(filePath) ? `/api/receipts/${row.id}/file/preview?w=160` : null,
+    })),
+    nextCursor: rows.length > page.limit && last ? encodeListCursor(last.date, last.id) : null,
+    total,
+  };
 }

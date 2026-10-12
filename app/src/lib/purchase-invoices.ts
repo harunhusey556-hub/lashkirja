@@ -33,6 +33,7 @@ import { planPairs } from "./match-gate";
 import { rejectedPurchasePairs } from "./purchase-bank-match";
 import { isPurchaseVatTreatment, type PurchaseVatTreatment } from "./alv";
 import type { ExtractedReceipt } from "./ai";
+import { afterListCursorAsc, encodeListCursor, type ListPage } from "./list-cursor";
 
 export type PurchaseStatus = "open" | "paid" | "credited" | "cancelled";
 
@@ -1424,11 +1425,15 @@ export interface ListPurchaseOptions {
   status?: PurchaseStatus | "overdue" | "all";
   month?: string;
   limit?: number;
+  /** Keyset page (W24): `[dueDate asc, id asc]`, adds `nextCursor` and `total` to the result. */
+  page?: ListPage;
 }
 
 export interface PurchaseListResult {
   invoices: PublicPurchaseInvoice[];
   aging: AgingReport & { totalOpen: number; overdue: number };
+  nextCursor?: string | null;
+  total?: number;
 }
 
 export async function listPurchaseInvoices(
@@ -1459,12 +1464,22 @@ export async function listPurchaseInvoices(
     };
   }
 
-  const rows = await prisma.purchaseInvoice.findMany({
-    where,
+  const page = options.page;
+  const fetched = await prisma.purchaseInvoice.findMany({
+    where: page?.cursor ? { AND: [where, afterListCursorAsc(page.cursor, "dueDate")] } : where,
     include: purchaseInclude,
-    orderBy: [{ dueDate: "asc" }, { createdAt: "asc" }],
-    take: options.limit ?? 200,
+    // A page orders by id after the due date, the only tie-break a cursor can resume from.
+    orderBy: page ? [{ dueDate: "asc" }, { id: "asc" }] : [{ dueDate: "asc" }, { createdAt: "asc" }],
+    take: page ? page.limit + 1 : options.limit ?? 200,
   });
+  const rows = page ? fetched.slice(0, page.limit) : fetched;
+  const last = rows[rows.length - 1];
+  const paging = page
+    ? {
+        nextCursor: fetched.length > page.limit && last ? encodeListCursor(last.dueDate, last.id) : null,
+        total: await prisma.purchaseInvoice.count({ where }),
+      }
+    : {};
 
   const invoices = rows.map((row) => toPublicPurchaseInvoice(row, now));
 
@@ -1504,6 +1519,7 @@ export async function listPurchaseInvoices(
       totalOpen: centsToEuros(aging.totalOpenCents),
       overdue: centsToEuros(aging.overdueCents),
     },
+    ...paging,
   };
 }
 
