@@ -529,7 +529,7 @@ struct InvoiceRow: View {
             Spacer()
             VStack(alignment: .trailing, spacing: 3) {
                 MoneyText(amount: invoice.gross).font(.subheadline.weight(.semibold))
-                StatusBadge(status: invoice.displayStatus)
+                StatusBadge(status: invoice.displayStatus, partlyCredited: invoice.isPartlyCredited)
             }
         }
         .padding(.vertical, 2)
@@ -538,25 +538,29 @@ struct InvoiceRow: View {
     private var secondary: String {
         if invoice.isCreditNote { return "Hyvityslasku \(invoice.number)" }
         if invoice.displayStatus == .draft { return "Lasku \(invoice.number)" }
-        return "Lasku \(invoice.number) · \(invoice.displayStatus == .overdue ? "myöhässä, eräpäivä" : "eräpäivä") \(APIDate.displayDay(invoice.dueDate))"
+        let base = "Lasku \(invoice.number) · \(invoice.displayStatus == .overdue ? "myöhässä, eräpäivä" : "eräpäivä") \(APIDate.displayDay(invoice.dueDate))"
+        return base + (invoice.creditedRowSuffix ?? "")
     }
 }
 
 struct StatusBadge: View {
     let status: InvoiceStatus
+    /// A part credit leaves the status as it was; the badge says "Osittain hyvitetty" instead.
+    var partlyCredited = false
     var body: some View {
-        Text(status.label)
+        Text(partlyCredited ? InvoiceCreditDisplay.partlyCreditedLabel : status.label)
             .font(.caption2.weight(.semibold))
             .padding(.horizontal, 8).padding(.vertical, 3)
             .background(color.opacity(0.12), in: Capsule())
             .foregroundStyle(color)
     }
     private var color: Color {
+        if partlyCredited { return Theme.warning }
         switch status {
-        case .draft: Theme.ink2
-        case .sent: Theme.warning
-        case .overdue: Theme.danger
-        case .paid, .credited: Theme.success
+        case .draft: return Theme.ink2
+        case .sent: return Theme.warning
+        case .overdue: return Theme.danger
+        case .paid, .credited: return Theme.success
         }
     }
 }

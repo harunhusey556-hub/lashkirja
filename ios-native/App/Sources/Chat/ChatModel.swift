@@ -35,6 +35,11 @@ final class ChatModel {
     private(set) var decisions: [String: ChatProposalDecision] = [:]
     /// A decision the server refused, shown in that message's card.
     private(set) var decisionErrors: [String: String] = [:]
+    /// What the owner did on each match-batch card, by assistant message id (see `ChatMatchBatchState`).
+    private(set) var batchStates: [String: ChatMatchBatchState] = [:]
+    /// The batch card's request on its way (one at a time per card).
+    private(set) var batchBusy: [String: ChatMatchBatchState.Busy] = [:]
+    private(set) var batchErrors: [String: String] = [:]
     /// Receipts sent in this conversation, by the id of the user message showing them: the
     /// local bubble while it uploads, then the server's message (keeping the thumbnail).
     private(set) var attachments: [String: ChatAttachment] = [:]
@@ -306,6 +311,73 @@ final class ChatModel {
                     decisionErrors[id] = error.userMessage
                     Haptics.error()
                 }
+            }
+        }
+    }
+
+    // MARK: Match batch
+
+    func batchState(_ id: String) -> ChatMatchBatchState { batchStates[id] ?? ChatMatchBatchState() }
+
+    /// "Hyväksy kaikki varmat": the pairs still undecided go to confirm-all together.
+    func confirmBatch(_ id: String) {
+        guard batchBusy[id] == nil, let batch = messages.first(where: { $0.id == id })?.proposal?.matchBatch else { return }
+        let pairs = batchState(id).pending(batch)
+        guard !pairs.isEmpty else { return }
+        runBatch(id, .all) { [self] in
+            let result: ChatMatchConfirmResult = try await app.api.send("POST", "/api/matching/confirm-all", body: ChatMatchPairsRequest(pairs: pairs))
+            batchStates[id, default: ChatMatchBatchState()].applyBulk(sent: pairs, result: result)
+            return result.confirmed + result.alreadyConfirmed > 0
+        }
+    }
+
+    /// One row's Hyväksy: the same endpoint with that single pair.
+    func acceptBatchRow(_ id: String, _ card: ChatMatchBatch.Card) {
+        guard batchBusy[id] == nil, let receiptId = card.receiptId else { return }
+        runBatch(id, .row(card.transactionId)) { [self] in
+            let pair = ChatMatchBatch.Pair(transactionId: card.transactionId, receiptId: receiptId)
+            let result: ChatMatchConfirmResult = try await app.api.send("POST", "/api/matching/confirm-all", body: ChatMatchPairsRequest(pairs: [pair]))
+            batchStates[id, default: ChatMatchBatchState()].applyAccept(transactionId: card.transactionId, result: result)
+            return result.skipped == 0
+        }
+    }
+
+    func rejectBatchRow(_ id: String, _ card: ChatMatchBatch.Card) {
+        struct Body: Encodable { let transactionId: String; let receiptId: String }
+        guard batchBusy[id] == nil, let receiptId = card.receiptId else { return }
+        runBatch(id, .row(card.transactionId)) { [self] in
+            let _: Ignored = try await app.api.send("POST", "/api/matching/reject", body: Body(transactionId: card.transactionId, receiptId: receiptId))
+            batchStates[id, default: ChatMatchBatchState()].mark(card.transactionId, .rejected)
+            return false
+        }
+    }
+
+    /// An ambiguous row has no stored suggestion: the owner's pick is a manual confirm.
+    func chooseBatchOption(_ id: String, _ card: ChatMatchBatch.Card, receiptId: String) {
+        struct Body: Encodable { let transactionId: String; let receiptId: String }
+        guard batchBusy[id] == nil else { return }
+        runBatch(id, .row(card.transactionId)) { [self] in
+            let _: Ignored = try await app.api.send("POST", "/api/matching/confirm", body: Body(transactionId: card.transactionId, receiptId: receiptId))
+            batchStates[id, default: ChatMatchBatchState()].mark(card.transactionId, .confirmed)
+            return true
+        }
+    }
+
+    /// Runs one batch request; `work` records its outcome and answers whether a receipt was linked
+    /// (the write filter skips /api/ai/, so the lists are told here).
+    private func runBatch(_ id: String, _ busy: ChatMatchBatchState.Busy, work: @escaping () async throws -> Bool) {
+        batchErrors[id] = nil
+        batchBusy[id] = busy
+        Task {
+            defer { batchBusy[id] = nil }
+            do {
+                let linked = try await work()
+                if linked { app.dataVersion += 1 }
+                Haptics.success()
+            } catch is CancellationError {
+            } catch {
+                batchErrors[id] = error.userMessage
+                Haptics.error()
             }
         }
     }

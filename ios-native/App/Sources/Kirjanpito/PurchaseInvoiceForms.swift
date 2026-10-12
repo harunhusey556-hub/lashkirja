@@ -341,9 +341,11 @@ struct PurchaseMarkPaidSheet: View {
 /// The status pill of a purchase invoice, toned like the web's `PURCHASE_STATUS`.
 struct PurchaseStatusBadge: View {
     let status: PurchaseDisplayStatus
+    /// "Hyvityslasku" or "Osittain hyvitetty" say more than the status alone.
+    var tag: PurchaseCreditTag?
 
     var body: some View {
-        Text(status.label)
+        Text(tag?.label ?? status.label)
             .font(.caption2.weight(.semibold))
             .padding(.horizontal, 8)
             .padding(.vertical, 3)
@@ -352,12 +354,14 @@ struct PurchaseStatusBadge: View {
     }
 
     private var color: Color {
+        if let tag { return tag == .partlyCredited ? Theme.warning : Theme.ink2 }
         switch status {
-        case .open: Theme.ink2
-        case .overdue: Theme.danger
-        case .paid: Theme.success
-        case .credited: Theme.ink2
-        case .cancelled: Theme.ink2
+        case .open: return Theme.ink2
+        case .overdue: return Theme.danger
+        case .paid: return Theme.success
+        // Neutral as the web's PURCHASE_STATUS: nothing is owed, but nothing was paid either.
+        case .credited: return Theme.ink2
+        case .cancelled: return Theme.ink2
         }
     }
 }
@@ -395,7 +399,7 @@ struct PurchaseInvoiceRow: View {
                 MoneyText(amount: invoice.gross).font(.subheadline.weight(.semibold))
                 HStack(spacing: 4) {
                     if recurring { RecurringBadge() }
-                    PurchaseStatusBadge(status: invoice.displayStatus)
+                    PurchaseStatusBadge(status: invoice.displayStatus, tag: invoice.creditTag)
                 }
             }
         }

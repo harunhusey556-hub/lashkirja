@@ -23,6 +23,8 @@ struct ChatProposalCardView: View {
             case .match: matchContent
             case .invoiceDraft: if let draft = proposal.invoiceDraft { draftContent(draft) }
             case .receiptUpdate: if let update = proposal.receiptUpdate { receiptContent(update) }
+            // A batch has its own card (ChatMatchBatchCardView); AssistantView never routes it here.
+            case .matchBatch: EmptyView()
             }
             switch phase {
             case .open:
@@ -73,6 +75,7 @@ struct ChatProposalCardView: View {
         case .match: "link"
         case .invoiceDraft: "doc.text"
         case .receiptUpdate: "pencil"
+        case .matchBatch: "link"
         }
     }
 
@@ -162,6 +165,109 @@ struct ChatProposalCardView: View {
         }
         .font(.footnote.weight(.medium))
         .foregroundStyle(accepted ? Theme.success : Theme.ink2)
+    }
+}
+
+/// The batch of match proposals under a reply: a count header, "Hyväksy kaikki varmat (N)" for the
+/// confident pairs, and one compact row per proposal with its own Hyväksy / Hylkää (or, for a bank
+/// row two receipts fit, one button per receipt). Nothing is linked until the owner presses a button.
+struct ChatMatchBatchCardView: View {
+    let messageId: String
+    let batch: ChatMatchBatch
+    let model: ChatModel
+
+    var body: some View {
+        let state = model.batchState(messageId)
+        let busy = model.batchBusy[messageId]
+        let pending = state.pending(batch).count
+        VStack(alignment: .leading, spacing: 10) {
+            Label(ChatMatchBatchText.header(batch), systemImage: "link")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(Theme.accentDark)
+            Button { model.confirmBatch(messageId) } label: {
+                HStack(spacing: 8) {
+                    if busy == .all { ProgressView().controlSize(.small).tint(Theme.onInk) }
+                    Text(busy == .all ? ChatMatchBatchText.bulkBusyLabel : ChatMatchBatchText.buttonLabel(pending: pending))
+                        .fontWeight(.semibold)
+                }
+                .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.primary)
+            .disabled(pending == 0 || busy != nil)
+            if batch.truncated {
+                Text(ChatMatchBatchText.truncatedNote(confident: batch.confident))
+                    .font(.caption)
+                    .foregroundStyle(Theme.ink2)
+            }
+            if let result = state.resultText {
+                Text(result).font(.caption.weight(.medium)).foregroundStyle(Theme.success)
+            }
+            if let error = model.batchErrors[messageId] {
+                Label(error, systemImage: "exclamationmark.triangle")
+                    .font(.footnote)
+                    .foregroundStyle(Theme.danger)
+            }
+            VStack(spacing: 8) {
+                ForEach(batch.cards) { card in
+                    row(card, row: state.rows[card.transactionId], busy: busy)
+                }
+            }
+        }
+        .padding(14)
+        .frame(maxWidth: cardMaxWidth, alignment: .leading)
+        .background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous).stroke(Theme.line))
+        .motion(.snappy, value: state)
+    }
+
+    private func row(_ card: ChatMatchBatch.Card, row decided: ChatMatchBatchState.Row?, busy: ChatMatchBatchState.Busy?) -> some View {
+        let rowBusy = busy == .row(card.transactionId)
+        return VStack(alignment: .leading, spacing: 4) {
+            Text(ChatMatchBatchText.rowTitle(card)).font(.subheadline.weight(.semibold)).foregroundStyle(Theme.ink)
+            Text(ChatMatchBatchText.rowDetail(card)).font(.caption).foregroundStyle(Theme.ink).monospacedDigit()
+            if card.ambiguous {
+                Text(ChatMatchBatchText.ambiguousNote).font(.caption).foregroundStyle(Theme.ink2)
+            } else if let reasons = ChatMatchBatchText.reasonsLine(card) {
+                Text(reasons).font(.caption).foregroundStyle(Theme.ink2)
+            }
+            if let decided {
+                Label(ChatMatchBatchText.rowStatusLabel(decided), systemImage: decided == .confirmed ? "checkmark.circle.fill" : (decided == .failed ? "exclamationmark.triangle" : "xmark.circle"))
+                    .font(.footnote.weight(.medium))
+                    .foregroundStyle(decided == .confirmed ? Theme.success : (decided == .failed ? Theme.danger : Theme.ink2))
+            } else if card.ambiguous {
+                VStack(alignment: .leading, spacing: 6) {
+                    ForEach(card.options, id: \.receiptId) { option in
+                        rowButton(option.label, prominent: true, spinning: rowBusy, disabled: busy != nil) {
+                            model.chooseBatchOption(messageId, card, receiptId: option.receiptId)
+                        }
+                    }
+                }
+            } else {
+                HStack(spacing: 8) {
+                    rowButton("Hyväksy", prominent: true, spinning: rowBusy, disabled: busy != nil) { model.acceptBatchRow(messageId, card) }
+                    rowButton("Hylkää", prominent: false, spinning: false, disabled: busy != nil) { model.rejectBatchRow(messageId, card) }
+                }
+            }
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Theme.ink.opacity(0.05), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+    }
+
+    private func rowButton(_ title: String, prominent: Bool, spinning: Bool, disabled: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 6) {
+                if spinning && prominent { ProgressView().controlSize(.small) }
+                Text(title).font(.footnote.weight(.semibold)).multilineTextAlignment(.leading)
+            }
+            .foregroundStyle(prominent ? Theme.accentDark : Theme.ink2)
+            .padding(.horizontal, 14)
+            .frame(minHeight: 44)
+            .background(prominent ? Theme.accentSoft : Theme.ink.opacity(0.05), in: Capsule())
+            .contentShape(Capsule())
+        }
+        .buttonStyle(.pressable)
+        .disabled(disabled)
     }
 }
 

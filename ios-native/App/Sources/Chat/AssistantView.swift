@@ -284,7 +284,9 @@ private struct MessageRow: View {
             )
             .equatable()
             if !streaming && message.role == "assistant" {
-                if let proposal = message.proposal, ChatProposalCard.isShown(proposal) {
+                if let proposal = message.proposal, ChatProposalCard.isShown(proposal), proposal.kind == .matchBatch, let batch = proposal.matchBatch {
+                    ChatMatchBatchCardView(messageId: message.id, batch: batch, model: model)
+                } else if let proposal = message.proposal, ChatProposalCard.isShown(proposal) {
                     ChatProposalCardView(
                         proposal: proposal,
                         saving: model.decisions[message.id],

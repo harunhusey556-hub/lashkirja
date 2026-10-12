@@ -105,6 +105,8 @@ public struct Invoice: Decodable, Sendable, Identifiable, Hashable {
     public let vat: Decimal
     public let gross: Decimal
     public let paid: Decimal
+    /// Total of the credit notes against this invoice (positive); absent from older servers.
+    public let credited: Decimal?
     public let open: Decimal
     public let closedReason: String?
     public let updatedAt: String
