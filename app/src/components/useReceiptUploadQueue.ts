@@ -54,6 +54,8 @@ export interface ReceiptQueueRow {
   error?: string;
   duplicateReceiptId?: string;
   progress?: string;
+  /** Present once the file is read; the bulk import saves every ready row from here. */
+  ready?: ReadyUpload;
 }
 
 interface InternalRow extends ReceiptQueueRow {
@@ -294,7 +296,7 @@ export function useReceiptUploadQueue(
     if (row?.ready) callbacksRef.current.onReady(row.ready);
   }
 
-  const visible: ReceiptQueueRow[] = rows.map(({ file: _file, ready: _ready, jobId: _jobId, ...row }) => row);
+  const visible: ReceiptQueueRow[] = rows.map(({ file: _file, jobId: _jobId, ...row }) => row);
 
   return { rows: visible, enqueue, cancel, retryFailed, useReady };
 }

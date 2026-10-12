@@ -1,6 +1,7 @@
 "use client";
 
 import { Disclosure } from "@/components/ds/Disclosure";
+import ReceiptPreview from "@/components/ReceiptPreview";
 import { useLeavingRows } from "@/components/useLeavingRows";
 import { useState } from "react";
 import Link from "next/link";
@@ -161,10 +162,16 @@ export default function ReviewQueue({
         title={sheetFor?.vendor || "Tuntematon myyjä"}
         subtitle={sheetFor ? rowSecondary(sheetFor) : undefined}
         labelledBy="review-sheet-title"
-        heightClass="max-h-[60dvh]"
+        heightClass="max-h-[80dvh]"
       >
         {sheetFor && (
           <div className="space-y-3 px-5 py-4 sheet-safe-bottom">
+            {/* B: the row sheet shows the document next to the amount, so a
+                reading can be checked without leaving the queue. */}
+            <ReceiptPreview
+              src={`/api/receipts/${sheetFor.id}/file/preview`}
+              fileName={sheetFor.fileName}
+            />
             <p className="text-title-2 font-bold tabular-nums tracking-[-0.02em] text-ink">
               {sheetFor.totalAmount != null ? formatEur(sheetFor.totalAmount) : "–"}
             </p>

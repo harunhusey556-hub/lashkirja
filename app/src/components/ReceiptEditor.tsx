@@ -76,6 +76,7 @@ import { RECEIPT_MATCH_STATUS, receiptMatchStatusKey } from "@/lib/status-labels
 import { readPageCache, writePageCache } from "@/lib/page-cache";
 import { isUnreadableNote, UNREADABLE_RECEIPT_NOTE } from "@/lib/receipt-unreadable";
 import { useReceiptUploadQueue, validateUploadFile, type ReadyUpload } from "@/components/useReceiptUploadQueue";
+import { bulkImportSummary, bulkSavePayload, splitApprovable } from "@/lib/review-queue";
 import ReceiptUploadArea from "@/components/ReceiptUploadArea";
 import { BottomActions, DetailHero, MoreMenu, PageTitle, Section, StatusTag } from "@/components/ds";
 import { IS_MOBILE_BUILD } from "@/lib/build-target";
@@ -186,6 +187,7 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
   const [loading, setLoading] = useState(isEdit);
   const [uploadProgress, setUploadProgress] = useState("");
   const [saving, setSaving] = useState(false);
+  const [bulkImporting, setBulkImporting] = useState(false);
   const [formReady, setFormReady] = useState(false);
   const [filePath, setFilePath] = useState("");
   const [uploadId, setUploadId] = useState("");
@@ -347,6 +349,89 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
   const uploading = uploadQueue.rows.some(
     (row) => row.status === "uploading" || row.status === "processing"
   );
+
+  // C: every file whose reading is done. The one-tap path saves them all in
+  // one action; the single-file pick is the form's own job as before.
+  const readyUploads: ReadyUpload[] = uploadQueue.rows.flatMap((row) =>
+    row.status === "ready" && row.ready ? [row.ready] : []
+  );
+  const readySplit = splitApprovable(
+    readyUploads.map((upload) => ({
+      id: upload.uploadId,
+      vendor: upload.extracted.vendor ?? null,
+      totalAmount: upload.extracted.totalAmount ?? null,
+    }))
+  );
+  const showBulkImport = !isEdit && uploadQueue.rows.length > 1 && readyUploads.length > 0;
+
+  /**
+   * The bulk import: save every ready upload with its own reading, then approve
+   * what the server's one rule accepts (receipt-approval.ts). What lacks an
+   * amount or a vendor is saved but stays pending, so the manual work left is
+   * exactly the receipts that need it.
+   */
+  async function handleImportAll() {
+    if (readyUploads.length === 0) return;
+    setBulkImporting(true);
+    setError("");
+    const savedIds: string[] = [];
+    let refusedSave = 0;
+    try {
+      for (const upload of readyUploads) {
+        try {
+          const res = await apiFetch("/api/receipts/save", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(bulkSavePayload(upload.uploadId, upload.extracted)),
+          });
+          const data = await readJson<ReceiptResponse>(res, "Tallennus epäonnistui");
+          if (data.receipt?.id) savedIds.push(String(data.receipt.id));
+          else refusedSave += 1;
+        } catch (saveError: unknown) {
+          if (isUnauthorized(saveError)) {
+            redirectToLogin();
+            return;
+          }
+          // One unreadable or duplicated file must not stop the rest.
+          refusedSave += 1;
+        }
+      }
+
+      let approvedCount = 0;
+      let refusedApprove = 0;
+      // The endpoint takes at most 200 ids per call (route.ts).
+      for (let start = 0; start < savedIds.length; start += 200) {
+        const chunk = savedIds.slice(start, start + 200);
+        const res = await apiFetch("/api/receipts/batch-approve", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ receiptIds: chunk }),
+        });
+        const data = await readJson<{ updatedCount?: number; failedCount?: number }>(
+          res,
+          "Hyväksyntä epäonnistui"
+        );
+        approvedCount += data.updatedCount ?? 0;
+        refusedApprove += data.failedCount ?? Math.max(0, chunk.length - (data.updatedCount ?? 0));
+      }
+
+      showToast({
+        tone: refusedSave + refusedApprove > 0 ? "info" : "success",
+        text: bulkImportSummary(approvedCount, refusedSave + refusedApprove),
+      });
+      // The form still holds a reading that is now saved; leaving avoids
+      // saving it a second time.
+      if (savedIds.length > 0) router.push("/kuitit");
+    } catch (importError: unknown) {
+      if (isUnauthorized(importError)) {
+        redirectToLogin();
+        return;
+      }
+      setError(errorMessage(importError, "Tallennus epäonnistui"));
+    } finally {
+      setBulkImporting(false);
+    }
+  }
 
   // OWN-04 / BOOKS-18 / SHELL-02: "Ota kuva" in the Lisää sheet already took
   // the photo. On /kuitit/uusi?from=camera the picked files are drained once
@@ -1000,6 +1085,30 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
           onPickPhoto={() => void pickNativeOrInput(() => choosePhotoLibrary(), photoInputRef.current)}
           onPickFile={() => void pickDocument()}
         />
+      )}
+
+      {/* C: a batch of files no longer has to be applied and saved one by one.
+          The reading is what the owner accepts; what lacks an amount or a vendor
+          is saved but left for review. */}
+      {showBulkImport && (
+        <div className="flex flex-col gap-2 rounded-card border border-line bg-surface px-4 py-3">
+          <p className="text-caption text-ink-2">
+            {readySplit.ready.length === 1
+              ? "1 kuitti on luettu ja valmis."
+              : `${readySplit.ready.length} kuittia on luettu ja valmiina.`}
+            {readySplit.incomplete.length > 0 &&
+              ` ${readySplit.incomplete.length} vaatii tarkistuksen ennen hyväksyntää.`}
+          </p>
+          <Button
+            type="button"
+            className="w-full"
+            busy={bulkImporting}
+            busyLabel="Tallennetaan…"
+            onClick={() => void handleImportAll()}
+          >
+            Tallenna ja hyväksy kaikki ({readyUploads.length})
+          </Button>
+        </div>
       )}
 
       {/* A refused save is shown once, by the note above the save bar (F37). */}

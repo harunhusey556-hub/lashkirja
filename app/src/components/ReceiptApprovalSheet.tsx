@@ -1,6 +1,7 @@
 "use client";
 
 import BottomSheet from "@/components/BottomSheet";
+import ReceiptPreview from "@/components/ReceiptPreview";
 import { Button } from "@/components/ui";
 import { KeyValueList } from "@/components/ds";
 import { formatDate, formatEur } from "@/lib/format";
@@ -18,6 +19,17 @@ export interface ApprovalSheetReceipt {
   gaps: ApprovalGap[];
   /** Drafted from a bank row (MobilePay etc.): nothing was read from a kuitti. */
   fromBank?: boolean;
+  /**
+   * The stored file name, when the caller has it (the Koti pending-receipt
+   * item does not). The rendered /preview endpoint answers an image for any
+   * file type, so an unknown name is only a label for the viewer.
+   */
+  fileName?: string;
+}
+
+/** The rendered variant: one raster image for a photo, a PDF page or HEIC. */
+function approvalPreviewSrc(receiptId: string): string {
+  return `/api/receipts/${receiptId}/file/preview`;
 }
 
 function sheetSubtitle(receipt: ApprovalSheetReceipt): string {
@@ -55,6 +67,12 @@ export function ReceiptApprovalSheet({
     >
       {receipt ? (
         <div className="space-y-4 px-4 py-2 sheet-safe-bottom">
+          {/* B: the owner checks the AI reading against the document, so the
+              sheet shows the receipt above the fields (the viewer still opens). */}
+          <ReceiptPreview
+            src={approvalPreviewSrc(receipt.receiptId)}
+            fileName={receipt.fileName ?? "kuitti.jpg"}
+          />
           <KeyValueList
             rows={[
               { label: "Summa", value: receipt.amount == null ? "Puuttuu" : formatEur(receipt.amount) },
