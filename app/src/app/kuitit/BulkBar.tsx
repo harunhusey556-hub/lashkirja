@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui";
+import { bulkApproveLabel } from "@/lib/review-queue";
 
 const EXIT_MS = 170;
 
@@ -32,13 +33,20 @@ export function BulkBar({
   visible,
   count,
   busy,
+  approveBusy,
+  approvableCount,
   onCancel,
+  onApproveRequest,
   onDeleteRequest,
 }: {
   visible: boolean;
   count: number;
   busy: boolean;
+  approveBusy: boolean;
+  /** Selected rows this action will actually approve (pending, no gap). */
+  approvableCount: number;
   onCancel: () => void;
+  onApproveRequest: () => void;
   onDeleteRequest: () => void;
 }) {
   const [mounted, setMounted] = useState(visible);
@@ -111,6 +119,19 @@ export function BulkBar({
           <Button type="button" variant="secondary" onClick={onCancel}>
             Peruuta
           </Button>
+          {/* One rule for every approve path (receipt-approval.ts): a selected
+              receipt that is not ready is left behind, not force-approved. */}
+          {approvableCount > 0 && (
+            <Button
+              type="button"
+              variant="secondary"
+              busy={approveBusy}
+              busyLabel="Hyväksytään…"
+              onClick={onApproveRequest}
+            >
+              {bulkApproveLabel(approvableCount, count - approvableCount)}
+            </Button>
+          )}
           <Button type="button" variant="danger" busy={busy} busyLabel="Poistetaan…" onClick={onDeleteRequest}>
             Poista
           </Button>

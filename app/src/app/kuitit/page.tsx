@@ -46,8 +46,11 @@ import { HeaderAddPill, PageTitle, Section, SlotSkeleton, useSkeletonFade, Revea
 import { batchOutcomeMessage } from "@/lib/upload-queue";
 import {
   approvalFailureText,
+  chunkIds,
   noticeToneFor,
   retryableFailureIds,
+  splitApprovable,
+  type ApprovalFailure,
   type NoticeTone,
 } from "@/lib/review-queue";
 import { ReceiptFilters, type ReceiptAdvancedFilters } from "./ReceiptFilters";
@@ -483,38 +486,52 @@ export default function KuititPage() {
     }
   }
 
-  async function handleReviewMany(ids: string[]) {
-    if (ids.length === 0) return;
+  async function handleReviewMany(ids: string[]): Promise<ApprovalFailure[]> {
+    if (ids.length === 0) return [];
     setActionError("");
     setBulkReviewing(true);
     try {
-      const res = await apiFetch("/api/receipts/batch-approve", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ receiptIds: ids }),
-      });
-      const data = await readJson<{
-        updatedCount?: number;
-        failedCount?: number;
-        failed?: { id: string; error?: string }[];
-      }>(res, "Hyväksyntä epäonnistui");
-      const failed = (data.failed ?? []).map((item) => ({ id: item.id, error: item.error ?? "" }));
-      const failedCount = data.failedCount ?? failed.length;
-      const updatedCount = data.updatedCount ?? Math.max(0, ids.length - failedCount);
+      // The endpoint takes at most 200 ids (route.ts); a grown pending list or
+      // a page-wide accept sends chunks and aggregates the refusals.
+      const failed: ApprovalFailure[] = [];
+      let updatedCount = 0;
+      for (const chunk of chunkIds(ids)) {
+        const res = await apiFetch("/api/receipts/batch-approve", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ receiptIds: chunk }),
+        });
+        const data = await readJson<{
+          updatedCount?: number;
+          failedCount?: number;
+          failed?: { id: string; error?: string }[];
+        }>(res, "Hyväksyntä epäonnistui");
+        failed.push(...(data.failed ?? []).map((item) => ({ id: item.id, error: item.error ?? "" })));
+        updatedCount += data.updatedCount ?? Math.max(0, chunk.length - (data.failedCount ?? 0));
+      }
       // The refusal is named (F15), and a retry is only offered when a second try can differ.
       setActionError(approvalFailureText(updatedCount, failed), noticeToneFor(failed.length));
       setRetryApproveIds(retryableFailureIds(failed));
       setLoadAttempt((a) => a + 1);
       void loadCounts();
+      return failed;
     } catch (error: unknown) {
       if (isUnauthorized(error)) {
         redirectToLogin();
-        return;
+        return [];
       }
       setActionError(errorMessage(error, "Hyväksyntä epäonnistui"));
+      return [];
     } finally {
       setBulkReviewing(false);
     }
+  }
+
+  /** The BulkBar's approve: the selected pending receipts that are ready, one
+   * rule for every path (receipt-approval.ts). What failed stays selected. */
+  async function handleBulkApprove() {
+    const failed = await handleReviewMany(bulkApprovable.map((receipt) => receipt.id));
+    setSelectedIds(new Set(failed.map((item) => item.id)));
   }
 
   async function handleBulkDelete() {
@@ -658,6 +675,10 @@ export default function KuititPage() {
     (r) => r.source !== "email_sync" && r.source !== "auto_income"
   );
 
+  // C: one action across every queue on the page — the single rule of
+  // receipt-approval.ts decides what it carries; the rest stay in their queue.
+  const { ready: allPendingReady, incomplete: allPendingIncomplete } = splitApprovable(pendingReceipts);
+
   const visibleReceipts = showAllReceipts ? receipts : receipts.slice(0, RECENT_LIMIT);
   // Selection is always read through the visible rows (BOOKS-12, P0): "Valitse
   // kaikki" selects what is on screen, and a row hidden by "Näytä vähemmän" or a
@@ -670,6 +691,12 @@ export default function KuititPage() {
     setSelectedIds(new Set(selectedVisible.map((receipt) => receipt.id)));
   }
   const allSelected = visibleReceipts.length > 0 && selectedCount === visibleReceipts.length;
+  // The bulk bar acts on what is on screen (BOOKS-12); of the selection only
+  // the pending receipts without a gap can be approved (F15).
+  const pendingIds = new Set(pendingReceipts.map((receipt) => receipt.id));
+  const bulkApprovable = splitApprovable(
+    selectedVisible.filter((receipt) => pendingIds.has(receipt.id))
+  ).ready;
 
   return (
     <>
@@ -708,6 +735,29 @@ export default function KuititPage() {
             )}
           </div>
         ) : null}</Reveal>
+
+        {/* C: the whole page's ready pending receipts in one action, instead of
+            opening each queue card. The ones with a gap are named, never swept in. */}
+        {allPendingReady.length > 0 && (
+          <div className="flex flex-col gap-2 rounded-card border border-line bg-surface px-4 py-3">
+            <p className="text-caption text-ink-2">
+              {allPendingReady.length === 1
+                ? "1 kuitti on valmis hyväksyttäväksi."
+                : `${allPendingReady.length} kuittia on valmiina hyväksyttäväksi.`}
+              {allPendingIncomplete.length > 0 &&
+                ` ${allPendingIncomplete.length} vaatii täydennyksen.`}
+            </p>
+            <Button
+              type="button"
+              className="w-full"
+              busy={bulkReviewing}
+              busyLabel="Hyväksytään…"
+              onClick={() => void handleReviewMany(allPendingReady.map((receipt) => receipt.id))}
+            >
+              Hyväksy kaikki valmiit ({allPendingReady.length})
+            </Button>
+          </div>
+        )}
 
         {emailPending.length > 0 && (
           <ReviewQueue
@@ -919,7 +969,10 @@ export default function KuititPage() {
         visible={selectedCount > 0}
         count={selectedCount}
         busy={bulkDeleting}
+        approveBusy={bulkReviewing}
+        approvableCount={bulkApprovable.length}
         onCancel={() => setSelectedIds(new Set())}
+        onApproveRequest={() => void handleBulkApprove()}
         onDeleteRequest={() => setShowBulkConfirm(true)}
       />
     </>

@@ -62,6 +62,8 @@ export interface ReceiptQueueRow {
   error?: string;
   duplicateReceiptId?: string;
   progress?: string;
+  /** Present once the file is read; the bulk import saves every ready row from here. */
+  ready?: ReadyUpload;
 }
 
 interface InternalRow extends ReceiptQueueRow {
@@ -85,6 +87,9 @@ function listedRow(row: InternalRow): ReceiptQueueRow {
     error: row.error,
     duplicateReceiptId: row.duplicateReceiptId,
     progress: row.progress,
+    // The bulk import saves every ready row from the public list, so the
+    // reading travels with it (W2) -- still identity-stable per row.
+    ready: row.ready,
   };
 }
 
@@ -167,7 +172,8 @@ export function useReceiptUploadQueue(
         listed.status === row.status &&
         listed.error === row.error &&
         listed.progress === row.progress &&
-        listed.duplicateReceiptId === row.duplicateReceiptId
+        listed.duplicateReceiptId === row.duplicateReceiptId &&
+        listed.ready === row.ready
       ) {
         return row;
       }

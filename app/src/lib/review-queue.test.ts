@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
+  APPROVE_BATCH_LIMIT,
   approvalFailureText,
+  bulkApproveLabel,
+  bulkImportSummary,
+  bulkSavePayload,
+  chunkIds,
   noticeToneFor,
   queueTotalText,
   retryableFailureIds,
@@ -98,5 +103,65 @@ describe("noticeToneFor (V14, R56)", () => {
   it("is an error as soon as one item failed", () => {
     expect(noticeToneFor(1)).toBe("error");
     expect(noticeToneFor(7)).toBe("error");
+  });
+});
+
+describe("chunkIds", () => {
+  it("keeps every id, in order, under the endpoint's 200-id ceiling", () => {
+    const ids = Array.from({ length: 450 }, (_, index) => `id-${index}`);
+    const chunks = chunkIds(ids);
+    expect(chunks.map((chunk) => chunk.length)).toEqual([200, 200, 50]);
+    expect(chunks.flat()).toEqual(ids);
+    expect(Math.max(...chunks.map((chunk) => chunk.length))).toBeLessThanOrEqual(APPROVE_BATCH_LIMIT);
+  });
+
+  it("sends an empty list as no call at all, not one empty batch", () => {
+    expect(chunkIds([])).toEqual([]);
+  });
+});
+
+describe("bulkApproveLabel", () => {
+  it("names the count it will act on", () => {
+    expect(bulkApproveLabel(187, 0)).toBe("Hyväksy (187)");
+  });
+
+  it("says the selection is only partly ready", () => {
+    expect(bulkApproveLabel(7, 3)).toBe("Hyväksy valmiit (7)");
+  });
+});
+
+describe("bulkImportSummary", () => {
+  it("reports both buckets, as the import promised (C)", () => {
+    expect(bulkImportSummary(187, 13)).toBe("Hyväksyttiin 187 kuittia · 13 vaatii tarkistusta");
+  });
+
+  it("counts one receipt in the singular", () => {
+    expect(bulkImportSummary(1, 0)).toBe("Hyväksyttiin 1 kuitti");
+    expect(bulkImportSummary(0, 1)).toBe("1 vaatii tarkistusta");
+  });
+
+  it("omits a bucket that is empty, and never divides by nothing", () => {
+    expect(bulkImportSummary(0, 0)).toBe("Ei hyväksyttäviä kuitteja.");
+    expect(bulkImportSummary(4, 0)).toBe("Hyväksyttiin 4 kuittia");
+  });
+});
+
+describe("bulkSavePayload", () => {
+  it("sends the reading as the form would, with a missing amount left missing", () => {
+    expect(
+      bulkSavePayload("upload-1", { vendor: "Kahvila", date: "2026-09-01", totalAmount: null })
+    ).toMatchObject({ uploadId: "upload-1", vendor: "Kahvila", date: "2026-09-01", totalAmount: null });
+  });
+
+  it("defaults an unread type to a purchase, never a made-up income", () => {
+    expect(bulkSavePayload("u", {}).type).toBe("meno");
+    expect(bulkSavePayload("u", { type: "tulo" }).type).toBe("tulo");
+  });
+
+  it("drops VAT rows that are not two numbers, so the server's own check sees clean input", () => {
+    expect(
+      bulkSavePayload("u", { vatDetails: [{ rate: 24, amount: 2.4 }, { rate: 14 }, {}] }).vatDetails
+    ).toEqual([{ rate: 24, amount: 2.4 }]);
+    expect(bulkSavePayload("u", { vatDetails: null }).vatDetails).toEqual([]);
   });
 });
