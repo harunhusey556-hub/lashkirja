@@ -3,10 +3,11 @@
 import { AnimatedRows } from "@/components/AnimatedRows";
 import { PullToRefresh } from "@/components/ds/PullToRefresh";
 import Link from "next/link";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { startTransition, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ConfirmModal from "@/components/ConfirmModal";
 import QueuedReceiptsCard from "@/components/QueuedReceiptsCard";
-import { useRefetchOnReconnect } from "@/components/useRefetchOnReconnect";
+import { useCachedResource } from "@/components/useCachedResource";
+import { useWindowedRows } from "@/components/useWindowedRows";
 import { useOfflineReceiptQueue } from "@/components/useOfflineReceiptQueue";
 import ReviewQueue from "@/components/ReviewQueue";
 import RejectedReceipts from "@/components/RejectedReceipts";
@@ -21,10 +22,17 @@ import {
   readJson,
   redirectToLogin,
 } from "@/components/clientFetch";
-import { pageCacheFetchedAt, readPageCache, writePageCache } from "@/lib/page-cache";
-import { useCacheAfterBoot } from "@/components/invoices/useCacheAfterBoot";
+import { pageCacheFetchedAt, readPageCache } from "@/lib/page-cache";
 import { usePersistedState, useScrollRestoration } from "@/lib/list-ui-state";
-import { useRefetchOnDataVersion } from "@/components/useDataVersion";
+import { rememberReceiptRows } from "@/lib/receipt-row-seed";
+import {
+  appendReceiptPage,
+  nextPageParams,
+  readReceiptPage,
+  receiptPageQuery,
+  reuseEqualReceipts,
+  type ReceiptPageResponse,
+} from "@/lib/receipt-paging";
 
 import { categoryLabel } from "@/lib/receipt-categories";
 import { formatMonth, parseFinnishNumber } from "@/lib/format";
@@ -32,7 +40,6 @@ import { drillFromSearch } from "@/lib/report-drill";
 import {
   coerceReceiptListCache,
   dropReceipts,
-  mergeReceiptPage,
   receiptCountLabel,
   type ReceiptListPayload,
 } from "@/lib/receipt-list";
@@ -96,12 +103,6 @@ const emptyAdvanced: ReceiptAdvancedFilters = {
 };
 
 export default function KuititPage() {
-  const [listResult, setListResult] = useState<{
-    query: string;
-    receipts: SavedReceipt[];
-    count: number;
-    truncated: boolean;
-  } | null>(null);
   const [loadingMore, setLoadingMore] = useState(false);
   // Persisted so back-navigation restores the active month/search/advanced
   // filters instead of resetting the list to its defaults.
@@ -120,7 +121,6 @@ export default function KuititPage() {
     "kuitit.showAllReceipts",
     false
   );
-  const [loadError, setLoadError] = useState<{ query: string; error: unknown } | null>(null);
   const [actionNotice, setActionNotice] = useState<{ text: string; tone: NoticeTone }>({
     text: "",
     tone: "error",
@@ -132,54 +132,33 @@ export default function KuititPage() {
   useEffect(() => {
     if (actionError) actionErrorRef.current?.scrollIntoView({ block: "nearest", behavior: "smooth" });
   }, [actionError]);
-  const [loadAttempt, setLoadAttempt] = useState(0);
-  // A sync, import or save (anywhere) changes the list, the pending queue and the chip counts.
-  useRefetchOnDataVersion(() => setLoadAttempt((a) => a + 1));
-  // The connection came back, or the offline queue just delivered a photo:
-  // the list refetches by itself instead of showing "Lähetetty" next to an
-  // old list or an error card (F32).
-  useRefetchOnReconnect(() => setLoadAttempt((attempt) => attempt + 1));
   const { rows: queueRows } = useOfflineReceiptQueue();
   const deliveredCount = queueRows.filter((row) => row.status === "done").length;
   const deliveredSeen = useRef(deliveredCount);
-  useEffect(() => {
-    if (deliveredCount > deliveredSeen.current) setLoadAttempt((attempt) => attempt + 1);
-    deliveredSeen.current = deliveredCount;
-  }, [deliveredCount]);
-  // null = not known yet: the chips show no number rather than a false 0.
-  const [fetchedCounts, setFetchedCounts] = useState<{ key: string; counts: ReceiptTabCounts } | null>(null);
   // Task 10: set once, right after the offline capture path (ReceiptEditor)
   // sends the user back here -- read from the URL rather than router state
   // so it survives the redirect cleanly, then stripped so a later back
   // navigation to this exact URL does not re-show it.
   const [offlineCaptureNotice, setOfflineCaptureNotice] = useState(false);
 
-  const [pendingReceipts, setPendingReceipts] = useState<SavedReceipt[]>(
-    () => readPageCache<SavedReceipt[]>("receipts-pending") ?? []
-  );
-  const [pendingTruncated, setPendingTruncated] = useState(false);
-  // Rejected receipts stay reachable: shown in a card, restorable (F38).
-  const [rejectedReceipts, setRejectedReceipts] = useState<SavedReceipt[]>([]);
   const [loadingMorePending, setLoadingMorePending] = useState(false);
   const [bulkReviewing, setBulkReviewing] = useState(false);
   const [retryApproveIds, setRetryApproveIds] = useState<string[]>([]);
-  const [, setLoadingPending] = useState(
-    () => readPageCache<SavedReceipt[]>("receipts-pending") === null
-  );
   const [filtersOpen, setFiltersOpen] = useState(false);
 
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [bulkDeleting, setBulkDeleting] = useState(false);
   const [showBulkConfirm, setShowBulkConfirm] = useState(false);
 
-  function toggleSelection(id: string) {
+  // Stable, so the memoised rows do not repaint when one other row is ticked.
+  const toggleSelection = useCallback((id: string) => {
     setSelectedIds((prev) => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
       else next.add(id);
       return next;
     });
-  }
+  }, []);
 
   useEffect(() => {
     const drill = drillFromSearch(window.location.search);
@@ -232,16 +211,11 @@ export default function KuititPage() {
     // A link sets the view once; later edits stay on this page.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-  const pendingCount = pendingReceipts.length;
-  useEffect(() => {
-    if (!focusReviewRef.current || pendingCount === 0 || !reviewSectionRef.current) return;
-    focusReviewRef.current = false;
-    reviewSectionRef.current.scrollIntoView({ block: "start", behavior: "smooth" });
-  }, [pendingCount]);
 
   // Debounce search typing
   useEffect(() => {
-    const t = setTimeout(() => setSearchQuery(searchInput.trim()), 300);
+    // A transition: typing stays responsive while the list under the new query swaps in.
+    const t = setTimeout(() => startTransition(() => setSearchQuery(searchInput.trim())), 300);
     return () => clearTimeout(t);
   }, [searchInput]);
 
@@ -267,66 +241,32 @@ export default function KuititPage() {
   const queryRef = useRef(query);
   queryRef.current = query;
 
-  useEffect(() => {
-    let cancelled = false;
-    // Reloads after the first (version change, mutation, retry) skip any cached copy.
-    const noCache = loadAttempt > 0 ? ({ cache: "no-store" } as const) : undefined;
-    apiFetch(`/api/receipts${query ? `?${query}` : ""}`, noCache)
-      .then((response) =>
-        readJson<{ receipts?: SavedReceipt[]; count?: number; truncated?: boolean }>(
-          response,
-          "Kuittien lataus epäonnistui"
-        )
-      )
-      .then((data) => {
-        if (cancelled) return;
-        setLoadError(null);
-        const page = mergeReceiptPage<SavedReceipt>(
-          [],
-          {
-            receipts: data.receipts || [],
-            count: typeof data.count === "number" ? data.count : (data.receipts || []).length,
-            truncated: Boolean(data.truncated),
-          },
-          0
-        );
-        writePageCache(`receipts:${query}`, page);
-        setListResult({ query, ...page });
-      })
-      .catch((error: unknown) => {
-        if (cancelled) return;
-        if (isUnauthorized(error)) {
-          redirectToLogin();
-          return;
-        }
-        setLoadError({ query, error });
-      });
-
-    apiFetch("/api/receipts?reviewStatus=pending&kind=receipt", noCache)
-      .then((res) =>
-        readJson<{ receipts?: SavedReceipt[]; truncated?: boolean }>(res, "Virhe")
-      )
-      .then((data) => {
-        if (cancelled) return;
-        writePageCache("receipts-pending", data.receipts || []);
-        setPendingReceipts(data.receipts || []);
-        setPendingTruncated(Boolean(data.truncated));
-        setLoadingPending(false);
-      })
-      .catch(() => {
-        if (!cancelled) setLoadingPending(false);
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [query, loadAttempt]);
+  // The list, the review queue, the rejected card and the chip counts are four
+  // separate cached resources (N3): a chip or filter change refetches only the
+  // list under its own key; the queues and counts keep their cached copy and
+  // revalidate only on a sync/save, a reconnect or a pull. A revisit paints the
+  // cached copy at once and the conditional GET (ETag) confirms it.
+  const list = useCachedResource<ReceiptListPayload<SavedReceipt>>(`receipts:${query}`, async (signal) => {
+    const response = await apiFetch(`/api/receipts?${receiptPageQuery(query)}`, { signal });
+    const page = readReceiptPage(await readJson<ReceiptPageResponse<SavedReceipt>>(response, "Kuittien lataus epäonnistui"));
+    const previous = coerceReceiptListCache<SavedReceipt>(readPageCache(`receipts:${query}`));
+    return previous ? { ...page, receipts: reuseEqualReceipts(previous.receipts, page.receipts) } : page;
+  });
+  const pending = useCachedResource<ReceiptListPayload<SavedReceipt>>("receipts-pending", async (signal) => {
+    const response = await apiFetch("/api/receipts?reviewStatus=pending&kind=receipt", { signal });
+    return readReceiptPage(await readJson<ReceiptPageResponse<SavedReceipt>>(response, "Virhe"));
+  });
+  const rejected = useCachedResource<SavedReceipt[]>("receipts-rejected", async (signal) => {
+    const response = await apiFetch("/api/receipts?reviewStatus=rejected", { signal });
+    const data = await readJson<{ receipts?: SavedReceipt[] }>(response, "Hylättyjen haku epäonnistui");
+    return data.receipts || [];
+  });
 
   // Filter-chip counts: DB-side, scoped by the same month/search/advanced
   // filters as the visible list (everything except the tab dimension itself,
-  // which each chip overlays) - the row list above is capped, so counting
-  // those rows would silently undercount past the cap. Refetched after every
-  // mutation below (review/approve/delete) so the chips never go stale.
+  // which each chip overlays) - the row list above is paged, so counting
+  // those rows would silently undercount past the page. Revalidated after every
+  // write (the data version) so the chips never go stale.
   const countsQuery = useMemo(() => {
     const params = new URLSearchParams();
     if (monthFilter) params.set("month", monthFilter);
@@ -339,78 +279,58 @@ export default function KuititPage() {
     return params.toString();
   }, [monthFilter, searchQuery, appliedAdvanced.category, appliedAdvanced.source, appliedAdvanced.minAmount, appliedAdvanced.maxAmount]);
 
-  async function loadCounts(signal?: AbortSignal) {
-    try {
-      const response = await apiFetch(`/api/receipts/counts${countsQuery ? `?${countsQuery}` : ""}`, { signal, cache: loadAttempt > 0 ? "no-store" : undefined });
-      const data = await readJson<{ counts: ReceiptTabCounts }>(response, "Määrien haku epäonnistui");
-      if (signal?.aborted) return;
-      writePageCache(`receipt-counts:${countsQuery}`, data.counts);
-      setFetchedCounts({ key: countsQuery, counts: data.counts });
-    } catch (error) {
-      if (signal?.aborted) return;
-      if (isUnauthorized(error)) redirectToLogin();
-      // Otherwise leave the last-known (or zero) counts - the receipt list
-      // itself still loads independently of this fetch.
-    }
-  }
+  const counts = useCachedResource<ReceiptTabCounts>(`receipt-counts:${countsQuery}`, async (signal) => {
+    const response = await apiFetch(`/api/receipts/counts${countsQuery ? `?${countsQuery}` : ""}`, { signal });
+    const data = await readJson<{ counts: ReceiptTabCounts }>(response, "Määrien haku epäonnistui");
+    return data.counts;
+  });
 
+  const { reload: reloadList } = list;
+  const { reload: reloadPending } = pending;
+  const { reload: reloadRejected } = rejected;
+  const { reload: reloadCounts } = counts;
+  /** Pull to refresh, "Yritä uudelleen" and a delivered offline photo: all four resources again. */
+  const reloadAll = useCallback(() => {
+    reloadList();
+    reloadPending();
+    reloadRejected();
+    reloadCounts();
+  }, [reloadList, reloadPending, reloadRejected, reloadCounts]);
   useEffect(() => {
-    let cancelled = false;
-    const noCache = loadAttempt > 0 ? ({ cache: "no-store" } as const) : undefined;
-    apiFetch("/api/receipts?reviewStatus=rejected", noCache)
-      .then((res) => readJson<{ receipts?: SavedReceipt[] }>(res, "Hylättyjen haku epäonnistui"))
-      .then((data) => {
-        if (!cancelled) setRejectedReceipts(data.receipts || []);
-      })
-      .catch(() => {
-        // The card is a convenience; the rest of the page does not wait for it.
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [loadAttempt]);
+    if (deliveredCount > deliveredSeen.current) reloadAll();
+    deliveredSeen.current = deliveredCount;
+  }, [deliveredCount, reloadAll]);
 
-  useEffect(() => {
-    const controller = new AbortController();
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional fetch-on-mount/refetch: storing the fetched counts is exactly the external-system sync this effect exists for
-    void loadCounts(controller.signal);
-    return () => controller.abort();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [countsQuery, loadAttempt]);
-
-  // A stale-but-cached copy paints immediately while the fetch above
-  // revalidates; the skeleton is reserved for a genuinely never-seen query.
-  // Cold launch: the cache hydrates after this page mounted; these two hooks
-  // re-render it the moment the copies from the last session are readable, so
-  // the reads below find them (N3).
-  useCacheAfterBoot(`receipts:${query}`);
-  useCacheAfterBoot(`receipt-counts:${countsQuery}`);
-  const cachedList =
-    listResult?.query === query
-      ? null
-      : coerceReceiptListCache<SavedReceipt>(readPageCache(`receipts:${query}`));
-  const receipts =
-    listResult?.query === query ? listResult.receipts : cachedList?.receipts ?? [];
-  const receiptCount =
-    listResult?.query === query ? listResult.count : cachedList?.count ?? receipts.length;
-  const truncated =
-    listResult?.query === query ? listResult.truncated : cachedList?.truncated ?? false;
-  const currentLoadError = loadError?.query === query ? loadError.error : null;
-  const loadingList =
-    listResult?.query !== query && cachedList === null && !currentLoadError;
+  const shown = useMemo(() => coerceReceiptListCache<SavedReceipt>(list.value), [list.value]);
+  const receipts = useMemo(() => shown?.receipts ?? [], [shown]);
+  const receiptCount = shown?.count ?? receipts.length;
+  const truncated = shown?.truncated ?? false;
+  const currentLoadError = list.error;
+  const loadingList = shown === null && !currentLoadError;
   // The list that replaces the skeleton fades in (owner report 2026-09-30: fluidity).
   const listFade = useSkeletonFade(loadingList);
 
+  // Receipts opened from here paint their title and amount from this row while the full receipt loads.
+  useEffect(() => rememberReceiptRows(receipts), [receipts]);
+
   useScrollRestoration("kuitit", !loadingList);
 
-  const tabCounts: ReceiptTabCounts | null =
-    fetchedCounts?.key === countsQuery
-      ? fetchedCounts.counts
-      : readPageCache<ReceiptTabCounts>(`receipt-counts:${countsQuery}`) ??
-        (!loadingList && !truncated && kindFilter !== "invoice" && receiptTabFromQuery(appliedAdvanced.type, appliedAdvanced.linkedStatus) === "all"
-          ? countsFromList(receipts)
-          : null);
+  const pendingShown = useMemo(() => coerceReceiptListCache<SavedReceipt>(pending.value), [pending.value]);
+  const pendingReceipts = useMemo(() => pendingShown?.receipts ?? [], [pendingShown]);
+  const pendingTruncated = pendingShown?.truncated ?? false;
+  const rejectedReceipts = useMemo(() => rejected.value ?? [], [rejected.value]);
+  const pendingCount = pendingReceipts.length;
+  useEffect(() => {
+    if (!focusReviewRef.current || pendingCount === 0 || !reviewSectionRef.current) return;
+    focusReviewRef.current = false;
+    reviewSectionRef.current.scrollIntoView({ block: "start", behavior: "smooth" });
+  }, [pendingCount]);
 
+  const tabCounts: ReceiptTabCounts | null =
+    counts.value ??
+    (!loadingList && !truncated && kindFilter !== "invoice" && receiptTabFromQuery(appliedAdvanced.type, appliedAdvanced.linkedStatus) === "all"
+      ? countsFromList(receipts)
+      : null);
 
   const activeChips = useMemo(() => {
     const chips: { key: string; label: string; clear: () => void }[] = [];
@@ -479,11 +399,13 @@ export default function KuititPage() {
     // and the "active filters" chips always see a consistent format.
     const minAmount = parseFinnishNumber(advanced.minAmount);
     const maxAmount = parseFinnishNumber(advanced.maxAmount);
-    setAppliedAdvanced({
-      ...advanced,
-      minAmount: minAmount !== null ? String(minAmount) : "",
-      maxAmount: maxAmount !== null ? String(maxAmount) : "",
-    });
+    startTransition(() =>
+      setAppliedAdvanced({
+        ...advanced,
+        minAmount: minAmount !== null ? String(minAmount) : "",
+        maxAmount: maxAmount !== null ? String(maxAmount) : "",
+      })
+    );
     setFiltersOpen(false);
   }
 
@@ -496,6 +418,12 @@ export default function KuititPage() {
     setKindFilter("receipt");
   }
 
+  /** Receipts that were just approved or rejected leave the review queue without waiting for the refetch. */
+  function dropPending(ids: ReadonlySet<string>) {
+    const base = coerceReceiptListCache<SavedReceipt>(pending.value);
+    if (base && ids.size > 0) pending.set(dropReceipts(base, ids));
+  }
+
   async function handleReview(id: string, status: "approved" | "rejected" | "pending") {
     setActionError("");
     try {
@@ -505,8 +433,8 @@ export default function KuititPage() {
         body: JSON.stringify({ reviewStatus: status }),
       });
       if (!res.ok) await readJson(res, "Päivitys epäonnistui");
-      setLoadAttempt((a) => a + 1);
-      void loadCounts();
+      // The row leaves the queue at once; the write's data version refetches the truth (list, counts, rejected).
+      if (status !== "pending") dropPending(new Set([id]));
       if (status === "rejected") {
         // Reject is never a silent delete: it can be undone here, and the receipt
         // stays listed under Hylätyt kuitit (F38).
@@ -553,8 +481,8 @@ export default function KuititPage() {
       // The refusal is named (F15), and a retry is only offered when a second try can differ.
       setActionError(approvalFailureText(updatedCount, failed), noticeToneFor(failed.length));
       setRetryApproveIds(retryableFailureIds(failed));
-      setLoadAttempt((a) => a + 1);
-      void loadCounts();
+      const refused = new Set(failed.map((item) => item.id));
+      dropPending(new Set(ids.filter((id) => !refused.has(id))));
       return failed;
     } catch (error: unknown) {
       if (isUnauthorized(error)) {
@@ -598,18 +526,8 @@ export default function KuititPage() {
       const failedCount = data.failedCount ?? failed.length;
       const deletedCount = data.deletedCount ?? succeeded.size;
       if (succeeded.size > 0) {
-        setListResult((prev) => {
-          const cached = coerceReceiptListCache<SavedReceipt>(readPageCache(`receipts:${query}`));
-          const base: ReceiptListPayload<SavedReceipt> | null =
-            prev?.query === query
-              ? { receipts: prev.receipts, count: prev.count, truncated: prev.truncated }
-              : cached;
-          if (!base) return prev;
-          const next = dropReceipts(base, succeeded);
-          writePageCache(`receipts:${query}`, next);
-          return { query, ...next };
-        });
-        void loadCounts();
+        const base = coerceReceiptListCache<SavedReceipt>(list.value);
+        if (base) list.set(dropReceipts(base, succeeded));
       }
       setActionError(
         batchOutcomeMessage("Poistettiin", deletedCount, failedCount),
@@ -631,35 +549,16 @@ export default function KuititPage() {
   }
 
   async function loadMoreReceipts() {
-    if (loadingMore || !truncated) return;
+    if (loadingMore || !truncated || !shown) return;
     const requested = query;
-    const offset = receipts.length;
     setLoadingMore(true);
     setActionError("");
     try {
-      const params = new URLSearchParams(requested);
-      params.set("offset", String(offset));
-      const response = await apiFetch(`/api/receipts?${params.toString()}`);
-      const data = await readJson<{ receipts?: SavedReceipt[]; count?: number; truncated?: boolean }>(
-        response,
-        "Kuittien lataus epäonnistui"
-      );
+      const response = await apiFetch(`/api/receipts?${receiptPageQuery(requested, nextPageParams(shown))}`);
+      const data = await readJson<ReceiptPageResponse<SavedReceipt>>(response, "Kuittien lataus epäonnistui");
+      // The owner changed the filter while this page was on its way.
       if (queryRef.current !== requested) return;
-      setListResult((previous) => {
-        const current =
-          previous?.query === requested ? previous.receipts : receipts;
-        const page = mergeReceiptPage(
-          current,
-          {
-            receipts: data.receipts || [],
-            count: typeof data.count === "number" ? data.count : offset + (data.receipts || []).length,
-            truncated: Boolean(data.truncated),
-          },
-          offset
-        );
-        writePageCache(`receipts:${requested}`, page);
-        return { query: requested, ...page };
-      });
+      list.set(appendReceiptPage(shown, readReceiptPage(data)));
     } catch (error: unknown) {
       if (isUnauthorized(error)) {
         redirectToLogin();
@@ -672,21 +571,16 @@ export default function KuititPage() {
   }
 
   async function loadMorePending() {
-    if (loadingMorePending || !pendingTruncated) return;
-    const offset = pendingReceipts.length;
+    if (loadingMorePending || !pendingTruncated || !pendingShown) return;
     setLoadingMorePending(true);
     try {
-      const response = await apiFetch(`/api/receipts?reviewStatus=pending&kind=receipt&offset=${offset}`);
-      const data = await readJson<{ receipts?: SavedReceipt[]; truncated?: boolean }>(
-        response,
-        "Kuittien lataus epäonnistui"
-      );
-      setPendingReceipts((current) => {
-        const next = [...current, ...(data.receipts || [])];
-        writePageCache("receipts-pending", next);
-        return next;
-      });
-      setPendingTruncated(Boolean(data.truncated));
+      const params = new URLSearchParams("reviewStatus=pending&kind=receipt");
+      const next = nextPageParams(pendingShown);
+      if (next.cursor) params.set("cursor", next.cursor);
+      else params.set("offset", String(next.offset));
+      const response = await apiFetch(`/api/receipts?${params.toString()}`);
+      const data = await readJson<ReceiptPageResponse<SavedReceipt>>(response, "Kuittien lataus epäonnistui");
+      pending.set(appendReceiptPage(pendingShown, readReceiptPage(data)));
     } catch (error: unknown) {
       if (isUnauthorized(error)) {
         redirectToLogin();
@@ -702,10 +596,13 @@ export default function KuititPage() {
   const activeTab = kindFilter === "invoice" ? "laskut" : receiptTabFromQuery(appliedAdvanced.type, appliedAdvanced.linkedStatus);
 
   function onTabChange(id: Parameters<typeof receiptTabQuery>[0]) {
-    setKindFilter(id === "laskut" ? "invoice" : "receipt");
     const patch = receiptTabQuery(id);
-    setAdvanced((a) => ({ ...a, ...patch }));
-    setAppliedAdvanced((a) => ({ ...a, ...patch }));
+    // A chip tap is a transition: the chip highlights at once, the rows swap in from the cache or the fetch.
+    startTransition(() => {
+      setKindFilter(id === "laskut" ? "invoice" : "receipt");
+      setAdvanced((a) => ({ ...a, ...patch }));
+      setAppliedAdvanced((a) => ({ ...a, ...patch }));
+    });
   }
 
   // Split the review queue by where the document came from.
@@ -721,7 +618,11 @@ export default function KuititPage() {
   // receipt-approval.ts decides what it carries; the rest stay in their queue.
   const { ready: allPendingReady, incomplete: allPendingIncomplete } = splitApprovable(pendingReceipts);
 
-  const visibleReceipts = showAllReceipts ? receipts : receipts.slice(0, RECENT_LIMIT);
+  const visibleReceipts = useMemo(
+    () => (showAllReceipts ? receipts : receipts.slice(0, RECENT_LIMIT)),
+    [showAllReceipts, receipts]
+  );
+  const rowWindow = useWindowedRows(visibleReceipts.length);
   // Selection is always read through the visible rows (BOOKS-12, P0): "Valitse
   // kaikki" selects what is on screen, and a row hidden by "Näytä vähemmän" or a
   // filter change drops out of the selection instead of being deleted unseen.
@@ -745,8 +646,7 @@ export default function KuititPage() {
       <div className="space-y-6">
         {/* C1.6 (IA-24): pull to refresh runs the same reload as Yritä uudelleen. */}
         <PullToRefresh onRefresh={() => {
-            setLoadError(null);
-            setLoadAttempt((attempt) => attempt + 1);
+            reloadAll();
           }} />
         <PageTitle
           title="Kuitit"
@@ -860,7 +760,7 @@ export default function KuititPage() {
         {!(receipts.length === 0 && !hasFilters && !loadingList) && (
         <ReceiptFilters
           monthFilter={monthFilter}
-          onMonthChange={setMonthFilter}
+          onMonthChange={(month) => startTransition(() => setMonthFilter(month))}
           searchInput={searchInput}
           onSearchChange={setSearchInput}
           filtersOpen={filtersOpen}
@@ -929,8 +829,7 @@ export default function KuititPage() {
             <StaleBanner
               fetchedAt={pageCacheFetchedAt(`receipts:${query}`)}
               onRetry={() => {
-                setLoadError(null);
-                setLoadAttempt((attempt) => attempt + 1);
+                reloadAll();
               }}
             />
           ) : null}
@@ -939,8 +838,7 @@ export default function KuititPage() {
               error={currentLoadError}
               fallback="Kuittien lataus epäonnistui"
               onRetry={() => {
-                setLoadError(null);
-                setLoadAttempt((attempt) => attempt + 1);
+                reloadAll();
               }}
               compact
             />
@@ -967,16 +865,30 @@ export default function KuititPage() {
             />
           ) : (
             <div className={`space-y-3 ${listFade}`}>
-              <Section>
-                <AnimatedRows rows={visibleReceipts.map((r) => ({ key: r.id, node: (
-                  <ReceiptRow
-                    key={r.id}
-                    receipt={r}
-                    selected={selectedIds.has(r.id)}
-                    onToggleSelect={() => toggleSelection(r.id)}
-                  />
-                ) }))} />
-              </Section>
+              {rowWindow.windowed ? (
+                // Over 200 rows only the ones near the screen are mounted; spacers keep the scroll height.
+                <div
+                  ref={rowWindow.listRef}
+                  className="ui-card overflow-hidden rounded-card border border-line bg-surface divide-y divide-line"
+                >
+                  <div data-window-pad="top" aria-hidden style={{ height: rowWindow.padTop, borderWidth: 0 }} />
+                  {visibleReceipts.slice(rowWindow.start, rowWindow.end).map((r) => (
+                    <ReceiptRow key={r.id} receipt={r} selected={selectedIds.has(r.id)} onToggleSelect={toggleSelection} />
+                  ))}
+                  <div data-window-pad="bottom" aria-hidden style={{ height: rowWindow.padBottom, borderWidth: 0 }} />
+                </div>
+              ) : (
+                <Section>
+                  <AnimatedRows rows={visibleReceipts.map((r) => ({ key: r.id, node: (
+                    <ReceiptRow
+                      key={r.id}
+                      receipt={r}
+                      selected={selectedIds.has(r.id)}
+                      onToggleSelect={toggleSelection}
+                    />
+                  ) }))} />
+                </Section>
+              )}
               {receipts.length > RECENT_LIMIT && (
                 <Button
                   type="button"

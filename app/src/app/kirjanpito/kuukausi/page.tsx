@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useEffect, useState } from "react";
+import { Suspense, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { ArrowLeftRight, Camera, Circle, CircleCheck, CircleDashed, Copy, FilePen, FileUp, Percent, Tag, type LucideIcon } from "lucide-react";
@@ -26,6 +26,7 @@ import { MonthDone } from "./MonthDone";
 import { hapticNotify } from "@/lib/haptics";
 import { showToast } from "@/lib/toast";
 import { PERIOD_LOCK_KEY, storeCached } from "@/lib/cached-resource";
+import { useCachedResource } from "@/components/useCachedResource";
 
 /**
  * Kuukauden sulkeminen (FP-13, TF-07): one month's finish line.
@@ -211,33 +212,17 @@ function MonthClose() {
   const month = raw && /^\d{4}-(0[1-9]|1[0-2])$/.test(raw) ? raw : previousMonth(helsinkiMonthKey());
   const { profile } = useProfile();
 
-  const [status, setStatus] = useState<{ month: string; data: MonthStatus } | null>(null);
-  const [loadError, setLoadError] = useState<unknown>(null);
-  const [attempt, setAttempt] = useState(0);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [closing, setClosing] = useState(false);
 
-  useEffect(() => {
-    const controller = new AbortController();
-    apiFetch(`/api/dashboard/month?month=${month}`, { credentials: "include", signal: controller.signal })
-      .then((response) => readJson<MonthStatus>(response, "Kuukauden tietojen lataus epäonnistui"))
-      .then((data) => {
-        if (controller.signal.aborted) return;
-        setLoadError(null);
-        setStatus({ month, data });
-      })
-      .catch((error: unknown) => {
-        if (controller.signal.aborted) return;
-        if (isUnauthorized(error)) {
-          redirectToLogin();
-          return;
-        }
-        setLoadError(error);
-      });
-    return () => controller.abort();
-  }, [month, attempt]);
-
-  const data = status?.month === month ? status.data : null;
+  // Per month, painted from the cache on a revisit and revalidated on a write (N3).
+  const monthStatus = useCachedResource<MonthStatus>(`month-close:${month}`, async (signal) => {
+    const response = await apiFetch(`/api/dashboard/month?month=${month}`, { credentials: "include", signal });
+    return readJson<MonthStatus>(response, "Kuukauden tietojen lataus epäonnistui");
+  });
+  const data = monthStatus.value;
+  const loadError = monthStatus.error;
+  const reloadStatus = monthStatus.reload;
   const kind = vatPeriodKindOf(profile?.vatPeriod);
   const vatPeriod = vatPeriodEndingIn(month, kind);
   const vat = useVatDue(vatPeriod ? profile : null, vatPeriod);
@@ -342,7 +327,7 @@ function MonthClose() {
       setConfirmOpen(false);
       void hapticNotify("success");
       showToast({ tone: "success", text: `${name} on merkitty valmiiksi.` });
-      setAttempt((a) => a + 1);
+      reloadStatus();
     } catch (error) {
       if (isUnauthorized(error)) {
         redirectToLogin();
@@ -351,7 +336,7 @@ function MonthClose() {
       setConfirmOpen(false);
       showToast({ tone: "error", text: errorMessage(error, "Kuukauden sulkeminen epäonnistui") });
       // The page may be showing an old lock; load the real one again.
-      setAttempt((a) => a + 1);
+      reloadStatus();
     } finally {
       setClosing(false);
     }
@@ -367,10 +352,7 @@ function MonthClose() {
         <ConnectionNotice
           error={loadError}
           fallback="Kuukauden tietojen lataus epäonnistui"
-          onRetry={() => {
-            setLoadError(null);
-            setAttempt((a) => a + 1);
-          }}
+          onRetry={reloadStatus}
         />
       ) : !data ? (
         <MonthCloseSkeleton />

@@ -10,6 +10,10 @@ export interface SavedReceipt {
   reference: string | null;
   invoiceNumber: string | null;
   fileName: string;
+  /** Set by a list answer that omits the file name (narrow select). */
+  hasFile?: boolean;
+  hasThumbnail?: boolean;
+  currency?: string | null;
   source: string;
   createdAt: string;
   linkedTransaction?: BankTxMatch | null;

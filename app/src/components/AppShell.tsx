@@ -22,10 +22,9 @@ import {
 import { Icon, IconTile } from "@/components/ds/Icon";
 import { AppMark } from "@/components/AppMark";
 import { ConnectivityBanner } from "@/components/ConnectivityBanner";
-import { OnboardingChat } from "@/components/onboarding/OnboardingChat";
 import { OnboardingResumeCard } from "@/components/onboarding/OnboardingResumeCard";
 import { isOnboardingSnoozed } from "@/lib/onboarding-gate";
-import { AiChatDrawer } from "@/components/AiChatDrawer";
+import dynamic from "next/dynamic";
 import { ToastHost } from "@/components/ToastHost";
 import { useSignOut } from "@/components/useSignOut";
 
@@ -38,8 +37,7 @@ import { useSession } from "@/components/SessionProvider";
 import { IS_MOBILE_BUILD } from "@/lib/build-target";
 import { markFirstScreen, onFirstScreen } from "@/lib/splash";
 import { readPageCache, writePageCache } from "@/lib/page-cache";
-import { readStatementsPage, statementsUrl } from "@/lib/bank-feed-pages";
-import { helsinkiMonthKey } from "@/lib/validation";
+import { warmMainRoutes, warmRoute } from "@/lib/route-warmup";
 import { bumpNavEpoch } from "@/lib/screen-state";
 import {
   adoptTab,
@@ -137,6 +135,13 @@ function writeStoredInitial(value: string | null): void {
   }
 }
 
+// The chat drawer (~55 KB) and the onboarding dialog (~28 KB) are not on any screen's
+// first paint: their code loads when first opened (and in idle time after launch).
+const loadAiChatDrawer = () => import("@/components/AiChatDrawer").then((m) => m.AiChatDrawer);
+const loadOnboardingChat = () => import("@/components/onboarding/OnboardingChat").then((m) => m.OnboardingChat);
+const AiChatDrawer = dynamic(loadAiChatDrawer, { ssr: false });
+const OnboardingChat = dynamic(loadOnboardingChat, { ssr: false });
+
 const noSubscribe = () => () => {};
 
 /** Longest the native splash waits for the first page to have real content. */
@@ -144,14 +149,10 @@ const SPLASH_MAX_WAIT_MS = 350;
 
 let warmedTabs = false;
 
-function currentMonthKey(): string {
-  return helsinkiMonthKey();
-}
-
 /**
  * Warm-up of the main tab payloads, so even the first tap on each tab paints
- * with data instead of a skeleton. Keys and shapes mirror what each page
- * caches for itself; existing entries are never overwritten.
+ * with data instead of a skeleton (`lib/route-warmup.ts` holds the keys and
+ * shapes; existing entries are never overwritten).
  *
  * Web: in idle time, in parallel. Mobile (SHELL-08): once, 1.5 s after the
  * first screen, one request at a time, so it never competes with the
@@ -160,43 +161,10 @@ function currentMonthKey(): string {
 async function warmTabCaches(sequential: boolean) {
   if (warmedTabs) return;
   warmedTabs = true;
-
-  const warm = (url: string, key: string, pick: (data: Record<string, unknown>) => unknown) => {
-    if (readPageCache(key) !== null) return Promise.resolve();
-    return apiFetch(url, { credentials: "include" })
-      .then((res) => (res.ok ? (res.json() as Promise<Record<string, unknown>>) : null))
-      .then((data) => {
-        if (!data) return;
-        const value = pick(data);
-        if (value !== undefined && readPageCache(key) === null) {
-          writePageCache(key, value);
-        }
-      })
-      .catch(() => {
-        // Warm-up only; the page's own fetch will surface real errors.
-      });
-  };
-
-  const month = currentMonthKey();
-  // Key must match the kuitit page's default query (its default sort is
-  // part of the query string).
-  const jobs: Array<() => Promise<void>> = [
-    () =>
-      warm(`/api/dashboard?month=${month}`, `dashboard:${month}`, (d) =>
-        Number.isFinite(d.income) && Number.isFinite(d.expenses) && d.vat ? d : undefined
-      ),
-    () => warm("/api/invoices?", "invoices", (d) => (d.invoices && d.aging ? d : undefined)),
-    () => warm("/api/receipts?sort=date_desc", "receipts:sort=date_desc", (d) => d.receipts ?? []),
-    () => warm("/api/receipts?reviewStatus=pending", "receipts-pending", (d) => d.receipts ?? []),
-    // One page, not the ledger: the whole list was the 5 s request this warm-up used to start.
-    () => warm(statementsUrl(null), "statements", (d) => readStatementsPage(d).statements),
-    () => warm("/api/bank-accounts", "bank-overview", (d) => (d.accounts ? d : undefined)),
-  ];
-  if (sequential) {
-    for (const job of jobs) await job();
-  } else {
-    await Promise.all(jobs.map((job) => job()));
-  }
+  await warmMainRoutes(sequential);
+  // Code, not data: so the first tap on the chat button or the onboarding dialog does not wait for a chunk.
+  void loadAiChatDrawer();
+  void loadOnboardingChat();
 }
 
 /**
@@ -1132,6 +1100,11 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
   const showProfile = profileOpenOn === pathname;
   const chatOpen = chatOpenOn === pathname;
+  // Mounted from the first open on, so closing keeps its slide-out and its thread.
+  const [chatMounted, setChatMounted] = useState(false);
+  if (chatOpen && !chatMounted) setChatMounted(true);
+  const [onboardingMounted, setOnboardingMounted] = useState(false);
+  if (showOnboarding && !onboardingMounted) setOnboardingMounted(true);
   const liveInitial = (user?.firstName?.trim()?.[0] || user?.email?.trim()?.[0] || "").toUpperCase();
   const storedInitial = useSyncExternalStore(noSubscribe, readStoredInitial, () => "");
   const initials = liveInitial || (sessionStatus === "signed-out" ? "" : storedInitial);
@@ -1316,6 +1289,12 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     if (tab) goToRoot({ preventDefault: () => {} }, tab);
   }
 
+  /** A tab was hovered, focused or touched: load its screen's code and its data before the tap lands. */
+  function prefetchRoot(item: NavEntry) {
+    router.prefetch(tabTarget(item.id) ?? item.path);
+    void warmRoute(item.path);
+  }
+
   function renderTab(item: NavEntry) {
     const active = activeTabId === item.id;
     return (
@@ -1324,8 +1303,9 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         href={item.path}
         prefetch
         onClick={(event) => goToRoot(event, item)}
-        onPointerEnter={() => router.prefetch(tabTarget(item.id) ?? item.path)}
-        onFocus={() => router.prefetch(tabTarget(item.id) ?? item.path)}
+        onPointerEnter={() => prefetchRoot(item)}
+        onTouchStart={() => prefetchRoot(item)}
+        onFocus={() => prefetchRoot(item)}
         className={`tab-item relative z-[1] flex min-w-0 flex-1 flex-col items-center justify-center gap-0.5 transition-colors active-press ${
           active ? "text-accent" : "text-ink"
         }`}
@@ -1401,8 +1381,9 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                 href={item.path}
                 prefetch
                 onClick={(event) => goToRoot(event, item)}
-        onPointerEnter={() => router.prefetch(tabTarget(item.id) ?? item.path)}
-        onFocus={() => router.prefetch(tabTarget(item.id) ?? item.path)}
+        onPointerEnter={() => prefetchRoot(item)}
+        onTouchStart={() => prefetchRoot(item)}
+        onFocus={() => prefetchRoot(item)}
                 aria-current={active ? "page" : undefined}
                 className={`flex min-h-12 items-center gap-3 rounded-card px-3 text-left text-body active-press ${
                   active ? "bg-accent-soft font-semibold text-accent" : "font-medium text-ink"
@@ -1489,21 +1470,23 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
       {sessionStatus !== "signed-out" && (
         <>
-          <AiChatDrawer open={chatOpen} onClose={() => setChatOpenOn(null)} />
-          <OnboardingChat
-            isOpen={showOnboarding}
-            onComplete={() => {
-              writePageCache(ONBOARDED_CACHE_KEY, true);
-              setOnboardingSnoozed(false);
-              setShowOnboarding(false);
-              // F21: Koti stays mounted behind the dialog with the profile from before the answers.
-              void refreshSharedProfile();
-            }}
-            onSnooze={() => {
-              setOnboardingSnoozed(true);
-              setShowOnboarding(false);
-            }}
-          />
+          {chatMounted && <AiChatDrawer open={chatOpen} onClose={() => setChatOpenOn(null)} />}
+          {onboardingMounted && (
+            <OnboardingChat
+              isOpen={showOnboarding}
+              onComplete={() => {
+                writePageCache(ONBOARDED_CACHE_KEY, true);
+                setOnboardingSnoozed(false);
+                setShowOnboarding(false);
+                // F21: Koti stays mounted behind the dialog with the profile from before the answers.
+                void refreshSharedProfile();
+              }}
+              onSnooze={() => {
+                setOnboardingSnoozed(true);
+                setShowOnboarding(false);
+              }}
+            />
+          )}
 
           {/* Stays mounted on detail routes and slides away (SHELL-13). */}
           {/* A floating glass capsule (iOS 26): the four tabs share one track with a
