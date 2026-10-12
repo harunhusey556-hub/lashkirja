@@ -43,8 +43,10 @@ public struct ReceiptUploadQueue: Sendable, Equatable {
     }
 
     public static let maxBytes = 15 * 1024 * 1024
-    /// How many photos one library pick may hold.
-    public static let maxPick = 25
+    /// How many files one pick may hold: a company moving onto the app imports
+    /// its previous bookkeeping in one sitting. The one constant the picker
+    /// follows (`CaptureFlow`'s PhotosPicker), so the app and the shell agree.
+    public static let maxPick = 200
 
     public private(set) var rows: [UploadQueueRow] = []
     private var autoOpened = false

@@ -6,8 +6,8 @@ import VisionKit
 import UniformTypeIdentifiers
 import LashKirjaCore
 
-/// Lisää kuitti: camera, photos (up to 25 at once) or files (PDF, images) → the files are
-/// uploaded in turn and read side by side → the owner checks the fields → save (web `ReceiptUploadArea.tsx`).
+/// Lisää kuitti: camera, photos (up to `ReceiptUploadQueue.maxPick` at once) or files (PDF, images) →
+/// the files are uploaded in turn and read side by side → the owner checks the fields → save (web `ReceiptUploadArea.tsx`).
 /// The first file read opens in the editor by itself; the rest wait in "Lähetysjono" with
 /// "Käytä lomakkeessa". Without a connection the files are kept on the phone and sent later
 /// (`OfflineReceiptQueueModel`). With `transactionId` one receipt is picked and the saved one
@@ -28,8 +28,8 @@ struct CaptureFlow: View {
     }
 
     enum Step { case pick, queue, edit(rowId: String, draft: ReceiptDraft) }
-    /// Where a picked file's bytes come from; read only when its turn comes, so ten photos are
-    /// never all in memory at once.
+    /// Where a picked file's bytes come from; read only when its turn comes, so the two hundred
+    /// photos of a full pick are never all in memory at once.
     /// `refused`: a picked file that was never copied (too large, empty); its row fails with the reason.
     enum Source { case camera(UIImage), photo(PhotosPickerItem), file(URL), refused(String) }
     /// A file as it is sent: photos re-encoded to JPEG, PDFs as they are.
