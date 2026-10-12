@@ -52,6 +52,7 @@ import { useCachedResource } from "@/components/useCachedResource";
 import { CUSTOMER_COUNT_KEY, RECURRING_COUNT_KEY } from "@/lib/cached-resource";
 import { isForbidden } from "@/lib/screen-state";
 import { usePersistedState, useScrollRestoration } from "@/lib/list-ui-state";
+import { useRefetchOnDataVersion } from "@/components/useDataVersion";
 import { showToast } from "@/lib/toast";
 import { hapticNotify } from "@/lib/haptics";
 
@@ -264,6 +265,9 @@ function InvoicesPageContent() {
       setStatus((current) => (current === "ready" ? "ready" : "error"));
     }
   }, [filter, customerFilter, monthFilter, query]);
+
+  // A bank sync can mark an invoice paid; any save changes the list. Refetch quietly.
+  useRefetchOnDataVersion(() => void load());
 
   useEffect(() => {
     const controller = new AbortController();

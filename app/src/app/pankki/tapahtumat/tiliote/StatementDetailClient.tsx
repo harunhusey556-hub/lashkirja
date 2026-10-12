@@ -14,6 +14,7 @@ import {
 import type { StatementData } from "@/lib/statement-client";
 import { statementListHref } from "@/lib/navigation";
 import { readPageCache, writePageCache } from "@/lib/page-cache";
+import { useRefetchOnDataVersion } from "@/components/useDataVersion";
 
 export default function StatementDetailPage() {
   const router = useRouter();
@@ -28,7 +29,7 @@ export default function StatementDetailPage() {
   const [loading, setLoading] = useState(!cachedStatement);
   const [loadError, setLoadError] = useState<unknown>(null);
 
-  const loadStatement = useCallback(async () => {
+  const loadStatement = useCallback(async (fresh = false) => {
     if (!statementId) {
       setStatement(null);
       setLoadError(null);
@@ -36,7 +37,7 @@ export default function StatementDetailPage() {
       return;
     }
     try {
-      const res = await apiFetch(`/api/statements/${statementId}`);
+      const res = await apiFetch(`/api/statements/${statementId}`, { cache: fresh ? "no-store" : undefined });
       const data = await readJson<{ statement?: StatementData }>(
         res,
         "Tiliotteen lataus epäonnistui"
@@ -65,6 +66,9 @@ export default function StatementDetailPage() {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional fetch-on-mount: flipping to a loading state and storing the response is exactly the external-system sync this effect exists for
     void loadStatement();
   }, [loadStatement]);
+
+  // A sync or an edit elsewhere changes this statement's rows and balances.
+  useRefetchOnDataVersion(() => void loadStatement(true));
 
   return (
     <>

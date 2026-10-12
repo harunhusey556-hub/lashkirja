@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   PARTIAL_PULL_NOTICE,
   accountOutcomeText,
+  applySyncBalances,
   heldBackNotice,
   isSyncNotice,
   shortenedNotice,
@@ -87,5 +88,53 @@ describe("accountOutcomeText", () => {
     expect(accountOutcomeText({ ...row({ ok: true, imported: 1 }), heldBack: 1, partial: true })).toBe(
       "1 uusi tapahtuma, 1 tapahtuma odottaa lukittua kuukautta, haku jäi kesken"
     );
+  });
+});
+
+describe("applySyncBalances", () => {
+  const connection = (id: string, balance: number | null) => ({
+    id,
+    lastSyncAt: "2026-10-11T06:00:00Z",
+    lastSuccessAt: "2026-10-11T06:00:00Z",
+    accounts: [
+      { id: "acc-1", balance },
+      { id: "acc-2", balance: 5 },
+    ],
+  });
+  const NOW = "2026-10-12T09:00:00Z";
+
+  it("puts the balances of the sync answer on screen at once, and the new sync time", () => {
+    const next = applySyncBalances(
+      [connection("c1", 100), connection("c2", 7)],
+      "c1",
+      { balances: [{ accountId: "acc-1", balanceCents: 12345 }] },
+      NOW
+    );
+    expect(next[0].accounts[0].balance).toBe(123.45);
+    expect(next[0].accounts[1].balance).toBe(5);
+    expect(next[0].lastSuccessAt).toBe(NOW);
+    expect(next[1]).toEqual(connection("c2", 7));
+  });
+
+  it("reads the per-account picture W18 returns with a sync (connectedAccountId + balanceCents)", () => {
+    const next = applySyncBalances(
+      [connection("c1", 100)],
+      "c1",
+      { bank: { accounts: [{ connectedAccountId: "acc-1", balanceCents: 25000, lastSyncAt: NOW }, { connectedAccountId: null, balanceCents: 1 }] } },
+      NOW
+    );
+    expect(next[0].accounts[0].balance).toBe(250);
+    expect(next[0].accounts[1].balance).toBe(5);
+  });
+
+  it("reads balances carried on the account rows too", () => {
+    const next = applySyncBalances([connection("c1", 100)], "c1", { accounts: [{ accountId: "acc-2", ok: true, balance: 9 }] }, NOW);
+    expect(next[0].accounts[1].balance).toBe(9);
+  });
+
+  it("changes nothing about balances when the answer has none, and does not call a failed sync a success", () => {
+    const next = applySyncBalances([connection("c1", 100)], "c1", { accounts: [{ accountId: "acc-1", ok: false }] }, NOW);
+    expect(next[0].accounts[0].balance).toBe(100);
+    expect(next[0].lastSuccessAt).toBe("2026-10-11T06:00:00Z");
   });
 });

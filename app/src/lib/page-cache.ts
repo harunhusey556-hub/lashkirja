@@ -197,6 +197,12 @@ const MUTATION_PREFIXES: Array<{ match: (path: string) => boolean; prefixes: str
   },
 ];
 
+/** Whether a write to this URL changes data that screens show (the same rules as `invalidateForMutation`). */
+export function mutationChangesData(url: string): boolean {
+  const path = url.split("?")[0] ?? url;
+  return MUTATION_PREFIXES.some((rule) => rule.match(path));
+}
+
 export function invalidateForMutation(url: string): string[] {
   const path = url.split("?")[0] ?? url;
   const removed = new Set<string>();

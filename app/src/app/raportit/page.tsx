@@ -53,6 +53,7 @@ import {
 import { pageCacheFetchedAt, readPageCache, writePageCache } from "@/lib/page-cache";
 import { useCacheAfterBoot } from "@/components/invoices/useCacheAfterBoot";
 import { usePersistedState, useScrollRestoration } from "@/lib/list-ui-state";
+import { useRefetchOnDataVersion } from "@/components/useDataVersion";
 
 // Extends a small inline text link's touch target to >=44px tall without
 // growing what's actually drawn (same trick as kirjanpito/alv/page.tsx's
@@ -289,7 +290,7 @@ export default function ReportsPage() {
   }
   const fade = useSkeletonFade(status === "loading");
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (fresh = false) => {
     // Show the cached year immediately and refresh it silently; a year that
     // has never been computed still gets the loading state.
     const cached = readPageCache<Report>(`report:${year}`);
@@ -302,7 +303,7 @@ export default function ReportsPage() {
     try {
       const response = await apiFetch(
         `/api/reports/profit-loss?from=${year}-01&to=${year}-12`,
-        { credentials: "include" }
+        { credentials: "include", cache: fresh ? "no-store" : undefined }
       );
       const data = await readJson<Report>(response, "Raportin haku epäonnistui");
       writePageCache(`report:${year}`, data);
@@ -324,6 +325,9 @@ export default function ReportsPage() {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional fetch-on-mount: flipping to a loading state and storing the response is exactly the external-system sync this effect exists for
     void load();
   }, [load]);
+
+  // A sync, import or save changed the figures behind this report.
+  useRefetchOnDataVersion(() => void load(true));
 
   useScrollRestoration("raportit", status === "ready");
 

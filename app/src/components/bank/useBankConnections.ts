@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { apiFetch, isUnauthorized, readJson, redirectToLogin } from "@/components/clientFetch";
 import { readPageCache, writePageCache } from "@/lib/page-cache";
 import { useCacheAfterBoot } from "@/components/invoices/useCacheAfterBoot";
+import { useRefetchOnDataVersion } from "@/components/useDataVersion";
 import type { BankConnectionSummary, BankConnectionsPayload } from "@/lib/bank-status";
 
 const CACHE_KEY = "bank-connections";
@@ -37,7 +38,8 @@ export function useBankConnections() {
 
   useEffect(() => {
     const controller = new AbortController();
-    apiFetch("/api/bank/connections", { signal: controller.signal })
+    // Only the first load may be served revalidated; a reload (sync, version change) skips any copy.
+    apiFetch("/api/bank/connections", { signal: controller.signal, cache: attempt > 0 ? "no-store" : undefined })
       .then((response) => readJson<BankConnectionsPayload>(response, "Pankkiyhteyden haku epäonnistui"))
       .then((raw) => {
         if (controller.signal.aborted) return;
@@ -61,6 +63,9 @@ export function useBankConnections() {
     setError(null);
     setAttempt((value) => value + 1);
   }, []);
+
+  // The balances and sync times live here: a sync from anywhere makes them stale.
+  useRefetchOnDataVersion(reload);
 
   /** Local update after a mutation (scope toggle, disconnect), cached too. */
   const updateConnections = useCallback(
