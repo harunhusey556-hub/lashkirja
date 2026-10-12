@@ -6,7 +6,7 @@ import { UnauthorizedError, withErrorHandler } from "@/lib/api-errors";
 import { csvAttachmentHeaders, csvMoney, toCsv, type CsvValue } from "@/lib/csv";
 import { centsToEuros } from "@/lib/money";
 import { monthSchema } from "@/lib/validation";
-import { displayStatus, openPosition, type InvoiceStatus } from "@/lib/invoices";
+import { creditedCentsOf, displayStatus, openPosition, type InvoiceStatus } from "@/lib/invoices";
 import { loadAlvPeriodSources } from "@/lib/alv-period";
 import { buildProfitLoss } from "@/lib/reports";
 
@@ -154,6 +154,7 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
       include: {
         customer: { select: { name: true, businessId: true } },
         payments: { select: { amountCents: true } },
+        creditNotes: { select: { grossCents: true, status: true } },
       },
     });
     headers = [
@@ -179,6 +180,7 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
               status: invoice.status,
               grossCents: invoice.grossCents,
               paidCents,
+              creditedCents: creditedCentsOf(invoice.creditNotes),
               closedReason: invoice.closedReason,
             }).openCents
           )
@@ -191,7 +193,10 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
     const invoices = await prisma.purchaseInvoice.findMany({
       where: { userId, ...(window ? { issueDate: window } : {}) },
       orderBy: [{ dueDate: "asc" }],
-      include: { payments: { select: { amountCents: true } } },
+      include: {
+        payments: { select: { amountCents: true } },
+        creditNotes: { select: { grossCents: true, status: true } }, // wave2-schema: PurchaseInvoice.creditsInvoiceId / creditNotes
+      },
     });
     headers = [
       "Päivä", "Eräpäivä", "Toimittaja", "Laskun numero", "Viitenumero",
@@ -215,6 +220,7 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
               status: invoice.status,
               grossCents: invoice.grossCents,
               paidCents,
+              creditedCents: creditedCentsOf(invoice.creditNotes),
               closedReason: invoice.closedReason,
             }).openCents
           )

@@ -134,6 +134,7 @@ export async function reviewOpenMatches(userId: string, options: ReviewRunOption
         dueDate: true,
         grossCents: true,
         payments: { select: { amountCents: true } },
+        creditNotes: { select: { grossCents: true, status: true } },
         customer: { select: { name: true } },
       },
     }),

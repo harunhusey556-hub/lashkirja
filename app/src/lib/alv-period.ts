@@ -87,7 +87,13 @@ export function bookedSalesWhere(userId: string, start: Date, end: Date) {
 export async function loadCountedReceipts(userId: string, start: Date, end: Date) {
   const [receipts, payments] = await Promise.all([
     prisma.receipt.findMany({
-      where: { userId, date: { gte: start, lt: end }, reviewStatus: "approved" },
+      where: {
+        userId,
+        date: { gte: start, lt: end },
+        reviewStatus: "approved",
+        // The document of a supplier credit note is that credit note (negative), not an expense.
+        NOT: { purchaseInvoice: { is: { grossCents: { lt: 0 } } } },
+      },
       include: { linkedTransaction: { select: { id: true } } },
     }),
     prisma.invoicePayment.findMany({
@@ -276,9 +282,13 @@ export async function classifyPurchaseInvoices(userId: string, start: Date, end:
       receiptUnusable: false,
     };
     rows.set(invoice.id, row);
-    if (invoice.status !== "open" && invoice.status !== "paid") row.treatment = "cancelled";
+    // "credited": a credited invoice keeps counting where it was; its credit note counts, negative, in its own period.
+    if (invoice.status !== "open" && invoice.status !== "paid" && invoice.status !== "credited") row.treatment = "cancelled";
     // A reverse-charge invoice carries no VAT of its own but still belongs in the return.
-    else if (invoice.vatCents <= 0 && invoice.vatTreatment === "domestic") row.treatment = "no_vat";
+    else if (invoice.vatCents === 0 && invoice.vatTreatment === "domestic") row.treatment = "no_vat";
+    // A supplier credit note (negative total) is counted as it is: no receipt stands in for it, and
+    // the receipt it was filed from is left out of the return (loadCountedReceipts).
+    else if (invoice.grossCents < 0) row.treatment = "counted";
     else if (receiptCountsPurchase(invoice.receipt)) row.treatment = "linked_receipt";
     else if (invoice.payments.some((payment) => payment.transactionId !== null && documentedRows.has(payment.transactionId))) {
       row.treatment = "bank_receipt";

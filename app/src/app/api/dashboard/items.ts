@@ -16,7 +16,7 @@
 import { prisma } from "@/lib/db";
 import { centsToEuros } from "@/lib/money";
 import { receiptTitle } from "@/lib/display-titles";
-import { openPosition } from "@/lib/invoices";
+import { creditedCentsOf, openPosition } from "@/lib/invoices";
 import { parseVatDetails } from "@/lib/alv";
 import { findPaymentReceiptDuplicates, findReceiptsWithoutVatBreakdown } from "@/lib/alv-period";
 import { matchInvoicePaymentsFromBank } from "@/lib/sales-invoices";
@@ -186,6 +186,7 @@ export async function buildDashboardItems(
         customerId: true,
         customer: { select: { name: true } },
         payments: { select: { amountCents: true } },
+        creditNotes: { select: { grossCents: true, status: true } },
       },
       orderBy: { dueDate: "asc" },
     }),
@@ -315,6 +316,7 @@ export async function buildDashboardItems(
         status: invoice.status,
         grossCents: invoice.grossCents,
         paidCents: invoice.payments.reduce((sum, payment) => sum + payment.amountCents, 0),
+        creditedCents: creditedCentsOf(invoice.creditNotes),
         closedReason: invoice.closedReason,
       });
       return { invoice, position };

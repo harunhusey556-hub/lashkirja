@@ -6,7 +6,7 @@ import { centsToEuros } from "@/lib/money";
 import { parseBusinessDetails, deriveVatProfile } from "@/lib/onboarding";
 import { bankEverConnected, getBankPosition, loadBalanceTrend, type BalancePoint, type BankPosition, type PositionConnection } from "@/lib/bank-position";
 import { loadCashflow, type CashflowMonth } from "@/lib/koti-cashflow";
-import { buildAging, buildAgingReport, openPosition, type InvoiceStatus } from "@/lib/invoices";
+import { buildAging, buildAgingReport, creditedCentsOf, openPosition, type InvoiceStatus } from "@/lib/invoices";
 import { alvReportOf, loadAlvPeriodSources, type AlvPeriodSources } from "@/lib/alv-period";
 import { computeYearTurnover } from "@/lib/alv-threshold";
 import { buildProfitLoss } from "@/lib/reports";
@@ -178,6 +178,7 @@ export async function GET(req: NextRequest) {
         grossCents: true,
         closedReason: true,
         payments: { select: { amountCents: true } },
+        creditNotes: { select: { grossCents: true, status: true } },
       },
     });
     const openPayables = await prisma.purchaseInvoice.findMany({
@@ -188,6 +189,7 @@ export async function GET(req: NextRequest) {
         grossCents: true,
         closedReason: true,
         payments: { select: { amountCents: true } },
+        creditNotes: { select: { grossCents: true, status: true } }, // wave2-schema: PurchaseInvoice.creditsInvoiceId / creditNotes
       },
     });
     const payablesAging = buildAging(
@@ -197,6 +199,7 @@ export async function GET(req: NextRequest) {
           status: invoice.status,
           grossCents: invoice.grossCents,
           paidCents,
+          creditedCents: creditedCentsOf(invoice.creditNotes),
           closedReason: invoice.closedReason,
         });
         return {
@@ -212,6 +215,7 @@ export async function GET(req: NextRequest) {
         dueDate: invoice.dueDate,
         grossCents: invoice.grossCents,
         paidCents: invoice.payments.reduce((sum, payment) => sum + payment.amountCents, 0),
+        creditedCents: creditedCentsOf(invoice.creditNotes),
         closedReason: invoice.closedReason,
       })),
       now

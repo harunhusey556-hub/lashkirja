@@ -29,6 +29,7 @@ import {
   dueDateFor,
   overdueBefore,
   openPosition,
+  creditedCentsOf,
   type AgingReport,
   type InvoiceDisplayStatus,
   type InvoiceLineInput,
@@ -237,6 +238,9 @@ export interface PublicInvoice {
   vat: number;
   gross: number;
   paid: number;
+  /** Total of the credit notes against this invoice (positive); a part credit leaves `status` alone. */
+  credited: number;
+  /** Still owed: gross less payments and credits. */
   open: number;
   closedReason: string | null;
   updatedAt: string;
@@ -367,10 +371,12 @@ export function toPublicInvoice(
   now: Date = new Date()
 ): PublicInvoice {
   const paidCents = invoice.payments.reduce((sum, payment) => sum + payment.amountCents, 0);
+  const creditedCents = creditedCentsOf(invoice.creditNotes);
   const position = openPosition({
     status: invoice.status,
     grossCents: invoice.grossCents,
     paidCents,
+    creditedCents,
     closedReason: invoice.closedReason,
   });
   return {
@@ -396,6 +402,7 @@ export function toPublicInvoice(
     vat: centsToEuros(invoice.vatCents),
     gross: centsToEuros(invoice.grossCents),
     paid: centsToEuros(paidCents),
+    credited: centsToEuros(creditedCents),
     open: centsToEuros(position.openCents),
     closedReason: invoice.closedReason,
     updatedAt: invoice.updatedAt.toISOString(),
@@ -856,9 +863,11 @@ export async function createCreditNote(
     where: { id: invoiceId, userId },
     include: {
       lines: { orderBy: { sortOrder: "asc" } },
+      payments: { select: { amountCents: true } },
       creditNotes: {
         select: {
           grossCents: true,
+          status: true,
           lines: { select: { sortOrder: true, quantityMilli: true } },
         },
       },
@@ -1004,11 +1013,23 @@ export async function createCreditNote(
           select: { id: true, number: true },
         });
         // A partly credited invoice stays where it is: the rest of it is still
-        // owed and can be credited, or paid, the ordinary way.
+        // owed and can be credited, or paid, the ordinary way. Unless what was
+        // already paid covers the rest: then the credit settles it.
+        const paidCents = original.payments.reduce((sum, payment) => sum + payment.amountCents, 0);
+        const settledByCredit =
+          !fullyCredited &&
+          original.status === "sent" &&
+          paidCents >=
+            original.grossCents - creditedCentsOf(original.creditNotes) + totals.grossCents;
         if (fullyCredited) {
           await tx.salesInvoice.update({
             where: { id: original.id },
             data: { status: "credited" },
+          });
+        } else if (settledByCredit) {
+          await tx.salesInvoice.update({
+            where: { id: original.id },
+            data: { status: "paid", paidAt: issueDate },
           });
         }
         await recordActivity(
@@ -1030,6 +1051,8 @@ export async function createCreditNote(
             "status_changed",
             `Tila muuttui: ${statusFi(original.status)} → Hyvitetty.`
           );
+        } else if (settledByCredit) {
+          await recordActivity(tx, original.id, "status_changed", "Tila muuttui: Odottaa maksua → Maksettu.");
         }
         return created.id;
       });
@@ -1276,7 +1299,10 @@ export async function applyInvoicePayment(
 
   const invoice = await conn.salesInvoice.findFirst({
     where: { id: invoiceId, userId },
-    include: { payments: { select: { amountCents: true } } },
+    include: {
+      payments: { select: { amountCents: true } },
+      creditNotes: { select: { grossCents: true, status: true } },
+    },
   });
   if (!invoice) throw new NotFoundError("Laskua ei löytynyt.");
   if (invoice.status === "draft") {
@@ -1318,7 +1344,9 @@ export async function applyInvoicePayment(
   }
 
   const paidBefore = invoice.payments.reduce((sum, payment) => sum + payment.amountCents, 0);
-  const openCents = invoice.grossCents - paidBefore;
+  // A part credit leaves the invoice open for the rest, so that rest is what a payment may cover.
+  const owedCents = invoice.grossCents - creditedCentsOf(invoice.creditNotes);
+  const openCents = owedCents - paidBefore;
   if (manual && amountCents > openCents) {
     throw new AppError(
       openCents <= 0
@@ -1331,9 +1359,9 @@ export async function applyInvoicePayment(
   }
 
   const paidCents = paidBefore + amountCents;
-  const covered = paidCents >= invoice.grossCents;
+  const covered = paidCents >= owedCents;
   const reopens =
-    invoice.status === "paid" && !invoice.closedReason?.trim() && paidCents < invoice.grossCents;
+    invoice.status === "paid" && !invoice.closedReason?.trim() && paidCents < owedCents;
 
   const created = await conn.invoicePayment.create({
     data: {
@@ -1385,14 +1413,19 @@ export async function reopenIfUncovered(
 ): Promise<void> {
   const invoice = await tx.salesInvoice.findUnique({
     where: { id: invoiceId },
-    select: { status: true, closedReason: true, grossCents: true },
+    select: {
+      status: true,
+      closedReason: true,
+      grossCents: true,
+      creditNotes: { select: { grossCents: true, status: true } },
+    },
   });
   if (!invoice || invoice.status !== "paid" || invoice.closedReason?.trim()) return;
   const remaining = await tx.invoicePayment.aggregate({
     where: { invoiceId },
     _sum: { amountCents: true },
   });
-  if ((remaining._sum.amountCents ?? 0) < invoice.grossCents) {
+  if ((remaining._sum.amountCents ?? 0) < invoice.grossCents - creditedCentsOf(invoice.creditNotes)) {
     await tx.salesInvoice.update({
       where: { id: invoiceId },
       data: { status: "sent", paidAt: null },
@@ -1748,6 +1781,7 @@ export async function listInvoices(
       grossCents: true,
       closedReason: true,
       payments: { select: { amountCents: true, paidDate: true } },
+      creditNotes: { select: { grossCents: true, status: true } },
     },
   });
   const aging = buildAgingReport(
@@ -1756,6 +1790,7 @@ export async function listInvoices(
       dueDate: invoice.dueDate,
       grossCents: invoice.grossCents,
       paidCents: invoice.payments.reduce((sum, payment) => sum + payment.amountCents, 0),
+      creditedCents: creditedCentsOf(invoice.creditNotes),
       closedReason: invoice.closedReason,
     })),
     now
@@ -1860,6 +1895,8 @@ export interface InvoicePaymentInvoice {
   dueDate: Date;
   grossCents: number;
   payments: Array<{ amountCents: number }>;
+  /** Credit notes against the invoice: the bank pays what is left after them. */
+  creditNotes?: Array<{ grossCents: number; status?: string }>;
   customer: { name: string };
 }
 
@@ -1871,13 +1908,14 @@ export interface InvoicePaymentPick<R extends InvoicePaymentRow = InvoicePayment
 
 function invoiceGateCandidate(invoice: InvoicePaymentInvoice): GateCandidate {
   const paid = invoice.payments.reduce((sum, payment) => sum + payment.amountCents, 0);
+  const owedCents = invoice.grossCents - creditedCentsOf(invoice.creditNotes);
   return {
     id: invoice.id,
     kind: "lasku",
     date: invoice.issueDate,
     dueDate: invoice.dueDate,
-    amountCents: invoice.grossCents,
-    openCents: invoice.grossCents - paid,
+    amountCents: owedCents,
+    openCents: owedCents - paid,
     party: invoice.customer.name,
     reference: invoice.reference,
     invoiceNumber: String(invoice.number),
@@ -1896,7 +1934,7 @@ export function planInvoicePaymentSuggestions<R extends InvoicePaymentRow, I ext
   const incoming = rows.filter((row) => row.amountCents > 0);
   const open = invoices.filter((invoice) => {
     const paid = invoice.payments.reduce((sum, payment) => sum + payment.amountCents, 0);
-    return invoice.grossCents - paid > 0;
+    return invoice.grossCents - creditedCentsOf(invoice.creditNotes) - paid > 0;
   });
   const rowById = new Map(incoming.map((row) => [row.id, row]));
   const invoiceById = new Map(open.map((invoice) => [invoice.id, invoice]));
@@ -2003,6 +2041,7 @@ export async function matchInvoicePaymentsFromBank(
     where: { userId, status: "sent", documentKind: "invoice" },
     include: {
       payments: { select: { amountCents: true } },
+      creditNotes: { select: { grossCents: true, status: true } },
       customer: { select: { name: true } },
     },
   });

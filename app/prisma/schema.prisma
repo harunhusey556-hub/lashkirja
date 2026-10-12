@@ -801,7 +801,7 @@ model PurchaseInvoice {
   reference          String? // viitenumero, used for bank matching
   issueDate          DateTime
   dueDate            DateTime
-  status             String    @default("open") // open | paid | cancelled
+  status             String    @default("open") // open | paid | credited | cancelled
   grossCents         Int
   vatCents           Int       @default(0)
   netCents           Int       @default(0)
@@ -820,6 +820,12 @@ model PurchaseInvoice {
   /// The recurring template (toistuva ostolasku) that created this invoice.
   recurringPurchaseId String?
   recurringPurchase   RecurringPurchase? @relation(fields: [recurringPurchaseId], references: [id], onDelete: SetNull)
+  /// A supplier credit note (hyvityslasku) is a row with a negative total. This is
+  /// the ostolasku it corrects; null on ordinary invoices and on a credit note
+  /// whose original is not in the app.
+  creditsInvoiceId   String?
+  creditsInvoice     PurchaseInvoice?  @relation("PurchaseCredit", fields: [creditsInvoiceId], references: [id], onDelete: SetNull)
+  creditNotes        PurchaseInvoice[] @relation("PurchaseCredit")
   createdAt          DateTime  @default(now())
   updatedAt          DateTime  @updatedAt
 
@@ -829,6 +835,7 @@ model PurchaseInvoice {
   @@index([userId, status, dueDate])
   @@index([userId, issueDate])
   @@index([recurringPurchaseId])
+  @@index([creditsInvoiceId])
 }
 
 model PurchasePayment {

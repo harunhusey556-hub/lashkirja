@@ -11,6 +11,13 @@
  * side. The one written rule is in alv-period.ts (`classifyPurchaseInvoices`).
  * The owner settles a flagged pair by linking the receipt here, never by
  * rejecting or cancelling.
+ *
+ * A supplier credit note (hyvityslasku) is a row of its own with a NEGATIVE
+ * total (`grossCents < 0`), linked to the invoice it corrects by
+ * `creditsInvoiceId`. It posts the mirror of an ostolasku through the same
+ * ledger path (negative expense, negative input VAT, payables reduced) and
+ * counts in the VAT return in the period of its own date. The corrected
+ * invoice keeps its figures: what is still owed is gross - paid - credited.
  */
 import type { Prisma } from "@/generated/prisma/client";
 import { prisma } from "./db";
@@ -20,14 +27,14 @@ import { formatDate, formatEur } from "./format";
 import { helsinkiCalendarDate, isoDateToUtc } from "./validation";
 import { isValidBusinessId, isValidReferenceNumber, normalizeBusinessId, normalizeReference } from "./finnish-reference";
 import { isValidIban, normalizeIban } from "./iban";
-import { buildAging, displayStatus, openPosition, overdueBefore, type AgingReport } from "./invoices";
+import { buildAging, creditedCentsOf, displayStatus, openPosition, overdueBefore, type AgingReport } from "./invoices";
 import { assertPeriodOpen, PeriodLockedError } from "./period-lock";
 import { planPairs } from "./match-gate";
 import { rejectedPurchasePairs } from "./purchase-bank-match";
 import { isPurchaseVatTreatment, type PurchaseVatTreatment } from "./alv";
 import type { ExtractedReceipt } from "./ai";
 
-export type PurchaseStatus = "open" | "paid" | "cancelled";
+export type PurchaseStatus = "open" | "paid" | "credited" | "cancelled";
 
 export interface PurchaseInvoiceInput {
   supplierName: string;
@@ -66,6 +73,8 @@ export interface PublicPurchaseInvoice {
   vat: number;
   net: number;
   paid: number;
+  /** Total of the credit notes against this invoice (positive). */
+  credited: number;
   open: number;
   closedReason: string | null;
   category: string | null;
@@ -77,6 +86,12 @@ export interface PublicPurchaseInvoice {
   receiptId: string | null;
   /** The recurring template that created this invoice ("Toistuva"), if any. */
   recurringPurchaseId: string | null;
+  /** True for a supplier credit note (a negative total); it is never a payable. */
+  isCreditNote: boolean;
+  /** The invoice a credit note corrects; null on invoices and on a credit note filed on its own. */
+  creditsInvoiceId: string | null;
+  /** Credit notes against this invoice, oldest first (amounts negative, as stored). */
+  creditNotes: Array<{ id: string; issueDate: string; gross: number; invoiceNumber: string | null }>;
   payments: Array<{
     id: string;
     paidDate: string;
@@ -118,6 +133,14 @@ type PurchaseRow = {
   closedReason: string | null;
   receiptId: string | null;
   recurringPurchaseId: string | null;
+  creditsInvoiceId: string | null;
+  creditNotes: Array<{
+    id: string;
+    issueDate: Date;
+    grossCents: number;
+    invoiceNumber: string | null;
+    status: string;
+  }>;
   payments: Array<{
     id: string;
     paidDate: Date;
@@ -136,6 +159,10 @@ type PurchaseRow = {
 };
 
 const purchaseInclude = {
+  creditNotes: { // wave2-schema: PurchaseInvoice.creditsInvoiceId / creditNotes
+    select: { id: true, issueDate: true, grossCents: true, invoiceNumber: true, status: true },
+    orderBy: { issueDate: "asc" as const },
+  },
   payments: {
     orderBy: { paidDate: "asc" as const },
     include: {
@@ -151,15 +178,22 @@ export function toPublicPurchaseInvoice(
   now: Date = new Date()
 ): PublicPurchaseInvoice {
   const paidCents = invoice.payments.reduce((sum, payment) => sum + payment.amountCents, 0);
+  const isCreditNote = invoice.grossCents < 0;
+  const creditedCents = creditedCentsOf(invoice.creditNotes);
   const position = openPosition({
     status: invoice.status,
     grossCents: invoice.grossCents,
     paidCents,
+    creditedCents,
     closedReason: invoice.closedReason,
   });
-  // An open payable ages exactly like an unpaid sales invoice.
-  const derived =
-    invoice.status === "open"
+  // An open payable ages exactly like an unpaid sales invoice. A credit note
+  // is nothing to pay: it lists with the credited invoices.
+  const derived = isCreditNote
+    ? invoice.status === "cancelled"
+      ? "cancelled"
+      : "credited"
+    : invoice.status === "open"
       ? displayStatus({ status: "sent", dueDate: invoice.dueDate }, now) === "overdue"
         ? "overdue"
         : "open"
@@ -180,7 +214,8 @@ export function toPublicPurchaseInvoice(
     vat: centsToEuros(invoice.vatCents),
     net: centsToEuros(invoice.netCents),
     paid: centsToEuros(paidCents),
-    open: centsToEuros(position.openCents),
+    credited: centsToEuros(creditedCents),
+    open: isCreditNote ? 0 : centsToEuros(position.openCents),
     closedReason: invoice.closedReason,
     category: invoice.category,
     notes: invoice.notes,
@@ -190,6 +225,16 @@ export function toPublicPurchaseInvoice(
     paidAt: invoice.paidAt ? invoice.paidAt.toISOString() : null,
     receiptId: invoice.receiptId,
     recurringPurchaseId: invoice.recurringPurchaseId,
+    isCreditNote,
+    creditsInvoiceId: invoice.creditsInvoiceId, // wave2-schema: PurchaseInvoice.creditsInvoiceId / creditNotes
+    creditNotes: invoice.creditNotes
+      .filter((note) => note.status !== "cancelled")
+      .map((note) => ({
+        id: note.id,
+        issueDate: note.issueDate.toISOString().slice(0, 10),
+        gross: centsToEuros(note.grossCents),
+        invoiceNumber: note.invoiceNumber,
+      })),
     payments: invoice.payments.map((payment) => ({
       id: payment.id,
       paidDate: payment.paidDate.toISOString().slice(0, 10),
@@ -286,6 +331,29 @@ async function assertReceiptAvailable(
 }
 
 /**
+ * The supplier's invoice number names one invoice: the same one entered twice doubled its cost
+ * and its payable (audit 2026-10-09). An invoice without a number is not checked. A credit note
+ * has a number of its own and is held to the same rule.
+ */
+async function assertInvoiceNumberFree(
+  userId: string,
+  supplierName: string,
+  rawNumber: string | null | undefined,
+  db: Prisma.TransactionClient | typeof prisma
+): Promise<void> {
+  const invoiceNumber = rawNumber?.trim() || null;
+  if (!invoiceNumber) return;
+  const sameNumber = await db.purchaseInvoice.findMany({
+    where: { userId, invoiceNumber },
+    select: { supplierName: true },
+  });
+  const key = supplierName.toLocaleLowerCase("fi");
+  if (sameNumber.some((other) => other.supplierName.trim().toLocaleLowerCase("fi") === key)) {
+    throw new AppError(`Lasku ${invoiceNumber} toimittajalta ${supplierName} on jo kirjattu.`, "DUPLICATE_PURCHASE_INVOICE", 409);
+  }
+}
+
+/**
  * `db` is the transaction of an idempotent request (lib/idempotency.ts): every
  * read and write then goes through it, so SQLite never waits on itself.
  */
@@ -309,19 +377,7 @@ export async function createPurchaseInvoice(
   const { grossCents, vatCents, netCents } = purchaseAmounts(input.gross, input.vat);
   if (input.receiptId) await assertReceiptAvailable(userId, input.receiptId, undefined, db ?? prisma);
 
-  // The supplier's invoice number names one invoice: the same one entered twice doubled its cost
-  // and its payable (audit 2026-10-09). An invoice without a number is not checked.
-  const invoiceNumber = input.invoiceNumber?.trim() || null;
-  if (invoiceNumber) {
-    const sameNumber = await (db ?? prisma).purchaseInvoice.findMany({
-      where: { userId, invoiceNumber },
-      select: { supplierName: true },
-    });
-    const key = supplierName.toLocaleLowerCase("fi");
-    if (sameNumber.some((other) => other.supplierName.trim().toLocaleLowerCase("fi") === key)) {
-      throw new AppError(`Lasku ${invoiceNumber} toimittajalta ${supplierName} on jo kirjattu.`, "DUPLICATE_PURCHASE_INVOICE", 409);
-    }
-  }
+  await assertInvoiceNumberFree(userId, supplierName, input.invoiceNumber, db ?? prisma);
 
   const created = await (db ?? prisma).purchaseInvoice.create({
     data: {
@@ -371,12 +427,17 @@ export async function fileReceiptAsPurchaseInvoice(
     originalAmountCents: number | null;
     vatTreatment: string;
     type: string;
+    /** Read only to recognise a credit note (isCreditNoteExtraction). */
+    notes?: string | null;
+    rawText?: string | null;
+    fileName?: string | null;
   },
   reading: Pick<ExtractedReceipt, "documentType" | "dueDate"> | null
 ): Promise<
   | { created: true; invoice: PublicPurchaseInvoice }
   | { created: false; skipped: "not_an_invoice" | "sales_document" | "no_supplier" | "no_date" | "no_amount" | "duplicate" }
 > {
+  if (isCreditNoteExtraction(receipt, reading)) return fileReceiptAsPurchaseCredit(userId, receipt);
   if (reading?.documentType !== "invoice") return { created: false, skipped: "not_an_invoice" };
   if (receipt.type === "tulo") return { created: false, skipped: "sales_document" };
   const supplierName = receipt.vendor?.trim();
@@ -453,6 +514,21 @@ export async function updatePurchaseInvoice(
     existing.issueDate,
     input.issueDate ? isoDateToUtc(input.issueDate) : null,
   ]);
+  const isCreditNote = existing.grossCents < 0;
+  if (isCreditNote) {
+    // The amounts of a credit note are what the supplier credited; they are
+    // not edited into a payable. A wrong one is removed and made again.
+    if (input.gross !== undefined || input.vat !== undefined) {
+      throw new AppError(
+        "Hyvityslaskun summaa ei voi muuttaa. Poista hyvityslasku ja luo se uudelleen.",
+        "CREDIT_NOTE_AMOUNT_LOCKED",
+        409
+      );
+    }
+    if (input.status !== undefined && input.status !== "paid" && input.status !== "cancelled") {
+      throw new AppError("Hyvityslasku voidaan vain mitätöidä.", "CREDIT_NOTE_STATUS", 409);
+    }
+  }
 
   const data: Record<string, unknown> = {};
   if (input.supplierName !== undefined) {
@@ -507,6 +583,13 @@ export async function updatePurchaseInvoice(
         409
       );
     }
+    if (grossCents < creditedCentsOf(existing.creditNotes)) {
+      throw new AppError(
+        "Summa on pienempi kuin jo hyvitetty summa.",
+        "AMOUNT_BELOW_CREDITS",
+        409
+      );
+    }
     data.grossCents = grossCents;
     data.vatCents = vatCents;
     data.netCents = netCents;
@@ -522,6 +605,13 @@ export async function updatePurchaseInvoice(
       throw new AppError(
         "Laskulla on maksuja, joten sitä ei voi mitätöidä.",
         "INVOICE_HAS_PAYMENTS",
+        409
+      );
+    }
+    if (input.status === "cancelled" && creditedCentsOf(existing.creditNotes) > 0) {
+      throw new AppError(
+        "Laskulla on hyvityslasku. Mitätöi hyvityslasku ensin.",
+        "INVOICE_HAS_CREDIT_NOTES",
         409
       );
     }
@@ -554,13 +644,20 @@ export async function updatePurchaseInvoice(
     data,
     include: purchaseInclude,
   });
+  // Cancelling or restoring a credit note changes what its invoice still owes.
+  if (isCreditNote && existing.creditsInvoiceId && input.status !== undefined) { // wave2-schema: PurchaseInvoice.creditsInvoiceId / creditNotes
+    await settleAfterCredit(prisma, existing.creditsInvoiceId); // wave2-schema: PurchaseInvoice.creditsInvoiceId / creditNotes
+  }
   return toPublicPurchaseInvoice(updated);
 }
 
 export async function deletePurchaseInvoice(userId: string, id: string): Promise<void> {
   const existing = await prisma.purchaseInvoice.findFirst({
     where: { id, userId },
-    include: { payments: { select: { id: true } } },
+    include: {
+      payments: { select: { id: true } },
+      creditNotes: { select: { status: true } }, // wave2-schema: PurchaseInvoice.creditsInvoiceId / creditNotes
+    },
   });
   if (!existing) throw new NotFoundError("Ostolaskua ei löytynyt.");
   await assertPeriodOpen(userId, [existing.issueDate]);
@@ -571,7 +668,16 @@ export async function deletePurchaseInvoice(userId: string, id: string): Promise
       409
     );
   }
+  if (existing.creditNotes.some((note) => note.status !== "cancelled")) {
+    throw new AppError(
+      "Laskulla on hyvityslasku. Poista hyvityslasku ensin.",
+      "INVOICE_HAS_CREDIT_NOTES",
+      409
+    );
+  }
   await prisma.purchaseInvoice.delete({ where: { id } });
+  // The invoice a deleted credit note corrected owes the credited amount again.
+  if (existing.creditsInvoiceId) await settleAfterCredit(prisma, existing.creditsInvoiceId); // wave2-schema: PurchaseInvoice.creditsInvoiceId / creditNotes
 }
 
 export async function getPurchaseInvoice(
@@ -585,6 +691,270 @@ export async function getPurchaseInvoice(
   });
   if (!invoice) throw new NotFoundError("Ostolaskua ei löytynyt.");
   return toPublicPurchaseInvoice(invoice);
+}
+
+/* ------------------------------------------------------------------ */
+/* Supplier credit notes (hyvityslasku)                                 */
+/* ------------------------------------------------------------------ */
+
+const CREDIT_NOTE_WORDING = /hyvityslasku|hyvitys\s+lasku|credit\s*note|kreditnota|kreditfaktura|gutschrift/i;
+
+/**
+ * Whether a document the AI read as a bill is really a supplier's credit note:
+ * the reading names it so, the total is negative, or the head of the document
+ * says hyvityslasku / credit note. Pure: it only looks at what extraction left on
+ * the receipt. The wording is looked for in the notes, the file name and the
+ * first lines of the text - a payable that merely mentions credit notes in its
+ * terms further down stays a payable.
+ */
+export function isCreditNoteExtraction(
+  receipt: {
+    totalAmountCents?: number | null;
+    notes?: string | null;
+    rawText?: string | null;
+    fileName?: string | null;
+  },
+  reading: { documentType?: string | null } | null
+): boolean {
+  const type = reading?.documentType ?? null;
+  // A document type the reading step may report itself (never produced by the current prompt).
+  if (type === "credit_note" || type === "creditNote") return true;
+  if (type !== "invoice") return false;
+  if ((receipt.totalAmountCents ?? 0) < 0) return true;
+  const head = [receipt.notes, receipt.fileName, receipt.rawText?.slice(0, 400)].filter(Boolean).join(" ");
+  return CREDIT_NOTE_WORDING.test(head);
+}
+
+/**
+ * Re-derives the status of an invoice from what is paid and credited:
+ * fully credited, settled by payments plus credits, or open. A cancelled
+ * invoice and a write-off close (closedReason) are left as they are.
+ */
+async function settleAfterCredit(db: Prisma.TransactionClient | typeof prisma, invoiceId: string): Promise<void> {
+  const invoice = await db.purchaseInvoice.findUnique({
+    where: { id: invoiceId },
+    select: {
+      status: true,
+      grossCents: true,
+      closedReason: true,
+      paidAt: true,
+      payments: { select: { amountCents: true } },
+      creditNotes: { select: { grossCents: true, status: true } }, // wave2-schema: PurchaseInvoice.creditsInvoiceId / creditNotes
+    },
+  });
+  if (!invoice || invoice.status === "cancelled" || invoice.grossCents < 0) return;
+  const paid = invoice.payments.reduce((sum, payment) => sum + payment.amountCents, 0);
+  const credited = creditedCentsOf(invoice.creditNotes);
+  const next: PurchaseStatus =
+    credited >= invoice.grossCents
+      ? "credited"
+      : invoice.closedReason?.trim() || paid + credited >= invoice.grossCents
+        ? "paid"
+        : "open";
+  if (next === invoice.status) return;
+  await db.purchaseInvoice.update({
+    where: { id: invoiceId },
+    data:
+      next === "paid"
+        ? { status: next, paidAt: invoice.paidAt ?? new Date() }
+        : next === "open"
+          ? { status: next, paidAt: null }
+          : { status: next },
+  });
+}
+
+export interface PurchaseCreditInput {
+  /** Cents to credit; omitted = everything still creditable. */
+  amountCents?: number;
+  /** VAT inside the credit, in cents; omitted = the original's VAT pro rata. */
+  vatCents?: number;
+  /** Why the supplier credited (shown on the credit note). */
+  reason: string;
+  /** The credit note's date, YYYY-MM-DD: the VAT period it counts in. */
+  date: string;
+  /** The number printed on the supplier's credit note, if any. */
+  supplierNumber?: string | null;
+}
+
+/**
+ * Records a supplier's credit note against an ostolasku: a row with a negative
+ * total (`creditsInvoiceId` = the original). It reduces what is owed - the
+ * original keeps its figures, its open amount is gross - paid - credited - and
+ * the original turns "credited" only when nothing remains creditable. Posting
+ * and the VAT return read the row like any other ostolasku, so they get the
+ * mirror image with negative signs; there is no separate path.
+ *
+ * Over-credit is refused (409), as are crediting a credit note or a cancelled
+ * invoice. `db`: the transaction of an idempotent request, as createPurchaseInvoice.
+ */
+export async function createPurchaseCreditNote(
+  userId: string,
+  invoiceId: string,
+  input: PurchaseCreditInput,
+  db?: Prisma.TransactionClient
+): Promise<{ creditNote: PublicPurchaseInvoice; invoice: PublicPurchaseInvoice }> {
+  const reason = input.reason?.trim() ?? "";
+  if (reason.length < 3) throw new ValidationError("Kirjoita hyvityksen syy (vähintään kolme merkkiä).");
+  const issueDate = isoDateToUtc(input.date);
+
+  const write = async (tx: Prisma.TransactionClient) => {
+    // A write comes first: it takes the write lock, so the creditable remainder
+    // read below is still true when this transaction commits.
+    await tx.$executeRaw`UPDATE "PurchaseInvoice" SET "grossCents" = "grossCents" WHERE "id" = ${invoiceId} AND "userId" = ${userId}`;
+    const original = await tx.purchaseInvoice.findFirst({
+      where: { id: invoiceId, userId },
+      include: { creditNotes: { select: { grossCents: true, vatCents: true, status: true } } }, // wave2-schema: PurchaseInvoice.creditsInvoiceId / creditNotes
+    });
+    if (!original) throw new NotFoundError("Ostolaskua ei löytynyt.");
+    if (original.grossCents < 0) {
+      throw new AppError("Hyvityslaskua ei hyvitetä uudelleen.", "CREDIT_NOTE_REQUIRED", 409);
+    }
+    if (original.status === "cancelled") {
+      throw new AppError("Mitätöityä ostolaskua ei hyvitetä.", "INVOICE_CANCELLED", 409);
+    }
+    if (issueDate.getTime() < original.issueDate.getTime()) {
+      throw new ValidationError("Hyvityksen päivä ei voi olla ennen ostolaskun päivää.");
+    }
+    await assertPeriodOpen(userId, [issueDate], tx);
+
+    const live = original.creditNotes.filter((note) => note.status !== "cancelled");
+    const creditedGross = live.reduce((sum, note) => sum - note.grossCents, 0);
+    const creditedVat = live.reduce((sum, note) => sum - note.vatCents, 0);
+    const remaining = original.grossCents - creditedGross;
+    if (remaining <= 0) throw new AppError("Lasku on jo hyvitetty.", "ALREADY_CREDITED", 409);
+
+    const amountCents = input.amountCents ?? remaining;
+    if (!Number.isInteger(amountCents) || amountCents <= 0) {
+      throw new ValidationError("Hyvityksen summan on oltava positiivinen.");
+    }
+    if (amountCents > remaining) {
+      throw new AppError(
+        `Hyvitys ${formatEur(centsToEuros(amountCents))} ylittää hyvitettävissä olevan summan ${formatEur(centsToEuros(remaining))}.`,
+        "CREDIT_EXCEEDS_REMAINING",
+        409,
+        { remainingCents: remaining }
+      );
+    }
+    // The last credit takes the VAT that is left, so the credits add up to the
+    // original's VAT to the cent whatever the pro rata rounded to before.
+    const vatCents =
+      input.vatCents ??
+      (amountCents === remaining
+        ? Math.max(0, original.vatCents - creditedVat)
+        : Math.round((original.vatCents * amountCents) / original.grossCents));
+    if (!Number.isInteger(vatCents) || vatCents < 0 || vatCents > amountCents) {
+      throw new ValidationError("Hyvityksen ALV ei voi olla negatiivinen eikä suurempi kuin hyvityksen summa.");
+    }
+    await assertInvoiceNumberFree(userId, original.supplierName, input.supplierNumber, tx);
+
+    const created = await tx.purchaseInvoice.create({
+      data: {
+        userId,
+        supplierName: original.supplierName,
+        supplierBusinessId: original.supplierBusinessId,
+        supplierIban: original.supplierIban,
+        invoiceNumber: input.supplierNumber?.trim() || null,
+        issueDate,
+        dueDate: issueDate,
+        // Nothing is payable on a credit note, but the VAT return only counts open and paid rows.
+        status: "paid",
+        paidAt: issueDate,
+        grossCents: -amountCents,
+        vatCents: -vatCents,
+        netCents: -(amountCents - vatCents),
+        category: original.category,
+        notes: `Hyvitys ostolaskulle${original.invoiceNumber ? ` ${original.invoiceNumber}` : ""}: ${reason}`.slice(0, 2000),
+        currency: original.currency,
+        originalAmountCents:
+          original.originalAmountCents == null
+            ? null
+            : -Math.round((original.originalAmountCents * amountCents) / original.grossCents),
+        vatTreatment: original.vatTreatment,
+        creditsInvoiceId: original.id, // wave2-schema: PurchaseInvoice.creditsInvoiceId / creditNotes
+      },
+      select: { id: true },
+    });
+    await settleAfterCredit(tx, original.id);
+    return created.id;
+  };
+
+  const creditId = db ? await write(db) : await prisma.$transaction(write);
+  const client = db ?? prisma;
+  return {
+    creditNote: await getPurchaseInvoice(userId, creditId, client),
+    invoice: await getPurchaseInvoice(userId, invoiceId, client),
+  };
+}
+
+/**
+ * A document the reading took for a supplier's credit note, filed on its own:
+ * the original is not named on it, so the credit is not linked to an ostolasku
+ * (the owner sees it under Hyvitetyt). The receipt stays linked as the document
+ * and is left out of the VAT return (loadCountedReceipts), so the credit counts
+ * once and with a negative sign instead of as an expense.
+ */
+async function fileReceiptAsPurchaseCredit(
+  userId: string,
+  receipt: {
+    id: string;
+    vendor: string | null;
+    date: Date | null;
+    invoiceNumber: string | null;
+    totalAmountCents: number | null;
+    vatDetails: string | null;
+    category: string | null;
+    currency: string;
+    originalAmountCents: number | null;
+    vatTreatment: string;
+    type: string;
+  }
+): Promise<
+  | { created: true; invoice: PublicPurchaseInvoice }
+  | { created: false; skipped: "sales_document" | "no_supplier" | "no_date" | "no_amount" | "duplicate" }
+> {
+  if (receipt.type === "tulo") return { created: false, skipped: "sales_document" };
+  const supplierName = receipt.vendor?.trim();
+  if (!supplierName) return { created: false, skipped: "no_supplier" };
+  if (!receipt.date) return { created: false, skipped: "no_date" };
+  // A credit note's total is read as printed, with or without its minus sign.
+  const grossCents = Math.abs(receipt.totalAmountCents ?? 0);
+  if (grossCents === 0) return { created: false, skipped: "no_amount" };
+  const vatCents = Math.min(grossCents, Math.abs(eurosToCents(receiptVatTotalEuros(receipt.vatDetails))));
+  const issueDate = receipt.date;
+  try {
+    await assertPeriodOpen(userId, [issueDate]);
+    await assertReceiptAvailable(userId, receipt.id);
+    await assertInvoiceNumberFree(userId, supplierName, receipt.invoiceNumber, prisma);
+    const created = await prisma.purchaseInvoice.create({
+      data: {
+        userId,
+        supplierName,
+        invoiceNumber: receipt.invoiceNumber?.trim() || null,
+        issueDate,
+        dueDate: issueDate,
+        status: "paid",
+        paidAt: issueDate,
+        grossCents: -grossCents,
+        vatCents: -vatCents,
+        netCents: -(grossCents - vatCents),
+        category: receipt.category,
+        notes: "Hyvityslasku",
+        receiptId: receipt.id,
+        currency: receipt.currency,
+        originalAmountCents:
+          receipt.originalAmountCents == null ? null : -Math.abs(receipt.originalAmountCents),
+        vatTreatment: isPurchaseVatTreatment(receipt.vatTreatment) ? receipt.vatTreatment : "domestic",
+      },
+      include: purchaseInclude,
+    });
+    return { created: true, invoice: toPublicPurchaseInvoice(created) };
+  } catch (error) {
+    // The receipt already documents an invoice or credit note: filed before.
+    if (error instanceof AppError && (error.code === "DUPLICATE_PURCHASE_INVOICE" || error.code === "RECEIPT_IN_USE")) {
+      return { created: false, skipped: "duplicate" };
+    }
+    throw error;
+  }
 }
 
 export interface PurchaseReceiptCandidate {
@@ -713,6 +1083,9 @@ export async function recordPurchasePayment(
     if (invoice.status === "cancelled") {
       throw new AppError("Mitätöidylle laskulle ei voi kirjata maksua.", "INVOICE_CANCELLED", 409);
     }
+    if (invoice.grossCents < 0 || invoice.status === "credited") {
+      throw new AppError("Hyvitetylle laskulle ei voi kirjata maksua.", "INVOICE_CREDITED", 409);
+    }
 
     await assertPeriodOpen(userId, [isoDateToUtc(input.paidDate)], tx);
 
@@ -767,7 +1140,9 @@ export async function recordPurchasePayment(
     }
 
     const paidBefore = invoice.payments.reduce((sum, payment) => sum + payment.amountCents, 0);
-    const openCents = invoice.grossCents - paidBefore;
+    // A part credit leaves the invoice open for the rest: that is what a payment may cover.
+    const owedCents = invoice.grossCents - creditedCentsOf(invoice.creditNotes);
+    const openCents = owedCents - paidBefore;
     if (manual && amountCents > openCents) {
       throw new AppError(
         openCents <= 0
@@ -790,7 +1165,7 @@ export async function recordPurchasePayment(
       },
     });
 
-    if (paidBefore + amountCents >= invoice.grossCents && invoice.status === "open") {
+    if (paidBefore + amountCents >= owedCents && invoice.status === "open") {
       await tx.purchaseInvoice.update({
         where: { id: invoiceId },
         data: { status: "paid", paidAt: isoDateToUtc(input.paidDate) },
@@ -813,7 +1188,13 @@ export async function removePurchasePayment(
 ): Promise<PublicPurchaseInvoice> {
   const invoice = await prisma.purchaseInvoice.findFirst({
     where: { id: invoiceId, userId },
-    select: { id: true, status: true, grossCents: true, closedReason: true },
+    select: {
+      id: true,
+      status: true,
+      grossCents: true,
+      closedReason: true,
+      creditNotes: { select: { grossCents: true, status: true } }, // wave2-schema: PurchaseInvoice.creditsInvoiceId / creditNotes
+    },
   });
   if (!invoice) throw new NotFoundError("Ostolaskua ei löytynyt.");
 
@@ -834,7 +1215,7 @@ export async function removePurchasePayment(
       where: { purchaseInvoiceId: invoiceId },
       _sum: { amountCents: true },
     });
-    if ((remaining._sum.amountCents ?? 0) < invoice.grossCents) {
+    if ((remaining._sum.amountCents ?? 0) < invoice.grossCents - creditedCentsOf(invoice.creditNotes)) {
       await prisma.purchaseInvoice.update({
         where: { id: invoiceId },
         data: { status: "open", paidAt: null },
@@ -867,6 +1248,12 @@ export async function listPurchaseInvoices(
     // or 200 earlier non-open rows can crowd the overdue one out of the page.
     where.status = "open";
     where.dueDate = { lt: overdueBefore(now) };
+  } else if (options.status === "credited") {
+    // A credit note belongs with the invoices it corrects, never under "Maksetut".
+    where.OR = [{ status: "credited" }, { grossCents: { lt: 0 }, status: { not: "cancelled" } }];
+  } else if (options.status === "paid") {
+    where.status = "paid";
+    where.grossCents = { gte: 0 };
   } else if (options.status && options.status !== "all") {
     where.status = options.status;
   }
@@ -895,6 +1282,7 @@ export async function listPurchaseInvoices(
       grossCents: true,
       closedReason: true,
       payments: { select: { amountCents: true } },
+      creditNotes: { select: { grossCents: true, status: true } }, // wave2-schema: PurchaseInvoice.creditsInvoiceId / creditNotes
     },
   });
   const aging = buildAging(
@@ -904,6 +1292,7 @@ export async function listPurchaseInvoices(
         status: invoice.status,
         grossCents: invoice.grossCents,
         paidCents,
+        creditedCents: creditedCentsOf(invoice.creditNotes),
         closedReason: invoice.closedReason,
       });
       return {
@@ -928,6 +1317,8 @@ export interface PurchaseInvoiceStatusCounts {
   open: number;
   overdue: number;
   paid: number;
+  /** Credited invoices and the credit notes themselves. */
+  credited: number;
   cancelled: number;
 }
 
@@ -943,17 +1334,20 @@ export async function countPurchaseInvoicesByDisplayStatus(
   now: Date = new Date()
 ): Promise<PurchaseInvoiceStatusCounts> {
   const dueBefore = overdueBefore(now);
-  const [open, overdue, paid, cancelled] = await Promise.all([
+  const [open, overdue, paid, credited, cancelled] = await Promise.all([
     prisma.purchaseInvoice.count({
       where: { userId, status: "open", dueDate: { gte: dueBefore } },
     }),
     prisma.purchaseInvoice.count({
       where: { userId, status: "open", dueDate: { lt: dueBefore } },
     }),
-    prisma.purchaseInvoice.count({ where: { userId, status: "paid" } }),
+    prisma.purchaseInvoice.count({ where: { userId, status: "paid", grossCents: { gte: 0 } } }),
+    prisma.purchaseInvoice.count({
+      where: { userId, OR: [{ status: "credited" }, { grossCents: { lt: 0 }, status: { not: "cancelled" } }] },
+    }),
     prisma.purchaseInvoice.count({ where: { userId, status: "cancelled" } }),
   ]);
-  return { open, overdue, paid, cancelled };
+  return { open, overdue, paid, credited, cancelled };
 }
 
 export interface PurchaseMatchSuggestion {
@@ -986,7 +1380,12 @@ export interface PurchaseMatchResult {
   suggestions: PurchaseMatchSuggestion[];
 }
 
-type OpenPurchase = Prisma.PurchaseInvoiceGetPayload<{ include: { payments: { select: { amountCents: true } } } }>;
+type OpenPurchase = Prisma.PurchaseInvoiceGetPayload<{
+  include: {
+    payments: { select: { amountCents: true } };
+    creditNotes: { select: { grossCents: true; status: true } }; // wave2-schema: PurchaseInvoice.creditsInvoiceId / creditNotes
+  };
+}>;
 type OutgoingRow = {
   id: string;
   amountCents: number;
@@ -999,8 +1398,11 @@ type OutgoingRow = {
 
 async function loadMatchInputs(userId: string): Promise<{ openInvoices: OpenPurchase[]; outgoing: OutgoingRow[] }> {
   const openInvoices = await prisma.purchaseInvoice.findMany({
-    where: { userId, status: "open" },
-    include: { payments: { select: { amountCents: true } } },
+    where: { userId, status: "open", grossCents: { gt: 0 } },
+    include: {
+      payments: { select: { amountCents: true } },
+      creditNotes: { select: { grossCents: true, status: true } }, // wave2-schema: PurchaseInvoice.creditsInvoiceId / creditNotes
+    },
   });
   if (openInvoices.length === 0) return { openInvoices, outgoing: [] };
   const outgoing = await prisma.transaction.findMany({
@@ -1033,7 +1435,9 @@ async function planPurchaseSuggestions(
   const rejected = await rejectedPurchasePairs(userId);
   const rowById = new Map(outgoing.map((row) => [row.id, row]));
   const invoiceById = new Map(openInvoices.map((invoice) => [invoice.id, invoice]));
-  const paidOf = (invoice: OpenPurchase) => invoice.payments.reduce((sum, payment) => sum + payment.amountCents, 0);
+  // Settled = paid or credited: the bank pays what a credit note left.
+  const paidOf = (invoice: OpenPurchase) =>
+    invoice.payments.reduce((sum, payment) => sum + payment.amountCents, 0) + creditedCentsOf(invoice.creditNotes);
   const plan = planPairs(
     outgoing.map((row) => ({ ...row, amountCents: Math.abs(row.amountCents), counterpartyIban: null })),
     openInvoices.map((invoice) => ({
@@ -1041,7 +1445,7 @@ async function planPurchaseSuggestions(
       kind: "lasku" as const,
       date: invoice.issueDate,
       dueDate: invoice.dueDate,
-      amountCents: invoice.grossCents,
+      amountCents: invoice.grossCents - creditedCentsOf(invoice.creditNotes),
       openCents: invoice.grossCents - paidOf(invoice),
       party: invoice.supplierName,
       reference: invoice.reference,
@@ -1103,7 +1507,9 @@ export async function matchPurchasePaymentsFromBank(
     byReference.set(invoice.reference, [...(byReference.get(invoice.reference) ?? []), invoice]);
   }
   const openCents = (invoice: OpenPurchase) =>
-    invoice.grossCents - invoice.payments.reduce((sum, payment) => sum + payment.amountCents, 0);
+    invoice.grossCents -
+    creditedCentsOf(invoice.creditNotes) -
+    invoice.payments.reduce((sum, payment) => sum + payment.amountCents, 0);
   const applied: PurchaseMatchResult["applied"] = [];
   const skippedLocked: PurchaseMatchResult["skippedLocked"] = [];
   const consumed = new Set<string>();

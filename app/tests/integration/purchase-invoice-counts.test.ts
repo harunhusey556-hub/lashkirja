@@ -55,7 +55,7 @@ describe("countPurchaseInvoicesByDisplayStatus / GET /api/purchase-invoices/coun
     const body = await readJson(
       await getCounts(buildRequest("GET", "/api/purchase-invoices/counts", undefined, { cookie }))
     );
-    expect(body.counts).toEqual({ open: 2, overdue: 1, paid: 1, cancelled: 1 });
+    expect(body.counts).toEqual({ open: 2, overdue: 1, paid: 1, credited: 0, cancelled: 1 });
   });
 
   it("requires a session and returns the same numbers once signed in", async () => {
@@ -72,6 +72,7 @@ describe("countPurchaseInvoicesByDisplayStatus / GET /api/purchase-invoices/coun
       open: 1,
       overdue: 0,
       paid: 0,
+      credited: 0,
       cancelled: 0,
     });
   });
