@@ -28,8 +28,24 @@ describe("suggestPurchaseVatTreatment", () => {
 });
 
 describe("foreignFieldsFromExtraction", () => {
-  it("defaults the currency to EUR", () => {
-    expect(foreignFieldsFromExtraction({ ...base, currency: null })).toEqual({ currency: "EUR", vatTreatment: "domestic" });
+  it("defaults the currency to EUR and keeps no original amount", () => {
+    expect(foreignFieldsFromExtraction({ ...base, currency: null })).toEqual({
+      currency: "EUR",
+      vatTreatment: "domestic",
+      originalAmountCents: null,
+    });
     expect(foreignFieldsFromExtraction({ ...base, currency: "USD" }).currency).toBe("USD");
+  });
+
+  it("keeps the amount a non-EUR document printed, in its own currency", () => {
+    expect(foreignFieldsFromExtraction({ ...base, currency: "USD", originalAmount: 50.1 }).originalAmountCents).toBe(5010);
+    // No euro document carries a separate original amount.
+    expect(foreignFieldsFromExtraction({ ...base, currency: "EUR", originalAmount: 50.1 }).originalAmountCents).toBeNull();
+    // A foreign document the AI read without a total has nothing to keep.
+    expect(foreignFieldsFromExtraction({ ...base, currency: "SEK", originalAmount: null }).originalAmountCents).toBeNull();
+  });
+
+  it("suggests the foreign treatment for a USD document", () => {
+    expect(foreignFieldsFromExtraction({ ...base, currency: "USD", category: "ohjelmistot" }).vatTreatment).toBe("non_eu_service");
   });
 });

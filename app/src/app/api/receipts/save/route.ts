@@ -16,6 +16,8 @@ import { assertPeriodOpen } from "@/lib/period-lock";
 import { vatLinesProblem } from "@/lib/receipt-vat";
 import { PURCHASE_VAT_TREATMENTS } from "@/lib/alv";
 import { currencySchema, foreignColumns } from "@/lib/foreign-purchase-input";
+import { storedDocumentKind } from "@/lib/receipt-staging";
+import { fileReceiptAsPurchaseInvoice } from "@/lib/purchase-invoices";
 
 const vatLineSchema = z.object({
   rate: z.number().finite().min(0).max(100),
@@ -81,6 +83,9 @@ export const POST = withErrorHandler(async (req: NextRequest) => {
   }
 
   try {
+    // The stored reading names the document kind (kuitti / lasku / ...): a bill
+    // is filed as an ostolasku below, so it is never silently a plain receipt.
+    let reading = storedDocumentKind(null);
     const receipt = await prisma.$transaction(async (db) => {
       const upload = await db.upload.findFirst({
         where: {
@@ -92,6 +97,7 @@ export const POST = withErrorHandler(async (req: NextRequest) => {
         },
       });
       if (!upload) throw new UploadClaimError();
+      reading = storedDocumentKind(upload.extractedJson);
 
       const claim = await db.upload.updateMany({
         where: {
@@ -128,6 +134,10 @@ export const POST = withErrorHandler(async (req: NextRequest) => {
         },
       });
     });
+
+    // The AI read a payable bill: file it as the ostolasku of the same
+    // purchase, linked to this receipt so the VAT return never counts it twice.
+    const filing = await fileReceiptAsPurchaseInvoice(session.userId!, receipt, reading);
 
     await runMatching(session.userId!).catch((error) =>
       console.error("Matching after receipt save failed:", error)
@@ -193,6 +203,11 @@ export const POST = withErrorHandler(async (req: NextRequest) => {
           })),
         },
       },
+      // What the reading turned into, so a bill is never filed as a plain
+      // kuitti behind the owner's back: the ostolasku created for it, or why
+      // none was (an ordinary receipt, an unclear reading, a duplicate...).
+      purchaseInvoice: filing.created ? filing.invoice : null,
+      purchaseInvoiceSkipped: filing.created ? null : filing.skipped,
     });
   } catch (error) {
     if (error instanceof UploadClaimError) {

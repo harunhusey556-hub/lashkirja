@@ -108,4 +108,24 @@ describe("foreign purchases: no invented rate, no guessed Finnish VAT", () => {
     expect(read.currency).toBeNull();
     expect(read.sellerCountry).toBeNull();
   });
+
+  it("keeps the total a foreign document printed, and a null euro total", () => {
+    const read = normalizeAIResult(
+      { vendor: "OpenCode", currency: "USD", originalAmount: 49.999, totalAmount: null, vatDetails: [] },
+      "openai-compatible"
+    );
+    expect(read.currency).toBe("USD");
+    expect(read.originalAmount).toBe(50);
+    expect(read.totalAmount).toBeNull();
+    // A euro document has no separate original amount.
+    expect(
+      normalizeAIResult({ vendor: "K-Market", currency: "EUR", totalAmount: 12.5 }, "openai-compatible").originalAmount
+    ).toBeNull();
+  });
+
+  it("reads a due date only as a strict date", () => {
+    expect(normalizeAIResult({ dueDate: "2026-10-31" }, "openai-compatible").dueDate).toBe("2026-10-31");
+    expect(normalizeAIResult({ dueDate: "31.10.2026" }, "openai-compatible").dueDate).toBeNull();
+    expect(normalizeAIResult({}, "openai-compatible").dueDate).toBeNull();
+  });
 });

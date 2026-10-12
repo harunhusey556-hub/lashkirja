@@ -19,7 +19,7 @@ export function foreignColumns(
   body: { currency?: string; originalAmount?: number | null; vatTreatment?: PurchaseVatTreatment; type?: string; category?: string | null; vatDetails?: Array<{ rate: number; amount: number }> | null },
   extractedJson: string | null
 ): { currency: string; vatTreatment: PurchaseVatTreatment; originalAmountCents: number | null } {
-  let read: { currency?: string | null; sellerCountry?: string | null; notes?: string | null } = {};
+  let read: { currency?: string | null; sellerCountry?: string | null; notes?: string | null; originalAmount?: number | null } = {};
   try {
     read = extractedJson ? (JSON.parse(extractedJson) as typeof read) : {};
   } catch {
@@ -33,10 +33,13 @@ export function foreignColumns(
     category: body.category ?? null,
     type: body.type,
     vatDetails: body.vatDetails ?? [],
+    originalAmount: read.originalAmount ?? null,
   });
   return {
     currency: body.currency ?? suggested.currency,
     vatTreatment: body.vatTreatment ?? suggested.vatTreatment,
-    originalAmountCents: body.originalAmount == null ? null : eurosToCents(body.originalAmount),
+    // The owner's own figure wins; a foreign document they did not touch keeps
+    // the amount the reading found, so it is never silently dropped.
+    originalAmountCents: body.originalAmount != null ? eurosToCents(body.originalAmount) : suggested.originalAmountCents,
   };
 }

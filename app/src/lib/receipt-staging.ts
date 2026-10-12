@@ -7,7 +7,7 @@
  */
 import type { Prisma } from "@/generated/prisma/client";
 import { prisma } from "./db";
-import type { ExtractedReceipt } from "./ai";
+import type { DocumentType, ExtractedReceipt } from "./ai";
 import { removeUserUpload } from "./storage";
 import { UNREADABLE_RECEIPT_NOTE } from "./receipt-unreadable";
 import { foreignFieldsFromExtraction } from "./foreign-purchase";
@@ -124,6 +124,7 @@ type PendingReceiptFields = Pick<
   | "rawText"
   | "currency"
   | "vatTreatment"
+  | "originalAmountCents"
 >;
 
 /** Same field mapping mail-sync.ts uses for an email-imported receipt
@@ -165,7 +166,23 @@ export function unreadableReceiptFields(fallbackDate: Date): PendingReceiptField
     type: "meno",
     confidence: null,
     rawText: null,
+    originalAmountCents: null,
   };
+}
+
+/** The kind of document a stored reading says an upload is: a bill the owner
+ * owes ("invoice"), a mere receipt, or something not to be filed at all. */
+export function storedDocumentKind(
+  extractedJson: string | null
+): { documentType: DocumentType | null; dueDate: string | null } {
+  if (!extractedJson) return { documentType: null, dueDate: null };
+  try {
+    const read = JSON.parse(extractedJson) as { documentType?: DocumentType | null; dueDate?: string | null };
+    return { documentType: read.documentType ?? null, dueDate: read.dueDate ?? null };
+  } catch {
+    // An unreadable stored reading files nothing on its own.
+    return { documentType: null, dueDate: null };
+  }
 }
 
 /** Creates the pending "app_capture" receipt and claims its upload, inside

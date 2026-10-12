@@ -42,6 +42,14 @@ export interface ExtractedReceipt {
   currency?: string | null;
   /** ISO 3166 alpha-2 country of the seller, when the document names it. */
   sellerCountry?: string | null;
+  /**
+   * The total printed in `currency` when the document is not in euros: the app
+   * never guesses a rate, so `totalAmount` stays null unless euros are printed
+   * too and this is the amount as the document states it.
+   */
+  originalAmount?: number | null;
+  /** The payment due date a bill names (for the ostolasku); null when it shows none. */
+  dueDate?: string | null;
 }
 
 export type DocumentType = "receipt" | "invoice" | "marketing" | "other";
@@ -121,10 +129,12 @@ Palauta VAIN validi JSON seuraavalla rakenteella (ei muuta tekstiä):
   "invoiceNumber": "laskun numero",
   "documentType": "kuitti",
   "currency": "EUR",
-  "sellerCountry": "FI"
+  "sellerCountry": "FI",
+  "originalAmount": null,
+  "dueDate": null
 }
 
-documentType: "kuitti" (ostokuitti tai maksukuitti), "lasku" (maksettava lasku), "markkinointi" (mainos, tarjous, uutiskirje, kampanja — vaikka siinä näkyisi hintoja) tai "muu" (esim. toimitusilmoitus, tiedote, salasanaviesti). Vain kuitti ja lasku kirjataan kirjanpitoon.
+documentType: "kuitti" (ostokuitti tai maksukuitti), "lasku" (maksettava lasku), "markkinointi" (mainos, tarjous, uutiskirje, kampanja — vaikka siinä näkyisi hintoja) tai "muu" (esim. toimitusilmoitus, tiedote, salasanaviesti). Vain kuitti ja lasku kirjataan kirjanpitoon. dueDate = laskun eräpäivä (YYYY-MM-DD), vain jos se lukee dokumentissa, muuten null.
 
 Kategoriat (käytä TARKALLEEN näitä id-arvoja category-kentässä):
 ${categoriesForAiPrompt()}${priorsHint}
@@ -138,7 +148,7 @@ ${categoriesVatHintsForAiPrompt()}
 - Oletus verollisille ostoille: 25,5 % ellei 13,5 % tai 10 % ole selvästi oikea.
 Ulkomaiset ostot:
 - currency = dokumentin valuutta (ISO-koodi, esim. EUR, USD). sellerCountry = myyjän maa (ISO-koodi, esim. FI, IE, US), null jos ei näy.
-- Jos dokumentti ei ole euroissa, totalAmount on euromäärä VAIN jos se lukee dokumentissa. Muuten totalAmount = null ja kirjoita alkuperäinen summa ja valuutta notes-kenttään. ÄLÄ KOSKAAN arvioi valuuttakurssia.
+- Jos dokumentti ei ole euroissa, totalAmount on euromäärä VAIN jos se lukee dokumentissa. Kirjoita aina dokumentissa painettu summa originalAmount-kenttään (desimaaliluku dokumentin omassa valuutassa). ÄLÄ KOSKAAN arvioi valuuttakurssia: jos eurosumma ei lue dokumentissa, totalAmount = null ja summa säilyy originalAmount-kentässä.
 - Ulkomaisen myyjän laskulla ilman ALV:ta (reverse charge / käännetty verovelvollisuus): vatDetails [{rate:0, amount:0}]. Älä arvioi Suomen ALV:ta.
 - Jos ulkomainen myyjä on veloittanut Suomen ALV:n (esim. "VAT – Finland 25.5%"), kirjaa se vatDetails-kenttään sellaisenaan ja mainitse notes-kentässä: "Ulkomainen myyjä veloitti Suomen ALV:n".
 Tyyppi: "tulo" (myynti/tulo) tai "meno" (osto/kulu)
@@ -475,8 +485,16 @@ export function normalizeAIResult(
     typeof parsed.date === "string" && isStrictIsoDate(parsed.date)
       ? parsed.date
       : null;
-  const total = Number(parsed.totalAmount);
+  // A null the model returned stays null - a foreign bill with no euro printed
+  // must not become a zero-euro receipt. Number(null) is 0, so check first.
+  const total = parsed.totalAmount == null ? NaN : Number(parsed.totalAmount);
   const totalAmount = Number.isFinite(total) && total >= 0 ? toCents(total) : null;
+  // The total printed in the document's own currency: kept whole cents like
+  // totalAmount, so a non-EUR bill is never left without its amount.
+  const original = parsed.originalAmount == null ? NaN : Number(parsed.originalAmount);
+  const originalAmount = Number.isFinite(original) && original >= 0 ? toCents(original) : null;
+  const dueDate =
+    typeof parsed.dueDate === "string" && isStrictIsoDate(parsed.dueDate) ? parsed.dueDate : null;
   const allowedRates = new Set([0, 10, 13.5, 14, 24, 25.5]);
   const vatDetails = (Array.isArray(parsed.vatDetails) ? parsed.vatDetails : [])
     .map((line) => {
@@ -503,6 +521,8 @@ export function normalizeAIResult(
     documentType: normalizeDocumentType(parsed.documentType),
     currency: isoCode(parsed.currency, 3),
     sellerCountry: isoCode(parsed.sellerCountry, 2),
+    originalAmount,
+    dueDate,
   };
 }
 
