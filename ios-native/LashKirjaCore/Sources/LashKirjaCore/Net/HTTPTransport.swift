@@ -34,6 +34,10 @@ public final class URLSessionTransport: HTTPTransport, @unchecked Sendable {
         config.httpShouldSetCookies = false
         config.httpCookieAcceptPolicy = .never
         config.httpCookieStorage = nil
+        // The books change on the server (a bank sync, another device): every answer comes from
+        // the server, never from a cached copy, so a reload or pull-to-refresh is always fresh.
+        config.urlCache = nil
+        config.requestCachePolicy = .reloadIgnoringLocalCacheData
         config.timeoutIntervalForRequest = timeout
         session = URLSession(configuration: config)
     }

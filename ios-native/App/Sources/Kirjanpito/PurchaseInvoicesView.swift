@@ -28,6 +28,16 @@ struct PurchaseInvoicesView: View {
     /// A link's chip (a VAT figure opens every status); the owner's own pick replaces it.
     /// Kept apart from `filterRaw` so a link never overwrites the chip remembered between visits.
     @State private var linked: PurchaseFilter?
+    /// "Valitse": invoices picked for a bulk action.
+    @State private var selection = BulkSelection()
+    @State private var bulkAction: BulkAction?
+    /// The reason the server wants when payments do not cover an invoice marked paid.
+    @State private var bulkReason = ""
+
+    enum BulkAction: Identifiable {
+        case markPaid, delete
+        var id: Self { self }
+    }
 
     init(status: PurchaseFilter? = nil) {
         _linked = State(initialValue: status)
@@ -53,6 +63,19 @@ struct PurchaseInvoicesView: View {
         .background(Theme.canvas)
         .navigationTitle("Ostolaskut")
         .toolbar {
+            ToolbarItem(placement: .topBarLeading) {
+                if selection.isActive {
+                    let ids = shownInvoices.map(\.id)
+                    Button(selection.allSelected(ids) ? "Poista valinnat" : "Valitse kaikki") { selection.toggleAll(ids) }
+                }
+            }
+            ToolbarItem(placement: .topBarTrailing) {
+                if selection.isActive {
+                    Button("Valmis") { selection.end() }
+                } else if !shownInvoices.isEmpty {
+                    Button("Valitse") { selection.begin() }
+                }
+            }
             ToolbarItem(placement: .topBarTrailing) {
                 NavigationLink(value: Route.recurringPurchases) { Image(systemName: "repeat") }
                     .accessibilityLabel(RecurringPurchaseText.title)
@@ -62,7 +85,50 @@ struct PurchaseInvoicesView: View {
                     .accessibilityLabel("Uusi ostolasku")
             }
         }
-        .refreshable { await load() }
+        .safeAreaInset(edge: .bottom) {
+            let picked = pickedInvoices
+            if selection.isActive && !picked.isEmpty {
+                let payable = PurchaseBulk.payable(picked).count
+                let deletable = PurchaseBulk.deletable(picked).count
+                BulkBar(count: picked.count, busy: busy, onCancel: { selection.end() }) {
+                    if payable > 0 {
+                        BulkBarButton(title: PurchaseBulk.markPaidLabel(payable)) {
+                            bulkReason = ""
+                            bulkAction = .markPaid
+                        }
+                    }
+                    if deletable > 0 {
+                        BulkBarButton(title: PurchaseBulk.deleteLabel(deletable), destructive: true) { bulkAction = .delete }
+                    }
+                }
+            }
+        }
+        .alert(PurchaseBulk.markPaidTitle(PurchaseBulk.payable(pickedInvoices).count),
+               isPresented: Binding(get: { bulkAction == .markPaid }, set: { if !$0 { bulkAction = nil } })) {
+            let needsReason = PurchaseBulk.needsReason(pickedInvoices)
+            if needsReason { TextField("Perustelu", text: $bulkReason) }
+            Button("Merkitse maksetuksi") { Task { await markPaidSelected() } }
+                .disabled(needsReason && !PurchaseStatusChange.reasonIsLongEnough(bulkReason))
+            Button("Peruuta", role: .cancel) {}
+        } message: {
+            Text(PurchaseBulk.needsReason(pickedInvoices)
+                 ? "Osalle laskuista ei ole kirjattu maksuja koko summalle. Kirjoita vähintään kolmen merkin perustelu, esim. maksettu käteisellä."
+                 : "Kirjatut maksut kattavat laskujen summat.")
+        }
+        .confirmationDialog(
+            PurchaseBulk.deleteTitle(PurchaseBulk.deletable(pickedInvoices).count),
+            isPresented: Binding(get: { bulkAction == .delete }, set: { if !$0 { bulkAction = nil } }),
+            titleVisibility: .visible
+        ) {
+            Button("Poista", role: .destructive) { Task { await deleteSelected() } }
+        } message: {
+            Text("Laskut, joilla on maksuja tai hyvityksiä, jäävät paikalleen.")
+        }
+        .refreshable {
+            // Pull-to-refresh asks every screen again; this one's own load stands for the bump.
+            gate.mark(key: filter.rawValue, version: app.refreshEverything())
+            await load()
+        }
         .task(id: "\(filter.rawValue)|\(app.dataVersion)") {
             guard state.value == nil || gate.isDue(key: filter.rawValue, version: app.dataVersion) else { return }
             // Marked only after a load that finished: a cancelled one must not count as fresh.
@@ -192,7 +258,23 @@ struct PurchaseInvoicesView: View {
         }
     }
 
-    private func row(_ invoice: PurchaseInvoice) -> some View {
+    @ViewBuilder private func row(_ invoice: PurchaseInvoice) -> some View {
+        if selection.isActive {
+            Button { selection.toggle(invoice.id) } label: {
+                HStack(spacing: 12) {
+                    BulkCheckmark(selected: selection.contains(invoice.id))
+                    PurchaseInvoiceRow(invoice: invoice, recurring: recurringIds[invoice.id] != nil)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.pressable)
+            .accessibilityAddTraits(selection.contains(invoice.id) ? .isSelected : [])
+        } else {
+            linkRow(invoice)
+        }
+    }
+
+    private func linkRow(_ invoice: PurchaseInvoice) -> some View {
         NavigationLink(value: Route.purchaseInvoice(invoice.id)) {
             PurchaseInvoiceRow(invoice: invoice, recurring: recurringIds[invoice.id] != nil)
         }
@@ -360,6 +442,81 @@ struct PurchaseInvoicesView: View {
                 let _: Ignored = try await api.send("DELETE", "/api/purchase-invoices/\(id)", body: Optional<EmptyBody>.none)
             }
         }
+    }
+
+    // MARK: Bulk actions
+
+    /// The rows on screen: the chip's list as far as "Näytä lisää" has opened it. Bulk actions
+    /// take only these, never rows a filter or a fold hides.
+    private var shownInvoices: [PurchaseInvoice] {
+        guard let list = state.value else { return [] }
+        let rows = PurchaseFilter.groups(list.invoices.filter { !app.removedIds.contains($0.id) }, filter: filter).flatMap(\.items)
+        return Array(rows.prefix(limit.visible(rows.count)))
+    }
+
+    private var pickedInvoices: [PurchaseInvoice] {
+        guard selection.isActive else { return [] }
+        return shownInvoices.filter { selection.contains($0.id) }
+    }
+
+    /// "Merkitse maksetuksi": `PATCH /api/purchase-invoices/[id]` with `status: paid` for each open
+    /// picked invoice, with the reason when one is needed. No batch route exists for purchases.
+    private func markPaidSelected() async {
+        let invoices = PurchaseBulk.payable(pickedInvoices)
+        let reason = bulkReason.trimmingCharacters(in: .whitespacesAndNewlines)
+        let change = PurchaseStatusChange(status: .paid, closeReason: reason.isEmpty ? nil : reason)
+        await runEach("Merkittiin maksetuksi", invoices.map(\.id)) { id in
+            let _: PurchaseInvoiceResponse = try await app.api.send("PATCH", "/api/purchase-invoices/\(id)", body: change)
+        }
+    }
+
+    /// "Poista": `DELETE /api/purchase-invoices/[id]` for each picked invoice that can go. The rows
+    /// leave the list at once; the refused ones come back.
+    private func deleteSelected() async {
+        let ids = PurchaseBulk.deletable(pickedInvoices).map(\.id)
+        withMotion { app.hide(ids) }
+        await runEach("Poistettiin", ids) { id in
+            let _: Ignored = try await app.api.send("DELETE", "/api/purchase-invoices/\(id)", body: Optional<EmptyBody>.none)
+        }
+        // What failed stays picked and is shown again.
+        withMotion { app.unhide(Array(selection.ids)) }
+    }
+
+    /// One call per invoice, one after another; what failed stays picked, named by its first reason.
+    private func runEach(_ verb: String, _ ids: [String], _ work: (String) async throws -> Void) async {
+        guard !ids.isEmpty, !busy else { return }
+        busy = true
+        message = nil
+        failure = nil
+        defer { busy = false }
+        var done = 0
+        var failed: [String] = []
+        var reasons: [String] = []
+        for (index, id) in ids.enumerated() {
+            do {
+                try await work(id)
+                done += 1
+            } catch is CancellationError {
+                // Not sent: they stay picked (and, for a delete, come back to the list).
+                let rest = Array(ids[index...])
+                failed += rest
+                reasons += rest.map { _ in "" }
+                break
+            } catch {
+                failed.append(id)
+                reasons.append(error.userMessage)
+            }
+        }
+        let outcome = BulkBatch.outcome(verb, done: done, failures: reasons)
+        if failed.isEmpty {
+            message = outcome
+            Haptics.success()
+        } else {
+            failure = outcome
+            Haptics.error()
+        }
+        selection.finish(failed: failed)
+        if done > 0 { app.dataVersion += 1 }
     }
 }
 

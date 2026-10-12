@@ -12,8 +12,21 @@ final class AppModel {
     }
 
     private(set) var phase: Phase = .launching
-    /// Bumped after a change made outside a screen (the "+" sheet), so that screen reloads.
-    var dataVersion = 0
+    /// The one record of how fresh the screens are: bumped by every write the server accepted,
+    /// every pull-to-refresh, coming back to the app, and `/api/sync/version` answering
+    /// differently than before (polled every 30 s in the foreground).
+    let versions = DataVersionStore()
+    /// What the screens that show money reload on (`.task(id: app.dataVersion)` + `ReloadGate`).
+    /// Every caller writes `dataVersion += 1`: any write is one bump of `versions`.
+    var dataVersion: Int {
+        get { versions.version }
+        set { versions.bump() }
+    }
+    /// The last Pankki figures, kept across visits: coming back shows them at once while they
+    /// refresh behind (the hub is a pushed screen, so its own state goes with it).
+    var bankHubMemory: BankHubMemory?
+    /// The last loaded Pankkitapahtumat per month filter ("" = every month), for the same reason.
+    var bankFeedMemory: [String: BankFeedMemory] = [:]
     /// Ids deleted but not yet confirmed by the server: lists leave them out at once, so a delete
     /// does not wait on the server's answer (removing a tiliote can take seconds).
     private(set) var removedIds: Set<String> = []
@@ -49,6 +62,10 @@ final class AppModel {
     /// Sends the debugging trail (EventLog: screens, requests, problem reports) to /api/observe/events.
     let eventUploader: EventLogUploader
     private var eventFlushLoop: Task<Void, Never>?
+    private var versionPoll: Task<Void, Never>?
+    private var versionSettle: Task<Void, Never>?
+    /// A server without `/api/sync/version` (404) is not asked again this session.
+    private var versionRouteMissing = false
 
     init(baseURL: URL = AppConfig.apiBaseURL, store: TokenStore = KeychainTokenStore()) {
         let auth = AuthService(store: store)
@@ -78,7 +95,10 @@ final class AppModel {
         // reload, the reloads logged new events, and the next upload reloaded them again.
         await api.setOnWrite { [weak self] path in
             guard !path.hasPrefix("/api/auth"), !path.hasPrefix("/api/ai/"), !path.hasPrefix("/api/observe") else { return }
-            await MainActor.run { self?.dataVersion += 1 }
+            await MainActor.run {
+                self?.dataVersion += 1
+                self?.settleVersionSoon()
+            }
         }
         await api.setOnUnauthorized { [weak self] in await self?.sessionExpired() }
         let observer = self.observer
@@ -115,6 +135,8 @@ final class AppModel {
         await auth.refreshIfDue()
         // A refused refresh already signed out (with the notice): stop here.
         guard await auth.currentToken() != nil else { return }
+        // After the refresh: the first look at the version goes out with a current token.
+        startVersionPolling()
         // Only for the account it was asked for: a sign-out (and maybe another sign-in) can
         // happen while it loads.
         if let me: MeResponse = try? await api.get("/api/auth/me"), session.isCurrent(started),
@@ -134,6 +156,7 @@ final class AppModel {
         Haptics.success()
         session.next()
         phase = .signedIn(user)
+        startVersionPolling()
         Task { await auth.revokePending() }
     }
 
@@ -170,6 +193,8 @@ final class AppModel {
 
     func background() {
         backgroundedAt = Date()
+        // Nothing to keep fresh while the app is not on screen; `foreground()` asks at once.
+        stopVersionPolling()
         EventLog.shared.log(.lifecycle("background"))
         let uploader = eventUploader
         Task { await uploader.flush() }
@@ -183,6 +208,70 @@ final class AppModel {
         }
         backgroundedAt = nil
         await auth.refreshIfDue()
+        startVersionPolling()
+    }
+
+    // MARK: Freshness
+
+    /// Pull-to-refresh on a screen that shows money: every screen asks again, not only this one,
+    /// and the server's version becomes the new baseline. Returns the version the screen's own
+    /// reload stands for, so its gate does not load a second time for the same bump.
+    @discardableResult
+    func refreshEverything() -> Int {
+        versions.bump()
+        settleVersionSoon()
+        return versions.version
+    }
+
+    /// Asks `/api/sync/version` now and then every 30 s, while signed in and in the foreground.
+    private func startVersionPolling() {
+        versionPoll?.cancel()
+        guard case .signedIn = phase else { return }
+        versionPoll = Task { [weak self] in
+            while !Task.isCancelled {
+                guard let self else { return }
+                await self.pollVersion()
+                try? await Task.sleep(nanoseconds: UInt64(VersionPolling.interval * 1_000_000_000))
+            }
+        }
+    }
+
+    private func stopVersionPolling() {
+        versionPoll?.cancel()
+        versionPoll = nil
+    }
+
+    /// After the app's own write (or a pull-to-refresh) the screens are reloading already: the
+    /// server's next answer is taken as the baseline, so the poll does not reload them again.
+    /// A burst of writes (a bulk action) settles first.
+    private func settleVersionSoon() {
+        versionSettle?.cancel()
+        versionSettle = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 800_000_000)
+            guard !Task.isCancelled else { return }
+            await self?.pollVersion(absorb: true)
+        }
+    }
+
+    /// One look at `/api/sync/version`; an answer that differs from the previous one bumps
+    /// `dataVersion` (unless `absorb`). Returns the answer, nil when there was none.
+    @discardableResult
+    func pollVersion(absorb: Bool = false) async -> SyncVersion? {
+        guard !versionRouteMissing, case .signedIn = phase else { return nil }
+        let started = session.current
+        do {
+            let snapshot: SyncVersion = try await api.get("/api/sync/version")
+            guard session.isCurrent(started) else { return nil }
+            versions.apply(snapshot, absorb: absorb)
+            return snapshot
+        } catch let error as LKError where error.status == 404 {
+            // An older server: the writes, pull-to-refresh and foreground bumps still keep the screens fresh.
+            versionRouteMissing = true
+            return nil
+        } catch {
+            // Offline or a passing failure: the next poll tries again.
+            return nil
+        }
     }
 
     /// A `lashkirja://` link opened the app; a reset link waits for the sign-in screen.
@@ -260,6 +349,13 @@ final class AppModel {
     /// flight. Run before the sign-in screen shows.
     private func endLocalSession() {
         session.next()
+        stopVersionPolling()
+        versionSettle?.cancel()
+        versionRouteMissing = false
+        versions.endSession()
+        // This owner's figures must not show to the next one.
+        bankHubMemory = nil
+        bankFeedMemory = [:]
         chat?.shutdown()
         chat = nil
         DocumentCache.shared.clear()

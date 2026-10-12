@@ -11,7 +11,12 @@ struct KotiView: View {
     var body: some View {
         Group {
             if let model {
-                KotiContent(model: model)
+                KotiContent(model: model, refresh: {
+                    // Pull-to-refresh asks every screen again (Pankki, Raportit…); Koti's own load
+                    // stands for the bump here, so the gate does not load it twice.
+                    gate.mark(version: app.refreshEverything())
+                    await model.load()
+                })
             } else {
                 ProgressView()
             }
@@ -35,6 +40,8 @@ struct KotiView: View {
 private struct KotiContent: View {
     @Environment(AppModel.self) private var app
     @Bindable var model: KotiModel
+    /// Pull-to-refresh: everything asked again, not only Koti.
+    let refresh: () async -> Void
     /// The bank row a receipt is being photographed for.
     @State private var captureFor: CaptureTarget?
     /// Täydennä: the pending receipt whose gaps the approval sheet asks for.
@@ -69,7 +76,7 @@ private struct KotiContent: View {
             }
         }
         .background(Theme.canvas)
-        .refreshable { await model.load() }
+        .refreshable { await refresh() }
         // Another month has its own tasks: back to the first five.
         .onChange(of: model.month) { _, _ in taskLimit.reset() }
         .fullScreenCover(item: $captureFor, onDismiss: { Task { await model.load() } }) { target in
