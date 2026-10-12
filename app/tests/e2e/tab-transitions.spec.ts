@@ -63,21 +63,42 @@ const hubRow = (page: Page, name: string) => page.getByRole("link", { name: new 
 
 const ROWS = '[data-testid="list-row"]';
 
-const steps: Array<{ name: string; go: (page: Page) => Promise<void>; ready: string }> = [
+/**
+ * The Kirjanpito hub, the way the owner reaches it: a tap on another tab's bar
+ * item reopens Kirjanpito where it was left (e.g. Pankki), and a tap on the
+ * active tab scrolls to the top, then pops to the hub; so tap until it shows.
+ */
+async function openHub(page: Page) {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    await tab(page, "Kirjanpito").click();
+    try {
+      await hubRow(page, "Kuitit").waitFor({ state: "visible", timeout: 3_000 });
+      return;
+    } catch {
+      // Still on a remembered Kirjanpito screen; the next tap on the active tab pops to the hub.
+    }
+  }
+  await hubRow(page, "Kuitit").waitFor({ state: "visible", timeout: 3_000 });
+}
+
+// `row` is the Kirjanpito hub row that opens the screen: the bank feed is "Tapahtumat"
+// (/pankki/tapahtumat); a row starting "Pankki" is the bank-connection screen instead.
+const steps: Array<{ name: string; row?: string; go: (page: Page) => Promise<void>; ready: string }> = [
   { name: "Koti", go: (page) => tab(page, "Koti").click(), ready: "main h1, main [data-testid='summary-card']" },
   {
     name: "Kuitit",
     go: async (page) => {
-      await tab(page, "Kirjanpito").click();
+      await openHub(page);
       await hubRow(page, "Kuitit").click();
     },
     ready: ROWS,
   },
   {
     name: "Pankki",
+    row: "Tapahtumat",
     go: async (page) => {
-      await tab(page, "Kirjanpito").click();
-      await hubRow(page, "Pankki").click();
+      await openHub(page);
+      await hubRow(page, "Tapahtumat").click();
     },
     ready: ROWS,
   },
@@ -99,9 +120,8 @@ test("tab transitions with a warm cache are each under 300 ms", async ({ page })
   const timings: Record<string, number> = {};
   for (const step of steps) {
     if (step.name === "Kuitit" || step.name === "Pankki") {
-      await tab(page, "Kirjanpito").click();
-      await page.waitForSelector("main h1", { timeout: 10_000 });
-      timings[step.name] = await tapAndMeasure(page, () => hubRow(page, step.name).click(), step.ready);
+      await openHub(page);
+      timings[step.name] = await tapAndMeasure(page, () => hubRow(page, step.row ?? step.name).click(), step.ready);
     } else {
       timings[step.name] = await tapAndMeasure(page, () => step.go(page), step.ready);
     }
