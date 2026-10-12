@@ -29,6 +29,9 @@ public struct UploadQueueRow: Identifiable, Sendable, Equatable {
     public var error: String?
     /// What the server read, once the row is `ready`.
     public var draft: ReceiptDraft?
+    /// Set on `saved`: the server approved the receipt as it was saved, so it never waits in the
+    /// review queue.
+    public var autoApproved = false
 }
 
 /// The several-files-at-once upload of the new-receipt screen (web `useReceiptUploadQueue.ts`):
@@ -45,8 +48,14 @@ public struct ReceiptUploadQueue: Sendable, Equatable {
     public static let maxBytes = 15 * 1024 * 1024
     /// How many files one pick may hold: a company moving onto the app imports
     /// its previous bookkeeping in one sitting. The one constant the picker
-    /// follows (`CaptureFlow`'s PhotosPicker), so the app and the shell agree.
+    /// follows (`CaptureFlow`'s PhotosPicker), so the app and the shell agree. The web has no
+    /// cap; 200 is PhotosPicker's practical ceiling on a phone, so the iOS limit stops there.
     public static let maxPick = 200
+    /// How many files are on their way to the server at once: enough that a hundred photos do
+    /// not take all night, few enough that the phone and the server are not flooded.
+    public static let uploadConcurrency = 3
+    /// Rows the queue list opens on, and each "Näytä enemmän" adds: a bulk import is hundreds long.
+    public static let listPage = 50
 
     public private(set) var rows: [UploadQueueRow] = []
     private var autoOpened = false
@@ -76,13 +85,24 @@ public struct ReceiptUploadQueue: Sendable, Equatable {
 
     public func row(_ id: String) -> UploadQueueRow? { rows.first { $0.id == id } }
     public var nextPending: UploadQueueRow? { rows.first { $0.status == .pending } }
+    public var uploadingCount: Int { rows.filter { $0.status == .uploading }.count }
+
+    /// The next waiting file, marked uploading in the same step so two callers never take the
+    /// same row; nil while `limit` files are already going up, or when none is waiting.
+    public mutating func claimNext(limit: Int = ReceiptUploadQueue.uploadConcurrency) -> UploadQueueRow? {
+        guard uploadingCount < max(limit, 1), let next = nextPending else { return nil }
+        markUploading(next.id)
+        return next
+    }
 
     public mutating func markUploading(_ id: String) { patch(id) { $0.status = .uploading; $0.progress = "Lähetetään"; $0.error = nil } }
     public mutating func markProcessing(_ id: String) { patch(id) { $0.status = .processing; $0.progress = "Käsitellään" } }
     public mutating func markReady(_ id: String, draft: ReceiptDraft) {
         patch(id) { $0.status = .ready; $0.progress = "Odottaa tarkistusta"; $0.error = nil; $0.draft = draft }
     }
-    public mutating func markSaved(_ id: String) { patch(id) { $0.status = .saved; $0.progress = nil; $0.draft = nil } }
+    public mutating func markSaved(_ id: String, autoApproved: Bool = false) {
+        patch(id) { $0.status = .saved; $0.progress = nil; $0.draft = nil; $0.autoApproved = autoApproved }
+    }
     public mutating func markFailed(_ id: String, _ message: String) { patch(id) { $0.status = .failed; $0.progress = nil; $0.error = message } }
     public mutating func markCancelled(_ id: String) { patch(id) { $0.status = .cancelled; $0.progress = nil; $0.error = nil } }
     public mutating func markBackground(_ id: String) {
@@ -127,6 +147,23 @@ public struct ReceiptUploadQueue: Sendable, Equatable {
     /// After a save the screen closes only when nothing is left to check or to try again.
     public var closesAfterSave: Bool { isFinished && !hasFailed }
     public var offlineCount: Int { rows.filter { $0.status == .offline }.count }
+
+    /// The line under the queue once the files are through, as the web's upload summary:
+    /// "Hyväksyttiin automaattisesti 12 · 3 odottaa tarkistusta · 1 epäonnistui". Nil while files
+    /// are still going up, and when nothing was saved or waits for a check.
+    public var summaryLine: String? {
+        guard !isWorking else { return nil }
+        let saved = rows.filter { $0.status == .saved }
+        let approved = saved.filter { $0.autoApproved }.count
+        // A saved receipt the server did not approve waits in Kuitit; a file read but not yet saved waits here.
+        let waiting = saved.count - approved + rows.filter { $0.status == .ready }.count
+        let failed = rows.filter { $0.status == .failed }.count
+        var parts: [String] = []
+        if approved > 0 { parts.append("Hyväksyttiin automaattisesti \(approved)") }
+        if waiting > 0 { parts.append("\(waiting) odottaa tarkistusta") }
+        if failed > 0 && !parts.isEmpty { parts.append("\(failed) epäonnistui") }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    }
 
     private mutating func patch(_ id: String, _ change: (inout UploadQueueRow) -> Void) {
         guard let index = rows.firstIndex(where: { $0.id == id }) else { return }

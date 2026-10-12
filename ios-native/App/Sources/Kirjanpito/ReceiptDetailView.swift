@@ -38,6 +38,14 @@ struct ReceiptDetailView: View {
                     .frame(maxWidth: .infinity)
                     .listRowBackground(Color.clear)
                 }
+                // Review screen: the picture is on the page, so the fields are checked against it
+                // without a trip to "Näytä kuitti".
+                if r.hasOriginalFile && r.reviewStatus == "pending" {
+                    Section {
+                        ReceiptPreviewImage(receiptId: receiptId) { showFile = true }
+                            .listRowInsets(EdgeInsets())
+                    }
+                }
                 Section {
                     if let date = r.date { LabeledContent("Päivä", value: APIDate.displayDay(date)) }
                     if let category = r.category, !category.isEmpty { LabeledContent("Kategoria", value: ReceiptCategory.label(for: category)) }
@@ -104,11 +112,25 @@ struct ReceiptDetailView: View {
                 }
             }
         }
-        .confirmationDialog("Poistetaanko kuitti?", isPresented: $confirmDelete, titleVisibility: .visible) {
+        .confirmationDialog(deleteTitle, isPresented: $confirmDelete, titleVisibility: .visible) {
             Button("Poista", role: .destructive) { Task { await delete() } }
+        } message: {
+            Text(deleteNote)
         }
         .task { await load() }
         .onDisappear { toastTask?.cancel() }
+    }
+
+    /// The delete dialog names the receipt, so it is clear which one goes.
+    private var deleteTitle: String {
+        guard let r = state.value else { return "Poistetaanko kuitti?" }
+        return "Poistetaanko kuitti · \(r.title)?"
+    }
+
+    private var deleteNote: String {
+        guard let r = state.value else { return "" }
+        guard let amount = r.totalAmount else { return "\(r.title) poistetaan." }
+        return "\(r.title) · \(Money.format(amount)) poistetaan."
     }
 
     // MARK: Vendor rule

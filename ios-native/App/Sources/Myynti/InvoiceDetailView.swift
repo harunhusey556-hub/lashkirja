@@ -38,8 +38,11 @@ struct InvoiceDetailView: View {
     /// Card details and refund state of the card payments, by `posPaymentId`.
     @State private var cardPayments: [String: POSPaymentView] = [:]
 
-    enum SheetKind: Identifiable { case payment, card, send, pdf, edit, reminder, reminderPdf, close; var id: Self { self } }
-    enum ConfirmKind: Identifiable, Hashable { case delete, credit, markSent, refund(Invoice.Payment); var id: Self { self } }
+    /// The credit note made by the credit sheet: pushed once the sheet has closed.
+    @State private var creditedId: String?
+
+    enum SheetKind: Identifiable { case payment, card, send, pdf, edit, reminder, reminderPdf, close, credit; var id: Self { self } }
+    enum ConfirmKind: Identifiable, Hashable { case delete, markSent, refund(Invoice.Payment); var id: Self { self } }
 
     var body: some View {
         List {
@@ -91,7 +94,13 @@ struct InvoiceDetailView: View {
             if !tabChosen, let status { tab = InvoiceDetailLayout.initialTab(overdue: status == .overdue) }
         }
         .disabled(busy)
-        .sheet(item: $sheet, onDismiss: { Task { await load() } }) { kind in
+        .sheet(item: $sheet, onDismiss: {
+            if let id = creditedId {
+                creditedId = nil
+                pushedId = id
+            }
+            Task { await load() }
+        }) { kind in
             if let invoice = state.value {
                 switch kind {
                 case .payment: PaymentSheet(invoice: invoice)
@@ -106,6 +115,7 @@ struct InvoiceDetailView: View {
                     if result.isWarning { warning = result.message; notice = nil } else { notice = result.message; warning = nil }
                 }
                 case .close: CloseReasonSheet { reason in Task { await setStatus(.close(reason: reason)) } }
+                case .credit: InvoiceCreditSheet(invoice: invoice) { id in creditedId = id }
                 case .pdf: DocumentPreviewSheet(path: "/api/invoices/\(invoice.id)/pdf", fileName: "Lasku-\(invoice.number).pdf", cacheKey: invoice.updatedAt)
                 case .edit: InvoiceFormView(existing: invoice)
                 case .reminder:
@@ -120,7 +130,6 @@ struct InvoiceDetailView: View {
         .confirmationDialog(confirmTitle, isPresented: Binding(get: { confirm != nil }, set: { if !$0 { confirm = nil } }), titleVisibility: .visible) {
             switch confirm {
             case .delete: Button("Poista luonnos", role: .destructive) { Task { await deleteDraft() } }
-            case .credit: Button("Luo hyvityslasku") { Task { await credit() } }
             case .markSent: Button("Merkitse lähetetyksi") { Task { await setStatus(.markSent) } }
             case .refund(let payment): Button("Palauta maksu", role: .destructive) { Task { await refund(payment) } }
             case nil: EmptyView()
@@ -131,12 +140,17 @@ struct InvoiceDetailView: View {
 
     private var confirmTitle: String {
         switch confirm {
-        case .delete: "Poistetaanko luonnos?"
-        case .credit: "Luodaanko hyvityslasku? Alkuperäinen lasku kuitataan hyvitetyksi."
+        case .delete: deleteDraftTitle
         case .markSent: "Merkitäänkö lasku lähetetyksi ilman sähköpostia?"
         case .refund(let payment): "Palautetaanko korttimaksu \(Money.format(payment.amount))? Raha palautetaan asiakkaan kortille Stripen kautta."
         case nil: ""
         }
+    }
+
+    /// A draft has no number worth naming yet: the customer and the sum say which one goes.
+    private var deleteDraftTitle: String {
+        guard let invoice = state.value else { return "Poistetaanko luonnos?" }
+        return "Poistetaanko luonnos · \(invoice.customer.name), \(Money.format(invoice.gross))?"
     }
 
     /// Amount, customer, where the invoice stands and the three dates, in one card.
@@ -425,7 +439,7 @@ struct InvoiceDetailView: View {
                 Button { confirm = .markSent } label: { Label("Merkitse lähetetyksi", systemImage: "checkmark.circle") }
             }
             if invoice.displayStatus != .draft && invoice.displayStatus != .credited && !invoice.isCreditNote {
-                Button { confirm = .credit } label: { Label("Hyvitä", systemImage: "arrow.uturn.backward") }
+                Button { sheet = .credit } label: { Label("Hyvitä", systemImage: "arrow.uturn.backward") }
             }
             if InvoiceStatusChange.canClose(status: invoice.status, open: invoice.open, isCreditNote: invoice.isCreditNote) {
                 Button { sheet = .close } label: { Label("Sulje perustelulla", systemImage: "checkmark.seal") }
@@ -519,14 +533,6 @@ struct InvoiceDetailView: View {
         toastAction = nil
         withMotion { toast = nil }
         if let action { Task { await action() } }
-    }
-
-    private func credit() async {
-        await run {
-            let r: InvoiceResponse = try await app.api.send("POST", "/api/invoices/\(invoiceId)/credit", body: EmptyBody())
-            pushedId = r.invoice.id
-        }
-        await load()
     }
 
     private func duplicate() async {

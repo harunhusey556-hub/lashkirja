@@ -66,7 +66,12 @@ struct QueuedReceiptsCard: View {
                         confirmRemove = nil
                     }
                 } message: {
-                    Text("Kuvaa ei lähetetä, jos poistat sen jonosta.")
+                    // Names the photo by the day it was taken, as its row does.
+                    if let id = confirmRemove, let item = waiting.first(where: { $0.id == id }) {
+                        Text("\(OfflineReceiptRules.title(createdAt: item.createdAt)): kuvaa ei lähetetä, jos poistat sen jonosta.")
+                    } else {
+                        Text("Kuvaa ei lähetetä, jos poistat sen jonosta.")
+                    }
                 }
             }
             if !sent.isEmpty {

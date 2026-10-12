@@ -27,6 +27,17 @@ struct KirjanpitoView: View {
                     HubRow(title: "Ostolaskut", subtitle: "Saapuneet laskut ja niiden maksut", symbol: "tray.full")
                 }
             }
+            // The two matchings the web reaches from its tabs: receipts to bank rows, and bank
+            // payments to purchase invoices (the latter opens the ostolaskut list, which holds
+            // its suggestions; there is no separate screen for it yet).
+            Section("Kohdistus") {
+                NavigationLink(value: Route.bankFeedFiltered(month: nil, onlyOpen: true, focus: nil)) {
+                    HubRow(title: "Kohdista kuitit", subtitle: "Pankkitapahtumat, joille puuttuu kuitti", symbol: "link")
+                }
+                NavigationLink(value: Route.purchaseInvoices) {
+                    HubRow(title: "Kohdista ostolaskujen maksut", subtitle: "Pankkimaksut ostolaskuille", symbol: "creditcard")
+                }
+            }
             Section("Kuun lopussa") {
                 NavigationLink(value: Route.periods) {
                     HubRow(title: "Kuukauden sulku", subtitle: "Tarkista ja lukitse valmiit kuukaudet", symbol: "lock.rectangle.stack")
