@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { prisma } from "@/lib/db";
 import { resetRateLimitsForTests } from "@/lib/rate-limit";
 import { claimAssistantReply, listConversationMessages, priorContextTurns, runAssistantTurn } from "@/lib/chat-store";
@@ -23,10 +23,17 @@ let cookie: string;
 
 beforeEach(async () => {
   delete process.env.COPILOT_GITHUB_TOKEN;
+  // A model key in the shell or .env sent each of the 22 posts of the rate-limit test to the
+  // real provider (a hung call lasts the 30 s turn timeout = the test timeout). Tests never use the network.
+  vi.stubEnv("LLM_API_KEY", "");
   resetRateLimitsForTests();
   await resetDatabase();
   user = await createUser();
   cookie = await sessionCookie(user);
+});
+
+afterEach(() => {
+  vi.unstubAllEnvs();
 });
 
 async function postMessage(message: string, extra: Record<string, unknown> = {}) {

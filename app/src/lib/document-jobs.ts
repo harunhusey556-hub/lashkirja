@@ -9,6 +9,7 @@ import {
   type ExtractedReceipt,
 } from "./ai";
 import { ensureReceiptPreviewImage } from "./preview";
+import { euroConversion } from "./fx-rates";
 import { resolveUserUploadPath } from "./storage";
 import { RECEIPT_PHASE } from "./screen-state";
 import { findActiveVendorRule } from "./vendor-rules";
@@ -82,6 +83,10 @@ async function persistExtraction(
         documentType: extracted.documentType ?? null,
         originalAmount: extracted.originalAmount ?? null,
         dueDate: extracted.dueDate ?? null,
+        // Which rate priced a foreign total, kept so the euro figure can be explained later.
+        fxRate: extracted.fxRate ?? null,
+        fxRateDate: extracted.fxRateDate ?? null,
+        fxSource: extracted.fxSource ?? null,
       }),
       // An unreadable file is typed in by hand: its receipt is "manual", not "ocr".
       extractionSource: extracted.unreadable ? "manual" : extracted.source === "ai" ? "ai" : "ocr",
@@ -211,6 +216,20 @@ export async function processDocumentJob(jobId: string): Promise<void> {
         const previous = extracted.category;
         extracted = { ...extracted, category: rule.category };
         appliedRule = { vendor: rule.vendor, category: rule.category, previous };
+      }
+    }
+
+    // A foreign document with no euro total printed is priced at the document's
+    // own rate or the ECB's; a failed lookup leaves the gap for the owner.
+    if (!extracted.unreadable && extracted.totalAmount == null && extracted.currency && extracted.currency !== "EUR") {
+      const fx = await euroConversion({
+        currency: extracted.currency,
+        originalAmount: extracted.originalAmount,
+        date: extracted.date,
+        printedRate: extracted.fxRate,
+      });
+      if (fx) {
+        extracted = { ...extracted, totalAmount: fx.totalAmount, fxRate: fx.fxRate, fxRateDate: fx.fxRateDate, fxSource: fx.fxSource };
       }
     }
 

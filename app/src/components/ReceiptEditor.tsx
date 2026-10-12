@@ -84,7 +84,7 @@ import { useConnectivity } from "@/lib/connectivity";
 import { useOfflineReceiptQueue } from "@/components/useOfflineReceiptQueue";
 import { tintedButtonClass } from "@/components/control-styles";
 import { isPurchaseVatTreatment, PURCHASE_VAT_TREATMENTS, type PurchaseVatTreatment } from "@/lib/alv";
-import { foreignFieldsFromExtraction, VAT_TREATMENT_HINTS, VAT_TREATMENT_LABELS } from "@/lib/foreign-purchase";
+import { foreignFieldsFromExtraction, fxRateLine, VAT_TREATMENT_HINTS, VAT_TREATMENT_LABELS } from "@/lib/foreign-purchase";
 
 /** The fields the receipt form shows an error under (the VAT rows are `vat-<n>`). */
 const RECEIPT_FORM_SLOTS = ["vendor", "date", "totalAmount", "category", "reference", "invoiceNumber", "notes"];
@@ -198,6 +198,8 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
   const [formData, setFormData] = useState(emptyForm);
   const [baseline, setBaseline] = useState(emptyForm);
   const [updatedAt, setUpdatedAt] = useState("");
+  // Which rate priced the prefilled euro total; shown only while the owner has not typed another figure.
+  const [fxNote, setFxNote] = useState<{ line: string; total: string } | null>(null);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [conflict, setConflict] = useState(false);
   const [useCustomCategory, setUseCustomCategory] = useState(false);
@@ -254,6 +256,13 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
       fieldConfidence: upload.extracted.fieldConfidence,
     });
     const extractedTotal = moneyField(upload.extracted.totalAmount);
+    const fxLine = fxRateLine({
+      currency: upload.extracted.currency,
+      fxRate: upload.extracted.fxRate,
+      fxRateDate: upload.extracted.fxRateDate,
+      fxSource: upload.extracted.fxSource,
+    });
+    setFxNote(fxLine && extractedTotal ? { line: fxLine, total: extractedTotal } : null);
     setFormData({
       vendor: upload.extracted.vendor || "",
       date: upload.extracted.date || "",
@@ -282,8 +291,8 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
         vatDetails: (upload.extracted.vatDetails ?? []).map((detail) => ({ rate: detail.rate ?? 0, amount: detail.amount ?? 0 })),
       }),
       // A non-EUR document keeps the amount the reading found in its own
-      // currency; the owner still checks it, and the euro figure stays theirs
-      // to type (the app never guesses a rate).
+      // currency; the euro figure is the document's own or the ECB rate's (shown
+      // under the amount), and the owner can overwrite it.
       originalAmount: moneyField(upload.extracted.originalAmount),
     });
     setUseCustomCategory(!knownCategory && Boolean(upload.extracted.category));
@@ -1296,6 +1305,11 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
                           aria-describedby={fieldErrors.totalAmount ? "receipt-total-error" : undefined}
                           className={fieldClass(lowAmount)}
                         />
+                        {fxNote && fxNote.total === formData.totalAmount && (
+                          <p className="mt-1.5 text-caption text-ink-2" data-testid="receipt-fx-rate">
+                            {fxNote.line}
+                          </p>
+                        )}
                         {lowAmount && !fieldErrors.totalAmount && (
                           <p className="mt-1.5 text-caption text-warning">Epävarma tunnistus</p>
                         )}
