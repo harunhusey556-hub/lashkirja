@@ -15,6 +15,7 @@ import { createHash } from "crypto";
 import { withTrackedJob } from "./job-tracker";
 import { ARCHIVED_NOTE, isMarketingMail, isTooSmallToBeABill, looksLikeBill } from "./mail-classify";
 import { foreignFieldsFromExtraction } from "./foreign-purchase";
+import { euroConversion } from "./fx-rates";
 // We only process attachments that are likely to be receipts.
 const VALID_EXTENSIONS = [".pdf", ".jpg", ".jpeg", ".png", ".heic"];
 
@@ -122,7 +123,22 @@ export async function storeEmailDocument(input: {
   mailDate: Date | null;
   extraction: ExtractedReceipt;
 }): Promise<boolean> {
-  const { userId, extraction, filename, mimeType } = input;
+  const { userId, filename, mimeType } = input;
+  let extraction = input.extraction;
+  // Same pricing as an uploaded document (document-jobs.ts): a foreign bill with
+  // no euro total printed gets one, so it is recognised as a bill and filed in
+  // euros; a failed lookup leaves the gap for the owner.
+  if (!extraction.unreadable && extraction.totalAmount == null && extraction.currency && extraction.currency !== "EUR") {
+    const fx = await euroConversion({
+      currency: extraction.currency,
+      originalAmount: extraction.originalAmount,
+      date: extraction.date,
+      printedRate: extraction.fxRate,
+    });
+    if (fx) {
+      extraction = { ...extraction, totalAmount: fx.totalAmount, fxRate: fx.fxRate, fxRateDate: fx.fxRateDate, fxSource: fx.fxSource };
+    }
+  }
   // An invoice often arrives with its payment receipt in the same email (Anthropic,
   // Stripe sellers): one purchase, two PDFs. The second is kept, but never counted.
   const sameInvoice = looksLikeBill(extraction)

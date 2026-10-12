@@ -4,6 +4,7 @@ import { POST as saveReceipt } from "@/app/api/receipts/save/route";
 import { prisma } from "@/lib/db";
 import { processDocumentJob, setDocumentExtractorForTests } from "@/lib/document-jobs";
 import { setFxFetcherForTests, type FxFetcher } from "@/lib/fx-rates";
+import { storeEmailDocument } from "@/lib/mail-sync";
 import type { ExtractedReceipt } from "@/lib/ai";
 import { createUser, resetDatabase, type TestUser } from "./helpers/factories";
 import { buildFormRequest, buildRequest, readJson, sessionCookie } from "./helpers/http";
@@ -173,5 +174,43 @@ describe("a euro receipt", () => {
     expect(body.receipt.totalAmount).toBe(24.9);
     expect(body.receipt.currency).toBe("EUR");
     expect(fxCalls).toHaveLength(0);
+  });
+});
+
+describe("a USD bill imported from email", () => {
+  it("gets the same euro total as an uploaded one, and its ostolasku the euro gross", async () => {
+    const isBill = await storeEmailDocument({
+      userId: user.id,
+      accountEmail: "laskut@example.com",
+      content: Buffer.from("%PDF-1.4 usd"),
+      filename: "invoice.pdf",
+      ext: ".pdf",
+      mimeType: "application/pdf",
+      checksum: "email-usd-1",
+      mailDate: new Date("2026-07-12T08:00:00.000Z"),
+      extraction: usdBill,
+    });
+    expect(isBill).toBe(true);
+    const receipt = await prisma.receipt.findFirstOrThrow({ where: { userId: user.id, source: "email_sync" }, include: { upload: true } });
+    expect(receipt.totalAmountCents).toBe(4_571);
+    expect(JSON.parse(receipt.upload?.extractedJson ?? "{}")).toMatchObject({ totalAmount: 45.71, fxRate: 0.9123, fxSource: "ECB" });
+    expect(await prisma.purchaseInvoice.findFirst({ where: { receiptId: receipt.id } })).toMatchObject({ grossCents: 4_571 });
+  });
+
+  it("keeps the gap when no rate can be found", async () => {
+    setFxFetcherForTests(offline);
+    await storeEmailDocument({
+      userId: user.id,
+      accountEmail: "laskut@example.com",
+      content: Buffer.from("%PDF-1.4 usd offline"),
+      filename: "invoice.pdf",
+      ext: ".pdf",
+      mimeType: "application/pdf",
+      checksum: "email-usd-2",
+      mailDate: new Date("2026-07-12T08:00:00.000Z"),
+      extraction: usdBill,
+    });
+    const receipt = await prisma.receipt.findFirstOrThrow({ where: { userId: user.id, source: "email_sync" } });
+    expect(receipt.totalAmountCents).toBeNull();
   });
 });

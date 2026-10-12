@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { prisma } from "@/lib/db";
 import { resetRateLimitsForTests } from "@/lib/rate-limit";
 import { alvReportOf, loadAlvPeriodSources } from "@/lib/alv-period";
@@ -15,10 +15,16 @@ let cookie: string;
 
 beforeEach(async () => {
   delete process.env.COPILOT_GITHUB_TOKEN;
+  // A model key in the shell or .env would send these turns to the real provider. Tests never use the network.
+  vi.stubEnv("LLM_API_KEY", "");
   resetRateLimitsForTests();
   await resetDatabase();
   user = await createUser();
   cookie = await sessionCookie(user);
+});
+
+afterEach(() => {
+  vi.unstubAllEnvs();
 });
 
 async function ask(message: string) {

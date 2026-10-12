@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { POST as uploadReceipt, GET as listReceipts } from "@/app/api/receipts/route";
 import { POST as saveReceipt } from "@/app/api/receipts/save/route";
-import { PATCH as patchReceipt } from "@/app/api/receipts/[id]/route";
+import { PATCH as patchReceipt, DELETE as deleteReceipt } from "@/app/api/receipts/[id]/route";
+import { PATCH as reviewReceipt } from "@/app/api/receipts/[id]/review/route";
 import { GET as receiptCounts } from "@/app/api/receipts/counts/route";
 import { GET as receiptPurchaseInvoice } from "@/app/api/receipts/[id]/purchase-invoice/route";
 import { POST as inbox } from "@/app/api/receipts/inbox/route";
@@ -217,6 +218,24 @@ describe("every intake path files", () => {
     expect(invoice).toMatchObject({ supplierName: "Kampaamotukku Oy", invoiceNumber: "1234", grossCents: 10_050 });
   });
 
+  it("the offline photo inbox files a photographed credit note inside its own transaction", async () => {
+    // W11's credit filing runs through W9's inbox transaction: it must write
+    // through that transaction, not wait on its lock.
+    setDocumentExtractorForTests(async () => ({ ...bill, notes: "Hyvityslasku", invoiceNumber: "H-77" }));
+    const form = new FormData();
+    form.set("file", jpeg());
+    form.set("capturedAt", new Date().toISOString());
+    const response = await inbox(
+      buildFormRequest("/api/receipts/inbox", form, { cookie, headers: { "idempotency-key": "inbox-credit-1" } })
+    );
+    expect(response.status).toBe(201);
+    const { jobId, uploadId } = await readJson<{ jobId: string; uploadId: string }>(response);
+    expect((await finish(jobId))?.status).toBe("done");
+    const receipt = await prisma.receipt.findFirstOrThrow({ where: { userId: user.id, uploadId } });
+    const credit = await prisma.purchaseInvoice.findFirstOrThrow({ where: { receiptId: receipt.id } });
+    expect(credit).toMatchObject({ invoiceNumber: "H-77", grossCents: -10_050, status: "paid" });
+  });
+
   it("the offline photo inbox leaves a photographed kuitti a kuitti", async () => {
     setDocumentExtractorForTests(async () => ({ ...bill, documentType: "receipt", invoiceNumber: null }));
     const form = new FormData();
@@ -284,5 +303,46 @@ describe("Kuitit shows kuitit; the Laskut chip shows the bills", () => {
     await patch(billBody.receipt.id, { documentType: "receipt" });
     expect((await listIds("kind=receipt")).sort()).toEqual([kuitti.id, billBody.receipt.id].sort());
     expect(await listIds("kind=invoice")).toEqual([]);
+  });
+});
+
+describe("a bill receipt the owner throws away", () => {
+  async function emailedBill(checksum: string) {
+    await storeEmailDocument({
+      userId: user.id,
+      accountEmail: "laskut@example.com",
+      content: Buffer.from(`%PDF-1.4 ${checksum}`),
+      filename: "lasku.pdf",
+      ext: ".pdf",
+      mimeType: "application/pdf",
+      checksum,
+      mailDate: new Date("2026-02-10T08:00:00.000Z"),
+      extraction: bill,
+    });
+    const receipt = await prisma.receipt.findFirstOrThrow({ where: { userId: user.id, uploadId: { not: null }, upload: { sha256: checksum } } });
+    const invoice = await prisma.purchaseInvoice.findFirstOrThrow({ where: { receiptId: receipt.id } });
+    expect(invoice.status).toBe("open");
+    return { receipt, invoice };
+  }
+
+  it("rejecting it cancels its ostolasku instead of leaving an open payable", async () => {
+    const { receipt, invoice } = await emailedBill("reject-bill");
+    const response = await reviewReceipt(
+      buildRequest("PATCH", `/api/receipts/${receipt.id}/review`, { reviewStatus: "rejected" }, { cookie }),
+      routeContext({ id: receipt.id })
+    );
+    expect(response.status).toBe(200);
+    expect(await prisma.purchaseInvoice.findUniqueOrThrow({ where: { id: invoice.id } })).toMatchObject({ status: "cancelled" });
+  });
+
+  it("deleting it cancels its ostolasku instead of leaving an open payable", async () => {
+    const { receipt, invoice } = await emailedBill("delete-bill");
+    const response = await deleteReceipt(
+      buildRequest("DELETE", `/api/receipts/${receipt.id}`, undefined, { cookie }),
+      routeContext({ id: receipt.id })
+    );
+    expect(response.status).toBe(200);
+    expect(await prisma.receipt.findUnique({ where: { id: receipt.id } })).toBeNull();
+    expect(await prisma.purchaseInvoice.findUniqueOrThrow({ where: { id: invoice.id } })).toMatchObject({ status: "cancelled" });
   });
 });

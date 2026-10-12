@@ -12,7 +12,7 @@ import {
   rejectCrossSite,
   rejectOversizedContentLength,
 } from "@/lib/http-security";
-import { withErrorHandler, UnauthorizedError } from "@/lib/api-errors";
+import { withErrorHandler, UnauthorizedError, AppError } from "@/lib/api-errors";
 
 import { assertPeriodOpen } from "@/lib/period-lock";
 import { expectedUpdatedAtDate } from "@/lib/edit-conflict";
@@ -217,6 +217,15 @@ export const DELETE = withErrorHandler(async (
   if (!existing) return noStoreJson({ error: "Kuittia ei löytynyt" }, { status: 404 });
   // Deleting a receipt changes a filed return exactly as much as editing one.
   await assertPeriodOpen(session.userId!, [existing.date]);
+  // A bill filed from this receipt must not outlive it as an open payable. One
+  // with payments or in a closed month is real bookkeeping and stays.
+  await syncReceiptDocumentKind(session.userId!, id, "receipt").catch((error) => {
+    if (error instanceof AppError && (error.code === "INVOICE_HAS_PAYMENTS" || error.code === "PERIOD_LOCKED")) {
+      console.warn(`Deleted receipt ${id} leaves its ostolasku:`, error.message);
+      return null;
+    }
+    throw error;
+  });
 
   await prisma.$transaction(async (db) => {
     await db.transaction.updateMany({

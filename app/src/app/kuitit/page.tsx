@@ -219,6 +219,8 @@ export default function KuititPage() {
     if (!review && !unlinked) return;
     focusReviewRef.current = review;
     if (unlinked) {
+      // The Laskut tab (W9) is remembered across visits; this link is about kuitit.
+      setKindFilter("receipt");
       const patch = receiptTabQuery("unlinked");
       setAdvanced((a) => ({ ...a, ...patch }));
       setAppliedAdvanced((a) => ({ ...a, ...patch }));

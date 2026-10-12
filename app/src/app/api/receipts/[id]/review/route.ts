@@ -6,6 +6,7 @@ import { z } from "zod";
 import { withErrorHandler, AppError } from "@/lib/api-errors";
 import { serverApprovalBlock } from "@/lib/receipt-approval";
 import { assertPeriodOpen } from "@/lib/period-lock";
+import { syncReceiptDocumentKind } from "@/lib/purchase-invoices";
 
 const reviewSchema = z.object({
   reviewStatus: z.enum(["approved", "rejected", "pending"]),
@@ -71,6 +72,19 @@ export const PATCH = withErrorHandler(
           409
         );
       }
+    }
+
+    // A bill filed from this receipt (inbox, email) must not outlive it as an
+    // open payable. One with payments or in a closed month is real bookkeeping
+    // and is left for the owner to handle in Ostolaskut.
+    if (parsed.reviewStatus === "rejected") {
+      await syncReceiptDocumentKind(session.userId, receipt.id, "receipt").catch((error) => {
+        if (error instanceof AppError && (error.code === "INVOICE_HAS_PAYMENTS" || error.code === "PERIOD_LOCKED")) {
+          console.warn(`Rejected receipt ${receipt.id} keeps its ostolasku:`, error.message);
+          return null;
+        }
+        throw error;
+      });
     }
 
     const updated = await prisma.receipt.update({

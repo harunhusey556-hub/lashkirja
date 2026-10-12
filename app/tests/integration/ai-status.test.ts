@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { resetRateLimitsForTests } from "@/lib/rate-limit";
 import { explainsLimitedMode } from "@/lib/chat-honesty";
 import { GET as getStatus } from "@/app/api/ai/status/route";
@@ -12,6 +12,8 @@ const savedToken = process.env.COPILOT_GITHUB_TOKEN;
 
 beforeEach(async () => {
   delete process.env.COPILOT_GITHUB_TOKEN;
+  // A model key in the shell or .env would send these turns to the real provider. Tests never use the network.
+  vi.stubEnv("LLM_API_KEY", "");
   resetRateLimitsForTests();
   await resetDatabase();
   user = await createUser();
@@ -19,6 +21,7 @@ beforeEach(async () => {
 });
 
 afterEach(() => {
+  vi.unstubAllEnvs();
   if (savedToken === undefined) delete process.env.COPILOT_GITHUB_TOKEN;
   else process.env.COPILOT_GITHUB_TOKEN = savedToken;
 });
