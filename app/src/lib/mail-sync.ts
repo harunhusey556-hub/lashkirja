@@ -16,6 +16,7 @@ import { withTrackedJob } from "./job-tracker";
 import { ARCHIVED_NOTE, isMarketingMail, isTooSmallToBeABill, looksLikeBill } from "./mail-classify";
 import { foreignFieldsFromExtraction } from "./foreign-purchase";
 import { euroConversion } from "./fx-rates";
+import { helsinkiDayUtc } from "./validation";
 // We only process attachments that are likely to be receipts.
 const VALID_EXTENSIONS = [".pdf", ".jpg", ".jpeg", ".png", ".heic"];
 
@@ -175,7 +176,8 @@ export async function storeEmailDocument(input: {
       userId,
       uploadId: newUpload.id,
       vendor: extraction.vendor,
-      date: extraction.date ? new Date(extraction.date) : input.mailDate,
+      // The mail's send time is an instant; the receipt keeps the Helsinki day it arrived on.
+      date: extraction.date ? new Date(extraction.date) : input.mailDate && helsinkiDayUtc(input.mailDate),
       totalAmountCents: extraction.totalAmount ? Math.round(extraction.totalAmount * 100) : null,
       vatDetails: extraction.vatDetails.length ? JSON.stringify(extraction.vatDetails) : null,
       category: extraction.category,

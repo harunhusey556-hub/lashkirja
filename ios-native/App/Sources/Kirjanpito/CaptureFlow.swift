@@ -534,7 +534,7 @@ struct ReceiptEditor: View {
     }
 
     private var dateBinding: Binding<Date> {
-        Binding(get: { APIDate.day(form.date) ?? Date() }, set: { form.setDate(APIDate.dayString($0)) })
+        Binding(get: { APIDate.pickerDate(form.date) ?? Date() }, set: { form.setDate(APIDate.pickerDay($0)) })
     }
 
     @ViewBuilder private func fieldError(_ key: String) -> some View {

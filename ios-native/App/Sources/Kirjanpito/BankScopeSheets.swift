@@ -209,14 +209,14 @@ struct BankHistorySheet: View {
     /// The DatePicker's bounds: inside the bank's limit, before the current start.
     private var range: ClosedRange<Date> {
         let calendar = Calendar.current
-        let upper = connection.historyFrom.flatMap(APIDate.day).flatMap { calendar.date(byAdding: .day, value: -1, to: $0) } ?? Date()
-        let lower = BankHistory.earliest(limitDays: connection.historyLimitDays).flatMap(APIDate.day)
+        let upper = connection.historyFrom.flatMap { APIDate.pickerDate($0) }.flatMap { calendar.date(byAdding: .day, value: -1, to: $0) } ?? Date()
+        let lower = BankHistory.earliest(limitDays: connection.historyLimitDays).flatMap { APIDate.pickerDate($0) }
             ?? calendar.date(byAdding: .year, value: -10, to: upper) ?? upper
         return min(lower, upper)...upper
     }
 
     private var chosenFrom: String? {
-        if choiceKey == Self.customKey { return APIDate.dayString(customDate) }
+        if choiceKey == Self.customKey { return APIDate.pickerDay(customDate) }
         return choices.first { $0.key == choiceKey }?.from
     }
 

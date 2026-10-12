@@ -26,7 +26,7 @@ struct PurchaseCreditSheet: View {
         let start = PurchaseCreditForm(invoice: invoice, today: today)
         initial = start
         _form = State(initialValue: start)
-        _date = State(initialValue: Date())
+        _date = State(initialValue: APIDate.pickerDate(today) ?? Date())
     }
 
     private var dirty: Bool { form != initial }
@@ -52,7 +52,7 @@ struct PurchaseCreditSheet: View {
                 }
                 Section {
                     DatePicker("Hyvityslaskun päivä", selection: $date, displayedComponents: .date)
-                        .onChange(of: date) { _, picked in form.date = APIDate.dayString(picked) }
+                        .onChange(of: date) { _, picked in form.date = APIDate.pickerDay(picked) }
                     TextField("Hyvityslaskun numero (valinnainen)", text: $form.number)
                     TextField("Syy, esim. palautus tai hinnanalennus", text: $form.reason)
                 }

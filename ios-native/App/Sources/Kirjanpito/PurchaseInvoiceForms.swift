@@ -136,8 +136,8 @@ struct PurchaseInvoiceFormView: View {
 
     private func dayBinding(_ keyPath: WritableKeyPath<PurchaseInvoiceForm, String>) -> Binding<Date> {
         Binding(
-            get: { APIDate.day(form[keyPath: keyPath]) ?? Date() },
-            set: { form[keyPath: keyPath] = APIDate.dayString($0) }
+            get: { APIDate.pickerDate(form[keyPath: keyPath]) ?? Date() },
+            set: { form[keyPath: keyPath] = APIDate.pickerDay($0) }
         )
     }
 
@@ -197,7 +197,7 @@ struct PurchasePaymentSheet: View {
     var onSaved: (PurchaseInvoice) -> Void = { _ in }
 
     @State private var amountText = ""
-    @State private var date = Date()
+    @State private var date = APIDate.pickerDate(APIDate.dayString(Date())) ?? Date()
     @State private var note = ""
     @State private var busy = false
     @State private var failure: String?
@@ -260,7 +260,7 @@ struct PurchasePaymentSheet: View {
         failure = nil
         defer { busy = false }
         do {
-            let body = PurchasePaymentBody(amount: amount, paidDate: APIDate.dayString(date), note: note)
+            let body = PurchasePaymentBody(amount: amount, paidDate: APIDate.pickerDay(date), note: note)
             let response: PurchaseInvoiceResponse = try await app.api.send("POST", "/api/purchase-invoices/\(invoice.id)/payments", body: body, idempotencyKey: key)
             Haptics.success()
             app.dataVersion += 1

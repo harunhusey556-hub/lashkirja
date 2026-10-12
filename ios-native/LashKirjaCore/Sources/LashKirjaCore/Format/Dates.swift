@@ -33,6 +33,27 @@ public enum APIDate {
     public static func dayString(_ d: Date) -> String { with("yyyy-MM-dd") { $0.string(from: d) } }
     public static func month(_ d: Date) -> String { with("yyyy-MM") { $0.string(from: d) } }
 
+    /// A calendar day as the Date a DatePicker shows on that same day. The picker draws its
+    /// selection in the device zone, so Helsinki midnight from `day` showed 13.10 as 12.10 on any
+    /// device west of Helsinki. Noon, because some zones skip midnight on a DST change.
+    public static func pickerDate(_ s: String, in zone: TimeZone = .current) -> Date? {
+        guard day(s) != nil else { return nil }
+        let parts = s.split(separator: "-").compactMap { Int($0) }
+        return calendar(zone).date(from: DateComponents(year: parts[0], month: parts[1], day: parts[2], hour: 12))
+    }
+
+    /// The calendar day a DatePicker selection shows, as "YYYY-MM-DD", with no zone conversion.
+    public static func pickerDay(_ d: Date, in zone: TimeZone = .current) -> String {
+        let c = calendar(zone).dateComponents([.year, .month, .day], from: d)
+        return String(format: "%04d-%02d-%02d", c.year ?? 0, c.month ?? 0, c.day ?? 0)
+    }
+
+    private static func calendar(_ zone: TimeZone) -> Calendar {
+        var c = Calendar(identifier: .gregorian)
+        c.timeZone = zone
+        return c
+    }
+
     /// "2.10.2026", the Finnish short date. Takes "YYYY-MM-DD" or an ISO timestamp.
     public static func displayDay(_ s: String) -> String {
         guard let d = day(String(s.prefix(10))) else { return s }

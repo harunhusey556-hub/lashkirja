@@ -4,6 +4,7 @@ import { useState } from "react";
 import { Button, controlClass } from "@/components/ui";
 import { bankNameFromIban, formatIban, isValidIban, normalizeIban } from "@/lib/iban";
 import { parseFinnishNumber } from "@/lib/format";
+import { helsinkiCalendarDate } from "@/lib/validation";
 
 export interface BankAccountFormValues {
   name: string;
@@ -32,7 +33,7 @@ const EMPTY: BankAccountFormValues = {
   bic: "",
   currency: "EUR",
   openingBalance: "0",
-  openingDate: new Date().toISOString().slice(0, 10),
+  openingDate: helsinkiCalendarDate(),
 };
 
 /** Client-side mirror of the server rules, so mistakes surface before saving. */
