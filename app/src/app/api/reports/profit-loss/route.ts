@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { requireSession } from "@/lib/session";
-import { noStoreJson } from "@/lib/http-security";
+import { revalidatedJson } from "@/lib/etag-json";
+import { cachedForStamp, readBooksStamp } from "@/lib/books-cache";
 import { UnauthorizedError, ValidationError, withErrorHandler } from "@/lib/api-errors";
 import { monthSchema } from "@/lib/validation";
 import { buildProfitLoss, periodToEuros } from "@/lib/reports";
@@ -33,16 +34,27 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
 
   // Same sources as the VAT return: approved receipts plus booked sales
   // invoices and credit notes, with bank-settled income receipts deduplicated.
-  const sources = await loadAlvPeriodSources(session.userId, range.gte, range.lt);
-  const report = buildProfitLoss(sources.reportReceipts, sources.reportInvoices);
-  return noStoreJson({
-    from: range.start,
-    to: range.end,
-    total: periodToEuros(report.total),
-    months: report.months.map(periodToEuros),
-    undatedCount: report.undatedCount,
-    excludedReceiptCount: sources.excludedReceiptCount,
-    suspectedDuplicateCount: sources.suspectedDuplicateCount,
-    basis: "laskutusperuste",
+  // W24: reused while nothing it reads has changed (lib/books-cache.ts), the same rule as Koti.
+  const load = async () => {
+    const sources = await loadAlvPeriodSources(session.userId, range.gte, range.lt);
+    const report = buildProfitLoss(sources.reportReceipts, sources.reportInvoices);
+    return {
+      from: range.start,
+      to: range.end,
+      total: periodToEuros(report.total),
+      months: report.months.map(periodToEuros),
+      undatedCount: report.undatedCount,
+      excludedReceiptCount: sources.excludedReceiptCount,
+      suspectedDuplicateCount: sources.suspectedDuplicateCount,
+      basis: "laskutusperuste",
+    };
+  };
+  const stamp = await readBooksStamp(session.userId).catch((error: unknown) => {
+    console.warn("Report cache stamp failed, computing uncached:", error);
+    return null;
   });
+  const body = stamp === null
+    ? await load()
+    : await cachedForStamp(`${session.userId}|profit-loss|${range.start}|${range.end}`, stamp, load);
+  return revalidatedJson(req, body);
 });

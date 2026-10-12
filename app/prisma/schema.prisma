@@ -245,6 +245,8 @@ model Receipt {
 
   @@index([userId, date])
   @@index([userId, createdAt])
+  // W24: keyset page order of Kuitit (?cursor=).
+  @@index([userId, date, id])
 }
 
 model Statement {
@@ -691,6 +693,8 @@ model SalesInvoice {
   @@index([userId, status, dueDate])
   @@index([customerId, issueDate])
   @@index([creditsInvoiceId])
+  // W24: keyset page order of Myynti (?cursor=).
+  @@index([userId, issueDate, id])
 }
 
 model InvoiceLine {
@@ -848,6 +852,8 @@ model PurchaseInvoice {
   @@index([userId, issueDate])
   @@index([recurringPurchaseId])
   @@index([creditsInvoiceId])
+  // W24: keyset page order of Ostolaskut (?cursor=).
+  @@index([userId, dueDate, id])
 }
 
 model PurchasePayment {
