@@ -242,9 +242,16 @@ export interface PublicInvoice {
   updatedAt: string;
   documentKind: "invoice" | "credit_note";
   creditsInvoice: { id: string; number: number } | null;
-  creditNotes: Array<{ id: string; number: number; status: string }>;
+  creditNotes: Array<{
+    id: string;
+    number: number;
+    status: string;
+    gross: number;
+    /** What of each original line (by its sortOrder) this note already reversed. */
+    lines: Array<{ sortOrder: number; quantity: number }>;
+  }>;
   customer: { id: string; name: string; email: string | null; businessId: string | null };
-  lines: PublicInvoiceLine[];
+  lines: Array<PublicInvoiceLine & { sortOrder: number }>;
   payments: Array<{
     id: string;
     paidDate: string;
@@ -290,7 +297,13 @@ type InvoiceWithRelations = {
   updatedAt: Date;
   documentKind: string;
   creditsInvoice: { id: string; number: number } | null;
-  creditNotes: Array<{ id: string; number: number; status: string }>;
+  creditNotes: Array<{
+    id: string;
+    number: number;
+    status: string;
+    grossCents: number;
+    lines: Array<{ sortOrder: number; quantityMilli: number }>;
+  }>;
   customer: { id: string; name: string; email: string | null; businessId: string | null };
   lines: Array<{
     id: string;
@@ -334,7 +347,15 @@ const invoiceInclude = {
   },
   creditsInvoice: { select: { id: true, number: true } },
   creditNotes: {
-    select: { id: true, number: true, status: true },
+    select: {
+      id: true,
+      number: true,
+      status: true,
+      grossCents: true,
+      // A credit note stores its lines under the original line's sortOrder,
+      // so the remaining quantity of each original line is recoverable.
+      lines: { select: { sortOrder: true, quantityMilli: true } },
+    },
     orderBy: { createdAt: "desc" as const },
   },
   emailSends: { orderBy: { createdAt: "desc" as const } },
@@ -380,7 +401,13 @@ export function toPublicInvoice(
     updatedAt: invoice.updatedAt.toISOString(),
     documentKind: invoice.documentKind === "credit_note" ? "credit_note" : "invoice",
     creditsInvoice: invoice.creditsInvoice,
-    creditNotes: invoice.creditNotes,
+    creditNotes: invoice.creditNotes.map((note) => ({
+      id: note.id,
+      number: note.number,
+      status: note.status,
+      gross: centsToEuros(note.grossCents),
+      lines: note.lines.map((line) => ({ sortOrder: line.sortOrder, quantity: line.quantityMilli / 1000 })),
+    })),
     customer: invoice.customer,
     lines: invoice.lines.map((line) => ({
       id: line.id,
@@ -390,6 +417,7 @@ export function toPublicInvoice(
       unitPrice: centsToEuros(line.unitPriceCents),
       vatRate: line.vatRatePermille / 10,
       net: centsToEuros(line.netCents),
+      sortOrder: line.sortOrder,
     })),
     payments: invoice.payments.map((payment) => ({
       id: payment.id,
@@ -762,14 +790,79 @@ export async function deleteInvoice(userId: string, id: string): Promise<void> {
   });
 }
 
+/** One line of the invoice being credited, with the quantity to reverse. */
+export interface CreditLineInput {
+  lineId: string;
+  /** Units of that line to credit, up to three decimals. */
+  quantity: number;
+}
+
+export interface CreateCreditNoteInput {
+  /**
+   * The lines to reverse and how much of each. A line that is left out stays
+   * uncredited; omit the whole field to credit the full remaining amount.
+   */
+  lines?: CreditLineInput[];
+}
+
 /**
- * Issues a numbered credit note that reverses the original lines and marks
- * the original credited. Status alone is not a credit note.
+ * What is still creditable on an invoice, per line and in total. A credit note
+ * carries the reversed amounts as negative figures (its lines are the original
+ * quantities at negated unit prices), so the gross remainder is the original
+ * plus every credit note's total — the same way the month's income is.
  */
-export async function createCreditNote(userId: string, invoiceId: string): Promise<PublicInvoice> {
+export function creditableRemainder(
+  original: {
+    grossCents: number;
+    lines: Array<{ id: string; sortOrder: number; quantityMilli: number }>;
+  },
+  creditNotes: Array<{ grossCents: number; lines: Array<{ sortOrder: number; quantityMilli: number }> }>
+): { byLineId: Map<string, number>; grossCents: number } {
+  const creditedBySortOrder = new Map<number, number>();
+  for (const note of creditNotes) {
+    for (const line of note.lines) {
+      // A credit note keeps its quantities positive and negates only the unit
+      // price, so "already reversed" is the sum of the credit lines' quantities.
+      creditedBySortOrder.set(
+        line.sortOrder,
+        (creditedBySortOrder.get(line.sortOrder) ?? 0) + line.quantityMilli
+      );
+    }
+  }
+  const byLineId = new Map<string, number>();
+  for (const line of original.lines) {
+    // Floored at zero: data written outside this path must not hand back a
+    // negative "remaining" that a call could then credit in the wrong direction.
+    const remaining = line.quantityMilli - (creditedBySortOrder.get(line.sortOrder) ?? 0);
+    byLineId.set(line.id, Math.max(0, remaining));
+  }
+  return {
+    byLineId,
+    grossCents: original.grossCents + creditNotes.reduce((sum, note) => sum + note.grossCents, 0),
+  };
+}
+
+/**
+ * Issues a numbered credit note that reverses the given lines of the original
+ * — all of them, by default — and marks the original credited once nothing
+ * creditable is left. Status alone is not a credit note.
+ */
+export async function createCreditNote(
+  userId: string,
+  invoiceId: string,
+  input: CreateCreditNoteInput = {}
+): Promise<PublicInvoice> {
   const original = await prisma.salesInvoice.findFirst({
     where: { id: invoiceId, userId },
-    include: { lines: { orderBy: { sortOrder: "asc" } } },
+    include: {
+      lines: { orderBy: { sortOrder: "asc" } },
+      creditNotes: {
+        select: {
+          grossCents: true,
+          lines: { select: { sortOrder: true, quantityMilli: true } },
+        },
+      },
+    },
   });
   if (!original) throw new NotFoundError("Laskua ei löytynyt.");
   if (original.documentKind === "credit_note") {
@@ -781,16 +874,51 @@ export async function createCreditNote(userId: string, invoiceId: string): Promi
   if (original.status === "credited") {
     throw new AppError("Lasku on jo hyvitetty.", "ALREADY_CREDITED", 409);
   }
-  const existingNote = await prisma.salesInvoice.findFirst({
-    where: { userId, creditsInvoiceId: original.id },
-    select: { id: true },
-  });
-  if (existingNote) {
-    throw new AppError("Laskulla on jo hyvityslasku.", "ALREADY_CREDITED", 409);
-  }
   if (original.lines.length === 0) {
     throw new ValidationError("Tyhjää laskua ei voi hyvittää.");
   }
+
+  const remainder = creditableRemainder(original, original.creditNotes);
+  if (remainder.grossCents <= 0) {
+    throw new AppError("Lasku on jo hyvitetty.", "ALREADY_CREDITED", 409);
+  }
+
+  // What the caller asked for, checked against what is left line by line: a
+  // second credit can never reverse a line past its remaining quantity.
+  const requestedMilli = new Map<string, number>();
+  if (input.lines) {
+    if (input.lines.length === 0) {
+      throw new ValidationError("Valitse vähintään yksi rivi hyvitettäväksi.");
+    }
+    for (const choice of input.lines) {
+      const line = original.lines.find((candidate) => candidate.id === choice.lineId);
+      if (!line) throw new ValidationError("Hyvitettävä rivi ei kuulu tähän laskuun.");
+      const milli = Math.round(choice.quantity * 1000);
+      if (!Number.isFinite(choice.quantity) || Math.abs(choice.quantity * 1000 - milli) > 1e-6) {
+        throw new ValidationError("Rivin määrä on virheellinen.");
+      }
+      if (milli <= 0) throw new ValidationError("Rivin määrän on oltava suurempi kuin nolla.");
+      const remaining = remainder.byLineId.get(line.id) ?? 0;
+      if (milli > remaining) {
+        throw new ValidationError(
+          `Riviltä ${line.description} on hyvitettävissä enää ${String(remaining / 1000).replace(".", ",")} ${line.unit}.`
+        );
+      }
+      requestedMilli.set(line.id, milli);
+    }
+  }
+
+  // The lines to reverse, in the original order. Two lines of the same VAT
+  // rate are one box in the return; the reversed figures are grouped the same
+  // way, so a full reversal gives back exactly the original's totals.
+  const reversals = original.lines
+    .filter((line) => (input.lines ? requestedMilli.has(line.id) : (remainder.byLineId.get(line.id) ?? 0) > 0))
+    .map((line) => ({
+      line,
+      quantityMilli: input.lines
+        ? (requestedMilli.get(line.id) as number)
+        : (remainder.byLineId.get(line.id) as number),
+    }));
 
   const issueDate = isoDateToUtc(helsinkiCalendarDate());
   // Only the credit note's own month changes (AVL 136 §): the original stays
@@ -803,15 +931,27 @@ export async function createCreditNote(userId: string, invoiceId: string): Promi
   // registered or the rate has since ended (a 14 % invoice from 2025 is
   // credited at 14 %). Anything else would leave VAT on the customer's account.
   const lineInputs = toLineInputs(
-    original.lines.map((line) => ({
+    reversals.map(({ line, quantityMilli }) => ({
       description: line.description,
-      quantity: line.quantityMilli / 1000,
+      quantity: quantityMilli / 1000,
       unit: line.unit,
       unitPrice: centsToEuros(-line.unitPriceCents),
       vatRate: line.vatRatePermille / 10,
     }))
   );
   const totals = computeInvoiceTotals(lineInputs);
+  // The line checks bound each line; this bounds the document, which is what
+  // the month's total follows. A cent of slack covers a rounding difference
+  // between the per-line reversal and the whole-document remainder.
+  if (Math.abs(totals.grossCents) > remainder.grossCents + 1) {
+    throw new ValidationError(
+      `Hyvitettävä summa ${formatEur(centsToEuros(-totals.grossCents))} ylittää hyvitettävissä olevan ${formatEur(
+        centsToEuros(remainder.grossCents)
+      )}.`
+    );
+  }
+  // Nothing creditable left after this note: the original is done with.
+  const fullyCredited = remainder.grossCents + totals.grossCents <= 0;
   const snapshot = await capturePartySnapshot(userId, original.customerId);
 
   for (let attempt = 0; attempt < 5; attempt += 1) {
@@ -831,13 +971,16 @@ export async function createCreditNote(userId: string, invoiceId: string): Promi
             documentKind: "credit_note",
             creditsInvoiceId: original.id,
             partySnapshot: snapshot,
-            notes: `Hyvitys laskulle ${original.number}`,
+            notes: `${fullyCredited ? "Hyvitys" : "Osittainen hyvitys"} laskulle ${original.number}`,
             netCents: totals.netCents,
             vatCents: totals.vatCents,
             grossCents: totals.grossCents,
             lines: {
               create: lineInputs.map((line, index) => ({
-                sortOrder: index,
+                // The original line's own sortOrder, not the position in this
+                // note: it is how a later partial credit finds what of that
+                // line is already reversed.
+                sortOrder: reversals[index].line.sortOrder,
                 description: line.description,
                 unit: line.unit,
                 quantityMilli: line.quantityMilli,
@@ -849,28 +992,34 @@ export async function createCreditNote(userId: string, invoiceId: string): Promi
           },
           select: { id: true, number: true },
         });
-        await tx.salesInvoice.update({
-          where: { id: original.id },
-          data: { status: "credited" },
-        });
+        // A partly credited invoice stays where it is: the rest of it is still
+        // owed and can be credited, or paid, the ordinary way.
+        if (fullyCredited) {
+          await tx.salesInvoice.update({
+            where: { id: original.id },
+            data: { status: "credited" },
+          });
+        }
         await recordActivity(
           tx,
           created.id,
           "credit_issued",
-          `Hyvityslasku luotiin laskulle ${original.number}.`
+          `${fullyCredited ? "Hyvityslasku" : "Osittainen hyvityslasku"} luotiin laskulle ${original.number}.`
         );
         await recordActivity(
           tx,
           original.id,
           "credit_issued",
-          `Hyvityslasku ${created.number} kirjattiin.`
+          `Hyvityslasku ${created.number} ${fullyCredited ? "kirjattiin" : "kirjattiin osittaisena"}.`
         );
-        await recordActivity(
-          tx,
-          original.id,
-          "status_changed",
-          `Tila muuttui: ${statusFi(original.status)} → Hyvitetty.`
-        );
+        if (fullyCredited) {
+          await recordActivity(
+            tx,
+            original.id,
+            "status_changed",
+            `Tila muuttui: ${statusFi(original.status)} → Hyvitetty.`
+          );
+        }
         return created.id;
       });
       return getInvoice(userId, createdId);
