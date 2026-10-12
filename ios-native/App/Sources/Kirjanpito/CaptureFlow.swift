@@ -7,7 +7,7 @@ import UniformTypeIdentifiers
 import LashKirjaCore
 
 /// Lisää kuitti: camera, photos (up to `ReceiptUploadQueue.maxPick` at once) or files (PDF, images) →
-/// the files are uploaded in turn and read side by side → the owner checks the fields → save (web `ReceiptUploadArea.tsx`).
+/// the files are uploaded a few at a time and read side by side → the owner checks the fields → save (web `ReceiptUploadArea.tsx`).
 /// The first file read opens in the editor by itself; the rest wait in "Lähetysjono" with
 /// "Käytä lomakkeessa". Without a connection the files are kept on the phone and sent later
 /// (`OfflineReceiptQueueModel`). With `transactionId` one receipt is picked and the saved one
@@ -50,7 +50,8 @@ struct CaptureFlow: View {
     @State private var importFailure: String?
     /// Copying picked files off the main actor; cancelled when the flow closes.
     @State private var importTask: Task<Void, Never>?
-    @State private var limit = ShowMore()
+    /// A bulk import is hundreds of rows long: the list opens on 50 and grows by 50.
+    @State private var limit = ShowMore(step: ReceiptUploadQueue.listPage)
 
     /// Matching a bank row takes exactly one receipt, and never goes to the offline queue
     /// (the inbox cannot match it).
@@ -80,7 +81,7 @@ struct CaptureFlow: View {
                 case .queue:
                     queueList
                 case .edit(let rowId, let draft):
-                    ReceiptEditor(draft: draft, transactionId: transactionId) { saved(rowId) }
+                    ReceiptEditor(draft: draft, transactionId: transactionId) { autoApproved in saved(rowId, autoApproved: autoApproved) }
                         .id(rowId)
                 }
             }
@@ -171,6 +172,9 @@ struct CaptureFlow: View {
                 }
             } header: {
                 Text("Lähetysjono")
+            } footer: {
+                // Same words as the web's upload summary.
+                if let summary = queue.summaryLine { Text(summary) }
             }
             if queue.isFinished {
                 Section {
@@ -284,8 +288,17 @@ struct CaptureFlow: View {
         guard worker == nil else { return }
         let mine = generation
         worker = Task {
-            while !Task.isCancelled, let next = queue.nextPending {
-                await process(next.id, name: next.name)
+            // A hundred photos one by one take all night: up to `uploadConcurrency` go up at once,
+            // and a slot freed by one file is refilled from the queue straight away. Every row
+            // update still happens on the main actor, inside `process`.
+            await withTaskGroup(of: Void.self) { group in
+                while !Task.isCancelled {
+                    while let next = queue.claimNext() {
+                        group.addTask { await process(next.id, name: next.name) }
+                    }
+                    // Nothing more may start: wait for one upload to finish, or stop when none is left.
+                    if await group.next() == nil { break }
+                }
             }
             if generation == mine { worker = nil }
         }
@@ -439,8 +452,8 @@ struct CaptureFlow: View {
 
     // MARK: Closing
 
-    private func saved(_ rowId: String) {
-        queue.markSaved(rowId)
+    private func saved(_ rowId: String, autoApproved: Bool = false) {
+        queue.markSaved(rowId, autoApproved: autoApproved)
         onSaved?()
         // A bank row takes one receipt: once it is saved the match is done.
         if single || queue.closesAfterSave { close() } else { step = .queue }
@@ -470,16 +483,19 @@ struct ReceiptEditor: View {
     @Environment(AppModel.self) private var app
     let uploadId: String
     let transactionId: String?
-    let done: () -> Void
+    /// Called with whether the server approved the receipt as it saved it.
+    let done: (Bool) -> Void
     @State private var form: ReceiptForm
     @State private var errors: [String: String] = [:]
     @State private var busy = false
     @State private var failure: String?
     @State private var duplicate = false
     @State private var savedId: String?
+    /// Kept with `savedId`, so a retry that only repeats the match still reports the approval.
+    @State private var savedAutoApproved = false
     @State private var customCategory: Bool
 
-    init(draft: ReceiptDraft, transactionId: String?, done: @escaping () -> Void) {
+    init(draft: ReceiptDraft, transactionId: String?, done: @escaping (Bool) -> Void) {
         let form = ReceiptForm(draft: draft)
         uploadId = draft.uploadId
         self.transactionId = transactionId
@@ -592,7 +608,7 @@ struct ReceiptEditor: View {
 
     private func save(forceDuplicate: Bool) async {
         guard !busy else { return }
-        struct Saved: Decodable { struct R: Decodable { let id: String }; let receipt: R }
+        struct Saved: Decodable { struct R: Decodable { let id: String }; let receipt: R; let autoApproved: Bool? }
         struct Match: Encodable { let transactionId: String; let receiptId: String }
         // A retry after a failed match only repeats the match, never the save.
         var request: ReceiptDraft?
@@ -603,7 +619,9 @@ struct ReceiptEditor: View {
                 failure = nil
                 Haptics.error()
                 return
-            case .draft(let draft):
+            case .draft(var draft):
+                // The server approves a complete receipt as it saves it (it checks, not the app).
+                draft.autoApprove = true
                 request = draft
             }
         }
@@ -619,6 +637,8 @@ struct ReceiptEditor: View {
                 let saved: Saved = try await app.api.send("POST", "/api/receipts/save", body: request)
                 receiptId = saved.receipt.id
                 savedId = receiptId
+                // Absent from a server that does not auto-approve: then the receipt waits as before.
+                savedAutoApproved = saved.autoApproved ?? false
                 duplicate = false
             } else {
                 return
@@ -627,7 +647,7 @@ struct ReceiptEditor: View {
                 let _: Ignored = try await app.api.send("POST", "/api/matching/confirm", body: Match(transactionId: transactionId, receiptId: receiptId))
             }
             Haptics.success()
-            done()
+            done(savedAutoApproved)
         } catch is CancellationError {
         } catch let error as LKError where error.isDuplicate && savedId == nil {
             duplicate = true

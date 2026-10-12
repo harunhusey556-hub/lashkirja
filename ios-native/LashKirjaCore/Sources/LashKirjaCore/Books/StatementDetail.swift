@@ -16,6 +16,28 @@ public enum StatementText {
         return "\(label) · \(month(m))"
     }
 
+    /// "Nordea Syyskuu 2026": the bank and month that tell this statement from the others.
+    private static func deleteDetail(_ s: Statement) -> String {
+        var parts: [String] = []
+        if let account = s.bankAccount { parts.append(account.bankName ?? account.name) }
+        if let m = s.periodMonth { parts.append(month(m)) }
+        return parts.filter { !$0.isEmpty }.joined(separator: " ")
+    }
+
+    /// "Tiliote · Nordea Syyskuu 2026": what the delete dialog's text calls the statement.
+    public static func deleteName(_ s: Statement) -> String {
+        let label = s.fileType == "enablebanking" ? "Pankkiyhteys" : "Tiliote"
+        let detail = deleteDetail(s)
+        return detail.isEmpty ? label : "\(label) · \(detail)"
+    }
+
+    /// "Poistetaanko tiliote · Nordea Syyskuu 2026?": the dialog names what goes, not just its kind.
+    public static func deleteTitle(_ s: Statement) -> String {
+        let label = s.fileType == "enablebanking" ? "pankkiyhteys" : "tiliote"
+        let detail = deleteDetail(s)
+        return detail.isEmpty ? "Poistetaanko \(label)?" : "Poistetaanko \(label) · \(detail)?"
+    }
+
     static let invoiceStaysPaid = "Lasku jää maksetuksi, ja siitä tehty hyväksytty myynti merkitään hylätyksi, jotta myynti ei tuplaannu."
 
     /// The delete confirmation's body.
@@ -57,6 +79,11 @@ extension LKError {
 }
 
 extension StatementText {
+    /// "Poistetaanko tapahtuma · Prisma −12,50 €?": the row dialog names the row too.
+    public static func deleteRowTitle(_ row: BankTransaction) -> String {
+        "Poistetaanko tapahtuma · \(row.title) \(Money.format(row.amount, signed: true))?"
+    }
+
     /// The row delete confirmation's body.
     public static func deleteRowDescription(_ row: BankTransaction) -> String {
         let sale = row.matchStatus == "suggested" && row.suggestedReceipt?.source == "auto_income"

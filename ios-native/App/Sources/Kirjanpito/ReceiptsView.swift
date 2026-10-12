@@ -39,6 +39,30 @@ struct ReceiptsView: View {
     /// Month, tab, category, source and sort are kept between visits (as the purchase invoices' filter).
     private static let filterKey = "kuitit.filter"
 
+    /// The receipts about to be deleted; deleting starts from the main list only.
+    private var deleting: [Receipt] {
+        (receipts.value ?? []).filter { deleteIds.contains($0.id) }
+    }
+
+    /// The dialog names the receipt so the owner sees which one goes.
+    private var deleteTitle: String {
+        if deleteIds.count == 1, let receipt = deleting.first {
+            return "Poistetaanko kuitti · \(receipt.title)?"
+        }
+        return deleteIds.count == 1 ? "Poistetaanko kuitti?" : "Poistetaanko \(deleteIds.count) kuittia?"
+    }
+
+    private var deleteNote: String {
+        let named = deleting
+        guard !named.isEmpty else { return "" }
+        let shown = named.prefix(3).map { receipt -> String in
+            guard let amount = receipt.totalAmount else { return receipt.title }
+            return "\(receipt.title) \(Money.format(amount))"
+        }
+        let more = deleteIds.count - shown.count
+        return "Poistettavat: " + shown.joined(separator: ", ") + (more > 0 ? " ja \(more) muuta." : ".")
+    }
+
     /// Opened from a figure (a report, ALV, Koti) the list shows exactly those rows and leaves the
     /// owner's remembered Kuitit filters alone; opened plainly, it restores and keeps them.
     private let remembers: Bool
@@ -146,9 +170,10 @@ struct ReceiptsView: View {
                 .padding(.bottom, 8)
             }
         }
-        .confirmationDialog(deleteIds.count == 1 ? String("Poistetaanko kuitti?") : String("Poistetaanko \(deleteIds.count) kuittia?"),
-                            isPresented: $confirmDelete, titleVisibility: .visible) {
+        .confirmationDialog(deleteTitle, isPresented: $confirmDelete, titleVisibility: .visible) {
             Button("Poista", role: .destructive) { Task { await delete(deleteIds) } }
+        } message: {
+            Text(deleteNote)
         }
         .fullScreenCover(isPresented: $capture, onDismiss: { Task { await load() } }) { CaptureFlow(transactionId: nil) }
         .alert("Summarajaus", isPresented: $editingAmount) {

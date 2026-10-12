@@ -53,15 +53,16 @@ struct StatementDetailView: View {
                 }
             }
         }
-        .confirmationDialog("Poistetaanko tiliote?", isPresented: $confirmDelete, titleVisibility: .visible) {
+        // The dialog names the statement (bank and month) so it is clear which one goes.
+        .confirmationDialog(statementDeleteTitle, isPresented: $confirmDelete, titleVisibility: .visible) {
             Button("Poista tiliote", role: .destructive) { Task { await deleteStatement() } }
         } message: {
             if let statement = state.value {
-                Text(StatementText.deleteDescription(title: StatementText.title(statement), rows: statement.transactions))
+                Text(StatementText.deleteDescription(title: StatementText.deleteName(statement), rows: statement.transactions))
             }
         }
         .confirmationDialog(
-            "Poistetaanko tapahtuma?",
+            rowDeleteTitle,
             isPresented: Binding(get: { deletingRow != nil }, set: { if !$0 { deletingRow = nil } }),
             titleVisibility: .visible,
             presenting: deletingRow
@@ -86,6 +87,14 @@ struct StatementDetailView: View {
         }
         .refreshable { await load() }
         .task(id: app.dataVersion) { await load() }
+    }
+
+    private var statementDeleteTitle: String {
+        state.value.map(StatementText.deleteTitle) ?? "Poistetaanko tiliote?"
+    }
+
+    private var rowDeleteTitle: String {
+        deletingRow.map(StatementText.deleteRowTitle) ?? "Poistetaanko tapahtuma?"
     }
 
     @ViewBuilder private func content(_ s: Statement) -> some View {
