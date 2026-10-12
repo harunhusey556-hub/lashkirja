@@ -11,7 +11,7 @@ export interface StatusedPurchaseInvoice {
 }
 
 /** Every filter id the purchase list supports: "all" plus one per display status. */
-export const PURCHASE_FILTER_IDS = ["all", "overdue", "open", "paid", "cancelled"] as const;
+export const PURCHASE_FILTER_IDS = ["all", "overdue", "open", "paid", "credited", "cancelled"] as const;
 export type PurchaseFilterId = (typeof PURCHASE_FILTER_IDS)[number];
 
 type PurchaseStatusFilterId = Exclude<PurchaseFilterId, "all">;
@@ -27,13 +27,14 @@ export const PURCHASE_LIST_LIMIT = 200;
  * chips: overdue first (most urgent), cancelled last (and hidden entirely
  * from the chips when there are none - see `purchaseFilterChips`).
  */
-const STATUS_ORDER: PurchaseStatusFilterId[] = ["overdue", "open", "paid", "cancelled"];
+const STATUS_ORDER: PurchaseStatusFilterId[] = ["overdue", "open", "paid", "credited", "cancelled"];
 
 const FILTER_LABEL: Record<PurchaseFilterId, string> = {
   all: "Kaikki",
   overdue: "Myöhässä",
   open: "Odottaa maksua",
   paid: "Maksetut",
+  credited: "Hyvitetyt",
   cancelled: "Mitätöidyt",
 };
 
@@ -41,6 +42,7 @@ const GROUP_LABEL: Record<PurchaseStatusFilterId, string> = {
   overdue: "Myöhässä",
   open: "Odottaa maksua",
   paid: "Maksetut",
+  credited: "Hyvitetyt",
   cancelled: "Mitätöidyt",
 };
 
@@ -74,7 +76,7 @@ export function purchaseFilterChips(counts: PurchaseStatusCounts): PurchaseFilte
   const total = STATUS_ORDER.reduce((sum, id) => sum + counts[id], 0);
   const chips: PurchaseFilterChip[] = [{ id: "all", label: FILTER_LABEL.all, count: total }];
   for (const id of STATUS_ORDER) {
-    if (id === "cancelled" && counts.cancelled === 0) continue;
+    if ((id === "cancelled" || id === "credited") && counts[id] === 0) continue;
     chips.push({ id, label: FILTER_LABEL[id], count: counts[id] });
   }
   return chips;

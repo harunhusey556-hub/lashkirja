@@ -27,6 +27,7 @@ import {
 
 export { nameSimilarity, normalizeRef } from "./match-gate";
 import { assertPeriodOpen, PeriodLockedError } from "./period-lock";
+import { parseVatDetails } from "./alv";
 
 /**
  * Bank-transaction ↔ receipt matcher.
@@ -275,18 +276,26 @@ export function candidatesFor(
     });
 }
 
-/** Gate-eligible bank rows for one receipt ("which bank row fits this kuitti?"). */
+/**
+ * Bank rows for one receipt ("which bank row fits this kuitti?"). `suggest` (the chat's one
+ * proposal) lists only gate-eligible rows. `search` (the receipt screen, the owner choosing by
+ * hand) adds related rows after them: the same amount, a viite or the same name within the date
+ * window, as "Etsi kuitti" does from the bank side. Without it a receipt whose bank row had the
+ * exact amount but a different-looking name (ABC Prisma vs "KSO ABC Sahkonlata") listed nothing.
+ */
 export function candidatesForReceipt(
   receipt: MatchReceipt,
   txs: MatchTx[],
   rejectedPairs: Set<string>,
-  limit = 3
+  limit = 3,
+  mode: "suggest" | "search" = "suggest"
 ): ScoredPair[] {
-  const scored: ScoredPair[] = [];
+  const scored: Array<ScoredPair & { eligible: boolean }> = [];
   for (const tx of txs) {
     if (rejectedPairs.has(pairKey(tx.id, receipt.id))) continue;
     const result = scorePair(tx, receipt);
-    if (!result?.eligible) continue;
+    if (!result) continue;
+    if (!result.eligible && (mode === "suggest" || result.score <= 0)) continue;
     scored.push({
       transactionId: tx.id,
       receiptId: receipt.id,
@@ -294,17 +303,25 @@ export function candidatesForReceipt(
       reasons: result.reasons,
       explanation: result.explanation,
       certain: result.certain,
+      eligible: result.eligible,
     });
   }
-  const decision = decide(scored.map((s) => ({ ...s, certain: Boolean(s.certain) })));
+  const decision = decide(scored.filter((s) => s.eligible).map((s) => ({ ...s, certain: Boolean(s.certain) })));
   const tied = new Set(decision.ambiguous.map((s) => s.transactionId));
-  return decision.eligible.slice(0, limit).map((pair) =>
-    tied.has(pair.transactionId)
-      ? { ...pair, reasons: [...pair.reasons, "competing"], explanation: [...(pair.explanation ?? []), AMBIGUOUS_REASON] }
-      : decision.eligible.length > 1
-        ? { ...pair, reasons: [...pair.reasons, "competing"] }
-        : pair
-  );
+  const eligibleCount = decision.eligible.length;
+  const strip = ({ eligible: _eligible, ...pair }: ScoredPair & { eligible: boolean }): ScoredPair => pair;
+  const eligible = decision.eligible.map((pair) => {
+    const plain = strip(pair as ScoredPair & { eligible: boolean });
+    if (tied.has(plain.transactionId)) {
+      return { ...plain, reasons: [...plain.reasons, "competing"], explanation: [...(plain.explanation ?? []), AMBIGUOUS_REASON] };
+    }
+    return eligibleCount > 1 ? { ...plain, reasons: [...plain.reasons, "competing"] } : plain;
+  });
+  const related = scored
+    .filter((s) => !s.eligible)
+    .sort((a, b) => b.score - a.score)
+    .map(strip);
+  return [...eligible, ...related].slice(0, limit);
 }
 
 /** The one pick a shortlist allows: its best entry, unless that entry ties with another. */
@@ -540,7 +557,8 @@ export async function buildReceiptMatchViews(
       receiptModel,
       sourceTxId ? openTxModels.filter((tx) => tx.id === sourceTxId) : openTxModels,
       rejectedPairs,
-      3
+      5,
+      "search"
     );
     const byId = new Map(openTxs.map((tx) => [tx.id, tx]));
     const matchCandidates = scored
@@ -581,24 +599,31 @@ export async function confirmMatch(
   fromSuggestion = false,
   db: MatchWriter = prisma
 ): Promise<void> {
-  const [tx, receipt] = await Promise.all([
-    db.transaction.findFirst({
-      where: { id: transactionId, statement: { userId } },
-    }),
-    db.receipt.findFirst({
-      where: { id: receiptId, userId },
-      include: { linkedTransaction: { select: { id: true } } },
-    }),
-  ]);
-  if (!tx || !receipt) throw new MatchNotFoundError();
-  if (receipt.linkedTransaction && receipt.linkedTransaction.id !== tx.id) {
-    throw new MatchConflictError("Kuitti on jo kohdistettu toiseen tapahtumaan");
-  }
-  // Confirming approves a waiting receipt, which moves its month's VAT return
-  // and report exactly as approving it from the review queue does.
-  if (receipt.reviewStatus !== "approved") await assertPeriodOpen(userId, [receipt.date], db);
+  // Read, check and write in one transaction: a period closed (or a receipt
+  // linked elsewhere) between the check and the write cannot slip through.
+  const run = async (client: MatchWriter) => {
+    const [tx, receipt] = await Promise.all([
+      client.transaction.findFirst({
+        where: { id: transactionId, statement: { userId } },
+      }),
+      client.receipt.findFirst({
+        where: { id: receiptId, userId },
+        include: { linkedTransaction: { select: { id: true } } },
+      }),
+    ]);
+    if (!tx || !receipt) throw new MatchNotFoundError();
+    if (receipt.linkedTransaction && receipt.linkedTransaction.id !== tx.id) {
+      throw new MatchConflictError("Kuitti on jo kohdistettu toiseen tapahtumaan");
+    }
+    // The row's own receipt stays: a second one took the row and left the first approved without
+    // its bank row (audit 2026-10-09). Unlinking first is the way to change it.
+    if (tx.receiptId && tx.receiptId !== receipt.id) {
+      throw new MatchConflictError("Tapahtuma on jo kohdistettu toiseen kuittiin. Poista ensin se kohdistus.");
+    }
+    // Confirming approves a waiting receipt, which moves its month's VAT return
+    // and report exactly as approving it from the review queue does.
+    if (receipt.reviewStatus !== "approved") await assertPeriodOpen(userId, [receipt.date], client);
 
-  const write = async (client: MatchWriter) => {
     await client.automationEvent.create({
       data: {
         userId,
@@ -636,17 +661,40 @@ export async function confirmMatch(
     });
     await client.receipt.update({
       where: { id: receiptId },
-      data: { reviewStatus: "approved" },
+      data: { reviewStatus: "approved", ...bankEuroAmount(receipt, tx.amountCents) },
     });
   };
 
   if (db === prisma) {
     await prisma.$transaction(async (txClient) => {
-      await write(txClient);
+      await run(txClient);
     });
     return;
   }
-  await write(db);
+  await run(db);
+}
+
+/**
+ * A receipt in another currency is booked at what the bank actually charged in
+ * euros: the original amount stays in `originalAmountCents`, VAT lines follow
+ * the new total. Nothing changes for a euro receipt.
+ */
+export function bankEuroAmount(
+  receipt: { currency: string; totalAmountCents: number | null; originalAmountCents: number | null; vatDetails: string | null },
+  bankAmountCents: number
+): { totalAmountCents?: number; originalAmountCents?: number; vatDetails?: string } {
+  if (receipt.currency === "EUR") return {};
+  const euros = Math.abs(bankAmountCents);
+  const previous = receipt.totalAmountCents;
+  const out: { totalAmountCents: number; originalAmountCents?: number; vatDetails?: string } = { totalAmountCents: euros };
+  if (receipt.originalAmountCents == null && previous != null) out.originalAmountCents = previous;
+  const lines = parseVatDetails(receipt.vatDetails);
+  if (lines && previous && previous > 0) {
+    out.vatDetails = JSON.stringify(
+      lines.map((line) => ({ rate: line.rate, amount: Math.round((line.amountCents * euros) / previous) / 100 }))
+    );
+  }
+  return out;
 }
 
 export class MatchNotFoundError extends Error {
@@ -697,6 +745,80 @@ export async function confirmAllSuggestions(
     count += 1;
   }
   return count;
+}
+
+export interface ProposedMatchConfirm {
+  confirmed: number;
+  /** Proposed pairs whose suggestion was withdrawn, re-pointed, taken elsewhere or in a closed month. */
+  skipped: number;
+  /** Pairs that were already linked to each other (a second tap, a retry): nothing was written. */
+  alreadyConfirmed: number;
+  /** Which pairs were skipped, so a list can mark exactly those rows. */
+  skippedPairs: Array<{ transactionId: string; receiptId: string }>;
+}
+
+/**
+ * Confirm exactly the pairs a review proposed. A pair whose stored suggestion
+ * was withdrawn (an AI rejection) or re-pointed by a later run is skipped,
+ * never linked from a stale list; income drafts are not silently approved
+ * (same guard as confirmAllSuggestions). Ambiguous rows are not pairs here by
+ * construction — the review never proposes them. A pair that is already
+ * confirmed to each other is counted as alreadyConfirmed, so a second tap on
+ * the same list writes nothing and is not reported as a failure. Confirmed,
+ * skipped and alreadyConfirmed counts let the caller say what actually happened.
+ */
+export async function confirmProposedMatches(
+  userId: string,
+  pairs: Array<{ transactionId: string; receiptId: string }>
+): Promise<ProposedMatchConfirm> {
+  const draftReceiptIds = new Set(
+    (
+      await prisma.receipt.findMany({
+        where: { id: { in: pairs.map((pair) => pair.receiptId) }, source: "auto_income", sourceTransactionId: { not: null } },
+        select: { id: true },
+      })
+    ).map((receipt) => receipt.id)
+  );
+  const result: ProposedMatchConfirm = { confirmed: 0, skipped: 0, alreadyConfirmed: 0, skippedPairs: [] };
+  const skip = (pair: { transactionId: string; receiptId: string }) => {
+    result.skipped += 1;
+    result.skippedPairs.push({ transactionId: pair.transactionId, receiptId: pair.receiptId });
+  };
+  const seen = new Set<string>();
+  for (const pair of pairs) {
+    // The same pair twice in one request is one pair.
+    const key = pairKey(pair.transactionId, pair.receiptId);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    if (draftReceiptIds.has(pair.receiptId)) {
+      skip(pair);
+      continue;
+    }
+    const tx = await prisma.transaction.findFirst({
+      where: { id: pair.transactionId, statement: { userId } },
+      select: { matchStatus: true, suggestedReceiptId: true, receiptId: true },
+    });
+    if (tx?.matchStatus === "confirmed" && tx.receiptId === pair.receiptId) {
+      result.alreadyConfirmed += 1;
+      continue;
+    }
+    if (tx?.matchStatus !== "suggested" || tx.suggestedReceiptId !== pair.receiptId) {
+      skip(pair);
+      continue;
+    }
+    try {
+      await confirmMatch(userId, pair.transactionId, pair.receiptId, true);
+      result.confirmed += 1;
+    } catch (error) {
+      // A closed month, or a receipt/row taken meanwhile, leaves that pair a suggestion; the rest still go through.
+      if (error instanceof PeriodLockedError || error instanceof MatchConflictError || error instanceof MatchNotFoundError) {
+        skip(pair);
+        continue;
+      }
+      throw error;
+    }
+  }
+  return result;
 }
 
 /** An automatic income draft that knows the bank row it was made from. */

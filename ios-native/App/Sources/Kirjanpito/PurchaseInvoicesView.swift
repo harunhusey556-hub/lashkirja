@@ -18,6 +18,8 @@ struct PurchaseInvoicesView: View {
     @State private var busy = false
     @State private var showNew = false
     @State private var payTarget: PurchaseInvoice?
+    /// "Liitä kuitti" from the row, without opening the invoice first.
+    @State private var receiptTarget: PurchaseInvoice?
     @State private var deleteTarget: PurchaseInvoice?
     @State private var limit = ShowMore()
     /// Bank rows the matcher thinks paid an invoice (`GET /api/purchase-invoices/match`), for "N ehdotusta".
@@ -71,6 +73,7 @@ struct PurchaseInvoicesView: View {
         .disabled(busy)
         .sheet(isPresented: $showNew) { PurchaseInvoiceFormView(existing: nil) }
         .sheet(item: $payTarget) { invoice in PurchasePaymentSheet(invoice: invoice) }
+        .sheet(item: $receiptTarget) { invoice in PurchaseReceiptLinkSheet(invoice: invoice) }
         .sheet(isPresented: $showSuggestions) { PurchaseSuggestionsSheet(suggestions: suggestions) }
         .confirmationDialog(
             "Poistetaanko ostolasku?",
@@ -82,7 +85,7 @@ struct PurchaseInvoicesView: View {
         } message: { invoice in
             Text("\(invoice.supplierName) · \(Money.format(invoice.gross))")
         }
-        .animation(.snappy, value: filter)
+        .motion(.snappy, value: filter)
     }
 
     @ViewBuilder
@@ -120,7 +123,7 @@ struct PurchaseInvoicesView: View {
                             Text(PurchaseBankLinkText.suggestionCount(suggestions.count))
                                 .font(.subheadline.weight(.semibold))
                                 .foregroundStyle(Theme.accent)
-                            Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(Theme.ink2)
+                            Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(Theme.ink2).accessibilityHidden(true)
                         }
                     }
                     .accessibilityHint("Hyväksy tai hylkää ehdotetut maksut")
@@ -202,6 +205,18 @@ struct PurchaseInvoicesView: View {
             if invoice.canRecordPayment {
                 Button { payTarget = invoice } label: { Label("Kirjaa maksu", systemImage: "eurosign.circle") }
                     .tint(Theme.successFill)
+            }
+            if invoice.canLinkReceipt {
+                Button { receiptTarget = invoice } label: { Label("Liitä kuitti", systemImage: "paperclip") }
+                    .tint(Theme.accent)
+            }
+        }
+        .contextMenu {
+            if invoice.canLinkReceipt {
+                Button { receiptTarget = invoice } label: { Label("Liitä kuitti", systemImage: "paperclip") }
+            }
+            if invoice.canRecordPayment {
+                Button { payTarget = invoice } label: { Label("Kirjaa maksu", systemImage: "eurosign.circle") }
             }
         }
     }
@@ -325,7 +340,7 @@ struct PurchaseInvoicesView: View {
         do {
             let result: PurchaseMatchResult = try await app.api.send("POST", "/api/purchase-invoices/match", body: EmptyBody())
             Haptics.success()
-            withAnimation {
+            withMotion {
                 message = result.summary
                 suggestions = result.suggestions.filter(\.canAccept)
             }
@@ -340,7 +355,7 @@ struct PurchaseInvoicesView: View {
     private func delete(_ invoice: PurchaseInvoice) async {
         failure = nil
         let api = app.api, id = invoice.id
-        withAnimation {
+        withMotion {
             app.removeInBackground([id]) {
                 let _: Ignored = try await api.send("DELETE", "/api/purchase-invoices/\(id)", body: Optional<EmptyBody>.none)
             }
@@ -366,7 +381,7 @@ struct PurchaseInvoiceDetailView: View {
     @State private var failure: String?
 
     enum SheetKind: String, Identifiable {
-        case edit, payment, bankLink, markPaid, makeRecurring
+        case edit, payment, bankLink, markPaid, makeRecurring, credit
         var id: String { rawValue }
     }
 
@@ -408,7 +423,8 @@ struct PurchaseInvoiceDetailView: View {
                 }
                 details(invoice)
                 receiptSection(invoice)
-                paymentsSection(invoice)
+                if !invoice.isCreditNote { paymentsSection(invoice) }
+                PurchaseCreditLinksSection(invoice: invoice)
                 if let notes = invoice.notes, !notes.isEmpty {
                     Section("Lisätiedot") { Text(notes) }
                 }
@@ -418,7 +434,7 @@ struct PurchaseInvoiceDetailView: View {
                 if invoice.canDelete {
                     Section {
                         Button(role: .destructive) { confirm = .delete } label: {
-                            Label("Poista ostolasku", systemImage: "trash")
+                            Label(invoice.isCreditNote ? "Poista hyvityslasku" : "Poista ostolasku", systemImage: "trash")
                         }
                     }
                 }
@@ -447,6 +463,11 @@ struct PurchaseInvoiceDetailView: View {
                 case .payment: PurchasePaymentSheet(invoice: invoice) { updated in apply(updated) }
                 case .bankLink: PurchaseBankLinkSheet(invoice: invoice) { updated in apply(updated) }
                 case .markPaid: PurchaseMarkPaidSheet(invoice: invoice) { updated in apply(updated) }
+                case .credit:
+                    PurchaseCreditSheet(invoice: invoice) { updated in
+                        apply(updated)
+                        notice = PurchaseCreditForm.createdMessage
+                    }
                 case .makeRecurring:
                     RecurringPurchaseFormSheet(existing: nil, prefill: RecurringPurchaseForm(from: invoice)) { message in
                         notice = message
@@ -485,10 +506,10 @@ struct PurchaseInvoiceDetailView: View {
 
     private func header(_ invoice: PurchaseInvoice) -> some View {
         VStack(spacing: 6) {
-            MoneyText(amount: invoice.gross).font(.system(size: 36, weight: .bold, design: .rounded))
+            MoneyText(amount: invoice.gross).scaledFont(size: 36, weight: .bold, design: .rounded, relativeTo: .largeTitle).moneyHero()
             Text(invoice.supplierName).font(.headline).foregroundStyle(Theme.ink)
             HStack(spacing: 6) {
-                PurchaseStatusBadge(status: invoice.displayStatus)
+                PurchaseStatusBadge(status: invoice.displayStatus, tag: invoice.creditTag)
                 if let recurringPurchaseId {
                     Button { openTemplate = recurringPurchaseId } label: {
                         RecurringBadge(chevron: true)
@@ -498,8 +519,12 @@ struct PurchaseInvoiceDetailView: View {
                     .accessibilityHint("Avaa toistuva ostolasku")
                 }
             }
-            if invoice.open > 0 && invoice.paid > 0 {
+            if invoice.open > 0 && invoice.paid > 0 && invoice.credited == 0 {
                 Text("Avoinna \(Money.format(invoice.open))").font(.caption).foregroundStyle(Theme.ink2)
+            }
+            if invoice.credited > 0 && invoice.displayStatus != .credited && !invoice.isCreditNote {
+                Text("Avoinna \(Money.format(invoice.open)), hyvitetty \(Money.format(invoice.credited))")
+                    .font(.caption).foregroundStyle(Theme.ink2)
             }
         }
         .frame(maxWidth: .infinity)
@@ -510,7 +535,10 @@ struct PurchaseInvoiceDetailView: View {
     private func details(_ invoice: PurchaseInvoice) -> some View {
         Section {
             LabeledContent("Laskun päivä", value: APIDate.displayDay(invoice.issueDate))
-            LabeledContent("Eräpäivä", value: APIDate.displayDay(invoice.dueDate))
+            // A credit note is not payable: its due date is just its own date.
+            if !invoice.isCreditNote {
+                LabeledContent("Eräpäivä", value: APIDate.displayDay(invoice.dueDate))
+            }
             if let number = invoice.invoiceNumber, !number.isEmpty {
                 LabeledContent("Laskun numero", value: number)
             }
@@ -538,6 +566,9 @@ struct PurchaseInvoiceDetailView: View {
             LabeledContent("Yhteensä") { MoneyText(amount: invoice.gross).fontWeight(.semibold) }
             if !invoice.payments.isEmpty {
                 LabeledContent("Maksettu") { MoneyText(amount: invoice.paid) }
+            }
+            if invoice.credited > 0 {
+                LabeledContent("Hyvitetty") { MoneyText(amount: invoice.credited) }
             }
             if invoice.status == .open {
                 LabeledContent("Avoinna") { MoneyText(amount: invoice.open).fontWeight(.semibold) }
@@ -638,7 +669,13 @@ struct PurchaseInvoiceDetailView: View {
 
     private func actions(_ invoice: PurchaseInvoice) -> some View {
         Menu {
-            Button { sheet = .edit } label: { Label("Muokkaa", systemImage: "pencil") }
+            // A credit note's amounts are locked on the server; it is only deleted.
+            if !invoice.isCreditNote {
+                Button { sheet = .edit } label: { Label("Muokkaa", systemImage: "pencil") }
+            }
+            if invoice.canCredit {
+                Button { sheet = .credit } label: { Label("Hyvitä", systemImage: "arrow.uturn.backward.circle") }
+            }
             if invoice.canRecordPayment {
                 Button { sheet = .bankLink } label: { Label("Kohdista pankkitapahtumaan", systemImage: "building.columns") }
                 Button { sheet = .payment } label: { Label("Kirjaa maksu", systemImage: "eurosign.circle") }
@@ -657,7 +694,7 @@ struct PurchaseInvoiceDetailView: View {
             }
             if let recurringPurchaseId {
                 Button { openTemplate = recurringPurchaseId } label: { Label("Avaa toistuva ostolasku", systemImage: "repeat") }
-            } else if invoice.status != .cancelled {
+            } else if invoice.status != .cancelled && !invoice.isCreditNote {
                 Button { sheet = .makeRecurring } label: { Label("Tee toistuvaksi", systemImage: "repeat") }
             }
             if invoice.canReopen {
@@ -667,7 +704,7 @@ struct PurchaseInvoiceDetailView: View {
                 Button(role: .destructive) { confirm = .cancel } label: { Label("Mitätöi", systemImage: "xmark.circle") }
             }
             if invoice.canDelete {
-                Button(role: .destructive) { confirm = .delete } label: { Label("Poista ostolasku", systemImage: "trash") }
+                Button(role: .destructive) { confirm = .delete } label: { Label(invoice.isCreditNote ? "Poista hyvityslasku" : "Poista ostolasku", systemImage: "trash") }
             }
         } label: {
             Image(systemName: "ellipsis.circle")
@@ -677,7 +714,7 @@ struct PurchaseInvoiceDetailView: View {
 
     private var confirmTitle: String {
         switch confirm {
-        case .delete: "Poistetaanko ostolasku?"
+        case .delete: state.value?.isCreditNote == true ? "Poistetaanko hyvityslasku?" : "Poistetaanko ostolasku?"
         case .cancel: "Mitätöidäänkö ostolasku?"
         case .reopen: "Palautetaanko ostolasku avoimeksi?"
         case .markPaid: "Merkitäänkö ostolasku maksetuksi?"

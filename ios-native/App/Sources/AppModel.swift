@@ -33,6 +33,10 @@ final class AppModel {
     /// A password reset link handed to the app (`lashkirja://…?token=…`), waiting for the
     /// sign-in screen to open the reset form with it.
     var pendingResetLink: String?
+    /// A Home Screen quick action or App Intent (`lashkirja://capture`, `invoice/new`, `assistant`),
+    /// waiting for MainTabView to open its sheet. Cleared on sign-out so it never runs for
+    /// someone else.
+    var pendingQuickAction: QuickAction?
     /// When the app went to the background: coming back after a while reloads the screens.
     private var backgroundedAt: Date?
     /// Bumped whenever the signed-in session starts or ends: an answer that arrives for an earlier
@@ -40,23 +44,62 @@ final class AppModel {
     private var session = LoadGeneration()
     let auth: AuthService
     let api: APIClient
+    /// Sends unexpected server failures and MetricKit diagnostics to /api/observe, signed in only.
+    let observer: ObserveReporter
+    /// Sends the debugging trail (EventLog: screens, requests, problem reports) to /api/observe/events.
+    let eventUploader: EventLogUploader
+    private var eventFlushLoop: Task<Void, Never>?
 
     init(baseURL: URL = AppConfig.apiBaseURL, store: TokenStore = KeychainTokenStore()) {
         let auth = AuthService(store: store)
         self.auth = auth
-        self.api = APIClient(baseURL: baseURL, transport: URLSessionTransport(), tokens: auth)
+        let api = APIClient(baseURL: baseURL, transport: URLSessionTransport(), tokens: auth)
+        self.api = api
+        self.observer = ObserveReporter(
+            app: ObserveAppInfo.current,
+            isSignedIn: { await auth.currentToken() != nil },
+            send: { payload in let _: Ignored = try await api.send("POST", "/api/observe", body: payload) })
+        self.eventUploader = EventLogUploader(
+            log: EventLog.shared,
+            app: ObserveAppInfo.current,
+            isSignedIn: { await auth.currentToken() != nil },
+            send: { batch in let _: Ignored = try await api.send("POST", "/api/observe/events", body: batch) })
     }
+
+    /// Now, for a problem report or a trip to the background; otherwise every 30 s.
+    func flushEvents() async { await eventUploader.flush() }
 
     func start() async {
         await auth.bind(api)
         // Every write the server accepts marks what the screens show as out of date, so a list
         // reloads when the owner comes back to it after acting on a detail screen or a sheet.
-        // Sign-in and chat housekeeping change no bookkeeping data.
+        // Sign-in, chat housekeeping and the app's own diagnostics change no bookkeeping data.
+        // /api/observe above all: an event upload that marked the screens stale made them
+        // reload, the reloads logged new events, and the next upload reloaded them again.
         await api.setOnWrite { [weak self] path in
-            guard !path.hasPrefix("/api/auth"), !path.hasPrefix("/api/ai/") else { return }
+            guard !path.hasPrefix("/api/auth"), !path.hasPrefix("/api/ai/"), !path.hasPrefix("/api/observe") else { return }
             await MainActor.run { self?.dataVersion += 1 }
         }
         await api.setOnUnauthorized { [weak self] in await self?.sessionExpired() }
+        let observer = self.observer
+        await api.setOnUnexpectedFailure { method, path, status, decodeError in
+            await observer.reportAPIFailure(method: method, path: path, status: status, decodeError: decodeError)
+        }
+        await api.setOnRequestFinished { trace in await EventLog.shared.record(.request(trace)) }
+        EventLog.shared.log(.lifecycle("launch"))
+        let uploader = eventUploader
+        eventFlushLoop = Task {
+            // What the previous run left on the phone (a freeze, a crash) goes first, soon after
+            // launch; then every 30 s.
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            while !Task.isCancelled {
+                await uploader.flush()
+                try? await Task.sleep(nanoseconds: 30_000_000_000)
+            }
+        }
+        // The offline banner also covers a server that does not answer while the phone has a network.
+        await api.setOnReachability { reached in await MainActor.run { Connectivity.shared.requestFinished(reached: reached) } }
+        Connectivity.shared.attach { [api] in let _: Ignored? = try? await api.get("/api/auth/me") }
         let auth = self.auth
         // The revoke of an earlier sign-out is a network call: it must not hold up opening the app.
         Task { await auth.revokePending() }
@@ -127,9 +170,13 @@ final class AppModel {
 
     func background() {
         backgroundedAt = Date()
+        EventLog.shared.log(.lifecycle("background"))
+        let uploader = eventUploader
+        Task { await uploader.flush() }
     }
 
     func foreground() async {
+        EventLog.shared.log(.lifecycle("foreground"))
         // Back after more than five minutes: what the screens show may be out of date.
         if ForegroundRefresh.isStale(backgroundedAt: backgroundedAt, now: Date()), case .signedIn = phase {
             dataVersion += 1
@@ -142,6 +189,28 @@ final class AppModel {
     func handle(url: URL) {
         let link = url.absoluteString
         if PasswordReset.token(from: link) != nil { pendingResetLink = link }
+        // Quick actions and App Intents: MainTabView exists only while signed in, so before
+        // sign-in (or during launch) the action waits here and runs once the tabs appear.
+        if let action = QuickAction(url: url) { pendingQuickAction = action }
+        // A Spotlight result: its tab and detail, as a notification tap opens them. Nothing opens
+        // for a signed-out app (the index is cleared at sign-out, so a stale result only misses).
+        if let target = OpenTarget(url: url), !isSignedOut {
+            switch target {
+            case .customer(let id): pendingRoute = PendingRoute(tab: .myynti, route: .customer(id))
+            case .invoice(let id): pendingRoute = PendingRoute(tab: .myynti, route: .invoice(id))
+            }
+        }
+    }
+
+    private var isSignedOut: Bool {
+        if case .signedOut = phase { return true }
+        return false
+    }
+
+    /// Lists that loaded feed system search, only while an owner is signed in.
+    func indexForSpotlight(_ entries: [SpotlightEntry]) {
+        guard case .signedIn = phase else { return }
+        SpotlightIndexer.index(entries)
     }
 
     /// The sign-in email was changed and confirmed: the profile and the signed-in user show it.
@@ -169,11 +238,15 @@ final class AppModel {
     /// them back and says why. The write bumps `dataVersion`, so lists reload after it lands.
     func removeInBackground(_ ids: [String], _ work: @escaping @Sendable @MainActor () async throws -> Void) {
         hide(ids)
-        Haptics.success()
+        // A light tap now (the row went away); the success feel only once the server agreed, so a
+        // deletion the server refuses never felt done.
+        Haptics.selection()
         let started = session.current
         Task {
-            do { try await work() }
-            catch {
+            do {
+                try await work()
+                if session.isCurrent(started) { Haptics.success() }
+            } catch {
                 // Signed out meanwhile: the next session never saw these rows hidden.
                 guard session.isCurrent(started) else { return }
                 unhide(ids)
@@ -190,10 +263,14 @@ final class AppModel {
         chat?.shutdown()
         chat = nil
         DocumentCache.shared.clear()
+        // Names, Y-tunnukset and amounts must not stay findable in system search.
+        SpotlightIndexer.clear()
         profile = nil
         removedIds = []
         pendingRoute = nil
         pendingCapture = nil
+        // A shortcut tapped by the previous owner must not open on the next one's account.
+        pendingQuickAction = nil
         removalFailure = nil
         // This owner's notifications, shown or waiting, and the record of what was shown.
         AppNotifications.shared.clearForSignOut()
@@ -209,5 +286,6 @@ struct PendingRoute: Equatable {
 
 struct PendingCapture: Identifiable, Equatable {
     let id = UUID()
-    let transactionId: String
+    /// The bank row to match; nil for a plain "Kuvaa kuitti" (quick action).
+    let transactionId: String?
 }

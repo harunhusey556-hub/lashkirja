@@ -23,6 +23,17 @@ public struct Invoice: Decodable, Sendable, Identifiable, Hashable {
         public let unitPrice: Decimal
         public let vatRate: Decimal
         public let net: Decimal
+        /// The line's place on the invoice; a credit note names the lines it reversed by it.
+        /// Absent from older servers.
+        public let sortOrder: Int?
+    }
+    /// A credit note issued against this invoice, with what it reversed of each line.
+    public struct CreditNote: Decodable, Sendable, Hashable {
+        public struct Line: Decodable, Sendable, Hashable {
+            public let sortOrder: Int
+            public let quantity: Decimal
+        }
+        public let lines: [Line]
     }
     public struct Payment: Decodable, Sendable, Identifiable, Hashable {
         public let id: String
@@ -94,11 +105,15 @@ public struct Invoice: Decodable, Sendable, Identifiable, Hashable {
     public let vat: Decimal
     public let gross: Decimal
     public let paid: Decimal
+    /// Total of the credit notes against this invoice (positive); absent from older servers.
+    public let credited: Decimal?
     public let open: Decimal
     public let closedReason: String?
     public let updatedAt: String
     public let documentKind: String
     public let creditsInvoice: Ref?
+    /// Credit notes already issued against this invoice; absent from older servers.
+    public let creditNotes: [CreditNote]?
     public let customer: Party
     public let lines: [Line]
     public let payments: [Payment]

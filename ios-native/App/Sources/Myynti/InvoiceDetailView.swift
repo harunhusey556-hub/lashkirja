@@ -38,8 +38,11 @@ struct InvoiceDetailView: View {
     /// Card details and refund state of the card payments, by `posPaymentId`.
     @State private var cardPayments: [String: POSPaymentView] = [:]
 
-    enum SheetKind: Identifiable { case payment, card, send, pdf, edit, reminder, reminderPdf, close; var id: Self { self } }
-    enum ConfirmKind: Identifiable, Hashable { case delete, credit, markSent, refund(Invoice.Payment); var id: Self { self } }
+    /// The credit note made by the credit sheet: pushed once the sheet has closed.
+    @State private var creditedId: String?
+
+    enum SheetKind: Identifiable { case payment, card, send, pdf, edit, reminder, reminderPdf, close, credit; var id: Self { self } }
+    enum ConfirmKind: Identifiable, Hashable { case delete, markSent, refund(Invoice.Payment); var id: Self { self } }
 
     var body: some View {
         List {
@@ -91,7 +94,13 @@ struct InvoiceDetailView: View {
             if !tabChosen, let status { tab = InvoiceDetailLayout.initialTab(overdue: status == .overdue) }
         }
         .disabled(busy)
-        .sheet(item: $sheet, onDismiss: { Task { await load() } }) { kind in
+        .sheet(item: $sheet, onDismiss: {
+            if let id = creditedId {
+                creditedId = nil
+                pushedId = id
+            }
+            Task { await load() }
+        }) { kind in
             if let invoice = state.value {
                 switch kind {
                 case .payment: PaymentSheet(invoice: invoice)
@@ -106,6 +115,7 @@ struct InvoiceDetailView: View {
                     if result.isWarning { warning = result.message; notice = nil } else { notice = result.message; warning = nil }
                 }
                 case .close: CloseReasonSheet { reason in Task { await setStatus(.close(reason: reason)) } }
+                case .credit: InvoiceCreditSheet(invoice: invoice) { id in creditedId = id }
                 case .pdf: DocumentPreviewSheet(path: "/api/invoices/\(invoice.id)/pdf", fileName: "Lasku-\(invoice.number).pdf", cacheKey: invoice.updatedAt)
                 case .edit: InvoiceFormView(existing: invoice)
                 case .reminder:
@@ -120,7 +130,6 @@ struct InvoiceDetailView: View {
         .confirmationDialog(confirmTitle, isPresented: Binding(get: { confirm != nil }, set: { if !$0 { confirm = nil } }), titleVisibility: .visible) {
             switch confirm {
             case .delete: Button("Poista luonnos", role: .destructive) { Task { await deleteDraft() } }
-            case .credit: Button("Luo hyvityslasku") { Task { await credit() } }
             case .markSent: Button("Merkitse lähetetyksi") { Task { await setStatus(.markSent) } }
             case .refund(let payment): Button("Palauta maksu", role: .destructive) { Task { await refund(payment) } }
             case nil: EmptyView()
@@ -131,19 +140,24 @@ struct InvoiceDetailView: View {
 
     private var confirmTitle: String {
         switch confirm {
-        case .delete: "Poistetaanko luonnos?"
-        case .credit: "Luodaanko hyvityslasku? Alkuperäinen lasku kuitataan hyvitetyksi."
+        case .delete: deleteDraftTitle
         case .markSent: "Merkitäänkö lasku lähetetyksi ilman sähköpostia?"
         case .refund(let payment): "Palautetaanko korttimaksu \(Money.format(payment.amount))? Raha palautetaan asiakkaan kortille Stripen kautta."
         case nil: ""
         }
     }
 
+    /// A draft has no number worth naming yet: the customer and the sum say which one goes.
+    private var deleteDraftTitle: String {
+        guard let invoice = state.value else { return "Poistetaanko luonnos?" }
+        return "Poistetaanko luonnos · \(invoice.customer.name), \(Money.format(invoice.gross))?"
+    }
+
     /// Amount, customer, where the invoice stands and the three dates, in one card.
     private func summaryCard(_ invoice: Invoice) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .firstTextBaseline) {
-                StatusBadge(status: invoice.displayStatus)
+                StatusBadge(status: invoice.displayStatus, partlyCredited: invoice.isPartlyCredited)
                 Spacer(minLength: 8)
                 Text(InvoiceDetailLayout.dueLine(status: invoice.displayStatus, dueDate: invoice.dueDate,
                                                  paidAt: invoice.paidAt, today: APIDate.dayString(Date())))
@@ -151,12 +165,12 @@ struct InvoiceDetailView: View {
                     .foregroundStyle(invoice.displayStatus == .overdue ? Theme.danger : Theme.ink2)
             }
             VStack(alignment: .leading, spacing: 2) {
-                MoneyText(amount: invoice.gross).font(.system(size: 34, weight: .bold, design: .rounded))
+                MoneyText(amount: invoice.gross).scaledFont(size: 34, weight: .bold, design: .rounded, relativeTo: .largeTitle).moneyHero()
                 // A button, not a NavigationLink: a link would make the whole card one tap target.
                 Button { customerRoute = .customer(invoice.customer.id) } label: {
                     HStack(spacing: 4) {
                         Text(invoice.customer.name).font(.headline).foregroundStyle(Theme.ink)
-                        Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(Theme.ink2)
+                        Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(Theme.ink2).accessibilityHidden(true)
                     }
                 }
                 .buttonStyle(.borderless)
@@ -167,6 +181,9 @@ struct InvoiceDetailView: View {
                     Text("Maksettu \(Money.format(invoice.paid)) · avoinna \(Money.format(invoice.open))")
                         .font(.caption).foregroundStyle(Theme.ink2)
                 }
+            }
+            if let line = invoice.openAndCreditedLine {
+                Text(line).font(.caption).foregroundStyle(Theme.ink2)
             }
             if let line = InvoiceSendState.line(status: invoice.status, sentAt: invoice.sentAt, sends: invoice.sends) {
                 sendLine(line)
@@ -223,7 +240,7 @@ struct InvoiceDetailView: View {
         return HStack(alignment: .firstTextBaseline, spacing: 8) {
             Button {
                 tabChosen = true
-                withAnimation(.snappy) { tab = .history }
+                withMotion(.snappy) { tab = .history }
             } label: {
                 Label(line.text, systemImage: line.tone == .muted ? "paperplane" : "exclamationmark.triangle")
                     .font(.caption)
@@ -288,7 +305,7 @@ struct InvoiceDetailView: View {
     private func quickAction(_ title: String, symbol: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             VStack(spacing: 4) {
-                Image(systemName: symbol).font(.body.weight(.semibold))
+                Image(systemName: symbol).font(.body.weight(.semibold)).accessibilityHidden(true)
                 Text(title).font(.caption)
             }
             .foregroundStyle(Theme.accent)
@@ -304,7 +321,7 @@ struct InvoiceDetailView: View {
                 ForEach(tabs) { item in
                     SectionChip(title: item.title, selected: item.tab == tab) {
                         tabChosen = true
-                        withAnimation(.snappy) { tab = item.tab }
+                        withMotion(.snappy) { tab = item.tab }
                     }
                 }
             }
@@ -425,7 +442,7 @@ struct InvoiceDetailView: View {
                 Button { confirm = .markSent } label: { Label("Merkitse lähetetyksi", systemImage: "checkmark.circle") }
             }
             if invoice.displayStatus != .draft && invoice.displayStatus != .credited && !invoice.isCreditNote {
-                Button { confirm = .credit } label: { Label("Hyvitä", systemImage: "arrow.uturn.backward") }
+                Button { sheet = .credit } label: { Label("Hyvitä", systemImage: "arrow.uturn.backward") }
             }
             if InvoiceStatusChange.canClose(status: invoice.status, open: invoice.open, isCreditNote: invoice.isCreditNote) {
                 Button { sheet = .close } label: { Label("Sulje perustelulla", systemImage: "checkmark.seal") }
@@ -468,6 +485,20 @@ struct InvoiceDetailView: View {
         catch { failure = error.userMessage; Haptics.error() }
     }
 
+    /// Like `run`, handing over the attempt's Idempotency-Key and saying what happened to the
+    /// action when the connection fails. A retry after a failure reuses the key.
+    private func runKeyed(notDone: String, maybeDone: String, _ work: (String) async throws -> Void) async {
+        guard let key = submit.begin() else { return }
+        failure = nil
+        var succeeded = false
+        defer { submit.finish(succeeded: succeeded) }
+        do { try await work(key); succeeded = true; Haptics.success() }
+        catch {
+            failure = WriteFailureCopy.message(for: error, notDone: notDone, maybeDone: maybeDone, retrySafe: true)
+            Haptics.error()
+        }
+    }
+
     @discardableResult
     private func setStatus(_ change: InvoiceStatusChange) async -> Bool {
         var done = false
@@ -490,11 +521,11 @@ struct InvoiceDetailView: View {
     private func showToast(_ text: String, action: String?, run: (() async -> Void)?) {
         toastTask?.cancel()
         toastAction = run
-        withAnimation(.snappy) { toast = Toast(text: text, actionLabel: action) }
+        withMotion(.snappy) { toast = Toast(text: text, actionLabel: action) }
         toastTask = Task {
             try? await Task.sleep(nanoseconds: 5_000_000_000)
             guard !Task.isCancelled else { return }
-            withAnimation { toast = nil }
+            withMotion { toast = nil }
             toastAction = nil
         }
     }
@@ -503,21 +534,13 @@ struct InvoiceDetailView: View {
         let action = toastAction
         toastTask?.cancel()
         toastAction = nil
-        withAnimation { toast = nil }
+        withMotion { toast = nil }
         if let action { Task { await action() } }
     }
 
-    private func credit() async {
-        await run {
-            let r: InvoiceResponse = try await app.api.send("POST", "/api/invoices/\(invoiceId)/credit", body: EmptyBody())
-            pushedId = r.invoice.id
-        }
-        await load()
-    }
-
     private func duplicate() async {
-        await run {
-            let r: InvoiceResponse = try await app.api.send("POST", "/api/invoices/\(invoiceId)/duplicate", body: EmptyBody())
+        await runKeyed(notDone: "Kopiota ei luotu.", maybeDone: "Kopio on voinut tallentua luonnoksiin.") { key in
+            let r: InvoiceResponse = try await app.api.send("POST", "/api/invoices/\(invoiceId)/duplicate", body: EmptyBody(), idempotencyKey: key)
             pushedId = r.invoice.id
         }
     }
@@ -840,19 +863,19 @@ struct ReminderSheet: View {
     }
 
     private func send() async {
-        // The reminder route takes no Idempotency-Key: the guard is what keeps a second tap from mailing twice.
-        guard submit.begin() != nil else { return }
+        // The same key on every retry of this reminder: a lost answer is replayed, not mailed twice.
+        guard let key = submit.begin() else { return }
         failure = nil
         var succeeded = false
         defer { submit.finish(succeeded: succeeded) }
         do {
-            let result: ReminderSendResult = try await app.api.send("POST", "/api/invoices/\(invoice.id)/reminders", body: EmptyBody())
+            let result: ReminderSendResult = try await app.api.send("POST", "/api/invoices/\(invoice.id)/reminders", body: EmptyBody(), idempotencyKey: key)
             succeeded = true
             Haptics.success()
             onSent(result.message)
             dismiss()
         } catch {
-            failure = error.userMessage
+            failure = WriteFailureCopy.message(for: error, notDone: "Muistutusta ei lähetetty.", maybeDone: "Muistutus on voinut lähteä asiakkaalle.", retrySafe: true)
             Haptics.error()
         }
     }
@@ -903,7 +926,7 @@ struct SendInvoiceSheet: View {
                                     Text(preview.iban ?? "–").textSelection(.enabled)
                                     if let iban = preview.iban {
                                         Button { UIPasteboard.general.string = iban; Haptics.selection() } label: {
-                                            Image(systemName: "doc.on.doc")
+                                            Image(systemName: "doc.on.doc").tapTarget()
                                         }
                                         .buttonStyle(.borderless)
                                         .accessibilityLabel("Kopioi IBAN")
@@ -995,7 +1018,7 @@ struct SendInvoiceSheet: View {
                             HStack(spacing: 4) {
                                 if templateBusy { ProgressView() }
                                 Text(templates.first { $0.id == templateId }?.name ?? "Valitse")
-                                Image(systemName: "chevron.up.chevron.down").font(.caption2)
+                                Image(systemName: "chevron.up.chevron.down").font(.caption2).accessibilityHidden(true)
                             }
                             .foregroundStyle(Theme.accent)
                         }

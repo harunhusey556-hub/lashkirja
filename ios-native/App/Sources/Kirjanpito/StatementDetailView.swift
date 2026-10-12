@@ -53,15 +53,16 @@ struct StatementDetailView: View {
                 }
             }
         }
-        .confirmationDialog("Poistetaanko tiliote?", isPresented: $confirmDelete, titleVisibility: .visible) {
+        // The dialog names the statement (bank and month) so it is clear which one goes.
+        .confirmationDialog(statementDeleteTitle, isPresented: $confirmDelete, titleVisibility: .visible) {
             Button("Poista tiliote", role: .destructive) { Task { await deleteStatement() } }
         } message: {
             if let statement = state.value {
-                Text(StatementText.deleteDescription(title: StatementText.title(statement), rows: statement.transactions))
+                Text(StatementText.deleteDescription(title: StatementText.deleteName(statement), rows: statement.transactions))
             }
         }
         .confirmationDialog(
-            "Poistetaanko tapahtuma?",
+            rowDeleteTitle,
             isPresented: Binding(get: { deletingRow != nil }, set: { if !$0 { deletingRow = nil } }),
             titleVisibility: .visible,
             presenting: deletingRow
@@ -88,6 +89,14 @@ struct StatementDetailView: View {
         .task(id: app.dataVersion) { await load() }
     }
 
+    private var statementDeleteTitle: String {
+        state.value.map(StatementText.deleteTitle) ?? "Poistetaanko tiliote?"
+    }
+
+    private var rowDeleteTitle: String {
+        deletingRow.map(StatementText.deleteRowTitle) ?? "Poistetaanko tapahtuma?"
+    }
+
     @ViewBuilder private func content(_ s: Statement) -> some View {
         let rows = s.transactions
         let relevant = rows.filter { $0.type != "oma_siirto" && $0.type != "palkka" }.count
@@ -101,7 +110,7 @@ struct StatementDetailView: View {
             VStack(alignment: .leading, spacing: 4) {
                 if let net = s.totals?.net {
                     MoneyText(amount: net, signed: true)
-                        .font(.system(size: 30, weight: .bold, design: .rounded))
+                        .scaledFont(size: 30, weight: .bold, design: .rounded, relativeTo: .largeTitle).moneyHero()
                         .foregroundStyle(net >= 0 ? Theme.success : Theme.ink)
                 }
                 Text(StatementText.title(s)).font(.headline).foregroundStyle(Theme.ink)
@@ -114,13 +123,29 @@ struct StatementDetailView: View {
         }
 
         if let totals = s.totals {
+            // The bank's own in/out first, so the figures can be checked against the statement
+            // ("Panot" / "Otot"); the owner read Tulot/Menot as wrong when an owner's withdrawal
+            // was left out of Menot without a word (2026-10-09).
+            if let moneyIn = totals.moneyIn, let moneyOut = totals.moneyOut {
+                Section {
+                    LabeledContent("Tilille tuli") { MoneyText(amount: moneyIn) }
+                    LabeledContent("Tililtä lähti") { MoneyText(amount: moneyOut) }
+                } header: {
+                    Text("Pankin mukaan")
+                }
+            }
             Section {
                 LabeledContent("Tulot") { MoneyText(amount: totals.income).foregroundStyle(Theme.success) }
                 LabeledContent("Menot") { MoneyText(amount: totals.expenses) }
                 LabeledContent("Netto") { MoneyText(amount: totals.net, signed: true).fontWeight(.semibold) }
+                if let transfers = totals.transfers, transfers != 0 {
+                    LabeledContent("Omat siirrot ja yksityisotot") { MoneyText(amount: transfers, signed: true) }
+                }
+            } header: {
+                Text("Kirjanpidossa")
             } footer: {
                 if let transfers = totals.transfers, transfers != 0 {
-                    Text("Omat siirrot \(Money.format(transfers)), eivät sisälly nettoon")
+                    Text("Omat siirrot ja yrittäjän yksityisotot eivät ole tuloa eikä menoa, joten ne eivät sisälly tuloihin, menoihin eikä nettoon.")
                 }
             }
         }
@@ -219,6 +244,9 @@ struct StatementDetailView: View {
     }
 
     private func load() async {
+        // Deleted from this screen: the delete's write reloads screens while this one is still
+        // closing, and asking again only answered 404 (event log 2026-10-08, every delete).
+        guard !app.removedIds.contains(statementId) else { return }
         state.begin()
         do {
             let response: StatementResponse = try await app.api.get("/api/statements/\(statementId)")

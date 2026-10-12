@@ -42,6 +42,8 @@ enum Route: Hashable {
     case statement(String)
     case recurringInvoices
     case periods
+    /// Kirjanpito: the double-entry books (tuloslaskelma, tase, saldoluettelo, päiväkirja).
+    case ledger
     case workQueue
     case privacy
     case help
@@ -73,6 +75,8 @@ enum Route: Hashable {
     case purchaseInvoicesFiltered(status: String)
     /// Toistuvat ostolaskut: rent and other routine bills made into purchase invoices each period.
     case recurringPurchases
+    /// Kohdista ostolaskujen maksut: open ostolaskut with the bank payment proposed for each.
+    case purchaseMatch
 }
 
 extension Route {
@@ -156,6 +160,7 @@ extension View {
         // Pushed screens use the small inline title: the large one costs a phone screen ~50 pt.
         navigationDestination(for: Route.self) { route in
             RouteScreen(route: route).navigationBarTitleDisplayMode(.inline)
+                .onAppear { EventLog.shared.log(.screen(String(describing: route))) }
         }
     }
 }
@@ -183,6 +188,7 @@ struct RouteScreen: View {
         case .statement(let id): StatementDetailView(statementId: id)
         case .recurringInvoices: RecurringInvoicesView()
         case .periods: PeriodsView()
+        case .ledger: LedgerView()
         case .workQueue: WorkQueueView()
         case .privacy: PrivacyView()
         case .help: HelpView()
@@ -208,6 +214,7 @@ struct RouteScreen: View {
             MyyntiView(scope: InvoiceScope(month: month, customerId: customerId), status: SalesFilter(rawValue: status) ?? .all)
         case .purchaseInvoicesFiltered(let status): PurchaseInvoicesView(status: PurchaseFilter(rawValue: status))
         case .recurringPurchases: RecurringPurchasesView()
+        case .purchaseMatch: PurchaseMatchView()
         }
     }
 }

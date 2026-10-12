@@ -12,12 +12,14 @@ export const OMAVERO_FIELDS = {
   301: "Vero kotimaan myynnistä 25,5 % (24 % ennen 1.9.2024)",
   302: "Vero kotimaan myynnistä 13,5 % (14 % ennen 1.1.2026)",
   303: "Vero kotimaan myynnistä 10 %",
-  304: "Vero palveluostoista muista EU-maista",
+  304: "Vero tavaroiden maahantuonnista EU:n ulkopuolelta",
   305: "Vero tavaraostoista muista EU-maista",
-  306: "Vero tavaroiden maahantuonnista EU:n ulkopuolelta",
+  306: "Vero palveluostoista muista EU-maista",
   307: "Verokauden vähennettävä vero",
   308: "Maksettava vero / Palautukseen oikeuttava vero (-)",
   309: "0-verokannan alainen liikevaihto",
+  313: "Tavaraostot muista EU-maista",
+  314: "Palveluostot muista EU-maista",
   318: "Vero rakentamispalvelun ja metalliromun ostoista",
 } as const;
 

@@ -1,4 +1,5 @@
 import SwiftUI
+import CoreSpotlight
 import LashKirjaCore
 
 enum AppConfig {
@@ -11,6 +12,7 @@ enum AppConfig {
 
 @main
 struct LashKirjaApp: App {
+    @UIApplicationDelegateAdaptor(QuickActionAppDelegate.self) private var quickActionDelegate
     @State private var app: AppModel
     @Environment(\.scenePhase) private var scenePhase
 
@@ -19,6 +21,11 @@ struct LashKirjaApp: App {
         _app = State(initialValue: app)
         // Before launch finishes: a notification tap that launched the app must find its delegate.
         AppNotifications.shared.activate(app: app)
+        // MetricKit hands over the previous run's crash and hang reports shortly after launch.
+        DiagnosticsObserver.shared.start(reporter: app.observer)
+        HangWatchdog.shared.start()
+        // A quick action that launched the app is already waiting in QuickActions.
+        QuickActions.attach { url in app.handle(url: url) }
     }
 
     var body: some Scene {
@@ -35,12 +42,14 @@ struct LashKirjaApp: App {
                 }
                 .onChange(of: scenePhase) { _, phase in
                     if phase == .active {
+                        HangWatchdog.shared.start()
                         Task {
                             await app.foreground()
                             await AppNotifications.shared.appBecameActive()
                         }
                     }
                     if phase == .background {
+                        HangWatchdog.shared.pause()
                         app.background()
                         AppLock.shared.lockIfEnabled()
                         AppNotifications.shared.scheduleBackgroundRefresh()
@@ -49,6 +58,9 @@ struct LashKirjaApp: App {
                 // Links reach the app whatever screen is showing; the sign-in screen takes a
                 // reset link from AppModel when it appears.
                 .onOpenURL { url in app.handle(url: url) }
+                .onContinueUserActivity(CSSearchableItemActionType) { activity in
+                    if let url = SpotlightIndexer.url(from: activity) { app.handle(url: url) }
+                }
         }
         // Background App Refresh: iOS decides when (if ever) this runs; see AppNotifications.
         .backgroundTask(.appRefresh(AppNotifications.refreshTaskId)) {

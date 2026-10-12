@@ -11,6 +11,7 @@ import {
   categoriesVatHintsForAiPrompt,
   guessVatForReceipt,
 } from "./vat-rules";
+import { isUsableRate } from "./foreign-purchase";
 import { amountsOnLine, isoFromDateMatch, DATE_RE, parseAmount } from "./finnish-numbers";
 
 import { getTopVendorsForAiPrompt } from "./vendor-intelligence";
@@ -38,6 +39,28 @@ export interface ExtractedReceipt {
    * or vendor (vat-rules.ts); the notes say so too. Absent when VAT was read.
    */
   vatGuessed?: boolean;
+  /** ISO 4217 code printed on the document; totalAmount is EUR only when EUR is printed. */
+  currency?: string | null;
+  /** ISO 3166 alpha-2 country of the seller, when the document names it. */
+  sellerCountry?: string | null;
+  /**
+   * The total printed in `currency` when the document is not in euros: the AI
+   * never guesses a rate, so `totalAmount` stays null unless euros are printed
+   * too (the extraction job then prices it with a looked-up rate, see fx-rates.ts)
+   * and this is the amount as the document states it.
+   */
+  originalAmount?: number | null;
+  /** The payment due date a bill names (for the ostolasku); null when it shows none. */
+  dueDate?: string | null;
+  /**
+   * Euros for one unit of `currency`, set when the document itself prints a
+   * rate (the AI never estimates one). Without it the ECB rate is looked up.
+   */
+  fxRate?: number | null;
+  /** The day the rate behind a computed euro total is from; set by the extraction job, not the AI. */
+  fxRateDate?: string | null;
+  /** Where the rate came from: "document" when printed, "ECB" when looked up. */
+  fxSource?: "ECB" | "document" | null;
 }
 
 export type DocumentType = "receipt" | "invoice" | "marketing" | "other";
@@ -115,10 +138,15 @@ Palauta VAIN validi JSON seuraavalla rakenteella (ei muuta tekstiä):
   "type": "meno",
   "reference": "maksun viitenumero (esim. 1009 tai RF-viite), EI viitteenne/viitteemme",
   "invoiceNumber": "laskun numero",
-  "documentType": "kuitti"
+  "documentType": "kuitti",
+  "currency": "EUR",
+  "sellerCountry": "FI",
+  "originalAmount": null,
+  "fxRate": null,
+  "dueDate": null
 }
 
-documentType: "kuitti" (ostokuitti tai maksukuitti), "lasku" (maksettava lasku), "markkinointi" (mainos, tarjous, uutiskirje, kampanja — vaikka siinä näkyisi hintoja) tai "muu" (esim. toimitusilmoitus, tiedote, salasanaviesti). Vain kuitti ja lasku kirjataan kirjanpitoon.
+documentType: "kuitti" (ostokuitti tai maksukuitti), "lasku" (maksettava lasku), "markkinointi" (mainos, tarjous, uutiskirje, kampanja — vaikka siinä näkyisi hintoja) tai "muu" (esim. toimitusilmoitus, tiedote, salasanaviesti). Vain kuitti ja lasku kirjataan kirjanpitoon. dueDate = laskun eräpäivä (YYYY-MM-DD), vain jos se lukee dokumentissa, muuten null.
 
 Kategoriat (käytä TARKALLEEN näitä id-arvoja category-kentässä):
 ${categoriesForAiPrompt()}${priorsHint}
@@ -130,6 +158,12 @@ ${categoriesVatHintsForAiPrompt()}
 - Vakuutus, TyEL/YEL, pankkipalvelumaksut, verot: vatDetails [{rate:0, amount:0}], ei vähennyskelpoista ALV:ta.
 - Muistutusmaksu/viivästyskorko/perintämaksu (5–10 € yms.) EI ole ALV-vähennyskelpoinen — kirjoita notes-kenttään, älä sisällytä ALV-laskentaan.
 - Oletus verollisille ostoille: 25,5 % ellei 13,5 % tai 10 % ole selvästi oikea.
+Ulkomaiset ostot:
+- currency = dokumentin valuutta (ISO-koodi, esim. EUR, USD). sellerCountry = myyjän maa (ISO-koodi, esim. FI, IE, US), null jos ei näy.
+- Jos dokumentti ei ole euroissa, totalAmount on euromäärä VAIN jos se lukee dokumentissa. Kirjoita aina dokumentissa painettu summa originalAmount-kenttään (desimaaliluku dokumentin omassa valuutassa). ÄLÄ KOSKAAN arvioi valuuttakurssia: jos eurosumma ei lue dokumentissa, totalAmount = null ja summa säilyy originalAmount-kentässä (sovellus laskee euromäärän EKP:n kurssilla).
+- fxRate: jos dokumentti itse painaa valuuttakurssin, palauta se muodossa "montako euroa yksi dokumentin valuuttayksikkö on" (esim. "1 USD = 0,9123 EUR" → 0.9123; jos kurssi on painettu "1 EUR = 1,0961 USD", palauta 1/1,0961). Muuten fxRate = null. ÄLÄ KOSKAAN arvioi kurssia itse.
+- Ulkomaisen myyjän laskulla ilman ALV:ta (reverse charge / käännetty verovelvollisuus): vatDetails [{rate:0, amount:0}]. Älä arvioi Suomen ALV:ta.
+- Jos ulkomainen myyjä on veloittanut Suomen ALV:n (esim. "VAT – Finland 25.5%"), kirjaa se vatDetails-kenttään sellaisenaan ja mainitse notes-kentässä: "Ulkomainen myyjä veloitti Suomen ALV:n".
 Tyyppi: "tulo" (myynti/tulo) tai "meno" (osto/kulu)
 ALV-kannat Suomessa 2026: 25.5%, 13.5%, 10%, 0%
 Päivämäärä muodossa YYYY-MM-DD.
@@ -464,8 +498,19 @@ export function normalizeAIResult(
     typeof parsed.date === "string" && isStrictIsoDate(parsed.date)
       ? parsed.date
       : null;
-  const total = Number(parsed.totalAmount);
+  // A null the model returned stays null - a foreign bill with no euro printed
+  // must not become a zero-euro receipt. Number(null) is 0, so check first.
+  const total = parsed.totalAmount == null ? NaN : Number(parsed.totalAmount);
   const totalAmount = Number.isFinite(total) && total >= 0 ? toCents(total) : null;
+  // The total printed in the document's own currency: kept whole cents like
+  // totalAmount, so a non-EUR bill is never left without its amount.
+  const original = parsed.originalAmount == null ? NaN : Number(parsed.originalAmount);
+  const originalAmount = Number.isFinite(original) && original >= 0 ? toCents(original) : null;
+  const dueDate =
+    typeof parsed.dueDate === "string" && isStrictIsoDate(parsed.dueDate) ? parsed.dueDate : null;
+  // Only a rate the document printed; a null stays null (Number(null) is 0).
+  const printedRate = parsed.fxRate == null ? NaN : Number(parsed.fxRate);
+  const fxRate = isUsableRate(printedRate) ? printedRate : null;
   const allowedRates = new Set([0, 10, 13.5, 14, 24, 25.5]);
   const vatDetails = (Array.isArray(parsed.vatDetails) ? parsed.vatDetails : [])
     .map((line) => {
@@ -490,8 +535,29 @@ export function normalizeAIResult(
     provenance,
     confidence: aiReadingConfidence({ vendor, date, totalAmount, vatDetails, documentType: normalizeDocumentType(parsed.documentType) }),
     documentType: normalizeDocumentType(parsed.documentType),
+    currency: isoCode(parsed.currency, 3),
+    sellerCountry: isoCode(parsed.sellerCountry, 2),
+    originalAmount,
+    dueDate,
+    fxRate,
   };
 }
+
+function isoCode(value: unknown, length: 2 | 3): string | null {
+  if (typeof value !== "string") return null;
+  const code = value.trim().toUpperCase();
+  return code.length === length && /^[A-Z]+$/.test(code) ? code : null;
+}
+
+/** A foreign seller or a non-EUR document: Finnish VAT is never guessed for it. */
+export function isForeignPurchase(extracted: Pick<ExtractedReceipt, "currency" | "sellerCountry">): boolean {
+  return (
+    (extracted.currency != null && extracted.currency !== "EUR") ||
+    (extracted.sellerCountry != null && extracted.sellerCountry !== "FI")
+  );
+}
+
+const FOREIGN_VAT_NOTE = "Ulkomainen osto: tarkista ALV-käsittely (käännetty verovelvollisuus) ja euromäärä pankista.";
 
 /**
  * How much of a bill the model actually read (A4), instead of one constant: the
@@ -710,11 +776,11 @@ function guessCategory(vendor: string | null, text: string): string | null {
   if (/\b(verohallinto|ennakkomaksu|vero\b)/.test(hay)) return "verot";
   if (/\b(helsingin kaupunki|kunnallisvero)\b/.test(hay)) return "kuntavero";
   if (/\b(holvi|pankki|palvelumaksu|tilimaksu)\b/.test(hay)) return "pankki";
-  if (/\b(fennia|pohjola|vakuutusyhtiö|vakuutus)\b/.test(hay)) return "vakuutus";
+  if (/\b(fennia|pohjola|vakuutusyhtiö|vakuutus)(?![\p{L}\p{N}])/u.test(hay)) return "vakuutus";
   if (/\b(cloudflare|github|jetbrains|merit|saas|software)\b/.test(hay)) {
     return "ohjelmistot";
   }
-  if (/\b(helen|sähkö|sahko)\b/.test(hay)) return "sähkö";
+  if (/\b(helen|sähkö|sahko)(?![\p{L}\p{N}])/u.test(hay)) return "sähkö";
   if (/\b(vesi|jätevesi|jatevesi)\b/.test(hay)) return "vesi";
   if (/\b(neste|abc|st1|polttoaine|tankkaus)\b/.test(hay)) return "polttoaine";
   if (/\b(posti|dhl|rahti|kuljetus|uuva)\b/.test(hay)) return "rahti";
@@ -895,7 +961,8 @@ function extractTotalAmount(lines: string[]): number | null {
     }
 
     if (
-      /\byhteens[äa]\b/i.test(line) &&
+      // \b is ASCII-only in JS, so it never matches after "ä"; spell the boundaries out.
+      /(?<![\p{L}\p{N}])yhteens[äa](?![\p{L}\p{N}])/iu.test(line) &&
       !/tuotteet\s+yhteens|veroton|verokanta|veron\s+m/i.test(line)
     ) {
       const score = /maksettu|maksutapa|kustom/i.test(line) ? 88 : 75;
@@ -916,7 +983,7 @@ function extractDate(lines: string[]): string | null {
   const priorityPatterns = [
     /maksum[äa][äa]r[äa]yksen\s+p[äa]iv[äa]/i,
     /maksun\s+kirjausp[äa]iv[äa]/i,
-    /laskun\s+p[äa]iv[äa]\b/i,
+    /laskun\s+p[äa]iv[äa](?![\p{L}\p{N}])/iu,
     /(laskun\s+)?p[äa]iv[äa](m[äa][äa]r[äa]|ys)/i,
   ];
 
@@ -1026,6 +1093,15 @@ function ocrConfidence(
 }
 
 export function enrichExtractedReceipt(extracted: ExtractedReceipt): ExtractedReceipt {
+  if (isForeignPurchase(extracted)) {
+    // The category hints are Finnish rates; a foreign document gets the owner's review instead.
+    if (extracted.notes?.includes(FOREIGN_VAT_NOTE)) return extracted;
+    return {
+      ...extracted,
+      notes: [extracted.notes, FOREIGN_VAT_NOTE].filter(Boolean).join(" "),
+      confidence: Math.min(extracted.confidence, 0.6),
+    };
+  }
   const text = extracted.rawText ?? "";
   const guess = guessVatForReceipt({
     category: extracted.category,

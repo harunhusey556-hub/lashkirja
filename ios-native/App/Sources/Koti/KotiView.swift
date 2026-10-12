@@ -292,7 +292,7 @@ private struct KotiContent: View {
                 }
             }
             .background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
-            .animation(.snappy, value: model.visibleItems)
+            .motion(.snappy, value: model.visibleItems)
         }
     }
 
@@ -380,7 +380,7 @@ private struct RowIcon: View {
     let tint: Color
     var body: some View {
         Image(systemName: symbol)
-            .font(.system(size: 15, weight: .medium))
+            .scaledFont(size: 15, weight: .medium, relativeTo: .subheadline)
             .foregroundStyle(tint)
             .frame(width: 36, height: 36)
             .background(tint.opacity(0.12), in: Circle())
@@ -469,20 +469,26 @@ private struct TaskRow: View {
     let confirm: () -> Void
     let capture: () -> Void
     let remind: () -> Void
+    @Environment(\.dynamicTypeSize) private var typeSize
 
     var body: some View {
-        HStack(spacing: 12) {
+        // At accessibility sizes the amount and the action drop under the name instead of squeezing it.
+        let layout = typeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
+            : AnyLayout(HStackLayout(spacing: 12))
+        layout {
             Image(systemName: symbol)
-                .font(.system(size: 15, weight: .medium))
+                .scaledFont(size: 15, weight: .medium, relativeTo: .subheadline)
                 .foregroundStyle(tint)
                 .frame(width: 36, height: 36)
                 .background(tint.opacity(0.12), in: Circle())
+                .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 2) {
-                Text(item.party).font(.body).foregroundStyle(Theme.ink).lineLimit(1)
-                Text(subtitle).font(.caption).foregroundStyle(Theme.ink2).lineLimit(1)
+                Text(item.party).font(.body).foregroundStyle(Theme.ink).lineLimitUnlessLarge()
+                Text(subtitle).font(.caption).foregroundStyle(Theme.ink2).lineLimitUnlessLarge()
             }
             Spacer(minLength: 8)
-            VStack(alignment: .trailing, spacing: 6) {
+            VStack(alignment: typeSize.isAccessibilitySize ? .leading : .trailing, spacing: 6) {
                 if let amount = item.amount { MoneyText(amount: amount).font(.subheadline.weight(.semibold)) }
                 actionButton
             }

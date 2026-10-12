@@ -48,6 +48,11 @@ interface ALVData {
   field302: SalesField;
   field303: SalesField;
   field309: { label: string; turnover: number };
+  /** Reverse charge on purchases from other EU countries (absent from an older server). */
+  field305?: { label: string; amount: number };
+  field306?: { label: string; amount: number };
+  field313?: { label: string; amount: number };
+  field314?: { label: string; amount: number };
   field307: { label: string; amount: number };
   field308: { label: string; amount: number; isRefund: boolean };
   review: { salesGross: number; purchasesGross: number; count: number };
@@ -59,6 +64,10 @@ interface ALVData {
     /** F39: deductible VAT from purchase invoices, already inside field 307. */
     purchaseInvoiceVat?: number;
     purchaseInvoiceCount?: number;
+    /** Self-assessed on foreign purchases: in 301/305/306 and again in 307. */
+    reverseChargeVat?: number;
+    /** Finnish VAT foreign sellers charged; paid but not deductible. */
+    foreignVatNotDeducted?: number;
   };
   skippedPurchaseInvoiceCount?: number;
   suspectedPurchaseDuplicateCount?: number;
@@ -384,6 +393,31 @@ export default function ALVRaporttiPage() {
               <FieldRow label="Liikevaihto" value={formatEur(data.field309.turnover)} />
             </Section>
           )}
+
+          {(data.field306?.amount ?? 0) > 0 || (data.field314?.amount ?? 0) > 0 ? (
+            <Section title="306 · Vero palveluostoista muista EU-maista">
+              <FieldRow label="Palveluostot (314)" value={formatEur(data.field314?.amount ?? 0)} />
+              <FieldRow label="Vero" value={formatEur(data.field306?.amount ?? 0)} />
+            </Section>
+          ) : null}
+
+          {(data.field305?.amount ?? 0) > 0 || (data.field313?.amount ?? 0) > 0 ? (
+            <Section title="305 · Vero tavaraostoista muista EU-maista">
+              <FieldRow label="Tavaraostot (313)" value={formatEur(data.field313?.amount ?? 0)} />
+              <FieldRow label="Vero" value={formatEur(data.field305?.amount ?? 0)} />
+            </Section>
+          ) : null}
+
+          {(data.sources?.reverseChargeVat ?? 0) > 0 ? (
+            <p className="text-caption text-ink-2">
+              {`Ulkomaisista ostoista laskettu käännetyn verovelvollisuuden vero ${formatEur(data.sources?.reverseChargeVat ?? 0)} on mukana maksettavassa verossa ja vähennetään samalla summalla kohdassa 307. EU:n ulkopuolelta ostettujen palvelujen vero on kohdassa 301.`}
+            </p>
+          ) : null}
+          {(data.sources?.foreignVatNotDeducted ?? 0) > 0 ? (
+            <p className="text-caption text-warning">
+              {`Ulkomaiset myyjät veloittivat Suomen ALV:a ${formatEur(data.sources?.foreignVatNotDeducted ?? 0)}. Sitä ei voi vähentää. Anna myyjälle ALV-tunnuksesi, niin seuraavat laskut tulevat ilman veroa.`}
+            </p>
+          ) : null}
 
           <Section title="307 · Verokauden vähennettävä vero">
             <DrillRow

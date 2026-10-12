@@ -16,6 +16,8 @@ export type NativePick =
 
 export const CAMERA_PERMISSION_DENIED =
   "Kameran käyttö estettiin. Salli kamera laitteen asetuksista, tai valitse kuva tiedostoista.";
+/** One library pick holds a migration-size batch (matches native ReceiptUploadQueue.maxPick). */
+export const MAX_LIBRARY_PICK = 200;
 export const PHOTO_PERMISSION_DENIED =
   "Kuvakirjaston käyttö estettiin. Voit sallia kaikki kuvat tai rajatun valinnan laitteen asetuksista.";
 export const FILE_PICK_FAILED = "Tiedoston valinta ei onnistunut. Yritä uudelleen.";
@@ -135,7 +137,7 @@ export async function choosePhotoLibrary(): Promise<NativePick> {
     }
     const picked = await Camera.chooseFromGallery({
       allowMultipleSelection: true,
-      limit: 10,
+      limit: MAX_LIBRARY_PICK,
       includeMetadata: true,
     });
     const files: File[] = [];

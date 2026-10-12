@@ -367,3 +367,36 @@ describe("PATCH /api/bank/connections/{id} keeps its other answers", () => {
     expect(body.connections[0]).toMatchObject({ historyFrom: daysAgo(60), historyLimitDays: null });
   });
 });
+
+describe("audit 2026-10-09: an account's own history, whatever the connection's last sync", () => {
+  it("an account put in scope after the first sync of an all-history connection gets its history", async () => {
+    const connection = await createConnection({
+      historyFrom: null,
+      accounts: [
+        { iban: IBAN_A, uid: "acc-1", inScope: true },
+        { iban: IBAN_B, uid: "acc-2", inScope: false },
+      ],
+    });
+    const ledger = {
+      "acc-1": [row("a1", daysAgo(40)), row("a2", daysAgo(2))],
+      "acc-2": [row("b1", daysAgo(80)), row("b2", daysAgo(30)), row("b3", daysAgo(1))],
+    };
+    await syncBankConnection(user.id, connection.id, { attended: true, client: fakeBank(ledger).client });
+    await prisma.connectedAccount.updateMany({ where: { connectionId: connection.id, iban: IBAN_B }, data: { inScope: true } });
+    await syncBankConnection(user.id, connection.id, { attended: true, client: fakeBank(ledger).client });
+    const b = await prisma.transaction.findMany({ where: { userId: user.id, iban: IBAN_B }, select: { bankRef: true } });
+    expect(b.length).toBe(3);
+  });
+
+  it("an account back in scope after a pause gets the rows of the pause", async () => {
+    const connection = await createConnection({ historyFrom: daysAgo(90) });
+    const ledger = { "acc-1": [row("a1", daysAgo(60)), row("a2", daysAgo(45)), row("a3", daysAgo(20)), row("a4", daysAgo(1))] };
+    // Synced long ago (rows up to 50 days back), out of scope since, the connection synced yesterday.
+    await syncBankConnection(user.id, connection.id, { attended: true, client: fakeBank({ "acc-1": ledger["acc-1"].slice(0, 1) }).client });
+    // Its balance was fetched with that pull, 50 days ago; the connection itself synced yesterday.
+    await prisma.connectedAccount.updateMany({ where: { connectionId: connection.id }, data: { balanceAt: new Date(Date.now() - 50 * DAY_MS) } });
+    await prisma.bankConnection.update({ where: { id: connection.id }, data: { lastSuccessAt: new Date(Date.now() - DAY_MS) } });
+    await syncBankConnection(user.id, connection.id, { attended: true, client: fakeBank(ledger).client });
+    expect(await storedDays()).toEqual([daysAgo(60), daysAgo(45), daysAgo(20), daysAgo(1)].sort());
+  });
+});

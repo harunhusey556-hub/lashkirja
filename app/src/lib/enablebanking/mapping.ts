@@ -13,8 +13,14 @@ export interface EbParty {
   name?: string | null;
 }
 
+export interface EbGenericId {
+  identification?: string | null;
+  scheme_name?: string | null;
+}
+
 export interface EbAccountRef {
   iban?: string | null;
+  other?: EbGenericId | null;
 }
 
 export interface EbTransaction {
@@ -41,6 +47,7 @@ export interface EbSessionAccount {
   product?: string | null;
   currency?: string | null;
   account_id?: EbAccountRef | null;
+  all_account_ids?: EbGenericId[] | null;
 }
 
 export interface EbBalance {
@@ -312,6 +319,37 @@ export function mapBookedTransaction(
   };
 }
 
+/**
+ * The account's IBAN wherever the bank put it: `account_id.iban`, or an IBAN-shaped
+ * `account_id.other` / `all_account_ids` entry. Holvi's consent (2026-10-08) came back with
+ * no `account_id.iban`, and the connection was refused with "Pankki ei palauttanut IBAN-tiliä".
+ */
+export function sessionAccountIban(account: EbSessionAccount): string | null {
+  const direct = normalizeIban(account.account_id?.iban);
+  if (direct) return direct;
+  const others = [account.account_id?.other, ...(account.all_account_ids ?? [])];
+  for (const id of others) {
+    const scheme = id?.scheme_name?.trim().toUpperCase();
+    if (scheme && scheme !== "IBAN") continue;
+    const iban = normalizeIban(id?.identification);
+    if (iban) return iban;
+  }
+  return null;
+}
+
+/** What a session's accounts looked like, without any account number: for the log. */
+export function describeSessionAccounts(accounts: EbSessionAccount[]): string {
+  return JSON.stringify(
+    accounts.map((account) => ({
+      keys: Object.keys(account).sort(),
+      uid: Boolean(account.uid),
+      iban: Boolean(account.account_id?.iban),
+      other: account.account_id?.other?.scheme_name ?? (account.account_id?.other ? "?" : null),
+      all: (account.all_account_ids ?? []).map((id) => id.scheme_name ?? "?"),
+    }))
+  );
+}
+
 export function sessionAccountsForStorage(
   accounts: EbSessionAccount[],
   userId: string,
@@ -320,7 +358,7 @@ export function sessionAccountsForStorage(
   const seen = new Set<string>();
   const rows: StoredBankAccount[] = [];
   for (const account of accounts) {
-    const iban = normalizeIban(account.account_id?.iban);
+    const iban = sessionAccountIban(account);
     const uid = account.uid?.trim();
     if (!iban || !uid || seen.has(uid)) continue;
     seen.add(uid);

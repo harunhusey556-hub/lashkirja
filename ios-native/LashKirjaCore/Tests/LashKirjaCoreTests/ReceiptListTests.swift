@@ -4,8 +4,9 @@ import Foundation
 
 @Test func listQueryCarriesFiltersAndOffset() {
     var q = ReceiptListQuery()
-    #expect(q.listQuery() == ["sort": "date_desc"])
-    #expect(q.countsQuery().isEmpty)
+    // Kuitit asks for kuitit only (`kind=receipt`); the bills filed as ostolaskut sit under Laskut.
+    #expect(q.listQuery() == ["sort": "date_desc", "kind": "receipt"])
+    #expect(q.countsQuery() == ["kind": "receipt"])
     q.search = "  kesko "
     q.month = "2026-10"
     q.tab = .meno
@@ -13,10 +14,10 @@ import Foundation
     q.sort = .amountDesc
     #expect(q.listQuery(offset: 200) == [
         "q": "kesko", "month": "2026-10", "type": "meno", "category": "tarvikkeet",
-        "sort": "amount_desc", "offset": "200",
+        "sort": "amount_desc", "offset": "200", "kind": "receipt",
     ])
     // The chips count every tab: no type, no linkedStatus, no sort, no paging.
-    #expect(q.countsQuery() == ["q": "kesko", "month": "2026-10", "category": "tarvikkeet"])
+    #expect(q.countsQuery() == ["q": "kesko", "month": "2026-10", "category": "tarvikkeet", "kind": "receipt"])
     q.tab = .unlinked
     #expect(q.listQuery()["linkedStatus"] == "unlinked")
     #expect(q.listQuery()["type"] == nil)
@@ -26,7 +27,8 @@ import Foundation
 
 @Test func tabCountsAndSortTitles() throws {
     let counts = try JSONDecoder().decode(ReceiptCounts.self, from: Data(#"{"counts":{"all":5,"tulo":2,"meno":3,"linked":1,"unlinked":4}}"#.utf8)).counts
-    #expect(ReceiptTab.allCases.map { $0.count(in: counts) } == [5, 2, 3, 1, 4])
+    // A server before the kuitti/lasku split sends no "laskut": the chip counts zero.
+    #expect(ReceiptTab.allCases.map { $0.count(in: counts) } == [5, 2, 3, 1, 4, 0])
     #expect(ReceiptTab.linked.title == "Kohdistettu")
     #expect(ReceiptSort.createdDesc.title == "Lisätty (uusin)")
 }
@@ -59,6 +61,14 @@ import Foundation
     #expect(ReceiptMatchText.isStrong(score: 0.2, reasons: ["viite", "amount"]))
     #expect(!ReceiptMatchText.isStrong(score: 0.2, reasons: ["amount"]))
     #expect(ReceiptMatchText.percent(0.904) == "90 %")
+}
+
+@Test func linkedAmountGapMatchesTheWebTolerance() {
+    #expect(ReceiptMatchText.amountGap(bank: -124, receiptTotal: 124) == nil)
+    #expect(ReceiptMatchText.amountGap(bank: -126, receiptTotal: 124) == nil)
+    #expect(ReceiptMatchText.amountGap(bank: -99, receiptTotal: nil) == nil)
+    #expect(ReceiptMatchText.amountGap(bank: Decimal(string: "-25.01")!, receiptTotal: Decimal(string: "1546.47")!) == Decimal(string: "-1521.46")!)
+    #expect(ReceiptMatchText.amountGap(bank: -130, receiptTotal: Decimal(string: "124.25")!) == Decimal(string: "5.75")!)
 }
 
 @Test func captureImageDownscaleSize() {

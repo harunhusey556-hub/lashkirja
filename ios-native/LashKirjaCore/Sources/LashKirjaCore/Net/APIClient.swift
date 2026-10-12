@@ -20,6 +20,15 @@ public actor APIClient {
     /// Told the path of every write the server accepted, so the app can mark what it shows as
     /// out of date without each screen remembering to.
     public private(set) var onWrite: (@Sendable (String) async -> Void)?
+    /// Told after each request whether the server answered (true) or the request never got an
+    /// answer (false), for the offline indicator. A cancelled request says nothing.
+    public private(set) var onReachability: (@Sendable (Bool) async -> Void)?
+    /// Told (method, path, status, decodeError) of a 5xx the server answered or an answer that
+    /// would not decode, never of offline, timeouts or 4xx. Runs detached: it cannot slow a request.
+    public private(set) var onUnexpectedFailure: (@Sendable (String, String, Int, Bool) async -> Void)?
+    /// Told about every request once it is over (the debugging trail, `EventLog`). Runs
+    /// detached; the trail's own uploads (/api/observe…) are not reported.
+    public private(set) var onRequestFinished: (@Sendable (RequestTrace) async -> Void)?
 
     public init(baseURL: URL, transport: HTTPTransport, tokens: TokenProvider,
                 sleep: @escaping @Sendable (UInt64) async -> Void = { try? await Task.sleep(nanoseconds: $0) }) {
@@ -31,16 +40,40 @@ public actor APIClient {
 
     public func setOnUnauthorized(_ handler: (@Sendable () async -> Void)?) { onUnauthorized = handler }
     public func setOnWrite(_ handler: (@Sendable (String) async -> Void)?) { onWrite = handler }
+    public func setOnReachability(_ handler: (@Sendable (Bool) async -> Void)?) { onReachability = handler }
+
+    public func setOnUnexpectedFailure(_ handler: (@Sendable (String, String, Int, Bool) async -> Void)?) { onUnexpectedFailure = handler }
+    public func setOnRequestFinished(_ handler: (@Sendable (RequestTrace) async -> Void)?) { onRequestFinished = handler }
+
+    private func noteFinished(_ method: String, _ path: String, status: Int, started: Date, requestId: String, error: Error?) {
+        guard let handler = onRequestFinished, !path.hasPrefix("/api/observe") else { return }
+        let trace = RequestTrace(method: method, path: path, status: status,
+                                 durationMs: Int(Date().timeIntervalSince(started) * 1000),
+                                 requestId: requestId, error: error.map(Self.traceDescription))
+        Task.detached { await handler(trace) }
+    }
+
+    /// The error code and message the owner saw, or the kind of failure without an answer.
+    static func traceDescription(_ error: Error) -> String {
+        if let failure = error as? LKError { return [failure.code, failure.message].compactMap { $0 }.joined(separator: ": ") }
+        if error is CancellationError { return "cancelled" }
+        return String(describing: type(of: error))
+    }
+
+    private func noteUnexpected(_ method: String, _ path: String, _ status: Int, decodeError: Bool) {
+        guard let handler = onUnexpectedFailure else { return }
+        Task.detached { await handler(method, path, status, decodeError) }
+    }
 
     public func get<T: Decodable>(_ path: String, query: [String: String] = [:]) async throws -> T {
         let response = try await perform("GET", path, query: query, body: nil, contentType: nil, idempotencyKey: nil)
-        return try decode(response)
+        return try decode(response, method: "GET", path: path)
     }
 
     public func send<T: Decodable, B: Encodable>(_ method: String, _ path: String, query: [String: String] = [:], body: B?, idempotencyKey: String? = nil) async throws -> T {
         let data = try body.map { try JSONEncoder().encode($0) }
         let response = try await perform(method, path, query: query, body: data, contentType: data == nil ? nil : "application/json", idempotencyKey: idempotencyKey)
-        return try decode(response)
+        return try decode(response, method: method, path: path)
     }
 
     public func raw(_ method: String, _ path: String, query: [String: String] = [:], body: Data?, contentType: String?, idempotencyKey: String? = nil) async throws -> HTTPResponse {
@@ -77,11 +110,14 @@ public actor APIClient {
         return LKError(status: 0, code: "NETWORK", message: LKError.unreachable)
     }
 
-    private func decode<T: Decodable>(_ response: HTTPResponse) throws -> T {
+    private func decode<T: Decodable>(_ response: HTTPResponse, method: String? = nil, path: String? = nil) throws -> T {
         // A 204 (or any empty body) reads as an empty object.
         let body = response.body.isEmpty ? Data("{}".utf8) : response.body
         do { return try JSONDecoder().decode(T.self, from: body) }
-        catch { throw LKError(status: response.status, code: "DECODE", message: "Palvelimen vastausta ei voitu lukea.") }
+        catch {
+            if let method, let path { noteUnexpected(method, path, response.status, decodeError: true) }
+            throw LKError(status: response.status, code: "DECODE", message: "Palvelimen vastausta ei voitu lukea.")
+        }
     }
 
     private func url(_ path: String, query: [String: String]) -> URL {
@@ -93,8 +129,24 @@ public actor APIClient {
     }
 
     private func perform(_ method: String, _ path: String, query: [String: String], body: Data?, contentType: String?, idempotencyKey: String?) async throws -> HTTPResponse {
+        // Sent as X-Request-Id: the server logs its errors under the same id.
+        let requestId = String(UUID().uuidString.prefix(8)).lowercased()
+        let started = Date()
+        do {
+            let response = try await attempt(method, path, query: query, body: body, contentType: contentType,
+                                             idempotencyKey: idempotencyKey, requestId: requestId)
+            noteFinished(method, path, status: response.status, started: started, requestId: requestId, error: nil)
+            return response
+        } catch {
+            noteFinished(method, path, status: (error as? LKError)?.status ?? 0, started: started, requestId: requestId, error: error)
+            throw error
+        }
+    }
+
+    private func attempt(_ method: String, _ path: String, query: [String: String], body: Data?, contentType: String?, idempotencyKey: String?, requestId: String) async throws -> HTTPResponse {
         var request = URLRequest(url: url(path, query: query))
         request.httpMethod = method
+        request.setValue(requestId, forHTTPHeaderField: "X-Request-Id")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         if let contentType { request.setValue(contentType, forHTTPHeaderField: "Content-Type") }
         if let idempotencyKey { request.setValue(idempotencyKey, forHTTPHeaderField: "Idempotency-Key") }
@@ -102,27 +154,39 @@ public actor APIClient {
         if let sentToken { request.setValue("Bearer \(sentToken)", forHTTPHeaderField: "Authorization") }
         request.httpBody = body
 
-        let attempts = method == "GET" ? 3 : 1
+        let attempts = RetryPolicy.attempts(method: method)
         var last: HTTPResponse?
         for attempt in 0..<attempts {
             let response: HTTPResponse
             do { response = try await transport.send(request) }
             catch let error as LKError { throw error }
-            catch { throw Self.transportError(error) }
+            catch {
+                if RetryPolicy.retriesTransport(error) && attempt < attempts - 1 {
+                    await sleep(RetryPolicy.delay(afterAttempt: attempt))
+                    continue
+                }
+                let failure = Self.transportError(error)
+                if !(failure is CancellationError) { await onReachability?(false) }
+                throw failure
+            }
             if (200..<300).contains(response.status) {
+                await onReachability?(true)
                 if method != "GET", let onWrite { await onWrite(path) }
                 return response
             }
-            let gateway = [502, 503, 504].contains(response.status) && !response.fromApp
+            let gateway = RetryPolicy.retriesStatus(response.status, fromApp: response.fromApp)
             if gateway && attempt < attempts - 1 {
                 last = response
-                await sleep(UInt64(500_000_000) << UInt64(attempt))
+                await sleep(RetryPolicy.delay(afterAttempt: attempt))
                 continue
             }
+            // A refusal the app wrote still proves the server answered; a gateway's does not.
+            await onReachability?(!gateway)
             // Only a request that carried the session that is still current
             // ends it: a wrong password (no token) or a stale request from a
             // previous sign-in must not sign the owner out.
             let failure = APIErrorDecoder.decode(status: response.status, data: response.body)
+            if response.status >= 500 { noteUnexpected(method, path, response.status, decodeError: false) }
             if failure.endsSession, let sentToken, let handler = onUnauthorized,
                await tokens.currentToken() == sentToken {
                 await handler()

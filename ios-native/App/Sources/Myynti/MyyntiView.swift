@@ -167,8 +167,8 @@ struct MyyntiView: View {
             guard !Task.isCancelled else { return }
             query = text
         }
-        .animation(.snappy, value: filter)
-        .animation(.snappy, value: lateBucket)
+        .motion(.snappy, value: filter)
+        .motion(.snappy, value: lateBucket)
         // Another chip or search shows a different list: it opens on its first rows again.
         .onChange(of: filter) { _, new in
             limit.reset()
@@ -199,6 +199,7 @@ struct MyyntiView: View {
                     .font(.body.weight(.semibold))
                     .foregroundStyle(Theme.accent)
                     .frame(width: 24)
+                    .accessibilityHidden(true)
                 Text(title)
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(Theme.ink)
@@ -206,7 +207,7 @@ struct MyyntiView: View {
                     .minimumScaleFactor(0.85)
                     .multilineTextAlignment(.leading)
                 Spacer(minLength: 0)
-                Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(Theme.ink2)
+                Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(Theme.ink2).accessibilityHidden(true)
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 16)
@@ -271,6 +272,10 @@ struct MyyntiView: View {
         do {
             let list: InvoiceList = try await app.api.get("/api/invoices", query: SalesListQuery.query(scope: scope, filter: filter, search: query))
             state.succeed(list)
+            app.indexForSpotlight(list.invoices.compactMap {
+                SpotlightEntry.invoice(id: $0.id, number: $0.number, customerName: $0.customer.name,
+                                       gross: $0.gross, statusLabel: $0.displayStatus.label)
+            })
         }
         catch is CancellationError {}
         catch { state.fail(error) }
@@ -310,13 +315,14 @@ private struct ReceivablesCard: View {
                 }
                 Spacer()
                 if !buckets.isEmpty {
-                    Button { withAnimation(.snappy) { open.toggle() } } label: {
+                    Button { withMotion(.snappy) { open.toggle() } } label: {
                         HStack(spacing: 4) {
                             Text("Erittely")
-                            Image(systemName: "chevron.down").rotationEffect(.degrees(open ? 180 : 0))
+                            Image(systemName: "chevron.down").rotationEffect(.degrees(open ? 180 : 0)).accessibilityHidden(true)
                         }
                         .font(.caption)
                         .foregroundStyle(Theme.ink2)
+                        .frame(minHeight: 44)
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(.borderless)
@@ -517,13 +523,13 @@ struct InvoiceRow: View {
     var body: some View {
         HStack(alignment: .firstTextBaseline) {
             VStack(alignment: .leading, spacing: 3) {
-                Text(invoice.customer.name).font(.body).foregroundStyle(Theme.ink).lineLimit(1)
+                Text(invoice.customer.name).font(.body).foregroundStyle(Theme.ink).lineLimitUnlessLarge()
                 Text(secondary).font(.caption).foregroundStyle(Theme.ink2)
             }
             Spacer()
             VStack(alignment: .trailing, spacing: 3) {
                 MoneyText(amount: invoice.gross).font(.subheadline.weight(.semibold))
-                StatusBadge(status: invoice.displayStatus)
+                StatusBadge(status: invoice.displayStatus, partlyCredited: invoice.isPartlyCredited)
             }
         }
         .padding(.vertical, 2)
@@ -532,25 +538,29 @@ struct InvoiceRow: View {
     private var secondary: String {
         if invoice.isCreditNote { return "Hyvityslasku \(invoice.number)" }
         if invoice.displayStatus == .draft { return "Lasku \(invoice.number)" }
-        return "Lasku \(invoice.number) · \(invoice.displayStatus == .overdue ? "myöhässä, eräpäivä" : "eräpäivä") \(APIDate.displayDay(invoice.dueDate))"
+        let base = "Lasku \(invoice.number) · \(invoice.displayStatus == .overdue ? "myöhässä, eräpäivä" : "eräpäivä") \(APIDate.displayDay(invoice.dueDate))"
+        return base + (invoice.creditedRowSuffix ?? "")
     }
 }
 
 struct StatusBadge: View {
     let status: InvoiceStatus
+    /// A part credit leaves the status as it was; the badge says "Osittain hyvitetty" instead.
+    var partlyCredited = false
     var body: some View {
-        Text(status.label)
+        Text(partlyCredited ? InvoiceCreditDisplay.partlyCreditedLabel : status.label)
             .font(.caption2.weight(.semibold))
             .padding(.horizontal, 8).padding(.vertical, 3)
             .background(color.opacity(0.12), in: Capsule())
             .foregroundStyle(color)
     }
     private var color: Color {
+        if partlyCredited { return Theme.warning }
         switch status {
-        case .draft: Theme.ink2
-        case .sent: Theme.warning
-        case .overdue: Theme.danger
-        case .paid, .credited: Theme.success
+        case .draft: return Theme.ink2
+        case .sent: return Theme.warning
+        case .overdue: return Theme.danger
+        case .paid, .credited: return Theme.success
         }
     }
 }

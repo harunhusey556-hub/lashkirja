@@ -59,3 +59,7 @@ skills-lock.json
 .claude/
 .windsurf/
 .agents/
+
+# Simulator walk output (scripts/sim/run-ui.sh)
+/sim-shots/
+/build-sim/

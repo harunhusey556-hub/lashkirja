@@ -624,7 +624,12 @@ export async function parseXLSX(filePath: string): Promise<ParsedTransaction[]> 
   );
 }
 
+/** The text of a CSV, its line breaks as LF: an old Mac export ends lines with a bare CR. */
 function decodeCSV(buffer: Buffer): string {
+  return decodeCSVText(buffer).replace(/\r(?!\n)/g, "\n");
+}
+
+function decodeCSVText(buffer: Buffer): string {
   if (buffer[0] === 0xff && buffer[1] === 0xfe) {
     return buffer.subarray(2).toString("utf16le");
   }
@@ -864,34 +869,63 @@ function parseHolviDetailLines(lines: string[]): {
   reference: string | null;
 } {
   let counterparty: string | null = null;
-  let message: string | null = null;
+  const messageParts: string[] = [];
+  let inMessage = false;
   let reference: string | null = null;
+  // The payee's name may wrap onto more lines; it ends at the first line of another kind.
+  let nameOpen = false;
+  let afterIban = false;
 
   for (const raw of lines) {
     const line = raw.trim();
     if (!line) continue;
+    const wasNameOpen = nameOpen;
+    nameOpen = false;
+    // Holvi's page footer and confidentiality notice (between two rows on a page break).
+    if (/^LUOTTAMUKSELLINEN\./i.test(line)) continue;
+    if (/^Holvi Payment Services Oy\./i.test(line) || /^Puh:\s*\+358/i.test(line) || /^©\d{4}\s+Holvi/i.test(line)) continue;
 
     const viiteMatch = line.match(/^viite:\s*(.+)/i);
     if (viiteMatch) {
       reference = viiteMatch[1].trim();
+      inMessage = false;
       continue;
     }
     const viestiMatch = line.match(/^viesti:\s*(.+)/i);
     if (viestiMatch) {
-      message = viestiMatch[1].trim();
+      messageParts.push(viestiMatch[1].trim());
+      inMessage = true;
       continue;
     }
+    // A row's closing lines end its message: the booking time and the payment kind.
+    if (/^varattu:/i.test(line) || /^kello\s/i.test(line)) { inMessage = false; continue; }
+    if (/^(sepa-maksu|lähtevä maksu|korttimaksu)$/i.test(line)) { inMessage = false; continue; }
     if (/^arkistointitunnus:/i.test(line)) continue;
     if (/^[0-9a-f]{20,}$/i.test(line)) continue;
-    if (/^FI\d{2}\s/i.test(line)) continue;
-    if (/^varattu:/i.test(line) || /^kello\s/i.test(line)) continue;
-    if (/^(sepa-maksu|lähtevä maksu)$/i.test(line)) continue;
+    // A message wraps over several lines in Holvi's PDF (2026-10-09: 219 of 222 messages were cut
+    // to their first line); every line until the closing lines belongs to it.
+    if (inMessage) {
+      messageParts.push(line);
+      continue;
+    }
+    // A payee's IBAN, of any country, and the end of one that wrapped ("PL40 2490 ... 0029" /
+    // "6526"): 79 of 478 rows named the IBAN as the payee (audit 2026-10-09).
+    if (/^[A-Z]{2}\d{2}(?:\s?[0-9A-Z]{1,4}){2,8}$/i.test(line)) { afterIban = true; continue; }
+    if (afterIban && /^[0-9A-Z]{1,4}$/i.test(line)) { afterIban = false; continue; }
+    afterIban = false;
 
+    const name = line.replace(/,\s*$/, "").trim();
     if (!counterparty) {
-      counterparty = line.replace(/,\s*$/, "").trim() || null;
+      counterparty = name || null;
+      nameOpen = true;
+    } else if (wasNameOpen && name) {
+      // "KAWAFEL SPOLKA Z OGRANICZONA" / "ODPOWIEDZIALNOSCIA": one name over two lines.
+      counterparty = `${counterparty} ${name}`;
+      nameOpen = true;
     }
   }
 
+  const message = messageParts.join(" ").replace(/\s+/g, " ").trim() || null;
   return { counterparty, message, reference };
 }
 
@@ -1092,4 +1126,123 @@ export function parseBankStatementText(text: string): ParsedTransaction[] {
     });
   }
   return transactions;
+}
+
+/** A balance the statement itself prints: "SALDO 1.9.2026 + 367,10" (Holvi PDF). */
+export interface PrintedBalance {
+  date: string;
+  balance: number;
+}
+
+export function parsePrintedBalances(text: string): PrintedBalance[] {
+  const found: PrintedBalance[] = [];
+  for (const line of text.split(/\r?\n/)) {
+    const match = /^\s*SALDO\s+(\d{1,2})\.(\d{1,2})\.(\d{4})\s+([+-−])?\s*([\d\s.]+,\d{2})\s*$/i.exec(line);
+    if (!match) continue;
+    const date = `${match[3]}-${match[2].padStart(2, "0")}-${match[1].padStart(2, "0")}`;
+    const amount = parseAmountValue(match[5].replace(/\s/g, ""));
+    if (!isIsoCalendarDate(date) || amount == null) continue;
+    found.push({ date, balance: match[4] === "-" || match[4] === "−" ? -amount : amount });
+  }
+  return found;
+}
+
+/**
+ * Month-end balances from printed ones: a balance on the 1st is the end of the month before
+ * (it is the opening balance, before that day's rows), one on the last day closes its month.
+ * Others say nothing about a month end and are left out.
+ */
+export function monthEndBalances(balances: PrintedBalance[]): Array<{ month: string; closingBalance: number }> {
+  const byMonth = new Map<string, number>();
+  for (const { date, balance } of balances) {
+    const [year, month, day] = date.split("-").map(Number);
+    const lastDay = new Date(Date.UTC(year, month, 0)).getUTCDate();
+    if (day === 1) {
+      const previous = new Date(Date.UTC(year, month - 2, 1));
+      byMonth.set(`${previous.getUTCFullYear()}-${String(previous.getUTCMonth() + 1).padStart(2, "0")}`, balance);
+    } else if (day === lastDay) {
+      byMonth.set(`${year}-${String(month).padStart(2, "0")}`, balance);
+    }
+  }
+  return [...byMonth.entries()].map(([month, closingBalance]) => ({ month, closingBalance }));
+}
+
+/**
+ * Plain text of a PDF or the first rows of an xlsx, for what the statement says about itself
+ * (its own IBAN, printed balances); the rows are parsed separately. Null when unreadable.
+ */
+export async function statementHeaderText(kind: string, filePath: string): Promise<string | null> {
+  try {
+    if (kind === "pdf") {
+      return execFileSync("pdftotext", ["-layout", filePath, "-"], {
+        timeout: 30_000,
+        maxBuffer: MAX_TEXT_OUTPUT_BYTES,
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "ignore"],
+      });
+    }
+    if (kind === "xlsx") {
+      const sheets = await readXlsxFile(readBoundedFile(filePath, "xlsx"));
+      const rows = (sheets[0]?.data ?? []) as Row[];
+      return rows.slice(0, 15).map((row) => row.map((cell) => (cell == null ? "" : String(cell))).join("\t")).join("\n");
+    }
+  } catch (error) {
+    console.warn("Statement header text unreadable:", error instanceof Error ? error.message : error);
+  }
+  return null;
+}
+
+/**
+ * Month-end balances counted from a statement's own opening and closing balance: a Holvi export
+ * of 5.6.-9.10. prints only "SALDO 5.6." and "SALDO 9.10." (2026-10-09), and every month end
+ * between is the opening balance plus the rows up to it. Only when the rows add up exactly from
+ * the first printed balance to the last (they are the whole period); otherwise nothing.
+ */
+export function derivedMonthEndBalances(
+  printed: PrintedBalance[],
+  rows: Array<{ date: string | null; amount: number }>
+): Array<{ month: string; closingBalance: number }> {
+  if (printed.length < 2) return [];
+  const sorted = [...printed].sort((a, b) => a.date.localeCompare(b.date));
+  const start = sorted[0];
+  const end = sorted[sorted.length - 1];
+  // The opening balance stands before its day's rows, the closing one after its day's.
+  const inPeriod = rows.filter((row) => row.date !== null && row.date >= start.date && row.date <= end.date);
+  const cents = (value: number) => Math.round(value * 100);
+  const total = inPeriod.reduce((sum, row) => sum + cents(row.amount), 0);
+  if (cents(start.balance) + total !== cents(end.balance)) return [];
+  const result: Array<{ month: string; closingBalance: number }> = [];
+  let [year, month] = start.date.split("-").map(Number);
+  for (;;) {
+    const key = `${year}-${String(month).padStart(2, "0")}`;
+    const lastDay = `${key}-${String(new Date(Date.UTC(year, month, 0)).getUTCDate()).padStart(2, "0")}`;
+    if (lastDay > end.date) break;
+    const upTo = inPeriod.filter((row) => row.date! <= lastDay).reduce((sum, row) => sum + cents(row.amount), 0);
+    result.push({ month: key, closingBalance: (cents(start.balance) + upTo) / 100 });
+    month += 1;
+    if (month > 12) { month = 1; year += 1; }
+  }
+  return result;
+}
+
+/**
+ * The balances a camt.052/053 states: OPBD/PRCD (opening, before the day's rows) and CLBD
+ * (closing, after them), in the same shape as a PDF's SALDO lines. A Holvi camt of Mar-Aug
+ * gave 1307,58 and 59,81 that the app ignored, so a new account counted from 0 (audit
+ * 2026-10-09). Only a file of one account: with several, whose balance is whose is not told.
+ */
+export function parseCamtBalances(xml: string): PrintedBalance[] {
+  if ((xml.match(/<(?:Stmt|Rpt)>/g) ?? []).length > 1) return [];
+  const found: PrintedBalance[] = [];
+  for (const block of xml.match(/<Bal>[\s\S]*?<\/Bal>/g) ?? []) {
+    const code = /<Cd>\s*(OPBD|PRCD|CLBD)\s*<\/Cd>/.exec(block)?.[1];
+    const amount = /<Amt[^>]*>\s*([\d.]+)\s*<\/Amt>/.exec(block)?.[1];
+    const date = /<Dt>\s*(?:<Dt>)?\s*(\d{4}-\d{2}-\d{2})/.exec(block)?.[1];
+    if (!code || !amount || !date || !isIsoCalendarDate(date)) continue;
+    const value = Number(amount);
+    if (!Number.isFinite(value)) continue;
+    const debit = /<CdtDbtInd>\s*DBIT\s*<\/CdtDbtInd>/.test(block);
+    found.push({ date, balance: debit ? -value : value });
+  }
+  return found.sort((a, b) => a.date.localeCompare(b.date));
 }

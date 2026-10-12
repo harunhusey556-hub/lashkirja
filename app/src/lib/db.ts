@@ -23,8 +23,13 @@ class HardenedPrismaLibSql extends PrismaLibSql {
   override createClient(config: Config): Client {
     const client = super.createClient(config);
     if (config.url.startsWith("file:")) {
-      // journal_mode persists on the database. busyTimeout above applies to
-      // every connection, including connections reopened after transactions.
+      // journal_mode persists on the database; busy_timeout and foreign_keys are
+      // per connection, so every connection (also one reopened after a
+      // transaction) sets them. Without busy_timeout a write that meets the
+      // worker's write lock fails at once with SQLITE_BUSY instead of waiting.
+      void client.execute("PRAGMA busy_timeout = 5000").catch((error) => {
+        console.error("SQLite busy_timeout initialization failed:", error);
+      });
       void client.execute("PRAGMA journal_mode = WAL").catch((error) => {
         console.error("SQLite WAL initialization failed:", error);
       });

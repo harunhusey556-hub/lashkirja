@@ -9,13 +9,13 @@ struct ShowMoreButton: View {
     var body: some View {
         if let title = limit.buttonTitle(total: total) {
             Button {
-                withAnimation(.snappy) { limit.more(total: total) }
+                withMotion(.snappy) { limit.more(total: total) }
                 Haptics.selection()
             } label: {
                 HStack {
                     Text(title).font(.subheadline.weight(.semibold))
                     Spacer()
-                    Image(systemName: limit.visible(total) >= total ? "chevron.up" : "chevron.down").font(.caption.weight(.semibold))
+                    Image(systemName: limit.visible(total) >= total ? "chevron.up" : "chevron.down").font(.caption.weight(.semibold)).accessibilityHidden(true)
                 }
                 .foregroundStyle(Theme.accent)
             }

@@ -1,5 +1,7 @@
 import { NextRequest } from "next/server";
 import { z } from "zod";
+import { PURCHASE_VAT_TREATMENTS } from "@/lib/alv";
+import { currencySchema } from "@/lib/foreign-purchase-input";
 import { requireSession } from "@/lib/session";
 import { noStoreJson, rejectCrossSite, rejectOversizedContentLength } from "@/lib/http-security";
 import { UnauthorizedError, withErrorHandler } from "@/lib/api-errors";
@@ -24,6 +26,9 @@ const patchSchema = z
     category: z.string().trim().max(60).nullish(),
     notes: z.string().trim().max(2000).nullish(),
     receiptId: z.string().uuid().nullish(),
+    currency: currencySchema.optional(),
+    originalAmount: nonnegativeMoneySchema.nullish(),
+    vatTreatment: z.enum(PURCHASE_VAT_TREATMENTS).optional(),
     status: z.enum(["open", "paid", "cancelled"]).optional(),
     closeReason: z.string().trim().min(3).max(500).optional(),
   })

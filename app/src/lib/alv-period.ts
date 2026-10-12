@@ -84,10 +84,16 @@ export function bookedSalesWhere(userId: string, start: Date, end: Date) {
  * invoice is left out. One place, so the VAT return and the "ALV-erittely
  * puuttuu" exception below can never disagree about which receipts exist.
  */
-async function loadCountedReceipts(userId: string, start: Date, end: Date) {
+export async function loadCountedReceipts(userId: string, start: Date, end: Date) {
   const [receipts, payments] = await Promise.all([
     prisma.receipt.findMany({
-      where: { userId, date: { gte: start, lt: end }, reviewStatus: "approved" },
+      where: {
+        userId,
+        date: { gte: start, lt: end },
+        reviewStatus: "approved",
+        // The document of a supplier credit note is that credit note (negative), not an expense.
+        NOT: { purchaseInvoice: { is: { grossCents: { lt: 0 } } } },
+      },
       include: { linkedTransaction: { select: { id: true } } },
     }),
     prisma.invoicePayment.findMany({
@@ -123,7 +129,9 @@ export async function findReceiptsWithoutVatBreakdown(userId: string, start: Dat
     (receipt) =>
       (receipt.type === "meno" || receipt.type === "tulo") &&
       (receipt.totalAmountCents ?? 0) > 0 &&
-      parseVatDetails(receipt.vatDetails) === null
+      parseVatDetails(receipt.vatDetails) === null &&
+      // A foreign purchase's VAT comes from its treatment, not from VAT lines on the document.
+      !(receipt.type === "meno" && receipt.vatTreatment !== "domestic")
   );
 }
 
@@ -147,6 +155,8 @@ export interface PurchaseVatRow {
   grossCents: number;
   vatCents: number;
   status: string;
+  /** How the VAT return reads the invoice's VAT (lib/alv.ts): domestic or a reverse charge. */
+  vatTreatment: string;
   treatment: PurchaseVatTreatment;
   /** Counted, but a receipt of the same amount and a close date may be the same purchase. */
   suspected: boolean;
@@ -164,6 +174,7 @@ type PurchaseReceiptEvidence = {
   invoiceNumber: string | null;
   reference: string | null;
   totalAmountCents: number | null;
+  vatTreatment: string;
 };
 
 const PURCHASE_RECEIPT_SELECT = {
@@ -176,6 +187,7 @@ const PURCHASE_RECEIPT_SELECT = {
   invoiceNumber: true,
   reference: true,
   totalAmountCents: true,
+  vatTreatment: true,
 } as const;
 
 /** A receipt the VAT return actually counts as a purchase: approved, dated, with a usable VAT breakdown. */
@@ -185,7 +197,7 @@ function receiptCountsPurchase(receipt: PurchaseReceiptEvidence | null | undefin
     receipt.reviewStatus === "approved" &&
     receipt.type === "meno" &&
     receipt.date !== null &&
-    parseVatDetails(receipt.vatDetails) !== null
+    (parseVatDetails(receipt.vatDetails) !== null || receipt.vatTreatment !== "domestic")
   );
 }
 
@@ -217,7 +229,7 @@ function documentKey(value: string | null | undefined): string {
  * (`suspected`), never removed. The owner settles it by linking the receipt to
  * the invoice (Ostolaskut), not by rejecting or cancelling anything.
  */
-async function classifyPurchaseInvoices(userId: string, start: Date, end: Date): Promise<PurchaseVatRow[]> {
+export async function classifyPurchaseInvoices(userId: string, start: Date, end: Date): Promise<PurchaseVatRow[]> {
   const invoices = await prisma.purchaseInvoice.findMany({
     where: { userId, issueDate: { gte: start, lt: end } },
     orderBy: [{ issueDate: "asc" }, { createdAt: "asc" }],
@@ -230,6 +242,7 @@ async function classifyPurchaseInvoices(userId: string, start: Date, end: Date):
       vatCents: true,
       grossCents: true,
       issueDate: true,
+      vatTreatment: true,
       receipt: { select: PURCHASE_RECEIPT_SELECT },
       payments: { select: { transactionId: true } },
     },
@@ -263,13 +276,19 @@ async function classifyPurchaseInvoices(userId: string, start: Date, end: Date):
       grossCents: invoice.grossCents,
       vatCents: invoice.vatCents,
       status: invoice.status,
+      vatTreatment: invoice.vatTreatment,
       treatment: "counted",
       suspected: false,
       receiptUnusable: false,
     };
     rows.set(invoice.id, row);
-    if (invoice.status !== "open" && invoice.status !== "paid") row.treatment = "cancelled";
-    else if (invoice.vatCents <= 0) row.treatment = "no_vat";
+    // "credited": a credited invoice keeps counting where it was; its credit note counts, negative, in its own period.
+    if (invoice.status !== "open" && invoice.status !== "paid" && invoice.status !== "credited") row.treatment = "cancelled";
+    // A reverse-charge invoice carries no VAT of its own but still belongs in the return.
+    else if (invoice.vatCents === 0 && invoice.vatTreatment === "domestic") row.treatment = "no_vat";
+    // A supplier credit note (negative total) is counted as it is: no receipt stands in for it, and
+    // the receipt it was filed from is left out of the return (loadCountedReceipts).
+    else if (invoice.grossCents < 0) row.treatment = "counted";
     else if (receiptCountsPurchase(invoice.receipt)) row.treatment = "linked_receipt";
     else if (invoice.payments.some((payment) => payment.transactionId !== null && documentedRows.has(payment.transactionId))) {
       row.treatment = "bank_receipt";
@@ -357,7 +376,14 @@ async function loadPurchaseVat(userId: string, start: Date, end: Date) {
   const counted = rows.filter((row) => row.treatment === "counted");
   return {
     rows,
-    counted: counted.map((row): PurchaseVatSource => ({ vatCents: row.vatCents })),
+    counted: counted.map(
+      (row): PurchaseVatSource => ({
+        vatCents: row.vatCents,
+        grossCents: row.grossCents,
+        vatTreatment: row.vatTreatment,
+        date: row.issueDate,
+      })
+    ),
     skipped: rows.filter(
       (row) => row.treatment === "linked_receipt" || row.treatment === "bank_receipt" || row.treatment === "same_purchase_receipt"
     ).length,
@@ -399,6 +425,8 @@ export async function loadAlvPeriodSources(
       totalAmount:
         receipt.totalAmountCents == null ? null : centsToEuros(receipt.totalAmountCents),
       vatDetails: receipt.vatDetails,
+      vatTreatment: receipt.vatTreatment,
+      date: receipt.date,
     })),
     invoices: bookedInvoices.map(({ totals }) => ({ breakdown: totals.breakdown })),
     reportReceipts: counted.map((receipt) => ({

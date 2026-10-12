@@ -11,7 +11,13 @@ final class ChatModel {
     var conversationId: String?
     var title = "Avustaja"
     private(set) var messages: [ChatMessage] = []
-    private(set) var streaming = false
+    /// Where the current question stands (see `ChatTurn`); a failed one offers "Yritä uudelleen".
+    private(set) var turn: ChatTurn = .idle
+    var streaming: Bool { turn.isBusy }
+    /// The client id of the last question: a retry repeats it, so the server keeps one user message.
+    private var clientId = UUID().uuidString
+    /// A reply that came in part before failing: a retry replaces it.
+    private var failedReplyId: String?
     var failure: String?
     /// The composer's draft: kept here so closing the sheet does not lose it.
     var input = ""
@@ -29,6 +35,11 @@ final class ChatModel {
     private(set) var decisions: [String: ChatProposalDecision] = [:]
     /// A decision the server refused, shown in that message's card.
     private(set) var decisionErrors: [String: String] = [:]
+    /// What the owner did on each match-batch card, by assistant message id (see `ChatMatchBatchState`).
+    private(set) var batchStates: [String: ChatMatchBatchState] = [:]
+    /// The batch card's request on its way (one at a time per card).
+    private(set) var batchBusy: [String: ChatMatchBatchState.Busy] = [:]
+    private(set) var batchErrors: [String: String] = [:]
     /// Receipts sent in this conversation, by the id of the user message showing them: the
     /// local bubble while it uploads, then the server's message (keeping the thumbnail).
     private(set) var attachments: [String: ChatAttachment] = [:]
@@ -121,6 +132,7 @@ final class ChatModel {
 
     func open(_ conversation: Conversation) async {
         stop()
+        turn = .idle
         dropPendingReceipts()
         loads.next()
         failure = nil
@@ -132,6 +144,7 @@ final class ChatModel {
 
     func startNew() {
         stop()
+        turn = .idle
         dropPendingReceipts()
         loads.next()
         failure = nil
@@ -140,15 +153,30 @@ final class ChatModel {
         messages = []
     }
 
-    func send(_ text: String) {
+    func send(_ text: String) { send(text, retrying: false) }
+
+    /// Asks the failed question again: its message stays where it is (no second bubble) and
+    /// goes out with the same client id.
+    func retry() {
+        guard let text = turn.retryText else { return }
+        send(text, retrying: true)
+    }
+
+    private func send(_ text: String, retrying: Bool) {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, !streaming, cooldownUntil == nil, !receiptBusy else { return }
         loads.next()
         failure = nil
-        messages.append(ChatMessage(id: UUID().uuidString, role: "user", content: trimmed))
+        if retrying {
+            if let id = failedReplyId { messages.removeAll { $0.id == id } }
+        } else {
+            clientId = UUID().uuidString
+            messages.append(ChatMessage(id: UUID().uuidString, role: "user", content: trimmed))
+        }
+        failedReplyId = nil
         let replyId = UUID().uuidString
         messages.append(ChatMessage(id: replyId, role: "assistant", content: ""))
-        streaming = true
+        turn = retrying ? turn.retried() : turn.sent()
         liveReplyId = replyId
         task = Task { await stream(trimmed, replyId: replyId) }
     }
@@ -169,14 +197,14 @@ final class ChatModel {
         // Stopped before the first word: no empty bubble is left behind.
         if let id = liveReplyId { messages.removeAll { $0.id == id && $0.content.isEmpty } }
         liveReplyId = nil
-        streaming = false
+        turn = turn.stopped()
     }
 
     private func stream(_ text: String, replyId: String) async {
         defer {
             if liveReplyId == replyId {
                 liveReplyId = nil
-                streaming = false
+                turn = turn.finished()
             }
         }
         struct Body: Encodable { let message: String; let stream = true; let clientId: String; let conversationId: String? }
@@ -187,7 +215,7 @@ final class ChatModel {
             request.setValue("text/event-stream", forHTTPHeaderField: "Accept")
             let token = await app.auth.currentToken()
             if let token { request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
-            request.httpBody = try JSONEncoder().encode(Body(message: text, clientId: UUID().uuidString, conversationId: conversationId))
+            request.httpBody = try JSONEncoder().encode(Body(message: text, clientId: clientId, conversationId: conversationId))
             request.timeoutInterval = 120
             let (bytes, response) = try await Self.streamSession.bytes(for: request)
             if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
@@ -209,6 +237,7 @@ final class ChatModel {
                 if !pending.isEmpty {
                     let piece = pending
                     pending = ""
+                    turn = turn.received(piece)
                     update(replyId) { $0.content += piece }
                 }
                 lastFlush = .now
@@ -236,17 +265,24 @@ final class ChatModel {
                     messages.removeAll { $0.id == message.id && $0.id != replyId }
                     update(replyId) { $0 = message }
                 case .failed(let message):
-                    failure = message
-                    update(replyId) { if $0.content.isEmpty { $0.content = message } }
+                    fail(message, text: text, replyId: replyId)
                 }
             }
         } catch is CancellationError {
         } catch let error as URLError where error.code == .cancelled {
         } catch {
             guard liveReplyId == replyId else { return }
-            failure = error.userMessage
-            messages.removeAll { $0.id == replyId && $0.content.isEmpty }
+            fail(error.userMessage, text: text, replyId: replyId)
         }
+    }
+
+    /// The answer did not come (or stopped short): the reason stays visible and the question can
+    /// be asked again. An empty placeholder goes; a partial answer stays until the retry.
+    private func fail(_ message: String, text: String, replyId: String) {
+        failure = message
+        turn = turn.failed(message, text: text)
+        messages.removeAll { $0.id == replyId && $0.content.isEmpty }
+        if messages.contains(where: { $0.id == replyId }) { failedReplyId = replyId }
     }
 
     // MARK: Match proposal
@@ -275,6 +311,73 @@ final class ChatModel {
                     decisionErrors[id] = error.userMessage
                     Haptics.error()
                 }
+            }
+        }
+    }
+
+    // MARK: Match batch
+
+    func batchState(_ id: String) -> ChatMatchBatchState { batchStates[id] ?? ChatMatchBatchState() }
+
+    /// "Hyväksy kaikki varmat": the pairs still undecided go to confirm-all together.
+    func confirmBatch(_ id: String) {
+        guard batchBusy[id] == nil, let batch = messages.first(where: { $0.id == id })?.proposal?.matchBatch else { return }
+        let pairs = batchState(id).pending(batch)
+        guard !pairs.isEmpty else { return }
+        runBatch(id, .all) { [self] in
+            let result: ChatMatchConfirmResult = try await app.api.send("POST", "/api/matching/confirm-all", body: ChatMatchPairsRequest(pairs: pairs))
+            batchStates[id, default: ChatMatchBatchState()].applyBulk(sent: pairs, result: result)
+            return result.confirmed + result.alreadyConfirmed > 0
+        }
+    }
+
+    /// One row's Hyväksy: the same endpoint with that single pair.
+    func acceptBatchRow(_ id: String, _ card: ChatMatchBatch.Card) {
+        guard batchBusy[id] == nil, let receiptId = card.receiptId else { return }
+        runBatch(id, .row(card.transactionId)) { [self] in
+            let pair = ChatMatchBatch.Pair(transactionId: card.transactionId, receiptId: receiptId)
+            let result: ChatMatchConfirmResult = try await app.api.send("POST", "/api/matching/confirm-all", body: ChatMatchPairsRequest(pairs: [pair]))
+            batchStates[id, default: ChatMatchBatchState()].applyAccept(transactionId: card.transactionId, result: result)
+            return result.skipped == 0
+        }
+    }
+
+    func rejectBatchRow(_ id: String, _ card: ChatMatchBatch.Card) {
+        struct Body: Encodable { let transactionId: String; let receiptId: String }
+        guard batchBusy[id] == nil, let receiptId = card.receiptId else { return }
+        runBatch(id, .row(card.transactionId)) { [self] in
+            let _: Ignored = try await app.api.send("POST", "/api/matching/reject", body: Body(transactionId: card.transactionId, receiptId: receiptId))
+            batchStates[id, default: ChatMatchBatchState()].mark(card.transactionId, .rejected)
+            return false
+        }
+    }
+
+    /// An ambiguous row has no stored suggestion: the owner's pick is a manual confirm.
+    func chooseBatchOption(_ id: String, _ card: ChatMatchBatch.Card, receiptId: String) {
+        struct Body: Encodable { let transactionId: String; let receiptId: String }
+        guard batchBusy[id] == nil else { return }
+        runBatch(id, .row(card.transactionId)) { [self] in
+            let _: Ignored = try await app.api.send("POST", "/api/matching/confirm", body: Body(transactionId: card.transactionId, receiptId: receiptId))
+            batchStates[id, default: ChatMatchBatchState()].mark(card.transactionId, .confirmed)
+            return true
+        }
+    }
+
+    /// Runs one batch request; `work` records its outcome and answers whether a receipt was linked
+    /// (the write filter skips /api/ai/, so the lists are told here).
+    private func runBatch(_ id: String, _ busy: ChatMatchBatchState.Busy, work: @escaping () async throws -> Bool) {
+        batchErrors[id] = nil
+        batchBusy[id] = busy
+        Task {
+            defer { batchBusy[id] = nil }
+            do {
+                let linked = try await work()
+                if linked { app.dataVersion += 1 }
+                Haptics.success()
+            } catch is CancellationError {
+            } catch {
+                batchErrors[id] = error.userMessage
+                Haptics.error()
             }
         }
     }

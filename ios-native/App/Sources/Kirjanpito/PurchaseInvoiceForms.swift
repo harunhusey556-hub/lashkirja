@@ -79,6 +79,18 @@ struct PurchaseInvoiceFormView: View {
                 } footer: {
                     Text("Viitenumero tarvitaan automaattiseen kohdistukseen.")
                 }
+                Section {
+                    Picker("ALV-käsittely", selection: $form.vatTreatment) {
+                        ForEach(PurchaseVatTreatment.allCases) { treatment in
+                            Text(treatment.label).tag(treatment)
+                        }
+                    }
+                    .pickerStyle(.navigationLink)
+                } header: {
+                    Text("ALV-käsittely")
+                } footer: {
+                    if !form.vatTreatment.hint.isEmpty { Text(form.vatTreatment.hint) }
+                }
 
                 Section {
                     TextField("Lisätiedot (valinnainen)", text: $form.notes, axis: .vertical)
@@ -329,9 +341,11 @@ struct PurchaseMarkPaidSheet: View {
 /// The status pill of a purchase invoice, toned like the web's `PURCHASE_STATUS`.
 struct PurchaseStatusBadge: View {
     let status: PurchaseDisplayStatus
+    /// "Hyvityslasku" or "Osittain hyvitetty" say more than the status alone.
+    var tag: PurchaseCreditTag?
 
     var body: some View {
-        Text(status.label)
+        Text(tag?.label ?? status.label)
             .font(.caption2.weight(.semibold))
             .padding(.horizontal, 8)
             .padding(.vertical, 3)
@@ -340,11 +354,14 @@ struct PurchaseStatusBadge: View {
     }
 
     private var color: Color {
+        if let tag { return tag == .partlyCredited ? Theme.warning : Theme.ink2 }
         switch status {
-        case .open: Theme.ink2
-        case .overdue: Theme.danger
-        case .paid: Theme.success
-        case .cancelled: Theme.ink2
+        case .open: return Theme.ink2
+        case .overdue: return Theme.danger
+        case .paid: return Theme.success
+        // Neutral as the web's PURCHASE_STATUS: nothing is owed, but nothing was paid either.
+        case .credited: return Theme.ink2
+        case .cancelled: return Theme.ink2
         }
     }
 }
@@ -355,9 +372,9 @@ struct RecurringBadge: View {
 
     var body: some View {
         HStack(spacing: 3) {
-            Image(systemName: "repeat").imageScale(.small)
+            Image(systemName: "repeat").imageScale(.small).accessibilityHidden(true)
             Text("Toistuva")
-            if chevron { Image(systemName: "chevron.right").imageScale(.small) }
+            if chevron { Image(systemName: "chevron.right").imageScale(.small).accessibilityHidden(true) }
         }
         .font(.caption2.weight(.semibold))
         .padding(.horizontal, 8)
@@ -374,7 +391,7 @@ struct PurchaseInvoiceRow: View {
     var body: some View {
         HStack(alignment: .firstTextBaseline) {
             VStack(alignment: .leading, spacing: 3) {
-                Text(invoice.supplierName).foregroundStyle(Theme.ink).lineLimit(1)
+                Text(invoice.supplierName).foregroundStyle(Theme.ink).lineLimitUnlessLarge()
                 Text(invoice.rowSecondary).font(.caption).foregroundStyle(Theme.ink2).lineLimit(2)
             }
             Spacer()
@@ -382,7 +399,7 @@ struct PurchaseInvoiceRow: View {
                 MoneyText(amount: invoice.gross).font(.subheadline.weight(.semibold))
                 HStack(spacing: 4) {
                     if recurring { RecurringBadge() }
-                    PurchaseStatusBadge(status: invoice.displayStatus)
+                    PurchaseStatusBadge(status: invoice.displayStatus, tag: invoice.creditTag)
                 }
             }
         }

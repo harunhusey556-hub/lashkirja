@@ -3,7 +3,8 @@
 import { AnimatedRows } from "@/components/AnimatedRows";
 import { PullToRefresh } from "@/components/ds/PullToRefresh";
 import { Reveal } from "@/components/ds/Reveal";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import { SkeletonList } from "@/components/AsyncState";
 import { ConnectionNotice, EmptyState, StaleBanner } from "@/components/ScreenState";
 import ConfirmModal from "@/components/ConfirmModal";
@@ -22,6 +23,7 @@ import { hapticNotify } from "@/lib/haptics";
 import { formatDate, formatDayMonth, formatEur, parseFinnishNumber } from "@/lib/format";
 import { moneyEntryProblem } from "@/lib/money-entry";
 import { isValidReferenceNumber, normalizeReference } from "@/lib/finnish-reference";
+import { newIdempotencyKey } from "@/lib/idempotency-key";
 import { PURCHASE_STATUS } from "@/lib/status-labels";
 import {
   PURCHASE_LIST_LIMIT,
@@ -33,6 +35,7 @@ import {
 
 import { Button, controlClass } from "@/components/ui";
 import {
+  ActionPill,
   FilterChips,
   HeaderAddPill,
   KeyValueList,
@@ -52,6 +55,8 @@ import { useCachedResource } from "@/components/useCachedResource";
 import { useCacheAfterBoot } from "@/components/invoices/useCacheAfterBoot";
 import { PURCHASE_COUNTS_KEY } from "@/lib/cached-resource";
 import { tintedButtonClass } from "@/components/control-styles";
+import { PURCHASE_VAT_TREATMENTS, type PurchaseVatTreatment } from "@/lib/alv";
+import { VAT_TREATMENT_HINTS, VAT_TREATMENT_LABELS } from "@/lib/foreign-purchase";
 
 interface PurchaseInvoice {
   id: string;
@@ -60,13 +65,19 @@ interface PurchaseInvoice {
   reference: string | null;
   issueDate: string;
   dueDate: string;
-  status: "open" | "paid" | "cancelled";
-  displayStatus: "open" | "paid" | "cancelled" | "overdue";
+  status: "open" | "paid" | "credited" | "cancelled";
+  displayStatus: "open" | "paid" | "credited" | "cancelled" | "overdue";
+  /** Negative on a supplier credit note. */
   gross: number;
   vat: number;
   net: number;
   paid: number;
+  /** Credited so far (positive); absent in a list cached before credit notes existed. */
+  credited?: number;
   open: number;
+  /** A supplier credit note (negative total): nothing to pay, listed under Hyvitetyt. */
+  isCreditNote?: boolean;
+  creditNotes?: Array<{ id: string; issueDate: string; gross: number; invoiceNumber: string | null }>;
   category: string | null;
   notes: string | null;
   /** The receipt that documents this purchase: its VAT counts through the receipt (F39). */
@@ -122,6 +133,10 @@ const today = () => new Date().toISOString().slice(0, 10);
  * repeating it here would be redundant.
  */
 function rowSecondary(invoice: PurchaseInvoice): string {
+  if (invoice.isCreditNote) {
+    const date = `Hyvityslasku ${formatDayMonth(invoice.issueDate)}`;
+    return invoice.invoiceNumber ? `${invoice.invoiceNumber} · ${date}` : date;
+  }
   const datePhrase = invoice.displayStatus === "overdue" ? "myöhässä, eräpäivä" : "eräpäivä";
   const dateText = `${datePhrase} ${formatDayMonth(invoice.dueDate)}`;
   // Without an invoice number the date phrase starts the line, so it starts with a capital.
@@ -129,7 +144,18 @@ function rowSecondary(invoice: PurchaseInvoice): string {
     ? `${invoice.invoiceNumber} · ${dateText}`
     : dateText.charAt(0).toUpperCase() + dateText.slice(1);
   const partiallyPaid = invoice.paid > 0 && invoice.open > 0;
+  const partlyCredited = (invoice.credited ?? 0) > 0 && invoice.displayStatus !== "credited";
+  if (partlyCredited) return `${base} · hyvitetty ${formatEur(invoice.credited ?? 0)}, avoinna ${formatEur(invoice.open)}`;
   return partiallyPaid ? `${base} · avoinna ${formatEur(invoice.open)}` : base;
+}
+
+/** The tag of a row or sheet: a credit note says so, an invoice with a part credit says "Osittain hyvitetty". */
+function statusTagOf(invoice: PurchaseInvoice): { label: string; tone: (typeof PURCHASE_STATUS)[keyof typeof PURCHASE_STATUS]["tone"] } {
+  if (invoice.isCreditNote && invoice.displayStatus !== "cancelled") return { label: "Hyvityslasku", tone: "neutral" };
+  if ((invoice.credited ?? 0) > 0 && (invoice.displayStatus === "open" || invoice.displayStatus === "paid")) {
+    return { label: "Osittain hyvitetty", tone: "warning" };
+  }
+  return PURCHASE_STATUS[invoice.displayStatus];
 }
 
 export default function PurchaseInvoicesPage() {
@@ -162,6 +188,8 @@ export default function PurchaseInvoicesPage() {
   const [createOpen, setCreateOpen] = useState(false);
   const [confirmRemove, setConfirmRemove] = useState<PurchaseInvoice | null>(null);
   const [detailInvoice, setDetailInvoice] = useState<PurchaseInvoice | null>(null);
+  // "Liitä kuitti" straight from the list row, without opening the detail sheet first.
+  const [linkInvoice, setLinkInvoice] = useState<PurchaseInvoice | null>(null);
   const [confirmRemovePayment, setConfirmRemovePayment] = useState<{
     invoiceId: string;
     paymentId: string;
@@ -171,6 +199,12 @@ export default function PurchaseInvoicesPage() {
   const [receiptLinks, setReceiptLinks] = useState<{ linked: ReceiptChoice | null; candidates: ReceiptChoice[] } | null>(null);
   const [paymentDraft, setPaymentDraft] = useState("");
   const [payError, setPayError] = useState("");
+  // "Hyvitä": the sheet for a supplier credit note against the invoice in the detail sheet.
+  const [creditTarget, setCreditTarget] = useState<PurchaseInvoice | null>(null);
+  const [creditForm, setCreditForm] = useState({ amount: "", vat: "", date: today(), reason: "", number: "" });
+  const [creditError, setCreditError] = useState("");
+  // One key per distinct credit: a retried tap replays, an edited field is a new credit.
+  const creditKey = useRef(newIdempotencyKey());
 
   const [form, setForm] = useState({
     supplierName: "",
@@ -181,6 +215,7 @@ export default function PurchaseInvoicesPage() {
     gross: "",
     vat: "",
     category: "",
+    vatTreatment: "domestic" as PurchaseVatTreatment,
   });
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
   const [createError, setCreateError] = useState("");
@@ -275,6 +310,7 @@ export default function PurchaseInvoicesPage() {
       gross: gross as number,
       vat: vat as number,
       category: form.category.trim() || null,
+      vatTreatment: form.vatTreatment,
     };
   }
 
@@ -303,6 +339,7 @@ export default function PurchaseInvoicesPage() {
         gross: "",
         vat: "",
         category: "",
+        vatTreatment: "domestic",
       });
       setFormErrors({});
       await Promise.all([load(), reloadCounts()]);
@@ -331,6 +368,31 @@ export default function PurchaseInvoicesPage() {
     void loadReceiptLinks(invoice.id);
   }
 
+  // "Avaa ostolasku" on a receipt (OstolaskuNotice) links here with ?id=: open
+  // that invoice's sheet once, whatever the list filter, then drop the id from the URL.
+  useEffect(() => {
+    const id = new URLSearchParams(window.location.search).get("id");
+    if (!id) return;
+    window.history.replaceState(null, "", "/kirjanpito/ostolaskut");
+    apiFetch(`/api/purchase-invoices/${encodeURIComponent(id)}`, { credentials: "include" })
+      .then((response) => readJson<{ invoice: PurchaseInvoice }>(response, "Ostolaskua ei löytynyt"))
+      .then((data) => openDetail(data.invoice))
+      .catch((error: unknown) => {
+        if (isUnauthorized(error)) {
+          redirectToLogin();
+          return;
+        }
+        showToast({ tone: "error", text: errorMessage(error, "Ostolaskua ei löytynyt") });
+      });
+    // Mount only: the id is read from the URL once.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  function openLinkSheet(invoice: PurchaseInvoice) {
+    setLinkInvoice(invoice);
+    void loadReceiptLinks(invoice.id);
+  }
+
   async function loadReceiptLinks(invoiceId: string) {
     setReceiptLinks(null);
     try {
@@ -355,7 +417,9 @@ export default function PurchaseInvoicesPage() {
         body: JSON.stringify({ receiptId }),
       });
       const data = await readJson<{ invoice: PurchaseInvoice }>(response, "Kuitin liittäminen epäonnistui");
-      setDetailInvoice(data.invoice);
+      // From the list row's sheet the detail stays closed; from the detail it shows the new link.
+      setDetailInvoice((current) => (current ? data.invoice : current));
+      setLinkInvoice(null);
       showToast({ tone: "success", text: receiptId ? "Kuitti liitettiin" : "Liitos poistettiin" });
       await Promise.all([load(), reloadCounts(), loadReceiptLinks(invoice.id)]);
     } catch (error) {
@@ -364,6 +428,92 @@ export default function PurchaseInvoicesPage() {
         return;
       }
       showToast({ tone: "error", text: errorMessage(error, "Kuitin liittäminen epäonnistui") });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  /** What can still be credited on an invoice: its gross less the credit notes so far. */
+  function creditableOf(invoice: PurchaseInvoice): number {
+    return Math.round((invoice.gross - (invoice.credited ?? 0)) * 100) / 100;
+  }
+
+  function openCredit(invoice: PurchaseInvoice) {
+    creditKey.current = newIdempotencyKey();
+    setCreditForm({
+      amount: String(creditableOf(invoice)).replace(".", ","),
+      vat: "",
+      date: today(),
+      reason: "",
+      number: "",
+    });
+    setCreditError("");
+    setCreditTarget(invoice);
+    setDetailInvoice(null);
+  }
+
+  function changeCreditForm(change: Partial<typeof creditForm>) {
+    setCreditForm((current) => ({ ...current, ...change }));
+    creditKey.current = newIdempotencyKey();
+    setCreditError("");
+  }
+
+  async function submitCredit() {
+    if (!creditTarget) return;
+    const amount = parseFinnishNumber(creditForm.amount);
+    if (amount === null || amount <= 0) {
+      setCreditError("Anna hyvityksen summa, esim. 62,00.");
+      return;
+    }
+    const amountProblem = moneyEntryProblem(amount);
+    if (amountProblem) {
+      setCreditError(amountProblem);
+      return;
+    }
+    if (amount > creditableOf(creditTarget)) {
+      setCreditError(`Hyvitettävissä on enintään ${formatEur(creditableOf(creditTarget))}.`);
+      return;
+    }
+    const vat = creditForm.vat.trim() ? parseFinnishNumber(creditForm.vat) : null;
+    if (creditForm.vat.trim() && (vat === null || vat < 0 || vat > amount)) {
+      setCreditError("ALV on virheellinen.");
+      return;
+    }
+    if (creditForm.reason.trim().length < 3) {
+      setCreditError("Kirjoita hyvityksen syy.");
+      return;
+    }
+    if (creditForm.date < creditTarget.issueDate) {
+      setCreditError("Hyvityksen päivä ei voi olla ennen laskun päivää.");
+      return;
+    }
+    setBusy(true);
+    setCreditError("");
+    try {
+      const response = await apiFetch(`/api/purchase-invoices/${creditTarget.id}/credit`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json", "Idempotency-Key": creditKey.current },
+        body: JSON.stringify({
+          amount,
+          ...(vat === null ? {} : { vat }),
+          date: creditForm.date,
+          reason: creditForm.reason.trim(),
+          supplierNumber: creditForm.number.trim() || null,
+        }),
+      });
+      await readJson(response, "Hyvitys epäonnistui");
+      void hapticNotify("success");
+      showToast({ tone: "success", text: "Hyvityslasku luotu" });
+      setCreditTarget(null);
+      await Promise.all([load(), reloadCounts()]);
+    } catch (error) {
+      if (isUnauthorized(error)) {
+        redirectToLogin();
+        return;
+      }
+      // Renders inside the credit sheet, which stays open.
+      setCreditError(errorMessage(error, "Hyvitys epäonnistui"));
     } finally {
       setBusy(false);
     }
@@ -530,6 +680,12 @@ export default function PurchaseInvoicesPage() {
             Kohdista maksut
           </Button>
         )}
+        {!noPurchases && (
+          // The proposals the button above leaves for review, one by one.
+          <Link href="/kirjanpito/ostolaskut/kohdistus" className={tintedButtonClass("accent", "w-full min-h-11")}>
+            Tarkista maksuehdotukset
+          </Link>
+        )}
 
         <Reveal show={Boolean(message)}>{message ? (
           <p className="rounded-card bg-accent-soft px-4 py-3 text-sm text-ink" role="status">
@@ -568,9 +724,17 @@ export default function PurchaseInvoicesPage() {
                     amount={formatEur(invoice.gross)}
                     secondary={rowSecondary(invoice)}
                     trailing={
-                      <StatusTag tone={PURCHASE_STATUS[invoice.displayStatus].tone}>
-                        {PURCHASE_STATUS[invoice.displayStatus].label}
-                      </StatusTag>
+                      <span className="flex items-center gap-2">
+                        {!invoice.receiptId && invoice.status !== "cancelled" ? (
+                          <ActionPill
+                            onClick={() => openLinkSheet(invoice)}
+                            ariaLabel={`Liitä kuitti ostolaskuun ${invoice.supplierName}`}
+                          >
+                            Liitä kuitti
+                          </ActionPill>
+                        ) : null}
+                        <StatusTag tone={statusTagOf(invoice).tone}>{statusTagOf(invoice).label}</StatusTag>
+                      </span>
                     }
                   />
                 ) }))} />
@@ -664,6 +828,24 @@ export default function PurchaseInvoicesPage() {
                   <p id="pi-vat-error" className="mt-1.5 text-sm text-danger" role="alert">
                     {formErrors.vat}
                   </p>
+                )}
+              </div>
+              <div>
+                <label className={label} htmlFor="pi-vat-treatment">ALV-käsittely</label>
+                <select
+                  id="pi-vat-treatment"
+                  className={field}
+                  value={form.vatTreatment}
+                  onChange={(e) => setForm({ ...form, vatTreatment: e.target.value as PurchaseVatTreatment })}
+                >
+                  {PURCHASE_VAT_TREATMENTS.map((treatment) => (
+                    <option key={treatment} value={treatment}>
+                      {VAT_TREATMENT_LABELS[treatment]}
+                    </option>
+                  ))}
+                </select>
+                {form.vatTreatment !== "domestic" && (
+                  <p className="mt-1.5 text-caption text-ink-2">{VAT_TREATMENT_HINTS[form.vatTreatment]}</p>
                 )}
               </div>
             </div>
@@ -766,13 +948,13 @@ export default function PurchaseInvoicesPage() {
       >
         {detailInvoice && (
           <div className="space-y-4 px-5 py-4 sheet-safe-bottom">
-            <StatusTag tone={PURCHASE_STATUS[detailInvoice.displayStatus].tone}>
-              {PURCHASE_STATUS[detailInvoice.displayStatus].label}
-            </StatusTag>
+            <StatusTag tone={statusTagOf(detailInvoice).tone}>{statusTagOf(detailInvoice).label}</StatusTag>
 
             <KeyValueList
               rows={[
-                { label: "Eräpäivä", value: formatDate(detailInvoice.dueDate) },
+                ...(detailInvoice.isCreditNote
+                  ? [{ label: "Päivä", value: formatDate(detailInvoice.issueDate) }]
+                  : [{ label: "Eräpäivä", value: formatDate(detailInvoice.dueDate) }]),
                 { label: "Veroton", value: formatEur(detailInvoice.net) },
                 { label: "ALV", value: formatEur(detailInvoice.vat) },
                 { label: "Yhteensä", value: formatEur(detailInvoice.gross) },
@@ -782,11 +964,17 @@ export default function PurchaseInvoicesPage() {
                 ...(detailInvoice.payments.length > 0
                   ? [{ label: "Maksettu", value: formatEur(detailInvoice.paid) }]
                   : []),
+                ...((detailInvoice.credited ?? 0) > 0
+                  ? [{ label: "Hyvitetty", value: formatEur(detailInvoice.credited ?? 0) }]
+                  : []),
                 ...(detailInvoice.status === "open"
                   ? [{ label: "Avoinna", value: formatEur(detailInvoice.open) }]
                   : []),
               ]}
             />
+            {detailInvoice.isCreditNote && detailInvoice.notes ? (
+              <p className="text-caption text-ink-2">{detailInvoice.notes}</p>
+            ) : null}
             {detailInvoice.status !== "cancelled" && detailInvoice.vat > 0 ? (
               <p className="text-caption text-ink-2">
                 {detailInvoice.receiptId
@@ -891,7 +1079,21 @@ export default function PurchaseInvoicesPage() {
               </div>
             )}
 
-            {detailInvoice.payments.length === 0 && (
+            {!detailInvoice.isCreditNote &&
+              (detailInvoice.status === "open" || detailInvoice.status === "paid") &&
+              creditableOf(detailInvoice) > 0 && (
+                <Button
+                  type="button"
+                  variant="secondary"
+                  className="w-full"
+                  disabled={busy}
+                  onClick={() => openCredit(detailInvoice)}
+                >
+                  Hyvitä
+                </Button>
+              )}
+
+            {detailInvoice.payments.length === 0 && (detailInvoice.creditNotes ?? []).length === 0 && (
               <Button
                 type="button"
                 variant="danger"
@@ -902,9 +1104,151 @@ export default function PurchaseInvoicesPage() {
                   setDetailInvoice(null);
                 }}
               >
-                Poista ostolasku
+                {detailInvoice.isCreditNote ? "Poista hyvityslasku" : "Poista ostolasku"}
               </Button>
             )}
+          </div>
+        )}
+      </BottomSheet>
+
+      <BottomSheet
+        isOpen={linkInvoice !== null}
+        onClose={() => setLinkInvoice(null)}
+        title={linkInvoice ? `Liitä kuitti · ${linkInvoice.supplierName}` : undefined}
+        labelledBy="pi-link-title"
+      >
+        {linkInvoice && (
+          <div className="space-y-3 px-5 py-4 sheet-safe-bottom">
+            <p className="text-caption text-ink-2">
+              {formatEur(linkInvoice.gross)} · eräpäivä {formatDate(linkInvoice.dueDate)}. Liitä saman oston kuitti, niin ALV ei lasketa kahdesti.
+            </p>
+            {receiptLinks === null ? (
+              <SkeletonList rows={2} label="Haetaan kuitteja" />
+            ) : receiptLinks.candidates.length === 0 ? (
+              <p className="text-caption text-ink">Sopivia kuitteja ei löytynyt. Lisää kuitti Kuitit-näkymässä ja liitä se sitten.</p>
+            ) : (
+              <ul className="space-y-1">
+                {receiptLinks.candidates.map((receipt) => (
+                  <li key={receipt.id} className="flex min-h-11 items-center justify-between gap-3 text-caption text-ink">
+                    <span className="min-w-0 truncate">{receiptChoiceText(receipt)}</span>
+                    <button
+                      type="button"
+                      className={tintedButtonClass("accent", "shrink-0")}
+                      disabled={busy}
+                      aria-label={`Liitä kuitti ${receiptChoiceText(receipt)}`}
+                      onClick={() => void setReceiptLink(linkInvoice, receipt.id)}
+                    >
+                      Liitä
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        )}
+      </BottomSheet>
+
+      <BottomSheet
+        isOpen={creditTarget !== null}
+        onClose={() => {
+          setCreditTarget(null);
+          setCreditError("");
+        }}
+        title="Hyvitä ostolasku"
+        labelledBy="pi-credit-title"
+        heightClass="max-h-[94dvh]"
+      >
+        {creditTarget && (
+          <div className="flex min-h-0 flex-1 flex-col overflow-y-auto px-5 py-4 sheet-safe-bottom">
+            <form
+              onSubmit={(event) => {
+                event.preventDefault();
+                void submitCredit();
+              }}
+              className="space-y-4"
+              noValidate
+            >
+              <p className="text-body text-ink">
+                {creditTarget.supplierName} · {formatEur(creditTarget.gross)}
+              </p>
+              <div className="field-grid">
+                <div>
+                  <label className={label} htmlFor="pi-credit-amount">Hyvitettävä summa (€)</label>
+                  <input
+                    id="pi-credit-amount"
+                    enterKeyHint="next"
+                    className={field}
+                    value={creditForm.amount}
+                    onChange={(e) => changeCreditForm({ amount: e.target.value })}
+                    inputMode="decimal"
+                  />
+                </div>
+                <div>
+                  <label className={label} htmlFor="pi-credit-vat">ALV (€)</label>
+                  <input
+                    id="pi-credit-vat"
+                    enterKeyHint="next"
+                    className={field}
+                    value={creditForm.vat}
+                    onChange={(e) => changeCreditForm({ vat: e.target.value })}
+                    inputMode="decimal"
+                    placeholder="Laskennallinen"
+                  />
+                </div>
+              </div>
+              <p className="-mt-1 text-caption text-ink-2">
+                Jätä ALV tyhjäksi, niin se lasketaan ostolaskun ALV:stä samassa suhteessa. Hyvitys vähentää
+                avointa summaa ja ALV-vähennystä hyvityspäivän kaudella.
+              </p>
+              <div className="field-grid">
+                <div>
+                  <label className={label} htmlFor="pi-credit-date">Hyvityslaskun päivä</label>
+                  <input
+                    id="pi-credit-date"
+                    type="date"
+                    className={field}
+                    value={creditForm.date}
+                    onChange={(e) => changeCreditForm({ date: e.target.value })}
+                  />
+                </div>
+                <div>
+                  <label className={label} htmlFor="pi-credit-number">Hyvityslaskun numero</label>
+                  <input
+                    id="pi-credit-number"
+                    enterKeyHint="next"
+                    className={field}
+                    value={creditForm.number}
+                    onChange={(e) => changeCreditForm({ number: e.target.value })}
+                    maxLength={40}
+                  />
+                </div>
+              </div>
+              <div>
+                <label className={label} htmlFor="pi-credit-reason">Syy</label>
+                <input
+                  id="pi-credit-reason"
+                  enterKeyHint="done"
+                  className={field}
+                  value={creditForm.reason}
+                  onChange={(e) => changeCreditForm({ reason: e.target.value })}
+                  placeholder="Esim. palautus tai hinnanalennus"
+                  maxLength={300}
+                />
+              </div>
+              {creditError && (
+                <p className="text-sm text-danger" role="alert">
+                  {creditError}
+                </p>
+              )}
+              <div className="flex gap-3">
+                <Button type="button" variant="secondary" className="flex-1" onClick={() => setCreditTarget(null)}>
+                  Peruuta
+                </Button>
+                <Button type="submit" className="flex-1" busy={busy} busyLabel="Tallennetaan…">
+                  Luo hyvityslasku
+                </Button>
+              </div>
+            </form>
           </div>
         )}
       </BottomSheet>
@@ -924,7 +1268,7 @@ export default function PurchaseInvoicesPage() {
 
       <ConfirmModal
         isOpen={confirmRemove !== null}
-        title="Poistetaanko ostolasku?"
+        title={confirmRemove?.isCreditNote ? "Poistetaanko hyvityslasku?" : "Poistetaanko ostolasku?"}
         description={confirmRemove ? `${confirmRemove.supplierName} · ${formatEur(confirmRemove.gross)}` : ""}
         confirmLabel="Poista"
         onConfirm={() => (confirmRemove ? remove(confirmRemove) : Promise.resolve())}

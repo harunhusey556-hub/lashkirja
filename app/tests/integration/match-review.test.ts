@@ -3,7 +3,7 @@ import { randomUUID } from "crypto";
 import { prisma } from "@/lib/db";
 import { resetCopilotPauseForTests } from "@/lib/copilot";
 import { createChatToolSession } from "@/lib/chat-tools";
-import { buildInlineCandidates, matchExplanation, runMatching } from "@/lib/matching";
+import { buildInlineCandidates, confirmProposedMatches, matchExplanation, runMatching } from "@/lib/matching";
 import { processAiChatMessage } from "@/lib/ai-assistant";
 import { REVIEW_EVENT_KIND } from "@/lib/match-review";
 import { createUser, resetDatabase, type TestUser } from "./helpers/factories";
@@ -166,13 +166,17 @@ describe("review_matches (chat tool)", () => {
     expect(result.ambiguous.map((row: { transactionId: string }) => row.transactionId)).toEqual([f.coffeeRow.id]);
     expect(result.ambiguous[0].options).toHaveLength(2);
 
-    // One card per reply, waiting for Hyväksy; nothing linked.
-    expect(session.proposal()).toMatchObject({
-      type: "match_proposal",
+    // Every passed pair and the ambiguous row ride on the reply as one batch card, waiting for Hyväksy; nothing linked.
+    const batchCard = session.proposal() as unknown as { type: string; cards: Array<Record<string, unknown>>; pairs: unknown[] };
+    expect(batchCard.type).toBe("match_batch");
+    expect(batchCard.pairs).toHaveLength(2);
+    expect(batchCard.cards).toHaveLength(3);
+    expect(batchCard.cards[0]).toMatchObject({
       transactionId: f.rentRow.id,
       receiptId: f.rent.id,
       reasons: expect.arrayContaining(["viite täsmää", "summa sama"]),
     });
+    expect(batchCard.cards[2]).toMatchObject({ transactionId: f.coffeeRow.id, ambiguous: true, receiptId: null });
     expect(await prisma.transaction.count({ where: { receiptId: { not: null } } })).toBe(0);
 
     // The stored suggestion carries the review; a second run asks nothing.
@@ -221,6 +225,67 @@ describe("review_matches (chat tool)", () => {
     const result = JSON.parse(await session.run("review_matches", "{}"));
     expect(result).toMatchObject({ ok: true, passed: [], ambiguous: [] });
     expect(session.proposal()).toBeNull();
+  });
+
+  it("lists every confident match, not one and not ten, and keeps ambiguous rows out of the proposals", async () => {
+    installReviewer((candidates) => ({ match: candidates[0].id, confidence: 0.9, reasons: ["sama operaattori"] }));
+    const f = await fixtures();
+    // Eleven more viite + amount pairs; pending so they stay suggestions.
+    for (let i = 0; i < 11; i += 1) {
+      const ref = `91${String(i).padStart(2, "0")}`;
+      await receipt({ vendor: `Toimittaja ${i}`, date: "2026-09-08", cents: 10_000 + i, reference: ref, reviewStatus: "pending" });
+      await statement([{ date: "2026-09-09", amountCents: -(10_000 + i), counterparty: `TOIMITTAJA ${i}`, reference: ref }]);
+    }
+    await runMatching(owner.id);
+
+    const { result, session } = await review("2026-09");
+    // rent + 11 extras are certain; the phone pair is AI-accepted = 13.
+    expect(result.passedTotal).toBe(13);
+    expect(result.passed).toHaveLength(13);
+    expect(result.truncated).toBe(false);
+    expect(result.batch).toMatchObject({ count: 13, ambiguous: 1, href: "/api/matching/confirm-all" });
+    // The accept-all pairs ride on the reply's batch card, not in the model's text.
+    const card = session.proposal() as { type: string; pairs: Array<{ receiptId: string }>; cards: unknown[] };
+    expect(card.type).toBe("match_batch");
+    expect(card.pairs).toHaveLength(13);
+    expect(card.cards).toHaveLength(14);
+    const proposed = new Set(result.passed.map((m: { match: { id: string } }) => m.match.id));
+    expect(proposed.has(f.coffeeA.id)).toBe(false);
+    expect(proposed.has(f.coffeeB.id)).toBe(false);
+    expect(proposed.has(f.fuel.id)).toBe(false);
+    const batchIds = new Set(card.pairs.map((p) => p.receiptId));
+    expect(batchIds.has(f.coffeeA.id)).toBe(false);
+    expect(batchIds.has(f.coffeeB.id)).toBe(false);
+    expect(result.ambiguous.map((row: { transactionId: string }) => row.transactionId)).toEqual([f.coffeeRow.id]);
+  });
+});
+
+describe("confirming exactly the proposed pairs", () => {
+  it("confirms the pairs still suggested, skips withdrawn ones, and counts both", async () => {
+    vi.stubEnv("LLM_API_KEY", "");
+    const f = await fixtures();
+    await runMatching(owner.id);
+    // The phone suggestion is withdrawn (as an AI rejection would); the rent
+    // one stays. The batch confirms only the rent pair and reports the skip.
+    await prisma.transaction.update({
+      where: { id: f.phoneRow.id },
+      data: { matchStatus: "unmatched", suggestedReceiptId: null, matchScore: null, matchReasons: null },
+    });
+    const result = await confirmProposedMatches(owner.id, [
+      { transactionId: f.rentRow.id, receiptId: f.rent.id },
+      { transactionId: f.phoneRow.id, receiptId: f.phone.id },
+    ]);
+    expect(result).toEqual({
+      confirmed: 1,
+      skipped: 1,
+      alreadyConfirmed: 0,
+      skippedPairs: [{ transactionId: f.phoneRow.id, receiptId: f.phone.id }],
+    });
+    expect(await prisma.transaction.findUnique({ where: { id: f.rentRow.id } })).toMatchObject({
+      receiptId: f.rent.id,
+      matchStatus: "confirmed",
+    });
+    expect(await prisma.transaction.findUnique({ where: { id: f.phoneRow.id } })).toMatchObject({ receiptId: null });
   });
 });
 

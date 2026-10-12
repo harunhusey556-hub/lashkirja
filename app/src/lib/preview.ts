@@ -37,7 +37,8 @@ function pdfFirstPageJpeg(pdfPath: string, outPath: string): void {
     );
     const page = fs
       .readdirSync(tempDir)
-      .find((name) => /^page-1\.jpg$/i.test(name));
+      // pdftoppm pads the number to the page count's width: page-01.jpg for a 10+ page PDF.
+      .find((name) => /^page-0*1\.jpg$/i.test(name));
     if (!page) throw new Error("PDF preview page missing");
     fs.copyFileSync(path.join(tempDir, page), outPath);
     fs.chmodSync(outPath, 0o600);

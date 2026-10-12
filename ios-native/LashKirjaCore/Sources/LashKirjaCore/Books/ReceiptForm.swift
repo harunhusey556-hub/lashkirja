@@ -196,6 +196,9 @@ public struct ReceiptForm: Sendable, Equatable {
     public var notes: String
     public var reference: String
     public var invoiceNumber: String
+    public var vatTreatment: PurchaseVatTreatment = .domestic
+    /// Three letters; "EUR" for a euro document.
+    public var currency: String = "EUR"
     public private(set) var vatRows: [ReceiptVatRow]
 
     public static let limits = (vendor: 300, reference: 40, invoiceNumber: 40, notes: 500)
@@ -209,6 +212,8 @@ public struct ReceiptForm: Sendable, Equatable {
         notes = r.notes ?? ""
         reference = r.reference ?? ""
         invoiceNumber = r.invoiceNumber ?? ""
+        vatTreatment = r.vatTreatment
+        currency = r.currency
         // No saved VAT gives no rows: opening a receipt never invents VAT.
         var rows = (r.vatDetails ?? []).map { ReceiptVatRow(rate: $0.rate, amountText: ReceiptAmount.field($0.amount), auto: false) }
         if rows.count == 1, let total = r.totalAmount,
@@ -418,6 +423,11 @@ public struct ReceiptForm: Sendable, Equatable {
         optional("notes", notes, baseline.notes)
         optional("reference", reference, baseline.reference)
         optional("invoiceNumber", invoiceNumber, baseline.invoiceNumber)
+        if vatTreatment != baseline.vatTreatment { patch.set("vatTreatment", .text(vatTreatment.rawValue)) }
+        let code = Self.trimmed(currency).uppercased()
+        if code != Self.trimmed(baseline.currency).uppercased(), code.count == 3, code.allSatisfy(\.isLetter) {
+            patch.set("currency", .text(code))
+        }
         return patch.isEmpty ? .unchanged : .patch(patch)
     }
 }

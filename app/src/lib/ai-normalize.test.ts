@@ -85,3 +85,47 @@ describe("A4: VAT guessed from the category is marked as guessed", () => {
     expect(enriched.notes).toMatch(/arvioitu/);
   });
 });
+
+describe("foreign purchases: no invented rate, no guessed Finnish VAT", () => {
+  it("reads currency and seller country and leaves VAT to the owner", () => {
+    const read = normalizeAIResult({ vendor: "OpenCode", date: "2026-09-12", totalAmount: null, vatDetails: [], category: "ohjelmistot", currency: "usd", sellerCountry: "US" }, "openai-compatible");
+    expect(read.currency).toBe("USD");
+    expect(read.sellerCountry).toBe("US");
+    const enriched = enrichExtractedReceipt({ ...read, rawText: "" });
+    expect(enriched.vatDetails).toEqual([]);
+    expect(enriched.vatGuessed).toBeFalsy();
+    expect(enriched.notes).toMatch(/käännetty verovelvollisuus/);
+    expect(enriched.confidence).toBeLessThanOrEqual(0.6);
+  });
+
+  it("guesses for a Finnish EUR receipt as before", () => {
+    const read = normalizeAIResult({ vendor: "Kampaamotukku", date: "2026-09-12", totalAmount: 125.5, vatDetails: [], category: "tarvikkeet", currency: "EUR", sellerCountry: "FI" }, "openai-compatible");
+    expect(enrichExtractedReceipt({ ...read, rawText: "" }).vatGuessed).toBe(true);
+  });
+
+  it("drops a malformed code", () => {
+    const read = normalizeAIResult({ vendor: "X", currency: "euro", sellerCountry: "Suomi" }, "openai-compatible");
+    expect(read.currency).toBeNull();
+    expect(read.sellerCountry).toBeNull();
+  });
+
+  it("keeps the total a foreign document printed, and a null euro total", () => {
+    const read = normalizeAIResult(
+      { vendor: "OpenCode", currency: "USD", originalAmount: 49.999, totalAmount: null, vatDetails: [] },
+      "openai-compatible"
+    );
+    expect(read.currency).toBe("USD");
+    expect(read.originalAmount).toBe(50);
+    expect(read.totalAmount).toBeNull();
+    // A euro document has no separate original amount.
+    expect(
+      normalizeAIResult({ vendor: "K-Market", currency: "EUR", totalAmount: 12.5 }, "openai-compatible").originalAmount
+    ).toBeNull();
+  });
+
+  it("reads a due date only as a strict date", () => {
+    expect(normalizeAIResult({ dueDate: "2026-10-31" }, "openai-compatible").dueDate).toBe("2026-10-31");
+    expect(normalizeAIResult({ dueDate: "31.10.2026" }, "openai-compatible").dueDate).toBeNull();
+    expect(normalizeAIResult({}, "openai-compatible").dueDate).toBeNull();
+  });
+});

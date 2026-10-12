@@ -6,7 +6,7 @@ import { centsToEuros } from "@/lib/money";
 import { parseBusinessDetails, deriveVatProfile } from "@/lib/onboarding";
 import { bankEverConnected, getBankPosition, loadBalanceTrend, type BalancePoint, type BankPosition, type PositionConnection } from "@/lib/bank-position";
 import { loadCashflow, type CashflowMonth } from "@/lib/koti-cashflow";
-import { buildAging, buildAgingReport, openPosition, type InvoiceStatus } from "@/lib/invoices";
+import { buildAging, buildAgingReport, creditedCentsOf, openPosition, type InvoiceStatus } from "@/lib/invoices";
 import { alvReportOf, loadAlvPeriodSources, type AlvPeriodSources } from "@/lib/alv-period";
 import { computeYearTurnover } from "@/lib/alv-threshold";
 import { buildProfitLoss } from "@/lib/reports";
@@ -16,6 +16,7 @@ import { MONTH_ROW_FACTS, monthProgress } from "@/lib/month-rows";
 import { getLockedThrough, isMonthLocked } from "@/lib/period-lock";
 import { summariseHandled, type Handled } from "@/lib/koti-handled";
 import { monthEvents } from "@/lib/koti-month";
+import { receiptKindWhere } from "@/lib/receipt-filters";
 
 /** Koti's "Hoidettu automaattisesti" looks back this far. */
 const HANDLED_DAYS = 7;
@@ -146,7 +147,8 @@ export async function GET(req: NextRequest) {
   let pendingReceiptsCount = 0;
   try {
     pendingReceiptsCount = await prisma.receipt.count({
-      where: { userId: session.userId, reviewStatus: "pending" },
+      // Same rows as the Koti queue: a bill filed as an ostolasku is not a kuitti to review.
+      where: { userId: session.userId, reviewStatus: "pending", ...receiptKindWhere("receipt") },
     });
   } catch {
     sectionErrors.pending = "Tarkastettavia kuitteja ei saatu ladattua.";
@@ -178,6 +180,7 @@ export async function GET(req: NextRequest) {
         grossCents: true,
         closedReason: true,
         payments: { select: { amountCents: true } },
+        creditNotes: { select: { grossCents: true, status: true } },
       },
     });
     const openPayables = await prisma.purchaseInvoice.findMany({
@@ -188,6 +191,7 @@ export async function GET(req: NextRequest) {
         grossCents: true,
         closedReason: true,
         payments: { select: { amountCents: true } },
+        creditNotes: { select: { grossCents: true, status: true } }, // wave2-schema: PurchaseInvoice.creditsInvoiceId / creditNotes
       },
     });
     const payablesAging = buildAging(
@@ -197,6 +201,7 @@ export async function GET(req: NextRequest) {
           status: invoice.status,
           grossCents: invoice.grossCents,
           paidCents,
+          creditedCents: creditedCentsOf(invoice.creditNotes),
           closedReason: invoice.closedReason,
         });
         return {
@@ -212,6 +217,7 @@ export async function GET(req: NextRequest) {
         dueDate: invoice.dueDate,
         grossCents: invoice.grossCents,
         paidCents: invoice.payments.reduce((sum, payment) => sum + payment.amountCents, 0),
+        creditedCents: creditedCentsOf(invoice.creditNotes),
         closedReason: invoice.closedReason,
       })),
       now

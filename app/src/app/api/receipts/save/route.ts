@@ -14,6 +14,12 @@ import { withErrorHandler, UnauthorizedError, AppError, ValidationError } from "
 import { sanitizeText } from "@/lib/sanitizer";
 import { assertPeriodOpen } from "@/lib/period-lock";
 import { vatLinesProblem } from "@/lib/receipt-vat";
+import { PURCHASE_VAT_TREATMENTS } from "@/lib/alv";
+import { currencySchema, foreignColumns } from "@/lib/foreign-purchase-input";
+import { storedDocumentKind } from "@/lib/receipt-staging";
+import { fileReceiptAsPurchaseInvoice } from "@/lib/purchase-invoices";
+import { euroConversionForSave, withFxRecorded } from "@/lib/fx-rates";
+import { canAutoAccept } from "@/lib/auto-accept";
 
 const vatLineSchema = z.object({
   rate: z.number().finite().min(0).max(100),
@@ -31,7 +37,13 @@ const saveSchema = z.object({
   type: z.enum(["meno", "tulo"]).default("meno"),
   reference: z.string().trim().max(40).nullish(),
   invoiceNumber: z.string().trim().max(40).nullish(),
+  currency: currencySchema.optional(),
+  originalAmount: nonnegativeMoneySchema.nullish(),
+  vatTreatment: z.enum(PURCHASE_VAT_TREATMENTS).optional(),
   forceDuplicate: z.boolean().default(false),
+  // W8: the upload queue asks the server to approve a complete reading in the
+  // same transaction (lib/auto-accept.ts); anything the rule refuses is pending.
+  autoApprove: z.boolean().default(false),
 }).strict();
 
 export const POST = withErrorHandler(async (req: NextRequest) => {
@@ -75,7 +87,21 @@ export const POST = withErrorHandler(async (req: NextRequest) => {
     }
   }
 
+  // A foreign document saved without a euro figure is priced at the rate the document
+  // printed or the ECB's. Looked up before the transaction: no network inside a write lock.
+  let fx: Awaited<ReturnType<typeof euroConversionForSave>> = null;
+  if (body.totalAmount == null) {
+    const staged = await prisma.upload.findFirst({
+      where: { id: body.uploadId, userId: session.userId!, purpose: "receipt" },
+      select: { extractedJson: true },
+    });
+    fx = await euroConversionForSave(body, staged?.extractedJson ?? null);
+  }
+
   try {
+    // The stored reading names the document kind (kuitti / lasku / ...): a bill
+    // is filed as an ostolasku below, so it is never silently a plain receipt.
+    let reading = storedDocumentKind(null);
     const receipt = await prisma.$transaction(async (db) => {
       const upload = await db.upload.findFirst({
         where: {
@@ -87,6 +113,7 @@ export const POST = withErrorHandler(async (req: NextRequest) => {
         },
       });
       if (!upload) throw new UploadClaimError();
+      reading = storedDocumentKind(upload.extractedJson);
 
       const claim = await db.upload.updateMany({
         where: {
@@ -98,14 +125,16 @@ export const POST = withErrorHandler(async (req: NextRequest) => {
         data: { claimedAt: new Date() },
       });
       if (claim.count !== 1) throw new UploadClaimError();
+      const recorded = fx ? withFxRecorded(upload.extractedJson, fx) : null;
+      if (recorded) await db.upload.update({ where: { id: upload.id }, data: { extractedJson: recorded } });
 
-      return db.receipt.create({
+      const created = await db.receipt.create({
         data: {
           userId: session.userId!,
           uploadId: upload.id,
           vendor: sanitizeText(body.vendor),
           date: body.date ? isoDateToUtc(body.date) : null,
-          totalAmountCents: body.totalAmount == null ? null : eurosToCents(body.totalAmount),
+          totalAmountCents: fx ? eurosToCents(fx.totalAmount) : body.totalAmount == null ? null : eurosToCents(body.totalAmount),
           vatDetails: body.vatDetails?.length ? JSON.stringify(body.vatDetails) : null,
           category: sanitizeText(body.category),
           notes: sanitizeText(body.notes),
@@ -119,9 +148,32 @@ export const POST = withErrorHandler(async (req: NextRequest) => {
           // never marks the user's own fields as uncertain (V11).
           confidence: upload.extractionSource === "manual" ? null : upload.confidence,
           rawText: upload.rawText,
+          ...foreignColumns(body, upload.extractedJson),
+        },
+      });
+      if (!body.autoApprove) return created;
+      // W8 auto-accept: judged on the row as stored, inside the create's own
+      // transaction, so a crash can never leave it half approved. The guards are
+      // the manual approve's (amount, open period - asserted above); a new
+      // receipt has no source bank row, so nothing else of that path applies.
+      return db.receipt.update({
+        where: { id: created.id },
+        data: {
+          reviewStatus: canAutoAccept({
+            ...created,
+            documentType: reading.documentType,
+            // forceDuplicate = the client was told about a look-alike and insisted.
+            duplicate: body.forceDuplicate,
+          })
+            ? "approved"
+            : "pending",
         },
       });
     });
+
+    // The AI read a payable bill: file it as the ostolasku of the same
+    // purchase, linked to this receipt so the VAT return never counts it twice.
+    const filing = await fileReceiptAsPurchaseInvoice(session.userId!, receipt, reading);
 
     await runMatching(session.userId!).catch((error) =>
       console.error("Matching after receipt save failed:", error)
@@ -160,12 +212,13 @@ export const POST = withErrorHandler(async (req: NextRequest) => {
     ]);
     const match = matchViews.get(receipt.id);
 
-    const { totalAmountCents: _tac, rawText: _rawText, filePath: _filePath, userId: _userId, ...safe } = receipt;
+    const { totalAmountCents: _tac, originalAmountCents, rawText: _rawText, filePath: _filePath, userId: _userId, ...safe } = receipt;
     return noStoreJson({
       ok: true,
       receipt: {
         ...safe,
         totalAmount,
+        originalAmount: originalAmountCents == null ? null : centsToEuros(originalAmountCents),
         linkedTransaction: match?.linkedTransaction
           ? {
               ...match.linkedTransaction,
@@ -186,6 +239,14 @@ export const POST = withErrorHandler(async (req: NextRequest) => {
           })),
         },
       },
+      // What the reading turned into, so a bill is never filed as a plain
+      // kuitti behind the owner's back: the ostolasku created for it, or why
+      // none was (an ordinary receipt, an unclear reading, a duplicate...).
+      purchaseInvoice: filing.created ? filing.invoice : null,
+      purchaseInvoiceSkipped: filing.created ? null : filing.skipped,
+      // The rate that priced a foreign total the owner left empty; null otherwise.
+      fx,
+      ...(body.autoApprove ? { autoApproved: receipt.reviewStatus === "approved" } : {}),
     });
   } catch (error) {
     if (error instanceof UploadClaimError) {

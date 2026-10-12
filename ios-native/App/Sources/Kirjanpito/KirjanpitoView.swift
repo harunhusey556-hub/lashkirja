@@ -27,12 +27,25 @@ struct KirjanpitoView: View {
                     HubRow(title: "Ostolaskut", subtitle: "Saapuneet laskut ja niiden maksut", symbol: "tray.full")
                 }
             }
+            // The two matchings the web reaches from its tabs: receipts to bank rows, and bank
+            // payments to purchase invoices (its own screen, as the web's kohdistus page).
+            Section("Kohdistus") {
+                NavigationLink(value: Route.bankFeedFiltered(month: nil, onlyOpen: true, focus: nil)) {
+                    HubRow(title: "Kohdista kuitit", subtitle: "Pankkitapahtumat, joille puuttuu kuitti", symbol: "link")
+                }
+                NavigationLink(value: Route.purchaseMatch) {
+                    HubRow(title: "Kohdista ostolaskujen maksut", subtitle: "Pankkimaksut ostolaskuille", symbol: "creditcard")
+                }
+            }
             Section("Kuun lopussa") {
                 NavigationLink(value: Route.periods) {
                     HubRow(title: "Kuukauden sulku", subtitle: "Tarkista ja lukitse valmiit kuukaudet", symbol: "lock.rectangle.stack")
                 }
                 NavigationLink(value: Route.alv("")) {
                     HubRow(title: "ALV-ilmoitus", subtitle: "Kauden arvonlisävero", symbol: "percent")
+                }
+                NavigationLink(value: Route.ledger) {
+                    HubRow(title: "Kirjanpito", subtitle: "Tuloslaskelma, tase ja päiväkirja", symbol: "book.closed")
                 }
             }
         }
@@ -52,8 +65,9 @@ struct KirjanpitoView: View {
     /// The three hub figures load side by side; the pending figure is a count query, not the receipt list.
     private func load() async {
         let api = app.api
-        async let all: ReceiptCounts? = try? api.get("/api/receipts/counts")
-        async let waiting: ReceiptCounts? = try? api.get("/api/receipts/counts", query: ["reviewStatus": "pending"])
+        // Kuitit only: a bill filed as an ostolasku is counted under Ostolaskut.
+        async let all: ReceiptCounts? = try? api.get("/api/receipts/counts", query: ReceiptListQuery().countsQuery())
+        async let waiting: ReceiptCounts? = try? api.get("/api/receipts/counts", query: ReceiptListQuery.pendingCountQuery)
         async let open: StatementOpenCount? = try? api.get("/api/statements/counts")
         if let c = await all { counts = c.counts }
         if let p = await waiting { pending = p.counts.all }
@@ -76,6 +90,7 @@ struct HubRow: View {
                 .foregroundStyle(Theme.accent)
                 .frame(width: 34, height: 34)
                 .background(Theme.accentSoft, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+                .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 2) {
                 Text(title).foregroundStyle(Theme.ink)
                 Text(subtitle).font(.caption).foregroundStyle(Theme.ink2)

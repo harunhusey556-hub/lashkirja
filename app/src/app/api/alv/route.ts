@@ -38,6 +38,11 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
     field302: { label: OMAVERO_FIELDS[302], ...report.field302 },
     field303: { label: OMAVERO_FIELDS[303], ...report.field303 },
     field309: { label: OMAVERO_FIELDS[309], ...report.field309 },
+    // Reverse charge (foreign purchases): the tax here is deducted again in 307.
+    field305: { label: OMAVERO_FIELDS[305], ...report.field305 },
+    field306: { label: OMAVERO_FIELDS[306], ...report.field306 },
+    field313: { label: OMAVERO_FIELDS[313], ...report.field313 },
+    field314: { label: OMAVERO_FIELDS[314], ...report.field314 },
     field307: { label: OMAVERO_FIELDS[307], ...report.field307 },
     field308: { label: OMAVERO_FIELDS[308], ...report.field308 },
     review: report.review,

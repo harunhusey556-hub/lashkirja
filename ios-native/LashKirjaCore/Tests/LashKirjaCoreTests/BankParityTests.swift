@@ -107,6 +107,17 @@ private func encodedObject<T: Encodable>(_ value: T) throws -> [String: Any] {
     #expect(StatementText.title(s) == "Pankkiyhteys · Syyskuu 2026")
     #expect(s.totals?.transfers == 100)
     #expect(s.bankAccount?.bankName == "Nordea")
+    // An older server sends no bank in/out figures: the screen leaves that section out.
+    #expect(s.totals?.moneyIn == nil)
+}
+
+@Test func statementTotalsCarryTheBanksOwnInAndOut() throws {
+    let s = try decode(StatementResponse.self, #"""
+    {"statement":{"id":"s1","fileName":"holvi.xlsx","fileType":"xlsx","periodMonth":"2026-08","uploadedAt":"2026-10-09T00:00:00Z","bankAccount":null,
+     "transactions":[],"totals":{"income":1500.85,"expenses":1241.23,"transfers":-234,"net":259.62,"txCount":79,"moneyIn":1500.85,"moneyOut":1475.23}}}
+    """#).statement
+    #expect(s.totals?.moneyIn == Decimal(string: "1500.85"))
+    #expect(s.totals?.moneyOut == Decimal(string: "1475.23"))
 }
 
 @Test func deleteCopyMentionsSalesAndInvoices() throws {

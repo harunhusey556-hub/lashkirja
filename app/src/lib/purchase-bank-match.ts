@@ -12,11 +12,12 @@ import { prisma } from "./db";
 import { AppError, NotFoundError, ValidationError } from "./api-errors";
 import { centsToEuros } from "./money";
 import { formatEur } from "./format";
+import { creditedCentsOf } from "./invoices";
 import { ELIGIBLE_MIN, gatePair, RELATED_MAX, type GateCandidate, type GateRow } from "./match-gate";
 
-/** A difference of up to 2 € or 0.5 % of the amount owed counts as a fee. */
-export const FEE_TOLERANCE_CENTS = 2_00;
-export const FEE_TOLERANCE_RATIO = 0.005;
+import { FEE_TOLERANCE_CENTS, FEE_TOLERANCE_RATIO } from "./fee-tolerance";
+
+export { FEE_TOLERANCE_CENTS, FEE_TOLERANCE_RATIO, linkAmountGapCents } from "./fee-tolerance";
 /** The most rows or invoices one list returns. */
 export const PURCHASE_CANDIDATE_LIMIT = 30;
 /** Without a search, rows this far around the invoice are listed even with no signal. */
@@ -159,8 +160,16 @@ function isoDay(date: Date | null): string | null {
   return date ? date.toISOString().slice(0, 10) : null;
 }
 
-function openCentsOf(invoice: { grossCents: number; payments: Array<{ amountCents: number }> }): number {
-  return invoice.grossCents - invoice.payments.reduce((sum, payment) => sum + payment.amountCents, 0);
+function openCentsOf(invoice: {
+  grossCents: number;
+  payments: Array<{ amountCents: number }>;
+  creditNotes?: Array<{ grossCents: number; status?: string }>;
+}): number {
+  return (
+    invoice.grossCents -
+    creditedCentsOf(invoice.creditNotes) -
+    invoice.payments.reduce((sum, payment) => sum + payment.amountCents, 0)
+  );
 }
 
 export interface PurchaseBankCandidate {
@@ -200,7 +209,10 @@ export async function listBankRowsForPurchase(
 ): Promise<PurchaseBankCandidateList> {
   const invoice = await prisma.purchaseInvoice.findFirst({
     where: { id: invoiceId, userId },
-    include: { payments: { select: { amountCents: true } } },
+    include: {
+      payments: { select: { amountCents: true } },
+      creditNotes: { select: { grossCents: true, status: true } }, // wave2-schema: PurchaseInvoice.creditsInvoiceId / creditNotes
+    },
   });
   if (!invoice) throw new NotFoundError("Ostolaskua ei löytynyt.");
 
@@ -318,8 +330,11 @@ export async function listPurchasesForBankRow(
   }
 
   const invoices = await prisma.purchaseInvoice.findMany({
-    where: { userId, status: "open" },
-    include: { payments: { select: { amountCents: true } } },
+    where: { userId, status: "open", grossCents: { gt: 0 } },
+    include: {
+      payments: { select: { amountCents: true } },
+      creditNotes: { select: { grossCents: true, status: true } }, // wave2-schema: PurchaseInvoice.creditsInvoiceId / creditNotes
+    },
   });
   const q = options.q?.trim() ?? "";
   const ranked = rankPurchasePairs(

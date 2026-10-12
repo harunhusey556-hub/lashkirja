@@ -53,7 +53,7 @@ struct ReviewQueueSection: View {
                 ForEach(groups) { item in
                     let count = item == .rejected ? rejectedTotal : (ReviewQueue.split(pending)[item]?.count ?? 0)
                     SectionChip(title: item.title, count: count, selected: item == current) {
-                        withAnimation(.snappy) {
+                        withMotion(.snappy) {
                             group = item
                             showAll = false
                             rejectedLimit.reset()
@@ -98,7 +98,7 @@ struct ReviewQueueSection: View {
         }
         if rows.count > Self.preview {
             Button {
-                withAnimation(.snappy) { showAll.toggle() }
+                withMotion(.snappy) { showAll.toggle() }
             } label: {
                 Label(showAll ? String("Näytä vähemmän") : String("Näytä kaikki (\(rows.count))"),
                       systemImage: showAll ? "chevron.up" : "chevron.down")

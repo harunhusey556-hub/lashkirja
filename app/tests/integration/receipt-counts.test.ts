@@ -73,7 +73,7 @@ describe("GET /api/receipts/counts", () => {
     const response = await getCounts(buildRequest("GET", "/api/receipts/counts", undefined, { cookie }));
     expect(response.status).toBe(200);
     const body = await readJson(response);
-    expect(body.counts).toEqual({ all: 4, tulo: 1, meno: 3, linked: 1, unlinked: 3 });
+    expect(body.counts).toEqual({ all: 4, tulo: 1, meno: 3, linked: 1, unlinked: 3, laskut: 0 });
   });
 
   it("scopes counts by the same month filter the visible list uses", async () => {

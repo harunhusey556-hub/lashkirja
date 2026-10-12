@@ -1,12 +1,13 @@
 "use client";
 
-import type { RefObject } from "react";
+import { memo, type RefObject } from "react";
 import Link from "next/link";
 import { FileUp } from "lucide-react";
 import { Icon, Section } from "@/components/ds";
 import { filePickDecision } from "@/lib/native-file-flow";
+import { queueProgressLabel } from "@/lib/upload-queue";
 import { detailHref } from "@/lib/routes";
-import type { useReceiptUploadQueue } from "@/components/useReceiptUploadQueue";
+import type { ReceiptQueueRow, useReceiptUploadQueue } from "@/components/useReceiptUploadQueue";
 import { tintedButtonClass } from "@/components/control-styles";
 
 const ACCEPTED_UPLOAD = ".pdf,.jpg,.jpeg,.png,.heic,.heif,image/jpeg,image/png,image/heic";
@@ -21,6 +22,10 @@ function queueStatusLabel(status: string): string {
       return "Käsitellään";
     case "ready":
       return "Valmis";
+    case "saving":
+      return "Tallennetaan";
+    case "saved":
+      return "Tallennettu";
     case "failed":
       return "Epäonnistui";
     case "cancelled":
@@ -58,6 +63,65 @@ interface ReceiptUploadAreaProps {
   onPickFile: () => void;
 }
 
+/**
+ * One "Lähetysjono" row, memoized on the row itself: a poll tick on one file
+ * must not repaint the other 239 rows of a migration-size pick. The callbacks
+ * are ignored by the comparison -- they read the queue through refs, so a
+ * stale identity is harmless.
+ */
+const QueueRow = memo(
+  function QueueRow({
+    row,
+    onUseReady,
+  }: {
+    row: ReceiptQueueRow;
+    onUseReady: (localId: string) => void;
+  }) {
+    return (
+      <div className="px-4 py-3">
+        <div className="flex items-start justify-between gap-3">
+          <p className="min-w-0 truncate text-body font-medium text-ink">{row.name}</p>
+          <p className="shrink-0 text-caption text-ink-2">{queueStatusLabel(row.status)}</p>
+        </div>
+        {row.progress && <p className="mt-1 text-caption text-ink-2">{row.progress}</p>}
+        {row.error && (
+          <p className="mt-1 text-caption text-danger" role="alert">
+            {row.error}
+          </p>
+        )}
+        {row.duplicateReceiptId && (
+          <Link
+            href={detailHref("receipt", row.duplicateReceiptId)}
+            className={tintedButtonClass("accent", "mt-1")}
+          >
+            Avaa olemassa oleva
+          </Link>
+        )}
+        {row.status === "saved" && row.receiptId && (
+          <Link
+            href={detailHref("receipt", row.receiptId)}
+            className={tintedButtonClass("accent", "mt-1")}
+          >
+            Avaa kuitti
+          </Link>
+        )}
+        {/* A reading whose auto-save was refused (e.g. VAT larger than the
+            total) can still be fixed by hand in the form. */}
+        {(row.status === "ready" || (row.status === "failed" && row.ready)) && (
+          <button
+            type="button"
+            onClick={() => onUseReady(row.localId)}
+            className={tintedButtonClass("accent")}
+          >
+            Käytä lomakkeessa
+          </button>
+        )}
+      </div>
+    );
+  },
+  (prev, next) => prev.row === next.row
+);
+
 /** The pre-upload picker Card plus the upload queue list, for the new-receipt flow. */
 export default function ReceiptUploadArea({
   fileInputRef,
@@ -71,6 +135,10 @@ export default function ReceiptUploadArea({
   onPickPhoto,
   onPickFile,
 }: ReceiptUploadAreaProps) {
+  const workingProgress =
+    uploadQueue.rows.find((row) => row.status === "uploading" || row.status === "processing")?.progress ||
+    uploadProgress;
+
   return (
     <>
       <input
@@ -137,7 +205,10 @@ export default function ReceiptUploadArea({
         {uploading && (
           <div className="flex items-center justify-center gap-3 pt-4 text-caption text-ink-2" role="status" aria-live="polite">
             <div className="h-5 w-5 animate-spin rounded-full border-2 border-accent border-t-transparent motion-reduce:animate-none" aria-hidden="true" />
-            {uploadQueue.rows.find((row) => row.status === "uploading" || row.status === "processing")?.progress || uploadProgress}
+            <span>
+              {queueProgressLabel(uploadQueue.rows)}
+              {workingProgress ? ` — ${workingProgress}` : ""}
+            </span>
           </div>
         )}
       </div>
@@ -165,35 +236,7 @@ export default function ReceiptUploadArea({
           }
         >
           {uploadQueue.rows.map((row) => (
-            <div key={row.localId} className="px-4 py-3">
-              <div className="flex items-start justify-between gap-3">
-                <p className="min-w-0 truncate text-body font-medium text-ink">{row.name}</p>
-                <p className="shrink-0 text-caption text-ink-2">{queueStatusLabel(row.status)}</p>
-              </div>
-              {row.progress && <p className="mt-1 text-caption text-ink-2">{row.progress}</p>}
-              {row.error && (
-                <p className="mt-1 text-caption text-danger" role="alert">
-                  {row.error}
-                </p>
-              )}
-              {row.duplicateReceiptId && (
-                <Link
-                  href={detailHref("receipt", row.duplicateReceiptId)}
-                  className={tintedButtonClass("accent", "mt-1")}
-                >
-                  Avaa olemassa oleva
-                </Link>
-              )}
-              {row.status === "ready" && (
-                <button
-                  type="button"
-                  onClick={() => uploadQueue.useReady(row.localId)}
-                  className={tintedButtonClass("accent")}
-                >
-                  Käytä lomakkeessa
-                </button>
-              )}
-            </div>
+            <QueueRow key={row.localId} row={row} onUseReady={uploadQueue.useReady} />
           ))}
         </Section>
       )}

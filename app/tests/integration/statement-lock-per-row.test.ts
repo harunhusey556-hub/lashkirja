@@ -82,6 +82,27 @@ describe("R54: a file import honours the lock for every row date", () => {
     expect(drafts.every((receipt) => receipt.date && receipt.date.toISOString() >= "2026-10-01")).toBe(true);
   });
 
+  it("after the month is reopened the same file brings in the rows it held back, and only those", async () => {
+    await lockThrough("2026-09");
+    const mixed =
+      HEADER +
+      "28.09.2026;40,00;Syyskuun Asiakas\n29.09.2026;-9,00;Syyskuun Kauppa\n02.10.2026;50,00;Lokakuun Asiakas\n";
+    const first = await upload(mixed, "yli.csv");
+    expect((await readJson(first)).heldBack).toBe(2);
+    await lockThrough(null);
+
+    const again = await upload(mixed, "yli.csv");
+    expect(again.status).toBe(200);
+    const body = await readJson(again);
+    expect(body.count).toBe(2);
+    expect(body.statement.periodMonth).toBe("2026-09");
+    expect(await prisma.transaction.count({ where: { statement: { userId: user.id } } })).toBe(3);
+
+    const third = await upload(mixed, "yli.csv");
+    expect(third.status).toBe(409);
+    expect((await readJson(third)).skippedDuplicates).toBe(3);
+  });
+
   it("refuses a file whose every new row is in a closed month and leaves nothing behind", async () => {
     await lockThrough("2026-09");
     const response = await upload(september, "syys.csv");

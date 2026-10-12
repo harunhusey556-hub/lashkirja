@@ -256,6 +256,8 @@ export interface ReceivableLike {
   dueDate: Date | string;
   grossCents: number;
   paidCents?: number;
+  /** Cents taken off by credit notes (see creditedCentsOf); a part credit leaves the status as it was. */
+  creditedCents?: number;
   closedReason?: string | null;
 }
 
@@ -263,7 +265,21 @@ export interface OpenPositionInput {
   status: string;
   grossCents: number;
   paidCents?: number;
+  creditedCents?: number;
   closedReason?: string | null;
+}
+
+/**
+ * The cents a set of credit notes has taken off the invoice they correct. A
+ * credit note stores its total negative; a cancelled one corrects nothing.
+ */
+export function creditedCentsOf(
+  creditNotes: ReadonlyArray<{ grossCents: number; status?: string }> | null | undefined
+): number {
+  return (creditNotes ?? []).reduce(
+    (sum, note) => (note.status === "cancelled" || note.status === "draft" ? sum : sum + Math.max(0, -note.grossCents)),
+    0
+  );
 }
 
 export interface OpenPosition {
@@ -285,12 +301,15 @@ const NOT_A_RECEIVABLE = new Set(["draft", "credited", "cancelled"]);
  */
 export function openPosition(input: OpenPositionInput): OpenPosition {
   const paid = input.paidCents ?? 0;
-  const remainder = input.grossCents - paid;
+  // A part credit leaves the invoice "sent" with its full gross, so what is
+  // still owed is the gross less payments and credits, not the gross alone.
+  const remainder = input.grossCents - paid - (input.creditedCents ?? 0);
   const writtenOff = Boolean(input.closedReason?.trim());
 
   if (NOT_A_RECEIVABLE.has(input.status)) {
     return {
-      openCents: input.status === "draft" ? remainder : Math.min(remainder, 0),
+      // A credited or cancelled invoice is out of collections whatever was paid on it.
+      openCents: input.status === "draft" ? remainder : Math.min(input.grossCents - paid, 0),
       collectible: false,
       settled: input.status !== "draft",
     };
@@ -359,6 +378,7 @@ export function buildAgingReport(
         status: invoice.status,
         grossCents: invoice.grossCents,
         paidCents: invoice.paidCents,
+        creditedCents: invoice.creditedCents,
         closedReason: invoice.closedReason,
       });
       return {

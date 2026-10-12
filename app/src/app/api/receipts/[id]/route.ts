@@ -5,6 +5,7 @@ import { requireSession } from "@/lib/session";
 import { runMatching, buildReceiptMatchViews } from "@/lib/matching";
 import { dismissIncomeDraft } from "@/lib/income-automation";
 import { centsToEuros } from "@/lib/money";
+import { storedFxRate } from "@/lib/fx-rates";
 import { removeUserUpload } from "@/lib/storage";
 import { isoDateSchema, nonnegativeMoneySchema } from "@/lib/validation";
 import {
@@ -12,11 +13,14 @@ import {
   rejectCrossSite,
   rejectOversizedContentLength,
 } from "@/lib/http-security";
-import { withErrorHandler, UnauthorizedError } from "@/lib/api-errors";
+import { withErrorHandler, UnauthorizedError, AppError } from "@/lib/api-errors";
 
 import { assertPeriodOpen } from "@/lib/period-lock";
 import { expectedUpdatedAtDate } from "@/lib/edit-conflict";
-import { applyReceiptPatch } from "@/lib/receipt-update";
+import { applyReceiptPatch, UPDATED_RECEIPT_SELECT } from "@/lib/receipt-update";
+import { syncReceiptDocumentKind } from "@/lib/purchase-invoices";
+import { PURCHASE_VAT_TREATMENTS } from "@/lib/alv";
+import { currencySchema } from "@/lib/foreign-purchase-input";
 const patchSchema = z.object({
   vendor: z.string().trim().max(300).nullish(),
   date: isoDateSchema.nullish(),
@@ -30,6 +34,11 @@ const patchSchema = z.object({
   type: z.enum(["meno", "tulo"]).optional(),
   reference: z.string().trim().max(40).nullish(),
   invoiceNumber: z.string().trim().max(40).nullish(),
+  currency: currencySchema.optional(),
+  originalAmount: nonnegativeMoneySchema.nullish(),
+  vatTreatment: z.enum(PURCHASE_VAT_TREATMENTS).optional(),
+  // The owner's own kuitti / lasku choice: "invoice" files (or reopens) the ostolasku, "receipt" cancels it.
+  documentType: z.enum(["invoice", "receipt"]).optional(),
   expectedUpdatedAt: z.string().max(40).optional(),
 }).strict();
 
@@ -59,11 +68,16 @@ export const GET = withErrorHandler(async (
       type: true,
       reference: true,
       invoiceNumber: true,
+      currency: true,
+      originalAmountCents: true,
+      vatTreatment: true,
       fileName: true,
       source: true,
       confidence: true,
       createdAt: true,
       updatedAt: true,
+      // Only to surface the ECB / document rate behind a foreign receipt; the raw reading is not sent.
+      upload: { select: { extractedJson: true } },
       linkedTransaction: {
         select: {
           id: true,
@@ -80,8 +94,9 @@ export const GET = withErrorHandler(async (
   });
   if (!receipt) return noStoreJson({ error: "Kuittia ei löytynyt" }, { status: 404 });
 
-  const { totalAmountCents, linkedTransaction, ...safe } = receipt;
+  const { totalAmountCents, originalAmountCents, linkedTransaction, upload, ...safe } = receipt;
   const totalAmount = totalAmountCents == null ? null : centsToEuros(totalAmountCents);
+  const originalAmount = originalAmountCents == null ? null : centsToEuros(originalAmountCents);
   const matchViews = await buildReceiptMatchViews(session.userId!, [
     {
       id: receipt.id,
@@ -100,6 +115,8 @@ export const GET = withErrorHandler(async (
     receipt: {
       ...safe,
       totalAmount,
+      originalAmount,
+      ...storedFxRate(upload?.extractedJson),
       linkedTransaction: match?.linkedTransaction
         ? {
             id: match.linkedTransaction.id,
@@ -150,22 +167,43 @@ export const PATCH = withErrorHandler(async (
   if (Object.keys(parsed.data).length === 0) {
     return noStoreJson({ error: "Ei päivitettäviä kenttiä" }, { status: 400 });
   }
-  const { expectedUpdatedAt, ...body } = parsed.data;
-  if (Object.keys(body).length === 0) {
+  const { expectedUpdatedAt, documentType, ...body } = parsed.data;
+  if (Object.keys(body).length === 0 && !documentType) {
     return noStoreJson({ error: "Ei päivitettäviä kenttiä" }, { status: 400 });
   }
   const expected = expectedUpdatedAtDate(expectedUpdatedAt);
 
   // The same write the assistant's accepted receipt_update uses (lib/receipt-update.ts).
-  const receipt = await applyReceiptPatch(session.userId!, id, body, { expected });
+  const receipt =
+    Object.keys(body).length > 0
+      ? await applyReceiptPatch(session.userId!, id, body, { expected })
+      : await prisma.receipt.findFirstOrThrow({ where: { id, userId: session.userId! }, select: UPDATED_RECEIPT_SELECT });
+
+  // An explicit kind always applies (its errors reach the owner); without one, a
+  // receipt read as a bill is filed once the edit gave it what an ostolasku needs.
+  let kind: Awaited<ReturnType<typeof syncReceiptDocumentKind>> | null = null;
+  if (documentType) {
+    kind = await syncReceiptDocumentKind(session.userId!, id, documentType);
+  } else {
+    kind = await syncReceiptDocumentKind(session.userId!, id, null).catch((error) => {
+      console.warn(`Receipt ${id} was not filed as an ostolasku after an edit:`, error);
+      return null;
+    });
+  }
 
   await runMatching(session.userId!).catch((error) =>
     console.error("Matching after receipt edit failed:", error)
   );
-  const { totalAmountCents, ...safe } = receipt;
+  const { totalAmountCents, originalAmountCents, ...safe } = receipt;
   return noStoreJson({
     ok: true,
-    receipt: { ...safe, totalAmount: totalAmountCents == null ? null : centsToEuros(totalAmountCents) },
+    receipt: {
+      ...safe,
+      totalAmount: totalAmountCents == null ? null : centsToEuros(totalAmountCents),
+      originalAmount: originalAmountCents == null ? null : centsToEuros(originalAmountCents),
+    },
+    purchaseInvoiceAction: kind?.action ?? "none",
+    purchaseInvoiceSkipped: kind?.skipped ?? null,
   });
 });
 
@@ -183,6 +221,15 @@ export const DELETE = withErrorHandler(async (
   if (!existing) return noStoreJson({ error: "Kuittia ei löytynyt" }, { status: 404 });
   // Deleting a receipt changes a filed return exactly as much as editing one.
   await assertPeriodOpen(session.userId!, [existing.date]);
+  // A bill filed from this receipt must not outlive it as an open payable. One
+  // with payments or in a closed month is real bookkeeping and stays.
+  await syncReceiptDocumentKind(session.userId!, id, "receipt").catch((error) => {
+    if (error instanceof AppError && (error.code === "INVOICE_HAS_PAYMENTS" || error.code === "PERIOD_LOCKED")) {
+      console.warn(`Deleted receipt ${id} leaves its ostolasku:`, error.message);
+      return null;
+    }
+    throw error;
+  });
 
   await prisma.$transaction(async (db) => {
     await db.transaction.updateMany({

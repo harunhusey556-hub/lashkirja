@@ -25,6 +25,9 @@ export interface RowIdentity {
 export function normaliseRowText(value: string | null | undefined): string {
   if (!value) return "";
   return value
+    // Holvi's xlsx appends the payee's email ("Qred Bank AB <asiakaspalvelu@qred.com>"), its camt
+    // does not: the same row was stored twice, 20 of 242 in August (audit 2026-10-09).
+    .replace(/<[^<>\s]+@[^<>\s]+>/g, " ")
     .normalize("NFKC")
     .toLocaleLowerCase("fi")
     .replace(/[^\p{L}\p{N}]+/gu, " ")

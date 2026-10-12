@@ -3,7 +3,7 @@
 import { ProgressRing } from "@/components/ds/ProgressRing";
 import { helsinkiMonthKey } from "@/lib/validation";
 import { PullToRefresh } from "@/components/ds/PullToRefresh";
-import { Inbox, ListChecks, LockKeyhole, Percent, ReceiptEuro } from "lucide-react";
+import { ArrowLeftRight, BookOpen, Inbox, Landmark, ListChecks, LockKeyhole, Percent, ReceiptEuro } from "lucide-react";
 import { Icon, PageTitle, Section, ListRow, SlotSkeleton } from "@/components/ds";
 import { apiFetch, readJson } from "@/components/clientFetch";
 import { MONTHS } from "@/lib/finnish-months";
@@ -17,6 +17,7 @@ import { ConnectionNotice, StaleBanner } from "@/components/ScreenState";
 import { firstHubFailure } from "@/lib/hub-failure";
 import { useCachedResource } from "@/components/useCachedResource";
 import { PERIOD_LOCK_KEY, PURCHASE_COUNTS_KEY } from "@/lib/cached-resource";
+import { navShortcuts } from "@/lib/navigation";
 
 /**
  * Bookkeeping hub: one place for everything bookkeeping. Phase 3
@@ -149,6 +150,26 @@ export default function KirjanpitoPage() {
         />
       </Section>
 
+      <Section title="Kohdistus">
+        {/* One step from the tab bar to each matching flow: receipts against
+            bank rows, and purchase-invoice payments. The rows come from the
+            navigation registry (lib/navigation.ts NAV_SHORTCUTS). */}
+        {navShortcuts("kohdistus").map((shortcut) => (
+          <ListRow
+            key={shortcut.id}
+            href={shortcut.href}
+            leading={<Icon icon={shortcut.id === "kohdista-kuitit" ? ArrowLeftRight : Landmark} />}
+            chevron
+            title={shortcut.label}
+            secondary={
+              shortcut.id === "kohdista-kuitit" && openEvents > 0
+                ? `${openEvents} odottaa kohdistusta tässä kuussa`
+                : shortcut.description
+            }
+          />
+        ))}
+      </Section>
+
       <Section title="Pankki">
         {/* One row for the bank: it used to sit beside a "Pankkitilit" row, and
             both opened a screen led by the same "connect your bank" card. */}
@@ -173,6 +194,13 @@ export default function KirjanpitoPage() {
           title="Suljetut kaudet"
           amount={pending(lock) ? <SlotSkeleton width={72} /> : lockValue}
           amountTone="muted"
+        />
+        <ListRow
+          href="/kirjanpito/paakirja"
+          leading={<Icon icon={BookOpen} />}
+          chevron
+          title="Kirjanpito"
+          secondary="Tuloslaskelma, tase, saldoluettelo ja päiväkirja"
         />
       </Section>
     </div>

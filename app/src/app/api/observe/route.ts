@@ -7,7 +7,7 @@ import { allowClientReport, publicErrorMessage, reportEvent } from "@/lib/observ
 const bodySchema = z
   .object({
     message: z.string().trim().min(1).max(500),
-    source: z.enum(["window", "rejection"]),
+    source: z.enum(["window", "rejection", "native"]),
   })
   .strict();
 

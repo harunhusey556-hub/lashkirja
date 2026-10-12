@@ -68,6 +68,17 @@ targets:
         CFBundleURLTypes:
           - CFBundleURLName: fi.tiyouba.lashkirja
             CFBundleURLSchemes: [lashkirja]
+        # Home Screen quick actions; the types must match QuickAction.shortcutType in Core.
+        UIApplicationShortcutItems:
+          - UIApplicationShortcutItemType: fi.tiyouba.lashkirja.capture
+            UIApplicationShortcutItemTitle: Kuvaa kuitti
+            UIApplicationShortcutItemIconSymbolName: camera
+          - UIApplicationShortcutItemType: fi.tiyouba.lashkirja.newInvoice
+            UIApplicationShortcutItemTitle: Uusi lasku
+            UIApplicationShortcutItemIconSymbolName: doc.badge.plus
+          - UIApplicationShortcutItemType: fi.tiyouba.lashkirja.assistant
+            UIApplicationShortcutItemTitle: Avustaja
+            UIApplicationShortcutItemIconSymbolName: bubble.left
         # "Avaa sähköposti" on the code screens opens Gmail when canOpenURL says it is installed.
         LSApplicationQueriesSchemes: [googlegmail]
     settings:
@@ -96,7 +107,19 @@ targets:
     sources: [Tests/LashKirjaAppTests]
     dependencies:
       - target: LashKirja
+  # Simulator walk against a throwaway demo server (scripts/sim/run-ui.sh). Not in the LashKirja
+  # scheme: it needs that server, so CI does not run it.
+  LashKirjaUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources: [Tests/LashKirjaUITests]
+    settings: { base: { GENERATE_INFOPLIST_FILE: "YES" } }
+    dependencies:
+      - target: LashKirja
 schemes:
+  LashKirja-UITests:
+    build: { targets: { LashKirja: all, LashKirjaUITests: [test] } }
+    test: { config: Debug, targets: [LashKirjaUITests] }
   # Unsigned, as CI and the IPA build it.
   LashKirja:
     build: { targets: { LashKirja: all } }

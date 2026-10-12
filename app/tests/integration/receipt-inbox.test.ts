@@ -4,7 +4,7 @@ import { POST as issueToken } from "@/app/api/auth/token/route";
 import { POST as inbox } from "@/app/api/receipts/inbox/route";
 import { prisma } from "@/lib/db";
 import { processDocumentJob, setDocumentExtractorForTests } from "@/lib/document-jobs";
-import { resetRateLimitsForTests } from "@/lib/rate-limit";
+import { consumeRateLimit, RECEIPT_UPLOADS_PER_WINDOW, resetRateLimitsForTests } from "@/lib/rate-limit";
 import { MAX_RECEIPT_REQUEST_BYTES } from "@/lib/storage";
 import type { ExtractedReceipt } from "@/lib/ai";
 import { createUser, resetDatabase, type TestUser } from "./helpers/factories";
@@ -168,13 +168,17 @@ describe("POST /api/receipts/inbox", () => {
     });
   });
 
-  it("429s with Retry-After on the 21st upload in 10 minutes, sharing the bucket with POST /api/receipts", async () => {
-    let last: Response | undefined;
-    for (let i = 0; i < 21; i += 1) {
-      last = await postInbox(jpeg(i), `queue-item-rate-${i}`);
+  it("429s with Retry-After once the upload limit for 10 minutes is used, sharing the bucket with POST /api/receipts", async () => {
+    // The limit is a few hundred per 10 minutes (W1): filling it with real
+    // requests would take minutes, so the shared bucket is filled directly and
+    // one request proves the route refuses once it is exhausted.
+    const key = `receipt-upload:${user.id}`;
+    for (let i = 0; i < RECEIPT_UPLOADS_PER_WINDOW; i += 1) {
+      consumeRateLimit(key, RECEIPT_UPLOADS_PER_WINDOW, 10 * 60_000);
     }
-    expect(last?.status).toBe(429);
-    const retryAfter = Number(last?.headers.get("Retry-After"));
+    const last = await postInbox(jpeg(0), "queue-item-rate");
+    expect(last.status).toBe(429);
+    const retryAfter = Number(last.headers.get("Retry-After"));
     expect(Number.isFinite(retryAfter)).toBe(true);
     expect(retryAfter).toBeGreaterThan(0);
   });

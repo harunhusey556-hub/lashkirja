@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, expect, it } from "vitest";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { prisma } from "@/lib/db";
 import { prepareChat } from "@/lib/ai-assistant";
 import { runAssistantTurn } from "@/lib/chat-store";
@@ -11,9 +11,12 @@ beforeEach(async () => {
   await resetDatabase();
   // A configured provider, so prepareChat takes the model path (nothing is called here).
   process.env.COPILOT_GITHUB_TOKEN = "test-token";
+  // A model key in the shell or .env would send these turns to the real provider. Tests never use the network.
+  vi.stubEnv("LLM_API_KEY", "");
 });
 
 afterEach(() => {
+  vi.unstubAllEnvs();
   if (savedToken === undefined) delete process.env.COPILOT_GITHUB_TOKEN;
   else process.env.COPILOT_GITHUB_TOKEN = savedToken;
 });

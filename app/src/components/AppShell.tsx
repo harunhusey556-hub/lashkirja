@@ -5,13 +5,13 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
   BookOpen,
-  Camera,
   ChartColumn,
   ChevronLeft,
   FilePlus,
   FileText,
   FileUp,
   House,
+  ReceiptText,
   LogOut,
   Mail,
   MessageCircle,
@@ -1162,7 +1162,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     router.push(href);
   }
 
-  // Lisää sheet: "Kuvaa kuitti" opens the camera and "Tuo tiliote" the document
+  // Lisää sheet: a task's "Kuvaa kuitti" opens the camera and "Tuo tiliote" the document
   // picker straight from the tap (SHELL-02 / OWN-04, SHELL-30). The picked
   // files wait in lib/pending-capture for the receiving screen. Web: the tap
   // is the user gesture a hidden file input needs.
@@ -1204,6 +1204,18 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       return;
     }
     void pickFromSheet(kind, true);
+  }
+
+  // "+" → "Lisää kuitti" opens the receipt page, where the owner picks camera,
+  // photos or files; a task's own camera action still opens the camera directly.
+  function openReceiptPage() {
+    setAddOpenOn(null);
+    const href = captureReceiptHref(undefined, false);
+    if (anyFormDirty()) {
+      requestLeave(() => goForward(href));
+      return;
+    }
+    goForward(href);
   }
 
   // TF-06 / FP-10: "Ota ensimmäinen kuva" and "Lisää kuva" on a task open the
@@ -1579,12 +1591,12 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
             <div className="space-y-3 px-4 py-2 sheet-safe-bottom">
               <button
                 type="button"
-                onClick={() => startPick("receipt")}
+                onClick={openReceiptPage}
                 className="flex w-full items-center gap-3 rounded-card bg-ink px-4 py-4 text-left text-canvas active-press"
               >
-                <Icon icon={Camera} size="tab" />
+                <Icon icon={ReceiptText} size="tab" />
                 <span className="min-w-0">
-                  <span className="block text-base font-semibold">Kuvaa kuitti</span>
+                  <span className="block text-base font-semibold">Lisää kuitti</span>
                   <span className="block text-caption text-canvas/70">Kuitti luetaan automaattisesti</span>
                 </span>
               </button>

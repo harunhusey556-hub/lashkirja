@@ -64,9 +64,31 @@ export async function collectHealth(now = new Date()): Promise<HealthReport> {
   let bankJobs: HealthCheck & { failedRecent: number };
   try {
     const since = new Date(now.getTime() - 24 * 60 * 60 * 1000);
-    const failedRecent = await prisma.backgroundJob.count({
-      where: { kind: "bank_sync", status: "failed", finishedAt: { gte: since } },
-    });
+    // A connection counts only while its newest sync failed: a failure followed by a success
+    // kept the check red for 24 h, and so did the jobs of a connection revoked since
+    // (2026-10-09). The same rule as the owner's "sync failed" notification.
+    const [jobs, connections] = await Promise.all([
+      prisma.backgroundJob.findMany({
+        where: { kind: "bank_sync", status: { in: ["failed", "done", "dismissed"] }, finishedAt: { gte: since } },
+        orderBy: { createdAt: "desc" },
+        select: { status: true, resourceId: true, createdAt: true },
+      }),
+      prisma.bankConnection.findMany({ select: { id: true, status: true, lastSuccessAt: true } }),
+    ]);
+    const byId = new Map(connections.map((connection) => [connection.id, connection]));
+    const decided = new Set<string>();
+    let failedRecent = 0;
+    for (const job of jobs) {
+      if (job.resourceId) {
+        if (decided.has(job.resourceId)) continue;
+        decided.add(job.resourceId);
+      }
+      if (job.status !== "failed") continue;
+      const connection = job.resourceId ? byId.get(job.resourceId) : undefined;
+      if (job.resourceId && (!connection || connection.status === "revoked")) continue;
+      if (connection?.lastSuccessAt && connection.lastSuccessAt > job.createdAt) continue;
+      failedRecent += 1;
+    }
     bankJobs = {
       ok: failedRecent === 0,
       failedRecent,

@@ -135,7 +135,7 @@ struct OnboardingSummaryBubble: View {
                                 Text(row.value).font(.body.weight(.medium)).foregroundStyle(Theme.ink)
                             }
                             Spacer(minLength: 8)
-                            Image(systemName: "chevron.right").font(.footnote.weight(.semibold)).foregroundStyle(Theme.ink2)
+                            Image(systemName: "chevron.right").font(.footnote.weight(.semibold)).foregroundStyle(Theme.ink2).accessibilityHidden(true)
                         }
                         .padding(.horizontal, 14)
                         .padding(.vertical, 8)
@@ -179,8 +179,9 @@ struct OnboardingChoiceRow: View {
                     Image(systemName: selected ? "checkmark.circle.fill" : "circle")
                         .imageScale(.large)
                         .foregroundStyle(selected ? Theme.accent : Theme.line)
+                        .accessibilityHidden(true)
                 } else if selected {
-                    Image(systemName: "checkmark").font(.body.weight(.semibold)).foregroundStyle(Theme.accent)
+                    Image(systemName: "checkmark").font(.body.weight(.semibold)).foregroundStyle(Theme.accent).accessibilityHidden(true)
                 }
             }
             .padding(.horizontal, 14)

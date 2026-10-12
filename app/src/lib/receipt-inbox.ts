@@ -11,7 +11,7 @@ import { Prisma } from "@/generated/prisma/client";
 import { prisma } from "./db";
 import { requireSession } from "./session";
 import { enqueueDocumentAnalysis } from "./document-jobs";
-import { consumeRateLimit } from "./rate-limit";
+import { consumeRateLimit, RECEIPT_UPLOADS_PER_WINDOW } from "./rate-limit";
 import {
   MAX_RECEIPT_REQUEST_BYTES,
   UploadValidationError,
@@ -167,7 +167,7 @@ export async function handleReceiptInboxUpload(req: NextRequest) {
 
   // Same bucket as POST /api/receipts: one owner uploading from the app and
   // from the web at once still shares one limit.
-  const rate = consumeRateLimit(`receipt-upload:${session.userId}`, 20, 10 * 60_000);
+  const rate = consumeRateLimit(`receipt-upload:${session.userId}`, RECEIPT_UPLOADS_PER_WINDOW, 10 * 60_000);
   if (!rate.allowed) {
     return noStoreJson(
       { error: "Liian monta tiedostoa. Yritä myöhemmin uudelleen." },

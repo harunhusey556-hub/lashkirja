@@ -31,7 +31,7 @@ struct EmailImportView: View {
                     Section {
                         ForEach(list) { account in
                             HStack(spacing: 12) {
-                                Image(systemName: "envelope.fill").foregroundStyle(Theme.success).frame(width: 28)
+                                Image(systemName: "envelope.fill").foregroundStyle(Theme.success).frame(width: 28).accessibilityHidden(true)
                                 VStack(alignment: .leading, spacing: 2) {
                                     Text(account.email).lineLimit(1).truncationMode(.middle)
                                     Text("Aktiivinen").font(.caption).foregroundStyle(Theme.success)
@@ -90,7 +90,7 @@ struct EmailImportView: View {
         accounts.begin()
         do {
             let profile = (try await app.api.get("/api/profile") as ProfileResponse).profile
-            withAnimation { accounts.succeed(profile.imapAccounts ?? []) }
+            withMotion { accounts.succeed(profile.imapAccounts ?? []) }
             onChange(profile)
         } catch is CancellationError {
         } catch {
@@ -188,7 +188,7 @@ private struct ConnectMailboxSheet: View {
                                 HStack {
                                     Text(option.title).foregroundStyle(Theme.ink)
                                     Spacer()
-                                    Image(systemName: "chevron.right").font(.footnote.weight(.semibold)).foregroundStyle(Theme.ink2)
+                                    Image(systemName: "chevron.right").font(.footnote.weight(.semibold)).foregroundStyle(Theme.ink2).accessibilityHidden(true)
                                 }
                             }
                         }
@@ -203,7 +203,7 @@ private struct ConnectMailboxSheet: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     if provider != nil {
-                        Button { withAnimation { provider = nil; failure = nil } } label: { Image(systemName: "chevron.left") }
+                        Button { withMotion { provider = nil; failure = nil } } label: { Image(systemName: "chevron.left") }
                             .accessibilityLabel("Takaisin")
                     } else {
                         Button("Peruuta") { dismiss() }
@@ -222,7 +222,7 @@ private struct ConnectMailboxSheet: View {
     }
 
     private func choose(_ option: MailProvider) {
-        withAnimation {
+        withMotion {
             provider = option
             host = option.host ?? ""
             port = "993"

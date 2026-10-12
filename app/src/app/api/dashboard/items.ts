@@ -16,7 +16,7 @@
 import { prisma } from "@/lib/db";
 import { centsToEuros } from "@/lib/money";
 import { receiptTitle } from "@/lib/display-titles";
-import { openPosition } from "@/lib/invoices";
+import { creditedCentsOf, openPosition } from "@/lib/invoices";
 import { parseVatDetails } from "@/lib/alv";
 import { findPaymentReceiptDuplicates, findReceiptsWithoutVatBreakdown } from "@/lib/alv-period";
 import { matchInvoicePaymentsFromBank } from "@/lib/sales-invoices";
@@ -25,6 +25,7 @@ import { helsinkiCalendarDate, isoDateToUtc } from "@/lib/validation";
 import { openMonthRowsWhere } from "@/lib/month-rows";
 import { approvalGaps, type ApprovalGap } from "@/lib/receipt-approval";
 import { isBlockingKind } from "@/lib/dashboard-kinds";
+import { receiptKindWhere } from "@/lib/receipt-filters";
 
 /** Rows shown per kind; the rest sit behind "Näytä kaikki". */
 export const ITEMS_PER_KIND = 3;
@@ -186,6 +187,7 @@ export async function buildDashboardItems(
         customerId: true,
         customer: { select: { name: true } },
         payments: { select: { amountCents: true } },
+        creditNotes: { select: { grossCents: true, status: true } },
       },
       orderBy: { dueDate: "asc" },
     }),
@@ -194,6 +196,8 @@ export async function buildDashboardItems(
         userId,
         reviewStatus: "pending",
         ...(isCurrent ? {} : { date: { gte: monthStart, lt: monthEnd } }),
+        // A bill filed as an ostolasku is handled in Ostolaskut, not in this queue.
+        ...receiptKindWhere("receipt"),
       },
       select: {
         id: true,
@@ -315,6 +319,7 @@ export async function buildDashboardItems(
         status: invoice.status,
         grossCents: invoice.grossCents,
         paidCents: invoice.payments.reduce((sum, payment) => sum + payment.amountCents, 0),
+        creditedCents: creditedCentsOf(invoice.creditNotes),
         closedReason: invoice.closedReason,
       });
       return { invoice, position };

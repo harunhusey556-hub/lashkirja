@@ -1,8 +1,9 @@
 import Foundation
 
-/// The five mutually exclusive tabs of the kuitit list (`lib/receipt-tabs.ts`).
+/// The tabs of the kuitit list (`lib/receipt-tabs.ts`): five mutually exclusive ones over the kuitit,
+/// and "Laskut", the bills filed as ostolaskut, which the other five leave out.
 public enum ReceiptTab: String, CaseIterable, Sendable, Identifiable {
-    case all, tulo, meno, linked, unlinked
+    case all, tulo, meno, linked, unlinked, laskut
     public var id: String { rawValue }
 
     public var title: String {
@@ -12,6 +13,7 @@ public enum ReceiptTab: String, CaseIterable, Sendable, Identifiable {
         case .meno: "Menot"
         case .linked: "Kohdistettu"
         case .unlinked: "Ei kohdistettu"
+        case .laskut: "Laskut"
         }
     }
 
@@ -22,6 +24,7 @@ public enum ReceiptTab: String, CaseIterable, Sendable, Identifiable {
         case .meno: counts.meno
         case .linked: counts.linked
         case .unlinked: counts.unlinked
+        case .laskut: counts.laskut ?? 0
         }
     }
 }
@@ -98,9 +101,10 @@ public struct ReceiptListQuery: Sendable, Equatable, Hashable {
 
     private var trimmedSearch: String { String(search.trimmingCharacters(in: .whitespacesAndNewlines).prefix(100)) }
 
-    /// The month/search/category scope shared by the list and the tab counts.
+    /// The month/search/category scope shared by the list and the tab counts. The counts always
+    /// count the kuitit (`kind=receipt`); the Laskut chip's own number comes back in the same answer.
     public func countsQuery() -> [String: String] {
-        var q: [String: String] = [:]
+        var q: [String: String] = ["kind": "receipt"]
         if !trimmedSearch.isEmpty { q["q"] = trimmedSearch }
         if !month.isEmpty { q["month"] = month }
         if !category.isEmpty { q["category"] = category }
@@ -119,6 +123,8 @@ public struct ReceiptListQuery: Sendable, Equatable, Hashable {
         case .tulo, .meno: q["type"] = tab.rawValue
         case .linked, .unlinked: q["linkedStatus"] = tab.rawValue
         case .all: break
+        // The Laskut chip lists the bills filed as ostolaskut instead of the kuitit.
+        case .laskut: q["kind"] = "invoice"
         }
         q["sort"] = sort.rawValue
         if offset > 0 { q["offset"] = String(offset) }
@@ -129,6 +135,31 @@ public struct ReceiptListQuery: Sendable, Equatable, Hashable {
     public var isFiltered: Bool {
         !trimmedSearch.isEmpty || !month.isEmpty || !category.isEmpty || tab != .all
             || source != .all || !minAmount.isEmpty || !maxAmount.isEmpty || missingVat
+    }
+
+    /// The review queue on top of the list (`reviewStatus=pending`): kuitit only, as the web's;
+    /// a bill filed as an ostolasku is not waiting here for approval.
+    public static func pendingQueue(offset: Int = 0) -> [String: String] {
+        var q = ["reviewStatus": "pending", "kind": "receipt"]
+        if offset > 0 { q["offset"] = String(offset) }
+        return q
+    }
+
+    /// The count behind "N odottaa" on the Kirjanpito hub: the same queue, counted.
+    public static let pendingCountQuery = ["reviewStatus": "pending", "kind": "receipt"]
+
+    /// The empty list's sentence; the Laskut chip talks about laskut.
+    public var emptyText: String {
+        let narrowed = !trimmedSearch.isEmpty || !month.isEmpty || !category.isEmpty
+            || source != .all || !minAmount.isEmpty || !maxAmount.isEmpty || missingVat
+        if tab == .laskut { return narrowed ? "Ei hakua vastaavia laskuja." : "Ei laskuja." }
+        return isFiltered ? "Ei hakua vastaavia kuitteja." : "Ei kuitteja."
+    }
+
+    /// The header over the rows: "12 kuittia", "3 laskua".
+    public func countHeader(_ total: Int) -> String {
+        if tab == .laskut { return total == 1 ? "1 lasku" : "\(total) laskua" }
+        return "\(total) kuittia"
     }
 }
 
@@ -160,6 +191,22 @@ public enum ReceiptMatchText {
 
     /// "90 %"
     public static func percent(_ score: Double?) -> String { "\(Int(((score ?? 0) * 100).rounded())) %" }
+
+    /// Bank amount minus receipt total when they disagree by more than a fee
+    /// (2 € or 0,5 %, as `linkAmountGapCents` in lib/fee-tolerance.ts); nil otherwise.
+    public static func amountGap(bank: Decimal, receiptTotal: Decimal?) -> Decimal? {
+        guard let receiptTotal else { return nil }
+        let paid = abs(bank), booked = abs(receiptTotal)
+        let diff = paid - booked
+        var ratio = booked * Decimal(string: "0.005")!
+        var rounded = Decimal()
+        NSDecimalRound(&rounded, &ratio, 2, .plain)
+        let tolerance = max(Decimal(2), rounded)
+        return abs(diff) > tolerance ? diff : nil
+    }
+
+    /// "Kohdistettu · summa poikkeaa 1 521,46 €"
+    public static func gapTitle(_ gap: Decimal) -> String { "Kohdistettu · summa poikkeaa \(Money.format(abs(gap)))" }
 }
 
 // MARK: Kept between visits

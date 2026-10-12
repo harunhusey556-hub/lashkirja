@@ -12,6 +12,20 @@ public struct Extracted: Decodable, Sendable, Equatable {
     public let reference: String?
     public let invoiceNumber: String?
     public let unreadable: Bool?
+    // What `AutoAccept` judges a reading by (the server's `extractedJson`; absent on older readings).
+    public let confidence: Double?
+    public let fieldConfidence: FieldConfidence?
+    /// "manual" means nothing could be read.
+    public let source: String?
+    /// "receipt", "invoice", "marketing" or "other" when the reading names it.
+    public let documentType: String?
+}
+
+/// Per-field recognition scores, 0...1.
+public struct FieldConfidence: Decodable, Sendable, Equatable {
+    public let vendor: Double?
+    public let date: Double?
+    public let totalAmount: Double?
 }
 
 /// `POST /api/receipts` (multipart `file`): read at once, or queued as a job.
@@ -47,6 +61,9 @@ public struct ReceiptDraft: Encodable, Sendable, Equatable {
     public var reference: String = ""
     public var invoiceNumber: String = ""
     public var forceDuplicate = false
+    /// Ask the server to approve the receipt as it saves it when nothing is missing; it decides,
+    /// and answers `autoApproved`. Off for a draft that is only displayed or kept.
+    public var autoApprove = false
 
     public init(uploadId: String, extracted: Extracted? = nil) {
         self.uploadId = uploadId
@@ -68,7 +85,7 @@ public struct ReceiptDraft: Encodable, Sendable, Equatable {
         return nil
     }
 
-    enum CodingKeys: String, CodingKey { case uploadId, vendor, date, totalAmount, vatDetails, category, notes, type, reference, invoiceNumber, forceDuplicate }
+    enum CodingKeys: String, CodingKey { case uploadId, vendor, date, totalAmount, vatDetails, category, notes, type, reference, invoiceNumber, forceDuplicate, autoApprove }
 
     public func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
@@ -87,5 +104,17 @@ public struct ReceiptDraft: Encodable, Sendable, Equatable {
         try put(reference, .reference)
         try put(invoiceNumber, .invoiceNumber)
         if forceDuplicate { try c.encode(true, forKey: .forceDuplicate) }
+        if autoApprove { try c.encode(true, forKey: .autoApprove) }
     }
+}
+
+/// The answer of `POST /api/receipts/save`: the new receipt, and (only when `autoApprove` was
+/// sent) whether the server approved it as it saved it.
+public struct ReceiptSaveResult: Decodable, Sendable, Equatable {
+    public struct Stored: Decodable, Sendable, Equatable { public let id: String }
+    public let receipt: Stored
+    public let autoApproved: Bool?
+
+    /// Absent from a server that does not auto-approve: then the receipt waits for review.
+    public var approved: Bool { autoApproved ?? false }
 }

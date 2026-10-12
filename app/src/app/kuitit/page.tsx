@@ -46,8 +46,11 @@ import { HeaderAddPill, PageTitle, Section, SlotSkeleton, useSkeletonFade, Revea
 import { batchOutcomeMessage } from "@/lib/upload-queue";
 import {
   approvalFailureText,
+  chunkIds,
   noticeToneFor,
   retryableFailureIds,
+  splitApprovable,
+  type ApprovalFailure,
   type NoticeTone,
 } from "@/lib/review-queue";
 import { ReceiptFilters, type ReceiptAdvancedFilters } from "./ReceiptFilters";
@@ -109,6 +112,9 @@ export default function KuititPage() {
     "kuitit.appliedAdvanced",
     emptyAdvanced
   );
+  // A bill filed as an ostolasku lives in Ostolaskut; Kuitit lists kuitit and
+  // shows the bills only under its Laskut chip ("invoice").
+  const [kindFilter, setKindFilter] = usePersistedState<"receipt" | "invoice">("kuitit.kind", "receipt");
   const [showAllReceipts, setShowAllReceipts] = usePersistedState(
     "kuitit.showAllReceipts",
     false
@@ -201,6 +207,35 @@ export default function KuititPage() {
     window.history.replaceState(null, "", "/kuitit");
   }, []);
 
+  // W8: the upload summary links here. "tarkista=1" brings the review queues
+  // (what auto-accept left pending) into view once they have loaded;
+  // "nayta=ei-kohdistettu" opens the list on the receipts no bank row explains.
+  const reviewSectionRef = useRef<HTMLDivElement>(null);
+  const focusReviewRef = useRef(false);
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const review = params.get("tarkista") === "1";
+    const unlinked = params.get("nayta") === "ei-kohdistettu";
+    if (!review && !unlinked) return;
+    focusReviewRef.current = review;
+    if (unlinked) {
+      // The Laskut tab (W9) is remembered across visits; this link is about kuitit.
+      setKindFilter("receipt");
+      const patch = receiptTabQuery("unlinked");
+      setAdvanced((a) => ({ ...a, ...patch }));
+      setAppliedAdvanced((a) => ({ ...a, ...patch }));
+    }
+    window.history.replaceState(null, "", "/kuitit");
+    // A link sets the view once; later edits stay on this page.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const pendingCount = pendingReceipts.length;
+  useEffect(() => {
+    if (!focusReviewRef.current || pendingCount === 0 || !reviewSectionRef.current) return;
+    focusReviewRef.current = false;
+    reviewSectionRef.current.scrollIntoView({ block: "start", behavior: "smooth" });
+  }, [pendingCount]);
+
   // Debounce search typing
   useEffect(() => {
     const t = setTimeout(() => setSearchQuery(searchInput.trim()), 300);
@@ -221,9 +256,10 @@ export default function KuititPage() {
       params.set("maxAmount", appliedAdvanced.maxAmount);
     if (appliedAdvanced.sort) params.set("sort", appliedAdvanced.sort);
     if (appliedAdvanced.linkedStatus) params.set("linkedStatus", appliedAdvanced.linkedStatus);
+    params.set("kind", kindFilter === "invoice" ? "invoice" : "receipt");
 
     return params.toString();
-  }, [monthFilter, searchQuery, appliedAdvanced]);
+  }, [monthFilter, searchQuery, appliedAdvanced, kindFilter]);
 
   const queryRef = useRef(query);
   queryRef.current = query;
@@ -261,7 +297,7 @@ export default function KuititPage() {
         setLoadError({ query, error });
       });
 
-    apiFetch("/api/receipts?reviewStatus=pending")
+    apiFetch("/api/receipts?reviewStatus=pending&kind=receipt")
       .then((res) =>
         readJson<{ receipts?: SavedReceipt[]; truncated?: boolean }>(res, "Virhe")
       )
@@ -294,6 +330,7 @@ export default function KuititPage() {
     if (appliedAdvanced.source) params.set("source", appliedAdvanced.source);
     if (appliedAdvanced.minAmount) params.set("minAmount", appliedAdvanced.minAmount);
     if (appliedAdvanced.maxAmount) params.set("maxAmount", appliedAdvanced.maxAmount);
+    params.set("kind", "receipt");
     return params.toString();
   }, [monthFilter, searchQuery, appliedAdvanced.category, appliedAdvanced.source, appliedAdvanced.minAmount, appliedAdvanced.maxAmount]);
 
@@ -364,7 +401,7 @@ export default function KuititPage() {
     fetchedCounts?.key === countsQuery
       ? fetchedCounts.counts
       : readPageCache<ReceiptTabCounts>(`receipt-counts:${countsQuery}`) ??
-        (!loadingList && !truncated && receiptTabFromQuery(appliedAdvanced.type, appliedAdvanced.linkedStatus) === "all"
+        (!loadingList && !truncated && kindFilter !== "invoice" && receiptTabFromQuery(appliedAdvanced.type, appliedAdvanced.linkedStatus) === "all"
           ? countsFromList(receipts)
           : null);
 
@@ -450,6 +487,7 @@ export default function KuititPage() {
     setSearchQuery("");
     setAdvanced(emptyAdvanced);
     setAppliedAdvanced(emptyAdvanced);
+    setKindFilter("receipt");
   }
 
   async function handleReview(id: string, status: "approved" | "rejected" | "pending") {
@@ -483,38 +521,52 @@ export default function KuititPage() {
     }
   }
 
-  async function handleReviewMany(ids: string[]) {
-    if (ids.length === 0) return;
+  async function handleReviewMany(ids: string[]): Promise<ApprovalFailure[]> {
+    if (ids.length === 0) return [];
     setActionError("");
     setBulkReviewing(true);
     try {
-      const res = await apiFetch("/api/receipts/batch-approve", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ receiptIds: ids }),
-      });
-      const data = await readJson<{
-        updatedCount?: number;
-        failedCount?: number;
-        failed?: { id: string; error?: string }[];
-      }>(res, "Hyväksyntä epäonnistui");
-      const failed = (data.failed ?? []).map((item) => ({ id: item.id, error: item.error ?? "" }));
-      const failedCount = data.failedCount ?? failed.length;
-      const updatedCount = data.updatedCount ?? Math.max(0, ids.length - failedCount);
+      // The endpoint takes at most 200 ids (route.ts); a grown pending list or
+      // a page-wide accept sends chunks and aggregates the refusals.
+      const failed: ApprovalFailure[] = [];
+      let updatedCount = 0;
+      for (const chunk of chunkIds(ids)) {
+        const res = await apiFetch("/api/receipts/batch-approve", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ receiptIds: chunk }),
+        });
+        const data = await readJson<{
+          updatedCount?: number;
+          failedCount?: number;
+          failed?: { id: string; error?: string }[];
+        }>(res, "Hyväksyntä epäonnistui");
+        failed.push(...(data.failed ?? []).map((item) => ({ id: item.id, error: item.error ?? "" })));
+        updatedCount += data.updatedCount ?? Math.max(0, chunk.length - (data.failedCount ?? 0));
+      }
       // The refusal is named (F15), and a retry is only offered when a second try can differ.
       setActionError(approvalFailureText(updatedCount, failed), noticeToneFor(failed.length));
       setRetryApproveIds(retryableFailureIds(failed));
       setLoadAttempt((a) => a + 1);
       void loadCounts();
+      return failed;
     } catch (error: unknown) {
       if (isUnauthorized(error)) {
         redirectToLogin();
-        return;
+        return [];
       }
       setActionError(errorMessage(error, "Hyväksyntä epäonnistui"));
+      return [];
     } finally {
       setBulkReviewing(false);
     }
+  }
+
+  /** The BulkBar's approve: the selected pending receipts that are ready, one
+   * rule for every path (receipt-approval.ts). What failed stays selected. */
+  async function handleBulkApprove() {
+    const failed = await handleReviewMany(bulkApprovable.map((receipt) => receipt.id));
+    setSelectedIds(new Set(failed.map((item) => item.id)));
   }
 
   async function handleBulkDelete() {
@@ -618,7 +670,7 @@ export default function KuititPage() {
     const offset = pendingReceipts.length;
     setLoadingMorePending(true);
     try {
-      const response = await apiFetch(`/api/receipts?reviewStatus=pending&offset=${offset}`);
+      const response = await apiFetch(`/api/receipts?reviewStatus=pending&kind=receipt&offset=${offset}`);
       const data = await readJson<{ receipts?: SavedReceipt[]; truncated?: boolean }>(
         response,
         "Kuittien lataus epäonnistui"
@@ -641,9 +693,10 @@ export default function KuititPage() {
   }
 
   const hasFilters = activeChips.length > 0;
-  const activeTab = receiptTabFromQuery(appliedAdvanced.type, appliedAdvanced.linkedStatus);
+  const activeTab = kindFilter === "invoice" ? "laskut" : receiptTabFromQuery(appliedAdvanced.type, appliedAdvanced.linkedStatus);
 
   function onTabChange(id: Parameters<typeof receiptTabQuery>[0]) {
+    setKindFilter(id === "laskut" ? "invoice" : "receipt");
     const patch = receiptTabQuery(id);
     setAdvanced((a) => ({ ...a, ...patch }));
     setAppliedAdvanced((a) => ({ ...a, ...patch }));
@@ -658,6 +711,10 @@ export default function KuititPage() {
     (r) => r.source !== "email_sync" && r.source !== "auto_income"
   );
 
+  // C: one action across every queue on the page — the single rule of
+  // receipt-approval.ts decides what it carries; the rest stay in their queue.
+  const { ready: allPendingReady, incomplete: allPendingIncomplete } = splitApprovable(pendingReceipts);
+
   const visibleReceipts = showAllReceipts ? receipts : receipts.slice(0, RECENT_LIMIT);
   // Selection is always read through the visible rows (BOOKS-12, P0): "Valitse
   // kaikki" selects what is on screen, and a row hidden by "Näytä vähemmän" or a
@@ -670,6 +727,12 @@ export default function KuititPage() {
     setSelectedIds(new Set(selectedVisible.map((receipt) => receipt.id)));
   }
   const allSelected = visibleReceipts.length > 0 && selectedCount === visibleReceipts.length;
+  // The bulk bar acts on what is on screen (BOOKS-12); of the selection only
+  // the pending receipts without a gap can be approved (F15).
+  const pendingIds = new Set(pendingReceipts.map((receipt) => receipt.id));
+  const bulkApprovable = splitApprovable(
+    selectedVisible.filter((receipt) => pendingIds.has(receipt.id))
+  ).ready;
 
   return (
     <>
@@ -709,40 +772,69 @@ export default function KuititPage() {
           </div>
         ) : null}</Reveal>
 
-        {emailPending.length > 0 && (
-          <ReviewQueue
-            title="Tarkastettavat sähköpostikuitit"
-            description="Sähköpostista tuodut kuitit odottavat hyväksyntää ennen kirjanpitoon siirtymistä."
-            receipts={emailPending}
-            rejectLabel="Hylkää (Yksityinen)"
-            onReview={handleReview}
-            onApproveAll={(readyIds) => void handleReviewMany(readyIds)}
-            bulkBusy={bulkReviewing}
-          />
-        )}
+        {/* What waits for the owner: auto-accept (W8) leaves only these. The
+            upload summary's "Näytä tarkistettavat" scrolls here. */}
+        {pendingReceipts.length > 0 && (
+          <div ref={reviewSectionRef} className="scroll-mt-4 space-y-6">
+            {/* C: the whole page's ready pending receipts in one action, instead of
+                opening each queue card. The ones with a gap are named, never swept in. */}
+            {allPendingReady.length > 0 && (
+              <div className="flex flex-col gap-2 rounded-card border border-line bg-surface px-4 py-3">
+                <p className="text-caption text-ink-2">
+                  {allPendingReady.length === 1
+                    ? "1 kuitti on valmis hyväksyttäväksi."
+                    : `${allPendingReady.length} kuittia on valmiina hyväksyttäväksi.`}
+                  {allPendingIncomplete.length > 0 &&
+                    ` ${allPendingIncomplete.length} vaatii täydennyksen.`}
+                </p>
+                <Button
+                  type="button"
+                  className="w-full"
+                  busy={bulkReviewing}
+                  busyLabel="Hyväksytään…"
+                  onClick={() => void handleReviewMany(allPendingReady.map((receipt) => receipt.id))}
+                >
+                  Hyväksy kaikki valmiit ({allPendingReady.length})
+                </Button>
+              </div>
+            )}
 
-        {bankSalesPending.length > 0 && (
-          <ReviewQueue
-            title="Myynnit pankista"
-            description="Tiliotteen tuloista tehdyt myyntikirjaukset odottavat hyväksyntää."
-            receipts={bankSalesPending}
-            rejectLabel="Hylkää"
-            onReview={handleReview}
-            onApproveAll={(readyIds) => void handleReviewMany(readyIds)}
-            bulkBusy={bulkReviewing}
-          />
-        )}
+            {emailPending.length > 0 && (
+              <ReviewQueue
+                title="Tarkastettavat sähköpostikuitit"
+                description="Sähköpostista tuodut kuitit odottavat hyväksyntää ennen kirjanpitoon siirtymistä."
+                receipts={emailPending}
+                rejectLabel="Hylkää (Yksityinen)"
+                onReview={handleReview}
+                onApproveAll={(readyIds) => void handleReviewMany(readyIds)}
+                bulkBusy={bulkReviewing}
+              />
+            )}
 
-        {otherPending.length > 0 && (
-          <ReviewQueue
-            title="Muut tarkastettavat kuitit"
-            description="Odottavat hyväksyntää ennen kirjanpitoon siirtymistä."
-            receipts={otherPending}
-            rejectLabel="Hylkää"
-            onReview={handleReview}
-            onApproveAll={(readyIds) => void handleReviewMany(readyIds)}
-            bulkBusy={bulkReviewing}
-          />
+            {bankSalesPending.length > 0 && (
+              <ReviewQueue
+                title="Myynnit pankista"
+                description="Tiliotteen tuloista tehdyt myyntikirjaukset odottavat hyväksyntää."
+                receipts={bankSalesPending}
+                rejectLabel="Hylkää"
+                onReview={handleReview}
+                onApproveAll={(readyIds) => void handleReviewMany(readyIds)}
+                bulkBusy={bulkReviewing}
+              />
+            )}
+
+            {otherPending.length > 0 && (
+              <ReviewQueue
+                title="Muut tarkastettavat kuitit"
+                description="Odottavat hyväksyntää ennen kirjanpitoon siirtymistä."
+                receipts={otherPending}
+                rejectLabel="Hylkää"
+                onReview={handleReview}
+                onApproveAll={(readyIds) => void handleReviewMany(readyIds)}
+                bulkBusy={bulkReviewing}
+              />
+            )}
+          </div>
         )}
 
         <RejectedReceipts receipts={rejectedReceipts} onRestore={(id) => void handleReview(id, "pending")} />
@@ -919,7 +1011,10 @@ export default function KuititPage() {
         visible={selectedCount > 0}
         count={selectedCount}
         busy={bulkDeleting}
+        approveBusy={bulkReviewing}
+        approvableCount={bulkApprovable.length}
         onCancel={() => setSelectedIds(new Set())}
+        onApproveRequest={() => void handleBulkApprove()}
         onDeleteRequest={() => setShowBulkConfirm(true)}
       />
     </>

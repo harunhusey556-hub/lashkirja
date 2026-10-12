@@ -104,6 +104,9 @@ struct CustomersView: View {
         do {
             let list: CustomerList = try await app.api.get("/api/customers", query: CustomerArchive.listQuery(includeArchived: archived))
             state.succeed(archived ? list.customers : list.customers.filter { !$0.isArchived })
+            app.indexForSpotlight(list.customers.filter { !$0.isArchived }.compactMap {
+                SpotlightEntry.customer(id: $0.id, name: $0.name, businessId: $0.businessId)
+            })
         } catch is CancellationError {
         } catch {
             state.fail(error)
@@ -228,6 +231,7 @@ struct CustomerDetailView: View {
                             Button(role: .destructive) { confirmDelete = true } label: { Label("Poista", systemImage: "trash") }
                         }
                     } label: { Image(systemName: "ellipsis.circle") }
+                    .accessibilityLabel("Toiminnot")
                 }
             }
         }

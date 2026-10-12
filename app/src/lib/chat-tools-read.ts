@@ -12,7 +12,7 @@ import { buildProfitLoss, type CategoryRow } from "./reports";
 import { alvReportOf, loadAlvPeriodSources } from "./alv-period";
 import { parseVatDetails } from "./alv";
 import { categoryLabel, isKnownCategory, normalizeExtractedCategory } from "./receipt-categories";
-import { daysOverdue, displayStatus, openPosition, overdueBefore, type InvoiceStatus } from "./invoices";
+import { creditedCentsOf, daysOverdue, displayStatus, openPosition, overdueBefore, type InvoiceStatus } from "./invoices";
 import { customerSearchFields } from "./search";
 import { getBankPosition } from "./bank-position";
 import { alvPeriodBoundsUtc, alvPeriodSchema, helsinkiCalendarDate, helsinkiMonthKey, isoDateToUtc } from "./validation";
@@ -152,12 +152,13 @@ const searchInvoices: ChatTool = {
         closedReason: true,
         customer: { select: { name: true } },
         payments: { select: { amountCents: true } },
+        creditNotes: { select: { grossCents: true, status: true } },
       },
       orderBy: [{ issueDate: "desc" }, { number: "desc" }],
       take: SCAN_LIMIT + 1,
     });
     const scanned = rows.slice(0, SCAN_LIMIT).map((row) => {
-      const position = openPosition({ status: row.status, grossCents: row.grossCents, paidCents: sumCents(row.payments), closedReason: row.closedReason });
+      const position = openPosition({ status: row.status, grossCents: row.grossCents, paidCents: sumCents(row.payments), creditedCents: creditedCentsOf(row.creditNotes), closedReason: row.closedReason });
       return { row, position, shown: displayStatus({ status: row.status as InvoiceStatus, dueDate: row.dueDate, documentKind: row.documentKind }, ctx.now) };
     });
     const matches = status === "open" || status === "overdue" ? scanned.filter((entry) => entry.position.collectible) : scanned;
@@ -342,6 +343,7 @@ const searchPurchaseInvoices: ChatTool = {
         category: true,
         closedReason: true,
         payments: { select: { amountCents: true } },
+        creditNotes: { select: { grossCents: true, status: true } }, // wave2-schema: PurchaseInvoice.creditsInvoiceId / creditNotes
       },
       orderBy: [{ dueDate: "asc" }, { id: "asc" }],
       take: SCAN_LIMIT + 1,
@@ -351,7 +353,7 @@ const searchPurchaseInvoices: ChatTool = {
       .filter((row) => !args.supplier || fuzzyMatch(args.supplier, row.supplierName))
       .map((row) => ({
         row,
-        position: openPosition({ status: row.status, grossCents: row.grossCents, paidCents: sumCents(row.payments), closedReason: row.closedReason }),
+        position: openPosition({ status: row.status, grossCents: row.grossCents, paidCents: sumCents(row.payments), creditedCents: creditedCentsOf(row.creditNotes), closedReason: row.closedReason }),
       }))
       .filter((entry) => (status === "open" || status === "overdue" ? entry.position.collectible : true));
     const page = pageOf(matches, args.cursor, args.limit);
@@ -554,18 +556,18 @@ const cashForecast: ChatTool = {
       getBankPosition(ctx.userId, { now: ctx.now }),
       prisma.salesInvoice.findMany({
         where: { userId: ctx.userId, status: "sent", documentKind: "invoice", currency: "EUR", dueDate: { lte: horizon } },
-        select: { id: true, number: true, dueDate: true, grossCents: true, status: true, closedReason: true, customer: { select: { name: true } }, payments: { select: { amountCents: true } } },
+        select: { id: true, number: true, dueDate: true, grossCents: true, status: true, closedReason: true, customer: { select: { name: true } }, payments: { select: { amountCents: true } }, creditNotes: { select: { grossCents: true, status: true } } },
         orderBy: { dueDate: "asc" },
       }),
       prisma.purchaseInvoice.findMany({
         where: { userId: ctx.userId, status: "open", dueDate: { lte: horizon } },
-        select: { id: true, supplierName: true, dueDate: true, grossCents: true, status: true, closedReason: true, payments: { select: { amountCents: true } } },
+        select: { id: true, supplierName: true, dueDate: true, grossCents: true, status: true, closedReason: true, payments: { select: { amountCents: true } }, creditNotes: { select: { grossCents: true, status: true } } }, // wave2-schema: PurchaseInvoice.creditsInvoiceId / creditNotes
         orderBy: { dueDate: "asc" },
       }),
     ]);
-    const open = <T extends { grossCents: number; status: string; closedReason: string | null; payments: Array<{ amountCents: number }> }>(rows: T[]) =>
+    const open = <T extends { grossCents: number; status: string; closedReason: string | null; payments: Array<{ amountCents: number }>; creditNotes: Array<{ grossCents: number; status: string }> }>(rows: T[]) =>
       rows
-        .map((row) => ({ row, cents: openPosition({ status: row.status, grossCents: row.grossCents, paidCents: sumCents(row.payments), closedReason: row.closedReason }) }))
+        .map((row) => ({ row, cents: openPosition({ status: row.status, grossCents: row.grossCents, paidCents: sumCents(row.payments), creditedCents: creditedCentsOf(row.creditNotes), closedReason: row.closedReason }) }))
         .filter((entry) => entry.cents.collectible && entry.cents.openCents > 0)
         .map((entry) => ({ row: entry.row, openCents: entry.cents.openCents }));
     const receivables = open(sales);

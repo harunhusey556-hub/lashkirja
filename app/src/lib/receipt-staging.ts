@@ -7,9 +7,11 @@
  */
 import type { Prisma } from "@/generated/prisma/client";
 import { prisma } from "./db";
-import type { ExtractedReceipt } from "./ai";
+import type { DocumentType, ExtractedReceipt } from "./ai";
 import { removeUserUpload } from "./storage";
 import { UNREADABLE_RECEIPT_NOTE } from "./receipt-unreadable";
+import { foreignFieldsFromExtraction } from "./foreign-purchase";
+import { fileReceiptAsPurchaseInvoice } from "./purchase-invoices";
 
 export const STAGING_TTL_MS = 24 * 60 * 60 * 1000;
 /** How long an inbox-claimed upload's file is kept after it becomes a receipt. */
@@ -121,6 +123,9 @@ type PendingReceiptFields = Pick<
   | "type"
   | "confidence"
   | "rawText"
+  | "currency"
+  | "vatTreatment"
+  | "originalAmountCents"
 >;
 
 /** Same field mapping mail-sync.ts uses for an email-imported receipt
@@ -143,6 +148,7 @@ export function receiptFieldsFromExtraction(
     type: extracted.type,
     confidence: extracted.confidence,
     rawText: extracted.rawText,
+    ...foreignFieldsFromExtraction(extracted),
   };
 }
 
@@ -161,7 +167,23 @@ export function unreadableReceiptFields(fallbackDate: Date): PendingReceiptField
     type: "meno",
     confidence: null,
     rawText: null,
+    originalAmountCents: null,
   };
+}
+
+/** The kind of document a stored reading says an upload is: a bill the owner
+ * owes ("invoice"), a mere receipt, or something not to be filed at all. */
+export function storedDocumentKind(
+  extractedJson: string | null
+): { documentType: DocumentType | null; dueDate: string | null } {
+  if (!extractedJson) return { documentType: null, dueDate: null };
+  try {
+    const read = JSON.parse(extractedJson) as { documentType?: DocumentType | null; dueDate?: string | null };
+    return { documentType: read.documentType ?? null, dueDate: read.dueDate ?? null };
+  } catch {
+    // An unreadable stored reading files nothing on its own.
+    return { documentType: null, dueDate: null };
+  }
 }
 
 /** Creates the pending "app_capture" receipt and claims its upload, inside
@@ -178,7 +200,7 @@ export async function createPendingInboxReceipt(
     fields: PendingReceiptFields;
   }
 ): Promise<void> {
-  await tx.receipt.create({
+  const receipt = await tx.receipt.create({
     data: {
       userId: input.userId,
       uploadId: input.uploadId,
@@ -189,11 +211,20 @@ export async function createPendingInboxReceipt(
       ...input.fields,
     },
   });
-  await tx.upload.update({
+  const upload = await tx.upload.update({
     where: { id: input.uploadId },
     data: {
       claimedAt: new Date(),
       expiresAt: new Date(Date.now() + INBOX_UPLOAD_RETENTION_MS),
     },
+    select: { extractedJson: true },
   });
+  // A photographed bill becomes an ostolasku like a saved one (the reading is
+  // on the upload by now). Best effort: a closed period or an incomplete
+  // reading must never lose the capture itself.
+  try {
+    await fileReceiptAsPurchaseInvoice(input.userId, receipt, storedDocumentKind(upload.extractedJson), tx);
+  } catch (error) {
+    console.warn(`Inbox receipt ${receipt.id} was not filed as an ostolasku:`, error);
+  }
 }

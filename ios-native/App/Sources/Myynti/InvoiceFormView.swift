@@ -36,6 +36,8 @@ struct InvoiceFormView: View {
     /// Field errors appear after the first save attempt and then follow the typing.
     @State private var showErrors = false
     @State private var showDetails = false
+    /// The number the server will give this invoice; shown under the title, read-only.
+    @State private var nextNumber: Int?
     @State private var scrollTarget: InvoiceFormField?
     @FocusState private var focus: InvoiceFormField?
 
@@ -76,7 +78,7 @@ struct InvoiceFormView: View {
                 }
                 .onChange(of: scrollTarget) { _, target in
                     guard let target else { return }
-                    withAnimation { proxy.scrollTo(rowId(target), anchor: .center) }
+                    withMotion { proxy.scrollTo(rowId(target), anchor: .center) }
                     scrollTarget = nil
                 }
             }
@@ -87,16 +89,23 @@ struct InvoiceFormView: View {
             .navigationTitle(existing == nil ? "Uusi lasku" : "Muokkaa laskua")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                if existing == nil, let label = InvoiceSequence.label(nextNumber) {
+                    ToolbarItem(placement: .principal) {
+                        VStack(spacing: 0) {
+                            Text("Uusi lasku").font(.headline).foregroundStyle(Theme.ink)
+                            Text(label).font(.caption2).foregroundStyle(Theme.ink2)
+                        }
+                        .accessibilityElement(children: .combine)
+                    }
+                }
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Peruuta") { if dirty { confirmDiscard = true } else { dismiss() } }.disabled(busy)
                 }
                 ToolbarItemGroup(placement: .keyboard) {
+                    // Navigation only: the total is in the bar under the form, and a long amount or a
+                    // large text size must not squeeze these buttons.
                     Button("Seuraava") { focusNext() }
                         .disabled(InvoiceForm.field(after: focus, lines: draft.lines) == nil)
-                    Spacer()
-                    Text("Yhteensä \(Money.format(draft.totals.gross))")
-                        .font(.subheadline.weight(.semibold).monospacedDigit())
-                        .foregroundStyle(Theme.ink)
                     Spacer()
                     Button("Valmis") { focus = nil }.fontWeight(.semibold)
                 }
@@ -157,7 +166,7 @@ struct InvoiceFormView: View {
                     HStack {
                         Label("Valitse asiakas", systemImage: "person.crop.circle")
                         Spacer()
-                        Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(Theme.ink2)
+                        Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(Theme.ink2).accessibilityHidden(true)
                     }
                     .contentShape(Rectangle())
                 }
@@ -287,30 +296,17 @@ struct InvoiceFormView: View {
                     .foregroundStyle(Theme.danger)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
-            HStack(spacing: 12) {
-                VStack(alignment: .leading, spacing: 2) {
-                    if sellerRegistered {
-                        Text("Veroton \(Money.format(totals.net)) · ALV \(Money.format(totals.vat))")
-                            .font(.caption)
-                            .foregroundStyle(Theme.ink2)
-                            .monospacedDigit()
-                    }
-                    HStack(alignment: .firstTextBaseline, spacing: 6) {
-                        Text("Yhteensä").font(.subheadline).foregroundStyle(Theme.ink2)
-                        MoneyText(amount: totals.gross).font(.title3.weight(.semibold)).foregroundStyle(Theme.ink)
-                    }
+            // Totals and the button side by side while they fit; stacked at large text sizes.
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 12) {
+                    totalsView(totals)
+                    Spacer(minLength: 8)
+                    saveButton
                 }
-                .accessibilityElement(children: .combine)
-                Spacer(minLength: 8)
-                Button { Task { await save() } } label: {
-                    if busy {
-                        ProgressView().tint(Theme.onInk)
-                    } else {
-                        Text(existing == nil ? "Luo lasku" : "Tallenna").font(.body.weight(.semibold))
-                    }
+                VStack(alignment: .leading, spacing: 10) {
+                    totalsView(totals)
+                    saveButton.frame(maxWidth: .infinity)
                 }
-                .buttonStyle(.primary)
-                .disabled(busy || baseline == nil)
             }
         }
         .padding(.horizontal, 16)
@@ -318,6 +314,34 @@ struct InvoiceFormView: View {
         .padding(.bottom, 8)
         .background(Theme.surface)
         .overlay(alignment: .top) { Divider() }
+    }
+
+    private func totalsView(_ totals: (net: Decimal, vat: Decimal, gross: Decimal)) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            if sellerRegistered {
+                Text("Veroton \(Money.format(totals.net)) · ALV \(Money.format(totals.vat))")
+                    .font(.caption)
+                    .foregroundStyle(Theme.ink2)
+                    .monospacedDigit()
+            }
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Text("Yhteensä").font(.subheadline).foregroundStyle(Theme.ink2)
+                MoneyText(amount: totals.gross).font(.title3.weight(.semibold)).foregroundStyle(Theme.ink)
+            }
+        }
+        .accessibilityElement(children: .combine)
+    }
+
+    private var saveButton: some View {
+        Button { Task { await save() } } label: {
+            if busy {
+                ProgressView().tint(Theme.onInk)
+            } else {
+                Text(existing == nil ? "Luo lasku" : "Tallenna").font(.body.weight(.semibold))
+            }
+        }
+        .buttonStyle(.primary)
+        .disabled(busy || baseline == nil)
     }
 
     // MARK: Bindings
@@ -395,7 +419,7 @@ struct InvoiceFormView: View {
     private func addLine() {
         let line = InvoiceDraft.Line.new(sellerRegistered: sellerRegistered)
         priceTexts[line.id] = ""
-        withAnimation { draft.lines.append(line) }
+        withMotion { draft.lines.append(line) }
         focus = InvoiceFormField.description(line.id)
     }
 
@@ -413,20 +437,20 @@ struct InvoiceFormView: View {
         guard let index = draft.lines.firstIndex(where: { $0.id == lineId }) else { return }
         switch action {
         case .copy:
-            withAnimation {
+            withMotion {
                 if let copy = draft.lines.duplicateLine(at: index) {
                     priceTexts[copy] = priceTexts[lineId] ?? InvoiceForm.priceText(draft.lines[index].unitPrice)
                 }
             }
-        case .moveUp: withAnimation { draft.lines.moveLine(at: index, by: -1) }
-        case .moveDown: withAnimation { draft.lines.moveLine(at: index, by: 1) }
+        case .moveUp: withMotion { draft.lines.moveLine(at: index, by: -1) }
+        case .moveDown: withMotion { draft.lines.moveLine(at: index, by: 1) }
         case .delete:
             // Any field of this line loses focus first, then the line goes once the swipe has
             // finished, so no view is left editing a line that no longer exists.
             if let focused = focus, focused.lineId == lineId { focus = nil }
             Task { @MainActor in
                 guard let current = draft.lines.firstIndex(where: { $0.id == lineId }), draft.lines.count > 1 else { return }
-                _ = withAnimation { draft.lines.remove(at: current) }
+                _ = withMotion { draft.lines.remove(at: current) }
                 priceTexts[lineId] = nil
             }
         case .saveProduct:
@@ -447,7 +471,7 @@ struct InvoiceFormView: View {
 
     /// "Lisää tuotteista": fills the untouched last line, otherwise adds one.
     private func addFromCatalog(_ item: CatalogItem) {
-        withAnimation {
+        withMotion {
             if let index = InvoiceForm.lineForCatalogPick(draft.lines, priceTexts: priceTexts) {
                 fill(index, with: item)
             } else {
@@ -523,6 +547,12 @@ struct InvoiceFormView: View {
         if let owner { SalesDraftStore.shared.clear(owner: owner) }
     }
 
+    private func fetchNextNumber() async -> Int? {
+        guard existing == nil else { return nil }
+        let sequence: InvoiceSequence? = try? await app.api.get("/api/invoices/sequence")
+        return sequence?.nextNumber
+    }
+
     private func prepare() async {
         guard !loaded else { return }
         loaded = true
@@ -531,10 +561,13 @@ struct InvoiceFormView: View {
         async let customerList: CustomerList? = try? api.get("/api/customers")
         async let catalogList: CatalogList? = try? api.get("/api/catalog")
         async let profile = app.cachedProfile()
+        async let number = fetchNextNumber()
         if let list = await customerList { customers = list.customers.filter { $0.archivedAt == nil } }
         // The form works without the catalog; "Lisää tuotteista" just stays hidden.
         if let list = await catalogList { catalog = list.items }
         if let profile = await profile { sellerRegistered = profile.vatRegistered }
+        // Only a hint: a failed read leaves the title as it was.
+        nextNumber = await number
         if let existing {
             draft.customerId = existing.customer.id
             draft.issueDate = existing.issueDate
@@ -597,7 +630,7 @@ struct InvoiceFormView: View {
     private func deleteProduct(_ item: CatalogItem) async {
         do {
             let _: Ignored = try await app.api.send("DELETE", "/api/catalog/\(item.id)", body: Optional<EmptyBody>.none)
-            withAnimation { catalog.removeAll { $0.id == item.id } }
+            withMotion { catalog.removeAll { $0.id == item.id } }
             productNotice = "Tuote \(item.name) poistettiin valikosta."
             Haptics.success()
         } catch {

@@ -19,12 +19,15 @@ public struct ChatDecisionRequest: Encodable, Sendable, Equatable {
 /// "Kuitin korjaus"): what it shows and how a decision is applied before the server has answered.
 public enum ChatProposalCard {
     public static let title = "Ehdotus kohdistukseksi"
+    /// Shown while a decision is on its way: nothing reads as done before the server says so.
+    public static let savingLabel = "Tallennetaan…"
     public static let acceptedLabel = "Kohdistus hyväksytty"
     public static let rejectedLabel = "Ehdotus hylätty"
     public static let invoiceDraftTitle = "Laskuluonnos"
     public static let invoiceDraftAcceptedLabel = "Luonnos tehty"
     public static let receiptUpdateTitle = "Kuitin korjaus"
     public static let receiptUpdateAcceptedLabel = "Kuitti korjattu"
+    public static let matchBatchTitle = ChatMatchBatchText.title
 
     public enum Phase: Equatable, Sendable {
         /// Buttons on.
@@ -47,6 +50,8 @@ public enum ChatProposalCard {
             return !draft.customerName.isEmpty && !draft.lines.isEmpty
         case .receiptUpdate:
             return !(proposal.receiptUpdate?.changes.isEmpty ?? true)
+        case .matchBatch:
+            return !(proposal.matchBatch?.cards.isEmpty ?? true)
         }
     }
 
@@ -55,6 +60,7 @@ public enum ChatProposalCard {
         case .match: title
         case .invoiceDraft: invoiceDraftTitle
         case .receiptUpdate: receiptUpdateTitle
+        case .matchBatch: matchBatchTitle
         }
     }
 
@@ -62,12 +68,14 @@ public enum ChatProposalCard {
     public static func statusLabel(_ phase: Phase, for proposal: ChatProposal) -> String? {
         switch phase {
         case .open: return nil
-        case .saving(.rejected), .rejected: return rejectedLabel
-        case .saving(.accepted), .accepted:
+        case .saving: return savingLabel
+        case .rejected: return rejectedLabel
+        case .accepted:
             switch proposal.kind {
             case .match: return acceptedLabel
             case .invoiceDraft: return invoiceDraftAcceptedLabel
             case .receiptUpdate: return receiptUpdateAcceptedLabel
+            case .matchBatch: return acceptedLabel
             }
         }
     }
@@ -76,7 +84,7 @@ public enum ChatProposalCard {
     public static func resultLink(_ proposal: ChatProposal) -> (label: String, href: String)? {
         guard proposal.status == "accepted", let href = proposal.href, href.hasPrefix("/") else { return nil }
         switch proposal.kind {
-        case .match: return nil
+        case .match, .matchBatch: return nil
         case .invoiceDraft:
             if let number = proposal.invoiceDraft?.invoiceNumber { return ("Avaa lasku \(number)", href) }
             return ("Avaa lasku", href)
@@ -107,7 +115,8 @@ public enum ChatProposalCard {
     }
 
     public static func canDecide(_ proposal: ChatProposal?, saving: ChatProposalDecision?) -> Bool {
-        guard let proposal, isShown(proposal) else { return false }
+        // A batch is decided row by row against /api/matching/*; PATCH /api/ai/chat refuses it.
+        guard let proposal, isShown(proposal), proposal.kind != .matchBatch else { return false }
         return phase(proposal, saving: saving) == .open
     }
 
@@ -115,8 +124,9 @@ public enum ChatProposalCard {
     public static func statusLabel(_ phase: Phase) -> String? {
         switch phase {
         case .open: nil
-        case .saving(.accepted), .accepted: acceptedLabel
-        case .saving(.rejected), .rejected: rejectedLabel
+        case .saving: savingLabel
+        case .accepted: acceptedLabel
+        case .rejected: rejectedLabel
         }
     }
 

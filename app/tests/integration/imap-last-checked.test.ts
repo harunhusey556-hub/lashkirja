@@ -33,3 +33,19 @@ describe("profile imapAccounts", () => {
     expect(body.profile.imapAccounts[0].lastCheckedAt).toBe(checked.toISOString());
   });
 });
+
+describe("PATCH /api/profile keeps the business profile the app reads (2026-10-09)", () => {
+  it("an ALV status, period or company form changed in Settings reaches businessDetails", async () => {
+    const { parseBusinessDetails } = await import("@/lib/onboarding");
+    const owner = await createUser({ vatRegistered: false });
+    await prisma.user.update({ where: { id: owner.id }, data: { businessDetails: null, entityType: "toiminimi" } });
+    const ownerCookie = await sessionCookie(owner);
+    const response = await patchProfile(
+      buildRequest("PATCH", "/api/profile", { vatRegistered: true, vatPeriod: "quarter", entityType: "oy" }, { cookie: ownerCookie })
+    );
+    expect(response.status).toBe(200);
+    const stored = await prisma.user.findUniqueOrThrow({ where: { id: owner.id } });
+    const profile = parseBusinessDetails(stored.businessDetails);
+    expect([profile.vatRegistered, profile.vatPeriod, profile.entityType]).toEqual([true, "quarter", "oy"]);
+  });
+});

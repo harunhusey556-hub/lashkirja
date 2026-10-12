@@ -57,3 +57,6 @@ skills-lock.json
 
 # integration test scratch databases
 /tests/.tmp/
+
+# event log written in dev (lib/event-log.ts)
+/logs/

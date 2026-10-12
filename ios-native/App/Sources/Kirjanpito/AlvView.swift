@@ -30,7 +30,7 @@ struct AlvView: View {
                 Section {
                     VStack(alignment: .leading, spacing: 4) {
                         Text(r.field308.isRefund ? "Palautettava ALV" : "Maksettava ALV").font(.subheadline).foregroundStyle(Theme.ink2)
-                        MoneyText(amount: r.field308.amount).font(.system(size: 32, weight: .bold, design: .rounded))
+                        MoneyText(amount: r.field308.amount).scaledFont(size: 32, weight: .bold, design: .rounded, relativeTo: .largeTitle).moneyHero()
                     }
                     .padding(.vertical, 4)
                     // TF-11: pending receipts are not in the figure yet; Kuitit lists them on top.
@@ -54,6 +54,26 @@ struct AlvView: View {
                     field(r.field302)
                     field(r.field303)
                     LabeledContent(r.field309.label) { MoneyText(amount: r.field309.turnover) }.font(.subheadline)
+                }
+                if (r.field306?.amount ?? 0) > 0 || (r.field305?.amount ?? 0) > 0 || (r.sources?.reverseChargeVat ?? 0) > 0 || (r.sources?.foreignVatNotDeducted ?? 0) > 0 {
+                    Section {
+                        if let services = r.field306, services.amount > 0 {
+                            LabeledContent("Palveluostot (314)") { MoneyText(amount: r.field314?.amount ?? 0) }.font(.subheadline)
+                            LabeledContent(services.label) { MoneyText(amount: services.amount) }.font(.subheadline)
+                        }
+                        if let goods = r.field305, goods.amount > 0 {
+                            LabeledContent("Tavaraostot (313)") { MoneyText(amount: r.field313?.amount ?? 0) }.font(.subheadline)
+                            LabeledContent(goods.label) { MoneyText(amount: goods.amount) }.font(.subheadline)
+                        }
+                        if let notDeducted = r.sources?.foreignVatNotDeducted, notDeducted > 0 {
+                            LabeledContent("Ulkomaisten myyjien Suomen ALV, ei vähennettävissä") { MoneyText(amount: notDeducted) }
+                                .font(.subheadline).foregroundStyle(Theme.warning)
+                        }
+                    } header: {
+                        Text("Ulkomaiset ostot")
+                    } footer: {
+                        Text("Käännetyn verovelvollisuuden vero on mukana maksettavassa verossa ja vähennetään samalla summalla kohdassa 307. EU:n ulkopuolelta ostettujen palvelujen vero on kohdassa 301.")
+                    }
                 }
                 Section {
                     NavigationLink(value: Route.forDrill(ReportDrill.alvDeductible(period: period))) {
@@ -114,7 +134,7 @@ struct AlvView: View {
         }
         Section {
             HStack {
-                Button { show(VatPeriod.shift(period, by: -1)) } label: { Image(systemName: "chevron.left") }
+                Button { show(VatPeriod.shift(period, by: -1)) } label: { Image(systemName: "chevron.left").tapTarget() }
                     .accessibilityLabel("Edellinen kausi")
                 Spacer()
                 Menu {
@@ -131,7 +151,7 @@ struct AlvView: View {
                 }
                 .accessibilityLabel("Valitse kausi")
                 Spacer()
-                Button { show(VatPeriod.shift(period, by: 1)) } label: { Image(systemName: "chevron.right") }
+                Button { show(VatPeriod.shift(period, by: 1)) } label: { Image(systemName: "chevron.right").tapTarget() }
                     .disabled(period >= VatPeriod.key(for: MonthKey.current(), kind: kind.rawValue))
                     .accessibilityLabel("Seuraava kausi")
             }
@@ -223,7 +243,7 @@ struct AlvView: View {
         let owed = VatFiling.amountToPay(amount: r.field308.amount, filedAt: filing?.filedAt, filedAmount: filing?.filedAmount)
         Section {
             HStack(spacing: 6) {
-                if vat.state != .open { Image(systemName: "checkmark.circle.fill").foregroundStyle(Theme.success) }
+                if vat.state != .open { Image(systemName: "checkmark.circle.fill").foregroundStyle(Theme.success).accessibilityHidden(true) }
                 Text(VatFiling.stateLabel(vat.state, nothingToPay: vat.nothingToPay)).font(.subheadline.weight(.semibold))
                 if !dueIso.isEmpty {
                     Text("· eräpäivä \(VatDue.dueDateText(dueIso, periodYear: periodYear))").font(.subheadline).foregroundStyle(Theme.ink2)

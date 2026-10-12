@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeAll, describe, expect, it, vi } from "vitest";
 
 // No Unicode font on disk: the PDF must still never print garbage.
 vi.mock("./pdf-fonts", () => ({ pdfFontFiles: () => null, resetPdfFontCache: () => {} }));
@@ -42,6 +42,12 @@ const data = (): InvoicePdfData => ({
 });
 
 describe("renderInvoicePdf without the Unicode font", () => {
+  // The first extractText loads pdf-parse (pdfjs) cold: ~0.5 s alone, but over 4 s when the whole
+  // suite runs in parallel, which ate the 5 s budget of whichever test came first. Pay it here.
+  beforeAll(async () => {
+    await extractText(await renderInvoicePdf(data()));
+  }, 30_000);
+
   it("maps letters to their closest plain form and never prints garbage", async () => {
     const pdf = await renderInvoicePdf(data());
     const text = await extractText(pdf);

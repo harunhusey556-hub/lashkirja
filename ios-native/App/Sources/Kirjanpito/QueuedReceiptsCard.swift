@@ -36,7 +36,8 @@ struct QueuedReceiptsCard: View {
                         Spacer(minLength: 0)
                         Button("Poista", role: .destructive) {
                             Haptics.selection()
-                            withAnimation { queue.removeCorrupt() }
+                            EventLog.shared.log(.action("remove-corrupt", screen: "receipts"))
+                            Task { @MainActor in queue.removeCorrupt() }
                         }
                         .font(.caption.bold())
                         .buttonStyle(.borderless)
@@ -58,11 +59,19 @@ struct QueuedReceiptsCard: View {
                 .confirmationDialog("Poista kuva jonosta?", isPresented: Binding(get: { confirmRemove != nil }, set: { if !$0 { confirmRemove = nil } }),
                                     titleVisibility: .visible) {
                     Button("Poista", role: .destructive) {
-                        if let id = confirmRemove { withAnimation { queue.remove(id) } }
+                        if let id = confirmRemove {
+                            EventLog.shared.log(.action("remove-queued", screen: "receipts"))
+                            Task { @MainActor in queue.remove(id) }
+                        }
                         confirmRemove = nil
                     }
                 } message: {
-                    Text("Kuvaa ei lähetetä, jos poistat sen jonosta.")
+                    // Names the photo by the day it was taken, as its row does.
+                    if let id = confirmRemove, let item = waiting.first(where: { $0.id == id }) {
+                        Text("\(OfflineReceiptRules.title(createdAt: item.createdAt)): kuvaa ei lähetetä, jos poistat sen jonosta.")
+                    } else {
+                        Text("Kuvaa ei lähetetä, jos poistat sen jonosta.")
+                    }
                 }
             }
             if !sent.isEmpty {
@@ -72,7 +81,11 @@ struct QueuedReceiptsCard: View {
                         Spacer(minLength: 0)
                         Button("Poista listalta") {
                             Haptics.selection()
-                            withAnimation { queue.clearSent() }
+                            EventLog.shared.log(.action("clear-sent", screen: "receipts"))
+                            // After the tap has finished, and without an animation: removing the
+                            // section that holds the button while its gesture is still running
+                            // froze the list on a device (2026-10-08).
+                            Task { @MainActor in queue.clearSent() }
                         }
                         .font(.caption.bold())
                         .buttonStyle(.borderless)
@@ -88,7 +101,7 @@ struct QueuedReceiptsCard: View {
     private func row(_ item: QueuedReceipt) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack {
-                Text(OfflineReceiptRules.title(createdAt: item.createdAt)).lineLimit(1)
+                Text(OfflineReceiptRules.title(createdAt: item.createdAt)).lineLimitUnlessLarge()
                 Spacer()
                 if item.status == .sending { ProgressView().controlSize(.small) }
             }

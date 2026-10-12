@@ -56,7 +56,7 @@ private let proposalJSON = #"""
     #expect(!ChatProposalCard.canDecide(open, saving: .accepted))
     #expect(ChatProposalCard.phase(open, saving: .rejected) == .saving(.rejected))
     #expect(ChatProposalCard.statusLabel(.open) == nil)
-    #expect(ChatProposalCard.statusLabel(.saving(.accepted)) == "Kohdistus hyväksytty")
+    #expect(ChatProposalCard.statusLabel(.saving(.accepted)) == "Tallennetaan…")
     #expect(ChatProposalCard.statusLabel(.accepted) == "Kohdistus hyväksytty")
     #expect(ChatProposalCard.statusLabel(.rejected) == "Ehdotus hylätty")
     var accepted = open

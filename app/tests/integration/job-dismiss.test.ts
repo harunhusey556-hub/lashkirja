@@ -49,3 +49,35 @@ describe("POST /api/jobs/:id/dismiss", () => {
     expect((await prisma.backgroundJob.findUniqueOrThrow({ where: { id: job.id } })).status).toBe("failed");
   });
 });
+
+describe("bank health counts a connection only while its newest sync failed (2026-10-09)", () => {
+  async function connection(status = "active") {
+    return prisma.bankConnection.create({
+      data: { userId: user.id, aspspName: "Holvi", aspspCountry: "FI", psuType: "business", status },
+    });
+  }
+  function job(resourceId: string, status: string, minutesAgo: number) {
+    const at = new Date(Date.now() - minutesAgo * 60_000);
+    return prisma.backgroundJob.create({
+      data: { userId: user.id, kind: "bank_sync", status, title: "Pankki", resourceId, createdAt: at, finishedAt: at, error: status === "failed" ? "Pankkiyhteys epäonnistui." : null },
+    });
+  }
+
+  it("a later successful sync of the same connection clears it", async () => {
+    const holvi = await connection();
+    await job(holvi.id, "failed", 360);
+    expect((await collectHealth()).checks.bankJobs.ok).toBe(false);
+    await job(holvi.id, "done", 10);
+    expect((await collectHealth()).checks.bankJobs).toMatchObject({ ok: true, failedRecent: 0 });
+  });
+
+  it("a revoked connection's failures do not count; a connection still failing does", async () => {
+    const old = await connection("revoked");
+    await job(old.id, "failed", 30);
+    expect((await collectHealth()).checks.bankJobs.ok).toBe(true);
+    const failing = await connection();
+    await job(failing.id, "done", 120);
+    await job(failing.id, "failed", 5);
+    expect((await collectHealth()).checks.bankJobs).toMatchObject({ ok: false, failedRecent: 1 });
+  });
+});

@@ -210,8 +210,14 @@ model Receipt {
   user             User      @relation(fields: [userId], references: [id])
   vendor           String?
   date             DateTime?
-  totalAmountCents Int?
-  vatDetails       String?
+  totalAmountCents Int? // EUR, what the books count
+  vatDetails       String? // VAT printed on the document
+  /// ISO 4217 code of the document; totalAmountCents stays in EUR.
+  currency            String @default("EUR")
+  /// The amount in `currency` when it is not EUR.
+  originalAmountCents Int?
+  /// domestic | eu_service | eu_goods | non_eu_service | non_eu_goods | foreign_vat_charged (lib/alv.ts)
+  vatTreatment        String @default("domestic")
   category         String?
   notes            String?
   type             String    @default("meno")
@@ -795,10 +801,13 @@ model PurchaseInvoice {
   reference          String? // viitenumero, used for bank matching
   issueDate          DateTime
   dueDate            DateTime
-  status             String    @default("open") // open | paid | cancelled
+  status             String    @default("open") // open | paid | credited | cancelled
   grossCents         Int
   vatCents           Int       @default(0)
   netCents           Int       @default(0)
+  currency            String   @default("EUR")
+  originalAmountCents Int?
+  vatTreatment        String   @default("domestic")
   category           String?
   notes              String?
   paidAt             DateTime?
@@ -811,6 +820,12 @@ model PurchaseInvoice {
   /// The recurring template (toistuva ostolasku) that created this invoice.
   recurringPurchaseId String?
   recurringPurchase   RecurringPurchase? @relation(fields: [recurringPurchaseId], references: [id], onDelete: SetNull)
+  /// A supplier credit note (hyvityslasku) is a row with a negative total. This is
+  /// the ostolasku it corrects; null on ordinary invoices and on a credit note
+  /// whose original is not in the app.
+  creditsInvoiceId   String?
+  creditsInvoice     PurchaseInvoice?  @relation("PurchaseCredit", fields: [creditsInvoiceId], references: [id], onDelete: SetNull)
+  creditNotes        PurchaseInvoice[] @relation("PurchaseCredit")
   createdAt          DateTime  @default(now())
   updatedAt          DateTime  @updatedAt
 
@@ -820,6 +835,7 @@ model PurchaseInvoice {
   @@index([userId, status, dueDate])
   @@index([userId, issueDate])
   @@index([recurringPurchaseId])
+  @@index([creditsInvoiceId])
 }
 
 model PurchasePayment {
@@ -1091,4 +1107,20 @@ model InvoiceEmailTemplate {
   updatedAt DateTime @updatedAt
 
   @@index([userId, kind])
+}
+
+/// An ECB reference rate used to price a foreign-currency document in euros, kept
+/// so the rate behind a receipt's euro total can always be shown. `date` is the
+/// day asked for, `rateDate` the business day the ECB rate is from. Read and
+/// written with raw SQL in lib/fx-rates.ts.
+model FxRate {
+  currency  String
+  date      String
+  /// Euros for one unit of `currency`.
+  rate      Float
+  rateDate  String
+  source    String   @default("ECB")
+  fetchedAt DateTime @default(now())
+
+  @@id([currency, date])
 }

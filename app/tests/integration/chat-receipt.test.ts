@@ -4,7 +4,7 @@ import { GET as listMessages, PATCH as decideChat } from "@/app/api/ai/chat/rout
 import { prisma } from "@/lib/db";
 import { ReceiptExtractionError, type ExtractedReceipt } from "@/lib/ai";
 import { setChatReceiptExtractorForTests } from "@/lib/chat-receipt";
-import { resetRateLimitsForTests } from "@/lib/rate-limit";
+import { consumeRateLimit, RECEIPT_UPLOADS_PER_WINDOW, resetRateLimitsForTests } from "@/lib/rate-limit";
 import { createStatementWithTransactions, createUser, resetDatabase, type TestUser } from "./helpers/factories";
 import { buildFormRequest, buildRequest, readJson, sessionCookie } from "./helpers/http";
 
@@ -218,11 +218,14 @@ describe("POST /api/ai/chat/receipt", () => {
   });
 
   it("rate limits the paid extraction", async () => {
-    let status = 200;
-    for (let index = 0; index < 40 && status !== 429; index += 1) {
-      status = (await send(null)).response.status;
+    // The limit is a few hundred per 10 minutes (W1): filling it with real
+    // requests would take minutes, so the shared bucket is filled directly and
+    // one request proves the route refuses once it is exhausted.
+    const key = `receipt-upload:${user.id}`;
+    for (let index = 0; index < RECEIPT_UPLOADS_PER_WINDOW; index += 1) {
+      consumeRateLimit(key, RECEIPT_UPLOADS_PER_WINDOW, 10 * 60_000);
     }
-    expect(status).toBe(429);
+    expect((await send(null)).response.status).toBe(429);
   });
 });
 

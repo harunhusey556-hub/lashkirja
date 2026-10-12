@@ -175,3 +175,19 @@ Saaja;${B}
     expect(extractOwnIban("ei tilinumeroa täällä")).toBeNull();
   });
 });
+
+describe("extractOwnIban on Holvi exports (2026-10-09)", () => {
+  it("does not count an RF creditor reference as an IBAN", () => {
+    const xlsx = "IBAN\tFI0379977996764762\tTilin tyyppi\tdebit\n1.7.2026\t-2.5\tHolvi service fee\tRF44K3HEB8518F";
+    expect(extractOwnIban(xlsx)).toBe("FI0379977996764762");
+  });
+
+  it("reads a PDF's labelled line whose columns are runs of spaces", () => {
+    const pdf = [
+      "IBAN            FI03 7997 7996 7647 62                         Y-tunnus: 3628546-6",
+      "  3.9.2026  Tukku Oy  FI07 8000 2218 3182 76                    -40,00",
+      "  4.9.2026  Tukku Oy  FI07 8000 2218 3182 76                    -12,00",
+    ].join("\n");
+    expect(extractOwnIban(pdf)).toBe("FI0379977996764762");
+  });
+});

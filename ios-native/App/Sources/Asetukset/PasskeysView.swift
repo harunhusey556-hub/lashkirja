@@ -38,7 +38,7 @@ struct PasskeysView: View {
                     }
                     ForEach(list) { key in
                         HStack(spacing: 12) {
-                            Image(systemName: "person.badge.key").foregroundStyle(Theme.ink2).frame(width: 28)
+                            Image(systemName: "person.badge.key").foregroundStyle(Theme.ink2).frame(width: 28).accessibilityHidden(true)
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(key.deviceName).foregroundStyle(Theme.ink)
                                 Text(key.detail).font(.caption).foregroundStyle(Theme.ink2)

@@ -148,6 +148,41 @@ extension BankFeed {
         rows.filter { state(of: $0) == .suggested }.count
     }
 
+    /// What "Hyväksy kuittiehdotukset" is about to link, shown before it does: the pairs, the
+    /// money they cover and how many of them disagree on the amount by more than a fee.
+    public struct ConfirmPreview: Sendable, Equatable, Identifiable {
+        public struct Pair: Sendable, Equatable, Identifiable {
+            public let id: String
+            public let counterparty: String
+            public let date: String?
+            public let amount: Decimal
+            public let receiptVendor: String
+            public let receiptTotal: Decimal?
+            /// Bank amount minus receipt total when it is more than a fee (`ReceiptMatchText.amountGap`).
+            public let gap: Decimal?
+        }
+        public let pairs: [Pair]
+        public var id: String { pairs.map(\.id).joined(separator: ",") }
+        public var count: Int { pairs.count }
+        /// The bank rows' money, as a positive sum.
+        public var total: Decimal { pairs.reduce(0) { $0 + abs($1.amount) } }
+        public var mismatched: Int { pairs.filter { $0.gap != nil }.count }
+    }
+
+    public static func confirmPreview(_ rows: [BankTransaction]) -> ConfirmPreview {
+        ConfirmPreview(pairs: rows.filter { state(of: $0) == .suggested }.map { row in
+            ConfirmPreview.Pair(
+                id: row.id,
+                counterparty: row.counterparty?.isEmpty == false ? row.counterparty! : "Pankkitapahtuma",
+                date: row.date,
+                amount: row.amount,
+                receiptVendor: row.suggestedReceipt?.vendor?.isEmpty == false ? row.suggestedReceipt!.vendor! : "Kuitti",
+                receiptTotal: row.suggestedReceipt?.totalAmount,
+                gap: ReceiptMatchText.amountGap(bank: row.amount, receiptTotal: row.suggestedReceipt?.totalAmount)
+            )
+        })
+    }
+
     /// Whether "Etsi kuitti" makes sense for a row: open, and not a transfer or salary.
     public static func canSearchReceipts(_ row: BankTransaction) -> Bool {
         if row.type == "oma_siirto" || row.type == "palkka" { return false }

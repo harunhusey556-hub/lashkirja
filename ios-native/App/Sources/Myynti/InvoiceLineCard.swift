@@ -4,6 +4,7 @@ import LashKirjaCore
 /// One line of a new or edited invoice as a compact card: description, quantity stepper and
 /// unit, price, VAT and the line's total, with its actions in one menu.
 struct InvoiceLineCard: View {
+    @Environment(\.dynamicTypeSize) private var typeSize
     @Binding var line: InvoiceDraft.Line
     /// The price as typed; the form owns it so an empty field is "Hinta puuttuu.", not 0 €.
     @Binding var priceText: String
@@ -42,10 +43,14 @@ struct InvoiceLineCard: View {
                 .focused(focus, equals: InvoiceFormField.description(line.id))
                 .accessibilityLabel("Rivin \(number) kuvaus")
             fieldError(.description(line.id))
-            HStack(spacing: 10) {
-                quantityControl
-                unitMenu
-                Spacer(minLength: 4)
+            // Quantity, unit and price on one line; at accessibility text sizes the price gets its own
+            // line. AnyLayout keeps one price field, so its keyboard focus survives the switch.
+            let layout = typeSize.isAccessibilitySize
+                ? AnyLayout(VStackLayout(alignment: .leading, spacing: 10))
+                : AnyLayout(HStackLayout(spacing: 10))
+            layout {
+                HStack(spacing: 10) { quantityControl; unitMenu }
+                if !typeSize.isAccessibilitySize { Spacer(minLength: 4) }
                 priceField
             }
             fieldError(.quantity(line.id))
@@ -93,7 +98,7 @@ struct InvoiceLineCard: View {
             Image(systemName: "ellipsis.circle")
                 .font(.body)
                 .foregroundStyle(Theme.accent)
-                .frame(minWidth: 32, minHeight: 32)
+                .frame(minWidth: 44, minHeight: 44)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.borderless)
@@ -102,7 +107,7 @@ struct InvoiceLineCard: View {
 
     private var quantityControl: some View {
         HStack(spacing: 2) {
-            Button { step(-1) } label: { Image(systemName: "minus.circle").font(.title3) }
+            Button { step(-1) } label: { Image(systemName: "minus.circle").font(.title3).tapTarget() }
                 .disabled(line.quantity <= 1)
                 .accessibilityLabel("Vähennä määrää")
             TextField("Määrä", text: $quantityText)
@@ -113,7 +118,7 @@ struct InvoiceLineCard: View {
                 .focused(focus, equals: InvoiceFormField.quantity(line.id))
                 .onChange(of: quantityText) { _, text in line.quantity = Money.parse(text) ?? 0 }
                 .accessibilityLabel("Rivin \(number) määrä")
-            Button { step(1) } label: { Image(systemName: "plus.circle").font(.title3) }
+            Button { step(1) } label: { Image(systemName: "plus.circle").font(.title3).tapTarget() }
                 .accessibilityLabel("Lisää määrää")
         }
         .buttonStyle(.borderless)
@@ -138,7 +143,7 @@ struct InvoiceLineCard: View {
         } label: {
             HStack(spacing: 2) {
                 Text(line.unit.isEmpty ? "kpl" : line.unit)
-                Image(systemName: "chevron.up.chevron.down").font(.caption2)
+                Image(systemName: "chevron.up.chevron.down").font(.caption2).accessibilityHidden(true)
             }
             .foregroundStyle(Theme.ink)
             .padding(.horizontal, 8)

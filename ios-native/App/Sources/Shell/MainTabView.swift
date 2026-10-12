@@ -6,6 +6,7 @@ struct MainTabView: View {
     @State private var showAdd = false
     @State private var showSettings = false
     @State private var showAssistant = false
+    @State private var showNewInvoice = false
     /// Each tab's pushed screens, so a screen can be opened from outside its tab (AppModel.pendingRoute).
     @State private var paths: [AppTab: [Route]] = [:]
     @Environment(AppModel.self) private var app
@@ -28,15 +29,15 @@ struct MainTabView: View {
                     }
                 }
             }
-            // The search role sets "+" apart from the other tabs: on iOS 26 it is its own round
-            // button beside the bar. Selecting it never switches tab (see `select`).
-            Tab(AppTab.add.title, systemImage: AppTab.add.symbol, value: AppTab.add, role: .search) {
+            // "+" is a plain tab item that opens the Lisää sheet; selecting it never switches tab
+            // (see `select`). Not the search role: that told the system (and VoiceOver) "+" was search.
+            Tab(AppTab.add.title, systemImage: AppTab.add.symbol, value: AppTab.add) {
                 Color.clear
             }
         }
-        // Denser lists everywhere: less gap between sections and lower rows, so more fits on a phone.
+        // Less gap between sections, so more fits on a phone. Rows keep the system's 44 pt minimum,
+        // the smallest comfortable touch target.
         .listSectionSpacing(.compact)
-        .environment(\.defaultMinListRowHeight, 40)
         .sheet(isPresented: $showAdd) { AddSheet() }
         .sheet(isPresented: $showSettings) { SettingsSheet().presentationDetents([.large]) }
         .sheet(isPresented: $showAssistant) { AssistantView() }
@@ -58,8 +59,29 @@ struct MainTabView: View {
             showSettings = false
             showAssistant = false
             showAdd = false
+            showNewInvoice = false
             tab = pending.tab
             paths[pending.tab] = NavigationStackRule.collapse((paths[pending.tab] ?? []) + [pending.route])
+        }
+        // A Home Screen quick action or App Intent: the same sheets the "+" tab and the assistant
+        // button open. `initial` catches one that arrived before the tabs were on screen.
+        .onChange(of: app.pendingQuickAction, initial: true) { _, action in
+            guard let action else { return }
+            app.pendingQuickAction = nil
+            showSettings = false
+            showAdd = false
+            showAssistant = false
+            showNewInvoice = false
+            switch action {
+            case .capture: app.pendingCapture = PendingCapture(transactionId: nil)
+            case .newInvoice: showNewInvoice = true
+            case .assistant: showAssistant = true
+            }
+        }
+        .sheet(isPresented: $showNewInvoice) {
+            InvoiceFormView(existing: nil, onCreated: { id in
+                app.pendingRoute = PendingRoute(tab: .myynti, route: .invoice(id))
+            })
         }
         .task { await OnboardingGate.shared.check(app) }
         // Receipts photographed offline go out as soon as the app runs, not only once Kuitit opens.
@@ -84,11 +106,13 @@ struct MainTabView: View {
     /// "Lisää" is an action, not a place: it opens the add sheet and stays on the current tab.
     private func select(_ next: AppTab) {
         if next == .add {
+            EventLog.shared.log(.screen("add-sheet"))
             Haptics.impact()
             showAdd = true
             return
         }
         if next != tab { Haptics.selection() }
+        EventLog.shared.log(.screen("tab.\(next)"))
         tab = next
     }
 }

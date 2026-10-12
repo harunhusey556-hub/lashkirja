@@ -35,9 +35,12 @@ export const NAV: readonly NavEntry[] = [
   { id: "tyot", kind: "workspace", label: "Huomioitavat", path: "/tyot", parent: "kirjanpito" },
   { id: "alv", kind: "workspace", label: "ALV-ilmoitus", path: "/kirjanpito/alv", parent: "kirjanpito" },
   { id: "ostolaskut", kind: "workspace", label: "Ostolaskut", path: "/kirjanpito/ostolaskut", parent: "kirjanpito" },
+  // Open ostolaskut with the bank payments that may have paid them, accepted row by row.
+  { id: "ostolaskut-kohdistus", kind: "detail", label: "Kohdista ostolaskujen maksut", path: "/kirjanpito/ostolaskut/kohdistus", parent: "ostolaskut" },
   // Behind the gear on Pankki: connection, accounts and tiliote files (owner report 2026-09-30).
   { id: "pankkitilit", kind: "detail", label: "Pankkiyhteys ja tilit", path: "/kirjanpito/pankkitilit", parent: "pankki-tapahtumat" },
   { id: "kaudet", kind: "workspace", label: "Suljetut kaudet", path: "/kirjanpito/kaudet", parent: "kirjanpito" },
+  { id: "paakirja", kind: "workspace", label: "Kirjanpito", path: "/kirjanpito/paakirja", parent: "kirjanpito" },
   // FP-13 (TF-07): one month's finish line; a sticky primary owns the bottom edge.
   { id: "kuukausi", kind: "detail", label: "Kuukauden sulkeminen", path: "/kirjanpito/kuukausi", parent: "kirjanpito" },
 
@@ -62,6 +65,60 @@ export const NAV: readonly NavEntry[] = [
   { id: "asetukset-sahkoposti", kind: "settings", label: "Sähköpostien tuonti", path: "/asetukset/sahkoposti", parent: "asetukset" },
   { id: "asetukset-ohje", kind: "settings", label: "Ohje ja tuki", path: "/asetukset/ohje", parent: "asetukset" },
 ];
+
+/**
+ * A named way into a registered screen, possibly with a view preset in the
+ * query (`?nayta=toimet`). Shortcuts are not screens: they add no route and no
+ * menu level, they group links a hub renders (the Kirjanpito "Kohdistus"
+ * section), and each must land on a screen the registry knows.
+ */
+export type NavShortcut = {
+  id: string;
+  /** The group a hub renders together. */
+  section: "kohdistus";
+  label: string;
+  href: string;
+  description: string;
+};
+
+export const NAV_SHORTCUTS: readonly NavShortcut[] = [
+  {
+    id: "kohdista-kuitit",
+    section: "kohdistus",
+    label: "Kohdista kuitit",
+    href: "/pankki/tapahtumat?nayta=toimet",
+    description: "Pankkitapahtumat, joille ei ole kuittia",
+  },
+  {
+    id: "kohdista-ostolaskut",
+    section: "kohdistus",
+    label: "Kohdista ostolaskujen maksut",
+    href: "/kirjanpito/ostolaskut/kohdistus",
+    description: "Pankkimaksut avoimille ostolaskuille",
+  },
+];
+
+export function navShortcuts(
+  section: NavShortcut["section"],
+  shortcuts: readonly NavShortcut[] = NAV_SHORTCUTS
+): NavShortcut[] {
+  return shortcuts.filter((shortcut) => shortcut.section === section);
+}
+
+/** A shortcut that points nowhere the registry knows, or shares an id. */
+export function shortcutViolations(
+  shortcuts: readonly NavShortcut[] = NAV_SHORTCUTS,
+  entries: readonly NavEntry[] = NAV
+): string[] {
+  const errors: string[] = [];
+  const ids = new Set<string>();
+  for (const shortcut of shortcuts) {
+    if (ids.has(shortcut.id)) errors.push(`duplicate shortcut ${shortcut.id}`);
+    ids.add(shortcut.id);
+    if (!matchNav(shortcut.href, entries)) errors.push(`${shortcut.id}: ${shortcut.href} is not a registered screen`);
+  }
+  return errors;
+}
 
 const TAB_ROOT_IDS = ["etusivu", "myynti", "kirjanpito", "raportit"] as const;
 const AVATAR_ROOT_ID = "asetukset";

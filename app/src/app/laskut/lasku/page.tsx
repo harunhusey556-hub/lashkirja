@@ -14,7 +14,7 @@ import {
   readJson,
   redirectToLogin,
 } from "@/components/clientFetch";
-import { formatDate, formatDayMonth, formatEur, parseMoneyInput } from "@/lib/format";
+import { formatDate, formatDayMonth, formatEur, parseFinnishNumber, parseMoneyInput } from "@/lib/format";
 import { newIdempotencyKey } from "@/lib/idempotency-key";
 import { helsinkiCalendarDate } from "@/lib/validation";
 import { formatReference } from "@/lib/finnish-reference";
@@ -24,7 +24,7 @@ import { shareContent } from "@/lib/share";
 import { openAuthedFile } from "@/lib/authed-file";
 import { AuthedFileLink } from "@/components/AuthedFileLink";
 import { IS_MOBILE_BUILD } from "@/lib/build-target";
-import { daysOverdue, vatForNet } from "@/lib/invoices";
+import { daysOverdue, roundHalfAwayFromZero, vatForNet } from "@/lib/invoices";
 import { SALES_STATUS } from "@/lib/status-labels";
 import { detailHref } from "@/lib/routes";
 import { Button, buttonClass, controlClass, Field } from "@/components/ui";
@@ -98,7 +98,13 @@ interface Invoice {
   displayStatus: "draft" | "sent" | "paid" | "credited" | "overdue";
   documentKind?: "invoice" | "credit_note";
   creditsInvoice?: { id: string; number: number } | null;
-  creditNotes?: Array<{ id: string; number: number; status: string }>;
+  creditNotes?: Array<{
+    id: string;
+    number: number;
+    status: string;
+    gross: number;
+    lines: Array<{ sortOrder: number; quantity: number }>;
+  }>;
   issueDate: string;
   dueDate: string;
   notes: string | null;
@@ -106,6 +112,8 @@ interface Invoice {
   vat: number;
   gross: number;
   paid: number;
+  /** Total of the credit notes against this invoice; absent in a response cached before the field existed. */
+  credited?: number;
   open: number;
   closedReason: string | null;
   customer: { id: string; name: string; email: string | null; businessId: string | null };
@@ -117,6 +125,7 @@ interface Invoice {
     unitPrice: number;
     vatRate: number;
     net: number;
+    sortOrder: number;
   }>;
   payments: Array<{
     id: string;
@@ -219,6 +228,53 @@ function amountText(value: number): string {
   return value > 0 ? value.toFixed(2).replace(".", ",") : "";
 }
 
+/** What of each original line (by sortOrder) is still creditable. */
+function creditRemaining(invoice: Invoice): Map<number, number> {
+  const credited = new Map<number, number>();
+  for (const note of invoice.creditNotes ?? []) {
+    // A credit note's quantities are positive: its unit prices are what is negative.
+    for (const line of note.lines) {
+      credited.set(line.sortOrder, (credited.get(line.sortOrder) ?? 0) + line.quantity);
+    }
+  }
+  const remaining = new Map<number, number>();
+  for (const line of invoice.lines) {
+    remaining.set(line.sortOrder, Math.max(0, line.quantity - (credited.get(line.sortOrder) ?? 0)));
+  }
+  return remaining;
+}
+
+/**
+ * The exact totals of the credit the sheet is about to create: the same
+ * per-line rounding and per-rate VAT grouping the server uses, so the number
+ * on the button is the number that lands. Null when nothing is filled in.
+ */
+function creditTotals(
+  invoice: Invoice,
+  quantities: Record<string, string>
+): { net: number; vat: number; gross: number } | null {
+  const netByRate = new Map<number, number>();
+  for (const line of invoice.lines) {
+    const text = quantities[line.id]?.trim();
+    if (!text) continue;
+    const quantity = parseFinnishNumber(text);
+    if (quantity === null || quantity <= 0) return null;
+    const milli = Math.round(quantity * 1000);
+    if (Math.abs(quantity * 1000 - milli) > 1e-6) return null;
+    const net = roundHalfAwayFromZero((milli * Math.round(line.unitPrice * 100)) / 1000);
+    const rate = Math.round(line.vatRate * 10);
+    netByRate.set(rate, (netByRate.get(rate) ?? 0) + net);
+  }
+  if (netByRate.size === 0) return null;
+  let net = 0;
+  let vat = 0;
+  for (const [rate, rateNet] of netByRate) {
+    net += rateNet;
+    vat += vatForNet(rateNet, rate);
+  }
+  return { net, vat, gross: net + vat };
+}
+
 /** The detail at its final layout: hero, the key facts, the lines (L1, SALES-19). */
 function InvoiceSkeleton() {
   return (
@@ -295,7 +351,12 @@ function InvoiceDetail() {
   const [sendError, setSendError] = useState("");
   const [loadFailure, setLoadFailure] = useState<unknown>(null);
   const [refreshFailed, setRefreshFailed] = useState(false);
-  const [confirmCredit, setConfirmCredit] = useState(false);
+  // The credit sheet keeps one idempotency key per selection: a retry of the
+  // same tap reuses it, a changed quantity is a different credit (G04-style).
+  const creditKey = useRef(newIdempotencyKey());
+  const [creditSheetOpen, setCreditSheetOpen] = useState(false);
+  const [creditQuantities, setCreditQuantities] = useState<Record<string, string>>({});
+  const [creditError, setCreditError] = useState("");
   const [confirmMarkSent, setConfirmMarkSent] = useState(false);
   const [reminderSheetOpen, setReminderSheetOpen] = useState(false);
   const [pdfBusy, setPdfBusy] = useState(false);
@@ -634,20 +695,75 @@ function InvoiceDetail() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state, id]);
 
+  /** Pre-fill every line with what is still creditable of it. */
+  function openCreditSheet() {
+    if (!invoice) return;
+    const remaining = creditRemaining(invoice);
+    const prefilled: Record<string, string> = {};
+    for (const line of invoice.lines) {
+      const rest = remaining.get(line.sortOrder) ?? 0;
+      if (rest > 0) prefilled[line.id] = String(rest).replace(".", ",");
+    }
+    creditKey.current = newIdempotencyKey();
+    setCreditQuantities(prefilled);
+    setCreditError("");
+    setCreditSheetOpen(true);
+  }
+
+  /** A changed quantity is a different credit: it must not replay under the old key. */
+  function changeCreditQuantity(lineId: string, value: string) {
+    setCreditQuantities((current) => ({ ...current, [lineId]: value }));
+    creditKey.current = newIdempotencyKey();
+    setCreditError("");
+  }
+
   async function createCreditNote() {
+    if (!invoice) return;
+    const remaining = creditRemaining(invoice);
+    const lines: Array<{ lineId: string; quantity: number }> = [];
+    for (const line of invoice.lines) {
+      const text = creditQuantities[line.id]?.trim();
+      if (!text) continue;
+      const quantity = parseFinnishNumber(text);
+      const milli = quantity === null ? 0 : Math.round(quantity * 1000);
+      if (quantity === null || quantity <= 0 || Math.abs(quantity * 1000 - milli) > 1e-6) {
+        setCreditError(`Rivin määrä on virheellinen (enintään kolme desimaalia): ${line.description}`);
+        return;
+      }
+      if (quantity > (remaining.get(line.sortOrder) ?? 0)) {
+        setCreditError(
+          `Riviltä ${line.description} on hyvitettävissä enää ${String(remaining.get(line.sortOrder) ?? 0).replace(".", ",")} ${line.unit}.`
+        );
+        return;
+      }
+      lines.push({ lineId: line.id, quantity });
+    }
+    if (lines.length === 0) {
+      setCreditError("Valitse vähintään yksi rivi hyvitettäväksi.");
+      return;
+    }
     setBusy(true);
-    setMessage(null);
+    setCreditError("");
     try {
       const response = await apiFetch(`/api/invoices/${id}/credit`, {
         method: "POST",
         credentials: "include",
+        headers: { "content-type": "application/json", "idempotency-key": creditKey.current },
+        body: JSON.stringify({ lines }),
       });
-      const result = await readJson<{ invoice: { id: string; number: number } }>(response, "Hyvitys epäonnistui");
-      showToast({ tone: "success", text: `Hyvityslasku ${result.invoice.number} luotiin` });
+      const result = await readJson<{ invoice: { id: string; number: number; gross: number } }>(
+        response,
+        "Hyvitys epäonnistui"
+      );
+      // What happened, in one line: the note's number and the amount it reverses.
+      showToast({
+        tone: "success",
+        text: `Hyvityslasku ${result.invoice.number} luotiin: ${formatEur(result.invoice.gross)}`,
+      });
+      setCreditSheetOpen(false);
       router.push(detailHref("invoice", result.invoice.id));
     } catch (error) {
-      // ConfirmModal shows the failure inside the dialog.
-      throw new Error(errorMessage(error, "Hyvitys epäonnistui"));
+      setCreditError(errorMessage(error, "Hyvitys epäonnistui"));
     } finally {
       setBusy(false);
     }
@@ -848,7 +964,7 @@ function InvoiceDetail() {
         ...(invoice.documentKind !== "credit_note" &&
         invoice.status !== "credited" &&
         invoice.status !== "draft"
-          ? [{ label: "Hyvitä", onSelect: () => setConfirmCredit(true), disabled: busy || refreshFailed }]
+          ? [{ label: "Hyvitä", onSelect: () => openCreditSheet(), disabled: busy || refreshFailed }]
           : []),
         ...(invoice.status === "draft"
           ? [
@@ -1006,7 +1122,10 @@ function InvoiceDetail() {
                 title="Maksut"
                 action={
                   invoice.open > 0 ? (
-                    <span className="tabular-nums">{formatEur(invoice.open)} avoinna</span>
+                    <span className="tabular-nums">
+                      {formatEur(invoice.open)} avoinna
+                      {(invoice.credited ?? 0) > 0 ? `, hyvitetty ${formatEur(invoice.credited ?? 0)}` : ""}
+                    </span>
                   ) : undefined
                 }
               >
@@ -1206,18 +1325,76 @@ function InvoiceDetail() {
         onCancel={() => setConfirmDelete(false)}
       />
 
-      <ConfirmModal
-        isOpen={confirmCredit}
-        title="Luodaanko hyvityslasku?"
-        description={
-          invoice
-            ? `Laskulle ${invoice.number} luodaan numeroitu hyvityslasku koko summasta ${formatEur(invoice.gross)}. Hyvitystä ei voi perua.`
-            : undefined
-        }
-        confirmLabel="Hyvitä"
-        onConfirm={() => createCreditNote()}
-        onCancel={() => setConfirmCredit(false)}
-      />
+      <BottomSheet
+        isOpen={creditSheetOpen}
+        onClose={() => {
+          setCreditSheetOpen(false);
+          setCreditError("");
+        }}
+        title="Hyvitä laskua"
+        labelledBy="credit-sheet-title"
+      >
+        <div className="space-y-3 px-5 py-4 sheet-safe-bottom">
+          {invoice?.lines.map((line) => {
+            const rest = creditRemaining(invoice).get(line.sortOrder) ?? 0;
+            return (
+              <div
+                key={line.id}
+                className="flex items-start gap-3 rounded-card border border-line bg-surface px-4 py-3"
+              >
+                <div className="min-w-0 flex-1">
+                  <p className="text-body text-ink">{line.description}</p>
+                  <p className="text-caption text-ink-2">
+                    {lineQuantity(line)} · ALV {String(line.vatRate).replace(".", ",")} %
+                  </p>
+                  {rest > 0 && (
+                    <p className="text-caption text-ink-2">
+                      Hyvitettävissä {String(rest).replace(".", ",")} {line.unit}
+                    </p>
+                  )}
+                </div>
+                <Field label="Määrä" htmlFor={`credit-quantity-${line.id}`}>
+                  <input
+                    id={`credit-quantity-${line.id}`}
+                    className={`${controlClass} min-h-12 w-24 tabular-nums text-right`}
+                    value={creditQuantities[line.id] ?? ""}
+                    onChange={(event) => changeCreditQuantity(line.id, event.target.value)}
+                    inputMode="decimal"
+                    autoComplete="off"
+                    enterKeyHint="done"
+                    placeholder="0"
+                  />
+                </Field>
+              </div>
+            );
+          })}
+          {invoice && creditTotals(invoice, creditQuantities) && (
+            <div className="flex items-baseline justify-between px-1">
+              <span className="text-body text-ink">Hyvitetään yhteensä</span>
+              <span className="text-title text-ink tabular-nums">
+                {formatEur(creditTotals(invoice, creditQuantities)!.gross)}
+              </span>
+            </div>
+          )}
+          <p className="text-caption text-ink-2">
+            Laskulle luodaan numeroitu hyvityslasku. Hyvitystä ei voi perua.
+          </p>
+          {creditError && (
+            <p id="credit-sheet-error" className="text-caption text-danger" role="alert">
+              {creditError}
+            </p>
+          )}
+          <Button
+            type="button"
+            className="w-full"
+            disabled={busy}
+            disabledReason={busy ? "Hyvityslaskun luonti on kesken." : undefined}
+            onClick={() => void createCreditNote()}
+          >
+            Luo hyvityslasku
+          </Button>
+        </div>
+      </BottomSheet>
 
       <ConfirmModal
         isOpen={confirmMarkSent}

@@ -120,7 +120,7 @@ struct POSPaymentSheet: View {
                 HStack {
                     TextField("0,00", text: $amountText)
                         .moneyInput()
-                        .font(.system(size: 34, weight: .bold, design: .rounded))
+                        .scaledFont(size: 34, weight: .bold, design: .rounded, relativeTo: .largeTitle)
                         .onChange(of: amountText) { _, _ in amountProblem = nil }
                     Text("€").font(.title.weight(.semibold)).foregroundStyle(Theme.ink2)
                 }
@@ -131,7 +131,7 @@ struct POSPaymentSheet: View {
             .padding(16)
             .background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
         } else if let amount = pos.machine.amount ?? pos.machine.payment?.amount {
-            MoneyText(amount: amount).font(.system(size: 40, weight: .bold, design: .rounded))
+            MoneyText(amount: amount).scaledFont(size: 40, weight: .bold, design: .rounded, relativeTo: .largeTitle).moneyHero()
         }
     }
 
@@ -145,8 +145,9 @@ struct POSPaymentSheet: View {
         case .accountingRecorded(let receipt):
             VStack(spacing: 8) {
                 Image(systemName: receipt.testPayment ? "testtube.2" : "checkmark.circle.fill")
-                    .font(.system(size: 56))
+                    .scaledFont(size: 56, relativeTo: .largeTitle)
                     .foregroundStyle(receipt.testPayment ? Theme.ink2 : Theme.success)
+                    .accessibilityHidden(true)
                 Text(pos.phase.title).font(.title3.weight(.semibold)).multilineTextAlignment(.center)
                 if receipt.testPayment {
                     Text("Stripen testitila: rahaa ei siirtynyt, eikä laskun tila muuttunut.")
@@ -155,7 +156,7 @@ struct POSPaymentSheet: View {
             }
         case .succeeded:
             VStack(spacing: 8) {
-                Image(systemName: "checkmark.circle").font(.system(size: 56)).foregroundStyle(Theme.success)
+                Image(systemName: "checkmark.circle").scaledFont(size: 56, relativeTo: .largeTitle).foregroundStyle(Theme.success).accessibilityHidden(true)
                 Text(pos.phase.title).font(.headline).multilineTextAlignment(.center)
                 Text("Stripe veloitti kortin. Lasku päivittyy, kun palvelin on vahvistanut maksun.")
                     .font(.footnote).foregroundStyle(Theme.ink2).multilineTextAlignment(.center)
@@ -163,8 +164,9 @@ struct POSPaymentSheet: View {
         case .failed(let failure):
             VStack(spacing: 6) {
                 Image(systemName: failure.kind == .canceled ? "xmark.circle" : "exclamationmark.triangle.fill")
-                    .font(.system(size: 40))
+                    .scaledFont(size: 40, relativeTo: .largeTitle)
                     .foregroundStyle(failure.kind == .canceled ? Theme.ink2 : Theme.danger)
+                    .accessibilityHidden(true)
                 Text(failure.title).font(.headline).multilineTextAlignment(.center)
                 if !failure.message.isEmpty {
                     Text(failure.message).font(.footnote).foregroundStyle(Theme.ink2).multilineTextAlignment(.center)
@@ -173,8 +175,8 @@ struct POSPaymentSheet: View {
         default:
             VStack(spacing: 10) {
                 if pos.phase == .waitingForCard {
-                    Image(systemName: "wave.3.right.circle").font(.system(size: 56)).foregroundStyle(Theme.accent)
-                        .symbolEffect(.pulse)
+                    Image(systemName: "wave.3.right.circle").scaledFont(size: 56, relativeTo: .largeTitle).foregroundStyle(Theme.accent).accessibilityHidden(true)
+                        .symbolEffect(.pulse, isActive: !UIAccessibility.isReduceMotionEnabled)
                 } else if let progress = pos.updateProgress {
                     ProgressView(value: progress).tint(Theme.accent).frame(maxWidth: 220)
                 } else {

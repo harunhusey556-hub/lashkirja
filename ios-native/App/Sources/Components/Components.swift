@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 import LashKirjaCore
 
 /// A rounded surface card, the app's basic container.
@@ -83,6 +84,7 @@ struct LoadFailureView: View {
                     .buttonStyle(.primary)
             }
         }
+        .retryWhenBackOnline(failure, retry)
     }
 }
 
@@ -115,10 +117,32 @@ struct RefreshFailureBanner: View {
                 .buttonStyle(.borderless)
             }
         }
+        .retryWhenBackOnline(failure, retry)
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
         .accessibilityElement(children: .combine)
+    }
+}
+
+extension View {
+    /// A load that failed for want of a connection runs again on its own when the connection is
+    /// back, so the owner is not left looking at "no connection" after it has returned.
+    func retryWhenBackOnline(_ failure: LoadFailure, _ retry: @escaping () async -> Void) -> some View {
+        modifier(RetryWhenBackOnline(failure: failure, retry: retry))
+    }
+}
+
+private struct RetryWhenBackOnline: ViewModifier {
+    let failure: LoadFailure
+    let retry: () async -> Void
+    @State private var connectivity = Connectivity.shared
+
+    func body(content: Content) -> some View {
+        content.onChange(of: connectivity.backOnline) {
+            guard failure.canRetry, [.offline, .timeout, .unavailable].contains(failure.kind) else { return }
+            Task { await retry() }
+        }
     }
 }
 
@@ -162,7 +186,7 @@ struct ToastView: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            Image(systemName: "checkmark.circle")
+            Image(systemName: "checkmark.circle").accessibilityHidden(true)
             Text(toast.text).font(.subheadline).lineLimit(2)
             Spacer(minLength: 8)
             if let label = toast.actionLabel {
@@ -220,4 +244,77 @@ struct PressableButtonStyle: ButtonStyle {
 
 extension ButtonStyle where Self == PressableButtonStyle {
     static var pressable: PressableButtonStyle { PressableButtonStyle() }
+}
+
+// MARK: Accessibility helpers
+
+/// `withMotion` that does nothing visible when Reduce Motion is on, for call sites that have no
+/// view environment at hand (models, closures).
+@MainActor
+func withMotion<Result>(_ animation: Animation? = .default, _ body: () throws -> Result) rethrows -> Result {
+    // withAnimation, not withMotion: a rename once turned this into a call to itself, an endless
+    // loop that froze every "Näytä enemmän" (2026-10-08; RecursionGuardTests).
+    try withAnimation(UIAccessibility.isReduceMotionEnabled ? nil : animation, body)
+}
+
+private struct MotionModifier<Value: Equatable>: ViewModifier {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    let animation: Animation?
+    let value: Value
+
+    func body(content: Content) -> some View {
+        content.animation(reduceMotion ? nil : animation, value: value)
+    }
+}
+
+private struct LineLimitUnlessLargeModifier: ViewModifier {
+    @Environment(\.dynamicTypeSize) private var typeSize
+
+    func body(content: Content) -> some View {
+        content.lineLimit(typeSize.isAccessibilitySize ? nil : 1)
+    }
+}
+
+private struct ScaledFontModifier: ViewModifier {
+    @ScaledMetric private var size: CGFloat
+    let weight: Font.Weight
+    let design: Font.Design
+
+    init(size: CGFloat, weight: Font.Weight, design: Font.Design, style: Font.TextStyle) {
+        _size = ScaledMetric(wrappedValue: size, relativeTo: style)
+        self.weight = weight
+        self.design = design
+    }
+
+    func body(content: Content) -> some View {
+        content.font(.system(size: size, weight: weight, design: design))
+    }
+}
+
+extension View {
+    /// `.animation(_:value:)` that is skipped when Reduce Motion is on.
+    func motion<Value: Equatable>(_ animation: Animation?, value: Value) -> some View {
+        modifier(MotionModifier(animation: animation, value: value))
+    }
+
+    /// A custom-size system font that still follows Dynamic Type, scaled relative to `style`.
+    func scaledFont(size: CGFloat, weight: Font.Weight = .regular, design: Font.Design = .default,
+                    relativeTo style: Font.TextStyle = .body) -> some View {
+        modifier(ScaledFontModifier(size: size, weight: weight, design: design, style: style))
+    }
+
+    /// A 44pt hit area for a small icon control. Uses the content shape, never a visible background.
+    func tapTarget() -> some View {
+        frame(minWidth: 44, minHeight: 44).contentShape(Rectangle())
+    }
+
+    /// One line of a list row, but free to wrap at accessibility text sizes so names are not cut.
+    func lineLimitUnlessLarge() -> some View {
+        modifier(LineLimitUnlessLargeModifier())
+    }
+
+    /// A headline figure: one line, shrinking only as a last resort at the largest text sizes.
+    func moneyHero() -> some View {
+        lineLimit(1).minimumScaleFactor(0.5)
+    }
 }

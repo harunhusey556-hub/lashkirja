@@ -39,6 +39,30 @@ struct ReceiptsView: View {
     /// Month, tab, category, source and sort are kept between visits (as the purchase invoices' filter).
     private static let filterKey = "kuitit.filter"
 
+    /// The receipts about to be deleted; deleting starts from the main list only.
+    private var deleting: [Receipt] {
+        (receipts.value ?? []).filter { deleteIds.contains($0.id) }
+    }
+
+    /// The dialog names the receipt so the owner sees which one goes.
+    private var deleteTitle: String {
+        if deleteIds.count == 1, let receipt = deleting.first {
+            return "Poistetaanko kuitti · \(receipt.title)?"
+        }
+        return deleteIds.count == 1 ? "Poistetaanko kuitti?" : "Poistetaanko \(deleteIds.count) kuittia?"
+    }
+
+    private var deleteNote: String {
+        let named = deleting
+        guard !named.isEmpty else { return "" }
+        let shown = named.prefix(3).map { receipt -> String in
+            guard let amount = receipt.totalAmount else { return receipt.title }
+            return "\(receipt.title) \(Money.format(amount))"
+        }
+        let more = deleteIds.count - shown.count
+        return "Poistettavat: " + shown.joined(separator: ", ") + (more > 0 ? " ja \(more) muuta." : ".")
+    }
+
     /// Opened from a figure (a report, ALV, Koti) the list shows exactly those rows and leaves the
     /// owner's remembered Kuitit filters alone; opened plainly, it restores and keeps them.
     private let remembers: Bool
@@ -106,7 +130,7 @@ struct ReceiptsView: View {
                 let all = shownReceipts
                 Section {
                     if all.isEmpty {
-                        Text(query.isFiltered ? "Ei hakua vastaavia kuitteja." : "Ei kuitteja.").foregroundStyle(Theme.ink2)
+                        Text(query.emptyText).foregroundStyle(Theme.ink2)
                     }
                     ForEach(all.prefix(limit.visible(all.count))) { receipt in row(receipt) }
                     // Ten at a time; the next server page is asked for only by the button, never on scroll.
@@ -115,7 +139,7 @@ struct ReceiptsView: View {
                         return shownReceipts.count
                     }
                 } header: {
-                    if !all.isEmpty { Text("\(total) kuittia") }
+                    if !all.isEmpty { Text(query.countHeader(total)) }
                 }
             } else {
                 ScreenStateView(state: receipts, retry: load) { (_: [Receipt]) in EmptyView() }.listRowBackground(Color.clear)
@@ -146,9 +170,10 @@ struct ReceiptsView: View {
                 .padding(.bottom, 8)
             }
         }
-        .confirmationDialog(deleteIds.count == 1 ? String("Poistetaanko kuitti?") : String("Poistetaanko \(deleteIds.count) kuittia?"),
-                            isPresented: $confirmDelete, titleVisibility: .visible) {
+        .confirmationDialog(deleteTitle, isPresented: $confirmDelete, titleVisibility: .visible) {
             Button("Poista", role: .destructive) { Task { await delete(deleteIds) } }
+        } message: {
+            Text(deleteNote)
         }
         .fullScreenCover(isPresented: $capture, onDismiss: { Task { await load() } }) { CaptureFlow(transactionId: nil) }
         .alert("Summarajaus", isPresented: $editingAmount) {
@@ -177,8 +202,8 @@ struct ReceiptsView: View {
             if remembers { UserDefaults.standard.set(next.remembered, forKey: Self.filterKey) }
             limit.reset()
         }
-        .animation(.snappy, value: pending.map(\.id))
-        .animation(.snappy, value: rejected.map(\.id))
+        .motion(.snappy, value: pending.map(\.id))
+        .motion(.snappy, value: rejected.map(\.id))
         // Photos kept while offline are sent from here too, not only from the capture screen.
         .task { OfflineReceiptQueueModel.shared.start(app: app) }
     }
@@ -197,12 +222,14 @@ struct ReceiptsView: View {
                     Image(systemName: selected.contains(receipt.id) ? "checkmark.circle.fill" : "circle")
                         .foregroundStyle(selected.contains(receipt.id) ? Theme.accent : Theme.ink2)
                         .imageScale(.large)
-                    ReceiptRow(receipt: receipt)
+                        .accessibilityHidden(true)
+                    ReceiptRow(receipt: receipt, thumbnail: true)
                 }
             }
             .foregroundStyle(Theme.ink)
+            .accessibilityAddTraits(selected.contains(receipt.id) ? .isSelected : [])
         } else {
-            NavigationLink(value: Route.receipt(receipt.id)) { ReceiptRow(receipt: receipt) }
+            NavigationLink(value: Route.receipt(receipt.id)) { ReceiptRow(receipt: receipt, thumbnail: true) }
                 .swipeActions(edge: .trailing) {
                     Button(role: .destructive) {
                         deleteIds = [receipt.id]
@@ -268,7 +295,7 @@ struct ReceiptsView: View {
         Button(action: clear) {
             HStack(spacing: 4) {
                 Text(title)
-                Image(systemName: "xmark").font(.caption2.bold())
+                Image(systemName: "xmark").font(.caption2.bold()).accessibilityHidden(true)
             }
             .font(.caption)
             .foregroundStyle(Theme.accentDark)
@@ -369,7 +396,7 @@ struct ReceiptsView: View {
         let listQuery = asked.listQuery()
         let countsQuery = asked.countsQuery()
         async let countsResponse: ReceiptCounts? = try? api.get("/api/receipts/counts", query: countsQuery)
-        async let queue: ReceiptList? = try? api.get("/api/receipts", query: ["reviewStatus": "pending"])
+        async let queue: ReceiptList? = try? api.get("/api/receipts", query: ReceiptListQuery.pendingQueue())
         async let rejectedResponse: ReceiptList? = try? api.get("/api/receipts", query: ["reviewStatus": "rejected"])
         do {
             let list: ReceiptList = try await api.get("/api/receipts", query: listQuery)
@@ -412,7 +439,7 @@ struct ReceiptsView: View {
         loadingMorePending = true
         defer { loadingMorePending = false }
         do {
-            let page: ReceiptList = try await app.api.get("/api/receipts", query: ["reviewStatus": "pending", "offset": String(pending.count)])
+            let page: ReceiptList = try await app.api.get("/api/receipts", query: ReceiptListQuery.pendingQueue(offset: pending.count))
             pending = ReceiptPaging.append(pending, page.receipts)
             pendingTruncated = page.truncated ?? false
         } catch is CancellationError {
@@ -475,7 +502,7 @@ struct ReceiptsView: View {
             }
             if ids.count > 1 { notice = outcome }
             Haptics.success()
-            withAnimation { pending.removeAll { ids.contains($0.id) } }
+            withMotion { pending.removeAll { ids.contains($0.id) } }
             await load()
         } catch {
             failure = error.userMessage
@@ -490,7 +517,7 @@ struct ReceiptsView: View {
         notice = nil
         defer { busy = false }
         let row = rejected[index]
-        withAnimation {
+        withMotion {
             rejected.remove(at: index)
             rejectedTotal = max(0, rejectedTotal - 1)
         }
@@ -501,7 +528,7 @@ struct ReceiptsView: View {
             await load()
         } catch is CancellationError {
         } catch {
-            withAnimation {
+            withMotion {
                 rejected.insert(row, at: min(index, rejected.count))
                 rejectedTotal += 1
             }
@@ -518,7 +545,7 @@ struct ReceiptsView: View {
         notice = nil
         defer { busy = false }
         // Gone from the list at once; the ones the server refuses come back.
-        withAnimation { app.hide(ids) }
+        withMotion { app.hide(ids) }
         var deleted: [String] = []
         var refused: [String] = []
         var messages: [String] = []
@@ -538,13 +565,13 @@ struct ReceiptsView: View {
             }
         }
         if !deleted.isEmpty {
-            withAnimation {
+            withMotion {
                 receipts.update { rows in rows.removeAll { deleted.contains($0.id) } }
                 total = max(0, total - deleted.count)
             }
             app.dataVersion += 1
         }
-        withAnimation { app.unhide(refused) }
+        withMotion { app.unhide(refused) }
         selected = Set(refused)
         if selecting && refused.isEmpty { selecting = false }
         if refused.isEmpty {
@@ -559,10 +586,13 @@ struct ReceiptsView: View {
 
 struct ReceiptRow: View {
     let receipt: Receipt
+    /// Kuitit shows a small picture of the file; the review queue and mail list stay text only.
+    var thumbnail = false
     var body: some View {
         HStack {
+            if thumbnail { ReceiptThumbnail(receipt: receipt) }
             VStack(alignment: .leading, spacing: 2) {
-                Text(receipt.title).lineLimit(1)
+                Text(receipt.title).lineLimitUnlessLarge()
                 HStack(spacing: 4) {
                     Text([receipt.date.map(APIDate.displayDay), receipt.category.map(ReceiptCategory.label(for:))].compactMap { $0 }.joined(separator: " · "))
                     if receipt.linkedTransaction != nil {
@@ -600,10 +630,10 @@ struct PagedShowMoreButton: View {
                     let before = loaded
                     Task {
                         let after = await fetch()
-                        withAnimation(.snappy) { PagedShowMore.revealFetched(&limit, before: before, after: after) }
+                        withMotion(.snappy) { PagedShowMore.revealFetched(&limit, before: before, after: after) }
                     }
                 case .reveal, .fold:
-                    withAnimation(.snappy) { limit.more(total: loaded) }
+                    withMotion(.snappy) { limit.more(total: loaded) }
                 case nil:
                     break
                 }
@@ -616,6 +646,7 @@ struct PagedShowMoreButton: View {
                     } else {
                         Image(systemName: limit.visible(loaded) >= loaded && !serverHasMore ? "chevron.up" : "chevron.down")
                             .font(.caption.weight(.semibold))
+                            .accessibilityHidden(true)
                     }
                 }
                 .foregroundStyle(Theme.accent)

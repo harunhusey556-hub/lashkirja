@@ -75,13 +75,22 @@ import {
 import { RECEIPT_MATCH_STATUS, receiptMatchStatusKey } from "@/lib/status-labels";
 import { readPageCache, writePageCache } from "@/lib/page-cache";
 import { isUnreadableNote, UNREADABLE_RECEIPT_NOTE } from "@/lib/receipt-unreadable";
-import { useReceiptUploadQueue, validateUploadFile, type ReadyUpload } from "@/components/useReceiptUploadQueue";
+import {
+  useReceiptUploadQueue,
+  validateUploadFile,
+  type AutoSavedUpload,
+  type ReadyUpload,
+} from "@/components/useReceiptUploadQueue";
+import { autoAcceptSummary, uploadOutcomeCounts } from "@/lib/auto-accept";
 import ReceiptUploadArea from "@/components/ReceiptUploadArea";
 import { BottomActions, DetailHero, MoreMenu, PageTitle, Section, StatusTag } from "@/components/ds";
 import { IS_MOBILE_BUILD } from "@/lib/build-target";
 import { useConnectivity } from "@/lib/connectivity";
 import { useOfflineReceiptQueue } from "@/components/useOfflineReceiptQueue";
 import { tintedButtonClass } from "@/components/control-styles";
+import { isPurchaseVatTreatment, PURCHASE_VAT_TREATMENTS, type PurchaseVatTreatment } from "@/lib/alv";
+import { foreignFieldsFromExtraction, fxRateLine, VAT_TREATMENT_HINTS, VAT_TREATMENT_LABELS } from "@/lib/foreign-purchase";
+import OstolaskuNotice from "@/components/OstolaskuNotice";
 
 /** The fields the receipt form shows an error under (the VAT rows are `vat-<n>`). */
 const RECEIPT_FORM_SLOTS = ["vendor", "date", "totalAmount", "category", "reference", "invoiceNumber", "notes"];
@@ -108,6 +117,9 @@ interface ReceiptForm {
   vatDetails: VatRow[];
   reference: string;
   invoiceNumber: string;
+  currency: string;
+  originalAmount: string;
+  vatTreatment: PurchaseVatTreatment;
 }
 
 const emptyForm: ReceiptForm = {
@@ -122,6 +134,9 @@ const emptyForm: ReceiptForm = {
   vatDetails: [],
   reference: "",
   invoiceNumber: "",
+  currency: "EUR",
+  originalAmount: "",
+  vatTreatment: "domestic",
 };
 
 interface ExtractedMeta {
@@ -154,6 +169,12 @@ interface ReceiptResponse {
     type?: string | null;
     reference?: string | null;
     invoiceNumber?: string | null;
+    currency?: string | null;
+    originalAmount?: number | null;
+    fxRate?: number | null;
+    fxRateDate?: string | null;
+    fxSource?: string | null;
+    vatTreatment?: string | null;
     updatedAt?: string;
     linkedTransaction?: LinkedBankTx | null;
     match?: ReceiptMatchData;
@@ -185,6 +206,8 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
   const [formData, setFormData] = useState(emptyForm);
   const [baseline, setBaseline] = useState(emptyForm);
   const [updatedAt, setUpdatedAt] = useState("");
+  // Which rate priced the prefilled euro total; shown only while the owner has not typed another figure.
+  const [fxNote, setFxNote] = useState<{ line: string; total: string } | null>(null);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [conflict, setConflict] = useState(false);
   const [useCustomCategory, setUseCustomCategory] = useState(false);
@@ -241,6 +264,13 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
       fieldConfidence: upload.extracted.fieldConfidence,
     });
     const extractedTotal = moneyField(upload.extracted.totalAmount);
+    const fxLine = fxRateLine({
+      currency: upload.extracted.currency,
+      fxRate: upload.extracted.fxRate,
+      fxRateDate: upload.extracted.fxRateDate,
+      fxSource: upload.extracted.fxSource,
+    });
+    setFxNote(fxLine && extractedTotal ? { line: fxLine, total: extractedTotal } : null);
     setFormData({
       vendor: upload.extracted.vendor || "",
       date: upload.extracted.date || "",
@@ -260,6 +290,18 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
       ),
       reference: upload.extracted.reference || "",
       invoiceNumber: upload.extracted.invoiceNumber || "",
+      ...foreignFieldsFromExtraction({
+        currency: upload.extracted.currency,
+        sellerCountry: upload.extracted.sellerCountry,
+        category: upload.extracted.category,
+        notes: upload.extracted.notes,
+        type: upload.extracted.type || "meno",
+        vatDetails: (upload.extracted.vatDetails ?? []).map((detail) => ({ rate: detail.rate ?? 0, amount: detail.amount ?? 0 })),
+      }),
+      // A non-EUR document keeps the amount the reading found in its own
+      // currency; the euro figure is the document's own or the ECB rate's (shown
+      // under the amount), and the owner can overwrite it.
+      originalAmount: moneyField(upload.extracted.originalAmount),
     });
     setUseCustomCategory(!knownCategory && Boolean(upload.extracted.category));
     setFormReady(true);
@@ -284,13 +326,17 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
   }
 
   function handleFilesPicked(files: File[]) {
-    const invalid = files.map((file) => validateUploadFile(file)).find((message) => message);
-    if (invalid) {
-      setError(invalid);
+    // One unreadable file must not drop a migration-size pick (W1's finding): every
+    // file is enqueued and the queue marks an unacceptable one as failed on its own
+    // row, with its own message. Only a pick where nothing at all is acceptable
+    // keeps the single one-line error.
+    const acceptable = files.filter((file) => !validateUploadFile(file));
+    if (acceptable.length === 0) {
+      setError(files.map((file) => validateUploadFile(file)).find(Boolean) ?? "");
       return;
     }
     if (IS_MOBILE_BUILD && !isConnectivityOk()) {
-      void captureOffline(files);
+      void captureOffline(acceptable);
       return;
     }
     setError("");
@@ -301,7 +347,25 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
     void captureOffline([file]);
   }
 
-  const uploadQueue = useReceiptUploadQueue(applyUpload, IS_MOBILE_BUILD ? handleUploadNetworkFailure : undefined);
+  // W8: a read file is saved without the form (complete = approved). Off when
+  // editing, and when the pick is for one bank row: that link is
+  // made by the form's own save (captureTransactionId).
+  const uploadQueue = useReceiptUploadQueue(
+    applyUpload,
+    IS_MOBILE_BUILD ? handleUploadNetworkFailure : undefined,
+    { enabled: !isEdit && !captureTransactionId, onSingleSaved: handleSingleAutoSaved }
+  );
+
+  function handleSingleAutoSaved(saved: AutoSavedUpload) {
+    showToast({
+      tone: saved.outcome === "approved" ? "success" : "info",
+      text:
+        saved.outcome === "approved"
+          ? "Kuitti hyväksyttiin automaattisesti."
+          : "Kuitti tallennettiin. Se odottaa tarkistusta.",
+    });
+    router.push(detailHref("receipt", saved.receiptId, { new: "true" }));
+  }
 
   async function pickNativeOrInput(
     native: () => Promise<NativePick>,
@@ -325,8 +389,36 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
     }
   }
   const uploading = uploadQueue.rows.some(
-    (row) => row.status === "uploading" || row.status === "processing"
+    (row) => row.status === "uploading" || row.status === "processing" || row.status === "saving"
   );
+
+  // C (W8): the outcome of a pick of several files, counted from the queue
+  // rows themselves, so the summary can never disagree with the list under it.
+  const outcomeCounts = uploadOutcomeCounts(uploadQueue.rows);
+  const queueSettled =
+    uploadQueue.rows.length > 0 &&
+    !uploadQueue.rows.some((row) =>
+      ["pending", "uploading", "processing", "saving"].includes(row.status)
+    );
+  // Shown from the first saved file on, with the running counts; the toast
+  // comes once, when the last file has an outcome.
+  const showImportSummary =
+    !isEdit && uploadQueue.rows.length > 1 && uploadQueue.rows.some((row) => row.status === "saved");
+  const stillWorking = uploadQueue.rows.filter((row) =>
+    ["pending", "uploading", "processing", "saving"].includes(row.status)
+  ).length;
+  const importSummary = autoAcceptSummary(outcomeCounts);
+  const reviewHref = "/kuitit?tarkista=1";
+  const summaryToastShown = useRef("");
+  useEffect(() => {
+    if (!showImportSummary || !queueSettled || summaryToastShown.current === importSummary) return;
+    summaryToastShown.current = importSummary;
+    showToast({
+      tone: outcomeCounts.failed > 0 ? "info" : "success",
+      text: importSummary,
+      action: { label: "Näytä", onAction: () => router.push(outcomeCounts.pending > 0 ? reviewHref : "/kuitit") },
+    });
+  }, [showImportSummary, queueSettled, importSummary, outcomeCounts.failed, outcomeCounts.pending, router]);
 
   // OWN-04 / BOOKS-18 / SHELL-02: "Ota kuva" in the Lisää sheet already took
   // the photo. On /kuitit/uusi?from=camera the picked files are drained once
@@ -363,9 +455,13 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fromCamera]);
   const handoffFailed = uploadQueue.rows.some((row) => row.status === "failed" || row.status === "cancelled");
-  const showHandoff = cameraHandoff && !formReady && !error && !handoffFailed;
+  // Several photos from the camera are saved without the form: once the queue
+  // settles, the list and its summary replace the hand-off spinner.
+  const showHandoff = cameraHandoff && !formReady && !error && !handoffFailed && !queueSettled;
   const handoffProgress =
-    uploadQueue.rows.find((row) => row.status === "uploading" || row.status === "processing")?.progress ||
+    uploadQueue.rows.find(
+      (row) => row.status === "uploading" || row.status === "processing" || row.status === "saving"
+    )?.progress ||
     uploadProgress ||
     "Lähetetään kuvaa…";
 
@@ -444,7 +540,13 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
       vatDetails,
       reference: r.reference || "",
       invoiceNumber: r.invoiceNumber || "",
+      currency: r.currency || "EUR",
+      originalAmount: moneyField(r.originalAmount ?? null),
+      vatTreatment: isPurchaseVatTreatment(r.vatTreatment) ? r.vatTreatment : "domestic",
     };
+    // Auto-saved foreign receipts never pass the upload screen, so the rate is shown here too.
+    const savedFxLine = fxRateLine({ currency: r.currency, fxRate: r.fxRate, fxRateDate: r.fxRateDate, fxSource: r.fxSource });
+    setFxNote(savedFxLine && totalText ? { line: savedFxLine, total: totalText } : null);
     setFormData(loaded);
     setBaseline(loaded);
     setUpdatedAt(r.updatedAt ? String(r.updatedAt) : "");
@@ -630,6 +732,17 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
     }
   }
 
+  /** The form takes the bank row's amount; the owner sees the change and saves it (VAT follows like a typed total). */
+  function handleFitToBank(bankAmount: number) {
+    const totalAmount = moneyField(bankAmount);
+    setFormData((prev) => ({
+      ...prev,
+      totalAmount,
+      vatDetails: syncAutoVat(prev.vatDetails, totalAmount),
+    }));
+    showToast({ tone: "info", text: "Summa vaihdettu pankin mukaan. Tarkista ALV ja tallenna." });
+  }
+
   async function handleSave() {
     const resolvedCategory = useCustomCategory
       ? formData.customCategory.trim()
@@ -685,6 +798,9 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
         type: formData.type,
         reference: formData.reference || null,
         invoiceNumber: formData.invoiceNumber || null,
+        currency: /^[A-Za-z]{3}$/.test(formData.currency.trim()) ? formData.currency.trim().toUpperCase() : "EUR",
+        originalAmount: formData.currency.trim().toUpperCase() === "EUR" ? null : parseReceiptAmount(formData.originalAmount),
+        vatTreatment: formData.type === "tulo" ? "domestic" : formData.vatTreatment,
       };
 
       const res = isEdit
@@ -950,7 +1066,42 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
         </SkeletonGroup>
       )}
 
+      {/* C (W8): the files were saved as they were read - complete ones
+          approved, the rest waiting in Kuitit for review. This tells the truth
+          about each bucket and leads to the ones that need the owner. */}
+      {showImportSummary && (
+        <div
+          className="flex flex-col gap-3 rounded-card border border-line bg-surface px-4 py-3"
+          role="status"
+          aria-live={queueSettled ? "polite" : "off"}
+        >
+          <p className="text-body text-ink">{importSummary}</p>
+          {stillWorking > 0 && (
+            <p className="text-caption text-ink-2">Käsitellään vielä {stillWorking}…</p>
+          )}
+          {queueSettled && outcomeCounts.failed > 0 && (
+            <p className="text-caption text-ink-2">
+              Epäonnistuneet ovat alla syineen. Voit yrittää ne uudelleen.
+            </p>
+          )}
+          {outcomeCounts.pending > 0 && (
+            <Link href={reviewHref} className={buttonClass("primary", "w-full")}>
+              Näytä tarkistettavat ({outcomeCounts.pending})
+            </Link>
+          )}
+          {/* Approved but not yet explained by a bank row is a normal state;
+              this is the list the owner goes through next. */}
+          <Link href="/kuitit?nayta=ei-kohdistettu" className={buttonClass("secondary", "w-full")}>
+            Näytä ei kohdistetut
+          </Link>
+          <Link href="/kuitit" className={tintedButtonClass("neutral", "self-center")}>
+            Siirry kuitteihin
+          </Link>
+        </div>
+      )}
+
       {!isEdit && !formReady && !showHandoff && (
+
         <ReceiptUploadArea
           fileInputRef={fileInputRef}
           cameraInputRef={cameraInputRef}
@@ -997,8 +1148,10 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
                     match={matchData}
                     linkedTransaction={linkedTx}
                     busy={matchBusy}
+                    receiptTotal={parseReceiptAmount(baseline.totalAmount)}
                     onConfirm={handleMatchConfirm}
                     onUnlink={linkedTx ? handleMatchUnlink : undefined}
+                    onFitToBank={handleFitToBank}
                   />
                 </ErrorBoundary>
               </Section>
@@ -1052,6 +1205,8 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
                     )}
 
                     {originalName && <p className="text-caption text-ink-2">{originalName}</p>}
+
+                    {isEdit && receiptId ? <OstolaskuNotice receiptId={receiptId} receiptType={formData.type} /> : null}
 
                     <div>
                       <label htmlFor="receipt-vendor" className={LABEL_CLASS}>Myyjä</label>
@@ -1141,6 +1296,11 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
                           aria-describedby={fieldErrors.totalAmount ? "receipt-total-error" : undefined}
                           className={fieldClass(lowAmount)}
                         />
+                        {fxNote && fxNote.total === formData.totalAmount && (
+                          <p className="mt-1.5 text-caption text-ink-2" data-testid="receipt-fx-rate">
+                            {fxNote.line}
+                          </p>
+                        )}
                         {lowAmount && !fieldErrors.totalAmount && (
                           <p className="mt-1.5 text-caption text-warning">Epävarma tunnistus</p>
                         )}
@@ -1187,6 +1347,63 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
 
               <Section title="ALV-erittely">
                 <div className="space-y-3 px-4 py-4">
+                  {formData.type === "meno" && (
+                    <div className="field-grid">
+                      <div>
+                        <label htmlFor="receipt-vat-treatment" className={LABEL_CLASS}>
+                          ALV-käsittely
+                        </label>
+                        <select
+                          id="receipt-vat-treatment"
+                          value={formData.vatTreatment}
+                          onChange={(e) =>
+                            setFormData({ ...formData, vatTreatment: e.target.value as PurchaseVatTreatment })
+                          }
+                          className={controlClass}
+                        >
+                          {PURCHASE_VAT_TREATMENTS.map((treatment) => (
+                            <option key={treatment} value={treatment}>
+                              {VAT_TREATMENT_LABELS[treatment]}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      <div>
+                        <label htmlFor="receipt-currency" className={LABEL_CLASS}>
+                          Valuutta
+                        </label>
+                        <input
+                          id="receipt-currency"
+                          type="text"
+                          value={formData.currency}
+                          maxLength={3}
+                          autoCapitalize="characters"
+                          onChange={(e) => setFormData({ ...formData, currency: e.target.value.toUpperCase() })}
+                          className={controlClass}
+                        />
+                      </div>
+                      {formData.currency.trim().toUpperCase() !== "EUR" && (
+                        <div>
+                          <label htmlFor="receipt-original-amount" className={LABEL_CLASS}>
+                            {`Summa (${formData.currency.trim().toUpperCase() || "valuutta"})`}
+                          </label>
+                          <input
+                            id="receipt-original-amount"
+                            type="text"
+                            inputMode="decimal"
+                            value={formData.originalAmount}
+                            onChange={(e) => setFormData({ ...formData, originalAmount: e.target.value })}
+                            className={controlClass}
+                          />
+                        </div>
+                      )}
+                    </div>
+                  )}
+                  {formData.type === "meno" && formData.vatTreatment !== "domestic" && (
+                    <p className="text-caption text-ink-2" data-testid="vat-treatment-hint">
+                      {VAT_TREATMENT_HINTS[formData.vatTreatment]}
+                    </p>
+                  )}
                   {formData.vatDetails.length === 0 && (
                     <p className="text-body text-ink-2" data-testid="vat-empty">
                       Ei ALV-erittelyä. Lisää rivi, jos kuitilla on ALV.

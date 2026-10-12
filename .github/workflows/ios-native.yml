@@ -80,6 +80,17 @@ jobs:
             -sdk iphoneos -destination 'generic/platform=iOS' -derivedDataPath build \
             API_BASE_URL="$API_URL" CURRENT_PROJECT_VERSION=${{ github.run_number }} \
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" build | xcbeautify --renderer github-actions
+          # A Release IPA must talk to a real https server and carry a build number that names this run.
+          PLIST=build/Build/Products/Release-iphoneos/LashKirja.app/Info.plist
+          BASE=$(/usr/libexec/PlistBuddy -c "Print :LKAPIBaseURL" "$PLIST")
+          BUILD=$(/usr/libexec/PlistBuddy -c "Print :CFBundleVersion" "$PLIST")
+          echo "API base: $BASE, build: $BUILD"
+          case "$BASE" in
+            https://localhost*|https://127.*|https://0.0.0.0*|https://*.local*|https://invalid*) echo "::error::API base '$BASE' is a local or placeholder host"; exit 1 ;;
+            https://*) ;;
+            *) echo "::error::API base '$BASE' is not https"; exit 1 ;;
+          esac
+          [ "$BUILD" = "${{ github.run_number }}" ] || { echo "::error::CFBundleVersion '$BUILD' is not the run number"; exit 1; }
           mkdir -p Payload && cp -R build/Build/Products/Release-iphoneos/LashKirja.app Payload/
           zip -qry LashKirja-native-unsigned.ipa Payload
       - uses: actions/upload-artifact@v4

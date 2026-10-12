@@ -91,3 +91,12 @@ export function resetRateLimitsForTests(): void {
   buckets.clear();
 }
 
+/**
+ * Receipt uploads per owner in 10 minutes, shared by the app, the web, the
+ * offline inbox and the assistant. The ceiling exists to stop a runaway
+ * client, not to throttle a migration: a company moving onto the app imports
+ * hundreds of receipts (native `ReceiptUploadQueue.maxPick` is 200) in one
+ * sitting, so the window admits a few hundred uploads while still bounding a
+ * stuck client to ~1 per second.
+ */
+export const RECEIPT_UPLOADS_PER_WINDOW = 600;

@@ -14,6 +14,9 @@ struct ReceiptDetailView: View {
     @State private var matchSubmit = SubmitGuard()
     private var matchBusy: Bool { matchSubmit.inFlight }
     @State private var reviewBusy = false
+    /// The ostolasku this receipt is filed as (nil until known, or while the server lacks the route).
+    @State private var ostolasku: ReceiptPurchaseInvoiceView?
+    @State private var kindBusy = false
     @State private var prefetched = false
     @State private var ruleActive = false
     @State private var ruleBusy = false
@@ -31,12 +34,25 @@ struct ReceiptDetailView: View {
                 }
                 Section {
                     VStack(spacing: 6) {
-                        if let amount = r.totalAmount { MoneyText(amount: amount).font(.system(size: 34, weight: .bold, design: .rounded)) }
+                        if let amount = r.totalAmount { MoneyText(amount: amount).scaledFont(size: 34, weight: .bold, design: .rounded, relativeTo: .largeTitle).moneyHero() }
+                        // Which rate priced a foreign-currency document ("Kurssi 1 USD = 0,8749 EUR (EKP 10.7.2026)").
+                        if let rateLine = r.fxRateLine {
+                            Text(rateLine).font(.caption).foregroundStyle(Theme.ink2).multilineTextAlignment(.center)
+                        }
                         Text(r.title).font(.headline)
                         Text(r.isIncome ? "Tulo" : "Meno").font(.caption).foregroundStyle(Theme.ink2)
                     }
                     .frame(maxWidth: .infinity)
                     .listRowBackground(Color.clear)
+                }
+                ostolaskuSection(r)
+                // Review screen: the picture is on the page, so the fields are checked against it
+                // without a trip to "Näytä kuitti".
+                if r.hasOriginalFile && r.reviewStatus == "pending" {
+                    Section {
+                        ReceiptPreviewImage(receiptId: receiptId) { showFile = true }
+                            .listRowInsets(EdgeInsets())
+                    }
                 }
                 Section {
                     if let date = r.date { LabeledContent("Päivä", value: APIDate.displayDay(date)) }
@@ -85,6 +101,7 @@ struct ReceiptDetailView: View {
                         Button { editing = true } label: { Label("Muokkaa", systemImage: "pencil") }
                         Button(role: .destructive) { confirmDelete = true } label: { Label("Poista kuitti", systemImage: "trash") }
                     } label: { Image(systemName: "ellipsis.circle") }
+                    .accessibilityLabel("Toiminnot")
                 }
             }
         }
@@ -103,11 +120,81 @@ struct ReceiptDetailView: View {
                 }
             }
         }
-        .confirmationDialog("Poistetaanko kuitti?", isPresented: $confirmDelete, titleVisibility: .visible) {
+        .confirmationDialog(deleteTitle, isPresented: $confirmDelete, titleVisibility: .visible) {
             Button("Poista", role: .destructive) { Task { await delete() } }
+        } message: {
+            Text(deleteNote)
         }
         .task { await load() }
         .onDisappear { toastTask?.cancel() }
+    }
+
+    /// The delete dialog names the receipt, so it is clear which one goes.
+    private var deleteTitle: String {
+        guard let r = state.value else { return "Poistetaanko kuitti?" }
+        return "Poistetaanko kuitti · \(r.title)?"
+    }
+
+    private var deleteNote: String {
+        guard let r = state.value else { return "" }
+        guard let amount = r.totalAmount else { return "\(r.title) poistetaan." }
+        return "\(r.title) · \(Money.format(amount)) poistetaan."
+    }
+
+    // MARK: Ostolasku
+
+    /// One document, one home: a receipt filed as an ostolasku says so and links there; the owner can
+    /// also say what the document is ("Ei ole lasku" cancels the ostolasku, "Merkitse ostolaskuksi" files it).
+    @ViewBuilder private func ostolaskuSection(_ r: Receipt) -> some View {
+        if let notice = ReceiptOstolaskuNotice.make(view: ostolasku, receiptType: r.type) {
+            switch notice {
+            case .filed(let invoiceId, let headline, let canMarkAsReceipt):
+                Section {
+                    Text(headline).font(.subheadline.weight(.semibold)).foregroundStyle(Theme.ink)
+                    NavigationLink(value: Route.purchaseInvoice(invoiceId)) {
+                        Label("Avaa ostolasku", systemImage: "tray.full")
+                    }
+                    if canMarkAsReceipt {
+                        Button { Task { await setKind(.receipt) } } label: { Label("Ei ole lasku", systemImage: "xmark.circle") }
+                            .disabled(kindBusy)
+                    }
+                }
+                .listRowBackground(Theme.accentSoft)
+            case .offer(let text):
+                Section {
+                    Text(text).font(.subheadline).foregroundStyle(Theme.ink2)
+                    Button { Task { await setKind(.invoice) } } label: { Label("Merkitse ostolaskuksi", systemImage: "tray.and.arrow.down") }
+                        .disabled(kindBusy)
+                }
+            }
+        }
+    }
+
+    /// The notice is extra information on the receipt screen; without it the screen still works.
+    private func loadOstolasku() async {
+        let view: ReceiptPurchaseInvoiceView? = try? await app.api.get("/api/receipts/\(receiptId)/purchase-invoice")
+        ostolasku = view
+    }
+
+    private func setKind(_ kind: ReceiptDocumentKind) async {
+        guard !kindBusy else { return }
+        kindBusy = true
+        failure = nil
+        defer { kindBusy = false }
+        do {
+            let result: ReceiptDocumentKindResult = try await app.api.send(
+                "PATCH", "/api/receipts/\(receiptId)", body: ReceiptDocumentKindBody(kind)
+            )
+            Haptics.success()
+            showToast(result.message(for: kind), action: nil, run: nil)
+            app.dataVersion += 1
+            await loadOstolasku()
+        } catch is CancellationError {
+        } catch {
+            // The server's own sentence, e.g. that an ostolasku with payments cannot become a kuitti.
+            failure = error.userMessage
+            Haptics.error()
+        }
     }
 
     // MARK: Vendor rule
@@ -181,8 +268,15 @@ struct ReceiptDetailView: View {
         Section {
             if let tx = r.linkedTransaction {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(ReceiptMatchText.isStrong(score: tx.bestScore, reasons: tx.bestReasons) ? "Kohdistettu, varma osuma" : "Kohdistettu pankkitapahtumaan")
-                        .font(.caption.weight(.semibold)).foregroundStyle(Theme.success)
+                    if let gap = ReceiptMatchText.amountGap(bank: tx.amount, receiptTotal: r.totalAmount) {
+                        Text(ReceiptMatchText.gapTitle(gap))
+                            .font(.caption.weight(.semibold)).foregroundStyle(Theme.warning)
+                        Text("Pankista maksettiin \(Money.format(abs(tx.amount))), kuitissa on \(Money.format(r.totalAmount ?? 0)). Kirjanpito laskee kuitin summan, joten korjaa summa tai poista kohdistus.")
+                            .font(.caption).foregroundStyle(Theme.ink2)
+                    } else {
+                        Text(ReceiptMatchText.isStrong(score: tx.bestScore, reasons: tx.bestReasons) ? "Kohdistettu, varma osuma" : "Kohdistettu pankkitapahtumaan")
+                            .font(.caption.weight(.semibold)).foregroundStyle(Theme.success)
+                    }
                     transactionLine(tx)
                     let reasons = ReceiptMatchText.reasons(tx.bestReasons)
                     if !reasons.isEmpty { Text("Peruste: \(reasons)").font(.caption).foregroundStyle(Theme.ink2) }
@@ -227,7 +321,7 @@ struct ReceiptDetailView: View {
     private func transactionLine(_ tx: Receipt.LinkedTransaction) -> some View {
         HStack {
             VStack(alignment: .leading, spacing: 2) {
-                Text(tx.counterparty ?? "Pankkitapahtuma").lineLimit(1)
+                Text(tx.counterparty ?? "Pankkitapahtuma").lineLimitUnlessLarge()
                 if let date = tx.date { Text(APIDate.displayDay(date)).font(.caption).foregroundStyle(Theme.ink2) }
             }
             Spacer()
@@ -284,11 +378,11 @@ struct ReceiptDetailView: View {
     private func showToast(_ text: String, action: String?, run: (() async -> Void)?) {
         toastTask?.cancel()
         toastAction = run
-        withAnimation(.snappy) { toast = Toast(text: text, actionLabel: action) }
+        withMotion(.snappy) { toast = Toast(text: text, actionLabel: action) }
         toastTask = Task {
             try? await Task.sleep(nanoseconds: 5_000_000_000)
             guard !Task.isCancelled else { return }
-            withAnimation { toast = nil }
+            withMotion { toast = nil }
             toastAction = nil
         }
     }
@@ -297,7 +391,7 @@ struct ReceiptDetailView: View {
         let action = toastAction
         toastTask?.cancel()
         toastAction = nil
-        withAnimation { toast = nil }
+        withMotion { toast = nil }
         if let action { Task { await action() } }
     }
 
@@ -318,6 +412,7 @@ struct ReceiptDetailView: View {
                 DocumentCache.shared.prefetch(app, path: "/api/receipts/\(receiptId)/file", query: Self.fileQuery, fileName: r.receipt.fileName ?? "kuitti", key: Self.fileCacheKey)
             }
             await loadRule(vendor: r.receipt.vendor)
+            await loadOstolasku()
         } catch is CancellationError {
         } catch {
             state.fail(error)
@@ -418,6 +513,7 @@ struct ReceiptEditSheet: View {
                 } header: {
                     Text("Kategoria")
                 }
+                if form.type == "meno" { foreignPurchaseSection }
                 vatSection
                 Section {
                     TextField("Viitenumero", text: $form.reference)
@@ -476,6 +572,25 @@ struct ReceiptEditSheet: View {
         }
     }
 
+    /// How the purchase's VAT reaches the return, and the document's currency (web "ALV-käsittely").
+    private var foreignPurchaseSection: some View {
+        Section {
+            Picker("ALV-käsittely", selection: $form.vatTreatment) {
+                ForEach(PurchaseVatTreatment.allCases) { treatment in
+                    Text(treatment.label).tag(treatment)
+                }
+            }
+            .pickerStyle(.navigationLink)
+            TextField("Valuutta", text: $form.currency)
+                .textInputAutocapitalization(.characters)
+                .autocorrectionDisabled()
+        } header: {
+            Text("ALV-käsittely")
+        } footer: {
+            if !form.vatTreatment.hint.isEmpty { Text(form.vatTreatment.hint) }
+        }
+    }
+
     private var vatSection: some View {
         Section {
             if form.vatRows.isEmpty {
@@ -494,7 +609,7 @@ struct ReceiptEditSheet: View {
                     TextField("ALV €", text: Binding(get: { row.amountText }, set: { form.setVatAmount($0, at: index) }))
                         .moneyInput()
                         .multilineTextAlignment(.trailing)
-                    Button(role: .destructive) { form.removeVatRow(at: index) } label: { Image(systemName: "minus.circle") }
+                    Button(role: .destructive) { form.removeVatRow(at: index) } label: { Image(systemName: "minus.circle").tapTarget() }
                         .buttonStyle(.borderless)
                         .accessibilityLabel("Poista ALV-rivi")
                 }

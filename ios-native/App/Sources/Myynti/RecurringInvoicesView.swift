@@ -105,7 +105,7 @@ struct RecurringInvoicesView: View {
     private func row(_ entry: RecurringInvoice) -> some View {
         HStack(alignment: .firstTextBaseline) {
             VStack(alignment: .leading, spacing: 3) {
-                Text(entry.title).lineLimit(1)
+                Text(entry.title).lineLimitUnlessLarge()
                 Text(entry.secondary(today: APIDate.dayString(Date()))).font(.caption).foregroundStyle(Theme.ink2)
             }
             Spacer()
@@ -119,7 +119,7 @@ struct RecurringInvoicesView: View {
                         .foregroundStyle(Theme.ink2)
                 }
             }
-            Image(systemName: "chevron.right").font(.footnote.weight(.semibold)).foregroundStyle(Theme.ink2)
+            Image(systemName: "chevron.right").font(.footnote.weight(.semibold)).foregroundStyle(Theme.ink2).accessibilityHidden(true)
         }
         .padding(.vertical, 2)
         .contentShape(Rectangle())
@@ -424,9 +424,9 @@ struct RecurringFormSheet: View {
                     }
                     .onDelete { offsets in
                         let ids = offsets.map { draft.lines[$0].id }
-                        Task { @MainActor in withAnimation { draft.lines.removeAll { ids.contains($0.id) } } }
+                        Task { @MainActor in withMotion { draft.lines.removeAll { ids.contains($0.id) } } }
                     }
-                    Button { withAnimation { draft.lines.append(.new(sellerRegistered: sellerRegistered)) } } label: { Label("Lisää rivi", systemImage: "plus") }
+                    Button { withMotion { draft.lines.append(.new(sellerRegistered: sellerRegistered)) } } label: { Label("Lisää rivi", systemImage: "plus") }
                 }
                 if let failure { Section { Text(failure).foregroundStyle(Theme.danger) } }
             }

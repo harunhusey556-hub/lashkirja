@@ -7,6 +7,12 @@ import {
   parseXLSX,
   parseCSV,
   parsePDFStatement,
+  derivedMonthEndBalances,
+  monthEndBalances,
+  parsePrintedBalances,
+  parseCamtBalances,
+  type PrintedBalance,
+  statementHeaderText,
 } from "@/lib/parsers";
 import {
   MAX_STATEMENT_BYTES,
@@ -23,8 +29,9 @@ import { inferTransactionType } from "@/lib/statements";
 import { listStatementsForUser } from "@/lib/statement-api";
 import { centsToEuros } from "@/lib/money";
 import { autoGenerateIncomeReceipts } from "@/lib/income-automation";
-import { archivedAccountForIban, archivedAccountImportNotice, resolveAccountForImport } from "@/lib/bank-accounts";
-import { extractOwnIban } from "@/lib/iban";
+import { archivedAccountForIban, archivedAccountImportNotice, resolveAccountForImport, upsertMonthlyBalance } from "@/lib/bank-accounts";
+import { isValidIban, normalizeIban, ownIbanOf } from "@/lib/iban";
+import { formatIbanDisplay } from "@/lib/enablebanking/mapping";
 import { Prisma } from "@/generated/prisma/client";
 import { loadStoredRowIdentities, lockedRowsNotice, skippedRowsNotice, splitNewRows } from "@/lib/bank-row-fingerprint";
 
@@ -34,6 +41,140 @@ import { AppError } from "@/lib/api-errors";
 function publicTransaction<T extends { amountCents: number }>(tx: T) {
   const { amountCents, ...rest } = tx;
   return { ...rest, amount: centsToEuros(amountCents) };
+}
+
+/**
+ * Balances the statement prints become the account's month-end balances, so its saldo is the
+ * bank's and not one counted up from an opening balance of 0 (2026-10-09, Holvi PDF). One the
+ * owner entered stays; a month that cannot take one (closed, before the account) is skipped.
+ */
+async function recordPrintedBalances(
+  userId: string,
+  bankAccountId: string | null,
+  headerText: string | null,
+  rows: Array<{ date: string | null; amount: number }>,
+  fileName: string,
+  ibanHint: string | null = null
+): Promise<number> {
+  if (!bankAccountId || !headerText) return 0;
+  const printed = [...parsePrintedBalances(headerText), ...parseCamtBalances(headerText)];
+  await fitAccountToStatement(userId, bankAccountId, printed, rows, ibanHint);
+  // Printed month ends first; the ones counted from the opening and closing balance fill in.
+  const ends = new Map(derivedMonthEndBalances(printed, rows).map((row) => [row.month, row.closingBalance]));
+  for (const row of monthEndBalances(printed)) ends.set(row.month, row.closingBalance);
+  let stored = 0;
+  for (const [month, closingBalance] of ends) {
+    const existing = await prisma.monthlyBalance.findUnique({
+      where: { bankAccountId_month: { bankAccountId, month } },
+      select: { source: true },
+    });
+    if (existing?.source === "manual") continue;
+    await upsertMonthlyBalance(userId, bankAccountId, { month, closingBalance, source: "statement", note: fileName.slice(0, 200) })
+      .then(() => { stored += 1; })
+      .catch((e: unknown) => console.warn(`Statement upload: month-end balance ${month} not stored:`, e instanceof Error ? e.message : e));
+  }
+  return stored;
+}
+
+/**
+ * A statement that reaches back before its account fits the account to itself, when the account
+ * is still as the app made it: opening balance 0 (never entered by the owner) and no stored row
+ * dated before the statement starts. Then:
+ * - the opening date moves back to the statement's first day (the first printed SALDO, else the
+ *   first row), because an account added in the app gets today as its opening date and every
+ *   month-end balance and row before it was refused (prod 2026-10-09: "Kuukausi on ennen tilin
+ *   avauspäivää" for June-September of a Holvi statement uploaded on 9.10.);
+ * - the opening balance becomes the statement's first printed SALDO (Holvi "SALDO 5.6. +83,01");
+ * - an account without an IBAN takes the file's own IBAN, if no other account of the user has it.
+ * An opening balance the owner set is their decision and is never changed.
+ */
+async function fitAccountToStatement(
+  userId: string,
+  bankAccountId: string,
+  printed: PrintedBalance[],
+  rows: Array<{ date: string | null }>,
+  ibanHint: string | null
+) {
+  const account = await prisma.bankAccount.findFirst({
+    where: { id: bankAccountId, userId },
+    select: { openingBalanceCents: true, openingDate: true, iban: true },
+  });
+  if (!account) return;
+  const first = [...printed].sort((a, b) => a.date.localeCompare(b.date))[0];
+  const firstRowDay = rows.map((row) => row.date).filter((d): d is string => Boolean(d)).sort()[0];
+  const startDay = first?.date ?? firstRowDay;
+  const data: { openingDate?: Date; openingBalanceCents?: number; iban?: string } = {};
+  // The opening only while it is still the default 0; the IBAN also for an account whose owner
+  // entered an opening balance (audit 2026-10-09: the IBAN was never filled there, so the bank
+  // feed could not find the account's file rows and stored them again).
+  if (startDay && account.openingBalanceCents === 0) {
+    const startsAt = new Date(`${startDay}T00:00:00.000Z`);
+    const earlier = await prisma.transaction.count({
+      where: { statement: { bankAccountId }, date: { lt: startsAt } },
+    });
+    if (earlier === 0) {
+      if (startsAt < account.openingDate) data.openingDate = startsAt;
+      if (first && first.date === startDay && first.balance !== 0) data.openingBalanceCents = eurosToCents(first.balance);
+    }
+  }
+  if (!account.iban && ibanHint) {
+    const iban = normalizeIban(ibanHint);
+    const taken = isValidIban(iban) && (await prisma.bankAccount.findFirst({ where: { userId, iban }, select: { id: true } }));
+    if (isValidIban(iban) && !taken) data.iban = iban;
+  }
+  if (Object.keys(data).length === 0) return;
+  await prisma.bankAccount.update({ where: { id: bankAccountId }, data });
+}
+
+/**
+ * A file read again brings the whole message of a row stored with a cut one: the Holvi PDF parser
+ * kept only a message's first line until 2026-10-09 ("MobilePay Ella Anni Ilma" of "MobilePay Ella
+ * Anni Ilma Lehtoranta"). Only a file row of the same account, day, amount and counterparty whose
+ * stored message is the start of the new one; nothing else about the row changes.
+ */
+async function completeCutMessages(
+  userId: string,
+  bankAccountId: string | null,
+  rows: Array<{ date: string | null; amount: number; counterparty: string | null; message: string | null }>
+): Promise<number> {
+  if (!bankAccountId) return 0;
+  const full = rows.filter((row) => row.date && row.message);
+  if (full.length === 0) return 0;
+  const days = full.map((row) => row.date!.slice(0, 10)).sort();
+  const end = new Date(`${days[days.length - 1]}T00:00:00.000Z`);
+  end.setUTCDate(end.getUTCDate() + 1);
+  const stored = await prisma.transaction.findMany({
+    where: {
+      userId,
+      source: "file",
+      statement: { userId, bankAccountId },
+      date: { gte: new Date(`${days[0]}T00:00:00.000Z`), lt: end },
+    },
+    select: { id: true, date: true, amountCents: true, counterparty: true, message: true },
+  });
+  const squash = (value: string | null | undefined) => (value ?? "").replace(/\s+/g, " ").trim();
+  const used = new Set<string>();
+  let completed = 0;
+  for (const row of full) {
+    const message = squash(row.message);
+    const cents = eurosToCents(row.amount);
+    const day = row.date!.slice(0, 10);
+    const cut = stored.find(
+      (tx) =>
+        !used.has(tx.id) &&
+        tx.date?.toISOString().slice(0, 10) === day &&
+        tx.amountCents === cents &&
+        squash(tx.counterparty) === squash(row.counterparty) &&
+        squash(tx.message).length > 0 &&
+        squash(tx.message).length < message.length &&
+        message.startsWith(squash(tx.message))
+    );
+    if (!cut) continue;
+    used.add(cut.id);
+    await prisma.transaction.update({ where: { id: cut.id }, data: { message } });
+    completed += 1;
+  }
+  return completed;
 }
 
 /** Most common YYYY-MM among the rows' dates; the fallback when none has a date. */
@@ -54,6 +195,10 @@ function splitNotice(months: number): string | null {
 
 /** Every row of the file is already stored (an overlapping or repeated export). */
 class AllRowsKnownError extends Error {
+  /** Month-end balances the file still brought (see recordPrintedBalances). */
+  balancesStored = 0;
+  /** Rows whose cut message the file completed (see completeCutMessages). */
+  messagesCompleted = 0;
   constructor(readonly skipped: number) {
     super("all rows already stored");
   }
@@ -105,17 +250,13 @@ export async function POST(req: NextRequest) {
     checksum = fileChecksum;
     const duplicate = await prisma.statement.findFirst({
       where: { userId, checksum: fileChecksum },
-      select: { id: true, fileName: true },
+      select: { id: true },
     });
-    if (duplicate) {
-      return NextResponse.json(
-        {
-          error: `Tämä tiliote on jo tuotu aiemmin (${duplicate.fileName}).`,
-          statementId: duplicate.id,
-        },
-        { status: 409 }
-      );
-    }
+    // A file seen before is not refused outright: rows held back from a month
+    // that was closed then may be importable now. The row identities below
+    // decide; a file with nothing new still gets the "already imported" 409.
+    // The repeat needs its own checksum, as Statement.checksum is unique.
+    const statementChecksum = duplicate ? `${fileChecksum}:again:${Date.now().toString(36)}` : fileChecksum;
 
     const written = await writePrivateUpload(userId, detected.extension, buffer);
     storageKey = written.storageKey;
@@ -154,11 +295,16 @@ export async function POST(req: NextRequest) {
     const requestedAccountId = formData.get("bankAccountId");
     let bankAccountId: string | null = null;
     let accountNotice: string | null = null;
-    // Only text formats are cheap to scan; xlsx/pdf have no IBAN hint.
+    // What the file says about itself: text formats as they are, a PDF's text and an xlsx's first
+    // rows (a Holvi export names its IBAN in row 1 and prints SALDO lines in its PDF).
     const scannable = detected.kind === "xml" || detected.kind === "csv";
+    const headerText = scannable ? buffer.toString("utf8").slice(0, 200_000) : await statementHeaderText(detected.kind, filePath);
     // The file's own account, never a counterparty's (a transfer to the owner's
     // other account names that account in the rows too).
-    const ibanHint = scannable ? extractOwnIban(buffer.toString("utf8").slice(0, 200_000)) : null;
+    const ownIban = headerText ? ownIbanOf(headerText) : null;
+    const ibanHint = ownIban?.iban ?? null;
+    // Only an IBAN the file names as its own may become an account's or keep it off the default.
+    const strongIban = ownIban?.strong ? ownIban.iban : null;
     if (typeof requestedAccountId === "string" && requestedAccountId.trim()) {
       const owned = await prisma.bankAccount.findFirst({
         where: { id: requestedAccountId.trim(), userId },
@@ -174,15 +320,18 @@ export async function POST(req: NextRequest) {
       }
       bankAccountId = owned.id;
     } else {
-      bankAccountId = await resolveAccountForImport(userId, { iban: ibanHint });
+      bankAccountId = await resolveAccountForImport(userId, { iban: ibanHint, strong: Boolean(strongIban) });
       // M1-4: the file's own account is archived, so it was filed under none; say so.
       if (bankAccountId === null) {
         const archivedHolder = await archivedAccountForIban(userId, ibanHint);
         if (archivedHolder) accountNotice = archivedAccountImportNotice(archivedHolder.name);
+        else if (strongIban && (await prisma.bankAccount.count({ where: { userId, archivedAt: null } })) > 0) {
+          accountNotice = `Tiedoston tili ${formatIbanDisplay(strongIban)} ei ole yksikään pankkitileistäsi, joten tiliotetta ei liitetty tiliin. Lisää tili, niin tiliote liittyy siihen.`;
+        }
       }
     }
 
-    const { statement, statements, skippedDuplicates, heldBack } = await prisma.$transaction(async (db) => {
+    const imported = await prisma.$transaction(async (db) => {
       // The statement is written first: that takes SQLite's write lock, so the
       // stored rows read below cannot change under a concurrent import.
       const created = await db.statement.create({
@@ -192,7 +341,7 @@ export async function POST(req: NextRequest) {
           fileName: file.name,
           fileType,
           filePath: storageKey!,
-          checksum: fileChecksum,
+          checksum: statementChecksum,
           periodMonth: provisionalMonth,
           periodSource: "auto",
         },
@@ -245,7 +394,7 @@ export async function POST(req: NextRequest) {
               fileName: file.name,
               fileType,
               filePath: storageKey!,
-              checksum: `${fileChecksum}:${month}`,
+              checksum: `${statementChecksum}:${month}`,
               periodMonth: month,
               periodSource: "auto",
             },
@@ -258,6 +407,9 @@ export async function POST(req: NextRequest) {
           statementId: statementOf.get(tx.date ? tx.date.slice(0, 7) : periodMonth)!,
           userId,
           source: "file",
+          // The file's own account, as the bank feed's rows carry it: an account created later
+          // with this IBAN adopts the statement, and the feed finds these rows (audit 2026-10-09).
+          iban: strongIban,
           date: tx.date ? new Date(tx.date) : null,
           counterparty: tx.counterparty,
           amountCents: tx.amountCents,
@@ -270,7 +422,18 @@ export async function POST(req: NextRequest) {
         })),
       });
       return { statement: labelled, statements: made, skippedDuplicates: duplicates.length, heldBack: fresh.length - open.length };
+    }).catch(async (error: unknown) => {
+      // A file already imported can still bring the balances it prints (an upload from before
+      // they were read, 2026-10-09): they are stored, and the 409 says so.
+      if (error instanceof AllRowsKnownError) {
+        error.balancesStored = await recordPrintedBalances(userId, bankAccountId, headerText, parsedTransactions, file.name, strongIban);
+        error.messagesCompleted = await completeCutMessages(userId, bankAccountId, parsedTransactions);
+      }
+      throw error;
     });
+    const { statement, statements, skippedDuplicates, heldBack } = imported;
+
+    await recordPrintedBalances(userId, bankAccountId, headerText, parsedTransactions, file.name, strongIban);
 
     // Fetch recent emails from connected accounts before matching so that
     // any new emailed receipts can be matched to this statement immediately.
@@ -330,7 +493,16 @@ export async function POST(req: NextRequest) {
     if (e instanceof AllRowsKnownError) {
       return NextResponse.json(
         {
-          error: "Kaikki tiedoston tapahtumat oli jo tuotu aiemmin, joten mitään ei lisätty.",
+          error:
+            e.balancesStored > 0 || e.messagesCompleted > 0
+              ? [
+                  "Kaikki tiedoston tapahtumat oli jo tuotu aiemmin, joten tapahtumia ei lisätty.",
+                  e.balancesStored > 0 ? "Tiliotteen saldot päivitettiin tilille." : null,
+                  e.messagesCompleted > 0 ? `${e.messagesCompleted} tapahtuman viesti täydennettiin tiliotteelta.` : null,
+                ]
+                  .filter(Boolean)
+                  .join(" ")
+              : "Kaikki tiedoston tapahtumat oli jo tuotu aiemmin, joten mitään ei lisätty.",
           skippedDuplicates: e.skipped,
         },
         { status: 409 }

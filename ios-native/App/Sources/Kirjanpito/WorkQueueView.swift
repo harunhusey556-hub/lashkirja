@@ -70,7 +70,7 @@ struct WorkQueueView: View {
                     let help = JobsQueue.help(for: job)
                     VStack(alignment: .leading, spacing: 6) {
                         HStack(spacing: 8) {
-                            Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(Theme.danger)
+                            Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(Theme.danger).accessibilityHidden(true)
                             Text(job.kindLabel).font(.subheadline.weight(.semibold)).foregroundStyle(Theme.ink)
                             Spacer(minLength: 8)
                             Text(APIDate.timestamp(job.createdAt)).font(.caption).foregroundStyle(Theme.ink2)

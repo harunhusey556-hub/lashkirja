@@ -83,6 +83,13 @@ private struct KotiApprovalForm: View {
 
     var body: some View {
         Form {
+            // The picture first, so the fields below are checked against the receipt itself.
+            if receipt.hasOriginalFile {
+                Section {
+                    ReceiptPreviewImage(receiptId: receipt.id)
+                        .listRowInsets(EdgeInsets())
+                }
+            }
             Section {
                 Text(KotiApproval.subtitle(type: receipt.type, fromBank: item.fromBank))
                     .font(.subheadline).foregroundStyle(Theme.ink2)

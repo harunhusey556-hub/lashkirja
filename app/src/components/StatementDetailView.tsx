@@ -17,6 +17,7 @@ import {
   filterStatementTransactions,
   formatEur,
   formatMonth,
+  linkedGapSuffix,
   receiptLabel,
   recomputeTotals,
   type MatchCandidate,
@@ -892,6 +893,9 @@ export default function StatementDetailView({
                         {t.matchStatus === "confirmed" && t.receipt && (
                           <p className="text-caption text-ink-2">
                             Kohdistettu kuitti: {receiptLabel(t.receipt)}
+                            {linkedGapSuffix(t.amount, t.receipt) && (
+                              <span className="text-warning">{linkedGapSuffix(t.amount, t.receipt)}</span>
+                            )}
                           </p>
                         )}
 
@@ -1050,7 +1054,7 @@ export default function StatementDetailView({
 
       <ConfirmModal
         isOpen={confirmingDelete}
-        title="Poistetaanko tiliote?"
+        title={`Poistetaanko ${statementTitle(statement)}?`}
         description={deleteStatementDescription(statementTitle(statement), statement.transactions.map(deleteFacts))}
         confirmLabel="Poista tiliote"
         onConfirm={() => handleDelete()}

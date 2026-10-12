@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it } from "vitest";
 import { renderInvoicePdf, type InvoicePdfData } from "./invoice-pdf";
 import { createReferenceNumber } from "./finnish-reference";
 
@@ -49,6 +49,12 @@ const base = (overrides: Partial<InvoicePdfData> = {}): InvoicePdfData => ({
 });
 
 describe("a draft invoice PDF says it is a draft (M2-4)", () => {
+  // The first extractText loads pdf-parse (pdfjs) cold: ~0.5 s alone, but over 4 s when the whole
+  // suite runs in parallel, which ate the 5 s budget of whichever test came first. Pay it here.
+  beforeAll(async () => {
+    await extractText(await renderInvoicePdf(base()));
+  }, 30_000);
+
   it("prints LUONNOS on a draft and nothing of the kind on an issued invoice", async () => {
     expect(await extractText(await renderInvoicePdf(base({ draft: true })))).toContain("LUONNOS");
     expect(await extractText(await renderInvoicePdf(base()))).not.toContain("LUONNOS");

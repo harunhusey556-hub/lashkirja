@@ -2,14 +2,17 @@ import SwiftUI
 import PhotosUI
 import UIKit
 import ImageIO
+import VisionKit
 import UniformTypeIdentifiers
 import LashKirjaCore
 
-/// Kuvaa kuitti: camera, photos (up to ten at once) or files (PDF, images) → each file is
-/// uploaded and read in turn → the owner checks the fields → save (web `ReceiptUploadArea.tsx`).
-/// The first file read opens in the editor by itself; the rest wait in "Lähetysjono" with
-/// "Käytä lomakkeessa". Without a connection the files are kept on the phone and sent later
-/// (`OfflineReceiptQueueModel`). With `transactionId` one receipt is picked and the saved one
+/// Lisää kuitti: camera, photos (up to `ReceiptUploadQueue.maxPick` at once) or files (PDF, images) →
+/// the files are uploaded a few at a time and read side by side → the owner checks the fields → save (web `ReceiptUploadArea.tsx`).
+/// In a pick of several files every reading is saved straight away, up to `saveConcurrency` at a
+/// time (the server approves the complete ones, the rest wait in Kuitit's review queue); a single
+/// file is saved at once only when its reading is complete (`AutoAccept`), otherwise the editor
+/// opens on it. A save the server refuses keeps its row with "Avaa lomake". Without a connection
+/// the files are kept on the phone and sent later (`OfflineReceiptQueueModel`). With `transactionId` one receipt is picked and the saved one
 /// is matched to that bank row.
 struct CaptureFlow: View {
     @Environment(AppModel.self) private var app
@@ -18,9 +21,17 @@ struct CaptureFlow: View {
     /// Called after each receipt is saved (and matched). Not called when the flow is cancelled.
     var onSaved: (() -> Void)? = nil
 
+    /// `opensCamera`: a missing-receipt action goes straight to the camera; "+" → "Lisää kuitti"
+    /// opens this page so the owner picks camera, photos or files.
+    init(transactionId: String?, onSaved: (() -> Void)? = nil, opensCamera: Bool = true) {
+        self.transactionId = transactionId
+        self.onSaved = onSaved
+        _showCamera = State(initialValue: opensCamera && CaptureFlow.cameraAvailable)
+    }
+
     enum Step { case pick, queue, edit(rowId: String, draft: ReceiptDraft) }
-    /// Where a picked file's bytes come from; read only when its turn comes, so ten photos are
-    /// never all in memory at once.
+    /// Where a picked file's bytes come from; read only when its turn comes, so the two hundred
+    /// photos of a full pick are never all in memory at once.
     /// `refused`: a picked file that was never copied (too large, empty); its row fails with the reason.
     enum Source { case camera(UIImage), photo(PhotosPickerItem), file(URL), refused(String) }
     /// A file as it is sent: photos re-encoded to JPEG, PDFs as they are.
@@ -30,16 +41,21 @@ struct CaptureFlow: View {
     @State private var queue = ReceiptUploadQueue()
     @State private var sources: [String: Source] = [:]
     @State private var worker: Task<Void, Never>?
+    /// One per file the server is reading: the next file goes up meanwhile, so all are read side by side.
+    @State private var readers: [String: Task<Void, Never>] = [:]
+    /// Saves of finished readings, bounded apart from the uploads (each save runs the bank matching).
+    @State private var saver: Task<Void, Never>?
     /// Bumped by "Peruuta lähetys": a cancelled worker finishing late must not clear a newer one.
     @State private var generation = 0
-    @State private var showCamera = UIImagePickerController.isSourceTypeAvailable(.camera)
+    @State private var showCamera: Bool
     @State private var showFiles = false
     @State private var photos: [PhotosPickerItem] = []
     @State private var confirmDiscard = false
     @State private var importFailure: String?
     /// Copying picked files off the main actor; cancelled when the flow closes.
     @State private var importTask: Task<Void, Never>?
-    @State private var limit = ShowMore()
+    /// A bulk import is hundreds of rows long: the list opens on 50 and grows by 50.
+    @State private var limit = ShowMore(step: ReceiptUploadQueue.listPage)
 
     /// Matching a bank row takes exactly one receipt, and never goes to the offline queue
     /// (the inbox cannot match it).
@@ -53,6 +69,11 @@ struct CaptureFlow: View {
         return false
     }
 
+    /// The document scanner where the device has one, else the plain camera.
+    private static var cameraAvailable: Bool {
+        VNDocumentCameraViewController.isSupported || UIImagePickerController.isSourceTypeAvailable(.camera)
+    }
+
     private static let fileTypes: [UTType] = [.pdf, .jpeg, .png, .heic, .heif]
 
     var body: some View {
@@ -64,13 +85,14 @@ struct CaptureFlow: View {
                 case .queue:
                     queueList
                 case .edit(let rowId, let draft):
-                    ReceiptEditor(draft: draft, transactionId: transactionId) { saved(rowId) }
+                    ReceiptEditor(draft: draft, transactionId: transactionId) { autoApproved in saved(rowId, autoApproved: autoApproved) }
                         .id(rowId)
                 }
             }
             .background(Theme.canvas)
             .formKeyboard()
             .navigationTitle("Uusi kuitti")
+            .onAppear { EventLog.shared.log(.screen(transactionId.map { "capture.forBankRow(\($0))" } ?? "capture")) }
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -84,11 +106,19 @@ struct CaptureFlow: View {
             }
             .discardGuard(dirty: unsaved, busy: false, asking: $confirmDiscard) { close() }
             .fullScreenCover(isPresented: $showCamera) {
-                CameraPicker { image in
-                    showCamera = false
-                    if let image { add([(ReceiptUploadQueue.Pick(name: "kuitti.jpg", size: nil), .camera(image))]) }
+                if VNDocumentCameraViewController.isSupported {
+                    DocumentScanner { images in
+                        showCamera = false
+                        addScanned(images)
+                    }
+                    .ignoresSafeArea()
+                } else {
+                    CameraPicker { image in
+                        showCamera = false
+                        if let image { add([(ReceiptUploadQueue.Pick(name: "kuitti.jpg", size: nil), .camera(image))]) }
+                    }
+                    .ignoresSafeArea()
                 }
-                .ignoresSafeArea()
             }
             .fileImporter(isPresented: $showFiles, allowedContentTypes: Self.fileTypes, allowsMultipleSelection: !single) { result in
                 importFiles(result)
@@ -109,7 +139,7 @@ struct CaptureFlow: View {
 
     private var picker: some View {
         VStack(spacing: 16) {
-            Image(systemName: "doc.viewfinder").font(.system(size: 54)).foregroundStyle(Theme.accent)
+            Image(systemName: "doc.viewfinder").scaledFont(size: 54, relativeTo: .largeTitle).foregroundStyle(Theme.accent).accessibilityHidden(true)
             Text("Lisää kuva tai PDF kuitista tai laskusta").font(.headline).multilineTextAlignment(.center)
             pickButtons
             if let importFailure { Text(importFailure).font(.footnote).foregroundStyle(Theme.danger) }
@@ -117,7 +147,7 @@ struct CaptureFlow: View {
     }
 
     @ViewBuilder private var pickButtons: some View {
-        if UIImagePickerController.isSourceTypeAvailable(.camera) {
+        if Self.cameraAvailable {
             Button { showCamera = true } label: { Label("Kuvaa kuitti", systemImage: "camera").frame(maxWidth: .infinity, minHeight: 44) }
                 .buttonStyle(.primary)
         }
@@ -146,9 +176,23 @@ struct CaptureFlow: View {
                 }
             } header: {
                 Text("Lähetysjono")
+            } footer: {
+                // Same words as the web's upload summary.
+                if let summary = queue.summaryLine { Text(summary) }
             }
             if queue.isFinished {
                 Section {
+                    // The queue has settled: the review queue and the list are one tap away.
+                    if let title = queue.reviewButtonTitle {
+                        Button { openReceipts() } label: { Text(title).frame(maxWidth: .infinity, minHeight: 44).font(.headline) }
+                            .buttonStyle(.bordered)
+                            .listRowBackground(Color.clear)
+                    }
+                    if queue.savedCount > 0 {
+                        Button { openReceipts() } label: { Text(ReceiptUploadQueue.receiptsButtonTitle).frame(maxWidth: .infinity, minHeight: 44).font(.headline) }
+                            .buttonStyle(.bordered)
+                            .listRowBackground(Color.clear)
+                    }
                     Button { close() } label: { Text("Valmis").frame(maxWidth: .infinity, minHeight: 44).font(.headline) }
                         .buttonStyle(.primary)
                         .listRowBackground(Color.clear)
@@ -170,16 +214,29 @@ struct CaptureFlow: View {
     private func queueRow(_ row: UploadQueueRow) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 8) {
-                Text(row.name).lineLimit(1).truncationMode(.middle)
+                Text(row.name).lineLimitUnlessLarge().truncationMode(.middle)
                 Spacer(minLength: 8)
-                if row.status == .uploading || row.status == .processing { ProgressView().controlSize(.small) }
+                if row.status == .uploading || row.status == .processing || row.status == .saving { ProgressView().controlSize(.small) }
                 Text(row.status.label).font(.caption).foregroundStyle(row.status == .failed ? Theme.danger : Theme.ink2)
             }
             if let progress = row.progress, row.status != .ready {
                 Text(progress).font(.caption).foregroundStyle(Theme.ink2)
             }
+            if let outcome = row.outcomeText {
+                Text(outcome).font(.caption).foregroundStyle(Theme.ink2)
+            }
             if let error = row.error {
                 Text(error).font(.caption).foregroundStyle(row.status == .failed ? Theme.danger : Theme.ink2)
+            }
+            // A save the server refused: the form takes the reading from there (web "Käytä lomakkeessa").
+            if row.canOpenForm, let draft = row.draft {
+                Button("Avaa lomake") {
+                    Haptics.selection()
+                    step = .edit(rowId: row.id, draft: draft)
+                }
+                .font(.caption.bold())
+                .buttonStyle(.borderless)
+                .foregroundStyle(Theme.accent)
             }
             if row.status == .ready, let draft = row.draft {
                 Button("Käytä lomakkeessa") {
@@ -194,6 +251,16 @@ struct CaptureFlow: View {
     }
 
     // MARK: Picking
+
+    /// Each scanned page is its own receipt, like each photo of a multi-pick; matching a bank row
+    /// takes the first page only.
+    private func addScanned(_ images: [UIImage]) {
+        let pages = single ? Array(images.prefix(1)) : images
+        let start = queue.rows.count
+        add(pages.enumerated().map { offset, image in
+            (ReceiptUploadQueue.Pick(name: ReceiptUploadFile.photoName(index: start + offset), size: nil), Source.camera(image))
+        })
+    }
 
     private func add(_ picks: [(ReceiptUploadQueue.Pick, Source)]) {
         guard !picks.isEmpty else { return }
@@ -249,10 +316,41 @@ struct CaptureFlow: View {
         guard worker == nil else { return }
         let mine = generation
         worker = Task {
-            while !Task.isCancelled, let next = queue.nextPending {
-                await process(next.id, name: next.name)
+            // A hundred photos one by one take all night: up to `uploadConcurrency` go up at once,
+            // and a slot freed by one file is refilled from the queue straight away. Every row
+            // update still happens on the main actor, inside `process`.
+            await withTaskGroup(of: Void.self) { group in
+                while !Task.isCancelled {
+                    while let next = queue.claimNext() {
+                        group.addTask { await process(next.id, name: next.name) }
+                    }
+                    // Nothing more may start: wait for one upload to finish, or stop when none is left.
+                    if await group.next() == nil { break }
+                }
             }
             if generation == mine { worker = nil }
+        }
+    }
+
+    /// Saves finished readings, `saveConcurrency` at a time (the web's save limiter); a slot freed by
+    /// one save is refilled at once, and one refused save never stops the rest.
+    private func startSaveWorker() {
+        guard saver == nil else { return }
+        let mine = generation
+        saver = Task {
+            repeat {
+                await withTaskGroup(of: Void.self) { group in
+                    while !Task.isCancelled {
+                        while let next = queue.claimNextSave() {
+                            group.addTask { await saveRead(next.id) }
+                        }
+                        if await group.next() == nil { break }
+                    }
+                }
+                // A reading queued while the group was winding down is picked up here; nothing
+                // suspends between this check and clearing `saver`, so none can be missed.
+            } while !Task.isCancelled && queue.nextSaveQueued != nil
+            if generation == mine { saver = nil }
         }
     }
 
@@ -260,6 +358,10 @@ struct CaptureFlow: View {
         generation += 1
         worker?.cancel()
         worker = nil
+        saver?.cancel()
+        saver = nil
+        for reader in readers.values { reader.cancel() }
+        readers = [:]
     }
 
     /// "Peruuta lähetys": what has not finished stops; read and failed files stay.
@@ -272,6 +374,52 @@ struct CaptureFlow: View {
     private func retryFailed() {
         queue.retryFailed()
         startWorker()
+        startSaveWorker()
+    }
+
+    /// Saves one finished reading and asks the server to approve it when it is complete. Like the
+    /// web, a look-alike of a receipt already on file is saved anyway, as pending (the server never
+    /// approves a forced duplicate), so the owner decides in the review queue instead of it vanishing.
+    private func saveRead(_ id: String) async {
+        guard let draft = queue.row(id)?.draft else {
+            queue.markFailed(id, "Kuittia ei voitu tallentaa.")
+            return
+        }
+        var body = draft
+        body.autoApprove = true
+        var duplicate = false
+        do {
+            let result: ReceiptSaveResult
+            do {
+                result = try await postSave(body)
+            } catch let error as LKError where error.isDuplicate {
+                duplicate = true
+                body.forceDuplicate = true
+                result = try await postSave(body)
+            }
+            queue.markSaved(id, autoApproved: result.approved, duplicate: duplicate)
+            onSaved?()
+        } catch {
+            // Kept with its reading: "Avaa lomake" or "Yritä epäonnistuneet" take it from here.
+            queue.markFailed(id, error.userMessage)
+        }
+    }
+
+    /// Not tied to the caller's cancellation: a save already sent must finish, or the owner could
+    /// not tell whether the receipt exists.
+    private func postSave(_ body: ReceiptDraft) async throws -> ReceiptSaveResult {
+        let api = app.api
+        let sent = Task<ReceiptSaveResult, Error> {
+            let result: ReceiptSaveResult = try await api.send("POST", "/api/receipts/save", body: body)
+            return result
+        }
+        return try await sent.value
+    }
+
+    /// "Näytä tarkistettavat" and "Siirry kuitteihin": Kuitit, whose review queue sits on top of the list.
+    private func openReceipts() {
+        app.pendingRoute = PendingRoute(tab: .kirjanpito, route: .receipts)
+        close()
     }
 
     private func process(_ id: String, name: String) async {
@@ -303,38 +451,80 @@ struct CaptureFlow: View {
         do {
             let response = try await app.api.raw("POST", "/api/receipts", body: form.finalize(), contentType: form.contentType)
             let result = try JSONDecoder().decode(UploadResult.self, from: response.body)
-            var extracted = result.extracted
-            if extracted == nil, let jobId = result.jobId {
+            if result.extracted == nil, let jobId = result.jobId {
                 queue.markProcessing(id)
-                var finished = false
-                for _ in 0..<90 {
-                    try await Task.sleep(nanoseconds: 1_500_000_000)
-                    let job: JobResponse = try await app.api.get("/api/jobs/\(jobId)")
-                    if job.job.isFinished {
-                        // Not status 0: a reading the server gave up on is not a lost connection.
-                        if job.job.status != "done" { throw LKError(status: 422, message: job.job.error ?? "Kuitin luku epäonnistui.") }
-                        extracted = job.job.extracted
-                        finished = true
-                        break
-                    }
-                }
-                if !finished {
-                    queue.markBackground(id)
-                    dropSource(id)
+                readers[id] = Task { await awaitReading(id, jobId: jobId, uploadId: result.uploadId, file: file) }
+                return
+            }
+            finishReading(id, uploadId: result.uploadId, extracted: result.extracted)
+        } catch is CancellationError {
+            queue.markCancelled(id)
+        } catch let error as LKError where single && error.duplicateReceiptId != nil {
+            // Taken from a bank row, and the file is already a receipt: link that receipt to the
+            // row instead of stopping at "Tämä kuitti on jo tallennettu" (2026-10-08).
+            await linkExisting(id, receiptId: error.duplicateReceiptId!)
+        } catch let error where !single && ReceiptUploadFile.isNetworkFailure(error) {
+            keepOffline(id, file)
+        } catch {
+            queue.markFailed(id, error.userMessage)
+        }
+    }
+
+    private func linkExisting(_ id: String, receiptId: String) async {
+        struct Match: Encodable { let transactionId: String; let receiptId: String }
+        guard let transactionId else { return }
+        EventLog.shared.log(.action("link-existing-receipt", screen: "capture"))
+        do {
+            let _: Ignored = try await app.api.send("POST", "/api/matching/confirm", body: Match(transactionId: transactionId, receiptId: receiptId))
+            dropSource(id)
+            Haptics.success()
+            saved(id)
+        } catch is CancellationError {
+            queue.markCancelled(id)
+        } catch {
+            queue.markFailed(id, "Kuitti oli jo tallennettu, mutta sitä ei voitu kohdistaa tähän tapahtumaan: \(error.userMessage)")
+        }
+    }
+
+    /// Waits for the server's reading of one uploaded file; runs beside the uploads of the others.
+    private func awaitReading(_ id: String, jobId: String, uploadId: String, file: Encoded) async {
+        defer { readers[id] = nil }
+        do {
+            for _ in 0..<90 {
+                try await Task.sleep(nanoseconds: 1_500_000_000)
+                let job: JobResponse = try await app.api.get("/api/jobs/\(jobId)")
+                if job.job.isFinished {
+                    // Not status 0: a reading the server gave up on is not a lost connection.
+                    if job.job.status != "done" { throw LKError(status: 422, message: job.job.error ?? "Kuitin luku epäonnistui.") }
+                    finishReading(id, uploadId: uploadId, extracted: job.job.extracted)
                     return
                 }
             }
-            queue.markReady(id, draft: ReceiptDraft(uploadId: result.uploadId, extracted: extracted))
+            queue.markBackground(id)
             dropSource(id)
-            if case .queue = step, let row = queue.takeAutoOpen(), let draft = row.draft {
-                step = .edit(rowId: row.id, draft: draft)
-            }
         } catch is CancellationError {
             queue.markCancelled(id)
         } catch let error where !single && ReceiptUploadFile.isNetworkFailure(error) {
             keepOffline(id, file)
         } catch {
             queue.markFailed(id, error.userMessage)
+        }
+    }
+
+    private func finishReading(_ id: String, uploadId: String, extracted: Extracted?) {
+        let reading = ReceiptDraft(uploadId: uploadId, extracted: extracted)
+        // As the web: in a pick of several files every reading is saved at once, a single file only
+        // when complete; matching one bank row needs the form's save (it links the receipt).
+        if !single, AutoAccept.takesAutoSavePath(several: queue.rows.count > 1, reading: extracted) {
+            queue.markSaveQueued(id, draft: reading)
+            dropSource(id)
+            startSaveWorker()
+            return
+        }
+        queue.markReady(id, draft: reading)
+        dropSource(id)
+        if case .queue = step, let row = queue.takeAutoOpen(), let draft = row.draft {
+            step = .edit(rowId: row.id, draft: draft)
         }
     }
 
@@ -369,8 +559,8 @@ struct CaptureFlow: View {
 
     // MARK: Closing
 
-    private func saved(_ rowId: String) {
-        queue.markSaved(rowId)
+    private func saved(_ rowId: String, autoApproved: Bool = false) {
+        queue.markSaved(rowId, autoApproved: autoApproved)
         onSaved?()
         // A bank row takes one receipt: once it is saved the match is done.
         if single || queue.closesAfterSave { close() } else { step = .queue }
@@ -400,16 +590,19 @@ struct ReceiptEditor: View {
     @Environment(AppModel.self) private var app
     let uploadId: String
     let transactionId: String?
-    let done: () -> Void
+    /// Called with whether the server approved the receipt as it saved it.
+    let done: (Bool) -> Void
     @State private var form: ReceiptForm
     @State private var errors: [String: String] = [:]
     @State private var busy = false
     @State private var failure: String?
     @State private var duplicate = false
     @State private var savedId: String?
+    /// Kept with `savedId`, so a retry that only repeats the match still reports the approval.
+    @State private var savedAutoApproved = false
     @State private var customCategory: Bool
 
-    init(draft: ReceiptDraft, transactionId: String?, done: @escaping () -> Void) {
+    init(draft: ReceiptDraft, transactionId: String?, done: @escaping (Bool) -> Void) {
         let form = ReceiptForm(draft: draft)
         uploadId = draft.uploadId
         self.transactionId = transactionId
@@ -504,7 +697,7 @@ struct ReceiptEditor: View {
                     TextField("ALV €", text: Binding(get: { row.amountText }, set: { form.setVatAmount($0, at: index) }))
                         .moneyInput()
                         .multilineTextAlignment(.trailing)
-                    Button(role: .destructive) { form.removeVatRow(at: index) } label: { Image(systemName: "minus.circle") }
+                    Button(role: .destructive) { form.removeVatRow(at: index) } label: { Image(systemName: "minus.circle").tapTarget() }
                         .buttonStyle(.borderless)
                         .accessibilityLabel("Poista ALV-rivi")
                 }
@@ -522,7 +715,7 @@ struct ReceiptEditor: View {
 
     private func save(forceDuplicate: Bool) async {
         guard !busy else { return }
-        struct Saved: Decodable { struct R: Decodable { let id: String }; let receipt: R }
+        struct Saved: Decodable { struct R: Decodable { let id: String }; let receipt: R; let autoApproved: Bool? }
         struct Match: Encodable { let transactionId: String; let receiptId: String }
         // A retry after a failed match only repeats the match, never the save.
         var request: ReceiptDraft?
@@ -533,7 +726,9 @@ struct ReceiptEditor: View {
                 failure = nil
                 Haptics.error()
                 return
-            case .draft(let draft):
+            case .draft(var draft):
+                // The server approves a complete receipt as it saves it (it checks, not the app).
+                draft.autoApprove = true
                 request = draft
             }
         }
@@ -549,6 +744,8 @@ struct ReceiptEditor: View {
                 let saved: Saved = try await app.api.send("POST", "/api/receipts/save", body: request)
                 receiptId = saved.receipt.id
                 savedId = receiptId
+                // Absent from a server that does not auto-approve: then the receipt waits as before.
+                savedAutoApproved = saved.autoApproved ?? false
                 duplicate = false
             } else {
                 return
@@ -557,7 +754,7 @@ struct ReceiptEditor: View {
                 let _: Ignored = try await app.api.send("POST", "/api/matching/confirm", body: Match(transactionId: transactionId, receiptId: receiptId))
             }
             Haptics.success()
-            done()
+            done(savedAutoApproved)
         } catch is CancellationError {
         } catch let error as LKError where error.isDuplicate && savedId == nil {
             duplicate = true

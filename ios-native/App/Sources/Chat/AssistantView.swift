@@ -105,7 +105,21 @@ struct AssistantView: View {
                             .id(message.id)
                     }
                     if let failure = model.failure {
-                        Text(failure).font(.footnote).foregroundStyle(Theme.danger)
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text(failure).font(.footnote).foregroundStyle(Theme.danger)
+                            if model.turn.retryText != nil {
+                                Button { Haptics.selection(); model.retry() } label: {
+                                    Label("Yritä uudelleen", systemImage: "arrow.clockwise")
+                                        .font(.subheadline.weight(.medium))
+                                        .padding(.horizontal, 14)
+                                        .frame(minHeight: 36)
+                                        .background(Theme.accentSoft, in: Capsule())
+                                        .foregroundStyle(Theme.accentDark)
+                                }
+                                .buttonStyle(.pressable)
+                                .disabled(!model.canSendShortcut)
+                            }
+                        }
                     }
                 }
                 .padding(16)
@@ -270,7 +284,9 @@ private struct MessageRow: View {
             )
             .equatable()
             if !streaming && message.role == "assistant" {
-                if let proposal = message.proposal, ChatProposalCard.isShown(proposal) {
+                if let proposal = message.proposal, ChatProposalCard.isShown(proposal), proposal.kind == .matchBatch, let batch = proposal.matchBatch {
+                    ChatMatchBatchCardView(messageId: message.id, batch: batch, model: model)
+                } else if let proposal = message.proposal, ChatProposalCard.isShown(proposal) {
                     ChatProposalCardView(
                         proposal: proposal,
                         saving: model.decisions[message.id],
@@ -305,9 +321,12 @@ private struct Bubble: View, Equatable {
                 if message.content.isEmpty && streaming {
                     ProgressView().padding(.vertical, 4)
                 } else {
-                    // Plain text while the reply grows; markdown once it is complete.
-                    Text(streaming ? AttributedString(message.content) : markdown(message.content))
-                        .textSelection(.enabled)
+                    // Markdown as the reply grows: a half-written marker shows as plain text until it closes.
+                    if mine {
+                        Text(message.content).textSelection(.enabled)
+                    } else {
+                        ChatMarkdownText(text: message.content)
+                    }
                 }
             }
             .padding(.horizontal, 14)
@@ -320,9 +339,46 @@ private struct Bubble: View, Equatable {
         }
         .frame(maxWidth: .infinity, alignment: mine ? .trailing : .leading)
     }
+}
 
-    private func markdown(_ text: String) -> AttributedString {
-        (try? AttributedString(markdown: text, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace))) ?? AttributedString(text)
+/// Bold, italic, code and links; a half-written marker or unreadable text shows as plain text.
+private func inlineMarkdown(_ text: String) -> AttributedString {
+    let options = AttributedString.MarkdownParsingOptions(interpretedSyntax: .inlineOnlyPreservingWhitespace)
+    return (try? AttributedString(markdown: text, options: options)) ?? AttributedString(text)
+}
+
+/// An assistant reply: paragraphs, headings and lists drawn with SwiftUI text, links inline.
+private struct ChatMarkdownText: View {
+    let text: String
+
+    var body: some View {
+        let blocks = ChatMarkdown.blocks(text)
+        VStack(alignment: .leading, spacing: 8) {
+            ForEach(Array(blocks.enumerated()), id: \.offset) { _, block in
+                switch block {
+                case .paragraph(let value):
+                    Text(inlineMarkdown(value))
+                case .heading(let value):
+                    Text(inlineMarkdown(value)).font(.headline)
+                case .bullets(let items):
+                    list(items) { _ in "\u{2022}" }
+                case .numbered(let items):
+                    list(items) { "\($0 + 1)." }
+                }
+            }
+        }
+        .textSelection(.enabled)
+    }
+
+    private func list(_ items: [String], marker: @escaping (Int) -> String) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            ForEach(Array(items.enumerated()), id: \.offset) { index, item in
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text(marker(index)).foregroundStyle(Theme.ink2)
+                    Text(inlineMarkdown(item))
+                }
+            }
+        }
     }
 }
 
@@ -425,7 +481,7 @@ private struct ConversationsSheet: View {
         Button {
             switch PagedShowMore.step(limit, loaded: conversations.count, serverHasMore: hasMore) {
             case .fetch: Task { await loadOlder() }
-            case .reveal, .fold: withAnimation(.snappy) { limit.more(total: conversations.count) }
+            case .reveal, .fold: withMotion(.snappy) { limit.more(total: conversations.count) }
             case nil: break
             }
             Haptics.selection()
@@ -477,7 +533,7 @@ private struct ConversationsSheet: View {
             let before = conversations.count
             conversations = (conversations + page.conversations).uniquedById()
             hasMore = page.hasMore
-            withAnimation(.snappy) { PagedShowMore.revealFetched(&limit, before: before, after: conversations.count) }
+            withMotion(.snappy) { PagedShowMore.revealFetched(&limit, before: before, after: conversations.count) }
             failure = nil
         } catch is CancellationError {
         } catch {

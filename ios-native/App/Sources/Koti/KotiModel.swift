@@ -79,11 +79,11 @@ final class KotiModel {
     /// A passing message (a reminder sent, a failure) without an undo.
     func say(_ text: String) {
         flushPending()
-        withAnimation(.snappy) { toast = Toast(text: text, actionLabel: nil) }
+        withMotion(.snappy) { toast = Toast(text: text, actionLabel: nil) }
         toastTask = Task { [weak self] in
             try? await Task.sleep(nanoseconds: 4_000_000_000)
             guard !Task.isCancelled else { return }
-            withAnimation { self?.toast = nil }
+            withMotion { self?.toast = nil }
         }
     }
 
@@ -132,15 +132,15 @@ final class KotiModel {
     func undo() {
         toastTask?.cancel()
         pendingCommit = nil
-        if let id = undoItemId { withAnimation { hidden.unhide(id) } }
+        if let id = undoItemId { withMotion { hidden.unhide(id) } }
         undoItemId = nil
-        withAnimation { toast = nil }
+        withMotion { toast = nil }
     }
 
     private var undoItemId: String?
 
     private func hide(_ id: String) {
-        withAnimation(.snappy) { hidden.hide(id) }
+        withMotion(.snappy) { hidden.hide(id) }
     }
 
     private func offerUndo(_ text: String, itemId: String, commit: @escaping () async throws -> Void) {
@@ -156,12 +156,12 @@ final class KotiModel {
             } catch {
                 await MainActor.run {
                     guard let self else { return }
-                    withAnimation { self.hidden.unhide(itemId) }
+                    withMotion { self.hidden.unhide(itemId) }
                     self.toast = Toast(text: error.userMessage, actionLabel: nil)
                 }
             }
         }
-        withAnimation(.snappy) { toast = Toast(text: text, actionLabel: "Kumoa") }
+        withMotion(.snappy) { toast = Toast(text: text, actionLabel: "Kumoa") }
         toastTask = Task { [weak self] in
             try? await Task.sleep(nanoseconds: 4_000_000_000)
             guard !Task.isCancelled else { return }
@@ -175,7 +175,7 @@ final class KotiModel {
         guard let commit = pendingCommit else { return }
         pendingCommit = nil
         undoItemId = nil
-        withAnimation { toast = nil }
+        withMotion { toast = nil }
         Task { await commit() }
     }
 }

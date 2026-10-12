@@ -6,6 +6,7 @@ import {
   buildAgingReport,
   canTransition,
   openPosition,
+  creditedCentsOf,
   computeInvoiceTotals,
   daysOverdue,
   displayStatus,
@@ -311,6 +312,33 @@ describe("openPosition", () => {
       collectible: false,
       settled: true,
     });
+  });
+
+  it("takes the credits off what is owed: a part credit leaves the invoice collectible for the rest", () => {
+    expect(openPosition({ status: "sent", grossCents: 10_000, creditedCents: 4_000 })).toEqual({
+      openCents: 6_000,
+      collectible: true,
+      settled: false,
+    });
+    // Payments and credits together can settle it.
+    expect(openPosition({ status: "sent", grossCents: 10_000, paidCents: 6_000, creditedCents: 4_000 })).toMatchObject({
+      openCents: 0,
+      collectible: false,
+      settled: true,
+    });
+    // A fully credited invoice is out of collections whatever was paid before.
+    expect(openPosition({ status: "credited", grossCents: 10_000, paidCents: 0, creditedCents: 10_000 }).openCents).toBe(0);
+  });
+
+  it("sums credit notes as positive cents and ignores a cancelled one", () => {
+    expect(creditedCentsOf(undefined)).toBe(0);
+    expect(
+      creditedCentsOf([
+        { grossCents: -4_000, status: "sent" },
+        { grossCents: -1_000 },
+        { grossCents: -9_000, status: "cancelled" },
+      ])
+    ).toBe(5_000);
   });
 
   it("treats an explicit close as settled with a zero open balance", () => {

@@ -6,7 +6,7 @@ import { isValidIban, normalizeIban } from "@/lib/iban";
 import { isValidBusinessId, normalizeBusinessId } from "@/lib/finnish-reference";
 import { reminderSettingsData } from "@/lib/invoice-reminders";
 import { ValidationError } from "@/lib/api-errors";
-import { ENTITY_TYPES } from "@/lib/onboarding";
+import { ENTITY_TYPES, parseBusinessDetails } from "@/lib/onboarding";
 import { guardWrite } from "@/lib/http-security";
 import { SELLER_LIMITS } from "@/lib/seller-limits";
 import { zodIssuesFi } from "@/lib/zod-messages";
@@ -136,9 +136,25 @@ export async function PATCH(req: NextRequest) {
     data.businessId = normalizeBusinessId(data.businessId);
   }
 
+  // The VAT status, period and company form live twice: the User columns written here, and the
+  // businessDetails profile that receipts, income drafts, the VAT threshold and the assistant
+  // read. Settings changed only the columns, so an owner who turned ALV on there kept getting
+  // ALV 0 % drafts (2026-10-09). The profile follows the same save.
+  let businessDetails: string | undefined;
+  if (data.entityType !== undefined || data.vatRegistered !== undefined || data.vatPeriod !== undefined) {
+    const current = await prisma.user.findUnique({ where: { id: session.userId }, select: { businessDetails: true } });
+    const profile = parseBusinessDetails(current?.businessDetails);
+    businessDetails = JSON.stringify({
+      ...profile,
+      ...(data.entityType !== undefined ? { entityType: data.entityType } : {}),
+      ...(data.vatRegistered !== undefined ? { vatRegistered: data.vatRegistered } : {}),
+      ...(data.vatPeriod !== undefined ? { vatPeriod: data.vatPeriod } : {}),
+    });
+  }
+
   const user = await prisma.user.update({
     where: { id: session.userId },
-    data: { ...data, ...reminderData },
+    data: { ...data, ...reminderData, ...(businessDetails !== undefined ? { businessDetails } : {}) },
     select: {
       firstName: true,
       lastName: true,

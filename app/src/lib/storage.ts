@@ -73,13 +73,20 @@ function detectFile(buffer: Buffer): DetectedFile | null {
     return { extension: ".xls", mimeType: "application/vnd.ms-excel", kind: "xls" };
   }
 
-  if (buffer.includes(0)) return null;
-  const text = buffer.subarray(0, Math.min(buffer.length, 8192)).toString("utf8");
+  // Excel's "Unicode text" and some bank exports are UTF-16 with a byte-order mark: every other
+  // byte is 0, which read as a binary file and was refused (audit 2026-10-09); decodeCSV reads it.
+  const head = buffer.subarray(0, Math.min(buffer.length, 8192));
+  const utf16 = (head[0] === 0xff && head[1] === 0xfe) || (head[0] === 0xfe && head[1] === 0xff);
+  if (!utf16 && buffer.includes(0)) return null;
+  const text = utf16
+    ? (head[0] === 0xff ? head.subarray(2) : Buffer.from(head.subarray(2)).swap16()).toString("utf16le")
+    : head.toString("utf8");
   const trimmed = text.replace(/^\uFEFF/, "").trimStart();
   if (trimmed.startsWith("<?xml") || /^<(Document|[A-Za-z]+:Document)\b/.test(trimmed)) {
     return { extension: ".xml", mimeType: "application/xml", kind: "xml" };
   }
-  if (text.includes("\n") && (text.includes(";") || text.includes(","))) {
+  // A line break of any kind: an old Mac export ends its lines with a bare CR.
+  if (/[\r\n]/.test(text) && (text.includes(";") || text.includes(","))) {
     return { extension: ".csv", mimeType: "text/csv", kind: "csv" };
   }
   return null;
@@ -107,6 +114,14 @@ export function validateUploadBuffer(
       ? new Set([".heic", ".heif"])
       : new Set([detected.extension]);
   if (!acceptable.has(suppliedExt)) {
+    // A bank statement is read by what it contains (the parser follows `kind`) and stored under
+    // the detected extension, so its name does not matter: bank exports often carry another one
+    // (a CSV as .txt, an "Excel" file that is CSV). Refused that way on 2026-10-09, eleven times
+    // in a row from the phone. Receipts keep the check.
+    if (purpose === "statement") {
+      console.warn(`Statement upload: name says ${suppliedExt || "(none)"}, content is ${detected.kind}; read as ${detected.kind}`);
+      return detected;
+    }
     throw new UploadValidationError("Tiedoston sisältö ja tiedostopääte eivät vastaa toisiaan", 415);
   }
   return detected;
@@ -127,9 +142,19 @@ function safeSegment(value: string): string {
   return value;
 }
 
+const STORAGE_KEY = /^[a-f0-9-]{36}\.[a-z0-9]{2,5}$/;
+
 function safeStorageKey(value: string): string {
-  if (!/^[a-f0-9-]{36}\.[a-z0-9]{2,5}$/.test(value)) throw new Error("Unsafe storage key");
+  if (!STORAGE_KEY.test(value)) throw new Error("Unsafe storage key");
   return value;
+}
+
+/**
+ * Whether a receipt's filePath names a stored upload at all. Receipts drafted from a bank row
+ * carry "auto-generated" and have no file: their file and preview answer 404, never 500.
+ */
+export function isStoredUploadKey(value: string | null | undefined): value is string {
+  return typeof value === "string" && STORAGE_KEY.test(value);
 }
 
 export async function ensurePrivateUploadDirectories(userId: string): Promise<string> {
@@ -205,6 +230,10 @@ export async function removeUserUpload(
       if (stat.isSymbolicLink()) throw new Error("Refusing to remove symlinked upload");
       if (!stat.isFile()) throw new Error("Stored object is not a regular file");
       await fs.unlink(candidate);
+      // Derived copies made beside it (PDF/HEIC preview, scaled JPEGs): nothing outlives the upload.
+      for (const suffix of [".preview.jpg", ".preview.svg", ".360.jpg", ".1600.jpg"]) {
+        await fs.unlink(`${candidate}${suffix}`).catch(() => undefined);
+      }
       return;
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
