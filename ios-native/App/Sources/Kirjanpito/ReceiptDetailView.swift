@@ -14,6 +14,9 @@ struct ReceiptDetailView: View {
     @State private var matchSubmit = SubmitGuard()
     private var matchBusy: Bool { matchSubmit.inFlight }
     @State private var reviewBusy = false
+    /// The ostolasku this receipt is filed as (nil until known, or while the server lacks the route).
+    @State private var ostolasku: ReceiptPurchaseInvoiceView?
+    @State private var kindBusy = false
     @State private var prefetched = false
     @State private var ruleActive = false
     @State private var ruleBusy = false
@@ -32,12 +35,17 @@ struct ReceiptDetailView: View {
                 Section {
                     VStack(spacing: 6) {
                         if let amount = r.totalAmount { MoneyText(amount: amount).scaledFont(size: 34, weight: .bold, design: .rounded, relativeTo: .largeTitle).moneyHero() }
+                        // Which rate priced a foreign-currency document ("Kurssi 1 USD = 0,8749 EUR (EKP 10.7.2026)").
+                        if let rateLine = r.fxRateLine {
+                            Text(rateLine).font(.caption).foregroundStyle(Theme.ink2).multilineTextAlignment(.center)
+                        }
                         Text(r.title).font(.headline)
                         Text(r.isIncome ? "Tulo" : "Meno").font(.caption).foregroundStyle(Theme.ink2)
                     }
                     .frame(maxWidth: .infinity)
                     .listRowBackground(Color.clear)
                 }
+                ostolaskuSection(r)
                 // Review screen: the picture is on the page, so the fields are checked against it
                 // without a trip to "Näytä kuitti".
                 if r.hasOriginalFile && r.reviewStatus == "pending" {
@@ -131,6 +139,62 @@ struct ReceiptDetailView: View {
         guard let r = state.value else { return "" }
         guard let amount = r.totalAmount else { return "\(r.title) poistetaan." }
         return "\(r.title) · \(Money.format(amount)) poistetaan."
+    }
+
+    // MARK: Ostolasku
+
+    /// One document, one home: a receipt filed as an ostolasku says so and links there; the owner can
+    /// also say what the document is ("Ei ole lasku" cancels the ostolasku, "Merkitse ostolaskuksi" files it).
+    @ViewBuilder private func ostolaskuSection(_ r: Receipt) -> some View {
+        if let notice = ReceiptOstolaskuNotice.make(view: ostolasku, receiptType: r.type) {
+            switch notice {
+            case .filed(let invoiceId, let headline, let canMarkAsReceipt):
+                Section {
+                    Text(headline).font(.subheadline.weight(.semibold)).foregroundStyle(Theme.ink)
+                    NavigationLink(value: Route.purchaseInvoice(invoiceId)) {
+                        Label("Avaa ostolasku", systemImage: "tray.full")
+                    }
+                    if canMarkAsReceipt {
+                        Button { Task { await setKind(.receipt) } } label: { Label("Ei ole lasku", systemImage: "xmark.circle") }
+                            .disabled(kindBusy)
+                    }
+                }
+                .listRowBackground(Theme.accentSoft)
+            case .offer(let text):
+                Section {
+                    Text(text).font(.subheadline).foregroundStyle(Theme.ink2)
+                    Button { Task { await setKind(.invoice) } } label: { Label("Merkitse ostolaskuksi", systemImage: "tray.and.arrow.down") }
+                        .disabled(kindBusy)
+                }
+            }
+        }
+    }
+
+    /// The notice is extra information on the receipt screen; without it the screen still works.
+    private func loadOstolasku() async {
+        let view: ReceiptPurchaseInvoiceView? = try? await app.api.get("/api/receipts/\(receiptId)/purchase-invoice")
+        ostolasku = view
+    }
+
+    private func setKind(_ kind: ReceiptDocumentKind) async {
+        guard !kindBusy else { return }
+        kindBusy = true
+        failure = nil
+        defer { kindBusy = false }
+        do {
+            let result: ReceiptDocumentKindResult = try await app.api.send(
+                "PATCH", "/api/receipts/\(receiptId)", body: ReceiptDocumentKindBody(kind)
+            )
+            Haptics.success()
+            showToast(result.message(for: kind), action: nil, run: nil)
+            app.dataVersion += 1
+            await loadOstolasku()
+        } catch is CancellationError {
+        } catch {
+            // The server's own sentence, e.g. that an ostolasku with payments cannot become a kuitti.
+            failure = error.userMessage
+            Haptics.error()
+        }
     }
 
     // MARK: Vendor rule
@@ -348,6 +412,7 @@ struct ReceiptDetailView: View {
                 DocumentCache.shared.prefetch(app, path: "/api/receipts/\(receiptId)/file", query: Self.fileQuery, fileName: r.receipt.fileName ?? "kuitti", key: Self.fileCacheKey)
             }
             await loadRule(vendor: r.receipt.vendor)
+            await loadOstolasku()
         } catch is CancellationError {
         } catch {
             state.fail(error)

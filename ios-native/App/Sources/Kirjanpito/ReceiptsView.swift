@@ -130,7 +130,7 @@ struct ReceiptsView: View {
                 let all = shownReceipts
                 Section {
                     if all.isEmpty {
-                        Text(query.isFiltered ? "Ei hakua vastaavia kuitteja." : "Ei kuitteja.").foregroundStyle(Theme.ink2)
+                        Text(query.emptyText).foregroundStyle(Theme.ink2)
                     }
                     ForEach(all.prefix(limit.visible(all.count))) { receipt in row(receipt) }
                     // Ten at a time; the next server page is asked for only by the button, never on scroll.
@@ -139,7 +139,7 @@ struct ReceiptsView: View {
                         return shownReceipts.count
                     }
                 } header: {
-                    if !all.isEmpty { Text("\(total) kuittia") }
+                    if !all.isEmpty { Text(query.countHeader(total)) }
                 }
             } else {
                 ScreenStateView(state: receipts, retry: load) { (_: [Receipt]) in EmptyView() }.listRowBackground(Color.clear)
@@ -396,7 +396,7 @@ struct ReceiptsView: View {
         let listQuery = asked.listQuery()
         let countsQuery = asked.countsQuery()
         async let countsResponse: ReceiptCounts? = try? api.get("/api/receipts/counts", query: countsQuery)
-        async let queue: ReceiptList? = try? api.get("/api/receipts", query: ["reviewStatus": "pending"])
+        async let queue: ReceiptList? = try? api.get("/api/receipts", query: ReceiptListQuery.pendingQueue())
         async let rejectedResponse: ReceiptList? = try? api.get("/api/receipts", query: ["reviewStatus": "rejected"])
         do {
             let list: ReceiptList = try await api.get("/api/receipts", query: listQuery)
@@ -439,7 +439,7 @@ struct ReceiptsView: View {
         loadingMorePending = true
         defer { loadingMorePending = false }
         do {
-            let page: ReceiptList = try await app.api.get("/api/receipts", query: ["reviewStatus": "pending", "offset": String(pending.count)])
+            let page: ReceiptList = try await app.api.get("/api/receipts", query: ReceiptListQuery.pendingQueue(offset: pending.count))
             pending = ReceiptPaging.append(pending, page.receipts)
             pendingTruncated = page.truncated ?? false
         } catch is CancellationError {

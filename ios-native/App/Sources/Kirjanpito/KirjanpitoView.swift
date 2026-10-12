@@ -28,13 +28,12 @@ struct KirjanpitoView: View {
                 }
             }
             // The two matchings the web reaches from its tabs: receipts to bank rows, and bank
-            // payments to purchase invoices (the latter opens the ostolaskut list, which holds
-            // its suggestions; there is no separate screen for it yet).
+            // payments to purchase invoices (its own screen, as the web's kohdistus page).
             Section("Kohdistus") {
                 NavigationLink(value: Route.bankFeedFiltered(month: nil, onlyOpen: true, focus: nil)) {
                     HubRow(title: "Kohdista kuitit", subtitle: "Pankkitapahtumat, joille puuttuu kuitti", symbol: "link")
                 }
-                NavigationLink(value: Route.purchaseInvoices) {
+                NavigationLink(value: Route.purchaseMatch) {
                     HubRow(title: "Kohdista ostolaskujen maksut", subtitle: "Pankkimaksut ostolaskuille", symbol: "creditcard")
                 }
             }
@@ -66,8 +65,9 @@ struct KirjanpitoView: View {
     /// The three hub figures load side by side; the pending figure is a count query, not the receipt list.
     private func load() async {
         let api = app.api
-        async let all: ReceiptCounts? = try? api.get("/api/receipts/counts")
-        async let waiting: ReceiptCounts? = try? api.get("/api/receipts/counts", query: ["reviewStatus": "pending"])
+        // Kuitit only: a bill filed as an ostolasku is counted under Ostolaskut.
+        async let all: ReceiptCounts? = try? api.get("/api/receipts/counts", query: ReceiptListQuery().countsQuery())
+        async let waiting: ReceiptCounts? = try? api.get("/api/receipts/counts", query: ReceiptListQuery.pendingCountQuery)
         async let open: StatementOpenCount? = try? api.get("/api/statements/counts")
         if let c = await all { counts = c.counts }
         if let p = await waiting { pending = p.counts.all }
