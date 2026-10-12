@@ -11,10 +11,11 @@ const CLEARANCE_PX = 12 + 8;
 
 /**
  * The room the list needs at its end so the last row and "Katso kaikki" can
- * scroll clear of the bar. Published as a CSS variable on the root; the Kuitit
- * page reads it as bottom padding, so nothing changes while no bar is shown.
+ * scroll clear of the bar. Published as a CSS variable on the root; `.app-main`
+ * (globals.css) adds it to its bottom padding, so every page that mounts a bar
+ * reserves the same space and nothing changes while no bar is shown.
  */
-export const BULK_BAR_SPACE_VAR = "--bulk-bar-space";
+const BULK_BAR_SPACE_VAR = "--bulk-bar-space";
 
 /**
  * The floating bar shown once one or more receipts are checkbox-selected.

@@ -56,7 +56,7 @@ import {
 } from "@/lib/review-queue";
 import { ReceiptFilters, type ReceiptAdvancedFilters } from "./ReceiptFilters";
 import { ReceiptRow } from "./ReceiptRow";
-import { BULK_BAR_SPACE_VAR, BulkBar } from "./BulkBar";
+import { BulkBar } from "./BulkBar";
 import type { SavedReceipt } from "./types";
 import { tintedButtonClass } from "@/components/control-styles";
 
@@ -742,8 +742,7 @@ export default function KuititPage() {
 
   return (
     <>
-      {/* BulkBar publishes its height while shown, so the last row and "Katso kaikki" scroll clear of it. */}
-      <div className="space-y-6" style={{ paddingBottom: `var(${BULK_BAR_SPACE_VAR}, 0px)` }}>
+      <div className="space-y-6">
         {/* C1.6 (IA-24): pull to refresh runs the same reload as Yritä uudelleen. */}
         <PullToRefresh onRefresh={() => {
             setLoadError(null);

@@ -21,8 +21,9 @@ export function SelectableRow({
   return (
     <div className="flex items-stretch">
       <label className="relative flex w-11 shrink-0 cursor-pointer items-center justify-center">
-        <input type="checkbox" className="peer sr-only" checked={selected} onChange={onToggle} aria-label={label} />
-        <span className="flex h-5 w-5 items-center justify-center rounded-full border-[1.5px] border-ink-2/50 bg-surface transition-colors peer-checked:border-ink peer-checked:bg-ink peer-focus-visible:ring-2 peer-focus-visible:ring-accent/40">
+        {/* Fills the cell instead of sr-only, so a tap lands on the input itself and not on the drawn circle above it. */}
+        <input type="checkbox" className="peer absolute inset-0 h-full w-full cursor-pointer opacity-0" checked={selected} onChange={onToggle} aria-label={label} />
+        <span className="pointer-events-none flex h-5 w-5 items-center justify-center rounded-full border-[1.5px] border-ink-2/50 bg-surface transition-colors peer-checked:border-ink peer-checked:bg-ink peer-focus-visible:ring-2 peer-focus-visible:ring-accent/40">
           <Check
             aria-hidden
             width={12}
