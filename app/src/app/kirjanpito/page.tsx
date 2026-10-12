@@ -3,7 +3,7 @@
 import { ProgressRing } from "@/components/ds/ProgressRing";
 import { helsinkiMonthKey } from "@/lib/validation";
 import { PullToRefresh } from "@/components/ds/PullToRefresh";
-import { BookOpen, Inbox, ListChecks, LockKeyhole, Percent, ReceiptEuro } from "lucide-react";
+import { ArrowLeftRight, BookOpen, Inbox, Landmark, ListChecks, LockKeyhole, Percent, ReceiptEuro } from "lucide-react";
 import { Icon, PageTitle, Section, ListRow, SlotSkeleton } from "@/components/ds";
 import { apiFetch, readJson } from "@/components/clientFetch";
 import { MONTHS } from "@/lib/finnish-months";
@@ -146,6 +146,25 @@ export default function KirjanpitoPage() {
           chevron
           title="Tapahtumat"
           secondary={openEvents > 0 ? `${openEvents} odottaa kohdistusta tässä kuussa` : "Tiliotteet ja pankin tapahtumat"}
+        />
+      </Section>
+
+      <Section title="Kohdistus">
+        {/* One step from the tab bar to each matching flow: receipts against
+            bank rows, and purchase-invoice payments by viite. */}
+        <ListRow
+          href="/pankki/tapahtumat?nayta=toimet"
+          leading={<Icon icon={ArrowLeftRight} />}
+          chevron
+          title="Kohdista kuitit"
+          secondary={openEvents > 0 ? `${openEvents} odottaa kohdistusta tässä kuussa` : "Pankkitapahtumat, joille ei ole kuittia"}
+        />
+        <ListRow
+          href="/kirjanpito/ostolaskut"
+          leading={<Icon icon={Landmark} />}
+          chevron
+          title="Kohdista ostolaskujen maksut"
+          secondary="Kirjaa maksut viitenumeron mukaan"
         />
       </Section>
 

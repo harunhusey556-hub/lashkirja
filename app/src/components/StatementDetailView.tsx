@@ -1054,7 +1054,7 @@ export default function StatementDetailView({
 
       <ConfirmModal
         isOpen={confirmingDelete}
-        title="Poistetaanko tiliote?"
+        title={`Poistetaanko ${statementTitle(statement)}?`}
         description={deleteStatementDescription(statementTitle(statement), statement.transactions.map(deleteFacts))}
         confirmLabel="Poista tiliote"
         onConfirm={() => handleDelete()}
