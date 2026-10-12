@@ -110,20 +110,19 @@ struct InvoiceFormView: View {
                     Button("Valmis") { focus = nil }.fontWeight(.semibold)
                 }
             }
-            // Own alert (three choices for a new invoice); the swipe hook is the shared one.
+            // Own sheet (three choices for a new invoice); the swipe hook is the shared one.
             .background(SwipeAttemptObserver { if dirty && !busy { confirmDiscard = true } })
-            .alert("Hylätäänkö muutokset?", isPresented: $confirmDiscard) {
-                Button("Hylkää muutokset", role: .destructive) {
-                    if existing == nil, let owner { SalesDraftStore.shared.clear(owner: owner) }
-                    dismiss()
-                }
-                if existing == nil {
-                    // Kept in memory: "Uusi lasku" opens with it again.
-                    Button("Säilytä luonnos ja sulje") { dismiss() }
-                }
-                Button("Jatka muokkausta", role: .cancel) {}
-            } message: {
-                Text(existing == nil ? "Laskua ei ole vielä luotu." : "Muutoksia ei ole tallennettu.")
+            .confirmSheet(
+                isPresented: $confirmDiscard,
+                title: "Hylätäänkö muutokset?",
+                message: existing == nil ? "Laskua ei ole vielä luotu." : "Muutoksia ei ole tallennettu.",
+                confirmTitle: "Hylkää muutokset",
+                // Kept in memory: "Uusi lasku" opens with it again.
+                secondary: existing == nil ? ConfirmRequest.Action(title: "Säilytä luonnos ja sulje", run: { dismiss() }) : nil,
+                cancelTitle: "Jatka muokkausta"
+            ) {
+                if existing == nil, let owner { SalesDraftStore.shared.clear(owner: owner) }
+                dismiss()
             }
             .sheet(isPresented: $showNewCustomer) {
                 CustomerFormSheet(existing: nil) { created in addCreatedCustomer(created) }

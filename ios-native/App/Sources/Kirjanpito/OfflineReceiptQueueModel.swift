@@ -58,6 +58,8 @@ final class OfflineReceiptQueueModel {
         // waiting for a tap (the receipts are in the review queue by then).
         if !sent.isEmpty { clearSent() }
         drain()
+        // Readings an earlier run left unsaved come back with the queue, for Kuitit's "Kesken".
+        CaptureQueueModel.shared.prepare(app: app)
     }
 
     /// Keeps a file for sending later. False when it could not be written (the caller shows an error).
@@ -121,6 +123,8 @@ final class OfflineReceiptQueueModel {
         unbind()
         store.removeAll()
         clearShownState()
+        // The readings not yet saved are the same owner's receipts: they leave too.
+        CaptureQueueModel.shared.clearForSignOut()
     }
 
     /// The session expired: sending stops, but the photos stay for the same owner's next sign-in

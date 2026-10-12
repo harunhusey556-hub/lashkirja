@@ -31,6 +31,9 @@ private struct FetchProgress: View {
 private func fetchNow(_ connection: BankConnection, app: AppModel) async throws -> BankSyncResult? {
     guard connection.status == "active" else { return nil }
     let result: BankSyncResult = try await app.api.send("POST", "/api/bank/connections/\(connection.id)/sync", body: EmptyBody())
+    // The balances it brought show at once; its version is the new baseline (BankSyncFlow does the same).
+    app.versions.takeBalances(result.balances)
+    app.versions.absorb(dataVersion: result.dataVersion)
     app.dataVersion += 1
     return result
 }

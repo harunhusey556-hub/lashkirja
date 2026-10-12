@@ -97,3 +97,67 @@ export function syncOutcomeMessage(
   }
   return { tone: "ok", text: "Ei uusia tapahtumia." };
 }
+
+/**
+ * What a sync answer may carry about balances (W18's contract: fresh balances
+ * and the new `dataVersion` come back with the sync, so the screen needs no
+ * second round trip). Every field is optional: an answer without them changes
+ * nothing, and the reload that follows brings the truth.
+ */
+export interface SyncBalanceAnswer {
+  accounts?: Array<{ accountId?: string; ok?: boolean; balance?: number | null; balanceCents?: number | null }>;
+  balances?: Array<{ accountId?: string; id?: string; balance?: number | null; balanceCents?: number | null }>;
+  /** W18: the fresh per-account picture that travels with a sync (the shape of `GET /api/sync/version`). */
+  bank?: {
+    accounts?: Array<{
+      connectedAccountId?: string | null;
+      balanceCents?: number | null;
+      lastSyncAt?: string | null;
+    }>;
+  } | null;
+  lastSyncAt?: string | null;
+  lastSuccessAt?: string | null;
+}
+
+function answerBalance(entry: { balance?: number | null; balanceCents?: number | null }): number | null | undefined {
+  if (typeof entry.balance === "number" && Number.isFinite(entry.balance)) return entry.balance;
+  if (typeof entry.balanceCents === "number" && Number.isFinite(entry.balanceCents)) return entry.balanceCents / 100;
+  return undefined;
+}
+
+/**
+ * The connection list with the balances (and sync time) a sync answer carried
+ * applied at once, so the old saldo is never on screen after "Päivitä".
+ */
+export function applySyncBalances<
+  C extends { id: string; lastSyncAt: string | null; lastSuccessAt: string | null; accounts: Array<{ id: string; balance: number | null }> },
+>(connections: C[], connectionId: string, answer: SyncBalanceAnswer, nowIso: string): C[] {
+  const byAccount = new Map<string, number>();
+  for (const entry of answer.balances ?? []) {
+    const id = entry.accountId ?? entry.id;
+    const balance = answerBalance(entry);
+    if (id && balance !== undefined && balance !== null) byAccount.set(id, balance);
+  }
+  for (const entry of answer.accounts ?? []) {
+    const balance = answerBalance(entry);
+    if (entry.accountId && balance !== undefined && balance !== null) byAccount.set(entry.accountId, balance);
+  }
+  for (const entry of answer.bank?.accounts ?? []) {
+    const balance = answerBalance(entry);
+    if (entry.connectedAccountId && balance !== undefined && balance !== null) byAccount.set(entry.connectedAccountId, balance);
+  }
+  // A sync where every account failed fetched nothing: it is not a "last success".
+  const nothingSucceeded = (answer.accounts ?? []).length > 0 && (answer.accounts ?? []).every((entry) => entry.ok === false);
+  return connections.map((connection) =>
+    connection.id !== connectionId
+      ? connection
+      : {
+          ...connection,
+          lastSyncAt: answer.lastSyncAt ?? nowIso,
+          lastSuccessAt: nothingSucceeded ? connection.lastSuccessAt : (answer.lastSuccessAt ?? nowIso),
+          accounts: connection.accounts.map((account) =>
+            byAccount.has(account.id) ? { ...account, balance: byAccount.get(account.id) ?? account.balance } : account
+          ),
+        }
+  );
+}

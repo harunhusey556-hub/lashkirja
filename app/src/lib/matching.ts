@@ -7,6 +7,7 @@ import {
   decide,
   ELIGIBLE_MIN,
   gatePair,
+  mayBeEligible,
   normalizeRef,
   planPairs,
   type GateCandidate,
@@ -1184,9 +1185,15 @@ export async function buildInlineCandidates(
 
   const lists = new Map<string, ScoredPair[]>();
   const cases: Array<{ txId: string; pick: ScoredPair; item: ReviewCase }> = [];
+  // Only eligible pairs are offered here, and every eligible pair has an amount or reference
+  // match: the receipts without one are left out before the name and date scoring, which
+  // otherwise ran rows x receipts times on every bank page load (1.6 s on a 5 000-row ledger).
+  const gateCandidates = receiptModels.map(receiptToGateCandidate);
   for (const tx of unmatched) {
     const model: MatchTx = { ...tx, amount: centsToEuros(tx.amountCents) };
-    const scored = candidatesFor(model, receiptModels, rejectedPairs, 3);
+    const row = txToGateRow(model);
+    const pool = receiptModels.filter((_, index) => mayBeEligible(row, gateCandidates[index]));
+    const scored = candidatesFor(model, pool, rejectedPairs, 3);
     if (scored.length === 0) continue;
     lists.set(tx.id, scored);
     const best = unambiguousBest(scored);

@@ -26,7 +26,9 @@ import { rejectCrossSite, rejectOversizedContentLength } from "@/lib/http-securi
 import { runMatching } from "@/lib/matching";
 import { eurosToCents } from "@/lib/money";
 import { inferTransactionType } from "@/lib/statements";
-import { listStatementsForUser } from "@/lib/statement-api";
+import { FEED_PAGE_MAX, FEED_PAGE_SIZE, FeedCursorError, listStatementFeedPage, listStatementSummariesForUser, listStatementsForUser } from "@/lib/statement-api";
+import { readSyncVersion } from "@/lib/data-version";
+import { revalidatedJson } from "@/lib/etag-json";
 import { centsToEuros } from "@/lib/money";
 import { autoGenerateIncomeReceipts } from "@/lib/income-automation";
 import { archivedAccountForIban, archivedAccountImportNotice, resolveAccountForImport, upsertMonthlyBalance } from "@/lib/bank-accounts";
@@ -468,8 +470,12 @@ export async function POST(req: NextRequest) {
       orderBy: { date: "asc" },
     });
 
+    // As the bank sync: the new change counter and balances, so the client need not guess.
+    const version = await readSyncVersion(userId);
     return NextResponse.json({
       ok: true,
+      dataVersion: version.dataVersion,
+      bank: version.bank,
       statement,
       // The tiliotteet this file became, one per month (additive; `statement` is the main one).
       statements,
@@ -556,7 +562,32 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "Ei kirjautunut" }, { status: 401 });
   }
 
-  const month = new URL(req.url).searchParams.get("month");
+  const params = new URL(req.url).searchParams;
+  const month = params.get("month");
+  // Paged feed (W18): `?cursor=` (empty for the first page) or `?limit=`. The full list below
+  // stays for clients that have not moved to it.
+  if (params.has("cursor") || params.has("limit")) {
+    const rawLimit = params.get("limit");
+    const limit = rawLimit ? Number(rawLimit) : FEED_PAGE_SIZE;
+    if (!Number.isInteger(limit) || limit < 1 || limit > FEED_PAGE_MAX) {
+      return NextResponse.json({ error: `limit on 1–${FEED_PAGE_MAX}` }, { status: 400 });
+    }
+    try {
+      const page = await listStatementFeedPage(session.userId, {
+        cursor: params.get("cursor") || null,
+        limit,
+        month,
+        accountId: params.get("accountId"),
+      });
+      return revalidatedJson(req, page);
+    } catch (error) {
+      if (error instanceof FeedCursorError) return NextResponse.json({ error: error.message }, { status: 400 });
+      throw error;
+    }
+  }
+  if (params.get("view") === "summary") {
+    return revalidatedJson(req, { statements: await listStatementSummariesForUser(session.userId, month) });
+  }
   const statements = await listStatementsForUser(session.userId, month);
-  return NextResponse.json({ statements });
+  return revalidatedJson(req, { statements });
 }

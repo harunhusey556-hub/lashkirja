@@ -14,14 +14,15 @@ struct DiscardGuard: ViewModifier {
             .interactiveDismissDisabled(busy || dirty)
             // A held swipe otherwise just bounces back with no word of why (P0.5 device check).
             .background(SwipeAttemptObserver { if dirty && !busy { asking = true } })
-            // An alert, not a confirmation dialog: on iOS 26 the dialog floats over the sheet title
-            // with no visible way back; the alert shows both choices.
-            .alert("Hylätäänkö muutokset?", isPresented: $asking) {
-                Button("Hylkää muutokset", role: .destructive) { discard() }
-                Button("Jatka muokkausta", role: .cancel) {}
-            } message: {
-                Text("Tallentamattomat muutokset menetetään.")
-            }
+            // A bottom sheet like every confirmation: the system dialog floated over the sheet title
+            // on iOS 26 with no visible way back, and this one shows both choices.
+            .confirmSheet(
+                isPresented: $asking,
+                title: "Hylätäänkö muutokset?",
+                message: "Tallentamattomat muutokset menetetään.",
+                confirmTitle: "Hylkää muutokset",
+                cancelTitle: "Jatka muokkausta"
+            ) { discard() }
     }
 }
 

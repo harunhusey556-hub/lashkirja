@@ -51,6 +51,18 @@ import { ReceiptText } from "lucide-react";
 import { pageCacheFetchedAt, readPageCache, writePageCache } from "@/lib/page-cache";
 import { isForbidden } from "@/lib/screen-state";
 import { usePersistedState, useScrollRestoration } from "@/lib/list-ui-state";
+import { useRefetchOnDataVersion } from "@/components/useDataVersion";
+import { SelectableRowIf } from "@/components/SelectableRow";
+import { BulkBar } from "@/app/kuitit/BulkBar";
+import {
+  payablePurchases,
+  purchaseBulkBody,
+  purchaseBulkLabels,
+  purchaseBulkOutcome,
+  purchaseBulkTitle,
+  runLimited,
+  type PurchaseBulkKind,
+} from "@/lib/purchase-bulk";
 import { useCachedResource } from "@/components/useCachedResource";
 import { useCacheAfterBoot } from "@/components/invoices/useCacheAfterBoot";
 import { PURCHASE_COUNTS_KEY } from "@/lib/cached-resource";
@@ -252,6 +264,9 @@ export default function PurchaseInvoicesPage() {
       setStatus((current) => (current === "ready" ? "ready" : "error"));
     }
   }, [filter]);
+
+  // A bank sync can settle a purchase invoice; any save changes the list. Refetch quietly.
+  useRefetchOnDataVersion(() => void load());
 
   useEffect(() => {
     const controller = new AbortController();
@@ -588,6 +603,69 @@ export default function PurchaseInvoicesPage() {
     }
   }
 
+  // Select mode: "Merkitse maksetuiksi" and "Poista valitut" over the ticked invoices.
+  const [selectMode, setSelectMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<ReadonlySet<string>>(() => new Set());
+  const [bulkConfirm, setBulkConfirm] = useState<PurchaseBulkKind | null>(null);
+  const [bulkBusy, setBulkBusy] = useState<PurchaseBulkKind | null>(null);
+
+  const selectedInvoices = invoices.filter((invoice) => selectedIds.has(invoice.id));
+  const payableSelected = payablePurchases(selectedInvoices);
+  const bulkTargetCount = (kind: PurchaseBulkKind) => (kind === "pay" ? payableSelected.length : selectedInvoices.length);
+
+  function toggleSelected(id: string) {
+    setSelectedIds((current) => {
+      const next = new Set(current);
+      if (!next.delete(id)) next.add(id);
+      return next;
+    });
+  }
+
+  function stopSelecting() {
+    setSelectMode(false);
+    setSelectedIds(new Set());
+  }
+
+  /** One request per invoice, a few at a time, through the same routes as the detail sheet. */
+  async function runBulk(kind: PurchaseBulkKind) {
+    const targets = kind === "pay" ? payableSelected : selectedInvoices;
+    if (targets.length === 0) return;
+    setBulkBusy(kind);
+    try {
+      const result = await runLimited(targets, 4, async (invoice) => {
+        const response =
+          kind === "pay"
+            ? await apiFetch(`/api/purchase-invoices/${invoice.id}/payments`, {
+                method: "POST",
+                credentials: "include",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ amount: invoice.open, paidDate: today() }),
+              })
+            : await apiFetch(`/api/purchase-invoices/${invoice.id}`, { method: "DELETE", credentials: "include" });
+        await readJson(response, kind === "pay" ? "Maksun kirjaus epäonnistui" : "Poisto epäonnistui");
+      });
+      const unauthorized = result.failed.find((entry) => isUnauthorized(entry.error));
+      if (unauthorized) {
+        redirectToLogin();
+        return;
+      }
+      void hapticNotify(result.failed.length === 0 ? "success" : "warning");
+      showToast({
+        tone: result.failed.length === 0 ? "success" : result.done.length === 0 ? "error" : "info",
+        text:
+          result.failed.length > 0 && result.done.length === 0
+            ? errorMessage(result.failed[0].error, purchaseBulkOutcome(kind, 0, result.failed.length))
+            : purchaseBulkOutcome(kind, result.done.length, result.failed.length),
+      });
+      // What failed stays ticked so the owner sees which ones and can try again.
+      setSelectedIds(new Set(result.failed.map((entry) => entry.item.id)));
+      await Promise.all([load(), reloadCounts()]);
+    } finally {
+      setBulkBusy(null);
+      setBulkConfirm(null);
+    }
+  }
+
   async function runBankMatch() {
     setBusy(true);
     setMessage(null);
@@ -696,6 +774,18 @@ export default function PurchaseInvoicesPage() {
         {!noPurchases && (
           <FilterChips label="Suodata ostolaskut" items={filterChips} value={filter} onChange={setFilter} />
         )}
+        {!noPurchases && status === "ready" && invoices.length > 0 && (
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              aria-pressed={selectMode}
+              onClick={() => (selectMode ? stopSelecting() : setSelectMode(true))}
+              className={tintedButtonClass(selectMode ? "neutral" : "accent")}
+            >
+              {selectMode ? "Valmis" : "Valitse"}
+            </button>
+          </div>
+        )}
 
         {loadFailure != null && status === "ready" && (
           <StaleBanner fetchedAt={pageCacheFetchedAt("purchases")} onRetry={() => void load()} />
@@ -717,15 +807,21 @@ export default function PurchaseInvoicesPage() {
             {groups.map((group) => (
               <Section key={group.id} title={group.label}>
                 <AnimatedRows rows={group.items.map((invoice) => ({ key: invoice.id, node: (
+                  <SelectableRowIf
+                    on={selectMode}
+                    selected={selectedIds.has(invoice.id)}
+                    onToggle={() => toggleSelected(invoice.id)}
+                    label={`Valitse ${invoice.supplierName}`}
+                  >
                   <ListRow
                     key={invoice.id}
-                    onClick={() => openDetail(invoice)}
+                    onClick={() => (selectMode ? toggleSelected(invoice.id) : openDetail(invoice))}
                     title={invoice.supplierName}
                     amount={formatEur(invoice.gross)}
                     secondary={rowSecondary(invoice)}
                     trailing={
                       <span className="flex items-center gap-2">
-                        {!invoice.receiptId && invoice.status !== "cancelled" ? (
+                        {!selectMode && !invoice.receiptId && invoice.status !== "cancelled" ? (
                           <ActionPill
                             onClick={() => openLinkSheet(invoice)}
                             ariaLabel={`Liitä kuitti ostolaskuun ${invoice.supplierName}`}
@@ -737,6 +833,7 @@ export default function PurchaseInvoicesPage() {
                       </span>
                     }
                   />
+                  </SelectableRowIf>
                 ) }))} />
               </Section>
             ))}
@@ -1273,6 +1370,55 @@ export default function PurchaseInvoicesPage() {
         confirmLabel="Poista"
         onConfirm={() => (confirmRemove ? remove(confirmRemove) : Promise.resolve())}
         onCancel={() => setConfirmRemove(null)}
+      />
+
+      <ConfirmModal
+        isOpen={bulkConfirm !== null}
+        title={bulkConfirm ? purchaseBulkTitle(bulkConfirm, bulkTargetCount(bulkConfirm)) : ""}
+        description={bulkConfirm ? purchaseBulkBody(bulkConfirm) : undefined}
+        confirmLabel={bulkConfirm === "pay" ? "Merkitse maksetuiksi" : "Poista"}
+        isDestructive={bulkConfirm === "remove"}
+        onConfirm={() => (bulkConfirm ? runBulk(bulkConfirm) : Promise.resolve())}
+        onCancel={() => setBulkConfirm(null)}
+      />
+
+      {/* The Kuitit bar, with this list's own actions: it names the count of what each one will touch. */}
+      <BulkBar
+        visible={selectMode && selectedIds.size > 0}
+        count={selectedIds.size}
+        busy={false}
+        approveBusy={false}
+        approvableCount={0}
+        onCancel={stopSelecting}
+        onApproveRequest={() => {}}
+        onDeleteRequest={() => {}}
+        label="Valitut ostolaskut"
+        actions={
+          <>
+            {payableSelected.length > 0 && (
+              <Button
+                type="button"
+                variant="secondary"
+                busy={bulkBusy === "pay"}
+                busyLabel="Kirjataan…"
+                disabled={bulkBusy !== null}
+                onClick={() => setBulkConfirm("pay")}
+              >
+                {purchaseBulkLabels.pay(payableSelected.length)}
+              </Button>
+            )}
+            <Button
+              type="button"
+              variant="danger"
+              busy={bulkBusy === "remove"}
+              busyLabel="Poistetaan…"
+              disabled={bulkBusy !== null}
+              onClick={() => setBulkConfirm("remove")}
+            >
+              {purchaseBulkLabels.remove(selectedInvoices.length)}
+            </Button>
+          </>
+        }
       />
     </>
   );

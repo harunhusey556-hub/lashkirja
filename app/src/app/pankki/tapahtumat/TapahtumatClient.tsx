@@ -2,6 +2,7 @@
 
 import { PullToRefresh } from "@/components/ds/PullToRefresh";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { CheckCircle2, Landmark, RefreshCw, Settings } from "lucide-react";
@@ -9,22 +10,37 @@ import { ErrorState, SkeletonList } from "@/components/AsyncState";
 import { EmptyState } from "@/components/ScreenState";
 import { apiFetch, errorMessage, isUnauthorized, readJson, redirectToLogin } from "@/components/clientFetch";
 import { formatMonth, type StatementData, type StatementTransaction } from "@/lib/statement-client";
-import { formatDayMonth, formatEur, formatEurSigned } from "@/lib/format";
+import { formatEur } from "@/lib/format";
 import { readPageCache, writePageCache } from "@/lib/page-cache";
 import { useCacheAfterBoot } from "@/components/invoices/useCacheAfterBoot";
 import { useScrollRestoration } from "@/lib/list-ui-state";
 import { Button } from "@/components/ui";
-import { FilterChips, Icon, ListRow, PageTitle, SearchField, Section, StatusTag, useSkeletonFade } from "@/components/ds";
+import { FilterChips, Icon, ListRow, PageTitle, SearchField, Section, useSkeletonFade } from "@/components/ds";
 import { useLeavingRows } from "@/components/useLeavingRows";
 import BankConnectCard from "@/components/BankConnectCard";
 import { BankLogo } from "@/components/bank/BankPickerSheet";
 import { BankRowSheet } from "@/components/bank/BankRowSheet";
+import { BankFeedRow } from "@/components/bank/BankFeedRow";
+import type { RowPatches } from "@/components/bank/BankBulkActions";
 import { focusRowId } from "@/lib/bank-feed-focus";
 import { useBankConnections } from "@/components/bank/useBankConnections";
 import { useStatementUpload } from "@/components/bank/useStatementUpload";
 import { accountSubline, type BankConnectionSummary } from "@/lib/bank-status";
-import { feedRows, groupByMonth, matchesSearch, needsAction, rowState, type FeedRow } from "@/lib/bank-feed";
-import { isSyncNotice, syncOutcomeMessage, type AccountSyncRow } from "@/lib/bank-sync-summary";
+import { feedRows, groupByMonth, matchesSearch, needsAction, rowState } from "@/lib/bank-feed";
+import {
+  MAX_RELOAD_PAGES,
+  STATEMENT_SUMMARY_URL,
+  applySummaries,
+  mergeStatementsPage,
+  openTotal,
+  readStatementsPage,
+  readSummaries,
+  reuseEqualRows,
+  statementsUrl,
+  type StatementSummary,
+} from "@/lib/bank-feed-pages";
+import { applySyncBalances, isSyncNotice, syncOutcomeMessage, type AccountSyncRow, type SyncBalanceAnswer } from "@/lib/bank-sync-summary";
+import { useRefetchOnDataVersion } from "@/components/useDataVersion";
 import { hapticNotify } from "@/lib/haptics";
 import { showToast } from "@/lib/toast";
 import {
@@ -44,47 +60,10 @@ const SEARCH_FROM_ROWS = 15;
 
 type View = "" | "toimet";
 
-const ROW_TAG: Partial<Record<ReturnType<typeof rowState>, { tone: "warning" | "accent"; label: string }>> = {
-  sale: { tone: "warning", label: "Hyväksy myynti" },
-  suggested: { tone: "accent", label: "Tarkista" },
-};
-
-/** "Maksu laskulle 5": the row is done because an invoice took it (F12). */
-function invoicePaymentNote(row: FeedRow): string {
-  if (row.paidInvoice) return `Maksu laskulle ${row.paidInvoice.number}`;
-  return row.settlesPurchase ? "Maksu ostolaskulle" : "Kunnossa";
-}
-
-function rowSecondary(row: FeedRow): string {
-  const day = row.date ? formatDayMonth(row.date) : "";
-  const state = rowState(row);
-  const note =
-    state === "linked"
-      ? "Kunnossa"
-      : state === "invoice"
-        ? invoicePaymentNote(row)
-        : state === "ignored"
-        ? "Ei kuittia tarvita"
-        : state === "transfer"
-          ? row.type === "palkka"
-            ? "Palkka"
-            : "Oma siirto"
-          : state === "missing"
-            ? row.amount > 0
-              ? "Kuittia ei vielä ole"
-              : "Kuitti puuttuu"
-            : "";
-  return [day, note].filter(Boolean).join(" · ");
-}
-
-function rowTag(row: FeedRow) {
-  const state = rowState(row);
-  if (state === "missing") {
-    return <StatusTag tone="warning">{row.amount > 0 ? "Puuttuu" : "Uusi kuitti"}</StatusTag>;
-  }
-  const tag = ROW_TAG[state];
-  return tag ? <StatusTag tone={tag.tone}>{tag.label}</StatusTag> : null;
-}
+// Only select mode needs the bar, the confirmations and the match sheet.
+const BankBulkActions = dynamic(() => import("@/components/bank/BankBulkActions").then((module) => module.BankBulkActions), {
+  ssr: false,
+});
 
 /** The connected accounts at the top: balance, when fetched, and a refresh. */
 function AccountsCard({
@@ -107,10 +86,11 @@ function AccountsCard({
     setBusyId(connection.id);
     try {
       const response = await apiFetch(`/api/bank/connections/${connection.id}/sync`, { method: "POST" });
-      const data = await readJson<{ imported: number; accounts?: AccountSyncRow[]; notice?: string | null }>(
-        response,
-        "Päivitys epäonnistui"
-      );
+      const data = await readJson<
+        { imported: number; accounts?: AccountSyncRow[]; notice?: string | null } & SyncBalanceAnswer
+      >(response, "Päivitys epäonnistui");
+      // The balances the sync returned go on screen before anything is refetched.
+      bank.updateConnections((list) => applySyncBalances(list, connection.id, data, new Date().toISOString()));
       const outcome = syncOutcomeMessage(data.accounts || [], data.imported, data.notice ?? null);
       void hapticNotify(outcome.tone === "ok" ? "success" : "warning");
       // Something waiting is told as a note, never as the green all-clear.
@@ -203,29 +183,137 @@ export default function TapahtumatClient() {
   const [unfolded, setUnfolded] = useState<string | null>(null);
   const fade = useSkeletonFade(loading);
   const bank = useBankConnections();
+  // Paging (W20): the feed opens on one page; the cursor of the page after it, if the server has one.
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [paged, setPaged] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [serverOpen, setServerOpen] = useState<number | null>(null);
+  const pagesRef = useRef(1);
+  // Account and month of every statement (the paged rows carry only their ids).
+  const summariesRef = useRef<StatementSummary[]>([]);
+  const statementsRef = useRef(statements);
+  useEffect(() => {
+    statementsRef.current = statements;
+  });
+  // A reload that lands after a newer one started must not paint over it.
+  const generationRef = useRef(0);
+  const inFlightRef = useRef(false);
+  const queuedFreshRef = useRef<boolean | null>(null);
+  // Select mode (bulk actions).
+  const [selectMode, setSelectMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<ReadonlySet<string>>(() => new Set());
 
-  const loadStatements = useCallback(async () => {
+  /** "Vaatii toimia" counts rows past the pages on screen: the server counts them without loading the ledger. */
+  const loadOpenCount = useCallback(async (fresh: boolean) => {
     try {
-      const res = await apiFetch("/api/statements");
-      const data = await readJson<{ statements?: StatementData[] }>(res, "Pankkitapahtumien lataus epäonnistui");
-      writePageCache("statements", data.statements || []);
-      setStatements(data.statements || []);
-      setLoadError(null);
+      const res = await apiFetch("/api/statements/counts", fresh ? { cache: "no-store" } : undefined);
+      const data = await readJson<{ open?: number }>(res, "Määrien haku epäonnistui");
+      setServerOpen(typeof data.open === "number" ? data.open : null);
+    } catch {
+      // The chip falls back to counting the rows on screen.
+      setServerOpen(null);
+    }
+  }, []);
+
+  const loadStatements = useCallback(
+    async (fresh = false): Promise<void> => {
+      // One read at a time: a request that arrives meanwhile (a sheet's reload, the version
+      // poll) runs once more afterwards, so the last word is always the newest data.
+      if (inFlightRef.current) {
+        queuedFreshRef.current = (queuedFreshRef.current ?? false) || fresh;
+        return;
+      }
+      inFlightRef.current = true;
+      try {
+        let next: boolean | null = fresh;
+        while (next !== null) {
+          const generation = (generationRef.current += 1);
+          try {
+            // First paint: one page. A reload re-reads as many pages as the owner has opened.
+            const pages = Math.min(pagesRef.current, MAX_RELOAD_PAGES);
+            let cursor: string | null = null;
+            let merged: StatementData[] = [];
+            let read = 0;
+            const init = next ? ({ cache: "no-store" } as const) : undefined;
+            // The first page and the statements' summary are asked together: neither waits for the other.
+            const summaryRequest = apiFetch(STATEMENT_SUMMARY_URL, init)
+              .then((res) => readJson<{ statements?: unknown }>(res, "Pankkitapahtumien lataus epäonnistui"))
+              .then(readSummaries)
+              .catch(() => summariesRef.current);
+            while (read < pages) {
+              const res: Response = await apiFetch(statementsUrl(cursor), init);
+              const page = readStatementsPage(await readJson(res, "Pankkitapahtumien lataus epäonnistui"));
+              merged = mergeStatementsPage(merged, page.statements);
+              cursor = page.nextCursor;
+              read += 1;
+              if (!cursor) break;
+            }
+            const summaries = await summaryRequest;
+            if (generation !== generationRef.current) return;
+            summariesRef.current = summaries;
+            merged = applySummaries(merged, summaries);
+            pagesRef.current = Math.max(1, read);
+            writePageCache("statements", merged);
+            setStatements((current) => reuseEqualRows(current, merged));
+            setNextCursor(cursor);
+            if (cursor) setPaged(true);
+            setLoadError(null);
+            const open = openTotal(summaries);
+            setServerOpen(open);
+            // A server without per-statement counts: ask for the one number.
+            if (cursor && open === null) void loadOpenCount(next);
+          } catch (error: unknown) {
+            if (isUnauthorized(error)) {
+              redirectToLogin();
+              return;
+            }
+            // A background refresh that fails keeps the rows on screen; only an empty screen shows the error.
+            if (statementsRef.current.length === 0) setLoadError(error);
+          } finally {
+            setLoading(false);
+          }
+          next = queuedFreshRef.current;
+          queuedFreshRef.current = null;
+        }
+      } finally {
+        inFlightRef.current = false;
+      }
+    },
+    [loadOpenCount]
+  );
+
+  const loadMore = useCallback(async () => {
+    if (!nextCursor || loadingMore || inFlightRef.current) return;
+    const generation = generationRef.current;
+    setLoadingMore(true);
+    try {
+      const res = await apiFetch(statementsUrl(nextCursor));
+      const page = readStatementsPage(await readJson(res, "Pankkitapahtumien lataus epäonnistui"));
+      if (generation !== generationRef.current) return;
+      pagesRef.current += 1;
+      setStatements((current) => {
+        const next = applySummaries(mergeStatementsPage(current, page.statements), summariesRef.current);
+        writePageCache("statements", next);
+        return next;
+      });
+      setNextCursor(page.nextCursor);
     } catch (error: unknown) {
       if (isUnauthorized(error)) {
         redirectToLogin();
         return;
       }
-      setLoadError(error);
+      showToast({ tone: "error", text: errorMessage(error, "Lisää tapahtumia ei saatu ladattua. Yritä uudelleen.") });
     } finally {
-      setLoading(false);
+      setLoadingMore(false);
     }
-  }, []);
+  }, [nextCursor, loadingMore]);
 
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- fetch-on-mount: storing the response is the external sync this effect exists for
     void loadStatements();
   }, [loadStatements]);
+
+  // A sync, import or save (here, on another device, or by the 6-hourly job) moves the data version.
+  useRefetchOnDataVersion(() => void loadStatements(true));
 
   useScrollRestoration("pankki", !loading);
 
@@ -305,7 +393,9 @@ export default function TapahtumatClient() {
   }
 
   const rows = useMemo(() => feedRows(statements), [statements]);
-  const openCount = useMemo(() => rows.filter(needsAction).length, [rows]);
+  const loadedOpenCount = useMemo(() => rows.filter(needsAction).length, [rows]);
+  // Past the first page the server's count is the whole truth; never less than what is on screen.
+  const openCount = nextCursor && serverOpen !== null ? Math.max(serverOpen, loadedOpenCount) : loadedOpenCount;
   const visibleRows = useMemo(
     () =>
       rows.filter(
@@ -319,7 +409,9 @@ export default function TapahtumatClient() {
   const months = useMemo(() => groupByMonth(visibleRows), [visibleRows]);
   // Narrowed views show everything they found; the full feed pages by month.
   const narrowed = Boolean(view || monthFilter || query.trim());
-  const shownMonths = narrowed ? months : months.slice(0, monthsShown);
+  // Once the server pages the feed, every loaded month shows (the page size bounds it); a feed
+  // that arrives in one piece keeps the month-by-month reveal.
+  const shownMonths = narrowed || paged ? months : months.slice(0, monthsShown);
   // A connected bank with nothing to show is not "connect your bank": say what is known.
   const connectedNote = (bank.data?.connections ?? []).find(
     (connection) => connection.status === "active" && isSyncNotice(connection.lastError)
@@ -338,12 +430,70 @@ export default function TapahtumatClient() {
     setSheetRowId(id);
   }, [focusParam, rows]);
 
+  // A narrowed view (search, "Vaatii toimia", one month) or a row linked from elsewhere must see
+  // every row, not just the pages opened so far: the rest streams in page by page.
+  const wantsEverything = narrowed || (Boolean(focusParam) && !rows.some((row) => row.id === focusParam));
+  useEffect(() => {
+    if (wantsEverything && nextCursor && !loading && !loadingMore && pagesRef.current < MAX_RELOAD_PAGES) void loadMore();
+  }, [wantsEverything, nextCursor, loading, loadingMore, loadMore]);
+
+  // End of the list: the next page comes in before the owner reaches it.
+  const sentinelRef = useRef<HTMLDivElement>(null);
+  const canInfiniteScroll = !narrowed && nextCursor !== null;
+  useEffect(() => {
+    const node = sentinelRef.current;
+    if (!canInfiniteScroll || !node || typeof IntersectionObserver === "undefined") return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) void loadMore();
+      },
+      { rootMargin: "600px 0px" }
+    );
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [canInfiniteScroll, loadMore, shownMonths.length]);
+
+  const openRow = useCallback((id: string) => setSheetRowId(id), []);
+  const toggleRow = useCallback((id: string) => {
+    setSelectedIds((current) => {
+      const next = new Set(current);
+      if (!next.delete(id)) next.add(id);
+      return next;
+    });
+  }, []);
+  function stopSelecting() {
+    setSelectMode(false);
+    setSelectedIds(new Set());
+  }
+  // Only rows the owner can see are acted on; a filter that hides a ticked row un-ticks it.
+  const selectedRows = useMemo(() => visibleRows.filter((row) => selectedIds.has(row.id)), [visibleRows, selectedIds]);
+  const suggestionRows = useMemo(
+    () => visibleRows.filter((row) => rowState(row) === "suggested" || rowState(row) === "sale"),
+    [visibleRows]
+  );
+  function applyBulk(patches: RowPatches) {
+    setStatements((current) =>
+      current.map((statement) => ({
+        ...statement,
+        transactions: statement.transactions.map((row) => {
+          const patch = patches.get(row.id);
+          return patch ? { ...row, ...patch } : row;
+        }),
+      }))
+    );
+    // What failed stays ticked so the owner can see it and try again.
+    setSelectedIds((current) => new Set([...current].filter((id) => !patches.has(id))));
+    void loadStatements(true);
+  }
+
   return (
     <div className="space-y-5">
       <PullToRefresh
         onRefresh={() => {
           setLoadError(null);
-          return loadStatements();
+          bank.reload();
+          // Skips every cached copy: the pull is the owner saying "show me the truth".
+          return loadStatements(true);
         }}
       />
       <PageTitle
@@ -361,7 +511,7 @@ export default function TapahtumatClient() {
 
       {/* Not connected, or the consent needs renewing: the shared card leads (BOOKS-04). */}
       <BankConnectCard variant="compact" />
-      <AccountsCard bank={bank} onSynced={() => void loadStatements()} />
+      <AccountsCard bank={bank} onSynced={() => void loadStatements(true)} />
 
       {rows.length > 0 && (
         <div className="space-y-3">
@@ -385,6 +535,40 @@ export default function TapahtumatClient() {
             >
               {formatMonth(monthFilter)} · näytä kaikki kuukaudet
             </button>
+          )}
+          {!loading && loadError == null && (
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                aria-pressed={selectMode}
+                onClick={() => (selectMode ? stopSelecting() : setSelectMode(true))}
+                className={tintedButtonClass(selectMode ? "neutral" : "accent")}
+              >
+                {selectMode ? "Valmis" : "Valitse"}
+              </button>
+              {selectMode && suggestionRows.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setSelectedIds(new Set(suggestionRows.map((row) => row.id)))}
+                  className={tintedButtonClass("accent")}
+                >
+                  Valitse ehdotukset ({suggestionRows.length})
+                </button>
+              )}
+              {selectMode && visibleRows.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() =>
+                    setSelectedIds(
+                      selectedRows.length === visibleRows.length ? new Set() : new Set(visibleRows.map((row) => row.id))
+                    )
+                  }
+                  className={tintedButtonClass("accent")}
+                >
+                  {selectedRows.length === visibleRows.length ? "Poista valinnat" : "Valitse kaikki näkyvät"}
+                </button>
+              )}
+            </div>
           )}
         </div>
       )}
@@ -446,7 +630,9 @@ export default function TapahtumatClient() {
         <div key={`${view}|${monthFilter}`} className={`space-y-1 ${fade || "list-swap"}`}>
           {shownMonths.map((group, index) => {
             // A finished month folds into one line; the newest month always shows.
-            const folded = !narrowed && index > 0 && group.open === 0 && !openMonths.has(group.month);
+            // The last month of an unfinished feed may continue on the next page: it stays open.
+            const mayContinue = nextCursor !== null && index === shownMonths.length - 1;
+            const folded = !narrowed && index > 0 && group.open === 0 && !openMonths.has(group.month) && !mayContinue;
             return (
               <Section
                 key={group.month}
@@ -474,28 +660,17 @@ export default function TapahtumatClient() {
                   />
                 ) : (
                   group.rows.map((row) => (
-                    <div
+                    <BankFeedRow
                       key={row.id}
-                      data-leave-key={row.id}
-                      className={
-                        [
-                          leaving.has(row.id) ? "row-leave" : "",
-                          doneRowId === row.id ? "row-done" : "",
-                          unfolded === group.month ? "list-swap" : "",
-                        ]
-                          .filter(Boolean)
-                          .join(" ") || undefined
-                      }
-                    >
-                      <ListRow
-                        title={row.counterparty || (row.amount > 0 ? "Tulo" : "Meno")}
-                        secondary={rowSecondary(row)}
-                        amount={formatEurSigned(row.amount)}
-                        amountTone={row.amount > 0 ? "positive" : "default"}
-                        trailing={rowTag(row)}
-                        onClick={() => setSheetRowId(row.id)}
-                      />
-                    </div>
+                      row={row}
+                      leaving={leaving.has(row.id)}
+                      done={doneRowId === row.id}
+                      swap={unfolded === group.month}
+                      selectMode={selectMode}
+                      selected={selectedIds.has(row.id)}
+                      onOpen={openRow}
+                      onToggle={toggleRow}
+                    />
                   ))
                 )}
               </Section>
@@ -511,10 +686,27 @@ export default function TapahtumatClient() {
               Näytä vanhemmat kuukaudet
             </Button>
           )}
+          {canInfiniteScroll && (
+            // The sentinel loads the next page before the owner gets here; the button is the fallback.
+            <div ref={sentinelRef}>
+              <Button
+                type="button"
+                variant="secondary"
+                className="mt-4 w-full"
+                busy={loadingMore}
+                busyLabel="Ladataan…"
+                onClick={() => void loadMore()}
+              >
+                Näytä lisää
+              </Button>
+            </div>
+          )}
         </div>
       )}
 
       <BankRowSheet row={sheetRow} onClose={() => setSheetRowId(null)} onChanged={handleChanged} />
+
+      {selectMode && <BankBulkActions rows={selectedRows} onCancel={stopSelecting} onApplied={applyBulk} />}
     </div>
   );
 }

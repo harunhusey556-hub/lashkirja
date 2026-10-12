@@ -7,8 +7,13 @@ import LashKirjaCore
 /// are reported with a remove. List sections; shows nothing while the offline queue is empty
 /// and healthy. The screen showing it starts
 /// the queue (`OfflineReceiptQueueModel.start`).
+///
+/// Above it, "Kesken: N kuittia": files of "Lisää kuitti" still on their way, or read and not
+/// saved, after its screen was closed (`CaptureQueueModel`); "Jatka" opens the screen on them.
 struct QueuedReceiptsCard: View {
+    @Environment(AppModel.self) private var app
     @State private var queue = OfflineReceiptQueueModel.shared
+    @State private var capture = CaptureQueueModel.shared
     @State private var connectivity = Connectivity.shared
     @State private var confirmRemove: String?
     @State private var limit = ShowMore()
@@ -17,6 +22,27 @@ struct QueuedReceiptsCard: View {
         let waiting = queue.waiting
         let sent = queue.sent
         Group {
+            if capture.unfinishedCount > 0 {
+                Section {
+                    HStack(spacing: 12) {
+                        Text(capture.queue.isWorking ? "Lähetetään ja luetaan…" : "Luettu, odottaa tarkistusta ja tallennusta")
+                            .font(.caption)
+                            .foregroundStyle(Theme.ink2)
+                        Spacer(minLength: 0)
+                        Button("Jatka") {
+                            Haptics.selection()
+                            EventLog.shared.log(.action("resume-capture", screen: "receipts"))
+                            capture.resuming = true
+                            app.pendingCapture = PendingCapture(transactionId: nil)
+                        }
+                        .font(.caption.bold())
+                        .buttonStyle(.borderless)
+                        .foregroundStyle(Theme.accent)
+                    }
+                } header: {
+                    Text(ReceiptUploadQueue.unfinishedTitle(capture.unfinishedCount))
+                }
+            }
             if let storageError = queue.storageError {
                 Section {
                     Text(storageError).font(.footnote).foregroundStyle(Theme.danger)
@@ -55,23 +81,6 @@ struct QueuedReceiptsCard: View {
                     ShowMoreButton(limit: $limit, total: waiting.count)
                 } header: {
                     Text(OfflineReceiptRules.waitingTitle(waiting.count))
-                }
-                .confirmationDialog("Poista kuva jonosta?", isPresented: Binding(get: { confirmRemove != nil }, set: { if !$0 { confirmRemove = nil } }),
-                                    titleVisibility: .visible) {
-                    Button("Poista", role: .destructive) {
-                        if let id = confirmRemove {
-                            EventLog.shared.log(.action("remove-queued", screen: "receipts"))
-                            Task { @MainActor in queue.remove(id) }
-                        }
-                        confirmRemove = nil
-                    }
-                } message: {
-                    // Names the photo by the day it was taken, as its row does.
-                    if let id = confirmRemove, let item = waiting.first(where: { $0.id == id }) {
-                        Text("\(OfflineReceiptRules.title(createdAt: item.createdAt)): kuvaa ei lähetetä, jos poistat sen jonosta.")
-                    } else {
-                        Text("Kuvaa ei lähetetä, jos poistat sen jonosta.")
-                    }
                 }
             }
             if !sent.isEmpty {
@@ -123,5 +132,17 @@ struct QueuedReceiptsCard: View {
             }
         }
         .accessibilityElement(children: .contain)
+        // On the row, not the List section: a sheet modifier on a Section is copied onto every row,
+        // and only the row whose photo was chosen may present it. The message names the photo by the
+        // day it was taken, as the row does.
+        .confirmSheet(
+            isPresented: Binding(get: { confirmRemove == item.id }, set: { if !$0 { confirmRemove = nil } }),
+            title: "Poista kuva jonosta?",
+            message: "\(OfflineReceiptRules.title(createdAt: item.createdAt)): kuvaa ei lähetetä, jos poistat sen jonosta.",
+            confirmTitle: "Poista"
+        ) {
+            EventLog.shared.log(.action("remove-queued", screen: "receipts"))
+            Task { @MainActor in queue.remove(item.id) }
+        }
     }
 }

@@ -76,7 +76,50 @@ public struct Statement: Decodable, Sendable, Identifiable, Hashable {
     public let totals: Totals?
 }
 
-public struct StatementList: Decodable, Sendable { public let statements: [Statement] }
+/// `GET /api/statements`: the tiliotteet with their rows, or, asked with `?cursor=` from a server
+/// that pages (W18), one page of rows newest first, each carrying its statement's month and
+/// account. A page is read into the same shape: one statement per `statementId`, holding that
+/// page's rows of it, so every screen groups and merges them the same way.
+public struct StatementList: Decodable, Sendable {
+    public let statements: [Statement]
+    /// Where the next page starts (`?cursor=`); nil when this answer is the whole list, as from a
+    /// server that does not page. Read leniently: an odd value means no more pages, not a failure.
+    public let nextCursor: String?
+
+    public init(statements: [Statement], nextCursor: String? = nil) {
+        self.statements = statements
+        self.nextCursor = nextCursor
+    }
+
+    enum CodingKeys: String, CodingKey { case statements, transactions, nextCursor }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        if let statements = try c.decodeIfPresent([Statement].self, forKey: .statements) {
+            self.statements = statements
+        } else {
+            statements = StatementPaging.group(try c.decode([PagedFeedRow].self, forKey: .transactions))
+        }
+        let cursor: String? = (try? c.decodeIfPresent(String.self, forKey: .nextCursor)) ?? nil
+        nextCursor = cursor.flatMap { $0.isEmpty ? nil : $0 }
+    }
+}
+
+/// One row of the paged feed: the bank row plus where it is filed.
+struct PagedFeedRow: Decodable {
+    let row: BankTransaction
+    let periodMonth: String?
+    let bankAccountId: String?
+
+    enum CodingKeys: String, CodingKey { case periodMonth, bankAccountId }
+
+    init(from decoder: Decoder) throws {
+        row = try BankTransaction(from: decoder)
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        periodMonth = (try? c.decodeIfPresent(String.self, forKey: .periodMonth)) ?? nil
+        bankAccountId = (try? c.decodeIfPresent(String.self, forKey: .bankAccountId)) ?? nil
+    }
+}
 public struct StatementResponse: Decodable, Sendable { public let statement: Statement }
 
 /// The Pankki screen's logic, the same rules as the web app's lib/bank-feed.ts.

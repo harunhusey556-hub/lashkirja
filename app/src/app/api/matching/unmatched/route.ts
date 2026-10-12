@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { noStoreJson } from "@/lib/http-security";
 import { prisma } from "@/lib/db";
 import { requireSession } from "@/lib/session";
 import { centsToEuros } from "@/lib/money";
@@ -53,7 +54,7 @@ export async function GET(req: NextRequest) {
     }),
   ]);
 
-  return NextResponse.json({
+  return noStoreJson({
     month,
     unmatchedTx: unmatchedTx.map(({ amountCents, ...tx }) => ({
       ...tx,

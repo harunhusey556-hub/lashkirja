@@ -127,23 +127,22 @@ struct InvoiceDetailView: View {
                 }
             }
         }
-        .confirmationDialog(confirmTitle, isPresented: Binding(get: { confirm != nil }, set: { if !$0 { confirm = nil } }), titleVisibility: .visible) {
-            switch confirm {
-            case .delete: Button("Poista luonnos", role: .destructive) { Task { await deleteDraft() } }
-            case .markSent: Button("Merkitse lähetetyksi") { Task { await setStatus(.markSent) } }
-            case .refund(let payment): Button("Palauta maksu", role: .destructive) { Task { await refund(payment) } }
-            case nil: EmptyView()
-            }
-        }
+        .confirmSheet(presenting: $confirm) { kind in confirmRequest(kind) }
         .navigationDestination(item: $pushedId) { id in InvoiceDetailView(invoiceId: id) }
     }
 
-    private var confirmTitle: String {
-        switch confirm {
-        case .delete: deleteDraftTitle
-        case .markSent: "Merkitäänkö lasku lähetetyksi ilman sähköpostia?"
-        case .refund(let payment): "Palautetaanko korttimaksu \(Money.format(payment.amount))? Raha palautetaan asiakkaan kortille Stripen kautta."
-        case nil: ""
+    private func confirmRequest(_ kind: ConfirmKind) -> ConfirmRequest {
+        switch kind {
+        case .delete:
+            return ConfirmRequest(title: deleteDraftTitle, confirmTitle: "Poista luonnos",
+                                  onConfirm: { Task { await deleteDraft() } })
+        case .markSent:
+            return ConfirmRequest(title: "Merkitäänkö lasku lähetetyksi ilman sähköpostia?", confirmTitle: "Merkitse lähetetyksi",
+                                  isDestructive: false, onConfirm: { Task { await setStatus(.markSent) } })
+        case .refund(let payment):
+            return ConfirmRequest(title: "Palautetaanko korttimaksu \(Money.format(payment.amount))?",
+                                  message: "Raha palautetaan asiakkaan kortille Stripen kautta.",
+                                  confirmTitle: "Palauta maksu", onConfirm: { Task { await refund(payment) } })
         }
     }
 
@@ -981,12 +980,15 @@ struct SendInvoiceSheet: View {
             } message: {
                 Text("Malli löytyy myöhemmin kohdasta Asetukset → Sähköpostimallit.")
             }
-            .confirmationDialog("Korvataanko tämän laskun tiedot paikkamerkeillä?", isPresented: $askConvert, titleVisibility: .visible) {
-                Button("Korvaa paikkamerkeillä") { Task { await saveTemplate(convert: true) } }
-                Button("Tallenna sellaisenaan") { Task { await saveTemplate(convert: false) } }
-                Button("Peruuta", role: .cancel) {}
-            } message: {
-                Text("Silloin malli sopii muillekin laskuille: esimerkiksi asiakkaan nimen tilalle tulee {asiakas}.")
+            .confirmSheet(
+                isPresented: $askConvert,
+                title: "Korvataanko tämän laskun tiedot paikkamerkeillä?",
+                message: "Silloin malli sopii muillekin laskuille: esimerkiksi asiakkaan nimen tilalle tulee {asiakas}.",
+                confirmTitle: "Korvaa paikkamerkeillä",
+                isDestructive: false,
+                secondary: ConfirmRequest.Action(title: "Tallenna sellaisenaan") { Task { await saveTemplate(convert: false) } }
+            ) {
+                Task { await saveTemplate(convert: true) }
             }
         }
     }
@@ -1117,7 +1119,12 @@ struct SendInvoiceSheet: View {
         }
         let values = check.value?.placeholders ?? [:]
         if EmailTemplateText.hasInvoiceValues(subject + "\n" + message, values: values) {
-            askConvert = true
+            // This runs from the name alert's button; a sheet raised while the alert is still leaving
+            // the screen is dropped, so the question waits until the alert is gone.
+            Task { @MainActor in
+                try? await Task.sleep(for: .milliseconds(400))
+                askConvert = true
+            }
         } else {
             Task { await saveTemplate(convert: false) }
         }

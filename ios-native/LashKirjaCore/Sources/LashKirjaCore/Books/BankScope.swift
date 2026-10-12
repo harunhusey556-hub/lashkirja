@@ -80,13 +80,24 @@ public struct BankSyncResult: Decodable, Sendable, Equatable {
     public let imported: Int
     public let skipped: Int
     public let notice: String?
+    /// The books' new `dataVersion` (W18), so the next `/api/sync/version` answer is not taken
+    /// for another change; nil from a server that does not send it.
+    public let dataVersion: String?
+    /// Ledger (or connected-only) account id → the balance the sync brought, shown at once.
+    public let balances: [String: Decimal]
+    /// The server took the sync as a job and answered before it finished.
+    public let isPending: Bool
 
     enum CodingKeys: String, CodingKey { case imported, skipped, notice }
 
-    public init(imported: Int, skipped: Int = 0, notice: String? = nil) {
+    public init(imported: Int, skipped: Int = 0, notice: String? = nil,
+                dataVersion: String? = nil, balances: [String: Decimal] = [:], isPending: Bool = false) {
         self.imported = imported
         self.skipped = skipped
         self.notice = notice
+        self.dataVersion = dataVersion
+        self.balances = balances
+        self.isPending = isPending
     }
 
     public init(from decoder: Decoder) throws {
@@ -94,6 +105,22 @@ public struct BankSyncResult: Decodable, Sendable, Equatable {
         imported = try c.decodeIfPresent(Int.self, forKey: .imported) ?? 0
         skipped = try c.decodeIfPresent(Int.self, forKey: .skipped) ?? 0
         notice = try c.decodeIfPresent(String.self, forKey: .notice)
+        // The freshness fields are newer than the app: read leniently, never failing the sync.
+        let extra = try decoder.container(keyedBy: LenientKey.self)
+        dataVersion = extra.lenientString("dataVersion")
+        var balances: [String: Decimal] = [:]
+        // W18 sends `bank.accounts` (the same rows as `/api/sync/version`); `accounts`/`balances`
+        // at the top are read too, so either shape brings the balances.
+        let bank = try? extra.nestedContainer(keyedBy: LenientKey.self, forKey: LenientKey("bank"))
+        var lists: [[SyncBalanceRow]] = [(try? bank?.decode([SyncBalanceRow].self, forKey: LenientKey("accounts"))) ?? []]
+        for key in ["accounts", "balances"] {
+            lists.append((try? extra.decode([SyncBalanceRow].self, forKey: LenientKey(key))) ?? [])
+        }
+        for row in lists.joined() { if let id = row.id, let balance = row.balance { balances[id] = balance } }
+        self.balances = balances
+        let status = extra.lenientString("status")?.lowercased()
+        isPending = extra.lenientString("jobId") != nil || (try? extra.decodeIfPresent(Bool.self, forKey: LenientKey("queued"))) == true
+            || ["queued", "pending", "running", "accepted"].contains(status ?? "")
     }
 
     /// "Haettiin 12 tapahtumaa." plus the server's note, if any.
@@ -106,6 +133,30 @@ public struct BankSyncResult: Decodable, Sendable, Equatable {
         }
         guard let notice = notice?.trimmingCharacters(in: .whitespacesAndNewlines), !notice.isEmpty else { return head }
         return "\(head) \(notice)"
+    }
+}
+
+/// One account of a sync answer with the balance it brought: the ledger account when the server
+/// names it, else the connection's account. Never throws, so an odd row is only skipped.
+private struct SyncBalanceRow: Decodable {
+    let id: String?
+    let balance: Decimal?
+
+    init(from decoder: Decoder) throws {
+        guard let c = try? decoder.container(keyedBy: LenientKey.self) else {
+            id = nil
+            balance = nil
+            return
+        }
+        id = c.lenientString("bankAccountId") ?? c.lenientString("connectedAccountId")
+            ?? c.lenientString("accountId") ?? c.lenientString("id")
+        if let cents = c.lenientInt("balanceCents") {
+            balance = Decimal(cents) / 100
+        } else if let euros = c.lenientString("balance") {
+            balance = Decimal(string: euros, locale: Locale(identifier: "en_US_POSIX"))
+        } else {
+            balance = nil
+        }
     }
 }
 

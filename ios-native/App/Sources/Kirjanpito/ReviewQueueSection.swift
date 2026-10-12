@@ -77,11 +77,9 @@ struct ReviewQueueSection: View {
                         }
                     }
                     if gaps.isEmpty {
-                        // Its own button: a tap on the pill approves, the rest of the row opens the receipt.
-                        Button { Task { await approve([receipt.id]) } } label: { pill("Hyväksy") }
-                            .buttonStyle(.borderless)
-                            .disabled(busy)
-                            .accessibilityLabel("Hyväksy \(receipt.title)")
+                        // Not a button of its own: approving from the queue meant approving a receipt
+                        // nobody had seen. The row opens the receipt, whose picture sits above "Hyväksy".
+                        pill("Tarkista")
                     } else {
                         // The row opens the receipt, where the missing fields are filled in.
                         pill("Täydennä")

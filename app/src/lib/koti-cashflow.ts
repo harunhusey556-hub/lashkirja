@@ -6,6 +6,7 @@
  * invoices, laskutusperuste).
  */
 import { prisma } from "./db";
+import { Prisma } from "@/generated/prisma/client";
 import { addMonths } from "./bank-balances";
 import { loadAlvPeriodSources } from "./alv-period";
 import { buildProfitLoss } from "./reports";
@@ -55,25 +56,26 @@ export async function loadCashflow(userId: string, throughMonth: string, months 
   const start = new Date(Date.UTC(firstYear, firstMonth - 1, 1));
   const end = new Date(Date.UTC(lastYear, lastMonth, 1));
 
+  // One grouped sum per month instead of every row of six months (W18: Koti's load time).
   const [rows, books] = await Promise.all([
-    prisma.transaction.findMany({
-      where: { statement: { userId, periodMonth: { in: window } } },
-      select: { amountCents: true, type: true, statement: { select: { periodMonth: true } } },
-    }),
+    prisma.$queryRaw<Array<{ periodMonth: string; incomeCents: number | bigint; expenseCents: number | bigint; count: number | bigint }>>`
+      SELECT s."periodMonth",
+        SUM(CASE WHEN t."type" = 'tulo' THEN t."amountCents" ELSE 0 END) AS "incomeCents",
+        SUM(CASE WHEN t."type" = 'meno' THEN ABS(t."amountCents") ELSE 0 END) AS "expenseCents",
+        COUNT(*) AS "count"
+      FROM "Transaction" t JOIN "Statement" s ON s."id" = t."statementId"
+      WHERE s."userId" = ${userId} AND s."periodMonth" IN (${Prisma.join(window)})
+      GROUP BY s."periodMonth"`,
     loadAlvPeriodSources(userId, start, end),
   ]);
 
-  const bank = new Map<string, { incomeCents: number; expenseCents: number; count: number }>();
-  for (const row of rows) {
-    const month = row.statement?.periodMonth;
-    if (!month) continue;
-    const entry = bank.get(month) ?? { incomeCents: 0, expenseCents: 0, count: 0 };
-    entry.count += 1;
-    // Same rule as Koti's month: tulo and meno count, oma_siirto is left out.
-    if (row.type === "tulo") entry.incomeCents += row.amountCents;
-    else if (row.type === "meno") entry.expenseCents += Math.abs(row.amountCents);
-    bank.set(month, entry);
-  }
+  // Same rule as Koti's month: tulo and meno count, oma_siirto is left out.
+  const bank = new Map<string, { incomeCents: number; expenseCents: number; count: number }>(
+    rows.map((row) => [
+      row.periodMonth,
+      { incomeCents: Number(row.incomeCents), expenseCents: Number(row.expenseCents), count: Number(row.count) },
+    ])
+  );
 
   const documents = new Map<string, { incomeCents: number; expenseCents: number }>();
   for (const period of buildProfitLoss(books.reportReceipts, books.reportInvoices).months) {

@@ -94,7 +94,11 @@ struct RaportitView: View {
         .scrollContentBackground(.hidden)
         .background(Theme.canvas)
         .navigationTitle("Raportit")
-        .refreshable { await load() }
+        .refreshable {
+            // Pull-to-refresh asks every screen again; this one's own load stands for the bump.
+            gate.mark(key: String(year), version: app.refreshEverything())
+            await load()
+        }
         .task(id: "\(year)|\(app.dataVersion)") {
             let key = String(year)
             guard state.value == nil || gate.isDue(key: key, version: app.dataVersion) else { return }

@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRefetchOnReconnect } from "@/components/useRefetchOnReconnect";
+import { useRefetchOnDataVersion } from "@/components/useDataVersion";
 import { isUnauthorized, redirectToLogin } from "@/components/clientFetch";
 import { useCacheAfterBoot } from "@/components/invoices/useCacheAfterBoot";
 import {
@@ -78,6 +79,8 @@ export function useCachedResource<T>(
 
   // The connection came back: an error card clears and a cached copy catches up (F32).
   useRefetchOnReconnect(reload);
+  // A sync, import or save changed the data behind this value (W20).
+  useRefetchOnDataVersion(reload);
 
   return { value, failed: error !== null, error, set, reload };
 }

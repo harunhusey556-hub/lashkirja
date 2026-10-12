@@ -311,6 +311,7 @@ model Transaction {
   @@index([suggestedReceiptId])
   @@unique([userId, bankRef])
   @@index([userId, source])
+  @@index([userId, date])
 }
 
 // The owner deleted the sale draft that was made from a bank row: the row does
@@ -592,6 +593,17 @@ model MonthlyBalance {
 
   @@unique([bankAccountId, month])
   @@index([bankAccountId, month])
+}
+
+/// One change counter per user for client freshness (GET /api/sync/version). Written only by the
+/// SQLite triggers of migration 20261015090000_data_version, so every write path moves it; the app
+/// reads it with a raw query. No relation on purpose: a cascade delete of the user must not trip it.
+model DataVersion {
+  userId     String    @id
+  version    Int       @default(0)
+  bankAt     DateTime?
+  receiptsAt DateTime?
+  invoicesAt DateTime?
 }
 
 // A person or company the user invoices. Kept per user; two users may hold the

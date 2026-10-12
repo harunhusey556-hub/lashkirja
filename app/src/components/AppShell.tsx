@@ -38,6 +38,7 @@ import { useSession } from "@/components/SessionProvider";
 import { IS_MOBILE_BUILD } from "@/lib/build-target";
 import { markFirstScreen, onFirstScreen } from "@/lib/splash";
 import { readPageCache, writePageCache } from "@/lib/page-cache";
+import { readStatementsPage, statementsUrl } from "@/lib/bank-feed-pages";
 import { helsinkiMonthKey } from "@/lib/validation";
 import { bumpNavEpoch } from "@/lib/screen-state";
 import {
@@ -187,7 +188,8 @@ async function warmTabCaches(sequential: boolean) {
     () => warm("/api/invoices?", "invoices", (d) => (d.invoices && d.aging ? d : undefined)),
     () => warm("/api/receipts?sort=date_desc", "receipts:sort=date_desc", (d) => d.receipts ?? []),
     () => warm("/api/receipts?reviewStatus=pending", "receipts-pending", (d) => d.receipts ?? []),
-    () => warm("/api/statements", "statements", (d) => d.statements ?? []),
+    // One page, not the ledger: the whole list was the 5 s request this warm-up used to start.
+    () => warm(statementsUrl(null), "statements", (d) => readStatementsPage(d).statements),
     () => warm("/api/bank-accounts", "bank-overview", (d) => (d.accounts ? d : undefined)),
   ];
   if (sequential) {

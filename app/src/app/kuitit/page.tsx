@@ -24,6 +24,7 @@ import {
 import { pageCacheFetchedAt, readPageCache, writePageCache } from "@/lib/page-cache";
 import { useCacheAfterBoot } from "@/components/invoices/useCacheAfterBoot";
 import { usePersistedState, useScrollRestoration } from "@/lib/list-ui-state";
+import { useRefetchOnDataVersion } from "@/components/useDataVersion";
 
 import { categoryLabel } from "@/lib/receipt-categories";
 import { formatMonth, parseFinnishNumber } from "@/lib/format";
@@ -55,7 +56,7 @@ import {
 } from "@/lib/review-queue";
 import { ReceiptFilters, type ReceiptAdvancedFilters } from "./ReceiptFilters";
 import { ReceiptRow } from "./ReceiptRow";
-import { BULK_BAR_SPACE_VAR, BulkBar } from "./BulkBar";
+import { BulkBar } from "./BulkBar";
 import type { SavedReceipt } from "./types";
 import { tintedButtonClass } from "@/components/control-styles";
 
@@ -132,6 +133,8 @@ export default function KuititPage() {
     if (actionError) actionErrorRef.current?.scrollIntoView({ block: "nearest", behavior: "smooth" });
   }, [actionError]);
   const [loadAttempt, setLoadAttempt] = useState(0);
+  // A sync, import or save (anywhere) changes the list, the pending queue and the chip counts.
+  useRefetchOnDataVersion(() => setLoadAttempt((a) => a + 1));
   // The connection came back, or the offline queue just delivered a photo:
   // the list refetches by itself instead of showing "Lähetetty" next to an
   // old list or an error card (F32).
@@ -266,7 +269,9 @@ export default function KuititPage() {
 
   useEffect(() => {
     let cancelled = false;
-    apiFetch(`/api/receipts${query ? `?${query}` : ""}`)
+    // Reloads after the first (version change, mutation, retry) skip any cached copy.
+    const noCache = loadAttempt > 0 ? ({ cache: "no-store" } as const) : undefined;
+    apiFetch(`/api/receipts${query ? `?${query}` : ""}`, noCache)
       .then((response) =>
         readJson<{ receipts?: SavedReceipt[]; count?: number; truncated?: boolean }>(
           response,
@@ -297,7 +302,7 @@ export default function KuititPage() {
         setLoadError({ query, error });
       });
 
-    apiFetch("/api/receipts?reviewStatus=pending&kind=receipt")
+    apiFetch("/api/receipts?reviewStatus=pending&kind=receipt", noCache)
       .then((res) =>
         readJson<{ receipts?: SavedReceipt[]; truncated?: boolean }>(res, "Virhe")
       )
@@ -336,7 +341,7 @@ export default function KuititPage() {
 
   async function loadCounts(signal?: AbortSignal) {
     try {
-      const response = await apiFetch(`/api/receipts/counts${countsQuery ? `?${countsQuery}` : ""}`, { signal });
+      const response = await apiFetch(`/api/receipts/counts${countsQuery ? `?${countsQuery}` : ""}`, { signal, cache: loadAttempt > 0 ? "no-store" : undefined });
       const data = await readJson<{ counts: ReceiptTabCounts }>(response, "Määrien haku epäonnistui");
       if (signal?.aborted) return;
       writePageCache(`receipt-counts:${countsQuery}`, data.counts);
@@ -351,7 +356,8 @@ export default function KuititPage() {
 
   useEffect(() => {
     let cancelled = false;
-    apiFetch("/api/receipts?reviewStatus=rejected")
+    const noCache = loadAttempt > 0 ? ({ cache: "no-store" } as const) : undefined;
+    apiFetch("/api/receipts?reviewStatus=rejected", noCache)
       .then((res) => readJson<{ receipts?: SavedReceipt[] }>(res, "Hylättyjen haku epäonnistui"))
       .then((data) => {
         if (!cancelled) setRejectedReceipts(data.receipts || []);
@@ -736,8 +742,7 @@ export default function KuititPage() {
 
   return (
     <>
-      {/* BulkBar publishes its height while shown, so the last row and "Katso kaikki" scroll clear of it. */}
-      <div className="space-y-6" style={{ paddingBottom: `var(${BULK_BAR_SPACE_VAR}, 0px)` }}>
+      <div className="space-y-6">
         {/* C1.6 (IA-24): pull to refresh runs the same reload as Yritä uudelleen. */}
         <PullToRefresh onRefresh={() => {
             setLoadError(null);

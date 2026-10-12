@@ -383,7 +383,8 @@ button:disabled {
   background: var(--color-canvas);
   padding-top: 1.25rem;
   padding-right: max(1rem, env(safe-area-inset-right, 0px));
-  padding-bottom: 1.25rem;
+  /* --bulk-bar-space is published by BulkBar while it is shown, so every list that mounts it clears the bar. */
+  padding-bottom: calc(1.25rem + var(--bulk-bar-space, 0px));
   scroll-padding-bottom: 1.5rem;
   padding-left: max(1rem, env(safe-area-inset-left, 0px));
   overflow-y: auto;
@@ -467,7 +468,7 @@ button:disabled {
 /* On a detail page the tab bar slides away (data-tabs="hidden"), so .app-main
    carries the home-indicator inset itself instead of losing it. */
 .app-frame[data-tabs="hidden"] > .app-main {
-  padding-bottom: max(1.25rem, calc(var(--safe-bottom) + 1.25rem));
+  padding-bottom: calc(max(1.25rem, calc(var(--safe-bottom) + 1.25rem)) + var(--bulk-bar-space, 0px));
 }
 
 /* Push/pop: the outgoing page is a snapshot that slides under the incoming
@@ -611,7 +612,7 @@ button:disabled {
 
 @media (max-width: 767.98px) {
   .app-frame:not([data-tabs="hidden"]) > .app-main {
-    padding-bottom: calc(var(--app-tab-height) + var(--safe-bottom) + 0.5rem);
+    padding-bottom: calc(var(--app-tab-height) + var(--safe-bottom) + 0.5rem + var(--bulk-bar-space, 0px));
   }
 }
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Button } from "@/components/ui";
 import { bulkApproveLabel } from "@/lib/review-queue";
 
@@ -11,10 +11,11 @@ const CLEARANCE_PX = 12 + 8;
 
 /**
  * The room the list needs at its end so the last row and "Katso kaikki" can
- * scroll clear of the bar. Published as a CSS variable on the root; the Kuitit
- * page reads it as bottom padding, so nothing changes while no bar is shown.
+ * scroll clear of the bar. Published as a CSS variable on the root; `.app-main`
+ * (globals.css) adds it to its bottom padding, so every page that mounts a bar
+ * reserves the same space and nothing changes while no bar is shown.
  */
-export const BULK_BAR_SPACE_VAR = "--bulk-bar-space";
+const BULK_BAR_SPACE_VAR = "--bulk-bar-space";
 
 /**
  * The floating bar shown once one or more receipts are checkbox-selected.
@@ -38,6 +39,8 @@ export function BulkBar({
   onCancel,
   onApproveRequest,
   onDeleteRequest,
+  label = "Valitut kuitit",
+  actions,
 }: {
   visible: boolean;
   count: number;
@@ -48,6 +51,10 @@ export function BulkBar({
   onCancel: () => void;
   onApproveRequest: () => void;
   onDeleteRequest: () => void;
+  /** Toolbar name for screen readers; other lists (Pankki, Ostolaskut) reuse this bar. */
+  label?: string;
+  /** Replaces the approve/delete pair with the screen's own buttons (they wrap onto a second line). */
+  actions?: ReactNode;
 }) {
   const [mounted, setMounted] = useState(visible);
   const [leaving, setLeaving] = useState(false);
@@ -103,38 +110,44 @@ export function BulkBar({
     >
       <div
         ref={barRef}
-        className="bottom-actions flex w-full max-w-sm items-center gap-3 rounded-card bg-ink px-4 py-2.5 text-canvas"
+        className={`bottom-actions flex w-full items-center gap-3 rounded-card bg-ink px-4 py-2.5 text-canvas ${
+          actions ? "max-w-md flex-wrap" : "max-w-sm"
+        }`}
         style={{
           transition: "transform 160ms var(--ease-drawer), opacity 160ms var(--ease-out)",
           transform: leaving ? "translateY(calc(100% + 1rem))" : undefined,
           opacity: leaving ? 0 : undefined,
         }}
         role="toolbar"
-        aria-label="Valitut kuitit"
+        aria-label={label}
       >
         <span className="text-caption font-medium" aria-live="polite">
           {shownCount} valittu
         </span>
-        <div className="ml-auto flex gap-2">
+        <div className={`ml-auto flex gap-2 ${actions ? "flex-wrap justify-end" : ""}`}>
           <Button type="button" variant="secondary" onClick={onCancel}>
             Peruuta
           </Button>
-          {/* One rule for every approve path (receipt-approval.ts): a selected
-              receipt that is not ready is left behind, not force-approved. */}
-          {approvableCount > 0 && (
-            <Button
-              type="button"
-              variant="secondary"
-              busy={approveBusy}
-              busyLabel="Hyväksytään…"
-              onClick={onApproveRequest}
-            >
-              {bulkApproveLabel(approvableCount, count - approvableCount)}
-            </Button>
+          {actions ?? (
+            <>
+              {/* One rule for every approve path (receipt-approval.ts): a selected
+                  receipt that is not ready is left behind, not force-approved. */}
+              {approvableCount > 0 && (
+                <Button
+                  type="button"
+                  variant="secondary"
+                  busy={approveBusy}
+                  busyLabel="Hyväksytään…"
+                  onClick={onApproveRequest}
+                >
+                  {bulkApproveLabel(approvableCount, count - approvableCount)}
+                </Button>
+              )}
+              <Button type="button" variant="danger" busy={busy} busyLabel="Poistetaan…" onClick={onDeleteRequest}>
+                Poista
+              </Button>
+            </>
           )}
-          <Button type="button" variant="danger" busy={busy} busyLabel="Poistetaan…" onClick={onDeleteRequest}>
-            Poista
-          </Button>
         </div>
       </div>
     </div>

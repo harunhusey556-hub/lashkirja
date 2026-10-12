@@ -47,18 +47,31 @@ function rowMonth(statement: StatementData, row: StatementTransaction): string {
   return "";
 }
 
+/**
+ * A row keeps its `FeedRow` object for as long as the underlying transaction
+ * object lives. A list that re-sorts after a single row changed (or after a
+ * refetch that reused the unchanged rows, see `reuseEqualRows`) then hands the
+ * memoised row components the same props, so only the changed row repaints.
+ */
+const feedRowCache = new WeakMap<StatementTransaction, FeedRow>();
+
+function toFeedRow(statement: StatementData, row: StatementTransaction): FeedRow {
+  const month = rowMonth(statement, row);
+  const accountName = statement.bankAccount?.name ?? null;
+  const cached = feedRowCache.get(row);
+  if (cached && cached.statementId === statement.id && cached.month === month && cached.accountName === accountName) {
+    return cached;
+  }
+  const next: FeedRow = { ...row, statementId: statement.id, month, accountName };
+  feedRowCache.set(row, next);
+  return next;
+}
+
 /** Every row of every statement, newest first; undated rows last in their month. */
 export function feedRows(statements: StatementData[]): FeedRow[] {
   const rows: FeedRow[] = [];
   for (const statement of statements) {
-    for (const row of statement.transactions) {
-      rows.push({
-        ...row,
-        statementId: statement.id,
-        month: rowMonth(statement, row),
-        accountName: statement.bankAccount?.name ?? null,
-      });
-    }
+    for (const row of statement.transactions) rows.push(toFeedRow(statement, row));
   }
   return rows.sort((a, b) => {
     if (a.month !== b.month) return b.month.localeCompare(a.month);
@@ -139,3 +152,21 @@ export function unlinkMessage(restoredSale: boolean): string {
     ? "Kohdistus poistettu. Myynti ei ole kirjanpidossa, ennen kuin hyväksyt sen uudelleen."
     : "Kohdistus poistettu.";
 }
+
+/** The row after its suggested kuitti (or recognised sale) is linked. */
+export function linkedRowPatch(row: FeedRow): Partial<StatementTransaction> {
+  return {
+    matchStatus: "confirmed",
+    receiptId: row.suggestedReceiptId,
+    receipt: row.suggestedReceipt,
+    suggestedReceiptId: null,
+    suggestedReceipt: null,
+  };
+}
+
+/** The row after its suggestion was turned down. */
+export const REJECTED_SUGGESTION_PATCH: Partial<StatementTransaction> = {
+  matchStatus: "unmatched",
+  suggestedReceiptId: null,
+  suggestedReceipt: null,
+};
