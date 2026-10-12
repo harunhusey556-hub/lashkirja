@@ -26,6 +26,11 @@ describe("chat policy", () => {
     expect(isMatchRequest("Mikä on laskun ALV?")).toBe(false);
     expect(isMatchRequest("Kohdista kuitit")).toBe(true);
     expect(isMatchRequest("Täsmäytä kuitit")).toBe(true);
+    // The second phrasing in the owner's screenshot and the Finnish variants route to the match tool too.
+    for (const text of ["Kohdista kaikki kuitit", "kohdista kaikki kuitit pankkitapahtumiin", "Täsmäytä kaikki kuitit", "Yhdistä kuitit", "Yhdistä kaikki kuitit", "yhdistä avoimet kuitit tiliotteeseen", "Täsmää kuitit"]) {
+      expect(isMatchRequest(text), text).toBe(true);
+    }
+    expect(isMatchRequest("Missä ovat kaikki kuittini?")).toBe(false);
   });
 
   it("F58: only a clear question about this month's VAT is a VAT question", () => {

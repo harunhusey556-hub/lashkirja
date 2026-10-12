@@ -55,7 +55,8 @@ export function isGreeting(text: string): boolean {
 }
 
 // Matching receipts to bank rows: Finnish, English, Turkish ("eşleştir") and Swedish ("matcha").
-const MATCH_WORD = /kohdist|täsmäyt|yhdistä kuit|\bmatch\b|(?<![\p{L}])matcha\p{L}*|e[şs]le[şs]tir|koppla kvitt/u;
+// "Kohdista kaikki kuitit", "yhdistä kaikki kuitit" and "täsmäytä kuitit" are the same request as "kohdista kuitit".
+const MATCH_WORD = /kohdist|täsmäyt|(?:yhdistä|täsmää|sovita)(?:\s+\p{L}+){0,2}\s+kuit|\bmatch\b|(?<![\p{L}])matcha\p{L}*|e[şs]le[şs]tir|koppla kvitt/u;
 
 export function isMatchRequest(text: string): boolean {
   return MATCH_WORD.test(text.replace(/İ/g, "i").toLowerCase());

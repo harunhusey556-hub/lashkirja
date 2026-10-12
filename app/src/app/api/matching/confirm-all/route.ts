@@ -18,7 +18,7 @@ const bodySchema = z
 export async function POST(req: NextRequest) {
   const blocked = guardWrite(req);
   if (blocked) return blocked;
-  const session = await requireSession();
+  const session = await requireSession(req);
   if (!session) {
     return NextResponse.json({ error: "Ei kirjautunut" }, { status: 401 });
   }

@@ -5,10 +5,12 @@ import { APP_GUIDE, CHAT_DESTINATIONS, asksToConnectBank, suggestedChatActions }
 import { prisma } from "./db";
 import { parseBusinessDetails, generateProfileSummary } from "./onboarding";
 import { offerableReceiptWhere } from "./matching";
-import { buildMatchProposal, type ChatMatchProposal } from "./chat-match-proposal";
+import type { ChatMatchProposal } from "./chat-match-proposal";
+import { batchSummaryEn, batchSummaryFi, buildMatchBatch, type ChatMatchBatch } from "./chat-match-batch";
 import { reviewedReceiptMatches } from "./match-review-run";
 
 export { buildMatchProposal, type ChatMatchProposal } from "./chat-match-proposal";
+export type { ChatMatchBatch } from "./chat-match-batch";
 import { chatProviderConfigured, streamChatWithTools } from "./chat-provider";
 import { CHAT_TOOL_RULES, createChatToolSession, withToolHonesty, type ChatToolSession } from "./chat-tools";
 import type { ChatActionProposal } from "./chat-tools-propose";
@@ -43,7 +45,7 @@ import {
 } from "./chat-policy";
 
 /** What a reply can carry for the owner to confirm: a match, or a tool's proposed action. */
-export type ChatProposal = ChatMatchProposal | ChatActionProposal;
+export type ChatProposal = ChatMatchProposal | ChatMatchBatch | ChatActionProposal;
 
 export interface ChatAssistantResult {
   reply: string;
@@ -56,7 +58,7 @@ export type PreparedChat =
   | {
       kind: "local";
       reply: string;
-      proposal?: ChatMatchProposal;
+      proposal?: ChatMatchProposal | ChatMatchBatch;
       limited?: boolean;
       sources?: ChatSource[];
       honesty?: HonestyContext;
@@ -204,48 +206,51 @@ export async function prepareChat(
       // is offered. Date-only or vendor-only look-alikes never are; no
       // suggestion is a valid answer.
       const { offered, report } = await reviewedReceiptMatches(userId);
-      const ambiguousRows = report.ambiguous.filter((row) => row.target === "receipt").length;
+      const receiptAmbiguous = report.ambiguous.filter((row) => row.target === "receipt");
+      const ambiguousRows = receiptAmbiguous.length;
       const waiting = report.aiAvailable ? report.unreviewed : 0;
       const best = offered[0];
-      if (best) {
-        const proposal = buildMatchProposal(
-          { id: best.transactionId, date: best.row.date, counterparty: best.row.counterparty, message: best.row.message, amountCents: best.row.amountCents },
-          { id: best.candidateId, vendor: best.candidate.label, totalAmountCents: best.candidate.amountCents, fileName: best.candidate.fileName ?? "" },
-          { score: best.confidence ?? best.score, reasons: [], explanation: best.reasons }
-        );
-        const txMonth = monthKey(best.row.date);
-        const receiptMonth = monthKey(best.candidate.date);
+      // Every proposal rides on the reply as one card list (a lone pair keeps
+      // its single card), so the text never sends the owner to Pankki for them.
+      const { batch, proposal } = buildMatchBatch(offered, receiptAmbiguous);
+      if (proposal) {
         const matchSources: ChatSource[] = [];
-        if (txMonth) matchSources.push({ label: "Tiliotteet", href: statementDrillHref(txMonth) });
-        if (receiptMonth) {
-          matchSources.push({
-            label: "Kuitit",
-            href: receiptDrillHref({ month: receiptMonth, type: best.row.amountCents >= 0 ? "tulo" : "meno" }),
-          });
+        if (best) {
+          const txMonth = monthKey(best.row.date);
+          const receiptMonth = monthKey(best.candidate.date);
+          if (txMonth) matchSources.push({ label: "Tiliotteet", href: statementDrillHref(txMonth) });
+          if (receiptMonth) {
+            matchSources.push({
+              label: "Kuitit",
+              href: receiptDrillHref({ month: receiptMonth, type: best.row.amountCents >= 0 ? "tulo" : "meno" }),
+            });
+          }
         }
-        const amounts = [proposal.txSummary, proposal.receiptSummary]
-          .flatMap((line) => [...line.matchAll(/(\d+\.\d{2})/g)].map((match) => match[1]));
-        const single = offered.length === 1;
-        const ambiguousNote = ambiguousRows > 0
+        const single = proposal.type === "match_proposal";
+        const waitingNote = waiting > 0
           ? english
-            ? ` ${ambiguousRows} bank row${ambiguousRows === 1 ? " has" : "s have"} two equally likely receipts, so I did not pick one; choose yourself in Pankki.`
-            : ` ${ambiguousRows} pankkitapahtumalle sopii kaksi yhtä hyvää kuittia, joten en valinnut kumpaakaan. Valitse itse Pankki-näkymässä.`
+            ? ` ${waiting} possible match${waiting === 1 ? " is" : "es are"} still being checked.`
+            : ` ${waiting} mahdollista ehdotusta on vielä tarkistettavana.`
           : "";
+        const amounts = single
+          ? [proposal.txSummary, proposal.receiptSummary].flatMap((line) => [...line.matchAll(/(\d+\.\d{2})/g)].map((match) => match[1]))
+          : [];
+        const recordIds = single
+          ? [proposal.transactionId, proposal.receiptId]
+          : batch.cards.flatMap((card) => [card.transactionId, ...(card.receiptId ? [card.receiptId] : [])]);
         return {
           kind: "local",
-          reply: english
-            ? single
-              ? `I checked your bank rows and receipts and found a suggestion. Confirm it below. I have not linked them.${ambiguousNote}`
-              : `I checked your bank rows and receipts: ${offered.length} receipts match. Below is the best suggestion; accept them all at once in Pankki (Hyväksy kaikki). I have not linked anything.${ambiguousNote}`
-            : single
-              ? `Tarkistin pankkitapahtumasi ja kuitit. Löysin ehdotuksen. Vahvista se alta. En ole vielä yhdistänyt niitä.${ambiguousNote}`
-              : `Tarkistin pankkitapahtumasi ja kuitit. ${offered.length} kuittia täsmäävät. Alla on paras ehdotus; hyväksy ne kerralla Pankki-näkymässä (Hyväksy kaikki). En ole vielä yhdistänyt mitään.${ambiguousNote}`,
+          reply: single
+            ? english
+              ? "I checked your bank rows and receipts and found a suggestion. Confirm it below. I have not linked them."
+              : "Tarkistin pankkitapahtumasi ja kuitit. Löysin ehdotuksen. Vahvista se alta. En ole vielä yhdistänyt niitä."
+            : `${english ? batchSummaryEn(batch) : batchSummaryFi(batch)}${waitingNote}`,
           proposal,
           sources: matchSources,
           honesty: {
             performedActions: [],
             allowedAmounts: amounts,
-            allowedRecordIds: [proposal.transactionId, proposal.receiptId],
+            allowedRecordIds: recordIds,
             allowedHrefs: matchSources.map((source) => source.href),
           },
         };
