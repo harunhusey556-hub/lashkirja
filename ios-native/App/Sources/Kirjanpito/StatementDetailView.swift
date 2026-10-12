@@ -235,6 +235,9 @@ struct StatementDetailView: View {
     }
 
     private func load() async {
+        // Deleted from this screen: the delete's write reloads screens while this one is still
+        // closing, and asking again only answered 404 (event log 2026-10-08, every delete).
+        guard !app.removedIds.contains(statementId) else { return }
         state.begin()
         do {
             let response: StatementResponse = try await app.api.get("/api/statements/\(statementId)")
