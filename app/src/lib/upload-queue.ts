@@ -3,6 +3,9 @@ export type UploadQueueStatus =
   | "uploading"
   | "processing"
   | "ready"
+  // Auto-accept (W8): the reading is being saved / was saved as a receipt.
+  | "saving"
+  | "saved"
   | "failed"
   | "cancelled"
   | "background";
@@ -65,9 +68,12 @@ export async function drainQueue<T extends { status: string }>(
   await Promise.all(Array.from({ length: Math.max(1, concurrency) }, lane));
 }
 
-/** "12 / 240 valmista": ready rows out of the whole pick, counted from the rows. */
+/** "12 / 240 valmista": read (or already saved) rows out of the whole pick, counted from the rows. */
 export function queueProgressCounts(items: UploadQueueItem[]): { done: number; total: number } {
-  return { done: items.filter((item) => item.status === "ready").length, total: items.length };
+  return {
+    done: items.filter((item) => item.status === "ready" || item.status === "saved").length,
+    total: items.length,
+  };
 }
 
 export function queueProgressLabel(items: UploadQueueItem[]): string {

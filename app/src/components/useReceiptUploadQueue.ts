@@ -16,6 +16,8 @@ import {
   retryFailedOnly,
   type UploadQueueStatus,
 } from "@/lib/upload-queue";
+import { AUTO_SAVE_CONCURRENCY, createLimiter, takesAutoSavePath } from "@/lib/auto-accept";
+import { bulkSavePayload } from "@/lib/review-queue";
 
 const MAX_UPLOAD_BYTES = 15 * 1024 * 1024;
 /**
@@ -50,6 +52,8 @@ export interface ExtractedUpload {
   fieldConfidence?: { vendor?: number; date?: number; totalAmount?: number } | null;
   /** Nothing could be read from the file: the form opens empty for manual entry (F04). */
   unreadable?: boolean;
+  /** receipt / invoice / marketing / other, when the reading names it. */
+  documentType?: string | null;
 }
 
 export interface ReadyUpload {
@@ -66,8 +70,26 @@ export interface ReceiptQueueRow {
   error?: string;
   duplicateReceiptId?: string;
   progress?: string;
-  /** Present once the file is read; the bulk import saves every ready row from here. */
+  /** Present once the file is read; the auto-save sends this reading. */
   ready?: ReadyUpload;
+  /** Once saved: approved automatically, or waiting in the review queue. */
+  outcome?: "approved" | "pending";
+  receiptId?: string;
+}
+
+/** What one auto-saved file became (W8). */
+export interface AutoSavedUpload {
+  receiptId: string;
+  outcome: "approved" | "pending";
+  /** The server saw the same vendor, date and sum already: saved for review. */
+  duplicate: boolean;
+}
+
+export interface AutoSaveOptions {
+  /** Off where the form itself must save (editing, linking to one bank row). */
+  enabled: boolean;
+  /** A single-file pick that was saved without the form. */
+  onSingleSaved?: (saved: AutoSavedUpload) => void;
 }
 
 interface InternalRow extends ReceiptQueueRow {
@@ -91,9 +113,10 @@ function listedRow(row: InternalRow): ReceiptQueueRow {
     error: row.error,
     duplicateReceiptId: row.duplicateReceiptId,
     progress: row.progress,
-    // The bulk import saves every ready row from the public list, so the
-    // reading travels with it (W2) -- still identity-stable per row.
+    // The reading travels with the row (W2) -- still identity-stable per row.
     ready: row.ready,
+    outcome: row.outcome,
+    receiptId: row.receiptId,
   };
 }
 
@@ -130,6 +153,45 @@ function duplicateReceiptId(error: unknown): string | null {
   return typeof id === "string" && id ? id : null;
 }
 
+function isDuplicateRefusal(error: unknown): boolean {
+  return (
+    error instanceof ApiError &&
+    error.status === 409 &&
+    typeof error.details === "object" &&
+    error.details !== null &&
+    (error.details as { isDuplicate?: unknown }).isDuplicate === true
+  );
+}
+
+/**
+ * Saves one read file as a receipt and lets the server approve it when the
+ * reading is complete (`autoApprove`, lib/auto-accept.ts). A look-alike of a
+ * receipt already on file is saved anyway, as pending, so the owner decides
+ * in the review queue instead of the file silently vanishing.
+ */
+async function autoSaveUpload(ready: ReadyUpload): Promise<AutoSavedUpload> {
+  const payload = { ...bulkSavePayload(ready.uploadId, ready.extracted), autoApprove: true };
+  const post = async (forceDuplicate: boolean) => {
+    const response = await apiFetch("/api/receipts/save", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ...payload, forceDuplicate }),
+    });
+    return readJson<{ receipt?: { id?: string }; autoApproved?: boolean }>(response, "Tallennus epäonnistui");
+  };
+  let duplicate = false;
+  let data: Awaited<ReturnType<typeof post>>;
+  try {
+    data = await post(false);
+  } catch (error: unknown) {
+    if (!isDuplicateRefusal(error)) throw error;
+    duplicate = true;
+    data = await post(true);
+  }
+  if (!data.receipt?.id) throw new ApiError("Tallennus epäonnistui", 500);
+  return { receiptId: data.receipt.id, outcome: data.autoApproved ? "approved" : "pending", duplicate };
+}
+
 async function sleep(ms: number, signal: AbortSignal): Promise<void> {
   await new Promise<void>((resolve, reject) => {
     const timer = setTimeout(resolve, ms);
@@ -152,18 +214,23 @@ export function useReceiptUploadQueue(
    * offline capture path. The caller (ReceiptEditor) enqueues the file into
    * the offline receipt queue and leaves this screen; only ever passed on
    * the mobile build. */
-  onNetworkFailure?: (file: File) => void
+  onNetworkFailure?: (file: File) => void,
+  /** W8: a read file is saved (and approved when complete) without the form. */
+  autoSave?: AutoSaveOptions
 ) {
   const [rows, setRows] = useState<InternalRow[]>([]);
   const rowsRef = useRef<InternalRow[]>([]);
-  // Both callbacks kept on one ref, refreshed after each render.
-  const callbacksRef = useRef({ onReady, onNetworkFailure });
+  // The callbacks kept on one ref, refreshed after each render.
+  const callbacksRef = useRef({ onReady, onNetworkFailure, autoSave });
+  // Saves are bounded separately from uploads: a 200-file pick must not open
+  // ten parallel bookkeeping writes (each runs the bank matching) at once.
+  const saveLimit = useRef(createLimiter(AUTO_SAVE_CONCURRENCY));
   const draining = useRef(false);
   const cancelAll = useRef(false);
   const applied = useRef(false);
   const cancelListeners = useRef(new Map<string, () => void>());
   useLayoutEffect(() => {
-    callbacksRef.current = { onReady, onNetworkFailure };
+    callbacksRef.current = { onReady, onNetworkFailure, autoSave };
   });
 
   function commit(next: InternalRow[]) {
@@ -177,7 +244,9 @@ export function useReceiptUploadQueue(
         listed.error === row.error &&
         listed.progress === row.progress &&
         listed.duplicateReceiptId === row.duplicateReceiptId &&
-        listed.ready === row.ready
+        listed.ready === row.ready &&
+        listed.outcome === row.outcome &&
+        listed.receiptId === row.receiptId
       ) {
         return row;
       }
@@ -253,6 +322,20 @@ export function useReceiptUploadQueue(
       originalName: data.originalName,
       extracted,
     };
+    // W8: in a pick of several files every reading is saved straight away
+    // (complete ones approved, the rest pending for review); a single file is
+    // saved only when complete, otherwise the form opens for it as before.
+    const several = rowsRef.current.length > 1;
+    if (
+      takesAutoSavePath({
+        enabled: Boolean(callbacksRef.current.autoSave?.enabled),
+        several,
+        reading: extracted,
+      })
+    ) {
+      await saveRead(row.localId, ready, several);
+      return;
+    }
     patch(row.localId, {
       status: "ready",
       progress: RECEIPT_PHASE.review,
@@ -262,6 +345,39 @@ export function useReceiptUploadQueue(
     if (!applied.current) {
       applied.current = true;
       callbacksRef.current.onReady(ready);
+    }
+  }
+
+  async function saveRead(localId: string, ready: ReadyUpload, several: boolean) {
+    patch(localId, { status: "saving", progress: "Tallennetaan…", ready, error: undefined });
+    try {
+      // Not tied to the row's abort signal: a save already sent must finish,
+      // or the owner could not tell whether the receipt exists.
+      const saved = await saveLimit.current(() => autoSaveUpload(ready));
+      patch(localId, {
+        status: "saved",
+        outcome: saved.outcome,
+        receiptId: saved.receiptId,
+        error: undefined,
+        progress:
+          saved.outcome === "approved"
+            ? "Hyväksytty automaattisesti"
+            : saved.duplicate
+              ? "Samanlainen kuitti on jo tallennettu – odottaa tarkistusta"
+              : "Odottaa tarkistusta",
+      });
+      if (!several) callbacksRef.current.autoSave?.onSingleSaved?.(saved);
+    } catch (error: unknown) {
+      if (isUnauthorized(error)) {
+        redirectToLogin();
+        return;
+      }
+      // One refused save keeps its row, with the reason, and the rest go on.
+      patch(localId, {
+        status: "failed",
+        progress: undefined,
+        error: errorMessage(error, "Tallennus epäonnistui"),
+      });
     }
   }
 

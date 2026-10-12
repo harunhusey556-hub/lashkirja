@@ -107,6 +107,15 @@ describe("queue progress", () => {
     expect(queueProgressLabel(rows)).toBe("1 / 3 valmista");
     expect(queueProgressLabel([])).toBe("0 / 0 valmista");
   });
+
+  it("an auto-saved row still counts as done, one being saved does not", () => {
+    const rows = [
+      { localId: "a", name: "a.jpg", status: "saved" as const },
+      { localId: "b", name: "b.jpg", status: "saving" as const },
+      { localId: "c", name: "c.jpg", status: "ready" as const },
+    ];
+    expect(queueProgressLabel(rows)).toBe("2 / 3 valmista");
+  });
 });
 
 describe("receipt confidence", () => {

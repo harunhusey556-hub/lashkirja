@@ -19,6 +19,7 @@ import { currencySchema, foreignColumns } from "@/lib/foreign-purchase-input";
 import { storedDocumentKind } from "@/lib/receipt-staging";
 import { fileReceiptAsPurchaseInvoice } from "@/lib/purchase-invoices";
 import { euroConversionForSave, withFxRecorded } from "@/lib/fx-rates";
+import { canAutoAccept } from "@/lib/auto-accept";
 
 const vatLineSchema = z.object({
   rate: z.number().finite().min(0).max(100),
@@ -40,6 +41,9 @@ const saveSchema = z.object({
   originalAmount: nonnegativeMoneySchema.nullish(),
   vatTreatment: z.enum(PURCHASE_VAT_TREATMENTS).optional(),
   forceDuplicate: z.boolean().default(false),
+  // W8: the upload queue asks the server to approve a complete reading in the
+  // same transaction (lib/auto-accept.ts); anything the rule refuses is pending.
+  autoApprove: z.boolean().default(false),
 }).strict();
 
 export const POST = withErrorHandler(async (req: NextRequest) => {
@@ -124,7 +128,7 @@ export const POST = withErrorHandler(async (req: NextRequest) => {
       const recorded = fx ? withFxRecorded(upload.extractedJson, fx) : null;
       if (recorded) await db.upload.update({ where: { id: upload.id }, data: { extractedJson: recorded } });
 
-      return db.receipt.create({
+      const created = await db.receipt.create({
         data: {
           userId: session.userId!,
           uploadId: upload.id,
@@ -145,6 +149,24 @@ export const POST = withErrorHandler(async (req: NextRequest) => {
           confidence: upload.extractionSource === "manual" ? null : upload.confidence,
           rawText: upload.rawText,
           ...foreignColumns(body, upload.extractedJson),
+        },
+      });
+      if (!body.autoApprove) return created;
+      // W8 auto-accept: judged on the row as stored, inside the create's own
+      // transaction, so a crash can never leave it half approved. The guards are
+      // the manual approve's (amount, open period - asserted above); a new
+      // receipt has no source bank row, so nothing else of that path applies.
+      return db.receipt.update({
+        where: { id: created.id },
+        data: {
+          reviewStatus: canAutoAccept({
+            ...created,
+            documentType: reading.documentType,
+            // forceDuplicate = the client was told about a look-alike and insisted.
+            duplicate: body.forceDuplicate,
+          })
+            ? "approved"
+            : "pending",
         },
       });
     });
@@ -224,6 +246,7 @@ export const POST = withErrorHandler(async (req: NextRequest) => {
       purchaseInvoiceSkipped: filing.created ? null : filing.skipped,
       // The rate that priced a foreign total the owner left empty; null otherwise.
       fx,
+      ...(body.autoApprove ? { autoApproved: receipt.reviewStatus === "approved" } : {}),
     });
   } catch (error) {
     if (error instanceof UploadClaimError) {
