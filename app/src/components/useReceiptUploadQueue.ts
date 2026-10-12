@@ -43,6 +43,10 @@ export interface ExtractedUpload {
   sellerCountry?: string | null;
   /** The total the document printed in `currency`, when it was not in euros. */
   originalAmount?: number | null;
+  /** The rate that priced a foreign total in euros (EUR per 1 unit of `currency`), and where it came from. */
+  fxRate?: number | null;
+  fxRateDate?: string | null;
+  fxSource?: string | null;
   fieldConfidence?: { vendor?: number; date?: number; totalAmount?: number } | null;
   /** Nothing could be read from the file: the form opens empty for manual entry (F04). */
   unreadable?: boolean;

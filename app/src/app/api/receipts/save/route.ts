@@ -18,6 +18,7 @@ import { PURCHASE_VAT_TREATMENTS } from "@/lib/alv";
 import { currencySchema, foreignColumns } from "@/lib/foreign-purchase-input";
 import { storedDocumentKind } from "@/lib/receipt-staging";
 import { fileReceiptAsPurchaseInvoice } from "@/lib/purchase-invoices";
+import { euroConversionForSave, withFxRecorded } from "@/lib/fx-rates";
 
 const vatLineSchema = z.object({
   rate: z.number().finite().min(0).max(100),
@@ -82,6 +83,17 @@ export const POST = withErrorHandler(async (req: NextRequest) => {
     }
   }
 
+  // A foreign document saved without a euro figure is priced at the rate the document
+  // printed or the ECB's. Looked up before the transaction: no network inside a write lock.
+  let fx: Awaited<ReturnType<typeof euroConversionForSave>> = null;
+  if (body.totalAmount == null) {
+    const staged = await prisma.upload.findFirst({
+      where: { id: body.uploadId, userId: session.userId!, purpose: "receipt" },
+      select: { extractedJson: true },
+    });
+    fx = await euroConversionForSave(body, staged?.extractedJson ?? null);
+  }
+
   try {
     // The stored reading names the document kind (kuitti / lasku / ...): a bill
     // is filed as an ostolasku below, so it is never silently a plain receipt.
@@ -109,6 +121,8 @@ export const POST = withErrorHandler(async (req: NextRequest) => {
         data: { claimedAt: new Date() },
       });
       if (claim.count !== 1) throw new UploadClaimError();
+      const recorded = fx ? withFxRecorded(upload.extractedJson, fx) : null;
+      if (recorded) await db.upload.update({ where: { id: upload.id }, data: { extractedJson: recorded } });
 
       return db.receipt.create({
         data: {
@@ -116,7 +130,7 @@ export const POST = withErrorHandler(async (req: NextRequest) => {
           uploadId: upload.id,
           vendor: sanitizeText(body.vendor),
           date: body.date ? isoDateToUtc(body.date) : null,
-          totalAmountCents: body.totalAmount == null ? null : eurosToCents(body.totalAmount),
+          totalAmountCents: fx ? eurosToCents(fx.totalAmount) : body.totalAmount == null ? null : eurosToCents(body.totalAmount),
           vatDetails: body.vatDetails?.length ? JSON.stringify(body.vatDetails) : null,
           category: sanitizeText(body.category),
           notes: sanitizeText(body.notes),
@@ -208,6 +222,8 @@ export const POST = withErrorHandler(async (req: NextRequest) => {
       // none was (an ordinary receipt, an unclear reading, a duplicate...).
       purchaseInvoice: filing.created ? filing.invoice : null,
       purchaseInvoiceSkipped: filing.created ? null : filing.skipped,
+      // The rate that priced a foreign total the owner left empty; null otherwise.
+      fx,
     });
   } catch (error) {
     if (error instanceof UploadClaimError) {

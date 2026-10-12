@@ -11,6 +11,7 @@ import {
   categoriesVatHintsForAiPrompt,
   guessVatForReceipt,
 } from "./vat-rules";
+import { isUsableRate } from "./foreign-purchase";
 import { amountsOnLine, isoFromDateMatch, DATE_RE, parseAmount } from "./finnish-numbers";
 
 import { getTopVendorsForAiPrompt } from "./vendor-intelligence";
@@ -43,13 +44,23 @@ export interface ExtractedReceipt {
   /** ISO 3166 alpha-2 country of the seller, when the document names it. */
   sellerCountry?: string | null;
   /**
-   * The total printed in `currency` when the document is not in euros: the app
+   * The total printed in `currency` when the document is not in euros: the AI
    * never guesses a rate, so `totalAmount` stays null unless euros are printed
-   * too and this is the amount as the document states it.
+   * too (the extraction job then prices it with a looked-up rate, see fx-rates.ts)
+   * and this is the amount as the document states it.
    */
   originalAmount?: number | null;
   /** The payment due date a bill names (for the ostolasku); null when it shows none. */
   dueDate?: string | null;
+  /**
+   * Euros for one unit of `currency`, set when the document itself prints a
+   * rate (the AI never estimates one). Without it the ECB rate is looked up.
+   */
+  fxRate?: number | null;
+  /** The day the rate behind a computed euro total is from; set by the extraction job, not the AI. */
+  fxRateDate?: string | null;
+  /** Where the rate came from: "document" when printed, "ECB" when looked up. */
+  fxSource?: "ECB" | "document" | null;
 }
 
 export type DocumentType = "receipt" | "invoice" | "marketing" | "other";
@@ -131,6 +142,7 @@ Palauta VAIN validi JSON seuraavalla rakenteella (ei muuta tekstiä):
   "currency": "EUR",
   "sellerCountry": "FI",
   "originalAmount": null,
+  "fxRate": null,
   "dueDate": null
 }
 
@@ -148,7 +160,8 @@ ${categoriesVatHintsForAiPrompt()}
 - Oletus verollisille ostoille: 25,5 % ellei 13,5 % tai 10 % ole selvästi oikea.
 Ulkomaiset ostot:
 - currency = dokumentin valuutta (ISO-koodi, esim. EUR, USD). sellerCountry = myyjän maa (ISO-koodi, esim. FI, IE, US), null jos ei näy.
-- Jos dokumentti ei ole euroissa, totalAmount on euromäärä VAIN jos se lukee dokumentissa. Kirjoita aina dokumentissa painettu summa originalAmount-kenttään (desimaaliluku dokumentin omassa valuutassa). ÄLÄ KOSKAAN arvioi valuuttakurssia: jos eurosumma ei lue dokumentissa, totalAmount = null ja summa säilyy originalAmount-kentässä.
+- Jos dokumentti ei ole euroissa, totalAmount on euromäärä VAIN jos se lukee dokumentissa. Kirjoita aina dokumentissa painettu summa originalAmount-kenttään (desimaaliluku dokumentin omassa valuutassa). ÄLÄ KOSKAAN arvioi valuuttakurssia: jos eurosumma ei lue dokumentissa, totalAmount = null ja summa säilyy originalAmount-kentässä (sovellus laskee euromäärän EKP:n kurssilla).
+- fxRate: jos dokumentti itse painaa valuuttakurssin, palauta se muodossa "montako euroa yksi dokumentin valuuttayksikkö on" (esim. "1 USD = 0,9123 EUR" → 0.9123; jos kurssi on painettu "1 EUR = 1,0961 USD", palauta 1/1,0961). Muuten fxRate = null. ÄLÄ KOSKAAN arvioi kurssia itse.
 - Ulkomaisen myyjän laskulla ilman ALV:ta (reverse charge / käännetty verovelvollisuus): vatDetails [{rate:0, amount:0}]. Älä arvioi Suomen ALV:ta.
 - Jos ulkomainen myyjä on veloittanut Suomen ALV:n (esim. "VAT – Finland 25.5%"), kirjaa se vatDetails-kenttään sellaisenaan ja mainitse notes-kentässä: "Ulkomainen myyjä veloitti Suomen ALV:n".
 Tyyppi: "tulo" (myynti/tulo) tai "meno" (osto/kulu)
@@ -495,6 +508,9 @@ export function normalizeAIResult(
   const originalAmount = Number.isFinite(original) && original >= 0 ? toCents(original) : null;
   const dueDate =
     typeof parsed.dueDate === "string" && isStrictIsoDate(parsed.dueDate) ? parsed.dueDate : null;
+  // Only a rate the document printed; a null stays null (Number(null) is 0).
+  const printedRate = parsed.fxRate == null ? NaN : Number(parsed.fxRate);
+  const fxRate = isUsableRate(printedRate) ? printedRate : null;
   const allowedRates = new Set([0, 10, 13.5, 14, 24, 25.5]);
   const vatDetails = (Array.isArray(parsed.vatDetails) ? parsed.vatDetails : [])
     .map((line) => {
@@ -523,6 +539,7 @@ export function normalizeAIResult(
     sellerCountry: isoCode(parsed.sellerCountry, 2),
     originalAmount,
     dueDate,
+    fxRate,
   };
 }
 

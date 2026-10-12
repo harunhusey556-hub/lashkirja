@@ -1101,3 +1101,19 @@ model InvoiceEmailTemplate {
 
   @@index([userId, kind])
 }
+
+/// An ECB reference rate used to price a foreign-currency document in euros, kept
+/// so the rate behind a receipt's euro total can always be shown. `date` is the
+/// day asked for, `rateDate` the business day the ECB rate is from. Read and
+/// written with raw SQL in lib/fx-rates.ts.
+model FxRate {
+  currency  String
+  date      String
+  /// Euros for one unit of `currency`.
+  rate      Float
+  rateDate  String
+  source    String   @default("ECB")
+  fetchedAt DateTime @default(now())
+
+  @@id([currency, date])
+}

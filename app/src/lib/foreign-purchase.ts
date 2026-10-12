@@ -65,6 +65,33 @@ export function foreignFieldsFromExtraction(input: ForeignPurchaseInput): {
   };
 }
 
+/** A printed or looked-up rate is only usable when it is a positive number of a believable size. */
+export function isUsableRate(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value) && value > 1e-6 && value < 1e6;
+}
+
+/**
+ * The line under the euro amount that says which rate priced it, e.g.
+ * "Kurssi 1 USD = 0,9123 EUR (EKP 12.7.2026)". null when no rate was applied.
+ */
+export function fxRateLine(fx: {
+  currency: string | null | undefined;
+  fxRate: number | null | undefined;
+  fxRateDate?: string | null;
+  fxSource?: string | null;
+}): string | null {
+  if (!fx.currency || fx.currency === "EUR" || !isUsableRate(fx.fxRate)) return null;
+  // A small unit value (JPY, KRW) needs more digits than 0,9123 to say anything.
+  const rate = fx.fxRate.toLocaleString("fi-FI", { minimumFractionDigits: 4, maximumFractionDigits: fx.fxRate < 0.1 ? 6 : 4 });
+  const parsedDate = fx.fxRateDate ? new Date(fx.fxRateDate) : null;
+  const date =
+    parsedDate && !Number.isNaN(parsedDate.getTime())
+      ? new Intl.DateTimeFormat("fi-FI", { day: "numeric", month: "numeric", year: "numeric", timeZone: "UTC" }).format(parsedDate)
+      : null;
+  const origin = fx.fxSource === "document" ? "laskulla" : "EKP";
+  return `Kurssi 1 ${fx.currency} = ${rate} EUR (${date ? `${origin} ${date}` : origin})`;
+}
+
 /** Finnish names for the treatments, shared by the web forms and the VAT page. */
 export const VAT_TREATMENT_LABELS: Record<PurchaseVatTreatment, string> = {
   domestic: "Kotimainen ALV",

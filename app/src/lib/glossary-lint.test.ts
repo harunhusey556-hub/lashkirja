@@ -64,7 +64,9 @@ const ALLOWED: string[] = [
 ];
 
 describe("glossary lint", () => {
-  it("no retired word appears in a UI string", () => {
+  // Parses every .ts/.tsx under src with the TypeScript compiler, so the cost grows with the app:
+  // 1.7 s alone, 7 s in a full parallel run (measured 2026-10-12), over the 5 s default.
+  it("no retired word appears in a UI string", { timeout: 30_000 }, () => {
     const hits: string[] = [];
     for (const file of walk(SRC, [])) {
       const rel = path.relative(SRC, file).split(path.sep).join("/");
