@@ -125,7 +125,7 @@ export default function RecurringInvoicesPage() {
   const shownVatRate = (stored: number) =>
     profile && !profile.vatRegistered
       ? 0
-      : adjustVatRateForDate(Math.round(stored * 10), new Date().toISOString().slice(0, 10)) / 10;
+      : adjustVatRateForDate(Math.round(stored * 10), helsinkiCalendarDate()) / 10;
   const cached = readPageCache<{ recurring: RecurringInvoice[]; dueNow: number }>("recurring");
   const [recurring, setRecurring] = useState<RecurringInvoice[]>(cached?.recurring ?? []);
   const [dueNow, setDueNow] = useState(cached?.dueNow ?? 0);
