@@ -6,6 +6,7 @@ import {
   queueProgressCounts,
   queueProgressLabel,
   retryFailedOnly,
+  type UploadQueueItem,
 } from "./upload-queue";
 import { isLowConfidenceField } from "./receipt-confidence";
 import { normalizeVendorKey } from "./vendor-rules";
@@ -33,10 +34,10 @@ describe("upload queue", () => {
   });
 
   it("retries only the failed rows of a 240-file pick", () => {
-    const rows = Array.from({ length: 240 }, (_, index) => ({
+    const rows: UploadQueueItem[] = Array.from({ length: 240 }, (_, index) => ({
       localId: `r${index}`,
       name: `kuitti-${index}.jpg`,
-      status: index === 7 || index === 200 ? ("failed" as const) : ("ready" as const),
+      status: index === 7 || index === 200 ? "failed" : "ready",
       error: index === 7 || index === 200 ? "Lataus epäonnistui" : undefined,
     }));
     const retried = retryFailedOnly(rows);

@@ -76,8 +76,14 @@ interface InternalRow extends ReceiptQueueRow {
 
 /** The row without the file bytes and the job bookkeeping. */
 function listedRow(row: InternalRow): ReceiptQueueRow {
-  const { file: _file, ready: _ready, jobId: _jobId, listed: _listed, ...rest } = row;
-  return rest;
+  return {
+    localId: row.localId,
+    name: row.name,
+    status: row.status,
+    error: row.error,
+    duplicateReceiptId: row.duplicateReceiptId,
+    progress: row.progress,
+  };
 }
 
 export function validateUploadFile(file: File): string | null {
