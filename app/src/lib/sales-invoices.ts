@@ -930,6 +930,11 @@ export async function createCreditNote(
   // original charged, rate for rate, even when the seller is no longer VAT
   // registered or the rate has since ended (a 14 % invoice from 2025 is
   // credited at 14 %). Anything else would leave VAT on the customer's account.
+  // Reachable when the lines are exhausted but a rounding cent of gross is not
+  // (see fullyCredited below); "nothing to reverse" is a 409, not a 400.
+  if (reversals.length === 0) {
+    throw new AppError("Lasku on jo hyvitetty.", "ALREADY_CREDITED", 409);
+  }
   const lineInputs = toLineInputs(
     reversals.map(({ line, quantityMilli }) => ({
       description: line.description,
@@ -950,8 +955,14 @@ export async function createCreditNote(
       )}.`
     );
   }
-  // Nothing creditable left after this note: the original is done with.
-  const fullyCredited = remainder.grossCents + totals.grossCents <= 0;
+  // Nothing creditable left after this note: the original is done with. The
+  // quantity test is the honest one — a line with no units left cannot be
+  // credited whatever the gross rounds to.
+  const fullyCredited =
+    remainder.grossCents + totals.grossCents <= 0 ||
+    original.lines.every(
+      (line) => (remainder.byLineId.get(line.id) ?? 0) <= (requestedMilli.get(line.id) ?? 0)
+    );
   const snapshot = await capturePartySnapshot(userId, original.customerId);
 
   for (let attempt = 0; attempt < 5; attempt += 1) {

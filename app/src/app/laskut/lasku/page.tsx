@@ -749,8 +749,15 @@ function InvoiceDetail() {
         headers: { "content-type": "application/json", "idempotency-key": creditKey.current },
         body: JSON.stringify({ lines }),
       });
-      const result = await readJson<{ invoice: { id: string; number: number } }>(response, "Hyvitys epäonnistui");
-      showToast({ tone: "success", text: `Hyvityslasku ${result.invoice.number} luotiin` });
+      const result = await readJson<{ invoice: { id: string; number: number; gross: number } }>(
+        response,
+        "Hyvitys epäonnistui"
+      );
+      // What happened, in one line: the note's number and the amount it reverses.
+      showToast({
+        tone: "success",
+        text: `Hyvityslasku ${result.invoice.number} luotiin: ${formatEur(result.invoice.gross)}`,
+      });
       setCreditSheetOpen(false);
       router.push(detailHref("invoice", result.invoice.id));
     } catch (error) {
