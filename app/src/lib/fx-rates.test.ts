@@ -5,6 +5,7 @@ import {
   getEurRate,
   setFxFetcherForTests,
   setFxStoreForTests,
+  storedFxRate,
   type EurRate,
   type FxFetcher,
 } from "./fx-rates";
@@ -131,6 +132,23 @@ describe("fxRateLine", () => {
   it("says nothing for euros or when no rate was applied", () => {
     expect(fxRateLine({ currency: "EUR", fxRate: 1 })).toBeNull();
     expect(fxRateLine({ currency: "USD", fxRate: null })).toBeNull();
+  });
+});
+
+describe("storedFxRate", () => {
+  it("reads the recorded rate from an upload's reading, ready for fxRateLine", () => {
+    const read = JSON.stringify({ currency: "USD", fxRate: 0.8749, fxRateDate: "2026-07-10", fxSource: "ECB" });
+    const fx = storedFxRate(read);
+    expect(fx).toEqual({ fxRate: 0.8749, fxRateDate: "2026-07-10", fxSource: "ECB" });
+    expect(fxRateLine({ currency: "USD", ...fx })).toBe("Kurssi 1 USD = 0,8749 EUR (EKP 10.7.2026)");
+  });
+
+  it("returns nulls for no reading, an unreadable one, or no usable rate", () => {
+    const none = { fxRate: null, fxRateDate: null, fxSource: null };
+    expect(storedFxRate(null)).toEqual(none);
+    expect(storedFxRate("{not json")).toEqual(none);
+    expect(storedFxRate(JSON.stringify({ fxRate: null }))).toEqual(none);
+    expect(storedFxRate(JSON.stringify({ fxRate: 0 }))).toEqual(none);
   });
 });
 

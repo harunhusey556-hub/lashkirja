@@ -203,3 +203,29 @@ export function withFxRecorded(extractedJson: string | null, fx: EuroConversion)
     return null;
   }
 }
+
+/**
+ * The rate behind a saved receipt's euro figure, read from its upload's stored
+ * reading, so the receipt screen can show it after an auto-save skipped the
+ * editor. Nulls when nothing usable was recorded.
+ */
+export function storedFxRate(extractedJson: string | null | undefined): {
+  fxRate: number | null;
+  fxRateDate: string | null;
+  fxSource: FxSource | null;
+} {
+  const none = { fxRate: null, fxRateDate: null, fxSource: null };
+  if (!extractedJson) return none;
+  try {
+    const read = JSON.parse(extractedJson) as { fxRate?: unknown; fxRateDate?: unknown; fxSource?: unknown };
+    if (!isUsableRate(read.fxRate)) return none;
+    return {
+      fxRate: read.fxRate,
+      fxRateDate: typeof read.fxRateDate === "string" ? read.fxRateDate : null,
+      fxSource: read.fxSource === "document" ? "document" : "ECB",
+    };
+  } catch {
+    // An unreadable stored reading only hides the rate line.
+    return none;
+  }
+}

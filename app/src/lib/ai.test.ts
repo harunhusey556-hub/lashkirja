@@ -64,6 +64,24 @@ describe("parseOCRText", () => {
     expect(r.reference).toBe("23055 28807 37031");
     expect(r.category).toBe("työeläke");
   });
+
+  it.each(["Yhteensä 12,40", "YHTEENSÄ 12,40", "yhteensä 12,40", "YHTEENSA 12,40"])(
+    "reads the total from a %s line (Finnish letters at a word end)",
+    (totalLine) => {
+      const r = parseOCRText(`Kahvila Testi\nKuitti 3.8.2026\nKahvi 3,10\nKakku 9,30\n${totalLine}\n`);
+      expect(r.totalAmount).toBe(12.4);
+    }
+  );
+
+  it("reads the date after a 'Laskun päivä' label", () => {
+    const r = parseOCRText("Testi Oy\nLaskun päivä 5.8.2026\nPäätös 1.1.2020\nYhteensä 10,00\n");
+    expect(r.date).toBe("2026-08-05");
+  });
+
+  it("guesses sähkö and vakuutus from words that end in Finnish letters", () => {
+    expect(parseOCRText("Osto\nsähkö 10,00\nYhteensä 10,00\n").category).toBe("sähkö");
+    expect(parseOCRText("Osto\nvakuutusyhtiö 10,00\nYhteensä 10,00\n").category).toBe("vakuutus");
+  });
 });
 
 describe("extractReferenceFields", () => {

@@ -5,6 +5,7 @@ import { requireSession } from "@/lib/session";
 import { runMatching, buildReceiptMatchViews } from "@/lib/matching";
 import { dismissIncomeDraft } from "@/lib/income-automation";
 import { centsToEuros } from "@/lib/money";
+import { storedFxRate } from "@/lib/fx-rates";
 import { removeUserUpload } from "@/lib/storage";
 import { isoDateSchema, nonnegativeMoneySchema } from "@/lib/validation";
 import {
@@ -75,6 +76,8 @@ export const GET = withErrorHandler(async (
       confidence: true,
       createdAt: true,
       updatedAt: true,
+      // Only to surface the ECB / document rate behind a foreign receipt; the raw reading is not sent.
+      upload: { select: { extractedJson: true } },
       linkedTransaction: {
         select: {
           id: true,
@@ -91,7 +94,7 @@ export const GET = withErrorHandler(async (
   });
   if (!receipt) return noStoreJson({ error: "Kuittia ei löytynyt" }, { status: 404 });
 
-  const { totalAmountCents, originalAmountCents, linkedTransaction, ...safe } = receipt;
+  const { totalAmountCents, originalAmountCents, linkedTransaction, upload, ...safe } = receipt;
   const totalAmount = totalAmountCents == null ? null : centsToEuros(totalAmountCents);
   const originalAmount = originalAmountCents == null ? null : centsToEuros(originalAmountCents);
   const matchViews = await buildReceiptMatchViews(session.userId!, [
@@ -113,6 +116,7 @@ export const GET = withErrorHandler(async (
       ...safe,
       totalAmount,
       originalAmount,
+      ...storedFxRate(upload?.extractedJson),
       linkedTransaction: match?.linkedTransaction
         ? {
             id: match.linkedTransaction.id,

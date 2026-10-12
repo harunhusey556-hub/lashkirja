@@ -171,6 +171,9 @@ interface ReceiptResponse {
     invoiceNumber?: string | null;
     currency?: string | null;
     originalAmount?: number | null;
+    fxRate?: number | null;
+    fxRateDate?: string | null;
+    fxSource?: string | null;
     vatTreatment?: string | null;
     updatedAt?: string;
     linkedTransaction?: LinkedBankTx | null;
@@ -541,6 +544,9 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
       originalAmount: moneyField(r.originalAmount ?? null),
       vatTreatment: isPurchaseVatTreatment(r.vatTreatment) ? r.vatTreatment : "domestic",
     };
+    // Auto-saved foreign receipts never pass the upload screen, so the rate is shown here too.
+    const savedFxLine = fxRateLine({ currency: r.currency, fxRate: r.fxRate, fxRateDate: r.fxRateDate, fxSource: r.fxSource });
+    setFxNote(savedFxLine && totalText ? { line: savedFxLine, total: totalText } : null);
     setFormData(loaded);
     setBaseline(loaded);
     setUpdatedAt(r.updatedAt ? String(r.updatedAt) : "");

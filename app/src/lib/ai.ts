@@ -776,11 +776,11 @@ function guessCategory(vendor: string | null, text: string): string | null {
   if (/\b(verohallinto|ennakkomaksu|vero\b)/.test(hay)) return "verot";
   if (/\b(helsingin kaupunki|kunnallisvero)\b/.test(hay)) return "kuntavero";
   if (/\b(holvi|pankki|palvelumaksu|tilimaksu)\b/.test(hay)) return "pankki";
-  if (/\b(fennia|pohjola|vakuutusyhtiö|vakuutus)\b/.test(hay)) return "vakuutus";
+  if (/\b(fennia|pohjola|vakuutusyhtiö|vakuutus)(?![\p{L}\p{N}])/u.test(hay)) return "vakuutus";
   if (/\b(cloudflare|github|jetbrains|merit|saas|software)\b/.test(hay)) {
     return "ohjelmistot";
   }
-  if (/\b(helen|sähkö|sahko)\b/.test(hay)) return "sähkö";
+  if (/\b(helen|sähkö|sahko)(?![\p{L}\p{N}])/u.test(hay)) return "sähkö";
   if (/\b(vesi|jätevesi|jatevesi)\b/.test(hay)) return "vesi";
   if (/\b(neste|abc|st1|polttoaine|tankkaus)\b/.test(hay)) return "polttoaine";
   if (/\b(posti|dhl|rahti|kuljetus|uuva)\b/.test(hay)) return "rahti";
@@ -961,7 +961,8 @@ function extractTotalAmount(lines: string[]): number | null {
     }
 
     if (
-      /\byhteens[äa]\b/i.test(line) &&
+      // \b is ASCII-only in JS, so it never matches after "ä"; spell the boundaries out.
+      /(?<![\p{L}\p{N}])yhteens[äa](?![\p{L}\p{N}])/iu.test(line) &&
       !/tuotteet\s+yhteens|veroton|verokanta|veron\s+m/i.test(line)
     ) {
       const score = /maksettu|maksutapa|kustom/i.test(line) ? 88 : 75;
@@ -982,7 +983,7 @@ function extractDate(lines: string[]): string | null {
   const priorityPatterns = [
     /maksum[äa][äa]r[äa]yksen\s+p[äa]iv[äa]/i,
     /maksun\s+kirjausp[äa]iv[äa]/i,
-    /laskun\s+p[äa]iv[äa]\b/i,
+    /laskun\s+p[äa]iv[äa](?![\p{L}\p{N}])/iu,
     /(laskun\s+)?p[äa]iv[äa](m[äa][äa]r[äa]|ys)/i,
   ];
 

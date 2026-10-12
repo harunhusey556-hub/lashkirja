@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { POST as uploadReceipt } from "@/app/api/receipts/route";
 import { POST as saveReceipt } from "@/app/api/receipts/save/route";
+import { GET as getReceipt } from "@/app/api/receipts/[id]/route";
 import { prisma } from "@/lib/db";
 import { processDocumentJob, setDocumentExtractorForTests } from "@/lib/document-jobs";
 import { setFxFetcherForTests, type FxFetcher } from "@/lib/fx-rates";
@@ -147,6 +148,29 @@ describe("a USD bill with no euro total printed", () => {
     const body = await readJson(saved);
     expect(body.receipt.totalAmount).toBe(44);
     expect(body.fx).toBeNull();
+  });
+});
+
+describe("the saved receipt's own read", () => {
+  function read(id: string) {
+    return getReceipt(buildRequest("GET", `/api/receipts/${id}`, undefined, { cookie }), { params: Promise.resolve({ id }) });
+  }
+
+  it("carries the rate that priced a foreign receipt, and not the raw reading", async () => {
+    const { uploadId } = await readOne(usdBill);
+    const saved = await readJson(await save(uploadId, { totalAmount: 45.71 }));
+    const response = await read(saved.receipt.id);
+    expect(response.status).toBe(200);
+    const body = await readJson(response);
+    expect(body.receipt).toMatchObject({ currency: "USD", totalAmount: 45.71, fxRate: 0.9123, fxRateDate: "2026-07-10", fxSource: "ECB" });
+    expect(body.receipt).not.toHaveProperty("upload");
+  });
+
+  it("has no rate for a euro receipt", async () => {
+    const { uploadId } = await readOne({ ...usdBill, currency: "EUR", sellerCountry: "FI", originalAmount: null, totalAmount: 24.9, documentType: "receipt" });
+    const saved = await readJson(await save(uploadId, { totalAmount: 24.9 }));
+    const body = await readJson(await read(saved.receipt.id));
+    expect(body.receipt).toMatchObject({ fxRate: null, fxRateDate: null, fxSource: null });
   });
 });
 
