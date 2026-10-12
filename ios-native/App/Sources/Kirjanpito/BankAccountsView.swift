@@ -11,6 +11,8 @@ struct BankAccountsView: View {
     @State private var failure: String?
     @State private var notice: String?
     @State private var syncing: String?
+    /// The server finishes the sync as a job: "Päivitetään…" until its rows are in.
+    @State private var syncWaiting = false
     @State private var loadFailed = false
     @State private var showArchived = false
     @State private var detail: BankAccount?
@@ -34,8 +36,13 @@ struct BankAccountsView: View {
                 }
             }
             if let overview {
+                // A sync's balances show at once, before the accounts are asked again.
+                let fresh = app.versions.balances
                 Section {
-                    LabeledContent("Saldo yhteensä") { MoneyText(amount: overview.totalBalance).fontWeight(.semibold) }
+                    LabeledContent("Saldo yhteensä") {
+                        MoneyText(amount: fresh.total(overview.totalBalance, lines: overview.accounts.map { (id: $0.id, balance: $0.balance) }))
+                            .fontWeight(.semibold)
+                    }
                     if overview.needsAttention > 0 {
                         Text("\(overview.needsAttention) vaatii saldon tarkistusta").font(.caption).foregroundStyle(Theme.danger)
                     }
@@ -53,7 +60,7 @@ struct BankAccountsView: View {
                                 HStack {
                                     Text(account.name).foregroundStyle(Theme.ink)
                                     Spacer()
-                                    if let balance = account.balance { MoneyText(amount: balance).foregroundStyle(Theme.ink) }
+                                    if let balance = fresh.balance(account.id, shown: account.balance) { MoneyText(amount: balance).foregroundStyle(Theme.ink) }
                                 }
                                 Text(BankAccountText.subtitle(account)).font(.caption).foregroundStyle(Theme.ink2)
                             }
@@ -154,7 +161,11 @@ struct BankAccountsView: View {
                 onConfirm: { Task { await disconnect(connection) } }
             )
         }
-        .refreshable { await load() }
+        .refreshable {
+            // Pull-to-refresh asks every screen again, the hub and Koti under this one included.
+            app.refreshEverything()
+            await load()
+        }
         .task(id: showArchived) {
             await load()
             askScopeOnce()
@@ -243,7 +254,12 @@ struct BankAccountsView: View {
                 }
             }
             Spacer()
-            if syncing == connection.id { ProgressView() }
+            if syncing == connection.id {
+                HStack(spacing: 6) {
+                    if syncWaiting { Text("Päivitetään…").font(.caption).foregroundStyle(Theme.ink2) }
+                    ProgressView()
+                }
+            }
         }
     }
 
@@ -275,13 +291,17 @@ struct BankAccountsView: View {
         var problem: String?
         // Accounts and connections load side by side.
         let api = app.api
+        let startedAt = Date()
         let query = showArchived ? ["includeArchived": "1"] : [String: String]()
         async let accountsResult = Result<BankAccountsOverview, Error>(asyncCatching: { try await api.get("/api/bank-accounts", query: query) })
         async let connectionsResult = Result<BankConnections, Error>(asyncCatching: { try await api.get("/api/bank/connections") })
         let (accounts, links) = await (accountsResult, connectionsResult)
         if Task.isCancelled { return }
         switch accounts {
-        case .success(let value): overview = value
+        case .success(let value):
+            overview = value
+            // These balances are at least as new as the ones the sync returned.
+            app.versions.settleBalances(loadStartedAt: startedAt)
         case .failure(let error): problem = error.userMessage
         }
         switch links {
@@ -299,15 +319,25 @@ struct BankAccountsView: View {
     }
 
     private func sync(_ c: BankConnection) async {
+        guard syncing == nil else { return }
         syncing = c.id
-        defer { syncing = nil }
+        syncWaiting = false
+        defer {
+            syncing = nil
+            syncWaiting = false
+        }
         do {
-            let result: BankSyncResult = try await app.api.send("POST", "/api/bank/connections/\(c.id)/sync", body: EmptyBody())
-            Haptics.success()
-            notice = result.summary
+            // The balances it returned show at once and every screen is asked again (BankSyncFlow).
+            switch try await BankSyncFlow.run(app, connectionId: c.id, waiting: { syncWaiting = true }) {
+            case .done(let result):
+                Haptics.success()
+                notice = result.summary
+            case .stillRunning:
+                notice = BankSyncFlow.stillRunningNotice
+            }
             failure = nil
-            app.dataVersion += 1
             await load()
+        } catch is CancellationError {
         } catch {
             failure = error.userMessage
         }

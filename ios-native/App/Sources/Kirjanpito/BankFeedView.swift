@@ -30,6 +30,23 @@ struct BankFeedView: View {
     /// The bank connections, for "Päivitä" in the menu and the reconnect line.
     @State private var bankLinks: [BankConnection] = []
     @State private var syncingBank: String?
+    /// The server finishes the sync as a job: "Päivitetään…" until its rows are in.
+    @State private var syncWaiting = false
+    /// The rows come a page at a time from a server that pages (`?cursor=`); the next page loads
+    /// when the end of the list comes into view.
+    @State private var paging = CursorPaging()
+    @State private var loadingPage = false
+    /// "Valitse": rows picked for a bulk action.
+    @State private var selection = BulkSelection()
+    /// The confirmation preview is for the picked rows, not every suggestion.
+    @State private var previewForSelection = false
+    @State private var bulkConfirm: BankBulkAction?
+
+    /// The bulk actions that ask first.
+    enum BankBulkAction: Identifiable {
+        case reject, ignore
+        var id: Self { self }
+    }
 
     /// `month` opens the feed on that month, `onlyOpen` on "Vaatii toimia" (web `?nayta=toimet`),
     /// and `focusTransactionId` opens that row's sheet once it is found.
@@ -70,7 +87,7 @@ struct BankFeedView: View {
                 }
             }
             if syncingBank != nil {
-                HStack(spacing: 8) { ProgressView(); Text("Haetaan tapahtumia pankista…").foregroundStyle(Theme.ink2) }
+                HStack(spacing: 8) { ProgressView(); Text(syncWaiting ? "Päivitetään…" : "Haetaan tapahtumia pankista…").foregroundStyle(Theme.ink2) }
                     .font(.footnote)
             }
             if let notice { Text(notice).font(.footnote).foregroundStyle(noticeFailed ? Theme.danger : Theme.success) }
@@ -126,7 +143,16 @@ struct BankFeedView: View {
                     }
                     Section {
                         ForEach(group.rows.prefix(limit.visible(group.rows.count))) { row in
-                            Button { selected = row } label: { BankRow(row: row) }.buttonStyle(.pressable)
+                            Button {
+                                if selection.isActive { selection.toggle(row.id) } else { selected = row }
+                            } label: {
+                                HStack(spacing: 12) {
+                                    if selection.isActive { BulkCheckmark(selected: selection.contains(row.id)) }
+                                    BankRow(row: row)
+                                }
+                            }
+                            .buttonStyle(.pressable)
+                            .accessibilityAddTraits(selection.contains(row.id) ? .isSelected : [])
                         }
                         ShowMoreButton(limit: $limit, total: group.rows.count)
                     } header: {
@@ -139,6 +165,12 @@ struct BankFeedView: View {
                 } else if !months.isEmpty {
                     Text(search.isEmpty ? "Kaikilla tapahtumilla on kuitti tai merkintä." : "Ei osumia.").foregroundStyle(Theme.ink2)
                 }
+                if paging.hasMore {
+                    // Reaching the end of the list asks for the next page (infinite scroll).
+                    HStack(spacing: 8) { ProgressView(); Text("Ladataan lisää tapahtumia…").foregroundStyle(Theme.ink2) }
+                        .font(.footnote)
+                        .task(id: paging.nextCursor) { await loadNextPage() }
+                }
             } else {
                 ScreenStateView(state: state, retry: load) { (_: [BankFeed.Month]) in EmptyView() }.listRowBackground(Color.clear)
             }
@@ -148,6 +180,20 @@ struct BankFeedView: View {
         .searchable(text: Binding(get: { search }, set: { search = $0; limit.reset() }), prompt: "Hae…")
         .navigationTitle("Pankkitapahtumat")
         .toolbar {
+            ToolbarItem(placement: .topBarLeading) {
+                if selection.isActive {
+                    Button(selection.allSelected(shownRows().map(\.id)) ? "Poista valinnat" : "Valitse kaikki") {
+                        selection.toggleAll(shownRows().map(\.id))
+                    }
+                }
+            }
+            ToolbarItem(placement: .topBarTrailing) {
+                if selection.isActive {
+                    Button("Valmis") { selection.end() }
+                } else if state.value?.isEmpty == false {
+                    Button("Valitse") { selection.begin() }
+                }
+            }
             ToolbarItem(placement: .topBarTrailing) {
                 Menu {
                     Picker("Kuukausi", selection: Binding(get: { month }, set: { month = $0; limit.reset() })) {
@@ -188,12 +234,45 @@ struct BankFeedView: View {
                     .accessibilityLabel("Tiliotteet")
             }
         }
-        .sheet(item: $confirmPreview) { preview in
+        .sheet(item: $confirmPreview, onDismiss: { previewForSelection = false }) { preview in
             ConfirmAllPreviewSheet(preview: preview) {
+                // The picked rows' pairs only, or every suggestion of the month.
+                let forSelection = previewForSelection
                 confirmPreview = nil
-                Task { await confirmAll() }
+                Task { if forSelection { await confirmSelected() } else { await confirmAll() } }
             }
             .presentationDetents([.medium, .large])
+        }
+        .confirmSheet(presenting: $bulkConfirm) { action in
+            switch action {
+            case .reject:
+                return ConfirmRequest(title: bulkConfirmTitle(action),
+                                      message: "Kuitit jäävät tallennetuiksi; vain ehdotettu kohdistus poistuu.",
+                                      confirmTitle: "Hylkää") { Task { await rejectSelected() } }
+            case .ignore:
+                return ConfirmRequest(title: bulkConfirmTitle(action),
+                                      message: "Tapahtumat eivät enää näy kohdassa Vaatii toimia.",
+                                      confirmTitle: "Merkitse", isDestructive: false) { Task { await ignoreSelected() } }
+            }
+        }
+        .safeAreaInset(edge: .bottom) {
+            if selection.isActive && !selectedRows.isEmpty {
+                let rows = selectedRows
+                let pairs = BankBulk.pairs(rows).count
+                let ignorable = BankBulk.ignorable(rows).count
+                BulkBar(count: rows.count, busy: bulkBusy, onCancel: { selection.end() }) {
+                    if pairs > 0 {
+                        BulkBarButton(title: BankBulk.acceptLabel(pairs)) {
+                            previewForSelection = true
+                            confirmPreview = BankFeed.confirmPreview(rows)
+                        }
+                        BulkBarButton(title: BankBulk.rejectLabel(pairs), destructive: true) { bulkConfirm = .reject }
+                    }
+                    if ignorable > 0 {
+                        BulkBarButton(title: BankBulk.ignoreLabel(ignorable)) { bulkConfirm = .ignore }
+                    }
+                }
+            }
         }
         .fileImporter(isPresented: $importing, allowedContentTypes: [.commaSeparatedText, .plainText, .xml, .pdf, .spreadsheet, .data]) { result in
             if case .success(let url) = result { Task { await upload(url) } }
@@ -209,10 +288,13 @@ struct BankFeedView: View {
         }
         .navigationDestination(item: $pushed) { route in RouteScreen(route: route) }
         .refreshable {
+            // Pull-to-refresh asks every screen again; this one's own load stands for the bump.
+            gate.mark(key: month ?? "", version: app.refreshEverything())
             await load()
             await loadBankLinks()
         }
         .task(id: loadKey) {
+            restore()
             guard state.value == nil || gate.isDue(key: month ?? "", version: app.dataVersion) else { return }
             // Marked only after a load that finished: a cancelled one must not count as fresh.
             let version = app.dataVersion
@@ -242,17 +324,158 @@ struct BankFeedView: View {
         state.begin()
         // A slow answer for a month the owner already left must not replace the newer one.
         let requested = month
+        // The first page (50 rows, or as many as were loaded); a server that does not page sends all.
+        let loadedRows = statements.reduce(0) { $0 + $1.transactions.count }
+        let query = CursorPaging.firstQuery(BankFeed.query(month: requested), loadedRows: loadedRows)
         do {
-            let list: StatementList = try await app.api.get("/api/statements", query: BankFeed.query(month: requested))
+            let list: StatementList = try await app.api.get("/api/statements", query: query)
             guard requested == month else { return }
             statements = list.statements
+            paging.firstPage(next: list.nextCursor)
             state.succeed(BankFeed.months(list.statements))
+            remember()
             openPendingFocus()
+            // A row asked for from Koti may be further down: the pages are read until it is found.
+            while pendingFocus != nil, paging.hasMore, !Task.isCancelled, await loadNextPage() {
+                openPendingFocus()
+            }
         } catch is CancellationError {
         } catch {
             guard requested == month else { return }
             state.fail(error)
         }
+    }
+
+    /// The page after the loaded rows, merged in (a row is never shown twice). A failure leaves
+    /// the rows shown; the end-of-list row asks again when it next comes into view. Returns
+    /// whether a page was added.
+    @discardableResult
+    private func loadNextPage() async -> Bool {
+        guard !loadingPage, let cursor = paging.nextCursor, let query = paging.nextQuery(BankFeed.query(month: month)) else { return false }
+        let requested = month
+        loadingPage = true
+        defer { loadingPage = false }
+        guard let page: StatementList = try? await app.api.get("/api/statements", query: query),
+              !Task.isCancelled, requested == month, paging.nextCursor == cursor else { return false }
+        statements = StatementPaging.merge(statements, page.statements)
+        paging.nextPage(next: page.nextCursor)
+        state.update { $0 = BankFeed.months(statements) }
+        remember()
+        return true
+    }
+
+    /// The previous visit's rows for this month filter, shown at once; the load refreshes them behind.
+    private func restore() {
+        guard state.value == nil, let memory = app.bankFeedMemory[month ?? ""] else { return }
+        statements = memory.statements
+        paging = memory.paging
+        state.succeed(BankFeed.months(memory.statements))
+    }
+
+    private func remember() {
+        app.bankFeedMemory[month ?? ""] = BankFeedMemory(statements: statements, paging: paging)
+    }
+
+    /// The rows on screen: the shown month's group, as far as "Näytä lisää" has opened it. Bulk
+    /// actions take only these (web BOOKS-12), never rows a filter or a fold hides.
+    private func shownRows() -> [BankTransaction] {
+        guard let months = state.value else { return [] }
+        let groups = visibleGroups(months)
+        guard let key = GroupChoice.pick(shownMonth, available: groups.map(\.month)),
+              let group = groups.first(where: { $0.month == key }) else { return [] }
+        return Array(group.rows.prefix(limit.visible(group.rows.count)))
+    }
+
+    private var selectedRows: [BankTransaction] {
+        guard selection.isActive else { return [] }
+        return shownRows().filter { selection.contains($0.id) }
+    }
+
+    private func bulkConfirmTitle(_ action: BankBulkAction) -> String {
+        let rows = selectedRows
+        switch action {
+        case .reject: return BankBulk.rejectTitle(BankBulk.pairs(rows).count)
+        case .ignore: return BankBulk.ignoreTitle(BankBulk.ignorable(rows).count)
+        }
+    }
+
+    // MARK: Bulk actions
+
+    /// "Hyväksy ehdotukset": exactly the picked rows' pairs (`POST /api/matching/confirm-all` with
+    /// `pairs`), at most 500 per call.
+    private func confirmSelected() async {
+        await confirmPairs(BankBulk.pairs(selectedRows))
+    }
+
+    /// Links exactly `pairs`, what the preview showed; a pair that changed meanwhile is skipped.
+    private func confirmPairs(_ pairs: [BulkMatchPairsBody.Pair]) async {
+        guard !pairs.isEmpty, !bulkBusy else { return }
+        bulkBusy = true
+        defer { bulkBusy = false }
+        var confirmed = 0
+        var skipped = 0
+        for chunk in BulkBatch.chunks(pairs, size: BulkBatch.pairsLimit) {
+            do {
+                let result: BulkMatchConfirmResult = try await app.api.send("POST", "/api/matching/confirm-all", body: BulkMatchPairsBody(pairs: chunk))
+                confirmed += result.confirmed + result.alreadyConfirmed
+                skipped += result.skipped
+            } catch is CancellationError {
+                return
+            } catch {
+                notice = BulkBatch.outcome("Kohdistettiin", done: confirmed, failures: [error.userMessage])
+                noticeFailed = true
+                Haptics.error()
+                if confirmed > 0 { app.dataVersion += 1 }
+                return
+            }
+        }
+        // A pair that changed meanwhile is skipped, not linked to something else.
+        notice = skipped > 0 ? "Kohdistettiin \(confirmed). \(skipped) ehdotusta oli muuttunut, eikä niitä kohdistettu." : "Kohdistettiin \(confirmed)."
+        noticeFailed = skipped > 0
+        if skipped > 0 { Haptics.error() } else { Haptics.success() }
+        selection.finish(failed: [])
+        app.dataVersion += 1
+    }
+
+    /// "Hylkää ehdotukset": `POST /api/matching/reject` for each picked suggestion.
+    private func rejectSelected() async {
+        let rejections = BankBulk.rejections(selectedRows)
+        await runEach("Hylättiin", rejections.map(\.transactionId)) { index in
+            let _: Ignored = try await app.api.send("POST", "/api/matching/reject", body: rejections[index])
+        }
+    }
+
+    /// "Ei vaadi kuittia": `POST /api/matching/ignore` for each picked row that can take it.
+    private func ignoreSelected() async {
+        let rows = BankBulk.ignorable(selectedRows)
+        await runEach("Merkittiin", rows.map(\.id)) { index in
+            let _: Ignored = try await app.api.send("POST", "/api/matching/ignore", body: BulkIgnoreBody(transactionId: rows[index].id))
+        }
+    }
+
+    /// One call per row, one after another; what failed stays picked, named by its first reason.
+    private func runEach(_ verb: String, _ ids: [String], _ work: (Int) async throws -> Void) async {
+        guard !ids.isEmpty, !bulkBusy else { return }
+        bulkBusy = true
+        defer { bulkBusy = false }
+        var failed: [String] = []
+        var reasons: [String] = []
+        for index in ids.indices {
+            do {
+                try await work(index)
+            } catch is CancellationError {
+                return
+            } catch {
+                failed.append(ids[index])
+                reasons.append(error.userMessage)
+            }
+        }
+        let done = ids.count - failed.count
+        notice = BulkBatch.outcome(verb, done: done, failures: reasons)
+        noticeFailed = !failed.isEmpty
+        if failed.isEmpty { Haptics.success() } else { Haptics.error() }
+        selection.finish(failed: failed)
+        if done > 0 { app.dataVersion += 1 }
     }
 
     /// Opens the asked-for row once: from the loaded months, else from all months.
@@ -262,6 +485,9 @@ struct BankFeedView: View {
             pendingFocus = nil
             reveal(row)
             selected = row
+        } else if paging.hasMore {
+            // A later page may hold it: `load()` reads on until it turns up.
+            return
         } else if month != nil {
             // Not in this month: look in every month (the month change reloads).
             month = nil
@@ -290,18 +516,26 @@ struct BankFeedView: View {
         bankLinks = list.connections
     }
 
-    /// `POST /api/bank/connections/[id]/sync`, told as "Haettiin N tapahtumaa."
+    /// `POST /api/bank/connections/[id]/sync`, told as "Haettiin N tapahtumaa." The balances it
+    /// returned show at once and every screen is asked again (BankSyncFlow).
     private func syncBank(_ connection: BankConnection) async {
         guard syncingBank == nil else { return }
         syncingBank = connection.id
+        syncWaiting = false
         notice = nil
-        defer { syncingBank = nil }
+        defer {
+            syncingBank = nil
+            syncWaiting = false
+        }
         do {
-            let result: BankSyncResult = try await app.api.send("POST", "/api/bank/connections/\(connection.id)/sync", body: EmptyBody())
-            notice = result.summary
+            switch try await BankSyncFlow.run(app, connectionId: connection.id, waiting: { syncWaiting = true }) {
+            case .done(let result):
+                notice = result.summary
+                Haptics.success()
+            case .stillRunning:
+                notice = BankSyncFlow.stillRunningNotice
+            }
             noticeFailed = false
-            Haptics.success()
-            app.dataVersion += 1
         } catch is CancellationError {
         } catch {
             notice = error.userMessage
@@ -312,21 +546,16 @@ struct BankFeedView: View {
         }
     }
 
+    /// "Hyväksy kuittiehdotukset": the pairs the preview listed. With the rows read a page at a time,
+    /// "every suggestion of the month" on the server could link rows the owner never saw listed.
     private func confirmAll() async {
-        bulkBusy = true
-        defer { bulkBusy = false }
-        do {
-            let result: BankConfirmAllResult = try await app.api.send("POST", "/api/matching/confirm-all", body: BankConfirmAllRequest(periodMonth: month))
-            notice = result.message ?? "Ei kohdistettavia ehdotuksia."
+        let pairs = BankBulk.pairs(statements.flatMap(\.transactions))
+        guard !pairs.isEmpty else {
+            notice = "Ei kohdistettavia ehdotuksia."
             noticeFailed = false
-            Haptics.success()
-            app.dataVersion += 1
-        } catch is CancellationError {
-        } catch {
-            notice = error.userMessage
-            noticeFailed = true
-            Haptics.error()
+            return
         }
+        await confirmPairs(pairs)
     }
 
     private func rerunMatching() async {
@@ -368,6 +597,12 @@ struct BankFeedView: View {
             Haptics.error()
         }
     }
+}
+
+/// What Pankkitapahtumat showed last for one month filter (`AppModel.bankFeedMemory`).
+struct BankFeedMemory {
+    let statements: [Statement]
+    let paging: CursorPaging
 }
 
 struct BankRow: View {

@@ -128,7 +128,11 @@ struct MyyntiView: View {
         .scrollContentBackground(.hidden)
         .background(Theme.canvas)
         .searchable(text: $search, prompt: "Hae asiakasta tai numeroa")
-        .refreshable { await load() }
+        .refreshable {
+            // Pull-to-refresh asks every screen again; this one's own load stands for the bump.
+            gate.mark(key: listKey, version: app.refreshEverything())
+            await load()
+        }
         .navigationTitle(scope.isEmpty ? "Myynti" : "Laskut")
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {

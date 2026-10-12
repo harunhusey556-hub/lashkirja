@@ -52,7 +52,11 @@ struct KirjanpitoView: View {
         .scrollContentBackground(.hidden)
         .background(Theme.canvas)
         .navigationTitle("Kirjanpito")
-        .refreshable { await load() }
+        .refreshable {
+            // Pull-to-refresh asks every screen again; this one's own load stands for the bump.
+            gate.mark(version: app.refreshEverything())
+            await load()
+        }
         .task(id: app.dataVersion) {
             guard counts == nil || gate.isDue(version: app.dataVersion) else { return }
             // Marked only after a load that finished: a cancelled one must not count as fresh.

@@ -20,6 +20,8 @@ struct StatementDetailView: View {
     /// A screen the row sheet asked for, pushed once the sheet has closed.
     @State private var openAfterSheet: Route?
     @State private var pushed: Route?
+    /// The version a pull-to-refresh bumped to: its own load already covers it.
+    @State private var refreshedVersion: Int?
 
     var body: some View {
         List {
@@ -84,8 +86,15 @@ struct StatementDetailView: View {
         .sheet(item: $editing) { row in
             StatementRowEditSheet(statementId: statementId, row: row) { Task { await changed() } }
         }
-        .refreshable { await load() }
-        .task(id: app.dataVersion) { await load() }
+        .refreshable {
+            // Pull-to-refresh asks every screen again; this load stands for that bump here.
+            refreshedVersion = app.refreshEverything()
+            await load()
+        }
+        .task(id: app.dataVersion) {
+            guard app.dataVersion != refreshedVersion else { return }
+            await load()
+        }
     }
 
     private var statementDeleteTitle: String {
