@@ -22,6 +22,10 @@ function queueStatusLabel(status: string): string {
       return "Käsitellään";
     case "ready":
       return "Valmis";
+    case "saving":
+      return "Tallennetaan";
+    case "saved":
+      return "Tallennettu";
     case "failed":
       return "Epäonnistui";
     case "cancelled":
@@ -93,7 +97,17 @@ const QueueRow = memo(
             Avaa olemassa oleva
           </Link>
         )}
-        {row.status === "ready" && (
+        {row.status === "saved" && row.receiptId && (
+          <Link
+            href={detailHref("receipt", row.receiptId)}
+            className={tintedButtonClass("accent", "mt-1")}
+          >
+            Avaa kuitti
+          </Link>
+        )}
+        {/* A reading whose auto-save was refused (e.g. VAT larger than the
+            total) can still be fixed by hand in the form. */}
+        {(row.status === "ready" || (row.status === "failed" && row.ready)) && (
           <button
             type="button"
             onClick={() => onUseReady(row.localId)}

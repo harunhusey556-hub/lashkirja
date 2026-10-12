@@ -204,6 +204,33 @@ export default function KuititPage() {
     window.history.replaceState(null, "", "/kuitit");
   }, []);
 
+  // W8: the upload summary links here. "tarkista=1" brings the review queues
+  // (what auto-accept left pending) into view once they have loaded;
+  // "nayta=ei-kohdistettu" opens the list on the receipts no bank row explains.
+  const reviewSectionRef = useRef<HTMLDivElement>(null);
+  const focusReviewRef = useRef(false);
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const review = params.get("tarkista") === "1";
+    const unlinked = params.get("nayta") === "ei-kohdistettu";
+    if (!review && !unlinked) return;
+    focusReviewRef.current = review;
+    if (unlinked) {
+      const patch = receiptTabQuery("unlinked");
+      setAdvanced((a) => ({ ...a, ...patch }));
+      setAppliedAdvanced((a) => ({ ...a, ...patch }));
+    }
+    window.history.replaceState(null, "", "/kuitit");
+    // A link sets the view once; later edits stay on this page.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const pendingCount = pendingReceipts.length;
+  useEffect(() => {
+    if (!focusReviewRef.current || pendingCount === 0 || !reviewSectionRef.current) return;
+    focusReviewRef.current = false;
+    reviewSectionRef.current.scrollIntoView({ block: "start", behavior: "smooth" });
+  }, [pendingCount]);
+
   // Debounce search typing
   useEffect(() => {
     const t = setTimeout(() => setSearchQuery(searchInput.trim()), 300);
@@ -736,63 +763,69 @@ export default function KuititPage() {
           </div>
         ) : null}</Reveal>
 
-        {/* C: the whole page's ready pending receipts in one action, instead of
-            opening each queue card. The ones with a gap are named, never swept in. */}
-        {allPendingReady.length > 0 && (
-          <div className="flex flex-col gap-2 rounded-card border border-line bg-surface px-4 py-3">
-            <p className="text-caption text-ink-2">
-              {allPendingReady.length === 1
-                ? "1 kuitti on valmis hyväksyttäväksi."
-                : `${allPendingReady.length} kuittia on valmiina hyväksyttäväksi.`}
-              {allPendingIncomplete.length > 0 &&
-                ` ${allPendingIncomplete.length} vaatii täydennyksen.`}
-            </p>
-            <Button
-              type="button"
-              className="w-full"
-              busy={bulkReviewing}
-              busyLabel="Hyväksytään…"
-              onClick={() => void handleReviewMany(allPendingReady.map((receipt) => receipt.id))}
-            >
-              Hyväksy kaikki valmiit ({allPendingReady.length})
-            </Button>
+        {/* What waits for the owner: auto-accept (W8) leaves only these. The
+            upload summary's "Näytä tarkistettavat" scrolls here. */}
+        {pendingReceipts.length > 0 && (
+          <div ref={reviewSectionRef} className="scroll-mt-4 space-y-6">
+            {/* C: the whole page's ready pending receipts in one action, instead of
+                opening each queue card. The ones with a gap are named, never swept in. */}
+            {allPendingReady.length > 0 && (
+              <div className="flex flex-col gap-2 rounded-card border border-line bg-surface px-4 py-3">
+                <p className="text-caption text-ink-2">
+                  {allPendingReady.length === 1
+                    ? "1 kuitti on valmis hyväksyttäväksi."
+                    : `${allPendingReady.length} kuittia on valmiina hyväksyttäväksi.`}
+                  {allPendingIncomplete.length > 0 &&
+                    ` ${allPendingIncomplete.length} vaatii täydennyksen.`}
+                </p>
+                <Button
+                  type="button"
+                  className="w-full"
+                  busy={bulkReviewing}
+                  busyLabel="Hyväksytään…"
+                  onClick={() => void handleReviewMany(allPendingReady.map((receipt) => receipt.id))}
+                >
+                  Hyväksy kaikki valmiit ({allPendingReady.length})
+                </Button>
+              </div>
+            )}
+
+            {emailPending.length > 0 && (
+              <ReviewQueue
+                title="Tarkastettavat sähköpostikuitit"
+                description="Sähköpostista tuodut kuitit odottavat hyväksyntää ennen kirjanpitoon siirtymistä."
+                receipts={emailPending}
+                rejectLabel="Hylkää (Yksityinen)"
+                onReview={handleReview}
+                onApproveAll={(readyIds) => void handleReviewMany(readyIds)}
+                bulkBusy={bulkReviewing}
+              />
+            )}
+
+            {bankSalesPending.length > 0 && (
+              <ReviewQueue
+                title="Myynnit pankista"
+                description="Tiliotteen tuloista tehdyt myyntikirjaukset odottavat hyväksyntää."
+                receipts={bankSalesPending}
+                rejectLabel="Hylkää"
+                onReview={handleReview}
+                onApproveAll={(readyIds) => void handleReviewMany(readyIds)}
+                bulkBusy={bulkReviewing}
+              />
+            )}
+
+            {otherPending.length > 0 && (
+              <ReviewQueue
+                title="Muut tarkastettavat kuitit"
+                description="Odottavat hyväksyntää ennen kirjanpitoon siirtymistä."
+                receipts={otherPending}
+                rejectLabel="Hylkää"
+                onReview={handleReview}
+                onApproveAll={(readyIds) => void handleReviewMany(readyIds)}
+                bulkBusy={bulkReviewing}
+              />
+            )}
           </div>
-        )}
-
-        {emailPending.length > 0 && (
-          <ReviewQueue
-            title="Tarkastettavat sähköpostikuitit"
-            description="Sähköpostista tuodut kuitit odottavat hyväksyntää ennen kirjanpitoon siirtymistä."
-            receipts={emailPending}
-            rejectLabel="Hylkää (Yksityinen)"
-            onReview={handleReview}
-            onApproveAll={(readyIds) => void handleReviewMany(readyIds)}
-            bulkBusy={bulkReviewing}
-          />
-        )}
-
-        {bankSalesPending.length > 0 && (
-          <ReviewQueue
-            title="Myynnit pankista"
-            description="Tiliotteen tuloista tehdyt myyntikirjaukset odottavat hyväksyntää."
-            receipts={bankSalesPending}
-            rejectLabel="Hylkää"
-            onReview={handleReview}
-            onApproveAll={(readyIds) => void handleReviewMany(readyIds)}
-            bulkBusy={bulkReviewing}
-          />
-        )}
-
-        {otherPending.length > 0 && (
-          <ReviewQueue
-            title="Muut tarkastettavat kuitit"
-            description="Odottavat hyväksyntää ennen kirjanpitoon siirtymistä."
-            receipts={otherPending}
-            rejectLabel="Hylkää"
-            onReview={handleReview}
-            onApproveAll={(readyIds) => void handleReviewMany(readyIds)}
-            bulkBusy={bulkReviewing}
-          />
         )}
 
         <RejectedReceipts receipts={rejectedReceipts} onRestore={(id) => void handleReview(id, "pending")} />

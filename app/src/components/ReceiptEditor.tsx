@@ -75,8 +75,13 @@ import {
 import { RECEIPT_MATCH_STATUS, receiptMatchStatusKey } from "@/lib/status-labels";
 import { readPageCache, writePageCache } from "@/lib/page-cache";
 import { isUnreadableNote, UNREADABLE_RECEIPT_NOTE } from "@/lib/receipt-unreadable";
-import { useReceiptUploadQueue, validateUploadFile, type ReadyUpload } from "@/components/useReceiptUploadQueue";
-import { bulkImportSummary, bulkSavePayload, splitApprovable } from "@/lib/review-queue";
+import {
+  useReceiptUploadQueue,
+  validateUploadFile,
+  type AutoSavedUpload,
+  type ReadyUpload,
+} from "@/components/useReceiptUploadQueue";
+import { autoAcceptSummary, uploadOutcomeCounts } from "@/lib/auto-accept";
 import ReceiptUploadArea from "@/components/ReceiptUploadArea";
 import { BottomActions, DetailHero, MoreMenu, PageTitle, Section, StatusTag } from "@/components/ds";
 import { IS_MOBILE_BUILD } from "@/lib/build-target";
@@ -187,7 +192,6 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
   const [loading, setLoading] = useState(isEdit);
   const [uploadProgress, setUploadProgress] = useState("");
   const [saving, setSaving] = useState(false);
-  const [bulkImporting, setBulkImporting] = useState(false);
   const [formReady, setFormReady] = useState(false);
   const [filePath, setFilePath] = useState("");
   const [uploadId, setUploadId] = useState("");
@@ -330,7 +334,25 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
     void captureOffline([file]);
   }
 
-  const uploadQueue = useReceiptUploadQueue(applyUpload, IS_MOBILE_BUILD ? handleUploadNetworkFailure : undefined);
+  // W8: a read file is saved without the form (complete = approved). Off when
+  // editing, and when the pick is for one bank row: that link is
+  // made by the form's own save (captureTransactionId).
+  const uploadQueue = useReceiptUploadQueue(
+    applyUpload,
+    IS_MOBILE_BUILD ? handleUploadNetworkFailure : undefined,
+    { enabled: !isEdit && !captureTransactionId, onSingleSaved: handleSingleAutoSaved }
+  );
+
+  function handleSingleAutoSaved(saved: AutoSavedUpload) {
+    showToast({
+      tone: saved.outcome === "approved" ? "success" : "info",
+      text:
+        saved.outcome === "approved"
+          ? "Kuitti hyväksyttiin automaattisesti."
+          : "Kuitti tallennettiin. Se odottaa tarkistusta.",
+    });
+    router.push(detailHref("receipt", saved.receiptId, { new: "true" }));
+  }
 
   async function pickNativeOrInput(
     native: () => Promise<NativePick>,
@@ -354,91 +376,36 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
     }
   }
   const uploading = uploadQueue.rows.some(
-    (row) => row.status === "uploading" || row.status === "processing"
+    (row) => row.status === "uploading" || row.status === "processing" || row.status === "saving"
   );
 
-  // C: every file whose reading is done. The one-tap path saves them all in
-  // one action; the single-file pick is the form's own job as before.
-  const readyUploads: ReadyUpload[] = uploadQueue.rows.flatMap((row) =>
-    row.status === "ready" && row.ready ? [row.ready] : []
-  );
-  const readySplit = splitApprovable(
-    readyUploads.map((upload) => ({
-      id: upload.uploadId,
-      vendor: upload.extracted.vendor ?? null,
-      totalAmount: upload.extracted.totalAmount ?? null,
-    }))
-  );
-  const showBulkImport = !isEdit && uploadQueue.rows.length > 1 && readyUploads.length > 0;
-
-  /**
-   * The bulk import: save every ready upload with its own reading, then approve
-   * what the server's one rule accepts (receipt-approval.ts). What lacks an
-   * amount or a vendor is saved but stays pending, so the manual work left is
-   * exactly the receipts that need it.
-   */
-  async function handleImportAll() {
-    if (readyUploads.length === 0) return;
-    setBulkImporting(true);
-    setError("");
-    const savedIds: string[] = [];
-    let refusedSave = 0;
-    try {
-      for (const upload of readyUploads) {
-        try {
-          const res = await apiFetch("/api/receipts/save", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(bulkSavePayload(upload.uploadId, upload.extracted)),
-          });
-          const data = await readJson<ReceiptResponse>(res, "Tallennus epäonnistui");
-          if (data.receipt?.id) savedIds.push(String(data.receipt.id));
-          else refusedSave += 1;
-        } catch (saveError: unknown) {
-          if (isUnauthorized(saveError)) {
-            redirectToLogin();
-            return;
-          }
-          // One unreadable or duplicated file must not stop the rest.
-          refusedSave += 1;
-        }
-      }
-
-      let approvedCount = 0;
-      let refusedApprove = 0;
-      // The endpoint takes at most 200 ids per call (route.ts).
-      for (let start = 0; start < savedIds.length; start += 200) {
-        const chunk = savedIds.slice(start, start + 200);
-        const res = await apiFetch("/api/receipts/batch-approve", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ receiptIds: chunk }),
-        });
-        const data = await readJson<{ updatedCount?: number; failedCount?: number }>(
-          res,
-          "Hyväksyntä epäonnistui"
-        );
-        approvedCount += data.updatedCount ?? 0;
-        refusedApprove += data.failedCount ?? Math.max(0, chunk.length - (data.updatedCount ?? 0));
-      }
-
-      showToast({
-        tone: refusedSave + refusedApprove > 0 ? "info" : "success",
-        text: bulkImportSummary(approvedCount, refusedSave + refusedApprove),
-      });
-      // The form still holds a reading that is now saved; leaving avoids
-      // saving it a second time.
-      if (savedIds.length > 0) router.push("/kuitit");
-    } catch (importError: unknown) {
-      if (isUnauthorized(importError)) {
-        redirectToLogin();
-        return;
-      }
-      setError(errorMessage(importError, "Tallennus epäonnistui"));
-    } finally {
-      setBulkImporting(false);
-    }
-  }
+  // C (W8): the outcome of a pick of several files, counted from the queue
+  // rows themselves, so the summary can never disagree with the list under it.
+  const outcomeCounts = uploadOutcomeCounts(uploadQueue.rows);
+  const queueSettled =
+    uploadQueue.rows.length > 0 &&
+    !uploadQueue.rows.some((row) =>
+      ["pending", "uploading", "processing", "saving"].includes(row.status)
+    );
+  // Shown from the first saved file on, with the running counts; the toast
+  // comes once, when the last file has an outcome.
+  const showImportSummary =
+    !isEdit && uploadQueue.rows.length > 1 && uploadQueue.rows.some((row) => row.status === "saved");
+  const stillWorking = uploadQueue.rows.filter((row) =>
+    ["pending", "uploading", "processing", "saving"].includes(row.status)
+  ).length;
+  const importSummary = autoAcceptSummary(outcomeCounts);
+  const reviewHref = "/kuitit?tarkista=1";
+  const summaryToastShown = useRef("");
+  useEffect(() => {
+    if (!showImportSummary || !queueSettled || summaryToastShown.current === importSummary) return;
+    summaryToastShown.current = importSummary;
+    showToast({
+      tone: outcomeCounts.failed > 0 ? "info" : "success",
+      text: importSummary,
+      action: { label: "Näytä", onAction: () => router.push(outcomeCounts.pending > 0 ? reviewHref : "/kuitit") },
+    });
+  }, [showImportSummary, queueSettled, importSummary, outcomeCounts.failed, outcomeCounts.pending, router]);
 
   // OWN-04 / BOOKS-18 / SHELL-02: "Ota kuva" in the Lisää sheet already took
   // the photo. On /kuitit/uusi?from=camera the picked files are drained once
@@ -475,9 +442,13 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fromCamera]);
   const handoffFailed = uploadQueue.rows.some((row) => row.status === "failed" || row.status === "cancelled");
-  const showHandoff = cameraHandoff && !formReady && !error && !handoffFailed;
+  // Several photos from the camera are saved without the form: once the queue
+  // settles, the list and its summary replace the hand-off spinner.
+  const showHandoff = cameraHandoff && !formReady && !error && !handoffFailed && !queueSettled;
   const handoffProgress =
-    uploadQueue.rows.find((row) => row.status === "uploading" || row.status === "processing")?.progress ||
+    uploadQueue.rows.find(
+      (row) => row.status === "uploading" || row.status === "processing" || row.status === "saving"
+    )?.progress ||
     uploadProgress ||
     "Lähetetään kuvaa…";
 
@@ -1079,7 +1050,42 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
         </SkeletonGroup>
       )}
 
+      {/* C (W8): the files were saved as they were read - complete ones
+          approved, the rest waiting in Kuitit for review. This tells the truth
+          about each bucket and leads to the ones that need the owner. */}
+      {showImportSummary && (
+        <div
+          className="flex flex-col gap-3 rounded-card border border-line bg-surface px-4 py-3"
+          role="status"
+          aria-live={queueSettled ? "polite" : "off"}
+        >
+          <p className="text-body text-ink">{importSummary}</p>
+          {stillWorking > 0 && (
+            <p className="text-caption text-ink-2">Käsitellään vielä {stillWorking}…</p>
+          )}
+          {queueSettled && outcomeCounts.failed > 0 && (
+            <p className="text-caption text-ink-2">
+              Epäonnistuneet ovat alla syineen. Voit yrittää ne uudelleen.
+            </p>
+          )}
+          {outcomeCounts.pending > 0 && (
+            <Link href={reviewHref} className={buttonClass("primary", "w-full")}>
+              Näytä tarkistettavat ({outcomeCounts.pending})
+            </Link>
+          )}
+          {/* Approved but not yet explained by a bank row is a normal state;
+              this is the list the owner goes through next. */}
+          <Link href="/kuitit?nayta=ei-kohdistettu" className={buttonClass("secondary", "w-full")}>
+            Näytä ei kohdistetut
+          </Link>
+          <Link href="/kuitit" className={tintedButtonClass("neutral", "self-center")}>
+            Siirry kuitteihin
+          </Link>
+        </div>
+      )}
+
       {!isEdit && !formReady && !showHandoff && (
+
         <ReceiptUploadArea
           fileInputRef={fileInputRef}
           cameraInputRef={cameraInputRef}
@@ -1092,30 +1098,6 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
           onPickPhoto={() => void pickNativeOrInput(() => choosePhotoLibrary(), photoInputRef.current)}
           onPickFile={() => void pickDocument()}
         />
-      )}
-
-      {/* C: a batch of files no longer has to be applied and saved one by one.
-          The reading is what the owner accepts; what lacks an amount or a vendor
-          is saved but left for review. */}
-      {showBulkImport && (
-        <div className="flex flex-col gap-2 rounded-card border border-line bg-surface px-4 py-3">
-          <p className="text-caption text-ink-2">
-            {readySplit.ready.length === 1
-              ? "1 kuitti on luettu ja valmis."
-              : `${readySplit.ready.length} kuittia on luettu ja valmiina.`}
-            {readySplit.incomplete.length > 0 &&
-              ` ${readySplit.incomplete.length} vaatii tarkistuksen ennen hyväksyntää.`}
-          </p>
-          <Button
-            type="button"
-            className="w-full"
-            busy={bulkImporting}
-            busyLabel="Tallennetaan…"
-            onClick={() => void handleImportAll()}
-          >
-            Tallenna ja hyväksy kaikki ({readyUploads.length})
-          </Button>
-        </div>
       )}
 
       {/* A refused save is shown once, by the note above the save bar (F37). */}
