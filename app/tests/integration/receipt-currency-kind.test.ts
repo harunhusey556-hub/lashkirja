@@ -215,3 +215,42 @@ describe("a bill whose ostolasku already exists", () => {
     expect(await prisma.purchaseInvoice.count()).toBe(1);
   });
 });
+
+describe("a domestic bill whose printed VAT is not a whole euro", () => {
+  it("files the ostolasku with the VAT the document shows instead of answering 500", async () => {
+    // Regression (2026-10-12 test group): the VAT total of the receipt was summed in euros
+    // and then passed through centsToEuros(), which demands integer cents. Any bill whose
+    // VAT total was not a whole euro made the save route throw RangeError after the receipt
+    // had already been written: the owner saw a 500 and no ostolasku was filed.
+    const bill: ExtractedReceipt = {
+      ...usdInvoice,
+      vendor: "Kampaamotukku Oy",
+      date: "2026-02-10",
+      totalAmount: 100.5,
+      originalAmount: null,
+      vatDetails: [{ rate: 25.5, amount: 20.42 }],
+      category: "tarvikkeet",
+      invoiceNumber: "1234",
+      documentType: "invoice",
+      currency: "EUR",
+      sellerCountry: "FI",
+      dueDate: "2026-03-12",
+    };
+    const saved = await uploadAndSave(bill, {
+      vendor: "Kampaamotukku Oy",
+      date: "2026-02-10",
+      totalAmount: 100.5,
+      category: "tarvikkeet",
+      type: "meno",
+      vatDetails: [{ rate: 25.5, amount: 20.42 }],
+      invoiceNumber: "1234",
+    });
+    expect(saved.status).toBe(200);
+    const body = await readJson(saved);
+    expect(body.purchaseInvoice).toBeTruthy();
+    expect(body.purchaseInvoice.gross).toBe(100.5);
+    expect(body.purchaseInvoice.vat).toBe(20.42);
+    expect(body.purchaseInvoice.net).toBe(80.08);
+    expect(await prisma.purchaseInvoice.count()).toBe(1);
+  });
+});

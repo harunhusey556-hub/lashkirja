@@ -395,7 +395,7 @@ export async function fileReceiptAsPurchaseInvoice(
       // owner edits the real term on the ostolasku screen.
       dueDate: reading.dueDate ?? issueDate,
       gross: centsToEuros(receipt.totalAmountCents),
-      vat: centsToEuros(receiptVatTotalCents(receipt.vatDetails)),
+      vat: receiptVatTotalEuros(receipt.vatDetails),
       category: receipt.category,
       receiptId: receipt.id,
       currency: receipt.currency,
@@ -412,8 +412,17 @@ export async function fileReceiptAsPurchaseInvoice(
   }
 }
 
-/** The receipt's VAT lines, stored as JSON cents, added up in cents. */
-function receiptVatTotalCents(vatDetails: string | null): number {
+/**
+ * The receipt's VAT lines added up, in EUROS - the unit `createPurchaseInvoice` takes
+ * (`PurchaseInvoiceInput.vat`) and the unit the stored `vatDetails` JSON holds (the form's
+ * `vatPayload` parses "12,34" into 12.34 euros, and the AI reads euro amounts too).
+ *
+ * This used to be called `receiptVatTotalCents` and its result was passed through
+ * `centsToEuros()`, which threw `RangeError: Stored money value is not an integer number of
+ * cents` for any bill whose VAT total was not a whole euro: the receipt was saved, the save
+ * route answered 500, and no ostolasku was filed (found by the 2026-10-12 test group).
+ */
+function receiptVatTotalEuros(vatDetails: string | null): number {
   if (!vatDetails) return 0;
   try {
     const lines = JSON.parse(vatDetails) as Array<{ amount?: unknown }>;
