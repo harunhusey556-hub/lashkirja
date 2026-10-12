@@ -9,7 +9,14 @@ import { Ban, Camera, Check, FileText, Landmark, Link2, ReceiptText, RotateCcw, 
 import { apiFetch, errorMessage, isUnauthorized, readJson, redirectToLogin } from "@/components/clientFetch";
 import { formatDate, formatEur, formatEurSigned } from "@/lib/format";
 import { linkedGapSuffix, receiptLabel, type StatementTransaction } from "@/lib/statement-client";
-import { rowState, unlinkMessage, unlinkedRowPatch, type FeedRow } from "@/lib/bank-feed";
+import {
+  linkedRowPatch,
+  REJECTED_SUGGESTION_PATCH,
+  rowState,
+  unlinkMessage,
+  unlinkedRowPatch,
+  type FeedRow,
+} from "@/lib/bank-feed";
 import { detailHref } from "@/lib/routes";
 import { requestReceiptCapture } from "@/lib/capture-request";
 import { hapticImpact, hapticNotify } from "@/lib/haptics";
@@ -24,23 +31,6 @@ type Action =
 /** What the unlink route says: the row's approved sale went back to waiting. */
 interface UnlinkAnswer {
   restoredSale?: boolean;
-}
-
-const UNSUGGESTED: Partial<StatementTransaction> = {
-  matchStatus: "unmatched",
-  suggestedReceiptId: null,
-  suggestedReceipt: null,
-};
-
-/** The row once its suggested kuitti (or recognised sale) is linked. */
-function linkedPatch(row: FeedRow): Partial<StatementTransaction> {
-  return {
-    matchStatus: "confirmed",
-    receiptId: row.suggestedReceiptId,
-    receipt: row.suggestedReceipt,
-    suggestedReceiptId: null,
-    suggestedReceipt: null,
-  };
 }
 
 // Secondary decisions: full width like the primary button above them, so a
@@ -186,7 +176,7 @@ export function BankRowSheet({
                   void run(
                     "approve",
                     { url: "/api/receipts/batch-approve", body: { receiptIds: [row.suggestedReceiptId!] } },
-                    linkedPatch(row),
+                    linkedRowPatch(row),
                     "Myynti hyväksytty."
                   )
                 }
@@ -205,7 +195,7 @@ export function BankRowSheet({
                       url: "/api/matching/reject",
                       body: { transactionId: row.id, receiptId: row.suggestedReceiptId! },
                     },
-                    UNSUGGESTED
+                    REJECTED_SUGGESTION_PATCH
                   )
                 }
               >
@@ -230,7 +220,7 @@ export function BankRowSheet({
                       url: "/api/matching/confirm",
                       body: { transactionId: row.id, receiptId: row.suggestedReceiptId! },
                     },
-                    linkedPatch(row),
+                    linkedRowPatch(row),
                     "Kuitti kohdistettu."
                   )
                 }
@@ -249,7 +239,7 @@ export function BankRowSheet({
                       url: "/api/matching/reject",
                       body: { transactionId: row.id, receiptId: row.suggestedReceiptId! },
                     },
-                    UNSUGGESTED
+                    REJECTED_SUGGESTION_PATCH
                   )
                 }
               >

@@ -1,5 +1,6 @@
 import { clearAllDrafts } from "@/lib/draft-store";
-import { clearPageCache, invalidateForMutation } from "@/lib/page-cache";
+import { clearPageCache, invalidateForMutation, mutationChangesData } from "@/lib/page-cache";
+import { bumpDataVersion } from "@/lib/data-version";
 import { logoutOutcome } from "@/lib/session-policy";
 import { apiUrl, IS_MOBILE_BUILD } from "@/lib/build-target";
 import { appNavigate } from "@/lib/app-nav";
@@ -225,6 +226,11 @@ async function apiFetchAttempt(input: RequestInfo | URL, init?: ApiFetchInit): P
     input = rewritten.url;
     rest = rewritten.init;
   }
+  // Bookkeeping data must be fresh after a sync or a save: ask the browser to
+  // revalidate every GET of ours instead of trusting a copy it kept (an ETag
+  // still turns that into a cheap 304). A caller that wants no cache at all
+  // (pull-to-refresh) passes `cache: "no-store"` itself.
+  if (IDEMPOTENT_METHODS.has(method) && rest.cache === undefined) rest = { ...rest, cache: "no-cache" };
   let attempt = 0;
 
   while (attempt < maxRetries) {
@@ -246,6 +252,8 @@ async function apiFetchAttempt(input: RequestInfo | URL, init?: ApiFetchInit): P
       reportRequestOutcome("ok", apiVersionFromHeader(response));
       if (response.ok && !IDEMPOTENT_METHODS.has(method)) {
         invalidateForMutation(requestUrl(input));
+        // Screens that stay mounted behind this one (or a sheet) refetch too.
+        if (mutationChangesData(requestUrl(input))) bumpDataVersion();
       }
       // Mobile GET fallback cache (Task 7): fire-and-forget, never delays
       // or fails this response. rememberGet's own isCacheableGet check

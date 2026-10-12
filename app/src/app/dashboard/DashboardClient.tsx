@@ -3,6 +3,7 @@
 import { PullToRefresh } from "@/components/ds/PullToRefresh";
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
+import dynamic from "next/dynamic";
 import { useRouter, useSearchParams } from "next/navigation";
 import { ConnectionNotice, PartialFailureNotice, StaleBanner } from "@/components/ScreenState";
 import {
@@ -43,6 +44,7 @@ import {
   useSkeletonFade,
 } from "@/components/ds";
 import { ProgressRing } from "@/components/ds/ProgressRing";
+import { BarChartSkeleton } from "@/components/ds/charts";
 import { KotiMoneyCards } from "./KotiMoneyCards";
 import { monthIsComplete, type TrendMonth } from "@/lib/koti-design";
 
@@ -55,7 +57,7 @@ import { receiptDrillHref, statementDrillHref } from "@/lib/report-drill";
 import { helsinkiMonthKey } from "@/lib/validation";
 import { MONTHS } from "@/lib/finnish-months";
 import { pageCacheFetchedAt, readPageCache, writePageCache } from "@/lib/page-cache";
-import { pollDelay, syncPageHiddenFlag } from "@/lib/page-activity";
+import { useRefetchOnDataVersion } from "@/components/useDataVersion";
 import { vatPeriodEndingIn, vatPeriodKindOf } from "@/lib/vat-deadline";
 import { VAT_ROW_TITLE, vatChangedNote, vatDueAmount, vatDueSecondary, vatPendingNote } from "@/lib/vat-due";
 import {
@@ -69,7 +71,6 @@ import {
 import { kotiGreeting } from "@/lib/koti-greeting";
 import { kotiBankRow, kotiBankState, type KotiBank } from "@/lib/koti-bank";
 import { BalanceTrendCard, type BalanceTrendPoint } from "@/components/charts/BalanceTrendCard";
-import { CashflowCard } from "@/components/charts/CashflowCard";
 import { handledDetail, handledHref, handledTitle, type Handled } from "@/lib/koti-handled";
 import { useVatDue } from "@/components/useVatDue";
 import { approvalGapText } from "@/lib/receipt-approval";
@@ -78,11 +79,23 @@ import { AnimatedRows } from "@/components/AnimatedRows";
 import { armNavigation } from "@/lib/nav-direction";
 import { ReceiptApprovalSheet, type ApprovalSheetReceipt } from "@/components/ReceiptApprovalSheet";
 import type { DashboardItem as ServerDashboardItem, DashboardItemKind } from "@/app/api/dashboard/items";
+
 import { isBlockingKind } from "@/lib/dashboard-kinds";
 import { useProfile } from "@/app/asetukset/useProfile";
 import { useSession } from "@/components/SessionProvider";
 import { useRefetchOnReconnect } from "@/components/useRefetchOnReconnect";
 import { tintedButtonClass } from "@/components/control-styles";
+
+// The bar chart is split out and drawn after the cards: the figures and tasks
+// above it never wait for chart code (the balance header stays eager, it is the headline).
+const CashflowCard = dynamic(() => import("@/components/charts/CashflowCard").then((module) => module.CashflowCard), {
+  ssr: false,
+  loading: () => (
+    <SkeletonCard>
+      <BarChartSkeleton />
+    </SkeletonCard>
+  ),
+});
 
 interface Position {
   totalOpen: number;
@@ -604,31 +617,15 @@ export default function DashboardClient() {
     }
   }
 
-  // Poll while the page is visible. A hidden document does not keep asking.
-  useEffect(() => {
-    let interval = 0;
-    const arm = () => {
-      window.clearInterval(interval);
-      const delay = pollDelay(document.visibilityState, 30_000);
-      syncPageHiddenFlag(delay == null);
-      if (delay == null) return;
-      interval = window.setInterval(() => setLoadAttempt((a) => a + 1), delay);
-    };
-    const onVisibility = () => {
-      if (document.visibilityState === "visible") setLoadAttempt((a) => a + 1);
-      arm();
-    };
-    arm();
-    document.addEventListener("visibilitychange", onVisibility);
-    return () => {
-      window.clearInterval(interval);
-      document.removeEventListener("visibilitychange", onVisibility);
-    };
-  }, []);
+  // A sync, import or save (here, on another device, or by the background job)
+  // moves the data version; the shared poller asks the cheap version endpoint
+  // every 30 s while the tab is visible instead of refetching the whole page.
+  useRefetchOnDataVersion(() => setLoadAttempt((a) => a + 1));
 
   useEffect(() => {
     let cancelled = false;
-    apiFetch(`/api/dashboard?month=${month}`, { credentials: "include" })
+    // Every reload after the first (version change, pull, retry) skips any cached copy.
+    apiFetch(`/api/dashboard?month=${month}`, { credentials: "include", cache: loadAttempt > 0 ? "no-store" : undefined })
       .then((response) =>
         readJson<DashboardData>(response, "Kodin tietojen lataus epäonnistui")
       )
