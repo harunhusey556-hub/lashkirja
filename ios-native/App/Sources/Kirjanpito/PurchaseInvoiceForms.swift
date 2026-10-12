@@ -356,6 +356,7 @@ struct PurchaseStatusBadge: View {
         case .open: Theme.ink2
         case .overdue: Theme.danger
         case .paid: Theme.success
+        case .credited: Theme.ink2
         case .cancelled: Theme.ink2
         }
     }

@@ -75,6 +75,8 @@ enum Route: Hashable {
     case purchaseInvoicesFiltered(status: String)
     /// Toistuvat ostolaskut: rent and other routine bills made into purchase invoices each period.
     case recurringPurchases
+    /// Kohdista ostolaskujen maksut: open ostolaskut with the bank payment proposed for each.
+    case purchaseMatch
 }
 
 extension Route {
@@ -212,6 +214,7 @@ struct RouteScreen: View {
             MyyntiView(scope: InvoiceScope(month: month, customerId: customerId), status: SalesFilter(rawValue: status) ?? .all)
         case .purchaseInvoicesFiltered(let status): PurchaseInvoicesView(status: PurchaseFilter(rawValue: status))
         case .recurringPurchases: RecurringPurchasesView()
+        case .purchaseMatch: PurchaseMatchView()
         }
     }
 }

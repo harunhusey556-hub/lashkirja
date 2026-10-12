@@ -18,6 +18,8 @@ struct PurchaseInvoicesView: View {
     @State private var busy = false
     @State private var showNew = false
     @State private var payTarget: PurchaseInvoice?
+    /// "Liitä kuitti" from the row, without opening the invoice first.
+    @State private var receiptTarget: PurchaseInvoice?
     @State private var deleteTarget: PurchaseInvoice?
     @State private var limit = ShowMore()
     /// Bank rows the matcher thinks paid an invoice (`GET /api/purchase-invoices/match`), for "N ehdotusta".
@@ -71,6 +73,7 @@ struct PurchaseInvoicesView: View {
         .disabled(busy)
         .sheet(isPresented: $showNew) { PurchaseInvoiceFormView(existing: nil) }
         .sheet(item: $payTarget) { invoice in PurchasePaymentSheet(invoice: invoice) }
+        .sheet(item: $receiptTarget) { invoice in PurchaseReceiptLinkSheet(invoice: invoice) }
         .sheet(isPresented: $showSuggestions) { PurchaseSuggestionsSheet(suggestions: suggestions) }
         .confirmationDialog(
             "Poistetaanko ostolasku?",
@@ -202,6 +205,18 @@ struct PurchaseInvoicesView: View {
             if invoice.canRecordPayment {
                 Button { payTarget = invoice } label: { Label("Kirjaa maksu", systemImage: "eurosign.circle") }
                     .tint(Theme.successFill)
+            }
+            if invoice.canLinkReceipt {
+                Button { receiptTarget = invoice } label: { Label("Liitä kuitti", systemImage: "paperclip") }
+                    .tint(Theme.accent)
+            }
+        }
+        .contextMenu {
+            if invoice.canLinkReceipt {
+                Button { receiptTarget = invoice } label: { Label("Liitä kuitti", systemImage: "paperclip") }
+            }
+            if invoice.canRecordPayment {
+                Button { payTarget = invoice } label: { Label("Kirjaa maksu", systemImage: "eurosign.circle") }
             }
         }
     }

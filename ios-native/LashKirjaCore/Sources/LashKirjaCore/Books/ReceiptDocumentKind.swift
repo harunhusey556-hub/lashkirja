@@ -1,0 +1,143 @@
+import Foundation
+
+/// What the owner says a saved document is (`PATCH /api/receipts/[id]` with `documentType`):
+/// "invoice" files (or reopens) the ostolasku, "receipt" cancels it.
+public enum ReceiptDocumentKind: String, Sendable, Equatable {
+    case invoice, receipt
+}
+
+/// The body of that PATCH; nothing else is sent, so no field of the receipt is touched.
+public struct ReceiptDocumentKindBody: Encodable, Sendable, Equatable {
+    public let documentType: String
+    public init(_ kind: ReceiptDocumentKind) { documentType = kind.rawValue }
+}
+
+/// The answer to that PATCH: what happened to the ostolasku, and why none was filed.
+public struct ReceiptDocumentKindResult: Decodable, Sendable, Equatable {
+    public let purchaseInvoiceAction: String?
+    public let purchaseInvoiceSkipped: String?
+
+    enum CodingKeys: String, CodingKey { case purchaseInvoiceAction, purchaseInvoiceSkipped }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        purchaseInvoiceAction = try c.decodeIfPresent(String.self, forKey: .purchaseInvoiceAction)
+        purchaseInvoiceSkipped = try c.decodeIfPresent(String.self, forKey: .purchaseInvoiceSkipped)
+    }
+
+    /// Why no ostolasku could be filed, in the owner's words (the web's `SKIP_TEXT`).
+    static let skipText: [String: String] = [
+        "sales_document": "Myyntitositteesta ei tehdä ostolaskua.",
+        "no_supplier": "Lisää myyjä ja tallenna, niin ostolasku voidaan luoda.",
+        "no_date": "Lisää päivämäärä ja tallenna, niin ostolasku voidaan luoda.",
+        "no_amount": "Lisää summa ja tallenna, niin ostolasku voidaan luoda.",
+        "duplicate": "Sama lasku on jo ostolaskuissa.",
+        "already_filed": "Ostolasku on peruttu Ostolaskut-näkymässä. Avaa se sieltä.",
+    ]
+
+    /// The line to show after the change: the reason when nothing was filed, else what was done.
+    public func message(for kind: ReceiptDocumentKind) -> String {
+        if purchaseInvoiceAction == "none", let reason = purchaseInvoiceSkipped, let text = Self.skipText[reason] {
+            return text
+        }
+        return kind == .invoice ? "Tallennettu ostolaskuksi" : "Merkitty kuitiksi, ostolasku peruttiin"
+    }
+}
+
+/// `GET /api/receipts/[id]/purchase-invoice`: the ostolasku a receipt is filed as, if any.
+public struct ReceiptPurchaseInvoiceView: Decodable, Sendable, Equatable {
+    public struct Invoice: Decodable, Sendable, Equatable {
+        public let id: String
+        public let status: PurchaseStatus
+        public let displayStatus: PurchaseDisplayStatus
+        public let dueDate: String
+        /// The due date is still the 14-day default, not one printed on the bill.
+        public let dueDateAssumed: Bool
+
+        enum CodingKeys: String, CodingKey { case id, status, displayStatus, dueDate, dueDateAssumed }
+
+        public init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            id = try c.decode(String.self, forKey: .id)
+            status = try c.decodeIfPresent(PurchaseStatus.self, forKey: .status) ?? .open
+            displayStatus = try c.decodeIfPresent(PurchaseDisplayStatus.self, forKey: .displayStatus) ?? .open
+            dueDate = try c.decodeIfPresent(String.self, forKey: .dueDate) ?? ""
+            dueDateAssumed = try c.decodeIfPresent(Bool.self, forKey: .dueDateAssumed) ?? false
+        }
+    }
+
+    /// What the stored reading called the document ("invoice", "receipt"), when there is a reading.
+    public let documentType: String?
+    public let purchaseInvoice: Invoice?
+
+    enum CodingKeys: String, CodingKey { case documentType, purchaseInvoice }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        documentType = try c.decodeIfPresent(String.self, forKey: .documentType)
+        purchaseInvoice = try c.decodeIfPresent(Invoice.self, forKey: .purchaseInvoice)
+    }
+}
+
+/// The receipt screen's "Tämä on ostolasku" banner (web `OstolaskuNotice`): one document, one home.
+public enum ReceiptOstolaskuNotice: Sendable, Equatable {
+    /// Filed as an ostolasku: the line to read, where to go, and whether "Ei ole lasku" is offered.
+    case filed(invoiceId: String, headline: String, canMarkAsReceipt: Bool)
+    /// Not filed (or the ostolasku was cancelled): the question and the "Merkitse ostolaskuksi" offer.
+    case offer(text: String)
+
+    /// nil until the view is known, and for a sale (`tulo`) that is no ostolasku: nothing to say.
+    public static func make(view: ReceiptPurchaseInvoiceView?, receiptType: String) -> ReceiptOstolaskuNotice? {
+        guard let view else { return nil }
+        let invoice = view.purchaseInvoice
+        if receiptType == "tulo" && invoice == nil { return nil }
+        guard let invoice, invoice.status != .cancelled else {
+            return .offer(text: invoice != nil ? "Ostolasku on peruttu, tämä on kuitti." : "Onko tämä lasku, joka maksetaan myöhemmin?")
+        }
+        var headline = "Tämä on ostolasku · Eräpäivä \(APIDate.displayDay(invoice.dueDate))"
+        if invoice.dueDateAssumed { headline += " (oletus)" }
+        switch (invoice.status, invoice.displayStatus) {
+        case (.paid, _): headline += " · Maksettu"
+        case (.credited, _): headline += " · Hyvitetty"
+        case (_, .overdue): headline += " · Myöhässä"
+        default: break
+        }
+        return .filed(invoiceId: invoice.id, headline: headline, canMarkAsReceipt: invoice.status == .open)
+    }
+}
+
+/// The line under the euro amount that says which rate priced a non-EUR document
+/// (web `fxRateLine`): "Kurssi 1 USD = 0,8749 EUR (EKP 10.7.2026)".
+public enum ReceiptFx {
+    /// A recorded rate outside this range is a misread, not a rate (web `isUsableRate`).
+    static func isUsable(_ rate: Double?) -> Bool {
+        guard let rate, rate.isFinite else { return false }
+        return rate > 1e-6 && rate < 1e6
+    }
+
+    /// Four decimals; a small unit value (JPY, KRW) gets up to six so the rate still says something.
+    static func rateText(_ rate: Double) -> String {
+        var text = String(format: rate < 0.1 ? "%.6f" : "%.4f", rate)
+        while text.hasSuffix("0"), let dot = text.firstIndex(of: "."), text.distance(from: dot, to: text.endIndex) - 1 > 4 {
+            text.removeLast()
+        }
+        return text.replacingOccurrences(of: ".", with: ",")
+    }
+
+    /// nil for euros and when no usable rate was recorded. A rate the document itself printed says
+    /// "laskulla"; every other rate is the ECB's.
+    public static func line(currency: String?, rate: Double?, date: String?, source: String?) -> String? {
+        guard let currency, !currency.isEmpty, currency != "EUR", isUsable(rate), let rate else { return nil }
+        let origin = source == "document" ? "laskulla" : "EKP"
+        var when = origin
+        if let date, APIDate.day(String(date.prefix(10))) != nil { when += " \(APIDate.displayDay(date))" }
+        return "Kurssi 1 \(currency) = \(rateText(rate)) EUR (\(when))"
+    }
+}
+
+extension Receipt {
+    /// "Kurssi 1 USD = 0,8749 EUR (EKP 10.7.2026)", nil for a euro receipt or one without a rate.
+    public var fxRateLine: String? {
+        ReceiptFx.line(currency: currency, rate: fxRate, date: fxRateDate, source: fxSource)
+    }
+}
