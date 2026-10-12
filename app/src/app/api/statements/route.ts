@@ -24,6 +24,7 @@ import {
 } from "@/lib/storage";
 import { rejectCrossSite, rejectOversizedContentLength } from "@/lib/http-security";
 import { runMatching } from "@/lib/matching";
+import { matchPurchasePaymentsFromBank } from "@/lib/purchase-invoices";
 import { eurosToCents } from "@/lib/money";
 import { inferTransactionType } from "@/lib/statements";
 import { FEED_PAGE_MAX, FEED_PAGE_SIZE, FeedCursorError, listStatementFeedPage, listStatementSummariesForUser, listStatementsForUser } from "@/lib/statement-api";
@@ -455,6 +456,11 @@ export async function POST(req: NextRequest) {
 
     await runMatching(userId).catch((e: unknown) =>
       console.error("Matching after statement upload failed:", e)
+    );
+    // An imported payment that carries an open ostolasku's viite pays it; the rest are
+    // proposals on the Kohdistus page. Before W27 only the Ostolaskut button ran this.
+    await matchPurchasePaymentsFromBank(userId).catch((e: unknown) =>
+      console.error("Purchase payment matching after statement upload failed:", e)
     );
 
     // Drafts pending sales receipts for recognised settlement providers only.

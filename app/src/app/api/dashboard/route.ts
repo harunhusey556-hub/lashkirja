@@ -9,6 +9,7 @@ import { bankEverConnected, getBankPosition, loadBalanceTrend, type BalancePoint
 import { loadCashflow, type CashflowMonth } from "@/lib/koti-cashflow";
 import { buildAging, buildAgingReport, creditedCentsOf, openPosition, type InvoiceStatus } from "@/lib/invoices";
 import { alvReportOf, loadAlvPeriodSources, type AlvPeriodSources } from "@/lib/alv-period";
+import { cachedForStamp, readBooksStamp } from "@/lib/books-cache";
 import { computeYearTurnover } from "@/lib/alv-threshold";
 import { buildProfitLoss } from "@/lib/reports";
 import { helsinkiMonthKey } from "@/lib/validation";
@@ -26,6 +27,22 @@ function previousMonthKey(month: string): string {
   const [y, m] = month.split("-").map(Number);
   const d = new Date(Date.UTC(y, m - 2, 1));
   return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
+}
+
+/** What Koti shows from the month's books; plain numbers, so a cached copy cannot be mutated. */
+type MonthFigures = {
+  total: ReturnType<typeof buildProfitLoss>["total"];
+  estimatedVat: number;
+  receiptCount: number;
+};
+
+function monthFiguresOf(books: AlvPeriodSources): MonthFigures {
+  const alvReport = alvReportOf(books);
+  return {
+    total: buildProfitLoss(books.reportReceipts, books.reportInvoices).total,
+    estimatedVat: alvReport.field308.isRefund ? -alvReport.field308.amount : alvReport.field308.amount,
+    receiptCount: books.receiptCount,
+  };
 }
 
 function round2(n: number): number {
@@ -92,28 +109,30 @@ export async function GET(req: NextRequest) {
   // credit notes negative and bank-settled income receipts left out. The VAT
   // estimate is computed from exactly the same sources as the VAT return, so
   // the front page, /raportit and /kirjanpito/alv cannot drift apart again.
-  let books: AlvPeriodSources | null = null;
+  // W24: the month's books, the year turnover and the cashflow are reused while nothing they read
+  // has changed (lib/books-cache.ts). Without a stamp they are computed as before.
+  const stamp = await readBooksStamp(session.userId).catch((error: unknown) => {
+    console.warn("Koti cache stamp failed, computing uncached:", error);
+    return null;
+  });
+  const cached = <T,>(key: string, load: () => Promise<T>): Promise<T> =>
+    stamp === null ? load() : cachedForStamp(`${session.userId}|${key}`, stamp, load);
+
+  let monthFigures: MonthFigures | null = null;
   try {
-    books = await loadAlvPeriodSources(session.userId, startOfMonth, endOfMonth);
+    monthFigures = await cached(`month|${month}`, async () =>
+      monthFiguresOf(await loadAlvPeriodSources(session.userId, startOfMonth, endOfMonth))
+    );
   } catch (error) {
     if (transactions.length === 0) throw error;
     sectionErrors.receipts = "Kuittimäärää ei saatu ladattua.";
     sectionErrors.vat = "ALV-arviota ei saatu ladattua.";
   }
 
-  const monthBooks = books
-    ? buildProfitLoss(books.reportReceipts, books.reportInvoices).total
-    : null;
+  const monthBooks = monthFigures?.total ?? null;
   const documentIncome = monthBooks ? centsToEuros(monthBooks.incomeGrossCents) : 0;
   const documentExpenses = monthBooks ? centsToEuros(monthBooks.expenseGrossCents) : 0;
-
-  let estimatedVat = 0;
-  if (books) {
-    const alvReport = alvReportOf(books);
-    estimatedVat = alvReport.field308.isRefund
-      ? -alvReport.field308.amount
-      : alvReport.field308.amount;
-  }
+  const estimatedVat = monthFigures?.estimatedVat ?? 0;
   const hasBankData = transactions.length > 0;
 
   const user = await prisma.user.findUnique({
@@ -139,7 +158,8 @@ export async function GET(req: NextRequest) {
   // the other months and nothing counts twice.
   let ytdRevenue = 0;
   try {
-    const turnover = await computeYearTurnover(session.userId, year, vatProfile.defaultSalesRate);
+    const rate = vatProfile.defaultSalesRate;
+    const turnover = await cached(`turnover|${year}|${rate}`, () => computeYearTurnover(session.userId, year, rate));
     ytdRevenue = centsToEuros(turnover.netCents);
   } catch {
     sectionErrors.threshold = "ALV-rajaa ei saatu ladattua.";
@@ -291,7 +311,7 @@ export async function GET(req: NextRequest) {
   // the chart stays put while the owner steps through the months it shows).
   let cashflow: CashflowMonth[] | null = null;
   try {
-    cashflow = await loadCashflow(session.userId, currentMonth);
+    cashflow = await cached(`cashflow|${currentMonth}`, () => loadCashflow(session.userId, currentMonth));
   } catch {
     cashflow = null;
   }
@@ -353,7 +373,7 @@ export async function GET(req: NextRequest) {
     source: hasBankData ? "tiliote" : "kuitit",
     basis: hasBankData ? "kassaperuste" : "laskutusperuste",
     txCount: transactions.length,
-    receiptCount: books?.receiptCount ?? 0,
+    receiptCount: monthFigures?.receiptCount ?? 0,
     invoiceCount: monthBooks ? monthBooks.invoiceCount + monthBooks.creditNoteCount : 0,
     matching: { matchable, matched, suggested },
     events,

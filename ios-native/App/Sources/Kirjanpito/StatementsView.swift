@@ -100,11 +100,14 @@ struct StatementsView: View {
     }
 
     private func load() async {
+        // The same answers as the Pankki hub's, through the app's cache: shown at once when known.
+        if statements.value == nil, let cached: StatementList = await app.cachedValue("/api/statements") {
+            statements.succeed(cached.statements)
+        }
         statements.begin()
-        let api = app.api
         // Files and accounts load side by side; the accounts only fill the picker.
-        async let filesResult = Result<StatementList, Error>(asyncCatching: { try await api.get("/api/statements") })
-        async let accountsResult: BankAccountsOverview? = try? api.get("/api/bank-accounts")
+        async let filesResult = Result<StatementList, Error>(asyncCatching: { try await app.cachedGet("/api/statements", persist: true) })
+        async let accountsResult: BankAccountsOverview? = try? app.cachedGet("/api/bank-accounts", persist: true)
         let (files, overview) = await (filesResult, accountsResult)
         if Task.isCancelled { return }
         switch files {

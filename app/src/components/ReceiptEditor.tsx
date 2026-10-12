@@ -11,7 +11,7 @@ import ReceiptMatchPanel, {
   type BankTxMatch,
 } from "@/components/ReceiptMatchPanel";
 import { ErrorState } from "@/components/AsyncState";
-import { FieldsSkeleton, ReceiptDetailSkeleton } from "@/components/books/Skeletons";
+import { FieldsSkeleton, ReceiptDetailSkeleton, type ReceiptSeed } from "@/components/books/Skeletons";
 import { Skeleton, SkeletonGroup } from "@/components/ds";
 import {
   clearPendingCapture,
@@ -76,6 +76,8 @@ import { RECEIPT_MATCH_STATUS, receiptMatchStatusKey } from "@/lib/status-labels
 import { readPageCache, writePageCache } from "@/lib/page-cache";
 import { isUnreadableNote, UNREADABLE_RECEIPT_NOTE } from "@/lib/receipt-unreadable";
 import {
+  discardStagedUpload,
+  SKIPPED_DUPLICATE_TEXT,
   useReceiptUploadQueue,
   validateUploadFile,
   type AutoSavedUpload,
@@ -151,6 +153,8 @@ type LinkedBankTx = BankTxMatch;
 interface ReceiptEditorProps {
   /** When set, loads and edits an existing receipt */
   receiptId?: string;
+  /** The list row this receipt was opened from: shown while the full receipt loads. */
+  seed?: ReceiptSeed;
 }
 
 interface ReceiptResponse {
@@ -181,7 +185,7 @@ interface ReceiptResponse {
   };
 }
 
-export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
+export default function ReceiptEditor({ receiptId, seed }: ReceiptEditorProps) {
   const isEdit = Boolean(receiptId);
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -224,6 +228,7 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
   const [notFound, setNotFound] = useState(false);
   const [loadAttempt, setLoadAttempt] = useState(0);
   const [forceDuplicate, setForceDuplicate] = useState(false);
+  const [discarding, setDiscarding] = useState(false);
   const [vendorRuleActive, setVendorRuleActive] = useState(false);
   const [vendorRuleBusy, setVendorRuleBusy] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -355,6 +360,24 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
     IS_MOBILE_BUILD ? handleUploadNetworkFailure : undefined,
     { enabled: !isEdit && !captureTransactionId, onSingleSaved: handleSingleAutoSaved }
   );
+
+  /** "Älä tallenna" after the look-alike question: the file is dropped, nothing is saved. */
+  async function discardDuplicate() {
+    if (!uploadId || discarding) return;
+    setDiscarding(true);
+    try {
+      await discardStagedUpload(uploadId);
+    } catch (discardError: unknown) {
+      if (isUnauthorized(discardError)) { redirectToLogin(); return; }
+      setError(errorMessage(discardError, "Tiedostoa ei voitu poistaa"));
+      setDiscarding(false);
+      return;
+    }
+    session.clearSavedDraft();
+    session.setPhase("saved");
+    showToast({ tone: "info", text: `${SKIPPED_DUPLICATE_TEXT}.` });
+    router.push("/kuitit");
+  }
 
   function handleSingleAutoSaved(saved: AutoSavedUpload) {
     showToast({
@@ -969,7 +992,7 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
     });
 
   if (loading) {
-    return <ReceiptDetailSkeleton />;
+    return <ReceiptDetailSkeleton seed={seed} />;
   }
 
   if (notFound) {
@@ -1770,14 +1793,29 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
             </Link>
           ) : (
             <div className="flex gap-2">
-              <Button
-                type="button"
-                variant="secondary"
-                className="flex-1"
-                onClick={() => session.requestCancel(() => router.push("/kuitit"))}
-              >
-                Peruuta
-              </Button>
+              {/* The look-alike prompt answers both ways: "Tallenna silti" or drop this file (W27). */}
+              {forceDuplicate && !isEdit && uploadId ? (
+                <Button
+                  type="button"
+                  variant="secondary"
+                  className="flex-1"
+                  busy={discarding}
+                  busyLabel="Ohitetaan…"
+                  disabled={saving}
+                  onClick={() => void discardDuplicate()}
+                >
+                  Älä tallenna
+                </Button>
+              ) : (
+                <Button
+                  type="button"
+                  variant="secondary"
+                  className="flex-1"
+                  onClick={() => session.requestCancel(() => router.push("/kuitit"))}
+                >
+                  Peruuta
+                </Button>
+              )}
               <Button
                 type="submit"
                 form="receipt-form"

@@ -81,7 +81,7 @@ struct CustomersView: View {
                 Task { await load() }
             }
         }
-        .refreshable { await load() }
+        .refreshable { await load(force: true) }
         .onAppear {
             if let flash = CustomerFlash.pending {
                 CustomerFlash.pending = nil
@@ -98,12 +98,23 @@ struct CustomersView: View {
         }
     }
 
-    private func load() async {
-        state.begin()
+    private func load() async { await load(force: false) }
+
+    /// Through the app's cache: the last list at once, then the server's when stale; `force`
+    /// (pull-to-refresh) always asks.
+    private func load(force: Bool) async {
+        let timing = ScreenTiming("Asiakkaat")
         let archived = includeArchived
+        let query = CustomerArchive.listQuery(includeArchived: archived)
+        if state.value == nil, let cached: CustomerList = await app.cachedValue("/api/customers", query: query) {
+            state.succeed(archived ? cached.customers : cached.customers.filter { !$0.isArchived })
+            timing.painted(fromCache: true)
+        }
+        state.begin()
         do {
-            let list: CustomerList = try await app.api.get("/api/customers", query: CustomerArchive.listQuery(includeArchived: archived))
+            let list: CustomerList = try await app.cachedGet("/api/customers", query: query, force: force)
             state.succeed(archived ? list.customers : list.customers.filter { !$0.isArchived })
+            timing.dataReady()
             app.indexForSpotlight(list.customers.filter { !$0.isArchived }.compactMap {
                 SpotlightEntry.customer(id: $0.id, name: $0.name, businessId: $0.businessId)
             })
@@ -212,7 +223,7 @@ struct CustomerDetailView: View {
         .scrollContentBackground(.hidden)
         .background(Theme.canvas)
         .navigationTitle(state.value?.customer.name ?? "Asiakas")
-        .refreshable { await load() }
+        .refreshable { await load(force: true) }
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             if state.value != nil {
@@ -268,12 +279,19 @@ struct CustomerDetailView: View {
         .task { await load() }
     }
 
-    private func load() async {
+    private func load() async { await load(force: false) }
+
+    /// The cached customer at once (opened before, nothing changed since), then the server's
+    /// when stale; `force` (pull-to-refresh) always asks.
+    private func load(force: Bool) async {
+        let path = "/api/customers/\(customerId)"
+        if state.value == nil, let cached: CustomerDetail = await app.cachedValue(path) { state.succeed(cached) }
         state.begin()
         do {
-            state.succeed(try await app.api.get("/api/customers/\(customerId)"))
+            let detail: CustomerDetail = try await app.cachedGet(path, force: force)
+            state.succeed(detail)
             // Merge candidates: every other customer still in use.
-            if let list: CustomerList = try? await app.api.get("/api/customers") {
+            if let list: CustomerList = try? await app.cachedGet("/api/customers") {
                 others = list.customers.filter { $0.id != customerId && $0.archivedAt == nil }
             }
         } catch is CancellationError {

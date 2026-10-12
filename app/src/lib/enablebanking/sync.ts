@@ -3,6 +3,7 @@ import { decrypt } from "../encryption";
 import { autoGenerateIncomeReceipts } from "../income-automation";
 import { runMatching } from "../matching";
 import { centsToEuros } from "../money";
+import { matchPurchasePaymentsFromBank } from "../purchase-invoices";
 import { inferTransactionType } from "../statements";
 import {
   EnableBankingClient,
@@ -389,6 +390,10 @@ async function syncBankConnectionUntracked(
   if (imported > 0) {
     await runMatching(userId).catch((error) => {
       console.error("Matching after bank sync failed", error);
+    });
+    // A synced payment with an open ostolasku's viite pays it (W27: nothing ran this after a sync).
+    await matchPurchasePaymentsFromBank(userId).catch((error) => {
+      console.error("Purchase payment matching after bank sync failed", error);
     });
     for (const statementId of statementIds) {
       await autoGenerateIncomeReceipts(userId, statementId).catch((error) => {

@@ -4,7 +4,7 @@ import { prisma } from "@/lib/db";
 import { requireSession } from "@/lib/session";
 import { noStoreJson } from "@/lib/http-security";
 import { UnauthorizedError, withErrorHandler } from "@/lib/api-errors";
-import { buildReceiptWhere, ReceiptFilterError, receiptKindWhere, withReceiptSearch } from "@/lib/receipt-filters";
+import { buildReceiptWhere, ReceiptFilterError, receiptKindWhere, receiptLinkWhere, withReceiptSearch } from "@/lib/receipt-filters";
 
 /**
  * Per-tab receipt counts for the kuitit list's filter chips (Kaikki /
@@ -38,16 +38,19 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
     throw error;
   }
 
-  // The five tabs count the list's own kind (`kind=receipt` from Kuitit); "laskut"
-  // always counts the bills filed as ostolaskut, the Laskut chip's rows.
+  // Kaikki / Tulot / Menot count the list's own kind (`kind=receipt` from Kuitit);
+  // Kohdistettu / Ei kohdistettu count every document a bank row does or does not
+  // explain, bills included, exactly as the list filters them (receiptLinkWhere);
+  // "laskut" always counts the bills filed as ostolaskut, the Laskut chip's rows.
   const shared = base;
-  base = { ...shared, ...receiptKindWhere(params.get("kind")) };
+  const kind = params.get("kind");
+  base = { ...shared, ...receiptKindWhere(kind) };
   const [all, tulo, meno, linked, unlinked, laskut] = await Promise.all([
     prisma.receipt.count({ where: base }),
     prisma.receipt.count({ where: { ...base, type: "tulo" } }),
     prisma.receipt.count({ where: { ...base, type: "meno" } }),
-    prisma.receipt.count({ where: { ...base, linkedTransaction: { isNot: null } } }),
-    prisma.receipt.count({ where: { ...base, linkedTransaction: null } }),
+    prisma.receipt.count({ where: { AND: [shared, receiptLinkWhere("linked", kind)!] } }),
+    prisma.receipt.count({ where: { AND: [shared, receiptLinkWhere("unlinked", kind)!] } }),
     prisma.receipt.count({ where: { ...shared, ...receiptKindWhere("invoice") } }),
   ]);
 

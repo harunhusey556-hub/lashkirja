@@ -32,6 +32,20 @@ public enum ReceiptSaving {
 
     public static func sendsFlag(_ support: FlagSupport) -> Bool { support != .unsupported }
 
+    /// The look-alike question's other answer (W27: the form only offered "Tallenna silti").
+    public static let skipDuplicateTitle = "Älä tallenna"
+
+    /// "Älä tallenna": the staged upload is deleted on the server (`DELETE /api/receipts/staged/{id}`).
+    /// One already gone (expired, or dropped on another device) is the same outcome, so a 404 is not
+    /// an error; anything else is thrown as it came and the row keeps its reading.
+    public static func discardDuplicate(uploadId: String, delete: (String) async throws -> Void) async throws {
+        do {
+            try await delete("/api/receipts/staged/\(uploadId)")
+        } catch let error as LKError where error.status == 404 {
+            return
+        }
+    }
+
     /// A 400 to a body that carried `autoApprove`: tried once more without the flag.
     public static func retriesWithoutFlag(_ error: Error, flagSent: Bool) -> Bool {
         guard flagSent, let error = error as? LKError else { return false }

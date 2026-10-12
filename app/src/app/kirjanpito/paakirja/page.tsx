@@ -1,11 +1,11 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { apiFetch, isUnauthorized, readJson, redirectToLogin } from "@/components/clientFetch";
+import { startTransition, useState } from "react";
+import { apiFetch, readJson } from "@/components/clientFetch";
 import { Card, FilterChips, PageTitle, Section, SkeletonCard } from "@/components/ds";
 import { ConnectionNotice } from "@/components/ScreenState";
 import { formatEur } from "@/lib/format";
-import { useRefetchOnReconnect } from "@/components/useRefetchOnReconnect";
+import { useCachedResource } from "@/components/useCachedResource";
 
 /**
  * Kirjanpito (pääkirja): the double-entry books of one fiscal year, derived
@@ -54,42 +54,24 @@ export default function LedgerPage() {
   const thisYear = new Date().getFullYear();
   const [year, setYear] = useState(thisYear);
   const [view, setView] = useState<View>("tulos");
-  // Kept with its year: a year switch shows the skeleton until that year's books arrive.
-  const [result, setResult] = useState<{ year: number; books: Books } | null>(null);
-  const books = result?.year === year ? result.books : null;
-  const [error, setError] = useState<unknown>(null);
-  const [attempt, setAttempt] = useState(0);
-  useRefetchOnReconnect(() => setAttempt((value) => value + 1));
-
-  useEffect(() => {
-    const controller = new AbortController();
-    apiFetch(`/api/ledger?year=${year}`, { signal: controller.signal })
-      .then((response) => readJson<Books>(response, "Kirjanpidon lataus epäonnistui"))
-      .then((data) => {
-        if (controller.signal.aborted) return;
-        setError(null);
-        setResult({ year, books: data });
-      })
-      .catch((failure: unknown) => {
-        if (controller.signal.aborted) return;
-        if (isUnauthorized(failure)) {
-          redirectToLogin();
-          return;
-        }
-        setError(failure);
-      });
-    return () => controller.abort();
-  }, [year, attempt]);
+  // Painted from the cache on a revisit and per year (a year already seen
+  // switches at once); revalidated on a sync/save and on reconnect (N3).
+  const ledger = useCachedResource<Books>(`ledger:${year}`, async (signal) => {
+    const response = await apiFetch(`/api/ledger?year=${year}`, { signal });
+    return readJson<Books>(response, "Kirjanpidon lataus epäonnistui");
+  });
+  const books = ledger.value;
+  const error = books ? null : ledger.error;
 
   const years = [thisYear, thisYear - 1, thisYear - 2].map((value) => ({ id: String(value), label: String(value) }));
 
   return (
     <div className="space-y-5">
       <PageTitle title="Kirjanpito" subtitle="Tuloslaskelma, tase ja tositteet kahdenkertaisena kirjanpitona" />
-      <FilterChips label="Tilikausi" items={years} value={String(year)} onChange={(id) => setYear(Number(id))} />
+      <FilterChips label="Tilikausi" items={years} value={String(year)} onChange={(id) => startTransition(() => setYear(Number(id)))} />
       <FilterChips label="Näkymä" items={VIEWS} value={view} onChange={setView} wrap />
 
-      {error && !books ? <ConnectionNotice error={error} onRetry={() => setAttempt((value) => value + 1)} /> : null}
+      {error && !books ? <ConnectionNotice error={error} onRetry={ledger.reload} /> : null}
       {!books && !error ? <SkeletonCard /> : null}
 
       {books ? (

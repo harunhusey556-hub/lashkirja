@@ -3,7 +3,7 @@
 import { AnimatedRows } from "@/components/AnimatedRows";
 import { Disclosure } from "@/components/ds/Disclosure";
 import { PullToRefresh } from "@/components/ds/PullToRefresh";
-import { Suspense, useCallback, useEffect, useState } from "react";
+import { memo, Suspense, useCallback, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { SkeletonList } from "@/components/AsyncState";
 import { ConnectionNotice, EmptyState, StaleBanner } from "@/components/ScreenState";
@@ -154,6 +154,19 @@ function rowTrailing(invoice: InvoiceSummary) {
  * useSearchParams opts the tree out of static rendering, so the reader lives
  * behind a Suspense boundary and the page itself stays prerenderable.
  */
+/** One sales document in the list. Memoised: typing in the search or ticking a chip repaints only the rows whose data changed. */
+const InvoiceRow = memo(function InvoiceRow({ invoice }: { invoice: InvoiceSummary }) {
+  return (
+    <ListRow
+      href={detailHref("invoice", invoice.id)}
+      title={invoice.customer.name}
+      amount={formatEur(invoice.gross)}
+      secondary={rowSecondary(invoice)}
+      trailing={rowTrailing(invoice)}
+    />
+  );
+});
+
 export default function InvoicesPage() {
   return (
     <Suspense fallback={<SkeletonList rows={4} />}>
@@ -494,14 +507,7 @@ function InvoicesPageContent() {
           {groups.map((group) => (
             <Section key={group.id} title={group.label}>
               <AnimatedRows rows={group.items.map((invoice) => ({ key: invoice.id, node: (
-                <ListRow
-                  key={invoice.id}
-                  href={detailHref("invoice", invoice.id)}
-                  title={invoice.customer.name}
-                  amount={formatEur(invoice.gross)}
-                  secondary={rowSecondary(invoice)}
-                  trailing={rowTrailing(invoice)}
-                />
+                <InvoiceRow key={invoice.id} invoice={invoice} />
               ) }))} />
             </Section>
           ))}

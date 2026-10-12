@@ -46,6 +46,7 @@ import { assertPeriodOpen, getLockedThrough, isDateLocked, PeriodLockedError } f
 import { INVOICE_LIST_LIMIT } from "./invoice-groups";
 import { DUPLICATE_DATE_WINDOW_DAYS, DUPLICATE_DISMISSED_KIND } from "./alv-period";
 import type { InvoicePdfData } from "./invoice-pdf";
+import { afterListCursor, encodeListCursor, type ListPage } from "./list-cursor";
 
 export interface InvoiceLinePayload {
   description: string;
@@ -1690,6 +1691,8 @@ export interface ListInvoicesOptions {
   /** Customer name, invoice number or reference (SALES-10). */
   search?: string;
   limit?: number;
+  /** Keyset page (W24): `[issueDate desc, id desc]`, adds `nextCursor` and `total` to the result. */
+  page?: ListPage;
 }
 
 /**
@@ -1743,7 +1746,12 @@ export async function listInvoices(
   userId: string,
   options: ListInvoicesOptions = {},
   now: Date = new Date()
-): Promise<{ invoices: PublicInvoice[]; aging: AgingReport & { totalOpen: number; overdue: number; paidRecentCents: number } }> {
+): Promise<{
+  invoices: PublicInvoice[];
+  aging: AgingReport & { totalOpen: number; overdue: number; paidRecentCents: number };
+  nextCursor?: string | null;
+  total?: number;
+}> {
   const where = invoiceScopeWhere(userId, options);
   const and: Array<Record<string, unknown>> = [];
   if (options.status === "overdue") {
@@ -1764,12 +1772,22 @@ export async function listInvoices(
   if (search) and.push(search);
   if (and.length > 0) where.AND = and;
 
-  const rows = await prisma.salesInvoice.findMany({
-    where,
+  const page = options.page;
+  const fetched = await prisma.salesInvoice.findMany({
+    where: page?.cursor ? { AND: [where, afterListCursor(page.cursor, "issueDate", false)] } : where,
     include: invoiceInclude,
-    orderBy: [{ issueDate: "desc" }, { number: "desc" }],
-    take: options.limit ?? INVOICE_LIST_LIMIT,
+    // A page orders by id after the date, the only tie-break a cursor can resume from.
+    orderBy: page ? [{ issueDate: "desc" }, { id: "desc" }] : [{ issueDate: "desc" }, { number: "desc" }],
+    take: page ? page.limit + 1 : options.limit ?? INVOICE_LIST_LIMIT,
   });
+  const rows = page ? fetched.slice(0, page.limit) : fetched;
+  const last = rows[rows.length - 1];
+  const paging = page
+    ? {
+        nextCursor: fetched.length > page.limit && last ? encodeListCursor(last.issueDate, last.id) : null,
+        total: await prisma.salesInvoice.count({ where }),
+      }
+    : {};
 
   const invoices = rows.map((row) => toPublicInvoice(row, now));
 
@@ -1805,6 +1823,7 @@ export async function listInvoices(
       // Additive: money received in the last 90 days, for the "Saatavat" bar on Myynti.
       paidRecentCents: paidWithinWindowCents(allOpen.flatMap((invoice) => invoice.payments), now),
     },
+    ...paging,
   };
 }
 

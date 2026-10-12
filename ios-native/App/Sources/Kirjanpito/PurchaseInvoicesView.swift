@@ -378,22 +378,30 @@ struct PurchaseInvoicesView: View {
         .padding(.vertical, 4)
     }
 
+    /// Through the app's cache: the last list for this chip at once, then the server's when stale.
     private func load() async {
-        state.begin()
+        let timing = ScreenTiming("Ostolaskut")
         var query: [String: String] = [:]
         if let status = filter.queryValue { query["status"] = status }
+        if state.value == nil, let cached: PurchaseInvoiceTaggedList = await app.cachedValue("/api/purchase-invoices", query: query) {
+            state.succeed(cached.list)
+            recurringIds = cached.recurringIds
+            if let cachedCounts: PurchaseInvoiceCountsResponse = await app.cachedValue("/api/purchase-invoices/counts") { counts = cachedCounts.counts }
+            timing.painted(fromCache: true)
+        }
+        state.begin()
         // Counts load alongside the list (one round trip instead of two).
-        let api = app.api
-        async let freshCounts: PurchaseInvoiceCountsResponse? = try? api.get("/api/purchase-invoices/counts")
+        async let freshCounts: PurchaseInvoiceCountsResponse? = try? app.cachedGet("/api/purchase-invoices/counts")
         // Optional: a server without recurring purchases (404) simply hides the row.
-        async let recurring: RecurringPurchaseList? = try? api.get("/api/recurring-purchases")
+        async let recurring: RecurringPurchaseList? = try? app.cachedGet("/api/recurring-purchases")
         // Optional too: an older server without the suggestion list simply shows none.
-        async let pending: PurchaseSuggestionList? = try? api.get("/api/purchase-invoices/match")
+        async let pending: PurchaseSuggestionList? = try? app.cachedGet("/api/purchase-invoices/match")
         do {
-            let tagged: PurchaseInvoiceTaggedList = try await app.api.get("/api/purchase-invoices", query: query)
+            let tagged: PurchaseInvoiceTaggedList = try await app.cachedGet("/api/purchase-invoices", query: query, persist: query.isEmpty)
             state.succeed(tagged.list)
             recurringIds = tagged.recurringIds
             failure = nil
+            timing.dataReady()
         } catch is CancellationError {
             return
         } catch {
@@ -618,7 +626,7 @@ struct PurchaseInvoiceDetailView: View {
                 ToolbarItem(placement: .topBarTrailing) { actions(invoice) }
             }
         }
-        .refreshable { await load() }
+        .refreshable { await load(force: true) }
         .task { await load() }
         .disabled(busy)
         .navigationDestination(item: $openTemplate) { id in RecurringPurchaseDetailView(recurringId: id) }
@@ -913,12 +921,24 @@ struct PurchaseInvoiceDetailView: View {
         Task { await loadLinks() }
     }
 
-    private func load() async {
+    private func load() async { await load(force: false) }
+
+    /// The cached ostolasku at once (opened before, nothing changed since), then the server's
+    /// when stale; `force` (pull-to-refresh) always asks.
+    private func load(force: Bool) async {
+        let timing = ScreenTiming("Ostolasku")
+        let path = "/api/purchase-invoices/\(purchaseInvoiceId)"
+        if state.value == nil, let cached: PurchaseInvoiceTaggedResponse = await app.cachedValue(path) {
+            state.succeed(cached.invoice)
+            recurringPurchaseId = cached.recurringPurchaseId
+            timing.painted(fromCache: true)
+        }
         state.begin()
         do {
-            let response: PurchaseInvoiceTaggedResponse = try await app.api.get("/api/purchase-invoices/\(purchaseInvoiceId)")
+            let response: PurchaseInvoiceTaggedResponse = try await app.cachedGet(path, force: force)
             state.succeed(response.invoice)
             recurringPurchaseId = response.recurringPurchaseId
+            timing.dataReady()
         } catch is CancellationError {
             return
         } catch {

@@ -27,6 +27,13 @@ final class AppModel {
     var bankHubMemory: BankHubMemory?
     /// The last loaded Pankkitapahtumat per month filter ("" = every month), for the same reason.
     var bankFeedMemory: [String: BankFeedMemory] = [:]
+    /// Every screen's GET answers: a screen paints the cached answer at once and asks the server
+    /// only when it is stale (`dataVersion` moved or older than 60 s). The main lists are kept on
+    /// disk per account, so a cold launch paints the last known Koti, Kuitit and Pankki.
+    let resources = ResourceCache(store: .standard())
+    /// The Kuitit rows last listed, by id: a receipt opens showing its row at once while the
+    /// detail loads. Not observed: no screen redraws when it changes.
+    @ObservationIgnored private var receiptRows: [String: Receipt] = [:]
     /// Ids deleted but not yet confirmed by the server: lists leave them out at once, so a delete
     /// does not wait on the server's answer (removing a tiliote can take seconds).
     private(set) var removedIds: Set<String> = []
@@ -63,6 +70,9 @@ final class AppModel {
     let eventUploader: EventLogUploader
     private var eventFlushLoop: Task<Void, Never>?
     private var versionPoll: Task<Void, Never>?
+    private var prefetchTask: Task<Void, Never>?
+    /// A server without `/api/bootstrap` (404) is not asked again this session.
+    private var bootstrapMissing = false
     private var versionSettle: Task<Void, Never>?
     /// A server without `/api/sync/version` (404) is not asked again this session.
     private var versionRouteMissing = false
@@ -137,6 +147,7 @@ final class AppModel {
         guard await auth.currentToken() != nil else { return }
         // After the refresh: the first look at the version goes out with a current token.
         startVersionPolling()
+        prefetch()
         // Only for the account it was asked for: a sign-out (and maybe another sign-in) can
         // happen while it loads.
         if let me: MeResponse = try? await api.get("/api/auth/me"), session.isCurrent(started),
@@ -157,6 +168,7 @@ final class AppModel {
         session.next()
         phase = .signedIn(user)
         startVersionPolling()
+        prefetch()
         Task { await auth.revokePending() }
     }
 
@@ -203,12 +215,96 @@ final class AppModel {
     func foreground() async {
         EventLog.shared.log(.lifecycle("foreground"))
         // Back after more than five minutes: what the screens show may be out of date.
-        if ForegroundRefresh.isStale(backgroundedAt: backgroundedAt, now: Date()), case .signedIn = phase {
+        let stale = ForegroundRefresh.isStale(backgroundedAt: backgroundedAt, now: Date())
+        if stale, case .signedIn = phase {
             dataVersion += 1
         }
         backgroundedAt = nil
         await auth.refreshIfDue()
         startVersionPolling()
+        // Back after a while: the first screens are asked again before the owner taps them.
+        if stale { prefetch() }
+    }
+
+    // MARK: Cache
+
+    /// A GET through `resources`: the cached answer while it is fresh (unless `force`), otherwise
+    /// the server's, shared with any other screen asking for the same at the same time. Decoded
+    /// off the main actor. `persist` keeps it on disk for the next launch (the main lists only).
+    func cachedGet<T: Decodable>(_ path: String, query: [String: String] = [:], force: Bool = false, persist: Bool = false) async throws -> T {
+        guard case .signedIn(let user) = phase else { throw CancellationError() }
+        let api = self.api
+        let key = ResourceKey(user: user.userId, path: path, query: query)
+        return try await resources.load(key, version: dataVersion, force: force, persist: persist, as: T.self) {
+            try await api.raw("GET", path, query: query, body: nil, contentType: nil).body
+        }
+    }
+
+    /// The cached answer, fresh or not, to paint before the server answers; nil when there is none.
+    func cachedValue<T: Decodable>(_ path: String, query: [String: String] = [:]) async -> T? {
+        guard case .signedIn(let user) = phase else { return nil }
+        let key = ResourceKey(user: user.userId, path: path, query: query)
+        return await resources.cached(key, version: dataVersion, as: T.self)?.value
+    }
+
+    /// The rows a list showed, for `receiptPreview`. Bounded: a long session never grows it past a thousand.
+    func rememberReceiptRows(_ rows: [Receipt]) {
+        if receiptRows.count + rows.count > 1_000 { receiptRows.removeAll() }
+        for row in rows { receiptRows[row.id] = row }
+    }
+
+    func receiptPreview(_ id: String) -> Receipt? { receiptRows[id] }
+
+    /// After sign-in and on coming back after a while: Koti, Kuitit page 1 with its counts and
+    /// queues, and the Pankki hub load side by side with exactly the screens' queries, so the tab
+    /// the owner opens paints from the cache. `/api/bootstrap` first, where the server has it.
+    func prefetch() {
+        guard case .signedIn = phase else { return }
+        prefetchTask?.cancel()
+        let filter = UserDefaults.standard.string(forKey: ReceiptsView.filterKey) ?? ""
+        let requests = LaunchPrefetch.requests(month: MonthKey.current(), kuititFilter: filter)
+        prefetchTask = Task { [weak self] in
+            guard let self else { return }
+            // Side by side: the bootstrap's counts stand in for the counts request if it is first.
+            async let booted: Void = self.bootstrap(kuititFilter: filter)
+            await withTaskGroup(of: Void.self) { group in
+                for request in requests {
+                    group.addTask { await self.warm(request) }
+                }
+            }
+            await booted
+        }
+    }
+
+    /// Fills the cache only; a failure is the screen's to show when it is opened.
+    private func warm(_ request: PrefetchRequest) async {
+        guard !Task.isCancelled else { return }
+        let _: Ignored? = try? await cachedGet(request.path, query: request.query, persist: request.persist)
+    }
+
+    /// One round trip for the server's version and the Kuitit counts (W24's `/api/bootstrap`).
+    /// An older server answers 404 and is not asked again; the separate requests cover it.
+    private func bootstrap(kuititFilter: String) async {
+        guard !bootstrapMissing, case .signedIn(let user) = phase else { return }
+        let started = session.current
+        do {
+            let response = try await api.raw("GET", "/api/bootstrap", body: nil, contentType: nil)
+            guard session.isCurrent(started),
+                  let boot = try? JSONDecoder().decode(AppBootstrap.self, from: response.body) else { return }
+            // Taken as the baseline only: the lists are being asked for right now anyway, and a
+            // bootstrap that counts its version differently from `/api/sync/version` must not
+            // reload every screen at each launch.
+            if let snapshot = boot.version { versions.apply(snapshot, absorb: true) }
+            if let counts = boot.receiptCounts, let request = LaunchPrefetch.countsRequest(kuititFilter: kuititFilter),
+               let data = try? ReceiptCounts.answer(counts) {
+                let key = ResourceKey(user: user.userId, path: request.path, query: request.query)
+                await resources.prime(key, data: data, version: dataVersion, persist: request.persist)
+            }
+        } catch let error as LKError where error.status == 404 {
+            bootstrapMissing = true
+        } catch {
+            // Offline or a passing failure: the separate requests still fill the cache.
+        }
     }
 
     // MARK: Freshness
@@ -352,6 +448,13 @@ final class AppModel {
         stopVersionPolling()
         versionSettle?.cancel()
         versionRouteMissing = false
+        prefetchTask?.cancel()
+        prefetchTask = nil
+        bootstrapMissing = false
+        // This owner's cached answers, in memory and on disk, go with them.
+        let resources = self.resources
+        Task { await resources.clear() }
+        receiptRows = [:]
         versions.endSession()
         // This owner's figures must not show to the next one.
         bankHubMemory = nil

@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect } from "react";
 import { ProgressRing } from "@/components/ds/ProgressRing";
 import { helsinkiMonthKey } from "@/lib/validation";
 import { PullToRefresh } from "@/components/ds/PullToRefresh";
@@ -18,6 +19,7 @@ import { firstHubFailure } from "@/lib/hub-failure";
 import { useCachedResource } from "@/components/useCachedResource";
 import { PERIOD_LOCK_KEY, PURCHASE_COUNTS_KEY } from "@/lib/cached-resource";
 import { navShortcuts } from "@/lib/navigation";
+import { warmRoute } from "@/lib/route-warmup";
 
 /**
  * Bookkeeping hub: one place for everything bookkeeping. Phase 3
@@ -30,6 +32,20 @@ import { navShortcuts } from "@/lib/navigation";
  */
 
 export default function KirjanpitoPage() {
+  // The hub's two biggest rows lead to Kuitit and Pankki: load their first rows while the owner reads this screen.
+  useEffect(() => {
+    const warm = () => {
+      void warmRoute("/kuitit");
+      void warmRoute("/pankki/tapahtumat");
+    };
+    if (typeof window.requestIdleCallback === "function") {
+      const handle = window.requestIdleCallback(warm);
+      return () => window.cancelIdleCallback(handle);
+    }
+    const timer = window.setTimeout(warm, 300);
+    return () => window.clearTimeout(timer);
+  }, []);
+
   const { profile, loadError, retry: retryProfile } = useProfile();
 
   // FP-4 / TF-01: the next return actually due (nextDueVatPeriod), with the

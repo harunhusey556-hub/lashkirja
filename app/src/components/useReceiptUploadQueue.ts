@@ -153,6 +153,23 @@ function duplicateReceiptId(error: unknown): string | null {
   return typeof id === "string" && id ? id : null;
 }
 
+/** What the owner is told when a look-alike was dropped instead of saved. */
+export const SKIPPED_DUPLICATE_TEXT = "Ohitettu (kaksoiskappale)";
+
+/**
+ * "Älä tallenna" on a look-alike (W27: the owner could only say "save anyway"):
+ * the staged file is deleted on the server. One already gone (expired, or dropped
+ * on another device) is the same outcome, so a 404 is not an error.
+ */
+export async function discardStagedUpload(
+  uploadId: string,
+  fetcher: (input: string, init?: RequestInit) => Promise<Response> = apiFetch
+): Promise<void> {
+  const response = await fetcher(`/api/receipts/staged/${encodeURIComponent(uploadId)}`, { method: "DELETE" });
+  if (response.status === 404) return;
+  await readJson(response, "Tiedostoa ei voitu poistaa");
+}
+
 function isDuplicateRefusal(error: unknown): boolean {
   return (
     error instanceof ApiError &&

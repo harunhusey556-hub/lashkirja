@@ -87,7 +87,7 @@ struct InvoiceDetailView: View {
         }
         .onDisappear { toastTask?.cancel() }
         .navigationDestination(item: $customerRoute) { route in RouteScreen(route: route) }
-        .refreshable { await load() }
+        .refreshable { await load(force: true) }
         .task { await load() }
         // An overdue invoice opens on its reminder, until the owner picks a tab.
         .onChange(of: state.value?.displayStatus) { _, status in
@@ -455,11 +455,23 @@ struct InvoiceDetailView: View {
         .accessibilityLabel("Toiminnot")
     }
 
-    private func load() async {
+    private func load() async { await load(force: false) }
+
+    /// The cached invoice at once (opened before, nothing changed since), then the server's when
+    /// stale; `force` (pull-to-refresh) always asks.
+    private func load(force: Bool) async {
+        let timing = ScreenTiming("Lasku")
+        let path = "/api/invoices/\(invoiceId)"
+        if state.value == nil, let cached: InvoiceDetailResponse = await app.cachedValue(path) {
+            state.succeed(cached.invoice)
+            duplicates = cached.paymentDuplicates ?? []
+            timing.painted(fromCache: true)
+        }
         state.begin()
         do {
-            let response: InvoiceDetailResponse = try await app.api.get("/api/invoices/\(invoiceId)")
+            let response: InvoiceDetailResponse = try await app.cachedGet(path, force: force)
             state.succeed(response.invoice)
+            timing.dataReady()
             duplicates = response.paymentDuplicates ?? []
             prefetchPdf(response.invoice)
             await loadCardPayments(response.invoice)

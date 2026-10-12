@@ -1,5 +1,25 @@
 import { describe, expect, it } from "vitest";
-import { rowFromFile, validateUploadFile } from "./useReceiptUploadQueue";
+import { discardStagedUpload, rowFromFile, SKIPPED_DUPLICATE_TEXT, validateUploadFile } from "./useReceiptUploadQueue";
+
+describe("discardStagedUpload ('Älä tallenna' on a look-alike, W27)", () => {
+  const json = (status: number, body: unknown) =>
+    new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
+
+  it("deletes the staged upload by its id", async () => {
+    const calls: Array<[string, RequestInit | undefined]> = [];
+    await discardStagedUpload("a1b2", async (input, init) => {
+      calls.push([input, init]);
+      return json(200, { ok: true });
+    });
+    expect(calls).toEqual([["/api/receipts/staged/a1b2", { method: "DELETE" }]]);
+    expect(SKIPPED_DUPLICATE_TEXT).toBe("Ohitettu (kaksoiskappale)");
+  });
+
+  it("a file already gone is the same outcome; any other refusal reaches the owner", async () => {
+    await expect(discardStagedUpload("gone", async () => json(404, { error: "Tiedostoa ei löytynyt" }))).resolves.toBeUndefined();
+    await expect(discardStagedUpload("x", async () => json(500, { error: { message: "Palvelinvirhe" } }))).rejects.toThrow();
+  });
+});
 
 describe("rowFromFile", () => {
   it("keeps every file of a 240-file pick, invalid ones failed with their message", () => {

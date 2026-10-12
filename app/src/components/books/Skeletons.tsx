@@ -1,6 +1,7 @@
 "use client";
 
-import { Skeleton, SkeletonCard, SkeletonGroup } from "@/components/ds";
+import { DetailHero, Skeleton, SkeletonCard, SkeletonGroup } from "@/components/ds";
+import { formatDate, formatEur } from "@/lib/format";
 
 /**
  * Final-size loading placeholders for the bookkeeping screens (BOOKS-17, L1).
@@ -40,11 +41,32 @@ export function SectionSkeleton({ rows = 3, heading = true }: { rows?: number; h
   );
 }
 
-/** Receipt screen: hero, the 192 px preview and the first form fields. */
-export function ReceiptDetailSkeleton() {
+/** The row the list already showed: enough to name the receipt while the rest loads. */
+export interface ReceiptSeed {
+  vendor: string | null;
+  date: string | null;
+  totalAmount: number | null;
+  type?: string;
+}
+
+/**
+ * Receipt screen: hero, the 192 px preview and the first form fields. Opened
+ * from a list row (`seed`), the hero is the real title, amount and date from
+ * that row at once and only the rest is a placeholder: the screen "fills in"
+ * instead of starting blank.
+ */
+export function ReceiptDetailSkeleton({ seed }: { seed?: ReceiptSeed }) {
   return (
     <SkeletonGroup label="Ladataan kuittia" className="space-y-6">
-      <DetailHeroSkeleton />
+      {seed ? (
+        <DetailHero
+          amount={`${seed.type === "tulo" ? "+" : ""}${formatEur(seed.totalAmount)}`}
+          title={seed.vendor || "Tuntematon"}
+          meta={formatDate(seed.date)}
+        />
+      ) : (
+        <DetailHeroSkeleton />
+      )}
       <SectionSkeleton rows={1} />
       <Skeleton radius="card" className="h-48 w-full" />
       <FieldsSkeleton />
