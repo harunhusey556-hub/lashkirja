@@ -170,10 +170,8 @@ struct ReceiptsView: View {
                 .padding(.bottom, 8)
             }
         }
-        .confirmationDialog(deleteTitle, isPresented: $confirmDelete, titleVisibility: .visible) {
-            Button("Poista", role: .destructive) { Task { await delete(deleteIds) } }
-        } message: {
-            Text(deleteNote)
+        .confirmSheet(isPresented: $confirmDelete, title: deleteTitle, message: deleteNote, confirmTitle: "Poista") {
+            Task { await delete(deleteIds) }
         }
         .fullScreenCover(isPresented: $capture, onDismiss: { Task { await load() } }) { CaptureFlow(transactionId: nil) }
         .alert("Summarajaus", isPresented: $editingAmount) {

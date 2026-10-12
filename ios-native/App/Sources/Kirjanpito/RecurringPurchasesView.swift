@@ -67,15 +67,13 @@ struct RecurringPurchasesView: View {
         .sheet(item: $editTarget) { entry in
             RecurringPurchaseFormSheet(existing: entry) { message in show(message) }
         }
-        .confirmationDialog(
-            "Poistetaanko toistuva ostolasku?",
-            isPresented: Binding(get: { deleteTarget != nil }, set: { if !$0 { deleteTarget = nil } }),
-            titleVisibility: .visible,
-            presenting: deleteTarget
-        ) { entry in
-            Button("Poista", role: .destructive) { remove(entry) }
-        } message: { entry in
-            Text("\(entry.supplierName). \(RecurringPurchaseText.deleteMessage)")
+        .confirmSheet(presenting: $deleteTarget) { entry in
+            ConfirmRequest(
+                title: "Poistetaanko toistuva ostolasku?",
+                message: "\(entry.supplierName). \(RecurringPurchaseText.deleteMessage)",
+                confirmTitle: "Poista",
+                onConfirm: { remove(entry) }
+            )
         }
         .navigationDestination(item: $selected) { entry in
             RecurringPurchaseDetailView(recurringId: entry.id, initial: entry)
@@ -295,10 +293,13 @@ struct RecurringPurchaseDetailView: View {
                 RecurringPurchaseFormSheet(existing: entry) { message in notice = message }
             }
         }
-        .confirmationDialog("Poistetaanko toistuva ostolasku?", isPresented: $confirmDelete, titleVisibility: .visible) {
-            Button("Poista", role: .destructive) { remove() }
-        } message: {
-            Text("\(current?.supplierName ?? ""). \(RecurringPurchaseText.deleteMessage)")
+        .confirmSheet(
+            isPresented: $confirmDelete,
+            title: "Poistetaanko toistuva ostolasku?",
+            message: "\(current?.supplierName ?? ""). \(RecurringPurchaseText.deleteMessage)",
+            confirmTitle: "Poista"
+        ) {
+            remove()
         }
     }
 

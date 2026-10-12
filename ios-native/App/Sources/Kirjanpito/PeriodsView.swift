@@ -74,19 +74,18 @@ struct PeriodsView: View {
             CaptureFlow(transactionId: target.transactionId)
         }
         .navigationDestination(item: $pushed) { route in RouteScreen(route: route) }
-        .alert(closeTitle, isPresented: $confirmClose) {
-            Button("Merkitse valmiiksi") { Task { await closeMonth() } }
-            Button("Peru", role: .cancel) {}
-        } message: {
-            Text(closeMessage)
+        .confirmSheet(isPresented: $confirmClose, title: closeTitle, message: closeMessage,
+                      confirmTitle: "Merkitse valmiiksi", isDestructive: false) {
+            Task { await closeMonth() }
         }
-        .alert(pendingLock?.confirmation.title ?? "", isPresented: Binding(get: { pendingLock != nil }, set: { if !$0 { pendingLock = nil } }), presenting: pendingLock) { pending in
-            Button(pending.confirmation.action, role: pending.confirmation.destructive ? .destructive : nil) {
-                Task { await commit(pending) }
-            }
-            Button("Peru", role: .cancel) {}
-        } message: { pending in
-            Text(pending.confirmation.message)
+        .confirmSheet(presenting: $pendingLock) { pending in
+            ConfirmRequest(
+                title: pending.confirmation.title,
+                message: pending.confirmation.message,
+                confirmTitle: pending.confirmation.action,
+                isDestructive: pending.confirmation.destructive,
+                onConfirm: { Task { await commit(pending) } }
+            )
         }
     }
 

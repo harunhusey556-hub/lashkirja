@@ -71,8 +71,8 @@ struct SettingsView: View {
         .navigationTitle("Asetukset")
         // The lock lives outside SwiftUI state; read it again when coming back from its screen.
         .onAppear { lockEnabled = AppLock.shared.isEnabled }
-        .confirmationDialog("Kirjaudutaanko ulos?", isPresented: $confirmLogout, titleVisibility: .visible) {
-            Button("Kirjaudu ulos", role: .destructive) { Task { await app.logout() } }
+        .confirmSheet(isPresented: $confirmLogout, title: "Kirjaudutaanko ulos?", confirmTitle: "Kirjaudu ulos") {
+            Task { await app.logout() }
         }
     }
 
@@ -358,17 +358,21 @@ struct DevicesView: View {
         .navigationTitle("Laitteet")
         .refreshable { await load() }
         .task { await load() }
-        .confirmationDialog("Kirjataanko laite ulos?", isPresented: Binding(get: { confirmSession != nil }, set: { if !$0 { confirmSession = nil } }), titleVisibility: .visible, presenting: confirmSession) { session in
-            Button("Kirjaa ulos", role: .destructive) { Task { await signOut(id: session.id) } }
-            Button("Peruuta", role: .cancel) {}
-        } message: { session in
-            Text("\(session.label) kirjataan ulos, ja sinne pitää kirjautua uudelleen.")
+        .confirmSheet(presenting: $confirmSession) { session in
+            ConfirmRequest(
+                title: "Kirjataanko laite ulos?",
+                message: "\(session.label) kirjataan ulos, ja sinne pitää kirjautua uudelleen.",
+                confirmTitle: "Kirjaa ulos",
+                onConfirm: { Task { await signOut(id: session.id) } }
+            )
         }
-        .confirmationDialog("Kirjataanko kaikki muut laitteet ulos?", isPresented: $confirmOthers, titleVisibility: .visible) {
-            Button("Kirjaa ulos kaikki muut", role: .destructive) { Task { await signOutOthers() } }
-            Button("Peruuta", role: .cancel) {}
-        } message: {
-            Text("Vain tämä laite jää kirjautuneeksi. Muille laitteille pitää kirjautua uudelleen.")
+        .confirmSheet(
+            isPresented: $confirmOthers,
+            title: "Kirjataanko kaikki muut laitteet ulos?",
+            message: "Vain tämä laite jää kirjautuneeksi. Muille laitteille pitää kirjautua uudelleen.",
+            confirmTitle: "Kirjaa ulos kaikki muut"
+        ) {
+            Task { await signOutOthers() }
         }
     }
 

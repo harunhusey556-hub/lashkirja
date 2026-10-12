@@ -254,12 +254,15 @@ struct CustomerDetailView: View {
                 Task { await load() }
             }
         }
-        .confirmationDialog("Poistetaanko asiakas?", isPresented: $confirmDelete, titleVisibility: .visible) {
-            Button("Poista", role: .destructive) { Task { await delete() } }
-        } message: {
-            if let detail = state.value {
-                Text(CustomerArchive.deleteNote(name: detail.customer.name, invoiceCount: detail.invoices.count, recurringCount: detail.recurringCount ?? 0))
-            }
+        .confirmSheet(
+            isPresented: $confirmDelete,
+            title: "Poistetaanko asiakas?",
+            message: state.value.map {
+                CustomerArchive.deleteNote(name: $0.customer.name, invoiceCount: $0.invoices.count, recurringCount: $0.recurringCount ?? 0)
+            } ?? "",
+            confirmTitle: "Poista"
+        ) {
+            Task { await delete() }
         }
         .disabled(busy)
         .task { await load() }
@@ -592,11 +595,13 @@ struct CustomerMergeSheet: View {
                 }
             }
             .interactiveDismissDisabled(busy)
-            .confirmationDialog("Yhdistetäänkö asiakkaat?", isPresented: $confirmMerge, titleVisibility: .visible) {
-                Button("Yhdistä ja arkistoi toinen", role: .destructive) { Task { await merge() } }
-                Button("Peruuta", role: .cancel) {}
-            } message: {
-                Text("\(others.first { $0.id == mergeId }?.name ?? "Valittu asiakas") arkistoidaan, ja sen laskut siirtyvät tälle asiakkaalle. Tätä ei voi perua.")
+            .confirmSheet(
+                isPresented: $confirmMerge,
+                title: "Yhdistetäänkö asiakkaat?",
+                message: "\(others.first { $0.id == mergeId }?.name ?? "Valittu asiakas") arkistoidaan, ja sen laskut siirtyvät tälle asiakkaalle. Tätä ei voi perua.",
+                confirmTitle: "Yhdistä ja arkistoi toinen"
+            ) {
+                Task { await merge() }
             }
         }
         .presentationDetents([.medium])

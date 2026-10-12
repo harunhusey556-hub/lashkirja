@@ -89,10 +89,14 @@ struct EmailInboxView: View {
                 ToastView(toast: toast) { runToastAction() }.padding(.bottom, 8)
             }
         }
-        .confirmationDialog("Arkistoidaanko liitteet, joissa ei ole summaa?", isPresented: $confirmCleanup, titleVisibility: .visible) {
-            Button("Arkistoi") { Task { await cleanup() } }
-        } message: {
-            Text("Ne siirtyvät Arkistoon, josta ne voi palauttaa.")
+        .confirmSheet(
+            isPresented: $confirmCleanup,
+            title: "Arkistoidaanko liitteet, joissa ei ole summaa?",
+            message: "Ne siirtyvät Arkistoon, josta ne voi palauttaa.",
+            confirmTitle: "Arkistoi",
+            isDestructive: false
+        ) {
+            Task { await cleanup() }
         }
         .refreshable { await load() }
         .task(id: ReloadKey(folder: folder, version: app.dataVersion)) {
