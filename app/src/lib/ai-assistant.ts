@@ -225,15 +225,21 @@ export async function prepareChat(
         }
         const amounts = [proposal.txSummary, proposal.receiptSummary]
           .flatMap((line) => [...line.matchAll(/(\d+\.\d{2})/g)].map((match) => match[1]));
-        const more = offered.length - 1;
-        const tail = english
-          ? more > 0 ? ` ${more} more suggestion${more === 1 ? "" : "s"} can be confirmed in Pankki.` : ""
-          : more > 0 ? ` Pankki-näkymässä odottaa vielä ${more} muuta ehdotusta.` : "";
+        const single = offered.length === 1;
+        const ambiguousNote = ambiguousRows > 0
+          ? english
+            ? ` ${ambiguousRows} bank row${ambiguousRows === 1 ? " has" : "s have"} two equally likely receipts, so I did not pick one; choose yourself in Pankki.`
+            : ` ${ambiguousRows} pankkitapahtumalle sopii kaksi yhtä hyvää kuittia, joten en valinnut kumpaakaan. Valitse itse Pankki-näkymässä.`
+          : "";
         return {
           kind: "local",
           reply: english
-            ? `I checked your bank rows and receipts and found a suggestion. Confirm it below. I have not linked them.${tail}`
-            : `Tarkistin pankkitapahtumasi ja kuitit. Löysin ehdotuksen. Vahvista se alta. En ole vielä yhdistänyt niitä.${tail}`,
+            ? single
+              ? `I checked your bank rows and receipts and found a suggestion. Confirm it below. I have not linked them.${ambiguousNote}`
+              : `I checked your bank rows and receipts: ${offered.length} receipts match. Below is the best suggestion; accept them all at once in Pankki (Hyväksy kaikki). I have not linked anything.${ambiguousNote}`
+            : single
+              ? `Tarkistin pankkitapahtumasi ja kuitit. Löysin ehdotuksen. Vahvista se alta. En ole vielä yhdistänyt niitä.${ambiguousNote}`
+              : `Tarkistin pankkitapahtumasi ja kuitit. ${offered.length} kuittia täsmäävät. Alla on paras ehdotus; hyväksy ne kerralla Pankki-näkymässä (Hyväksy kaikki). En ole vielä yhdistänyt mitään.${ambiguousNote}`,
           proposal,
           sources: matchSources,
           honesty: {

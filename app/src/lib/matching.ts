@@ -747,6 +747,61 @@ export async function confirmAllSuggestions(
   return count;
 }
 
+export interface ProposedMatchConfirm {
+  confirmed: number;
+  /** Proposed pairs whose suggestion was withdrawn or re-pointed since. */
+  skipped: number;
+}
+
+/**
+ * Confirm exactly the pairs a review proposed. A pair whose stored suggestion
+ * was withdrawn (an AI rejection) or re-pointed by a later run is skipped,
+ * never linked from a stale list; income drafts are not silently approved
+ * (same guard as confirmAllSuggestions). Ambiguous rows are not pairs here by
+ * construction — the review never proposes them. Confirmed and skipped counts
+ * let the caller say what actually happened.
+ */
+export async function confirmProposedMatches(
+  userId: string,
+  pairs: Array<{ transactionId: string; receiptId: string }>
+): Promise<ProposedMatchConfirm> {
+  const draftReceiptIds = new Set(
+    (
+      await prisma.receipt.findMany({
+        where: { id: { in: pairs.map((pair) => pair.receiptId) }, source: "auto_income", sourceTransactionId: { not: null } },
+        select: { id: true },
+      })
+    ).map((receipt) => receipt.id)
+  );
+  const result: ProposedMatchConfirm = { confirmed: 0, skipped: 0 };
+  for (const pair of pairs) {
+    if (draftReceiptIds.has(pair.receiptId)) {
+      result.skipped += 1;
+      continue;
+    }
+    const tx = await prisma.transaction.findUnique({
+      where: { id: pair.transactionId },
+      select: { matchStatus: true, suggestedReceiptId: true },
+    });
+    if (tx?.matchStatus !== "suggested" || tx.suggestedReceiptId !== pair.receiptId) {
+      result.skipped += 1;
+      continue;
+    }
+    try {
+      await confirmMatch(userId, pair.transactionId, pair.receiptId, true);
+      result.confirmed += 1;
+    } catch (error) {
+      // A receipt of a closed month stays a suggestion; the rest still go through.
+      if (error instanceof PeriodLockedError) {
+        result.skipped += 1;
+        continue;
+      }
+      throw error;
+    }
+  }
+  return result;
+}
+
 /** An automatic income draft that knows the bank row it was made from. */
 export function isSourceDraft(receipt: {
   source?: string | null;
