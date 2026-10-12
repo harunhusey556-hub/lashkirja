@@ -4,16 +4,20 @@
  * list's `type`/`linkedStatus` query params already enforced before this
  * became `FilterChips`). Pure functions, no React or fetch here.
  */
-export const RECEIPT_TAB_IDS = ["all", "tulo", "meno", "linked", "unlinked"] as const;
+// "laskut" is the document-kind tab: bills filed as ostolaskut, which the
+// other five (kuitit only) leave out. It maps to `kind=invoice`, not to type/linkedStatus.
+export const RECEIPT_TAB_IDS = ["all", "tulo", "meno", "linked", "unlinked", "laskut"] as const;
 export type ReceiptTabId = (typeof RECEIPT_TAB_IDS)[number];
 
-export type ReceiptTabCounts = Record<ReceiptTabId, number>;
+/** `laskut` is unknown (no number shown) until `/api/receipts/counts` answers. */
+export type ReceiptTabCounts = Record<Exclude<ReceiptTabId, "laskut">, number> & { laskut?: number };
 export const ZERO_RECEIPT_TAB_COUNTS: ReceiptTabCounts = {
   all: 0,
   tulo: 0,
   meno: 0,
   linked: 0,
   unlinked: 0,
+  laskut: 0,
 };
 
 const TAB_LABEL: Record<ReceiptTabId, string> = {
@@ -22,12 +26,13 @@ const TAB_LABEL: Record<ReceiptTabId, string> = {
   meno: "Menot",
   linked: "Kohdistettu",
   unlinked: "Ei kohdistettu",
+  laskut: "Laskut",
 };
 
 export interface ReceiptTabChip {
   id: ReceiptTabId;
   label: string;
-  count: number;
+  count: number | undefined;
 }
 
 /** Chips for `FilterChips`, in a fixed order, with live DB-side counts. */

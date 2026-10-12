@@ -16,6 +16,7 @@ import { MONTH_ROW_FACTS, monthProgress } from "@/lib/month-rows";
 import { getLockedThrough, isMonthLocked } from "@/lib/period-lock";
 import { summariseHandled, type Handled } from "@/lib/koti-handled";
 import { monthEvents } from "@/lib/koti-month";
+import { receiptKindWhere } from "@/lib/receipt-filters";
 
 /** Koti's "Hoidettu automaattisesti" looks back this far. */
 const HANDLED_DAYS = 7;
@@ -146,7 +147,8 @@ export async function GET(req: NextRequest) {
   let pendingReceiptsCount = 0;
   try {
     pendingReceiptsCount = await prisma.receipt.count({
-      where: { userId: session.userId, reviewStatus: "pending" },
+      // Same rows as the Koti queue: a bill filed as an ostolasku is not a kuitti to review.
+      where: { userId: session.userId, reviewStatus: "pending", ...receiptKindWhere("receipt") },
     });
   } catch {
     sectionErrors.pending = "Tarkastettavia kuitteja ei saatu ladattua.";

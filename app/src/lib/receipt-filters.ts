@@ -18,6 +18,24 @@ export interface ReceiptWhereInput {
 
 export class ReceiptFilterError extends Error {}
 
+/** A live (not cancelled) ostolasku filed from the receipt: the document is a bill, shown as one. */
+const FILED_AS_PURCHASE: Prisma.ReceiptWhereInput = {
+  purchaseInvoice: { is: { status: { not: "cancelled" } } },
+};
+
+/**
+ * The document-kind dimension of a receipt list: "receipt" = a kuitti (no live
+ * ostolasku filed from it), "invoice" = a bill whose home is Ostolaskut.
+ * Anything else adds nothing, so a client that sends no `kind` sees every
+ * document as before. Uses only the `NOT` / `purchaseInvoice` keys, which no
+ * other filter sets, so callers can spread it over their clause.
+ */
+export function receiptKindWhere(kind: string | null | undefined): Prisma.ReceiptWhereInput {
+  if (kind === "invoice") return FILED_AS_PURCHASE;
+  if (kind === "receipt") return { NOT: FILED_AS_PURCHASE };
+  return {};
+}
+
 /**
  * Builds the `where` clause shared by `GET /api/receipts` (the capped row
  * list) and `GET /api/receipts/counts` (the DB-side chip counts) - every

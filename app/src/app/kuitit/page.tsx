@@ -112,6 +112,9 @@ export default function KuititPage() {
     "kuitit.appliedAdvanced",
     emptyAdvanced
   );
+  // A bill filed as an ostolasku lives in Ostolaskut; Kuitit lists kuitit and
+  // shows the bills only under its Laskut chip ("invoice").
+  const [kindFilter, setKindFilter] = usePersistedState<"receipt" | "invoice">("kuitit.kind", "receipt");
   const [showAllReceipts, setShowAllReceipts] = usePersistedState(
     "kuitit.showAllReceipts",
     false
@@ -224,9 +227,10 @@ export default function KuititPage() {
       params.set("maxAmount", appliedAdvanced.maxAmount);
     if (appliedAdvanced.sort) params.set("sort", appliedAdvanced.sort);
     if (appliedAdvanced.linkedStatus) params.set("linkedStatus", appliedAdvanced.linkedStatus);
+    params.set("kind", kindFilter === "invoice" ? "invoice" : "receipt");
 
     return params.toString();
-  }, [monthFilter, searchQuery, appliedAdvanced]);
+  }, [monthFilter, searchQuery, appliedAdvanced, kindFilter]);
 
   const queryRef = useRef(query);
   queryRef.current = query;
@@ -264,7 +268,7 @@ export default function KuititPage() {
         setLoadError({ query, error });
       });
 
-    apiFetch("/api/receipts?reviewStatus=pending")
+    apiFetch("/api/receipts?reviewStatus=pending&kind=receipt")
       .then((res) =>
         readJson<{ receipts?: SavedReceipt[]; truncated?: boolean }>(res, "Virhe")
       )
@@ -297,6 +301,7 @@ export default function KuititPage() {
     if (appliedAdvanced.source) params.set("source", appliedAdvanced.source);
     if (appliedAdvanced.minAmount) params.set("minAmount", appliedAdvanced.minAmount);
     if (appliedAdvanced.maxAmount) params.set("maxAmount", appliedAdvanced.maxAmount);
+    params.set("kind", "receipt");
     return params.toString();
   }, [monthFilter, searchQuery, appliedAdvanced.category, appliedAdvanced.source, appliedAdvanced.minAmount, appliedAdvanced.maxAmount]);
 
@@ -367,7 +372,7 @@ export default function KuititPage() {
     fetchedCounts?.key === countsQuery
       ? fetchedCounts.counts
       : readPageCache<ReceiptTabCounts>(`receipt-counts:${countsQuery}`) ??
-        (!loadingList && !truncated && receiptTabFromQuery(appliedAdvanced.type, appliedAdvanced.linkedStatus) === "all"
+        (!loadingList && !truncated && kindFilter !== "invoice" && receiptTabFromQuery(appliedAdvanced.type, appliedAdvanced.linkedStatus) === "all"
           ? countsFromList(receipts)
           : null);
 
@@ -453,6 +458,7 @@ export default function KuititPage() {
     setSearchQuery("");
     setAdvanced(emptyAdvanced);
     setAppliedAdvanced(emptyAdvanced);
+    setKindFilter("receipt");
   }
 
   async function handleReview(id: string, status: "approved" | "rejected" | "pending") {
@@ -635,7 +641,7 @@ export default function KuititPage() {
     const offset = pendingReceipts.length;
     setLoadingMorePending(true);
     try {
-      const response = await apiFetch(`/api/receipts?reviewStatus=pending&offset=${offset}`);
+      const response = await apiFetch(`/api/receipts?reviewStatus=pending&kind=receipt&offset=${offset}`);
       const data = await readJson<{ receipts?: SavedReceipt[]; truncated?: boolean }>(
         response,
         "Kuittien lataus epäonnistui"
@@ -658,9 +664,10 @@ export default function KuititPage() {
   }
 
   const hasFilters = activeChips.length > 0;
-  const activeTab = receiptTabFromQuery(appliedAdvanced.type, appliedAdvanced.linkedStatus);
+  const activeTab = kindFilter === "invoice" ? "laskut" : receiptTabFromQuery(appliedAdvanced.type, appliedAdvanced.linkedStatus);
 
   function onTabChange(id: Parameters<typeof receiptTabQuery>[0]) {
+    setKindFilter(id === "laskut" ? "invoice" : "receipt");
     const patch = receiptTabQuery(id);
     setAdvanced((a) => ({ ...a, ...patch }));
     setAppliedAdvanced((a) => ({ ...a, ...patch }));

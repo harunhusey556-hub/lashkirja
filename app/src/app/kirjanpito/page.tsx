@@ -17,6 +17,7 @@ import { ConnectionNotice, StaleBanner } from "@/components/ScreenState";
 import { firstHubFailure } from "@/lib/hub-failure";
 import { useCachedResource } from "@/components/useCachedResource";
 import { PERIOD_LOCK_KEY, PURCHASE_COUNTS_KEY } from "@/lib/cached-resource";
+import { navShortcuts } from "@/lib/navigation";
 
 /**
  * Bookkeeping hub: one place for everything bookkeeping. Phase 3
@@ -151,21 +152,22 @@ export default function KirjanpitoPage() {
 
       <Section title="Kohdistus">
         {/* One step from the tab bar to each matching flow: receipts against
-            bank rows, and purchase-invoice payments by viite. */}
-        <ListRow
-          href="/pankki/tapahtumat?nayta=toimet"
-          leading={<Icon icon={ArrowLeftRight} />}
-          chevron
-          title="Kohdista kuitit"
-          secondary={openEvents > 0 ? `${openEvents} odottaa kohdistusta tässä kuussa` : "Pankkitapahtumat, joille ei ole kuittia"}
-        />
-        <ListRow
-          href="/kirjanpito/ostolaskut"
-          leading={<Icon icon={Landmark} />}
-          chevron
-          title="Kohdista ostolaskujen maksut"
-          secondary="Kirjaa maksut viitenumeron mukaan"
-        />
+            bank rows, and purchase-invoice payments. The rows come from the
+            navigation registry (lib/navigation.ts NAV_SHORTCUTS). */}
+        {navShortcuts("kohdistus").map((shortcut) => (
+          <ListRow
+            key={shortcut.id}
+            href={shortcut.href}
+            leading={<Icon icon={shortcut.id === "kohdista-kuitit" ? ArrowLeftRight : Landmark} />}
+            chevron
+            title={shortcut.label}
+            secondary={
+              shortcut.id === "kohdista-kuitit" && openEvents > 0
+                ? `${openEvents} odottaa kohdistusta tässä kuussa`
+                : shortcut.description
+            }
+          />
+        ))}
       </Section>
 
       <Section title="Pankki">
