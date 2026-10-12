@@ -38,12 +38,27 @@ public struct UploadQueueRow: Identifiable, Sendable, Equatable {
     /// Set on `saved`: the server found the same vendor, date and sum already on file, so the
     /// receipt was saved anyway, as pending.
     public var duplicate = false
+    /// False on `saved` by a server that predates `autoApprove`: it said nothing about the approval
+    /// (it approves by default), so the row counts as saved, never as waiting for review.
+    public var approvalKnown = true
+    /// Set on `saved`: what the server did with a bill ("ostolasku luotu, eräpäivä 14.10.2026");
+    /// nil for a plain receipt.
+    public var invoiceNote: String?
 
-    /// Said under a saved row: what became of the receipt (as the web's upload list).
+    /// Said under a saved row: what became of the receipt (as the web's upload list), and of the
+    /// bill it was: "Hyväksytty automaattisesti · ostolasku luotu, eräpäivä 14.10.2026".
     public var outcomeText: String? {
         guard status == .saved else { return nil }
-        if autoApproved { return "Hyväksytty automaattisesti" }
-        return duplicate ? "Samanlainen kuitti on jo tallennettu – odottaa tarkistusta" : "Odottaa tarkistusta"
+        let approval: String?
+        if autoApproved {
+            approval = "Hyväksytty automaattisesti"
+        } else if !approvalKnown {
+            approval = duplicate ? "Samanlainen kuitti oli jo tallennettu" : nil
+        } else {
+            approval = duplicate ? "Samanlainen kuitti on jo tallennettu – odottaa tarkistusta" : "Odottaa tarkistusta"
+        }
+        guard let invoiceNote else { return approval }
+        return "\(approval ?? "Tallennettu") · \(invoiceNote)"
     }
 
     /// A save the server refused keeps what was read, so the form can take it from there.
@@ -120,13 +135,16 @@ public struct ReceiptUploadQueue: Sendable, Equatable {
     public mutating func markReady(_ id: String, draft: ReceiptDraft) {
         patch(id) { $0.status = .ready; $0.progress = "Odottaa tarkistusta"; $0.error = nil; $0.draft = draft }
     }
-    public mutating func markSaved(_ id: String, autoApproved: Bool = false, duplicate: Bool = false) {
+    /// `autoApproved` nil: the server did not say (`ReceiptSaving.Outcome.approved`).
+    public mutating func markSaved(_ id: String, autoApproved: Bool? = false, duplicate: Bool = false, invoiceNote: String? = nil) {
         patch(id) {
+            $0.invoiceNote = invoiceNote
             $0.status = .saved
             $0.progress = nil
             $0.error = nil
             $0.draft = nil
-            $0.autoApproved = autoApproved
+            $0.autoApproved = autoApproved ?? false
+            $0.approvalKnown = autoApproved != nil
             $0.duplicate = duplicate
         }
     }
@@ -210,9 +228,53 @@ public struct ReceiptUploadQueue: Sendable, Equatable {
     public var offlineCount: Int { rows.filter { $0.status == .offline }.count }
     public var savedCount: Int { rows.filter { $0.status == .saved }.count }
     /// Saved but not approved by the server: these wait in Kuitit's review queue.
-    public var reviewCount: Int { rows.filter { $0.status == .saved && !$0.autoApproved }.count }
+    public var reviewCount: Int { rows.filter { $0.status == .saved && !$0.autoApproved && $0.approvalKnown }.count }
+    /// Rows the owner would lose by dropping the queue (Kuitit's "Kesken: N kuittia").
+    public var unfinishedCount: Int { rows.filter { Self.unfinished.contains($0.status) || $0.canOpenForm }.count }
+
+    // MARK: Kept across screens and app runs
+
+    /// Read but not saved: what `UnfinishedReadingStore` keeps. A save already sent is kept too: if
+    /// it did land, the server refuses the second one (the upload is claimed), never a duplicate.
+    public var unsavedReadings: [UploadQueueRow] {
+        rows.filter { row in
+            guard row.draft != nil else { return false }
+            return [.ready, .saveQueued, .saving].contains(row.status) || row.canOpenForm
+        }
+    }
+
+    /// Readings kept from an earlier run come back as rows waiting for the form, under their own
+    /// ids. None of them opens the form by itself.
+    public mutating func restore(_ readings: [UnfinishedReading]) {
+        let known = Set(rows.map(\.id))
+        for reading in readings where !known.contains(reading.id) {
+            rows.append(UploadQueueRow(id: reading.id, name: reading.name, status: .ready,
+                                       progress: "Odottaa tarkistusta", draft: reading.draft))
+        }
+        if !readings.isEmpty { autoOpened = true }
+    }
+
+    /// "Hylkää tallentamattomat": the readings not saved leave the queue (a save already sent
+    /// finishes). Returns the ids removed, so their pictures can go too.
+    @discardableResult
+    public mutating func discardUnsaved() -> [String] {
+        let removed = rows.filter { $0.status == .ready || $0.status == .saveQueued || $0.canOpenForm }.map(\.id)
+        rows.removeAll { removed.contains($0.id) }
+        return removed
+    }
+
+    /// Nothing is left to do: the next visit starts on a clean page.
+    public mutating func reset() {
+        rows = []
+        autoOpened = false
+    }
 
     public static let receiptsButtonTitle = "Siirry kuitteihin"
+
+    /// Kuitit's entry back to a queue whose screen was closed: "Kesken: 1 kuitti", "Kesken: 4 kuittia".
+    public static func unfinishedTitle(_ count: Int) -> String {
+        count == 1 ? "Kesken: 1 kuitti" : "Kesken: \(count) kuittia"
+    }
 
     /// "Näytä tarkistettavat (3)" once the queue has settled; nil when nothing waits in the review queue.
     public var reviewButtonTitle: String? {
@@ -227,11 +289,14 @@ public struct ReceiptUploadQueue: Sendable, Equatable {
         guard !isWorking else { return nil }
         let saved = rows.filter { $0.status == .saved }
         let approved = saved.filter { $0.autoApproved }.count
+        // Saved by a server that did not say whether it approved (it approves by default).
+        let unknown = saved.filter { !$0.approvalKnown }.count
         // A saved receipt the server did not approve waits in Kuitit; a file read but not yet saved waits here.
-        let waiting = saved.count - approved + rows.filter { $0.status == .ready }.count
+        let waiting = saved.count - approved - unknown + rows.filter { $0.status == .ready }.count
         let failed = rows.filter { $0.status == .failed }.count
         var parts: [String] = []
         if approved > 0 { parts.append("Hyväksyttiin automaattisesti \(approved)") }
+        if unknown > 0 { parts.append("Tallennettiin \(unknown)") }
         if waiting > 0 { parts.append("\(waiting) odottaa tarkistusta") }
         if failed > 0 && !parts.isEmpty { parts.append("\(failed) epäonnistui") }
         return parts.isEmpty ? nil : parts.joined(separator: " · ")

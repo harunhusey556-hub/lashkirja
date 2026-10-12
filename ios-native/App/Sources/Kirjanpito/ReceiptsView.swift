@@ -151,29 +151,28 @@ struct ReceiptsView: View {
         .navigationTitle("Kuitit")
         .toolbar { toolbar }
         .safeAreaInset(edge: .bottom) {
-            if selecting && !selected.isEmpty {
-                HStack {
-                    Text("\(selected.count) valittu").font(.subheadline).foregroundStyle(Theme.onInk)
-                    Spacer()
-                    Button(role: .destructive) {
-                        deleteIds = Array(selected)
-                        confirmDelete = true
-                    } label: {
-                        Label("Poista", systemImage: "trash").font(.subheadline.bold()).foregroundStyle(Theme.onInk)
+            // The web BulkBar's actions exactly: Peruuta, Hyväksy (only the ready pending ones), Poista.
+            let picked = selectedVisible
+            if selecting && !picked.isEmpty {
+                let approvable = ReceiptBulk.approvable(picked)
+                BulkBar(count: picked.count, busy: busy, onCancel: {
+                    selecting = false
+                    selected = []
+                }) {
+                    if !approvable.isEmpty {
+                        BulkBarButton(title: ReceiptBulk.approveLabel(ready: approvable.count, notReady: picked.count - approvable.count)) {
+                            Task { await approveSelected(approvable.map(\.id)) }
+                        }
                     }
-                    .disabled(busy)
+                    BulkBarButton(title: "Poista", destructive: true) {
+                        deleteIds = picked.map(\.id)
+                        confirmDelete = true
+                    }
                 }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 12)
-                .background(Theme.ink.opacity(0.94), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-                .padding(.horizontal, 16)
-                .padding(.bottom, 8)
             }
         }
-        .confirmationDialog(deleteTitle, isPresented: $confirmDelete, titleVisibility: .visible) {
-            Button("Poista", role: .destructive) { Task { await delete(deleteIds) } }
-        } message: {
-            Text(deleteNote)
+        .confirmSheet(isPresented: $confirmDelete, title: deleteTitle, message: deleteNote, confirmTitle: "Poista") {
+            Task { await delete(deleteIds) }
         }
         .fullScreenCover(isPresented: $capture, onDismiss: { Task { await load() } }) { CaptureFlow(transactionId: nil) }
         .alert("Summarajaus", isPresented: $editingAmount) {
@@ -184,7 +183,11 @@ struct ReceiptsView: View {
         } message: {
             Text("Jätä kenttä tyhjäksi, jos rajaa ei tarvita.")
         }
-        .refreshable { await load() }
+        .refreshable {
+            // Pull-to-refresh asks every screen again; this one's own load stands for the bump.
+            gate.mark(key: String(describing: query), version: app.refreshEverything())
+            await load()
+        }
         .task(id: ReloadKey(query: query, version: app.dataVersion)) {
             guard receipts.value == nil || gate.isDue(key: String(describing: query), version: app.dataVersion) else { return }
             // Marked only after a load that finished: a cancelled one must not count as fresh.
@@ -212,6 +215,12 @@ struct ReceiptsView: View {
 
     /// The loaded rows minus the ones deleted a moment ago (`app.removedIds`).
     private var shownReceipts: [Receipt] { (receipts.value ?? []).filter { !app.removedIds.contains($0.id) } }
+
+    /// The picked rows that are on screen: a folded list never acts on hidden receipts (web BOOKS-12).
+    private var selectedVisible: [Receipt] {
+        let all = shownReceipts
+        return all.prefix(limit.visible(all.count)).filter { selected.contains($0.id) }
+    }
 
     @ViewBuilder private func row(_ receipt: Receipt) -> some View {
         if selecting {
@@ -330,6 +339,12 @@ struct ReceiptsView: View {
     @ToolbarContentBuilder private var toolbar: some ToolbarContent {
         ToolbarItemGroup(placement: .topBarTrailing) {
             if selecting {
+                let all = shownReceipts
+                let onScreen = all.prefix(limit.visible(all.count)).map(\.id)
+                let allPicked = !onScreen.isEmpty && onScreen.allSatisfy(selected.contains)
+                Button(allPicked ? "Poista valinnat" : "Valitse kaikki") {
+                    if allPicked { selected.subtract(onScreen) } else { selected.formUnion(onScreen) }
+                }
                 Button("Valmis") {
                     selecting = false
                     selected = []
@@ -507,6 +522,46 @@ struct ReceiptsView: View {
         } catch {
             failure = error.userMessage
         }
+    }
+
+    /// The bulk bar's "Hyväksy": the picked ready pending receipts (`POST /api/receipts/batch-approve`,
+    /// at most 200 per call). What the server refused stays picked, named by its reason (web F15).
+    private func approveSelected(_ ids: [String]) async {
+        guard !ids.isEmpty, !busy else { return }
+        busy = true
+        failure = nil
+        notice = nil
+        defer { busy = false }
+        var approved = 0
+        var refusedIds: [String] = []
+        var refusals: [String] = []
+        for chunk in BulkBatch.chunks(ids, size: BulkBatch.approveLimit) {
+            do {
+                let result: BatchApproveResult = try await app.api.send("POST", "/api/receipts/batch-approve", body: ReceiptIdsBody(receiptIds: chunk))
+                approved += result.approvedCount
+                refusedIds += (result.failed ?? []).map(\.id)
+                refusals += (result.failed ?? []).map { $0.error ?? "" }
+            } catch is CancellationError {
+                return
+            } catch {
+                // One reason per receipt, so the count in the sentence is the receipts'.
+                let reason = error.userMessage
+                refusedIds += chunk
+                refusals += chunk.map { _ in reason }
+            }
+        }
+        let outcome = ReviewQueue.approvalOutcome(approved: approved, failures: refusals)
+        if refusals.isEmpty {
+            notice = outcome
+            Haptics.success()
+        } else {
+            failure = outcome
+            Haptics.error()
+        }
+        selected = Set(refusedIds)
+        if selected.isEmpty { selecting = false }
+        if approved > 0 { app.dataVersion += 1 }
+        await load()
     }
 
     /// "Palauta": a rejected receipt goes back to the review queue (`PATCH …/review`).

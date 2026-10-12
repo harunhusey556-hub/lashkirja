@@ -74,15 +74,13 @@ struct EmailImportView: View {
         .sheet(isPresented: $adding) {
             ConnectMailboxSheet { Task { await load() } }
         }
-        .confirmationDialog(
-            "Katkaise yhteys?",
-            isPresented: Binding(get: { disconnecting != nil }, set: { if !$0 { disconnecting = nil } }),
-            titleVisibility: .visible,
-            presenting: disconnecting
-        ) { account in
-            Button("Katkaise yhteys", role: .destructive) { Task { await disconnect(account) } }
-        } message: { account in
-            Text("Kuitteja ei enää haeta osoitteesta \(account.email). Jo tuodut kuitit säilyvät.")
+        .confirmSheet(presenting: $disconnecting) { account in
+            ConfirmRequest(
+                title: "Katkaise yhteys?",
+                message: "Kuitteja ei enää haeta osoitteesta \(account.email). Jo tuodut kuitit säilyvät.",
+                confirmTitle: "Katkaise yhteys",
+                onConfirm: { Task { await disconnect(account) } }
+            )
         }
     }
 

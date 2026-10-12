@@ -20,6 +20,8 @@ struct StatementDetailView: View {
     /// A screen the row sheet asked for, pushed once the sheet has closed.
     @State private var openAfterSheet: Route?
     @State private var pushed: Route?
+    /// The version a pull-to-refresh bumped to: its own load already covers it.
+    @State private var refreshedVersion: Int?
 
     var body: some View {
         List {
@@ -54,22 +56,21 @@ struct StatementDetailView: View {
             }
         }
         // The dialog names the statement (bank and month) so it is clear which one goes.
-        .confirmationDialog(statementDeleteTitle, isPresented: $confirmDelete, titleVisibility: .visible) {
-            Button("Poista tiliote", role: .destructive) { Task { await deleteStatement() } }
-        } message: {
-            if let statement = state.value {
-                Text(StatementText.deleteDescription(title: StatementText.deleteName(statement), rows: statement.transactions))
-            }
+        .confirmSheet(
+            isPresented: $confirmDelete,
+            title: statementDeleteTitle,
+            message: state.value.map { StatementText.deleteDescription(title: StatementText.deleteName($0), rows: $0.transactions) } ?? "",
+            confirmTitle: "Poista tiliote"
+        ) {
+            Task { await deleteStatement() }
         }
-        .confirmationDialog(
-            rowDeleteTitle,
-            isPresented: Binding(get: { deletingRow != nil }, set: { if !$0 { deletingRow = nil } }),
-            titleVisibility: .visible,
-            presenting: deletingRow
-        ) { row in
-            Button("Poista", role: .destructive) { Task { await deleteRow(row) } }
-        } message: { row in
-            Text(StatementText.deleteRowDescription(row))
+        .confirmSheet(presenting: $deletingRow) { row in
+            ConfirmRequest(
+                title: StatementText.deleteRowTitle(row),
+                message: StatementText.deleteRowDescription(row),
+                confirmTitle: "Poista",
+                onConfirm: { Task { await deleteRow(row) } }
+            )
         }
         .sheet(item: $selected, onDismiss: {
             // "Avaa kuitti/lasku" in the sheet: pushed here once it has closed, so Back returns to the tiliote.
@@ -85,16 +86,19 @@ struct StatementDetailView: View {
         .sheet(item: $editing) { row in
             StatementRowEditSheet(statementId: statementId, row: row) { Task { await changed() } }
         }
-        .refreshable { await load() }
-        .task(id: app.dataVersion) { await load() }
+        .refreshable {
+            // Pull-to-refresh asks every screen again; this load stands for that bump here.
+            refreshedVersion = app.refreshEverything()
+            await load()
+        }
+        .task(id: app.dataVersion) {
+            guard app.dataVersion != refreshedVersion else { return }
+            await load()
+        }
     }
 
     private var statementDeleteTitle: String {
         state.value.map(StatementText.deleteTitle) ?? "Poistetaanko tiliote?"
-    }
-
-    private var rowDeleteTitle: String {
-        deletingRow.map(StatementText.deleteRowTitle) ?? "Poistetaanko tapahtuma?"
     }
 
     @ViewBuilder private func content(_ s: Statement) -> some View {

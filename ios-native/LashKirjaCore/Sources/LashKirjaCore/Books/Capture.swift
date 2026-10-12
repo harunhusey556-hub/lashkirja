@@ -19,6 +19,15 @@ public struct Extracted: Decodable, Sendable, Equatable {
     public let source: String?
     /// "receipt", "invoice", "marketing" or "other" when the reading names it.
     public let documentType: String?
+    /// ISO 4217 of the document ("USD"); nil or "EUR" for a euro document.
+    public let currency: String?
+    /// The total in `currency`, read from a non-euro document.
+    public let originalAmount: Decimal?
+    /// Euros per one unit of `currency`, with its date and origin ("document" or the ECB's), when
+    /// the document printed a rate or the server priced it (`totalAmount` is then in euros).
+    public let fxRate: Double?
+    public let fxRateDate: String?
+    public let fxSource: String?
 }
 
 /// Per-field recognition scores, 0...1.
@@ -61,6 +70,12 @@ public struct ReceiptDraft: Encodable, Sendable, Equatable {
     public var reference: String = ""
     public var invoiceNumber: String = ""
     public var forceDuplicate = false
+    /// ISO 4217; "EUR" unless the document is in another currency. Always sent, as the web does.
+    public var currency = ReceiptCurrency.base
+    /// The total in `currency` for a non-euro document; `totalAmount` stays in euros.
+    public var originalAmount: Decimal?
+    /// The rate the reading carried, shown under the total; never sent (the save body is strict).
+    public var fx: ReceiptFxReading?
     /// Ask the server to approve the receipt as it saves it when nothing is missing; it decides,
     /// and answers `autoApproved`. Off for a draft that is only displayed or kept.
     public var autoApprove = false
@@ -77,6 +92,13 @@ public struct ReceiptDraft: Encodable, Sendable, Equatable {
         type = e.type == "tulo" ? "tulo" : "meno"
         reference = e.reference ?? ""
         invoiceNumber = e.invoiceNumber ?? ""
+        currency = ReceiptCurrency.code(e.currency)
+        if currency != ReceiptCurrency.base {
+            originalAmount = e.originalAmount
+            if let rate = e.fxRate, ReceiptFx.isUsable(rate) {
+                fx = ReceiptFxReading(currency: currency, rate: rate, date: e.fxRateDate, source: e.fxSource)
+            }
+        }
     }
 
     public var validationError: String? {
@@ -85,7 +107,11 @@ public struct ReceiptDraft: Encodable, Sendable, Equatable {
         return nil
     }
 
-    enum CodingKeys: String, CodingKey { case uploadId, vendor, date, totalAmount, vatDetails, category, notes, type, reference, invoiceNumber, forceDuplicate, autoApprove }
+    enum CodingKeys: String, CodingKey { case uploadId, vendor, date, totalAmount, vatDetails, category, notes, type, reference, invoiceNumber, currency, originalAmount, fx, forceDuplicate, autoApprove }
+
+    /// Set on the encoder that writes a reading to the phone (`UnfinishedReadingStore`): `fx` is part
+    /// of the reading there, but the strict body of the save must never carry it.
+    public static var keepsReadingKey: CodingUserInfoKey { CodingUserInfoKey(rawValue: "ReceiptDraft.keepsReading")! }
 
     public func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
@@ -103,18 +129,97 @@ public struct ReceiptDraft: Encodable, Sendable, Equatable {
         try c.encode(type, forKey: .type)
         try put(reference, .reference)
         try put(invoiceNumber, .invoiceNumber)
+        let code = ReceiptCurrency.code(currency)
+        try c.encode(code, forKey: .currency)
+        if code != ReceiptCurrency.base, let originalAmount { try c.encode(originalAmount, forKey: .originalAmount) }
+        if encoder.userInfo[Self.keepsReadingKey] as? Bool == true, let fx { try c.encode(fx, forKey: .fx) }
         if forceDuplicate { try c.encode(true, forKey: .forceDuplicate) }
         if autoApprove { try c.encode(true, forKey: .autoApprove) }
     }
 }
 
-/// The answer of `POST /api/receipts/save`: the new receipt, and (only when `autoApprove` was
-/// sent) whether the server approved it as it saved it.
+/// Read back from the phone (`UnfinishedReadingStore`): a reading not yet saved outlives the app.
+/// A field `encode` left out comes back empty, as it was.
+extension ReceiptDraft: Decodable {
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(uploadId: try c.decode(String.self, forKey: .uploadId))
+        vendor = try c.decodeIfPresent(String.self, forKey: .vendor) ?? ""
+        date = try c.decodeIfPresent(String.self, forKey: .date) ?? ""
+        totalAmount = try c.decodeIfPresent(Decimal.self, forKey: .totalAmount)
+        vatDetails = try c.decodeIfPresent([VatDetail].self, forKey: .vatDetails) ?? []
+        category = try c.decodeIfPresent(String.self, forKey: .category) ?? ""
+        notes = try c.decodeIfPresent(String.self, forKey: .notes) ?? ""
+        type = try c.decodeIfPresent(String.self, forKey: .type) ?? "meno"
+        reference = try c.decodeIfPresent(String.self, forKey: .reference) ?? ""
+        invoiceNumber = try c.decodeIfPresent(String.self, forKey: .invoiceNumber) ?? ""
+        let readCurrency = try c.decodeIfPresent(String.self, forKey: .currency)
+        currency = ReceiptCurrency.code(readCurrency)
+        originalAmount = try c.decodeIfPresent(Decimal.self, forKey: .originalAmount)
+        fx = try c.decodeIfPresent(ReceiptFxReading.self, forKey: .fx)
+        forceDuplicate = try c.decodeIfPresent(Bool.self, forKey: .forceDuplicate) ?? false
+        autoApprove = try c.decodeIfPresent(Bool.self, forKey: .autoApprove) ?? false
+    }
+}
+
+/// The answer of `POST /api/receipts/save`: the new receipt, whether the server approved it as it
+/// saved it (only when `autoApprove` was sent), and what became of a bill: the ostolasku filed for
+/// it (`purchaseInvoice`) or why none was (`purchaseInvoiceSkipped`).
 public struct ReceiptSaveResult: Decodable, Sendable, Equatable {
     public struct Stored: Decodable, Sendable, Equatable { public let id: String }
+    /// The ostolasku the server created from the receipt; only what the app tells the owner.
+    public struct Filed: Decodable, Sendable, Equatable {
+        public let id: String?
+        /// "YYYY-MM-DD"
+        public let dueDate: String?
+        public let isCreditNote: Bool?
+
+        public init(id: String? = nil, dueDate: String? = nil, isCreditNote: Bool? = nil) {
+            self.id = id
+            self.dueDate = dueDate
+            self.isCreditNote = isCreditNote
+        }
+    }
+
     public let receipt: Stored
     public let autoApproved: Bool?
+    public let purchaseInvoice: Filed?
+    /// "not_an_invoice", "sales_document", "no_supplier", "no_date", "no_amount", "duplicate" or "already_filed".
+    public let purchaseInvoiceSkipped: String?
+
+    public init(receipt: Stored, autoApproved: Bool? = nil, purchaseInvoice: Filed? = nil, purchaseInvoiceSkipped: String? = nil) {
+        self.receipt = receipt
+        self.autoApproved = autoApproved
+        self.purchaseInvoice = purchaseInvoice
+        self.purchaseInvoiceSkipped = purchaseInvoiceSkipped
+    }
+
+    private enum CodingKeys: String, CodingKey { case receipt, autoApproved, purchaseInvoice, purchaseInvoiceSkipped }
+
+    /// The receipt is already saved when this is read: a surprise in the extras must never make the
+    /// save look failed (the owner would save it twice), so they are read leniently.
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        receipt = try c.decode(Stored.self, forKey: .receipt)
+        autoApproved = try c.decodeIfPresent(Bool.self, forKey: .autoApproved)
+        purchaseInvoice = try? c.decodeIfPresent(Filed.self, forKey: .purchaseInvoice)
+        purchaseInvoiceSkipped = try? c.decodeIfPresent(String.self, forKey: .purchaseInvoiceSkipped)
+    }
 
     /// Absent from a server that does not auto-approve: then the receipt waits for review.
     public var approved: Bool { autoApproved ?? false }
+
+    /// What the owner is told about the bill, after "Tallennettu ·": "ostolasku luotu, eräpäivä 14.10.2026".
+    /// Nil for an ordinary receipt and for a reason the owner has nothing to do with.
+    public var purchaseInvoiceNote: String? {
+        if let invoice = purchaseInvoice {
+            if invoice.isCreditNote == true { return "hyvityslasku luotu" }
+            if let due = invoice.dueDate, APIDate.day(String(due.prefix(10))) != nil {
+                return "ostolasku luotu, eräpäivä \(APIDate.displayDay(due))"
+            }
+            return "ostolasku luotu"
+        }
+        if purchaseInvoiceSkipped == "duplicate" { return "ostolaskua ei luotu, sama lasku on jo ostolaskuissa" }
+        return nil
+    }
 }

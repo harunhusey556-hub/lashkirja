@@ -199,6 +199,11 @@ public struct ReceiptForm: Sendable, Equatable {
     public var vatTreatment: PurchaseVatTreatment = .domestic
     /// Three letters; "EUR" for a euro document.
     public var currency: String = "EUR"
+    /// New receipt only: the total printed in `currency`, as text ("Summa (USD)").
+    public var originalAmountText: String = ""
+    /// New receipt only: the rate the reading carried, and the total text it priced.
+    public private(set) var fx: ReceiptFxReading?
+    private var fxTotalText = ""
     public private(set) var vatRows: [ReceiptVatRow]
 
     public static let limits = (vendor: 300, reference: 40, invoiceNumber: 40, notes: 500)
@@ -229,12 +234,17 @@ public struct ReceiptForm: Sendable, Equatable {
     public init(draft d: ReceiptDraft) {
         vendor = d.vendor
         date = d.date
-        totalText = d.totalAmount.map(ReceiptAmount.field) ?? ""
+        let readTotal = d.totalAmount.map(ReceiptAmount.field) ?? ""
+        totalText = readTotal
         category = d.category
         type = d.type == "tulo" ? "tulo" : "meno"
         notes = d.notes
         reference = d.reference
         invoiceNumber = d.invoiceNumber
+        currency = d.currency
+        originalAmountText = d.originalAmount.map(ReceiptAmount.field) ?? ""
+        fx = d.fx
+        fxTotalText = readTotal
         var rows = d.vatDetails.map { ReceiptVatRow(rate: $0.rate, amountText: ReceiptAmount.field($0.amount), auto: false) }
         if rows.count == 1, let total = d.totalAmount,
            ReceiptAmount.parse(rows[0].amountText) == ReceiptVat.vatInGross(total, rate: rows[0].rate) {
@@ -248,6 +258,16 @@ public struct ReceiptForm: Sendable, Equatable {
     }
 
     public var isKnownCategory: Bool { ReceiptCategory.isKnown(category) }
+
+    /// The foreign document's figure is asked for (and sent) only while the currency is not euros.
+    public var isForeign: Bool { ReceiptCurrency.isForeign(currency) }
+
+    /// "Kurssi 1 USD = 0,8749 EUR (EKP 10.7.2026)" under the total, while the total is the one the
+    /// rate priced and the currency still the document's (web `fxNote`).
+    public var fxNote: String? {
+        guard let fx, totalText == fxTotalText, ReceiptCurrency.code(currency) == fx.currency else { return nil }
+        return fx.line
+    }
 
     // MARK: VAT rows
 
@@ -337,8 +357,20 @@ public struct ReceiptForm: Sendable, Equatable {
             let vatCents = lines.reduce(Decimal(0)) { $0 + ReceiptAmount.cents($1.amount) }
             if vatCents > ReceiptAmount.cents(total) { errors["vat-0"] = ReceiptVat.tooLargeMessage }
         }
+        // The document's own figure: only for a foreign currency; left empty it is the server's to
+        // keep from the reading (web: `originalAmount` null).
+        var original: Decimal?
+        if isForeign, !Self.trimmed(originalAmountText).isEmpty {
+            if let parsed = ReceiptAmount.parse(originalAmountText), parsed >= 0 {
+                original = ReceiptAmount.rounded(parsed, 2)
+            } else {
+                errors["originalAmount"] = ReceiptCurrency.invalidAmountMessage
+            }
+        }
         if !errors.isEmpty { return .invalid(errors) }
         var draft = ReceiptDraft(uploadId: uploadId)
+        draft.currency = ReceiptCurrency.code(currency)
+        draft.originalAmount = original
         draft.vendor = Self.trimmed(vendor)
         draft.date = date
         draft.totalAmount = total.map { ReceiptAmount.rounded($0, 2) }

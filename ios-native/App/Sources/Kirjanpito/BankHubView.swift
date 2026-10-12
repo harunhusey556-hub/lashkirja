@@ -16,6 +16,10 @@ struct BankHubView: View {
     @State private var gate = ReloadGate()
     /// The empty state's buttons: two in one list row need their own taps, so they push here.
     @State private var pushed: Route?
+    /// The rows come a page at a time from a server that pages (`?cursor=`); the rest load behind.
+    @State private var paging = CursorPaging()
+    /// The figures of the previous visit are put on screen once, before the first load.
+    @State private var restored = false
 
     var body: some View {
         List {
@@ -26,7 +30,7 @@ struct BankHubView: View {
                         .listRowInsets(EdgeInsets())
                 }
                 // Unknown balances are not "no bank": the empty state waits for the accounts answer.
-                if !positionFailed && BankHub.isEmpty(position, statements: statements) {
+                if !positionFailed && !paging.hasMore && BankHub.isEmpty(position, statements: statements) {
                     emptyState
                 } else {
                     balanceSection(statements)
@@ -35,25 +39,58 @@ struct BankHubView: View {
                     recentSection(statements)
                 }
                 links
-            } else {
+            } else if case .failed = state.display {
                 ScreenStateView(state: state, retry: { await load() }) { (_: [Statement]) in EmptyView() }
                     .listRowBackground(Color.clear)
+            } else {
+                // The page's shape at once: the balances fill in as soon as they arrive (they load
+                // beside the rows), the rows a moment later.
+                balanceSection([])
+                skeletonSection
             }
         }
         .scrollContentBackground(.hidden)
         .background(Theme.canvas)
         .navigationTitle("Pankki")
         .navigationDestination(item: $pushed) { route in RouteScreen(route: route) }
-        .refreshable { await load() }
+        .refreshable {
+            // Pull-to-refresh asks every screen again; this one's own load stands for the bump.
+            gate.mark(version: app.refreshEverything())
+            await load()
+        }
         .task(id: app.dataVersion) {
+            restoreOnce()
             guard state.value == nil || gate.isDue(version: app.dataVersion) else { return }
             // Marked only after a load that finished: a cancelled or failed one must not count as fresh.
             let version = app.dataVersion
             if await load(), !Task.isCancelled { gate.mark(version: version) }
         }
+        // The month figures need every row: further pages load behind the first while the hub is open.
+        .task(id: paging.nextCursor) { await loadNextPage() }
     }
 
     // MARK: Sections
+
+    /// Grey rows where the latest rows will be, until the first page arrives.
+    private var skeletonSection: some View {
+        Section {
+            ForEach(0..<5, id: \.self) { _ in
+                HStack {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Pankkitapahtuma").foregroundStyle(Theme.ink)
+                        Text("12.10.2026 · Kohdistettu").font(.caption).foregroundStyle(Theme.ink2)
+                    }
+                    Spacer()
+                    Text("-100,00 €").font(.subheadline.weight(.semibold))
+                }
+                .redacted(reason: .placeholder)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("Ladataan tapahtumia")
+            }
+        } header: {
+            Text("Viimeisimmät tapahtumat")
+        }
+    }
 
     private var emptyState: some View {
         ContentUnavailableView {
@@ -72,9 +109,13 @@ struct BankHubView: View {
     @ViewBuilder private func balanceSection(_ statements: [Statement]) -> some View {
         Section {
             if let position {
+                let lines = BankHub.accountLines(position, statements: statements)
+                // A sync's balances show at once, before the accounts are asked again.
+                let fresh = app.versions.balances
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Saldo yhteensä").font(.caption).foregroundStyle(Theme.ink2)
-                    MoneyText(amount: BankHub.total(position)).font(.title2.weight(.semibold)).foregroundStyle(Theme.ink)
+                    MoneyText(amount: fresh.total(BankHub.total(position), lines: lines.map { (id: $0.id, balance: $0.balance) }))
+                        .font(.title2.weight(.semibold)).foregroundStyle(Theme.ink)
                     if let excluded = position.combined?.excludedCurrencies, !excluded.isEmpty {
                         Text("Ei sisällä tilejä valuutoissa \(excluded.joined(separator: ", "))").font(.caption).foregroundStyle(Theme.ink2)
                     }
@@ -85,12 +126,11 @@ struct BankHubView: View {
                         Label(notice, systemImage: "exclamationmark.triangle").font(.subheadline).foregroundStyle(Theme.danger)
                     }
                 }
-                let lines = BankHub.accountLines(position, statements: statements)
                 if lines.isEmpty {
                     Text("Ei vielä tilejä. Saldo näkyy, kun yhdistät pankin tai lisäät tilin.").font(.subheadline).foregroundStyle(Theme.ink2)
                 }
                 ForEach(lines) { line in
-                    NavigationLink(value: Route.bankAccounts) { AccountLineRow(line: line) }
+                    NavigationLink(value: Route.bankAccounts) { AccountLineRow(line: line, balance: fresh.balance(line.id, shown: line.balance)) }
                 }
             } else if positionFailed {
                 Text("Saldoja ei saatu ladattua.").foregroundStyle(Theme.ink2)
@@ -99,7 +139,17 @@ struct BankHubView: View {
                 ProgressView().frame(maxWidth: .infinity)
             }
         } header: {
-            Text("Saldot")
+            HStack {
+                Text("Saldot")
+                Spacer()
+                // Figures from the previous visit stay while fresh ones load; it says so.
+                if state.isRefreshing {
+                    HStack(spacing: 4) {
+                        ProgressView().controlSize(.mini)
+                        Text("Päivitetään…")
+                    }
+                }
+            }
         }
     }
 
@@ -229,31 +279,54 @@ struct BankHubView: View {
 
     // MARK: Loading
 
+    /// The previous visit's figures, shown at once; the first load then refreshes them behind.
+    private func restoreOnce() {
+        guard !restored else { return }
+        restored = true
+        guard state.value == nil, let memory = app.bankHubMemory else { return }
+        state.succeed(memory.statements)
+        position = memory.position
+        openRows = memory.openRows
+        paging = memory.paging
+        if !monthChosen { month = BankHub.startMonth(memory.statements) }
+    }
+
+    private func remember() {
+        guard let statements = state.value else { return }
+        app.bankHubMemory = BankHubMemory(statements: statements, position: position, openRows: openRows, paging: paging)
+    }
+
     /// The rows, the balances and the open count load side by side; only the rows are required.
-    /// Returns whether the rows loaded.
+    /// The balances go on screen as soon as they arrive. Returns whether the rows loaded.
     @discardableResult
     private func load() async -> Bool {
         state.begin()
         let api = app.api
+        let startedAt = Date()
         async let listResult = Result<StatementList, Error>(asyncCatching: { try await api.get("/api/statements") })
         async let positionResult = Result<BankHubPosition, Error>(asyncCatching: { try await api.get("/api/bank-accounts") })
         async let countResult: StatementOpenCount? = try? api.get("/api/statements/counts")
-        let (list, balances, count) = await (listResult, positionResult, countResult)
+        let balances = await positionResult
         if Task.isCancelled { return false }
         switch balances {
         case .success(let value):
             position = value
             positionFailed = false
+            app.versions.settleBalances(loadStartedAt: startedAt)
         case .failure(let error):
             // A stale figure stays on screen; only a first failure shows the retry.
             if !(error is CancellationError) && position == nil { positionFailed = true }
         }
+        let (list, count) = await (listResult, countResult)
+        if Task.isCancelled { return false }
         switch list {
         case .success(let value):
             state.succeed(value.statements)
+            paging.firstPage(next: value.nextCursor)
             if !monthChosen { month = BankHub.startMonth(value.statements) }
             // A server without the count route: counted from the rows, as Kirjanpito does.
             openRows = count?.open ?? BankFeed.months(value.statements).reduce(0) { $0 + $1.open }
+            remember()
             return true
         case .failure(let error):
             if error is CancellationError { return false }
@@ -261,17 +334,39 @@ struct BankHubView: View {
             return false
         }
     }
+
+    /// The page after the loaded rows, merged in (a row is never shown twice). A failure leaves
+    /// the rows shown; the next load starts the paging again.
+    private func loadNextPage() async {
+        guard state.value != nil, let cursor = paging.nextCursor, let query = paging.nextQuery() else { return }
+        guard let page: StatementList = try? await app.api.get("/api/statements", query: query),
+              !Task.isCancelled, paging.nextCursor == cursor else { return }
+        state.update { $0 = StatementPaging.merge($0, page.statements) }
+        paging.nextPage(next: page.nextCursor)
+        if !monthChosen, let rows = state.value { month = BankHub.startMonth(rows) }
+        remember()
+    }
+}
+
+/// What the hub showed last (`AppModel.bankHubMemory`).
+struct BankHubMemory {
+    let statements: [Statement]
+    let position: BankHubPosition?
+    let openRows: Int
+    let paging: CursorPaging
 }
 
 /// One account on the balance card: name, bank and when the balance is from, and the balance.
 private struct AccountLineRow: View {
     let line: BankHub.AccountLine
+    /// The line's balance, or the one a sync just returned.
+    let balance: Decimal?
 
     var body: some View {
         // Name and balance side by side while they fit; the balance moves under the name otherwise.
         ViewThatFits(in: .horizontal) {
-            HStack(alignment: .firstTextBaseline) { description; Spacer(); balance }
-            VStack(alignment: .leading, spacing: 4) { description; balance }
+            HStack(alignment: .firstTextBaseline) { description; Spacer(); amount }
+            VStack(alignment: .leading, spacing: 4) { description; amount }
         }
         .padding(.vertical, 2)
     }
@@ -289,8 +384,8 @@ private struct AccountLineRow: View {
         }
     }
 
-    @ViewBuilder private var balance: some View {
-        if let balance = line.balance {
+    @ViewBuilder private var amount: some View {
+        if let balance {
             MoneyText(amount: balance).foregroundStyle(Theme.ink)
         } else {
             Text("–").foregroundStyle(Theme.ink2)
