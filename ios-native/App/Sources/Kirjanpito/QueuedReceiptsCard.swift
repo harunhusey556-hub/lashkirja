@@ -7,8 +7,13 @@ import LashKirjaCore
 /// are reported with a remove. List sections; shows nothing while the offline queue is empty
 /// and healthy. The screen showing it starts
 /// the queue (`OfflineReceiptQueueModel.start`).
+///
+/// Above it, "Kesken: N kuittia": files of "Lisää kuitti" still on their way, or read and not
+/// saved, after its screen was closed (`CaptureQueueModel`); "Jatka" opens the screen on them.
 struct QueuedReceiptsCard: View {
+    @Environment(AppModel.self) private var app
     @State private var queue = OfflineReceiptQueueModel.shared
+    @State private var capture = CaptureQueueModel.shared
     @State private var connectivity = Connectivity.shared
     @State private var confirmRemove: String?
     @State private var limit = ShowMore()
@@ -17,6 +22,27 @@ struct QueuedReceiptsCard: View {
         let waiting = queue.waiting
         let sent = queue.sent
         Group {
+            if capture.unfinishedCount > 0 {
+                Section {
+                    HStack(spacing: 12) {
+                        Text(capture.queue.isWorking ? "Lähetetään ja luetaan…" : "Luettu, odottaa tarkistusta ja tallennusta")
+                            .font(.caption)
+                            .foregroundStyle(Theme.ink2)
+                        Spacer(minLength: 0)
+                        Button("Jatka") {
+                            Haptics.selection()
+                            EventLog.shared.log(.action("resume-capture", screen: "receipts"))
+                            capture.resuming = true
+                            app.pendingCapture = PendingCapture(transactionId: nil)
+                        }
+                        .font(.caption.bold())
+                        .buttonStyle(.borderless)
+                        .foregroundStyle(Theme.accent)
+                    }
+                } header: {
+                    Text(ReceiptUploadQueue.unfinishedTitle(capture.unfinishedCount))
+                }
+            }
             if let storageError = queue.storageError {
                 Section {
                     Text(storageError).font(.footnote).foregroundStyle(Theme.danger)
