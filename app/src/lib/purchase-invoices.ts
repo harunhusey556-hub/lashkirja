@@ -266,6 +266,15 @@ export function prepareReference(value: string | null | undefined): string | nul
   return normalized;
 }
 
+/**
+ * A viite read from a document, or null: the reading is a guess, so a check digit
+ * that does not hold drops the viite instead of refusing the bill (W27).
+ */
+export function readReference(value: string | null | undefined): string | null {
+  const normalized = value ? normalizeReference(value) : "";
+  return normalized && isValidReferenceNumber(normalized) ? normalized : null;
+}
+
 /** The supplier's Y-tunnus and IBAN, normalized; refused when either is not valid. */
 export function prepareSupplier(input: Pick<PurchaseInvoiceInput, "supplierBusinessId" | "supplierIban">) {
   let businessId: string | null = null;
@@ -444,6 +453,8 @@ export async function fileReceiptAsPurchaseInvoice(
     vendor: string | null;
     date: Date | null;
     invoiceNumber: string | null;
+    /** The viite read from the bill: the bank row that carries it pays the ostolasku. */
+    reference?: string | null;
     totalAmountCents: number | null;
     vatDetails: string | null;
     category: string | null;
@@ -489,6 +500,8 @@ export async function fileReceiptAsPurchaseInvoice(
       {
         supplierName,
         invoiceNumber: receipt.invoiceNumber,
+        // Without it the payment carrying this viite never paid the bill (W27, owner's backup).
+        reference: readReference(receipt.reference),
         issueDate,
         dueDate: readDue ?? assumedDueDate(issueDate),
         gross: centsToEuros(receipt.totalAmountCents),
@@ -1578,6 +1591,7 @@ type OpenPurchase = Prisma.PurchaseInvoiceGetPayload<{
   include: {
     payments: { select: { amountCents: true } };
     creditNotes: { select: { grossCents: true; status: true } }; // wave2-schema: PurchaseInvoice.creditsInvoiceId / creditNotes
+    receipt: { select: { reference: true } };
   };
 }>;
 type OutgoingRow = {
@@ -1596,8 +1610,14 @@ async function loadMatchInputs(userId: string): Promise<{ openInvoices: OpenPurc
     include: {
       payments: { select: { amountCents: true } },
       creditNotes: { select: { grossCents: true, status: true } }, // wave2-schema: PurchaseInvoice.creditsInvoiceId / creditNotes
+      receipt: { select: { reference: true } },
     },
   });
+  // Bills filed from a receipt before W27 were stored without the viite the receipt
+  // carries; matching reads it from the receipt, so they are paid like new ones.
+  for (const invoice of openInvoices) {
+    if (!invoice.reference) invoice.reference = readReference(invoice.receipt?.reference);
+  }
   if (openInvoices.length === 0) return { openInvoices, outgoing: [] };
   const outgoing = await prisma.transaction.findMany({
     where: { statement: { userId }, amountCents: { lt: 0 }, purchasePayment: null, invoicePayment: null },
@@ -1708,52 +1728,64 @@ export async function matchPurchasePaymentsFromBank(
   const skippedLocked: PurchaseMatchResult["skippedLocked"] = [];
   const consumed = new Set<string>();
 
-  for (const transaction of outgoing) {
-    const candidates = [transaction.reference, transaction.message]
-      .filter((value): value is string => Boolean(value))
-      .map(normalizeReference);
-    const sharing = candidates.map((value) => byReference.get(value)).find((list) => list && list.length > 0);
-    if (!sharing) continue;
-    const paid = Math.abs(transaction.amountCents);
-    // The invoice of exactly this amount; else, alone with the viite, one this payment does not
-    // exceed (a part payment). An overpayment, or a choice between invoices, is left to the owner.
-    const invoice =
-      sharing.find((candidate) => openCents(candidate) === paid) ??
-      (sharing.length === 1 && paid <= openCents(sharing[0]) ? sharing[0] : undefined);
-    if (!invoice) continue;
+  // Exact amounts first, over every row, then part payments. A fixed viite (freight, a pension
+  // fund) is on months of earlier payments; the first one met was booked as a part of the new
+  // bill that a later row paid exactly (W27, owner's data, now that this runs after every sync).
+  for (const partial of [false, true]) {
+    for (const transaction of outgoing) {
+      if (consumed.has(transaction.id)) continue;
+      const candidates = [transaction.reference, transaction.message]
+        .filter((value): value is string => Boolean(value))
+        .map(normalizeReference);
+      const sharing = candidates.map((value) => byReference.get(value)).find((list) => list && list.length > 0);
+      if (!sharing) continue;
+      // A payment made before the bill's date paid an earlier bill with the same viite.
+      const dated = sharing.filter(
+        (candidate) => !transaction.date || transaction.date.getTime() >= candidate.issueDate.getTime()
+      );
+      const paid = Math.abs(transaction.amountCents);
+      // The invoice of exactly this amount; else, alone with the viite, one this payment does not
+      // exceed (a part payment). An overpayment, or a choice between invoices, is left to the owner.
+      const invoice = partial
+        ? dated.length === 1 && paid < openCents(dated[0])
+          ? dated[0]
+          : undefined
+        : dated.find((candidate) => openCents(candidate) === paid);
+      if (!invoice) continue;
 
-    const amount = centsToEuros(Math.abs(transaction.amountCents));
-    try {
-      await recordPurchasePayment(userId, invoice.id, {
-        amount,
-        paidDate: (transaction.date ?? now).toISOString().slice(0, 10),
-        transactionId: transaction.id,
-        source: "bank",
-        note: "Kohdistettu viitenumerolla",
-      });
-    } catch (error) {
-      // A closed period stops this one payment, not the whole run.
-      if (error instanceof PeriodLockedError) {
-        skippedLocked.push({
-          invoiceId: invoice.id,
-          supplierName: invoice.supplierName,
+      const amount = centsToEuros(Math.abs(transaction.amountCents));
+      try {
+        await recordPurchasePayment(userId, invoice.id, {
+          amount,
+          paidDate: (transaction.date ?? now).toISOString().slice(0, 10),
           transactionId: transaction.id,
+          source: "bank",
+          note: "Kohdistettu viitenumerolla",
         });
-        consumed.add(transaction.id);
-        continue;
+      } catch (error) {
+        // A closed period stops this one payment, not the whole run.
+        if (error instanceof PeriodLockedError) {
+          skippedLocked.push({
+            invoiceId: invoice.id,
+            supplierName: invoice.supplierName,
+            transactionId: transaction.id,
+          });
+          consumed.add(transaction.id);
+          continue;
+        }
+        throw error;
       }
-      throw error;
+      applied.push({
+        invoiceId: invoice.id,
+        supplierName: invoice.supplierName,
+        transactionId: transaction.id,
+        amount,
+      });
+      consumed.add(transaction.id);
+      const rest = sharing.filter((candidate) => candidate.id !== invoice.id);
+      if (paid >= openCents(invoice)) byReference.set(invoice.reference as string, rest);
+      else invoice.payments.push({ amountCents: paid });
     }
-    applied.push({
-      invoiceId: invoice.id,
-      supplierName: invoice.supplierName,
-      transactionId: transaction.id,
-      amount,
-    });
-    consumed.add(transaction.id);
-    const rest = sharing.filter((candidate) => candidate.id !== invoice.id);
-    if (paid >= openCents(invoice)) byReference.set(invoice.reference as string, rest);
-    else invoice.payments.push({ amountCents: paid });
   }
 
   const suggestions = await planPurchaseSuggestions(

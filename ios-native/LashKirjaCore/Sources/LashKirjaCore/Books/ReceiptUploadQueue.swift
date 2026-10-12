@@ -5,7 +5,8 @@ import Foundation
 /// the offline queue because the network was gone. `saveQueued` and `saving` are the web's
 /// auto-save: a finished reading waiting for a free slot, and one on its way to the server.
 public enum UploadQueueStatus: String, Sendable, Equatable {
-    case pending, uploading, processing, ready, saveQueued, saving, saved, failed, cancelled, background, offline
+    /// `skipped`: the owner answered "Älä tallenna" to the look-alike question; nothing was saved (W27).
+    case pending, uploading, processing, ready, saveQueued, saving, saved, failed, cancelled, background, offline, skipped
 
     public var label: String {
         switch self {
@@ -20,6 +21,7 @@ public enum UploadQueueStatus: String, Sendable, Equatable {
         case .cancelled: "Peruttu"
         case .background: "Taustalla"
         case .offline: "Odottaa yhteyttä"
+        case .skipped: "Ohitettu (kaksoiskappale)"
         }
     }
 }
@@ -175,6 +177,11 @@ public struct ReceiptUploadQueue: Sendable, Equatable {
         }
     }
     public mutating func markOffline(_ id: String) { patch(id) { $0.status = .offline; $0.progress = nil; $0.error = nil } }
+    /// "Älä tallenna" on the look-alike question (W27): its reading goes, so the row is no longer
+    /// work to finish ("Kesken") and is not kept on the phone; it stays listed with what happened.
+    public mutating func markSkippedDuplicate(_ id: String) {
+        patch(id) { $0.status = .skipped; $0.progress = nil; $0.error = nil; $0.draft = nil }
+    }
 
     /// "Peruuta": what has not finished stops; a read or failed file stays. A reading still
     /// waiting for a save slot is not lost: it stays read, for the form. A save already sent finishes.
@@ -294,10 +301,12 @@ public struct ReceiptUploadQueue: Sendable, Equatable {
         // A saved receipt the server did not approve waits in Kuitit; a file read but not yet saved waits here.
         let waiting = saved.count - approved - unknown + rows.filter { $0.status == .ready }.count
         let failed = rows.filter { $0.status == .failed }.count
+        let skipped = rows.filter { $0.status == .skipped }.count
         var parts: [String] = []
         if approved > 0 { parts.append("Hyväksyttiin automaattisesti \(approved)") }
         if unknown > 0 { parts.append("Tallennettiin \(unknown)") }
         if waiting > 0 { parts.append("\(waiting) odottaa tarkistusta") }
+        if skipped > 0 { parts.append("\(skipped) ohitettu (kaksoiskappale)") }
         if failed > 0 && !parts.isEmpty { parts.append("\(failed) epäonnistui") }
         return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }

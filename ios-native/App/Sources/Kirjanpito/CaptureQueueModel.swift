@@ -312,11 +312,30 @@ final class CaptureQueueModel {
         if invoiceNote == nil && queue.closesAfterSave { closeRequested = true } else { step = .queue }
     }
 
+    /// "Älä tallenna" on the look-alike question (W27): the staged file is deleted on the server and
+    /// the row says "Ohitettu (kaksoiskappale)" instead of waiting under "Kesken" for good. Back on
+    /// the queue, so the owner sees what happened; a bank-row match has nothing left to do and ends.
+    func skipDuplicate(_ rowId: String, uploadId: String) async throws {
+        guard let api = app?.api else { throw LKError(status: 0, message: LKError.unreachable) }
+        try await ReceiptSaving.discardDuplicate(uploadId: uploadId) { path in
+            let _: Ignored = try await api.send("DELETE", path, body: Optional<EmptyBody>.none)
+        }
+        queue.markSkippedDuplicate(rowId)
+        persist()
+        if single { closeRequested = true; return }
+        say(UploadQueueStatus.skipped.label)
+        step = .queue
+    }
+
     /// "Tallennettu · ostolasku luotu, eräpäivä 14.10.2026" for a few seconds; nothing for a plain receipt.
     private func announce(_ invoiceNote: String?) {
         guard let invoiceNote else { return }
+        say("Tallennettu · \(invoiceNote)")
+    }
+
+    private func say(_ text: String) {
         noticeTask?.cancel()
-        notice = "Tallennettu · \(invoiceNote)"
+        notice = text
         noticeTask = Task {
             // A cancelled sleep means a newer notice or a closed screen already took over.
             try? await Task.sleep(nanoseconds: 5_000_000_000)

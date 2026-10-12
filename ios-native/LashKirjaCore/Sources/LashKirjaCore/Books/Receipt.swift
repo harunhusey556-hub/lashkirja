@@ -165,4 +165,9 @@ extension Receipt {
     /// Whether `/api/receipts/[id]/file` has something to show. A sale drafted from a bank row
     /// (`auto_income`) is stored with a placeholder name and no upload behind it.
     public var hasOriginalFile: Bool { fileName != nil && source != "auto_income" }
+
+    /// A bank row explains the receipt: linked to it, or (a bill) paid from the bank through its
+    /// ostolasku, which the list reports as `match.status == "linked"` with no linked row (W27).
+    /// The same rule as the Kohdistettu / Ei kohdistettu chips.
+    public var isBankMatched: Bool { linkedTransaction != nil || match?.status == "linked" }
 }

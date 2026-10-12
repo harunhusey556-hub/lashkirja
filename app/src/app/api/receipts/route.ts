@@ -24,7 +24,7 @@ import {
   type StagedUploadRow,
 } from "@/lib/receipt-staging";
 import { buildReceiptMatchViews } from "@/lib/matching";
-import { buildReceiptWhere, ReceiptFilterError, receiptKindWhere, withReceiptSearch } from "@/lib/receipt-filters";
+import { buildReceiptWhere, ReceiptFilterError, receiptKindWhere, receiptLinkWhere, withReceiptSearch } from "@/lib/receipt-filters";
 import { noteRequest, timeDb } from "@/lib/observe";
 import {
   noStoreJson,
@@ -255,11 +255,12 @@ export async function GET(req: NextRequest) {
 
   if (type === "meno" || type === "tulo") where.type = type;
 
-  const linkedStatus = url.searchParams.get("linkedStatus");
-  if (linkedStatus === "linked") where.linkedTransaction = { isNot: null };
-  if (linkedStatus === "unlinked") where.linkedTransaction = null;
-  // Kuitit lists kuitit (`kind=receipt`) and its Laskut chip the bills filed as ostolaskut (`kind=invoice`).
-  Object.assign(where, receiptKindWhere(url.searchParams.get("kind")));
+  const kind = url.searchParams.get("kind");
+  // Kohdistettu / Ei kohdistettu span kuitit and bills alike (receipt-filters.ts, W27);
+  // the other tabs list kuitit (`kind=receipt`) and the Laskut chip the bills (`kind=invoice`).
+  const linkClause = receiptLinkWhere(url.searchParams.get("linkedStatus"), kind);
+  if (linkClause) where = { AND: [where, linkClause] };
+  else Object.assign(where, receiptKindWhere(kind));
 
   let orderBy: Prisma.ReceiptOrderByWithRelationInput = { date: "desc" };
   if (sort === "date_asc") orderBy = { date: "asc" };
@@ -300,6 +301,8 @@ export async function GET(req: NextRequest) {
             statement: { select: { periodMonth: true, fileName: true } },
           },
         },
+        // A bill is paid through its ostolasku: such a payment explains it like a linked row.
+        purchaseInvoice: { select: { payments: { where: { transactionId: { not: null } }, select: { id: true }, take: 1 } } },
       },
     }),
     prisma.receipt.count({ where }),
@@ -316,8 +319,13 @@ export async function GET(req: NextRequest) {
   );
 
   const response = noStoreJson({
-    receipts: receipts.map(({ totalAmountCents, linkedTransaction, ...receipt }) => {
-      const match = matchViews.get(receipt.id);
+    receipts: receipts.map(({ totalAmountCents, linkedTransaction, purchaseInvoice, ...receipt }) => {
+      const view = matchViews.get(receipt.id);
+      // Same rule as the Kohdistettu tab (receiptLinkWhere): the row's tag must not say
+      // "Ei kohdistettu" in the list that holds only the explained documents.
+      const paidFromBank = (purchaseInvoice?.payments.length ?? 0) > 0;
+      const status = paidFromBank ? "linked" : (view?.status ?? "unlinked");
+      const match = paidFromBank ? { linkedTransaction: view?.linkedTransaction ?? null, suggestedTransaction: null } : view;
       return {
         ...receipt,
         totalAmount: totalAmountCents == null ? null : centsToEuros(totalAmountCents),
@@ -333,7 +341,7 @@ export async function GET(req: NextRequest) {
             }
           : null,
         match: {
-          status: match?.status ?? "unlinked",
+          status,
           suggestedTransaction: match?.suggestedTransaction
             ? {
                 ...match.suggestedTransaction,
@@ -341,7 +349,7 @@ export async function GET(req: NextRequest) {
               }
             : null,
           matchCandidates: [],
-          candidatesDeferred: (match?.status ?? "unlinked") === "unlinked",
+          candidatesDeferred: status === "unlinked",
         },
       };
     }),

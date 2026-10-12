@@ -134,7 +134,8 @@ export function PurchaseMatchList({
           {waiting.map(({ invoice }) => (
             <ListRow
               key={invoice.id}
-              href="/kirjanpito/ostolaskut"
+              // That ostolasku itself (its "Kohdista pankkitapahtumaan"), not the list to search again.
+              href={`/kirjanpito/ostolaskut?id=${encodeURIComponent(invoice.id)}`}
               title={invoice.supplierName}
               amount={formatEur(invoice.open)}
               secondary={invoiceLine(invoice)}

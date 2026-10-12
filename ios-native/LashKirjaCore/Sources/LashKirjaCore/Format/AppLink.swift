@@ -19,6 +19,8 @@ public enum AppLink: Equatable, Sendable {
     case customer(String)
     case purchaseInvoices
     case purchaseInvoice(String)
+    /// Kohdista ostolaskujen maksut (`/kirjanpito/ostolaskut/kohdistus`). Without it the link opened nothing.
+    case purchaseMatch
     case recurringInvoices
     case periods
     case workQueue
@@ -72,6 +74,7 @@ public enum AppLink: Equatable, Sendable {
         case "/asiakkaat": return .customers
         case "/asiakkaat/asiakas": return id.map(AppLink.customer) ?? .customers
         case "/kirjanpito/ostolaskut": return id.map(AppLink.purchaseInvoice) ?? .purchaseInvoices
+        case "/kirjanpito/ostolaskut/kohdistus": return .purchaseMatch
         case "/toistuvat": return .recurringInvoices
         case "/kirjanpito/kaudet", "/kirjanpito/kuukausi": return .periods
         case "/tyot": return .workQueue

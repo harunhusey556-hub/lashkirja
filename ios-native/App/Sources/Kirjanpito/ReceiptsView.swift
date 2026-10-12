@@ -650,7 +650,7 @@ struct ReceiptRow: View {
                 Text(receipt.title).lineLimitUnlessLarge()
                 HStack(spacing: 4) {
                     Text([receipt.date.map(APIDate.displayDay), receipt.category.map(ReceiptCategory.label(for:))].compactMap { $0 }.joined(separator: " · "))
-                    if receipt.linkedTransaction != nil {
+                    if receipt.isBankMatched {
                         Image(systemName: "link").accessibilityLabel("Kohdistettu")
                     }
                 }
