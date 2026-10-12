@@ -22,7 +22,7 @@ private func statement(_ id: String, rows: [String]) throws -> Statement {
     try decode(StatementResponse.self, #"{"statement":{"id":"\#(id)","fileName":"f.csv","periodMonth":"2026-10","uploadedAt":"2026-10-01T00:00:00Z","transactions":[\#(rows.joined(separator: ","))]}}"#).statement
 }
 
-private final class Flag: @unchecked Sendable { var value = false }
+private final class ObservedFlag: @unchecked Sendable { var value = false }
 
 // MARK: Version store
 
@@ -119,7 +119,7 @@ private final class Flag: @unchecked Sendable { var value = false }
 
     @MainActor @Test func theStoreTellsObserversOnABump() {
         let store = DataVersionStore()
-        let told = Flag()
+        let told = ObservedFlag()
         withObservationTracking { _ = store.version } onChange: { told.value = true }
         store.bump()
         #expect(told.value)
@@ -129,7 +129,7 @@ private final class Flag: @unchecked Sendable { var value = false }
     @MainActor @Test func theStoreTellsObserversWhenTheServerMoved() {
         let store = DataVersionStore()
         store.apply(SyncVersion(dataVersion: "1"))
-        let told = Flag()
+        let told = ObservedFlag()
         withObservationTracking { _ = store.version } onChange: { told.value = true }
         store.apply(SyncVersion(dataVersion: "2"))
         #expect(told.value)
@@ -138,7 +138,7 @@ private final class Flag: @unchecked Sendable { var value = false }
     @MainActor @Test func theStoreStaysQuietForTheSameAnswer() {
         let store = DataVersionStore()
         store.apply(SyncVersion(dataVersion: "1"))
-        let told = Flag()
+        let told = ObservedFlag()
         withObservationTracking { _ = store.version } onChange: { told.value = true }
         store.apply(SyncVersion(dataVersion: "1"))
         #expect(!told.value)
