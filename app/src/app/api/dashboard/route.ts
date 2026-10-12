@@ -10,6 +10,8 @@ import { loadCashflow, type CashflowMonth } from "@/lib/koti-cashflow";
 import { buildAging, buildAgingReport, creditedCentsOf, openPosition, type InvoiceStatus } from "@/lib/invoices";
 import { alvReportOf, loadAlvPeriodSources, type AlvPeriodSources } from "@/lib/alv-period";
 import { cachedForStamp, readBooksStamp } from "@/lib/books-cache";
+import { getBankOverview } from "@/lib/bank-accounts";
+import { monthKey } from "@/lib/bank-balances";
 import { computeYearTurnover } from "@/lib/alv-threshold";
 import { buildProfitLoss } from "@/lib/reports";
 import { helsinkiMonthKey } from "@/lib/validation";
@@ -184,7 +186,11 @@ export async function GET(req: NextRequest) {
   let receivables = { totalOpen: 0, overdue: 0, overdueCount: 0 };
   let payables = { totalOpen: 0, overdue: 0, overdueCount: 0 };
   try {
-    const bank = await getBankPosition(session.userId, { now });
+    // The ledger roll-forward (~25 ms on 5 000 rows) reads only bank accounts, statements, their
+    // rows and monthly balances, all of which bump DataVersion; it rolls through the current
+    // month, hence the key. Consent validity depends on `now` and is recomputed every time.
+    const overview = await cached(`bank-overview|${monthKey(new Date())}`, () => getBankOverview(session.userId));
+    const bank = await getBankPosition(session.userId, { now, overview });
     bankPosition = bank.position;
     bankConnections = bank.connections;
     try {
