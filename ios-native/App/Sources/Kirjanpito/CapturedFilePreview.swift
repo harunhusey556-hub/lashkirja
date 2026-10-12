@@ -24,6 +24,7 @@ struct CapturedFilePreview: View {
                         .accessibilityLabel("Kuitin kuva")
                         .accessibilityHint("Avaa koko näytölle")
                         .accessibilityAddTraits(.isButton)
+                        .accessibilityIdentifier("captured-file-preview")
                         .onTapGesture { fullScreen = url }
                 } else if failed {
                     Label("Kuvaa ei voitu näyttää", systemImage: "doc.questionmark")

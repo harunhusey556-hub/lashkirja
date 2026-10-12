@@ -114,6 +114,7 @@ private struct ConfirmSheetContent: View {
                         .foregroundStyle(Theme.ink)
                         .fixedSize(horizontal: false, vertical: true)
                         .accessibilityAddTraits(.isHeader)
+                        .accessibilityIdentifier("confirm-sheet-title")
                     if !request.message.isEmpty {
                         Text(request.message)
                             .font(.subheadline)
@@ -137,6 +138,7 @@ private struct ConfirmSheetContent: View {
                 .buttonStyle(ConfirmButtonStyle(fill: request.isDestructive ? Self.destructiveFill : Theme.ink,
                                                 text: request.isDestructive ? .white : Theme.onInk,
                                                 outlined: false))
+                .accessibilityIdentifier("confirm-sheet-confirm")
                 if let secondary = request.secondary {
                     Button {
                         choose(secondary.run)
@@ -151,6 +153,7 @@ private struct ConfirmSheetContent: View {
                     Text(request.cancelTitle)
                 }
                 .buttonStyle(ConfirmButtonStyle(fill: Theme.surface, text: Theme.ink, outlined: true))
+                .accessibilityIdentifier("confirm-sheet-cancel")
             }
             .disabled(chosen)
             .padding(.horizontal, 20)
@@ -158,6 +161,9 @@ private struct ConfirmSheetContent: View {
             .padding(.bottom, 12)
             .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { buttonsHeight = $0 }
         }
+        // One container the UI tests find and measure (anchored at the bottom, full width).
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("confirm-sheet")
         .presentationDetents([.height(detentHeight)])
         .presentationDragIndicator(.visible)
         .presentationCornerRadius(24)
