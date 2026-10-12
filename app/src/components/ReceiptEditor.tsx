@@ -279,7 +279,10 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
         type: upload.extracted.type || "meno",
         vatDetails: (upload.extracted.vatDetails ?? []).map((detail) => ({ rate: detail.rate ?? 0, amount: detail.amount ?? 0 })),
       }),
-      originalAmount: "",
+      // A non-EUR document keeps the amount the reading found in its own
+      // currency; the owner still checks it, and the euro figure stays theirs
+      // to type (the app never guesses a rate).
+      originalAmount: moneyField(upload.extracted.originalAmount),
     });
     setUseCustomCategory(!knownCategory && Boolean(upload.extracted.category));
     setFormReady(true);

@@ -35,6 +35,8 @@ export interface ExtractedUpload {
   invoiceNumber?: string | null;
   currency?: string | null;
   sellerCountry?: string | null;
+  /** The total the document printed in `currency`, when it was not in euros. */
+  originalAmount?: number | null;
   fieldConfidence?: { vendor?: number; date?: number; totalAmount?: number } | null;
   /** Nothing could be read from the file: the form opens empty for manual entry (F04). */
   unreadable?: boolean;

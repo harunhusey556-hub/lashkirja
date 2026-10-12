@@ -25,6 +25,7 @@ import { assertPeriodOpen, PeriodLockedError } from "./period-lock";
 import { planPairs } from "./match-gate";
 import { rejectedPurchasePairs } from "./purchase-bank-match";
 import { isPurchaseVatTreatment, type PurchaseVatTreatment } from "./alv";
+import type { ExtractedReceipt } from "./ai";
 
 export type PurchaseStatus = "open" | "paid" | "cancelled";
 
@@ -346,6 +347,87 @@ export async function createPurchaseInvoice(
     include: purchaseInclude,
   });
   return toPublicPurchaseInvoice(created);
+}
+
+/**
+ * Files a receipt the AI read as a payable bill ("lasku"): the receipt stays
+ * the document - the VAT return keeps reading it, and a linked purchase
+ * invoice is never counted twice - and the ostolasku tracks what is owed.
+ * The same supplier invoice number is never entered twice (createPurchaseInvoice
+ * guards that); a reading that is not a bill, or a receipt missing what an
+ * invoice needs, files nothing. The caller reports what happened.
+ */
+export async function fileReceiptAsPurchaseInvoice(
+  userId: string,
+  receipt: {
+    id: string;
+    vendor: string | null;
+    date: Date | null;
+    invoiceNumber: string | null;
+    totalAmountCents: number | null;
+    vatDetails: string | null;
+    category: string | null;
+    currency: string;
+    originalAmountCents: number | null;
+    vatTreatment: string;
+    type: string;
+  },
+  reading: Pick<ExtractedReceipt, "documentType" | "dueDate"> | null
+): Promise<
+  | { created: true; invoice: PublicPurchaseInvoice }
+  | { created: false; skipped: "not_an_invoice" | "sales_document" | "no_supplier" | "no_date" | "no_amount" | "duplicate" }
+> {
+  if (reading?.documentType !== "invoice") return { created: false, skipped: "not_an_invoice" };
+  if (receipt.type === "tulo") return { created: false, skipped: "sales_document" };
+  const supplierName = receipt.vendor?.trim();
+  if (!supplierName) return { created: false, skipped: "no_supplier" };
+  if (!receipt.date) return { created: false, skipped: "no_date" };
+  if (receipt.totalAmountCents == null || receipt.totalAmountCents <= 0) {
+    return { created: false, skipped: "no_amount" };
+  }
+  const issueDate = receipt.date.toISOString().slice(0, 10);
+  try {
+    const invoice = await createPurchaseInvoice(userId, {
+      supplierName,
+      invoiceNumber: receipt.invoiceNumber,
+      issueDate,
+      // A bill whose due date was not read is due when it was issued; the
+      // owner edits the real term on the ostolasku screen.
+      dueDate: reading.dueDate ?? issueDate,
+      gross: centsToEuros(receipt.totalAmountCents),
+      vat: centsToEuros(receiptVatTotalCents(receipt.vatDetails)),
+      category: receipt.category,
+      receiptId: receipt.id,
+      currency: receipt.currency,
+      originalAmount:
+        receipt.originalAmountCents == null ? null : centsToEuros(receipt.originalAmountCents),
+      vatTreatment: isPurchaseVatTreatment(receipt.vatTreatment) ? receipt.vatTreatment : "domestic",
+    });
+    return { created: true, invoice };
+  } catch (error) {
+    if (error instanceof AppError && error.code === "DUPLICATE_PURCHASE_INVOICE") {
+      return { created: false, skipped: "duplicate" };
+    }
+    throw error;
+  }
+}
+
+/** The receipt's VAT lines, stored as JSON cents, added up in cents. */
+function receiptVatTotalCents(vatDetails: string | null): number {
+  if (!vatDetails) return 0;
+  try {
+    const lines = JSON.parse(vatDetails) as Array<{ amount?: unknown }>;
+    return Array.isArray(lines)
+      ? lines.reduce(
+          (sum, line) =>
+            sum +
+            (typeof line?.amount === "number" && Number.isFinite(line.amount) ? line.amount : 0),
+          0
+        )
+      : 0;
+  } catch {
+    return 0;
+  }
 }
 
 export async function updatePurchaseInvoice(

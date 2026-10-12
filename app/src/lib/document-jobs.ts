@@ -75,6 +75,13 @@ async function persistExtraction(
         type: extracted.type,
         reference: extracted.reference,
         invoiceNumber: extracted.invoiceNumber,
+        // The reading's currency and kind must survive the save, or a foreign
+        // bill loses its amount and an invoice is filed as a plain kuitti.
+        currency: extracted.currency ?? null,
+        sellerCountry: extracted.sellerCountry ?? null,
+        documentType: extracted.documentType ?? null,
+        originalAmount: extracted.originalAmount ?? null,
+        dueDate: extracted.dueDate ?? null,
       }),
       // An unreadable file is typed in by hand: its receipt is "manual", not "ocr".
       extractionSource: extracted.unreadable ? "manual" : extracted.source === "ai" ? "ai" : "ocr",

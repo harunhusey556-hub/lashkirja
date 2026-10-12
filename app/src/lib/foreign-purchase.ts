@@ -22,6 +22,8 @@ export interface ForeignPurchaseInput {
   notes?: string | null;
   vatDetails: Array<{ rate: number; amount: number }>;
   type?: string;
+  /** The total the document printed, in `currency`, exactly as read (no FX rate is ever guessed). */
+  originalAmount?: number | null;
 }
 
 export function suggestPurchaseVatTreatment(input: ForeignPurchaseInput): PurchaseVatTreatment {
@@ -41,14 +43,25 @@ export function suggestPurchaseVatTreatment(input: ForeignPurchaseInput): Purcha
   return goods ? "non_eu_goods" : "non_eu_service";
 }
 
-/** The receipt columns for a reading: currency (EUR when unknown) and the suggested treatment. */
+/**
+ * The receipt columns for a reading: currency (EUR when unknown), the suggested
+ * treatment, and the original amount for a document that is not in euros - the
+ * VAT return needs the euro figure, but the document's own total must survive
+ * too or the owner has no record of what the bill actually said.
+ */
 export function foreignFieldsFromExtraction(input: ForeignPurchaseInput): {
   currency: string;
   vatTreatment: PurchaseVatTreatment;
+  originalAmountCents: number | null;
 } {
+  const currency = input.currency && /^[A-Z]{3}$/.test(input.currency) ? input.currency : "EUR";
   return {
-    currency: input.currency && /^[A-Z]{3}$/.test(input.currency) ? input.currency : "EUR",
+    currency,
     vatTreatment: suggestPurchaseVatTreatment(input),
+    originalAmountCents:
+      currency !== "EUR" && input.originalAmount != null && input.originalAmount > 0
+        ? Math.round(input.originalAmount * 100)
+        : null,
   };
 }
 
