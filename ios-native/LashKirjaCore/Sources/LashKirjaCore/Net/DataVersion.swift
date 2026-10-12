@@ -231,10 +231,23 @@ public final class DataVersionStore {
 
     @discardableResult
     public func apply(_ snapshot: SyncVersion, absorb: Bool = false) -> Set<DataArea> {
-        state.apply(snapshot, absorb: absorb)
+        var next = state
+        let moved = next.apply(snapshot, absorb: absorb)
+        update(next)
+        return moved
     }
 
-    public func absorb(dataVersion: String?) { state.absorb(dataVersion: dataVersion) }
+    public func absorb(dataVersion: String?) {
+        var next = state
+        next.absorb(dataVersion: dataVersion)
+        update(next)
+    }
+
+    /// Any write to `state` tells every observer, even an equal one; a poll answering the same
+    /// as last time must not re-run every screen's `.task(id:)`.
+    private func update(_ next: DataVersionState) {
+        if next != state { state = next }
+    }
 
     public func takeBalances(_ fresh: [String: Decimal], at now: Date = Date()) { balances.take(fresh, at: now) }
     public func settleBalances(loadStartedAt: Date) { balances.settle(loadStartedAt: loadStartedAt) }
