@@ -157,7 +157,7 @@ struct InvoiceDetailView: View {
     private func summaryCard(_ invoice: Invoice) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .firstTextBaseline) {
-                StatusBadge(status: invoice.displayStatus)
+                StatusBadge(status: invoice.displayStatus, partlyCredited: invoice.isPartlyCredited)
                 Spacer(minLength: 8)
                 Text(InvoiceDetailLayout.dueLine(status: invoice.displayStatus, dueDate: invoice.dueDate,
                                                  paidAt: invoice.paidAt, today: APIDate.dayString(Date())))
@@ -181,6 +181,9 @@ struct InvoiceDetailView: View {
                     Text("Maksettu \(Money.format(invoice.paid)) · avoinna \(Money.format(invoice.open))")
                         .font(.caption).foregroundStyle(Theme.ink2)
                 }
+            }
+            if let line = invoice.openAndCreditedLine {
+                Text(line).font(.caption).foregroundStyle(Theme.ink2)
             }
             if let line = InvoiceSendState.line(status: invoice.status, sentAt: invoice.sentAt, sends: invoice.sends) {
                 sendLine(line)

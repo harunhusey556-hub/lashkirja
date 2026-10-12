@@ -27,6 +27,7 @@ public enum ChatProposalCard {
     public static let invoiceDraftAcceptedLabel = "Luonnos tehty"
     public static let receiptUpdateTitle = "Kuitin korjaus"
     public static let receiptUpdateAcceptedLabel = "Kuitti korjattu"
+    public static let matchBatchTitle = ChatMatchBatchText.title
 
     public enum Phase: Equatable, Sendable {
         /// Buttons on.
@@ -49,6 +50,8 @@ public enum ChatProposalCard {
             return !draft.customerName.isEmpty && !draft.lines.isEmpty
         case .receiptUpdate:
             return !(proposal.receiptUpdate?.changes.isEmpty ?? true)
+        case .matchBatch:
+            return !(proposal.matchBatch?.cards.isEmpty ?? true)
         }
     }
 
@@ -57,6 +60,7 @@ public enum ChatProposalCard {
         case .match: title
         case .invoiceDraft: invoiceDraftTitle
         case .receiptUpdate: receiptUpdateTitle
+        case .matchBatch: matchBatchTitle
         }
     }
 
@@ -71,6 +75,7 @@ public enum ChatProposalCard {
             case .match: return acceptedLabel
             case .invoiceDraft: return invoiceDraftAcceptedLabel
             case .receiptUpdate: return receiptUpdateAcceptedLabel
+            case .matchBatch: return acceptedLabel
             }
         }
     }
@@ -79,7 +84,7 @@ public enum ChatProposalCard {
     public static func resultLink(_ proposal: ChatProposal) -> (label: String, href: String)? {
         guard proposal.status == "accepted", let href = proposal.href, href.hasPrefix("/") else { return nil }
         switch proposal.kind {
-        case .match: return nil
+        case .match, .matchBatch: return nil
         case .invoiceDraft:
             if let number = proposal.invoiceDraft?.invoiceNumber { return ("Avaa lasku \(number)", href) }
             return ("Avaa lasku", href)
@@ -110,7 +115,8 @@ public enum ChatProposalCard {
     }
 
     public static func canDecide(_ proposal: ChatProposal?, saving: ChatProposalDecision?) -> Bool {
-        guard let proposal, isShown(proposal) else { return false }
+        // A batch is decided row by row against /api/matching/*; PATCH /api/ai/chat refuses it.
+        guard let proposal, isShown(proposal), proposal.kind != .matchBatch else { return false }
         return phase(proposal, saving: saving) == .open
     }
 

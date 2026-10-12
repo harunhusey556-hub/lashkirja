@@ -14,6 +14,8 @@ public enum ChatProposalKind: String, Sendable, Hashable {
     case invoiceDraft = "invoice_draft"
     /// A correction to one receipt's fields.
     case receiptUpdate = "receipt_update"
+    /// Every pairing a match review proposed, in one card (decided row by row, not with `PATCH /api/ai/chat`).
+    case matchBatch = "match_batch"
 }
 
 /// `invoice_draft`: what Hyväksy creates as a DRAFT invoice. Amounts are exact euros from the server.
@@ -94,6 +96,7 @@ public struct ChatProposal: Decodable, Sendable, Hashable {
     public let reasons: [String]
     public let invoiceDraft: ChatInvoiceDraft?
     public let receiptUpdate: ChatReceiptUpdate?
+    public let matchBatch: ChatMatchBatch?
     /// Once accepted: the record that was created or changed ("/laskut/lasku?id=…", "/kuitit/kuitti?id=…").
     public let href: String?
     /// "accepted" or "rejected" once decided; nil while open.
@@ -110,6 +113,7 @@ public struct ChatProposal: Decodable, Sendable, Hashable {
         self.reasons = reasons
         self.invoiceDraft = nil
         self.receiptUpdate = nil
+        self.matchBatch = nil
         self.href = nil
         self.status = status
     }
@@ -124,6 +128,7 @@ public struct ChatProposal: Decodable, Sendable, Hashable {
         self.reasons = []
         self.invoiceDraft = invoiceDraft
         self.receiptUpdate = nil
+        self.matchBatch = nil
         self.href = href
         self.status = status
     }
@@ -138,6 +143,7 @@ public struct ChatProposal: Decodable, Sendable, Hashable {
         self.reasons = []
         self.invoiceDraft = nil
         self.receiptUpdate = receiptUpdate
+        self.matchBatch = nil
         self.href = href
         self.status = status
     }
@@ -204,6 +210,13 @@ public struct ChatProposal: Decodable, Sendable, Hashable {
             receiptUpdate = ChatReceiptUpdate(receiptSummary: receiptSummary, changes: changes)
         } else {
             receiptUpdate = nil
+        }
+
+        // The batch reads its own keys (cards, pairs, counts) from the same object.
+        if kind == .matchBatch {
+            matchBatch = try? ChatMatchBatch(from: decoder)
+        } else {
+            matchBatch = nil
         }
     }
 

@@ -2,7 +2,8 @@ import Foundation
 
 /// A payable's stored status (`/api/purchase-invoices`).
 public enum PurchaseStatus: String, Codable, Sendable, CaseIterable {
-    case open, paid, cancelled
+    /// `credited`: fully credited by credit notes; nothing is owed on it.
+    case open, paid, credited, cancelled
 
     public init(from decoder: Decoder) throws {
         let raw = try decoder.singleValueContainer().decode(String.self)
@@ -12,7 +13,8 @@ public enum PurchaseStatus: String, Codable, Sendable, CaseIterable {
 
 /// What the list shows: an open payable past its due date reads as overdue.
 public enum PurchaseDisplayStatus: String, Codable, Sendable, CaseIterable {
-    case open, overdue, paid, cancelled
+    /// `credited`: a fully credited invoice, and every supplier credit note itself.
+    case open, overdue, paid, credited, cancelled
 
     public init(from decoder: Decoder) throws {
         let raw = try decoder.singleValueContainer().decode(String.self)
@@ -25,6 +27,7 @@ public enum PurchaseDisplayStatus: String, Codable, Sendable, CaseIterable {
         case .open: "Odottaa maksua"
         case .overdue: "Myöhässä"
         case .paid: "Maksettu"
+        case .credited: "Hyvitetty"
         case .cancelled: "Mitätöity"
         }
     }
@@ -80,6 +83,24 @@ public struct PurchaseInvoice: Decodable, Sendable, Identifiable, Hashable {
         public var isLinkedToBank: Bool { transactionId != nil }
     }
 
+    /// One entry of `creditNotes[]`: a credit note against this invoice (its gross is negative, as stored).
+    public struct CreditNoteRef: Decodable, Sendable, Identifiable, Hashable {
+        public let id: String
+        public let issueDate: String
+        public let gross: Decimal
+        public let invoiceNumber: String?
+
+        enum CodingKeys: String, CodingKey { case id, issueDate, gross, invoiceNumber }
+
+        public init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            id = try c.decode(String.self, forKey: .id)
+            issueDate = try c.decodeIfPresent(String.self, forKey: .issueDate) ?? ""
+            gross = try c.decodeMoneyIfPresent(.gross) ?? 0
+            invoiceNumber = try c.decodeIfPresent(String.self, forKey: .invoiceNumber)
+        }
+    }
+
     public let id: String
     public let supplierName: String
     public let supplierBusinessId: String?
@@ -94,6 +115,8 @@ public struct PurchaseInvoice: Decodable, Sendable, Identifiable, Hashable {
     public let vat: Decimal
     public let net: Decimal
     public let paid: Decimal
+    /// Total of the credit notes against this invoice (positive); zero from an older server.
+    public let credited: Decimal
     public let open: Decimal
     public let closedReason: String?
     public let category: String?
@@ -103,10 +126,16 @@ public struct PurchaseInvoice: Decodable, Sendable, Identifiable, Hashable {
     public let vatTreatment: PurchaseVatTreatment
     public let receiptId: String?
     public let payments: [Payment]
+    /// A supplier credit note (a negative total): nothing to pay.
+    public let isCreditNote: Bool
+    /// The invoice a credit note corrects; nil on invoices and on a credit note filed on its own.
+    public let creditsInvoiceId: String?
+    public let creditNotes: [CreditNoteRef]
 
     enum CodingKeys: String, CodingKey {
         case id, supplierName, supplierBusinessId, supplierIban, invoiceNumber, reference, issueDate, dueDate
         case status, displayStatus, gross, vat, net, paid, open, closedReason, category, notes, paidAt, receiptId, payments, vatTreatment
+        case credited, isCreditNote, creditsInvoiceId, creditNotes
     }
 
     public init(from decoder: Decoder) throws {
@@ -125,6 +154,7 @@ public struct PurchaseInvoice: Decodable, Sendable, Identifiable, Hashable {
         vat = try c.decodeMoneyIfPresent(.vat) ?? 0
         net = try c.decodeMoneyIfPresent(.net) ?? gross - vat
         paid = try c.decodeMoneyIfPresent(.paid) ?? 0
+        credited = try c.decodeMoneyIfPresent(.credited) ?? 0
         open = try c.decodeMoneyIfPresent(.open) ?? 0
         closedReason = try c.decodeIfPresent(String.self, forKey: .closedReason)
         category = try c.decodeIfPresent(String.self, forKey: .category)
@@ -133,10 +163,19 @@ public struct PurchaseInvoice: Decodable, Sendable, Identifiable, Hashable {
         vatTreatment = (try? c.decodeIfPresent(String.self, forKey: .vatTreatment)).flatMap(PurchaseVatTreatment.init(rawValue:)) ?? .domestic
         receiptId = try c.decodeIfPresent(String.self, forKey: .receiptId)
         payments = try c.decodeIfPresent([Payment].self, forKey: .payments) ?? []
+        isCreditNote = try c.decodeIfPresent(Bool.self, forKey: .isCreditNote) ?? (gross < 0)
+        creditsInvoiceId = try c.decodeIfPresent(String.self, forKey: .creditsInvoiceId)
+        creditNotes = (try? c.decodeIfPresent([CreditNoteRef].self, forKey: .creditNotes)) ?? []
     }
 
     /// The list row's second line, as the web's `rowSecondary`: "A-12 · eräpäivä 15.9. · avoinna 100,00 €".
     public var rowSecondary: String {
+        // A credit note has no due date: "A-12 · Hyvityslasku 3.10.".
+        if isCreditNote {
+            let date = "Hyvityslasku \(Self.dayMonth(issueDate))"
+            if let number = invoiceNumber, !number.isEmpty { return "\(number) · \(date)" }
+            return date
+        }
         let phrase = displayStatus == .overdue ? "myöhässä, eräpäivä" : "eräpäivä"
         let dateText = "\(phrase) \(Self.dayMonth(dueDate))"
         let base: String
@@ -146,6 +185,7 @@ public struct PurchaseInvoice: Decodable, Sendable, Identifiable, Hashable {
             base = dateText.prefix(1).uppercased() + dateText.dropFirst()
         }
         let partiallyPaid = paid > 0 && open > 0
+        if credited > 0 && displayStatus != .credited { return "\(base) · hyvitetty \(Money.format(credited)), avoinna \(Money.format(open))" }
         return partiallyPaid ? "\(base) · avoinna \(Money.format(open))" : base
     }
 
@@ -159,14 +199,15 @@ public struct PurchaseInvoice: Decodable, Sendable, Identifiable, Hashable {
     // Server rules (`updatePurchaseInvoice`, `deletePurchaseInvoice`).
 
     /// Only an invoice without payments can be deleted.
-    public var canDelete: Bool { payments.isEmpty }
+    public var canDelete: Bool { payments.isEmpty && creditNotes.isEmpty }
     /// Cancelling is refused once a payment is recorded.
     public var canCancel: Bool { status == .open && payments.isEmpty }
     public var canRecordPayment: Bool { status == .open }
     public var canMarkPaid: Bool { status == .open }
     /// Marking paid without full payments needs a written reason (3+ characters).
     public var markPaidNeedsReason: Bool { paid < gross }
-    public var canReopen: Bool { status != .open }
+    /// A credit note is only deleted; a fully credited invoice follows its credit notes.
+    public var canReopen: Bool { !isCreditNote && (status == .paid || status == .cancelled) }
 }
 
 public struct PurchaseInvoiceResponse: Decodable, Sendable { public let invoice: PurchaseInvoice }
@@ -213,15 +254,18 @@ public struct PurchaseStatusCounts: Decodable, Sendable, Equatable {
     public let overdue: Int
     public let paid: Int
     public let cancelled: Int
+    /// Credited invoices and the credit notes themselves.
+    public let credited: Int
 
-    public init(open: Int, overdue: Int, paid: Int, cancelled: Int) {
+    public init(open: Int, overdue: Int, paid: Int, cancelled: Int, credited: Int = 0) {
         self.open = open
         self.overdue = overdue
         self.paid = paid
         self.cancelled = cancelled
+        self.credited = credited
     }
 
-    enum CodingKeys: String, CodingKey { case open, overdue, paid, cancelled }
+    enum CodingKeys: String, CodingKey { case open, overdue, paid, cancelled, credited }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -229,15 +273,17 @@ public struct PurchaseStatusCounts: Decodable, Sendable, Equatable {
         overdue = try c.decodeIfPresent(Int.self, forKey: .overdue) ?? 0
         paid = try c.decodeIfPresent(Int.self, forKey: .paid) ?? 0
         cancelled = try c.decodeIfPresent(Int.self, forKey: .cancelled) ?? 0
+        credited = try c.decodeIfPresent(Int.self, forKey: .credited) ?? 0
     }
 
-    public var total: Int { open + overdue + paid + cancelled }
+    public var total: Int { open + overdue + paid + cancelled + credited }
 
     public func count(_ status: PurchaseDisplayStatus) -> Int {
         switch status {
         case .open: open
         case .overdue: overdue
         case .paid: paid
+        case .credited: credited
         case .cancelled: cancelled
         }
     }
@@ -274,7 +320,8 @@ public enum PurchaseFilter: String, Sendable, CaseIterable, Identifiable, Hashab
         }
     }
 
-    static let order: [PurchaseDisplayStatus] = [.overdue, .open, .paid, .cancelled]
+    // Credited sits before cancelled so credit notes and credited invoices still list under "Kaikki".
+    static let order: [PurchaseDisplayStatus] = [.overdue, .open, .paid, .credited, .cancelled]
 
     public struct Chip: Sendable, Hashable, Identifiable {
         public let filter: PurchaseFilter
@@ -295,6 +342,7 @@ public enum PurchaseFilter: String, Sendable, CaseIterable, Identifiable, Hashab
         case .overdue: "Myöhässä"
         case .open: "Odottaa maksua"
         case .paid: "Maksetut"
+        case .credited: "Hyvitetyt"
         case .cancelled: "Mitätöidyt"
         }
     }
