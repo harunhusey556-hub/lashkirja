@@ -3,8 +3,9 @@
  * It runs the strict gate over the owner's open bank rows (receipts and sales
  * invoices), asks the configured model (with thinking, when it takes it) about
  * the uncertain picks, and returns only what passed, with Finnish reasons.
- * The best passed receipt match becomes the reply's match card; nothing is
- * linked until the owner taps Hyväksy.
+ * The best passed receipt match becomes the reply's match card; every passed
+ * receipt pair is also returned as a batch the owner can accept in one tap.
+ * Nothing is linked until the owner taps Hyväksy.
  */
 import { z } from "zod";
 import { reviewOpenMatches, type ReviewedMatch } from "./match-review-run";
@@ -17,7 +18,8 @@ const args = z.object({ month: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/).optio
 /** The chat turn's own budget: a few model calls, answered within seconds. */
 export const CHAT_REVIEW_LIMITS = { maxCalls: 4, concurrency: 4, deadlineMs: 12_000 };
 
-const LIST_LIMIT = 10;
+/** How many passed rows the tool lists; passedTotal stays the real total. */
+const LIST_LIMIT = 50;
 
 function bankRowHref(date: Date | null, transactionId: string): string {
   const params = new URLSearchParams();
@@ -36,6 +38,8 @@ function bankRow(row: { date: Date | null; amountCents: number; counterparty: st
 
 const NOTE = [
   "Only 'passed' matches may be suggested; say why with their Finnish reasons (e.g. 'Miksi: viite täsmää · summa sama').",
+  "Quote passedTotal as the number of kuittia that täsmäävät. When truncated is true the list below shows only the first rows; say the rest exist too.",
+  "batch.pairs is every passed receipt pair the owner can accept in one tap via batch.href: say 'hyväksy ne kerralla' and quote batch.count. batch.ambiguous is how many rows stay the owner's choice.",
   "The receipt card (if any) waits for the user's Hyväksy; nothing was linked. A passed sales-invoice match is recorded from the invoice page.",
   "For 'ambiguous' rows say that two candidates fit equally and the user should choose; never pick one yourself.",
   "If nothing passed, say there is no confident suggestion. Do not suggest anything that is not listed here.",
@@ -47,7 +51,7 @@ export const reviewMatches: ChatTool = {
     function: {
       name: "review_matches",
       description:
-        "Reviews which open bank rows belong to which receipt or sales invoice: a strict check (exact amount plus viite, IBAN or the same name; dates only rank) and an AI review with reasoning for uncertain pairs. Returns only matches that passed, with Finnish reasons, and lists rows where two candidates fit equally. The best passed receipt match is shown to the user as a card to confirm. Use when the user asks to match, reconcile or check bank rows (kohdista, eşleştir).",
+        "Reviews which open bank rows belong to which receipt or sales invoice: a strict check (exact amount plus viite, IBAN or the same name; dates only rank) and an AI review with reasoning for uncertain pairs. Returns every match that passed, with Finnish reasons, the total count, and a batch of all passed receipt pairs the user can accept in one action; it also lists rows where two candidates fit equally. The best passed receipt match is shown to the user as a card to confirm. Use when the user asks to match, reconcile or check bank rows (kohdista, eşleştir).",
       parameters: {
         type: "object",
         properties: {
@@ -80,11 +84,19 @@ export const reviewMatches: ChatTool = {
         )
       : null;
 
+    // Every passed receipt pair as a one-tap accept-all, ids only so a large
+    // set stays small. Ambiguous rows are never here: they stay the owner's
+    // choice (a hard gate rule, see match-gate.ts).
+    const receiptPairs = passed
+      .filter((m) => m.target === "receipt")
+      .map((m) => ({ transactionId: m.transactionId, receiptId: m.candidateId }));
+    const shown = passed.slice(0, LIST_LIMIT);
+
     return {
       ok: true,
       month: month ?? null,
       aiReview: report.aiAvailable,
-      passed: passed.slice(0, LIST_LIMIT).map((m) => ({
+      passed: shown.map((m) => ({
         transactionId: m.transactionId,
         kind: m.target === "receipt" ? "kuitti" : "myyntilasku",
         bankRow: bankRow(m.row),
@@ -102,6 +114,14 @@ export const reviewMatches: ChatTool = {
         href: bankRowHref(m.row.date, m.transactionId),
       })),
       passedTotal: passed.length,
+      truncated: passed.length > LIST_LIMIT,
+      /** One-tap accept-all for every passed receipt pair; nothing ambiguous here. */
+      batch: {
+        count: receiptPairs.length,
+        ambiguous: report.ambiguous.length,
+        href: "/api/matching/confirm-all",
+        pairs: receiptPairs,
+      },
       notSuggested: rejected.slice(0, LIST_LIMIT).map((m) => ({
         transactionId: m.transactionId,
         bankRow: bankRow(m.row),
