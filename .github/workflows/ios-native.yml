@@ -165,6 +165,9 @@ jobs:
               for item in test.get("attachments", []):
                   source = os.path.join(root, item["exportedFileName"])
                   name = item.get("suggestedHumanReadableName") or item["exportedFileName"]
+                  # XCTest's own recordings and snapshots stay in the .xcresult (ui-xcresult artifact).
+                  if name.startswith(("Screen Recording", "Synthesized Event", "UI Snapshot", "App UI hierarchy", "Debug description")):
+                      continue
                   if os.path.exists(source):
                       # upload-artifact refuses " : < > | * ? and newlines (NTFS-safe names).
                       safe = re.sub(r'[\\/":<>|*?\r\n`]', "_", name)
@@ -185,12 +188,20 @@ jobs:
         with:
           name: ui-screenshots
           path: |
-            ios-native/App/ui-attachments
+            ios-native/App/ui-attachments/named
+            ios-native/App/ui-attachments/manifest.json
             ios-native/App/ui-shots
-            ios-native/App/UITestResults.xcresult.zip
-            ios-native/App/TestResults.xcresult.zip
             ios-native/App/api-server.log
           retention-days: 14
+          if-no-files-found: warn
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ui-xcresult
+          path: |
+            ios-native/App/UITestResults.xcresult.zip
+            ios-native/App/TestResults.xcresult.zip
+          retention-days: 7
           if-no-files-found: warn
 
   ipa:

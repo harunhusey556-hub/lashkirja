@@ -57,12 +57,26 @@ final class OwnerScreensTests: WalkTestCase {
 
     /// Kirjanpito → "Kuitit, 28 kuittia" (as StabilityTests.openHubRow).
     func openKuitit() -> Bool {
-        tab("Kirjanpito")
+        guard selectTab("Kirjanpito") else { note("MISS tab Kirjanpito not selected"); return false }
         for _ in 0..<2 where !app.navigationBars["Kuitit"].exists {
             tapLabel("label BEGINSWITH %@", "Kuitit")
             _ = app.navigationBars["Kuitit"].waitForExistence(timeout: 10)
         }
         return app.navigationBars["Kuitit"].exists
+    }
+
+    /// Taps a tab until it reports itself selected. The first tap after sign-in can land while the
+    /// passkey offer or a system prompt is still leaving, and is then lost (CI round 1: still on Koti).
+    func selectTab(_ name: String) -> Bool {
+        let button = app.tabBars.buttons[name].firstMatch
+        guard button.waitForExistence(timeout: 10) else { return false }
+        let selected = XCTNSPredicateExpectation(predicate: NSPredicate(format: "selected == true"), object: button)
+        for _ in 0..<3 where !button.isSelected {
+            dismissSystemPrompts()
+            button.tap(); taps += 1
+            _ = XCTWaiter().wait(for: [selected], timeout: 5)
+        }
+        return button.isSelected
     }
 
     /// The count in a chip's label ("Ei kohdistettu, 27"); -1 while the counts have not arrived.
@@ -207,6 +221,15 @@ final class OwnerScreensTests: WalkTestCase {
         // Whole euros: the decimal key follows the simulator's region, not the app's Finnish.
         if total.exists && isBlank(total, "Summa €") { type(total, "12") }
         if app.buttons["Valmis"].exists { app.buttons["Valmis"].tap(); sleep(1) }
+        // Category is required and only the cloud AI suggests one: the owner picks it from the menu.
+        let category = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Kategoria, ")).firstMatch
+        if category.waitForExistence(timeout: 5), category.label.hasSuffix("Valitse") {
+            if !category.isHittable { app.swipeUp(); sleep(1) }
+            category.tap()
+            let choice = app.buttons["Tarvikkeet & ostot"].firstMatch
+            if choice.waitForExistence(timeout: 5) { choice.tap() }
+            XCTAssertTrue(category.label.hasSuffix("Tarvikkeet & ostot"), "category not chosen: \(category.label)")
+        }
         capture("c4-form-filled")
         guard tap("Tallenna kuitti") else { XCTFail("no Tallenna kuitti"); return }
 
