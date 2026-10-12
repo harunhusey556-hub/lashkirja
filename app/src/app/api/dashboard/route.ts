@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
+import { noStoreJson } from "@/lib/http-security";
 import { requireSession } from "@/lib/session";
 import { VAT_REGISTRATION_THRESHOLD_EUR } from "@/lib/vero/omavero-fields";
 import { centsToEuros } from "@/lib/money";
@@ -340,7 +341,7 @@ export async function GET(req: NextRequest) {
     }
   }
 
-  return NextResponse.json({
+  return noStoreJson({
     firstName: session.firstName,
     month,
     // Bank data is the primary cash view (kassaperuste): an invoice paid into

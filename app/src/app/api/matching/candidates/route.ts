@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { noStoreJson } from "@/lib/http-security";
 import { prisma } from "@/lib/db";
 import { requireSession } from "@/lib/session";
 import { candidatesFor, offerableReceiptWhere } from "@/lib/matching";
@@ -69,7 +70,7 @@ export async function GET(req: NextRequest) {
   );
   const byId = new Map(receipts.map((r) => [r.id, r]));
 
-  return NextResponse.json({
+  return noStoreJson({
     candidates: scored.map((c) => ({
       score: c.score,
       reasons: c.reasons,

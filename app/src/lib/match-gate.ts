@@ -308,6 +308,17 @@ function referenceMatch(row: GateRow, candidate: GateCandidate): boolean {
   return false;
 }
 
+/**
+ * A cheap necessary condition for `gatePair(row, candidate).eligible`: every eligible pair has an
+ * amount match or a reference match. Callers that keep only eligible pairs skip the name and date
+ * work for the rest (the inline candidates of a 5 000-row ledger, W18).
+ */
+export function mayBeEligible(row: GateRow, candidate: GateCandidate): boolean {
+  if (amountMatch(row, candidate) !== null) return true;
+  if (!candidate.reference && !candidate.invoiceNumber) return false;
+  return referenceMatch(row, candidate);
+}
+
 /** Judge one bank row against one candidate. */
 export function gatePair(row: GateRow, candidate: GateCandidate): GateVerdict {
   const reference = referenceMatch(row, candidate);

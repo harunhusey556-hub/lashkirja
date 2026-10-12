@@ -4,6 +4,7 @@ import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { requireSession } from "@/lib/session";
 import { getStatementForUser } from "@/lib/statement-api";
+import { revalidatedJson } from "@/lib/etag-json";
 import { removeUserUpload } from "@/lib/storage";
 import * as path from "path";
 
@@ -39,7 +40,7 @@ export async function GET(
     );
   }
 
-  return NextResponse.json({ statement });
+  return revalidatedJson(req, { statement });
 }
 
 export const PATCH = withErrorHandler(async (

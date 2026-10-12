@@ -30,41 +30,38 @@ export async function computeYearTurnover(
   defaultSalesRate: number
 ): Promise<VatThresholdRevenue> {
   const yearPrefix = `${year}-`;
-  const rows = await prisma.transaction.findMany({
-    where: { statement: { userId, periodMonth: { startsWith: yearPrefix } } },
-    select: {
-      amountCents: true,
-      type: true,
-      statement: { select: { periodMonth: true } },
-      invoicePayment: {
-        select: { invoice: { select: { netCents: true, grossCents: true } } },
-      },
-    },
-  });
+  // SQL picks the year's months with bank rows and only the incoming rows with their invoice's
+  // net/gross; loading every row of the year with its relations cost ~170 ms of Koti (W18).
+  const [months, rows, books] = await Promise.all([
+    prisma.$queryRaw<Array<{ periodMonth: string }>>`
+      SELECT DISTINCT s."periodMonth" FROM "Statement" s
+      WHERE s."userId" = ${userId} AND substr(s."periodMonth", 1, ${yearPrefix.length}) = ${yearPrefix}
+        AND EXISTS (SELECT 1 FROM "Transaction" t WHERE t."statementId" = s."id")`,
+    prisma.$queryRaw<Array<{ amountCents: number | bigint; netCents: number | bigint | null; grossCents: number | bigint | null }>>`
+      SELECT t."amountCents", i."netCents", i."grossCents"
+      FROM "Transaction" t
+      JOIN "Statement" s ON s."id" = t."statementId"
+      LEFT JOIN "InvoicePayment" p ON p."transactionId" = t."id"
+      LEFT JOIN "SalesInvoice" i ON i."id" = p."invoiceId"
+      WHERE s."userId" = ${userId} AND substr(s."periodMonth", 1, ${yearPrefix.length}) = ${yearPrefix} AND t."type" = 'tulo'`,
+    loadAlvPeriodSources(userId, new Date(Date.UTC(year, 0, 1)), new Date(Date.UTC(year + 1, 0, 1))),
+  ]);
 
-  const bankMonths = new Set<string>();
+  const bankMonths = new Set(months.map((row) => row.periodMonth));
   let bankNetCents = 0;
   for (const row of rows) {
-    const month = row.statement.periodMonth;
-    if (!month) continue;
-    bankMonths.add(month);
-    if (row.type !== "tulo") continue;
-    const invoice = row.invoicePayment?.invoice;
-    if (invoice && invoice.grossCents !== 0) {
+    const amountCents = Number(row.amountCents);
+    const grossCents = row.grossCents == null ? null : Number(row.grossCents);
+    if (grossCents !== null && grossCents !== 0) {
       // A row that settled an invoice carries that invoice's VAT share.
-      bankNetCents += Math.round((row.amountCents * invoice.netCents) / invoice.grossCents);
+      bankNetCents += Math.round((amountCents * Number(row.netCents)) / grossCents);
     } else if (defaultSalesRate > 0) {
-      bankNetCents += Math.round(row.amountCents / (1 + defaultSalesRate / 100));
+      bankNetCents += Math.round(amountCents / (1 + defaultSalesRate / 100));
     } else {
-      bankNetCents += row.amountCents;
+      bankNetCents += amountCents;
     }
   }
 
-  const books = await loadAlvPeriodSources(
-    userId,
-    new Date(Date.UTC(year, 0, 1)),
-    new Date(Date.UTC(year + 1, 0, 1))
-  );
   const byMonth = buildProfitLoss(books.reportReceipts, books.reportInvoices).months;
   let documentNetCents = 0;
   for (const month of byMonth) {
