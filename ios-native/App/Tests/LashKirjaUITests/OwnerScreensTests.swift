@@ -70,10 +70,11 @@ final class OwnerScreensTests: WalkTestCase {
     func selectTab(_ name: String) -> Bool {
         let button = app.tabBars.buttons[name].firstMatch
         guard button.waitForExistence(timeout: 10) else { return false }
-        let selected = XCTNSPredicateExpectation(predicate: NSPredicate(format: "selected == true"), object: button)
         for _ in 0..<3 where !button.isSelected {
             dismissSystemPrompts()
             button.tap(); taps += 1
+            // A fresh expectation each round: XCTest allows one wait per expectation.
+            let selected = XCTNSPredicateExpectation(predicate: NSPredicate(format: "selected == true"), object: button)
             _ = XCTWaiter().wait(for: [selected], timeout: 5)
         }
         return button.isSelected
