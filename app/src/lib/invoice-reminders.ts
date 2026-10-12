@@ -9,7 +9,7 @@ import { prisma } from "./db";
 import { AppError, NotFoundError, ValidationError } from "./api-errors";
 import { centsToEuros } from "./money";
 import { buildReminderTotals, daysLate } from "./late-interest";
-import { addDaysUtc, openPosition } from "./invoices";
+import { addDaysUtc, creditedCentsOf, openPosition } from "./invoices";
 import { buildInvoicePdfData, getInvoice, type PublicInvoice } from "./sales-invoices";
 import { renderReminderPdf, type ReminderPdfData } from "./invoice-pdf";
 import { nextReminderWait, reminderWaitMessage } from "./reminder-schedule";
@@ -275,6 +275,7 @@ export async function listOverdueInvoices(
     include: {
       customer: { select: { name: true, email: true } },
       payments: { select: { amountCents: true } },
+      creditNotes: { select: { grossCents: true, status: true } },
       reminders: { where: { sentTo: { not: null } }, orderBy: { sentAt: "desc" }, take: 1 },
       _count: { select: { reminders: { where: { sentTo: { not: null } } } } },
     },
@@ -288,6 +289,7 @@ export async function listOverdueInvoices(
         status: invoice.status,
         grossCents: invoice.grossCents,
         paidCents: paid,
+        creditedCents: creditedCentsOf(invoice.creditNotes),
         closedReason: invoice.closedReason,
       });
       return {

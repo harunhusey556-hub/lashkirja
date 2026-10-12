@@ -14,7 +14,7 @@
  */
 import { prisma } from "./db";
 import { centsToEuros } from "./money";
-import { openPosition } from "./invoices";
+import { creditedCentsOf, openPosition } from "./invoices";
 import { receiptTitle } from "./display-titles";
 import { nextReminderWait } from "./reminder-schedule";
 import { pendingReminderAt } from "./reminder-waits";
@@ -122,6 +122,7 @@ async function overdueInvoices(userId: string, today: Date, now: Date): Promise<
       closedReason: true,
       customer: { select: { name: true } },
       payments: { select: { amountCents: true } },
+      creditNotes: { select: { grossCents: true, status: true } },
       reminders: { where: { sentTo: { not: null } }, orderBy: { sentAt: "desc" }, select: { sentAt: true, dueDate: true } },
     },
   });
@@ -131,6 +132,7 @@ async function overdueInvoices(userId: string, today: Date, now: Date): Promise<
       status: invoice.status,
       grossCents: invoice.grossCents,
       paidCents: invoice.payments.reduce((sum, payment) => sum + payment.amountCents, 0),
+      creditedCents: creditedCentsOf(invoice.creditNotes),
       closedReason: invoice.closedReason,
     });
     if (!position.collectible || position.openCents <= 0) continue;

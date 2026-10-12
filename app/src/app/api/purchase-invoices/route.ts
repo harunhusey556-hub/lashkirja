@@ -27,7 +27,7 @@ const createSchema = z.object({
   vatTreatment: z.enum(PURCHASE_VAT_TREATMENTS).optional(),
 });
 
-const statusFilter = z.enum(["all", "open", "paid", "cancelled", "overdue"]);
+const statusFilter = z.enum(["all", "open", "paid", "credited", "cancelled", "overdue"]);
 
 export const GET = withErrorHandler(async (req: NextRequest) => {
   const session = await requireSession(req);

@@ -11,6 +11,7 @@ import {
   DEFAULT_PAYMENT_TERM_DAYS,
   displayStatus,
   MAX_PAYMENT_TERM_DAYS,
+  creditedCentsOf,
   openPosition,
 } from "./invoices";
 import { centsToEuros } from "./money";
@@ -259,6 +260,7 @@ export async function listCustomers(
           issueDate: true,
           closedReason: true,
           payments: { select: { amountCents: true } },
+          creditNotes: { select: { grossCents: true, status: true } },
         },
       },
     },
@@ -288,6 +290,7 @@ export async function listCustomers(
         status: invoice.status,
         grossCents: invoice.grossCents,
         paidCents: paid,
+        creditedCents: creditedCentsOf(invoice.creditNotes),
         closedReason: invoice.closedReason,
       });
       if (position.collectible) {
@@ -353,7 +356,10 @@ export async function getCustomerDetail(userId: string, id: string): Promise<Cus
     include: {
       invoices: {
         orderBy: [{ issueDate: "desc" }, { number: "desc" }],
-        include: { payments: { select: { paidDate: true, amountCents: true } } },
+        include: {
+          payments: { select: { paidDate: true, amountCents: true } },
+          creditNotes: { select: { grossCents: true, status: true } },
+        },
       },
     },
   });
@@ -371,6 +377,7 @@ export async function getCustomerDetail(userId: string, id: string): Promise<Cus
       status: invoice.status,
       grossCents: invoice.grossCents,
       paidCents: paid,
+      creditedCents: creditedCentsOf(invoice.creditNotes),
       closedReason: invoice.closedReason,
     });
     if (

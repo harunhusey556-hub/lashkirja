@@ -12,10 +12,11 @@ export const SALES_STATUS: Record<InvoiceDisplayStatus, Label> = {
   credited: { label: "Hyvitetty", tone: "neutral" },
 };
 
-export const PURCHASE_STATUS: Record<"open" | "overdue" | "paid" | "cancelled", Label> = {
+export const PURCHASE_STATUS: Record<"open" | "overdue" | "paid" | "credited" | "cancelled", Label> = {
   open: { label: "Odottaa maksua", tone: "neutral" },
   overdue: { label: "Myöhässä", tone: "danger" },
   paid: { label: "Maksettu", tone: "success" },
+  credited: { label: "Hyvitetty", tone: "neutral" },
   cancelled: { label: "Mitätöity", tone: "neutral" },
 };
 

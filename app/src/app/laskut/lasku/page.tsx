@@ -112,6 +112,8 @@ interface Invoice {
   vat: number;
   gross: number;
   paid: number;
+  /** Total of the credit notes against this invoice; absent in a response cached before the field existed. */
+  credited?: number;
   open: number;
   closedReason: string | null;
   customer: { id: string; name: string; email: string | null; businessId: string | null };
@@ -1120,7 +1122,10 @@ function InvoiceDetail() {
                 title="Maksut"
                 action={
                   invoice.open > 0 ? (
-                    <span className="tabular-nums">{formatEur(invoice.open)} avoinna</span>
+                    <span className="tabular-nums">
+                      {formatEur(invoice.open)} avoinna
+                      {(invoice.credited ?? 0) > 0 ? `, hyvitetty ${formatEur(invoice.credited ?? 0)}` : ""}
+                    </span>
                   ) : undefined
                 }
               >

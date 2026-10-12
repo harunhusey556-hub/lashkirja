@@ -25,6 +25,7 @@ import { prisma } from "./db";
 import { AppError, ConflictError, NotFoundError, ValidationError } from "./api-errors";
 import { centsToEuros, eurosToCents } from "./money";
 import { formatEur } from "./format";
+import { creditedCentsOf } from "./invoices";
 import { assertPeriodOpen, getLockedThrough, isDateLocked } from "./period-lock";
 import { helsinkiCalendarDate, isoDateToUtc } from "./validation";
 import {
@@ -399,6 +400,7 @@ export async function createPosPaymentIntent(
       documentKind: true,
       grossCents: true,
       payments: { select: { amountCents: true } },
+      creditNotes: { select: { grossCents: true, status: true } },
     },
   });
   if (!invoice) throw new NotFoundError("Laskua ei löytynyt.");
@@ -411,7 +413,10 @@ export async function createPosPaymentIntent(
   if (invoice.status !== "sent") {
     throw new AppError("Lasku on jo maksettu.", "INVOICE_ALREADY_PAID", 409);
   }
-  const openCents = invoice.grossCents - invoice.payments.reduce((sum, row) => sum + row.amountCents, 0);
+  const openCents =
+    invoice.grossCents -
+    creditedCentsOf(invoice.creditNotes) -
+    invoice.payments.reduce((sum, row) => sum + row.amountCents, 0);
   if (amountCents > openCents) {
     throw new AppError(
       openCents <= 0
