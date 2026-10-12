@@ -146,15 +146,13 @@ struct BankAccountsView: View {
         .sheet(item: $detail) { account in
             BankAccountDetailSheet(account: account) { message in Task { await changed(message) } }
         }
-        .confirmationDialog(
-            "Katkaise pankkiyhteys?",
-            isPresented: Binding(get: { disconnecting != nil }, set: { if !$0 { disconnecting = nil } }),
-            titleVisibility: .visible,
-            presenting: disconnecting
-        ) { connection in
-            Button("Katkaise yhteys", role: .destructive) { Task { await disconnect(connection) } }
-        } message: { _ in
-            Text("Suostumus pankissa suljetaan. Jo haetut tiliotteet säilyvät.")
+        .confirmSheet(presenting: $disconnecting) { connection in
+            ConfirmRequest(
+                title: "Katkaise pankkiyhteys?",
+                message: "Suostumus pankissa suljetaan. Jo haetut tiliotteet säilyvät.",
+                confirmTitle: "Katkaise yhteys",
+                onConfirm: { Task { await disconnect(connection) } }
+            )
         }
         .refreshable { await load() }
         .task(id: showArchived) {
@@ -567,10 +565,9 @@ struct BankAccountDetailSheet: View {
                     dismiss()
                 }
             }
-            .confirmationDialog("Poistetaanko pankkitili?", isPresented: $confirmRemove, titleVisibility: .visible) {
-                Button("Poista", role: .destructive) { Task { await remove() } }
-            } message: {
-                Text(BankAccountText.removeDescription(account))
+            .confirmSheet(isPresented: $confirmRemove, title: "Poistetaanko pankkitili?",
+                          message: BankAccountText.removeDescription(account), confirmTitle: "Poista") {
+                Task { await remove() }
             }
             .alert("Kirjaa saldo", isPresented: Binding(get: { balanceMonth != nil }, set: { if !$0 { balanceMonth = nil } })) {
                 TextField("Pankin saldo", text: $balanceText).keyboardType(.numbersAndPunctuation)

@@ -179,13 +179,14 @@ private struct RecurringRunConfirmation: ViewModifier {
 
     func body(content: Content) -> some View {
         content
-            .alert(runner.plan?.confirmTitle ?? "",
-                   isPresented: Binding(get: { runner.plan != nil }, set: { if !$0 { runner.plan = nil } }),
-                   presenting: runner.plan) { plan in
-                Button(plan.confirmLabel) { Task { await run() } }
-                Button("Peruuta", role: .cancel) { runner.plan = nil }
-            } message: { plan in
-                Text(plan.summary)
+            .confirmSheet(presenting: Binding(get: { runner.plan }, set: { runner.plan = $0 })) { plan in
+                ConfirmRequest(
+                    title: plan.confirmTitle,
+                    message: plan.summary,
+                    confirmTitle: plan.confirmLabel,
+                    isDestructive: false,
+                    onConfirm: { Task { await run() } }
+                )
             }
             .onChange(of: runner.message) { _, message in
                 if let message {
@@ -309,10 +310,13 @@ struct RecurringDetailView: View {
                 onChanged(message)
             }
         }
-        .confirmationDialog("Poistetaanko toistuva lasku?", isPresented: $confirmDelete, titleVisibility: .visible) {
-            Button("Poista", role: .destructive) { Task { await remove() } }
-        } message: {
-            Text("\(current.title). Jo luodut laskut säilyvät.")
+        .confirmSheet(
+            isPresented: $confirmDelete,
+            title: "Poistetaanko toistuva lasku?",
+            message: "\(current.title). Jo luodut laskut säilyvät.",
+            confirmTitle: "Poista"
+        ) {
+            Task { await remove() }
         }
         .recurringRunConfirmation(runner: runner) { message in
             onChanged(message)

@@ -23,12 +23,13 @@ struct PushedDiscardGuard: ViewModifier {
                     }
                 }
             }
-            .alert("Hylätäänkö muutokset?", isPresented: $asking) {
-                Button("Hylkää muutokset", role: .destructive) { discard() }
-                Button("Jatka muokkausta", role: .cancel) {}
-            } message: {
-                Text("Tallentamattomat muutokset menetetään.")
-            }
+            .confirmSheet(
+                isPresented: $asking,
+                title: "Hylätäänkö muutokset?",
+                message: "Tallentamattomat muutokset menetetään.",
+                confirmTitle: "Hylkää muutokset",
+                cancelTitle: "Jatka muokkausta"
+            ) { discard() }
     }
 }
 

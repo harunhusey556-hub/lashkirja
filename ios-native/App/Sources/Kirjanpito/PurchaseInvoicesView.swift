@@ -75,15 +75,13 @@ struct PurchaseInvoicesView: View {
         .sheet(item: $payTarget) { invoice in PurchasePaymentSheet(invoice: invoice) }
         .sheet(item: $receiptTarget) { invoice in PurchaseReceiptLinkSheet(invoice: invoice) }
         .sheet(isPresented: $showSuggestions) { PurchaseSuggestionsSheet(suggestions: suggestions) }
-        .confirmationDialog(
-            "Poistetaanko ostolasku?",
-            isPresented: Binding(get: { deleteTarget != nil }, set: { if !$0 { deleteTarget = nil } }),
-            titleVisibility: .visible,
-            presenting: deleteTarget
-        ) { invoice in
-            Button("Poista", role: .destructive) { Task { await delete(invoice) } }
-        } message: { invoice in
-            Text("\(invoice.supplierName) · \(Money.format(invoice.gross))")
+        .confirmSheet(presenting: $deleteTarget) { invoice in
+            ConfirmRequest(
+                title: "Poistetaanko ostolasku?",
+                message: "\(invoice.supplierName) · \(Money.format(invoice.gross))",
+                confirmTitle: "Poista",
+                onConfirm: { Task { await delete(invoice) } }
+            )
         }
         .motion(.snappy, value: filter)
     }
@@ -477,28 +475,31 @@ struct PurchaseInvoiceDetailView: View {
                 }
             }
         }
-        .confirmationDialog(
-            confirmTitle,
-            isPresented: Binding(get: { confirm != nil }, set: { if !$0 { confirm = nil } }),
-            titleVisibility: .visible,
-            presenting: confirm
-        ) { kind in
-            switch kind {
-            case .delete:
-                Button("Poista", role: .destructive) { Task { await deleteInvoice() } }
-            case .cancel:
-                Button("Mitätöi", role: .destructive) { Task { await setStatus(PurchaseStatusChange(status: .cancelled)) } }
-            case .reopen:
-                Button("Palauta avoimeksi") { Task { await setStatus(PurchaseStatusChange(status: .open)) } }
-            case .markPaid:
-                Button("Merkitse maksetuksi") { Task { await setStatus(PurchaseStatusChange(status: .paid)) } }
-            case .removePayment(let payment):
-                Button("Poista maksu", role: .destructive) { Task { await removePayment(payment) } }
-            case .unlinkPayment(let payment):
-                Button("Irrota", role: .destructive) { Task { await removePayment(payment) } }
-            }
-        } message: { kind in
-            Text(confirmMessage(kind))
+        .confirmSheet(presenting: $confirm) { kind in confirmRequest(kind) }
+    }
+
+    private func confirmRequest(_ kind: ConfirmKind) -> ConfirmRequest {
+        let title = confirmTitle(kind)
+        let message = confirmMessage(kind)
+        switch kind {
+        case .delete:
+            return ConfirmRequest(title: title, message: message, confirmTitle: "Poista",
+                                  onConfirm: { Task { await deleteInvoice() } })
+        case .cancel:
+            return ConfirmRequest(title: title, message: message, confirmTitle: "Mitätöi",
+                                  onConfirm: { Task { await setStatus(PurchaseStatusChange(status: .cancelled)) } })
+        case .reopen:
+            return ConfirmRequest(title: title, message: message, confirmTitle: "Palauta avoimeksi", isDestructive: false,
+                                  onConfirm: { Task { await setStatus(PurchaseStatusChange(status: .open)) } })
+        case .markPaid:
+            return ConfirmRequest(title: title, message: message, confirmTitle: "Merkitse maksetuksi", isDestructive: false,
+                                  onConfirm: { Task { await setStatus(PurchaseStatusChange(status: .paid)) } })
+        case .removePayment(let payment):
+            return ConfirmRequest(title: title, message: message, confirmTitle: "Poista maksu",
+                                  onConfirm: { Task { await removePayment(payment) } })
+        case .unlinkPayment(let payment):
+            return ConfirmRequest(title: title, message: message, confirmTitle: "Irrota",
+                                  onConfirm: { Task { await removePayment(payment) } })
         }
     }
 
@@ -712,15 +713,14 @@ struct PurchaseInvoiceDetailView: View {
         .accessibilityLabel("Toiminnot")
     }
 
-    private var confirmTitle: String {
-        switch confirm {
+    private func confirmTitle(_ kind: ConfirmKind) -> String {
+        switch kind {
         case .delete: state.value?.isCreditNote == true ? "Poistetaanko hyvityslasku?" : "Poistetaanko ostolasku?"
         case .cancel: "Mitätöidäänkö ostolasku?"
         case .reopen: "Palautetaanko ostolasku avoimeksi?"
         case .markPaid: "Merkitäänkö ostolasku maksetuksi?"
         case .removePayment: "Poistetaanko maksu?"
         case .unlinkPayment: "Irrotetaanko pankkitapahtuma?"
-        case nil: ""
         }
     }
 

@@ -86,15 +86,13 @@ struct PasskeysView: View {
             Button("Tallenna") { Task { await rename(key) } }
             Button("Peru", role: .cancel) {}
         }
-        .confirmationDialog(
-            "Poistetaanko pääsyavain?",
-            isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } }),
-            titleVisibility: .visible,
-            presenting: deleting
-        ) { key in
-            Button("Poista", role: .destructive) { Task { await delete(key) } }
-        } message: { key in
-            Text("\(key.deviceName) ei enää kirjaa sinua sisään. Poista se myös laitteen salasanoista, jos et tarvitse sitä. Salasana toimii edelleen.")
+        .confirmSheet(presenting: $deleting) { key in
+            ConfirmRequest(
+                title: "Poistetaanko pääsyavain?",
+                message: "\(key.deviceName) ei enää kirjaa sinua sisään. Poista se myös laitteen salasanoista, jos et tarvitse sitä. Salasana toimii edelleen.",
+                confirmTitle: "Poista",
+                onConfirm: { Task { await delete(key) } }
+            )
         }
     }
 

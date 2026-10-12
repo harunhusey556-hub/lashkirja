@@ -56,23 +56,6 @@ struct QueuedReceiptsCard: View {
                 } header: {
                     Text(OfflineReceiptRules.waitingTitle(waiting.count))
                 }
-                .confirmationDialog("Poista kuva jonosta?", isPresented: Binding(get: { confirmRemove != nil }, set: { if !$0 { confirmRemove = nil } }),
-                                    titleVisibility: .visible) {
-                    Button("Poista", role: .destructive) {
-                        if let id = confirmRemove {
-                            EventLog.shared.log(.action("remove-queued", screen: "receipts"))
-                            Task { @MainActor in queue.remove(id) }
-                        }
-                        confirmRemove = nil
-                    }
-                } message: {
-                    // Names the photo by the day it was taken, as its row does.
-                    if let id = confirmRemove, let item = waiting.first(where: { $0.id == id }) {
-                        Text("\(OfflineReceiptRules.title(createdAt: item.createdAt)): kuvaa ei lähetetä, jos poistat sen jonosta.")
-                    } else {
-                        Text("Kuvaa ei lähetetä, jos poistat sen jonosta.")
-                    }
-                }
             }
             if !sent.isEmpty {
                 Section {
@@ -123,5 +106,17 @@ struct QueuedReceiptsCard: View {
             }
         }
         .accessibilityElement(children: .contain)
+        // On the row, not the List section: a sheet modifier on a Section is copied onto every row,
+        // and only the row whose photo was chosen may present it. The message names the photo by the
+        // day it was taken, as the row does.
+        .confirmSheet(
+            isPresented: Binding(get: { confirmRemove == item.id }, set: { if !$0 { confirmRemove = nil } }),
+            title: "Poista kuva jonosta?",
+            message: "\(OfflineReceiptRules.title(createdAt: item.createdAt)): kuvaa ei lähetetä, jos poistat sen jonosta.",
+            confirmTitle: "Poista"
+        ) {
+            EventLog.shared.log(.action("remove-queued", screen: "receipts"))
+            Task { @MainActor in queue.remove(item.id) }
+        }
     }
 }

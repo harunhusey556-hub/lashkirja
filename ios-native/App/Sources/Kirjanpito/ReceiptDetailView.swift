@@ -120,10 +120,8 @@ struct ReceiptDetailView: View {
                 }
             }
         }
-        .confirmationDialog(deleteTitle, isPresented: $confirmDelete, titleVisibility: .visible) {
-            Button("Poista", role: .destructive) { Task { await delete() } }
-        } message: {
-            Text(deleteNote)
+        .confirmSheet(isPresented: $confirmDelete, title: deleteTitle, message: deleteNote, confirmTitle: "Poista") {
+            Task { await delete() }
         }
         .task { await load() }
         .onDisappear { toastTask?.cancel() }
