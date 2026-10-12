@@ -183,6 +183,17 @@ function previewSrc(src: string, kind: PreviewKind): string {
   return src;
 }
 
+/**
+ * The small copy for the inline card: a saved receipt's own preview route at
+ * the cached thumbnail size. The viewer's 1600 px copy (and for a photo, the
+ * original upload) is fetched only when "Koko näyttö" opens. Anything else
+ * (a not yet saved upload) has no thumbnail and keeps its one image.
+ */
+export function inlinePreviewSrc(src: string, fullSrc: string): string {
+  const saved = /^(\/api\/receipts\/[^/?]+)\/file(?:\/preview)?\/?$/.exec(src.split("?")[0]);
+  return saved ? `${saved[1]}/file/preview?size=thumb` : fullSrc;
+}
+
 interface ReceiptPreviewProps {
   /** Authenticated URL that returns the file bytes */
   src: string;
@@ -219,9 +230,16 @@ export default function ReceiptPreview({
   // Web: `authedSrc` is `imageSrc` unchanged, exactly like today. Mobile:
   // fetched with the bearer token and exposed as a `blob:` object URL --
   // there is no cookie for a bare `<img src>` to ride along on.
-  const { src: authedSrc, failed: authedFailed } = useAuthedObjectUrl(
-    kind === "other" ? null : imageSrc
+  const inlineSrc = inlinePreviewSrc(src, imageSrc);
+  const { src: inlineAuthedSrc, failed: inlineFailed } = useAuthedObjectUrl(
+    kind === "other" ? null : inlineSrc
   );
+  // The large copy loads lazily: only once the full-screen viewer is opened.
+  const separateFull = inlineSrc !== imageSrc;
+  const { src: fullAuthedSrc, failed: fullFailed } = useAuthedObjectUrl(
+    kind === "other" || !separateFull || !fullscreen ? null : imageSrc
+  );
+  const authedFailed = inlineFailed || fullFailed;
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional fetch-on-mount: flipping to a loading state and storing the response is exactly the external-system sync this effect exists for
@@ -279,7 +297,7 @@ export default function ReceiptPreview({
     return (
       <PreviewBody
         src={src}
-        imageSrc={authedSrc}
+        imageSrc={fill && separateFull ? fullAuthedSrc : inlineAuthedSrc}
         kind={kind}
         fileName={fileName}
         fill={fill}

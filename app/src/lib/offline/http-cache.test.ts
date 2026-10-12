@@ -52,6 +52,7 @@ describe("isCacheableGet", () => {
     ["/api/jobs/*", "/api/jobs/123", {}, false],
     ["/api/health exactly", "/api/health", {}, false],
     ["/api/observe exactly", "/api/observe", {}, false],
+    ["/api/bootstrap exactly", "/api/bootstrap", {}, false],
   ];
 
   for (const [label, path, responseInit, expected] of table) {

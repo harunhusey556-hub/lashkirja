@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useRef, useState } from "react";
 import { SkeletonList } from "@/components/AsyncState";
 import { ConnectionNotice, EmptyState, StaleBanner } from "@/components/ScreenState";
 import BottomSheet from "@/components/BottomSheet";
@@ -63,6 +63,19 @@ function rowSecondary(customer: Customer): string {
   const term = `Maksuaika ${customer.defaultPaymentTermDays} pv`;
   return customer.businessId ? `${customer.businessId} · ${term}` : `Yksityisasiakas · ${term}`;
 }
+
+/** One customer in the list; memoised so a keystroke in the search repaints only the rows that changed. */
+const CustomerRow = memo(function CustomerRow({ customer }: { customer: Customer }) {
+  return (
+    <ListRow
+      href={detailHref("customer", customer.id)}
+      title={customer.name}
+      amount={formatEur(customer.openBalance)}
+      secondary={rowSecondary(customer)}
+      trailing={customer.archivedAt ? <StatusTag tone="neutral">Arkistoitu</StatusTag> : undefined}
+    />
+  );
+});
 
 export default function CustomersPage() {
   const cached = readPageCache<Customer[]>("customers");
@@ -300,16 +313,7 @@ export default function CustomersPage() {
           {customers.length > 0 && (
             <Section>
               {customers.map((customer) => (
-                <ListRow
-                  key={customer.id}
-                  href={detailHref("customer", customer.id)}
-                  title={customer.name}
-                  amount={formatEur(customer.openBalance)}
-                  secondary={rowSecondary(customer)}
-                  trailing={
-                    customer.archivedAt ? <StatusTag tone="neutral">Arkistoitu</StatusTag> : undefined
-                  }
-                />
+                <CustomerRow key={customer.id} customer={customer} />
               ))}
             </Section>
           )}

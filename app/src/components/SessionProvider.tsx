@@ -19,6 +19,7 @@ import { bootMobile } from "@/lib/mobile/boot";
 import { getAccessToken } from "@/lib/auth-client";
 import { syncPageHiddenFlag } from "@/lib/page-activity";
 import { setDraftOwner } from "@/lib/draft-store";
+import { primeFromBootstrap, type BootstrapPayload } from "@/lib/route-warmup";
 
 export type { SessionStatus, ShellUser } from "@/lib/session-state";
 
@@ -43,6 +44,25 @@ async function fetchMeOutcome(): Promise<MeOutcome> {
 }
 
 /**
+ * The launch check: `/api/bootstrap` answers the same `{ user }` as `/me` (401
+ * `{ user: null }` without a session) plus the badge counts, which seed the
+ * Myynti/Ostolaskut chips in the same round trip. A server without the route
+ * (404) falls back to `/me`. Later revalidations stay on the cheaper `/me`.
+ */
+async function fetchBootOutcome(): Promise<MeOutcome> {
+  try {
+    const response = await apiFetch("/api/bootstrap", { credentials: "include" });
+    if (response.status === 404) return fetchMeOutcome();
+    const data = await readJson<BootstrapPayload>(response, "Istunnon tarkistus epäonnistui");
+    primeFromBootstrap(data);
+    return { kind: "ok", user: data.user ?? {} };
+  } catch (error) {
+    if (isUnauthorized(error)) return { kind: "unauthorized" };
+    return { kind: "network-error" };
+  }
+}
+
+/**
  * The one session source for the signed-in app (mounted by ShellGate around
  * AppShell -- never for the bare routes, which do their own boot check).
  * Renders nothing itself; consumers read `useSession()`.
@@ -52,8 +72,8 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
     initialSessionState(readPageCache<ShellUser>(SESSION_CACHE_KEY))
   );
 
-  const refresh = useCallback(async () => {
-    const outcome = await sharedMeFetch(fetchMeOutcome);
+  const check = useCallback(async (fetcher: () => Promise<MeOutcome>) => {
+    const outcome = await sharedMeFetch(fetcher);
     if (outcome.kind === "unauthorized") {
       setState((previous) => applyMeOutcome(previous, outcome));
       redirectToLogin();
@@ -65,6 +85,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       return next;
     });
   }, []);
+  const refresh = useCallback(() => check(fetchMeOutcome), [check]);
 
   // Mount: mobile has a local, no-network verdict (a stored token or not)
   // before the first network round trip -- skip straight to signed-out
@@ -94,13 +115,13 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
         }
         setState((previous) => applyBootOutcome(previous, true));
       }
-      if (!cancelled) await refresh();
+      if (!cancelled) await check(fetchBootOutcome);
     }
     void boot();
     return () => {
       cancelled = true;
     };
-  }, [refresh]);
+  }, [check]);
 
   // Foreground resume: the JS context normally survives backgrounding, so
   // this is a quiet best-effort revalidation -- only a real 401 (session

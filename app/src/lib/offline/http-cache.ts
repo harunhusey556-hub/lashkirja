@@ -16,7 +16,8 @@ interface StoredHttpResponse {
   body: string;
 }
 
-const EXCLUDED_EXACT = ["/api/health", "/api/observe"];
+// /api/bootstrap answers the session check like /api/auth/me: never from a stale copy.
+const EXCLUDED_EXACT = ["/api/health", "/api/observe", "/api/bootstrap"];
 const EXCLUDED_PREFIXES = ["/api/auth/", "/api/jobs/"];
 
 function pathname(url: string): string {

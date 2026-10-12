@@ -11,7 +11,7 @@ import ReceiptMatchPanel, {
   type BankTxMatch,
 } from "@/components/ReceiptMatchPanel";
 import { ErrorState } from "@/components/AsyncState";
-import { FieldsSkeleton, ReceiptDetailSkeleton } from "@/components/books/Skeletons";
+import { FieldsSkeleton, ReceiptDetailSkeleton, type ReceiptSeed } from "@/components/books/Skeletons";
 import { Skeleton, SkeletonGroup } from "@/components/ds";
 import {
   clearPendingCapture,
@@ -151,6 +151,8 @@ type LinkedBankTx = BankTxMatch;
 interface ReceiptEditorProps {
   /** When set, loads and edits an existing receipt */
   receiptId?: string;
+  /** The list row this receipt was opened from: shown while the full receipt loads. */
+  seed?: ReceiptSeed;
 }
 
 interface ReceiptResponse {
@@ -181,7 +183,7 @@ interface ReceiptResponse {
   };
 }
 
-export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
+export default function ReceiptEditor({ receiptId, seed }: ReceiptEditorProps) {
   const isEdit = Boolean(receiptId);
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -969,7 +971,7 @@ export default function ReceiptEditor({ receiptId }: ReceiptEditorProps) {
     });
 
   if (loading) {
-    return <ReceiptDetailSkeleton />;
+    return <ReceiptDetailSkeleton seed={seed} />;
   }
 
   if (notFound) {
