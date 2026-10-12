@@ -7,6 +7,7 @@ import { syncBankConnection } from "@/lib/enablebanking/sync";
 import { noStoreJson, rejectCrossSite, rejectOversizedContentLength } from "@/lib/http-security";
 import { consumeRateLimit } from "@/lib/rate-limit";
 import { requireSession } from "@/lib/session";
+import { readSyncVersion } from "@/lib/data-version";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -43,8 +44,13 @@ export async function POST(
       attended: true,
       context: psuContextFromHeaders(req.headers),
     });
+    // The fresh balances and change counter travel with the answer, so the client updates the
+    // bank page, Koti and the charts at once instead of after a restart.
+    const version = await readSyncVersion(session.userId);
     return noStoreJson({
       ok: true,
+      dataVersion: version.dataVersion,
+      bank: version.bank,
       imported: result.imported,
       skipped: result.skipped,
       statementId: result.statementId,

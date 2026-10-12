@@ -3,7 +3,7 @@ import { prisma } from "@/lib/db";
 import { requireSession } from "@/lib/session";
 import { businessProfileSchema, parseBusinessDetails } from "@/lib/onboarding";
 import { errorText } from "@/lib/api-errors";
-import { guardWrite } from "@/lib/http-security";
+import { guardWrite, noStoreJson } from "@/lib/http-security";
 
 export async function GET(req: NextRequest) {
   const session = await requireSession(req);
@@ -33,7 +33,7 @@ export async function GET(req: NextRequest) {
     vatRegistered: user.vatRegistered,
     vatPeriod: user.vatPeriod,
   });
-  return NextResponse.json({
+  return noStoreJson({
     onboarded: user.onboarded,
     profile: profile.success ? profile.data : stored,
   });
