@@ -47,6 +47,9 @@ final class OwnerScreensTests: WalkTestCase {
         note("INFO \(name): \(text)")
     }
 
+    /// The element tree at a failure: what was on screen, not only a picture of it.
+    func tree(_ name: String) { keep(name + "-tree", app.debugDescription) }
+
     func waitGone(_ element: XCUIElement, timeout: TimeInterval) -> Bool {
         let gone = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: element)
         return XCTWaiter().wait(for: [gone], timeout: timeout) == .completed
@@ -81,7 +84,7 @@ final class OwnerScreensTests: WalkTestCase {
     // (a) Owner: "a random bubble in the middle". The delete question must be a full-width sheet at
     // the bottom of the screen whose title names the receipt.
     func testA_DeleteConfirmIsBottomSheet() {
-        guard openKuitit() else { capture("a0-no-kuitit"); XCTFail("Kuitit did not open"); return }
+        guard openKuitit() else { capture("a0-no-kuitit"); tree("a0-no-kuitit"); XCTFail("Kuitit did not open"); return }
         guard tapLabel("label CONTAINS %@", "ABC Prisma Kotka") else {
             capture("a0-no-row"); XCTFail("seed receipt ABC Prisma Kotka is not listed"); return
         }
@@ -216,6 +219,7 @@ final class OwnerScreensTests: WalkTestCase {
             sleep(1)
         }
         capture("c5-after-save")
+        if outcome.isEmpty { tree("c5-after-save") }
         keep("c-save-outcome", outcome.isEmpty ? "none" : (outcome == "toast" ? toast.label : outcome))
         XCTAssertFalse(outcome.isEmpty, "Tallenna kuitti neither saved (screen still up, no toast)")
         if outcome == "toast" {

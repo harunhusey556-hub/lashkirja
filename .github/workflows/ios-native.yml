@@ -159,20 +159,26 @@ jobs:
             if xcrun xcresulttool export attachments --path UITestResults.xcresult --output-path ui-attachments; then
               # manifest.json names each exported file; a copy under its step name is easier to browse.
               python3 - ui-attachments <<'PY' || echo "::warning::could not name the exported attachments"
-          import json, os, shutil, sys
+          import json, os, re, shutil, sys
           root = sys.argv[1]
           for test in json.load(open(os.path.join(root, "manifest.json"))):
               for item in test.get("attachments", []):
                   source = os.path.join(root, item["exportedFileName"])
                   name = item.get("suggestedHumanReadableName") or item["exportedFileName"]
                   if os.path.exists(source):
-                      shutil.copy(source, os.path.join(root, "named", name.replace("/", "_")))
+                      # upload-artifact refuses " : < > | * ? and newlines (NTFS-safe names).
+                      safe = re.sub(r'[\\/":<>|*?\r\n`]', "_", name)
+                      shutil.copy(source, os.path.join(root, "named", safe))
           PY
             else
               echo "::warning::xcresulttool export attachments failed; the .xcresult bundle is uploaded as is"
             fi
           fi
           cp ../../app/api-server.log . 2>/dev/null || true
+          # The bundles hold thousands of files, some with names upload-artifact refuses: one zip each.
+          for b in UITestResults.xcresult TestResults.xcresult; do
+            if [ -d "$b" ]; then ditto -c -k --keepParent "$b" "$b.zip"; fi
+          done
           echo "Attachments: $(ls ui-attachments/named | wc -l | tr -d ' '), host shots: $(ls ui-shots 2>/dev/null | wc -l | tr -d ' ')"
       - uses: actions/upload-artifact@v4
         if: always()
@@ -181,8 +187,8 @@ jobs:
           path: |
             ios-native/App/ui-attachments
             ios-native/App/ui-shots
-            ios-native/App/UITestResults.xcresult
-            ios-native/App/TestResults.xcresult
+            ios-native/App/UITestResults.xcresult.zip
+            ios-native/App/TestResults.xcresult.zip
             ios-native/App/api-server.log
           retention-days: 14
           if-no-files-found: warn
