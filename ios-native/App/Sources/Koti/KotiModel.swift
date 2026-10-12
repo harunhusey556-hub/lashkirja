@@ -6,6 +6,9 @@ import LashKirjaCore
 @Observable
 final class KotiModel {
     private let api: APIClient
+    /// The app's cache: Koti paints the last dashboard of the month at once (a cold launch: the
+    /// previous run's), then the server's. Nil only where no app is around (previews, tests).
+    @ObservationIgnored private weak var app: AppModel?
     /// The owner's profile, kept by AppModel: its ALV-verokausi picks the return the status card names.
     private let profile: () async -> Profile?
     var month: String = MonthKey.current()
@@ -25,9 +28,10 @@ final class KotiModel {
     private var pendingCommit: (() async -> Void)?
     private var toastTask: Task<Void, Never>?
 
-    init(api: APIClient, profile: @escaping () async -> Profile?) {
+    init(api: APIClient, profile: @escaping () async -> Profile?, app: AppModel? = nil) {
         self.api = api
         self.profile = profile
+        self.app = app
     }
 
     var visibleItems: [DashboardItem] { state.value?.items.filter { !hidden.contains($0.id) } ?? [] }
@@ -36,16 +40,30 @@ final class KotiModel {
     func load() async {
         let generation = loads.next()
         let month = self.month
+        let timing = ScreenTiming("Koti")
+        let query = ["month": month]
+        if state.value?.month != month, let app, let cached: Dashboard = await app.cachedValue("/api/dashboard", query: query),
+           loads.isCurrent(generation), month == self.month {
+            state.succeed(cached)
+            timing.painted(fromCache: true)
+        }
         state.begin()
         // The job list loads beside the dashboard; it only decides whether the failures row shows.
         let api = self.api
         async let jobsList: JobsList? = try? api.get("/api/jobs")
         async let connections = JobDismissals.connections(api: api)
         do {
-            let dashboard: Dashboard = try await api.get("/api/dashboard", query: ["month": month])
+            let dashboard: Dashboard
+            if let app {
+                // Only the current month is kept on disk: it is what a launch opens on.
+                dashboard = try await app.cachedGet("/api/dashboard", query: query, persist: month == MonthKey.current())
+            } else {
+                dashboard = try await api.get("/api/dashboard", query: query)
+            }
             guard loads.isCurrent(generation), month == self.month else { return }
             hidden.reloaded(present: dashboard.items.map(\.id), loadGeneration: generation)
             state.succeed(dashboard)
+            timing.dataReady()
             if let jobs = await jobsList, loads.isCurrent(generation) {
                 failedJobs = JobsQueue.failedCount(jobs.jobs, connections: await connections, dismissedLocally: JobDismissals.ids)
             }

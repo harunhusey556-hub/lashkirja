@@ -282,15 +282,23 @@ struct RaportitView: View {
         state.restart()
     }
 
+    /// Through the app's cache: a year looked at before shows at once, then refreshes when stale.
     private func load() async {
         // A pull-to-refresh is not cancelled by a year change: its answer is for the year it asked.
         let asked = year
+        let timing = ScreenTiming("Raportit")
+        let query = ["from": "\(asked)-01", "to": "\(asked)-12"]
+        if state.value == nil, let cached: ProfitLoss = await app.cachedValue("/api/reports/profit-loss", query: query), asked == year {
+            state.succeed(cached)
+            timing.painted(fromCache: true)
+        }
         state.begin()
         do {
-            let report: ProfitLoss = try await app.api.get("/api/reports/profit-loss", query: ["from": "\(asked)-01", "to": "\(asked)-12"])
+            let report: ProfitLoss = try await app.cachedGet("/api/reports/profit-loss", query: query)
             try Task.checkCancellation()
             guard asked == year else { return }
             state.succeed(report)
+            timing.dataReady()
         }
         catch is CancellationError {}
         catch {

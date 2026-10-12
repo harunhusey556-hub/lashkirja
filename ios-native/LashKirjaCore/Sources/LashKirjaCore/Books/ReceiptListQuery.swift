@@ -145,6 +145,13 @@ public struct ReceiptListQuery: Sendable, Equatable, Hashable {
         return q
     }
 
+    /// The rejected receipts under the review queue (F38), 200 at a time.
+    public static func rejectedQueue(offset: Int = 0) -> [String: String] {
+        var q = ["reviewStatus": "rejected"]
+        if offset > 0 { q["offset"] = String(offset) }
+        return q
+    }
+
     /// The count behind "N odottaa" on the Kirjanpito hub: the same queue, counted.
     public static let pendingCountQuery = ["reviewStatus": "pending", "kind": "receipt"]
 
@@ -240,5 +247,79 @@ extension ReceiptListQuery {
             default: break
             }
         }
+    }
+}
+
+// MARK: Pages
+
+/// Kuitit a page at a time: 50 rows by `?cursor=` from a server that pages, otherwise 200 rows
+/// by `offset` while the server says `truncated` (an older server ignores `cursor` and `limit`).
+public struct ReceiptListPaging: Sendable, Equatable {
+    public private(set) var cursor = CursorPaging()
+    /// An older server's "more rows after these" (offset paging).
+    public private(set) var truncated = false
+
+    public init() {}
+
+    public var hasMore: Bool { cursor.hasMore || truncated }
+
+    /// The first page's query. A reload asks for as many rows as were loaded (up to 200), so
+    /// acting on a row deep in the list does not fold it back to 50; a first visit asks for 50,
+    /// the same query the launch prefetch fills the cache with. Only the newest-first order pages
+    /// by cursor (a paging server refuses another sort with 400): any other sort keeps the
+    /// older 200-row pages by offset.
+    public static func firstQuery(_ query: ReceiptListQuery, loadedRows: Int = 0) -> [String: String] {
+        guard pagesByCursor(query) else { return query.listQuery() }
+        return CursorPaging.firstQuery(query.listQuery(), loadedRows: loadedRows)
+    }
+
+    public static func pagesByCursor(_ query: ReceiptListQuery) -> Bool { query.sort == .dateDesc }
+
+    public mutating func firstPage(_ list: ReceiptList) {
+        cursor.firstPage(next: list.nextCursor)
+        truncated = list.nextCursor == nil && (list.truncated ?? false)
+    }
+
+    /// The query of the page after `loaded` rows; nil when there is none.
+    public func nextQuery(_ query: ReceiptListQuery, loaded: Int) -> [String: String]? {
+        if let next = cursor.nextQuery(query.listQuery()) { return next }
+        if truncated { return query.listQuery(offset: loaded) }
+        return nil
+    }
+
+    public mutating func nextPage(_ list: ReceiptList) {
+        if cursor.hasMore {
+            cursor.nextPage(next: list.nextCursor)
+            truncated = false
+        } else {
+            truncated = list.truncated ?? false
+        }
+    }
+
+    /// The header's number: the server's count, else the tab's count, else the rows loaded.
+    public static func total(_ list: ReceiptList, tab: ReceiptTab, counts: ReceiptCounts.Counts?) -> Int {
+        if let count = list.count { return count }
+        if let counts, tab != .laskut || counts.laskut != nil { return tab.count(in: counts) }
+        return list.receipts.count
+    }
+}
+
+/// A Kuitit row's words, made once per row instead of on every redraw (the date formatter is the
+/// costly part). Equatable, so a row whose words did not change is not drawn again.
+public struct ReceiptRowText: Sendable, Equatable {
+    public let title: String
+    /// "12.10.2026 · Ruoka ja juoma"
+    public let detail: String
+    public let amount: Decimal?
+    public let isIncome: Bool
+    public let linked: Bool
+
+    public init(_ receipt: Receipt) {
+        title = receipt.title
+        detail = [receipt.date.map(APIDate.displayDay), receipt.category.map(ReceiptCategory.label(for:))]
+            .compactMap { $0 }.joined(separator: " · ")
+        amount = receipt.totalAmount
+        isIncome = receipt.isIncome
+        linked = receipt.linkedTransaction != nil
     }
 }

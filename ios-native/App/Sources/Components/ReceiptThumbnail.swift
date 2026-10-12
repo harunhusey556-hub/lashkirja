@@ -12,6 +12,7 @@ struct ReceiptThumbnail: View {
     @State private var image: UIImage?
 
     private static let side: CGFloat = 40
+    static let thumbQuery = ["size": "thumb", "w": "160"]
     /// Decoded thumbnails of this run, so a row scrolled back into view is instant.
     private static let memory = NSCache<NSString, UIImage>()
 
@@ -43,9 +44,10 @@ struct ReceiptThumbnail: View {
             return
         }
         // A failed download keeps the symbol; the row still opens the receipt.
-        // ?size=thumb: a ~30 kB copy the server caches, not the multi-megabyte original photo.
+        // ?w=160: a few-kB copy rendered once and cached by the server (W24); `size=thumb` is
+        // what an older server reads (360 px). Kept on disk by DocumentCache: never downloaded twice.
         guard let url = try? await DocumentCache.shared.file(
-            app, path: "/api/receipts/\(receipt.id)/file/preview", query: ["size": "thumb"], fileName: "esikatselu.jpg", key: "thumb-v1"
+            app, path: "/api/receipts/\(receipt.id)/file/preview", query: Self.thumbQuery, fileName: "esikatselu.jpg", key: "thumb-v1"
         ) else { return }
         let side = Self.side * 3
         let thumb = await Task.detached(priority: .utility) { Self.downsample(url, maxPixel: side) }.value
@@ -54,7 +56,8 @@ struct ReceiptThumbnail: View {
         image = thumb
     }
 
-    private nonisolated static func downsample(_ url: URL, maxPixel: CGFloat) -> UIImage? {
+    /// Decodes only `maxPixel` worth of the file (ImageIO thumbnail), never the full-size image.
+    nonisolated static func downsample(_ url: URL, maxPixel: CGFloat) -> UIImage? {
         guard let source = CGImageSourceCreateWithURL(url as CFURL, [kCGImageSourceShouldCache: false] as CFDictionary) else { return nil }
         let options: [CFString: Any] = [
             kCGImageSourceCreateThumbnailFromImageAlways: true,

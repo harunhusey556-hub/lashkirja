@@ -2,15 +2,16 @@ import SwiftUI
 import LashKirjaCore
 
 /// Kuitit: the approved receipts with search, tabs, month/category filters,
-/// sorting and paging (the server sends at most 200 rows at a time), the
-/// review queue on top, and multi-select delete.
+/// sorting and paging (50 rows a page by cursor from a server that pages, else 200 by offset),
+/// the review queue on top, and multi-select delete. Every answer goes through the app's cache:
+/// coming back paints the last list at once and asks again only when it is stale.
 struct ReceiptsView: View {
     @Environment(AppModel.self) private var app
     @State private var receipts = ScreenLoad<[Receipt]>()
     /// Coming back to the screen does not ask the server again unless something changed.
     @State private var gate = ReloadGate()
     @State private var total = 0
-    @State private var truncated = false
+    @State private var paging = ReceiptListPaging()
     @State private var loadingMore = false
     @State private var counts: ReceiptCounts.Counts?
     @State private var pending: [Receipt] = []
@@ -37,7 +38,8 @@ struct ReceiptsView: View {
     @State private var limit = ShowMore()
 
     /// Month, tab, category, source and sort are kept between visits (as the purchase invoices' filter).
-    private static let filterKey = "kuitit.filter"
+    /// Also read by the launch prefetch, so it asks for the list this screen opens on.
+    static let filterKey = "kuitit.filter"
 
     /// The receipts about to be deleted; deleting starts from the main list only.
     private var deleting: [Receipt] {
@@ -123,7 +125,7 @@ struct ReceiptsView: View {
 
             if receipts.value != nil {
                 if let banner = receipts.banner {
-                    Section { RefreshFailureBanner(failure: banner, retry: load) }
+                    Section { RefreshFailureBanner(failure: banner, retry: { await load() }) }
                         .listRowBackground(Color.clear)
                         .listRowInsets(EdgeInsets())
                 }
@@ -134,15 +136,17 @@ struct ReceiptsView: View {
                     }
                     ForEach(all.prefix(limit.visible(all.count))) { receipt in row(receipt) }
                     // Ten at a time; the next server page is asked for only by the button, never on scroll.
-                    PagedShowMoreButton(limit: $limit, loaded: all.count, total: total, serverHasMore: truncated, loading: loadingMore) {
+                    PagedShowMoreButton(limit: $limit, loaded: all.count, total: total, serverHasMore: paging.hasMore, loading: loadingMore) {
                         await loadMore()
                         return shownReceipts.count
                     }
                 } header: {
                     if !all.isEmpty { Text(query.countHeader(total)) }
                 }
+            } else if case .failed = receipts.display {
+                ScreenStateView(state: receipts, retry: { await load() }) { (_: [Receipt]) in EmptyView() }.listRowBackground(Color.clear)
             } else {
-                ScreenStateView(state: receipts, retry: load) { (_: [Receipt]) in EmptyView() }.listRowBackground(Color.clear)
+                skeletonSection
             }
         }
         .scrollContentBackground(.hidden)
@@ -186,7 +190,7 @@ struct ReceiptsView: View {
         .refreshable {
             // Pull-to-refresh asks every screen again; this one's own load stands for the bump.
             gate.mark(key: String(describing: query), version: app.refreshEverything())
-            await load()
+            await load(force: true)
         }
         .task(id: ReloadKey(query: query, version: app.dataVersion)) {
             guard receipts.value == nil || gate.isDue(key: String(describing: query), version: app.dataVersion) else { return }
@@ -213,6 +217,26 @@ struct ReceiptsView: View {
 
     // MARK: Pieces
 
+    /// Grey rows where the receipts will be, until the first answer (cached or the server's) arrives.
+    private var skeletonSection: some View {
+        Section {
+            ForEach(0..<6, id: \.self) { _ in
+                HStack(spacing: 12) {
+                    RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Theme.surface).frame(width: 40, height: 40)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Kuitin myyjä").foregroundStyle(Theme.ink)
+                        Text("12.10.2026 · Kategoria").font(.caption).foregroundStyle(Theme.ink2)
+                    }
+                    Spacer()
+                    Text("-10,00 €").font(.subheadline.weight(.semibold))
+                }
+                .redacted(reason: .placeholder)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("Ladataan kuitteja")
+            }
+        }
+    }
+
     /// The loaded rows minus the ones deleted a moment ago (`app.removedIds`).
     private var shownReceipts: [Receipt] { (receipts.value ?? []).filter { !app.removedIds.contains($0.id) } }
 
@@ -232,13 +256,13 @@ struct ReceiptsView: View {
                         .foregroundStyle(selected.contains(receipt.id) ? Theme.accent : Theme.ink2)
                         .imageScale(.large)
                         .accessibilityHidden(true)
-                    ReceiptRow(receipt: receipt, thumbnail: true)
+                    ReceiptRow(receipt: receipt, thumbnail: true).equatable()
                 }
             }
             .foregroundStyle(Theme.ink)
             .accessibilityAddTraits(selected.contains(receipt.id) ? .isSelected : [])
         } else {
-            NavigationLink(value: Route.receipt(receipt.id)) { ReceiptRow(receipt: receipt, thumbnail: true) }
+            NavigationLink(value: Route.receipt(receipt.id)) { ReceiptRow(receipt: receipt, thumbnail: true).equatable() }
                 .swipeActions(edge: .trailing) {
                     Button(role: .destructive) {
                         deleteIds = [receipt.id]
@@ -403,43 +427,68 @@ struct ReceiptsView: View {
 
     // MARK: Loading
 
-    private func load() async {
-        receipts.begin()
-        let api = app.api
+    /// The cached answers for these filters go on screen at once (a cold launch: the previous
+    /// run's), then the server's; `force` (pull-to-refresh) asks the server even while fresh.
+    private func load(force: Bool = false) async {
+        let timing = ScreenTiming("Kuitit")
         // A slow answer for filters the owner already changed must not replace the newer list.
         let asked = query
-        let listQuery = asked.listQuery()
+        let listQuery = ReceiptListPaging.firstQuery(asked, loadedRows: receipts.value?.count ?? 0)
         let countsQuery = asked.countsQuery()
-        async let countsResponse: ReceiptCounts? = try? api.get("/api/receipts/counts", query: countsQuery)
-        async let queue: ReceiptList? = try? api.get("/api/receipts", query: ReceiptListQuery.pendingQueue())
-        async let rejectedResponse: ReceiptList? = try? api.get("/api/receipts", query: ["reviewStatus": "rejected"])
+        if receipts.value == nil, let cached: ReceiptList = await app.cachedValue("/api/receipts", query: listQuery), asked == query {
+            if let c: ReceiptCounts = await app.cachedValue("/api/receipts/counts", query: countsQuery) { counts = c.counts }
+            if let q: ReceiptList = await app.cachedValue("/api/receipts", query: ReceiptListQuery.pendingQueue()) { applyPending(q) }
+            if let r: ReceiptList = await app.cachedValue("/api/receipts", query: ReceiptListQuery.rejectedQueue()) { applyRejected(r) }
+            guard asked == query else { return }
+            applyList(cached, tab: asked.tab)
+            timing.painted(fromCache: true)
+        }
+        receipts.begin()
+        async let countsResponse: ReceiptCounts? = try? app.cachedGet("/api/receipts/counts", query: countsQuery, force: force, persist: true)
+        async let queue: ReceiptList? = try? app.cachedGet("/api/receipts", query: ReceiptListQuery.pendingQueue(), force: force, persist: true)
+        async let rejectedResponse: ReceiptList? = try? app.cachedGet("/api/receipts", query: ReceiptListQuery.rejectedQueue(), force: force, persist: true)
+        let list: ReceiptList
         do {
-            let list: ReceiptList = try await api.get("/api/receipts", query: listQuery)
+            list = try await app.cachedGet("/api/receipts", query: listQuery, force: force, persist: true)
             guard asked == query else {
                 if let q = await queue { applyPending(q) }
                 if let r = await rejectedResponse { applyRejected(r) }
                 return
             }
-            receipts.succeed(list.receipts)
-            total = list.count ?? list.receipts.count
-            truncated = list.truncated ?? false
+            applyList(list, tab: asked.tab)
             failure = nil
-            // Rows that left the list (deleted elsewhere, filtered out) are no longer selected.
-            selected.formIntersection(list.receipts.map(\.id))
+            timing.dataReady()
         } catch is CancellationError {
             return
         } catch {
             guard asked == query else { return }
             receipts.fail(error)
+            if let q = await queue { applyPending(q) }
+            if let r = await rejectedResponse { applyRejected(r) }
+            return
         }
-        if let c = await countsResponse, asked == query { counts = c.counts }
+        if let c = await countsResponse, asked == query {
+            counts = c.counts
+            // A paging server may leave the count to the counts answer.
+            total = ReceiptListPaging.total(list, tab: asked.tab, counts: c.counts)
+        }
         if let q = await queue { applyPending(q) }
         if let r = await rejectedResponse { applyRejected(r) }
+    }
+
+    private func applyList(_ list: ReceiptList, tab: ReceiptTab) {
+        receipts.succeed(list.receipts)
+        paging.firstPage(list)
+        total = ReceiptListPaging.total(list, tab: tab, counts: counts)
+        // Rows that left the list (deleted elsewhere, filtered out) are no longer selected.
+        selected.formIntersection(list.receipts.map(\.id))
+        app.rememberReceiptRows(list.receipts)
     }
 
     private func applyPending(_ list: ReceiptList) {
         pending = list.receipts
         pendingTruncated = list.truncated ?? false
+        app.rememberReceiptRows(list.receipts)
     }
 
     private func applyRejected(_ list: ReceiptList) {
@@ -457,6 +506,7 @@ struct ReceiptsView: View {
             let page: ReceiptList = try await app.api.get("/api/receipts", query: ReceiptListQuery.pendingQueue(offset: pending.count))
             pending = ReceiptPaging.append(pending, page.receipts)
             pendingTruncated = page.truncated ?? false
+            app.rememberReceiptRows(page.receipts)
         } catch is CancellationError {
         } catch {
             failure = error.userMessage
@@ -468,7 +518,7 @@ struct ReceiptsView: View {
         loadingMoreRejected = true
         defer { loadingMoreRejected = false }
         do {
-            let page: ReceiptList = try await app.api.get("/api/receipts", query: ["reviewStatus": "rejected", "offset": String(rejected.count)])
+            let page: ReceiptList = try await app.api.get("/api/receipts", query: ReceiptListQuery.rejectedQueue(offset: rejected.count))
             rejected = ReceiptPaging.append(rejected, page.receipts)
             rejectedTotal = page.count ?? rejectedTotal
             rejectedTruncated = page.truncated ?? false
@@ -478,18 +528,20 @@ struct ReceiptsView: View {
         }
     }
 
+    /// The page after the loaded rows: by cursor from a paging server, by offset from an older one.
     private func loadMore() async {
-        guard truncated, !loadingMore, let loaded = receipts.value else { return }
+        let asked = query
+        guard !loadingMore, let loaded = receipts.value, let next = paging.nextQuery(asked, loaded: loaded.count) else { return }
         loadingMore = true
         defer { loadingMore = false }
-        let asked = query
         do {
-            let page: ReceiptList = try await app.api.get("/api/receipts", query: asked.listQuery(offset: loaded.count))
+            let page: ReceiptList = try await app.api.get("/api/receipts", query: next)
             // The filters changed while this page was on its way: the fresh load wins.
             guard asked == query else { return }
             receipts.update { $0 = ReceiptPaging.append(loaded, page.receipts) }
             total = page.count ?? total
-            truncated = page.truncated ?? false
+            paging.nextPage(page)
+            app.rememberReceiptRows(page.receipts)
         } catch is CancellationError {
         } catch {
             failure = error.userMessage
@@ -639,28 +691,43 @@ struct ReceiptsView: View {
     }
 }
 
-struct ReceiptRow: View {
+struct ReceiptRow: View, Equatable {
     let receipt: Receipt
     /// Kuitit shows a small picture of the file; the review queue and mail list stay text only.
-    var thumbnail = false
+    let thumbnail: Bool
+    /// The row's words, made once when the row is made instead of on every redraw.
+    private let text: ReceiptRowText
+
+    init(receipt: Receipt, thumbnail: Bool = false) {
+        self.receipt = receipt
+        self.thumbnail = thumbnail
+        text = ReceiptRowText(receipt)
+    }
+
+    /// A row whose words and picture did not change is not drawn again (`.equatable()`).
+    static func == (lhs: ReceiptRow, rhs: ReceiptRow) -> Bool {
+        lhs.receipt.id == rhs.receipt.id && lhs.text == rhs.text && lhs.thumbnail == rhs.thumbnail
+            && lhs.receipt.hasOriginalFile == rhs.receipt.hasOriginalFile
+    }
+
     var body: some View {
         HStack {
             if thumbnail { ReceiptThumbnail(receipt: receipt) }
             VStack(alignment: .leading, spacing: 2) {
-                Text(receipt.title).lineLimitUnlessLarge()
+                Text(text.title).lineLimitUnlessLarge()
                 HStack(spacing: 4) {
-                    Text([receipt.date.map(APIDate.displayDay), receipt.category.map(ReceiptCategory.label(for:))].compactMap { $0 }.joined(separator: " · "))
-                    if receipt.linkedTransaction != nil {
+                    Text(text.detail)
+                    if text.linked {
                         Image(systemName: "link").accessibilityLabel("Kohdistettu")
                     }
                 }
                 .font(.caption).foregroundStyle(Theme.ink2)
             }
             Spacer()
-            if let amount = receipt.totalAmount {
-                MoneyText(amount: receipt.isIncome ? amount : -amount, signed: receipt.isIncome)
+            if let amount = text.amount {
+                MoneyText(amount: text.isIncome ? amount : -amount, signed: text.isIncome)
                     .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(receipt.isIncome ? Theme.success : Theme.ink)
+                    .foregroundStyle(text.isIncome ? Theme.success : Theme.ink)
             }
         }
     }

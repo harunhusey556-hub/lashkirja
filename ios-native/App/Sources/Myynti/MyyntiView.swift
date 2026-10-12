@@ -269,13 +269,23 @@ struct MyyntiView: View {
         }
     }
 
+    /// Through the app's cache: the last list for this scope and chip at once, then the server's
+    /// when it is stale (pull-to-refresh bumps the version, so it always asks).
     private func load() async {
+        let timing = ScreenTiming("Myynti")
+        let listQuery = SalesListQuery.query(scope: scope, filter: filter, search: query)
+        if state.value == nil, let cached: InvoiceList = await app.cachedValue("/api/invoices", query: listQuery) {
+            state.succeed(cached)
+            if let cachedCounts: InvoiceCounts = await app.cachedValue("/api/invoices/counts", query: scope.query) { counts = cachedCounts.counts }
+            timing.painted(fromCache: true)
+        }
         state.begin()
         // The list and the chip counts are independent: one round trip instead of two.
         async let fresh = loadCounts()
         do {
-            let list: InvoiceList = try await app.api.get("/api/invoices", query: SalesListQuery.query(scope: scope, filter: filter, search: query))
+            let list: InvoiceList = try await app.cachedGet("/api/invoices", query: listQuery, persist: listQuery.isEmpty)
             state.succeed(list)
+            timing.dataReady()
             app.indexForSpotlight(list.invoices.compactMap {
                 SpotlightEntry.invoice(id: $0.id, number: $0.number, customerName: $0.customer.name,
                                        gross: $0.gross, statusLabel: $0.displayStatus.label)
@@ -290,7 +300,7 @@ struct MyyntiView: View {
     private func loadCounts() async -> [String: Int]? {
         do {
             // Scoped like the list (period, customer), never by status.
-            let response: InvoiceCounts = try await app.api.get("/api/invoices/counts", query: scope.query)
+            let response: InvoiceCounts = try await app.cachedGet("/api/invoices/counts", query: scope.query)
             return response.counts
         } catch {
             return nil
