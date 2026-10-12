@@ -70,8 +70,9 @@ public struct Receipt: Decodable, Sendable, Identifiable, Hashable {
         fileName = try c.decodeIfPresent(String.self, forKey: .fileName)
         source = try c.decodeIfPresent(String.self, forKey: .source)
         confidence = try c.decodeIfPresent(Double.self, forKey: .confidence)
-        createdAt = try c.decode(String.self, forKey: .createdAt)
-        updatedAt = try c.decode(String.self, forKey: .updatedAt)
+        // A paged list may leave the timestamps out of its narrow rows (the detail always has them).
+        createdAt = try c.decodeIfPresent(String.self, forKey: .createdAt) ?? ""
+        updatedAt = try c.decodeIfPresent(String.self, forKey: .updatedAt) ?? ""
         totalAmount = try c.decodeIfPresent(Decimal.self, forKey: .totalAmount)
         reviewStatus = try c.decodeIfPresent(String.self, forKey: .reviewStatus)
         notes = try c.decodeIfPresent(String.self, forKey: .notes)
@@ -109,6 +110,28 @@ public struct ReceiptList: Decodable, Sendable {
     public let receipts: [Receipt]
     public let count: Int?
     public let truncated: Bool?
+    /// Where the next page starts on a server that pages (`?cursor=&limit=50`); nil on the last
+    /// page and from an older server, which pages by `offset` and `truncated` instead.
+    public let nextCursor: String?
+
+    enum CodingKeys: String, CodingKey { case receipts, count, truncated, nextCursor, total, hasMore }
+
+    public init(receipts: [Receipt], count: Int? = nil, truncated: Bool? = nil, nextCursor: String? = nil) {
+        self.receipts = receipts
+        self.count = count
+        self.truncated = truncated
+        self.nextCursor = nextCursor
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        receipts = try c.decode([Receipt].self, forKey: .receipts)
+        // A paged answer may call them total/hasMore; either name reads, an odd type is unknown.
+        count = (try? c.decodeIfPresent(Int.self, forKey: .count)) ?? (try? c.decodeIfPresent(Int.self, forKey: .total))
+        truncated = (try? c.decodeIfPresent(Bool.self, forKey: .truncated)) ?? (try? c.decodeIfPresent(Bool.self, forKey: .hasMore))
+        let cursor = try? c.decodeIfPresent(String.self, forKey: .nextCursor)
+        nextCursor = cursor?.isEmpty == false ? cursor : nil
+    }
 }
 
 public struct ReceiptResponse: Decodable, Sendable { public let receipt: Receipt }

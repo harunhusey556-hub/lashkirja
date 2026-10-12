@@ -59,7 +59,7 @@ struct BankHubView: View {
             await load()
         }
         .task(id: app.dataVersion) {
-            restoreOnce()
+            await restoreOnce()
             guard state.value == nil || gate.isDue(version: app.dataVersion) else { return }
             // Marked only after a load that finished: a cancelled or failed one must not count as fresh.
             let version = app.dataVersion
@@ -280,15 +280,29 @@ struct BankHubView: View {
     // MARK: Loading
 
     /// The previous visit's figures, shown at once; the first load then refreshes them behind.
-    private func restoreOnce() {
+    /// On the first visit after a launch they come from the cache (prefetched, or the previous
+    /// run's from disk).
+    private func restoreOnce() async {
         guard !restored else { return }
         restored = true
-        guard state.value == nil, let memory = app.bankHubMemory else { return }
-        state.succeed(memory.statements)
-        position = memory.position
-        openRows = memory.openRows
-        paging = memory.paging
-        if !monthChosen { month = BankHub.startMonth(memory.statements) }
+        guard state.value == nil else { return }
+        if let memory = app.bankHubMemory {
+            state.succeed(memory.statements)
+            position = memory.position
+            openRows = memory.openRows
+            paging = memory.paging
+            if !monthChosen { month = BankHub.startMonth(memory.statements) }
+            return
+        }
+        guard let list: StatementList = await app.cachedValue("/api/statements"), state.value == nil else { return }
+        let cachedPosition: BankHubPosition? = await app.cachedValue("/api/bank-accounts")
+        let cachedCount: StatementOpenCount? = await app.cachedValue("/api/statements/counts")
+        guard state.value == nil else { return }
+        state.succeed(list.statements)
+        if position == nil { position = cachedPosition }
+        openRows = cachedCount?.open ?? BankFeed.months(list.statements).reduce(0) { $0 + $1.open }
+        paging.firstPage(next: list.nextCursor)
+        if !monthChosen { month = BankHub.startMonth(list.statements) }
     }
 
     private func remember() {
@@ -300,12 +314,14 @@ struct BankHubView: View {
     /// The balances go on screen as soon as they arrive. Returns whether the rows loaded.
     @discardableResult
     private func load() async -> Bool {
+        let timing = ScreenTiming("Pankki")
         state.begin()
-        let api = app.api
+        let app = self.app
         let startedAt = Date()
-        async let listResult = Result<StatementList, Error>(asyncCatching: { try await api.get("/api/statements") })
-        async let positionResult = Result<BankHubPosition, Error>(asyncCatching: { try await api.get("/api/bank-accounts") })
-        async let countResult: StatementOpenCount? = try? api.get("/api/statements/counts")
+        // Through the app's cache: a launch prefetched them, and an unchanged visit asks nothing.
+        async let listResult = Result<StatementList, Error>(asyncCatching: { try await app.cachedGet("/api/statements", persist: true) })
+        async let positionResult = Result<BankHubPosition, Error>(asyncCatching: { try await app.cachedGet("/api/bank-accounts", persist: true) })
+        async let countResult: StatementOpenCount? = try? app.cachedGet("/api/statements/counts", persist: true)
         let balances = await positionResult
         if Task.isCancelled { return false }
         switch balances {
@@ -327,6 +343,7 @@ struct BankHubView: View {
             // A server without the count route: counted from the rows, as Kirjanpito does.
             openRows = count?.open ?? BankFeed.months(value.statements).reduce(0) { $0 + $1.open }
             remember()
+            timing.dataReady()
             return true
         case .failure(let error):
             if error is CancellationError { return false }

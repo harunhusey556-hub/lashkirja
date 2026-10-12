@@ -28,7 +28,7 @@ struct ReceiptDetailView: View {
         List {
             if let r = state.value {
                 if let banner = state.banner {
-                    Section { RefreshFailureBanner(failure: banner, retry: load) }
+                    Section { RefreshFailureBanner(failure: banner, retry: { await load() }) }
                         .listRowBackground(Color.clear)
                         .listRowInsets(EdgeInsets())
                 }
@@ -85,14 +85,17 @@ struct ReceiptDetailView: View {
                     }
                 }
                 if let failure { Text(failure).foregroundStyle(Theme.danger) }
+            } else if state.failure == nil, let row = app.receiptPreview(receiptId) {
+                // The row the list showed, at once; the fields, picture and actions fill in.
+                previewSections(row)
             } else {
-                ScreenStateView(state: state, retry: load) { (_: Receipt) in EmptyView() }.listRowBackground(Color.clear)
+                ScreenStateView(state: state, retry: { await load() }) { (_: Receipt) in EmptyView() }.listRowBackground(Color.clear)
             }
         }
         .scrollContentBackground(.hidden)
         .background(Theme.canvas)
         .navigationTitle("Kuitti")
-        .refreshable { await load() }
+        .refreshable { await load(force: true) }
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             if state.value != nil {
@@ -125,6 +128,25 @@ struct ReceiptDetailView: View {
         }
         .task { await load() }
         .onDisappear { toastTask?.cancel() }
+    }
+
+    /// The list row's figures while the receipt loads: read only, no actions (the row lacks the
+    /// VAT rows and notes, so nothing may be edited or approved from it).
+    @ViewBuilder private func previewSections(_ r: Receipt) -> some View {
+        Section {
+            VStack(spacing: 6) {
+                if let amount = r.totalAmount { MoneyText(amount: amount).scaledFont(size: 34, weight: .bold, design: .rounded, relativeTo: .largeTitle).moneyHero() }
+                Text(r.title).font(.headline)
+                Text(r.isIncome ? "Tulo" : "Meno").font(.caption).foregroundStyle(Theme.ink2)
+            }
+            .frame(maxWidth: .infinity)
+            .listRowBackground(Color.clear)
+        }
+        Section {
+            if let date = r.date { LabeledContent("Päivä", value: APIDate.displayDay(date)) }
+            if let category = r.category, !category.isEmpty { LabeledContent("Kategoria", value: ReceiptCategory.label(for: category)) }
+            ProgressView().frame(maxWidth: .infinity).accessibilityLabel("Ladataan kuittia")
+        }
     }
 
     /// The delete dialog names the receipt, so it is clear which one goes.
@@ -400,11 +422,20 @@ struct ReceiptDetailView: View {
     private static let fileCacheKey = "receipt-file-preview"
     private static let fileQuery = ["preview": "1"]
 
-    private func load() async {
+    /// The cached receipt at once (opened before, nothing changed since), then the server's when
+    /// it is stale; `force` (pull-to-refresh) always asks.
+    private func load(force: Bool = false) async {
+        let timing = ScreenTiming("Kuitti")
+        let path = "/api/receipts/\(receiptId)"
+        if state.value == nil, let cached: ReceiptResponse = await app.cachedValue(path) {
+            state.succeed(cached.receipt)
+            timing.painted(fromCache: true)
+        }
         state.begin()
         do {
-            let r: ReceiptResponse = try await app.api.get("/api/receipts/\(receiptId)")
+            let r: ReceiptResponse = try await app.cachedGet(path, force: force)
             state.succeed(r.receipt)
+            timing.dataReady()
             if r.receipt.hasOriginalFile && !prefetched {
                 prefetched = true
                 DocumentCache.shared.prefetch(app, path: "/api/receipts/\(receiptId)/file", query: Self.fileQuery, fileName: r.receipt.fileName ?? "kuitti", key: Self.fileCacheKey)
