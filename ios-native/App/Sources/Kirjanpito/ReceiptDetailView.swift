@@ -14,6 +14,8 @@ struct ReceiptDetailView: View {
     @State private var matchSubmit = SubmitGuard()
     private var matchBusy: Bool { matchSubmit.inFlight }
     @State private var reviewBusy = false
+    /// The file is being read again on the server ("Lue uudelleen").
+    @State private var rereadBusy = false
     /// The ostolasku this receipt is filed as (nil until known, or while the server lacks the route).
     @State private var ostolasku: ReceiptPurchaseInvoiceView?
     @State private var kindBusy = false
@@ -72,6 +74,10 @@ struct ReceiptDetailView: View {
                         Button { showFile = true } label: { Label("Näytä kuitti", systemImage: "doc.viewfinder") }
                     }
                     Button { editing = true } label: { Label("Muokkaa", systemImage: "pencil") }
+                    // Ask the server to read the stored file again: a bill that came back wrong,
+                    // or with nothing at all (Kymenlaakson Sähkö's), can be retried from here.
+                    Button { Task { await reread() } } label: { Label("Lue uudelleen", systemImage: "arrow.clockwise") }
+                        .disabled(rereadBusy)
                     if r.reviewStatus == "pending" {
                         Button { Task { await review("approved") } } label: { Label("Hyväksy", systemImage: "checkmark.circle") }
                             .disabled(reviewBusy)
@@ -459,6 +465,37 @@ struct ReceiptDetailView: View {
         showToast("Käytetäänkö kategoriaa \(ReceiptCategory.label(for: category)) myyjälle \(vendor) myöhemmin?", action: "Muista") {
             guard await saveRule(vendor: vendor, category: category) else { return }
             showToast("Sääntö tallennettu.", action: "Kumoa") { await undoRule(vendor: vendor) }
+        }
+    }
+
+    /// Read the stored file again on the server (the owner's request, 2026-10-13): a bill the AI
+    /// read wrongly - or could not read at all, as Kymenlaakson Sähkö's - can be retried without
+    /// deleting and re-uploading it.
+    private func reread() async {
+        struct Body: Encodable { let again: Bool }
+        struct Result: Decodable { let saved: Bool; let reason: String? }
+        guard !rereadBusy else { return }
+        rereadBusy = true
+        failure = nil
+        defer { rereadBusy = false }
+        do {
+            let result: Result = try await app.api.send(
+                "POST", "/api/receipts/\(receiptId)/reread", body: Body(again: true)
+            )
+            await load()
+            if result.saved {
+                Haptics.success()
+            } else {
+                // Nothing was written, so say why rather than leaving the button looking dead.
+                failure = result.reason == "approved"
+                    ? "Kuitti on jo hyväksytty: palauta se tarkistettavaksi, jos haluat lukea sen uudelleen."
+                    : "Tiedostosta ei saatu luettua tietoja."
+                Haptics.error()
+            }
+        } catch is CancellationError {
+        } catch {
+            failure = error.userMessage
+            Haptics.error()
         }
     }
 
