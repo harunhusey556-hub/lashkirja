@@ -92,9 +92,10 @@ describe("POST /api/receipts/inbox", () => {
     expect(job?.status).toBe("done");
 
     const receipt = await prisma.receipt.findFirst({ where: { userId: user.id, uploadId: body.uploadId } });
+    // A complete reading gets the upload's auto-accept (W31); incomplete ones stay pending.
     expect(receipt).toMatchObject({
       source: "app_capture",
-      reviewStatus: "pending",
+      reviewStatus: "approved",
       vendor: "K-Market",
       totalAmountCents: 890,
     });

@@ -5,14 +5,17 @@
  * document-jobs.ts so both that module and the two routes can import from
  * here without a cycle.
  */
-import type { Prisma } from "@/generated/prisma/client";
+import type { Prisma, Receipt } from "@/generated/prisma/client";
 import { prisma } from "./db";
 import type { DocumentType, ExtractedReceipt } from "./ai";
 import { removeUserUpload } from "./storage";
 import { UNREADABLE_RECEIPT_NOTE } from "./receipt-unreadable";
 import { foreignFieldsFromExtraction } from "./foreign-purchase";
-import { fileReceiptAsPurchaseInvoice } from "./purchase-invoices";
+import { fileReceiptAsPurchaseInvoice, matchPurchasePaymentsFromBank } from "./purchase-invoices";
 import { helsinkiDayUtc } from "./validation";
+import { AUTO_ACCEPT_COMPLETE_RECEIPTS, canAutoAccept } from "./auto-accept";
+import { getLockedThrough, isDateLocked } from "./period-lock";
+import { runMatching } from "./matching";
 
 export const STAGING_TTL_MS = 24 * 60 * 60 * 1000;
 /** How long an inbox-claimed upload's file is kept after it becomes a receipt. */
@@ -188,10 +191,78 @@ export function storedDocumentKind(
   }
 }
 
-/** Creates the pending "app_capture" receipt and claims its upload, inside
- * the caller's transaction. Used both when a job finishes (document-jobs.ts)
- * and when a re-submitted photo's extraction is already on file
- * (receipt-inbox.ts). */
+/** A receipt the user already has with the same vendor, day and sum: the
+ * duplicate signal the save route answers with 409 and auto-accept never
+ * approves. `excludeId` leaves out the row being judged. */
+export async function findLookAlikeReceipt(
+  db: Prisma.TransactionClient | typeof prisma,
+  userId: string,
+  receipt: { vendor: string | null; date: Date | null; totalAmountCents: number | null },
+  excludeId?: string
+): Promise<{ id: string } | null> {
+  if (!receipt.vendor || !receipt.date || receipt.totalAmountCents == null) return null;
+  return db.receipt.findFirst({
+    where: {
+      userId,
+      vendor: receipt.vendor,
+      date: receipt.date,
+      totalAmountCents: receipt.totalAmountCents,
+      ...(excludeId ? { id: { not: excludeId } } : {}),
+    },
+    select: { id: true },
+  });
+}
+
+/** W8 auto-accept on a row just created inside `db`'s transaction: judged as
+ * stored (lib/auto-accept.ts), then approved or left pending in that same
+ * transaction, so a crash can never leave it half approved. The one approval
+ * step shared by POST /api/receipts/save (autoApprove) and the phone inbox. */
+export async function settleAutoAccept(
+  db: Prisma.TransactionClient,
+  created: Receipt,
+  signals: { documentType: DocumentType | null; duplicate: boolean }
+): Promise<Receipt> {
+  return db.receipt.update({
+    where: { id: created.id },
+    data: {
+      reviewStatus: canAutoAccept({ ...created, documentType: signals.documentType, duplicate: signals.duplicate })
+        ? "approved"
+        : "pending",
+    },
+  });
+}
+
+/** What follows a committed receipt save (W27): bank matching for the user,
+ * and the purchase-payment matching when a bill was just filed, so a bank row
+ * already carrying its viite pays the new ostolasku. Never fails the save. */
+export async function matchAfterReceiptSave(userId: string, filedInvoice: boolean): Promise<void> {
+  await runMatching(userId).catch((error) => console.error("Matching after receipt save failed:", error));
+  if (filedInvoice) {
+    await matchPurchasePaymentsFromBank(userId).catch((error) =>
+      console.error("Purchase payment matching after receipt save failed:", error)
+    );
+  }
+}
+
+/** Whether the stored reading itself found a date; an inbox receipt without
+ * one carries the capture day, which must not pass for a complete reading. */
+function readingHasDate(extractedJson: string | null): boolean {
+  if (!extractedJson) return false;
+  try {
+    return Boolean((JSON.parse(extractedJson) as { date?: unknown }).date);
+  } catch {
+    // An unreadable stored reading counts as no date: the receipt stays pending.
+    return false;
+  }
+}
+
+/** Creates the "app_capture" receipt and claims its upload, inside the
+ * caller's transaction. Used both when a job finishes (document-jobs.ts) and
+ * when a re-submitted photo's extraction is already on file
+ * (receipt-inbox.ts). A complete reading is approved the way an upload saved
+ * with autoApprove is (W31); anything else stays pending. When
+ * `matchAfterSave` is set the caller runs matchAfterReceiptSave once the
+ * transaction has committed, as the save route does. */
 export async function createPendingInboxReceipt(
   tx: Prisma.TransactionClient,
   input: {
@@ -201,8 +272,8 @@ export async function createPendingInboxReceipt(
     fileName: string;
     fields: PendingReceiptFields;
   }
-): Promise<void> {
-  const receipt = await tx.receipt.create({
+): Promise<{ receiptId: string; filedInvoice: boolean; matchAfterSave: boolean }> {
+  let receipt = await tx.receipt.create({
     data: {
       userId: input.userId,
       uploadId: input.uploadId,
@@ -221,12 +292,27 @@ export async function createPendingInboxReceipt(
     },
     select: { extractedJson: true },
   });
+  const reading = storedDocumentKind(upload.extractedJson);
+  // W31: phone captures get the upload's auto-accept. The save route asserts an
+  // open period and refuses a look-alike before it creates; here nobody waits
+  // for an answer, so a closed month or a look-alike simply stays pending.
+  if (
+    AUTO_ACCEPT_COMPLETE_RECEIPTS &&
+    readingHasDate(upload.extractedJson) &&
+    !isDateLocked(await getLockedThrough(input.userId, tx), receipt.date)
+  ) {
+    const lookAlike = await findLookAlikeReceipt(tx, input.userId, receipt, receipt.id);
+    receipt = await settleAutoAccept(tx, receipt, { documentType: reading.documentType, duplicate: lookAlike != null });
+  }
   // A photographed bill becomes an ostolasku like a saved one (the reading is
   // on the upload by now). Best effort: a closed period or an incomplete
-  // reading must never lose the capture itself.
+  // reading must never lose the capture itself. Idempotent per receipt, so an
+  // approved bill is still filed exactly once.
+  let filedInvoice = false;
   try {
-    await fileReceiptAsPurchaseInvoice(input.userId, receipt, storedDocumentKind(upload.extractedJson), tx);
+    filedInvoice = (await fileReceiptAsPurchaseInvoice(input.userId, receipt, reading, tx)).created;
   } catch (error) {
     console.warn(`Inbox receipt ${receipt.id} was not filed as an ostolasku:`, error);
   }
+  return { receiptId: receipt.id, filedInvoice, matchAfterSave: AUTO_ACCEPT_COMPLETE_RECEIPTS };
 }
