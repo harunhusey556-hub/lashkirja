@@ -231,6 +231,8 @@ export default function ReceiptEditor({ receiptId, seed }: ReceiptEditorProps) {
   const [discarding, setDiscarding] = useState(false);
   const [vendorRuleActive, setVendorRuleActive] = useState(false);
   const [vendorRuleBusy, setVendorRuleBusy] = useState(false);
+  /** Asking the app to read the stored file again (the owner's request, 2026-10-13). */
+  const [rereadBusy, setRereadBusy] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const draftKey = receiptId ? `receipt:${receiptId}` : "receipt:new";
@@ -1793,6 +1795,40 @@ export default function ReceiptEditor({ receiptId, seed }: ReceiptEditorProps) {
             </Link>
           ) : (
             <div className="flex gap-2">
+              {/* Reading the file again: a bill the AI got wrong (or could not read at all,
+                  like Kymenlaakson Sähkö's) can be retried without deleting and re-uploading. */}
+              {receiptId ? (
+                <Button
+                  type="button"
+                  variant="secondary"
+                  disabled={rereadBusy}
+                  onClick={async () => {
+                    setRereadBusy(true);
+                    try {
+                      const res = await fetch(`/api/receipts/${receiptId}/reread`, {
+                        method: "POST",
+                      });
+                      const data = await res.json().catch(() => null);
+                      if (!res.ok) {
+                        showToast({ tone: "info", text: data?.error || "Uudelleenluku ei onnistunut" });
+                      } else if (data?.saved) {
+                        showToast({ tone: "info", text: "Luettiin uudelleen. Tarkista tiedot ja tallenna." });
+                        router.refresh();
+                      } else if (data?.reason === "approved") {
+                        showToast({ tone: "info", text: "Kuitti on hyväksytty: peru hyväksyntä, jos haluat lukea sen uudelleen." });
+                      } else {
+                        showToast({ tone: "info", text: "Tiedostosta ei saatu luettua tietoja." });
+                      }
+                    } catch {
+                      showToast({ tone: "info", text: "Uudelleenluku ei onnistunut" });
+                    } finally {
+                      setRereadBusy(false);
+                    }
+                  }}
+                >
+                  {rereadBusy ? "Luetaan…" : "Lue uudelleen"}
+                </Button>
+              ) : null}
               {/* The look-alike prompt answers both ways: "Tallenna silti" or drop this file (W27). */}
               {forceDuplicate && !isEdit && uploadId ? (
                 <Button
