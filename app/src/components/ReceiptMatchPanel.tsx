@@ -28,7 +28,7 @@ export interface ReceiptMatchData {
 }
 
 
-import { shouldAutoConfirm } from "../lib/matching";
+import { shouldAutoConfirm } from "../lib/match-gate";
 
 function txLabel(tx: BankTxMatch): string {
   const parts = [tx.counterparty || "Pankkitapahtuma"];

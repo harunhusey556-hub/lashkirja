@@ -98,6 +98,36 @@ export const RELATED_MAX = 0.45;
  */
 export const TIGHT_DATE_DAYS = 3;
 
+/** Strong matches link immediately without manual approval. */
+export const AUTO_CONFIRM_THRESHOLD = 0.85;
+
+/**
+ * Will this pair be confirmed without a human? Evidence-based, not score-based: posting to the
+ * books needs proof the pair belongs together.
+ *
+ *   viite     — the bank reference equals the receipt reference or invoice number
+ *   iban      — the counterparty's account
+ *   vendor    — a strong name match, and only with dates that actually agree (dateClose)
+ *   amount    — the amounts agree to the cent
+ *
+ * `competing` marks a pair that had another eligible rival, which means the evidence is not
+ * decisive. Lives here, in the pure gate, so the web can show what the matcher will do without
+ * importing the database.
+ */
+export function shouldAutoConfirm(score: number, reasons: string[]): boolean {
+  if (score < AUTO_CONFIRM_THRESHOLD) return false;
+  if (reasons.includes("competing")) return false;
+  if (!reasons.includes("amount")) return false;
+  // The score rewards any identity signal, so the gate must read the same evidence: when it
+  // demanded `viite` alone, a pair at the top score sat in "suggested" forever and the owner
+  // read it as broken (122 rows at 1.0, 2026-10-13). A viite or the counterparty IBAN is
+  // decisive on its own; a name match needs the dates to actually agree (dateClose - not the
+  // loose `date` code, which covers a whole month and would link look-alike rows). A rival
+  // candidate would have added `competing`, refused above.
+  if (reasons.includes("viite") || reasons.includes("iban")) return true;
+  return reasons.includes("vendor") && reasons.includes("dateClose");
+}
+
 const DAY_MS = 86_400_000;
 
 /* ------------------------------ normalizing ------------------------------ */
