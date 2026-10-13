@@ -90,6 +90,14 @@ export const AMBIGUITY_MARGIN = 0.05;
 /** A non-eligible pair never scores above this (shown only when the owner searches). */
 export const RELATED_MAX = 0.45;
 
+/**
+ * How close the dates must be for an amount + name pair to count as decisive on its own.
+ * `date` alone is too weak: it is credited anywhere inside the window, so a card row and a
+ * receipt in the same month would auto-confirm (two identical MobilePay rows, 2026). Inside
+ * this many days the pair is the same event, not merely the same month.
+ */
+export const TIGHT_DATE_DAYS = 3;
+
 const DAY_MS = 86_400_000;
 
 /* ------------------------------ normalizing ------------------------------ */
@@ -366,6 +374,12 @@ export function gatePair(row: GateRow, candidate: GateCandidate): GateVerdict {
   if (iban) codes.push("iban");
   if (name > 0) codes.push("vendor");
   if (date.dateGapDays !== null && date.dateFit > 0) codes.push("date");
+  // `date` only says "inside the window", which for a card row is a 35-day span - "same amount,
+  // same month". This code says the dates actually agree, which is what makes an amount + name
+  // pair decisive enough to confirm without a reference.
+  if (date.dateGapDays !== null && Math.abs(date.dateGapDays) <= TIGHT_DATE_DAYS) {
+    codes.push("dateClose");
+  }
 
   return {
     candidateId: candidate.id,

@@ -124,9 +124,16 @@ const CATEGORIES = [...RECEIPT_CATEGORY_IDS];
 function buildExtractionPrompt(profileContext: string | null, vendorPriors: string): string {
   const profileHint = profileContext ? `\nKäyttäjän yritysprofiili:\n${profileContext}\n` : "";
   const priorsHint = vendorPriors ? `\n${vendorPriors}\n` : "";
+  // The vendor is whoever issued the document, never whoever received it. Left unsaid, the
+  // model reads the recipient block on a reminder letter (Tallink's 2026-08-05 reminder and
+  // Suvida Foods' invoice both came back as "Tiyouba Oy") and books a purchase from the
+  // owner's own company.
+  const ownCompanyRule = profileContext
+    ? "\nMYYJÄ: vendor on aina dokumentin lähettäjä (myyjä). Käyttäjän oma yritys on vastaanottaja - ÄLÄ KOSKAAN palauta sitä vendor-kenttään. Jos myyjää ei näy, vendor = null.\n"
+    : "";
   
   return `Olet kirjanpidon avustaja. Analysoi tämä kuitti/lasku ja palauta tiedot JSON-muodossa.
-${profileHint}
+${profileHint}${ownCompanyRule}
 Palauta VAIN validi JSON seuraavalla rakenteella (ei muuta tekstiä):
 {
   "vendor": "myyjän nimi",
@@ -189,12 +196,20 @@ export async function extractReceipt(
   filePath = converted.filePath;
   mimeType = converted.mimeType;
 
+  // One place where a reading becomes the result, so the own-company guard cannot be missed:
+  // a vendor that is really the owner's own company is dropped before it can be booked.
+  const finish = (reading: ExtractedReceipt, text: string): ExtractedReceipt =>
+    enrichExtractedReceipt({
+      ...(isOwnCompanyVendor(reading.vendor, profileContext) ? { ...reading, vendor: null } : reading),
+      rawText: text,
+    });
+
   try {
     // A photo is read by the model from the image itself; local OCR is only the fallback.
     if (isCloudAiEnabled() && process.env.LLM_API_KEY && mimeType.startsWith("image/")) {
       try {
         const result = await extractWithAIFromImage(filePath, process.env.LLM_API_KEY, profileContext, vendorPriors);
-        return enrichExtractedReceipt({ ...result, rawText: "" });
+        return finish(result, "");
       } catch (error) {
         console.warn("Receipt photo extraction failed; trying OCR:", error instanceof Error ? error.message : "UnknownError");
       }
@@ -219,7 +234,7 @@ export async function extractReceipt(
             profileContext,
             vendorPriors
           );
-          return enrichExtractedReceipt({ ...result, rawText: "" });
+          return finish(result, "");
         } catch (error) {
           console.warn(
             "PDF page-image extraction failed; falling back to the text path:",
@@ -247,7 +262,7 @@ export async function extractReceipt(
       for (const attempt of attempts) {
         try {
           const result = await attempt();
-          return enrichExtractedReceipt({ ...result, rawText });
+          return finish(result, rawText);
         } catch (error) {
           console.warn(
             "Cloud receipt extraction failed; trying the next configured path:",
@@ -458,6 +473,49 @@ type ExtractionContent = string | Array<{ type: "text"; text: string } | { type:
 
 /** How many pages of a PDF are rendered for the model: a receipt or bill is 1-3 pages. */
 const VISION_MAX_PAGES = 3;
+
+/**
+ * Words that identify nobody on their own: a match on these alone proves nothing.
+ */
+const NAME_NOISE = new Set([
+  "OY", "OYJ", "AB", "KY", "TMI", "RY", "LTD", "AS", "FINLAND", "SUOMI", "HELSINKI",
+  "ESPOO", "VANTAA", "TAMPERE", "TURKU", "OULU", "GROUP", "PALVELUT", "PALVELU",
+]);
+
+/** Name words long enough to identify someone, noise removed. */
+function nameWords(raw: string | null | undefined): string[] {
+  if (!raw) return [];
+  return raw
+    .toUpperCase()
+    .replace(/[^A-ZÄÖÅ0-9\s-]/g, " ")
+    .split(/[\s-]+/)
+    .map((word) => word.trim())
+    .filter((word) => word.length >= 3 && !NAME_NOISE.has(word));
+}
+
+/**
+ * Does this vendor simply repeat the owner's own company?
+ *
+ * The vendor must be whoever issued the document. A model reading a document where only the
+ * recipient is legible (Tallink's reminder letter, Suvida Foods' invoice) returns the owner
+ * instead, and the purchase would be booked from the owner's own company. Deterministic
+ * backing for the prompt rule: the reading is dropped, not trusted.
+ */
+export function isOwnCompanyVendor(
+  vendor: string | null | undefined,
+  profileContext: string | null | undefined
+): boolean {
+  const vendorWords = nameWords(vendor);
+  if (vendorWords.length === 0 || vendorWords.length > 4) return false;
+  const ownWords = new Set(nameWords(profileContext));
+  if (ownWords.size === 0) return false;
+  const businessId = /\b\d{7}-\d\b/.exec(profileContext ?? "")?.[0] ?? null;
+  if (businessId && (vendor ?? "").includes(businessId)) return true;
+  // Every word of the vendor must come from the owner's own name, and one of them must be
+  // distinctive - otherwise "Helsinki Oy" would be enough to hide a real vendor.
+  const allOwn = vendorWords.every((word) => ownWords.has(word));
+  return allOwn && vendorWords.some((word) => word.length >= 5);
+}
 
 /**
  * Is this text worth sending to the model as text?

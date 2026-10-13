@@ -95,7 +95,15 @@ export const AUTO_CONFIRM_THRESHOLD = 0.85;
 export function shouldAutoConfirm(score: number, reasons: string[]): boolean {
   if (score < AUTO_CONFIRM_THRESHOLD) return false;
   if (reasons.includes("competing")) return false;
-  return reasons.includes("viite") && reasons.includes("amount");
+  if (!reasons.includes("amount")) return false;
+  // The score rewards any identity signal, so the gate must read the same evidence: when it
+  // demanded `viite` alone, a pair at the top score sat in "suggested" forever and the owner
+  // read it as broken (122 rows at 1.0, 2026-10-13). A viite or the counterparty IBAN is
+  // decisive on its own; a name match needs the dates to actually agree (dateClose - not the
+  // loose `date` code, which covers a whole month and would link look-alike rows). A rival
+  // candidate would have added `competing`, refused above.
+  if (reasons.includes("viite") || reasons.includes("iban")) return true;
+  return reasons.includes("vendor") && reasons.includes("dateClose");
 }
 
 /** Euros (as the matcher models carry them) to whole cents, sign dropped. */

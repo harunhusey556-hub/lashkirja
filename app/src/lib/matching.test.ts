@@ -138,6 +138,17 @@ describe("shouldAutoConfirm", () => {
 
   it("refuses to auto-confirm when a rival candidate existed", () => {
     expect(shouldAutoConfirm(0.95, ["viite", "amount", "competing"])).toBe(false);
+    // The owner's report (2026-10-13): bank rows at the top score sat in "suggested" forever
+    // because a card or MobilePay row carries no viite. A name match plus dates that actually
+    // agree (dateClose) is decisive; `date` alone stays refused, as the guard above requires -
+    // it covers a whole month and two look-alike rows would link to whichever sorted first.
+    expect(shouldAutoConfirm(0.99, ["amount", "vendor", "date", "dateClose"])).toBe(true);
+    expect(shouldAutoConfirm(0.99, ["amount", "vendor", "dateClose", "competing"])).toBe(false);
+    expect(shouldAutoConfirm(0.9, ["amount", "iban"])).toBe(true);
+    // Still not enough on its own: a name without close dates, or an amount alone.
+    expect(shouldAutoConfirm(0.99, ["amount", "vendor"])).toBe(false);
+    expect(shouldAutoConfirm(0.99, ["amount", "vendor", "date"])).toBe(false);
+    expect(shouldAutoConfirm(0.99, ["amount", "date"])).toBe(false);
   });
 
   it("still respects the score floor", () => {

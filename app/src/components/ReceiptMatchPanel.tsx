@@ -28,6 +28,8 @@ export interface ReceiptMatchData {
 }
 
 
+import { shouldAutoConfirm } from "../lib/matching";
+
 function txLabel(tx: BankTxMatch): string {
   const parts = [tx.counterparty || "Pankkitapahtuma"];
   if (tx.date) parts.push(new Date(tx.date).toLocaleDateString("fi-FI"));
@@ -42,6 +44,7 @@ function reasonLabel(reasons: string[] | null | undefined): string {
     amount: "summa",
     vendor: "myyjä",
     date: "päivä",
+    dateClose: "päivämäärä täsmää",
     manual: "kohdistettu käsin",
     auto_income: "tulo tiliotteelta",
     approved: "hyväksytty",
@@ -57,8 +60,9 @@ function isStrongMatch(
   score: number | null | undefined,
   reasons: string[] | null | undefined
 ): boolean {
-  if (score != null && score >= 0.85) return true;
-  return Boolean(reasons?.includes("viite") && reasons?.includes("amount"));
+  // The matcher's own rule, not a copy of it: the panel used to call any row at 0.85+ strong,
+  // so it showed "vahva" for rows the gate then refused - the owner read it as broken.
+  return shouldAutoConfirm(score ?? 0, reasons ?? []);
 }
 
 interface ReceiptMatchPanelProps {

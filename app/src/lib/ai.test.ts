@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { parseOCRText, extractReferenceFields, isUsableDocumentText } from "./ai";
+import { parseOCRText, extractReferenceFields, isUsableDocumentText, isOwnCompanyVendor } from "./ai";
 
 const PINK_BEAUTY_SNIPPET = `
 PinkBeauty
@@ -114,5 +114,29 @@ describe("isUsableDocumentText", () => {
     // A couple of digits inside a wall of control codes is still not readable text.
     const mostlyControl = "\u0001\u0002\u0003\u0004\u0005\u0006".repeat(60) + "2026 12";
     expect(isUsableDocumentText(mostlyControl)).toBe(false);
+  });
+});
+
+const OWN_PROFILE =
+  "Tiyouba Oy\nY-tunnus 1541430-2\nMeri-Rastilantie 6 LT3, 00980 Helsinki";
+
+describe("isOwnCompanyVendor", () => {
+  it("catches the owner's own company read as the vendor", () => {
+    // Tallink's reminder letter and Suvida Foods' invoice both came back as the owner.
+    expect(isOwnCompanyVendor("TIYOUBA OY", OWN_PROFILE)).toBe(true);
+    expect(isOwnCompanyVendor("Tiyouba Oy", OWN_PROFILE)).toBe(true);
+    expect(isOwnCompanyVendor("Tiyouba", OWN_PROFILE)).toBe(true);
+  });
+
+  it("catches the owner's business id printed as the vendor", () => {
+    expect(isOwnCompanyVendor("1541430-2", OWN_PROFILE)).toBe(true);
+  });
+
+  it("leaves a real seller alone", () => {
+    expect(isOwnCompanyVendor("AS Tallink Grupp", OWN_PROFILE)).toBe(false);
+    expect(isOwnCompanyVendor("Suvida Foods Oy", OWN_PROFILE)).toBe(false);
+    // A generic word alone must not be enough to hide a real vendor.
+    expect(isOwnCompanyVendor("Helsinki Oy", OWN_PROFILE)).toBe(false);
+    expect(isOwnCompanyVendor(null, OWN_PROFILE)).toBe(false);
   });
 });
