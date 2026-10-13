@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { requireSession } from "@/lib/session";
-import { runMatching, buildReceiptMatchViews } from "@/lib/matching";
+import { buildReceiptMatchViews } from "@/lib/matching";
 import { centsToEuros, eurosToCents } from "@/lib/money";
 import { isoDateSchema, isoDateToUtc, nonnegativeMoneySchema } from "@/lib/validation";
 import {
@@ -16,10 +16,14 @@ import { assertPeriodOpen } from "@/lib/period-lock";
 import { vatLinesProblem } from "@/lib/receipt-vat";
 import { PURCHASE_VAT_TREATMENTS } from "@/lib/alv";
 import { currencySchema, foreignColumns } from "@/lib/foreign-purchase-input";
-import { storedDocumentKind } from "@/lib/receipt-staging";
-import { fileReceiptAsPurchaseInvoice, matchPurchasePaymentsFromBank } from "@/lib/purchase-invoices";
+import {
+  findLookAlikeReceipt,
+  matchAfterReceiptSave,
+  settleAutoAccept,
+  storedDocumentKind,
+} from "@/lib/receipt-staging";
+import { fileReceiptAsPurchaseInvoice } from "@/lib/purchase-invoices";
 import { euroConversionForSave, withFxRecorded } from "@/lib/fx-rates";
-import { canAutoAccept } from "@/lib/auto-accept";
 
 const vatLineSchema = z.object({
   rate: z.number().finite().min(0).max(100),
@@ -67,15 +71,10 @@ export const POST = withErrorHandler(async (req: NextRequest) => {
   await assertPeriodOpen(session.userId, [body.date ? isoDateToUtc(body.date) : null]);
 
   if (!body.forceDuplicate && body.vendor && body.date && body.totalAmount != null) {
-    const totalAmountCents = eurosToCents(body.totalAmount);
-    const existingDuplicate = await prisma.receipt.findFirst({
-      where: {
-        userId: session.userId!,
-        vendor: sanitizeText(body.vendor),
-        date: isoDateToUtc(body.date),
-        totalAmountCents,
-        id: { not: undefined } // Just to have something if we wanted to exclude self, but this is create so no self id
-      }
+    const existingDuplicate = await findLookAlikeReceipt(prisma, session.userId!, {
+      vendor: sanitizeText(body.vendor),
+      date: isoDateToUtc(body.date),
+      totalAmountCents: eurosToCents(body.totalAmount),
     });
     if (existingDuplicate) {
       return NextResponse.json({ 
@@ -156,18 +155,10 @@ export const POST = withErrorHandler(async (req: NextRequest) => {
       // transaction, so a crash can never leave it half approved. The guards are
       // the manual approve's (amount, open period - asserted above); a new
       // receipt has no source bank row, so nothing else of that path applies.
-      return db.receipt.update({
-        where: { id: created.id },
-        data: {
-          reviewStatus: canAutoAccept({
-            ...created,
-            documentType: reading.documentType,
-            // forceDuplicate = the client was told about a look-alike and insisted.
-            duplicate: body.forceDuplicate,
-          })
-            ? "approved"
-            : "pending",
-        },
+      return settleAutoAccept(db, created, {
+        documentType: reading.documentType,
+        // forceDuplicate = the client was told about a look-alike and insisted.
+        duplicate: body.forceDuplicate,
       });
     });
 
@@ -175,16 +166,9 @@ export const POST = withErrorHandler(async (req: NextRequest) => {
     // purchase, linked to this receipt so the VAT return never counts it twice.
     const filing = await fileReceiptAsPurchaseInvoice(session.userId!, receipt, reading);
 
-    await runMatching(session.userId!).catch((error) =>
-      console.error("Matching after receipt save failed:", error)
-    );
     // A bill uploaded after the bank already showed its payment (the owner's 24 of
     // 2026-10-12): the row carrying its viite pays the new ostolasku now.
-    if (filing.created) {
-      await matchPurchasePaymentsFromBank(session.userId!).catch((error) =>
-        console.error("Purchase payment matching after receipt save failed:", error)
-      );
-    }
+    await matchAfterReceiptSave(session.userId!, filing.created);
 
     const freshReceipt = await prisma.receipt.findUnique({
       where: { id: receipt.id },

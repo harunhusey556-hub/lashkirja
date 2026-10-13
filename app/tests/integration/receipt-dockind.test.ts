@@ -213,9 +213,11 @@ describe("every intake path files", () => {
     expect((await finish(jobId))?.status).toBe("done");
 
     const receipt = await prisma.receipt.findFirstOrThrow({ where: { userId: user.id, uploadId } });
-    expect(receipt).toMatchObject({ source: "app_capture", reviewStatus: "pending" });
+    // A complete bill reading is auto-accepted (W31) and still filed exactly once.
+    expect(receipt).toMatchObject({ source: "app_capture", reviewStatus: "approved" });
     const invoice = await prisma.purchaseInvoice.findFirstOrThrow({ where: { receiptId: receipt.id } });
     expect(invoice).toMatchObject({ supplierName: "Kampaamotukku Oy", invoiceNumber: "1234", grossCents: 10_050 });
+    expect(await prisma.purchaseInvoice.count({ where: { userId: user.id } })).toBe(1);
   });
 
   it("the offline photo inbox files a photographed credit note inside its own transaction", async () => {

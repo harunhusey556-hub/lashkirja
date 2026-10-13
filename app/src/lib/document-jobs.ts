@@ -17,6 +17,7 @@ import { isStuckRunning, runAfterResponse } from "./job-tracker";
 import { noteJobFailure } from "./observe";
 import {
   createPendingInboxReceipt,
+  matchAfterReceiptSave,
   receiptFieldsFromExtraction,
   unreadableReceiptFields,
 } from "./receipt-staging";
@@ -240,7 +241,7 @@ export async function processDocumentJob(jobId: string): Promise<void> {
       extracted,
       appliedRule,
     };
-    await prisma.$transaction(async (tx) => {
+    const inboxReceipt = await prisma.$transaction(async (tx) => {
       const won = await tx.backgroundJob.updateMany({
         where: { id: jobId, status: "running", attemptToken },
         data: {
@@ -251,7 +252,7 @@ export async function processDocumentJob(jobId: string): Promise<void> {
           payload: JSON.stringify(stored),
         },
       });
-      if (won.count === 0) return;
+      if (won.count === 0) return null;
       await persistExtraction(tx, payload.uploadId, extracted);
       if (appliedRule && extracted.vendor) {
         await tx.automationEvent.create({
@@ -266,16 +267,20 @@ export async function processDocumentJob(jobId: string): Promise<void> {
           },
         });
       }
-      if (payload.inbox) {
-        await createPendingInboxReceipt(tx, {
-          userId: job.userId,
-          uploadId: payload.uploadId,
-          storageKey: payload.storageKey,
-          fileName: payload.originalName,
-          fields: receiptFieldsFromExtraction(extracted, new Date(payload.inbox.capturedAt)),
-        });
-      }
+      if (!payload.inbox) return null;
+      return createPendingInboxReceipt(tx, {
+        userId: job.userId,
+        uploadId: payload.uploadId,
+        storageKey: payload.storageKey,
+        fileName: payload.originalName,
+        fields: receiptFieldsFromExtraction(extracted, new Date(payload.inbox.capturedAt)),
+      });
     });
+    // After the commit, as the save route does: matching reads the committed
+    // receipt and must not run inside the job's write transaction.
+    if (inboxReceipt?.matchAfterSave) {
+      await matchAfterReceiptSave(job.userId, inboxReceipt.filedInvoice);
+    }
   } catch (error) {
     const message =
       error instanceof ReceiptExtractionError

@@ -30,6 +30,7 @@ import {
   receiptFieldsFromExtraction,
   wantsAiUpgrade,
   createPendingInboxReceipt,
+  matchAfterReceiptSave,
   type StagedUploadRow,
 } from "./receipt-staging";
 import { noStoreJson, rejectCrossSite, rejectOversizedContentLength } from "./http-security";
@@ -77,7 +78,7 @@ async function queueFromStagedUpload(
     // previous inbox attempt that failed to send the response). Skip the
     // job entirely - the pending receipt is created right now.
     const extracted = extractedFromStagedUpload(upload);
-    const job = await prisma.$transaction(async (tx) => {
+    const { job, saved } = await prisma.$transaction(async (tx) => {
       const created = await tx.backgroundJob.create({
         data: {
           userId,
@@ -102,15 +103,16 @@ async function queueFromStagedUpload(
         },
         select: { id: true, status: true },
       });
-      await createPendingInboxReceipt(tx, {
+      const receipt = await createPendingInboxReceipt(tx, {
         userId,
         uploadId: upload.id,
         storageKey: upload.storageKey,
         fileName: originalName,
         fields: receiptFieldsFromExtraction(extracted, new Date(capturedAt)),
       });
-      return created;
+      return { job: created, saved: receipt };
     });
+    if (saved.matchAfterSave) await matchAfterReceiptSave(userId, saved.filedInvoice);
     return noStoreJson({ status: "queued", jobId: job.id, uploadId: upload.id }, { status: 201 });
   }
 
